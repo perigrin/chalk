@@ -4,15 +4,13 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Chalk::Bootstrap::IR::Node::Constructor;
-use Chalk::Bootstrap::IR::Node::Constant;
 use Chalk::IR::UseInfo;
 use Chalk::IR::Program;
 
 class Chalk::Bootstrap::DepChaser {
 
-    # Extract module names from UseDecl Constructor nodes in a Program IR.
-    # Walks top-level statements looking for UseInfo or Constructor:UseDecl nodes.
+    # Extract module names from UseDecl nodes in a Program IR.
+    # Walks top-level statements looking for UseInfo nodes.
     # Returns a list of module name strings.
     sub extract_use_decls($ir) {
         return unless defined $ir;
@@ -22,27 +20,7 @@ class Chalk::Bootstrap::DepChaser {
             return map { $_->name() } grep { defined $_->name() } $ir->use_decls()->@*;
         }
 
-        # Legacy Constructor:Program path
-        return unless $ir isa Chalk::Bootstrap::IR::Node::Constructor;
-        return unless $ir->class() eq 'Program';
-
-        # Program's inputs()->[0] is the statements arrayref
-        my $statements = $ir->inputs()->[0];
-        return unless defined $statements && ref($statements) eq 'ARRAY';
-
-        my @modules;
-        for my $stmt ($statements->@*) {
-            if ($stmt isa Chalk::IR::UseInfo) {
-                push @modules, $stmt->name() if defined $stmt->name();
-            } elsif ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                     && $stmt->class() eq 'UseDecl') {
-                my $name_node = $stmt->inputs()->[0];
-                next unless defined $name_node;
-                next unless $name_node isa Chalk::Bootstrap::IR::Node::Constant;
-                push @modules, $name_node->value();
-            }
-        }
-        return @modules;
+        return;
     }
 
     # Map a module name to a lib/ relative path, only for Chalk:: modules.

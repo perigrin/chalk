@@ -60,10 +60,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
     method generate($ir) {
         die "generate() requires a Program IR node"
-            unless defined($ir)
-            && ($ir isa Chalk::IR::Program
-                || ($ir isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $ir->class() eq 'Program'));
+            unless defined($ir) && $ir isa Chalk::IR::Program;
 
         return $self->_emit_program($ir);
     }
@@ -73,10 +70,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # then generates code using cfg_state for if/loop dispatch.
     method generate_with_cfg($ir, $sa, $ctx) {
         die "generate_with_cfg() requires a Program IR node"
-            unless defined($ir)
-            && ($ir isa Chalk::IR::Program
-                || ($ir isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $ir->class() eq 'Program'));
+            unless defined($ir) && $ir isa Chalk::IR::Program;
 
         %_cfg_lookup = ();
         %_aggregate_vars = ();
@@ -111,14 +105,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                         && !($ir_node isa Chalk::IR::ClassInfo)
                         && !($ir_node isa Chalk::IR::FieldInfo)
                         && !($ir_node isa Chalk::IR::MethodInfo)
-                        && !($ir_node isa Chalk::IR::SubInfo)
-                        && !($ir_node isa Chalk::Bootstrap::IR::Node::Constructor
-                             && ($ir_node->class() eq 'Program'
-                                 || $ir_node->class() eq 'ClassDecl'
-                                 || $ir_node->class() eq 'MethodDecl'
-                                 || $ir_node->class() eq 'SubDecl'
-                                 || $ir_node->class() eq 'UseDecl'
-                                 || $ir_node->class() eq 'FieldDecl'))) {
+                        && !($ir_node isa Chalk::IR::SubInfo)) {
                     $_cfg_lookup{refaddr($ir_node)} = $state;
                 }
             }
@@ -159,25 +146,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 if (defined $name && $name =~ /^([\@\%])(.+)/) {
                     $_aggregate_vars{$2} = $1;
                 }
-            } elsif ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-                # Also check legacy Constructor:FieldDecl for class-scope fields
-                if ($node->class() eq 'FieldDecl') {
-                    my $var = $node->inputs()->[0];
-                    if (defined $var && $var isa Chalk::Bootstrap::IR::Node::Constant) {
-                        my $name = $var->value();
-                        if (defined $name && $name =~ /^([\@\%])(.+)/) {
-                            $_aggregate_vars{$2} = $1;
-                        }
-                    }
-                }
-                for my $input ($node->inputs()->@*) {
-                    if (ref($input) eq 'ARRAY') {
-                        # Skip plain hashrefs (e.g., attribute data), push only IR nodes
-                        push @stack, grep { ref($_) ne 'HASH' } @$input;
-                    } elsif (ref($input) && ref($input) ne 'HASH') {
-                        push @stack, $input;
-                    }
-                }
             } elsif (ref($node) && ref($node) ne 'HASH' && $node->can('inputs')) {
                 for my $input ($node->inputs()->@*) {
                     if (ref($input) eq 'ARRAY') {
@@ -195,20 +163,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $code = $self->generate($ir);
 
         # Extract class name from the IR to determine file path
-        my @stmts;
-        if ($ir isa Chalk::IR::Program) {
-            @stmts = ($ir->classes()->@*, $ir->top_level_subs()->@*);
-        } else {
-            @stmts = $ir->inputs()->[0]->@*;
-        }
         my $class_name;
-        for my $stmt (@stmts) {
+        for my $stmt ($ir->classes()->@*, $ir->top_level_subs()->@*) {
             if ($stmt isa Chalk::IR::ClassInfo) {
                 $class_name = $stmt->name();
-                last;
-            } elsif ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $stmt->class() eq 'ClassDecl') {
-                $class_name = $stmt->inputs()->[0]->value();
                 last;
             }
         }
@@ -224,16 +182,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
     method _emit_program($node) {
         my @stmts;
-        if ($node isa Chalk::IR::Program) {
-            # Reassemble ordered output: use_decls first, then classes, top-level subs, other
-            push @stmts, $node->use_decls()->@*;
-            push @stmts, $node->classes()->@*;
-            push @stmts, $node->top_level_subs()->@*;
-            push @stmts, $node->other_stmts()->@*;
-        } else {
-            # Legacy Constructor:Program — stmts are inputs()->[0]
-            @stmts = $node->inputs()->[0]->@*;
-        }
+        # Reassemble ordered output: use_decls first, then classes, top-level subs, other
+        push @stmts, $node->use_decls()->@*;
+        push @stmts, $node->classes()->@*;
+        push @stmts, $node->top_level_subs()->@*;
+        push @stmts, $node->other_stmts()->@*;
         my @lines;
         for my $stmt (@stmts) {
             my $line = $self->_emit_node($stmt);
@@ -341,15 +294,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::IR::Node::Unwind) { return $self->_emit_die_call($node); }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-            my $class = $node->class();
-
-            if ($class eq 'Program')    { return $self->_emit_program($node); }
-            if ($class eq 'UseDecl')    { return $self->_emit_use_decl($node); }
-            if ($class eq 'ClassDecl')  { return $self->_emit_class_decl($node); }
-            if ($class eq 'MethodDecl') { return $self->_emit_method_decl($node); }
-            if ($class eq 'SubDecl')    { return $self->_emit_sub_decl($node); }
-            if ($class eq 'FieldDecl')  { return $self->_emit_field_decl($node); }
-            # Fallback: unmapped operators (../x/isa/!~/\//etc.) still produce
+            # Unmapped operators (../x/isa/!~/\//etc.) still produce
             # Constructor:BinaryExpr/UnaryExpr. Route to _emit_expr.
             return $self->_emit_expr($node) . ";";
         }
@@ -363,15 +308,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_use_decl($node) {
-        my ($module_name, $args);
-        if ($node isa Chalk::IR::UseInfo) {
-            $module_name = $node->name();
-            $args = scalar($node->args()->@*) ? $node->args() : undef;
-        } else {
-            my $module = $node->inputs()->[0];
-            $args      = $node->inputs()->[1];
-            $module_name = $module->value();
-        }
+        my $module_name = $node->name();
+        my $args = scalar($node->args()->@*) ? $node->args() : undef;
 
         # Version strings don't get quoted
         if ($module_name =~ /^v?[0-9]/) {
@@ -391,17 +329,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_class_decl($node) {
-        my ($name, $parent, $body);
-        if ($node isa Chalk::IR::ClassInfo) {
-            $name   = $node->name();
-            $parent = $node->parent();
-            $body   = $node->body();
-        } else {
-            $name   = $node->inputs()->[0]->value();
-            my $parent_node = $node->inputs()->[1];
-            $parent = defined $parent_node ? $parent_node->value() : undef;
-            $body   = $node->inputs()->[2];
-        }
+        my $name   = $node->name();
+        my $parent = $node->parent();
+        my $body   = $node->body();
 
         my $decl = "class $name";
         if (defined $parent) {
@@ -425,58 +355,30 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_method_decl($node) {
-        my ($name, $params, $body);
-        if ($node isa Chalk::IR::MethodInfo) {
-            $name   = $node->name();
-            $params = $node->params();    # plain strings
-            $body   = $node->body();
-        } else {
-            $name   = $node->inputs()->[0]->value();
-            $params = $node->inputs()->[1];  # Constant nodes
-            $body   = $node->inputs()->[2];
-        }
+        my $name   = $node->name();
+        my $params = $node->params();    # plain strings
+        my $body   = $node->body();
 
-        my $sig;
-        if ($node isa Chalk::IR::MethodInfo) {
-            $sig = '(' . join(', ', $params->@*) . ')';
-        } else {
-            $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
-        }
+        my $sig = '(' . join(', ', $params->@*) . ')';
         # Scope aggregate vars: params shadow class-scope aggregate names
         my %saved = %_aggregate_vars;
-        $self->_scope_body_vars($params, $body, $node isa Chalk::IR::MethodInfo);
+        $self->_scope_body_vars($params, $body);
         my $result = $self->_emit_body_block("method $name$sig {", $body);
         %_aggregate_vars = %saved;
         return $result;
     }
 
-    # SubDecl inputs: [name, params, body, scope]
-    # Dual-path: accepts Chalk::IR::SubInfo (plain strings) or Constructor:SubDecl (Constant nodes).
     method _emit_sub_decl($node) {
-        my ($name, $params, $body, $scope);
-        if ($node isa Chalk::IR::SubInfo) {
-            $name   = $node->name();
-            $params = $node->params();    # plain strings
-            $body   = $node->body();
-            $scope  = $node->scope();
-        } else {
-            $name   = $node->inputs()->[0]->value();
-            $params = $node->inputs()->[1];  # Constant nodes
-            $body   = $node->inputs()->[2];
-            my $scope_node = $node->inputs()->[3];
-            $scope  = defined $scope_node ? $scope_node->value() : 'package';
-        }
+        my $name   = $node->name();
+        my $params = $node->params();    # plain strings
+        my $body   = $node->body();
+        my $scope  = $node->scope();
 
-        my $sig;
-        if ($node isa Chalk::IR::SubInfo) {
-            $sig = '(' . join(', ', $params->@*) . ')';
-        } else {
-            $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
-        }
+        my $sig = '(' . join(', ', $params->@*) . ')';
         my $prefix = $scope eq 'package' ? 'sub' : "$scope sub";
         # Scope aggregate vars: params shadow class-scope aggregate names
         my %saved = %_aggregate_vars;
-        $self->_scope_body_vars($params, $body, $node isa Chalk::IR::SubInfo);
+        $self->_scope_body_vars($params, $body);
         my $result = $self->_emit_body_block("$prefix $name$sig {", $body);
         %_aggregate_vars = %saved;
         return $result;
@@ -485,12 +387,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # Adjust %_aggregate_vars for a method/sub body scope.
     # Remove param names (params are always scalars) and add body-local
     # VarDecl aggregate names.
-    # $params_are_strings: true when params are plain strings (MethodInfo/SubInfo),
-    # false when params are Constant nodes (Constructor:MethodDecl/SubDecl).
-    method _scope_body_vars($params, $body, $params_are_strings = false) {
+    # $params: plain strings from MethodInfo/SubInfo.
+    method _scope_body_vars($params, $body) {
         # Params shadow: $reachable param means $reachable is a scalar here
         for my $p ($params->@*) {
-            my $pname = $params_are_strings ? $p : $p->value();
+            my $pname = $p;
             if ($pname =~ /^\$(.+)/) {
                 delete $_aggregate_vars{$1};
             }
@@ -533,17 +434,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_field_decl($node) {
-        my ($name, $attrs, $default_value);
-        if ($node isa Chalk::IR::FieldInfo) {
-            $name          = $node->name();
-            $attrs         = $node->attributes();
-            $default_value = $node->default_value();
-        } else {
-            my $name_node  = $node->inputs()->[0];
-            $name          = $name_node->value();
-            $attrs         = $node->inputs()->[1];
-            $default_value = $node->inputs()->[2];
-        }
+        my $name          = $node->name();
+        my $attrs         = $node->attributes();
+        my $default_value = $node->default_value();
         my $decl = "field $name";
 
         if (ref($attrs) eq 'ARRAY' && $attrs->@*) {
@@ -639,15 +532,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::IR::Node::StructFieldAccess) { return $self->_emit_field_access_expr($node); }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-            my $class = $node->class();
-            if ($class eq 'TernaryExpr')  { return $self->_emit_ternary_expr($node); }
-            if ($class eq 'StructRef')    { return $self->_emit_struct_ref_expr($node); }
-            if ($class eq 'FieldAccess')  { return $self->_emit_field_access_expr($node); }
             # Unmapped operators (../x/isa/!~/\//etc.) still produce Constructor
-            if ($class eq 'BinaryExpr')   { return $self->_emit_binary_expr($node); }
-            if ($class eq 'UnaryExpr')    { return $self->_emit_unary_expr($node); }
-            # Fall through to _emit_node for statement-level types
-            return $self->_emit_node($node);
+            my $class = $node->class();
+            if ($class eq 'BinaryExpr') { return $self->_emit_binary_expr($node); }
+            if ($class eq 'UnaryExpr')  { return $self->_emit_unary_expr($node); }
         }
 
         return $self->_emit_node($node);
@@ -689,9 +577,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         # Parenthesize compound operands to preserve precedence
         # (e.g., unless desugars to !cond, and !$a && $b != !($a && $b))
         my $needs_parens = ($operand isa Chalk::IR::Node::BinOp)
-            || ($operand isa Chalk::IR::Node::TernaryExpr)
-            || ($operand isa Chalk::Bootstrap::IR::Node::Constructor
-                && $operand->class() eq 'TernaryExpr');
+            || ($operand isa Chalk::IR::Node::TernaryExpr);
 
         my $expr = $self->_emit_expr($operand);
         if ($needs_parens) {

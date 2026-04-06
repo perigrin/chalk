@@ -61,9 +61,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             my $class_decl = $self->_find_class_decl($ir);
             next unless defined $class_decl;
 
-            my $body = $class_decl isa Chalk::IR::ClassInfo
-                ? $class_decl->body()
-                : $class_decl->inputs()->[2];
+            my $body = $class_decl->body();
             next unless defined $body && ref($body) eq 'ARRAY';
 
             for my $item ($body->@*) {
@@ -74,10 +72,6 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                 } elsif ($item isa Chalk::IR::SubInfo) {
                     $method_name = $item->name();
                     $method_body = $item->body();
-                } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                        && ($item->class() eq 'MethodDecl' || $item->class() eq 'SubDecl')) {
-                    $method_name = $item->inputs()->[0]->value();
-                    $method_body = $item->inputs()->[2];
                 } else {
                     next;
                 }
@@ -164,8 +158,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
     # Recursively walk an IR statement/expression to detect hash patterns.
     method _walk_stmt($var_prefix, $node, $var_schemas) {
         return unless defined $node;
-        return unless $node isa Chalk::Bootstrap::IR::Node::Constructor
-            || $node isa Chalk::IR::Node;
+        return unless $node isa Chalk::Bootstrap::IR::Node;
 
         # Pattern 1: VarDecl with HashRefExpr initializer (empty or literal)
         if ($node isa Chalk::IR::Node::VarDecl) {
@@ -241,8 +234,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             return;
         }
 
-        # Walk children of any other Constructor-like node
-        return unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        # Walk children of any other IR node
         my $inputs = $node->inputs();
         for my $input ($inputs->@*) {
             next unless defined $input;
@@ -452,9 +444,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                 next;
             }
 
-            my $body = $class_decl isa Chalk::IR::ClassInfo
-                ? $class_decl->body()
-                : $class_decl->inputs()->[2];
+            my $body = $class_decl->body();
             unless (defined $body && ref($body) eq 'ARRAY') {
                 push @result, { $info->%* };
                 next;
@@ -544,59 +534,12 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                     next;
                 }
 
-                unless ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && ($item->class() eq 'MethodDecl' || $item->class() eq 'SubDecl')) {
-                    push @new_body, $item;
-                    next;
-                }
-
-                my $method_name = $item->inputs()->[0]->value();
-                my $params      = $item->inputs()->[1];
-                my $method_body = $item->inputs()->[2];
-                my $var_prefix  = "${class_name}::${method_name}";
-
-                # Only rewrite methods that contain promoted variables
-                my $method_has_promoted = false;
-                for my $vk (sort keys %var_to_schema) {
-                    if ($vk =~ /^\Q$var_prefix\E::/) {
-                        $method_has_promoted = true;
-                        last;
-                    }
-                }
-
-                unless ($method_has_promoted && defined $method_body
-                    && ref($method_body) eq 'ARRAY') {
-                    push @new_body, $item;
-                    next;
-                }
-
-                my $new_method_body = $self->_rewrite_method_body(
-                    $factory, $var_prefix, $method_body,
-                    \%var_to_schema, \%schema_fields,
-                );
-
-                # MethodDecl has return_type as 4th input, SubDecl has scope
-                my %extra;
-                if ($item->class() eq 'MethodDecl') {
-                    $extra{return_type} = $item->inputs()->[3];
-                } elsif ($item->class() eq 'SubDecl') {
-                    $extra{scope} = $item->inputs()->[3];
-                }
-
-                my $new_method = $factory->make('Constructor',
-                    class  => $item->class(),
-                    name   => $item->inputs()->[0],
-                    params => $params,
-                    body   => $new_method_body,
-                    %extra,
-                );
-                push @new_body, $new_method;
+                push @new_body, $item;
             }
 
             # Rebuild class declaration with new body.
-            # Preserves ClassInfo or Constructor:ClassDecl based on input type.
             my $new_class;
-            if ($class_decl isa Chalk::IR::ClassInfo) {
+            {
                 # Partition new body into fields/methods/subs for structured access
                 my (@fields, @methods, @subs);
                 for my $item (@new_body) {
@@ -611,13 +554,6 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                     methods => \@methods,
                     subs    => \@subs,
                     body    => \@new_body,
-                );
-            } else {
-                $new_class = $factory->make('Constructor',
-                    class  => 'ClassDecl',
-                    name   => $class_decl->inputs()->[0],
-                    parent => $class_decl->inputs()->[1],
-                    body   => \@new_body,
                 );
             }
 
@@ -647,9 +583,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
         for (my $i = 0; $i < scalar($body->@*); $i++) {
             my $stmt = $body->[$i];
-            next unless defined $stmt
-                && ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                    || $stmt isa Chalk::IR::Node);
+            next unless defined $stmt && $stmt isa Chalk::Bootstrap::IR::Node;
 
             # Detect VarDecl with empty HashRefExpr
             if ($stmt isa Chalk::IR::Node::VarDecl) {
@@ -762,8 +696,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
     # on promoted variables.
     method _rewrite_node($factory, $var_prefix, $node, $promoted_vars, $var_to_schema, $schema_fields) {
         return $node unless defined $node;
-        return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor
-            || $node isa Chalk::IR::Node;
+        return $node unless $node isa Chalk::Bootstrap::IR::Node;
 
         # Replace SubscriptExpr on promoted var with FieldAccess
         if ($node isa Chalk::IR::Node::Subscript) {
@@ -887,41 +820,16 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
     method _find_class_decl($ir) {
         return unless defined $ir;
 
-        # Direct ClassInfo match
-        if ($ir isa Chalk::IR::ClassInfo) {
-            return $ir;
-        }
-
         # Chalk::IR::Program — walk its classes list
         if ($ir isa Chalk::IR::Program) {
             for my $stmt ($ir->classes()->@*) {
-                if ($stmt isa Chalk::IR::ClassInfo) {
-                    return $stmt;
-                }
+                return $stmt if $stmt isa Chalk::IR::ClassInfo;
             }
             return;
         }
 
-        return unless $ir isa Chalk::Bootstrap::IR::Node::Constructor;
-
-        if ($ir->class() eq 'ClassDecl') {
-            return $ir;
-        }
-
-        if ($ir->class() eq 'Program') {
-            my $stmts = $ir->inputs()->[0];
-            if (defined $stmts && ref($stmts) eq 'ARRAY') {
-                for my $stmt ($stmts->@*) {
-                    if ($stmt isa Chalk::IR::ClassInfo) {
-                        return $stmt;
-                    }
-                    if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor) {
-                        my $found = $self->_find_class_decl($stmt);
-                        return $found if defined $found;
-                    }
-                }
-            }
-        }
+        # Direct ClassInfo match (for calls with a class node directly)
+        return $ir if $ir isa Chalk::IR::ClassInfo;
 
         return;
     }

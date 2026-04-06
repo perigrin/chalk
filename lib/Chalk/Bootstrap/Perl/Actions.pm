@@ -2389,16 +2389,6 @@ class Chalk::Bootstrap::Perl::Actions {
                     default_value => $value,
                 );
             }
-            # Constructor:FieldDecl target (legacy fallback): set default_value and return it
-            if ($target isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $target->class() eq 'FieldDecl') {
-                return $factory->make('Constructor',
-                    'class'         => 'FieldDecl',
-                    name          => $target->inputs()->[0],
-                    attributes    => $target->inputs()->[1],
-                    default_value => $value,
-                );
-            }
             # VarDecl target: set its initializer and return it
             if ($target isa Chalk::IR::Node::VarDecl) {
                 my $result = $factory->make('Constructor',

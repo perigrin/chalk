@@ -45,9 +45,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         return unless defined $class_decl;
 
         # Set the current class slug for identifier namespacing
-        my $class_name = $class_decl isa Chalk::IR::ClassInfo
-            ? $class_decl->name()
-            : $class_decl->inputs()->[0]->value();
+        my $class_name = $class_decl->name();
         $self->_set_current_slug($self->_class_slug($class_name));
 
         # Build field map once and store it for use throughout code generation
@@ -56,9 +54,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # Pre-scan methods to build $self->_get_class_methods_ref() for direct call optimization
         $self->_set_class_methods($self->_scan_class_methods($class_decl));
 
-        my $body = $class_decl isa Chalk::IR::ClassInfo
-            ? $class_decl->body()
-            : $class_decl->inputs()->[2];
+        my $body = $class_decl->body();
 
         # Collect class-scope variable metadata from ALL VarDecl items in class body.
         # These are compiled as static C variables, initialized at module load time.
@@ -70,10 +66,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $var = $raw_var;
             $var =~ s/^[\$\@\%]//;
             my $init = $item->inputs()->[1];
-            # Skip VarDecl whose init is a SubDecl/SubInfo (those are sub definitions)
-            next if defined $init
-                && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                && $init->class() eq 'SubDecl';
+            # Skip VarDecl whose init is a SubInfo (those are sub definitions)
             next if defined $init && $init isa Chalk::IR::SubInfo;
             # Skip VarDecl for variables that are fields (ADJUST assigns them,
             # but they're already handled by the field map)
@@ -90,22 +83,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # since C doesn't have Perl's constant sub mechanism.
         $self->_reset_use_constants();
         for my $item ($body->@*) {
-            my ($use_name, $use_args);
-            if ($item isa Chalk::IR::UseInfo) {
-                $use_name = $item->name();
-                $use_args = $item->args();
-            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                     && $item->class() eq 'UseDecl') {
-                my $mn = $item->inputs()->[0];
-                next unless defined $mn;
-                $use_name = $mn->value();
-                my $raw = $item->inputs()->[1];
-                $use_args = defined $raw
-                    ? (ref($raw) eq 'ARRAY' ? $raw : [$raw])
-                    : [];
-            } else {
-                next;
-            }
+            next unless $item isa Chalk::IR::UseInfo;
+            my $use_name = $item->name();
+            my $use_args = $item->args();
             next unless defined $use_name && $use_name eq 'constant';
             my $args = $use_args;
             next unless defined $args && ref($args) eq 'ARRAY';
@@ -1176,14 +1156,23 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 ? '{ SV **_mep = av_fetch(_msrc, _mi, 0); __sv = (_mep && *_mep) ? *_mep : &PL_sv_undef; } '
                 : '';
 
-            # If list is a range (BinaryExpr with '..'), emit integer for loop
-            if ($list_node isa Chalk::Bootstrap::IR::Node::Constructor
+            # If list is a range ('..'), emit integer for loop.
+            # Handles both Chalk::IR::Node::Range (typed) and legacy Constructor:BinaryExpr.
+            my ($range_lhs, $range_rhs);
+            if ($list_node isa Chalk::IR::Node::Range) {
+                $range_lhs = $list_node->inputs()->[0];
+                $range_rhs = $list_node->inputs()->[1];
+            } elsif ($list_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $list_node->class() eq 'BinaryExpr'
                     && defined $list_node->inputs()->[0]
                     && $list_node->inputs()->[0] isa Chalk::Bootstrap::IR::Node::Constant
                     && $list_node->inputs()->[0]->value() eq '..') {
-                my $range_left  = $self->_emit_expr($list_node->inputs()->[1], $declared_vars);
-                my $range_right = $self->_emit_expr($list_node->inputs()->[2], $declared_vars);
+                $range_lhs = $list_node->inputs()->[1];
+                $range_rhs = $list_node->inputs()->[2];
+            }
+            if (defined $range_lhs) {
+                my $range_left  = $self->_emit_expr($range_lhs, $declared_vars);
+                my $range_right = $self->_emit_expr($range_rhs, $declared_vars);
                 return "({ AV *_mav = newAV(); "
                     . "SV *_mrs = $range_left; SV *_mre = $range_right; "
                     . "SSize_t _ms = SvROK(_mrs) ? av_len((AV*)SvRV(_mrs)) : SvIV(_mrs); "
@@ -1434,8 +1423,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     # Returns a C expression string, or undef if the init cannot be represented.
     method _emit_init_expr($init_node, $sigil) {
         return undef unless defined $init_node;
-        return undef unless $init_node isa Chalk::IR::Node
-                         || $init_node isa Chalk::Bootstrap::IR::Node::Constructor;
+        return undef unless $init_node isa Chalk::Bootstrap::IR::Node;
 
         # my $scalar = [] — empty array reference
         if ($init_node isa Chalk::IR::Node::ArrayRef) {
@@ -1570,65 +1558,12 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 : $class_decl->inputs()->[2];
 
             # Emit class-scope subs (static helpers) before methods.
-            # Handles SubInfo structs and legacy Constructor:SubDecl nodes.
             for my $item ($body->@*) {
-                # Handle SubInfo metadata structs
-                if ($item isa Chalk::IR::SubInfo) {
-                    my $sname   = $item->name();
-                    my $sparams = $item->params();   # plain strings
-                    my $sbody   = $item->body();
-                    my $result = eval { $self->_emit_sub($sname, $sparams, $sbody) };
-                    if (defined $result && ref $result eq 'HASH') {
-                        push @static_lines, $result->{helper}->@*;
-                        push @static_lines, '';
-                        $self->_set_class_sub_compiled($sname, true);
-                    } else {
-                        $self->_set_class_sub_compiled($sname, false);
-                    }
-                    next;
-                }
-
-                next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-
-                # Handle mis-parented SubDecl/SubInfo inside VarDecl
-                if ($item->class() eq 'VarDecl') {
-                    my $init = $item->inputs()->[1];
-                    if (defined $init) {
-                        my ($sname, $sparams, $sbody);
-                        if ($init isa Chalk::IR::SubInfo) {
-                            $sname  = $init->name();
-                            $sparams = $init->params();   # plain strings
-                            $sbody  = $init->body();
-                        } elsif ($init isa Chalk::Bootstrap::IR::Node::Constructor
-                                && $init->class() eq 'SubDecl') {
-                            $sname   = $init->inputs()->[0]->value();
-                            my $raw  = $init->inputs()->[1];
-                            my @nodes;
-                            for my $p ($raw->@*) { push @nodes, $p; }
-                            $sparams = \@nodes;
-                            $sbody   = $init->inputs()->[2];
-                        }
-                        if (defined $sname) {
-                            my $result = eval { $self->_emit_sub($sname, $sparams, $sbody) };
-                            if (defined $result && ref $result eq 'HASH') {
-                                push @static_lines, $result->{helper}->@*;
-                                push @static_lines, '';
-                                $self->_set_class_sub_compiled($sname, true);
-                            } else {
-                                $self->_set_class_sub_compiled($sname, false);
-                            }
-                        }
-                    }
-                    next;
-                }
-
-                next unless $item->class() eq 'SubDecl';
-                my $sname   = $item->inputs()->[0]->value();
-                my $sparams = $item->inputs()->[1];
-                my $sbody   = $item->inputs()->[2];
-                my @param_nodes;
-                for my $p ($sparams->@*) { push @param_nodes, $p; }
-                my $result = eval { $self->_emit_sub($sname, \@param_nodes, $sbody) };
+                next unless $item isa Chalk::IR::SubInfo;
+                my $sname   = $item->name();
+                my $sparams = $item->params();   # plain strings
+                my $sbody   = $item->body();
+                my $result = eval { $self->_emit_sub($sname, $sparams, $sbody) };
                 if (defined $result && ref $result eq 'HASH') {
                     push @static_lines, $result->{helper}->@*;
                     push @static_lines, '';
@@ -1638,17 +1573,10 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 }
             }
 
-            # Emit MethodDecl/MethodInfo items as exported C functions
+            # Emit MethodInfo items as exported C functions
             for my $item ($body->@*) {
-                my $mname;
-                if ($item isa Chalk::IR::MethodInfo) {
-                    $mname = $item->name();
-                } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $item->class() eq 'MethodDecl') {
-                    $mname = $item->inputs()->[0]->value();
-                } else {
-                    next;
-                }
+                next unless $item isa Chalk::IR::MethodInfo;
+                my $mname = $item->name();
 
                 my $result = eval { $self->_emit_method($item) };
                 if (!defined $result || $@) {
@@ -2050,23 +1978,12 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         # Register fields (if the class has any FieldDecl nodes)
         if (defined $class_decl) {
-            my $body = $class_decl isa Chalk::IR::ClassInfo
-                ? $class_decl->body()
-                : $class_decl->inputs()->[2];
+            my $body = $class_decl->body();
             for my $item ($body->@*) {
-                my ($field_name, $attrs, $default);
-                if ($item isa Chalk::IR::FieldInfo) {
-                    $field_name = $item->name();
-                    $attrs      = $item->attributes();
-                    $default    = $item->default_value();
-                } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                         && $item->class() eq 'FieldDecl') {
-                    $field_name = $item->inputs()->[0]->value();
-                    $attrs      = $item->inputs()->[1];
-                    $default    = $item->inputs()->[2];
-                } else {
-                    next;
-                }
+                next unless $item isa Chalk::IR::FieldInfo;
+                my $field_name = $item->name();
+                my $attrs      = $item->attributes();
+                my $default    = $item->default_value();
                 # $field_name includes sigil
                 my $escaped    = $self->_escape_c_string($field_name);
 
