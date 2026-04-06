@@ -6,6 +6,7 @@ use experimental 'class';
 
 use Chalk::Bootstrap::Target;
 use Chalk::IR::Node;
+use Chalk::IR::Node::Return;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Interpolate;
@@ -697,14 +698,13 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
 
         my $body_item = $body->[0];
         my $returns_value = (defined $body_item
-            && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
-            && $body_item->class() eq 'ReturnStmt');
+            && $body_item isa Chalk::IR::Node::Return);
         my $dies = (defined $body_item
             && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
             && $body_item->class() eq 'DieCall');
 
         if ($returns_value) {
-            my $value = $body_item->inputs()->[0];
+            my $value = $body_item->inputs()->[1];  # inputs[0]=control, inputs[1]=value
             if ($value isa Chalk::IR::Node::Interpolate) {
                 return false;
             }
@@ -728,7 +728,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 if (defined $state && defined $state->{if_node}) {
                     my $then = $state->{then_stmts};
                     return true if $self->_body_contains_return($then);
-                    # Stale-merge can strip ReturnStmt leaving bare expressions
+                    # Stale-merge can strip Return node leaving bare expressions
                     return true if $self->_body_contains_bare_return($then);
                     my $else = $state->{else_stmts};
                     return true if defined($else) && ref($else) eq 'ARRAY'
@@ -747,7 +747,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return false;
     }
 
-    # Check if a body array contains any ReturnStmt
+    # Check if a body array contains any Return CFG node
     method _body_contains_return($body) {
         return false unless ref($body) eq 'ARRAY';
         for my $item ($body->@*) {
@@ -766,8 +766,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                         && $self->_body_contains_return($loop_body);
                 }
             }
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-            return true if $item->class() eq 'ReturnStmt';
+            return true if $item isa Chalk::IR::Node::Return;
         }
         return false;
     }
@@ -793,7 +792,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         if ($node isa Chalk::IR::Node::Interpolate) { return false; }
         return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
         my $class = $node->class();
-        my %void = map { $_ => 1 } qw(VarDecl DieCall CompoundAssign ReturnStmt
+        my %void = map { $_ => 1 } qw(VarDecl DieCall CompoundAssign
                                         BuiltinCall BinaryExpr);
         return false if $void{$class};
         return true if $class eq 'SubscriptExpr';
@@ -1000,7 +999,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     # Find an exists/delete BuiltinCall in a subscript chain.
-    # Walks SubscriptExpr, ReturnStmt, and DieCall wrappers inward.
+    # Walks SubscriptExpr, Return, and DieCall wrappers inward.
     method _find_exists_delete_in_chain($node) {
         my $cur = $node;
         while (defined $cur && ($cur isa Chalk::IR::Node || $cur isa Chalk::Bootstrap::IR::Node::Constructor)) {
@@ -1013,9 +1012,13 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 $cur = $cur->inputs()->[0];
                 next;
             }
-            # Unwrap ReturnStmt/DieCall wrappers (stale-value merge artifacts)
+            # Unwrap Return/DieCall wrappers (stale-value merge artifacts)
+            if ($cur isa Chalk::IR::Node::Return) {
+                $cur = $cur->inputs()->[1];  # inputs[1] is the value
+                next;
+            }
             next unless $cur isa Chalk::Bootstrap::IR::Node::Constructor;
-            if ($cur->class() eq 'ReturnStmt' || $cur->class() eq 'DieCall') {
+            if ($cur->class() eq 'DieCall') {
                 $cur = $cur->inputs()->[0];
                 next;
             }
@@ -1046,9 +1049,13 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 $base_node = $args->[0] if $args->@* > 0;
                 last;
             }
-            # Unwrap ReturnStmt/DieCall wrappers (stale-value merge artifacts)
+            # Unwrap Return/DieCall wrappers (stale-value merge artifacts)
+            if ($cur isa Chalk::IR::Node::Return) {
+                $cur = $cur->inputs()->[1];  # inputs[1] is the value
+                next;
+            }
             next unless $cur isa Chalk::Bootstrap::IR::Node::Constructor;
-            if ($cur->class() eq 'ReturnStmt' || $cur->class() eq 'DieCall') {
+            if ($cur->class() eq 'DieCall') {
                 $cur = $cur->inputs()->[0];
                 next;
             }
@@ -1155,7 +1162,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         for my $idx (0 .. $true_stmts->@* - 1) {
             my $stmt = $true_stmts->[$idx];
             my $is_last_in_then = ($idx == $true_stmts->@* - 1);
-            # Stale-merge can strip ReturnStmt leaving a bare expression.
+            # Stale-merge can strip Return node leaving a bare expression.
             # When in return context (method has returns), detect the last
             # bare expression and emit it as RETVAL assignment + goto.
             # Inside loops, MethodCallExpr at tail is likely a void side-effect
@@ -1509,12 +1516,12 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # Typed node fast-path: handle computation types before falling through
         # to Constructor class-string dispatch for legacy untyped nodes.
         if ($node isa Chalk::IR::Node::VarDecl) { return $self->_emit_var_decl($node, $declared_vars); }
+        if ($node isa Chalk::IR::Node::Return)  { return $self->_emit_return_stmt($node, $declared_vars, $is_last); }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
 
             if ($class eq 'VarDecl')         { return $self->_emit_var_decl($node, $declared_vars); }
-            if ($class eq 'ReturnStmt')      { return $self->_emit_return_stmt($node, $declared_vars, $is_last); }
             if ($class eq 'DieCall')         { return $self->_emit_die_call($node, $declared_vars); }
             if ($class eq 'CompoundAssign')  { return $self->_emit_compound_assign_stmt($node, $declared_vars); }
 
@@ -1841,7 +1848,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
 
         # Handle exists/delete with misparented subscript chain:
         # IR produces SubscriptExpr(BuiltinCall(exists, [$var]), $key) or
-        # SubscriptExpr(ReturnStmt(BuiltinCall(exists, [$var])), $key)
+        # SubscriptExpr(Return(ctrl, BuiltinCall(exists, [$var])), $key)
         # Collect the full subscript chain and emit native C exists/delete.
         {
             my $builtin = $self->_find_exists_delete_in_chain($node);
@@ -1852,7 +1859,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         }
 
         # Handle stale-merge parse artifact: return [EXPR] is parsed as
-        # SubscriptExpr("return", EXPR, "array") instead of ReturnStmt([EXPR]).
+        # SubscriptExpr("return", EXPR, "array") instead of Return(ctrl, [EXPR]).
         # The inner EXPR (e.g., map builtin) already produces the array content,
         # so emit it directly — the map handler wraps results in newRV_noinc(AV*).
         if ($style eq 'array'
@@ -2345,7 +2352,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     method _emit_return_stmt($node, $declared_vars, $is_last = true) {
-        my $value = $node->inputs()->[0];
+        my $value = $node->inputs()->[1];  # inputs[0]=control, inputs[1]=value
         my $val_expr = $self->_emit_expr($value, $declared_vars);
         $val_expr =~ s/^sv_2mortal\((.+)\)$/$1/;
         my $retval = $self->_wrap_retval($val_expr);
@@ -2403,6 +2410,11 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         if ($node isa Chalk::IR::Node::Subscript)    { return $self->_emit_subscript_expr($node, $declared_vars); }
         if ($node isa Chalk::IR::Node::PostfixDeref) { return $self->_emit_postfix_deref_expr($node, $declared_vars); }
         if ($node isa Chalk::IR::Node::VarDecl)      { return $self->_emit_var_decl_expr($node, $declared_vars); }
+        if ($node isa Chalk::IR::Node::Return) {
+            # Return used as expression: stale-value merge artifact from Earley parser.
+            # Unwrap and emit the inner value (inputs[1]) as an expression.
+            return $self->_emit_expr($node->inputs()->[1], $declared_vars);
+        }
         if ($node isa Chalk::IR::Node::Call) {
             if ($node->dispatch_kind() eq 'method')  { return $self->_emit_method_call_expr($node, $declared_vars); }
             if ($node->dispatch_kind() eq 'builtin') { return $self->_emit_builtin_call($node, $declared_vars); }
@@ -2429,13 +2441,6 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             if ($class eq 'VarDecl')            { return $self->_emit_var_decl_expr($node, $declared_vars); }
             if ($class eq 'StructRef')          { return $self->_emit_struct_ref_expr($node, $declared_vars); }
             if ($class eq 'FieldAccess')        { return $self->_emit_field_access_expr($node, $declared_vars); }
-
-            # ReturnStmt used as expression: stale-value merge artifact from Earley parser.
-            # Unwrap and emit the inner value as an expression.
-            if ($class eq 'ReturnStmt') {
-                my $inner = $node->inputs()->[0];
-                return $self->_emit_expr($inner, $declared_vars);
-            }
 
             # DieCall used as expression: stale-value merge artifact.
             # Emit croak in a statement expression — croak never returns.

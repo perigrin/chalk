@@ -8,15 +8,18 @@ use lib 'lib';
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
+use Chalk::IR::Node::Return;
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
 # Build a minimal IR: a class with one method (so we get exported_functions)
 my $class_name = 'Foo::Bar::Baz';
-my $method_body_return = $factory->make('Constructor',
-    class => 'ReturnStmt',
-    value => $factory->make('Constant', const_type => 'string', value => '1'),
+my $method_body_return = $factory->make_cfg('Return',
+    inputs => [
+        $factory->make('Start'),
+        $factory->make('Constant', const_type => 'string', value => '1'),
+    ],
 );
 my $method = $factory->make('Constructor',
     class  => 'MethodDecl',

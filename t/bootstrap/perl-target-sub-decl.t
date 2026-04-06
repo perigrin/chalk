@@ -8,6 +8,7 @@ use lib 'lib';
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::Perl;
+use Chalk::IR::Node::Return;
 
 # Reset factory for clean test state
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -57,10 +58,11 @@ my sub emit_via_program($stmt) {
 
 # === Test 2: Package-scope sub with params and body ===
 {
-    my $return_node = $factory->make('Constructor',
-        class => 'ReturnStmt',
-        value => $factory->make('Constant',
-            const_type => 'string', value => '42'),
+    my $return_node = $factory->make_cfg('Return',
+        inputs => [
+            $factory->make('Start'),
+            $factory->make('Constant', const_type => 'string', value => '42'),
+        ],
     );
     my $sub_node = make_sub_decl(
         name   => 'add',

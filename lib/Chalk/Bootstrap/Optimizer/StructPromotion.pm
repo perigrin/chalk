@@ -6,6 +6,7 @@ use experimental 'class';
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::Node;
+use Chalk::IR::Node::Return;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::HashRef;
 use Chalk::IR::Node::BinOp;
@@ -297,13 +298,10 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
     #   2. Passed as an argument to a method call on an object that may not be compiled
     method _check_escapes($var_prefix, $node, $var_schemas, $is_public) {
         return unless defined $node;
-        return unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
 
-        my $class = $node->class();
-
-        # ReturnStmt in a public method — hash escapes
-        if ($class eq 'ReturnStmt' && $is_public) {
-            my $value = $node->inputs()->[0];
+        # Return CFG node in a public method — returned value may escape.
+        if ($node isa Chalk::IR::Node::Return && $is_public) {
+            my $value = $node->inputs()->[1];  # inputs[0]=control, inputs[1]=value
             if (defined $value
                 && $value isa Chalk::Bootstrap::IR::Node::Constant
                 && $value->const_type() eq 'variable') {
@@ -314,6 +312,10 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             }
             return;
         }
+
+        return unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+
+        my $class = $node->class();
 
         # MethodCallExpr — check if any hash variable is passed as an argument.
         # If the invocant is $self, the call stays in compiled code (same class).
@@ -847,7 +849,6 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             'VarDecl'        => ['variable', 'initializer'],
             'BinaryExpr'     => ['op', 'left', 'right'],
             'UnaryExpr'      => ['op', 'operand'],
-            'ReturnStmt'     => ['value'],
             'SubscriptExpr'  => ['target', 'index', 'style'],
             'MethodCallExpr' => ['invocant', 'method_name', 'args'],
             'BuiltinCall'    => ['name', 'args'],

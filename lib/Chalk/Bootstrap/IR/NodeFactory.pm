@@ -57,7 +57,6 @@ class Chalk::Bootstrap::IR::NodeFactory {
         'Constructor:ClassDecl'  => ['name', 'parent', 'body'],
         'Constructor:MethodDecl' => ['name', 'params', 'body', 'return_type'],
         'Constructor:SubDecl'    => ['name', 'params', 'body', 'scope'],
-        'Constructor:ReturnStmt' => ['value'],
         'Constructor:DieCall'    => ['args'],
         'Constructor:_Attribute' => ['name', 'parent', 'body'],
         'Constructor:FieldDecl' => ['name', 'attributes', 'default_value'],
@@ -98,6 +97,17 @@ class Chalk::Bootstrap::IR::NodeFactory {
     # Lazily initialize the new-style factory on first use
     method _ensure_new_factory() {
         $_new_factory //= Chalk::IR::NodeFactory->new();
+    }
+
+    # Create a unique CFG node via the new-style factory.
+    # CFG nodes (Return, Unwind, If, Proj, Region, Loop, Start) represent
+    # control-flow positions and are never deduplicated — each call returns
+    # a distinct object even when inputs are identical.
+    # Delegates to Chalk::IR::NodeFactory::make_cfg so that the resulting
+    # nodes are Chalk::IR::Node::* instances, not Bootstrap::IR::Node::*.
+    method make_cfg($operation, %params) {
+        $self->_ensure_new_factory();
+        return $_new_factory->make_cfg($operation, %params);
     }
 
     # Create or retrieve a node

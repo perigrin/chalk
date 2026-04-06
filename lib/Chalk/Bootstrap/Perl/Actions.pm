@@ -12,6 +12,7 @@ use Chalk::IR::Node::UnaryOp;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
+use Chalk::IR::Node::Return;
 use Chalk::IR::UseInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
@@ -22,8 +23,8 @@ use Chalk::IR::Program;
 # Builtin keyword sets used by _fixup_stmts for statement merging
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
 my %PREFIX_BUILTINS = map { $_ => 1 } qw(scalar defined ref exists delete keys values each length chr ord substr sprintf join split);
-my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl ReturnStmt DieCall SubDecl VarDecl);
-my %STMT_BOUNDARY_OPS = map { $_ => 1 } qw(If Loop);
+my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl DieCall SubDecl VarDecl);
+my %STMT_BOUNDARY_OPS = map { $_ => 1 } qw(If Loop Return);
 my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless while until);
 
 class Chalk::Bootstrap::Perl::Actions {
@@ -133,7 +134,7 @@ class Chalk::Bootstrap::Perl::Actions {
     # the deref at the innermost target, then rewraps in correct order.
     #
     # Handles these misparenting patterns:
-    #   PostfixDeref(ReturnStmt(X), @) → ReturnStmt(PostfixDeref(X, @))
+    #   PostfixDeref(Return(ctrl, X), @) → Return(ctrl, PostfixDeref(X, @))
     #   PostfixDeref(BuiltinCall(scalar, [X]), @) → BuiltinCall(scalar, [PostfixDeref(X, @)])
     #   PostfixDeref(MethodCall(BuiltinCall(push, [A, B]), m, []), @)
     #     → BuiltinCall(push, [A, PostfixDeref(MethodCall(B, m, []), @)])
@@ -142,10 +143,10 @@ class Chalk::Bootstrap::Perl::Actions {
         my @wrappers;
         my $current = $target;
         while (defined $current && $current isa Chalk::IR::Node) {
-            if ($current isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $current->class() eq 'ReturnStmt') {
-                push @wrappers, ['ReturnStmt'];
-                $current = $current->inputs()->[0];
+            if ($current isa Chalk::IR::Node::Return) {
+                # Save the control token so it can be restored when re-wrapping.
+                push @wrappers, ['Return', $current->inputs()->[0]];
+                $current = $current->inputs()->[1];  # value is inputs[1]
             } elsif ($current isa Chalk::Bootstrap::IR::Node::Constructor
                     && $current->class() eq 'DieCall') {
                 push @wrappers, ['DieCall', $current->inputs()->[0]];
@@ -173,10 +174,10 @@ class Chalk::Bootstrap::Perl::Actions {
 
         # Rewrap layers from inside out
         for my $wrapper (reverse @wrappers) {
-            if ($wrapper->[0] eq 'ReturnStmt') {
-                $result = $factory->make('Constructor',
-                    'class' => 'ReturnStmt',
-                    value   => $result,
+            if ($wrapper->[0] eq 'Return') {
+                # Restore the original control token saved during unwrap.
+                $result = $factory->make_cfg('Return',
+                    inputs => [$wrapper->[1], $result],
                 );
             } elsif ($wrapper->[0] eq 'DieCall') {
                 my @args = ($wrapper->[1]->@*);
@@ -217,10 +218,10 @@ class Chalk::Bootstrap::Perl::Actions {
         my @wrappers;
         my $current = $invocant;
         while (defined $current && $current isa Chalk::IR::Node) {
-            if ($current isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $current->class() eq 'ReturnStmt') {
-                push @wrappers, ['ReturnStmt'];
-                $current = $current->inputs()->[0];
+            if ($current isa Chalk::IR::Node::Return) {
+                # Save control token for re-wrapping later.
+                push @wrappers, ['Return', $current->inputs()->[0]];
+                $current = $current->inputs()->[1];  # value is inputs[1]
             } elsif ($current isa Chalk::Bootstrap::IR::Node::Constructor
                     && $current->class() eq 'DieCall') {
                 push @wrappers, ['DieCall', $current->inputs()->[0]];
@@ -259,10 +260,10 @@ class Chalk::Bootstrap::Perl::Actions {
 
         # Rewrap layers from inside out
         for my $wrapper (reverse @wrappers) {
-            if ($wrapper->[0] eq 'ReturnStmt') {
-                $result = $factory->make('Constructor',
-                    'class' => 'ReturnStmt',
-                    value   => $result,
+            if ($wrapper->[0] eq 'Return') {
+                # Restore the original control token saved during unwrap.
+                $result = $factory->make_cfg('Return',
+                    inputs => [$wrapper->[1], $result],
                 );
             } elsif ($wrapper->[0] eq 'DieCall') {
                 my @die_args = ($wrapper->[1]->@*);
@@ -349,11 +350,6 @@ class Chalk::Bootstrap::Perl::Actions {
                     index  => $new_inputs[1],
                     style  => $new_inputs[2],
                 );
-            } elsif ($node->class() eq 'ReturnStmt') {
-                $node = $factory->make('Constructor',
-                    'class' => 'ReturnStmt',
-                    value   => $new_inputs[0],
-                );
             }
             # Other classes: leave unchanged (inputs are positional anyway)
         }
@@ -384,32 +380,28 @@ class Chalk::Bootstrap::Perl::Actions {
         # Fix prefix builtin subscript chain misparenting:
         # SubscriptExpr(BuiltinCall(defined/exists/ref/etc, [$var]), $key, style)
         #   → BuiltinCall(defined/exists/ref/etc, [SubscriptExpr($var, $key, style)])
-        # Also handles ReturnStmt wrapper from stale-value merge:
-        # SubscriptExpr(ReturnStmt(BuiltinCall(..., [$var])), $key, style)
-        #   → ReturnStmt(BuiltinCall(..., [SubscriptExpr($var, $key, style)]))
+        # Also handles Return/DieCall wrapper from stale-value merge:
+        # SubscriptExpr(Return(ctrl, BuiltinCall(..., [$var])), $key, style)
+        #   → Return(ctrl, BuiltinCall(..., [SubscriptExpr($var, $key, style)]))
         if ($node->class() eq 'SubscriptExpr') {
             my $target = $node->inputs()->[0];
             my $builtin_call;
-            my $wrapper_class;  # 'ReturnStmt' if wrapped, undef if direct
+            my $stmt_wrapper;  # Return or DieCall node if wrapped, undef if direct
 
             if (defined $target
                     && (($target isa Chalk::IR::Node::Call
                             && $target->dispatch_kind() eq 'builtin')
-                        || ($target isa Chalk::Bootstrap::IR::Node::Constructor
-                            && ($target->class() eq 'ReturnStmt'
-                                || $target->class() eq 'DieCall')))) {
+                        || _is_stmt_node($target))) {
                 if ($target isa Chalk::IR::Node::Call
                         && $target->dispatch_kind() eq 'builtin') {
                     $builtin_call = $target;
-                } elsif ($target isa Chalk::Bootstrap::IR::Node::Constructor
-                        && ($target->class() eq 'ReturnStmt'
-                        || $target->class() eq 'DieCall')) {
-                    my $inner = $target->inputs()->[0];
-                    if (defined $inner
-                            && $inner isa Chalk::IR::Node::Call
-                            && $inner->dispatch_kind() eq 'builtin') {
-                        $builtin_call = $inner;
-                        $wrapper_class = $target->class();
+                } elsif (_is_stmt_node($target)) {
+                    my ($inner_val) = _stmt_inner($target);
+                    if (defined $inner_val
+                            && $inner_val isa Chalk::IR::Node::Call
+                            && $inner_val->dispatch_kind() eq 'builtin') {
+                        $builtin_call = $inner_val;
+                        $stmt_wrapper = $target;
                     }
                 }
             }
@@ -430,11 +422,8 @@ class Chalk::Bootstrap::Perl::Actions {
                         name    => $builtin_call->inputs()->[0],
                         args    => \@args,
                     );
-                    if (defined $wrapper_class) {
-                        return $factory->make('Constructor',
-                            'class' => $wrapper_class,
-                            value   => $new_builtin,
-                        );
+                    if (defined $stmt_wrapper) {
+                        return _rewrap_stmt($factory, $stmt_wrapper, $new_builtin);
                     }
                     return $new_builtin;
                 }
@@ -556,11 +545,35 @@ class Chalk::Bootstrap::Perl::Actions {
         return $node;
     };
 
-    # Unwrap ReturnStmt/DieCall trapped inside expression nodes by stale-value
-    # merge.  Earley's add() can produce IR like BinaryExpr(==, ReturnStmt($x), 1)
-    # or SubscriptExpr(ReturnStmt($h), $k, hash) when the statement keyword gets
+    # Unwrap Return/DieCall trapped inside expression nodes by stale-value
+    # merge.  Earley's add() can produce IR like BinaryExpr(==, Return(ctrl,$x), 1)
+    # or SubscriptExpr(Return(ctrl,$h), $k, hash) when the statement keyword gets
     # absorbed as the left operand.  Restructure so the statement wraps the
-    # expression: ReturnStmt(BinaryExpr(==, $x, 1)).
+    # expression: Return(ctrl, BinaryExpr(==, $x, 1)).
+    # Helper: extract inner value and control from a Return or DieCall node.
+    my sub _stmt_inner($node) {
+        if ($node isa Chalk::IR::Node::Return) {
+            return ($node->inputs()->[1], $node->inputs()->[0]);  # value, control
+        }
+        # DieCall (Constructor): inner value is inputs()->[0]->[-1]
+        return ($node->inputs()->[0], undef);
+    }
+
+    my sub _is_stmt_node($node) {
+        return $node isa Chalk::IR::Node::Return
+            || ($node isa Chalk::Bootstrap::IR::Node::Constructor
+                && $node->class() eq 'DieCall');
+    }
+
+    my sub _rewrap_stmt($factory, $stmt_node, $new_inner) {
+        if ($stmt_node isa Chalk::IR::Node::Return) {
+            my $ctrl = $stmt_node->inputs()->[0];
+            return $factory->make_cfg('Return', inputs => [$ctrl, $new_inner]);
+        }
+        # DieCall
+        return $factory->make('Constructor', 'class' => 'DieCall', args => [$new_inner]);
+    }
+
     my $_unwrap_stmt_from_expr;
     $_unwrap_stmt_from_expr = sub ($factory, $node) {
         return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
@@ -568,23 +581,17 @@ class Chalk::Bootstrap::Perl::Actions {
 
         if ($class eq 'BinaryExpr') {
             # Recurse into left child first to handle nested cases like
-            # BinaryExpr(|, BinaryExpr(&, ReturnStmt(X), Y), Z)
+            # BinaryExpr(|, BinaryExpr(&, Return(ctrl,X), Y), Z)
             my $left = $_unwrap_stmt_from_expr->($factory, $node->inputs()->[1]);
-            if ($left isa Chalk::Bootstrap::IR::Node::Constructor
-                    && ($left->class() eq 'ReturnStmt' || $left->class() eq 'DieCall')) {
-                my $inner_val = $left->inputs()->[0];
+            if (_is_stmt_node($left)) {
+                my ($inner_val) = _stmt_inner($left);
                 my $new_expr = $factory->make('Constructor',
                     'class' => 'BinaryExpr',
                     op      => $node->inputs()->[0],
                     left    => $inner_val,
                     right   => $node->inputs()->[2],
                 );
-                if ($left->class() eq 'ReturnStmt') {
-                    return $factory->make('Constructor',
-                        'class' => 'ReturnStmt', value => $new_expr);
-                }
-                return $factory->make('Constructor',
-                    'class' => 'DieCall', args => [$new_expr]);
+                return _rewrap_stmt($factory, $left, $new_expr);
             }
             # Left was recursively fixed but isn't a stmt — rebuild if changed
             if (refaddr($left) != refaddr($node->inputs()->[1])) {
@@ -599,80 +606,56 @@ class Chalk::Bootstrap::Perl::Actions {
 
         if ($class eq 'SubscriptExpr') {
             my $base = $node->inputs()->[0];
-            if ($base isa Chalk::Bootstrap::IR::Node::Constructor
-                    && ($base->class() eq 'ReturnStmt' || $base->class() eq 'DieCall')) {
-                my $inner_val = $base->inputs()->[0];
+            if (_is_stmt_node($base)) {
+                my ($inner_val) = _stmt_inner($base);
                 my $new_expr = $factory->make('Constructor',
                     'class' => 'SubscriptExpr',
                     target  => $inner_val,
                     index   => $node->inputs()->[1],
                     style   => $node->inputs()->[2],
                 );
-                if ($base->class() eq 'ReturnStmt') {
-                    return $factory->make('Constructor',
-                        'class' => 'ReturnStmt', value => $new_expr);
-                }
-                return $factory->make('Constructor',
-                    'class' => 'DieCall', args => [$new_expr]);
+                return _rewrap_stmt($factory, $base, $new_expr);
             }
         }
 
         if ($class eq 'PostfixDerefExpr') {
             my $base = $node->inputs()->[0];
-            if ($base isa Chalk::Bootstrap::IR::Node::Constructor
-                    && ($base->class() eq 'ReturnStmt' || $base->class() eq 'DieCall')) {
-                my $inner_val = $base->inputs()->[0];
+            if (_is_stmt_node($base)) {
+                my ($inner_val) = _stmt_inner($base);
                 my $new_expr = $factory->make('Constructor',
                     'class' => 'PostfixDerefExpr',
                     target  => $inner_val,
                     sigil   => $node->inputs()->[1],
                 );
-                if ($base->class() eq 'ReturnStmt') {
-                    return $factory->make('Constructor',
-                        'class' => 'ReturnStmt', value => $new_expr);
-                }
-                return $factory->make('Constructor',
-                    'class' => 'DieCall', args => [$new_expr]);
+                return _rewrap_stmt($factory, $base, $new_expr);
             }
         }
 
         if ($class eq 'TernaryExpr') {
             my $cond = $node->inputs()->[0];
-            if ($cond isa Chalk::Bootstrap::IR::Node::Constructor
-                    && ($cond->class() eq 'ReturnStmt' || $cond->class() eq 'DieCall')) {
-                my $inner_val = $cond->inputs()->[0];
+            if (_is_stmt_node($cond)) {
+                my ($inner_val) = _stmt_inner($cond);
                 my $new_expr = $factory->make('Constructor',
                     'class'      => 'TernaryExpr',
                     condition  => $inner_val,
                     true_expr  => $node->inputs()->[1],
                     false_expr => $node->inputs()->[2],
                 );
-                if ($cond->class() eq 'ReturnStmt') {
-                    return $factory->make('Constructor',
-                        'class' => 'ReturnStmt', value => $new_expr);
-                }
-                return $factory->make('Constructor',
-                    'class' => 'DieCall', args => [$new_expr]);
+                return _rewrap_stmt($factory, $cond, $new_expr);
             }
         }
 
         if ($class eq 'MethodCallExpr') {
             my $invocant = $node->inputs()->[0];
-            if ($invocant isa Chalk::Bootstrap::IR::Node::Constructor
-                    && ($invocant->class() eq 'ReturnStmt' || $invocant->class() eq 'DieCall')) {
-                my $inner_val = $invocant->inputs()->[0];
+            if (_is_stmt_node($invocant)) {
+                my ($inner_val) = _stmt_inner($invocant);
                 my $new_expr = $factory->make('Constructor',
                     'class'     => 'MethodCallExpr',
                     invocant    => $inner_val,
                     method_name => $node->inputs()->[1],
                     args        => $node->inputs()->[2],
                 );
-                if ($invocant->class() eq 'ReturnStmt') {
-                    return $factory->make('Constructor',
-                        'class' => 'ReturnStmt', value => $new_expr);
-                }
-                return $factory->make('Constructor',
-                    'class' => 'DieCall', args => [$new_expr]);
+                return _rewrap_stmt($factory, $invocant, $new_expr);
             }
         }
 
@@ -682,7 +665,7 @@ class Chalk::Bootstrap::Perl::Actions {
     # Post-process statement list to fix grammar ambiguity artifacts.
     # The ambiguous grammar sometimes parses compound statements as
     # separate items. These fixups merge them back together:
-    # - `return 'Start'` → ReturnStmt(Constant('Start'))
+    # - `return 'Start'` → Return(ctrl, Constant('Start'))
     # - `die "message"` → DieCall([Constant('message')])
     # - `use Foo 'bar'` (split) → UseDecl(Foo, ['bar'])
     my sub _fixup_stmts($factory, $stmts) {
@@ -694,20 +677,20 @@ class Chalk::Bootstrap::Perl::Actions {
                     && defined $item->value()
                     && $item->value() eq 'return'
                     && $i + 1 <= $#$stmts) {
-                # Merge return + value into ReturnStmt
+                # Merge return + value into a Return CFG node.
+                # No cfg_state is available here (fixup runs post-parse),
+                # so a fresh Start node serves as the control token.
                 $i++;
                 my $value = $stmts->[$i];
-                push @result, $factory->make('Constructor',
-                    'class' => 'ReturnStmt',
-                    value => $value,
+                push @result, $factory->make_cfg('Return',
+                    inputs => [$factory->make('Start'), $value],
                 );
             } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $item->value()
                     && $item->value() eq 'return') {
-                # Bare return; with no following value — emit ReturnStmt(undef)
-                push @result, $factory->make('Constructor',
-                    'class' => 'ReturnStmt',
-                    value => _make_const($factory, 'undef'),
+                # Bare return; with no following value — emit Return CFG node.
+                push @result, $factory->make_cfg('Return',
+                    inputs => [$factory->make('Start'), _make_const($factory, 'undef')],
                 );
             } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $item->value()
@@ -791,7 +774,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # separate statement. Block merge for known statement-starting patterns.
                 my $next = $stmts->[$i + 1];
                 my $is_boundary = false;
-                # Statement-level Constructor classes (ReturnStmt, ClassDecl, etc.)
+                # Statement-level Constructor classes (ClassDecl, MethodDecl, DieCall, etc.)
                 $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constructor
                     && $STMT_BOUNDARY_CLASSES{$next->class()};
                 # ClassInfo/FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
@@ -799,8 +782,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 $is_boundary = true if $next isa Chalk::IR::FieldInfo;
                 $is_boundary = true if $next isa Chalk::IR::MethodInfo;
                 $is_boundary = true if $next isa Chalk::IR::SubInfo;
-                # CFG control flow nodes
-                $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node
+                # CFG control flow nodes (both Bootstrap and new Chalk::IR hierarchies)
+                $is_boundary = true if ($next isa Chalk::Bootstrap::IR::Node
+                        || $next isa Chalk::IR::Node)
                     && $STMT_BOUNDARY_OPS{$next->operation() // ''};
                 # Bare keyword Constants (push, return, die, for, etc.)
                 $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constant
@@ -839,8 +823,9 @@ class Chalk::Bootstrap::Perl::Actions {
                     last if $next isa Chalk::IR::FieldInfo;
                     last if $next isa Chalk::IR::MethodInfo;
                     last if $next isa Chalk::IR::SubInfo;
-                    # Stop at CFG control flow nodes
-                    last if $next isa Chalk::Bootstrap::IR::Node
+                    # Stop at CFG control flow nodes (both Bootstrap and new Chalk::IR hierarchies)
+                    last if ($next isa Chalk::Bootstrap::IR::Node
+                            || $next isa Chalk::IR::Node)
                         && $STMT_BOUNDARY_OPS{$next->operation() // ''};
                     # Stop at other bare builtins
                     last if $next isa Chalk::Bootstrap::IR::Node::Constant
@@ -992,17 +977,30 @@ class Chalk::Bootstrap::Perl::Actions {
     # §3 ReturnStatement ::= /return\b/ WS Expression | /return\b/
     method ReturnStatement($ctx) {
         my @values = _collect_ir_values($ctx);
-        # First IR value is the return expression (if present)
+        # First IR value is the return expression (if present).
+        # Skip the bare 'return' keyword Constant — take the first non-keyword node.
         my $value;
         for my $val (@values) {
-            if ($val isa Chalk::Bootstrap::IR::Node) {
+            if ($val isa Chalk::Bootstrap::IR::Node
+                    && !($val isa Chalk::Bootstrap::IR::Node::Constant
+                         && defined $val->value()
+                         && $val->value() eq 'return')) {
                 $value = $val;
                 last;
             }
         }
-        return $factory->make('Constructor',
-            'class' => 'ReturnStmt',
-            value => $value // _make_const($factory, 'undef'),
+        # Retrieve the current control token from cfg_state for CFG edge.
+        # Fall back to a fresh Start node when no cfg_state is available
+        # (e.g., in tests or early-parse contexts without scope tracking).
+        my $control;
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            $control = $state->{control} if defined $state;
+        }
+        $control //= $factory->make('Start');
+        return $factory->make_cfg('Return',
+            inputs => [$control, $value // _make_const($factory, 'undef')],
         );
     }
 
@@ -1312,7 +1310,7 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # Detect stale-merge artifact: `return unless COND` mis-parsed as
-    # ReturnStmt(value: ...BuiltinCall("unless",...)).
+    # Return(ctrl, value: ...BuiltinCall("unless",...)).
     # Walks the value tree looking for a BuiltinCall node whose name is
     # a postfix modifier keyword (unless/if/while/until/for/foreach).
     method _is_postfix_modifier_artifact($node, $keywords) {
@@ -1635,11 +1633,17 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         if (defined $func_name && $func_name eq 'return') {
-            # return EXPR → ReturnStmt
+            # return EXPR → Return CFG node
             my $value = $args[0]; # single value for Tier A
-            return $factory->make('Constructor',
-                'class' => 'ReturnStmt',
-                value => $value,
+            my $control;
+            my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+            if (defined $sa) {
+                my $state = $sa->inherited_cfg_state($ctx);
+                $control = $state->{control} if defined $state;
+            }
+            $control //= $factory->make('Start');
+            return $factory->make_cfg('Return',
+                inputs => [$control, $value],
             );
         }
 
@@ -2273,12 +2277,12 @@ class Chalk::Bootstrap::Perl::Actions {
         # constructs (return, scalar, etc.) can end up as the target of
         # PostfixDeref instead of wrapping it. Recursively push the deref
         # inward past prefix wrappers until it reaches the actual target:
-        #   PostfixDeref(ReturnStmt(X), @)
-        #     → ReturnStmt(PostfixDeref(X, @))
+        #   PostfixDeref(Return(ctrl, X), @)
+        #     → Return(ctrl, PostfixDeref(X, @))
         #   PostfixDeref(BuiltinCall(scalar, [X]), @)
         #     → BuiltinCall(scalar, [PostfixDeref(X, @)])
-        #   PostfixDeref(ReturnStmt(BuiltinCall(scalar, [X])), @)
-        #     → ReturnStmt(BuiltinCall(scalar, [PostfixDeref(X, @)]))
+        #   PostfixDeref(Return(ctrl, BuiltinCall(scalar, [X])), @)
+        #     → Return(ctrl, BuiltinCall(scalar, [PostfixDeref(X, @)]))
         return _push_deref_inward($factory, $target, $sigil_node);
     }
 

@@ -8,6 +8,7 @@ use Test2::V0;
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer::StructPromotion;
+use Chalk::IR::Node::Return;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
@@ -19,6 +20,14 @@ sub const_node($type, $value) {
 sub ctor($class, %inputs) {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
     return $factory->make('Constructor', class => $class, %inputs);
+}
+
+# Helper: create a Return CFG node
+sub ret_node($val) {
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    return $factory->make_cfg('Return',
+        inputs => [ $factory->make('Start'), $val ],
+    );
 }
 
 # === Test: Constructor detection — empty hash + literal-key assignments ===
@@ -68,7 +77,7 @@ sub ctor($class, %inputs) {
         push @assigns, $assign;
     }
 
-    my $return_stmt = ctor('ReturnStmt', value => $item_var);
+    my $return_stmt = ret_node($item_var);
 
     # Build method body
     my $method_body = [$var_decl, @assigns, $return_stmt];
@@ -249,7 +258,7 @@ sub ctor($class, %inputs) {
         right => const_node('string', 'ok'),
     );
 
-    my $return_stmt = ctor('ReturnStmt', value => $var);
+    my $return_stmt = ret_node($var);
 
     # Public method (no _ prefix)
     my $method = ctor('MethodDecl',
@@ -301,7 +310,7 @@ sub ctor($class, %inputs) {
         right => const_node('integer', '1'),
     );
 
-    my $return_stmt = ctor('ReturnStmt', value => $var);
+    my $return_stmt = ret_node($var);
 
     # Private method (_ prefix) — all callers are compiled
     my $method = ctor('MethodDecl',

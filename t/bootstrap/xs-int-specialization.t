@@ -8,6 +8,7 @@ use lib 'lib';
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
+use Chalk::IR::Node::Return;
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -22,14 +23,16 @@ my $method = $factory->make('Constructor',
         $factory->make('Constant', const_type => 'string', value => '$n'),
     ],
     body   => [
-        $factory->make('Constructor',
-            class => 'ReturnStmt',
-            value => $factory->make('Constructor',
-                class => 'BinaryExpr',
-                op    => $factory->make('Constant', const_type => 'string', value => '+'),
-                left  => $factory->make('Constant', const_type => 'variable', value => '$n'),
-                right => $factory->make('Constant', const_type => 'string', value => '1'),
-            ),
+        $factory->make_cfg('Return',
+            inputs => [
+                $factory->make('Start'),
+                $factory->make('Constructor',
+                    class => 'BinaryExpr',
+                    op    => $factory->make('Constant', const_type => 'string', value => '+'),
+                    left  => $factory->make('Constant', const_type => 'variable', value => '$n'),
+                    right => $factory->make('Constant', const_type => 'string', value => '1'),
+                ),
+            ],
         ),
     ],
     return_type => undef,
@@ -99,11 +102,10 @@ my sub binop($op, $l, $r) {
     );
 }
 
-# Helper: make a ReturnStmt node
+# Helper: make a Return CFG node
 my sub ret($val) {
-    return $factory2->make('Constructor',
-        class => 'ReturnStmt',
-        value => $val,
+    return $factory2->make_cfg('Return',
+        inputs => [ $factory2->make('Start'), $val ],
     );
 }
 

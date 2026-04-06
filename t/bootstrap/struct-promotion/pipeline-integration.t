@@ -8,6 +8,7 @@ use Test2::V0;
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer::StructPromotion;
+use Chalk::IR::Node::Return;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
@@ -19,6 +20,14 @@ sub const_node($type, $value) {
 sub ctor($class, %inputs) {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
     return $factory->make('Constructor', class => $class, %inputs);
+}
+
+# Helper: create a Return CFG node
+sub ret_node($val) {
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    return $factory->make_cfg('Return',
+        inputs => [ $factory->make('Start'), $val ],
+    );
 }
 
 # === Test: run() orchestrates analyze + rewrite ===
@@ -46,7 +55,7 @@ sub ctor($class, %inputs) {
         right => const_node('integer', '1'),
     );
 
-    my $return_stmt = ctor('ReturnStmt', value => $item_var);
+    my $return_stmt = ret_node($item_var);
 
     my $method = ctor('MethodDecl',
         name        => const_node('string', '_maker'),
@@ -108,7 +117,7 @@ sub ctor($class, %inputs) {
     my $method = ctor('MethodDecl',
         name        => const_node('string', 'simple'),
         params      => [],
-        body        => [ctor('ReturnStmt', value => const_node('integer', '42'))],
+        body        => [ret_node(const_node('integer', '42'))],
         return_type => undef,
     );
 

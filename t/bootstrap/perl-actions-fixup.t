@@ -10,6 +10,7 @@ use Chalk::IR::UseInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::Program;
+use Chalk::IR::Node::Return;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -131,7 +132,7 @@ my sub method_name($method) {
 
         my $body = method_body($method);
         is(scalar $body->@*, 1, 'return merge: method body has 1 item');
-        is($body->[0]->class(), 'ReturnStmt', 'return merge: body item is ReturnStmt');
+        ok($body->[0] isa Chalk::IR::Node::Return, 'return merge: body item is Return CFG node');
     }
 }
 
@@ -415,9 +416,9 @@ my sub method_name($method) {
         is(scalar $stmts->@*, 1, 'return scalar deref: one statement');
 
         my $ret = $stmts->[0];
-        is($ret->class(), 'ReturnStmt', 'return scalar deref: class is ReturnStmt');
+        ok($ret isa Chalk::IR::Node::Return, 'return scalar deref: is Return CFG node');
 
-        my $value = $ret->inputs()->[0];
+        my $value = $ret->inputs()->[1];  # inputs[0]=control, inputs[1]=value
         ok(defined $value, 'return scalar deref: return value defined');
         is($value->class(), 'BuiltinCall', 'return scalar deref: value is BuiltinCall(scalar)');
         is($value->inputs()->[0]->value(), 'scalar', 'return scalar deref: builtin name');

@@ -51,7 +51,7 @@ my %UNOP_MAP = (
 # Classes that are structural metadata or CFG constructs deferred to Phase 3b,
 # BNF grammar types, or optimizer-specific — none of these are translated.
 my %NOT_TRANSLATED = map { $_ => 1 } qw(
-    ReturnStmt DieCall
+    DieCall
     Program ClassDecl MethodDecl SubDecl FieldDecl UseDecl _Attribute
     Symbol Expression Rule
     StructRef FieldAccess

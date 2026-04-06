@@ -9,6 +9,7 @@ use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer::StructPromotion;
 use Chalk::Bootstrap::Perl::Target::C;
+use Chalk::IR::Node::Return;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
@@ -20,6 +21,14 @@ sub const_node($type, $value) {
 sub ctor($class, %inputs) {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
     return $factory->make('Constructor', class => $class, %inputs);
+}
+
+# Helper: create a Return CFG node
+sub ret_node($val) {
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    return $factory->make_cfg('Return',
+        inputs => [ $factory->make('Start'), $val ],
+    );
 }
 
 # === Test: Full pipeline — analyze → rewrite → emit C ===
@@ -111,7 +120,7 @@ sub ctor($class, %inputs) {
         right => const_node('integer', '0'),
     );
 
-    my $return_stmt = ctor('ReturnStmt', value => $item_var);
+    my $return_stmt = ret_node($item_var);
 
     my $method = ctor('MethodDecl',
         name        => const_node('string', '_make_item'),
@@ -131,7 +140,7 @@ sub ctor($class, %inputs) {
     my $reader = ctor('MethodDecl',
         name        => const_node('string', '_get_dot'),
         params      => [$item_param],
-        body        => [ctor('ReturnStmt', value => $read_dot)],
+        body        => [ret_node($read_dot)],
         return_type => undef,
     );
 

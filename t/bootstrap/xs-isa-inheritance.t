@@ -11,6 +11,7 @@ use lib 't/bootstrap/lib';
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
+use Chalk::IR::Node::Return;
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -24,9 +25,11 @@ my $child_method = $factory->make('Constructor',
     name   => $factory->make('Constant', const_type => 'string', value => 'greet'),
     params => [$factory->make('Constant', const_type => 'string', value => '$self')],
     body   => [
-        $factory->make('Constructor',
-            class => 'ReturnStmt',
-            value => $factory->make('Constant', const_type => 'string', value => 'hello'),
+        $factory->make_cfg('Return',
+            inputs => [
+                $factory->make('Start'),
+                $factory->make('Constant', const_type => 'string', value => 'hello'),
+            ],
         ),
     ],
     return_type => undef,

@@ -1,11 +1,12 @@
 # ABOUTME: Unit tests for Perl IR constructor types via NodeFactory.
-# ABOUTME: Validates Program, UseDecl, ClassDecl, MethodDecl, ReturnStmt, DieCall creation.
+# ABOUTME: Validates Program, UseDecl, ClassDecl, MethodDecl, Return CFG node, DieCall creation.
 use 5.42.0;
 use utf8;
 use Test::More;
 
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::Node::Return;
 
 # Reset factory for clean state
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -24,18 +25,19 @@ my $str_name  = $f->make('Constant', const_type => 'string', value => 'Chalk::Bo
 my $str_parent = $f->make('Constant', const_type => 'string', value => 'Chalk::Bootstrap::IR::Node');
 my $str_die_msg = $f->make('Constant', const_type => 'string', value => 'Subclass must implement name()');
 
-# === Constructor:ReturnStmt ===
+# === Return CFG node ===
 
 {
-    my $ret = $f->make('Constructor',
-        class => 'ReturnStmt',
-        value => $str_start,
+    my $ctrl = $f->make('Start');
+    my $ret = $f->make_cfg('Return',
+        inputs => [$ctrl, $str_start],
     );
-    ok(defined $ret, 'ReturnStmt created');
-    is($ret->operation(), 'Constructor', 'ReturnStmt operation is Constructor');
-    is($ret->class(), 'ReturnStmt', 'ReturnStmt class is ReturnStmt');
-    is(scalar $ret->inputs()->@*, 1, 'ReturnStmt has 1 input');
-    is($ret->inputs()->[0], $str_start, 'ReturnStmt value is str_start');
+    ok(defined $ret, 'Return CFG node created');
+    isa_ok($ret, 'Chalk::IR::Node::Return', 'Return is Chalk::IR::Node::Return');
+    is($ret->operation(), 'Return', 'Return operation is Return');
+    is(scalar $ret->inputs()->@*, 2, 'Return has 2 inputs (control + value)');
+    is($ret->inputs()->[0], $ctrl,      'Return inputs[0] is control');
+    is($ret->inputs()->[1], $str_start, 'Return inputs[1] is value');
 }
 
 # === Constructor:DieCall ===
@@ -56,9 +58,9 @@ my $str_die_msg = $f->make('Constant', const_type => 'string', value => 'Subclas
 # === Constructor:MethodDecl ===
 
 {
-    my $ret_stmt = $f->make('Constructor',
-        class => 'ReturnStmt',
-        value => $str_start,
+    my $ctrl = $f->make('Start');
+    my $ret_stmt = $f->make_cfg('Return',
+        inputs => [$ctrl, $str_start],
     );
     my $meth = $f->make('Constructor',
         class  => 'MethodDecl',
@@ -109,7 +111,7 @@ my $str_die_msg = $f->make('Constant', const_type => 'string', value => 'Subclas
         class  => 'MethodDecl',
         name   => $str_op,
         params => [],
-        body   => [$f->make('Constructor', class => 'ReturnStmt', value => $str_start)],
+        body   => [$f->make_cfg('Return', inputs => [$f->make('Start'), $str_start])],
     );
     my $cls = $f->make('Constructor',
         class  => 'ClassDecl',
@@ -158,12 +160,13 @@ my $str_die_msg = $f->make('Constant', const_type => 'string', value => 'Subclas
     is($prog->inputs()->[0][0], $use1, 'Program statement[0] is use1');
 }
 
-# === Hash consing ===
+# === CFG uniqueness — Return nodes are always distinct (CFG semantics) ===
 
 {
-    my $ret1 = $f->make('Constructor', class => 'ReturnStmt', value => $str_hello);
-    my $ret2 = $f->make('Constructor', class => 'ReturnStmt', value => $str_hello);
-    is(refaddr($ret1), refaddr($ret2), 'ReturnStmt hash consing: same inputs -> same node');
+    my $ctrl = $f->make('Start');
+    my $ret1 = $f->make_cfg('Return', inputs => [$ctrl, $str_hello]);
+    my $ret2 = $f->make_cfg('Return', inputs => [$ctrl, $str_hello]);
+    isnt(refaddr($ret1), refaddr($ret2), 'Return CFG nodes are always unique (no hash consing)');
 }
 
 done_testing();

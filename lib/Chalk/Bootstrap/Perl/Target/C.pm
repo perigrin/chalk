@@ -7,6 +7,7 @@ use experimental 'class';
 use Chalk::Bootstrap::Perl::Target::EmitHelpers;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::Node;
+use Chalk::IR::Node::Return;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Interpolate;
@@ -150,14 +151,13 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         if (scalar $body->@* == 1) {
             my $body_item = $body->[0];
             my $returns_value = (defined $body_item
-                && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
-                && $body_item->class() eq 'ReturnStmt');
+                && $body_item isa Chalk::IR::Node::Return);
             my $dies = (defined $body_item
                 && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
                 && $body_item->class() eq 'DieCall');
 
             if ($returns_value) {
-                my $value = $body_item->inputs()->[0];
+                my $value = $body_item->inputs()->[1];  # inputs[0]=control, inputs[1]=value
 
                 if ($value isa Chalk::IR::Node::Interpolate) {
                     return $self->_emit_interp_return($name, $value);
@@ -256,8 +256,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         my $last_item = $body->[-1];
         my $last_is_return = (defined $last_item
-            && $last_item isa Chalk::Bootstrap::IR::Node::Constructor
-            && $last_item->class() eq 'ReturnStmt');
+            && $last_item isa Chalk::IR::Node::Return);
         my $body_has_returns = $self->_body_contains_return($body);
         my $single_stmt_return = (!$last_is_return
             && scalar($body->@*) == 1
@@ -397,8 +396,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         my $last_item = $body->[-1];
         my $last_is_return = (defined $last_item
-            && $last_item isa Chalk::Bootstrap::IR::Node::Constructor
-            && $last_item->class() eq 'ReturnStmt');
+            && $last_item isa Chalk::IR::Node::Return);
         $last_is_return ||= (defined $last_item
             && $last_item isa Chalk::Bootstrap::IR::Node::Constant
             && ($last_item->value() // '') eq 'return');
@@ -1363,7 +1361,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
     # Emit VarDecl as C statement (SV assignment)
 
-    # Emit ReturnStmt as RETVAL assignment.
+    # Emit Return CFG node as RETVAL assignment.
     # Non-final returns jump to xsreturn: label before OUTPUT section.
     # Strips sv_2mortal() from the value expression since XS's OUTPUT
     # section applies sv_2mortal to ST(0) automatically. Double-mortal

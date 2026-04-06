@@ -8,6 +8,7 @@ use lib 'lib';
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
+use Chalk::IR::Node::Return;
 
 # Build a minimal IR: a class with a single no-op method so generate_c_files
 # has something to process without hitting undef errors.
@@ -21,9 +22,11 @@ my $method = $factory->make('Constructor',
         $factory->make('Constant', const_type => 'string', value => '$self'),
     ],
     body   => [
-        $factory->make('Constructor',
-            class => 'ReturnStmt',
-            value => $factory->make('Constant', const_type => 'string', value => '1'),
+        $factory->make_cfg('Return',
+            inputs => [
+                $factory->make('Start'),
+                $factory->make('Constant', const_type => 'string', value => '1'),
+            ],
         ),
     ],
     return_type => undef,
@@ -203,9 +206,8 @@ my $check_method = $factory2->make('Constructor',
         $factory2->make('Constant', const_type => 'string', value => '$v'),
     ],
     body   => [
-        $factory2->make('Constructor',
-            class => 'ReturnStmt',
-            value => $call_node,
+        $factory2->make_cfg('Return',
+            inputs => [ $factory2->make('Start'), $call_node ],
         ),
     ],
     return_type => undef,
@@ -276,9 +278,8 @@ for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
         name   => $f->make('Constant', const_type => 'string', value => 'stub'),
         params => [$f->make('Constant', const_type => 'string', value => '$self')],
         body   => [
-            $f->make('Constructor',
-                class => 'ReturnStmt',
-                value => $f->make('Constant', const_type => 'string', value => '1'),
+            $f->make_cfg('Return',
+                inputs => [ $f->make('Start'), $f->make('Constant', const_type => 'string', value => '1') ],
             ),
         ],
         return_type => undef,

@@ -9,10 +9,12 @@ use lib 't/bootstrap/lib';
 use Chalk::IR::UseInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::Node::Return;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::IR::Program;
 
 # Build Perl grammar pipeline: IR → generated Perl → eval → grammar objects
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -51,8 +53,26 @@ my sub parse_file($file) {
 my sub is_constructor($node, $expected_class, $msg) {
     ok(defined $node, "$msg: defined");
     return unless defined $node;
+    if ($node isa Chalk::IR::Program) {
+        is($expected_class, 'Program', "$msg: is Program typed node");
+        return;
+    }
     is($node->operation(), 'Constructor', "$msg: is Constructor");
     is($node->class(), $expected_class, "$msg: class is $expected_class");
+}
+
+# Get flattened statement list from Program (handles both typed and Constructor nodes)
+my sub program_stmts($ir) {
+    if ($ir isa Chalk::IR::Program) {
+        return [ $ir->use_decls()->@*, $ir->classes()->@*, $ir->top_level_subs()->@*, $ir->other_stmts()->@* ];
+    }
+    return $ir->inputs()->[0];
+}
+
+my sub is_return_node($node, $msg) {
+    ok(defined $node, "$msg: defined");
+    return unless defined $node;
+    ok($node isa Chalk::IR::Node::Return, "$msg: is Return CFG node");
 }
 
 # === Helpers for ClassInfo/ClassDecl dual-path ===
@@ -131,7 +151,7 @@ my sub is_use_info($node, $expected_name, $msg) {
         skip 'Start.pm: no IR', 20 unless defined $ir;
 
         is_constructor($ir, 'Program', 'Start.pm Program');
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = program_stmts($ir);
         is(ref $stmts, 'ARRAY', 'Start.pm: statements is arrayref');
 
         # Expect: use 5.42.0; use utf8; use experimental 'class'; class ... { ... }
@@ -167,14 +187,14 @@ my sub is_use_info($node, $expected_name, $msg) {
         my ($meth) = @methods;
         is(method_name($meth), 'operation', 'Start.pm method name');
 
-        # Method body has ReturnStmt
+        # Method body has Return CFG node
         my $meth_body = method_body($meth);
         is(ref $meth_body, 'ARRAY', 'Start.pm: method body is arrayref');
         is(scalar $meth_body->@*, 1, 'Start.pm: method body has 1 statement');
 
         my $ret = $meth_body->[0];
-        is_constructor($ret, 'ReturnStmt', 'Start.pm return');
-        is_constant($ret->inputs()->[0], 'Start', 'Start.pm return value');
+        is_return_node($ret, 'Start.pm return');
+        is_constant($ret->inputs()->[1], 'Start', 'Start.pm return value');
     }
 }
 
@@ -190,7 +210,7 @@ my sub is_use_info($node, $expected_name, $msg) {
         skip 'Return.pm: no IR', 10 unless defined $ir;
 
         is_constructor($ir, 'Program', 'Return.pm Program');
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = program_stmts($ir);
         my $cls = $stmts->[-1];
         is_class_node($cls, 'Return.pm class declaration');
         is(class_name($cls), 'Chalk::Bootstrap::IR::Node::Return', 'Return.pm class name');
@@ -206,8 +226,8 @@ my sub is_use_info($node, $expected_name, $msg) {
 
         my $meth_body = method_body($meth);
         my $ret = $meth_body->[0];
-        is_constructor($ret, 'ReturnStmt', 'Return.pm return');
-        is_constant($ret->inputs()->[0], 'Return', 'Return.pm return value');
+        is_return_node($ret, 'Return.pm return');
+        is_constant($ret->inputs()->[1], 'Return', 'Return.pm return value');
     }
 }
 
@@ -223,7 +243,7 @@ my sub is_use_info($node, $expected_name, $msg) {
         skip 'Target.pm: no IR', 15 unless defined $ir;
 
         is_constructor($ir, 'Program', 'Target.pm Program');
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = program_stmts($ir);
         my $cls = $stmts->[-1];
         is_class_node($cls, 'Target.pm class declaration');
         is(class_name($cls), 'Chalk::Bootstrap::Target', 'Target.pm class name');
@@ -266,7 +286,7 @@ my sub is_use_info($node, $expected_name, $msg) {
         skip 'Pass.pm: no IR', 15 unless defined $ir;
 
         is_constructor($ir, 'Program', 'Pass.pm Program');
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = program_stmts($ir);
         my $cls = $stmts->[-1];
         is_class_node($cls, 'Pass.pm class declaration');
         is(class_name($cls), 'Chalk::Bootstrap::Optimizer::Pass', 'Pass.pm class name');

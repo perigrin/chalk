@@ -13,6 +13,8 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::Node::Return;
+use Chalk::IR::Program;
 
 # Build Perl grammar pipeline: IR -> generated Perl -> eval -> grammar objects
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -48,10 +50,22 @@ my sub parse_file($file) {
 my sub is_constructor($node, $expected_class, $msg) {
     ok(defined $node, "$msg: defined");
     return unless defined $node;
+    if ($node isa Chalk::IR::Program) {
+        is($expected_class, 'Program', "$msg: is Program typed node");
+        return;
+    }
     # Shimmed typed nodes have operation() == class name; legacy Constructor nodes have operation() == 'Constructor'
     ok($node->operation() eq 'Constructor' || $node->class() eq $expected_class,
         "$msg: is Constructor");
     is($node->class(), $expected_class, "$msg: class is $expected_class");
+}
+
+# Get flattened statement list from Program (handles both typed and Constructor nodes)
+my sub program_stmts($ir) {
+    if ($ir isa Chalk::IR::Program) {
+        return [ $ir->use_decls()->@*, $ir->classes()->@*, $ir->top_level_subs()->@*, $ir->other_stmts()->@* ];
+    }
+    return $ir->inputs()->[0];
 }
 
 # === Helpers for ClassInfo/ClassDecl dual-path ===
@@ -132,7 +146,7 @@ my sub is_constant($node, $expected_value, $msg) {
         skip 'Constant.pm: no IR', 30 unless defined $ir;
 
         is_constructor($ir, 'Program', 'Constant.pm Program');
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = program_stmts($ir);
         my $cls = find_class_decl_in_stmts($stmts);
         ok(defined $cls, 'Constant.pm: found class declaration');
         is(class_name_str($cls), 'Chalk::Bootstrap::IR::Node::Constant', 'Constant.pm class name');
@@ -160,8 +174,8 @@ my sub is_constant($node, $expected_value, $msg) {
         if (defined $meth) {
             my $meth_body = method_body($meth);
             my $ret = $meth_body->[0];
-            is_constructor($ret, 'ReturnStmt', 'Constant.pm return');
-            is_constant($ret->inputs()->[0], 'Constant', 'Constant.pm return value');
+            ok($ret isa Chalk::IR::Node::Return, 'Constant.pm return: is Return CFG node');
+            is_constant($ret->inputs()->[1], 'Constant', 'Constant.pm return value');
         }
     }
 }
@@ -178,7 +192,7 @@ my sub is_constant($node, $expected_value, $msg) {
         skip 'XS::AST::Node.pm: no IR', 12 unless defined $ir;
 
         is_constructor($ir, 'Program', 'Node.pm Program');
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = program_stmts($ir);
         my $cls = find_class_decl_in_stmts($stmts);
         ok(defined $cls, 'Node.pm: found class declaration');
         is(class_name_str($cls), 'Chalk::Bootstrap::BNF::Target::XS::AST::Node', 'Node.pm class name');
@@ -209,7 +223,7 @@ my sub is_constant($node, $expected_value, $msg) {
         skip 'Statement.pm: no IR', 41 unless defined $ir;
 
         is_constructor($ir, 'Program', 'Statement.pm Program');
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = program_stmts($ir);
         my $cls = find_class_decl_in_stmts($stmts);
         ok(defined $cls, 'Statement.pm: found class declaration');
         is(class_name_str($cls), 'Chalk::Bootstrap::BNF::Target::XS::AST::Statement', 'Statement.pm class name');
@@ -231,10 +245,10 @@ my sub is_constant($node, $expected_value, $msg) {
         my $meth_body = defined $meth ? method_body($meth) : [];
         is(scalar $meth_body->@*, 1, 'Statement.pm: method body has 1 statement');
         my $ret = $meth_body->[0];
-        is_constructor($ret, 'ReturnStmt', 'Statement.pm return');
+        ok($ret isa Chalk::IR::Node::Return, 'Statement.pm return: is Return CFG node');
 
         # Return value should be InterpolatedString
-        my $interp = $ret->inputs()->[0];
+        my $interp = $ret->inputs()->[1];
         is_constructor($interp, 'InterpolatedString', 'Statement.pm interpolated string');
         my $parts = $interp->inputs()->[0];
         is(ref $parts, 'ARRAY', 'Statement.pm: parts is arrayref');
@@ -262,7 +276,7 @@ my sub is_constant($node, $expected_value, $msg) {
         skip 'Module.pm: no IR', 46 unless defined $ir;
 
         is_constructor($ir, 'Program', 'Module.pm Program');
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = program_stmts($ir);
         my $cls = find_class_decl_in_stmts($stmts);
         ok(defined $cls, 'Module.pm: found class declaration');
         is(class_name_str($cls), 'Chalk::Bootstrap::BNF::Target::XS::AST::Module', 'Module.pm class name');
@@ -284,9 +298,9 @@ my sub is_constant($node, $expected_value, $msg) {
         ok(defined $meth, 'Module.pm: has emit method');
         my $meth_body = defined $meth ? method_body($meth) : [];
         my $ret = $meth_body->[0];
-        is_constructor($ret, 'ReturnStmt', 'Module.pm return');
+        ok($ret isa Chalk::IR::Node::Return, 'Module.pm return: is Return CFG node');
 
-        my $interp = $ret->inputs()->[0];
+        my $interp = $ret->inputs()->[1];
         is_constructor($interp, 'InterpolatedString', 'Module.pm interpolated string');
         my $parts = $interp->inputs()->[0];
         is(scalar $parts->@*, 5, 'Module.pm: exactly 5 parts (2 vars + 3 literals)');
@@ -317,7 +331,7 @@ my sub is_constant($node, $expected_value, $msg) {
         skip 'Constructor.pm: no IR', 15 unless defined $ir;
 
         is_constructor($ir, 'Program', 'Constructor.pm Program');
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = program_stmts($ir);
 
         # Find the class declaration (ClassInfo or ClassDecl) in the statements
         my $class_decl = find_class_decl_in_stmts($stmts);
@@ -345,7 +359,7 @@ my sub is_constant($node, $expected_value, $msg) {
             if (defined $meth) {
                 my $meth_body = method_body($meth);
                 my $ret = $meth_body->[0];
-                is_constant($ret->inputs()->[0], 'Constructor', 'Constructor.pm return value');
+                is_constant($ret->inputs()->[1], 'Constructor', 'Constructor.pm return value');
             }
         }
     }
