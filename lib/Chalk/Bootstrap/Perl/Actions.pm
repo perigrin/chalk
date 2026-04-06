@@ -570,9 +570,11 @@ class Chalk::Bootstrap::Perl::Actions {
             my $ctrl = $stmt_node->inputs()->[0];
             return $factory->make_cfg('Return', inputs => [$ctrl, $new_inner]);
         }
-        # Unwind: restore control token and update exception value
+        # Unwind: restore control token and update exception value.
+        # Wrap $new_inner in arrayref — _emit_die_call expects inputs()->[1] to be an args arrayref.
         my $ctrl = $stmt_node->inputs()->[0];
-        return $factory->make_cfg('Unwind', inputs => [$ctrl, $new_inner]);
+        my $args = ref($new_inner) eq 'ARRAY' ? $new_inner : [$new_inner];
+        return $factory->make_cfg('Unwind', inputs => [$ctrl, $args]);
     }
 
     my $_unwrap_stmt_from_expr;
