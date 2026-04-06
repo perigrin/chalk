@@ -277,7 +277,7 @@ class Chalk::Bootstrap::Perl::Actions {
     sub _fix_postfix_chain {
         my ($factory, $node) = @_;
         return $node unless defined $node;
-        return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        return $node unless $node isa Chalk::IR::Node;
 
         # Recursively fix inputs first (bottom-up)
         my @new_inputs;
@@ -466,7 +466,7 @@ class Chalk::Bootstrap::Perl::Actions {
     my $_fix_postfix_chain_deep;
     $_fix_postfix_chain_deep = sub($f, $node) {
         return $node unless defined $node;
-        return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        return $node unless $node isa Chalk::IR::Node;
 
         # First, apply the top-level fix
         my $fixed = _fix_postfix_chain($f, $node);
@@ -555,7 +555,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
     my $_unwrap_stmt_from_expr;
     $_unwrap_stmt_from_expr = sub ($factory, $node) {
-        return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        return $node unless $node isa Chalk::IR::Node;
         my $class = $node->class();
 
         if ($class eq 'BinaryExpr') {
@@ -755,9 +755,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 # separate statement. Block merge for known statement-starting patterns.
                 my $next = $stmts->[$i + 1];
                 my $is_boundary = false;
-                # Statement-level Constructor classes (ClassDecl, MethodDecl, SubDecl, etc.)
-                $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $STMT_BOUNDARY_CLASSES{$next->class()};
+                # Statement-level boundary: metadata structs and Return/Unwind CFG nodes
+                $is_boundary = true if $next isa Chalk::IR::Node::Return
+                    || $next isa Chalk::IR::Node::Unwind;
                 # ClassInfo/FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
                 $is_boundary = true if $next isa Chalk::IR::ClassInfo;
                 $is_boundary = true if $next isa Chalk::IR::FieldInfo;
@@ -796,9 +796,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 my @args;
                 while ($i + 1 <= $#$stmts) {
                     my $next = $stmts->[$i + 1];
-                    # Stop at statement-level constructs
-                    last if $next isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $STMT_BOUNDARY_CLASSES{$next->class()};
+                    # Stop at statement-level constructs (Return/Unwind CFG nodes)
+                    last if $next isa Chalk::IR::Node::Return
+                        || $next isa Chalk::IR::Node::Unwind;
                     # ClassInfo/FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
                     last if $next isa Chalk::IR::ClassInfo;
                     last if $next isa Chalk::IR::FieldInfo;
