@@ -26,6 +26,7 @@ use Chalk::IR::Node::TryCatch;
 use Chalk::IR::UseInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::SubInfo;
 
 class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
@@ -98,6 +99,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}
                         && !($ir_node isa Chalk::IR::UseInfo)
                         && !($ir_node isa Chalk::IR::FieldInfo)
+                        && !($ir_node isa Chalk::IR::MethodInfo)
+                        && !($ir_node isa Chalk::IR::SubInfo)
                         && !($ir_node isa Chalk::Bootstrap::IR::Node::Constructor
                              && ($ir_node->class() eq 'Program'
                                  || $ir_node->class() eq 'ClassDecl'
@@ -288,6 +291,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return $self->_emit_method_decl($node);
         }
 
+        if ($node isa Chalk::IR::SubInfo) {
+            return $self->_emit_sub_decl($node);
+        }
+
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
 
@@ -391,18 +398,32 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     # SubDecl inputs: [name, params, body, scope]
+    # Dual-path: accepts Chalk::IR::SubInfo (plain strings) or Constructor:SubDecl (Constant nodes).
     method _emit_sub_decl($node) {
-        my $name   = $node->inputs()->[0]->value();
-        my $params = $node->inputs()->[1];
-        my $body   = $node->inputs()->[2];
-        my $scope_node = $node->inputs()->[3];
-        my $scope  = defined $scope_node ? $scope_node->value() : 'package';
+        my ($name, $params, $body, $scope);
+        if ($node isa Chalk::IR::SubInfo) {
+            $name   = $node->name();
+            $params = $node->params();    # plain strings
+            $body   = $node->body();
+            $scope  = $node->scope();
+        } else {
+            $name   = $node->inputs()->[0]->value();
+            $params = $node->inputs()->[1];  # Constant nodes
+            $body   = $node->inputs()->[2];
+            my $scope_node = $node->inputs()->[3];
+            $scope  = defined $scope_node ? $scope_node->value() : 'package';
+        }
 
-        my $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
+        my $sig;
+        if ($node isa Chalk::IR::SubInfo) {
+            $sig = '(' . join(', ', $params->@*) . ')';
+        } else {
+            $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
+        }
         my $prefix = $scope eq 'package' ? 'sub' : "$scope sub";
         # Scope aggregate vars: params shadow class-scope aggregate names
         my %saved = %_aggregate_vars;
-        $self->_scope_body_vars($params, $body);
+        $self->_scope_body_vars($params, $body, $node isa Chalk::IR::SubInfo);
         my $result = $self->_emit_body_block("$prefix $name$sig {", $body);
         %_aggregate_vars = %saved;
         return $result;

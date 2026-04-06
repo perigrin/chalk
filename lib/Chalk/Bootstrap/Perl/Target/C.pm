@@ -19,6 +19,7 @@ use Chalk::IR::Node::AnonSub;
 use Chalk::IR::UseInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::SubInfo;
 
 class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::EmitHelpers) {
     field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
@@ -62,10 +63,11 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $var = $raw_var;
             $var =~ s/^[\$\@\%]//;
             my $init = $item->inputs()->[1];
-            # Skip VarDecl whose init is a SubDecl (those are sub definitions)
+            # Skip VarDecl whose init is a SubDecl/SubInfo (those are sub definitions)
             next if defined $init
                 && $init isa Chalk::Bootstrap::IR::Node::Constructor
                 && $init->class() eq 'SubDecl';
+            next if defined $init && $init isa Chalk::IR::SubInfo;
             # Skip VarDecl for variables that are fields (ADJUST assigns them,
             # but they're already handled by the field map)
             next if defined $self->_get_field_map() && exists $self->_get_field_map()->{$var};
@@ -1562,27 +1564,54 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         if (defined $class_decl) {
             my $body = $class_decl->inputs()->[2];
 
-            # Emit class-scope subs (static helpers) before methods
+            # Emit class-scope subs (static helpers) before methods.
+            # Handles SubInfo structs and legacy Constructor:SubDecl nodes.
             for my $item ($body->@*) {
+                # Handle SubInfo metadata structs
+                if ($item isa Chalk::IR::SubInfo) {
+                    my $sname   = $item->name();
+                    my $sparams = $item->params();   # plain strings
+                    my $sbody   = $item->body();
+                    my $result = eval { $self->_emit_sub($sname, $sparams, $sbody) };
+                    if (defined $result && ref $result eq 'HASH') {
+                        push @static_lines, $result->{helper}->@*;
+                        push @static_lines, '';
+                        $self->_set_class_sub_compiled($sname, true);
+                    } else {
+                        $self->_set_class_sub_compiled($sname, false);
+                    }
+                    next;
+                }
+
                 next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
 
-                # Handle mis-parented SubDecl inside VarDecl
+                # Handle mis-parented SubDecl/SubInfo inside VarDecl
                 if ($item->class() eq 'VarDecl') {
                     my $init = $item->inputs()->[1];
-                    if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $init->class() eq 'SubDecl') {
-                        my $sname  = $init->inputs()->[0]->value();
-                        my $sparams = $init->inputs()->[1];
-                        my $sbody   = $init->inputs()->[2];
-                        my @param_nodes;
-                        for my $p ($sparams->@*) { push @param_nodes, $p; }
-                        my $result = eval { $self->_emit_sub($sname, \@param_nodes, $sbody) };
-                        if (defined $result && ref $result eq 'HASH') {
-                            push @static_lines, $result->{helper}->@*;
-                            push @static_lines, '';
-                            $self->_set_class_sub_compiled($sname, true);
-                        } else {
-                            $self->_set_class_sub_compiled($sname, false);
+                    if (defined $init) {
+                        my ($sname, $sparams, $sbody);
+                        if ($init isa Chalk::IR::SubInfo) {
+                            $sname  = $init->name();
+                            $sparams = $init->params();   # plain strings
+                            $sbody  = $init->body();
+                        } elsif ($init isa Chalk::Bootstrap::IR::Node::Constructor
+                                && $init->class() eq 'SubDecl') {
+                            $sname   = $init->inputs()->[0]->value();
+                            my $raw  = $init->inputs()->[1];
+                            my @nodes;
+                            for my $p ($raw->@*) { push @nodes, $p; }
+                            $sparams = \@nodes;
+                            $sbody   = $init->inputs()->[2];
+                        }
+                        if (defined $sname) {
+                            my $result = eval { $self->_emit_sub($sname, $sparams, $sbody) };
+                            if (defined $result && ref $result eq 'HASH') {
+                                push @static_lines, $result->{helper}->@*;
+                                push @static_lines, '';
+                                $self->_set_class_sub_compiled($sname, true);
+                            } else {
+                                $self->_set_class_sub_compiled($sname, false);
+                            }
                         }
                     }
                     next;

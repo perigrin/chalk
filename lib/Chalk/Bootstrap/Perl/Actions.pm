@@ -15,6 +15,7 @@ use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::UseInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::SubInfo;
 
 # Builtin keyword sets used by _fixup_stmts for statement merging
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
@@ -791,9 +792,10 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Statement-level Constructor classes (ReturnStmt, ClassDecl, etc.)
                 $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constructor
                     && $STMT_BOUNDARY_CLASSES{$next->class()};
-                # FieldInfo/MethodInfo metadata structs are always separate statements
+                # FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
                 $is_boundary = true if $next isa Chalk::IR::FieldInfo;
                 $is_boundary = true if $next isa Chalk::IR::MethodInfo;
+                $is_boundary = true if $next isa Chalk::IR::SubInfo;
                 # CFG control flow nodes
                 $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node
                     && $STMT_BOUNDARY_OPS{$next->operation() // ''};
@@ -829,9 +831,10 @@ class Chalk::Bootstrap::Perl::Actions {
                     # Stop at statement-level constructs
                     last if $next isa Chalk::Bootstrap::IR::Node::Constructor
                         && $STMT_BOUNDARY_CLASSES{$next->class()};
-                    # FieldInfo/MethodInfo metadata structs are always separate statements
+                    # FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
                     last if $next isa Chalk::IR::FieldInfo;
                     last if $next isa Chalk::IR::MethodInfo;
+                    last if $next isa Chalk::IR::SubInfo;
                     # Stop at CFG control flow nodes
                     last if $next isa Chalk::Bootstrap::IR::Node
                         && $STMT_BOUNDARY_OPS{$next->operation() // ''};
@@ -919,7 +922,8 @@ class Chalk::Bootstrap::Perl::Actions {
             } elsif ($val isa Chalk::Bootstrap::IR::Node
                      || $val isa Chalk::IR::UseInfo
                      || $val isa Chalk::IR::FieldInfo
-                     || $val isa Chalk::IR::MethodInfo) {
+                     || $val isa Chalk::IR::MethodInfo
+                     || $val isa Chalk::IR::SubInfo) {
                 push @stmts, $val;
             }
         }
@@ -936,7 +940,8 @@ class Chalk::Bootstrap::Perl::Actions {
             if ($val isa Chalk::Bootstrap::IR::Node
                     || $val isa Chalk::IR::UseInfo
                     || $val isa Chalk::IR::FieldInfo
-                    || $val isa Chalk::IR::MethodInfo) {
+                    || $val isa Chalk::IR::MethodInfo
+                    || $val isa Chalk::IR::SubInfo) {
                 push @ir_nodes, $val;
             }
         }
@@ -971,7 +976,8 @@ class Chalk::Bootstrap::Perl::Actions {
         for my $val (@values) {
             if ($val isa Chalk::Bootstrap::IR::Node
                     || $val isa Chalk::IR::UseInfo
-                    || $val isa Chalk::IR::MethodInfo) {
+                    || $val isa Chalk::IR::MethodInfo
+                    || $val isa Chalk::IR::SubInfo) {
                 push @ir_nodes, $val;
             }
         }
@@ -1278,10 +1284,10 @@ class Chalk::Bootstrap::Perl::Actions {
         return false;
     }
 
-    # §9 SubroutineDefinition — compile sub declarations into SubDecl IR nodes.
+    # §9 SubroutineDefinition — compile sub declarations into SubInfo structs.
     # Grammar: /sub\b/ WS QualifiedIdentifier _ Signature? _ Block
     #        | /(?:my|our|state)\b/ WS /sub\b/ WS QualifiedIdentifier _ Signature? _ Block
-    # Produces SubDecl with same structure as MethodDecl: name, params, body.
+    # Produces SubInfo with name, params (plain strings), body, and scope.
     # Also records the scope (bare = package, my/our/state = lexical).
     method SubroutineDefinition($ctx) {
         my @leaves = _collect_ir_leaves($ctx);
@@ -1335,13 +1341,14 @@ class Chalk::Bootstrap::Perl::Actions {
         @body = map { $_fix_postfix_chain_deep->($factory, $_) } @body;
         my $fixed_body = _fixup_stmts($factory, \@body);
 
-        return $factory->make('Constructor',
-            'class'  => 'SubDecl',
-            name     => $sub_name,
-            params   => \@params,
-            body     => $fixed_body,
-            scope    => $factory->make('Constant',
-                            const_type => 'string', value => $scope),
+        my $sub_name_val = $sub_name->value();
+        my @param_strs = map { $_->value() } @params;
+
+        return Chalk::IR::SubInfo->new(
+            name   => $sub_name_val,
+            params => \@param_strs,
+            body   => $fixed_body,
+            scope  => $scope,
         );
     }
 

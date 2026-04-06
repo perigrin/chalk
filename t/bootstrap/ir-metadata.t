@@ -73,6 +73,35 @@ is($si->scope(), 'my', 'SubInfo scope');
 my $si2 = Chalk::IR::SubInfo->new(name => 'pkg_sub', params => []);
 is($si2->scope(), 'package', 'SubInfo default scope is package');
 
+# body field — stores raw statement array
+my $si_with_body = Chalk::IR::SubInfo->new(
+    name   => 'do_thing',
+    params => ['$x'],
+    scope  => 'package',
+    body   => ['stmt1', 'stmt2'],
+);
+is(scalar $si_with_body->body()->@*, 2, 'SubInfo body stores statement array');
+is($si_with_body->body()->[0], 'stmt1', 'SubInfo body element 0 correct');
+
+my $si_no_body = Chalk::IR::SubInfo->new(name => 'bare_sub', params => []);
+is_deeply($si_no_body->body(), [], 'SubInfo body defaults to empty arrayref');
+
+# id() — content-based ID for hash-cons compatibility
+my $si_id = $si->id();
+ok(defined $si_id, 'SubInfo id() returns a value');
+like($si_id, qr/SubInfo/, 'SubInfo id() contains SubInfo marker');
+like($si_id, qr/_helper/, 'SubInfo id() contains sub name');
+like($si_id, qr/my/, 'SubInfo id() contains scope');
+
+my $si_same = Chalk::IR::SubInfo->new(name => '_helper', params => ['$a'], scope => 'my');
+is($si->id(), $si_same->id(), 'SubInfo id() is content-based (same content => same id)');
+
+my $si_diff = Chalk::IR::SubInfo->new(name => 'other_sub', params => ['$a'], scope => 'my');
+isnt($si->id(), $si_diff->id(), 'SubInfo id() differs for different names');
+
+# add_consumer() — no-op, does not participate in use-def chain
+ok(eval { $si->add_consumer('dummy'); 1 }, 'SubInfo add_consumer() does not die');
+
 my $ci = Chalk::IR::ClassInfo->new(name => 'MyClass', parent => 'BaseClass', fields => [$fi], methods => [$mi], subs => [$si]);
 is($ci->name(), 'MyClass', 'ClassInfo name');
 is($ci->parent(), 'BaseClass', 'ClassInfo parent');

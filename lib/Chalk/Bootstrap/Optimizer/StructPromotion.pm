@@ -11,6 +11,7 @@ use Chalk::IR::Node::HashRef;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::SubInfo;
 
 class Chalk::Bootstrap::Optimizer::StructPromotion {
 
@@ -63,6 +64,9 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             for my $item ($body->@*) {
                 my ($method_name, $method_body);
                 if ($item isa Chalk::IR::MethodInfo) {
+                    $method_name = $item->name();
+                    $method_body = $item->body();
+                } elsif ($item isa Chalk::IR::SubInfo) {
                     $method_name = $item->name();
                     $method_body = $item->body();
                 } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
@@ -494,6 +498,40 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                         return_type => $item->return_type(),
                         body        => $new_method_body,
                         graph       => $item->graph(),
+                    );
+                    next;
+                }
+
+                # Handle SubInfo metadata structs
+                if ($item isa Chalk::IR::SubInfo) {
+                    my $method_name = $item->name();
+                    my $method_body = $item->body();
+                    my $var_prefix  = "${class_name}::${method_name}";
+
+                    my $method_has_promoted = false;
+                    for my $vk (sort keys %var_to_schema) {
+                        if ($vk =~ /^\Q$var_prefix\E::/) {
+                            $method_has_promoted = true;
+                            last;
+                        }
+                    }
+
+                    unless ($method_has_promoted && defined $method_body
+                        && ref($method_body) eq 'ARRAY') {
+                        push @new_body, $item;
+                        next;
+                    }
+
+                    my $new_method_body = $self->_rewrite_method_body(
+                        $factory, $var_prefix, $method_body,
+                        \%var_to_schema, \%schema_fields,
+                    );
+                    push @new_body, Chalk::IR::SubInfo->new(
+                        name   => $item->name(),
+                        params => $item->params(),
+                        scope  => $item->scope(),
+                        body   => $new_method_body,
+                        graph  => $item->graph(),
                     );
                     next;
                 }

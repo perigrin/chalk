@@ -14,6 +14,7 @@ use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::TryCatch;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::SubInfo;
 
 class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader;  # module being compiled (e.g., "Chalk::Bootstrap::Earley")
@@ -201,22 +202,27 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $body = $class_decl->inputs()->[2];
         my %methods;
 
-        # Collect all MethodDecl/MethodInfo and SubDecl nodes from the class body.
-        # SubDecl may be mis-parented as VarDecl initializer due to parser
+        # Collect all MethodDecl/MethodInfo, SubDecl/SubInfo nodes from the class body.
+        # SubDecl/SubInfo may be mis-parented as VarDecl initializer due to parser
         # ambiguity (e.g., `my %_cache; sub _intern(...)` parsed as one unit).
         # Recurse one level into VarDecl initializers to find these.
         my @items_to_scan;
         for my $item ($body->@*) {
             next unless ($item isa Chalk::IR::Node
                       || $item isa Chalk::Bootstrap::IR::Node::Constructor
-                      || $item isa Chalk::IR::MethodInfo);
+                      || $item isa Chalk::IR::MethodInfo
+                      || $item isa Chalk::IR::SubInfo);
             push @items_to_scan, $item;
-            # Check VarDecl initializer for mis-parented SubDecl
+            # Check VarDecl initializer for mis-parented SubDecl/SubInfo
             if ($item isa Chalk::IR::Node::VarDecl) {
                 my $init = $item->inputs()->[1];
-                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $init->class() eq 'SubDecl') {
-                    push @items_to_scan, $init;
+                if (defined $init) {
+                    if ($init isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $init->class() eq 'SubDecl') {
+                        push @items_to_scan, $init;
+                    } elsif ($init isa Chalk::IR::SubInfo) {
+                        push @items_to_scan, $init;
+                    }
                 }
             }
         }
@@ -234,6 +240,26 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                     returns => true,
                     params  => \@param_names,
                 };
+                next;
+            }
+
+            # Handle SubInfo metadata structs
+            if ($item isa Chalk::IR::SubInfo) {
+                my $name = $item->name();
+                my @param_names;
+                for my $p ($item->params()->@*) {
+                    (my $pname = $p) =~ s/^[\$\@\%]//;
+                    push @param_names, $pname;
+                }
+                my $entry = {
+                    returns    => true,
+                    params     => \@param_names,
+                    is_sub     => true,
+                    class_name => $class_decl->inputs()->[0]->value(),
+                    scope      => $item->scope(),
+                };
+                $_class_subs{$name} = $entry;
+                $methods{$name} = $entry;
                 next;
             }
 
