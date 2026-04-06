@@ -8,6 +8,7 @@ use Chalk::Bootstrap::Perl::Target::EmitHelpers;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::Node;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Unwind;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Interpolate;
@@ -153,8 +154,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $returns_value = (defined $body_item
                 && $body_item isa Chalk::IR::Node::Return);
             my $dies = (defined $body_item
-                && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
-                && $body_item->class() eq 'DieCall');
+                && $body_item isa Chalk::IR::Node::Unwind);
 
             if ($returns_value) {
                 my $value = $body_item->inputs()->[1];  # inputs[0]=control, inputs[1]=value

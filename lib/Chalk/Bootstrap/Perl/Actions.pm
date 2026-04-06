@@ -13,6 +13,7 @@ use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Unwind;
 use Chalk::IR::UseInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
@@ -23,8 +24,8 @@ use Chalk::IR::Program;
 # Builtin keyword sets used by _fixup_stmts for statement merging
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
 my %PREFIX_BUILTINS = map { $_ => 1 } qw(scalar defined ref exists delete keys values each length chr ord substr sprintf join split);
-my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl DieCall SubDecl VarDecl);
-my %STMT_BOUNDARY_OPS = map { $_ => 1 } qw(If Loop Return);
+my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl SubDecl VarDecl);
+my %STMT_BOUNDARY_OPS = map { $_ => 1 } qw(If Loop Return Unwind);
 my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless while until);
 
 class Chalk::Bootstrap::Perl::Actions {
@@ -147,10 +148,10 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Save the control token so it can be restored when re-wrapping.
                 push @wrappers, ['Return', $current->inputs()->[0]];
                 $current = $current->inputs()->[1];  # value is inputs[1]
-            } elsif ($current isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $current->class() eq 'DieCall') {
-                push @wrappers, ['DieCall', $current->inputs()->[0]];
-                my $args = $current->inputs()->[0];
+            } elsif ($current isa Chalk::IR::Node::Unwind) {
+                # Save control token so it can be restored when re-wrapping.
+                push @wrappers, ['Unwind', $current->inputs()->[0], $current->inputs()->[1]];
+                my $args = $current->inputs()->[1];
                 $current = $args->[-1];
             } elsif (_is_unwrappable_builtin($current)) {
                 push @wrappers, ['BuiltinCall', $current->inputs()->[0], $current->inputs()->[1]];
@@ -179,12 +180,12 @@ class Chalk::Bootstrap::Perl::Actions {
                 $result = $factory->make_cfg('Return',
                     inputs => [$wrapper->[1], $result],
                 );
-            } elsif ($wrapper->[0] eq 'DieCall') {
-                my @args = ($wrapper->[1]->@*);
+            } elsif ($wrapper->[0] eq 'Unwind') {
+                # Restore the control token saved during unwrap.
+                my @args = ($wrapper->[2]->@*);
                 $args[-1] = $result;
-                $result = $factory->make('Constructor',
-                    'class' => 'DieCall',
-                    args    => \@args,
+                $result = $factory->make_cfg('Unwind',
+                    inputs => [$wrapper->[1], \@args],
                 );
             } elsif ($wrapper->[0] eq 'BuiltinCall') {
                 my @args = ($wrapper->[2]->@*);
@@ -222,10 +223,10 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Save control token for re-wrapping later.
                 push @wrappers, ['Return', $current->inputs()->[0]];
                 $current = $current->inputs()->[1];  # value is inputs[1]
-            } elsif ($current isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $current->class() eq 'DieCall') {
-                push @wrappers, ['DieCall', $current->inputs()->[0]];
-                my $die_args = $current->inputs()->[0];
+            } elsif ($current isa Chalk::IR::Node::Unwind) {
+                # Save control token so it can be restored when re-wrapping.
+                push @wrappers, ['Unwind', $current->inputs()->[0], $current->inputs()->[1]];
+                my $die_args = $current->inputs()->[1];
                 $current = $die_args->[-1];
             } elsif (_is_unwrappable_builtin($current)) {
                 push @wrappers, ['BuiltinCall', $current->inputs()->[0], $current->inputs()->[1]];
@@ -265,12 +266,12 @@ class Chalk::Bootstrap::Perl::Actions {
                 $result = $factory->make_cfg('Return',
                     inputs => [$wrapper->[1], $result],
                 );
-            } elsif ($wrapper->[0] eq 'DieCall') {
-                my @die_args = ($wrapper->[1]->@*);
+            } elsif ($wrapper->[0] eq 'Unwind') {
+                # Restore the control token saved during unwrap.
+                my @die_args = ($wrapper->[2]->@*);
                 $die_args[-1] = $result;
-                $result = $factory->make('Constructor',
-                    'class' => 'DieCall',
-                    args    => \@die_args,
+                $result = $factory->make_cfg('Unwind',
+                    inputs => [$wrapper->[1], \@die_args],
                 );
             } elsif ($wrapper->[0] eq 'BuiltinCall') {
                 my @bi_args = ($wrapper->[2]->@*);
@@ -380,13 +381,13 @@ class Chalk::Bootstrap::Perl::Actions {
         # Fix prefix builtin subscript chain misparenting:
         # SubscriptExpr(BuiltinCall(defined/exists/ref/etc, [$var]), $key, style)
         #   → BuiltinCall(defined/exists/ref/etc, [SubscriptExpr($var, $key, style)])
-        # Also handles Return/DieCall wrapper from stale-value merge:
+        # Also handles Return/Unwind wrapper from stale-value merge:
         # SubscriptExpr(Return(ctrl, BuiltinCall(..., [$var])), $key, style)
         #   → Return(ctrl, BuiltinCall(..., [SubscriptExpr($var, $key, style)]))
         if ($node->class() eq 'SubscriptExpr') {
             my $target = $node->inputs()->[0];
             my $builtin_call;
-            my $stmt_wrapper;  # Return or DieCall node if wrapped, undef if direct
+            my $stmt_wrapper;  # Return or Unwind node if wrapped, undef if direct
 
             if (defined $target
                     && (($target isa Chalk::IR::Node::Call
@@ -545,24 +546,23 @@ class Chalk::Bootstrap::Perl::Actions {
         return $node;
     };
 
-    # Unwrap Return/DieCall trapped inside expression nodes by stale-value
+    # Unwrap Return/Unwind trapped inside expression nodes by stale-value
     # merge.  Earley's add() can produce IR like BinaryExpr(==, Return(ctrl,$x), 1)
     # or SubscriptExpr(Return(ctrl,$h), $k, hash) when the statement keyword gets
     # absorbed as the left operand.  Restructure so the statement wraps the
     # expression: Return(ctrl, BinaryExpr(==, $x, 1)).
-    # Helper: extract inner value and control from a Return or DieCall node.
+    # Helper: extract inner value and control from a Return or Unwind node.
     my sub _stmt_inner($node) {
         if ($node isa Chalk::IR::Node::Return) {
             return ($node->inputs()->[1], $node->inputs()->[0]);  # value, control
         }
-        # DieCall (Constructor): inner value is inputs()->[0]->[-1]
-        return ($node->inputs()->[0], undef);
+        # Unwind CFG node: control is inputs()->[0], exception args is inputs()->[1]
+        return ($node->inputs()->[1], $node->inputs()->[0]);
     }
 
     my sub _is_stmt_node($node) {
         return $node isa Chalk::IR::Node::Return
-            || ($node isa Chalk::Bootstrap::IR::Node::Constructor
-                && $node->class() eq 'DieCall');
+            || $node isa Chalk::IR::Node::Unwind;
     }
 
     my sub _rewrap_stmt($factory, $stmt_node, $new_inner) {
@@ -570,8 +570,9 @@ class Chalk::Bootstrap::Perl::Actions {
             my $ctrl = $stmt_node->inputs()->[0];
             return $factory->make_cfg('Return', inputs => [$ctrl, $new_inner]);
         }
-        # DieCall
-        return $factory->make('Constructor', 'class' => 'DieCall', args => [$new_inner]);
+        # Unwind: restore control token and update exception value
+        my $ctrl = $stmt_node->inputs()->[0];
+        return $factory->make_cfg('Unwind', inputs => [$ctrl, $new_inner]);
     }
 
     my $_unwrap_stmt_from_expr;
@@ -666,7 +667,7 @@ class Chalk::Bootstrap::Perl::Actions {
     # The ambiguous grammar sometimes parses compound statements as
     # separate items. These fixups merge them back together:
     # - `return 'Start'` → Return(ctrl, Constant('Start'))
-    # - `die "message"` → DieCall([Constant('message')])
+    # - `die "message"` → Unwind(ctrl, Constant('message'))
     # - `use Foo 'bar'` (split) → UseDecl(Foo, ['bar'])
     my sub _fixup_stmts($factory, $stmts) {
         my @result;
@@ -696,13 +697,15 @@ class Chalk::Bootstrap::Perl::Actions {
                     && defined $item->value()
                     && $item->value() eq 'die'
                     && $i + 1 <= $#$stmts) {
-                # Merge die + single argument into DieCall.
+                # Merge die + single argument into an Unwind CFG node.
+                # No cfg_state is available here (fixup runs post-parse),
+                # so a fresh Start node serves as the control token.
                 # Consumes only one following node to avoid absorbing
                 # unrelated statements in multi-statement bodies.
+                # inputs->[1] is an arrayref of exception args.
                 $i++;
-                push @result, $factory->make('Constructor',
-                    'class' => 'DieCall',
-                    args  => [$stmts->[$i]],
+                push @result, $factory->make_cfg('Unwind',
+                    inputs => [$factory->make('Start'), [$stmts->[$i]]],
                 );
             } elsif ($item isa Chalk::IR::UseInfo
                     && !scalar($item->args()->@*)
@@ -774,7 +777,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # separate statement. Block merge for known statement-starting patterns.
                 my $next = $stmts->[$i + 1];
                 my $is_boundary = false;
-                # Statement-level Constructor classes (ClassDecl, MethodDecl, DieCall, etc.)
+                # Statement-level Constructor classes (ClassDecl, MethodDecl, SubDecl, etc.)
                 $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constructor
                     && $STMT_BOUNDARY_CLASSES{$next->class()};
                 # ClassInfo/FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
@@ -1648,10 +1651,16 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         if (defined $func_name && $func_name eq 'die') {
-            # die EXPR → DieCall
-            return $factory->make('Constructor',
-                'class' => 'DieCall',
-                args  => \@args,
+            # die EXPR → Unwind CFG node (exceptional exit)
+            my $control;
+            my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+            if (defined $sa) {
+                my $state = $sa->inherited_cfg_state($ctx);
+                $control = $state->{control} if defined $state;
+            }
+            $control //= $factory->make('Start');
+            return $factory->make_cfg('Unwind',
+                inputs => [$control, \@args],
             );
         }
 

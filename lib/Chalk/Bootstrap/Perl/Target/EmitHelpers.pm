@@ -7,6 +7,7 @@ use experimental 'class';
 use Chalk::Bootstrap::Target;
 use Chalk::IR::Node;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Unwind;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Interpolate;
@@ -700,8 +701,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $returns_value = (defined $body_item
             && $body_item isa Chalk::IR::Node::Return);
         my $dies = (defined $body_item
-            && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
-            && $body_item->class() eq 'DieCall');
+            && $body_item isa Chalk::IR::Node::Unwind);
 
         if ($returns_value) {
             my $value = $body_item->inputs()->[1];  # inputs[0]=control, inputs[1]=value
@@ -785,6 +785,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # Typed node fast-path: check typed nodes before falling through to
         # Constructor class-string dispatch for legacy untyped nodes.
         if ($node isa Chalk::IR::Node::VarDecl)    { return false; }
+        if ($node isa Chalk::IR::Node::Unwind)     { return false; }  # die is void
         if ($node isa Chalk::IR::Node::Call)        { return false; }  # BuiltinCall is void-ish
         if ($node isa Chalk::IR::Node::Subscript)   { return true;  }
         if ($node isa Chalk::IR::Node::PostfixDeref){ return false; }
@@ -792,7 +793,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         if ($node isa Chalk::IR::Node::Interpolate) { return false; }
         return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
         my $class = $node->class();
-        my %void = map { $_ => 1 } qw(VarDecl DieCall CompoundAssign
+        my %void = map { $_ => 1 } qw(VarDecl CompoundAssign
                                         BuiltinCall BinaryExpr);
         return false if $void{$class};
         return true if $class eq 'SubscriptExpr';
@@ -828,8 +829,10 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _is_single_stmt_return_expr($node) {
         return false unless defined $node;
         return false unless ($node isa Chalk::IR::Node || $node isa Chalk::Bootstrap::IR::Node::Constructor);
+        # Unwind (die) is never a return value — it exits the method exceptionally.
+        return false if $node isa Chalk::IR::Node::Unwind;
         my $class = $node->class();
-        my %void_classes = map { $_ => 1 } qw(VarDecl DieCall CompoundAssign);
+        my %void_classes = map { $_ => 1 } qw(VarDecl CompoundAssign);
         return false if $void_classes{$class};
         return true;
     }
@@ -999,7 +1002,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     # Find an exists/delete BuiltinCall in a subscript chain.
-    # Walks SubscriptExpr, Return, and DieCall wrappers inward.
+    # Walks SubscriptExpr, Return, and Unwind wrappers inward.
     method _find_exists_delete_in_chain($node) {
         my $cur = $node;
         while (defined $cur && ($cur isa Chalk::IR::Node || $cur isa Chalk::Bootstrap::IR::Node::Constructor)) {
@@ -1012,14 +1015,13 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 $cur = $cur->inputs()->[0];
                 next;
             }
-            # Unwrap Return/DieCall wrappers (stale-value merge artifacts)
+            # Unwrap Return/Unwind wrappers (stale-value merge artifacts)
             if ($cur isa Chalk::IR::Node::Return) {
                 $cur = $cur->inputs()->[1];  # inputs[1] is the value
                 next;
             }
-            next unless $cur isa Chalk::Bootstrap::IR::Node::Constructor;
-            if ($cur->class() eq 'DieCall') {
-                $cur = $cur->inputs()->[0];
+            if ($cur isa Chalk::IR::Node::Unwind) {
+                $cur = $cur->inputs()->[1];  # inputs[1] is exception args (arrayref)
                 next;
             }
             return;
@@ -1049,14 +1051,13 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 $base_node = $args->[0] if $args->@* > 0;
                 last;
             }
-            # Unwrap Return/DieCall wrappers (stale-value merge artifacts)
+            # Unwrap Return/Unwind wrappers (stale-value merge artifacts)
             if ($cur isa Chalk::IR::Node::Return) {
                 $cur = $cur->inputs()->[1];  # inputs[1] is the value
                 next;
             }
-            next unless $cur isa Chalk::Bootstrap::IR::Node::Constructor;
-            if ($cur->class() eq 'DieCall') {
-                $cur = $cur->inputs()->[0];
+            if ($cur isa Chalk::IR::Node::Unwind) {
+                $cur = $cur->inputs()->[1];  # inputs[1] is exception args (arrayref)
                 next;
             }
             last;
@@ -1517,12 +1518,12 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # to Constructor class-string dispatch for legacy untyped nodes.
         if ($node isa Chalk::IR::Node::VarDecl) { return $self->_emit_var_decl($node, $declared_vars); }
         if ($node isa Chalk::IR::Node::Return)  { return $self->_emit_return_stmt($node, $declared_vars, $is_last); }
+        if ($node isa Chalk::IR::Node::Unwind)  { return $self->_emit_die_call($node, $declared_vars); }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
 
             if ($class eq 'VarDecl')         { return $self->_emit_var_decl($node, $declared_vars); }
-            if ($class eq 'DieCall')         { return $self->_emit_die_call($node, $declared_vars); }
             if ($class eq 'CompoundAssign')  { return $self->_emit_compound_assign_stmt($node, $declared_vars); }
 
             # Expression types used as statements (side effects)
@@ -2365,7 +2366,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     method _emit_die_call($node, $declared_vars = undef) {
-        my $args = $node->inputs()->[0];
+        my $args = $node->inputs()->[1];
         my $msg = '';
         if (ref($args) eq 'ARRAY' && $args->@*) {
             my $first = $args->[0];
@@ -2415,6 +2416,12 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # Unwrap and emit the inner value (inputs[1]) as an expression.
             return $self->_emit_expr($node->inputs()->[1], $declared_vars);
         }
+        if ($node isa Chalk::IR::Node::Unwind) {
+            # Unwind used as expression: stale-value merge artifact.
+            # Emit croak in a statement expression — croak never returns.
+            my $croak = $self->_emit_die_call($node, $declared_vars);
+            return "({ $croak &PL_sv_undef; })";
+        }
         if ($node isa Chalk::IR::Node::Call) {
             if ($node->dispatch_kind() eq 'method')  { return $self->_emit_method_call_expr($node, $declared_vars); }
             if ($node->dispatch_kind() eq 'builtin') { return $self->_emit_builtin_call($node, $declared_vars); }
@@ -2442,12 +2449,6 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             if ($class eq 'StructRef')          { return $self->_emit_struct_ref_expr($node, $declared_vars); }
             if ($class eq 'FieldAccess')        { return $self->_emit_field_access_expr($node, $declared_vars); }
 
-            # DieCall used as expression: stale-value merge artifact.
-            # Emit croak in a statement expression — croak never returns.
-            if ($class eq 'DieCall') {
-                my $croak = $self->_emit_die_call($node, $declared_vars);
-                return "({ $croak &PL_sv_undef; })";
-            }
         }
 
         return "NULL /* unsupported */";

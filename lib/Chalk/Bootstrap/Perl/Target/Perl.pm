@@ -7,6 +7,7 @@ use experimental 'class';
 use Chalk::Bootstrap::Target;
 use Chalk::IR::Node;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Unwind;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::UnaryOp;
 use Chalk::IR::Node::Call;
@@ -334,6 +335,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         }
 
         if ($node isa Chalk::IR::Node::Return) { return $self->_emit_return_stmt($node); }
+        if ($node isa Chalk::IR::Node::Unwind) { return $self->_emit_die_call($node); }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
@@ -343,7 +345,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'ClassDecl')  { return $self->_emit_class_decl($node); }
             if ($class eq 'MethodDecl') { return $self->_emit_method_decl($node); }
             if ($class eq 'SubDecl')    { return $self->_emit_sub_decl($node); }
-            if ($class eq 'DieCall')    { return $self->_emit_die_call($node); }
             if ($class eq 'FieldDecl')  { return $self->_emit_field_decl($node); }
             die "Unknown Constructor class: $class";
         }
@@ -521,7 +522,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_die_call($node) {
-        my $args = $node->inputs()->[0];
+        my $args = $node->inputs()->[1];
         my @arg_strs = map { $self->_emit_expr($_) } $args->@*;
         return "die " . join(', ', @arg_strs) . ";";
     }

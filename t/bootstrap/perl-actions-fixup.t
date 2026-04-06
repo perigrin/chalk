@@ -11,6 +11,7 @@ use Chalk::IR::MethodInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::Program;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Unwind;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -156,9 +157,9 @@ my sub method_name($method) {
 
         my $body = method_body($method);
         is(scalar $body->@*, 1, 'die merge: method body has 1 item');
-        is($body->[0]->class(), 'DieCall', 'die merge: body item is DieCall');
+        isa_ok($body->[0], 'Chalk::IR::Node::Unwind', 'die merge: body item is Unwind CFG node');
 
-        my $args = $body->[0]->inputs()->[0];
+        my $args = $body->[0]->inputs()->[1];
         is($args->[0]->value(), 'something went wrong', 'die merge: message preserved');
     }
 }
@@ -249,8 +250,8 @@ my sub method_name($method) {
                 class_name  => $cname,
                 parent      => $cparent,
                 method_name => method_name($method),
-                body_class  => $mbody->[0]->class(),
-                die_msg     => $mbody->[0]->inputs()->[0][0]->value(),
+                body_class  => ref($mbody->[0]),
+                die_msg     => $mbody->[0]->inputs()->[1][0]->value(),
             };
         } else {
             push @results, { seed => $seed, error => 'no IR' };

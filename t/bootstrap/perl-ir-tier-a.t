@@ -1,5 +1,5 @@
 # ABOUTME: Unit tests for Perl IR constructor types via NodeFactory.
-# ABOUTME: Validates Program, UseDecl, ClassDecl, MethodDecl, Return CFG node, DieCall creation.
+# ABOUTME: Validates Program, UseDecl, ClassDecl, MethodDecl, Return CFG node, Unwind CFG node creation.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -7,6 +7,7 @@ use Test::More;
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Unwind;
 
 # Reset factory for clean state
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -40,19 +41,20 @@ my $str_die_msg = $f->make('Constant', const_type => 'string', value => 'Subclas
     is($ret->inputs()->[1], $str_start, 'Return inputs[1] is value');
 }
 
-# === Constructor:DieCall ===
+# === Unwind CFG node ===
 
 {
-    my $die = $f->make('Constructor',
-        class => 'DieCall',
-        args  => [$str_die_msg],
+    my $ctrl = $f->make('Start');
+    my $die = $f->make_cfg('Unwind',
+        inputs => [$ctrl, [$str_die_msg]],
     );
-    ok(defined $die, 'DieCall created');
-    is($die->operation(), 'Constructor', 'DieCall operation is Constructor');
-    is($die->class(), 'DieCall', 'DieCall class is DieCall');
-    is(scalar $die->inputs()->@*, 1, 'DieCall has 1 input');
-    is(ref($die->inputs()->[0]), 'ARRAY', 'DieCall args is arrayref');
-    is($die->inputs()->[0][0], $str_die_msg, 'DieCall args[0] is the message');
+    ok(defined $die, 'Unwind CFG node created');
+    isa_ok($die, 'Chalk::IR::Node::Unwind', 'Unwind is Chalk::IR::Node::Unwind');
+    is($die->operation(), 'Unwind', 'Unwind operation is Unwind');
+    is(scalar $die->inputs()->@*, 2, 'Unwind has 2 inputs (control + exception_args)');
+    is($die->inputs()->[0], $ctrl, 'Unwind inputs[0] is control');
+    is(ref($die->inputs()->[1]), 'ARRAY', 'Unwind inputs[1] is exception args arrayref');
+    is($die->inputs()->[1][0], $str_die_msg, 'Unwind args[0] is the message');
 }
 
 # === Constructor:MethodDecl ===

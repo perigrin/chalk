@@ -57,7 +57,6 @@ class Chalk::Bootstrap::IR::NodeFactory {
         'Constructor:ClassDecl'  => ['name', 'parent', 'body'],
         'Constructor:MethodDecl' => ['name', 'params', 'body', 'return_type'],
         'Constructor:SubDecl'    => ['name', 'params', 'body', 'scope'],
-        'Constructor:DieCall'    => ['args'],
         'Constructor:_Attribute' => ['name', 'parent', 'body'],
         'Constructor:FieldDecl' => ['name', 'attributes', 'default_value'],
         'Constructor:InterpolatedString' => ['parts'],

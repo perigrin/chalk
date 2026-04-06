@@ -861,7 +861,6 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             'AnonSubExpr'    => ['params', 'body'],
             'RegexMatch'     => ['target', 'pattern', 'flags'],
             'RegexSubst'     => ['target', 'pattern', 'replacement', 'flags'],
-            'DieCall'        => ['args'],
             'TryCatchStmt'   => ['try_body', 'catch_var', 'catch_body'],
             'InterpolatedString' => ['parts'],
             'BacktickExpr'   => ['command'],

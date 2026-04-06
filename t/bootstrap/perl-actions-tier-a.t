@@ -10,6 +10,7 @@ use Chalk::IR::UseInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Unwind;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -262,10 +263,10 @@ my sub is_use_info($node, $expected_name, $msg) {
             my $m1_params = method_params($m1);
             ok(scalar $m1_params->@* >= 1, 'Target.pm generate has at least 1 param');
 
-            # Body has DieCall
+            # Body has Unwind (die)
             my $m1_body = method_body($m1);
             is(scalar $m1_body->@*, 1, 'Target.pm generate body has 1 statement');
-            is_constructor($m1_body->[0], 'DieCall', 'Target.pm generate dies');
+            isa_ok($m1_body->[0], 'Chalk::IR::Node::Unwind', 'Target.pm generate dies (Unwind CFG node)');
         }
 
         # Find generate_distribution($ir) method

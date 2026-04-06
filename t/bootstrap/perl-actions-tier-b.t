@@ -14,6 +14,7 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Unwind;
 use Chalk::IR::Program;
 
 # Build Perl grammar pipeline: IR -> generated Perl -> eval -> grammar objects
@@ -206,7 +207,7 @@ my sub is_constant($node, $expected_value, $msg) {
         if (defined $meth) {
             my $meth_body = method_body($meth);
             is(scalar $meth_body->@*, 1, 'Node.pm: method body has 1 statement');
-            is_constructor($meth_body->[0], 'DieCall', 'Node.pm method dies');
+            isa_ok($meth_body->[0], 'Chalk::IR::Node::Unwind', 'Node.pm method dies (Unwind CFG node)');
         }
     }
 }
