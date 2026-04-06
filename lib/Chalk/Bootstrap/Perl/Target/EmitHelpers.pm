@@ -12,6 +12,7 @@ use Chalk::IR::Node::Interpolate;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::TryCatch;
+use Chalk::IR::FieldInfo;
 
 class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader;  # module being compiled (e.g., "Chalk::Bootstrap::Earley")
@@ -122,28 +123,34 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $index = 0;
 
         for my $item ($body->@*) {
-            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+            my ($raw_name, $attrs);
+            if ($item isa Chalk::IR::FieldInfo) {
+                $raw_name = $item->name();
+                $attrs    = $item->attributes();
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
                     && $item->class() eq 'FieldDecl') {
-                my $name_node = $item->inputs()->[0];
-                my $field_name = $name_node->value();
-                my ($sigil) = $field_name =~ /^([\$\@\%])/;
-                $field_name =~ s/^[\$\@\%]//;  # Strip sigil
-                $field_map{$field_name} = $index++;
-                $sigils{$field_name} = $sigil // '$';
-                # Detect :param attribute — these fields vary per instance
-                my $attrs = $item->inputs()->[1];
-                if (ref($attrs) eq 'ARRAY') {
-                    for my $attr ($attrs->@*) {
-                        my $attr_name;
-                        if (ref($attr) eq 'HASH') {
-                            $attr_name = $attr->{name};
-                        } else {
-                            # Legacy Constructor:_Attribute node
-                            $attr_name = $attr->inputs()->[0]->value();
-                        }
-                        if (defined $attr_name && $attr_name eq 'param') {
-                            $params{$field_name} = 1;
-                        }
+                $raw_name = $item->inputs()->[0]->value();
+                $attrs    = $item->inputs()->[1];
+            } else {
+                next;
+            }
+            my ($sigil) = $raw_name =~ /^([\$\@\%])/;
+            my $field_name = $raw_name;
+            $field_name =~ s/^[\$\@\%]//;  # Strip sigil
+            $field_map{$field_name} = $index++;
+            $sigils{$field_name} = $sigil // '$';
+            # Detect :param attribute — these fields vary per instance
+            if (ref($attrs) eq 'ARRAY') {
+                for my $attr ($attrs->@*) {
+                    my $attr_name;
+                    if (ref($attr) eq 'HASH') {
+                        $attr_name = $attr->{name};
+                    } else {
+                        # Legacy Constructor:_Attribute node
+                        $attr_name = $attr->inputs()->[0]->value();
+                    }
+                    if (defined $attr_name && $attr_name eq 'param') {
+                        $params{$field_name} = 1;
                     }
                 }
             }
@@ -243,12 +250,20 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             $methods{$name} = $entry;
         }
 
-        # Scan FieldDecl nodes for :reader attributes — these auto-generate
+        # Scan FieldDecl/FieldInfo nodes for :reader attributes — these auto-generate
         # accessor methods that can be called via direct dispatch.
         for my $item ($body->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
-                && $item->class() eq 'FieldDecl';
-            my $attrs = $item->inputs()->[1];
+            my ($raw_name, $attrs);
+            if ($item isa Chalk::IR::FieldInfo) {
+                $raw_name = $item->name();
+                $attrs    = $item->attributes();
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'FieldDecl') {
+                $raw_name = $item->inputs()->[0]->value();
+                $attrs    = $item->inputs()->[1];
+            } else {
+                next;
+            }
             next unless ref($attrs) eq 'ARRAY';
             my $has_reader = false;
             for my $attr ($attrs->@*) {
@@ -265,7 +280,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 }
             }
             if ($has_reader) {
-                my $fname = $item->inputs()->[0]->value();
+                my $fname = $raw_name;
                 $fname =~ s/^[\$\@\%]//;  # Strip sigil
                 $methods{$fname} //= {
                     returns    => true,

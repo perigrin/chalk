@@ -24,6 +24,7 @@ use Chalk::IR::Node::Aggregate;
 use Chalk::IR::Node::Regex;
 use Chalk::IR::Node::TryCatch;
 use Chalk::IR::UseInfo;
+use Chalk::IR::FieldInfo;
 
 class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
@@ -95,6 +96,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 # _emit_node emits a bare if-block instead of the class.
                 if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}
                         && !($ir_node isa Chalk::IR::UseInfo)
+                        && !($ir_node isa Chalk::IR::FieldInfo)
                         && !($ir_node isa Chalk::Bootstrap::IR::Node::Constructor
                              && ($ir_node->class() eq 'Program'
                                  || $ir_node->class() eq 'ClassDecl'
@@ -127,8 +129,14 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                     }
                 }
             }
-            if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-                # Also check FieldDecl for class-scope fields
+            if ($node isa Chalk::IR::FieldInfo) {
+                # FieldInfo metadata struct — check for aggregate-sigil field names
+                my $name = $node->name();
+                if (defined $name && $name =~ /^([\@\%])(.+)/) {
+                    $_aggregate_vars{$2} = $1;
+                }
+            } elsif ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+                # Also check legacy Constructor:FieldDecl for class-scope fields
                 if ($node->class() eq 'FieldDecl') {
                     my $var = $node->inputs()->[0];
                     if (defined $var && $var isa Chalk::Bootstrap::IR::Node::Constant) {
@@ -269,6 +277,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
         if ($node isa Chalk::IR::UseInfo) {
             return $self->_emit_use_decl($node);
+        }
+
+        if ($node isa Chalk::IR::FieldInfo) {
+            return $self->_emit_field_decl($node);
         }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
@@ -428,11 +440,17 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_field_decl($node) {
-        my $name_node     = $node->inputs()->[0];
-        my $attrs         = $node->inputs()->[1];
-        my $default_value = $node->inputs()->[2];
-
-        my $name = $name_node->value();
+        my ($name, $attrs, $default_value);
+        if ($node isa Chalk::IR::FieldInfo) {
+            $name          = $node->name();
+            $attrs         = $node->attributes();
+            $default_value = $node->default_value();
+        } else {
+            my $name_node  = $node->inputs()->[0];
+            $name          = $name_node->value();
+            $attrs         = $node->inputs()->[1];
+            $default_value = $node->inputs()->[2];
+        }
         my $decl = "field $name";
 
         if (ref($attrs) eq 'ARRAY' && $attrs->@*) {

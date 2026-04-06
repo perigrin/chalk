@@ -16,6 +16,7 @@ use Chalk::IR::Node::HashRef;
 use Chalk::IR::Node::ArrayRef;
 use Chalk::IR::Node::AnonSub;
 use Chalk::IR::UseInfo;
+use Chalk::IR::FieldInfo;
 
 class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::EmitHelpers) {
     field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
@@ -1982,13 +1983,20 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         if (defined $class_decl) {
             my $body = $class_decl->inputs()->[2];
             for my $item ($body->@*) {
-                next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
-                         && $item->class() eq 'FieldDecl';
-
-                my $name_node  = $item->inputs()->[0];
-                my $attrs      = $item->inputs()->[1];
-                my $default    = $item->inputs()->[2];
-                my $field_name = $name_node->value();  # includes sigil
+                my ($field_name, $attrs, $default);
+                if ($item isa Chalk::IR::FieldInfo) {
+                    $field_name = $item->name();
+                    $attrs      = $item->attributes();
+                    $default    = $item->default_value();
+                } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                         && $item->class() eq 'FieldDecl') {
+                    $field_name = $item->inputs()->[0]->value();
+                    $attrs      = $item->inputs()->[1];
+                    $default    = $item->inputs()->[2];
+                } else {
+                    next;
+                }
+                # $field_name includes sigil
                 my $escaped    = $self->_escape_c_string($field_name);
 
                 push @lines, '    {';

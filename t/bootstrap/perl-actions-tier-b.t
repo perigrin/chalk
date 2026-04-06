@@ -10,6 +10,7 @@ use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::IR::FieldInfo;
 
 # Build Perl grammar pipeline: IR -> generated Perl -> eval -> grammar objects
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -49,6 +50,14 @@ my sub is_constructor($node, $expected_class, $msg) {
     is($node->class(), $expected_class, "$msg: class is $expected_class");
 }
 
+my sub is_field_info($node, $expected_name, $msg) {
+    ok(defined $node, "$msg: defined");
+    return unless defined $node;
+    isa_ok($node, 'Chalk::IR::FieldInfo', $msg);
+    return unless $node isa Chalk::IR::FieldInfo;
+    is($node->name(), $expected_name, "$msg: name is '$expected_name'");
+}
+
 my sub is_constant($node, $expected_value, $msg) {
     ok(defined $node, "$msg: defined");
     return unless defined $node;
@@ -83,16 +92,14 @@ my sub is_constant($node, $expected_value, $msg) {
 
         # First field: $const_type :param :reader
         my $f1 = $body->[0];
-        is_constructor($f1, 'FieldDecl', 'Constant.pm field 1');
-        is_constant($f1->inputs()->[0], '$const_type', 'Constant.pm field 1 name');
-        my $f1_attrs = $f1->inputs()->[1];
+        is_field_info($f1, '$const_type', 'Constant.pm field 1');
+        my $f1_attrs = defined $f1 ? $f1->attributes() : [];
         is(ref $f1_attrs, 'ARRAY', 'Constant.pm field 1 attributes');
         is(scalar $f1_attrs->@*, 2, 'Constant.pm field 1 has 2 attributes');
 
         # Second field: $value :param :reader
         my $f2 = $body->[1];
-        is_constructor($f2, 'FieldDecl', 'Constant.pm field 2');
-        is_constant($f2->inputs()->[0], '$value', 'Constant.pm field 2 name');
+        is_field_info($f2, '$value', 'Constant.pm field 2');
 
         # Method: operation() returning 'Constant'
         my $meth = $body->[2];
@@ -163,8 +170,7 @@ my sub is_constant($node, $expected_value, $msg) {
 
         # Field: $code :param :reader
         my $f1 = $body->[0];
-        is_constructor($f1, 'FieldDecl', 'Statement.pm field');
-        is_constant($f1->inputs()->[0], '$code', 'Statement.pm field name');
+        is_field_info($f1, '$code', 'Statement.pm field');
 
         # Method: emit() returning interpolated string
         my $meth = $body->[1];
@@ -220,11 +226,9 @@ my sub is_constant($node, $expected_value, $msg) {
 
         # Fields
         my $f1 = $body->[0];
-        is_constructor($f1, 'FieldDecl', 'Module.pm field 1');
-        is_constant($f1->inputs()->[0], '$module', 'Module.pm field 1 name');
+        is_field_info($f1, '$module', 'Module.pm field 1');
         my $f2 = $body->[1];
-        is_constructor($f2, 'FieldDecl', 'Module.pm field 2');
-        is_constant($f2->inputs()->[0], '$package', 'Module.pm field 2 name');
+        is_field_info($f2, '$package', 'Module.pm field 2');
 
         # Method with InterpolatedString containing 2 variables
         my $meth = $body->[2];
@@ -293,8 +297,7 @@ my sub is_constant($node, $expected_value, $msg) {
             is(scalar $body->@*, 2, 'Constructor.pm: class body has 2 items');
 
             my $f1 = $body->[0];
-            is_constructor($f1, 'FieldDecl', 'Constructor.pm field');
-            is_constant($f1->inputs()->[0], '$class', 'Constructor.pm field name');
+            is_field_info($f1, '$class', 'Constructor.pm field');
 
             my $meth = $body->[1];
             is_constructor($meth, 'MethodDecl', 'Constructor.pm method');

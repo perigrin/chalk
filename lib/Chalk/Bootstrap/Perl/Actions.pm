@@ -13,6 +13,7 @@ use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::UseInfo;
+use Chalk::IR::FieldInfo;
 
 # Builtin keyword sets used by _fixup_stmts for statement merging
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
@@ -789,6 +790,8 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Statement-level Constructor classes (ReturnStmt, ClassDecl, etc.)
                 $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constructor
                     && $STMT_BOUNDARY_CLASSES{$next->class()};
+                # FieldInfo metadata structs are always separate statements
+                $is_boundary = true if $next isa Chalk::IR::FieldInfo;
                 # CFG control flow nodes
                 $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node
                     && $STMT_BOUNDARY_OPS{$next->operation() // ''};
@@ -824,6 +827,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     # Stop at statement-level constructs
                     last if $next isa Chalk::Bootstrap::IR::Node::Constructor
                         && $STMT_BOUNDARY_CLASSES{$next->class()};
+                    # FieldInfo metadata structs are always separate statements
+                    last if $next isa Chalk::IR::FieldInfo;
                     # Stop at CFG control flow nodes
                     last if $next isa Chalk::Bootstrap::IR::Node
                         && $STMT_BOUNDARY_OPS{$next->operation() // ''};
@@ -886,7 +891,8 @@ class Chalk::Bootstrap::Perl::Actions {
                 # StatementList returns arrayref
                 push @stmts, $val->@*;
             } elsif ($val isa Chalk::Bootstrap::IR::Node
-                     || $val isa Chalk::IR::UseInfo) {
+                     || $val isa Chalk::IR::UseInfo
+                     || $val isa Chalk::IR::FieldInfo) {
                 push @stmts, $val;
             }
         }
@@ -908,7 +914,8 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Nested StatementList result — flatten
                 push @stmts, $val->@*;
             } elsif ($val isa Chalk::Bootstrap::IR::Node
-                     || $val isa Chalk::IR::UseInfo) {
+                     || $val isa Chalk::IR::UseInfo
+                     || $val isa Chalk::IR::FieldInfo) {
                 push @stmts, $val;
             }
         }
@@ -923,7 +930,8 @@ class Chalk::Bootstrap::Perl::Actions {
         my @ir_nodes;
         for my $val (@values) {
             if ($val isa Chalk::Bootstrap::IR::Node
-                    || $val isa Chalk::IR::UseInfo) {
+                    || $val isa Chalk::IR::UseInfo
+                    || $val isa Chalk::IR::FieldInfo) {
                 push @ir_nodes, $val;
             }
         }
@@ -1801,11 +1809,9 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef unless defined $var_name;
 
         if ($is_field) {
-            return $factory->make('Constructor',
-                'class'         => 'FieldDecl',
-                name          => $var_name,
-                attributes    => \@attributes,
-                default_value => undef,
+            return Chalk::IR::FieldInfo->new(
+                name       => $var_name->value(),
+                attributes => \@attributes,
             );
         }
 
@@ -2262,7 +2268,9 @@ class Chalk::Bootstrap::Perl::Actions {
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
 
-            if (!defined $target && $focus isa Chalk::Bootstrap::IR::Node) {
+            if (!defined $target
+                    && ($focus isa Chalk::Bootstrap::IR::Node
+                        || $focus isa Chalk::IR::FieldInfo)) {
                 $target = $focus;
             } elsif (defined $target && !defined $op
                     && $focus isa Chalk::Bootstrap::IR::Node::Constant) {
@@ -2287,7 +2295,15 @@ class Chalk::Bootstrap::Perl::Actions {
 
         my $op_val = $op->value();
         if ($op_val eq '=') {
-            # FieldDecl target: set its default_value and return it
+            # FieldInfo target: set its default_value and return a new FieldInfo
+            if ($target isa Chalk::IR::FieldInfo) {
+                return Chalk::IR::FieldInfo->new(
+                    name          => $target->name(),
+                    attributes    => $target->attributes(),
+                    default_value => $value,
+                );
+            }
+            # Constructor:FieldDecl target (legacy fallback): set default_value and return it
             if ($target isa Chalk::Bootstrap::IR::Node::Constructor
                     && $target->class() eq 'FieldDecl') {
                 return $factory->make('Constructor',

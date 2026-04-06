@@ -20,6 +20,19 @@ my $fi2 = Chalk::IR::FieldInfo->new(name => '$count', default_value => '0');
 is($fi2->default_value(), '0', 'FieldInfo default_value');
 is_deeply($fi2->attributes(), [], 'FieldInfo attributes default empty');
 
+# id() — content-based, used for NodeFactory hash-cons keys
+my $id1 = $fi->id();
+ok(defined $id1, 'FieldInfo id() returns a value');
+like($id1, qr/FieldInfo/, 'FieldInfo id() contains FieldInfo marker');
+like($id1, qr/\$type/, 'FieldInfo id() contains field name');
+
+my $fi_same = Chalk::IR::FieldInfo->new(name => '$type', attributes => [{name => 'param'}, {name => 'reader'}]);
+is($fi->id(), $fi_same->id(), 'FieldInfo id() is content-based (same content => same id)');
+isnt($fi->id(), $fi2->id(), 'FieldInfo id() differs for different names');
+
+# add_consumer() — no-op, does not participate in use-def chain
+ok(eval { $fi->add_consumer('dummy'); 1 }, 'FieldInfo add_consumer() does not die');
+
 my $mi = Chalk::IR::MethodInfo->new(name => 'foo', params => ['$self', '$x'], graph => undef);
 is($mi->name(), 'foo', 'MethodInfo name');
 is(scalar $mi->params()->@*, 2, 'MethodInfo params');

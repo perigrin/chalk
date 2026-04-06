@@ -10,6 +10,7 @@ use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::IR::FieldInfo;
 
 # Build Perl grammar pipeline: IR -> generated Perl -> eval -> grammar objects
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -81,13 +82,12 @@ my sub find_method($class_decl, $name) {
     return undef;
 }
 
-# Helper to find FieldDecl by name in class body
+# Helper to find FieldInfo by name in class body
 my sub find_field($class_decl, $name) {
     my $body = $class_decl->inputs()->[2];
     for my $item ($body->@*) {
-        if ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                && $item->class() eq 'FieldDecl'
-                && $item->inputs()->[0]->value() eq $name) {
+        if ($item isa Chalk::IR::FieldInfo
+                && $item->name() eq $name) {
             return $item;
         }
     }
@@ -121,10 +121,7 @@ my sub find_field($class_decl, $name) {
 
             # Should have 5 fields + 2 methods = 7 items
             # (some fields have defaults, which may be parsed differently)
-            my @fields = grep {
-                $_ isa Chalk::Bootstrap::IR::Node::Constructor
-                && $_->class() eq 'FieldDecl'
-            } $body->@*;
+            my @fields = grep { $_ isa Chalk::IR::FieldInfo } $body->@*;
             ok(scalar @fields >= 5, 'ConciseOp.pm: at least 5 fields')
                 or diag("Got " . scalar @fields . " fields");
 
@@ -335,10 +332,7 @@ my sub find_field($class_decl, $name) {
                 'Chalk::Bootstrap::Context', 'Context class name');
 
             # Fields: $focus, $children, $position, $rule
-            my @fields = grep {
-                $_ isa Chalk::Bootstrap::IR::Node::Constructor
-                && $_->class() eq 'FieldDecl'
-            } $cls->inputs()->[2]->@*;
+            my @fields = grep { $_ isa Chalk::IR::FieldInfo } $cls->inputs()->[2]->@*;
             ok(scalar @fields >= 4, 'Context.pm: at least 4 fields')
                 or diag("Got " . scalar @fields . " fields");
 
