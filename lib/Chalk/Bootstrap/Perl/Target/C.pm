@@ -15,6 +15,7 @@ use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::HashRef;
 use Chalk::IR::Node::ArrayRef;
 use Chalk::IR::Node::AnonSub;
+use Chalk::IR::UseInfo;
 
 class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::EmitHelpers) {
     field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
@@ -77,11 +78,24 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # since C doesn't have Perl's constant sub mechanism.
         $self->_reset_use_constants();
         for my $item ($body->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
-                     && $item->class() eq 'UseDecl';
-            my $mn = $item->inputs()->[0];
-            next unless defined $mn && $mn->value() eq 'constant';
-            my $args = $item->inputs()->[1];
+            my ($use_name, $use_args);
+            if ($item isa Chalk::IR::UseInfo) {
+                $use_name = $item->name();
+                $use_args = $item->args();
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                     && $item->class() eq 'UseDecl') {
+                my $mn = $item->inputs()->[0];
+                next unless defined $mn;
+                $use_name = $mn->value();
+                my $raw = $item->inputs()->[1];
+                $use_args = defined $raw
+                    ? (ref($raw) eq 'ARRAY' ? $raw : [$raw])
+                    : [];
+            } else {
+                next;
+            }
+            next unless defined $use_name && $use_name eq 'constant';
+            my $args = $use_args;
             next unless defined $args && ref($args) eq 'ARRAY';
             my $hash_expr = $args->[0];
             next unless $hash_expr isa Chalk::IR::Node::HashRef;

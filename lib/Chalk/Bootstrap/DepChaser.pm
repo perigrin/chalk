@@ -6,6 +6,7 @@ use experimental 'class';
 
 use Chalk::Bootstrap::IR::Node::Constructor;
 use Chalk::Bootstrap::IR::Node::Constant;
+use Chalk::IR::UseInfo;
 
 class Chalk::Bootstrap::DepChaser {
 
@@ -23,12 +24,15 @@ class Chalk::Bootstrap::DepChaser {
 
         my @modules;
         for my $stmt ($statements->@*) {
-            next unless $stmt isa Chalk::Bootstrap::IR::Node::Constructor;
-            next unless $stmt->class() eq 'UseDecl';
-            my $name_node = $stmt->inputs()->[0];
-            next unless defined $name_node;
-            next unless $name_node isa Chalk::Bootstrap::IR::Node::Constant;
-            push @modules, $name_node->value();
+            if ($stmt isa Chalk::IR::UseInfo) {
+                push @modules, $stmt->name() if defined $stmt->name();
+            } elsif ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
+                     && $stmt->class() eq 'UseDecl') {
+                my $name_node = $stmt->inputs()->[0];
+                next unless defined $name_node;
+                next unless $name_node isa Chalk::Bootstrap::IR::Node::Constant;
+                push @modules, $name_node->value();
+            }
         }
         return @modules;
     }

@@ -12,6 +12,7 @@ use Chalk::IR::Node::UnaryOp;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
+use Chalk::IR::UseInfo;
 
 # Builtin keyword sets used by _fixup_stmts for statement merging
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
@@ -715,13 +716,12 @@ class Chalk::Bootstrap::Perl::Actions {
                     'class' => 'DieCall',
                     args  => [$stmts->[$i]],
                 );
-            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $item->class() eq 'UseDecl'
-                    && !defined $item->inputs()->[1]
+            } elsif ($item isa Chalk::IR::UseInfo
+                    && !scalar($item->args()->@*)
                     && $i + 1 <= $#$stmts
                     && $stmts->[$i + 1] isa Chalk::Bootstrap::IR::Node::Constant) {
-                # Merge UseDecl(module, undef) + bare Constant into
-                # UseDecl(module, [Constant]). Grammar ambiguity sometimes
+                # Merge UseInfo(module, []) + bare Constant into
+                # UseInfo(module, [Constant]). Grammar ambiguity sometimes
                 # splits `use Foo 'bar'` into separate statements.
                 my @import_args;
                 while ($i + 1 <= $#$stmts
@@ -732,10 +732,9 @@ class Chalk::Bootstrap::Perl::Actions {
                     push @import_args, $stmts->[$i];
                 }
                 if (@import_args) {
-                    push @result, $factory->make('Constructor',
-                        'class'       => 'UseDecl',
-                        module_name => $item->inputs()->[0],
-                        import_args => \@import_args,
+                    push @result, Chalk::IR::UseInfo->new(
+                        name => $item->name(),
+                        args => \@import_args,
                     );
                 } else {
                     push @result, $item;
@@ -886,7 +885,8 @@ class Chalk::Bootstrap::Perl::Actions {
             if (ref($val) eq 'ARRAY') {
                 # StatementList returns arrayref
                 push @stmts, $val->@*;
-            } elsif ($val isa Chalk::Bootstrap::IR::Node) {
+            } elsif ($val isa Chalk::Bootstrap::IR::Node
+                     || $val isa Chalk::IR::UseInfo) {
                 push @stmts, $val;
             }
         }
@@ -907,7 +907,8 @@ class Chalk::Bootstrap::Perl::Actions {
             if (ref($val) eq 'ARRAY') {
                 # Nested StatementList result — flatten
                 push @stmts, $val->@*;
-            } elsif ($val isa Chalk::Bootstrap::IR::Node) {
+            } elsif ($val isa Chalk::Bootstrap::IR::Node
+                     || $val isa Chalk::IR::UseInfo) {
                 push @stmts, $val;
             }
         }
@@ -921,7 +922,8 @@ class Chalk::Bootstrap::Perl::Actions {
         my @values = _collect_ir_values($ctx);
         my @ir_nodes;
         for my $val (@values) {
-            if ($val isa Chalk::Bootstrap::IR::Node) {
+            if ($val isa Chalk::Bootstrap::IR::Node
+                    || $val isa Chalk::IR::UseInfo) {
                 push @ir_nodes, $val;
             }
         }
@@ -954,7 +956,8 @@ class Chalk::Bootstrap::Perl::Actions {
         my @values = _collect_ir_values($ctx);
         my @ir_nodes;
         for my $val (@values) {
-            if ($val isa Chalk::Bootstrap::IR::Node) {
+            if ($val isa Chalk::Bootstrap::IR::Node
+                    || $val isa Chalk::IR::UseInfo) {
                 push @ir_nodes, $val;
             }
         }
@@ -1085,10 +1088,10 @@ class Chalk::Bootstrap::Perl::Actions {
             $module_name = _find_constant($ctx);
         }
 
-        return $factory->make('Constructor',
-            'class'       => 'UseDecl',
-            module_name => $module_name,
-            import_args => $import_args,
+        my $name_str = defined $module_name ? $module_name->value() : '';
+        return Chalk::IR::UseInfo->new(
+            name => $name_str,
+            args => $import_args // [],
         );
     }
 

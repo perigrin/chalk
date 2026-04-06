@@ -23,6 +23,7 @@ use Chalk::IR::Node::BacktickExpr;
 use Chalk::IR::Node::Aggregate;
 use Chalk::IR::Node::Regex;
 use Chalk::IR::Node::TryCatch;
+use Chalk::IR::UseInfo;
 
 class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
@@ -93,6 +94,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 # so without this guard, ClassDecl gets mapped to an If and
                 # _emit_node emits a bare if-block instead of the class.
                 if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}
+                        && !($ir_node isa Chalk::IR::UseInfo)
                         && !($ir_node isa Chalk::Bootstrap::IR::Node::Constructor
                              && ($ir_node->class() eq 'Program'
                                  || $ir_node->class() eq 'ClassDecl'
@@ -264,6 +266,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return $self->_emit_compound_assign($node) . ";";
         }
 
+        if ($node isa Chalk::IR::UseInfo) {
+            return $self->_emit_use_decl($node);
+        }
+
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
 
@@ -287,10 +293,15 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_use_decl($node) {
-        my $module = $node->inputs()->[0];
-        my $args   = $node->inputs()->[1];
-
-        my $module_name = $module->value();
+        my ($module_name, $args);
+        if ($node isa Chalk::IR::UseInfo) {
+            $module_name = $node->name();
+            $args = scalar($node->args()->@*) ? $node->args() : undef;
+        } else {
+            my $module = $node->inputs()->[0];
+            $args      = $node->inputs()->[1];
+            $module_name = $module->value();
+        }
 
         # Version strings don't get quoted
         if ($module_name =~ /^v?[0-9]/) {

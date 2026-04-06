@@ -6,6 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
+use Chalk::IR::UseInfo;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -59,6 +60,13 @@ my sub is_constant($node, $expected_value, $msg) {
     is($node->value(), $expected_value, "$msg: value is '$expected_value'");
 }
 
+my sub is_use_info($node, $expected_name, $msg) {
+    ok(defined $node, "$msg: defined");
+    return unless defined $node;
+    ok($node isa Chalk::IR::UseInfo, "$msg: is UseInfo");
+    is($node->name(), $expected_name, "$msg: name is '$expected_name'");
+}
+
 # ============================================================
 # 1. Start.pm — class :isa, method returning string
 # ============================================================
@@ -80,17 +88,15 @@ my sub is_constant($node, $expected_value, $msg) {
 
         # First statement: use 5.42.0
         my $use_ver = $stmts->[0];
-        is_constructor($use_ver, 'UseDecl', 'Start.pm use 5.42.0');
-        is_constant($use_ver->inputs()->[0], '5.42.0', 'Start.pm use 5.42.0 module');
+        is_use_info($use_ver, '5.42.0', 'Start.pm use 5.42.0');
 
         # Second: use utf8
         my $use_utf8 = $stmts->[1];
-        is_constructor($use_utf8, 'UseDecl', 'Start.pm use utf8');
-        is_constant($use_utf8->inputs()->[0], 'utf8', 'Start.pm use utf8 module');
+        is_use_info($use_utf8, 'utf8', 'Start.pm use utf8');
 
         # Third: use experimental 'class'
         my $use_exp = $stmts->[2];
-        is_constructor($use_exp, 'UseDecl', 'Start.pm use experimental');
+        is_use_info($use_exp, 'experimental', 'Start.pm use experimental');
 
         # Last: ClassDecl
         my $cls = $stmts->[-1];

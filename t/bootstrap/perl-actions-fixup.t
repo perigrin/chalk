@@ -6,6 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
+use Chalk::IR::UseInfo;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -127,20 +128,19 @@ my sub find_method_in_class($class_decl, $name) {
         skip 'use merge: no IR', 4 unless defined $ir;
 
         my $stmts = $ir->inputs()->[0];
-        # Find the 'experimental' UseDecl
+        # Find the 'experimental' UseInfo
         my $exp_use;
         for my $stmt ($stmts->@*) {
-            if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $stmt->class() eq 'UseDecl'
-                    && $stmt->inputs()->[0]->value() eq 'experimental') {
+            if ($stmt isa Chalk::IR::UseInfo
+                    && $stmt->name() eq 'experimental') {
                 $exp_use = $stmt;
                 last;
             }
         }
-        ok(defined $exp_use, 'use merge: found experimental UseDecl');
-        my $import_args = $exp_use->inputs()->[1];
-        ok(defined $import_args, 'use merge: import_args defined');
-        is(ref($import_args), 'ARRAY', 'use merge: import_args is arrayref');
+        ok(defined $exp_use, 'use merge: found experimental UseInfo');
+        my $import_args = $exp_use->args();
+        ok(defined $import_args, 'use merge: args defined');
+        is(ref($import_args), 'ARRAY', 'use merge: args is arrayref');
         is($import_args->[0]->value(), 'class', 'use merge: import arg is class');
     }
 }
