@@ -1157,18 +1157,10 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 : '';
 
             # If list is a range ('..'), emit integer for loop.
-            # Handles both Chalk::IR::Node::Range (typed) and legacy Constructor:BinaryExpr.
             my ($range_lhs, $range_rhs);
             if ($list_node isa Chalk::IR::Node::Range) {
                 $range_lhs = $list_node->inputs()->[0];
                 $range_rhs = $list_node->inputs()->[1];
-            } elsif ($list_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $list_node->class() eq 'BinaryExpr'
-                    && defined $list_node->inputs()->[0]
-                    && $list_node->inputs()->[0] isa Chalk::Bootstrap::IR::Node::Constant
-                    && $list_node->inputs()->[0]->value() eq '..') {
-                $range_lhs = $list_node->inputs()->[1];
-                $range_rhs = $list_node->inputs()->[2];
             }
             if (defined $range_lhs) {
                 my $range_left  = $self->_emit_expr($range_lhs, $declared_vars);

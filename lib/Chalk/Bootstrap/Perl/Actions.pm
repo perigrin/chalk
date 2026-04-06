@@ -53,31 +53,6 @@ class Chalk::Bootstrap::Perl::Actions {
         return map { $_->extract() } _collect_ir_leaves($ctx);
     }
 
-    # Helper: find first IR leaf whose focus is a Constructor with given class
-    my sub _find_constructor($ctx, $class) {
-        for my $leaf (_collect_ir_leaves($ctx)) {
-            my $focus = $leaf->extract();
-            if ($focus isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $focus->class() eq $class) {
-                return $focus;
-            }
-        }
-        return undef;
-    }
-
-    # Helper: collect all IR values that are Constructors with given class
-    my sub _collect_constructors($ctx, $class) {
-        my @results;
-        for my $leaf (_collect_ir_leaves($ctx)) {
-            my $focus = $leaf->extract();
-            if ($focus isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $focus->class() eq $class) {
-                push @results, $focus;
-            }
-        }
-        return @results;
-    }
-
     # Helper: find first Constant node in leaves
     my sub _find_constant($ctx) {
         for my $leaf (_collect_ir_leaves($ctx)) {

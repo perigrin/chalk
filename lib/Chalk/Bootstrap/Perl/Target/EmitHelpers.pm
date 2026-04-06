@@ -730,14 +730,6 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         if ($node isa Chalk::IR::Node::PostfixDeref){ return false; }
         if ($node isa Chalk::IR::Node::TryCatch)    { return false; }
         if ($node isa Chalk::IR::Node::Interpolate) { return false; }
-        return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
-        my $class = $node->class();
-        my %void = map { $_ => 1 } qw(VarDecl CompoundAssign
-                                        BuiltinCall BinaryExpr);
-        return false if $void{$class};
-        return true if $class eq 'SubscriptExpr';
-        return true if $class eq 'MethodCallExpr';
-        return true if $class eq 'TernaryExpr';
         return false;
     }
 
@@ -1109,9 +1101,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # value expressions (SubscriptExpr, TernaryExpr) inside loops.
             my $is_loop_safe_return = !$_loop_depth
                 || $stmt isa Chalk::IR::Node::Subscript
-                || $stmt isa Chalk::IR::Node::TernaryExpr
-                || ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $stmt->class() eq 'TernaryExpr');
+                || $stmt isa Chalk::IR::Node::TernaryExpr;
             if ($_return_context && $is_loop_safe_return && $is_last_in_then
                     && $self->_is_bare_return_expr($stmt)) {
                 my $val_expr = $self->_emit_expr($stmt, $declared_vars);
@@ -1458,12 +1448,6 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         if ($node isa Chalk::IR::Node::VarDecl) { return $self->_emit_var_decl($node, $declared_vars); }
         if ($node isa Chalk::IR::Node::Return)  { return $self->_emit_return_stmt($node, $declared_vars, $is_last); }
         if ($node isa Chalk::IR::Node::Unwind)  { return $self->_emit_die_call($node, $declared_vars); }
-
-        if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-            # Expression types used as statements (side effects):
-            # TernaryExpr, StructRef, FieldAccess, and structural types
-            return $self->_emit_expr($node, $declared_vars) . ";";
-        }
 
         # Typed IR nodes that aren't VarDecl: emit as expression statements
         if ($node isa Chalk::IR::Node) {

@@ -305,8 +305,6 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             return;
         }
 
-        return unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
-
         my $class = $node->class();
 
         # MethodCallExpr — check if any hash variable is passed as an argument.

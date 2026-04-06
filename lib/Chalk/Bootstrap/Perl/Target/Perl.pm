@@ -293,12 +293,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::IR::Node::Return) { return $self->_emit_return_stmt($node); }
         if ($node isa Chalk::IR::Node::Unwind) { return $self->_emit_die_call($node); }
 
-        if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-            # Unmapped operators (../x/isa/!~/\//etc.) still produce
-            # Constructor:BinaryExpr/UnaryExpr. Route to _emit_expr.
-            return $self->_emit_expr($node) . ";";
-        }
-
         die "Unknown IR node type: " . ref($node);
     }
 
@@ -530,13 +524,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::IR::Node::TernaryExpr)       { return $self->_emit_ternary_expr($node); }
         if ($node isa Chalk::IR::Node::StructRef)         { return $self->_emit_struct_ref_expr($node); }
         if ($node isa Chalk::IR::Node::StructFieldAccess) { return $self->_emit_field_access_expr($node); }
-
-        if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-            # Unmapped operators (../x/isa/!~/\//etc.) still produce Constructor
-            my $class = $node->class();
-            if ($class eq 'BinaryExpr') { return $self->_emit_binary_expr($node); }
-            if ($class eq 'UnaryExpr')  { return $self->_emit_unary_expr($node); }
-        }
 
         return $self->_emit_node($node);
     }
