@@ -9,6 +9,7 @@ use lib 't/bootstrap/lib';
 use Chalk::IR::UseInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::ClassInfo;
+use Chalk::IR::Program;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -41,11 +42,28 @@ my sub parse_source($source) {
     return $sem_ctx->extract();
 }
 
+# === Helper to get the flat statement list from a Program IR ===
+# Chalk::IR::Program stores statements partitioned; use_decls go into use_decls(),
+# classes into classes(), subs into top_level_subs(), bare nodes into other_stmts().
+# This helper assembles the full flat list for test assertions.
+
+my sub get_all_stmts($ir) {
+    return $ir->inputs()->[0] unless $ir isa Chalk::IR::Program;
+    return [
+        $ir->use_decls()->@*,
+        $ir->classes()->@*,
+        $ir->top_level_subs()->@*,
+        $ir->other_stmts()->@*,
+    ];
+}
+
 # === Helper to find a class declaration in IR statements ===
 
 my sub find_class_in_stmts($ir, $class) {
-    my $stmts = $ir->inputs()->[0];
-    for my $stmt ($stmts->@*) {
+    my @stmts = $ir isa Chalk::IR::Program
+        ? $ir->classes()->@*
+        : $ir->inputs()->[0]->@*;
+    for my $stmt (@stmts) {
         # ClassInfo (new path)
         if ($stmt isa Chalk::IR::ClassInfo) {
             return $stmt;
@@ -156,7 +174,7 @@ my sub method_name($method) {
     SKIP: {
         skip 'use merge: no IR', 4 unless defined $ir;
 
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = get_all_stmts($ir);
         # Find the 'experimental' UseInfo
         my $exp_use;
         for my $stmt ($stmts->@*) {
@@ -274,7 +292,7 @@ my sub method_name($method) {
     SKIP: {
         skip 'push multi-arg: no IR', 3 unless defined $ir;
 
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = get_all_stmts($ir);
         is(scalar $stmts->@*, 1, 'push multi-arg: one statement (not fragmented)');
 
         my $call = $stmts->[0];
@@ -294,7 +312,7 @@ my sub method_name($method) {
         my $ir = parse_source('$ops->@*;');
         ok(defined $ir, 'PostfixDeref: parses');
 
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = get_all_stmts($ir);
         is(scalar $stmts->@*, 1, 'PostfixDeref: one statement');
 
         my $deref = $stmts->[0];
@@ -312,7 +330,7 @@ my sub method_name($method) {
         my $ir = parse_source('$self->ops()->@*;');
         ok(defined $ir, 'PostfixDeref chain: parses');
 
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = get_all_stmts($ir);
         is(scalar $stmts->@*, 1, 'PostfixDeref chain: one statement');
 
         my $deref = $stmts->[0];
@@ -333,7 +351,7 @@ my sub method_name($method) {
         my $ir = parse_source('$x->foo();');
         ok(defined $ir, 'MethodCall: parses');
 
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = get_all_stmts($ir);
         is(scalar $stmts->@*, 1, 'MethodCall: one statement');
 
         my $call = $stmts->[0];
@@ -351,7 +369,7 @@ my sub method_name($method) {
         my $ir = parse_source('$x->foo()->bar();');
         ok(defined $ir, 'MethodCall chain: parses');
 
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = get_all_stmts($ir);
         is(scalar $stmts->@*, 1, 'MethodCall chain: one statement');
 
         my $call = $stmts->[0];
@@ -374,7 +392,7 @@ my sub method_name($method) {
         my $ir = parse_source('$h->{key};');
         ok(defined $ir, 'Subscript: parses');
 
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = get_all_stmts($ir);
         is(scalar $stmts->@*, 1, 'Subscript: one statement');
 
         my $sub = $stmts->[0];
@@ -393,7 +411,7 @@ my sub method_name($method) {
         my $ir = parse_source('return scalar $ops->@*;');
         ok(defined $ir, 'return scalar deref: parses');
 
-        my $stmts = $ir->inputs()->[0];
+        my $stmts = get_all_stmts($ir);
         is(scalar $stmts->@*, 1, 'return scalar deref: one statement');
 
         my $ret = $stmts->[0];
@@ -426,7 +444,7 @@ my sub method_name($method) {
         SKIP: {
             skip 'push method-deref: no IR', 6 unless defined $ir;
 
-            my $stmts = $ir->inputs()->[0];
+            my $stmts = get_all_stmts($ir);
             is(scalar $stmts->@*, 1, 'push method-deref: one statement');
 
             my $call = $stmts->[0];
@@ -468,7 +486,7 @@ my sub method_name($method) {
             skip "$builtin_name did not parse", 2 unless defined $ir;
 
             # Find the BuiltinCall in the top-level statement
-            my $stmts = $ir->inputs()->[0];
+            my $stmts = get_all_stmts($ir);
             my $stmt = $stmts->[0];
             ok(defined $stmt, "$builtin_name subscript: has statement");
 

@@ -239,6 +239,7 @@ use Chalk::Grammar::Symbol;
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::IR::Program;
 use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parser build_perl_ir_parser);
 
 {
@@ -898,7 +899,9 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
             ok(defined $ir_node, 'push multi-arg IR: extract returns IR');
 
             if (defined $ir_node) {
-                my $stmts = $ir_node->inputs()->[0];
+                my $stmts = $ir_node isa Chalk::IR::Program
+                    ? [$ir_node->other_stmts()->@*]
+                    : $ir_node->inputs()->[0];
                 ok(ref $stmts eq 'ARRAY', 'push multi-arg IR: statements is array');
 
                 if (ref $stmts eq 'ARRAY') {

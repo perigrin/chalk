@@ -11,6 +11,7 @@ use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::SubInfo;
+use Chalk::IR::Program;
 
 # Build Perl grammar pipeline
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -52,14 +53,13 @@ my sub parse_file($file) {
     SKIP: {
         skip 'Shim.pm: no IR', 15 unless defined $ir;
 
-        my $stmts = $ir->inputs()->[0];
+        isa_ok($ir, 'Chalk::IR::Program', 'Shim.pm: IR is Chalk::IR::Program');
 
         # Collect all top-level SubInfo nodes (package-level subs)
-        my @subs = grep { $_ isa Chalk::IR::SubInfo } $stmts->@*;
+        my @subs = $ir->top_level_subs()->@*;
         ok(scalar @subs >= 2,
-            'Shim.pm: top-level statements contain at least 2 SubInfo objects')
-            or diag("Got " . scalar @subs . " SubInfo objects; statements has "
-                . scalar($stmts->@*) . " items total");
+            'Shim.pm: top_level_subs contains at least 2 SubInfo objects')
+            or diag("Got " . scalar @subs . " SubInfo objects");
 
         # enable_class and disable_class should be SubInfo
         my ($enable_sub) = grep { $_->name() eq 'enable_class' } @subs;

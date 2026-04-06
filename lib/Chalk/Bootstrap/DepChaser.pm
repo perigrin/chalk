@@ -7,14 +7,22 @@ use experimental 'class';
 use Chalk::Bootstrap::IR::Node::Constructor;
 use Chalk::Bootstrap::IR::Node::Constant;
 use Chalk::IR::UseInfo;
+use Chalk::IR::Program;
 
 class Chalk::Bootstrap::DepChaser {
 
     # Extract module names from UseDecl Constructor nodes in a Program IR.
-    # Walks top-level statements looking for Constructor:UseDecl nodes.
+    # Walks top-level statements looking for UseInfo or Constructor:UseDecl nodes.
     # Returns a list of module name strings.
     sub extract_use_decls($ir) {
         return unless defined $ir;
+
+        # Chalk::IR::Program — use the use_decls() accessor directly
+        if ($ir isa Chalk::IR::Program) {
+            return map { $_->name() } grep { defined $_->name() } $ir->use_decls()->@*;
+        }
+
+        # Legacy Constructor:Program path
         return unless $ir isa Chalk::Bootstrap::IR::Node::Constructor;
         return unless $ir->class() eq 'Program';
 

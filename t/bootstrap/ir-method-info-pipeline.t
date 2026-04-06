@@ -12,6 +12,7 @@ use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::Program;
 
 # Build Perl grammar pipeline
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -53,16 +54,8 @@ my sub parse_file($file) {
     SKIP: {
         skip 'Constant.pm: no IR', 20 unless defined $ir;
 
-        my $stmts = $ir->inputs()->[0];
-        my $cls;
-        for my $stmt ($stmts->@*) {
-            if ($stmt isa Chalk::IR::ClassInfo) {
-                $cls = $stmt;
-            } elsif ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $stmt->class() eq 'ClassDecl') {
-                $cls = $stmt;
-            }
-        }
+        isa_ok($ir, 'Chalk::IR::Program', 'Constant.pm: IR is Chalk::IR::Program');
+        my ($cls) = $ir->classes()->@*;
         ok(defined $cls, 'Constant.pm: found class declaration');
 
         SKIP: {

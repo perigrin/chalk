@@ -13,6 +13,7 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::Program;
 
 # Build Perl grammar pipeline
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -54,12 +55,12 @@ my sub parse_file($file) {
     SKIP: {
         skip 'Constant.pm: no IR', 20 unless defined $ir;
 
-        my $stmts = $ir->inputs()->[0];
+        isa_ok($ir, 'Chalk::IR::Program', 'Constant.pm: IR is Chalk::IR::Program');
 
         # Find the ClassInfo node — should replace Constructor:ClassDecl
-        my ($cls) = grep { $_ isa Chalk::IR::ClassInfo } $stmts->@*;
-        ok(defined $cls, 'Constant.pm: top-level statements contain ClassInfo object')
-            or diag("Got types: " . join(', ', map { ref($_) } $stmts->@*));
+        my ($cls) = $ir->classes()->@*;
+        ok(defined $cls, 'Constant.pm: Program classes() contains ClassInfo object')
+            or diag("Got " . scalar($ir->classes()->@*) . " classes");
 
         SKIP: {
             skip 'Constant.pm: no ClassInfo', 15 unless defined $cls;
@@ -113,8 +114,7 @@ my sub parse_file($file) {
     SKIP: {
         skip 'Node.pm: no IR', 5 unless defined $ir;
 
-        my $stmts = $ir->inputs()->[0];
-        my ($cls) = grep { $_ isa Chalk::IR::ClassInfo } $stmts->@*;
+        my ($cls) = $ir->classes()->@*;
         ok(defined $cls, 'Node.pm: found ClassInfo');
 
         SKIP: {

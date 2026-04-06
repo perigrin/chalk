@@ -28,6 +28,7 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
+use Chalk::IR::Program;
 
 class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
@@ -53,10 +54,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method generate($ir) {
-        die "generate() requires a Constructor:Program IR node"
+        die "generate() requires a Program IR node"
             unless defined($ir)
-            && $ir isa Chalk::Bootstrap::IR::Node::Constructor
-            && $ir->class() eq 'Program';
+            && ($ir isa Chalk::IR::Program
+                || ($ir isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $ir->class() eq 'Program'));
 
         return $self->_emit_program($ir);
     }
@@ -65,10 +67,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # Walks the Context tree to build IR node → cfg_state lookup,
     # then generates code using cfg_state for if/loop dispatch.
     method generate_with_cfg($ir, $sa, $ctx) {
-        die "generate_with_cfg() requires a Constructor:Program IR node"
+        die "generate_with_cfg() requires a Program IR node"
             unless defined($ir)
-            && $ir isa Chalk::Bootstrap::IR::Node::Constructor
-            && $ir->class() eq 'Program';
+            && ($ir isa Chalk::IR::Program
+                || ($ir isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $ir->class() eq 'Program'));
 
         %_cfg_lookup = ();
         %_aggregate_vars = ();
@@ -98,6 +101,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 # so without this guard, ClassDecl gets mapped to an If and
                 # _emit_node emits a bare if-block instead of the class.
                 if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}
+                        && !($ir_node isa Chalk::IR::Program)
                         && !($ir_node isa Chalk::IR::UseInfo)
                         && !($ir_node isa Chalk::IR::ClassInfo)
                         && !($ir_node isa Chalk::IR::FieldInfo)
@@ -135,7 +139,13 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                     }
                 }
             }
-            if ($node isa Chalk::IR::ClassInfo) {
+            if ($node isa Chalk::IR::Program) {
+                # Program metadata struct — push all contained items for traversal
+                push @stack, $node->use_decls()->@*;
+                push @stack, $node->classes()->@*;
+                push @stack, $node->top_level_subs()->@*;
+                push @stack, $node->other_stmts()->@*;
+            } elsif ($node isa Chalk::IR::ClassInfo) {
                 # ClassInfo metadata struct — push body items for traversal
                 push @stack, $node->body()->@*;
             } elsif ($node isa Chalk::IR::FieldInfo) {
@@ -180,9 +190,14 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $code = $self->generate($ir);
 
         # Extract class name from the IR to determine file path
-        my $stmts = $ir->inputs()->[0];
+        my @stmts;
+        if ($ir isa Chalk::IR::Program) {
+            @stmts = ($ir->classes()->@*, $ir->top_level_subs()->@*);
+        } else {
+            @stmts = $ir->inputs()->[0]->@*;
+        }
         my $class_name;
-        for my $stmt ($stmts->@*) {
+        for my $stmt (@stmts) {
             if ($stmt isa Chalk::IR::ClassInfo) {
                 $class_name = $stmt->name();
                 last;
@@ -203,9 +218,19 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_program($node) {
-        my $stmts = $node->inputs()->[0];
+        my @stmts;
+        if ($node isa Chalk::IR::Program) {
+            # Reassemble ordered output: use_decls first, then classes, top-level subs, other
+            push @stmts, $node->use_decls()->@*;
+            push @stmts, $node->classes()->@*;
+            push @stmts, $node->top_level_subs()->@*;
+            push @stmts, $node->other_stmts()->@*;
+        } else {
+            # Legacy Constructor:Program — stmts are inputs()->[0]
+            @stmts = $node->inputs()->[0]->@*;
+        }
         my @lines;
-        for my $stmt ($stmts->@*) {
+        for my $stmt (@stmts) {
             my $line = $self->_emit_node($stmt);
             push @lines, $line if defined $line;
         }

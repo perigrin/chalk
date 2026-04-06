@@ -13,6 +13,7 @@ use Chalk::IR::Node::Subscript;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
+use Chalk::IR::Program;
 
 class Chalk::Bootstrap::Optimizer::StructPromotion {
 
@@ -889,6 +890,16 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         # Direct ClassInfo match
         if ($ir isa Chalk::IR::ClassInfo) {
             return $ir;
+        }
+
+        # Chalk::IR::Program — walk its classes list
+        if ($ir isa Chalk::IR::Program) {
+            for my $stmt ($ir->classes()->@*) {
+                if ($stmt isa Chalk::IR::ClassInfo) {
+                    return $stmt;
+                }
+            }
+            return;
         }
 
         return unless $ir isa Chalk::Bootstrap::IR::Node::Constructor;

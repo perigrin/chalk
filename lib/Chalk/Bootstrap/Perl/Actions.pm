@@ -17,6 +17,7 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
+use Chalk::IR::Program;
 
 # Builtin keyword sets used by _fixup_stmts for statement merging
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
@@ -890,7 +891,7 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §2 Program ::= _ StatementList? _
-    # Collects all statement-level IR nodes into Constructor:Program.
+    # Collects all statement-level IR nodes into Chalk::IR::Program.
     # Loop-carried Phi nodes are created eagerly in ForeachStatement,
     # WhileStatement, and ExpressionStatement (postfix loops) — not here.
     method Program($ctx) {
@@ -902,16 +903,45 @@ class Chalk::Bootstrap::Perl::Actions {
             } elsif ($val isa Chalk::Bootstrap::IR::Node
                      || $val isa Chalk::IR::UseInfo
                      || $val isa Chalk::IR::ClassInfo
-                     || $val isa Chalk::IR::FieldInfo) {
+                     || $val isa Chalk::IR::FieldInfo
+                     || $val isa Chalk::IR::MethodInfo
+                     || $val isa Chalk::IR::SubInfo) {
                 push @stmts, $val;
             }
         }
-        # Fix misparented postfix chains from Earley stale-value merge
-        @stmts = map { _fix_postfix_chain($factory, $_) } @stmts;
+        # Fix misparented postfix chains from Earley stale-value merge.
+        # Only IR nodes (with inputs()) need this — metadata structs skip it.
+        @stmts = map {
+            ($_ isa Chalk::Bootstrap::IR::Node || $_ isa Chalk::IR::Node)
+                ? _fix_postfix_chain($factory, $_)
+                : $_
+        } @stmts;
 
-        return $factory->make('Constructor',
-            'class'      => 'Program',
-            statements => \@stmts,
+        # Partition statements into Program metadata categories
+        my @use_decls;
+        my @classes;
+        my @top_level_subs;
+        my @other_stmts;
+
+        for my $stmt (@stmts) {
+            if ($stmt isa Chalk::IR::UseInfo) {
+                push @use_decls, $stmt;
+            } elsif ($stmt isa Chalk::IR::ClassInfo) {
+                push @classes, $stmt;
+            } elsif ($stmt isa Chalk::IR::SubInfo) {
+                push @top_level_subs, $stmt;
+            } else {
+                # Bare computation nodes — present in test snippets and
+                # expression-only programs; empty for well-formed .pm files.
+                push @other_stmts, $stmt;
+            }
+        }
+
+        return Chalk::IR::Program->new(
+            use_decls      => \@use_decls,
+            classes        => \@classes,
+            top_level_subs => \@top_level_subs,
+            other_stmts    => \@other_stmts,
         );
     }
 

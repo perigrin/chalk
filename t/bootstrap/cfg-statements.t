@@ -9,6 +9,7 @@ use lib 't/bootstrap/lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Scope;
+use Chalk::IR::Program;
 
 # --- Test 1: cfg_state accepts and returns statements field ---
 {
@@ -422,8 +423,11 @@ SKIP: {
         ok(defined $ir_node, 'IR node extracted for if/else');
 
         # The Program's statement list should contain a CFG If node, not IfStmt Constructor
-        my $stmts = $ir_node->inputs()->[0];
-        ok(ref($stmts) eq 'ARRAY', 'Program inputs[0] is array');
+        my @stmts = $ir_node isa Chalk::IR::Program
+            ? $ir_node->other_stmts()->@*
+            : $ir_node->inputs()->[0]->@*;
+        my $stmts = \@stmts;
+        ok(ref($stmts) eq 'ARRAY', 'Program stmts is array');
 
         my @if_stmts = grep {
             $_ isa Chalk::Bootstrap::IR::Node::Constructor
@@ -450,8 +454,11 @@ SKIP: {
         my $ir_node = $sem_ctx->extract();
         ok(defined $ir_node, 'IR node extracted for foreach');
 
-        my $stmts = $ir_node->inputs()->[0];
-        ok(ref($stmts) eq 'ARRAY', 'Program inputs[0] is array for foreach');
+        my @stmts = $ir_node isa Chalk::IR::Program
+            ? $ir_node->other_stmts()->@*
+            : $ir_node->inputs()->[0]->@*;
+        my $stmts = \@stmts;
+        ok(ref($stmts) eq 'ARRAY', 'Program stmts is array for foreach');
 
         my @foreach_stmts = grep {
             $_ isa Chalk::Bootstrap::IR::Node::Constructor

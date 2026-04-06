@@ -16,6 +16,7 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
+use Chalk::IR::Program;
 
 class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader;  # module being compiled (e.g., "Chalk::Bootstrap::Earley")
@@ -106,8 +107,13 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     # Extract ClassDecl or ClassInfo from Program IR.
     # Returns ClassInfo if available, falls back to Constructor:ClassDecl.
     method _find_class_decl($ir) {
-        my $stmts = $ir->inputs()->[0];
-        for my $stmt ($stmts->@*) {
+        my @stmts;
+        if ($ir isa Chalk::IR::Program) {
+            @stmts = $ir->classes()->@*;
+        } else {
+            @stmts = $ir->inputs()->[0]->@*;
+        }
+        for my $stmt (@stmts) {
             if ($stmt isa Chalk::IR::ClassInfo) {
                 return $stmt;
             }
