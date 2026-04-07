@@ -48,13 +48,13 @@ use lib 'lib';
 # Phase 2a: IR nodes can be constructed manually
 {
     use_ok('Chalk::Bootstrap::IR::NodeFactory');
-    use_ok('Chalk::Bootstrap::IR::Node::Constant');
+    use_ok(q{Chalk::IR::Node::Constant});
 
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     my $const = $factory->make('Constant', const_type => 'string', value => 'test_value');
-    isa_ok($const, 'Chalk::Bootstrap::IR::Node::Constant', 'Phase 2a: Can create Constant node');
+    isa_ok($const, 'Chalk::IR::Node::Constant', 'Phase 2a: Can create Constant node');
     is($const->value(), 'test_value', 'Phase 2a: Constant node holds value');
 }
 
@@ -75,7 +75,7 @@ use lib 'lib';
     );
 
     my $result = $actions->Identifier($ctx);
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Phase 2b: Identifier returns IR node');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'Phase 2b: Identifier returns IR node');
     is($result->value(), 'TestIdentifier', 'Phase 2b: action preserves identifier value');
 
     # Test parser with composite semiring extracts semantic value
