@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::IR::Node::Phi;
+use Chalk::IR::Node::Phi;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Actions;
@@ -123,14 +123,13 @@ my sub make_scan_ctx($text) {
 
     my $node = $result->extract();
     ok(defined $node, 'result has a focus node');
-    ok($node isa Chalk::Bootstrap::IR::Node::Phi, 'sentinel variable resolves to a Phi node');
+    ok($node isa Chalk::IR::Node::Phi, 'sentinel variable resolves to a Phi node');
 
-    # Phi inputs: [loop, [pre_value, undef]]
+    # Phi: region() returns the loop node; inputs() is the values array [pre_value, undef]
     my $inputs = $node->inputs();
-    is($inputs->[0], $loop, 'Phi region is the loop node');
-    ok(ref $inputs->[1] eq 'ARRAY', 'Phi values is an arrayref');
-    is($inputs->[1][0], $pre_value, 'Phi pre-value is the pre-loop binding');
-    ok(!defined $inputs->[1][1], 'Phi backedge is undef (not yet wired)');
+    is($node->region(), $loop, 'Phi region is the loop node');
+    is($inputs->[0], $pre_value, 'Phi pre-value is the pre-loop binding');
+    ok(!defined $inputs->[1], 'Phi backedge is undef (not yet wired)');
 
     # The cfg_state on the result should have the updated scope (Phi, not sentinel)
     my $state = $sa->cfg_state($result);
@@ -138,7 +137,7 @@ my sub make_scan_ctx($text) {
     if (defined $state) {
         my $x_after = $state->{scope}->lookup('$x');
         ok(defined $x_after, '$x is still in scope after resolution');
-        ok($x_after isa Chalk::Bootstrap::IR::Node::Phi,
+        ok($x_after isa Chalk::IR::Node::Phi,
             '$x binding was updated to the Phi node');
     }
 }

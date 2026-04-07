@@ -5,7 +5,7 @@ use utf8;
 use experimental 'class';
 
 use Scalar::Util 'refaddr';
-use Chalk::Bootstrap::IR::Node::Phi;
+use Chalk::IR::Node::Phi;
 
 class Chalk::Bootstrap::Scope {
     # Hash mapping variable names (strings like '$x', '@arr', '%hash') to IR nodes
@@ -137,7 +137,7 @@ class Chalk::Bootstrap::Scope {
     sub _remove_trivial_phi($phi) {
         my $same;
         my $seen_same = false;
-        for my $operand ($phi->inputs()->[1]->@*) {
+        for my $operand ($phi->inputs()->@*) {
             # Skip self-references (loop backedges)
             next if defined $operand
                 && ref($operand)

@@ -198,12 +198,10 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     );
 
     is($phi->operation(), 'Phi', 'Phi node has correct operation');
-    is(scalar($phi->inputs()->@*), 2, 'Phi has 2 inputs (region and values array)');
-    is($phi->inputs()->[0], $region, 'Phi first input is region');
-    is(ref($phi->inputs()->[1]), 'ARRAY', 'Phi second input is array');
-    is(scalar($phi->inputs()->[1]->@*), 2, 'Phi values array has 2 elements');
-    is($phi->inputs()->[1]->[0], $val_1, 'Phi first value is val_1');
-    is($phi->inputs()->[1]->[1], $val_2, 'Phi second value is val_2');
+    is(scalar($phi->inputs()->@*), 2, 'Phi has 2 value inputs');
+    is($phi->region(), $region, 'Phi region() is the region node');
+    is($phi->inputs()->[0], $val_1, 'Phi first value is val_1');
+    is($phi->inputs()->[1], $val_2, 'Phi second value is val_2');
 }
 
 # Test 10: Phi node appears in consumers of region and values
@@ -346,7 +344,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     is($ret->operation(), 'Return', 'complete pattern has Return node');
     is($ret->inputs()->[0], $phi, 'Return value is Phi node');
-    is($phi->inputs()->[0], $region, 'Phi region is Region node');
+    is($phi->region(), $region, 'Phi region is Region node');
     is($region->inputs()->[0]->[0], $proj_true, 'Region first control is true branch');
     is($region->inputs()->[0]->[1], $proj_false, 'Region second control is false branch');
 }

@@ -182,7 +182,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                     for (my $i = 0; $i < scalar($pairs->@*); $i += 2) {
                         my $key_node = $pairs->[$i];
                         if (defined $key_node
-                            && $key_node isa Chalk::Bootstrap::IR::Node::Constant
+                            && $key_node isa Chalk::IR::Node::Constant
                             && $key_node->const_type() eq 'string') {
                             $var_schemas->{$var_key}{keys}{$key_node->value()} = true;
                         } else {
@@ -201,7 +201,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             my $left    = $node->inputs()->[1];
             my $right   = $node->inputs()->[2];
 
-            if (defined $op_node && $op_node isa Chalk::Bootstrap::IR::Node::Constant) {
+            if (defined $op_node && $op_node isa Chalk::IR::Node::Constant) {
                 my $op_val = $op_node->value();
 
                 if ($op_val eq '=') {
@@ -259,12 +259,12 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
         # Only hash subscripts
         return unless defined $style
-            && $style isa Chalk::Bootstrap::IR::Node::Constant
+            && $style isa Chalk::IR::Node::Constant
             && $style->value() eq 'hash';
 
         # Target must be a variable
         return unless defined $target
-            && $target isa Chalk::Bootstrap::IR::Node::Constant
+            && $target isa Chalk::IR::Node::Constant
             && $target->const_type() eq 'variable';
 
         my $var_name = $target->value();
@@ -275,7 +275,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
         # Check if key is a literal string
         if (defined $index
-            && $index isa Chalk::Bootstrap::IR::Node::Constant
+            && $index isa Chalk::IR::Node::Constant
             && $index->const_type() eq 'string') {
             $var_schemas->{$var_key}{keys}{$index->value()} = true;
         } else {
@@ -295,7 +295,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         if ($node isa Chalk::IR::Node::Return && $is_public) {
             my $value = $node->inputs()->[1];  # inputs[0]=control, inputs[1]=value
             if (defined $value
-                && $value isa Chalk::Bootstrap::IR::Node::Constant
+                && $value isa Chalk::IR::Node::Constant
                 && $value->const_type() eq 'variable') {
                 my $var_key = "${var_prefix}::${\$value->value()}";
                 if (exists $var_schemas->{$var_key}) {
@@ -313,7 +313,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         if ($class eq 'MethodCallExpr') {
             my $invocant = $node->inputs()->[0];
             my $is_self  = (defined $invocant
-                && $invocant isa Chalk::Bootstrap::IR::Node::Constant
+                && $invocant isa Chalk::IR::Node::Constant
                 && $invocant->const_type() eq 'variable'
                 && $invocant->value() eq '$self');
 
@@ -322,7 +322,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                 if (defined $args && ref($args) eq 'ARRAY') {
                     for my $arg ($args->@*) {
                         if (defined $arg
-                            && $arg isa Chalk::Bootstrap::IR::Node::Constant
+                            && $arg isa Chalk::IR::Node::Constant
                             && $arg->const_type() eq 'variable') {
                             my $var_key = "${var_prefix}::${\$arg->value()}";
                             if (exists $var_schemas->{$var_key}) {
@@ -355,15 +355,15 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         my $style  = $subscript_node->inputs()->[2];
 
         return unless defined $style
-            && $style isa Chalk::Bootstrap::IR::Node::Constant
+            && $style isa Chalk::IR::Node::Constant
             && $style->value() eq 'hash';
 
         return unless defined $target
-            && $target isa Chalk::Bootstrap::IR::Node::Constant
+            && $target isa Chalk::IR::Node::Constant
             && $target->const_type() eq 'variable';
 
         return unless defined $index
-            && $index isa Chalk::Bootstrap::IR::Node::Constant
+            && $index isa Chalk::IR::Node::Constant
             && $index->const_type() eq 'string';
 
         my $var_key    = "${var_prefix}::${\$target->value()}";
@@ -373,7 +373,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
         # If RHS is an integer constant, mark field as integer context
         if (defined $rhs
-            && $rhs isa Chalk::Bootstrap::IR::Node::Constant
+            && $rhs isa Chalk::IR::Node::Constant
             && $rhs->const_type() eq 'integer') {
             $field_usage->{$var_key}{$field_name}{integer_ctx} = true;
         }
@@ -389,15 +389,15 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         my $style  = $node->inputs()->[2];
 
         return unless defined $style
-            && $style isa Chalk::Bootstrap::IR::Node::Constant
+            && $style isa Chalk::IR::Node::Constant
             && $style->value() eq 'hash';
 
         return unless defined $target
-            && $target isa Chalk::Bootstrap::IR::Node::Constant
+            && $target isa Chalk::IR::Node::Constant
             && $target->const_type() eq 'variable';
 
         return unless defined $index
-            && $index isa Chalk::Bootstrap::IR::Node::Constant
+            && $index isa Chalk::IR::Node::Constant
             && $index->const_type() eq 'string';
 
         my $var_key    = "${var_prefix}::${\$target->value()}";
@@ -603,7 +603,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             if ($stmt isa Chalk::IR::Node::BinOp) {
                 my $op_node = $stmt->inputs()->[0];
                 next unless defined $op_node
-                    && $op_node isa Chalk::Bootstrap::IR::Node::Constant
+                    && $op_node isa Chalk::IR::Node::Constant
                     && $op_node->value() eq '=';
 
                 my $left = $stmt->inputs()->[1];
@@ -612,7 +612,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
                 my $target = $left->inputs()->[0];
                 next unless defined $target
-                    && $target isa Chalk::Bootstrap::IR::Node::Constant
+                    && $target isa Chalk::IR::Node::Constant
                     && $target->const_type() eq 'variable';
 
                 my $var_name = $target->value();
@@ -620,7 +620,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
                 my $index = $left->inputs()->[1];
                 next unless defined $index
-                    && $index isa Chalk::Bootstrap::IR::Node::Constant
+                    && $index isa Chalk::IR::Node::Constant
                     && $index->const_type() eq 'string';
 
                 my $field_name = $index->value();
@@ -702,14 +702,14 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             my $style  = $node->inputs()->[2];
 
             if (defined $style
-                && $style isa Chalk::Bootstrap::IR::Node::Constant
+                && $style isa Chalk::IR::Node::Constant
                 && $style->value() eq 'hash'
                 && defined $target
-                && $target isa Chalk::Bootstrap::IR::Node::Constant
+                && $target isa Chalk::IR::Node::Constant
                 && $target->const_type() eq 'variable'
                 && exists $promoted_vars->{$target->value()}
                 && defined $index
-                && $index isa Chalk::Bootstrap::IR::Node::Constant
+                && $index isa Chalk::IR::Node::Constant
                 && $index->const_type() eq 'string') {
 
                 my $schema_name = $promoted_vars->{$target->value()};

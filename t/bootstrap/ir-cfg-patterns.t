@@ -31,9 +31,9 @@ use Chalk::Bootstrap::IR::NodeFactory;
     is($false_proj->inputs()->[0], $if_node, 'FalseProj from If');
     is($region->inputs()->[0]->[0], $true_proj, 'Region control 0 is TrueProj');
     is($region->inputs()->[0]->[1], $false_proj, 'Region control 1 is FalseProj');
-    is($phi->inputs()->[0], $region, 'Phi at Region merge');
-    is($phi->inputs()->[1]->[0], $val_a, 'Phi value 0 is val_a');
-    is($phi->inputs()->[1]->[1], $val_b, 'Phi value 1 is val_b');
+    is($phi->region(), $region, 'Phi at Region merge');
+    is($phi->inputs()->[0], $val_a, 'Phi value 0 is val_a');
+    is($phi->inputs()->[1], $val_b, 'Phi value 1 is val_b');
     is($return->inputs()->[0], $phi, 'Return uses Phi result');
 
     # Verify use-def: If is consumer of Start and cond
@@ -86,9 +86,9 @@ use Chalk::Bootstrap::IR::NodeFactory;
     # Verify graph shape
     is($loop->inputs()->[0], $start, 'Loop entry from Start');
     ok(!defined $loop->inputs()->[1], 'Loop backedge initially undef');
-    is($phi_x->inputs()->[0], $loop, 'Phi_x at Loop header');
-    is($phi_x->inputs()->[1]->[0], $init_x, 'Phi_x entry value is 0');
-    ok(!defined $phi_x->inputs()->[1]->[1], 'Phi_x backedge value initially undef');
+    is($phi_x->region(), $loop, 'Phi_x at Loop header');
+    is($phi_x->inputs()->[0], $init_x, 'Phi_x entry value is 0');
+    ok(!defined $phi_x->inputs()->[1], 'Phi_x backedge value initially undef');
     is($loop_if->inputs()->[0], $loop, 'If controlled by Loop');
     is($loop_if->inputs()->[1], $less, 'If condition is less-than comparison');
     is($body_proj->inputs()->[0], $loop_if, 'BodyProj from If');

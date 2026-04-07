@@ -125,7 +125,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             next unless defined $node && ref($node);
             if ($node isa Chalk::IR::Node::VarDecl) {
                 my $var = $node->inputs()->[0];
-                if (defined $var && $var isa Chalk::Bootstrap::IR::Node::Constant) {
+                if (defined $var && $var isa Chalk::IR::Node::Constant) {
                     my $name = $var->value();
                     if (defined $name && $name =~ /^([\@\%])(.+)/) {
                         $_aggregate_vars{$2} = $1;
@@ -240,7 +240,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+        if ($node isa Chalk::IR::Node::Constant) {
             # Loop control keywords must be emitted as bare keywords, not quoted
             my $val = $node->value() // '';
             if ($val eq 'next' || $val eq 'last' || $val eq 'redo') {
@@ -414,7 +414,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         for my $item ($body->@*) {
             next unless $item isa Chalk::IR::Node::VarDecl;
             my $var = $item->inputs()->[0];
-            next unless defined $var && $var isa Chalk::Bootstrap::IR::Node::Constant;
+            next unless defined $var && $var isa Chalk::IR::Node::Constant;
             my $vname = $var->value();
             if (defined $vname && $vname =~ /^([\@\%])(.+)/) {
                 $_aggregate_vars{$2} = $1;
@@ -499,7 +499,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     method _emit_expr($node) {
         return 'undef' unless defined $node;
 
-        if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+        if ($node isa Chalk::IR::Node::Constant) {
             my $val = $node->value();
             my $ct = $node->const_type();
             # Variables and special values don't get quoted
@@ -831,7 +831,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $cond = $if_node->inputs()->[1];
         # Detect negation wrapper: UnaryExpr('!', expr) → emit 'unless expr'
         if (($cond isa Chalk::IR::Node::UnaryOp)
-                && $cond->inputs()->[0] isa Chalk::Bootstrap::IR::Node::Constant
+                && $cond->inputs()->[0] isa Chalk::IR::Node::Constant
                 && $cond->inputs()->[0]->value() eq '!') {
             my $inner = $cond->inputs()->[1];
             return "$jump_keyword unless " . $self->_emit_expr($inner) . ";";
@@ -898,8 +898,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $cond = $if_node->inputs()->[1];
         my $cond_expr = $self->_emit_expr($cond);
 
-        my $region = $phi->inputs()->[0];
-        my $values = $phi->inputs()->[1];  # arrayref of [val_a, val_b]
+        my $region = $phi->region();
+        my $values = $phi->inputs();  # arrayref of [val_a, val_b]
         my $val_a_expr = $self->_emit_expr($values->[0]);
         my $val_b_expr = $self->_emit_expr($values->[1]);
 

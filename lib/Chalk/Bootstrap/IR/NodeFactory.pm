@@ -10,15 +10,15 @@ use Chalk::IR::NodeFactory;
 
 class Chalk::Bootstrap::IR::NodeFactory {
 
-    # Static imports for all Bootstrap node types (eliminates dynamic loading)
-    use Chalk::Bootstrap::IR::Node::Start;
-    use Chalk::Bootstrap::IR::Node::Return;
-    use Chalk::Bootstrap::IR::Node::Constant;
-    use Chalk::Bootstrap::IR::Node::If;
-    use Chalk::Bootstrap::IR::Node::Proj;
-    use Chalk::Bootstrap::IR::Node::Region;
-    use Chalk::Bootstrap::IR::Node::Phi;
-    use Chalk::Bootstrap::IR::Node::Loop;
+    # Static imports for typed node classes (new namespace)
+    use Chalk::IR::Node::Start;
+    use Chalk::IR::Node::Return;
+    use Chalk::IR::Node::Constant;
+    use Chalk::IR::Node::If;
+    use Chalk::IR::Node::Proj;
+    use Chalk::IR::Node::Region;
+    use Chalk::IR::Node::Phi;
+    use Chalk::IR::Node::Loop;
 
     # Singleton instance
     my $instance;
@@ -126,13 +126,26 @@ class Chalk::Bootstrap::IR::NodeFactory {
             return $node_cache->{$key} if exists $node_cache->{$key};
         }
 
-        # Create new node (node classes loaded statically at compile time)
-        my $node_class = "Chalk::Bootstrap::IR::Node::$operation";
-        my $node = $node_class->new(
-            id => $key,
-            inputs => \@inputs,
-            %attributes,
-        );
+        # Create new node using new-namespace typed classes
+        my $node_class = "Chalk::IR::Node::$operation";
+        my $node;
+        if ($operation eq 'Phi') {
+            # Chalk::IR::Node::Phi takes region as a named :param, not in inputs.
+            # INPUT_SPECS extracts @inputs = ($region, $values_arrayref).
+            my ($phi_region, $phi_values) = @inputs;
+            $node = $node_class->new(
+                id     => $key,
+                region => $phi_region,
+                inputs => defined $phi_values ? $phi_values : [],
+                %attributes,
+            );
+        } else {
+            $node = $node_class->new(
+                id => $key,
+                inputs => \@inputs,
+                %attributes,
+            );
+        }
 
         # Register this node as a consumer of its inputs
         for my $input (@inputs) {

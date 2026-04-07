@@ -96,8 +96,8 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             for (my $i = 0; $i < $pairs->@*; $i += 2) {
                 my $key_node = $pairs->[$i];
                 my $val_node = $pairs->[$i + 1];
-                next unless $key_node isa Chalk::Bootstrap::IR::Node::Constant;
-                next unless $val_node isa Chalk::Bootstrap::IR::Node::Constant;
+                next unless $key_node isa Chalk::IR::Node::Constant;
+                next unless $val_node isa Chalk::IR::Node::Constant;
                 my $kv = $key_node->value();
                 my $vv = $val_node->value();
                 # Only inline numeric constant values
@@ -141,7 +141,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
                 if ($value isa Chalk::IR::Node::Interpolate) {
                     return $self->_emit_interp_return($name, $value);
-                } elsif ($value isa Chalk::Bootstrap::IR::Node::Constant
+                } elsif ($value isa Chalk::IR::Node::Constant
                          && ($value->const_type() // '') ne 'variable'
                          && $value->value() !~ /^[\$\@\%]/) {
                     my $str = $self->_escape_c_string($value->value());
@@ -378,7 +378,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my $last_is_return = (defined $last_item
             && $last_item isa Chalk::IR::Node::Return);
         $last_is_return ||= (defined $last_item
-            && $last_item isa Chalk::Bootstrap::IR::Node::Constant
+            && $last_item isa Chalk::IR::Node::Constant
             && ($last_item->value() // '') eq 'return');
         my $body_has_returns = $self->_body_contains_return($body);
         my $single_stmt_return = (!$last_is_return
@@ -582,7 +582,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             # The invocant_node is a Constant with the field name as its value.
             my $field_name;
             if (defined $invocant_node
-                    && $invocant_node isa Chalk::Bootstrap::IR::Node::Constant) {
+                    && $invocant_node isa Chalk::IR::Node::Constant) {
                 my $raw = $invocant_node->value();
                 # Strip leading sigil if present (e.g., "$semiring" → "semiring")
                 (my $bare = $raw) =~ s/^[\$\@\%]//;
@@ -1220,7 +1220,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # Falls through to eval_pv for other templates.
         if ($name eq 'pack' && $args->@* >= 2) {
             my $tmpl_node = $args->[0];
-            if ($tmpl_node isa Chalk::Bootstrap::IR::Node::Constant) {
+            if ($tmpl_node isa Chalk::IR::Node::Constant) {
                 my $tmpl = $tmpl_node->value() // '';
                 $tmpl =~ s/^['"]|['"]$//g;
                 if ($tmpl eq 'NN' && $args->@* == 3) {
@@ -1432,7 +1432,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             }
         }
         # my $scalar = literal constant
-        if ($init_node isa Chalk::Bootstrap::IR::Node::Constant) {
+        if ($init_node isa Chalk::IR::Node::Constant) {
             my $val = $init_node->value();
             return '&PL_sv_undef' if $val eq 'undef';
             return '&PL_sv_yes'   if $val eq '1' || $val eq 'true';
@@ -1954,7 +1954,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 $parent_name = $class_decl->parent();
             } else {
                 my $parent_node = $class_decl->inputs()->[1];
-                $parent_name = defined $parent_node && $parent_node isa Chalk::Bootstrap::IR::Node::Constant
+                $parent_name = defined $parent_node && $parent_node isa Chalk::IR::Node::Constant
                     ? $parent_node->value()
                     : undef;
             }
@@ -2048,7 +2048,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my @lines;
         push @lines, '        {';
 
-        if ($default isa Chalk::Bootstrap::IR::Node::Constant) {
+        if ($default isa Chalk::IR::Node::Constant) {
             my $val = $default->value();
             if ($val eq 'undef') {
                 push @lines, '            OP *defop = newSVOP(OP_CONST, 0, &PL_sv_undef);';

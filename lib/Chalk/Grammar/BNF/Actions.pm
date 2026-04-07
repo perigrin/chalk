@@ -69,7 +69,7 @@ class Chalk::Grammar::BNF::Actions {
             if (ref($focus) eq 'ARRAY' && !defined $alts_node) {
                 # Alternatives returns an arrayref of arrayrefs of Symbol objects
                 $alts_node = $focus;
-            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constant' && !defined $name_str) {
+            } elsif ($focus isa Chalk::IR::Node::Constant && !defined $name_str) {
                 # First Constant is the identifier name
                 $name_str = $focus->value();
             }
@@ -141,7 +141,7 @@ class Chalk::Grammar::BNF::Actions {
             my $focus = $leaf->extract();
             if ($focus isa 'Chalk::Grammar::Symbol') {
                 $symbol = $focus;
-            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constant' && defined $focus->value()
+            } elsif ($focus isa Chalk::IR::Node::Constant && defined $focus->value()
                      && $focus->value() =~ /^[*+?]$/) {
                 $quantifier = $focus->value();
             }
@@ -168,7 +168,7 @@ class Chalk::Grammar::BNF::Actions {
         my $value_leaf;
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
-            if ($focus isa 'Chalk::Bootstrap::IR::Node::Constant') {
+            if ($focus isa Chalk::IR::Node::Constant) {
                 $value_leaf = $leaf;
                 last;
             }
@@ -251,7 +251,7 @@ class Chalk::Grammar::BNF::Actions {
         my @leaves = $ctx->leaves();
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
-            if ($focus isa 'Chalk::Bootstrap::IR::Node::Constant') {
+            if ($focus isa Chalk::IR::Node::Constant) {
                 return $focus;
             }
         }

@@ -18,15 +18,15 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->new();
     my $phi = $factory->make('Phi', region => $loop, values => [$pre_value, undef]);
 
     # Before wiring: backedge is undef
-    is($phi->inputs()->[1][1], undef, 'Phi backedge starts as undef');
+    ok(!defined $phi->inputs()->[1], 'Phi backedge starts as undef');
 
     # Wire backedge
     my $backedge_value = $factory->make('Constant', const_type => 'integer', value => '1');
     $phi->set_backedge($backedge_value);
 
-    is($phi->inputs()->[1][1], $backedge_value, 'Phi backedge wired to value');
-    is($phi->inputs()->[1][0], $pre_value, 'Phi pre-value unchanged');
-    is($phi->inputs()->[0], $loop, 'Phi region unchanged');
+    is($phi->inputs()->[1], $backedge_value, 'Phi backedge wired to value');
+    is($phi->inputs()->[0], $pre_value, 'Phi pre-value unchanged');
+    is($phi->region(), $loop, 'Phi region unchanged');
 }
 
 # --- Loop set_backedge_ctrl ---

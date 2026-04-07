@@ -8,7 +8,7 @@ package Chalk::Bootstrap::IR::Optimizer;
 # Collapse Phi(Region, X, X) → X when all value inputs are the same node.
 # Returns the collapsed value or the original Phi if inputs differ.
 sub collapse_phi($, $phi) {
-    my $values = $phi->inputs()->[1];  # values arrayref
+    my $values = $phi->inputs();  # values arrayref (inputs are Phi values directly)
     return $phi unless ref($values) eq 'ARRAY' && $values->@* > 0;
 
     my $first = $values->[0];

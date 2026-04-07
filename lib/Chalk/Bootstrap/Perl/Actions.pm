@@ -58,7 +58,7 @@ class Chalk::Bootstrap::Perl::Actions {
     my sub _find_constant($ctx) {
         for my $leaf (_collect_ir_leaves($ctx)) {
             my $focus = $leaf->extract();
-            if ($focus isa Chalk::Bootstrap::IR::Node::Constant) {
+            if ($focus isa Chalk::IR::Node::Constant) {
                 return $focus;
             }
         }
@@ -70,7 +70,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my @results;
         for my $leaf (_collect_ir_leaves($ctx)) {
             my $focus = $leaf->extract();
-            if ($focus isa Chalk::Bootstrap::IR::Node::Constant) {
+            if ($focus isa Chalk::IR::Node::Constant) {
                 push @results, $focus;
             }
         }
@@ -653,7 +653,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $i = 0;
         while ($i <= $#$stmts) {
             my $item = $stmts->[$i];
-            if ($item isa Chalk::Bootstrap::IR::Node::Constant
+            if ($item isa Chalk::IR::Node::Constant
                     && defined $item->value()
                     && $item->value() eq 'return'
                     && $i + 1 <= $#$stmts) {
@@ -665,14 +665,14 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @result, $factory->make_cfg('Return',
                     inputs => [$factory->make('Start'), $value],
                 );
-            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
+            } elsif ($item isa Chalk::IR::Node::Constant
                     && defined $item->value()
                     && $item->value() eq 'return') {
                 # Bare return; with no following value — emit Return CFG node.
                 push @result, $factory->make_cfg('Return',
                     inputs => [$factory->make('Start'), _make_const($factory, 'undef')],
                 );
-            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
+            } elsif ($item isa Chalk::IR::Node::Constant
                     && defined $item->value()
                     && $item->value() eq 'die'
                     && $i + 1 <= $#$stmts) {
@@ -689,13 +689,13 @@ class Chalk::Bootstrap::Perl::Actions {
             } elsif ($item isa Chalk::IR::UseInfo
                     && !scalar($item->args()->@*)
                     && $i + 1 <= $#$stmts
-                    && $stmts->[$i + 1] isa Chalk::Bootstrap::IR::Node::Constant) {
+                    && $stmts->[$i + 1] isa Chalk::IR::Node::Constant) {
                 # Merge UseInfo(module, []) + bare Constant into
                 # UseInfo(module, [Constant]). Grammar ambiguity sometimes
                 # splits `use Foo 'bar'` into separate statements.
                 my @import_args;
                 while ($i + 1 <= $#$stmts
-                        && $stmts->[$i + 1] isa Chalk::Bootstrap::IR::Node::Constant
+                        && $stmts->[$i + 1] isa Chalk::IR::Node::Constant
                         && !($stmts->[$i + 1]->value() =~ /^[a-zA-Z_]/
                              && $i + 2 <= $#$stmts)) {
                     $i++;
@@ -769,7 +769,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         || $next isa Chalk::IR::Node)
                     && $STMT_BOUNDARY_OPS{$next->operation() // ''};
                 # Bare keyword Constants (push, return, die, for, etc.)
-                $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constant
+                $is_boundary = true if $next isa Chalk::IR::Node::Constant
                     && defined $next->value()
                     && ($STOP_KEYWORDS{$next->value()}
                         || $LIST_BUILTINS{$next->value()}
@@ -788,7 +788,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 } else {
                     push @result, $item;
                 }
-            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
+            } elsif ($item isa Chalk::IR::Node::Constant
                     && defined $item->value()
                     && $LIST_BUILTINS{$item->value()}
                     && $i + 1 <= $#$stmts) {
@@ -810,11 +810,11 @@ class Chalk::Bootstrap::Perl::Actions {
                             || $next isa Chalk::IR::Node)
                         && $STMT_BOUNDARY_OPS{$next->operation() // ''};
                     # Stop at other bare builtins
-                    last if $next isa Chalk::Bootstrap::IR::Node::Constant
+                    last if $next isa Chalk::IR::Node::Constant
                         && defined $next->value()
                         && $STOP_KEYWORDS{$next->value()};
                     # Nest PREFIX_BUILTIN inside LIST_BUILTIN: sort keys %$h → sort(keys(%$h))
-                    if ($next isa Chalk::Bootstrap::IR::Node::Constant
+                    if ($next isa Chalk::IR::Node::Constant
                             && defined $next->value()
                             && $PREFIX_BUILTINS{$next->value()}
                             && $i + 2 <= $#$stmts) {
@@ -836,7 +836,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     name  => _make_const($factory, $builtin),
                     args  => \@args,
                 );
-            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
+            } elsif ($item isa Chalk::IR::Node::Constant
                     && defined $item->value()
                     && $PREFIX_BUILTINS{$item->value()}
                     && $i + 1 <= $#$stmts) {
@@ -964,7 +964,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $value;
         for my $val (@values) {
             if ($val isa Chalk::IR::Node
-                    && !($val isa Chalk::Bootstrap::IR::Node::Constant
+                    && !($val isa Chalk::IR::Node::Constant
                          && defined $val->value()
                          && $val->value() eq 'return')) {
                 $value = $val;
@@ -1079,7 +1079,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         # body_stmts. _build_cfg_lookup resolves this at codegen
                         # time. Future GCM/DCE passes that walk only the IR tree
                         # (not cfg_state) will need to be extended to see it.
-                        if ($body_expr isa Chalk::Bootstrap::IR::Node::Constant
+                        if ($body_expr isa Chalk::IR::Node::Constant
                                 && defined $body_expr->value()
                                 && ($body_expr->value() eq 'next'
                                     || $body_expr->value() eq 'last')) {
@@ -1111,7 +1111,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $rule = $leaf->rule();
 
             if (defined $rule && $rule eq 'ModuleName'
-                    && $focus isa Chalk::Bootstrap::IR::Node::Constant) {
+                    && $focus isa Chalk::IR::Node::Constant) {
                 $module_name = $focus;
             } elsif (defined $rule && $rule eq 'ImportList'
                     && ref($focus) eq 'ARRAY') {
@@ -1166,7 +1166,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $focus = $leaf->extract();
             my $rule = $leaf->rule();
 
-            if ($focus isa Chalk::Bootstrap::IR::Node::Constant) {
+            if ($focus isa Chalk::IR::Node::Constant) {
                 if (!defined $class_name) {
                     # First Constant is the class name (from QualifiedIdentifier)
                     $class_name = $focus;
@@ -1236,7 +1236,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $focus = $leaf->extract();
             my $rule = $leaf->rule();
 
-            if ($focus isa Chalk::Bootstrap::IR::Node::Constant
+            if ($focus isa Chalk::IR::Node::Constant
                     && !defined $method_name) {
                 $method_name = $focus;
             } elsif (ref($focus) eq 'ARRAY') {
@@ -1307,7 +1307,7 @@ class Chalk::Bootstrap::Perl::Actions {
             if ($n isa Chalk::IR::Node::Call && $n->dispatch_kind() eq 'builtin') {
                 my $name_node = $n->inputs()->[0];
                 if (defined $name_node
-                        && $name_node isa Chalk::Bootstrap::IR::Node::Constant
+                        && $name_node isa Chalk::IR::Node::Constant
                         && $keywords->{$name_node->value()}) {
                     return true;
                 }
@@ -1348,7 +1348,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 next if $focus eq 'sub';
             }
 
-            if ($focus isa Chalk::Bootstrap::IR::Node::Constant
+            if ($focus isa Chalk::IR::Node::Constant
                     && !defined $sub_name) {
                 my $val = $focus->value();
                 # Check for lexical scope prefix (my/our/state)
@@ -1472,7 +1472,7 @@ class Chalk::Bootstrap::Perl::Actions {
             if (ref($focus) eq 'ARRAY' && !defined $try_body) {
                 # First arrayref is try_body (from Block)
                 $try_body = $focus;
-            } elsif ($focus isa Chalk::Bootstrap::IR::Node::Constant && !defined $catch_var) {
+            } elsif ($focus isa Chalk::IR::Node::Constant && !defined $catch_var) {
                 # Constant node is the catch variable name
                 $catch_var = $focus->value();
             } elsif (ref($focus) eq 'ARRAY' && defined $try_body) {
@@ -1562,7 +1562,7 @@ class Chalk::Bootstrap::Perl::Actions {
         for my $val (_collect_ir_values($ctx)) {
             if (ref($val) eq 'ARRAY') {
                 push @params, $val->@*;
-            } elsif ($val isa Chalk::Bootstrap::IR::Node::Constant) {
+            } elsif ($val isa Chalk::IR::Node::Constant) {
                 push @params, $val;
             }
         }
@@ -1573,7 +1573,7 @@ class Chalk::Bootstrap::Perl::Actions {
     method SignatureParam($ctx) {
         my @values = _collect_ir_values($ctx);
         for my $val (@values) {
-            return $val if $val isa Chalk::Bootstrap::IR::Node::Constant;
+            return $val if $val isa Chalk::IR::Node::Constant;
         }
         return undef;
     }
@@ -1643,7 +1643,7 @@ class Chalk::Bootstrap::Perl::Actions {
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
             my $rule = $leaf->rule();
-            if ($focus isa Chalk::Bootstrap::IR::Node::Constant
+            if ($focus isa Chalk::IR::Node::Constant
                     && defined $rule
                     && $rule eq 'QualifiedIdentifier') {
                 $func_name = $focus->value();
@@ -1665,7 +1665,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $focus = $leaf->extract();
             my $rule = $leaf->rule();
             # Skip the function name itself
-            next if $focus isa Chalk::Bootstrap::IR::Node::Constant
+            next if $focus isa Chalk::IR::Node::Constant
                 && defined $rule
                 && $rule eq 'QualifiedIdentifier'
                 && defined $focus->value()
@@ -1917,7 +1917,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 next;
             }
 
-            if ($focus isa Chalk::Bootstrap::IR::Node::Constant
+            if ($focus isa Chalk::IR::Node::Constant
                     && defined $focus->value()
                     && $focus->value() =~ /^[\$\@\%]/) {
                 # Variable name (starts with sigil)
@@ -2088,7 +2088,7 @@ class Chalk::Bootstrap::Perl::Actions {
             if (!defined $left && $focus isa Chalk::IR::Node) {
                 $left = $focus;
             } elsif (defined $left && !defined $op
-                    && $focus isa Chalk::Bootstrap::IR::Node::Constant) {
+                    && $focus isa Chalk::IR::Node::Constant) {
                 # BinaryOp returns a Constant with the operator
                 $op = $focus;
             } elsif (defined $op && $focus isa Chalk::IR::Node) {
@@ -2102,7 +2102,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         # Handle =~ with regex
         if ($op_val eq '=~' && defined $right
-                && $right isa Chalk::Bootstrap::IR::Node::Constant
+                && $right isa Chalk::IR::Node::Constant
                 && defined $right->value()) {
             my $pat = $right->value();
             if ($pat =~ m{^s/}) {
@@ -2230,7 +2230,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $rule = $leaf->rule();
 
             if (!defined $method_name
-                    && $focus isa Chalk::Bootstrap::IR::Node::Constant
+                    && $focus isa Chalk::IR::Node::Constant
                     && defined $rule
                     && $rule eq 'QualifiedIdentifier') {
                 $method_name = $focus;
@@ -2399,7 +2399,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         || $focus isa Chalk::IR::FieldInfo)) {
                 $target = $focus;
             } elsif (defined $target && !defined $op
-                    && $focus isa Chalk::Bootstrap::IR::Node::Constant) {
+                    && $focus isa Chalk::IR::Node::Constant) {
                 $op = $focus;
             } elsif (defined $op && $focus isa Chalk::IR::Node) {
                 $value //= $focus;
@@ -2437,7 +2437,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     initializer => $value,
                 );
                 my $var_name_node = $target->inputs()->[0];
-                if ($var_name_node isa Chalk::Bootstrap::IR::Node::Constant
+                if ($var_name_node isa Chalk::IR::Node::Constant
                         && defined $var_name_node->value()
                         && $var_name_node->value() =~ /^[\$\@\%]/) {
                     $update_scope->($var_name_node->value(), $result);
@@ -2453,7 +2453,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 right => $value,
             );
             # SSA: track reassignment in scope (new value per assignment)
-            if ($target isa Chalk::Bootstrap::IR::Node::Constant
+            if ($target isa Chalk::IR::Node::Constant
                     && defined $target->value()
                     && $target->value() =~ /^[\$\@\%]/) {
                 $update_scope->($target->value(), $assign_result);
@@ -2468,7 +2468,7 @@ class Chalk::Bootstrap::Perl::Actions {
             target => $target,
             value  => $value,
         );
-        if ($target isa Chalk::Bootstrap::IR::Node::Constant
+        if ($target isa Chalk::IR::Node::Constant
                 && defined $target->value()
                 && $target->value() =~ /^[\$\@\%]/) {
             $update_scope->($target->value(), $compound_result);
@@ -2620,7 +2620,7 @@ class Chalk::Bootstrap::Perl::Actions {
             if (!defined $condition && $focus isa Chalk::IR::Node) {
                 # First IR node is the condition (from ParenExpr)
                 # Skip CFG If nodes from ElsifChain
-                if ($focus isa Chalk::Bootstrap::IR::Node::If) {
+                if ($focus isa Chalk::IR::Node::If) {
                     $else_body = [$focus];
                     next;
                 }
@@ -2634,7 +2634,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Second array is else_body (from else Block); remember leaf for scope extraction
                 $else_body = $focus;
                 $else_leaf = $leaf;
-            } elsif ($focus isa Chalk::Bootstrap::IR::Node::If) {
+            } elsif ($focus isa Chalk::IR::Node::If) {
                 # ElsifChain returns a CFG If node — wrap as else_body
                 $else_body = [$focus];
             }
@@ -2733,7 +2733,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
             if (!defined $condition && $focus isa Chalk::IR::Node) {
                 # Skip CFG If nodes from nested ElsifChain
-                if ($focus isa Chalk::Bootstrap::IR::Node::If) {
+                if ($focus isa Chalk::IR::Node::If) {
                     $else_body = [$focus];
                     next;
                 }
@@ -2742,7 +2742,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 $then_body = $focus;
             } elsif (ref($focus) eq 'ARRAY' && defined $then_body) {
                 $else_body = $focus;
-            } elsif ($focus isa Chalk::Bootstrap::IR::Node::If) {
+            } elsif ($focus isa Chalk::IR::Node::If) {
                 # Nested ElsifChain returns a CFG If node
                 $else_body = [$focus];
             }
@@ -2891,7 +2891,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $focus = $leaf->extract();
             my $rule = $leaf->rule() // '';
 
-            if ($focus isa Chalk::Bootstrap::IR::Node::Constant
+            if ($focus isa Chalk::IR::Node::Constant
                     && defined $focus->value()
                     && $focus->value() =~ /^[\$\@\%]/
                     && !defined $iterator) {

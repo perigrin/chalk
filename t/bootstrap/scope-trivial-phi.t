@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Scope;
-use Chalk::Bootstrap::IR::Node::Phi;
+use Chalk::IR::Node::Phi;
 use Scalar::Util 'refaddr';
 
 Chalk::Bootstrap::IR::NodeFactory::reset_for_testing();
@@ -28,7 +28,7 @@ my $region = $factory->make('Region', controls => []);
         values => [$const1, $const1],
     );
     my $result = Chalk::Bootstrap::Scope::_remove_trivial_phi($phi);
-    ok(!($result isa Chalk::Bootstrap::IR::Node::Phi),
+    ok(!($result isa Chalk::IR::Node::Phi),
         'direct: Phi with two identical operands is trivial');
     is(refaddr($result), refaddr($const1),
         'direct: trivial Phi returns the common value');
@@ -41,11 +41,11 @@ my $region = $factory->make('Region', controls => []);
         values => [undef, undef],
     );
     # Wire in: const1 as first operand, phi itself as second (self-reference)
-    $phi->inputs()->[1][0] = $const1;
-    $phi->inputs()->[1][1] = $phi;
+    $phi->inputs()->[0] = $const1;
+    $phi->inputs()->[1] = $phi;
 
     my $result = Chalk::Bootstrap::Scope::_remove_trivial_phi($phi);
-    ok(!($result isa Chalk::Bootstrap::IR::Node::Phi),
+    ok(!($result isa Chalk::IR::Node::Phi),
         'direct: Phi with self-ref + one value is trivial (self-ref ignored)');
     is(refaddr($result), refaddr($const1),
         'direct: trivial Phi (self-ref case) returns the non-self value');
@@ -58,7 +58,7 @@ my $region = $factory->make('Region', controls => []);
         values => [$const1, $const2],
     );
     my $result = Chalk::Bootstrap::Scope::_remove_trivial_phi($phi);
-    ok($result isa Chalk::Bootstrap::IR::Node::Phi,
+    ok($result isa Chalk::IR::Node::Phi,
         'direct: Phi with different operands is non-trivial');
     is(refaddr($result), refaddr($phi),
         'direct: non-trivial Phi returns the Phi itself');
@@ -71,7 +71,7 @@ my $region = $factory->make('Region', controls => []);
         values => [$const1, undef],
     );
     my $result = Chalk::Bootstrap::Scope::_remove_trivial_phi($phi);
-    ok($result isa Chalk::Bootstrap::IR::Node::Phi,
+    ok($result isa Chalk::IR::Node::Phi,
         'direct: Phi with undef operand is non-trivial');
     is(refaddr($result), refaddr($phi),
         'direct: non-trivial Phi (undef path) returns the Phi itself');
@@ -89,7 +89,7 @@ my $region = $factory->make('Region', controls => []);
     );
 
     my $x_val = $merged->lookup('$x');
-    ok(!($x_val isa Chalk::Bootstrap::IR::Node::Phi),
+    ok(!($x_val isa Chalk::IR::Node::Phi),
         'integration: both-unchanged merge returns original value, not a Phi');
     is(refaddr($x_val), refaddr($const1),
         'integration: returned value is the original node');
@@ -108,7 +108,7 @@ my $region = $factory->make('Region', controls => []);
     );
 
     my $x_val = $merged->lookup('$x');
-    ok($x_val isa Chalk::Bootstrap::IR::Node::Phi,
+    ok($x_val isa Chalk::IR::Node::Phi,
         'integration: different values produce a non-trivial Phi');
 }
 
@@ -123,7 +123,7 @@ my $region = $factory->make('Region', controls => []);
     );
 
     my $z_val = $merged->lookup('$z');
-    ok($z_val isa Chalk::Bootstrap::IR::Node::Phi,
+    ok($z_val isa Chalk::IR::Node::Phi,
         'integration: one-branch-only variable produces a Phi');
 }
 
@@ -140,7 +140,7 @@ my $region = $factory->make('Region', controls => []);
     );
 
     my $x_val = $merged->lookup('$x');
-    ok(!($x_val isa Chalk::Bootstrap::IR::Node::Phi),
+    ok(!($x_val isa Chalk::IR::Node::Phi),
         'integration: both-same-value returns the value, not a Phi');
     is(refaddr($x_val), refaddr($const2),
         'integration: returned value is the shared node');

@@ -27,7 +27,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Identifier($ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Identifier creates Constant');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'Identifier creates Constant');
     is($result->const_type(), 'string', 'Identifier constant is string type');
     is($result->value(), 'Element', 'Identifier value is preserved');
 }
@@ -43,7 +43,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->InlineRegex($ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'InlineRegex creates Constant');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'InlineRegex creates Constant');
     is($result->const_type(), 'string', 'InlineRegex constant is string type');
     is($result->value(), '/[A-Z]+/', 'InlineRegex value is preserved');
 }
@@ -59,7 +59,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Quantifier($ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Quantifier creates Constant');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'Quantifier creates Constant');
     is($result->const_type(), 'string', 'Quantifier constant is string type');
     is($result->value(), '*', 'Quantifier value is preserved');
 }
@@ -84,7 +84,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Atom($atom_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($result, 'Chalk::IR::Node::Constructor');
     is($result->class(), 'Symbol', 'Atom creates Symbol');
     is($result->inputs()->[0]->value(), 'reference', 'Atom type is reference');
     is($result->inputs()->[1]->value(), 'Element', 'Atom value from Identifier');
@@ -110,7 +110,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Atom($atom_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($result, 'Chalk::IR::Node::Constructor');
     is($result->class(), 'Symbol', 'Atom creates Symbol');
     is($result->inputs()->[0]->value(), 'terminal', 'Atom type is terminal');
     is($result->inputs()->[1]->value(), '/[A-Z]+/', 'Atom value from InlineRegex');
@@ -146,7 +146,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Element($elem_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($result, 'Chalk::IR::Node::Constructor');
     is($result->class(), 'Symbol', 'Element returns symbol');
     is($result->inputs()->[2]->value(), undef, 'Element has no quantifier');
 }
@@ -189,7 +189,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Element($elem_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($result, 'Chalk::IR::Node::Constructor');
     is($result->class(), 'Symbol', 'Element returns symbol');
     is($result->inputs()->[2]->value(), '+', 'Element has quantifier');
 }
@@ -330,9 +330,9 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     isa_ok($result, 'ARRAY', 'Alternatives returns arrayref');
     is(scalar($result->@*), 2, 'Alternatives finds 2 expressions in binary tree');
-    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($result->[0], 'Chalk::IR::Node::Constructor');
     is($result->[0]->class(), 'Expression', 'first alt is Expression');
-    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($result->[1], 'Chalk::IR::Node::Constructor');
     is($result->[1]->class(), 'Expression', 'second alt is Expression');
 }
 
@@ -395,14 +395,14 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Sequence($outer);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($result, 'Chalk::IR::Node::Constructor');
     is($result->class(), 'Expression', 'Sequence returns Expression');
     # inputs()->[0] is the elements arrayref (Expression's single input)
     my $elements = $result->inputs()->[0];
     is(scalar($elements->@*), 2, 'Sequence finds 2 elements in binary tree');
-    isa_ok($elements->[0], 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($elements->[0], 'Chalk::IR::Node::Constructor');
     is($elements->[0]->class(), 'Symbol', 'first element is Symbol');
-    isa_ok($elements->[1], 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($elements->[1], 'Chalk::IR::Node::Constructor');
     is($elements->[1]->class(), 'Symbol', 'second element is Symbol');
 }
 
@@ -455,11 +455,11 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Sequence($tree);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($result, 'Chalk::IR::Node::Constructor');
     is($result->class(), 'Expression', 'Sequence returns Expression');
     my $elements = $result->inputs()->[0];
     is(scalar($elements->@*), 1, 'Sequence filters to find only 1 Symbol (ignoring Constant)');
-    isa_ok($elements->[0], 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($elements->[0], 'Chalk::IR::Node::Constructor');
     is($elements->[0]->class(), 'Symbol', 'filtered result is Symbol');
 }
 
@@ -510,9 +510,9 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     isa_ok($result, 'ARRAY', 'Rule_star returns arrayref');
     is(scalar($result->@*), 2, 'Rule_star collects 2 rules');
-    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($result->[0], 'Chalk::IR::Node::Constructor');
     is($result->[0]->class(), 'Rule', 'first is Rule');
-    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($result->[1], 'Chalk::IR::Node::Constructor');
     is($result->[1]->class(), 'Rule', 'second is Rule');
 }
 
@@ -569,7 +569,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Quantifier_opt($tree);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Quantifier_opt with value returns Constant');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'Quantifier_opt with value returns Constant');
     is($result->value(), '+', 'Quantifier_opt preserves quantifier value');
 }
 
@@ -615,7 +615,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Atom($atom_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    isa_ok($result, 'Chalk::IR::Node::Constructor');
     is($result->class(), 'Symbol', 'Atom creates Symbol');
     is($result->inputs()->[0]->value(), 'reference', 'Atom correctly identifies reference via rule field');
 }

@@ -590,7 +590,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 my $method_const  = $node->inputs()->[1];
 
                 if (defined $invocant_node
-                        && $invocant_node isa Chalk::Bootstrap::IR::Node::Constant
+                        && $invocant_node isa Chalk::IR::Node::Constant
                         && defined $field_map) {
                     my $val = $invocant_node->value();
                     my $ct  = $invocant_node->const_type();
@@ -647,7 +647,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             if ($value isa Chalk::IR::Node::Interpolate) {
                 return false;
             }
-            if ($value isa Chalk::Bootstrap::IR::Node::Constant
+            if ($value isa Chalk::IR::Node::Constant
                     && ($value->const_type() // '') ne 'variable'
                     && $value->value() !~ /^[\$\@\%]/) {
                 return false;
@@ -744,7 +744,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             my $inputs = $node->inputs();
             if (defined $inputs && $inputs->@* >= 1) {
                 my $op_node = $inputs->[0];
-                if ($op_node isa Chalk::Bootstrap::IR::Node::Constant) {
+                if ($op_node isa Chalk::IR::Node::Constant) {
                     my $op = $op_node->value();
                     my %value_ops = map { $_ => 1 } qw(
                         >= <= > < == != <=> eq ne lt gt le ge cmp
@@ -785,7 +785,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                     }
                     if (defined $state->{loop}) {
                         my $iter = $state->{iterator};
-                        if (defined $iter && $iter isa Chalk::Bootstrap::IR::Node::Constant) {
+                        if (defined $iter && $iter isa Chalk::IR::Node::Constant) {
                             my $iter_name = $iter->value();
                             $iter_name =~ s/^[\$\@\%]//;
                             $declared_vars->{$iter_name} = true;
@@ -851,7 +851,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             my $addr = refaddr($node);
             next if $visited{$addr}++;
 
-            if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+            if ($node isa Chalk::IR::Node::Constant) {
                 my $val = $node->value() // '';
                 if ($val =~ /^\$([\w]+)$/) {
                     my $bare = $1;
@@ -918,7 +918,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             return '{}' if !$pairs->@*;
         }
 
-        if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+        if ($node isa Chalk::IR::Node::Constant) {
             my $val = $node->value();
             # undef is already Perl's default — skip
             return undef if $val eq 'undef';
@@ -1084,7 +1084,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # SvTRUE on an array reference is always true; av_len >= 0 matches
         # Perl's if (@array) semantics.
         my @lines;
-        if ($cond isa Chalk::Bootstrap::IR::Node::Constant
+        if ($cond isa Chalk::IR::Node::Constant
                 && $cond->value() =~ /^\@/) {
             push @lines, "$prefix (av_len((AV*)SvRV($cond_expr)) >= 0) {";
         } else {
@@ -1152,8 +1152,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $cond = $if_node->inputs()->[1];
         my $cond_expr = $self->_emit_expr($cond, $declared_vars);
 
-        my $region = $phi->inputs()->[0];
-        my $values = $phi->inputs()->[1];  # arrayref of [val_a, val_b]
+        my $region = $phi->region();
+        my $values = $phi->inputs();  # arrayref of [val_a, val_b]
         my $val_a_expr = $self->_emit_expr($values->[0], $declared_vars);
         my $val_b_expr = $self->_emit_expr($values->[1], $declared_vars);
 
@@ -1254,7 +1254,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # Detect while (@array): array variable in boolean context
             # should check element count, not SvTRUE (which is always true
             # for a reference). Emit av_len >= 0 for proper empty-array check.
-            } elsif ($cond isa Chalk::Bootstrap::IR::Node::Constant
+            } elsif ($cond isa Chalk::IR::Node::Constant
                     && $cond->value() =~ /^\@/) {
                 my $cond_expr = $self->_emit_expr($cond, $declared_vars);
                 push @lines, "while (av_len((AV*)SvRV($cond_expr)) >= 0) {";
@@ -1454,7 +1454,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             return $self->_emit_expr($node, $declared_vars) . ";";
         }
 
-        if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+        if ($node isa Chalk::IR::Node::Constant) {
             # Loop control keywords: next->continue, last->break, return->return in C
             my $val = $node->value() // '';
             # Inside scoped loops (ENTER/SAVETMPS per iteration), must
@@ -1784,7 +1784,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # so emit it directly — the map handler wraps results in newRV_noinc(AV*).
         if ($style eq 'array'
                 && defined $target
-                && $target isa Chalk::Bootstrap::IR::Node::Constant
+                && $target isa Chalk::IR::Node::Constant
                 && $target->value() eq 'return') {
             return $self->_emit_expr($index, $declared_vars);
         }
@@ -1855,7 +1855,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # needs get_hv (hash lookup). Detect and fix: wrap get_hv result in a
         # reference so the SvRV dereference below works correctly.
         if ($style eq 'hash' && defined $target) {
-            my $is_const = $target isa Chalk::Bootstrap::IR::Node::Constant;
+            my $is_const = $target isa Chalk::IR::Node::Constant;
             if ($is_const) {
                 my $var_name = $target->value();
                 if ($var_name =~ /\A(ENV|SIG|INC)\z/) {
@@ -1951,7 +1951,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         for (my $i = 0; $i < $pairs->@*; $i += 2) {
             my $key_node = $pairs->[$i];
             # Detect hash spread: %$var as a key means copy all entries from var
-            if ($key_node isa Chalk::Bootstrap::IR::Node::Constant
+            if ($key_node isa Chalk::IR::Node::Constant
                     && defined $key_node->value()
                     && $key_node->value() =~ /^%\$(\w+)$/) {
                 my $src_var = $1;
@@ -2289,7 +2289,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $msg = '';
         if (ref($args) eq 'ARRAY' && $args->@*) {
             my $first = $args->[0];
-            if ($first isa Chalk::Bootstrap::IR::Node::Constant) {
+            if ($first isa Chalk::IR::Node::Constant) {
                 $msg = $self->_escape_c_string($first->value());
             } elsif (defined $declared_vars) {
                 # Non-constant arg (e.g. string interpolation): emit as expression
@@ -2320,7 +2320,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _emit_expr($node, $declared_vars) {
         return 'NULL' unless defined $node;
 
-        if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+        if ($node isa Chalk::IR::Node::Constant) {
             return $self->_emit_const_expr($node, $declared_vars);
         }
 
