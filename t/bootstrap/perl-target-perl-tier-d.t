@@ -153,15 +153,15 @@ test_perl_file(
 );
 
 test_perl_file(
-    file        => 'lib/Chalk/Bootstrap/IR/Node.pm',
+    file        => 'lib/Chalk/IR/Node.pm',
     label       => 'IR::Node.pm',
     structural  => [
         { pattern => qr/field \$id/, label => 'has field $id' },
         { pattern => qr/method add_consumer/, label => 'has method add_consumer' },
         { pattern => qr/method remove_consumer/, label => 'has method remove_consumer' },
     ],
-    original_ns => 'Chalk::Bootstrap::IR::Node',
-    test_ns     => 'Chalk::Bootstrap::IR::NodeGenD',
+    original_ns => 'Chalk::IR::Node',
+    test_ns     => 'Chalk::IR::NodeGenD',
     behavioral  => sub ($mod) {
         my $node = $mod->new(id => 'test_1');
         is($node->id(), 'test_1', 'id reader');

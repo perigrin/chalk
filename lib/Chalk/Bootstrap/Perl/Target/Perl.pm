@@ -249,7 +249,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return $self->_emit_constant($node);
         }
 
-        # Typed fast-paths for computation nodes
+        # Typed fast-paths for computation nodes (expression-as-statement)
         if ($node isa Chalk::IR::Node::BinOp
                 || $node isa Chalk::IR::Node::UnaryOp
                 || $node isa Chalk::IR::Node::Call
@@ -261,7 +261,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 || $node isa Chalk::IR::Node::RegexMatch
                 || $node isa Chalk::IR::Node::RegexSubst
                 || $node isa Chalk::IR::Node::BacktickExpr
-                || $node isa Chalk::IR::Node::Interpolate) {
+                || $node isa Chalk::IR::Node::Interpolate
+                || $node isa Chalk::IR::Node::TernaryExpr
+                || $node isa Chalk::IR::Node::StructRef
+                || $node isa Chalk::IR::Node::StructFieldAccess) {
             return $self->_emit_expr($node) . ";";
         }
         if ($node isa Chalk::IR::Node::VarDecl) {
@@ -293,7 +296,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
         if ($node isa Chalk::IR::Node::Return) { return $self->_emit_return_stmt($node); }
         if ($node isa Chalk::IR::Node::Unwind) { return $self->_emit_die_call($node); }
+        if ($node isa Chalk::IR::Node::TryCatch) { return $self->_emit_expr($node) . ";"; }
 
+        # Every IR node type must have an explicit handler above. If we reach
+        # here, a new node type was added without a corresponding emitter —
+        # that's a bug, not a missing feature. Don't add a catch-all.
         die "Unknown IR node type: " . ref($node);
     }
 
