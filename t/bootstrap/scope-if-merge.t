@@ -10,7 +10,7 @@ use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Semiring::SemanticAction;
-use Chalk::Bootstrap::IR::Node::Phi;
+use Chalk::IR::Node::Phi;
 
 # Build the Perl grammar recognizer pipeline
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -58,7 +58,7 @@ SKIP: {
                 skip 'no scope to check', 2 unless defined $scope;
                 my $x_val = $scope->lookup('$x');
                 ok(defined $x_val, '$x is bound in scope after if/else');
-                ok($x_val isa Chalk::Bootstrap::IR::Node::Phi,
+                ok($x_val isa Chalk::IR::Node::Phi,
                     '$x is a Phi node after if/else with different branch values');
             }
         }
@@ -87,7 +87,7 @@ SKIP: {
                 skip 'no scope to check', 2 unless defined $scope;
                 my $x_val = $scope->lookup('$x');
                 ok(defined $x_val, '$x is bound in scope after if-without-else');
-                ok($x_val isa Chalk::Bootstrap::IR::Node::Phi,
+                ok($x_val isa Chalk::IR::Node::Phi,
                     '$x is a Phi after if-without-else (then assigns, else uses pre-value)');
             }
         }
@@ -115,7 +115,7 @@ SKIP: {
             SKIP: {
                 skip 'no scope to check', 1 unless defined $scope;
                 my $x_val = $scope->lookup('$x');
-                ok(!defined($x_val) || !($x_val isa Chalk::Bootstrap::IR::Node::Phi),
+                ok(!defined($x_val) || !($x_val isa Chalk::IR::Node::Phi),
                     '$x is NOT a Phi when not assigned in either branch');
             }
         }

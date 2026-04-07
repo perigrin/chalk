@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Scope;
-use Chalk::Bootstrap::IR::Node::Phi;
+use Chalk::IR::Node::Phi;
 
 Chalk::Bootstrap::IR::NodeFactory::reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -30,10 +30,10 @@ my $loop = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
 
     my $x_val = $post_scope->lookup('$x');
     ok(defined $x_val, 'case1: $x defined after merge_for_loop');
-    ok($x_val isa Chalk::Bootstrap::IR::Node::Phi, 'case1: $x is a Phi node');
-    is($x_val->inputs()->[0], $loop, 'case1: Phi region is the Loop node');
-    is($x_val->inputs()->[1][0], $const1, 'case1: Phi pre-loop value is const1');
-    is($x_val->inputs()->[1][1], $const2, 'case1: Phi backedge wired to body-final const2');
+    ok($x_val isa Chalk::IR::Node::Phi, 'case1: $x is a Phi node');
+    is($x_val->region(), $loop, 'case1: Phi region is the Loop node');
+    is($x_val->inputs()->[0], $const1, 'case1: Phi pre-loop value is const1');
+    is($x_val->inputs()->[1], $const2, 'case1: Phi backedge wired to body-final const2');
 }
 
 # Case 2: body does not assign $y — no Phi, keeps pre_loop value
@@ -77,8 +77,8 @@ my $loop = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
     is($i_val, $const1, 'case4: iterator $i excluded from Phi creation');
 
     my $sum_val = $post_scope->lookup('$sum');
-    ok($sum_val isa Chalk::Bootstrap::IR::Node::Phi, 'case4: $sum (non-iterator) gets a Phi');
-    is($sum_val->inputs()->[1][1], $const3, 'case4: $sum backedge wired to body-final value');
+    ok($sum_val isa Chalk::IR::Node::Phi, 'case4: $sum (non-iterator) gets a Phi');
+    is($sum_val->inputs()->[1], $const3, 'case4: $sum backedge wired to body-final value');
 }
 
 # Case 5: multiple variables — some get Phi, some do not
@@ -93,11 +93,11 @@ my $loop = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
 
     my $post_scope = $pre_scope->merge_for_loop(\%body_final, $loop, $factory, undef);
 
-    ok($post_scope->lookup('$a') isa Chalk::Bootstrap::IR::Node::Phi,
+    ok($post_scope->lookup('$a') isa Chalk::IR::Node::Phi,
         'case5: $a gets Phi (modified)');
     is($post_scope->lookup('$b'), $const2,
         'case5: $b unchanged (no Phi)');
-    ok($post_scope->lookup('$c') isa Chalk::Bootstrap::IR::Node::Phi,
+    ok($post_scope->lookup('$c') isa Chalk::IR::Node::Phi,
         'case5: $c gets Phi (modified)');
 }
 

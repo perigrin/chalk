@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Scope;
-use Chalk::Bootstrap::IR::Node::Phi;
+use Chalk::IR::Node::Phi;
 
 Chalk::Bootstrap::IR::NodeFactory::reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -33,10 +33,10 @@ my $region = $factory->make('Region', controls => []);
 
     my $x_val = $merged->lookup('$x');
     ok(defined $x_val, '$x is defined after merge');
-    ok($x_val isa Chalk::Bootstrap::IR::Node::Phi, '$x is a Phi node');
-    is($x_val->inputs()->[0], $region, 'Phi region is the Region node');
-    is($x_val->inputs()->[1][0], $const2, 'Phi then-operand is Const(2)');
-    is($x_val->inputs()->[1][1], $const1, 'Phi else-operand is Const(1)');
+    ok($x_val isa Chalk::IR::Node::Phi, '$x is a Phi node');
+    is($x_val->region(), $region, 'Phi region is the Region node');
+    is($x_val->inputs()->[0], $const2, 'Phi then-operand is Const(2)');
+    is($x_val->inputs()->[1], $const1, 'Phi else-operand is Const(1)');
 
     my $y_val = $merged->lookup('$y');
     is($y_val, $const3, '$y is unchanged (no Phi)');
@@ -52,9 +52,9 @@ my $region = $factory->make('Region', controls => []);
     );
 
     my $x_val = $merged->lookup('$x');
-    ok($x_val isa Chalk::Bootstrap::IR::Node::Phi, 'both-assign: $x is Phi');
-    is($x_val->inputs()->[1][0], $const2, 'then-operand');
-    is($x_val->inputs()->[1][1], $const3, 'else-operand');
+    ok($x_val isa Chalk::IR::Node::Phi, 'both-assign: $x is Phi');
+    is($x_val->inputs()->[0], $const2, 'then-operand');
+    is($x_val->inputs()->[1], $const3, 'else-operand');
 }
 
 # Case 3: variable only in then-branch
@@ -69,7 +69,7 @@ my $region = $factory->make('Region', controls => []);
 
     my $z_val = $merged->lookup('$z');
     ok(defined $z_val, '$z exists after merge');
-    ok($z_val isa Chalk::Bootstrap::IR::Node::Phi, '$z is Phi (then-only)');
+    ok($z_val isa Chalk::IR::Node::Phi, '$z is Phi (then-only)');
 }
 
 # Case 4: both branches unchanged — no Phis

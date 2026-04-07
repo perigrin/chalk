@@ -45,15 +45,15 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->new();
 
     my ($value, $new_scope) = $forked->resolve_sentinel('$x', $factory);
     ok(defined $value, 'resolve_sentinel returns a value');
-    ok($value isa Chalk::Bootstrap::IR::Node::Phi, 'value is a Phi node');
+    ok($value isa Chalk::IR::Node::Phi, 'value is a Phi node');
     ok(defined $new_scope, 'new scope returned (sentinel was resolved)');
 
-    # Phi inputs: [loop, [pre_value, undef]]
+    # Phi: region() is the Loop node, inputs() is values [pre_value, undef]
+    is($value->region(), $loop, 'Phi region is the Loop node');
     my $inputs = $value->inputs();
-    is($inputs->[0], $loop, 'Phi region is the Loop node');
-    ok(ref $inputs->[1] eq 'ARRAY', 'Phi values is an arrayref');
-    is($inputs->[1][0], $node_x, 'Phi first value is pre-loop value');
-    ok(!defined $inputs->[1][1], 'Phi backedge is undef (not yet wired)');
+    ok(ref $inputs eq 'ARRAY', 'Phi values is an arrayref');
+    is($inputs->[0], $node_x, 'Phi first value is pre-loop value');
+    ok(!defined $inputs->[1], 'Phi backedge is undef (not yet wired)');
 
     # Second resolve_sentinel on same name returns Phi directly, no new scope
     my ($value2, $new_scope2) = $new_scope->resolve_sentinel('$x', $factory);
