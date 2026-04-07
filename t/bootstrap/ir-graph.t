@@ -44,4 +44,22 @@ my $unw = $f->make_cfg('Unwind', inputs => [$start, $exc]);
 my $graph2 = Chalk::IR::Graph->new(start => $start, returns => [$ret, $unw]);
 is(scalar $graph2->returns()->@*, 2, 'graph with normal + exceptional exit');
 
+# Schedule field: default is empty hashref
+my $graph3 = Chalk::IR::Graph->new(start => $start, returns => []);
+is(ref($graph3->schedule()), 'HASH', 'schedule() returns hashref by default');
+is(scalar keys $graph3->schedule()->%*, 0, 'default schedule is empty');
+
+# Schedule field: populated with cfg_state entries
+my $if_node = $f->make_cfg('Start');   # Reuse Start as stand-in for If node in test
+my %cfg_state = (if_node => $if_node, then_stmts => [], else_stmts => []);
+my $key = refaddr($c1);
+my $graph4 = Chalk::IR::Graph->new(
+    start    => $start,
+    returns  => [],
+    schedule => { $key => \%cfg_state },
+);
+is(ref($graph4->schedule()), 'HASH', 'graph schedule() is a hashref');
+is(scalar keys $graph4->schedule()->%*, 1, 'schedule has one entry');
+is($graph4->schedule()->{$key}, \%cfg_state, 'schedule maps key to cfg_state');
+
 done_testing();

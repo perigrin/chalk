@@ -12,6 +12,7 @@ use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::Graph;
 use Chalk::IR::Program;
 
 # Build Perl grammar pipeline
@@ -100,6 +101,55 @@ my sub parse_file($file) {
 
             my ($ch_method) = grep { $_->name() eq 'content_hash' } @methods;
             ok(defined $ch_method, 'Constant.pm: found content_hash() method as MethodInfo');
+        }
+    }
+}
+
+# ============================================================
+# 2. Per-method Graph built during parsing
+# ============================================================
+
+{
+    my $ir = parse_file('lib/Chalk/IR/Node/Constant.pm');
+
+    SKIP: {
+        skip 'Constant.pm: no IR for graph test', 8 unless defined $ir;
+
+        my ($cls) = $ir->classes()->@*;
+        skip 'Constant.pm: no class for graph test', 8 unless defined $cls;
+
+        my $body = $cls isa Chalk::IR::ClassInfo ? $cls->body() : $cls->inputs()->[2];
+        my @methods = grep { $_ isa Chalk::IR::MethodInfo } $body->@*;
+        skip 'Constant.pm: no methods for graph test', 8 unless @methods;
+
+        my ($op_method) = grep { $_->name() eq 'operation' } @methods;
+        skip 'Constant.pm: no operation() for graph test', 8 unless defined $op_method;
+
+        # Every MethodInfo produced by Actions::MethodDefinition should have a Graph.
+        my $graph = $op_method->graph();
+        ok(defined $graph, 'operation() MethodInfo has a graph');
+
+        SKIP: {
+            skip 'no graph on operation() MethodInfo', 7 unless defined $graph;
+
+            isa_ok($graph, 'Chalk::IR::Graph', 'graph is a Chalk::IR::Graph');
+            ok(defined $graph->start(), 'graph has a start node');
+            is(ref($graph->returns()), 'ARRAY', 'graph returns() is arrayref');
+            is(ref($graph->schedule()), 'HASH', 'graph schedule() is a hashref');
+
+            # The schedule may be empty (no if/loop/try in a simple method),
+            # but must be defined and a hashref.
+            ok(defined $graph->schedule(), 'graph schedule is defined');
+
+            # All MethodInfo objects in the body should carry graphs.
+            my $all_have_graphs = 1;
+            for my $m (@methods) {
+                if (!defined $m->graph()) {
+                    $all_have_graphs = 0;
+                    last;
+                }
+            }
+            ok($all_have_graphs, 'all MethodInfo objects have graphs');
         }
     }
 }

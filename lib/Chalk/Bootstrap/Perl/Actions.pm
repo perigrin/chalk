@@ -20,6 +20,7 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
+use Chalk::IR::Graph;
 use Chalk::IR::Program;
 
 # Builtin keyword sets used by _fixup_stmts for statement merging
@@ -1282,11 +1283,14 @@ class Chalk::Bootstrap::Perl::Actions {
         my $method_name_val = defined $method_name ? $method_name->value() : '<unknown>';
         my @param_strs = map { $_->value() } @params;
 
+        my $graph = $self->_build_method_graph($ctx, $fixed_body);
+
         return Chalk::IR::MethodInfo->new(
             name        => $method_name_val,
             params      => \@param_strs,
             return_type => $return_type,
             body        => $fixed_body,
+            graph       => $graph,
         );
     }
 
@@ -1379,11 +1383,72 @@ class Chalk::Bootstrap::Perl::Actions {
         my $sub_name_val = $sub_name->value();
         my @param_strs = map { $_->value() } @params;
 
+        my $graph = $self->_build_method_graph($ctx, $fixed_body);
+
         return Chalk::IR::SubInfo->new(
             name   => $sub_name_val,
             params => \@param_strs,
             body   => $fixed_body,
             scope  => $scope,
+            graph  => $graph,
+        );
+    }
+
+    # Build a per-method/sub Graph from Context tree and body statements.
+    # Walks the Context subtree to collect cfg_state entries that carry
+    # control-flow information (if_node, loop, try_node). Maps each
+    # associated IR node's refaddr to the cfg_state hashref.
+    # Also collects Return/Unwind nodes from the fixed body as graph exits.
+    # Returns a Chalk::IR::Graph with start, returns, and schedule.
+    method _build_method_graph($ctx, $fixed_body) {
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+
+        # Walk Context subtree to collect cfg_state entries for this scope.
+        my %schedule;
+        if (defined $sa) {
+            my @stack = ($ctx);
+            while (@stack) {
+                my $c = pop @stack;
+                my $state = $sa->cfg_state($c);
+                if (defined $state
+                        && (defined $state->{if_node}
+                            || defined $state->{loop}
+                            || defined $state->{try_node})) {
+                    my $ir_node = $c->extract();
+                    if (defined $ir_node && ref($ir_node)) {
+                        $schedule{refaddr($ir_node)} = $state;
+                    }
+                    # try_node is the Constructor; also register by its refaddr.
+                    if (defined $state->{try_node} && ref($state->{try_node})) {
+                        $schedule{refaddr($state->{try_node})} = $state;
+                    }
+                }
+                push @stack, reverse $c->children()->@*;
+            }
+        }
+
+        # Determine graph start node: use inherited control from context,
+        # or create a fresh Start node.
+        my $start;
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            $start = $state->{control} if defined $state && defined $state->{control};
+        }
+        $start //= $factory->make('Start');
+
+        # Collect Return and Unwind nodes from the fixed body as graph exits.
+        my @returns;
+        for my $stmt ($fixed_body->@*) {
+            if ($stmt isa Chalk::IR::Node::Return
+                    || $stmt isa Chalk::IR::Node::Unwind) {
+                push @returns, $stmt;
+            }
+        }
+
+        return Chalk::IR::Graph->new(
+            start    => $start,
+            returns  => \@returns,
+            schedule => \%schedule,
         );
     }
 

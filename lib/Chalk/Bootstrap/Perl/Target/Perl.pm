@@ -33,6 +33,7 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
+use Chalk::IR::Graph;
 use Chalk::IR::Program;
 
 class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
@@ -353,6 +354,17 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $params = $node->params();    # plain strings
         my $body   = $node->body();
 
+        # Merge per-method graph schedule into cfg_lookup (additive).
+        # The global cfg_lookup (built from the Context tree) is already
+        # populated; the graph schedule supplements it for nodes that may
+        # have been missed due to stale-value merges in the parser.
+        if (defined $node->graph()) {
+            my $sched = $node->graph()->schedule();
+            for my $key (keys $sched->%*) {
+                $_cfg_lookup{$key} //= $sched->{$key};
+            }
+        }
+
         my $sig = '(' . join(', ', $params->@*) . ')';
         # Scope aggregate vars: params shadow class-scope aggregate names
         my %saved = %_aggregate_vars;
@@ -367,6 +379,14 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $params = $node->params();    # plain strings
         my $body   = $node->body();
         my $scope  = $node->scope();
+
+        # Merge per-sub graph schedule into cfg_lookup (additive).
+        if (defined $node->graph()) {
+            my $sched = $node->graph()->schedule();
+            for my $key (keys $sched->%*) {
+                $_cfg_lookup{$key} //= $sched->{$key};
+            }
+        }
 
         my $sig = '(' . join(', ', $params->@*) . ')';
         my $prefix = $scope eq 'package' ? 'sub' : "$scope sub";

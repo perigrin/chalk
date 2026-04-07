@@ -6,8 +6,9 @@ use experimental 'class';
 no warnings 'experimental::class';
 
 class Chalk::IR::Graph {
-    field $start   :param :reader;
-    field $returns :param :reader = [];
+    field $start    :param :reader;
+    field $returns  :param :reader = [];
+    field $schedule :param :reader = {};
 
     method nodes() {
         my @order;
