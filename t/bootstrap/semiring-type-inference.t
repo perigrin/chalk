@@ -910,10 +910,10 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
                     if (scalar($stmts->@*) >= 1) {
                         my $call = $stmts->[0];
-                        ok($call isa Chalk::Bootstrap::IR::Node::Constructor,
+                        ok($call isa Chalk::IR::Node::Constructor,
                             'push multi-arg IR: stmt is Constructor');
 
-                        if ($call isa Chalk::Bootstrap::IR::Node::Constructor) {
+                        if ($call isa Chalk::IR::Node::Constructor) {
                             is($call->class(), 'BuiltinCall',
                                 'push multi-arg IR: stmt is BuiltinCall');
 

@@ -430,13 +430,13 @@ SKIP: {
         ok(ref($stmts) eq 'ARRAY', 'Program stmts is array');
 
         my @if_stmts = grep {
-            $_ isa Chalk::Bootstrap::IR::Node::Constructor
+            $_ isa Chalk::IR::Node::Constructor
             && $_->class() eq 'IfStmt'
         } $stmts->@*;
         is(scalar @if_stmts, 0, 'no IfStmt Constructor in statement list');
 
         my @cfg_nodes = grep {
-            $_ isa Chalk::Bootstrap::IR::Node
+            $_ isa Chalk::IR::Node
             && $_->operation() eq 'If'
         } $stmts->@*;
         ok(scalar @cfg_nodes > 0, 'If CFG node present in statement list');
@@ -461,13 +461,13 @@ SKIP: {
         ok(ref($stmts) eq 'ARRAY', 'Program stmts is array for foreach');
 
         my @foreach_stmts = grep {
-            $_ isa Chalk::Bootstrap::IR::Node::Constructor
+            $_ isa Chalk::IR::Node::Constructor
             && $_->class() eq 'ForeachLoop'
         } $stmts->@*;
         is(scalar @foreach_stmts, 0, 'no ForeachLoop Constructor in statement list');
 
         my @cfg_loops = grep {
-            $_ isa Chalk::Bootstrap::IR::Node
+            $_ isa Chalk::IR::Node
             && $_->operation() eq 'Loop'
         } $stmts->@*;
         ok(scalar @cfg_loops > 0, 'Loop CFG node present in statement list');
@@ -503,7 +503,7 @@ SKIP: {
         my $found_postfix_loop = false;
         while (@stack) {
             my $node = pop @stack;
-            if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+            if ($node isa Chalk::IR::Node::Constructor) {
                 $found_postfix_loop = true if $node->class() eq 'PostfixLoop';
                 for my $input ($node->inputs()->@*) {
                     if (ref($input) eq 'ARRAY') {
@@ -564,7 +564,7 @@ SKIP: {
         # The If node's condition should be a negated expression (UnaryExpr '!')
         my $if_cond = $state->{if_node}->inputs()->[1];
         ok(defined $if_cond, 'If condition exists');
-        ok($if_cond isa Chalk::Bootstrap::IR::Node::Constructor
+        ok($if_cond isa Chalk::IR::Node::Constructor
             && $if_cond->class() eq 'UnaryExpr',
             'unless condition is UnaryExpr (negation)');
     }
@@ -1072,7 +1072,7 @@ SKIP: {
             my $found_next_unless = false;
             while (@stack) {
                 my $node = pop @stack;
-                if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+                if ($node isa Chalk::IR::Node::Constructor) {
                     $found_next_unless = true if $node->class() eq 'NextUnless';
                     for my $input ($node->inputs()->@*) {
                         if (ref($input) eq 'ARRAY') {
@@ -1265,17 +1265,17 @@ SKIP: {
                     ok(defined $cond, 'If condition exists');
                     # The condition must NOT be wrapped in spurious SubscriptExpr
                     # from the assignment target leaking through Earley stale-value merge
-                    if ($cond isa Chalk::Bootstrap::IR::Node::Constructor) {
+                    if ($cond isa Chalk::IR::Node::Constructor) {
                         isnt($cond->class(), 'SubscriptExpr',
                             'top-level condition not wrapped in SubscriptExpr');
                         # Also check internal: the || left side should not have
                         # SubscriptExpr wrapping the !defined BuiltinCall
                         if ($cond->class() eq 'BinaryExpr') {
                             my $left = $cond->inputs()->[1];
-                            if ($left isa Chalk::Bootstrap::IR::Node::Constructor
+                            if ($left isa Chalk::IR::Node::Constructor
                                 && $left->class() eq 'UnaryExpr') {
                                 my $operand = $left->inputs()->[1];
-                                if ($operand isa Chalk::Bootstrap::IR::Node::Constructor) {
+                                if ($operand isa Chalk::IR::Node::Constructor) {
                                     isnt($operand->class(), 'SubscriptExpr',
                                         'inner !defined operand not wrapped in SubscriptExpr');
                                 } else {
@@ -1323,7 +1323,7 @@ SKIP: {
                 SKIP: {
                     skip 'no condition', 2 unless defined $cond;
                     # Condition should be BinaryExpr(||, ...)
-                    my $is_or = $cond isa Chalk::Bootstrap::IR::Node::Constructor
+                    my $is_or = $cond isa Chalk::IR::Node::Constructor
                         && $cond->class() eq 'BinaryExpr'
                         && ($cond->inputs()->[0]->value() // '') eq '||';
                     ok($is_or, 'condition is BinaryExpr(||)');
@@ -1334,16 +1334,16 @@ SKIP: {
                         my $right = $cond->inputs()->[2];
                         # The right operand of < should be SubscriptExpr, not bare variable
                         my $right_rhs;
-                        if ($right isa Chalk::Bootstrap::IR::Node::Constructor
+                        if ($right isa Chalk::IR::Node::Constructor
                             && $right->class() eq 'BinaryExpr') {
                             $right_rhs = $right->inputs()->[2];  # right operand of <
                         }
                         if (defined $right_rhs
-                            && $right_rhs isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $right_rhs isa Chalk::IR::Node::Constructor
                             && $right_rhs->class() eq 'SubscriptExpr') {
                             pass('right || operand has SubscriptExpr (subscript pushed in)');
                         } else {
-                            my $class = (defined $right_rhs && $right_rhs isa Chalk::Bootstrap::IR::Node::Constructor)
+                            my $class = (defined $right_rhs && $right_rhs isa Chalk::IR::Node::Constructor)
                                 ? $right_rhs->class() : (ref($right_rhs) // 'undef');
                             fail("right || operand should have SubscriptExpr, got $class");
                         }
@@ -1375,7 +1375,7 @@ SKIP: {
                 SKIP: {
                     skip 'no if_node', 1 unless defined $if_node;
                     my $cond = $if_node->inputs()->[1];
-                    if ($cond isa Chalk::Bootstrap::IR::Node::Constructor) {
+                    if ($cond isa Chalk::IR::Node::Constructor) {
                         isnt($cond->class(), 'SubscriptExpr',
                             'simple condition not wrapped in SubscriptExpr');
                     } else {
@@ -1409,7 +1409,7 @@ SKIP: {
                     skip 'no if_node', 1 unless defined $if_node;
                     my $cond = $if_node->inputs()->[1];
                     # Legitimate SubscriptExpr should remain
-                    if ($cond isa Chalk::Bootstrap::IR::Node::Constructor
+                    if ($cond isa Chalk::IR::Node::Constructor
                         && $cond->class() eq 'SubscriptExpr') {
                         pass('legitimate SubscriptExpr condition preserved');
                     } else {

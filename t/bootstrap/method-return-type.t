@@ -44,7 +44,7 @@ my sub parse_and_find_methods($source) {
         my $node = pop @stack;
         next unless defined $node;
         next unless $node isa Chalk::IR::Node;
-        if ($node isa Chalk::Bootstrap::IR::Node::Constructor
+        if ($node isa Chalk::IR::Node::Constructor
                 && $node->class() eq 'MethodDecl') {
             push @methods, $node;
         }

@@ -83,7 +83,7 @@ my sub is_class_node($node, $msg) {
     ok(defined $node, "$msg: defined");
     return unless defined $node;
     ok($node isa Chalk::IR::ClassInfo
-        || ($node isa Chalk::Bootstrap::IR::Node::Constructor
+        || ($node isa Chalk::IR::Node::Constructor
             && $node->class() eq 'ClassDecl'),
         "$msg: is ClassInfo or ClassDecl");
 }
@@ -181,7 +181,7 @@ my sub is_use_info($node, $expected_name, $msg) {
         my $body = class_body($cls);
         is(ref $body, 'ARRAY', 'Start.pm: class body is arrayref');
         my @methods = grep { $_ isa Chalk::IR::MethodInfo
-            || ($_ isa Chalk::Bootstrap::IR::Node::Constructor && $_->class() eq 'MethodDecl')
+            || ($_ isa Chalk::IR::Node::Constructor && $_->class() eq 'MethodDecl')
         } $body->@*;
         ok(scalar @methods >= 1, 'Start.pm: class body has at least 1 method');
 
@@ -219,7 +219,7 @@ my sub is_use_info($node, $expected_name, $msg) {
 
         my $body = class_body($cls);
         my @methods = grep { $_ isa Chalk::IR::MethodInfo
-            || ($_ isa Chalk::Bootstrap::IR::Node::Constructor && $_->class() eq 'MethodDecl')
+            || ($_ isa Chalk::IR::Node::Constructor && $_->class() eq 'MethodDecl')
         } $body->@*;
         ok(scalar @methods >= 1, 'Return.pm: class body has at least 1 method');
         my ($meth) = @methods;
@@ -252,7 +252,7 @@ my sub is_use_info($node, $expected_name, $msg) {
 
         my $body = class_body($cls);
         my @methods = grep { $_ isa Chalk::IR::MethodInfo
-            || ($_ isa Chalk::Bootstrap::IR::Node::Constructor && $_->class() eq 'MethodDecl')
+            || ($_ isa Chalk::IR::Node::Constructor && $_->class() eq 'MethodDecl')
         } $body->@*;
         ok(scalar @methods >= 2, 'Target.pm: class body has at least 2 methods');
 
@@ -295,7 +295,7 @@ my sub is_use_info($node, $expected_name, $msg) {
 
         my $body = class_body($cls);
         my @methods = grep { $_ isa Chalk::IR::MethodInfo
-            || ($_ isa Chalk::Bootstrap::IR::Node::Constructor && $_->class() eq 'MethodDecl')
+            || ($_ isa Chalk::IR::Node::Constructor && $_->class() eq 'MethodDecl')
         } $body->@*;
         ok(scalar @methods >= 2, 'Pass.pm: class body has at least 2 methods');
 

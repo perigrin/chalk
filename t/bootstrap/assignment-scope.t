@@ -6,7 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::IR::Node::Constant;
+use Chalk::IR::Node::Constant;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Actions;

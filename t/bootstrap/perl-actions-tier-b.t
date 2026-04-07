@@ -100,7 +100,7 @@ my sub method_name_str($meth) {
 my sub find_class_decl_in_stmts($stmts) {
     for my $stmt ($stmts->@*) {
         return $stmt if $stmt isa Chalk::IR::ClassInfo;
-        return $stmt if $stmt isa Chalk::Bootstrap::IR::Node::Constructor
+        return $stmt if $stmt isa Chalk::IR::Node::Constructor
             && $stmt->class() eq 'ClassDecl';
     }
     return undef;
@@ -111,7 +111,7 @@ my sub find_method_in_body($body, $name) {
         if ($item isa Chalk::IR::MethodInfo && $item->name() eq $name) {
             return $item;
         }
-        if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+        if ($item isa Chalk::IR::Node::Constructor
                 && $item->class() eq 'MethodDecl'
                 && $item->inputs()->[0]->value() eq $name) {
             return $item;

@@ -86,7 +86,7 @@ my sub find_class_decl($ir) {
         if ($stmt isa Chalk::IR::ClassInfo) {
             return $stmt;
         }
-        if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
+        if ($stmt isa Chalk::IR::Node::Constructor
                 && $stmt->class() eq 'ClassDecl') {
             return $stmt;
         }
@@ -114,7 +114,7 @@ my sub count_methods($cls) {
     my $body = class_body($cls);
     return scalar grep {
         ($_ isa Chalk::IR::MethodInfo)
-        || ($_ isa Chalk::Bootstrap::IR::Node::Constructor && $_->class() eq 'MethodDecl')
+        || ($_ isa Chalk::IR::Node::Constructor && $_->class() eq 'MethodDecl')
     } $body->@*;
 }
 
@@ -125,7 +125,7 @@ my sub find_method($class_decl, $name) {
         if ($item isa Chalk::IR::MethodInfo && $item->name() eq $name) {
             return $item;
         }
-        if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+        if ($item isa Chalk::IR::Node::Constructor
                 && $item->class() eq 'MethodDecl'
                 && $item->inputs()->[0]->value() eq $name) {
             return $item;
@@ -245,7 +245,7 @@ my sub find_field($class_decl, $name) {
             # Methods: push_op, concat, to_exec_string, op_count
             my @methods = grep {
                 ($_ isa Chalk::IR::MethodInfo)
-                || ($_ isa Chalk::Bootstrap::IR::Node::Constructor
+                || ($_ isa Chalk::IR::Node::Constructor
                     && $_->class() eq 'MethodDecl')
             } class_body($cls)->@*;
             ok(scalar @methods >= 4, 'ConciseTree.pm: at least 4 methods')
@@ -267,7 +267,7 @@ my sub find_field($class_decl, $name) {
                 ok(ref $mbody eq 'ARRAY', 'ConciseTree.pm: to_exec_string body is array');
                 # Find the Loop CFG node in the method body (replaced ForeachLoop Constructor)
                 my ($loop_node) = grep {
-                    $_ isa Chalk::Bootstrap::IR::Node
+                    $_ isa Chalk::IR::Node
                     && $_->operation() eq 'Loop'
                 } $mbody->@*;
                 ok(defined $loop_node, 'ConciseTree.pm: to_exec_string has Loop CFG node');
@@ -393,7 +393,7 @@ my sub find_field($class_decl, $name) {
             # Methods: extract, extend, duplicate, leaves, scanned_text
             my @methods = grep {
                 ($_ isa Chalk::IR::MethodInfo)
-                || ($_ isa Chalk::Bootstrap::IR::Node::Constructor
+                || ($_ isa Chalk::IR::Node::Constructor
                     && $_->class() eq 'MethodDecl')
             } class_body($cls)->@*;
             ok(scalar @methods >= 5, 'Context.pm: at least 5 methods')

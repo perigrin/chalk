@@ -71,7 +71,7 @@ my sub find_class_in_stmts($ir, $class) {
             return $stmt;
         }
         # Constructor:ClassDecl (legacy path)
-        if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
+        if ($stmt isa Chalk::IR::Node::Constructor
                 && $stmt->class() eq $class) {
             return $stmt;
         }
@@ -92,7 +92,7 @@ my sub find_method_in_class($class_decl, $name) {
                 && $item->name() eq $name) {
             return $item;
         }
-        if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+        if ($item isa Chalk::IR::Node::Constructor
                 && $item->class() eq 'MethodDecl'
                 && $item->inputs()->[0]->value() eq $name) {
             return $item;
@@ -493,7 +493,7 @@ my sub method_name($method) {
             ok(defined $stmt, "$builtin_name subscript: has statement");
 
             # The statement should be BuiltinCall, NOT SubscriptExpr wrapping it
-            if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor) {
+            if ($stmt isa Chalk::IR::Node::Constructor) {
                 is($stmt->class(), 'BuiltinCall',
                     "$builtin_name subscript: top-level is BuiltinCall (not SubscriptExpr)");
 
@@ -503,7 +503,7 @@ my sub method_name($method) {
                     ok(ref($args) eq 'ARRAY' && $args->@* > 0,
                         "$builtin_name subscript: has arguments");
                     if (ref($args) eq 'ARRAY' && $args->@* > 0
-                        && $args->[0] isa Chalk::Bootstrap::IR::Node::Constructor) {
+                        && $args->[0] isa Chalk::IR::Node::Constructor) {
                         is($args->[0]->class(), 'SubscriptExpr',
                             "$builtin_name subscript: arg is SubscriptExpr");
                     }

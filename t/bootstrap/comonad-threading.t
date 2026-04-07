@@ -7,7 +7,7 @@ use Test::More tests => 14;
 use lib 'lib';
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::IR::Node::Constant;
+use Chalk::IR::Node::Constant;
 
 # Reset factory for clean test environment
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();

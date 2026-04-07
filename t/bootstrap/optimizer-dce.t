@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib';
 
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::IR::Node::Constant;
+use Chalk::IR::Node::Constant;
 
 use_ok('Chalk::Bootstrap::Optimizer::DCE');
 

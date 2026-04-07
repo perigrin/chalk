@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::IR::Node::Phi;
+use Chalk::IR::Node::Phi;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
@@ -52,7 +52,7 @@ SKIP: {
         ok(defined $x_binding, '$x in scope after loop');
 
         # $x should be a Phi node (created because $x was read inside loop)
-        ok($x_binding isa Chalk::Bootstrap::IR::Node::Phi,
+        ok($x_binding isa Chalk::IR::Node::Phi,
             '$x is a Phi (read-only, degenerate)')
             or diag("Got: " . ref($x_binding) . " / "
                 . ($x_binding->operation() // 'undef'));
@@ -77,10 +77,10 @@ SKIP: {
         ok(defined $sum_binding, '$sum in scope after loop');
 
         # $sum should be a Phi with a wired backedge
-        ok($sum_binding isa Chalk::Bootstrap::IR::Node::Phi,
+        ok($sum_binding isa Chalk::IR::Node::Phi,
             '$sum is a Phi after read-write loop')
             or diag('$sum binding is: ' . ref($sum_binding));
-        if ($sum_binding isa Chalk::Bootstrap::IR::Node::Phi) {
+        if ($sum_binding isa Chalk::IR::Node::Phi) {
             my $values = $sum_binding->inputs()->[1];
             ok(defined $values->[1],
                 'Phi backedge is wired (not undef)')
@@ -107,7 +107,7 @@ SKIP: {
         ok(defined $y_binding, '$y in scope after loop');
 
         # $y was never read inside the loop — should NOT be a Phi
-        ok(!($y_binding isa Chalk::Bootstrap::IR::Node::Phi),
+        ok(!($y_binding isa Chalk::IR::Node::Phi),
             '$y is not a Phi (never read in loop)')
             or diag("Got Phi for unread variable");
     }
@@ -134,7 +134,7 @@ SKIP: {
         ok(defined $x_binding, '$x in scope after nested loops');
         TODO: {
             local $TODO = 'nested loop Phi requires propagating inner body refs to outer loop';
-            ok($x_binding isa Chalk::Bootstrap::IR::Node::Phi,
+            ok($x_binding isa Chalk::IR::Node::Phi,
                 '$x is a Phi after nested loops')
                 or diag('$x binding is: ' . ref($x_binding));
         }
@@ -156,13 +156,13 @@ SKIP: {
         ok(defined $state, 'cfg_state available for multi-var loop');
 
         my $a_binding = $state->{scope}->lookup('$a');
-        ok($a_binding isa Chalk::Bootstrap::IR::Node::Phi,
+        ok($a_binding isa Chalk::IR::Node::Phi,
             '$a is a Phi (referenced in loop)')
             or diag('$a binding is: ' . ref($a_binding));
 
         my $b_binding = $state->{scope}->lookup('$b');
         ok(defined $b_binding, '$b is still in scope');
-        ok(!($b_binding isa Chalk::Bootstrap::IR::Node::Phi),
+        ok(!($b_binding isa Chalk::IR::Node::Phi),
             '$b is NOT a Phi (never referenced in loop)')
             or diag('$b binding is: ' . ref($b_binding));
     }

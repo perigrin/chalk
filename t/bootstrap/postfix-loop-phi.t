@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::IR::Node::Phi;
+use Chalk::IR::Node::Phi;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
@@ -52,7 +52,7 @@ SKIP: {
         ok(defined $state, 'cfg_state available after postfix for loop');
 
         my $x_binding = $state->{scope}->lookup('$x');
-        ok($x_binding isa Chalk::Bootstrap::IR::Node::Phi,
+        ok($x_binding isa Chalk::IR::Node::Phi,
             '$x is a Phi after postfix for loop (loop-carried dep)')
             or diag('$x binding is: ' . ref($x_binding)
                 . ' / ' . ($x_binding->operation() // 'undef'));
@@ -77,7 +77,7 @@ SKIP: {
 
         my $n_binding = $state->{scope}->lookup('$n');
         ok(defined $n_binding, '$n in scope after postfix while loop');
-        ok($n_binding isa Chalk::Bootstrap::IR::Node::Phi,
+        ok($n_binding isa Chalk::IR::Node::Phi,
             '$n is a Phi after postfix while loop')
             or diag('$n binding is: ' . ref($n_binding));
     }

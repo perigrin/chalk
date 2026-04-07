@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::IR::Node::Phi;
+use Chalk::IR::Node::Phi;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
@@ -58,7 +58,7 @@ SKIP: {
         my $x_binding = $state->{scope}->lookup('$x');
         ok(defined $x_binding, '$x in scope after accumulator loop');
 
-        ok($x_binding isa Chalk::Bootstrap::IR::Node::Phi,
+        ok($x_binding isa Chalk::IR::Node::Phi,
             '$x is a Phi node (loop-carried accumulator)')
             or diag('$x binding: ' . ref($x_binding)
                 . ' / ' . ($x_binding->operation() // 'undef'));
@@ -84,7 +84,7 @@ SKIP: {
         my $s_binding = $state->{scope}->lookup('$s');
         ok(defined $s_binding, '$s in scope after string concatenation loop');
 
-        ok($s_binding isa Chalk::Bootstrap::IR::Node::Phi,
+        ok($s_binding isa Chalk::IR::Node::Phi,
             '$s is a Phi node (loop-carried string accumulator)')
             or diag('$s binding: ' . ref($s_binding)
                 . ' / ' . ($s_binding->operation() // 'undef'));
@@ -108,11 +108,11 @@ SKIP: {
         ok(defined $state, 'cfg_state available for backedge check');
 
         my $sum_binding = $state->{scope}->lookup('$sum');
-        ok($sum_binding isa Chalk::Bootstrap::IR::Node::Phi,
+        ok($sum_binding isa Chalk::IR::Node::Phi,
             '$sum is a Phi in backedge test')
             or diag('$sum binding: ' . ref($sum_binding));
 
-        if ($sum_binding isa Chalk::Bootstrap::IR::Node::Phi) {
+        if ($sum_binding isa Chalk::IR::Node::Phi) {
             my $values = $sum_binding->inputs()->[1];
             ok(defined $values->[1],
                 'Phi backedge is wired (not undef) for $sum')
@@ -186,7 +186,7 @@ SKIP: {
         TODO: {
             local $TODO = 'trailing statement overwrites loop Phi via multiply() right-wins merge';
             my $x_binding = $state->{scope}->lookup('$x');
-            ok($x_binding isa Chalk::Bootstrap::IR::Node::Phi,
+            ok($x_binding isa Chalk::IR::Node::Phi,
                 '$x is a Phi even with trailing statement');
         }
     }
