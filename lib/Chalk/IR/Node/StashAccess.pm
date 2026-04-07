@@ -7,5 +7,13 @@ use experimental 'class';
 use Chalk::IR::Node::Access;
 
 class Chalk::IR::Node::StashAccess :isa(Chalk::IR::Node::Access) {
+    field $stash_name :param :reader = '';
+    field $var_name   :param :reader = '';
+
     method operation() { 'StashAccess' }
+
+    method content_hash() {
+        return join('|', 'StashAccess', "stash_name=$stash_name",
+            "var_name=$var_name", $self->_serialize_inputs());
+    }
 }

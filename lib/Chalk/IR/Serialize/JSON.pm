@@ -57,16 +57,33 @@ sub _extract_fields ($node, $id_remap) {
     if ($op eq 'FieldAccess') {
         return { field_index => $node->field_index, field_stash => $node->field_stash };
     }
+    if ($op eq 'StashAccess') {
+        return {
+            stash_name => $node->stash_name,
+            var_name   => $node->var_name,
+        };
+    }
     if ($op eq 'CompoundAssign') {
         return { op => $node->op };
     }
     if ($op eq 'PostfixDeref') {
         return { sigil => $node->sigil };
     }
-    # Chalk's RegexMatch/RegexSubst only have flags (from Regex base).
-    # SoN also carries pattern and replacement, but Chalk does not.
-    if ($op eq 'RegexMatch' || $op eq 'RegexSubst') {
-        return { flags => $node->flags };
+    if ($op eq 'RegexMatch') {
+        return {
+            pattern => $node->pattern,
+            flags   => $node->flags,
+        };
+    }
+    if ($op eq 'RegexSubst') {
+        return {
+            pattern     => $node->pattern,
+            replacement => $node->replacement,
+            flags       => $node->flags,
+        };
+    }
+    if ($op eq 'VarDecl') {
+        return { scope => $node->scope };
     }
     return undef;
 }
@@ -243,13 +260,22 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'PostfixDeref') {
             $args{sigil} = $fields->{sigil};
         }
-        elsif ($op eq 'RegexMatch' || $op eq 'RegexSubst') {
-            # Chalk only has flags; pattern/replacement from SoN JSON are dropped.
-            $args{flags} = $fields->{flags} // '';
+        elsif ($op eq 'StashAccess') {
+            $args{stash_name} = $fields->{stash_name} // '';
+            $args{var_name}   = $fields->{var_name}   // '';
         }
-        # VarDecl: SoN carries scope, but Chalk::IR::Node::VarDecl has no scope field.
-        # StashAccess: SoN carries stash_name/var_name, Chalk::IR::Node::StashAccess has none.
-        # Both are created with just inputs — extra fields silently dropped.
+        elsif ($op eq 'RegexMatch') {
+            $args{pattern} = $fields->{pattern} // '';
+            $args{flags}   = $fields->{flags}   // '';
+        }
+        elsif ($op eq 'RegexSubst') {
+            $args{pattern}     = $fields->{pattern}     // '';
+            $args{replacement} = $fields->{replacement} // '';
+            $args{flags}       = $fields->{flags}       // '';
+        }
+        elsif ($op eq 'VarDecl') {
+            $args{scope} = $fields->{scope} // 'my';
+        }
 
         my $node;
         if ($is_cfg) {

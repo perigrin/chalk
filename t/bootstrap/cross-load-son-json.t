@@ -232,7 +232,7 @@ sub _load_named_methods {
         PadAccess FieldAccess StashAccess Subscript
         Call HashRef ArrayRef Interpolate AnonSub
         RegexMatch RegexSubst TryCatch
-        PostfixDeref CompoundAssign BacktickExpr VarDecl
+        PostfixDeref CompoundAssign BacktickExpr Stringify VarDecl
         TernaryExpr StructRef StructFieldAccess
     );
 
@@ -264,14 +264,10 @@ sub _load_named_methods {
         note "Node types in B::SoN output not yet in Chalk::IR::NodeFactory:";
         note "  $_" for @unsupported;
 
-        # The only currently known unsupported type is Stringify.
-        # This test will need updating if B::SoN gains new op types.
-        my %known_unsupported = map { $_ => 1 } qw(Stringify);
-        my @unexpected = grep { !exists $known_unsupported{$_} } @unsupported;
-
-        ok(!@unexpected,
-            'Test 6: no unexpected unsupported op types (known: Stringify)')
-            or diag "Unexpected unsupported ops: @unexpected";
+        # All node types in B::SoN output should now be supported by Chalk.
+        ok(!@unsupported,
+            'Test 6: all B::SoN node types supported by Chalk NodeFactory')
+            or diag "Unsupported ops: @unsupported";
     }
 }
 
