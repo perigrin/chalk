@@ -20,21 +20,24 @@ class Chalk::IR::Graph {
         my %seen;
         while (my $node = shift @worklist) {
             next unless defined $node;
+            next unless blessed($node);
             next if $seen{$node->id()}++;
             push @all, $node;
             push @worklist, $node->inputs()->@*;
-            push @worklist, $node->consumers()->@*;
+            # consumers() may contain stale weak refs (unblessed); filter them
+            push @worklist, grep { defined $_ && blessed($_) } $node->consumers()->@*;
         }
 
         # Topological sort via DFS post-order
         my %temp;
         my $visit;
         $visit = sub ($n) {
+            return unless blessed($n);
             return if $visited{$n->id()};
             return if $temp{$n->id()};
             $temp{$n->id()} = 1;
             for my $input ($n->inputs()->@*) {
-                next unless defined $input;
+                next unless defined $input && blessed($input);
                 $visit->($input);
             }
             delete $temp{$n->id()};

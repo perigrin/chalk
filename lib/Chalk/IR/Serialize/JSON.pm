@@ -112,14 +112,14 @@ sub _all_nodes_topo ($graph) {
 
     # Always re-sort via DFS post-order so that Phi regions are guaranteed
     # to precede their Phi nodes (region is a predecessor, not in inputs[]).
-    my @all = ($base->@*, @extra);
+    my @all = grep { blessed($_) } ($base->@*, @extra);
     my %visited;
     my %in_progress;
     my @order;
 
     # Predecessors of a node are its inputs plus, for Phi, its region.
     my $predecessors = sub ($n) {
-        my @preds = grep { defined $_ } $n->inputs->@*;
+        my @preds = grep { defined $_ && blessed($_) } $n->inputs->@*;
         if ($n->operation eq 'Phi' && defined $n->region) {
             push @preds, $n->region;
         }
@@ -128,6 +128,7 @@ sub _all_nodes_topo ($graph) {
 
     my $visit;
     $visit = sub ($n) {
+        return unless blessed($n);
         return if $visited{ $n->id };
         return if $in_progress{ $n->id };   # cycle guard
         $in_progress{ $n->id } = 1;
@@ -162,7 +163,7 @@ sub _serialize_graph ($graph) {
     # Emit each node
     my @nodes;
     for my $node ($topo_nodes->@*) {
-        my @inputs = map { $id_remap{ $_->id } } $node->inputs->@*;
+        my @inputs = map { $id_remap{ $_->id } } grep { blessed($_) } $node->inputs->@*;
         my $fields = _extract_fields($node, \%id_remap);
 
         my %entry = (

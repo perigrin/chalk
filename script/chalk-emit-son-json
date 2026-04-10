@@ -1,0 +1,106 @@
+#!/usr/bin/env perl
+# ABOUTME: CLI tool that parses a Perl .pm file through Chalk and emits SoN-compatible JSON.
+# ABOUTME: Extracts per-method/sub graphs from the IR and serializes via Chalk::IR::Serialize::JSON.
+
+use 5.42.0;
+use utf8;
+
+use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::IR::Serialize::JSON qw(to_json);
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
+
+# -----------------------------------------------------------------------
+# Parse arguments
+# -----------------------------------------------------------------------
+my $file = shift @ARGV or die "Usage: $0 <file.pm>\n";
+die "File not found: $file\n" unless -f $file;
+
+# -----------------------------------------------------------------------
+# Step 1: Build the Perl grammar (BNF → grammar objects)
+# -----------------------------------------------------------------------
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $raw_ir = perl_pipeline();
+die "Failed to build Perl grammar IR\n" unless defined $raw_ir;
+
+my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
+my $generated = $target->generate($raw_ir);
+$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::EmitSoNJSON/g;
+eval $generated;
+die "Failed to eval generated grammar: $@\n" if $@;
+
+my $grammar = Chalk::Grammar::Perl::EmitSoNJSON::grammar();
+
+# -----------------------------------------------------------------------
+# Step 2: Parse the input file
+# -----------------------------------------------------------------------
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+open my $fh, '<:utf8', $file or die "Cannot read $file: $!\n";
+local $/;
+my $source = <$fh>;
+close $fh;
+
+my $parser = build_perl_ir_parser($grammar, start => 'Program');
+my $result = $parser->parse_value($source);
+die "Parse failed for $file\n" unless defined $result;
+
+my $sem_ctx = $result->[4];
+die "No semantic result for $file\n" unless defined $sem_ctx;
+
+my $program = $sem_ctx->extract();
+die "No Program IR for $file\n" unless defined $program;
+
+# -----------------------------------------------------------------------
+# Step 3: Extract per-method/sub graphs
+# -----------------------------------------------------------------------
+my %named_graphs;
+
+# Walk classes → methods
+for my $class ($program->classes()->@*) {
+    my $class_name = $class->name();
+    for my $method ($class->methods()->@*) {
+        my $graph = $method->graph();
+        next unless defined $graph;
+        my $key = "${class_name}::${\$method->name()}";
+        $named_graphs{$key} = $graph;
+    }
+    # Also check subs nested in classes
+    for my $sub ($class->subs()->@*) {
+        my $graph = $sub->graph();
+        next unless defined $graph;
+        my $key = "${class_name}::${\$sub->name()}";
+        $named_graphs{$key} = $graph;
+    }
+}
+
+# Walk top-level subs
+for my $sub ($program->top_level_subs()->@*) {
+    my $graph = $sub->graph();
+    next unless defined $graph;
+    $named_graphs{$sub->name()} = $graph;
+}
+
+# -----------------------------------------------------------------------
+# Step 4: Serialize and emit JSON
+# -----------------------------------------------------------------------
+
+# Build the output structure manually so we can set 'source'
+my %methods;
+for my $name (sort keys %named_graphs) {
+    # Serialize each graph through the same internal path as to_json,
+    # but we need the per-graph data structure. Use to_json on a
+    # single-method hash, parse back to get the structure.
+    # More efficient: call the internal serializer directly.
+    # For now, use to_json and decode.
+}
+
+# Use to_json but patch in the source field
+my $json = to_json(\%named_graphs);
+
+# Patch source field: replace "source" : null with the actual filename
+use JSON::PP ();
+my $data = JSON::PP->new->decode($json);
+$data->{source} = $file;
+my $output = JSON::PP->new->canonical->pretty->encode($data);
+
+print $output;
