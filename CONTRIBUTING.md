@@ -4,7 +4,7 @@
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) before making changes to the
 parser or semirings. It describes the layered parsing pipeline and the
-role of each semiring.
+role of each component.
 
 ## Development Environment
 

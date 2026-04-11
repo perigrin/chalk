@@ -27,8 +27,6 @@ sub _is_cfg ($node) {
 # _extract_fields($node, \%id_remap) — returns a hashref of extra fields
 # for nodes that carry them, or undef if no extra fields.
 # id_remap is needed for Phi whose region field holds a node reference.
-# Note: Chalk's RegexMatch/RegexSubst only have $flags (from Regex base),
-# NOT $pattern or $replacement as in the SoN reference implementation.
 # -----------------------------------------------------------------------
 sub _extract_fields ($node, $id_remap) {
     my $op = $node->operation;
