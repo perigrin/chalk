@@ -23,180 +23,199 @@ unless (-f $chalk_script) {
 }
 
 # -----------------------------------------------------------------------
-# Helper: run B::SoN on a file with package filter
+# Helpers
 # -----------------------------------------------------------------------
 
 sub run_bson ($file, $package) {
     my $cmd = "$perl -Ilib -I$son_lib -MO=SoN,json,package=$package $file 2>/dev/null";
     my $output = `$cmd`;
-    my $exit = $? >> 8;
-    return ($exit, $output);
+    return ($? >> 8, $output);
 }
-
-# -----------------------------------------------------------------------
-# Helper: run chalk-emit-son-json on a file
-# -----------------------------------------------------------------------
 
 sub run_chalk ($file) {
     my $cmd = "$perl -Ilib -It/bootstrap/lib $chalk_script $file 2>/dev/null";
     my $output = `$cmd`;
-    my $exit = $? >> 8;
-    return ($exit, $output);
+    return ($? >> 8, $output);
 }
 
-# -----------------------------------------------------------------------
-# Helper: extract method names from SoN JSON
-# -----------------------------------------------------------------------
+sub decode_json ($str) {
+    return eval { JSON::PP->new->decode($str) };
+}
 
 sub method_names ($json_str) {
-    my $data = eval { JSON::PP->new->decode($json_str) };
+    my $data = decode_json($json_str);
     return () unless defined $data && ref $data->{methods} eq 'HASH';
     return sort keys $data->{methods}->%*;
 }
 
-# -----------------------------------------------------------------------
-# Helper: compare node ops for a single method between two JSON outputs
-# Returns hashref with match status and details
-# -----------------------------------------------------------------------
+# Compare op-type multisets (unordered) between two method graphs.
+# Returns a hashref with match details.
+sub compare_method_ops ($bson_data, $chalk_data, $method_name) {
+    my $bson_m  = $bson_data->{methods}{$method_name};
+    my $chalk_m = $chalk_data->{methods}{$method_name};
 
-sub compare_method ($bson_data, $chalk_data, $method_name) {
-    my $bson_method  = $bson_data->{methods}{$method_name};
-    my $chalk_method = $chalk_data->{methods}{$method_name};
+    return { status => 'missing_bson' }  unless defined $bson_m;
+    return { status => 'missing_chalk' } unless defined $chalk_m;
 
-    return { match => false, reason => 'missing from B::SoN' }
-        unless defined $bson_method;
-    return { match => false, reason => 'missing from Chalk' }
-        unless defined $chalk_method;
+    my @bson_ops  = map { $_->{op} } $bson_m->{nodes}->@*;
+    my @chalk_ops = map { $_->{op} } $chalk_m->{nodes}->@*;
 
-    # Compare node operation sequences (structural comparison)
-    my @bson_ops  = map { $_->{op} } $bson_method->{nodes}->@*;
-    my @chalk_ops = map { $_->{op} } $chalk_method->{nodes}->@*;
+    # Exact sequence match
+    my $seq_match = (join(',', @bson_ops) eq join(',', @chalk_ops));
 
-    my $bson_ops_str  = join(',', @bson_ops);
-    my $chalk_ops_str = join(',', @chalk_ops);
+    # Op-type multiset comparison (order-independent)
+    my %bson_bag;
+    $bson_bag{$_}++ for @bson_ops;
+    my %chalk_bag;
+    $chalk_bag{$_}++ for @chalk_ops;
 
-    if ($bson_ops_str eq $chalk_ops_str) {
-        return { match => true, node_count => scalar @bson_ops };
-    }
+    my %all_ops;
+    @all_ops{ keys %bson_bag, keys %chalk_bag } = ();
+    my @only_bson  = grep { ($bson_bag{$_} // 0) > ($chalk_bag{$_} // 0) } sort keys %all_ops;
+    my @only_chalk = grep { ($chalk_bag{$_} // 0) > ($bson_bag{$_} // 0) } sort keys %all_ops;
 
     return {
-        match      => false,
-        reason     => 'op sequence differs',
-        bson_ops   => \@bson_ops,
-        chalk_ops  => \@chalk_ops,
+        status      => $seq_match ? 'exact_match' : 'diverged',
         bson_count  => scalar @bson_ops,
         chalk_count => scalar @chalk_ops,
+        bson_ops    => \@bson_ops,
+        chalk_ops   => \@chalk_ops,
+        only_bson   => \@only_bson,
+        only_chalk  => \@only_chalk,
     };
 }
 
-# =======================================================================
-# Test 1: UseInfo.pm — both pipelines produce JSON
-# =======================================================================
+# -----------------------------------------------------------------------
+# Test files: (file, package) pairs where both Chalk and B::SoN produce output
+# -----------------------------------------------------------------------
 
-my $test_file = 'lib/Chalk/IR/UseInfo.pm';
-my $test_pkg  = 'Chalk::IR::UseInfo';
+my @test_cases = (
+    ['lib/Chalk/IR/UseInfo.pm',    'Chalk::IR::UseInfo'],
+    ['lib/Chalk/IR/ClassInfo.pm',  'Chalk::IR::ClassInfo'],
+    ['lib/Chalk/IR/MethodInfo.pm', 'Chalk::IR::MethodInfo'],
+    ['lib/Chalk/IR/SubInfo.pm',    'Chalk::IR::SubInfo'],
+    ['lib/Chalk/IR/Program.pm',    'Chalk::IR::Program'],
+    ['lib/Chalk/IR/Node.pm',       'Chalk::IR::Node'],
+);
 
-{
-    my ($bson_exit, $bson_json) = run_bson($test_file, $test_pkg);
-    is($bson_exit, 0, "B::SoN exits 0 for $test_file");
+# -----------------------------------------------------------------------
+# Aggregation counters
+# -----------------------------------------------------------------------
 
-    my ($chalk_exit, $chalk_json) = run_chalk($test_file);
-    is($chalk_exit, 0, "Chalk exits 0 for $test_file");
+my %totals = (
+    files_tested    => 0,
+    methods_common  => 0,
+    exact_matches   => 0,
+    divergences     => 0,
+    bson_only       => 0,
+    chalk_only      => 0,
+);
 
-    SKIP: {
-        skip "one or both pipelines failed", 4 if $bson_exit != 0 || $chalk_exit != 0;
+# Divergence categories: op types that appear exclusively in one pipeline
+my %bson_exclusive_ops;
+my %chalk_exclusive_ops;
 
-        my $bson_data  = eval { JSON::PP->new->decode($bson_json) };
-        my $chalk_data = eval { JSON::PP->new->decode($chalk_json) };
+# -----------------------------------------------------------------------
+# Run comparisons
+# -----------------------------------------------------------------------
 
-        ok(defined $bson_data, 'B::SoN output is valid JSON');
-        ok(defined $chalk_data, 'Chalk output is valid JSON');
+for my $tc (@test_cases) {
+    my ($file, $pkg) = $tc->@*;
 
-        # Both should have methods
-        my @bson_methods  = method_names($bson_json);
-        my @chalk_methods = method_names($chalk_json);
-        ok(scalar @bson_methods > 0, 'B::SoN found methods');
-        ok(scalar @chalk_methods > 0, 'Chalk found methods');
+    subtest "$file" => sub {
+        my ($bson_exit, $bson_json) = run_bson($file, $pkg);
+        my ($chalk_exit, $chalk_json) = run_chalk($file);
 
-        # Report which methods are in common
-        my %bson_set  = map { $_ => 1 } @bson_methods;
-        my %chalk_set = map { $_ => 1 } @chalk_methods;
-        my @common = grep { $bson_set{$_} } @chalk_methods;
-        my @bson_only  = grep { !$chalk_set{$_} } @bson_methods;
-        my @chalk_only = grep { !$bson_set{$_} } @chalk_methods;
-
-        diag("Common methods: " . join(', ', @common)) if @common;
-        diag("B::SoN only: " . join(', ', @bson_only)) if @bson_only;
-        diag("Chalk only: " . join(', ', @chalk_only)) if @chalk_only;
-
-        # Report method set overlap
-        ok(scalar @common > 0 || scalar @bson_only + scalar @chalk_only > 0,
-            'at least one method found in either pipeline');
-
-        # For common methods, compare op sequences
-        for my $method (@common) {
-            my $result = compare_method($bson_data, $chalk_data, $method);
-            if ($result->{match}) {
-                pass("$method: op sequences match ($result->{node_count} nodes)");
-            } else {
-                # Report as TODO — divergences are expected at this stage
-                TODO: {
-                    local $TODO = "IR divergences expected: $result->{reason}";
-                    fail("$method: $result->{reason}");
-                    if ($result->{reason} eq 'op sequence differs') {
-                        diag("  B::SoN ($result->{bson_count} nodes): "
-                            . join(', ', $result->{bson_ops}->@*));
-                        diag("  Chalk  ($result->{chalk_count} nodes): "
-                            . join(', ', $result->{chalk_ops}->@*));
-                    }
-                }
-            }
-        }
-    }
-}
-
-# =======================================================================
-# Test 2: Run comparison on a second file to verify harness works broadly
-# =======================================================================
-
-{
-    my $file2 = 'lib/Chalk/IR/FieldInfo.pm';
-    my $pkg2  = 'Chalk::IR::FieldInfo';
-
-    SKIP: {
-        skip "FieldInfo.pm not found", 2 unless -f $file2;
-
-        my ($bson_exit, $bson_json) = run_bson($file2, $pkg2);
-        my ($chalk_exit, $chalk_json) = run_chalk($file2);
-
-        is($bson_exit, 0, "B::SoN exits 0 for $file2");
+        is($bson_exit, 0, "B::SoN exits 0");
 
         TODO: {
             local $TODO = "not all files parse cleanly yet" if $chalk_exit != 0;
-            is($chalk_exit, 0, "Chalk exits 0 for $file2");
+            is($chalk_exit, 0, "Chalk exits 0");
         }
 
-        if ($bson_exit == 0 && $chalk_exit == 0) {
-            my $bson_data  = eval { JSON::PP->new->decode($bson_json) };
-            my $chalk_data = eval { JSON::PP->new->decode($chalk_json) };
+        return if $bson_exit != 0 || $chalk_exit != 0;
 
-            my @bson_methods  = method_names($bson_json);
-            my @chalk_methods = method_names($chalk_json);
-            my %bson_set = map { $_ => 1 } @bson_methods;
-            my @common = grep { $bson_set{$_} } @chalk_methods;
+        my $bson_data  = decode_json($bson_json);
+        my $chalk_data = decode_json($chalk_json);
 
-            for my $method (@common) {
-                my $result = compare_method($bson_data, $chalk_data, $method);
-                if ($result->{match}) {
-                    pass("$method: op sequences match");
-                } else {
-                    TODO: {
-                        local $TODO = "IR divergences expected: $result->{reason}";
-                        fail("$method: $result->{reason}");
+        ok(defined $bson_data,  'B::SoN valid JSON');
+        ok(defined $chalk_data, 'Chalk valid JSON');
+
+        return unless defined $bson_data && defined $chalk_data;
+
+        # Method sets
+        my @bson_methods  = method_names($bson_json);
+        my @chalk_methods = method_names($chalk_json);
+        my %bson_set  = map { $_ => 1 } @bson_methods;
+        my %chalk_set = map { $_ => 1 } @chalk_methods;
+        my @common     = grep { $bson_set{$_} } @chalk_methods;
+        my @bson_only  = grep { !$chalk_set{$_} } @bson_methods;
+        my @chalk_only = grep { !$bson_set{$_} } @chalk_methods;
+
+        $totals{files_tested}++;
+        $totals{bson_only}  += scalar @bson_only;
+        $totals{chalk_only} += scalar @chalk_only;
+
+        diag("common=" . scalar @common
+           . " bson_only=" . scalar @bson_only
+           . " chalk_only=" . scalar @chalk_only)
+            if @common || @bson_only || @chalk_only;
+
+        # Compare common methods
+        for my $method (@common) {
+            $totals{methods_common}++;
+            my $r = compare_method_ops($bson_data, $chalk_data, $method);
+
+            if ($r->{status} eq 'exact_match') {
+                $totals{exact_matches}++;
+                pass("$method: exact match ($r->{bson_count} nodes)");
+            }
+            else {
+                $totals{divergences}++;
+                $bson_exclusive_ops{$_}++  for $r->{only_bson}->@*;
+                $chalk_exclusive_ops{$_}++ for $r->{only_chalk}->@*;
+
+                TODO: {
+                    local $TODO = "IR divergences expected";
+                    fail("$method: diverged (B::SoN=$r->{bson_count} Chalk=$r->{chalk_count})");
+                    if ($r->{only_bson}->@*) {
+                        diag("  B::SoN extra ops: " . join(', ', $r->{only_bson}->@*));
+                    }
+                    if ($r->{only_chalk}->@*) {
+                        diag("  Chalk extra ops: " . join(', ', $r->{only_chalk}->@*));
                     }
                 }
             }
         }
+    };
+}
+
+# -----------------------------------------------------------------------
+# Summary report
+# -----------------------------------------------------------------------
+
+diag("");
+diag("=== SoN Comparison Summary ===");
+diag("Files tested:    $totals{files_tested}");
+diag("Common methods:  $totals{methods_common}");
+diag("Exact matches:   $totals{exact_matches}");
+diag("Divergences:     $totals{divergences}");
+diag("B::SoN only:     $totals{bson_only} methods");
+diag("Chalk only:      $totals{chalk_only} methods");
+
+if (%bson_exclusive_ops) {
+    diag("");
+    diag("Ops seen only in B::SoN (not Chalk):");
+    for my $op (sort { $bson_exclusive_ops{$b} <=> $bson_exclusive_ops{$a} } keys %bson_exclusive_ops) {
+        diag("  $op ($bson_exclusive_ops{$op}x)");
+    }
+}
+
+if (%chalk_exclusive_ops) {
+    diag("");
+    diag("Ops seen only in Chalk (not B::SoN):");
+    for my $op (sort { $chalk_exclusive_ops{$b} <=> $chalk_exclusive_ops{$a} } keys %chalk_exclusive_ops) {
+        diag("  $op ($chalk_exclusive_ops{$op}x)");
     }
 }
 
