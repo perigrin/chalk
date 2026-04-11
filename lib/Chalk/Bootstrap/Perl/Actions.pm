@@ -270,6 +270,33 @@ class Chalk::Bootstrap::Perl::Actions {
         return $result;
     }
 
+    # Helpers for unwrapping Return/Unwind trapped inside expression nodes
+    # by stale-value merge.  Declared here so they are visible to both
+    # _fix_postfix_chain and $_unwrap_stmt_from_expr.
+    my sub _stmt_inner($node) {
+        if ($node isa Chalk::IR::Node::Return) {
+            return ($node->inputs()->[1], $node->inputs()->[0]);  # value, control
+        }
+        # Unwind CFG node: control is inputs()->[0], exception args is inputs()->[1]
+        return ($node->inputs()->[1], $node->inputs()->[0]);
+    }
+
+    my sub _is_stmt_node($node) {
+        return $node isa Chalk::IR::Node::Return
+            || $node isa Chalk::IR::Node::Unwind;
+    }
+
+    my sub _rewrap_stmt($factory, $stmt_node, $new_inner) {
+        if ($stmt_node isa Chalk::IR::Node::Return) {
+            my $ctrl = $stmt_node->inputs()->[0];
+            return $factory->make_cfg('Return', inputs => [$ctrl, $new_inner]);
+        }
+        # Unwind: restore control token and update exception value.
+        my $ctrl = $stmt_node->inputs()->[0];
+        my $args = ref($new_inner) eq 'ARRAY' ? $new_inner : [$new_inner];
+        return $factory->make_cfg('Unwind', inputs => [$ctrl, $args]);
+    }
+
     # Post-process: fix misparented postfix chains in the IR tree.
     # The Earley parser's stale-value merge can produce
     # MethodCallExpr(PostfixDerefExpr(X, S), M, A) when the correct
@@ -523,36 +550,7 @@ class Chalk::Bootstrap::Perl::Actions {
         return $node;
     };
 
-    # Unwrap Return/Unwind trapped inside expression nodes by stale-value
-    # merge.  Earley's add() can produce IR like BinaryExpr(==, Return(ctrl,$x), 1)
-    # or SubscriptExpr(Return(ctrl,$h), $k, hash) when the statement keyword gets
-    # absorbed as the left operand.  Restructure so the statement wraps the
-    # expression: Return(ctrl, BinaryExpr(==, $x, 1)).
-    # Helper: extract inner value and control from a Return or Unwind node.
-    my sub _stmt_inner($node) {
-        if ($node isa Chalk::IR::Node::Return) {
-            return ($node->inputs()->[1], $node->inputs()->[0]);  # value, control
-        }
-        # Unwind CFG node: control is inputs()->[0], exception args is inputs()->[1]
-        return ($node->inputs()->[1], $node->inputs()->[0]);
-    }
-
-    my sub _is_stmt_node($node) {
-        return $node isa Chalk::IR::Node::Return
-            || $node isa Chalk::IR::Node::Unwind;
-    }
-
-    my sub _rewrap_stmt($factory, $stmt_node, $new_inner) {
-        if ($stmt_node isa Chalk::IR::Node::Return) {
-            my $ctrl = $stmt_node->inputs()->[0];
-            return $factory->make_cfg('Return', inputs => [$ctrl, $new_inner]);
-        }
-        # Unwind: restore control token and update exception value.
-        # Wrap $new_inner in arrayref — _emit_die_call expects inputs()->[1] to be an args arrayref.
-        my $ctrl = $stmt_node->inputs()->[0];
-        my $args = ref($new_inner) eq 'ARRAY' ? $new_inner : [$new_inner];
-        return $factory->make_cfg('Unwind', inputs => [$ctrl, $args]);
-    }
+    # (helpers moved before _fix_postfix_chain for lexical visibility)
 
     my $_unwrap_stmt_from_expr;
     $_unwrap_stmt_from_expr = sub ($factory, $node) {
