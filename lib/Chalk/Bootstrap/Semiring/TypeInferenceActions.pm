@@ -74,14 +74,36 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Wrapper rules: passthrough child's type
 
+    # Helper: Get call_symbol from Context tree (for builtin disambiguation)
+    my sub _get_call_symbol($ctx) {
+        return unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus && ref($focus) eq 'HASH' && exists $focus->{call_symbol}) {
+            return $focus->{call_symbol};
+        }
+        for my $child ($ctx->children()->@*) {
+            my $t = __SUB__->($child);
+            return $t if defined $t;
+        }
+        return;
+    }
+
     method Atom($ctx) {
         my $child_type = _get_rightmost_type($ctx);
-        return { valid => true, ($child_type ? (type => $child_type) : ()) };
+        my $call_sym = _get_call_symbol($ctx);
+        return { valid => true,
+            ($child_type ? (type => $child_type) : ()),
+            ($call_sym   ? (call_symbol => $call_sym) : ()),
+        };
     }
 
     method Expression($ctx) {
         my $child_type = _get_rightmost_type($ctx);
-        return { valid => true, ($child_type ? (type => $child_type) : ()) };
+        my $call_sym = _get_call_symbol($ctx);
+        return { valid => true,
+            ($child_type ? (type => $child_type) : ()),
+            ($call_sym   ? (call_symbol => $call_sym) : ()),
+        };
     }
 
     method PostfixExpression($ctx) {

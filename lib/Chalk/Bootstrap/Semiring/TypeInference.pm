@@ -76,6 +76,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Position-independent: position is bookkeeping, not semantics.
     method _extend_ctx_with_focus($value, $focus, $rule_name) {
         return undef unless defined $focus;
+        if ($ENV{DEBUG_KEYS_PCT} && ($rule_name eq 'Atom' || $rule_name eq 'Expression')
+                && exists $focus->{call_symbol}) {
+            warn "_extend: rule=$rule_name call_symbol=$focus->{call_symbol} value_children=" . scalar($value->children()->@*) . "\n";
+        }
         my $focus_key = $self->_tag_key($focus);
         my $children_key = join(":", map { refaddr($_) } $value->children()->@*);
         my $key = "ext:$rule_name:$focus_key:$children_key";
@@ -430,10 +434,46 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return $value;
     }
 
+    # Builtins whose first argument is a hash or array: keys %hash, values %hash, each %hash.
+    # When these are the LHS of what looks like a BinaryExpression, the % is a hash
+    # sigil, not the modulo operator.
+    my %HASH_ARG_BUILTINS = map { $_ => true } qw(keys values each);
+
     # should_scan: gate for scan operation, called after regex match succeeds
     # Returns true to proceed with scan, false to skip it.
     # Rejects keywords as QualifiedIdentifier when a keyword-consuming rule is predicted.
+    # Rejects % as BinaryOp when the LHS is a hash-taking builtin.
     method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
+        # Reject % as BinaryOp when the accumulated value has call_symbol for
+        # a hash-taking builtin. keys %hash is keys(%hash), not (keys) % (hash).
+        if ($rule_name eq 'BinaryOp' && $matched_text eq '%' && defined $value) {
+            # Check focus directly: Atom/Expression propagate call_symbol into focus
+            my $focus = $value->extract();
+            if ($ENV{DEBUG_KEYS_PCT}) {
+                my $dump; $dump = sub ($ctx, $depth) {
+                    return 'undef' unless defined $ctx;
+                    my $f = $ctx->extract();
+                    my $fs = defined $f && ref($f) eq 'HASH' ? join(',', map { "$_=" . ($f->{$_}//'undef') } sort keys %$f) : (defined $f ? ref($f) : 'undef');
+                    my @ch = $ctx->children()->@*;
+                    my $prefix = '  ' x $depth;
+                    warn "${prefix}focus={$fs} children=" . scalar(@ch) . "\n";
+                    for my $c (@ch) { $dump->($c, $depth+1) }
+                };
+                warn "should_scan BinaryOp '%' tree:\n";
+                $dump->($value, 1);
+            }
+            if (defined $focus && ref($focus) eq 'HASH'
+                    && exists $focus->{call_symbol}
+                    && $HASH_ARG_BUILTINS{ $focus->{call_symbol} }) {
+                return false;
+            }
+            # Also walk children in case the value is a multiply tree
+            my $call_sym = $self->_get_call_symbol($value);
+            if (defined $call_sym && $HASH_ARG_BUILTINS{$call_sym}) {
+                return false;
+            }
+        }
+
         # Only filter QualifiedIdentifier scans
         return true unless $rule_name eq 'QualifiedIdentifier';
 

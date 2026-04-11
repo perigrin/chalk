@@ -12,6 +12,10 @@ This is the **Chalk::Bootstrap** worktree - a clean-room implementation of a BNF
 
 **Design Philosophy**: Correctness > Learn from Chalk patterns > Simplicity
 
+**Architecture**: Read [ARCHITECTURE.md](ARCHITECTURE.md) for the layered
+parsing pipeline design. Read [CONTRIBUTING.md](CONTRIBUTING.md) for where
+different types of fixes belong.
+
 ## Development Environment
 
 **Perl Version**: This project requires Perl 5.42.0 for `feature class` support.
