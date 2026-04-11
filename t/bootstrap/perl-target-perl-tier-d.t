@@ -44,10 +44,7 @@ my %TODO_PARSE = (
 my %TODO_EVAL = (
     'lib/Chalk/Bootstrap/IR/NodeFactory.pm'
         => 'delete argument codegen issue',
-    'lib/Chalk/Bootstrap/Semiring/Boolean.pm'
-        => 'unless defined in method body',
-    'lib/Chalk/Bootstrap/Semiring/Structural.pm'
-        => 'complex bitfield operations',
+    # Boolean.pm and Structural.pm: FIXED (scoping fix unblocked them)
     'lib/Chalk/Bootstrap/Semiring/Precedence.pm'
         => 'complex hash operations',
     'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm'
@@ -60,10 +57,7 @@ my %TODO_EVAL = (
         => 'complex semiring delegation',
     'lib/Chalk/Bootstrap/Perl/Target/Perl.pm'
         => 'complex string interpolation patterns',
-    'lib/Chalk/Grammar/Perl/KeywordTable.pm'
-        => 'hash variable subscript emits spurious semicolon',
-    'lib/Chalk/Grammar/Perl/PrecedenceTable.pm'
-        => 'hash variable subscript emits spurious semicolon',
+    # KeywordTable.pm and PrecedenceTable.pm: FIXED (scoping + hash init)
     'lib/Chalk/Grammar/Perl/TypeLibrary.pm'
         => 'my sub declarations emit incorrectly',
     'lib/Chalk/Bootstrap/BNF/Target/XS/AST/XSUB.pm'
