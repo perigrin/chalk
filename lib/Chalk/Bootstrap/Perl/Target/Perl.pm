@@ -842,6 +842,23 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $name = $node->inputs()->[0]->value();
         my $args = $node->inputs()->[1];
 
+        # Block-argument form: map { BLOCK } LIST, grep { BLOCK } LIST, sort { BLOCK } LIST
+        # First arg is AnonSubExpr representing the block.
+        if ($args->@* >= 1 && $args->[0] isa Chalk::IR::Node::AnonSub) {
+            my $block_node = $args->[0];
+            my $body = $block_node->inputs()->[1];  # body is inputs[1]
+            my @body_items = ref($body) eq 'ARRAY' ? $body->@* : ($body);
+            my @body_strs = map { $self->_emit_node($_) } @body_items;
+            my $block_str = '{ ' . join(' ', @body_strs) . ' }';
+
+            my @rest = $args->@[1 .. $#{$args}];
+            if (@rest) {
+                my @rest_strs = map { $self->_emit_expr($_) } @rest;
+                return "$name $block_str " . join(', ', @rest_strs);
+            }
+            return "$name $block_str";
+        }
+
         my @arg_strs = map { $self->_emit_expr($_) } $args->@*;
 
         # Some builtins use list syntax (no parens)

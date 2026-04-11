@@ -1665,8 +1665,9 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # Collect argument values
+        # Collect argument values, preserving Block as AnonSubExpr
         my @args;
+        my $has_block = false;
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
             my $rule = $leaf->rule();
@@ -1676,6 +1677,19 @@ class Chalk::Bootstrap::Perl::Actions {
                 && $rule eq 'QualifiedIdentifier'
                 && defined $focus->value()
                 && $focus->value() eq $func_name;
+
+            # Block argument (map { BLOCK } LIST form): wrap as AnonSubExpr
+            if (defined $rule && $rule eq 'Block') {
+                my @body = ref($focus) eq 'ARRAY' ? $focus->@* : (defined $focus ? ($focus) : ());
+                my $block_node = $factory->make('Constructor',
+                    'class' => 'AnonSubExpr',
+                    params => [],
+                    body   => \@body,
+                );
+                unshift @args, $block_node;
+                $has_block = true;
+                next;
+            }
 
             if (ref($focus) eq 'ARRAY') {
                 push @args, $focus->@*;
