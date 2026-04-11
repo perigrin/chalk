@@ -32,7 +32,7 @@
 
 The Chalk Earley parser (`Chalk::Bootstrap::Earley`) is a scanless, general context-free parser at the center of Chalk's compilation pipeline. It accepts arbitrary BNF grammars and parses input strings by maintaining an Earley chart: a data structure that records which grammar rules have been recognized up to each position in the input.
 
-The parser is "scanless" in the Marpa/Horspool sense: it does not require a separate lexer phase. Terminals are regex patterns matched directly against the input using `\G`-anchored matching, and the parse operates character-by-character, advancing through input positions as patterns match.
+The parser is "scanless" in the Marpa sense (Kegler 2012): it does not require a separate lexer phase. Terminals are regex patterns matched directly against the input using `\G`-anchored matching, and the parse operates character-by-character, advancing through input positions as patterns match.
 
 Its role in the pipeline is:
 
@@ -65,6 +65,9 @@ The primary optimization source for this implementation. Chapters of particular 
 - Chapter 4: Core item enumeration and LR(0) DFA construction.
 - Chapter 6: Safe-set definition and chart garbage collection.
 - Chapter 7: Aycock-Horspool nullable symbol handling (prediction past epsilon-nullable nonterminals).
+
+**Kegler, Jeffrey. "Marpa: A Practical General Parser." 2012-2015.**  
+Introduced scanless Earley parsing (terminal matching integrated into the Earley loop) and the "Ruby Slippers" virtual token recovery strategy.
 
 **Local design documents**:
 - `docs/chalk-ayock-optimizations.md` — Pseudo-code walkthrough of Aycock integration into Chalk's semiring architecture, with implementation status table.

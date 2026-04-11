@@ -299,3 +299,11 @@ This arrangement works but creates coupling between the two semirings that the c
 - `lib/Chalk/Bootstrap/Semiring/TypeInferenceActions.pm` — rule-specific type computation methods
 - `t/bootstrap/semiring-value-propagation.t` — diagnostic test for the parse history contract
 - `docs/comonad-specification.md` — original design specification
+
+---
+
+## References
+
+- Uustalu, Tarmo and Varmo Vene. "The Essence of Dataflow Programming." *Central European Functional Programming School (CEFP)*, Lecture Notes in Computer Science 4164, 2005. Comonads as a framework for context-dependent computation — the theoretical basis for using a comonad to thread parse history.
+- Mac Lane, Saunders. *Categories for the Working Mathematician*. Springer, 1971. Original categorical definition of comonads (as the dual of monads).
+- Scott, Elizabeth. "SPPF-Style Parsing From Earley Recognisers." *Electronic Notes in Theoretical Computer Science*, 203(2):53-67, 2008. The conventional SPPF approach to Earley parse forests that Context replaces.

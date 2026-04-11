@@ -441,3 +441,9 @@ Resolving this limitation would require either (a) a richer tree representation 
 | `lib/Chalk/Grammar/Perl/KeywordTable.pm` | Keyword classification and rule mapping |
 | `lib/Chalk/Grammar/Perl/TypeLibrary.pm` | Type hierarchy, builtin signatures, operator types |
 | `lib/Chalk/Bootstrap/Context.pm` | Comonad context tree implementation |
+
+---
+
+## References
+
+- Goodman, Joshua. "Semiring Parsing." *Computational Linguistics*, 25(4):573-605, 1999. Foundational framework for parameterizing parsers by semirings to obtain different parse products (recognition, counting, Viterbi path, forest). Chalk's FilterComposite extends this with a product semiring that composes five components with priority-ordered disambiguation.

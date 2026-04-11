@@ -5,7 +5,7 @@
 
 ## Overview
 
-Chalk uses a Sea of Nodes intermediate representation (IR) to model Perl programs between the parsing stage and code generation. The design follows the principles described by Cliff Click in "A Simple Graph-Based Intermediate Representation" (1995), adapted for the needs of a Perl-to-Perl/C compiler.
+Chalk uses a Sea of Nodes intermediate representation (IR) to model Perl programs between the parsing stage and code generation. The design follows the principles described by Cliff Click and Michael Paleczny in "A Simple Graph-Based Intermediate Representation" (1995), adapted for the needs of a Perl-to-Perl/C compiler.
 
 In a Sea of Nodes representation, the program is a directed graph of value and control operations. Unlike a basic-block IR where instructions belong to a fixed sequence within a block, data nodes in a Sea of Nodes IR float freely. Their only ordering constraints come from explicit data-flow and control-flow edges. This gives optimization passes latitude to move computations without tracking block membership.
 
@@ -425,7 +425,7 @@ The Sea of Nodes representation supports several optimization passes that operat
 
 **Dead code elimination.** Any data node not reachable backward from a `Return` node's value input contributes no output. Such nodes can be removed. The use-def chains (consumers lists) make reachability straightforward to compute.
 
-**Global Code Motion (GCM).** Because data nodes carry no inherent block membership, they can be moved to any point in the schedule that satisfies their data dependences. GCM finds the earliest and latest legal schedule for each node and places it optimally.
+**Global Code Motion (GCM).** Because data nodes carry no inherent block membership, they can be moved to any point in the schedule that satisfies their data dependences. GCM (Click 1995b) finds the earliest and latest legal schedule for each node and places it optimally.
 
 **StructPromotion.** Hash references whose keys are statically known can be promoted to typed structs. The `StructRef` and `StructFieldAccess` nodes represent the output of this promotion pass, enabling the XS code generator to emit direct struct field accesses rather than hash lookups.
 
@@ -433,6 +433,7 @@ The Sea of Nodes representation supports several optimization passes that operat
 
 ## References
 
-- Cliff Click, "A Simple Graph-Based Intermediate Representation," ACM IR '95 Workshop, 1995.
+- Click, Cliff and Michael Paleczny. "A Simple Graph-Based Intermediate Representation." ACM SIGPLAN Workshop on Intermediate Representations (IR '95), 1995.
+- Click, Cliff. "Global Code Motion / Global Value Numbering." *Proceedings of the ACM SIGPLAN Conference on Programming Language Design and Implementation (PLDI)*, 1995.
 - Cliff Click and Keith D. Cooper, "Combining Analyses, Combining Optimizations," ACM TOPLAS 17(2), 1995.
 - Jean-Christophe Filliatre and Sylvain Conchon, "Type-Safe Modular Hash-Consing," ML Workshop 2006.
