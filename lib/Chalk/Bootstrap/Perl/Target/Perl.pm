@@ -560,7 +560,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $init = $node->inputs()->[1];
 
         if (defined $init) {
-            return "my $var = " . $self->_emit_expr($init) . ";";
+            return "my $var = " . $self->_emit_init_expr($var, $init) . ";";
         }
         return "my $var;";
     }
@@ -571,9 +571,34 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $init = $node->inputs()->[1];
 
         if (defined $init) {
-            return "my $var = " . $self->_emit_expr($init);
+            return "my $var = " . $self->_emit_init_expr($var, $init);
         }
         return "my $var";
+    }
+
+    # Emit a VarDecl initializer expression.
+    # For %hash or @array variables initialized with a HashRef/ArrayRef node,
+    # emit as a parenthesized list rather than a ref constructor.
+    method _emit_init_expr($var, $init) {
+        # Hash variable with HashRefExpr init: emit as (k, v, ...) not { k, v, ... }
+        if ($var =~ /^\%/ && $init isa Chalk::IR::Node::HashRef) {
+            my $pairs = $init->inputs()->[0];
+            if ($pairs->@*) {
+                my @strs = map { $self->_emit_expr($_) } $pairs->@*;
+                return '(' . join(', ', @strs) . ')';
+            }
+            return '()';
+        }
+        # Array variable with ArrayRef init: emit as (elems) not [elems]
+        if ($var =~ /^\@/ && $init isa Chalk::IR::Node::ArrayRef) {
+            my $elems = $init->inputs()->[0];
+            if ($elems->@*) {
+                my @strs = map { $self->_emit_expr($_) } $elems->@*;
+                return '(' . join(', ', @strs) . ')';
+            }
+            return '()';
+        }
+        return $self->_emit_expr($init);
     }
 
     method _emit_binary_expr($node) {

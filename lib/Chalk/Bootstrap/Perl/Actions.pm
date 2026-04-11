@@ -2401,6 +2401,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 $op = $focus;
             } elsif (defined $op && $focus isa Chalk::IR::Node) {
                 $value //= $focus;
+            } elsif (defined $op && ref($focus) eq 'ARRAY') {
+                # ParenExpr/ExpressionList returns an arrayref for (k => v, ...)
+                $value //= $focus;
             }
         }
 
@@ -2429,10 +2432,20 @@ class Chalk::Bootstrap::Perl::Actions {
             }
             # VarDecl target: set its initializer and return it
             if ($target isa Chalk::IR::Node::VarDecl) {
+                # If value is an arrayref (from ParenExpr/ExpressionList),
+                # wrap it in a HashRef node so it can be stored as a node input.
+                # The emitter will render it as (k, v, ...) for hash variable init.
+                my $init_value = $value;
+                if (ref($value) eq 'ARRAY') {
+                    $init_value = $factory->make('Constructor',
+                        'class' => 'HashRefExpr',
+                        pairs => $value,
+                    );
+                }
                 my $result = $factory->make('Constructor',
                     'class'       => 'VarDecl',
                     variable    => $target->inputs()->[0],
-                    initializer => $value,
+                    initializer => $init_value,
                 );
                 my $var_name_node = $target->inputs()->[0];
                 if ($var_name_node isa Chalk::IR::Node::Constant
