@@ -239,7 +239,9 @@ PostfixDeref ::= Expression _ /->/ _ /@\*/
 CallExpression ::= QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
     | QualifiedIdentifier WS ExpressionList
     | QualifiedIdentifier WS Block WS ExpressionList
-    | QualifiedIdentifier WS Block ;
+    | QualifiedIdentifier WS Block
+    | /(?:keys|values|each)\b/ WS HashVariable
+    | /(?:keys|values|each)\b/ WS ScalarVariable ;
 
 PostfixIncDec ::= Expression _ /\+\+/
     | Expression _ /--/ ;
