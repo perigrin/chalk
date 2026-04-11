@@ -5,8 +5,9 @@ use utf8;
 use experimental 'class';
 
 class Chalk::IR::UseInfo {
-    field $name :param :reader;
-    field $args :param :reader = [];
+    field $name    :param :reader;
+    field $args    :param :reader = [];
+    field $keyword :param :reader = 'use';
 
     # Content-based ID for use in NodeFactory hash-cons keys.
     # UseInfo objects are not hash-consed themselves, but may appear as inputs

@@ -19,7 +19,7 @@ class Chalk::Grammar::Perl::KeywordTable {
     #   Quoting:      qw q qq m s qr (prefix tokens for quoting/regex)
     #   Special:      __SUB__
     my %KEYWORDS = map { $_ => true } qw(
-        use class sub method ADJUST package
+        use no class sub method ADJUST package
         if unless elsif else
         while until for foreach
         try catch

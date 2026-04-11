@@ -1097,12 +1097,19 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
-    # §7 UseDeclaration ::= /use\b/ WS ModuleName
-    #                      | /use\b/ WS ModuleName WS ImportList
+    # §7 UseDeclaration ::= /(?:use|no)\b/ WS ModuleName
+    #                      | /(?:use|no)\b/ WS ModuleName WS ImportList
     method UseDeclaration($ctx) {
         my @leaves = _collect_ir_leaves($ctx);
         my $module_name;
         my $import_args;
+        my $keyword = 'use';
+
+        # Extract keyword from the scanned text (first word is 'use' or 'no')
+        my $text = $ctx->scanned_text();
+        if ($text =~ /^\s*no\b/) {
+            $keyword = 'no';
+        }
 
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -1124,8 +1131,9 @@ class Chalk::Bootstrap::Perl::Actions {
 
         my $name_str = defined $module_name ? $module_name->value() : '';
         return Chalk::IR::UseInfo->new(
-            name => $name_str,
-            args => $import_args // [],
+            name    => $name_str,
+            args    => $import_args // [],
+            keyword => $keyword,
         );
     }
 

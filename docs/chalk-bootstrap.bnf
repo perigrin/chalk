@@ -79,8 +79,8 @@ IteratorVariable ::= /my\b/ WS ScalarVariable
 
 # §7  USE DECLARATIONS
 
-UseDeclaration ::= /use\b/ WS ModuleName
-    | /use\b/ WS ModuleName WS ImportList ;
+UseDeclaration ::= /(?:use|no)\b/ WS ModuleName
+    | /(?:use|no)\b/ WS ModuleName WS ImportList ;
 
 ModuleName ::= QualifiedIdentifier
     | Version

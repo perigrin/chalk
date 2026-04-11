@@ -310,6 +310,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_use_decl($node) {
+        my $kw          = $node->keyword();
         my $module_name = $node->name();
         my $args = scalar($node->args()->@*) ? $node->args() : undef;
 
@@ -317,17 +318,17 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($module_name =~ /^v?[0-9]/) {
             if (defined $args) {
                 my @arg_strs = map { $self->_emit_expr($_) } $args->@*;
-                return "use $module_name " . join(', ', @arg_strs) . ";";
+                return "$kw $module_name " . join(', ', @arg_strs) . ";";
             }
-            return "use $module_name;";
+            return "$kw $module_name;";
         }
 
         if (defined $args) {
             my @arg_strs = map { $self->_emit_expr($_) } $args->@*;
-            return "use $module_name " . join(', ', @arg_strs) . ";";
+            return "$kw $module_name " . join(', ', @arg_strs) . ";";
         }
 
-        return "use $module_name;";
+        return "$kw $module_name;";
     }
 
     method _emit_class_decl($node) {
