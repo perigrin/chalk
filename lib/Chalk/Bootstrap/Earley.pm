@@ -1406,6 +1406,44 @@ class Chalk::Bootstrap::Earley {
         }
     }
 
+    # Create an annotated Context for a scan event.
+    # The focus is the matched text; annotations record the scan event metadata
+    # so semirings can inspect it during multiply-based reification.
+    # position defaults to 0; the caller is responsible for setting it
+    # via a subsequent Context construction if a specific position is needed.
+    method _make_scan_context($matched_text, $rule_name, $alt_idx, $predicted_at) {
+        use Chalk::Bootstrap::Context;
+        return Chalk::Bootstrap::Context->new(
+            focus       => $matched_text,
+            position    => 0,
+            annotations => {
+                scan      => true,
+                rule_name => $rule_name,
+                alt_idx   => $alt_idx,
+                predicted => $predicted_at,
+            },
+        );
+    }
+
+    # Create an annotated Context for a completion event.
+    # focus is undef because the completed value is wrapped as a child;
+    # annotations record the complete event metadata for semiring inspection.
+    method _make_complete_context($value, $rule_name, $alt_idx, $pos, $origin) {
+        use Chalk::Bootstrap::Context;
+        return Chalk::Bootstrap::Context->new(
+            focus       => undef,
+            children    => [$value],
+            position    => $pos,
+            annotations => {
+                complete  => true,
+                rule_name => $rule_name,
+                alt_idx   => $alt_idx,
+                pos       => $pos,
+                origin    => $origin,
+            },
+        );
+    }
+
     # After prediction, check for already-completed items of the predicted
     # rule at the current position and advance the waiting item. This handles
     # nullable nonterminals (like whitespace _) appearing multiple times in a
