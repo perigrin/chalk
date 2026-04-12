@@ -25,6 +25,26 @@ my sub make_scan_ctx($text) {
     );
 }
 
+# Helper: build a complete-annotated Context for multiply() calls.
+# Replaces on_complete($value, $rule_name, $alt_idx, $pos, $origin).
+my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
+    $pos    //= 0;
+    $origin //= 0;
+    $alt_idx //= 0;
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => defined($value) ? [$value] : [],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+};
+
 # --- Case 1: Backward compat — variable not in scope returns Constant ---
 # We test this by calling on_complete for ScalarVariable with a context that
 # has no cfg_state (or empty scope), and verify a Constant is returned.
@@ -39,7 +59,7 @@ my sub make_scan_ctx($text) {
     # Scan context for $unbound — no cfg_state set
     my $ctx = make_scan_ctx('$unbound');
 
-    my $result = $sa->on_complete($ctx, 'ScalarVariable', 0, 0, 0);
+    my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ScalarVariable', 0, 0, 0));
     ok(defined $result, 'on_complete returns a result');
 
     my $node = $result->extract();
@@ -73,7 +93,7 @@ my sub make_scan_ctx($text) {
         scope   => $scope,
     });
 
-    my $result = $sa->on_complete($ctx, 'ScalarVariable', 0, 0, 0);
+    my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ScalarVariable', 0, 0, 0));
     ok(defined $result, 'on_complete returns a result for in-scope variable');
 
     my $node = $result->extract();
@@ -118,7 +138,7 @@ my sub make_scan_ctx($text) {
     });
 
 
-    my $result = $sa->on_complete($ctx, 'ScalarVariable', 0, 0, 0);
+    my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ScalarVariable', 0, 0, 0));
     ok(defined $result, 'on_complete returns a result for sentinel variable');
 
     my $node = $result->extract();
@@ -162,7 +182,7 @@ my sub make_scan_ctx($text) {
         scope   => $scope,
     });
 
-    my $result = $sa->on_complete($ctx, 'ArrayVariable', 0, 0, 0);
+    my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ArrayVariable', 0, 0, 0));
     ok(defined $result, 'ArrayVariable on_complete returns result');
     my $node = $result->extract();
     is($node, $arr_node, 'ArrayVariable returns bound node from scope');
@@ -188,7 +208,7 @@ my sub make_scan_ctx($text) {
         scope   => $scope,
     });
 
-    my $result = $sa->on_complete($ctx, 'HashVariable', 0, 0, 0);
+    my $result = $sa->multiply($ctx, $make_complete->($ctx, 'HashVariable', 0, 0, 0));
     ok(defined $result, 'HashVariable on_complete returns result');
     my $node = $result->extract();
     is($node, $hash_node, 'HashVariable returns bound node from scope');
