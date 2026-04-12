@@ -100,23 +100,30 @@ it in, because that's when the full context is available.
 
 #### add — disambiguation
 
-`add` combines two alternative Contexts for the same span and rule:
+`add` combines two alternative Contexts for the same span and rule.
+FilterComposite's add is the product of each component's add:
 
-- Both zero → return zero
-- Left zero → return right
-- Right zero → return left
-- Both non-zero → each semiring disambiguates via its annotation slot
+```
+product map { $_->add($left, $right) } @components
+```
 
-Each semiring's `add` reads its annotation slot from both alternatives
-and picks the winner (like Viterbi picks the higher probability). The
-priority ordering (Precedence > TypeInference > Structural > SA)
-determines which semiring disambiguates first.
+Each component's `add` reads its annotation slot from both
+alternatives and returns its result (like Viterbi picks the higher
+probability). The product of all results determines the outcome:
 
-If no semiring can disambiguate (both alternatives are equivalent from
-every semiring's perspective), this is unresolved ambiguity. The
-Context can pack both alternatives and flag `is_ambiguous`. Higher
-rules get a chance to resolve it through subsequent multiplies. Only
-if ambiguity reaches `Program` does the parser throw an exception.
+- Any component returns zero → product is zero → alternative eliminated
+- All components return non-zero → alternative survives
+
+There is no priority ordering. Each component disambiguates
+independently on its own concern. Validity is the product of all
+components.
+
+If no component can disambiguate (both alternatives are equivalent
+from every component's perspective), this is unresolved ambiguity.
+The Context can pack both alternatives and flag `is_ambiguous`.
+Higher rules get a chance to resolve it through subsequent
+multiplies. Only if ambiguity reaches `Program` does the parser
+throw an exception.
 
 #### is_zero — single flag
 
@@ -135,8 +142,8 @@ Each semiring's operation is pure: `(Context, ...) -> Context`. The
 operations are idempotent per-slot — each semiring writes only its
 own slot, so merging is conflict-free.
 
-`_filter_compare` goes away. The priority ordering moves into `add`:
-semirings are consulted in order, first to disambiguate wins.
+`_filter_compare` goes away. `add` becomes a simple product of
+component-wise adds — no priority ordering needed.
 
 `set_type_context` / `current_type_context` go away. SA reads TI's
 annotations directly from the shared Context.
@@ -162,14 +169,16 @@ incremental through multiply.
 
 - `on_complete` callback on all semirings
 - `set_type_context()` / `current_type_context()` bridge
-- `_filter_compare` in FilterComposite
+- `_filter_compare` and priority ordering in FilterComposite
+  (was an implementation artifact, not part of the algebra)
 - Parallel Context trees (TI and SA no longer build independent trees)
 - N-tuple bookkeeping in FilterComposite
 - Per-semiring hash-cons caches for Context objects (one cache)
 
 ### What stays the same
 
-- The semiring algebra (product semiring, same axioms)
+- The semiring algebra (product semiring: validity is the product
+  of all components)
 - FilterComposite as orchestrator
 - Context comonad operations (extract, extend, walk)
 - The Earley parser core (predict, scan, complete)
