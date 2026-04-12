@@ -50,13 +50,37 @@ class Chalk::Bootstrap::Semiring::Structural {
         return $value == $ZERO;
     }
 
+    # _slot_val: extract the structural integer from an argument.
+    # Accepts either a raw integer (direct semiring value) or a full Context
+    # (when called from FilterComposite with the shared parse Context).
+    # Falls back to one() (0) when no structural annotation is present.
+    my sub _slot_val($val, $fallback) {
+        return $fallback unless defined $val;
+        # Context object: read from annotations->{structural}
+        if (blessed($val) && $val->can('annotations')) {
+            return $val->annotations()->{structural} // $fallback;
+        }
+        return $val;
+    }
+
     method multiply($left, $right) {
+        my $l = _slot_val($left,  $self->one());
+        my $r = _slot_val($right, $self->one());
+
+        # Scan event: right Context has annotations->{scan} = true.
+        # Structural is transparent at scan time — pass through unchanged.
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{scan}) {
+            return $ZERO if $l == $ZERO;
+            return $l;
+        }
+
         # Propagate zero
-        return $ZERO if $left == $ZERO;
-        return $ZERO if $right == $ZERO;
+        return $ZERO if $l == $ZERO;
+        return $ZERO if $r == $ZERO;
 
         # Combine tags from both sides using bitwise OR
-        return $left | $right;
+        return $l | $r;
     }
 
     method add($left, $right) {
@@ -212,14 +236,6 @@ class Chalk::Bootstrap::Semiring::Structural {
         return $left | $right;
     }
 
-    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
-        # Propagate zero
-        return $ZERO if $value == $ZERO;
-
-        # Transparent pass-through
-        return $value;
-    }
-
     method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
         return $ZERO if $value == $ZERO;
 
@@ -361,13 +377,6 @@ class Chalk::Bootstrap::Semiring::Structural {
             STRUCT_IS_BLOCK | STRUCT_IS_HASH | STRUCT_IS_CALL  | STRUCT_IS_LIST  |
             STRUCT_IS_DEREF | STRUCT_IS_METHOD | STRUCT_IS_BINOP | STRUCT_IS_VARDECL
         );
-    }
-
-    # should_scan: gate for scan operation, called after regex match succeeds
-    # Returns true to proceed with scan, false to skip it.
-    # Default: always return true (no filtering).
-    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
-        return true;
     }
 
     # slot_name: Structural reads/writes the 'structural' annotation slot.
