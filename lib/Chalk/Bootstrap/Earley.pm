@@ -7,6 +7,7 @@ use experimental 'class';
 use Chalk::Bootstrap::Terminal;
 use Chalk::Bootstrap::CoreItemIndex;
 use Chalk::Bootstrap::LR0DFA;
+use Chalk::Bootstrap::Context;
 
 class Chalk::Bootstrap::Earley {
     # Ruby Slippers: the set of terminal patterns that are closing delimiters
@@ -117,6 +118,39 @@ class Chalk::Bootstrap::Earley {
     # Precomputed lookup: nonterminal name => arrayref of core item IDs where
     # the dot is immediately before that nonterminal.
     method waiting_core_ids() { return \%_waiting_core_ids; }
+
+    # Reify a scan event as an annotated Context. The focus is the matched
+    # text; annotations carry rule_name, alt_idx, matched_text, and the
+    # predicted hashref so semirings can dispatch on them during multiply.
+    # Each call returns a fresh Context object — unique refaddr preserves
+    # hash-consing correctness even when two scans share the same value.
+    method _make_scan_context($matched_text, $rule_name, $alt_idx, $predicted_at) {
+        return Chalk::Bootstrap::Context->new(
+            focus       => $matched_text,
+            annotations => {
+                rule_name    => $rule_name,
+                alt_idx      => $alt_idx,
+                matched_text => $matched_text,
+                predicted    => $predicted_at,
+            },
+        );
+    }
+
+    # Reify a completion event as an annotated Context. The focus is the
+    # completed value (may be an IR node or any semiring value); annotations
+    # carry rule_name, alt_idx, pos, and origin so semirings can dispatch
+    # on the completed symbol during multiply.
+    method _make_complete_context($value, $rule_name, $alt_idx, $pos, $origin) {
+        return Chalk::Bootstrap::Context->new(
+            focus       => $value,
+            annotations => {
+                rule_name => $rule_name,
+                alt_idx   => $alt_idx,
+                pos       => $pos,
+                origin    => $origin,
+            },
+        );
+    }
 
     # GC statistics accessor
     method gc_stats() {
