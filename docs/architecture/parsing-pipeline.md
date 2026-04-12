@@ -72,19 +72,15 @@ Combines two values in sequence (corresponding to consecutive symbols in a gramm
 **`add($left, $right)`**
 Combines two values representing alternative derivations of the same span. Performs disambiguation: returns a single winner (or in some semirings, an arrayref of survivors following the FilterComposite convention). A semiring that cannot distinguish between alternatives returns a value not equal to either input; FilterComposite interprets this as "no preference" and consults the next semiring.
 
-### Parse Event Callbacks
+### Parse Event Handling via Annotated Contexts
 
-**`on_scan($value, $rule_name, $alt_idx, $pos, $matched_text)`**
-Called when a terminal is successfully matched at position `$pos` in the input. The semiring receives its current accumulated value and the matched text. Returns the updated value, or zero to kill this path. Used to attach type tags to literals, validate operator precedence against the accumulated left-operand context, and create leaf nodes in the Context tree.
+Parse events (scan, complete, absent optional) are communicated to semirings via annotated `Context` objects passed as the right argument to `multiply`. Semirings inspect `$right->annotations()` to detect the event type:
 
-**`should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted)`**
-A pre-scan gate called before `on_scan`, after the terminal regex has already matched. Returns true to allow the scan to proceed, false to veto it. This is distinct from `on_scan` because rejection here prevents the scan from entering the chart at all. `$is_predicted` is either a hashref or a callback that returns true if a given rule name is currently predicted at this chart position. TypeInference uses `should_scan` to reject keywords as `QualifiedIdentifier` when a keyword-consuming rule is predicted.
+- **Scan event**: `annotations->{scan} = true`. Focus holds the matched text; `rule_name`, `alt_idx`, and `predicted` (a hashref of rules predicted at this chart position) are also in annotations. Semirings use this to attach type tags, validate operator precedence, and perform keyword rejection.
+- **Complete event**: `annotations->{complete} = true`. `rule_name`, `alt_idx`, `pos`, and `origin` are in annotations. Semirings apply rule-completion logic (level assignment, structural tagging, IR node construction). `$right->children->[0]` holds the accumulated child value.
+- **Absent optional**: The parser calls `multiply($value, one())` when an optional symbol (`X?`) is skipped. No special annotation is needed; `one()` is the identity element and the result is an unfocused Context node.
 
-**`on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit)`**
-Called when a nonterminal rule completion is recognized. The semiring receives the accumulated value for the completed rule and returns an updated value. `$alt_idx` identifies which alternative of the rule matched. `$on_epoch_commit` is an optional callback invoked by SemanticAction when the `StatementItem` rule completes, for chart GC. Returns zero to kill this derivation.
-
-**`on_skip_optional($value, $rule_name, $alt_idx, $pos, $symbol_name)`**
-Called when an optional symbol (`X?`) is skipped. Allows semirings to insert a placeholder into the Context tree so that positional child indexing in action methods remains consistent regardless of whether the optional symbol was present or absent.
+This design eliminates separate callback methods (`on_scan`, `should_scan`, `on_complete`, `on_skip_optional`). All semiring logic runs inline during `multiply`, with event type determined by inspection of the right argument's annotations.
 
 ---
 
@@ -92,21 +88,21 @@ Called when an optional symbol (`X?`) is skipped. Allows semirings to insert a p
 
 `FilterComposite` is the outermost semiring presented to the Earley parser. It holds an ordered list of component semirings and manages a 5-tuple value where each element is the value for the corresponding component.
 
-### Tuple Representation
+### Shared Context Representation
 
-Each chart item value is an arrayref `[$bool_val, $prec_val, $ti_val, $struct_val, $sa_val]`. The components are not aware of each other; `FilterComposite` slices the tuple before dispatching and reassembles it after.
+Each chart item value is a shared `Context` object. All components inspect and annotate the same Context: annotation-layer semirings write to named slots in `annotations` (e.g., `annotations->{precedence}`, `annotations->{structural}`, `annotations->{type}`), and SemanticAction owns the focus field and `annotations->{cfg}`.
 
 ### Zero Propagation
 
-`is_zero` returns true if ANY component is zero. This means any semiring can kill a derivation unilaterally: a precedence violation, a type mismatch, or a structural conflict all produce the same result — the path is removed from the chart.
+`is_zero` returns true if the Context's `is_zero` flag is set. Any semiring can kill a derivation unilaterally: a precedence violation, a type mismatch, or a structural conflict all produce the same result — the path is removed from the chart.
 
-`multiply` applies zero propagation per component and then runs a second pass checking for zeros in the result. The multiply is atomic: either all components succeed and contribute to a joint result, or the whole product is zero.
+`multiply` applies zero propagation per component and short-circuits as soon as any component returns zero. The multiply is atomic: either all components succeed and contribute to a joint result, or the whole product is zero.
 
-### Per-Component Dispatch
+### Per-Component Dispatch in `multiply`
 
-`on_scan`, `on_complete`, `on_skip_optional`, and `should_scan` all dispatch to each component with its own value slice. For `on_scan` and `on_complete`, if any component returns zero, `FilterComposite` returns its own zero immediately without calling subsequent components.
+All parse event handling (scan, complete, absent optional) flows through `multiply`. `FilterComposite.multiply` calls each annotation-layer semiring's `multiply` in order, passing the full Context objects. Each semiring detects the event type from the right Context's annotations and applies its logic inline. If any component returns zero, `FilterComposite` returns its own zero immediately without calling subsequent components.
 
-`should_scan` uses first-false short-circuit semantics: if any component returns false, the scan is vetoed without consulting subsequent components.
+After annotation-layer semirings run, the TypeInference tag hash result is threaded to SemanticAction via `set_type_context()` so that action methods can read type annotations via `current_type_context()` during complete events.
 
 ### First-Wins Disambiguation in `add`
 
@@ -121,7 +117,7 @@ This is the "first-wins ordered priority" model. Earlier semirings have higher p
 
 ### TypeInference-to-SemanticAction Context Threading
 
-After TypeInference computes its type tag hash during `on_complete`, FilterComposite wraps it in a Context and passes it to SemanticAction via `set_type_context()` before calling SemanticAction's `on_complete`. This bridge allows action methods to read type annotations via `current_type_context()`. The type tag hash is also stored as `annotations->{type}` on the result Context for direct access by tree-walkers.
+After TypeInference computes its type tag hash during a complete event, `FilterComposite.multiply` wraps it in a Context and passes it to SemanticAction via `set_type_context()` before calling SemanticAction's `multiply`. This bridge allows action methods to read type annotations via `current_type_context()`. The type tag hash is also stored as `annotations->{type}` on the result Context for direct access by tree-walkers.
 
 ### Post-Merge Hook
 
@@ -135,13 +131,10 @@ After TypeInference computes its type tag hash during `on_complete`, FilterCompo
 
 - `zero`: a unique arrayref identity (`$ZERO = []`). Equality is checked via `refaddr` so the zero element cannot be accidentally confused with any other reference.
 - `one`: the Perl boolean `true`.
-- `multiply`: returns `$ZERO` if either argument is zero; otherwise `true`.
+- `multiply`: returns `$ZERO` if either argument is zero; otherwise `true`. Scan and complete events (detected via annotations) are treated identically — both return `true` if value is non-zero.
 - `add`: returns `true` if either argument is non-zero; otherwise `$ZERO`.
-- `on_scan`: returns `multiply($value, one())`, which is effectively identity when value is non-zero.
-- `on_complete`: returns value unchanged.
-- `should_scan`: always returns true.
 
-The Boolean semiring supports Leo optimization (`supports_leo` returns true). Leo's algorithm collapses right-recursive completions into a chain, avoiding O(n^2) behavior. This is safe here because `on_complete` is identity and `multiply` is associative, so skipping intermediate completions does not change the result.
+The Boolean semiring supports Leo optimization (`supports_leo` returns true). Leo's algorithm collapses right-recursive completions into a chain, avoiding O(n^2) behavior. This is safe because multiply is effectively identity for non-zero values and is associative, so skipping intermediate completions does not change the result.
 
 ---
 
@@ -155,11 +148,11 @@ TypeInference values are `Context` objects whose focus is a hashref of type tags
 
 `zero`: `undef`.
 `one`: a singleton Context with focus `{ valid => true }` and no children.
-`multiply`: creates a new Context with `undef` focus and both arguments as children. This unfocused multiply node represents a partial derivation that has not yet been completed by `on_complete`. Hash-consed by the refaddrs of its children.
+`multiply`: creates a new Context with `undef` focus and both arguments as children. This unfocused multiply node represents a partial derivation that has not yet been completed. Hash-consed by the refaddrs of its children. When the right argument carries `annotations->{scan}=true`, `multiply` returns a type tag hash for the scanned token. When the right argument carries `annotations->{complete}=true`, `multiply` applies type inference for the completed rule.
 
-### Type Tags Attached at Scan Time (`on_scan`)
+### Type Tags Attached at Scan Time
 
-`on_scan` attaches type information to leaf Contexts based on what was matched:
+The scan branch of `multiply` attaches type information to leaf Contexts based on what was matched:
 
 - `RegexLiteral` scans: `{ type => 'Regex' }`
 - `QualifiedIdentifier` scans for known builtins: `{ call_symbol => $name, ident_text => $name }`
@@ -173,9 +166,9 @@ TypeInference values are `Context` objects whose focus is a hashref of type tags
 
 Pre-cached singleton Contexts are used for the fixed-tag combinations to avoid object allocation on every scan.
 
-### Type Propagation at Complete Time (`on_complete`)
+### Type Propagation at Complete Time
 
-`on_complete` dispatches to `TypeInferenceActions` (a separate class containing one method per grammar rule) via `can()` followed by `->dispatch()`. Each action method receives the accumulated Context tree for the completed rule and returns a focus hashref for the result. `on_complete` then calls `_extend_ctx_with_focus` to create a new focused Context preserving the children from the completed value.
+The complete branch of `multiply` dispatches to `TypeInferenceActions` (a separate class containing one method per grammar rule) via `can()` followed by `->dispatch()`. Each action method receives the accumulated Context tree for the completed rule and returns a focus hashref for the result. The complete branch then calls `_extend_ctx_with_focus` to create a new focused Context preserving the children from the completed value.
 
 Action methods use tree-walking helpers (`_get_rightmost_type`, `_get_op_text`, `_get_call_symbol`, `_get_item_types`) to extract tags from any depth in the multiply tree. Because the tree is a product of all scans and intermediate completions, tags set at any leaf are reachable from any ancestor.
 
@@ -195,7 +188,7 @@ Key type computations:
 2. `TypeLibrary::get_builtin($name)` fetches the signature: `min_arity`, `arg_types`, `return_type`.
 3. `_get_item_types` retrieves the per-position argument types from the ExpressionList context.
 4. For each argument position, `TypeLibrary::type_satisfies($actual, $expected)` validates compatibility.
-5. If arity is below `min_arity`, or any argument type is incompatible, `on_complete` returns `undef` (zero), killing the derivation.
+5. If arity is below `min_arity`, or any argument type is incompatible, the complete branch of `multiply` returns `undef` (zero), killing the derivation.
 
 `alt_idx` 2 and 3 correspond to block-first builtins (`map`, `grep`, `sort`), where the block counts as an implicit first argument. The `sig_offset` and `arity` adjustments account for this.
 
@@ -210,7 +203,7 @@ Key type computations:
 - Binary operator signatures covering arithmetic, string, comparison, logical, bitwise, regex binding, and range operators.
 - Unary operator signatures for `!`, `not`, `-`, `+`, `~`, `\`.
 
-### KeywordTable: Keyword Rejection via `should_scan`
+### KeywordTable: Keyword Rejection at Scan Time
 
 `Chalk::Grammar::Perl::KeywordTable` defines three data structures:
 
@@ -218,16 +211,16 @@ Key type computations:
 - `%HARD_KEYWORDS`: words that are unconditionally rejected as `QualifiedIdentifier`, regardless of prediction state (`else`, `elsif`). These are never valid as function names.
 - `%KEYWORD_RULES`: maps each keyword to the grammar rule(s) that consume it.
 
-`TypeInference.should_scan` implements this logic:
+The scan branch of `TypeInference.multiply` implements keyword rejection:
 
 1. Only applies to `QualifiedIdentifier` scans (other rule names pass through).
 2. Qualified identifiers containing `::` are never keywords; pass through.
 3. If the matched text is not in `%KEYWORDS`, pass through.
 4. If the matched text is a hard keyword, always reject.
-5. Look up `keyword_rules($matched_text)`. For each rule in the list, check whether that rule is predicted at the current chart position using the `$is_predicted` parameter. If any consuming rule is predicted, reject the scan (return false).
+5. Look up `keyword_rules($matched_text)`. For each rule in the list, check whether that rule is predicted at the current chart position using `annotations->{predicted}`. If any consuming rule is predicted, reject the scan (return undef/zero).
 6. If no consuming rule is predicted, admit the identifier. This handles the fat-arrow case: `class => "Foo"` inside an expression list, where `ClassBlock` is not predicted.
 
-Additionally, `should_scan` rejects `%` as `BinaryOp` when the accumulated context contains a `call_symbol` for `keys`, `values`, or `each`. This prevents `keys %hash` from parsing as `(keys) % (hash)`.
+Additionally, the scan branch rejects `%` as `BinaryOp` when the accumulated context contains a `call_symbol` for `keys`, `values`, or `each`. This prevents `keys %hash` from parsing as `(keys) % (hash)`.
 
 ---
 
@@ -272,18 +265,20 @@ In addition to operator levels, `on_complete` assigns conceptual levels to expre
 
 Negative levels are treated as a distinct domain from binary operator levels. Two negative-level values in `multiply` are passed through without precedence nesting checks.
 
-### Operator Validation at Scan Time (`on_scan`)
+### Operator Validation at Scan Time
 
-When a `BinaryOp` or `AssignOp` terminal is scanned, `on_scan` looks up the operator in `PrecedenceTable`, then checks whether the left operand's accumulated level (stored in the current value) is compatible:
+The scan branch of `Precedence.multiply` runs when `$right->annotations()->{scan}` is true. It looks up the operator in `PrecedenceTable`, then checks whether the left operand's accumulated level is compatible:
 
 - If the left operand's level is greater than the operator's level (meaning the left operand has lower precedence than the operator expects), the scan is rejected (`zero` is returned), killing that derivation.
 - If compatible, the accumulated value is replaced with a new value carrying the operator's level and setting `is_operator = true`.
 
-This `is_operator` flag marks the value as carrying an operator token, not an expression. `multiply` uses this flag to distinguish the moment when a `BinaryOp` completion multiplies back into a `BinaryExpression` context from the moment when a right-operand `Expression` is assembled.
+This `is_operator` flag marks the value as carrying an operator token, not an expression. The regular `multiply` path uses this flag to distinguish the moment when a `BinaryOp` completion multiplies back into a `BinaryExpression` context from the moment when a right-operand `Expression` is assembled.
 
-Subscript bracket boundary enforcement also occurs in `on_scan`: when `[` or `{` is scanned inside a `Subscript` rule and the accumulated value carries a level >= 0 (indicating a `BinaryExpression` target), the scan is rejected. This prevents `$a->[$i] // $a->[-1]` from parsing as `($a->[$i] // $a)->[-1]`.
+Subscript bracket boundary enforcement also occurs at scan time: when `[` or `{` is scanned inside a `Subscript` rule and the accumulated value carries a level >= 0 (indicating a `BinaryExpression` target), the scan is rejected. This prevents `$a->[$i] // $a->[-1]` from parsing as `($a->[$i] // $a)->[-1]`.
 
-### Level Propagation at Complete Time (`on_complete`)
+### Level Propagation at Complete Time
+
+The complete branch of `Precedence.multiply` runs when `$right->annotations()->{complete}` is true:
 
 - Parenthesized boundaries (`ParenExpr`, `ArrayConstructor`, `HashConstructor`) reset to `one()`, clearing all operator context.
 - Expression-type rules (`PostfixExpression`, `UnaryExpression`, `TernaryExpression`, `AssignmentExpression`) are assigned their conceptual level. `PostfixExpression` additionally rejects its value if it carries a level in 0..99, preventing unparenthesized `BinaryExpression` from being a postfix target.
@@ -314,9 +309,9 @@ When two Precedence values compete, `add` returns the value with the higher leve
 | 6   | `STRUCT_IS_BINOP`  | 64    | Completed a `BinaryExpression` rule            |
 | 7   | `STRUCT_IS_VARDECL`| 128   | Completed a `VariableDeclaration` rule         |
 
-`zero`: -1 (outside the valid 0-255 range). `one`: 0 (no bits set). `is_zero`: equality with -1. `multiply`: bitwise OR (with zero propagation). `on_scan`: transparent pass-through.
+`zero`: -1 (outside the valid 0-255 range). `one`: 0 (no bits set). `is_zero`: equality with -1. `multiply`: bitwise OR (with zero propagation). Scan events are transparent pass-throughs.
 
-### Tag Assignment in `on_complete`
+### Tag Assignment at Complete Time
 
 Each rule completion sets specific bits and selectively inherits bits from the child value:
 
@@ -371,19 +366,19 @@ SemanticAction values are Context objects. The Context type is defined in `Chalk
 
 `zero`: `undef`. `one`: a singleton Context with `undef` focus, no children, and a `cfg_state` entry pointing to a fresh `Start` node and empty `Scope`.
 
-`multiply` creates a new Context with `undef` focus and both arguments as children. It also propagates CFG state: the right child's state is preferred (it is later in sequence), but a `Start` control token from the right does not overwrite a more advanced token from the left. Scopes from both sides are merged.
+`multiply` creates a new Context with `undef` focus and both arguments as children. It propagates CFG state: the right child's state is preferred (it is later in sequence), but a `Start` control token from the right does not overwrite a more advanced token from the left. Scopes from both sides are merged.
 
-### Action Dispatch in `on_complete`
+When the right argument carries `annotations->{complete}=true`, `multiply` applies semantic action dispatch for the completed rule (see below).
 
-`on_complete` looks up the action method for `$rule_name` on the `$actions` object via `can()`. If found, the method is called as `$actions->$rule_name($value)`, receiving the accumulated Context tree. The method returns an IR node (or other focus value). A new Context is constructed with that focus and the rule name set.
+When an optional symbol (`X?`) is absent, the parser calls `multiply($value, one())`. The `one()` identity produces an unfocused Context node. Action methods that access children by position receive this unfocused node for absent optionals.
+
+### Action Dispatch at Complete Time
+
+The complete branch of `multiply` looks up the action method for `$rule_name` on the `$actions` object via `can()`. If found, the method is called as `$actions->$rule_name($value)`, receiving the accumulated Context tree. The method returns an IR node (or other focus value). A new Context is constructed with that focus and the rule name set.
 
 If no action method is registered, the value passes through unchanged, preserving the Context tree for higher-level actions to consume.
 
 Action methods in `Actions.pm` access CFG state via `Chalk::Bootstrap::Semiring::SemanticAction::current_instance()->cfg_state($ctx)` and request state updates via `->update_cfg($new_state)`. The semiring applies pending updates to the result context after the action returns.
-
-### Placeholder for Optional Symbols
-
-`on_skip_optional` creates a placeholder Context with rule name `"${symbol_name}_opt"`. This placeholder occupies the same child position as the symbol would have if present. Action methods that access children by position (e.g., `$value->children->[2]`) receive the placeholder instead of `undef`, allowing consistent indexing.
 
 ### `add` and Disambiguation
 
@@ -406,23 +401,23 @@ The `on_merge` hook addresses a specific Earley engine issue. When `add()` in Fi
 
 ## 10. Known Issues
 
-### TypeInference Value Propagation: Tags Lost Between `on_scan` and `should_scan`
+### TypeInference Value Propagation: Tags Lost Between Scan and Complete Events
 
-There is a structural limitation in TypeInference's ability to use accumulated type context within `should_scan`.
+There is a structural limitation in TypeInference's ability to use accumulated type context at scan time.
 
-Tags produced by `on_scan` for a given item are threaded through the multiply tree and are accessible via tree-walking from within `on_complete` (which sees the accumulated value for the entire completed rule). However, `should_scan` is called for each terminal scan as the rule is being built, before `on_complete` has been called. At this point, the accumulated value is an unfocused multiply tree of intermediate scan results.
+Tags produced during scan events for a given item are threaded through the multiply tree and are accessible via tree-walking from within the complete branch of `multiply` (which sees the accumulated value for the entire completed rule). However, the scan branch runs for each terminal scan as the rule is being built, before the complete branch has been called. At this point, the accumulated value is an unfocused multiply tree of intermediate scan results.
 
-The issue is that `_extend_ctx_with_focus` (called by `on_complete`) replaces the multiply tree with a new focused Context. This focused node is what downstream rules see. But within a rule still being assembled, the multiply tree has not been focused yet. Tree-walkers invoked from `should_scan` can search unfocused multiply nodes, but those nodes hold only scan-time tags (type, op_text, ident_text), not the richer on_complete-level tags (call_symbol propagated through Expression, item_types from ExpressionList).
+The issue is that `_extend_ctx_with_focus` (called during completion) replaces the multiply tree with a new focused Context. This focused node is what downstream rules see. But within a rule still being assembled, the multiply tree has not been focused yet. Tree-walkers invoked from the scan branch can search unfocused multiply nodes, but those nodes hold only scan-time tags (type, op_text, ident_text), not the richer completion-level tags (call_symbol propagated through Expression, item_types from ExpressionList).
 
-Practically: when `should_scan` for a `BinaryOp` scan tries to check whether the left operand is a `keys`/`values`/`each` call, it can only examine the partially-assembled multiply tree for the current `BinaryExpression`. If the `call_symbol` tag was set by `on_complete` of an inner `Atom` or `Expression` and was then folded into a new focused Context by `_extend_ctx_with_focus`, the tree-walker can find it. But if the multiply chain has not yet been focused (e.g., the Expression rule has not yet completed), the tag may not be in any leaf.
+Practically: when the scan branch for a `BinaryOp` scan tries to check whether the left operand is a `keys`/`values`/`each` call, it can only examine the partially-assembled multiply tree for the current `BinaryExpression`. If the `call_symbol` tag was set by the complete branch for an inner `Atom` or `Expression` and was then folded into a new focused Context by `_extend_ctx_with_focus`, the tree-walker can find it. But if the multiply chain has not yet been focused (e.g., the Expression rule has not yet completed), the tag may not be in any leaf.
 
-In the current implementation, the `keys %hash` case works because `Atom.on_complete` and `Expression.on_complete` in `TypeInferenceActions` propagate `call_symbol` into the new focused Context's focus hashref, which is reachable by tree-walking. The issue becomes relevant for cases where the blocking context for a semantic rejection depends on a tag that has not yet been promoted through an intermediate `on_complete`.
+In the current implementation, the `keys %hash` case works because `Atom` and `Expression` completions in `TypeInferenceActions` propagate `call_symbol` into the new focused Context's focus hashref, which is reachable by tree-walking. The issue becomes relevant for cases where the blocking context for a semantic rejection depends on a tag that has not yet been promoted through an intermediate completion.
 
-The consequence is that TypeInference cannot reliably reject semantically invalid parses where the invalidity depends on type context that spans multiple rule completions before the point where `should_scan` needs to act. For example, rejecting a bareword as a binary operand based on its position in a fully-typed expression would require type information from a higher-level completion that has not yet occurred when `should_scan` is called for the bareword's scan.
+The consequence is that TypeInference cannot reliably reject semantically invalid parses where the invalidity depends on type context that spans multiple rule completions before the point where the scan branch needs to act. For example, rejecting a bareword as a binary operand based on its position in a fully-typed expression would require type information from a higher-level completion that has not yet occurred when the scan branch is processing the bareword.
 
 This is the primary reason the current semiring order (`[Boolean, Precedence, TypeInference, Structural, SemanticAction]`) has not been changed to the target order (`[Boolean, TypeInference, Precedence, Structural, SemanticAction]`): TypeInference cannot fully exercise higher-priority disambiguation with its current value propagation model, and placing it before Precedence would introduce a risk of changing disambiguation outcomes without corresponding correctness gains.
 
-Resolving this limitation would require either (a) a richer tree representation that carries on_complete-focused nodes at every intermediate step (increasing memory pressure), or (b) a two-pass architecture where TypeInference re-validates completed spans against a finalized type context, similar to the extend-based redesign described in `docs/plans/2026-02-20-typeinference-redesign.md`.
+Resolving this limitation would require either (a) a richer tree representation that carries completion-focused nodes at every intermediate step (increasing memory pressure), or (b) a two-pass architecture where TypeInference re-validates completed spans against a finalized type context, similar to the extend-based redesign described in `docs/plans/2026-02-20-typeinference-redesign.md`.
 
 ---
 
