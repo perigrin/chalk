@@ -16,7 +16,10 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     method _annotation_semirings() {
         # All semirings except the last (SA) that have a defined slot_name.
         # Boolean has slot_name=undef and is handled through is_zero flag only.
-        return grep { defined $_->slot_name() } $semirings->@[0 .. $#{ $semirings } - 1];
+        # Non-object semirings (legacy test stubs) are skipped.
+        return grep {
+            blessed($_) && $_->can('slot_name') && defined $_->slot_name()
+        } $semirings->@[0 .. $#{ $semirings } - 1];
     }
 
     # Clear hash-cons caches in all component semirings that support it.
@@ -44,13 +47,16 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # copying it plus all annotation-layer slots.
     method one() {
         my $sa_one = $self->_sa()->one();
-        my $annotations = { $sa_one->annotations()->%* };
+        # SA must return a Context; non-Context last semirings get a plain wrapper.
+        my $is_ctx = blessed($sa_one) && $sa_one->can('annotations');
+        my $annotations = $is_ctx ? { $sa_one->annotations()->%* } : {};
         for my $sr ($self->_annotation_semirings()) {
             my $slot = $sr->slot_name();
             $annotations->{$slot} = $sr->one();
         }
+        my $focus = $is_ctx ? $sa_one->extract() : $sa_one;
         return Chalk::Bootstrap::Context->new(
-            focus    => $sa_one->extract(),
+            focus    => $focus,
             children => [],
             position => 0,
             is_zero  => false,
@@ -59,8 +65,29 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     }
 
     # is_zero() checks the Context's is_zero flag directly.
+    # Handles non-Context values from legacy semiring configurations.
     method is_zero($ctx) {
-        return $ctx->is_zero();
+        return true if !defined $ctx;
+        return $ctx->is_zero() if blessed($ctx) && $ctx->can('is_zero');
+        return false;
+    }
+
+    # _wrap_sa_result: Build a new Context from SA's result merged with slot annotations.
+    # Does NOT mutate $sa_result — it may be hash-consed or shared.
+    # Handles non-Context SA results (e.g., when last semiring is Structural).
+    method _wrap_sa_result($sa_result, %slot_results) {
+        my $is_ctx = blessed($sa_result) && $sa_result->can('extract');
+        return Chalk::Bootstrap::Context->new(
+            focus       => $is_ctx ? $sa_result->extract() : $sa_result,
+            children    => $is_ctx ? [$sa_result->children()->@*] : [],
+            position    => $is_ctx ? $sa_result->position() : 0,
+            rule        => $is_ctx ? $sa_result->rule() : undef,
+            is_zero     => false,
+            annotations => {
+                ($is_ctx ? $sa_result->annotations()->%* : ()),
+                %slot_results,
+            },
+        );
     }
 
     # _same_value: identity comparison suitable for both refs and scalars.
@@ -108,12 +135,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         my $sa_result = $self->_sa()->multiply($left, $right);
         return $self->zero() if $self->_sa()->is_zero($sa_result);
 
-        # Overlay annotation results on SA's result Context
-        for my $slot (keys %slot_results) {
-            $sa_result->annotations()->{$slot} = $slot_results{$slot};
-        }
-
-        return $sa_result;
+        return $self->_wrap_sa_result($sa_result, %slot_results);
     }
 
     # _filter_compare: scan each annotation-layer semiring for a preference
@@ -260,12 +282,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         my $sa_result = $self->_sa()->on_scan($ctx, $rule_name, $alt_idx, $pos, $matched_text);
         return $self->zero() if $self->_sa()->is_zero($sa_result);
 
-        # Overlay annotation results on SA's result Context
-        for my $slot (keys %slot_results) {
-            $sa_result->annotations()->{$slot} = $slot_results{$slot};
-        }
-
-        return $sa_result;
+        return $self->_wrap_sa_result($sa_result, %slot_results);
     }
 
     # on_complete() delegates to each annotation-layer semiring and to SA.
@@ -310,12 +327,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         my $sa_result = $self->_sa()->on_complete($ctx, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit);
         return $self->zero() if $self->_sa()->is_zero($sa_result);
 
-        # Overlay annotation results on SA's result Context
-        for my $slot (keys %slot_results) {
-            $sa_result->annotations()->{$slot} = $slot_results{$slot};
-        }
-
-        return $sa_result;
+        return $self->_wrap_sa_result($sa_result, %slot_results);
     }
 
     # on_skip_optional() delegates to each annotation-layer semiring and to SA.
@@ -358,31 +370,31 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         }
         return $self->zero() if $self->_sa()->is_zero($sa_result);
 
-        for my $slot (keys %slot_results) {
-            $sa_result->annotations()->{$slot} = $slot_results{$slot};
-        }
-
-        return $sa_result;
+        return $self->_wrap_sa_result($sa_result, %slot_results);
     }
 
-    # should_scan() delegates to each annotation-layer semiring and to SA.
+    # should_scan() delegates to ALL component semirings (not just annotation-layer).
     # First-false short-circuit: if ANY component returns false, return false.
     # This allows any semiring to veto a scan before on_scan is called.
+    # Each semiring receives its slot value (or the full Context for TI/SA).
     method should_scan($ctx, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
-        for my $sr ($self->_annotation_semirings()) {
-            my $slot = $sr->slot_name();
+        for my $sr ($semirings->@*) {
             my $val;
-            if ($slot eq 'type') {
-                $val = $ctx->annotations()->{_ti_raw} // $sr->one();
+            if (blessed($sr) && $sr->can('slot_name') && defined $sr->slot_name()) {
+                my $slot = $sr->slot_name();
+                if ($slot eq 'type') {
+                    $val = $ctx->annotations()->{_ti_raw} // $sr->one();
+                } else {
+                    $val = $ctx->annotations()->{$slot} // $sr->one();
+                }
             } else {
-                $val = $ctx->annotations()->{$slot} // $sr->one();
+                # SA and non-annotation semirings receive the full Context
+                $val = $ctx;
             }
             return false unless $sr->should_scan(
                 $val, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted
             );
         }
-        return $self->_sa()->should_scan(
-            $ctx, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted
-        );
+        return true;
     }
 }

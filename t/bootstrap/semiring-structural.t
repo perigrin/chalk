@@ -645,10 +645,10 @@ SKIP: {
         return $parser->parse_value($source);
     }
 
-    # Helper: extract Structural value from result
+    # Helper: extract Structural value from unified Context result
     my sub struct_val($result) {
-        return $result->[1] if defined $result;
-        return undef;
+        return undef unless defined $result && !$result->is_zero();
+        return $result->annotations()->{structural};
     }
 
     # --- { 42; } at statement level: with semicolon, unambiguous Block ---
