@@ -127,4 +127,21 @@ subtest 'extend preserves all fields together' => sub {
         "annotations preserved" );
 };
 
+subtest 'extend copies annotations — child mutation does not affect parent' => sub {
+    my $parent = Chalk::Bootstrap::Context->new(
+        focus       => "orig",
+        annotations => { cfg => { control => 'start' } },
+    );
+
+    my $child = $parent->extend( sub { "new" } );
+
+    # Mutate child's annotations
+    $child->annotations()->{cfg} = { control => 'changed' };
+
+    is( $parent->annotations()->{cfg}{control}, 'start',
+        "parent annotations not mutated by child write" );
+    is( $child->annotations()->{cfg}{control}, 'changed',
+        "child annotations reflect the write" );
+};
+
 done_testing();

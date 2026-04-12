@@ -1,5 +1,5 @@
-# ABOUTME: Tests for enriched SemanticAction focus with control token and scope.
-# ABOUTME: Verifies side-table approach threads control/scope without breaking Context tree.
+# ABOUTME: Tests for cfg_state threading in SemanticAction via Context annotations.
+# ABOUTME: Verifies control/scope state propagates correctly through parse operations.
 use 5.42.0;
 use utf8;
 use Test::More;

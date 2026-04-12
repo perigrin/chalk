@@ -28,7 +28,7 @@ class Chalk::Bootstrap::Context {
             children    => [$self],
             position    => $position,
             rule        => (exists $opts{rule} ? $opts{rule} : $rule),
-            annotations => (exists $opts{annotations} ? $opts{annotations} : $annotations),
+            annotations => (exists $opts{annotations} ? $opts{annotations} : { $annotations->%* }),
             token       => (exists $opts{token} ? $opts{token} : $token),
             is_zero     => (exists $opts{is_zero} ? $opts{is_zero} : $is_zero),
         );
