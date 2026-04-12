@@ -1,7 +1,7 @@
 # Unified Context Design (#702)
 
 **Date**: 2026-04-12
-**Status**: Draft
+**Status**: Draft (revised after pushback)
 **Depends on**: #698 (extend wraps), #699 (visitor), #701 (refactor to extend)
 
 ## Problem
@@ -17,14 +17,34 @@ values that cannot see each other.
 
 The N-tuple is a product semiring `S1 × S2 × S3 × S4 × S5`. Whether
 the product is represented as five separate objects in an arrayref or
-as one object with five named slots, the algebra is the same. The
-semiring operations (multiply, add, on_complete, on_scan, is_zero)
-work identically either way.
+as one object with five named slots, the algebra is the same.
 
-The only practical difference is that a single object lets semirings
-read each other's slots. Cross-semiring communication (TI writing type
-tags, SA reading them) becomes natural field access instead of a
-side-channel bridge.
+A single object lets semirings read each other's slots. Cross-semiring
+communication (TI writing type tags, SA reading them) becomes natural
+field access instead of a side-channel bridge.
+
+## Theoretical foundation
+
+The design aligns with Goodman's semiring parsing framework (1999).
+Goodman defines two operations: `multiply` for sequential combination
+and `add` for alternative combination. All parse values are computed
+through these two operations. There is no `on_complete` callback in
+the formalism.
+
+Our semirings perform disambiguation analogous to the Viterbi semiring,
+which picks the highest-probability parse through its `add` operation.
+Precedence picks the highest-precedence parse. TypeInference picks the
+type-valid parse. Structural picks the structurally richer parse. Each
+semiring's `add` IS its disambiguation function.
+
+Cross-component communication (one semiring reading another's
+annotations) has no direct precedent in the parsing literature. The
+closest algebraic models are Eisner's expectation semiring (2001),
+where a probability component drives an accumulator component via
+R-module structure, and Wirsching's semidirect product of semirings
+(2010), where one semiring acts on another via endomorphisms. Our
+approach is pragmatic: semirings share a Context object and read each
+other's named annotation slots.
 
 ## Design
 
@@ -38,62 +58,111 @@ Context:
   focus       => $ir_node          (SemanticAction's output)
   children    => [...]             (parse tree structure)
   annotations => {
-      boolean    => true/false,
       precedence => $level,
       type       => { valid => true, type => 'Int', ... },
       structural => $bitfield,
   }
+  token       => $token_name       (what symbol this fills in parent)
   rule        => $rule_name
   position    => $pos
+  is_zero     => true/false        (single flag, any semiring can set)
 ```
+
+Note: Boolean does not need an annotation slot. It operates entirely
+through `is_zero` — a valid derivation is non-zero, an invalid one
+is zero.
+
+### Pure semiring operations: multiply, add, zero, one
+
+`on_complete` is eliminated. All work happens in `multiply` and `add`,
+aligning with Goodman's formalism.
+
+#### multiply — incremental reification
+
+`multiply` combines two Contexts sequentially and *reifies* the value.
+The value isn't fully real until multiply provides the context that
+gives it meaning. A scanned identifier is just text until it's
+multiplied with `(` and an argument list — then it becomes a call.
+
+Each semiring's multiply:
+1. Receives the full Context (reads its own annotation slot)
+2. Computes its contribution given the combined children
+3. Returns a new Context with its annotation slot updated
+
+The parser annotates the Context with the **token name** — what
+symbol in the parent rule this value fills. This is how SemanticAction
+knows what to build: not "rule CallExpression completed" but "token
+CallExpression is being multiplied into Statement."
+
+Reification is incremental. A child doesn't need to be fully reified
+when its own rule completes — it reifies when the parent multiplies
+it in, because that's when the full context is available.
+
+#### add — disambiguation
+
+`add` combines two alternative Contexts for the same span and rule:
+
+- Both zero → return zero
+- Left zero → return right
+- Right zero → return left
+- Both non-zero → each semiring disambiguates via its annotation slot
+
+Each semiring's `add` reads its annotation slot from both alternatives
+and picks the winner (like Viterbi picks the higher probability). The
+priority ordering (Precedence > TypeInference > Structural > SA)
+determines which semiring disambiguates first.
+
+If no semiring can disambiguate (both alternatives are equivalent from
+every semiring's perspective), this is unresolved ambiguity. The
+Context can pack both alternatives and flag `is_ambiguous`. Higher
+rules get a chance to resolve it through subsequent multiplies. Only
+if ambiguity reaches `Program` does the parser throw an exception.
+
+#### is_zero — single flag
+
+Any semiring can kill a derivation by returning a Context with
+`is_zero` set. One field, one check. Replaces the current pattern of
+iterating through N-tuple slots checking each semiring's zero.
 
 ### FilterComposite changes
 
-FilterComposite passes one Context to each semiring instead of
-extracting a per-semiring slot from an arrayref.
+FilterComposite passes one Context to each semiring. For each
+operation (multiply, add, on_scan), all semirings receive the same
+Context, each returns a Context with its annotation slot updated, and
+FilterComposite merges the annotation slots into one result.
 
-- **multiply($left, $right)**: Calls each semiring's multiply in
-  sequence, each reading/writing its own annotation slot on the
-  shared Context. The Context tree structure (children) is built
-  once, not five times in parallel.
+Each semiring's operation is pure: `(Context, ...) -> Context`. The
+operations are idempotent per-slot — each semiring writes only its
+own slot, so merging is conflict-free.
 
-- **on_scan**: Each semiring annotates the scan result on the
-  shared Context.
+`_filter_compare` goes away. The priority ordering moves into `add`:
+semirings are consulted in order, first to disambiguate wins.
 
-- **on_complete**: Each semiring extends the Context, adding its
-  annotations. No `set_type_context` needed — SA reads TI's
-  annotations directly from the Context.
+`set_type_context` / `current_type_context` go away. SA reads TI's
+annotations directly from the shared Context.
 
-- **add**: Each semiring's add reads its annotation slot from both
-  alternatives. First semiring to express a preference wins, same
-  as today.
+### on_complete elimination
 
-- **is_zero**: Single field on Context. Any semiring can set it
-  during on_complete to kill a derivation. One check instead of
-  iterating through slots.
+`on_complete` is not part of Goodman's semiring formalism. It was a
+pragmatic extension to batch work at rule boundaries. With
+incremental reification through `multiply`, this work happens
+naturally as values are combined.
 
-### Semiring interface changes
+SemanticAction's rule-name dispatch (calling `$actions->$rule_name`)
+moves to multiply, keyed by the token name on the Context. The parser
+annotates the Context with the token name — what symbol in the parent
+rule was just satisfied — so SA's multiply knows which action to run.
 
-Each semiring's operations change from receiving their own value type
-to receiving the shared Context:
-
-| Operation | Before | After |
-|-----------|--------|-------|
-| multiply | `($my_val_left, $my_val_right)` | `($ctx_left, $ctx_right)` |
-| on_scan | `($my_val, ...)` | `($ctx, ...)` |
-| on_complete | `($my_val, ...)` | `($ctx, ...)` |
-| add | `($my_val_left, $my_val_right)` | `($ctx_left, $ctx_right)` |
-| is_zero | `($my_val)` | `($ctx)` |
-| one | returns `$my_identity` | returns shared identity Context |
-| zero | returns `$my_zero` | returns shared zero Context |
-
-Boolean reads `$ctx->annotations()->{boolean}`.
-Precedence reads `$ctx->annotations()->{precedence}`.
-And so on.
+This also subsumes the Leo optimization (#700). Leo skips intermediate
+completions and resolves them later. Without `on_complete`, there are
+no intermediate completions to skip — reification is always
+incremental through multiply.
 
 ### What goes away
 
+- `on_complete` callback on all semirings
 - `set_type_context()` / `current_type_context()` bridge
+- `_filter_compare` in FilterComposite
 - Parallel Context trees (TI and SA no longer build independent trees)
 - N-tuple bookkeeping in FilterComposite
 - Per-semiring hash-cons caches for Context objects (one cache)
@@ -101,54 +170,60 @@ And so on.
 ### What stays the same
 
 - The semiring algebra (product semiring, same axioms)
-- Priority ordering in add (Boolean > Precedence > TI > Structural > SA)
 - FilterComposite as orchestrator
 - Context comonad operations (extract, extend, walk)
-- The Earley parser (it sees one semiring, FilterComposite)
-
-### is_zero simplification
-
-Instead of each semiring maintaining its own zero sentinel and
-FilterComposite checking `$sr->is_zero($val->[$i])` for each slot,
-the Context has a single is_zero flag. Any semiring that determines
-a derivation is invalid sets this flag (or returns the shared zero
-Context). FilterComposite checks one field.
+- The Earley parser core (predict, scan, complete)
+- Hash-consing (one unified cache)
 
 ### Hash-consing
 
-Currently TI and SA each maintain their own hash-cons caches. With a
-unified Context, one cache keyed by the full annotation set. The
-cache key includes all annotation slots so that two Contexts with
-the same structure but different type tags or precedence levels
-remain distinct.
+One cache keyed by the full annotation set. Two Contexts with the same
+tree structure but different type tags or precedence levels remain
+distinct.
 
 ### scanned_text() concern
 
-`scanned_text()` has different traversal semantics from `walk()` —
-it recurses into ref-focused nodes. With a unified tree (instead of
-parallel trees), the focused values change (focus is now IR node,
-not type tags). `scanned_text()` needs review to ensure it still
-finds string scans correctly in the unified tree.
+`scanned_text()` has different traversal semantics from `walk()` — it
+recurses into ref-focused nodes. With a unified tree, the focused
+values change (focus is now IR node, not type tags). Needs review to
+ensure it still finds string scans correctly.
 
 ## Migration strategy
 
 Incremental. Each step must leave all tests passing.
 
-1. Add annotation slots to Context (backward compatible — empty by default)
-2. Boolean: read/write annotations->{boolean} instead of returning bare values
-3. Precedence: same
-4. Structural: same
-5. TypeInference: write to annotations->{type} instead of building separate Context tree
-6. SemanticAction: read annotations->{type} directly, remove current_type_context()
-7. FilterComposite: pass single Context instead of N-tuple
-8. Remove set_type_context bridge
-9. Clean up dead code
+1. Add `token` field and `is_zero` flag to Context
+2. Add annotation slots to Context (backward compatible, empty default)
+3. Move Boolean to is_zero-only (no annotation slot)
+4. Move Precedence to read/write annotations->{precedence}
+5. Move Structural to read/write annotations->{structural}
+6. Move TypeInference to write annotations->{type}
+7. Move SemanticAction to read annotations->{type} directly
+8. FilterComposite: pass single Context instead of N-tuple
+9. Remove set_type_context bridge and _filter_compare
+10. Migrate on_complete logic into multiply (token-name dispatch)
+11. Remove on_complete from semiring interface
+12. Clean up dead code
 
 ## Open questions
 
-- Should `complete` be a first-class method on Context (separate from
-  `extend`)? See #701 design note.
 - Cache key strategy for unified annotations — how to efficiently
   hash-cons when the key includes all semiring data.
-- Does the priority ordering in add need to change? (Probably not —
-  same algebra, different representation.)
+- Token name annotation: does the parser set this on the Context
+  before calling multiply, or does multiply infer it from the
+  grammar structure in the Context?
+- Ambiguity packing: what does the packed Context look like when
+  add returns both alternatives? Is `children => [$left, $right]`
+  with `is_ambiguous => true` sufficient, or do we need a distinct
+  packed node type?
+- How does `should_scan` fit? It's also not in Goodman's formalism.
+  Could it become part of multiply (multiply with a scan result
+  returns zero if the scan is invalid)?
+
+## Subsumes
+
+- **#700 (Leo optimization)**: Without on_complete, Leo's
+  "skip intermediate completions" becomes the default behavior.
+  Reification is always deferred to multiply.
+- **#702 original scope**: Unified annotation slots replace the
+  N-tuple, eliminating the TI/SA bridge.
