@@ -89,29 +89,75 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         ));
     }
 
-    # Tree-walkers for CallExpression on_complete.
-    # Follow leaf-finding semantics: stop at focused nodes (on_complete
-    # results) and only recurse through unfocused multiply nodes.
+    # _walk_annotations: Walk the shared Context tree collecting annotations->{type}.
+    # Unlike Context->walk(), this method descends into ALL nodes (including focused
+    # ones) because SA scan nodes have defined focus (scanned text) but no annotations.
+    # The TI type information is in annotations->{type}, not in the focus.
+    # Traversal order: left-to-right (reverse=false) or right-to-left (reverse=true).
+    # Returns the first non-undef result from $callback.
+    my sub _walk_annotations($ctx, $callback, $reverse = false) {
+        return undef unless defined $ctx;
+        my @stack = ($ctx);
+        while (@stack) {
+            my $node = pop @stack;
+            # Always check this node's annotations (regardless of focus state)
+            my $result = $callback->($node);
+            return $result if defined $result;
+            # Always descend into children (even if focus is defined)
+            my @kids = $node->children()->@*;
+            @kids = reverse @kids unless $reverse;
+            push @stack, @kids;
+        }
+        return undef;
+    }
 
-    # Search the multiply tree leaves for one with call_symbol in its focus.
+    # Tree-walkers for on_complete.
+    # Walk the shared Context tree, reading type tags from annotations->{type}.
+    # Use _walk_annotations (not Context->walk) because SA scan nodes have defined
+    # focus (scanned text) but no annotations — Context->walk would stop there.
+
+    # Search the shared tree nodes for one with call_symbol in annotations->{type}.
     # Returns the call_symbol string or undef.
     method _get_call_symbol($ctx) {
         return unless defined $ctx;
-        return $ctx->walk(sub ($n) { $n->extract()->{call_symbol} });
+        return _walk_annotations($ctx, sub ($n) {
+            my $type = $n->annotations()->{type};
+            return undef unless defined $type && ref($type) eq 'HASH';
+            return $type->{call_symbol};
+        });
     }
 
-    # Search the multiply tree leaves for one with item_types in its focus.
+    # Search the shared tree nodes for one with item_types in annotations->{type}.
     # Returns the item_types arrayref or undef.
     method _get_item_types($ctx) {
         return unless defined $ctx;
-        return $ctx->walk(sub ($n) { $n->extract()->{item_types} });
+        return _walk_annotations($ctx, sub ($n) {
+            my $type = $n->annotations()->{type};
+            return undef unless defined $type && ref($type) eq 'HASH';
+            return $type->{item_types};
+        });
     }
 
-    # Search the multiply tree leaves for one with list_arity in its focus.
+    # Search the shared tree nodes for one with list_arity in annotations->{type}.
     # Returns the list_arity integer or undef.
     method _get_list_arity($ctx) {
         return unless defined $ctx;
-        return $ctx->walk(sub ($n) { $n->extract()->{list_arity} });
+        return _walk_annotations($ctx, sub ($n) {
+            my $type = $n->annotations()->{type};
+            return undef unless defined $type && ref($type) eq 'HASH';
+            return $type->{list_arity};
+        });
+    }
+
+    # Search the shared tree nodes (rightmost first) for one with type in annotations->{type}.
+    # Returns the type string or undef. Used by the catch-all passthrough in on_complete.
+    method _get_rightmost_type($ctx) {
+        return unless defined $ctx;
+        return _walk_annotations($ctx, sub ($n) {
+            my $type = $n->annotations()->{type};
+            return undef unless defined $type && ref($type) eq 'HASH';
+            return $type->{type};
+        }, true);  # reverse=true for right-to-left traversal
     }
 
     method zero() {
@@ -248,10 +294,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     }
 
     method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
-        my $existing = $value;
-
-        # Propagate zero
-        return undef if !defined $existing;
+        # Propagate zero: undef means zero (not a shared Context)
+        return undef if !defined $value;
 
         # Lazy-init pre-cached scan Contexts on first call
         $self->_init_scan_cache() if !defined $_scan_regex;
@@ -260,7 +304,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # ambiguous with defined-or; Earley explores both paths and
         # disambiguation happens via CallExpression arg-type validation)
         if ($rule_name eq 'RegexLiteral') {
-            return $self->multiply($existing, $_scan_regex);
+            return $_scan_regex->extract();
         }
 
         # In QualifiedIdentifier context, tag bare builtins with their name
@@ -268,22 +312,20 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # All QualifiedIdentifier scans also get ident_text for method name extraction.
         if ($rule_name eq 'QualifiedIdentifier') {
             if (!($matched_text =~ /::/) && $self->_lookup_builtin($matched_text)) {
-                return $self->multiply($existing,
-                    $self->_scan_ctx_call_ident($matched_text));
+                return $self->_scan_ctx_call_ident($matched_text)->extract();
             }
-            return $self->multiply($existing,
-                $self->_scan_ctx_ident($matched_text));
+            return $self->_scan_ctx_ident($matched_text)->extract();
         }
 
         # Tag variable scans with their type
         if ($rule_name eq 'ScalarVariable') {
-            return $self->multiply($existing, $_scan_scalar);
+            return $_scan_scalar->extract();
         }
         if ($rule_name eq 'ArrayVariable') {
-            return $self->multiply($existing, $_scan_array);
+            return $_scan_array->extract();
         }
         if ($rule_name eq 'HashVariable') {
-            return $self->multiply($existing, $_scan_hash);
+            return $_scan_hash->extract();
         }
 
         # NumericLiteral: distinguish Int vs Num based on pattern
@@ -293,48 +335,46 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             if ($matched_text =~ /[.]/
                 || ($matched_text =~ /[eE]/ && !($matched_text =~ /^0[xX]/)))
             {
-                return $self->multiply($existing, $_scan_num);
+                return $_scan_num->extract();
             }
-            return $self->multiply($existing, $_scan_int);
+            return $_scan_int->extract();
         }
 
         # StringLiteral → type => 'Str'
         if ($rule_name eq 'StringLiteral') {
-            return $self->multiply($existing, $_scan_str);
+            return $_scan_str->extract();
         }
 
         # Literal: undef/true/false
         if ($rule_name eq 'Literal') {
             if ($matched_text eq 'undef') {
-                return $self->multiply($existing, $_scan_undef);
+                return $_scan_undef->extract();
             }
             if ($matched_text eq 'true' || $matched_text eq 'false') {
-                return $self->multiply($existing, $_scan_bool);
+                return $_scan_bool->extract();
             }
         }
 
         # Atom: __SUB__ → type => 'CodeRef'
         if ($rule_name eq 'Atom' && $matched_text eq '__SUB__') {
-            return $self->multiply($existing, $_scan_coderef);
+            return $_scan_coderef->extract();
         }
 
         # BinaryOp: capture operator text for later consumption at
         # BinaryExpression on_complete.
         if ($rule_name eq 'BinaryOp') {
-            return $self->multiply($existing,
-                $self->_scan_ctx_op($matched_text));
+            return $self->_scan_ctx_op($matched_text)->extract();
         }
 
         # UnaryExpression operator scan: capture op_text.
         if ($rule_name eq 'UnaryExpression'
             && $matched_text =~ /^(?:[!~\\]|not|[+-])$/)
         {
-            return $self->multiply($existing,
-                $self->_scan_ctx_op($matched_text));
+            return $self->_scan_ctx_op($matched_text)->extract();
         }
 
         # Non-QualifiedIdentifier or non-keyword: transparent
-        return $self->multiply($existing, $self->one());
+        return $self->one()->extract();
     }
 
     method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
@@ -342,9 +382,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
         # CallExpression: builtin signature validation.
         # Kept inline (not in TypeInferenceActions) because it needs
-        # complex multi-walker logic: $_get_call_symbol for function name,
-        # $_get_item_types/$_get_list_arity for argument info, plus
+        # complex multi-walker logic: _get_call_symbol for function name,
+        # _get_item_types/_get_list_arity for argument info, plus
         # builtin_lookup and type_satisfies for per-position validation.
+        # $value is the shared Context; tree-walkers read annotations->{type}.
         if ($rule_name eq 'CallExpression') {
             my $return_type;
             my $call_sym = $self->_get_call_symbol($value);
@@ -384,25 +425,28 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             }
             my $new_focus = { valid => true };
             $new_focus->{type} = $return_type if $return_type;
-            return $self->_extend_ctx_with_focus($value, $new_focus, $rule_name);
+            return $new_focus;
         }
 
         # Dispatch to TypeInferenceActions for rules with registered methods.
-        # Methods receive the Context directly and return a focus hash.
+        # Methods receive the shared Context directly and return a focus hash.
+        # Tree-walkers in Actions read annotations->{type} from child nodes.
         # Alt-dependent rules receive $alt_idx as an extra parameter.
         if ($actions->can($rule_name)) {
             my $action_focus = $actions->dispatch($rule_name, $value,
                 $_needs_alt_idx->{$rule_name} ? $alt_idx : undef);
             return undef unless defined $action_focus;
-            return $self->_extend_ctx_with_focus($value, $action_focus, $rule_name);
+            return $action_focus;
         }
 
-        # Catch-all: transparent passthrough for rules without Actions methods.
-        # No tag propagation needed — tree-walkers in Actions methods find
-        # tags in child focuses regardless of how many intermediate rules
-        # sit between producer and consumer. The unfocused multiply node
-        # preserves its children for tree-walking.
-        return $value;
+        # Catch-all: transparent passthrough for rules without Action methods.
+        # Propagates the rightmost type from children so type information flows
+        # upward through wrapper rules (e.g., Variable, PostfixExpression alt 0).
+        # FilterComposite stores the returned hash as annotations->{type}.
+        my $child_type = $self->_get_rightmost_type($value);
+        my $result_hash = { valid => true };
+        $result_hash->{type} = $child_type if defined $child_type;
+        return $result_hash;
     }
 
     # Builtins whose first argument is a hash or array: keys %hash, values %hash, each %hash.
@@ -418,27 +462,28 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # Reject % as BinaryOp when the accumulated value has call_symbol for
         # a hash-taking builtin. keys %hash is keys(%hash), not (keys) % (hash).
         if ($rule_name eq 'BinaryOp' && $matched_text eq '%' && defined $value) {
-            # Check focus directly: Atom/Expression propagate call_symbol into focus
-            my $focus = $value->extract();
+            # Check annotations->{type} directly: the shared Context carries call_symbol
+            # in annotations->{type} after TI migrated to shared Context (#707).
+            my $type_ann = $value->annotations()->{type};
             if ($ENV{DEBUG_KEYS_PCT}) {
                 my $dump; $dump = sub ($ctx, $depth) {
                     return 'undef' unless defined $ctx;
-                    my $f = $ctx->extract();
-                    my $fs = defined $f && ref($f) eq 'HASH' ? join(',', map { "$_=" . ($f->{$_}//'undef') } sort keys %$f) : (defined $f ? ref($f) : 'undef');
+                    my $ti = $ctx->annotations()->{type};
+                    my $fs = defined $ti && ref($ti) eq 'HASH' ? join(',', map { "$_=" . ($ti->{$_}//'undef') } sort keys %$ti) : 'no-type-ann';
                     my @ch = $ctx->children()->@*;
                     my $prefix = '  ' x $depth;
-                    warn "${prefix}focus={$fs} children=" . scalar(@ch) . "\n";
+                    warn "${prefix}type_ann={$fs} children=" . scalar(@ch) . "\n";
                     for my $c (@ch) { $dump->($c, $depth+1) }
                 };
                 warn "should_scan BinaryOp '%' tree:\n";
                 $dump->($value, 1);
             }
-            if (defined $focus && ref($focus) eq 'HASH'
-                    && exists $focus->{call_symbol}
-                    && $HASH_ARG_BUILTINS{ $focus->{call_symbol} }) {
+            if (defined $type_ann && ref($type_ann) eq 'HASH'
+                    && exists $type_ann->{call_symbol}
+                    && $HASH_ARG_BUILTINS{ $type_ann->{call_symbol} }) {
                 return false;
             }
-            # Also walk children in case the value is a multiply tree
+            # Also walk children in case the type annotation is on a descendant node
             my $call_sym = $self->_get_call_symbol($value);
             if (defined $call_sym && $HASH_ARG_BUILTINS{$call_sym}) {
                 return false;

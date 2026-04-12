@@ -253,7 +253,7 @@ sub make_5ary_comp {
 }
 
 # ========================================================================
-# 5-ary: _ti_raw annotation present for TI tree-walking (#707 transition)
+# 5-ary: annotations->{type} is a tag hash after #707 migration (no _ti_raw)
 # ========================================================================
 
 {
@@ -261,8 +261,10 @@ sub make_5ary_comp {
     my $one  = $comp->one();
 
     my $scanned = $comp->on_scan($one, 'Identifier', 0, 0, 'foo');
-    ok(exists $scanned->annotations()->{_ti_raw},
-        '5-ary on_scan result has _ti_raw annotation (TI transition slot)');
+    ok(!exists $scanned->annotations()->{_ti_raw},
+        '5-ary on_scan result has no _ti_raw annotation after #707 migration');
+    ok(exists $scanned->annotations()->{type},
+        '5-ary on_scan result has type annotation');
 }
 
 # ========================================================================

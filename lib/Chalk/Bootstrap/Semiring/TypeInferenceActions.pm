@@ -7,19 +7,53 @@ use experimental 'class';
 use Chalk::Grammar::Perl::TypeLibrary;
 class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
-    # Helper: Get rightmost type from Context tree (for wrapper rules)
+    # _walk_ann: Walk the shared Context tree reading annotations->{type}.
+    # Unlike Context->walk(), always descends into children regardless of focus state.
+    # SA scan nodes have defined focus (text string) but no annotations->{type}.
+    # Context->walk() would stop at those nodes; we must descend past them.
+    # reverse=true for right-to-left traversal.
+    my sub _walk_ann($ctx, $callback, $reverse = false) {
+        return undef unless defined $ctx;
+        my @stack = ($ctx);
+        while (@stack) {
+            my $node = pop @stack;
+            my $result = $callback->($node);
+            return $result if defined $result;
+            my @kids = $node->children()->@*;
+            @kids = reverse @kids unless $reverse;
+            push @stack, @kids;
+        }
+        return undef;
+    }
+
+    # Helper: Get rightmost type from shared Context tree (for wrapper rules).
+    # Reads from annotations->{type} since TI migrated to shared Context (#707).
     my sub _get_rightmost_type($ctx) {
-        return $ctx->walk(sub ($n) { $n->extract()->{type} }, reverse => true);
+        return _walk_ann($ctx, sub ($n) {
+            my $ti = $n->annotations()->{type};
+            return undef unless defined $ti && ref($ti) eq 'HASH';
+            return $ti->{type};
+        }, true);  # reverse=true for right-to-left
     }
 
-    # Helper: Get leftmost type from Context tree (for assignment LHS)
+    # Helper: Get leftmost type from shared Context tree (for assignment LHS).
+    # Reads from annotations->{type} since TI migrated to shared Context (#707).
     my sub _get_leftmost_type($ctx) {
-        return $ctx->walk(sub ($n) { $n->extract()->{type} });
+        return _walk_ann($ctx, sub ($n) {
+            my $ti = $n->annotations()->{type};
+            return undef unless defined $ti && ref($ti) eq 'HASH';
+            return $ti->{type};
+        });
     }
 
-    # Helper: Get ident_text from Context tree (for method/function names)
+    # Helper: Get ident_text from shared Context tree (for method/function names).
+    # Reads from annotations->{type} since TI migrated to shared Context (#707).
     my sub _get_ident_text($ctx) {
-        return $ctx->walk(sub ($n) { $n->extract()->{ident_text} });
+        return _walk_ann($ctx, sub ($n) {
+            my $ti = $n->annotations()->{type};
+            return undef unless defined $ti && ref($ti) eq 'HASH';
+            return $ti->{ident_text};
+        });
     }
 
     # Method return type registry: method_name => return_type
@@ -27,20 +61,25 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     # Scoped per file parse (reset via reset_method_registry).
     my %_method_returns;
 
-    # Helper: Get op_text from Context tree (for operator rules)
-    # Follows leaf-finding semantics: stops at focused nodes.
+    # Helper: Get op_text from shared Context tree (for operator rules).
+    # Reads from annotations->{type} since TI migrated to shared Context (#707).
     my sub _get_op_text($ctx) {
-        return $ctx->walk(sub ($n) { $n->extract()->{op_text} });
+        return _walk_ann($ctx, sub ($n) {
+            my $ti = $n->annotations()->{type};
+            return undef unless defined $ti && ref($ti) eq 'HASH';
+            return $ti->{op_text};
+        });
     }
 
     # Wrapper rules: passthrough child's type
 
-    # Helper: Get call_symbol from Context tree (for builtin disambiguation)
+    # Helper: Get call_symbol from shared Context tree (for builtin disambiguation).
+    # Reads from annotations->{type} since TI migrated to shared Context (#707).
     my sub _get_call_symbol($ctx) {
-        return $ctx->walk(sub ($n) {
-            my $f = $n->extract();
-            return $f->{call_symbol} if ref($f) eq 'HASH';
-            return undef;
+        return _walk_ann($ctx, sub ($n) {
+            my $ti = $n->annotations()->{type};
+            return undef unless defined $ti && ref($ti) eq 'HASH';
+            return $ti->{call_symbol};
         });
     }
 
@@ -95,22 +134,33 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         return { valid => true, ($result_type ? (type => $result_type) : ()) };
     }
 
-    # Helper: Get list_arity from Context tree
+    # Helper: Get list_arity from shared Context tree.
+    # Reads from annotations->{type} since TI migrated to shared Context (#707).
     my sub _get_list_arity($ctx) {
-        return $ctx->walk(sub ($n) { $n->extract()->{list_arity} });
+        return _walk_ann($ctx, sub ($n) {
+            my $ti = $n->annotations()->{type};
+            return undef unless defined $ti && ref($ti) eq 'HASH';
+            return $ti->{list_arity};
+        });
     }
 
-    # Helper: Get item_types from Context tree
+    # Helper: Get item_types from shared Context tree.
+    # Reads from annotations->{type} since TI migrated to shared Context (#707).
     my sub _get_item_types($ctx) {
-        return $ctx->walk(sub ($n) { $n->extract()->{item_types} });
+        return _walk_ann($ctx, sub ($n) {
+            my $ti = $n->annotations()->{type};
+            return undef unless defined $ti && ref($ti) eq 'HASH';
+            return $ti->{item_types};
+        });
     }
 
-    # Helper: Search for item_types in previous ExpressionList children
+    # Helper: Search for item_types in previous ExpressionList children.
+    # Reads from annotations->{type} since TI migrated to shared Context (#707).
     my sub _get_prev_item_types($ctx) {
-        return $ctx->walk(sub ($n) {
-            my $f = $n->extract();
-            return $f->{item_types} if exists $f->{item_types};
-            return undef;
+        return _walk_ann($ctx, sub ($n) {
+            my $ti = $n->annotations()->{type};
+            return undef unless defined $ti && ref($ti) eq 'HASH';
+            return exists $ti->{item_types} ? $ti->{item_types} : undef;
         });
     }
 
