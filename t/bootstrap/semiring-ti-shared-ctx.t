@@ -37,6 +37,26 @@ sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {
     );
 }
 
+# Helper: build a complete-annotated Context for multiply() calls.
+# Replaces on_complete($value, $rule_name, $alt_idx, $pos, $origin).
+my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
+    $pos    //= 0;
+    $origin //= 0;
+    $alt_idx //= 0;
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => defined($value) ? [$value] : [],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+};
+
 # Build a TypeInference semiring for direct testing
 my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
     keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
@@ -193,11 +213,11 @@ sub make_5ary_comp {
         annotations => { type => undef },
     );
 
-    my $result = $ti->on_complete($shared_ctx, 'BinaryExpression', 0, 2, 0);
-    ok(ref($result) eq 'HASH', 'TI on_complete returns a tag hash for BinaryExpression');
-    ok($result->{valid}, 'TI on_complete BinaryExpression result is valid');
+    my $result = $ti->multiply($shared_ctx, $make_complete->($shared_ctx, 'BinaryExpression', 0, 2, 0));
+    ok(ref($result) eq 'HASH', 'TI multiply with complete Context returns a tag hash for BinaryExpression');
+    ok($result->{valid}, 'TI multiply BinaryExpression result is valid');
     # BinaryExpression with op_text => '+' → result type is Num
-    is($result->{type}, 'Num', 'TI on_complete BinaryExpression + → type Num');
+    is($result->{type}, 'Num', 'TI multiply BinaryExpression + → type Num');
 }
 
 {
@@ -215,13 +235,13 @@ sub make_5ary_comp {
         annotations => { type => undef },
     );
 
-    my $result = $ti->on_complete($shared_ctx, 'ExpressionList', 0, 1, 0);
-    ok(ref($result) eq 'HASH', 'TI on_complete ExpressionList returns tag hash');
-    ok($result->{valid}, 'TI on_complete ExpressionList result is valid');
-    is($result->{list_arity}, 1, 'TI on_complete ExpressionList alt 0 arity = 1');
+    my $result = $ti->multiply($shared_ctx, $make_complete->($shared_ctx, 'ExpressionList', 0, 1, 0));
+    ok(ref($result) eq 'HASH', 'TI multiply ExpressionList returns tag hash');
+    ok($result->{valid}, 'TI multiply ExpressionList result is valid');
+    is($result->{list_arity}, 1, 'TI multiply ExpressionList alt 0 arity = 1');
     # item_types should reflect the type from annotations->{type}
     is_deeply($result->{item_types}, ['Int'],
-        'TI on_complete ExpressionList reads type from annotations->{type}');
+        'TI multiply ExpressionList reads type from annotations->{type}');
 }
 
 # ========================================================================
@@ -234,12 +254,12 @@ sub make_5ary_comp {
 
     # Scan an identifier to build up context
     my $scanned_ident = $comp->multiply($one, make_scan_ctx('QualifiedIdentifier', 'myvar'));
-    my $completed = $comp->on_complete($scanned_ident, 'Atom', 0, 1, 0);
+    my $completed = $comp->multiply($scanned_ident, $make_complete->($scanned_ident, 'Atom', 0, 1, 0));
 
-    ok(!$comp->is_zero($completed), 'on_complete Atom is not zero');
+    ok(!$comp->is_zero($completed), 'multiply with complete Context Atom is not zero');
     my $type_ann = $completed->annotations()->{type};
-    ok(ref($type_ann) eq 'HASH', 'on_complete Atom annotations->{type} is a hash ref');
-    ok($type_ann->{valid}, 'on_complete Atom annotations->{type}{valid} is true');
+    ok(ref($type_ann) eq 'HASH', 'multiply Atom annotations->{type} is a hash ref');
+    ok($type_ann->{valid}, 'multiply Atom annotations->{type}{valid} is true');
 }
 
 # ========================================================================
@@ -266,11 +286,11 @@ sub make_5ary_comp {
     # We can test indirectly: CallExpression on_complete with call_symbol in annotations
     # will look up the 'push' builtin and validate args.
     # Simulate CallExpression: pass ctx whose child has call_symbol annotation.
-    my $result = $ti->on_complete($ctx, 'CallExpression', 0, 1, 0);
+    my $result = $ti->multiply($ctx, $make_complete->($ctx, 'CallExpression', 0, 1, 0));
     # CallExpression with no item_types → passes arity check (min_arity may be 0 or > 0)
     # We just verify it runs without dying and returns a hash
     ok(!defined $result || ref($result) eq 'HASH',
-        'TI on_complete CallExpression with annotated call_symbol returns hash or undef');
+        'TI multiply CallExpression with annotated call_symbol returns hash or undef');
 }
 
 # ========================================================================
