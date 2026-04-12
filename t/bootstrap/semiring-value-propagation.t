@@ -48,12 +48,21 @@ package TracingSemiring {
     sub is_zero ($self, $value) { return !defined $value }
     sub reset_cache ($self) { }
 
+    # Extract raw hashref from a value that may be a Context (from FilterComposite)
+    sub _raw ($self, $value) {
+        return undef unless defined $value;
+        return $value->extract() if blessed($value) && $value->can('extract');
+        return $value;
+    }
+
     sub multiply ($self, $left, $right) {
         return undef if !defined $left || !defined $right;
-        my $result = { tag => 'mul', children => [$left, $right] };
+        my $l_raw = $self->_raw($left);
+        my $r_raw = $self->_raw($right);
+        my $result = { tag => 'mul', children => [$l_raw, $r_raw] };
         $self->_log('multiply', {
-            left_tag  => $left->{tag} // '?',
-            right_tag => $right->{tag} // '?',
+            left_tag  => defined $l_raw ? ($l_raw->{tag} // '?') : 'ZERO',
+            right_tag => defined $r_raw ? ($r_raw->{tag} // '?') : 'ZERO',
         });
         return $result;
     }
@@ -61,46 +70,52 @@ package TracingSemiring {
     sub add ($self, $left, $right) {
         return [$right] if !defined $left;
         return [$left]  if !defined $right;
+        my $l_raw = $self->_raw($left);
+        my $r_raw = $self->_raw($right);
         $self->_log('add', {
-            left_tag  => $left->{tag} // '?',
-            right_tag => $right->{tag} // '?',
+            left_tag  => defined $l_raw ? ($l_raw->{tag} // '?') : 'ZERO',
+            right_tag => defined $r_raw ? ($r_raw->{tag} // '?') : 'ZERO',
         });
         return [$left];
     }
 
     sub on_scan ($self, $value, $rule_name, $alt_idx, $pos, $matched_text) {
         return undef if !defined $value;
+        my $raw = $self->_raw($value);
         my $scan_val = { tag => "scan:$rule_name:$matched_text" };
         $self->_log('on_scan', {
             rule      => $rule_name,
             pos       => $pos,
             text      => $matched_text,
-            value_tag => $value->{tag} // '?',
-            depth     => _depth($value),
+            value_tag => defined $raw ? ($raw->{tag} // '?') : 'ZERO',
+            depth     => defined $raw ? _depth($raw) : 0,
         });
         return $self->multiply($value, $scan_val);
     }
 
     sub should_scan ($self, $value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
+        # FilterComposite may pass a Context (unified) or raw hashref (standalone)
+        my $raw = (blessed($value) && $value->can('extract')) ? $value->extract() : $value;
         $self->_log('should_scan', {
             rule      => $rule_name,
             pos       => $pos,
             text      => $matched_text,
-            value_tag => defined $value ? ($value->{tag} // '?') : 'ZERO',
-            depth     => defined $value ? _depth($value) : 0,
+            value_tag => defined $raw ? ($raw->{tag} // '?') : 'ZERO',
+            depth     => defined $raw ? _depth($raw) : 0,
         });
         return true;
     }
 
     sub on_complete ($self, $value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
         return undef if !defined $value;
-        my $result = { tag => "complete:$rule_name", inner => $value };
+        my $raw = $self->_raw($value);
+        my $result = { tag => "complete:$rule_name", inner => $raw };
         $self->_log('on_complete', {
             rule      => $rule_name,
             pos       => $pos,
             origin    => $origin,
-            value_tag => $value->{tag} // '?',
-            depth     => _depth($value),
+            value_tag => defined $raw ? ($raw->{tag} // '?') : 'ZERO',
+            depth     => defined $raw ? _depth($raw) : 0,
         });
         return $result;
     }
