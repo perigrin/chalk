@@ -245,32 +245,24 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         if ($actions) {
             $has_method = defined $actions->can($rule_name);
         }
-        my $result;
+        my $result_ctx;
         $_pending_cfg_update = undef;  # Clear before action call
         $_current_instance = $self;     # Make accessible to action methods
         if ($has_method) {
-            # Dispatch the action via string method name. Using $rule_name
-            # as a string method call compiles to call_method in XS, avoiding
-            # coderef calls which the XS codegen drops arguments from.
-            my $new_focus = $actions->$rule_name($value);
-            $result = Chalk::Bootstrap::Context->new(
-                focus    => $new_focus,
-                children => [$value],
-                position => $value->position(),
-                rule     => $value->rule(),
+            # Dispatch action and wrap value in one extend call.
+            # The action receives $value (the multiply tree) and returns an IR node.
+            # extend wraps $value as a child and stamps the rule name.
+            $result_ctx = $value->extend(
+                sub ($ctx) { $actions->$rule_name($ctx) },
+                rule => $rule_name,
             );
         } else {
-            # No action registered - preserve value as-is
-            $result = $value;
+            # No action registered — wrap value with rule name stamp only
+            $result_ctx = $value->extend(
+                sub ($ctx) { $ctx->extract() },
+                rule => $rule_name,
+            );
         }
-
-        # Set the rule name on the result context
-        my $result_ctx = Chalk::Bootstrap::Context->new(
-            focus    => $result->extract(),
-            children => [$result],
-            position => $result->position(),
-            rule     => $rule_name,
-        );
 
         # Apply pending CFG state update from action method, if any
         if (defined $_pending_cfg_update) {

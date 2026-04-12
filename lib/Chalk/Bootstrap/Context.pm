@@ -18,14 +18,15 @@ class Chalk::Bootstrap::Context {
 
     # Apply a function to this context, creating a new context with the result as focus
     # This is the comonad 'extend' operation: (Context -> a) -> Context -> Context
-    method extend($f) {
+    # Optional %opts may include rule => $name and annotations => $hashref overrides.
+    method extend($f, %opts) {
         my $new_focus = $f->($self);
         return Chalk::Bootstrap::Context->new(
             focus       => $new_focus,
             children    => [$self],
             position    => $position,
-            rule        => $rule,
-            annotations => $annotations,
+            rule        => (exists $opts{rule} ? $opts{rule} : $rule),
+            annotations => (exists $opts{annotations} ? $opts{annotations} : $annotations),
         );
     }
 
