@@ -230,22 +230,29 @@ The intended design, as described in `docs/comonad-specification.md`, is:
 
 > The comonad operates inside the semantic action semiring... The semiring's multiply operation chains contexts.
 
-The intent was a single Context type shared across all semirings, with multiply building a unified parse history tree that any semiring could read. Concretely:
+After #702 (Milestone 17), the design intent is realized:
 
-- TypeInference would store type tags as focuses in the shared tree.
-- SemanticAction would call `ctx->leaves(IR::Node)` to find child IR nodes, and separately call `ctx->leaves()` with a filter for tag nodes to read TypeInference's annotations.
-- The `FilterComposite.set_type_context()` bridge would be unnecessary; SemanticAction would find type information in its own Context tree because the tree would contain it.
+- One shared Context tree flows through all semirings via FilterComposite.
+- SemanticAction owns the tree structure (focus holds IR nodes, children hold the parse tree).
+- TypeInference writes type tag hashes to `annotations->{type}` on each node.
+- Precedence writes precedence state to `annotations->{precedence}`.
+- Structural writes bitfield tags to `annotations->{structural}`.
+- CFG state (control flow, scope) lives in `annotations->{cfg}`.
+- Boolean operates entirely through the `is_zero` flag on the Context.
 
-The current reality is:
+FilterComposite acts as an adapter: it extracts annotation values from the shared
+Context, calls each component semiring's native methods, and assembles the results
+into a new Context via `_wrap_sa_result()`. Component semirings keep their native
+value types (hashrefs, integers, tag hashes) — only FilterComposite handles Contexts.
 
-- TypeInference and SemanticAction each maintain separate, independent Context trees.
-- The trees are built in parallel from the same Earley events but carry different focus types and different hash-cons caches.
-- FilterComposite bridges them by calling `set_type_context($ti_ctx)` before SemanticAction's `on_complete` runs, making the TypeInference Context for the current completion available via the `current_type_context()` class method.
-- SemanticAction actions that need type information (e.g., MethodDefinition reading the return type) call `SemanticAction::current_type_context()` and walk its tree directly.
+TypeInference's tree-walkers read `annotations->{type}` from the shared tree nodes
+via `_walk_annotations()`, which descends into all children (including SA scan nodes
+that have string focuses but may lack type annotations).
 
-Since #698 and #701, the tree-flattening issue is resolved: both trees now grow correctly, and tag traversal using `$ctx->walk()` reaches the expected depth. Since #699, the explicit recursive tree-walkers have been replaced by visitor methods, making traversal uniform across both trees.
-
-The `set_type_context()` bridge still exists. Eliminating it — unifying the two trees into a single shared Context — is the goal of #702. This arrangement works but creates coupling between the two semirings that the comonad design was intended to avoid. A SemanticAction action method now needs to understand TypeInference's tag structure to extract type information, which mixes concerns across semiring layers.
+The `set_type_context()` bridge is still present as a transition mechanism: SA
+action methods run before FilterComposite overlays the type annotation on the
+result, so they read TI's type via `current_type_context()`. This bridge will be
+removed when `on_complete` is eliminated (#708).
 
 ---
 

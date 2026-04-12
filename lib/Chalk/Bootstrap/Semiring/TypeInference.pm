@@ -68,27 +68,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         ));
     }
 
-    # Construct an extended Context with a pre-computed focus (no closure needed).
-    # Builds a new Context preserving children/position/rule/annotations from
-    # $value but replacing the focus. Hash-consed by focus content and children
-    # refaddrs to ensure identical derivations share the same refaddr
-    # (required by FilterComposite identity comparison).
-    # Position-independent: position is bookkeeping, not semantics.
-    method _extend_ctx_with_focus($value, $focus, $rule_name) {
-        return undef unless defined $focus;
-        if ($ENV{DEBUG_KEYS_PCT} && ($rule_name eq 'Atom' || $rule_name eq 'Expression')
-                && exists $focus->{call_symbol}) {
-            warn "_extend: rule=$rule_name call_symbol=$focus->{call_symbol} value_children=" . scalar($value->children()->@*) . "\n";
-        }
-        my $focus_key = $self->_tag_key($focus);
-        my $children_key = join(":", map { refaddr($_) } $value->children()->@*);
-        my $key = "ext:$rule_name:$focus_key:$children_key";
-        return ($_ctx_cache{$key} //= $value->extend(
-            sub ($ctx) { $focus },
-            rule => $rule_name,
-        ));
-    }
-
     # _walk_annotations: Walk the shared Context tree collecting annotations->{type}.
     # Unlike Context->walk(), this method descends into ALL nodes (including focused
     # ones) because SA scan nodes have defined focus (scanned text) but no annotations.

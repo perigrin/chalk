@@ -121,7 +121,7 @@ This is the "first-wins ordered priority" model. Earlier semirings have higher p
 
 ### TypeInference-to-SemanticAction Context Threading
 
-After TypeInference (index 2) completes its `on_complete`, `FilterComposite` passes the TypeInference result to SemanticAction (index 4) via `$sr->set_type_context($ti_result)` before calling SemanticAction's `on_complete`. This allows IR-building action methods to read type annotations computed by TypeInference for the same completed rule.
+After TypeInference computes its type tag hash during `on_complete`, FilterComposite wraps it in a Context and passes it to SemanticAction via `set_type_context()` before calling SemanticAction's `on_complete`. This bridge allows action methods to read type annotations via `current_type_context()`. The type tag hash is also stored as `annotations->{type}` on the result Context for direct access by tree-walkers.
 
 ### Post-Merge Hook
 
@@ -358,7 +358,7 @@ These rules encode Perl's disambiguation defaults: a `{` in expression context i
 
 ## 9. SemanticAction Semiring
 
-`Chalk::Bootstrap::Semiring::SemanticAction` builds the Sea of Nodes IR. It operates on Context objects from `Chalk::Bootstrap::Context`, with a side-table (`%_cfg_state`) mapping Context refaddrs to CFG state `{control, scope}`.
+`Chalk::Bootstrap::Semiring::SemanticAction` builds the Sea of Nodes IR. It operates on Context objects from `Chalk::Bootstrap::Context`, with CFG state (control token and variable scope) stored in `annotations->{cfg}` on each Context.
 
 ### Values and the Context Comonad
 
