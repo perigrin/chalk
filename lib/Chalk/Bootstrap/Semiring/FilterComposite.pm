@@ -54,8 +54,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             my $slot = $sr->slot_name();
             # TI (#707): annotations->{type} holds a tag hash, not a TI Context.
             # Extract the focus from TI's one() to get the { valid => true } hash.
-            if ($slot eq 'type' && blessed($sr) && $sr->can('slot_name')
-                    && $sr->slot_name() eq 'type') {
+            if ($slot eq 'type') {
                 my $ti_one = $sr->one();
                 $annotations->{$slot} = (blessed($ti_one) && $ti_one->can('extract'))
                     ? $ti_one->extract()
