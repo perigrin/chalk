@@ -65,4 +65,9 @@ class Chalk::Bootstrap::Semiring::Boolean {
     method supports_leo() {
         return true;
     }
+
+    # slot_name: Boolean operates through is_zero only — no annotation slot.
+    method slot_name() {
+        return undef;
+    }
 }

@@ -399,4 +399,9 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return true;
     }
 
+    # slot_name: Precedence reads/writes the 'precedence' annotation slot.
+    method slot_name() {
+        return 'precedence';
+    }
+
 }

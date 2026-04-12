@@ -369,4 +369,9 @@ class Chalk::Bootstrap::Semiring::Structural {
     method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
         return true;
     }
+
+    # slot_name: Structural reads/writes the 'structural' annotation slot.
+    method slot_name() {
+        return 'structural';
+    }
 }

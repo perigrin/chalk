@@ -480,4 +480,9 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # (e.g., fat-arrow: class => "Foo" inside an expression list)
         return true;
     }
+
+    # slot_name: TypeInference reads/writes the 'type' annotation slot.
+    method slot_name() {
+        return 'type';
+    }
 }
