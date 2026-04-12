@@ -86,18 +86,23 @@ use Chalk::Bootstrap::IR::NodeFactory;
     is($state->{scope}->lookup('$x'), $node, 'scope updated via set_cfg_state');
 }
 
-# --- Test 4: reset_cache clears cfg state ---
+# --- Test 4: reset_cache creates a fresh singleton with cfg state ---
+# Context annotations are part of the Context object itself, so resetting the
+# cache causes the NEXT one() call to return a new singleton — not to clear
+# annotations on the old one.
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $one = $sa->one();
+    my $old_one = $sa->one();
 
-    ok(defined $sa->cfg_state($one), 'cfg_state exists before reset');
+    ok(defined $sa->cfg_state($old_one), 'cfg_state exists before reset');
 
     $sa->reset_cache();
 
-    # After reset, old contexts' state is cleared
-    is($sa->cfg_state($one), undef, 'cfg_state cleared after reset');
+    # After reset, next one() call returns a NEW singleton
+    my $new_one = $sa->one();
+    isnt($old_one, $new_one, 'reset_cache creates a new singleton');
+    ok(defined $sa->cfg_state($new_one), 'new singleton has fresh cfg_state');
 }
 
 done_testing();

@@ -162,4 +162,76 @@ subtest 'inherited_cfg_state returns cfg annotation from context' => sub {
         "inherited_cfg_state returns cfg annotation (not side-table fallback)" );
 };
 
+# ---------------------------------------------------------------------------
+# Phase 3: Verify that cfg_state works with no side-table entry at all
+# (simulates state after removing %_cfg_state)
+# ---------------------------------------------------------------------------
+
+subtest 'cfg_state works when only annotation is set (no side-table entry)' => sub {
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $start = $factory->make('Start');
+    my $state = { control => $start, scope => undef, origin => 'annotation_only' };
+
+    # Directly create a Context with cfg annotation — no set_cfg_state call
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus       => 'v',
+        annotations => { cfg => $state },
+    );
+
+    # Calling cfg_state should return from annotation
+    my $retrieved = $sa->cfg_state($ctx);
+    is( $retrieved->{origin}, 'annotation_only',
+        "cfg_state returns annotation-only state without side-table" );
+};
+
+subtest 'on_complete propagates cfg annotation from value to result' => sub {
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    $sa->reset_cache();
+
+    my $one = $sa->one();
+    # on_complete wraps value via extend, then propagates cfg state
+    my $result = $sa->on_complete( $one, 'TestRule', 0, 0, 0 );
+
+    ok( defined $result, "on_complete returns defined result" );
+    ok( defined $result->annotations()->{cfg},
+        "on_complete propagates cfg annotation to result" );
+};
+
+# ---------------------------------------------------------------------------
+# Phase 3: Side-table removal — no %_cfg_state or cfg_state()/set_cfg_state()
+# These tests verify that the API works without any internal side-table.
+# After Phase 3, the side-table is removed entirely; annotation is canonical.
+# ---------------------------------------------------------------------------
+
+subtest 'update_cfg propagates to result annotation via on_complete' => sub {
+    # Create a package with a Foo method that calls update_cfg
+    {
+        no warnings 'once';
+        *FakeActionsForCfg::Foo = sub ($self, $ctx) {
+            Chalk::Bootstrap::Semiring::SemanticAction->current_instance()
+                ->update_cfg({
+                    control     => Chalk::Bootstrap::IR::NodeFactory->instance()->make('Start'),
+                    scope       => undef,
+                    from_action => 1,
+                });
+            return undef;
+        };
+    }
+
+    my $sa_with_action = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        actions => bless {}, 'FakeActionsForCfg',
+    );
+    $sa_with_action->reset_cache();
+
+    my $one = $sa_with_action->one();
+    my $result = $sa_with_action->on_complete( $one, 'Foo', 0, 0, 0 );
+
+    ok( defined $result, "on_complete with update_cfg returns defined result" );
+    ok( defined $result->annotations()->{cfg},
+        "update_cfg result is in annotations->{cfg}" );
+    is( $result->annotations()->{cfg}{from_action}, 1,
+        "update_cfg state has from_action=1 in annotation" );
+};
+
 done_testing();

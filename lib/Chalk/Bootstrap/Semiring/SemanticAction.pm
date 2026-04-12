@@ -16,11 +16,6 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # can detect identity collapse via refaddr equality.
     my %_ctx_cache;
 
-    # Side-table mapping Context refaddr to {control, scope} state.
-    # Keeps the Context tree clean (focus remains bare IR node or undef)
-    # while threading CFG state for Sea of Nodes construction.
-    my %_cfg_state;
-
     # Pending CFG state update from action methods. Action methods call
     # update_cfg() to request a state change; on_complete applies it to the
     # result context after the action returns.
@@ -39,7 +34,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     my $_one_singleton;
 
     # Return a singleton one() Context, creating it on first call.
-    # Also initializes the cfg_state side-table entry and annotation for this context.
+    # Also initializes the cfg annotation for this context.
     # Implemented as a method (not my sub) so the XS codegen can compile it
     # natively — my sub cannot access class-scope lexicals in XS.
     method _one_ctx() {
@@ -55,8 +50,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 control => $factory->make('Start'),
                 scope   => Chalk::Bootstrap::Scope->new(),
             };
-            $_cfg_state{refaddr($_one_singleton)} = $state;
-            # Dual-write: also store cfg state in the Context annotation
+            # Store cfg state in the Context annotation (canonical location)
             $_one_singleton->annotations()->{cfg} = $state;
         }
         return $_one_singleton;
@@ -130,24 +124,19 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # because they reference different Context refaddrs.
     method reset_cache() {
         %_ctx_cache = ();
-        %_cfg_state = ();
         $_one_singleton = undef;
     }
 
     # Retrieve CFG state (control token + scope) for a Context.
-    # Prefers annotations->{cfg} (the canonical location after migration);
-    # falls back to the refaddr-keyed side-table for backwards compatibility.
+    # Reads from annotations->{cfg} — the canonical location for cfg state.
     # Returns hashref {control => $node, scope => $scope} or undef if no state.
     method cfg_state($ctx) {
-        return $ctx->annotations()->{cfg} // $_cfg_state{refaddr($ctx)};
+        return $ctx->annotations()->{cfg};
     }
 
     # Set CFG state for a Context. Used by action methods to update
     # control flow and scope as they build Sea of Nodes IR.
-    # Dual-writes to both the refaddr-keyed side-table and annotations->{cfg}.
     method set_cfg_state($ctx, $state) {
-        $_cfg_state{refaddr($ctx)} = $state;
-        # Dual-write: also store cfg state in the Context annotation
         $ctx->annotations()->{cfg} = $state;
         return;
     }
@@ -177,12 +166,11 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     sub current_type_context { return $_type_context }
 
     # Get the inherited CFG state for a context.
-    # Prefers annotations->{cfg}; falls back to refaddr side-table then one() defaults.
+    # Returns annotations->{cfg} if present, falls back to one() defaults.
     method inherited_cfg_state($ctx) {
-        my $state = $ctx->annotations()->{cfg} // $_cfg_state{refaddr($ctx)};
+        my $state = $ctx->annotations()->{cfg};
         return $state if defined $state;
-        my $one = $self->_one_ctx();
-        return $one->annotations()->{cfg} // $_cfg_state{refaddr($one)};
+        return $self->_one_ctx()->annotations()->{cfg};
     }
 
     # Check if value is zero (undef)
@@ -202,9 +190,11 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
         # Propagate cfg_state through multiply chains so that parent rules
         # see the most recent control/scope state from their children.
-        if (!exists $_cfg_state{refaddr($result)}) {
-            my $right_state = $right->annotations()->{cfg} // $_cfg_state{refaddr($right)};
-            my $left_state  = $left->annotations()->{cfg}  // $_cfg_state{refaddr($left)};
+        # Only propagate when the result does not already have an annotation
+        # (hash-consed results reuse the same object; avoid overwriting).
+        if (!defined $result->annotations()->{cfg}) {
+            my $right_state = $right->annotations()->{cfg};
+            my $left_state  = $left->annotations()->{cfg};
             # Combine CFG state from both sides of the multiply:
             # 1. Control: prefer non-Start over Start (structural change wins)
             # 2. Scope: merge both sides (left accumulated, right may add new vars)
@@ -230,11 +220,8 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             } else {
                 $inherited = $right_state // $left_state;
             }
-            if (defined $inherited) {
-                $_cfg_state{refaddr($result)} = $inherited;
-                # Dual-write: also store cfg state in the Context annotation
-                $result->annotations()->{cfg} = $inherited;
-            }
+            # Store cfg state in the Context annotation (canonical location)
+            $result->annotations()->{cfg} = $inherited if defined $inherited;
         }
 
         return $result;
@@ -279,21 +266,17 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
         # Apply pending CFG state update from action method, if any
         if (defined $_pending_cfg_update) {
-            $_cfg_state{refaddr($result_ctx)} = $_pending_cfg_update;
-            # Dual-write: also store cfg state in the Context annotation
+            # Store cfg state in the Context annotation (canonical location)
             $result_ctx->annotations()->{cfg} = $_pending_cfg_update;
             $_pending_cfg_update = undef;
         }
 
         # Propagate CFG state: inherit from the value context,
         # unless an action explicitly set state via update_cfg.
-        if (!exists $_cfg_state{refaddr($result_ctx)}) {
+        if (!defined $result_ctx->annotations()->{cfg}) {
             my $inherited = $self->inherited_cfg_state($value);
-            if (defined $inherited) {
-                $_cfg_state{refaddr($result_ctx)} = $inherited;
-                # Dual-write: also store cfg state in the Context annotation
-                $result_ctx->annotations()->{cfg} = $inherited;
-            }
+            # Store cfg state in the Context annotation (canonical location)
+            $result_ctx->annotations()->{cfg} = $inherited if defined $inherited;
         }
 
         # Signal epoch boundary for statement-level completions.
@@ -334,13 +317,12 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # problem where add() picks an older value that predates a cfg_state update.
     method on_merge($winner, $loser) {
         return unless defined $winner && defined $loser;
-        my $winner_state = $winner->annotations()->{cfg} // $_cfg_state{refaddr($winner)};
-        my $loser_state  = $loser->annotations()->{cfg}  // $_cfg_state{refaddr($loser)};
+        my $winner_state = $winner->annotations()->{cfg};
+        my $loser_state  = $loser->annotations()->{cfg};
 
         # If the loser has cfg_state but the winner doesn't, transfer it
         if (defined $loser_state && !defined $winner_state) {
-            $_cfg_state{refaddr($winner)} = $loser_state;
-            # Dual-write: also store cfg state in the Context annotation
+            # Store cfg state in the Context annotation (canonical location)
             $winner->annotations()->{cfg} = $loser_state;
             return;
         }
@@ -361,10 +343,8 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 $base = $winner_state;
             }
             my $merged_scope = $winner_state->{scope}->merge($loser_state->{scope});
-            my $merged = _copy_cfg_with_scope($base, $merged_scope);
-            $_cfg_state{refaddr($winner)} = $merged;
-            # Dual-write: also store cfg state in the Context annotation
-            $winner->annotations()->{cfg} = $merged;
+            # Store cfg state in the Context annotation (canonical location)
+            $winner->annotations()->{cfg} = _copy_cfg_with_scope($base, $merged_scope);
         }
         return;
     }
@@ -382,11 +362,8 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         );
         # Propagate cfg_state from parent to placeholder
         my $parent_state = $self->inherited_cfg_state($value);
-        if (defined $parent_state) {
-            $_cfg_state{refaddr($placeholder)} = $parent_state;
-            # Dual-write: also store cfg state in the Context annotation
-            $placeholder->annotations()->{cfg} = $parent_state;
-        }
+        # Store cfg state in the Context annotation (canonical location)
+        $placeholder->annotations()->{cfg} = $parent_state if defined $parent_state;
         return $self->multiply($value, $placeholder);
     }
 
