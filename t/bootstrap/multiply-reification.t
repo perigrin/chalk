@@ -43,6 +43,7 @@ sub make_earley() {
 
     isa_ok($ctx, 'Chalk::Bootstrap::Context', 'scan context is a Context');
     is($ctx->extract, 'foo', 'focus is the matched text');
+    is($ctx->rule,    'Atom', 'Context rule field set to rule_name');
 
     my $ann = $ctx->annotations;
     is($ann->{rule_name}, 'Atom', 'annotations has rule_name');
@@ -53,6 +54,13 @@ sub make_earley() {
         { Start => 1, Atom => 1 },
         'annotations has predicted set',
     );
+
+    # predicted hashref is snapshotted, not aliased — parser mutates
+    # its live %predicted_at during the position loop and Contexts must
+    # observe the state at reification time.
+    $predicted->{Mutated} = 1;
+    ok(!exists $ctx->annotations->{predicted}{Mutated},
+        'predicted hashref is snapshotted (immune to caller mutation)');
 }
 
 # Task 2: Complete annotation helper
@@ -64,6 +72,7 @@ sub make_earley() {
 
     isa_ok($ctx, 'Chalk::Bootstrap::Context', 'complete context is a Context');
     is($ctx->extract, $ir_value, 'focus is the completed value');
+    is($ctx->rule,    'Block',   'Context rule field set to rule_name');
 
     my $ann = $ctx->annotations;
     is($ann->{rule_name}, 'Block', 'annotations has rule_name');

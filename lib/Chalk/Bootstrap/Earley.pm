@@ -124,14 +124,17 @@ class Chalk::Bootstrap::Earley {
     # predicted hashref so semirings can dispatch on them during multiply.
     # Each call returns a fresh Context object — unique refaddr preserves
     # hash-consing correctness even when two scans share the same value.
+    # The predicted hashref is snapshotted because the parser mutates its
+    # live %predicted_at during the position loop.
     method _make_scan_context($matched_text, $rule_name, $alt_idx, $predicted_at) {
         return Chalk::Bootstrap::Context->new(
             focus       => $matched_text,
+            rule        => $rule_name,
             annotations => {
                 rule_name    => $rule_name,
                 alt_idx      => $alt_idx,
                 matched_text => $matched_text,
-                predicted    => $predicted_at,
+                predicted    => { $predicted_at->%* },
             },
         );
     }
@@ -143,6 +146,7 @@ class Chalk::Bootstrap::Earley {
     method _make_complete_context($value, $rule_name, $alt_idx, $pos, $origin) {
         return Chalk::Bootstrap::Context->new(
             focus       => $value,
+            rule        => $rule_name,
             annotations => {
                 rule_name => $rule_name,
                 alt_idx   => $alt_idx,
