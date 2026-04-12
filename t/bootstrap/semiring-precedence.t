@@ -99,6 +99,26 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
     lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
 );
 
+# Helper: build a complete-annotated Context for multiply() calls.
+# Replaces on_complete($value, $rule_name, $alt_idx, $pos, $origin).
+my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
+    $pos    //= 0;
+    $origin //= 0;
+    $alt_idx //= 0;
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => [$value],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+};
+
 # Test 7: zero and one
 {
     my $z = $prec->zero();
@@ -165,30 +185,30 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 }
 
 # ========================================================================
-# Precedence semiring: on_complete
+# Precedence semiring: multiply with complete Context
+# Complete events arrive as multiply($value, $complete_ctx) where
+# $complete_ctx carries annotations->{complete}=true, rule_name, alt_idx.
 # ========================================================================
 
-# Test 14: on_complete returns value unchanged for non-expression rules
+# Test 14: multiply with complete Context returns value unchanged for non-expression rules
 {
-    my $result = $prec->on_complete($prec->one(), 'Identifier', 0, 5, 0);
-    ok(defined $result, 'on_complete for Identifier returns value');
-    ok(!$prec->is_zero($result), 'on_complete for Identifier is not zero');
+    my $result = $prec->multiply($prec->one(), $make_complete->($prec->one(), 'Identifier', 0, 5, 0));
+    ok(defined $result, 'multiply with complete Context for Identifier returns value');
+    ok(!$prec->is_zero($result), 'multiply with complete Context for Identifier is not zero');
 }
 
-# Test 15: on_complete for BinaryOp marks the operator as passive
+# Test 15: multiply with complete Context for BinaryOp passes through operator info
 {
     # Simulate scanning an operator then completing BinaryOp
-    # (Using multiply with scan Context instead of on_scan)
-    use Chalk::Bootstrap::Context;
     my $scan_ctx = Chalk::Bootstrap::Context->new(
         focus       => '+',
         position    => 0,
         annotations => { scan => true, rule_name => 'BinaryOp', alt_idx => 0, predicted => {} },
     );
     my $scanned = $prec->multiply($prec->one(), $scan_ctx);
-    my $result = $prec->on_complete($scanned, 'BinaryOp', 0, 1, 0);
-    ok(defined $result, 'on_complete for BinaryOp returns value');
-    ok(!$prec->is_zero($result), 'on_complete for BinaryOp is not zero');
+    my $result = $prec->multiply($scanned, $make_complete->($scanned, 'BinaryOp', 0, 1, 0));
+    ok(defined $result, 'multiply with complete Context for BinaryOp returns value');
+    ok(!$prec->is_zero($result), 'multiply with complete Context for BinaryOp is not zero');
 }
 
 # ========================================================================
@@ -287,13 +307,13 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 # Precedence semiring: ParenExpr resets precedence context
 # ========================================================================
 
-# Test 21: on_complete for ParenExpr clears operator info
+# Test 21: multiply with complete Context for ParenExpr clears operator info
 {
     # Start with an operator-bearing value (simulating BinaryExpression inside parens)
     my $op_value = { valid => true, op => '+', level => 3, assoc => 'left' };
 
-    # Wrap in ParenExpr — on_complete should clear operator info
-    my $paren_result = $prec->on_complete($op_value, 'ParenExpr', 0, 3, 0);
+    # Wrap in ParenExpr — complete multiply should clear operator info
+    my $paren_result = $prec->multiply($op_value, $make_complete->($op_value, 'ParenExpr', 0, 3, 0));
 
     # After ParenExpr, the value should be "clean" — no operator restriction
     # So multiplying with a higher-precedence parent (* level 2) should be valid
@@ -310,7 +330,7 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 
 # Test 22: UnaryExpression has higher precedence than BinaryExpression
 {
-    my $unary_result = $prec->on_complete($prec->one(), 'UnaryExpression', 0, 2, 0);
+    my $unary_result = $prec->multiply($prec->one(), $make_complete->($prec->one(), 'UnaryExpression', 0, 2, 0));
 
     # Binary context with + (level 3)
     my $binary_context = { valid => true, op => '+', level => 3, assoc => 'left' };
@@ -322,7 +342,7 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 
 # Test 23: AssignmentExpression has lower precedence than BinaryExpression
 {
-    my $assign_result = $prec->on_complete($prec->one(), 'AssignmentExpression', 0, 5, 0);
+    my $assign_result = $prec->multiply($prec->one(), $make_complete->($prec->one(), 'AssignmentExpression', 0, 5, 0));
 
     # Binary context with + (level 3)
     my $binary_context = { valid => true, op => '+', level => 3, assoc => 'left' };
@@ -515,43 +535,44 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 }
 
 # ========================================================================
-# Hash-consing: on_complete returns interned objects
+# Hash-consing: multiply with complete Context returns interned objects
 # ========================================================================
 
-# Test 44: on_complete for ParenExpr always returns same (one) object
+# Test 44: multiply with complete Context for ParenExpr always returns same (one) object
 {
     my $op_value = { valid => true, op => '+', level => 3, assoc => 'left' };
-    my $r1 = $prec->on_complete($op_value, 'ParenExpr', 0, 0, 0);
-    my $r2 = $prec->on_complete({ valid => true, op => '-', level => 5, assoc => 'left' }, 'ParenExpr', 0, 0, 0);
+    my $r1 = $prec->multiply($op_value, $make_complete->($op_value, 'ParenExpr', 0, 0, 0));
+    my $op_value2 = { valid => true, op => '-', level => 5, assoc => 'left' };
+    my $r2 = $prec->multiply($op_value2, $make_complete->($op_value2, 'ParenExpr', 0, 0, 0));
     is(refaddr($r1), refaddr($r2),
-        'on_complete for ParenExpr always returns same reset (one) object');
+        'multiply with complete Context for ParenExpr always returns same reset (one) object');
     is(refaddr($r1), refaddr($prec->one()),
-        'on_complete for ParenExpr returns the one() singleton');
+        'multiply with complete Context for ParenExpr returns the one() singleton');
 }
 
-# Test 45: on_complete for PostfixExpression returns same interned object
+# Test 45: multiply with complete Context for PostfixExpression returns same interned object
 {
-    my $r1 = $prec->on_complete($prec->one(), 'PostfixExpression', 0, 0, 0);
-    my $r2 = $prec->on_complete($prec->one(), 'PostfixExpression', 0, 0, 0);
+    my $r1 = $prec->multiply($prec->one(), $make_complete->($prec->one(), 'PostfixExpression', 0, 0, 0));
+    my $r2 = $prec->multiply($prec->one(), $make_complete->($prec->one(), 'PostfixExpression', 0, 0, 0));
     is(refaddr($r1), refaddr($r2),
-        'on_complete for PostfixExpression returns same interned object');
+        'multiply with complete Context for PostfixExpression returns same interned object');
 }
 
-# Test 46: on_complete for Subscript (no high level) returns one singleton
+# Test 46: multiply with complete Context for Subscript (no high level) returns one singleton
 {
-    my $r = $prec->on_complete($prec->one(), 'Subscript', 0, 0, 0);
+    my $r = $prec->multiply($prec->one(), $make_complete->($prec->one(), 'Subscript', 0, 0, 0));
     is(refaddr($r), refaddr($prec->one()),
-        'on_complete for Subscript with no high level returns one() singleton');
+        'multiply with complete Context for Subscript with no high level returns one() singleton');
 }
 
-# Test 47: on_complete for generic rule returns one singleton
+# Test 47: multiply with complete Context for generic rule returns one singleton
 {
-    my $r1 = $prec->on_complete($prec->one(), 'SomeOtherRule', 0, 0, 0);
-    my $r2 = $prec->on_complete($prec->one(), 'AnotherRule', 0, 0, 0);
+    my $r1 = $prec->multiply($prec->one(), $make_complete->($prec->one(), 'SomeOtherRule', 0, 0, 0));
+    my $r2 = $prec->multiply($prec->one(), $make_complete->($prec->one(), 'AnotherRule', 0, 0, 0));
     is(refaddr($r1), refaddr($r2),
-        'on_complete for unrecognised rules returns same one() singleton');
+        'multiply with complete Context for unrecognised rules returns same one() singleton');
     is(refaddr($r1), refaddr($prec->one()),
-        'on_complete for unrecognised rules returns the one() singleton');
+        'multiply with complete Context for unrecognised rules returns the one() singleton');
 }
 
 # ========================================================================
