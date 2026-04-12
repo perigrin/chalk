@@ -41,6 +41,26 @@ sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {
     );
 }
 
+# Helper: build a complete-annotated Context for multiply() calls.
+# Replaces on_complete($value, $rule_name, $alt_idx, $pos, $origin).
+my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
+    $pos    //= 0;
+    $origin //= 0;
+    $alt_idx //= 0;
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => defined($value) ? [$value] : [],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+};
+
 # Helper: build a Context with a given set of annotations (merges over defaults).
 # Used to construct test inputs for methods that take Contexts with annotation slots.
 sub ctx_with_annotations($focus, $extra_annotations) {
@@ -514,12 +534,12 @@ sub ctx_with_structural($focus_value, $struct_tag, $rule = undef) {
         rule     => undef,
     );
 
-    my $result = $comp->on_complete($ctx, 'TestRule', 0, 5, 0);
+    my $result = $comp->multiply($ctx, $make_complete->($ctx, 'TestRule', 0, 5, 0));
 
-    isa_ok($result, 'Chalk::Bootstrap::Context', 'on_complete returns a Context');
-    ok(!$result->is_zero(), 'on_complete result is non-zero');
-    is($result->extract(), 'HELLO', 'on_complete has action applied');
-    is($result->rule(), 'TestRule', 'on_complete has rule name set');
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'multiply with complete Context returns a Context');
+    ok(!$result->is_zero(), 'multiply with complete Context result is non-zero');
+    is($result->extract(), 'HELLO', 'multiply with complete Context has action applied');
+    is($result->rule(), 'TestRule', 'multiply with complete Context has rule name set');
 }
 
 # ========================================================================
@@ -735,11 +755,11 @@ sub ctx_with_structural($focus_value, $struct_tag, $rule = undef) {
     # Build a valid input Context for the 5-ary composite using comp->one()
     my $value = $comp->one();
 
-    # Run on_complete
-    my $result = $comp->on_complete($value, 'TestRule', 0, 1, 0);
+    # Run multiply with complete Context (replaces on_complete)
+    my $result = $comp->multiply($value, $make_complete->($value, 'TestRule', 0, 1, 0));
 
     # TI is an annotation semiring. FilterComposite should have threaded TI's
-    # on_complete result to SA via set_type_context before SA's on_complete ran.
+    # multiply result to SA via set_type_context before SA's complete ran.
     ok(defined $captured_type_ctx, 'FilterComposite threads TI result to SA');
 }
 
