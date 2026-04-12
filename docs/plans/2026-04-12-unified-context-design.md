@@ -114,9 +114,14 @@ probability). The product of all results determines the outcome:
 - Any component returns zero → product is zero → alternative eliminated
 - All components return non-zero → alternative survives
 
-There is no priority ordering. Each component disambiguates
-independently on its own concern. Validity is the product of all
-components.
+Each component disambiguates independently on its own concern.
+Validity is the product of all components.
+
+As an optimization, components can be evaluated in order from most
+likely to return zero (Boolean, Precedence, TI, Structural, SA).
+If any component returns zero, the product is zero — remaining
+components can be skipped. This is short-circuit evaluation of the
+product, not a semantic ordering.
 
 If no component can disambiguate (both alternatives are equivalent
 from every component's perspective), this is unresolved ambiguity.
@@ -169,8 +174,8 @@ incremental through multiply.
 
 - `on_complete` callback on all semirings
 - `set_type_context()` / `current_type_context()` bridge
-- `_filter_compare` and priority ordering in FilterComposite
-  (was an implementation artifact, not part of the algebra)
+- `_filter_compare` in FilterComposite (replaced by product of
+  component adds)
 - Parallel Context trees (TI and SA no longer build independent trees)
 - N-tuple bookkeeping in FilterComposite
 - Per-semiring hash-cons caches for Context objects (one cache)
