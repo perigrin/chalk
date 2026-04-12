@@ -39,29 +39,14 @@ class Chalk::Bootstrap::Context {
     # Collect leaf contexts with defined focuses from this Context tree.
     # A "leaf" is a context that has a defined focus (from on_complete).
     # Optional $node_class filters to only contexts whose focus isa $node_class.
-    # Iterative (explicit stack) to avoid deep-recursion on tall parse trees.
     method leaves($node_class = undef) {
-        my @results;
-        my @stack = ($self);
-
-        while (@stack) {
-            my $node = pop @stack;
+        return $self->walk_all(sub ($node) {
             my $f = $node->extract();
-            if (defined $f) {
-                # This context has a focus — it's a "leaf" produced by on_complete
-                if (!$node_class || $f isa $node_class) {
-                    push @results, $node;
-                }
-                # Leaves don't recurse into their own children
-                next;
+            if (!$node_class || $f isa $node_class) {
+                return $node;
             }
-
-            # No focus — intermediate multiply() node. Push children in reverse
-            # order so leftmost child is processed first (preserving original order).
-            push @stack, reverse $node->children()->@*;
-        }
-
-        return @results;
+            return undef;
+        });
     }
 
     # Extract concatenated scanned text from this Context tree.
@@ -89,5 +74,75 @@ class Chalk::Bootstrap::Context {
         }
 
         return $text;
+    }
+
+    # Walk the tree and return the first defined result from $callback.
+    # Descends through unfocused multiply nodes, stops at focused leaves.
+    # Optional reverse => true for right-to-left traversal.
+    method walk($callback, %opts) {
+        my $reverse = $opts{reverse};
+        my @stack = ($self);
+
+        while (@stack) {
+            my $node = pop @stack;
+            my $f = $node->extract();
+            if (defined $f) {
+                my $result = $callback->($node);
+                return $result if defined $result;
+                next;
+            }
+            my @kids = $node->children()->@*;
+            @kids = reverse @kids unless $reverse;
+            push @stack, @kids;
+        }
+
+        return undef;
+    }
+
+    # Walk the tree and collect all defined results from $callback.
+    # Descends through unfocused multiply nodes, stops at focused leaves.
+    # Optional reverse => true for right-to-left traversal.
+    method walk_all($callback, %opts) {
+        my $reverse = $opts{reverse};
+        my @results;
+        my @stack = ($self);
+
+        while (@stack) {
+            my $node = pop @stack;
+            my $f = $node->extract();
+            if (defined $f) {
+                my $result = $callback->($node);
+                push @results, $result if defined $result;
+                next;
+            }
+            my @kids = $node->children()->@*;
+            @kids = reverse @kids unless $reverse;
+            push @stack, @kids;
+        }
+
+        return @results;
+    }
+
+    # Walk the tree threading an accumulator through focused leaves.
+    # $callback->($acc, $node) returns the new accumulator value.
+    # Optional reverse => true for right-to-left traversal.
+    method walk_acc($init, $callback, %opts) {
+        my $reverse = $opts{reverse};
+        my $acc = $init;
+        my @stack = ($self);
+
+        while (@stack) {
+            my $node = pop @stack;
+            my $f = $node->extract();
+            if (defined $f) {
+                $acc = $callback->($acc, $node);
+                next;
+            }
+            my @kids = $node->children()->@*;
+            @kids = reverse @kids unless $reverse;
+            push @stack, @kids;
+        }
+
+        return $acc;
     }
 }
