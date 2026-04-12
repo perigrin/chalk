@@ -39,7 +39,7 @@ my sub parse_source($source) {
     my $result = $parser->parse_value($source);
     return undef unless defined $result;
 
-    my $sem_ctx = $result->[4];
+    my $sem_ctx = $result;
     return undef unless defined $sem_ctx;
     return $sem_ctx->extract();
 }

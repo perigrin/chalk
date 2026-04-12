@@ -32,7 +32,7 @@ my sub parse_and_find_methods($source) {
     my $result = $parser->parse_value($source);
     return () unless defined $result;
 
-    my $sem_ctx = $result->[4];
+    my $sem_ctx = $result;
     return () unless defined $sem_ctx;
     my $ir = $sem_ctx->extract();
     return () unless defined $ir;

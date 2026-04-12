@@ -40,7 +40,7 @@ my sub parse_and_generate($file) {
     my $result = $parser->parse_value($source);
     return undef unless defined $result;
 
-    my $sem_ctx = $result->[4];
+    my $sem_ctx = $result;
     return undef unless defined $sem_ctx;
     my $ir = $sem_ctx->extract();
     return undef unless defined $ir;

@@ -37,12 +37,12 @@ for my $file (sort @files) {
 
     my $parser = build_perl_ir_parser($grammar, start => 'Program');
     my $result = eval { $parser->parse_value($source) };
-    my $ok = (defined $result && defined $result->[4]) ? 'OK' : 'FAIL';
+    my $ok = (defined $result && !$result->is_zero()) ? 'OK' : 'FAIL';
 
     my $graphs = 0;
     my @method_names;
     if ($ok eq 'OK') {
-        my $prog = eval { $result->[4]->extract() };
+        my $prog = eval { $result->extract() };
         if (defined $prog && $prog isa Chalk::IR::Program) {
             for my $c ($prog->classes()->@*) {
                 my $cn = $c->name();

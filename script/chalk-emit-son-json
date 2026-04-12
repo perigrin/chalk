@@ -42,9 +42,9 @@ close $fh;
 
 my $parser = build_perl_ir_parser($grammar, start => 'Program');
 my $result = $parser->parse_value($source);
-die "Parse failed for $file\n" unless defined $result;
+die "Parse failed for $file\n" unless defined $result && !$result->is_zero();
 
-my $sem_ctx = $result->[4];
+my $sem_ctx = $result;
 die "No semantic result for $file\n" unless defined $sem_ctx;
 
 my $program = $sem_ctx->extract();

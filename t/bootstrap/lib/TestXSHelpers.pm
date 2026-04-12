@@ -63,8 +63,8 @@ sub parse_file_ir($gen_grammar, $file) {
     my $result = $parser->parse_value($source);
     return unless defined $result;
 
-    my $sa = $semiring->semirings()->[4];
-    my $sem_ctx = $result->[4];
+    my $sa = $semiring->semirings()->[-1];  # SA is always last
+    my $sem_ctx = $result;
     return unless defined $sem_ctx;
     my $ir = $sem_ctx->extract();
     return unless defined $ir;

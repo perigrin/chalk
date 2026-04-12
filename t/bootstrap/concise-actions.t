@@ -31,14 +31,12 @@ SKIP: {
     skip 'Concise parser not built', 1 unless defined $parser;
 
     # Helper to parse and extract ConciseTree
-    # Result tuple: [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=Structural, [4]=SemanticAction
+    # parse_value returns a unified Context directly after #706
     my sub parse_concise($source) {
         my $result = $parser->parse_value($source);
         return undef unless defined $result;
-        my $bool_val = $result->[0];
-        my $sem_val = $result->[4];
-        return undef unless $bool_val;
-        return $sem_val->extract();
+        return undef if $result->is_zero();
+        return $result->extract();
     }
 
     # Helper to get op names from a tree

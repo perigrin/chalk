@@ -43,7 +43,7 @@ my sub parse_and_generate($file) {
     return undef unless defined $result;
 
     my $sa = $semiring->semirings()->[4];
-    my $sem_ctx = $result->[4];
+    my $sem_ctx = $result;
     return undef unless defined $sem_ctx;
     my $ir = $sem_ctx->extract();
     return undef unless defined $ir;

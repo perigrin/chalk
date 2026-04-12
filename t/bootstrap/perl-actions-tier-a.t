@@ -43,8 +43,8 @@ my sub parse_file($file) {
     my $result = $parser->parse_value($source);
     return undef unless defined $result;
 
-    # Extract SemanticAction value (index 4 in 5-ary composite)
-    my $sem_ctx = $result->[4];
+    # parse_value returns the unified Context directly after #706
+    my $sem_ctx = $result;
     return undef unless defined $sem_ctx;
     return $sem_ctx->extract();
 }

@@ -113,8 +113,8 @@ SKIP: {
         };
         my $result = $parser->parse_value($source);
         return undef unless defined $result;
-        return undef unless $result->[0]; # Boolean
-        return $result->[4]->extract();   # SemanticAction result
+        return undef if $result->is_zero(); # unified Context: is_zero replaces [0] bool check
+        return $result->extract();          # unified Context: direct access replaces [4]
     }
 
     # Get B::Concise oracle tree for a .pm file (using cache)

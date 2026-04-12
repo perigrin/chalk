@@ -29,11 +29,11 @@ SKIP: {
     skip 'Concise parser not built', 1 unless defined $parser;
 
     # Helper to parse and check if result is defined (no ambiguity crash)
+    # parse_value returns a unified Context directly after #706
     my sub parse_ok($source) {
         my $result = $parser->parse_value($source);
         return undef unless defined $result;
-        my $bool_val = $result->[0];
-        return undef unless $bool_val;
+        return undef if $result->is_zero();
         return $result;
     }
 
@@ -297,7 +297,7 @@ SKIP: {
         # If the wrong parse wins, aelem would be outermost because the //
         # would be nested inside the Subscript.
         if (defined $result) {
-            my $sa_ctx = $result->[4];  # SemanticAction result (Context)
+            my $sa_ctx = $result;  # unified Context directly after #706
             my $tree = $sa_ctx->extract();  # ConciseTree
             my $ops = $tree->ops();
             # The dor op should appear in the sequence, confirming //
@@ -310,7 +310,7 @@ SKIP: {
         my $result = parse_ok('my $x = $a->[$i] || $a->[0];');
         ok(defined $result, '$a->[$i] || $a->[0] parses correctly');
         if (defined $result) {
-            my $sa_ctx = $result->[4];
+            my $sa_ctx = $result;  # unified Context directly after #706
             my $tree = $sa_ctx->extract();
             my $ops = $tree->ops();
             my $has_or = grep { $_->name() eq 'or' } $ops->@*;
