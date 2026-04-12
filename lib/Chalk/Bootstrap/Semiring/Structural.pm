@@ -75,12 +75,169 @@ class Chalk::Bootstrap::Semiring::Structural {
             return $l;
         }
 
+        # Complete event: right Context has annotations->{complete} = true.
+        # Apply structural tagging based on the completed rule name.
+        # This is the body of the former on_complete method, now inlined here.
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{complete}) {
+            return $ZERO if $l == $ZERO;
+            my $rule_name = $right->annotations()->{rule_name};
+            my $alt_idx   = $right->annotations()->{alt_idx};
+            return $self->_complete_structural($l, $rule_name, $alt_idx);
+        }
+
         # Propagate zero
         return $ZERO if $l == $ZERO;
         return $ZERO if $r == $ZERO;
 
         # Combine tags from both sides using bitwise OR
         return $l | $r;
+    }
+
+    # _complete_structural: apply structural bit-tagging for a completed rule.
+    # Encapsulates all rule-name dispatch formerly in on_complete.
+    # Receives the accumulated left-side integer value and the rule metadata.
+    method _complete_structural($value, $rule_name, $alt_idx) {
+        return $ZERO if $value == $ZERO;
+
+        # Tag Block completions. Preserve is_hash from inner content so that
+        # add() can prefer a pure-Block interpretation over one where a
+        # HashConstructor acts as a trailing SimpleStatement. In `{ {} }`,
+        # alt 0 (inner Block) has is_block only; alt 1 (trailing HashConstructor)
+        # has is_block + is_hash. The preference for pure-Block resolves this.
+        if ($rule_name eq 'Block') {
+            return STRUCT_IS_BLOCK | ($value & STRUCT_IS_HASH);
+        }
+
+        # Tag HashConstructor completions
+        if ($rule_name eq 'HashConstructor') {
+            return STRUCT_IS_HASH;
+        }
+
+        # Tag VariableDeclaration completions — marks a `my`/`our`/`state`/`local`
+        # declaration. This distinguishes correct parses (where `my` is a
+        # declarator keyword) from bogus parses where `my` is treated as a
+        # bare QualifiedIdentifier in a CallExpression.
+        if ($rule_name eq 'VariableDeclaration') {
+            return STRUCT_IS_VARDECL | ($value & STRUCT_IS_BLOCK);
+        }
+
+        # Tag PostfixDeref completions — marks a deref on an expression.
+        # Do NOT propagate is_call from child: PostfixDeref is a dereference,
+        # not a function call. This allows add() to prefer CallExpression
+        # (is_call) over PostfixDeref-on-CallExpression (is_deref, no is_call)
+        # via the existing "prefer is_call over non-call" rule.
+        if ($rule_name eq 'PostfixDeref') {
+            return STRUCT_IS_DEREF | ($value & STRUCT_IS_BLOCK);
+        }
+
+        # Tag ALL Subscript completions with is_deref.
+        # Arrow variants (alts 0-2): $f->($x), $f->[$i], $f->{$k}
+        # Non-arrow variants (alts 3-4): $h[$i], $h{$k}
+        # Both are dereference operations. Tagging them allows add() to
+        # prefer CallExpression (is_call, no is_deref) over
+        # Subscript(CallExpression, ...) (is_call + is_deref).
+        if ($rule_name eq 'Subscript') {
+            return STRUCT_IS_DEREF
+                | ($value & STRUCT_IS_CALL)
+                | ($value & STRUCT_IS_BLOCK);
+        }
+
+        # Tag CallExpression completions — preferred over bare Identifier.
+        # Preserve is_block/is_hash from inner nonterminals so add() can
+        # prefer CallExpression-with-Block over CallExpression-with-Hash.
+        # Clear is_deref/is_method: CallExpression is a direct function call,
+        # deref/method tags from arguments should not leak outward.
+        if ($rule_name eq 'CallExpression') {
+            return STRUCT_IS_CALL | ($value & STRUCT_IS_BLOCK);
+        }
+
+        # Tag MethodCall completions with parens (alts 0, 2) — preferred over
+        # bare method access (alts 1, 3) so args aren't lost as separate stmts.
+        # All MethodCall alts get is_method so add() prefers CallExpression
+        # over MethodCall when both compete at the same PostfixExpression position.
+        if ($rule_name eq 'MethodCall') {
+            my $call_from_alt   = ($alt_idx == 0 || $alt_idx == 2) ? STRUCT_IS_CALL : 0;
+            my $call_from_child = $value & STRUCT_IS_CALL;
+            return STRUCT_IS_METHOD | $call_from_alt | $call_from_child;
+        }
+
+        # Tag BinaryExpression with is_binop to distinguish from CallExpression.
+        # When `push @a, $x . $y` produces two parses:
+        #   1. CallExpression: push(@a, $x . $y) — is_call only
+        #   2. BinaryExpression: (push @a) . $x . $y — is_call + is_binop
+        # add() prefers the non-binop (CallExpression) path.
+        if ($rule_name eq 'BinaryExpression') {
+            return STRUCT_IS_BINOP
+                | ($value & STRUCT_IS_BLOCK)
+                | ($value & STRUCT_IS_HASH)
+                | ($value & STRUCT_IS_CALL)
+                | ($value & STRUCT_IS_DEREF)
+                | ($value & STRUCT_IS_METHOD)
+                | ($value & STRUCT_IS_VARDECL);
+        }
+
+        # Tag ExpressionList alts 1-3 (comma/arrow/trailing-comma forms)
+        # with is_list so add() can prefer the simpler single-Expression
+        # alt 0 when both match. Without this, two ExpressionList alternatives
+        # ending in PostfixDeref would have identical tags.
+        if ($rule_name eq 'ExpressionList' && $alt_idx >= 1) {
+            return STRUCT_IS_LIST
+                | ($value & STRUCT_IS_BLOCK)
+                | ($value & STRUCT_IS_HASH)
+                | ($value & STRUCT_IS_CALL)
+                | ($value & STRUCT_IS_DEREF)
+                | ($value & STRUCT_IS_METHOD)
+                | ($value & STRUCT_IS_VARDECL);
+        }
+
+        # Tag ExpressionStatement alt 1 (ExpressionList) — when a single
+        # expression matches both Expression and ExpressionList, prefer
+        # Expression (simpler parse). The list form is only correct when
+        # there are actual commas or fat arrows.
+        if ($rule_name eq 'ExpressionStatement' && $alt_idx == 1) {
+            return STRUCT_IS_LIST
+                | ($value & STRUCT_IS_BLOCK)
+                | ($value & STRUCT_IS_HASH)
+                | ($value & STRUCT_IS_CALL)
+                | ($value & STRUCT_IS_VARDECL);
+        }
+
+        # Tag UseDeclaration with imports (alt 1) as is_call to prefer
+        # it over the shorter alt 0 (without imports). This prevents
+        # `use Foo 'bar'` from fragmenting into `use Foo` + `'bar'`.
+        if ($rule_name eq 'UseDeclaration' && $alt_idx == 1) {
+            return STRUCT_IS_CALL;
+        }
+
+        # ParenExpr alt 1 (ExpressionList) — tag as list so add() prefers
+        # the simpler Expression parse (alt 0) for single expressions.
+        if ($rule_name eq 'ParenExpr' && $alt_idx == 1) {
+            return STRUCT_IS_LIST;
+        }
+
+        # Boundary rules: clear all structural tags
+        if ($rule_name eq 'ParenExpr'
+            || $rule_name eq 'ArrayConstructor') {
+            return 0;
+        }
+
+        # Statement boundaries: preserve is_block/is_hash for disambiguation
+        # of nested empty {} (Block vs HashConstructor). Also preserve
+        # is_call and is_list for their existing uses.
+        if ($rule_name eq 'StatementList'
+            || $rule_name eq 'Program') {
+            return ($value & STRUCT_IS_BLOCK)
+                 | ($value & STRUCT_IS_HASH)
+                 | ($value & STRUCT_IS_CALL)
+                 | ($value & STRUCT_IS_LIST);
+        }
+
+        # Other rules: pass through all tags from value
+        return $value & (
+            STRUCT_IS_BLOCK | STRUCT_IS_HASH | STRUCT_IS_CALL  | STRUCT_IS_LIST  |
+            STRUCT_IS_DEREF | STRUCT_IS_METHOD | STRUCT_IS_BINOP | STRUCT_IS_VARDECL
+        );
     }
 
     method add($left, $right) {
@@ -234,149 +391,6 @@ class Chalk::Bootstrap::Semiring::Structural {
 
         # Both valid, untagged: merge all bits
         return $left | $right;
-    }
-
-    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
-        return $ZERO if $value == $ZERO;
-
-        # Tag Block completions. Preserve is_hash from inner content so that
-        # add() can prefer a pure-Block interpretation over one where a
-        # HashConstructor acts as a trailing SimpleStatement. In `{ {} }`,
-        # alt 0 (inner Block) has is_block only; alt 1 (trailing HashConstructor)
-        # has is_block + is_hash. The preference for pure-Block resolves this.
-        if ($rule_name eq 'Block') {
-            return STRUCT_IS_BLOCK | ($value & STRUCT_IS_HASH);
-        }
-
-        # Tag HashConstructor completions
-        if ($rule_name eq 'HashConstructor') {
-            return STRUCT_IS_HASH;
-        }
-
-        # Tag VariableDeclaration completions — marks a `my`/`our`/`state`/`local`
-        # declaration. This distinguishes correct parses (where `my` is a
-        # declarator keyword) from bogus parses where `my` is treated as a
-        # bare QualifiedIdentifier in a CallExpression.
-        if ($rule_name eq 'VariableDeclaration') {
-            return STRUCT_IS_VARDECL | ($value & STRUCT_IS_BLOCK);
-        }
-
-        # Tag PostfixDeref completions — marks a deref on an expression.
-        # Do NOT propagate is_call from child: PostfixDeref is a dereference,
-        # not a function call. This allows add() to prefer CallExpression
-        # (is_call) over PostfixDeref-on-CallExpression (is_deref, no is_call)
-        # via the existing "prefer is_call over non-call" rule.
-        if ($rule_name eq 'PostfixDeref') {
-            return STRUCT_IS_DEREF | ($value & STRUCT_IS_BLOCK);
-        }
-
-        # Tag ALL Subscript completions with is_deref.
-        # Arrow variants (alts 0-2): $f->($x), $f->[$i], $f->{$k}
-        # Non-arrow variants (alts 3-4): $h[$i], $h{$k}
-        # Both are dereference operations. Tagging them allows add() to
-        # prefer CallExpression (is_call, no is_deref) over
-        # Subscript(CallExpression, ...) (is_call + is_deref).
-        if ($rule_name eq 'Subscript') {
-            return STRUCT_IS_DEREF
-                | ($value & STRUCT_IS_CALL)
-                | ($value & STRUCT_IS_BLOCK);
-        }
-
-        # Tag CallExpression completions — preferred over bare Identifier.
-        # Preserve is_block/is_hash from inner nonterminals so add() can
-        # prefer CallExpression-with-Block over CallExpression-with-Hash.
-        # Clear is_deref/is_method: CallExpression is a direct function call,
-        # deref/method tags from arguments should not leak outward.
-        if ($rule_name eq 'CallExpression') {
-            return STRUCT_IS_CALL | ($value & STRUCT_IS_BLOCK);
-        }
-
-        # Tag MethodCall completions with parens (alts 0, 2) — preferred over
-        # bare method access (alts 1, 3) so args aren't lost as separate stmts.
-        # All MethodCall alts get is_method so add() prefers CallExpression
-        # over MethodCall when both compete at the same PostfixExpression position.
-        if ($rule_name eq 'MethodCall') {
-            my $call_from_alt   = ($alt_idx == 0 || $alt_idx == 2) ? STRUCT_IS_CALL : 0;
-            my $call_from_child = $value & STRUCT_IS_CALL;
-            return STRUCT_IS_METHOD | $call_from_alt | $call_from_child;
-        }
-
-        # Tag BinaryExpression with is_binop to distinguish from CallExpression.
-        # When `push @a, $x . $y` produces two parses:
-        #   1. CallExpression: push(@a, $x . $y) — is_call only
-        #   2. BinaryExpression: (push @a) . $x . $y — is_call + is_binop
-        # add() prefers the non-binop (CallExpression) path.
-        if ($rule_name eq 'BinaryExpression') {
-            return STRUCT_IS_BINOP
-                | ($value & STRUCT_IS_BLOCK)
-                | ($value & STRUCT_IS_HASH)
-                | ($value & STRUCT_IS_CALL)
-                | ($value & STRUCT_IS_DEREF)
-                | ($value & STRUCT_IS_METHOD)
-                | ($value & STRUCT_IS_VARDECL);
-        }
-
-        # Tag ExpressionList alts 1-3 (comma/arrow/trailing-comma forms)
-        # with is_list so add() can prefer the simpler single-Expression
-        # alt 0 when both match. Without this, two ExpressionList alternatives
-        # ending in PostfixDeref would have identical tags.
-        if ($rule_name eq 'ExpressionList' && $alt_idx >= 1) {
-            return STRUCT_IS_LIST
-                | ($value & STRUCT_IS_BLOCK)
-                | ($value & STRUCT_IS_HASH)
-                | ($value & STRUCT_IS_CALL)
-                | ($value & STRUCT_IS_DEREF)
-                | ($value & STRUCT_IS_METHOD)
-                | ($value & STRUCT_IS_VARDECL);
-        }
-
-        # Tag ExpressionStatement alt 1 (ExpressionList) — when a single
-        # expression matches both Expression and ExpressionList, prefer
-        # Expression (simpler parse). The list form is only correct when
-        # there are actual commas or fat arrows.
-        if ($rule_name eq 'ExpressionStatement' && $alt_idx == 1) {
-            return STRUCT_IS_LIST
-                | ($value & STRUCT_IS_BLOCK)
-                | ($value & STRUCT_IS_HASH)
-                | ($value & STRUCT_IS_CALL)
-                | ($value & STRUCT_IS_VARDECL);
-        }
-
-        # Tag UseDeclaration with imports (alt 1) as is_call to prefer
-        # it over the shorter alt 0 (without imports). This prevents
-        # `use Foo 'bar'` from fragmenting into `use Foo` + `'bar'`.
-        if ($rule_name eq 'UseDeclaration' && $alt_idx == 1) {
-            return STRUCT_IS_CALL;
-        }
-
-        # ParenExpr alt 1 (ExpressionList) — tag as list so add() prefers
-        # the simpler Expression parse (alt 0) for single expressions.
-        if ($rule_name eq 'ParenExpr' && $alt_idx == 1) {
-            return STRUCT_IS_LIST;
-        }
-
-        # Boundary rules: clear all structural tags
-        if ($rule_name eq 'ParenExpr'
-            || $rule_name eq 'ArrayConstructor') {
-            return 0;
-        }
-
-        # Statement boundaries: preserve is_block/is_hash for disambiguation
-        # of nested empty {} (Block vs HashConstructor). Also preserve
-        # is_call and is_list for their existing uses.
-        if ($rule_name eq 'StatementList'
-            || $rule_name eq 'Program') {
-            return ($value & STRUCT_IS_BLOCK)
-                 | ($value & STRUCT_IS_HASH)
-                 | ($value & STRUCT_IS_CALL)
-                 | ($value & STRUCT_IS_LIST);
-        }
-
-        # Other rules: pass through all tags from value
-        return $value & (
-            STRUCT_IS_BLOCK | STRUCT_IS_HASH | STRUCT_IS_CALL  | STRUCT_IS_LIST  |
-            STRUCT_IS_DEREF | STRUCT_IS_METHOD | STRUCT_IS_BINOP | STRUCT_IS_VARDECL
-        );
     }
 
     # slot_name: Structural reads/writes the 'structural' annotation slot.

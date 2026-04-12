@@ -123,23 +123,50 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # it as a scan event and apply their scan-time logic (e.g., Precedence
     # validates operators; TypeInference attaches type tags; Structural
     # performs a transparent passthrough).
+    # When $right carries annotations->{complete} = true, semirings apply
+    # their rule-completion logic (formerly on_complete) inline in multiply.
     method multiply($left, $right) {
         return $self->zero() if $left->is_zero();
         return $self->zero() if $right->is_zero();
 
+        my $is_complete = blessed($right) && $right->can('annotations')
+            && $right->annotations()->{complete};
+
         # Run each annotation-layer semiring and collect results.
-        # Pass full Context objects so each semiring can read scan metadata
-        # (annotations->{scan}, annotations->{rule_name}, etc.) and its own
+        # Pass full Context objects so each semiring can read event metadata
+        # (annotations->{scan}, annotations->{complete}, etc.) and its own
         # slot value from the shared Context's annotations hash.
         my %slot_results;
+        my $ti_result_tag_hash;
         for my $sr ($self->_annotation_semirings()) {
             my $slot = $sr->slot_name();
             my $result = $sr->multiply($left, $right);
             return $self->zero() if $sr->is_zero($result);
             $slot_results{$slot} = $result;
+            # Capture TI's tag hash result so we can thread it to SA below.
+            # TI.multiply returns a tag hash directly for complete events
+            # (and for scan events). For regular multiply it returns a Context.
+            if ($slot eq 'type' && $is_complete) {
+                $ti_result_tag_hash = $result;
+            }
         }
 
-        # SA builds the tree structure (the shared Context)
+        # Thread TI result to SA before SA runs so action methods can read type info.
+        # This mirrors the bridge that FC.on_complete used (set_type_context /
+        # current_type_context). SA actions fire during SA.multiply for complete events.
+        if ($is_complete && defined $ti_result_tag_hash
+                && $self->_sa()->can('set_type_context')) {
+            my $ti_ctx_wrapper = Chalk::Bootstrap::Context->new(
+                focus    => $ti_result_tag_hash,
+                children => [],
+                position => 0,
+                rule     => undef,
+            );
+            $self->_sa()->set_type_context($ti_ctx_wrapper);
+        }
+
+        # SA builds the tree structure (the shared Context) for regular multiply,
+        # or applies semantic action (via _complete_sa) for complete events.
         my $sa_result = $self->_sa()->multiply($left, $right);
         return $self->zero() if $self->_sa()->is_zero($sa_result);
 
@@ -257,59 +284,6 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         }
 
         return $winner;
-    }
-
-    # on_complete() delegates to each annotation-layer semiring and to SA.
-    # Threads TI result to SA via set_type_context so SA actions can read
-    # type annotations.
-    # If any component returns zero, the whole result is zero.
-    method on_complete($ctx, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
-        return $self->zero() if $ctx->is_zero();
-
-        # Run annotation-layer semirings; collect slot results
-        my %slot_results;
-        my $ti_result_tag_hash;
-        for my $sr ($self->_annotation_semirings()) {
-            my $slot = $sr->slot_name();
-            my $val;
-            # TI (#707): pass the shared Context directly so TI's on_complete
-            # can walk annotations->{type} from children and return a tag hash.
-            if ($slot eq 'type') {
-                $val = $ctx;
-            } else {
-                $val = $ctx->annotations()->{$slot} // $sr->one();
-            }
-            my $result = $sr->on_complete($val, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit);
-            return $self->zero() if $sr->is_zero($result);
-            if ($slot eq 'type') {
-                # TI's on_complete now returns a tag hash directly (#707).
-                # Store it as annotations->{type} on the shared Context.
-                $slot_results{type} = $result;
-                $ti_result_tag_hash = $result;
-            } else {
-                $slot_results{$slot} = $result;
-            }
-        }
-
-        # Thread TI result to SA before SA runs so action methods can read type info.
-        # The bridge (set_type_context / current_type_context) is still needed because
-        # SA actions run BEFORE FilterComposite overlays the type annotation (#708 will
-        # eliminate on_complete and remove the bridge entirely).
-        # Wrap the tag hash in a Context so set_type_context receives a Context object.
-        if (defined $ti_result_tag_hash && $self->_sa()->can('set_type_context')) {
-            my $ti_ctx_wrapper = Chalk::Bootstrap::Context->new(
-                focus    => $ti_result_tag_hash,
-                children => [],
-                position => 0,
-                rule     => undef,
-            );
-            $self->_sa()->set_type_context($ti_ctx_wrapper);
-        }
-
-        my $sa_result = $self->_sa()->on_complete($ctx, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit);
-        return $self->zero() if $self->_sa()->is_zero($sa_result);
-
-        return $self->_wrap_sa_result($sa_result, %slot_results);
     }
 
     # on_skip_optional() delegates to each annotation-layer semiring and to SA.

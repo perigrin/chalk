@@ -304,9 +304,19 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return $self->_type_tag_for_scan($rule_name, $matched_text);
         }
 
-        # Non-scan multiply: build a hash-consed Context tree with $left and $right
-        # as children. on_complete walks this tree via _walk_annotations to find
-        # type annotations embedded in leaf nodes' annotations->{type}.
+        # Complete event: right Context has annotations->{complete} = true.
+        # Apply type inference for the completed rule.
+        # This is the body of the former on_complete method, now inlined here.
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{complete}) {
+            my $rule_name = $right->annotations()->{rule_name};
+            my $alt_idx   = $right->annotations()->{alt_idx};
+            return $self->_complete_type($left, $rule_name, $alt_idx);
+        }
+
+        # Non-scan/non-complete multiply: build a hash-consed Context tree with
+        # $left and $right as children. The complete-event handler walks this tree
+        # via _walk_annotations to find type annotations in leaf annotations->{type}.
         # FC.is_zero calls TI.is_zero on this result — Context is always non-undef.
         my $key = "mul:" . refaddr($left) . ":" . refaddr($right);
         return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
@@ -315,6 +325,81 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             position => (blessed($right) && $right->can('position')) ? $right->position() : 0,
             rule     => undef,
         ));
+    }
+
+    # _complete_type: apply type inference for a completed rule.
+    # Encapsulates all rule-name dispatch formerly in on_complete.
+    # $value is the full accumulated TI Context (same as what on_complete received).
+    method _complete_type($value, $rule_name, $alt_idx) {
+        return undef if !defined $value;
+
+        # CallExpression: builtin signature validation.
+        # Kept inline (not in TypeInferenceActions) because it needs
+        # complex multi-walker logic: _get_call_symbol for function name,
+        # _get_item_types/_get_list_arity for argument info, plus
+        # builtin_lookup and type_satisfies for per-position validation.
+        # $value is the shared Context; tree-walkers read annotations->{type}.
+        if ($rule_name eq 'CallExpression') {
+            my $return_type;
+            my $call_sym = $self->_get_call_symbol($value);
+            if ($call_sym) {
+                my $sig = $self->_lookup_builtin($call_sym);
+                if ($sig) {
+                    my $item_types = $self->_get_item_types($value);
+                    if ($item_types) {
+                        my $arg_types = $sig->{arg_types};
+                        my $sig_offset = ($alt_idx == 2 || $alt_idx == 3) ? 1 : 0;
+                        for my $i (0 .. $#$item_types) {
+                            my $actual = $item_types->[$i];
+                            my $sig_idx = $i + $sig_offset;
+                            my $expected = $arg_types->[$sig_idx];
+                            $expected = $arg_types->[-1] if !defined $expected;
+                            if (!Chalk::Grammar::Perl::TypeLibrary::type_satisfies($actual, $expected)) {
+                                return undef;
+                            }
+                        }
+                    }
+                    my $arity = $self->_get_list_arity($value) // 1;
+                    $arity += 1 if ($alt_idx == 2 || $alt_idx == 3);
+                    if ($arity < $sig->{min_arity}) {
+                        return undef;
+                    }
+                    # For 'return', propagate the argument's type instead of
+                    # the signature's return_type ('Any'). This lets the enclosing
+                    # method know what type is actually being returned.
+                    if ($call_sym eq 'return') {
+                        my $arg_types = $self->_get_item_types($value);
+                        $return_type = $arg_types->[0] if $arg_types && $arg_types->@*;
+                    } else {
+                        $return_type = $sig->{return_type};
+                    }
+                    $return_type = undef if defined $return_type && $return_type eq 'Any';
+                }
+            }
+            my $new_focus = { valid => true };
+            $new_focus->{type} = $return_type if $return_type;
+            return $new_focus;
+        }
+
+        # Dispatch to TypeInferenceActions for rules with registered methods.
+        # Methods receive the shared Context directly and return a focus hash.
+        # Tree-walkers in Actions read annotations->{type} from child nodes.
+        # Alt-dependent rules receive $alt_idx as an extra parameter.
+        if ($actions->can($rule_name)) {
+            my $action_focus = $actions->dispatch($rule_name, $value,
+                $_needs_alt_idx->{$rule_name} ? $alt_idx : undef);
+            return undef unless defined $action_focus;
+            return $action_focus;
+        }
+
+        # Catch-all: transparent passthrough for rules without Action methods.
+        # Propagates the rightmost type from children so type information flows
+        # upward through wrapper rules (e.g., Variable, PostfixExpression alt 0).
+        # FilterComposite stores the returned hash as annotations->{type}.
+        my $child_type = $self->_get_rightmost_type($value);
+        my $result_hash = { valid => true };
+        $result_hash->{type} = $child_type if defined $child_type;
+        return $result_hash;
     }
 
     # _type_tag_for_scan: return the type tag hash for a scan event.
@@ -405,78 +490,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # No preference: return a merged Context (not equal to either input).
         # FilterComposite sees "result equals neither" and defers to the next semiring.
         return [$self->multiply($left, $right)];
-    }
-
-    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
-        return undef if !defined $value;
-
-        # CallExpression: builtin signature validation.
-        # Kept inline (not in TypeInferenceActions) because it needs
-        # complex multi-walker logic: _get_call_symbol for function name,
-        # _get_item_types/_get_list_arity for argument info, plus
-        # builtin_lookup and type_satisfies for per-position validation.
-        # $value is the shared Context; tree-walkers read annotations->{type}.
-        if ($rule_name eq 'CallExpression') {
-            my $return_type;
-            my $call_sym = $self->_get_call_symbol($value);
-            if ($call_sym) {
-                my $sig = $self->_lookup_builtin($call_sym);
-                if ($sig) {
-                    my $item_types = $self->_get_item_types($value);
-                    if ($item_types) {
-                        my $arg_types = $sig->{arg_types};
-                        my $sig_offset = ($alt_idx == 2 || $alt_idx == 3) ? 1 : 0;
-                        for my $i (0 .. $#$item_types) {
-                            my $actual = $item_types->[$i];
-                            my $sig_idx = $i + $sig_offset;
-                            my $expected = $arg_types->[$sig_idx];
-                            $expected = $arg_types->[-1] if !defined $expected;
-                            if (!Chalk::Grammar::Perl::TypeLibrary::type_satisfies($actual, $expected)) {
-                                return undef;
-                            }
-                        }
-                    }
-                    my $arity = $self->_get_list_arity($value) // 1;
-                    $arity += 1 if ($alt_idx == 2 || $alt_idx == 3);
-                    if ($arity < $sig->{min_arity}) {
-                        return undef;
-                    }
-                    # For 'return', propagate the argument's type instead of
-                    # the signature's return_type ('Any'). This lets the enclosing
-                    # method know what type is actually being returned.
-                    if ($call_sym eq 'return') {
-                        my $arg_types = $self->_get_item_types($value);
-                        $return_type = $arg_types->[0] if $arg_types && $arg_types->@*;
-                    } else {
-                        $return_type = $sig->{return_type};
-                    }
-                    $return_type = undef if defined $return_type && $return_type eq 'Any';
-                }
-            }
-            my $new_focus = { valid => true };
-            $new_focus->{type} = $return_type if $return_type;
-            return $new_focus;
-        }
-
-        # Dispatch to TypeInferenceActions for rules with registered methods.
-        # Methods receive the shared Context directly and return a focus hash.
-        # Tree-walkers in Actions read annotations->{type} from child nodes.
-        # Alt-dependent rules receive $alt_idx as an extra parameter.
-        if ($actions->can($rule_name)) {
-            my $action_focus = $actions->dispatch($rule_name, $value,
-                $_needs_alt_idx->{$rule_name} ? $alt_idx : undef);
-            return undef unless defined $action_focus;
-            return $action_focus;
-        }
-
-        # Catch-all: transparent passthrough for rules without Action methods.
-        # Propagates the rightmost type from children so type information flows
-        # upward through wrapper rules (e.g., Variable, PostfixExpression alt 0).
-        # FilterComposite stores the returned hash as annotations->{type}.
-        my $child_type = $self->_get_rightmost_type($value);
-        my $result_hash = { valid => true };
-        $result_hash->{type} = $child_type if defined $child_type;
-        return $result_hash;
     }
 
     # slot_name: TypeInference reads/writes the 'type' annotation slot.

@@ -453,4 +453,129 @@ my $parser = Chalk::Bootstrap::Earley->new(
         'FilterComposite multiply(zero, scan_ctx) propagates zero');
 }
 
+# =========================================================================
+# Complete-via-multiply protocol: each semiring receives complete events as
+# multiply($value, $complete_ctx) where $complete_ctx->annotations()->{complete} = true.
+# These tests verify that the complete protocol is correctly implemented.
+# =========================================================================
+
+# Helper: build an annotated complete Context (as Earley would create it)
+sub make_complete_ctx($value, $rule_name, $alt_idx = 0, $pos = 4, $origin = 0) {
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => [$value],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+}
+
+# Test 37: Boolean multiply with complete Context returns non-zero
+{
+    my $bool = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $val  = $bool->one();
+    my $ctx  = make_complete_ctx($val, 'Start');
+    my $result = $bool->multiply($val, $ctx);
+    ok(!$bool->is_zero($result),
+        'Boolean multiply with complete Context returns non-zero');
+}
+
+# Test 38: Boolean multiply(zero, complete_ctx) propagates zero
+{
+    my $bool = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $ctx  = make_complete_ctx($bool->one(), 'Start');
+    my $result = $bool->multiply($bool->zero(), $ctx);
+    ok($bool->is_zero($result),
+        'Boolean multiply(zero, complete_ctx) propagates zero');
+}
+
+# Test 39: Structural multiply with complete Context for Block returns is_block
+{
+    my $struct = Chalk::Bootstrap::Semiring::Structural->new();
+    my $val    = $struct->one();
+    my $ctx    = make_complete_ctx($val, 'Block');
+    my $result = $struct->multiply($val, $ctx);
+    ok(!$struct->is_zero($result),
+        'Structural multiply with Block complete Context is non-zero');
+    ok($result & Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_BLOCK,
+        'Structural multiply Block completion sets STRUCT_IS_BLOCK bit');
+}
+
+# Test 40: Structural multiply with complete Context for HashConstructor returns is_hash
+{
+    my $struct = Chalk::Bootstrap::Semiring::Structural->new();
+    my $val    = $struct->one();
+    my $ctx    = make_complete_ctx($val, 'HashConstructor');
+    my $result = $struct->multiply($val, $ctx);
+    ok($result & Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_HASH,
+        'Structural multiply HashConstructor completion sets STRUCT_IS_HASH bit');
+}
+
+# Test 41: Precedence multiply with ParenExpr complete Context resets to one()
+{
+    my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
+    my $val = $prec->one();
+    my $ctx = make_complete_ctx($val, 'ParenExpr');
+    my $result = $prec->multiply($val, $ctx);
+    ok(!$prec->is_zero($result),
+        'Precedence multiply with ParenExpr complete Context resets to non-zero');
+}
+
+# Test 42: Precedence multiply(zero, complete_ctx) propagates zero
+{
+    my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
+    my $ctx = make_complete_ctx($prec->one(), 'Expression');
+    my $result = $prec->multiply($prec->zero(), $ctx);
+    ok($prec->is_zero($result),
+        'Precedence multiply(zero, complete_ctx) propagates zero');
+}
+
+# Test 43: TypeInference multiply with complete Context returns a tag hash
+{
+    my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    );
+    my $val = $ti->one();
+    my $ctx = make_complete_ctx($val, 'Expression');
+    my $result = $ti->multiply($val, $ctx);
+    ok(defined $result && ref($result) eq 'HASH',
+        'TypeInference multiply with Expression complete Context returns tag hash');
+}
+
+# Test 44: FilterComposite multiply with complete Context for Block sets structural annotation
+{
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [
+            Chalk::Bootstrap::Semiring::Boolean->new(),
+            Chalk::Bootstrap::Semiring::Precedence->new(
+                lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+            ),
+            Chalk::Bootstrap::Semiring::TypeInference->new(
+                keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+                builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+            ),
+            Chalk::Bootstrap::Semiring::Structural->new(),
+            Chalk::Bootstrap::Semiring::SemanticAction->new(),
+        ],
+    );
+    my $one     = $comp->one();
+    my $ctx     = make_complete_ctx($one, 'Block');
+    my $result  = $comp->multiply($one, $ctx);
+    ok(!$comp->is_zero($result),
+        'FilterComposite multiply with Block complete Context is non-zero');
+    my $struct_ann = $result->annotations()->{structural};
+    ok(defined $struct_ann && ($struct_ann & Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_BLOCK),
+        'FilterComposite multiply Block completion sets structural STRUCT_IS_BLOCK in annotation');
+}
+
 done_testing();

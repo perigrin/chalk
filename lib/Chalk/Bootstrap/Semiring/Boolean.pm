@@ -43,12 +43,7 @@ class Chalk::Bootstrap::Semiring::Boolean {
         return $ZERO;
     }
 
-    # on_complete: no-op for Boolean, return value unchanged
-    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
-        return $value;
-    }
-
-    # Leo optimization is safe for Boolean: on_complete is identity,
+    # Leo optimization is safe for Boolean: multiply is associative,
     # multiply is associative, skipping intermediate completions is correct.
     method supports_leo() {
         return true;

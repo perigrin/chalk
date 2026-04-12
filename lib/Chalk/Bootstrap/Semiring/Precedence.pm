@@ -110,6 +110,16 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $self->_scan_multiply($existing, $rule_name, $matched_text);
         }
 
+        # Complete event: right Context has annotations->{complete} = true.
+        # Apply precedence rule-completion logic.
+        # This is the body of the former on_complete method, now inlined here.
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{complete}) {
+            my $rule_name = $right->annotations()->{rule_name};
+            my $alt_idx   = $right->annotations()->{alt_idx};
+            return $self->_complete_prec($l_prec, $rule_name, $alt_idx);
+        }
+
         return $self->zero() if $self->is_zero($r_prec);
 
         # Delegate to the regular multiply logic with extracted slot values
@@ -358,7 +368,10 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return [$left];
     }
 
-    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
+    # _complete_prec: apply precedence reification for a completed rule.
+    # Encapsulates all rule-name dispatch formerly in on_complete.
+    # Receives the accumulated left-side precedence hashref and rule metadata.
+    method _complete_prec($value, $rule_name, $alt_idx) {
         return $self->zero() if $self->is_zero($value);
 
         # Parenthesized expressions reset precedence context
@@ -381,7 +394,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         }
 
         # BinaryOp/AssignOp completion: the value already carries operator info
-        # from on_scan. Pass it through so multiply can use is_operator.
+        # from scan. Pass it through so multiply can use is_operator.
         if ($rule_name eq 'BinaryOp' || $rule_name eq 'AssignOp') {
             return $value;
         }
@@ -418,7 +431,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         }
 
         # MethodCall/CallExpression/PostfixDeref/PostfixIncDec: pass through
-        # precedence info so PostfixExpression's on_complete can reject
+        # precedence info so PostfixExpression's completion can reject
         # invalid targets (e.g., unparenthesized BinaryExpression as target).
         if ($rule_name eq 'MethodCall'
             || $rule_name eq 'CallExpression'

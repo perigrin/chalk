@@ -97,7 +97,9 @@ package TracingSemiring {
 
     # multiply: combines two values in sequence.
     # Detects scan events by checking annotations->{scan} on the right argument.
+    # Detects complete events by checking annotations->{complete} on the right argument.
     # Scan events: right is an annotated scan Context from Earley._make_scan_context.
+    # Complete events: right is an annotated complete Context from Earley._make_complete_context.
     sub multiply ($self, $left, $right) {
         return undef if !defined $left || !defined $right;
         my $l_raw = $self->_raw($left);
@@ -117,6 +119,24 @@ package TracingSemiring {
             });
             my $result = { tag => "scan:$rule_name:$matched_text",
                            depth => $l_depth + 1 };
+            return $result;
+        }
+
+        # Detect complete Context: right has annotations->{complete} = true
+        # Log as 'on_complete' for backward compatibility with test assertions.
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{complete}) {
+            my $rule_name = $right->annotations()->{rule_name} // '';
+            my $pos       = $right->annotations()->{pos} // 0;
+            my $origin    = $right->annotations()->{origin} // 0;
+            my $result = { tag => "complete:$rule_name", depth => $l_depth + 1, inner => $l_raw };
+            $self->_log('on_complete', {
+                rule      => $rule_name,
+                pos       => $pos,
+                origin    => $origin,
+                value_tag => $l_tag,
+                depth     => $l_depth,
+            });
             return $result;
         }
 
@@ -142,21 +162,6 @@ package TracingSemiring {
             right_tag => defined $r_raw ? ($r_raw->{tag} // '?') : 'ZERO',
         });
         return [$left];
-    }
-
-    sub on_complete ($self, $value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
-        return undef if !defined $value;
-        my $raw = $self->_raw($value);
-        my $depth = defined $raw ? _depth($raw) : 0;
-        my $result = { tag => "complete:$rule_name", depth => $depth + 1, inner => $raw };
-        $self->_log('on_complete', {
-            rule      => $rule_name,
-            pos       => $pos,
-            origin    => $origin,
-            value_tag => defined $raw ? ($raw->{tag} // '?') : 'ZERO',
-            depth     => $depth,
-        });
-        return $result;
     }
 }
 

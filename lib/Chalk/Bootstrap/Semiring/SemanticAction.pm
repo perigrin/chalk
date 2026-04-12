@@ -181,10 +181,21 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # Multiply combines two contexts in sequence.
     # Creates a parent context with both as children, hash-consed by child identity.
     # Propagates cfg_state from children: prefer right (later in sequence), fall back to left.
+    # When $right is a complete-annotated Context, applies rule-completion (semantic action)
+    # logic: looks up action by rule_name, extends the value via the action, propagates cfg.
     method multiply($left, $right) {
         # Propagate zero
         return undef if !defined $left;
         return undef if !defined $right;
+
+        # Complete event: right Context has annotations->{complete} = true.
+        # Apply semantic action for the completed rule.
+        # This is the body of the former on_complete method, now inlined here.
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{complete}) {
+            my $rule_name = $right->annotations()->{rule_name};
+            return $self->_complete_sa($left, $rule_name);
+        }
 
         my $result = _mul_ctx($left, $right);
 
@@ -227,11 +238,12 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return $result;
     }
 
-    # on_complete: apply semantic action for a completed rule.
+    # _complete_sa: apply semantic action for a completed rule.
     # Looks up action by rule_name via can(), applies via extend, sets rule field.
     # Not hash-consed: semantic actions may have side effects and the result
     # focus depends on the actions object, so caching by input refaddr is unsafe.
-    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
+    # Called from multiply() when the right argument is a complete-annotated Context.
+    method _complete_sa($value, $rule_name) {
         return undef if !defined $value;
 
         my $has_method = false;
@@ -272,14 +284,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             $result_ctx->annotations()->{cfg} = $inherited if defined $inherited;
         }
 
-        # Signal epoch boundary for statement-level completions.
-        # StatementItem wraps individual statements — its completion means
-        # the statement's internal parse positions can be swept.
-        if (defined $on_epoch_commit && $rule_name eq 'StatementItem') {
-            $on_epoch_commit->($origin, $pos);
-        }
-
-        # Clear current_instance and type_context after on_complete to prevent stale access
+        # Clear current_instance and type_context after action to prevent stale access
         $_current_instance = undef;
         $_type_context = undef;
 

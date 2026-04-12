@@ -572,21 +572,30 @@ class Chalk::Bootstrap::Earley {
                 my $value = $chart[$pos][$core_id][($pos - $origin)];
 
                 if ($ci_completions->[$core_id]) {
-                    # Apply on_complete for completed rule before propagating
+                    # Apply completion reification via multiply: build an annotated
+                    # Context carrying rule metadata, then multiply the accumulated
+                    # value by it. Each semiring detects annotations->{complete}=true
+                    # in its multiply and applies its rule-completion logic.
                     my $rule_name = $ci_rule_names->[$core_id];
                     my $alt_idx = $ci_alt_idxs->[$core_id];
-                    my $completed_value = $semiring->on_complete(
-                        $value, $rule_name,
-                        $alt_idx, $pos, $origin, $on_epoch_commit
+                    my $complete_ctx = $self->_make_complete_context(
+                        $value, $rule_name, $alt_idx, $pos, $origin
                     );
-                    # Update the chart entry with the action-applied value
+                    my $completed_value = $semiring->multiply($value, $complete_ctx);
+                    # Update the chart entry with the reification-applied value
                     $chart[$pos][$core_id][($pos - $origin)] = $completed_value;
                     # Skip propagation of zero-valued completions. A zero
-                    # from on_complete (e.g. TypeInference rejecting a
+                    # from multiply (e.g. TypeInference rejecting a
                     # keyword-as-Identifier) must not poison parent items
                     # via multiply — the valid parse path will supply
                     # the correct value independently.
                     next if !defined($completed_value) || $semiring->is_zero($completed_value);
+                    # Epoch boundary: StatementItem completion signals parse-position GC.
+                    # Fired here (after reification) rather than inside SA.multiply to
+                    # keep the epoch mechanism decoupled from semiring internals.
+                    if (defined $on_epoch_commit && $rule_name eq 'StatementItem') {
+                        $on_epoch_commit->($origin, $pos);
+                    }
                     # Index this completed item for _advance_from_completed lookups.
                     # Only non-zero completions are indexed — zero-valued entries
                     # would cause wasted work in _advance_from_completed.
@@ -1249,9 +1258,9 @@ class Chalk::Bootstrap::Earley {
         # Leo items are keyed by (rule_name, origin) where origin is where the
         # waiting items live. When a completion has this origin, the Leo item
         # shortcuts the entire chain to the top.
-        # Leo is only used when the semiring supports it (on_complete must be
-        # trivial / identity for correctness — non-trivial on_complete would
-        # be skipped for intermediate chain steps).
+        # Leo is only used when the semiring supports it (supports_leo() must
+        # return true, indicating that multiply is identity for completions —
+        # non-trivial completion logic would be skipped for intermediate chain steps).
         my $leo_resolved_core_id;
         my $leo_resolved_origin;
         if ($_leo_enabled
