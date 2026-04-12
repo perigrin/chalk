@@ -1,11 +1,23 @@
 # ABOUTME: N-ary FilterComposite semiring running multiple semirings together as staged filters.
-# ABOUTME: Values are N-tuples; add() uses _filter_compare to pick the winning tuple.
+# ABOUTME: Values are shared Context objects; each annotation-layer semiring writes to a named slot.
 use 5.42.0;
 use utf8;
 use experimental 'class';
 
+use Chalk::Bootstrap::Context;
+
 class Chalk::Bootstrap::Semiring::FilterComposite {
     field $semirings :param :reader;  # arrayref of semirings
+
+    # SA is always the last semiring by convention.
+    # All semirings before SA are annotation-layer semirings that write to
+    # named slots in the Context's annotations hash.
+    method _sa() { return $semirings->[-1] }
+    method _annotation_semirings() {
+        # All semirings except the last (SA) that have a defined slot_name.
+        # Boolean has slot_name=undef and is handled through is_zero flag only.
+        return grep { defined $_->slot_name() } $semirings->@[0 .. $#{ $semirings } - 1];
+    }
 
     # Clear hash-cons caches in all component semirings that support it.
     # Called between file parses to prevent unbounded memory growth.
@@ -15,91 +27,137 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         }
     }
 
+    # zero() returns a Context with is_zero=true.
+    # Any method that receives this value will short-circuit.
     method zero() {
-        my @z;
-        for my $sr ($semirings->@*) {
-            push @z, $sr->zero();
-        }
-        return \@z;
+        return Chalk::Bootstrap::Context->new(
+            focus    => undef,
+            children => [],
+            position => 0,
+            is_zero  => true,
+        );
     }
 
+    # one() returns a fresh Context with annotation slots initialized from
+    # each component semiring's one() value.
+    # SA's one() already carries the cfg annotation; we build a new Context
+    # copying it plus all annotation-layer slots.
     method one() {
-        my @o;
-        for my $sr ($semirings->@*) {
-            push @o, $sr->one();
+        my $sa_one = $self->_sa()->one();
+        my $annotations = { $sa_one->annotations()->%* };
+        for my $sr ($self->_annotation_semirings()) {
+            my $slot = $sr->slot_name();
+            $annotations->{$slot} = $sr->one();
         }
-        return \@o;
+        return Chalk::Bootstrap::Context->new(
+            focus    => $sa_one->extract(),
+            children => [],
+            position => 0,
+            is_zero  => false,
+            annotations => $annotations,
+        );
     }
 
-    # Staged filter: ANY component zero → whole tuple is zero
-    method is_zero($value) {
-        for my $i (0 .. scalar($semirings->@*) - 1) {
-            my $sr = $semirings->[$i];
-            my $vi = $value->[$i];
-            return true if $sr->is_zero($vi);
+    # is_zero() checks the Context's is_zero flag directly.
+    method is_zero($ctx) {
+        return $ctx->is_zero();
+    }
+
+    # _same_value: identity comparison suitable for both refs and scalars.
+    my sub _same_value($a, $b) {
+        return true  if !defined($a) && !defined($b);
+        return false if !defined($a) || !defined($b);
+        if (ref($a) && ref($b)) {
+            return refaddr($a) == refaddr($b);
+        }
+        if (!ref($a) && !ref($b)) {
+            return $a == $b;
         }
         return false;
     }
 
+    # multiply() computes the product of two Context values.
+    # Short-circuits to zero if either input is_zero or any annotation-layer
+    # semiring's multiply returns zero. SA builds the tree structure.
     method multiply($left, $right) {
-        my @result;
-        for my $idx (0 .. scalar($semirings->@*) - 1) {
-            my $sr = $semirings->[$idx];
-            my $lr = $left->[$idx];
-            my $rr = $right->[$idx];
-            my $mr = $sr->multiply($lr, $rr);
-            push @result, $mr;
+        return $self->zero() if $left->is_zero();
+        return $self->zero() if $right->is_zero();
+
+        # Run each annotation-layer semiring and collect results
+        my %slot_results;
+        for my $sr ($self->_annotation_semirings()) {
+            my $slot = $sr->slot_name();
+            my $l_val = $left->annotations()->{$slot} // $sr->one();
+            my $r_val = $right->annotations()->{$slot} // $sr->one();
+            # TI uses a separate raw Context stored in _ti_raw for tree-walking
+            if ($slot eq 'type') {
+                my $ti_l = $left->annotations()->{_ti_raw} // $sr->one();
+                my $ti_r = $right->annotations()->{_ti_raw} // $sr->one();
+                my $ti_result = $sr->multiply($ti_l, $ti_r);
+                return $self->zero() if $sr->is_zero($ti_result);
+                $slot_results{$slot}    = undef;     # type tag comes from on_complete
+                $slot_results{_ti_raw}  = $ti_result;
+                next;
+            }
+            my $result = $sr->multiply($l_val, $r_val);
+            return $self->zero() if $sr->is_zero($result);
+            $slot_results{$slot} = $result;
         }
-        # Annihilator: if any component multiply returns zero, the whole tuple is zero.
-        for my $i (0 .. scalar($semirings->@*) - 1) {
-            my $sr = $semirings->[$i];
-            my $ri = $result[$i];
-            return $self->zero() if $sr->is_zero($ri);
+
+        # SA builds the tree structure (the shared Context)
+        my $sa_result = $self->_sa()->multiply($left, $right);
+        return $self->zero() if $self->_sa()->is_zero($sa_result);
+
+        # Overlay annotation results on SA's result Context
+        for my $slot (keys %slot_results) {
+            $sa_result->annotations()->{$slot} = $slot_results{$slot};
         }
-        return \@result;
+
+        return $sa_result;
     }
 
-    # _filter_compare: scan each semiring for a preference between left and right.
+    # _filter_compare: scan each annotation-layer semiring for a preference
+    # between left and right Context values.
     #
-    # Semirings are checked in priority order. The FIRST semiring that expresses a
-    # clear preference determines the winner — subsequent semirings are not consulted.
-    # This matches the ordered-filter semantics: earlier semirings have higher priority.
+    # Semirings are checked in priority order. The FIRST semiring that expresses
+    # a clear preference determines the winner — subsequent semirings are not
+    # consulted. This matches the ordered-filter semantics: earlier semirings
+    # have higher priority.
     #
-    # For each semiring i, calls $semiring->add($li, $ri) and inspects the result:
-    #   - If the result matches $li but not $ri → this semiring prefers left ('right_loses')
-    #   - If the result matches $ri but not $li → this semiring prefers right ('left_loses')
-    #   - If result matches both or neither → no preference, try next semiring
+    # For each annotation-layer semiring, extracts the slot value from each
+    # Context, calls $semiring->add($li, $ri), and inspects the result:
+    #   - If the result matches $li but not $ri → prefers left ('right_loses')
+    #   - If the result matches $ri but not $li → prefers right ('left_loses')
+    #   - If result matches both or neither    → no preference, try next semiring
     #
     # Identity comparison: scalars compare numerically; refs compare by refaddr.
     # Semiring add() returns are normalized to arrayrefs for uniform handling.
     #
     # Returns: 'right_loses' | 'left_loses' | 'neither'
     method _filter_compare($left, $right) {
-        for my $i (0 .. scalar($semirings->@*) - 1) {
-            my $semiring = $semirings->[$i];
-            my $li = $left->[$i];
-            my $ri = $right->[$i];
+        for my $sr ($self->_annotation_semirings()) {
+            my $slot = $sr->slot_name();
+
+            # TI uses _ti_raw for comparison (the raw TI Context, not the type tag)
+            my ($li, $ri);
+            if ($slot eq 'type') {
+                $li = $left->annotations()->{_ti_raw};
+                $ri = $right->annotations()->{_ti_raw};
+            } else {
+                $li = $left->annotations()->{$slot};
+                $ri = $right->annotations()->{$slot};
+            }
 
             # Skip identity: same value means this semiring cannot distinguish.
-            my $same;
-            if (ref($li) && ref($ri)) {
-                $same = refaddr($li) == refaddr($ri);
-            } elsif (!ref($li) && !ref($ri)) {
-                $same = $li == $ri;
-            } else {
-                $same = false;
-            }
-            next if $same;
+            next if _same_value($li, $ri);
 
             # Invoke semiring add() and normalize result to arrayref.
-            # Semirings using the legacy scalar protocol (Boolean, Structural)
-            # return bare scalars; we wrap them so the comparison below is uniform.
-            my $result = $semiring->add($li, $ri);
+            # Semirings using the scalar protocol (Structural) return bare scalars;
+            # we wrap them so the comparison below is uniform.
+            my $result = $sr->add($li, $ri);
             $result = [$result] unless ref($result) eq 'ARRAY';
 
-            # Empty result: semiring rejects both alternatives (should not happen
-            # here because zeros are filtered before _filter_compare is called,
-            # but guard anyway).
+            # Empty result: semiring rejects both alternatives.
             next if $result->@* == 0;
 
             # Multi-element result: semiring genuinely cannot choose → no preference.
@@ -119,22 +177,20 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             next if $r_eq_left && $r_eq_right;
 
             # Result equals neither: semiring synthesized a new value — no preference.
-            # (This should not happen with well-designed filter semirings, but we
-            # treat it gracefully rather than dying.)
             next unless $r_eq_left || $r_eq_right;
 
-            # First semiring to express a preference wins. Return immediately.
+            # First semiring to express a preference wins.
             return $r_eq_left ? 'right_loses' : 'left_loses';
         }
 
         return 'neither';
     }
 
-    # add() returns a single winning tuple, not a survivor list.
+    # add() returns a single winning Context, not a survivor list.
     #
     # The design doc specifies survivor lists where multiple alternatives can
     # survive, with an end-of-parse assertion catching genuine ambiguities.
-    # This implementation uses single-tuple representation because the Earley
+    # This implementation uses single-Context representation because the Earley
     # parser (Earley.pm) stores one value per chart item — supporting survivor
     # lists would require deep changes to the parser's data structures.
     #
@@ -145,16 +201,11 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # across the full 1,867-test regression suite. Conflict detection can be
     # added later if needed for debugging.
     method add($left, $right) {
-        # Zero handling: if ANY component of left is zero, return right (and vice versa).
-        for my $i (0 .. scalar($semirings->@*) - 1) {
-            my $sr = $semirings->[$i];
-            my $li = $left->[$i];
-            my $ri = $right->[$i];
-            return $right if $sr->is_zero($li);
-            return $left  if $sr->is_zero($ri);
-        }
+        # Zero handling: is_zero flag on Context
+        return $right if $left->is_zero();
+        return $left  if $right->is_zero();
 
-        # Determine which tuple wins by scanning for semiring preferences.
+        # Determine which Context wins by scanning for annotation-layer preferences.
         my $verdict = $self->_filter_compare($left, $right);
 
         my ($winner, $loser);
@@ -167,87 +218,171 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             ($winner, $loser) = ($left, $right);
         }
 
-        # Post-merge hook: allow semirings to transfer side-table state from
+        # Post-merge hook: allow SA to transfer side-table state from
         # loser to winner. This fixes the Earley stale-value merge problem
         # where cfg_state updates are lost when add() picks the older value.
-        for my $i (0 .. scalar($semirings->@*) - 1) {
-            my $sr = $semirings->[$i];
-            if ($sr->can('on_merge')) {
-                my $wi = $winner->[$i];
-                my $lo = $loser->[$i];
-                $sr->on_merge($wi, $lo);
-            }
+        if ($self->_sa()->can('on_merge')) {
+            $self->_sa()->on_merge($winner, $loser);
         }
 
         return $winner;
     }
 
-    # Delegate on_scan to each component with its own slice of the value.
-    # If any component returns zero, the whole tuple is zero.
-    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
-        my @results;
-        for my $i (0 .. scalar($semirings->@*) - 1) {
-            my $sr = $semirings->[$i];
-            my $r = $sr->on_scan($value->[$i], $rule_name, $alt_idx, $pos, $matched_text);
-            return $self->zero() if $sr->is_zero($r);
-            push @results, $r;
-        }
-        return \@results;
-    }
+    # on_scan() delegates to each annotation-layer semiring and to SA.
+    # If any component returns zero, the whole result is zero.
+    # Returns a Context with annotation slots and SA tree structure.
+    method on_scan($ctx, $rule_name, $alt_idx, $pos, $matched_text) {
+        return $self->zero() if $ctx->is_zero();
 
-    # Delegate on_complete to each component with its own slice of the value.
-    # If any component returns zero, the whole tuple is zero.
-    # Threads TypeInference result (index 2) to SemanticAction (index 4)
-    # via set_type_context so SA actions can read type annotations.
-    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
-        my @results;
-        my $ti_result;
-        for my $i (0 .. scalar($semirings->@*) - 1) {
-            my $sr = $semirings->[$i];
-            # Thread TI result to SA: indices 2=TI, 4=SA match pipeline
-            # construction order in TestPipeline/build_perl_concise_parser.
-            if ($i == 4 && defined $ti_result
-                    && $sr->can('set_type_context')) {
-                $sr->set_type_context($ti_result);
-            }
-            my $r = $sr->on_complete($value->[$i], $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit);
-            return $self->zero() if $sr->is_zero($r);
-            push @results, $r;
-            # Capture TI result after it completes
-            $ti_result = $r if $i == 2;
-        }
-        return \@results;
-    }
-
-    # Delegate on_skip_optional to each component.
-    # Semirings with on_skip_optional get the placeholder path;
-    # others fall back to multiply(value, one()) which is identity.
-    method on_skip_optional($value, $rule_name, $alt_idx, $pos, $symbol_name) {
-        my @results;
-        for my $i (0 .. scalar($semirings->@*) - 1) {
-            my $sr = $semirings->[$i];
-            my $r;
-            if ($sr->can('on_skip_optional')) {
-                $r = $sr->on_skip_optional($value->[$i], $rule_name, $alt_idx, $pos, $symbol_name);
+        # Run each annotation-layer semiring
+        my %slot_results;
+        for my $sr ($self->_annotation_semirings()) {
+            my $slot = $sr->slot_name();
+            my $val;
+            # TI uses its own Context tree (stored in _ti_raw)
+            if ($slot eq 'type') {
+                $val = $ctx->annotations()->{_ti_raw} // $sr->one();
             } else {
-                $r = $sr->multiply($value->[$i], $sr->one());
+                $val = $ctx->annotations()->{$slot} // $sr->one();
             }
-            return $self->zero() if $sr->is_zero($r);
-            push @results, $r;
+            my $result = $sr->on_scan($val, $rule_name, $alt_idx, $pos, $matched_text);
+            return $self->zero() if $sr->is_zero($result);
+            if ($slot eq 'type') {
+                $slot_results{_ti_raw} = $result;
+                # type tag itself is set by on_complete; leave undef here
+                $slot_results{type} = undef;
+            } else {
+                $slot_results{$slot} = $result;
+            }
         }
-        return \@results;
+
+        # SA builds the tree structure
+        my $sa_result = $self->_sa()->on_scan($ctx, $rule_name, $alt_idx, $pos, $matched_text);
+        return $self->zero() if $self->_sa()->is_zero($sa_result);
+
+        # Overlay annotation results on SA's result Context
+        for my $slot (keys %slot_results) {
+            $sa_result->annotations()->{$slot} = $slot_results{$slot};
+        }
+
+        return $sa_result;
     }
 
-    # should_scan: gate for scan operation, called after regex match succeeds.
+    # on_complete() delegates to each annotation-layer semiring and to SA.
+    # Threads TI result to SA via set_type_context so SA actions can read
+    # type annotations.
+    # If any component returns zero, the whole result is zero.
+    method on_complete($ctx, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
+        return $self->zero() if $ctx->is_zero();
+
+        # Run annotation-layer semirings; collect slot results
+        my %slot_results;
+        my $ti_result_ctx;
+        for my $sr ($self->_annotation_semirings()) {
+            my $slot = $sr->slot_name();
+            my $val;
+            if ($slot eq 'type') {
+                $val = $ctx->annotations()->{_ti_raw} // $sr->one();
+            } else {
+                $val = $ctx->annotations()->{$slot} // $sr->one();
+            }
+            my $result = $sr->on_complete($val, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit);
+            return $self->zero() if $sr->is_zero($result);
+            if ($slot eq 'type') {
+                # Store TI's raw Context for tree-walking (_ti_raw transition slot)
+                $slot_results{_ti_raw} = $result;
+                # Extract the type tag from TI's result focus (hash with 'type' key)
+                my $ti_focus = defined($result) ? $result->extract() : undef;
+                my $type_tag = (defined $ti_focus && ref($ti_focus) eq 'HASH')
+                    ? $ti_focus->{type} : undef;
+                $slot_results{type} = $type_tag;
+                $ti_result_ctx = $result;
+            } else {
+                $slot_results{$slot} = $result;
+            }
+        }
+
+        # Thread TI result to SA before SA runs so action methods can read type info
+        if (defined $ti_result_ctx && $self->_sa()->can('set_type_context')) {
+            $self->_sa()->set_type_context($ti_result_ctx);
+        }
+
+        my $sa_result = $self->_sa()->on_complete($ctx, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit);
+        return $self->zero() if $self->_sa()->is_zero($sa_result);
+
+        # Overlay annotation results on SA's result Context
+        for my $slot (keys %slot_results) {
+            $sa_result->annotations()->{$slot} = $slot_results{$slot};
+        }
+
+        return $sa_result;
+    }
+
+    # on_skip_optional() delegates to each annotation-layer semiring and to SA.
+    # Semirings without on_skip_optional fall back to multiply(value, one()).
+    method on_skip_optional($ctx, $rule_name, $alt_idx, $pos, $symbol_name) {
+        return $self->zero() if $ctx->is_zero();
+
+        my %slot_results;
+        for my $sr ($self->_annotation_semirings()) {
+            my $slot = $sr->slot_name();
+            my $val;
+            if ($slot eq 'type') {
+                $val = $ctx->annotations()->{_ti_raw} // $sr->one();
+            } else {
+                $val = $ctx->annotations()->{$slot} // $sr->one();
+            }
+            my $result;
+            if ($sr->can('on_skip_optional')) {
+                $result = $sr->on_skip_optional($val, $rule_name, $alt_idx, $pos, $symbol_name);
+            } else {
+                $result = $sr->multiply($val, $sr->one());
+            }
+            return $self->zero() if $sr->is_zero($result);
+            if ($slot eq 'type') {
+                $slot_results{_ti_raw} = $result;
+                my $ti_focus = defined($result) ? $result->extract() : undef;
+                my $type_tag = (defined $ti_focus && ref($ti_focus) eq 'HASH')
+                    ? $ti_focus->{type} : undef;
+                $slot_results{type} = $type_tag;
+            } else {
+                $slot_results{$slot} = $result;
+            }
+        }
+
+        my $sa_result;
+        if ($self->_sa()->can('on_skip_optional')) {
+            $sa_result = $self->_sa()->on_skip_optional($ctx, $rule_name, $alt_idx, $pos, $symbol_name);
+        } else {
+            $sa_result = $self->_sa()->multiply($ctx, $self->_sa()->one());
+        }
+        return $self->zero() if $self->_sa()->is_zero($sa_result);
+
+        for my $slot (keys %slot_results) {
+            $sa_result->annotations()->{$slot} = $slot_results{$slot};
+        }
+
+        return $sa_result;
+    }
+
+    # should_scan() delegates to each annotation-layer semiring and to SA.
     # First-false short-circuit: if ANY component returns false, return false.
     # This allows any semiring to veto a scan before on_scan is called.
-    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
-        for my $i (0 .. scalar($semirings->@*) - 1) {
-            my $sr = $semirings->[$i];
+    method should_scan($ctx, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
+        for my $sr ($self->_annotation_semirings()) {
+            my $slot = $sr->slot_name();
+            my $val;
+            if ($slot eq 'type') {
+                $val = $ctx->annotations()->{_ti_raw} // $sr->one();
+            } else {
+                $val = $ctx->annotations()->{$slot} // $sr->one();
+            }
             return false unless $sr->should_scan(
-                $value->[$i], $rule_name, $alt_idx, $pos, $matched_text, $is_predicted
+                $val, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted
             );
         }
-        return true;
+        return $self->_sa()->should_scan(
+            $ctx, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted
+        );
     }
 }

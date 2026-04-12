@@ -68,15 +68,16 @@ sub build_parser {
     );
 }
 
-# Parses input and extracts the IR (semantic value)
-# Returns undef if parse fails
+# Parses input and extracts the IR (semantic value).
+# Returns undef if parse fails.
+# parse_value now returns a single Context (unified interface from #706).
 sub parse_ir {
     my ($parser, $input) = @_;
     my $result = $parser->parse_value($input);
     return undef unless defined $result;
-    my ($bool_val, $context) = $result->@*;
-    return undef unless $bool_val;
-    return $context->extract();
+    # Result is a Context: check is_zero flag then extract IR from focus
+    return undef if $result->is_zero();
+    return $result->extract();
 }
 
 # Convenience function: resets factory, builds parser, parses BNF text, returns IR
@@ -173,7 +174,7 @@ sub build_perl_recognizer {
 
 # Builds a FilterComposite(Boolean, Precedence, TypeInference, Structural, SemanticAction(ConciseTree::Actions))
 # parser from the generated Perl grammar IR. Accepts optional start => 'RuleName'.
-# Result tuple indices: [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=Structural, [4]=SemanticAction
+# Result is a unified Context; annotation slots: precedence, type, structural, cfg.
 sub build_perl_concise_parser {
     my ($grammar, %opts) = @_;
     return _build_perl_parser_with_actions(
@@ -183,7 +184,7 @@ sub build_perl_concise_parser {
 
 # Builds a FilterComposite(Boolean, Precedence, TypeInference, Structural, SemanticAction(Perl::Actions))
 # parser from the generated Perl grammar IR. Accepts optional start => 'RuleName'.
-# Result tuple indices: [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=Structural, [4]=SemanticAction
+# Result is a unified Context; annotation slots: precedence, type, structural, cfg.
 sub build_perl_ir_parser {
     my ($grammar, %opts) = @_;
     return _build_perl_parser_with_actions(
