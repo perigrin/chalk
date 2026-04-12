@@ -165,15 +165,32 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     ok(!$sr->is_zero($scan_empty), "multiply with empty scan Context returns non-zero value");
 }
 
-# Test 12: on_complete returns value unchanged
+# Test 12: Boolean semiring treats complete events as identity (pass-through)
+# on_complete was removed; use multiply with a complete-annotated Context.
 {
+    use Chalk::Bootstrap::Context;
+    my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
+        return Chalk::Bootstrap::Context->new(
+            focus       => undef,
+            children    => [$value],
+            position    => $pos,
+            annotations => {
+                complete  => true,
+                rule_name => $rule_name,
+                alt_idx   => $alt_idx,
+                pos       => $pos,
+                origin    => $origin,
+            },
+        );
+    };
+
     my $one = $sr->one();
-    my $result = $sr->on_complete($one, 'SomeRule', 0, 5, 0);
-    ok(!$sr->is_zero($result), "on_complete returns non-zero for non-zero input");
+    my $result = $sr->multiply($one, $make_complete->($one, 'SomeRule', 0, 5, 0));
+    ok(!$sr->is_zero($result), "multiply with complete Context returns non-zero for non-zero input");
 
     my $zero = $sr->zero();
-    my $result2 = $sr->on_complete($zero, 'SomeRule', 0, 5, 0);
-    ok($sr->is_zero($result2), "on_complete returns zero for zero input");
+    my $result2 = $sr->multiply($zero, $make_complete->($zero, 'SomeRule', 0, 5, 0));
+    ok($sr->is_zero($result2), "multiply with complete Context returns zero for zero input");
 }
 
 done_testing();
