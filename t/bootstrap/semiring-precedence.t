@@ -8,6 +8,21 @@ use lib 'lib';
 use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Grammar::Symbol;
+use Chalk::Bootstrap::Context;
+
+# Helper: build an annotated scan Context (as Earley would create it)
+sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {
+    return Chalk::Bootstrap::Context->new(
+        focus       => $matched_text,
+        position    => 0,
+        annotations => {
+            scan      => true,
+            rule_name => $rule_name,
+            alt_idx   => 0,
+            predicted => $is_predicted_hash,
+        },
+    );
+}
 
 # ========================================================================
 # PrecedenceTable tests
@@ -120,27 +135,33 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 }
 
 # ========================================================================
-# Precedence semiring: on_scan with operator detection
+# Precedence semiring: multiply with scan Context (operator detection)
+# Scan events arrive as multiply($left, $scan_ctx) in the unified protocol.
 # ========================================================================
 
-# Test 11: on_scan with non-operator text returns non-zero value
 {
-    my $result = $prec->on_scan($prec->one(), 'Identifier', 0, 0, 'foo');
-    ok(defined $result, 'on_scan with identifier returns defined value');
-    ok(!$prec->is_zero($result), 'on_scan with identifier is not zero');
-}
+    use Chalk::Bootstrap::Context;
+    my $make_scan = sub ($rule, $text) {
+        return Chalk::Bootstrap::Context->new(
+            focus       => $text,
+            position    => 0,
+            annotations => { scan => true, rule_name => $rule, alt_idx => 0, predicted => {} },
+        );
+    };
 
-# Test 12: on_scan with operator text in BinaryOp rule tags the value
-{
-    my $result = $prec->on_scan($prec->one(), 'BinaryOp', 0, 0, '+');
-    ok(defined $result, 'on_scan with + in BinaryOp returns defined value');
-    ok(!$prec->is_zero($result), 'on_scan with + in BinaryOp is not zero');
-}
+    # Test 11: multiply with non-operator scan returns non-zero value
+    my $result = $prec->multiply($prec->one(), $make_scan->('Identifier', 'foo'));
+    ok(defined $result, 'multiply with identifier scan returns defined value');
+    ok(!$prec->is_zero($result), 'multiply with identifier scan is not zero');
 
-# Test 13: on_scan with zero item value returns undef (propagates zero)
-{
-    my $result = $prec->on_scan($prec->zero(), 'BinaryOp', 0, 0, '+');
-    ok($prec->is_zero($result), 'on_scan with zero item value returns zero');
+    # Test 12: multiply with operator scan in BinaryOp rule tags the value
+    my $op_result = $prec->multiply($prec->one(), $make_scan->('BinaryOp', '+'));
+    ok(defined $op_result, 'multiply with + BinaryOp scan returns defined value');
+    ok(!$prec->is_zero($op_result), 'multiply with + BinaryOp scan is not zero');
+
+    # Test 13: multiply with zero left propagates zero
+    my $zero_result = $prec->multiply($prec->zero(), $make_scan->('BinaryOp', '+'));
+    ok($prec->is_zero($zero_result), 'multiply with zero left propagates zero');
 }
 
 # ========================================================================
@@ -157,7 +178,14 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 # Test 15: on_complete for BinaryOp marks the operator as passive
 {
     # Simulate scanning an operator then completing BinaryOp
-    my $scanned = $prec->on_scan($prec->one(), 'BinaryOp', 0, 0, '+');
+    # (Using multiply with scan Context instead of on_scan)
+    use Chalk::Bootstrap::Context;
+    my $scan_ctx = Chalk::Bootstrap::Context->new(
+        focus       => '+',
+        position    => 0,
+        annotations => { scan => true, rule_name => 'BinaryOp', alt_idx => 0, predicted => {} },
+    );
+    my $scanned = $prec->multiply($prec->one(), $scan_ctx);
     my $result = $prec->on_complete($scanned, 'BinaryOp', 0, 1, 0);
     ok(defined $result, 'on_complete for BinaryOp returns value');
     ok(!$prec->is_zero($result), 'on_complete for BinaryOp is not zero');
@@ -347,7 +375,7 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 
 # Test 24: Scanning non-operator text in non-BinaryOp context is transparent
 {
-    my $result = $prec->on_scan($prec->one(), 'Identifier', 0, 0, 'my_var');
+    my $result = $prec->multiply($prec->one(), make_scan_ctx('Identifier', 'my_var'));
     ok(!$prec->is_zero($result), 'non-operator scan in non-BinaryOp is transparent');
 }
 
@@ -357,12 +385,12 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 # refaddr of the result with the inputs.
 
 # ========================================================================
-# Precedence semiring: AssignOp on_scan sets is_operator for disambiguation
+# Precedence semiring: AssignOp scan sets is_operator for disambiguation
 # ========================================================================
 
-# Test 30: AssignOp //= gets level 101, right-assoc, and is_operator via on_scan
+# Test 30: AssignOp //= gets level 101, right-assoc, and is_operator via multiply with scan Context
 {
-    my $assign_scan = $prec->on_scan($prec->one(), 'AssignOp', 0, 0, '//=');
+    my $assign_scan = $prec->multiply($prec->one(), make_scan_ctx('AssignOp', '//='));
     ok($assign_scan->{is_operator}, 'AssignOp //= sets is_operator');
     is($assign_scan->{level}, 101, 'AssignOp //= has level 101');
     is($assign_scan->{assoc}, 'right', 'AssignOp //= has right assoc');
@@ -370,21 +398,21 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 
 # Test 31: AssignOp = also gets is_operator
 {
-    my $assign_scan = $prec->on_scan($prec->one(), 'AssignOp', 0, 0, '=');
+    my $assign_scan = $prec->multiply($prec->one(), make_scan_ctx('AssignOp', '='));
     ok($assign_scan->{is_operator}, 'AssignOp = sets is_operator');
     is($assign_scan->{level}, 101, 'AssignOp = has level 101');
     is($assign_scan->{assoc}, 'right', 'AssignOp = has right assoc');
 }
 
-# Test 32: Chained assignment right-associativity rejection at on_scan
+# Test 32: Chained assignment right-associativity rejection during scan multiply
 # `(my $x = $y) //= 1` is invalid — the left operand of //= is an
 # AssignmentExpression (level 101), same level as //=.
-# The on_scan itself rejects this when $existing carries level=101.
+# multiply rejects this when the existing left carries level=101.
 {
     my $left_assign = { valid => true, level => 101, assoc => 'right' };
-    my $result = $prec->on_scan($left_assign, 'AssignOp', 0, 0, '//=');
+    my $result = $prec->multiply($left_assign, make_scan_ctx('AssignOp', '//='));
     ok($prec->is_zero($result),
-        'on_scan rejects AssignOp //= when left operand is AssignmentExpression (level=101)');
+        'multiply rejects AssignOp //= when left operand is AssignmentExpression (level=101)');
 }
 
 # Test 33: Valid chained assignment: right-nesting is allowed
@@ -460,30 +488,30 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 }
 
 # ========================================================================
-# Hash-consing: on_scan returns interned objects
+# Hash-consing: scan multiply returns interned objects
 # ========================================================================
 
-# Test 41: on_scan with same operator in BinaryOp yields same interned object
+# Test 41: multiply with same operator in BinaryOp yields same interned object
 {
-    my $r1 = $prec->on_scan($prec->one(), 'BinaryOp', 0, 0, '+');
-    my $r2 = $prec->on_scan($prec->one(), 'BinaryOp', 0, 0, '+');
+    my $r1 = $prec->multiply($prec->one(), make_scan_ctx('BinaryOp', '+'));
+    my $r2 = $prec->multiply($prec->one(), make_scan_ctx('BinaryOp', '+'));
     is(refaddr($r1), refaddr($r2),
-        'on_scan with same operator returns same interned object');
+        'multiply with same operator scan returns same interned object');
 }
 
-# Test 42: on_scan zero propagation returns zero singleton
+# Test 42: multiply with zero left and scan returns zero singleton
 {
-    my $result = $prec->on_scan($prec->zero(), 'BinaryOp', 0, 0, '+');
+    my $result = $prec->multiply($prec->zero(), make_scan_ctx('BinaryOp', '+'));
     is(refaddr($result), refaddr($prec->zero()),
-        'on_scan with zero value returns zero singleton');
+        'multiply with zero left and scan returns zero singleton');
 }
 
-# Test 43: on_scan non-operator context returns interned one
+# Test 43: multiply with non-operator context scan returns interned one
 {
-    my $r1 = $prec->on_scan($prec->one(), 'Identifier', 0, 0, 'foo');
-    my $r2 = $prec->on_scan($prec->one(), 'Identifier', 0, 0, 'bar');
+    my $r1 = $prec->multiply($prec->one(), make_scan_ctx('Identifier', 'foo'));
+    my $r2 = $prec->multiply($prec->one(), make_scan_ctx('Identifier', 'bar'));
     is(refaddr($r1), refaddr($r2),
-        'on_scan in non-operator context returns same interned object for same input value');
+        'multiply in non-operator context returns same interned object for same input value');
 }
 
 # ========================================================================

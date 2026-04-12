@@ -56,6 +56,20 @@ for my $word (@non_keywords) {
 use_ok('Chalk::Bootstrap::Semiring::TypeInference');
 use_ok('Chalk::Bootstrap::Context');
 
+# Helper: build an annotated scan Context (as Earley would create it)
+sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {
+    return Chalk::Bootstrap::Context->new(
+        focus       => $matched_text,
+        position    => 0,
+        annotations => {
+            scan      => true,
+            rule_name => $rule_name,
+            alt_idx   => 0,
+            predicted => $is_predicted_hash,
+        },
+    );
+}
+
 my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
     keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
     builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
@@ -182,7 +196,7 @@ use Chalk::Grammar::Symbol;
 # Disambiguation between // (regex) and // (defined-or) happens via
 # Earley ambiguity + CallExpression arg-type validation, not at scan time.
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '//'));
     ok(!$ti->is_zero($result), 'scanning "//" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "//" as RegexLiteral tags type => Regex');
@@ -190,7 +204,7 @@ use Chalk::Grammar::Symbol;
 
 # Empty regex with flags → also accepted
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//i');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '//i'));
     ok(!$ti->is_zero($result), 'scanning "//i" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "//i" as RegexLiteral tags type => Regex');
@@ -198,7 +212,7 @@ use Chalk::Grammar::Symbol;
 
 # Empty regex //msixpodualngcer → accepted (all flags)
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//msixpodualngcer');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '//msixpodualngcer'));
     ok(!$ti->is_zero($result), 'scanning "//msixpodualngcer" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "//msixpodualngcer" as RegexLiteral tags type => Regex');
@@ -206,19 +220,19 @@ use Chalk::Grammar::Symbol;
 
 # Real regex with pattern → NOT zero (accepted)
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '/pattern/');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '/pattern/'));
     ok(!$ti->is_zero($result), 'scanning "/pattern/" as RegexLiteral is NOT zero');
 }
 
 # Real regex with flags → NOT zero (accepted)
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '/pattern/gi');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '/pattern/gi'));
     ok(!$ti->is_zero($result), 'scanning "/pattern/gi" as RegexLiteral is NOT zero');
 }
 
 # Empty m// → accepted (Earley explores both regex and defined-or paths)
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, 'm//');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', 'm//'));
     ok(!$ti->is_zero($result), 'scanning "m//" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "m//" as RegexLiteral tags type => Regex');
@@ -226,7 +240,7 @@ use Chalk::Grammar::Symbol;
 
 # m// with flags → accepted
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, 'm//i');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', 'm//i'));
     ok(!$ti->is_zero($result), 'scanning "m//i" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "m//i" as RegexLiteral tags type => Regex');
@@ -234,13 +248,13 @@ use Chalk::Grammar::Symbol;
 
 # m/pattern/ → NOT zero (real regex)
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, 'm/pattern/');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', 'm/pattern/'));
     ok(!$ti->is_zero($result), 'scanning "m/pattern/" as RegexLiteral is NOT zero');
 }
 
 # BinaryOp scanning // → NOT zero (TypeInference doesn't touch BinaryOp)
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '//');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', '//'));
     ok(!$ti->is_zero($result), 'scanning "//" as BinaryOp is NOT zero');
 }
 
@@ -373,7 +387,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ScalarVariable scanned → type => 'Scalar'
 {
-    my $result = $ti->on_scan($ti->one(), 'ScalarVariable', 0, 0, '$x');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('ScalarVariable', '$x'));
     ok(!$ti->is_zero($result), 'scanning $x as ScalarVariable is non-zero');
     my $tags = get_tags($result);
     is($tags->{type}, 'Scalar', 'scanning $x as ScalarVariable tags type => Scalar');
@@ -381,7 +395,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ArrayVariable scanned → type => 'Array'
 {
-    my $result = $ti->on_scan($ti->one(), 'ArrayVariable', 0, 0, '@arr');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('ArrayVariable', '@arr'));
     ok(!$ti->is_zero($result), 'scanning @arr as ArrayVariable is non-zero');
     my $tags = get_tags($result);
     is($tags->{type}, 'Array', 'scanning @arr as ArrayVariable tags type => Array');
@@ -389,7 +403,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # HashVariable scanned → type => 'Hash'
 {
-    my $result = $ti->on_scan($ti->one(), 'HashVariable', 0, 0, '%h');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('HashVariable', '%h'));
     ok(!$ti->is_zero($result), 'scanning %h as HashVariable is non-zero');
     my $tags = get_tags($result);
     is($tags->{type}, 'Hash', 'scanning %h as HashVariable tags type => Hash');
@@ -483,7 +497,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Scanning 'push' as QualifiedIdentifier → call_symbol = 'push'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'push');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'push'));
     ok(!$ti->is_zero($result), 'scanning "push" as QualifiedIdentifier is non-zero');
     is(get_tags($result)->{call_symbol}, 'push',
         'scanning "push" as QualifiedIdentifier tags call_symbol => push');
@@ -491,42 +505,42 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Scanning 'unshift' as QualifiedIdentifier → call_symbol = 'unshift'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'unshift');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'unshift'));
     is(get_tags($result)->{call_symbol}, 'unshift',
         'scanning "unshift" tags call_symbol => unshift');
 }
 
 # Scanning 'pop' as QualifiedIdentifier → call_symbol = 'pop'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'pop');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'pop'));
     is(get_tags($result)->{call_symbol}, 'pop',
         'scanning "pop" tags call_symbol => pop');
 }
 
 # Scanning 'shift' as QualifiedIdentifier → call_symbol = 'shift'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'shift');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'shift'));
     is(get_tags($result)->{call_symbol}, 'shift',
         'scanning "shift" tags call_symbol => shift');
 }
 
 # Scanning 'splice' as QualifiedIdentifier → call_symbol = 'splice'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'splice');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'splice'));
     is(get_tags($result)->{call_symbol}, 'splice',
         'scanning "splice" tags call_symbol => splice');
 }
 
 # Scanning 'foo' → no call_symbol
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'foo');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'foo'));
     ok(!get_tags($result)->{call_symbol},
         'scanning "foo" does NOT tag call_symbol');
 }
 
 # Qualified names (Foo::push) → no call_symbol
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'Foo::push');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'Foo::push'));
     ok(!get_tags($result)->{call_symbol},
         'scanning "Foo::push" does NOT tag call_symbol');
 }
@@ -689,7 +703,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Scanning 'keys' as QualifiedIdentifier → call_symbol = 'keys'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'keys');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'keys'));
     is(get_tags($result)->{call_symbol}, 'keys',
         'scanning "keys" as QualifiedIdentifier tags call_symbol => keys');
 }
@@ -954,21 +968,21 @@ TODO: {
 
 # ScalarVariable → type => 'Scalar'
 {
-    my $result = $ti->on_scan($ti->one(), 'ScalarVariable', 0, 0, '$x');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('ScalarVariable', '$x'));
     is(get_tags($result)->{type}, 'Scalar',
         'ScalarVariable scan tags type => Scalar');
 }
 
 # ArrayVariable → type => 'Array'
 {
-    my $result = $ti->on_scan($ti->one(), 'ArrayVariable', 0, 0, '@arr');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('ArrayVariable', '@arr'));
     is(get_tags($result)->{type}, 'Array',
         'ArrayVariable scan tags type => Array');
 }
 
 # HashVariable → type => 'Hash'
 {
-    my $result = $ti->on_scan($ti->one(), 'HashVariable', 0, 0, '%h');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('HashVariable', '%h'));
     is(get_tags($result)->{type}, 'Hash',
         'HashVariable scan tags type => Hash');
 }
@@ -977,7 +991,7 @@ TODO: {
 
 # NumericLiteral: integer → type => 'Int'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '42');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '42'));
     ok(!$ti->is_zero($result), 'NumericLiteral scan of "42" is non-zero');
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "42" tags type => Int');
@@ -985,49 +999,49 @@ TODO: {
 
 # NumericLiteral: hex integer → type => 'Int'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '0xFF');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '0xFF'));
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "0xFF" tags type => Int');
 }
 
 # NumericLiteral: binary integer → type => 'Int'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '0b1010');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '0b1010'));
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "0b1010" tags type => Int');
 }
 
 # NumericLiteral: octal integer → type => 'Int'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '0777');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '0777'));
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "0777" tags type => Int');
 }
 
 # NumericLiteral: float → type => 'Num'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '3.14');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '3.14'));
     is(get_tags($result)->{type}, 'Num',
         'NumericLiteral "3.14" tags type => Num');
 }
 
 # NumericLiteral: scientific notation → type => 'Num'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '1e10');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '1e10'));
     is(get_tags($result)->{type}, 'Num',
         'NumericLiteral "1e10" tags type => Num');
 }
 
 # NumericLiteral: negative exponent → type => 'Num'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '2.5E-3');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '2.5E-3'));
     is(get_tags($result)->{type}, 'Num',
         'NumericLiteral "2.5E-3" tags type => Num');
 }
 
 # StringLiteral → type => 'Str'
 {
-    my $result = $ti->on_scan($ti->one(), 'StringLiteral', 0, 0, '"hello"');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('StringLiteral', '"hello"'));
     ok(!$ti->is_zero($result), 'StringLiteral scan of "hello" is non-zero');
     is(get_tags($result)->{type}, 'Str',
         'StringLiteral tags type => Str');
@@ -1035,21 +1049,21 @@ TODO: {
 
 # StringLiteral: single-quoted → type => 'Str'
 {
-    my $result = $ti->on_scan($ti->one(), 'StringLiteral', 0, 0, "'hello'");
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('StringLiteral', "'hello'"));
     is(get_tags($result)->{type}, 'Str',
         'StringLiteral single-quoted tags type => Str');
 }
 
 # RegexLiteral (non-empty) → type => 'Regex'
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '/pattern/');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '/pattern/'));
     is(get_tags($result)->{type}, 'Regex',
         'RegexLiteral "/pattern/" tags type => Regex');
 }
 
 # RegexLiteral (empty, now accepted) → Regex type
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '//'));
     ok(!$ti->is_zero($result), 'RegexLiteral "//" accepted');
     is(get_tags($result)->{type}, 'Regex',
         'RegexLiteral "//" tags type => Regex');
@@ -1057,7 +1071,7 @@ TODO: {
 
 # Literal: undef → type => 'Undef'
 {
-    my $result = $ti->on_scan($ti->one(), 'Literal', 0, 0, 'undef');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('Literal', 'undef'));
     ok(!$ti->is_zero($result), 'Literal "undef" scan is non-zero');
     is(get_tags($result)->{type}, 'Undef',
         'Literal "undef" tags type => Undef');
@@ -1065,21 +1079,21 @@ TODO: {
 
 # Literal: true → type => 'Bool'
 {
-    my $result = $ti->on_scan($ti->one(), 'Literal', 0, 0, 'true');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('Literal', 'true'));
     is(get_tags($result)->{type}, 'Bool',
         'Literal "true" tags type => Bool');
 }
 
 # Literal: false → type => 'Bool'
 {
-    my $result = $ti->on_scan($ti->one(), 'Literal', 0, 0, 'false');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('Literal', 'false'));
     is(get_tags($result)->{type}, 'Bool',
         'Literal "false" tags type => Bool');
 }
 
 # Atom: __SUB__ → type => 'CodeRef'
 {
-    my $result = $ti->on_scan($ti->one(), 'Atom', 0, 0, '__SUB__');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('Atom', '__SUB__'));
     ok(!$ti->is_zero($result), 'Atom __SUB__ scan is non-zero');
     is(get_tags($result)->{type}, 'CodeRef',
         'Atom "__SUB__" tags type => CodeRef');
@@ -1106,64 +1120,64 @@ TODO: {
 
 # BinaryOp scans capture op_text
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '+');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', '+'));
     ok(!$ti->is_zero($result), 'BinaryOp "+" scan is non-zero');
     is(get_tags($result)->{op_text}, '+',
         'BinaryOp "+" tags op_text => +');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '==');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', '=='));
     is(get_tags($result)->{op_text}, '==',
         'BinaryOp "==" tags op_text => ==');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '.');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', '.'));
     is(get_tags($result)->{op_text}, '.',
         'BinaryOp "." tags op_text => .');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, 'eq');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', 'eq'));
     is(get_tags($result)->{op_text}, 'eq',
         'BinaryOp "eq" tags op_text => eq');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '&&');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', '&&'));
     is(get_tags($result)->{op_text}, '&&',
         'BinaryOp "&&" tags op_text => &&');
 }
 
 # UnaryExpression operator scans capture op_text
 {
-    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 200, '!');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('UnaryExpression', '!'));
     is(get_tags($result)->{op_text}, '!',
         'UnaryExpression "!" tags op_text => !');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 201, 'not');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('UnaryExpression', 'not'));
     is(get_tags($result)->{op_text}, 'not',
         'UnaryExpression "not" tags op_text => not');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 202, '~');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('UnaryExpression', '~'));
     is(get_tags($result)->{op_text}, '~',
         'UnaryExpression "~" tags op_text => ~');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 203, '\\');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('UnaryExpression', '\\'));
     is(get_tags($result)->{op_text}, '\\',
         'UnaryExpression "\\" tags op_text => \\');
 }
 
 # Standalone unary - gets op_text
 {
-    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 204, '-');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('UnaryExpression', '-'));
     is(get_tags($result)->{op_text}, '-',
         'standalone UnaryExpression "-" tags op_text => -');
 }

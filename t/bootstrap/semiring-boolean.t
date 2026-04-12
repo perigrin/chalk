@@ -142,15 +142,27 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     ok(!$sr->is_zero("false"), "string 'false' is not zero");
 }
 
-# Test 11: on_scan returns non-zero value (ignores terminal text)
+# Test 11: multiply with scan Context returns non-zero value (ignores terminal text)
+# Scan events arrive as multiply($value, $scan_ctx) in the unified protocol.
 {
+    use Chalk::Bootstrap::Context;
     my $one = $sr->one();
-    my $scan_val = $sr->on_scan($one, 'SomeRule', 0, 0, 'hello');
-    ok(!$sr->is_zero($scan_val), "on_scan returns non-zero value");
+    my $scan_ctx = Chalk::Bootstrap::Context->new(
+        focus       => 'hello',
+        position    => 0,
+        annotations => { scan => true, rule_name => 'SomeRule', alt_idx => 0, predicted => {} },
+    );
+    my $scan_val = $sr->multiply($one, $scan_ctx);
+    ok(!$sr->is_zero($scan_val), "multiply with scan Context returns non-zero value");
 
-    # on_scan with empty string also returns non-zero
-    my $scan_empty = $sr->on_scan($one, 'SomeRule', 0, 0, '');
-    ok(!$sr->is_zero($scan_empty), "on_scan('') returns non-zero value");
+    # empty string scan also returns non-zero
+    my $empty_ctx = Chalk::Bootstrap::Context->new(
+        focus       => '',
+        position    => 0,
+        annotations => { scan => true, rule_name => 'SomeRule', alt_idx => 0, predicted => {} },
+    );
+    my $scan_empty = $sr->multiply($one, $empty_ctx);
+    ok(!$sr->is_zero($scan_empty), "multiply with empty scan Context returns non-zero value");
 }
 
 # Test 12: on_complete returns value unchanged

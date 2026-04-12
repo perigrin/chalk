@@ -8,6 +8,20 @@ use lib 'lib';
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::IR::NodeFactory;
+
+# Helper: build an annotated scan Context (as Earley would create it)
+sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {
+    return Chalk::Bootstrap::Context->new(
+        focus       => $matched_text,
+        position    => 0,
+        annotations => {
+            scan      => true,
+            rule_name => $rule_name,
+            alt_idx   => 0,
+            predicted => $is_predicted_hash,
+        },
+    );
+}
 # Reset factory for clean test environment
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -151,24 +165,23 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is(refaddr($result2->[0]), refaddr($ctx), 'add(ctx, zero) arrayref contains ctx');
 }
 
-# Test 7: on_scan returns Context with matched text as focus
+# Test 7: multiply with scan Context returns Context with matched text accessible via scanned_text()
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $scan_val = $sr->on_scan($sr->one(), 'SomeRule', 0, 0, 'hello');
+    my $scan_val = $sr->multiply($sr->one(), make_scan_ctx('SomeRule', 'hello'));
 
-    isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'on_scan returns Context');
-    # on_scan multiplies one() with scan context, so focus is undef (parent node)
-    # but the scan text is in a child
-    ok(defined $scan_val, 'on_scan produces defined result');
+    isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'multiply with scan Context returns Context');
+    # multiply with scan context creates a parent Context; scan text is in a child
+    ok(defined $scan_val, 'multiply with scan Context produces defined result');
 }
 
-# Test 8: on_scan with empty string
+# Test 8: multiply with scan Context and empty string
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $scan_val = $sr->on_scan($sr->one(), 'SomeRule', 0, 0, '');
+    my $scan_val = $sr->multiply($sr->one(), make_scan_ctx('SomeRule', ''));
 
-    isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'on_scan("") returns Context');
-    ok(defined $scan_val, 'on_scan("") produces defined result');
+    isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'multiply with empty scan Context returns Context');
+    ok(defined $scan_val, 'multiply with empty scan Context produces defined result');
 }
 
 # Test 9: on_complete applies action via extend using actions object
@@ -239,27 +252,31 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is(refaddr($one_a), refaddr($one_b), 'one() is a singleton (same refaddr each call)');
 }
 
-# Test 13: on_scan produces hash-consed scan context
-# Same matched_text + pos → same refaddr for the resulting Context
+# Test 13: multiply with the same scan Context (same object) produces same hash-consed result
+# SA.multiply is keyed by the refaddrs of its left and right arguments.
+# When left and right are the same objects, the result is always the same object.
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
-    my $scan_a = $sr->on_scan($sr->one(), 'SomeRule', 0, 3, 'foo');
-    my $scan_b = $sr->on_scan($sr->one(), 'SomeRule', 0, 3, 'foo');
+    my $scan_ctx = make_scan_ctx('SomeRule', 'foo');
+    my $scan_a = $sr->multiply($sr->one(), $scan_ctx);
+    my $scan_b = $sr->multiply($sr->one(), $scan_ctx);
 
     is(refaddr($scan_a), refaddr($scan_b),
-        'on_scan with same text+pos produces same refaddr (hash-consed)');
+        'multiply with same scan Context produces same refaddr (hash-consed)');
 }
 
-# Test 14: on_scan with different text produces different refaddr
+# Test 14: multiply with different scan Contexts (different text) produces different refaddr
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
-    my $scan_a = $sr->on_scan($sr->one(), 'SomeRule', 0, 3, 'foo');
-    my $scan_b = $sr->on_scan($sr->one(), 'SomeRule', 0, 3, 'bar');
+    my $scan_foo = make_scan_ctx('SomeRule', 'foo');
+    my $scan_bar = make_scan_ctx('SomeRule', 'bar');
+    my $scan_a = $sr->multiply($sr->one(), $scan_foo);
+    my $scan_b = $sr->multiply($sr->one(), $scan_bar);
 
     isnt(refaddr($scan_a), refaddr($scan_b),
-        'on_scan with different text produces different refaddr');
+        'multiply with different scan Contexts produces different refaddr');
 }
 
 # Test 15: multiply produces hash-consed result
@@ -267,8 +284,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
-    my $ctx_a = $sr->on_scan($sr->one(), 'SomeRule', 0, 0, 'left');
-    my $ctx_b = $sr->on_scan($sr->one(), 'SomeRule', 0, 5, 'right');
+    my $ctx_a = $sr->multiply($sr->one(), make_scan_ctx('SomeRule', 'left'));
+    my $ctx_b = $sr->multiply($sr->one(), make_scan_ctx('SomeRule', 'right'));
 
     my $mul1 = $sr->multiply($ctx_a, $ctx_b);
     my $mul2 = $sr->multiply($ctx_a, $ctx_b);
@@ -281,9 +298,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
-    my $ctx_a = $sr->on_scan($sr->one(), 'SomeRule', 0, 0, 'left');
-    my $ctx_b = $sr->on_scan($sr->one(), 'SomeRule', 0, 5, 'right');
-    my $ctx_c = $sr->on_scan($sr->one(), 'SomeRule', 0, 10, 'other');
+    my $ctx_a = $sr->multiply($sr->one(), make_scan_ctx('SomeRule', 'left'));
+    my $ctx_b = $sr->multiply($sr->one(), make_scan_ctx('SomeRule', 'right'));
+    my $ctx_c = $sr->multiply($sr->one(), make_scan_ctx('SomeRule', 'other'));
 
     my $mul1 = $sr->multiply($ctx_a, $ctx_b);
     my $mul2 = $sr->multiply($ctx_a, $ctx_c);

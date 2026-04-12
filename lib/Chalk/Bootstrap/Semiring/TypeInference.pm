@@ -240,55 +240,92 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return Chalk::Grammar::Perl::TypeLibrary::get_builtin($name);
     }
 
+    # Builtins whose first argument is a hash or array: keys %hash, values %hash, each %hash.
+    # When these are the LHS of what looks like a BinaryExpression, the % is a hash
+    # sigil, not the modulo operator.
+    my %HASH_ARG_BUILTINS = map { $_ => true } qw(keys values each);
+
     method multiply($left, $right) {
         # Propagate zero
         return undef if !defined $left;
         return undef if !defined $right;
 
-        # Hash-cons by children refaddrs: same inputs → same output object
+        # Scan event: right Context has annotations->{scan} = true.
+        # Apply should_scan filtering then on_scan type-tag attachment.
+        # Returns a tag hash (not a Context) as the new type slot value.
+        # Returns undef (zero) when the scan is rejected (e.g., keyword at
+        # identifier position, or % after hash-taking builtin).
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{scan}) {
+            my $rule_name    = $right->annotations()->{rule_name} // '';
+            my $matched_text = $right->focus() // '';
+            my $is_predicted = $right->annotations()->{predicted} // {};
+
+            # Keyword rejection (should_scan logic): reject keywords as
+            # QualifiedIdentifier when a keyword-consuming rule is predicted.
+            if ($rule_name eq 'BinaryOp' && $matched_text eq '%') {
+                # Reject % as BinaryOp when LHS has call_symbol for hash-taking builtin
+                my $type_ann = $left->annotations()->{type};
+                if (defined $type_ann && ref($type_ann) eq 'HASH'
+                        && exists $type_ann->{call_symbol}
+                        && $HASH_ARG_BUILTINS{ $type_ann->{call_symbol} }) {
+                    return undef;
+                }
+                my $call_sym = $self->_get_call_symbol($left);
+                if (defined $call_sym && $HASH_ARG_BUILTINS{$call_sym}) {
+                    return undef;
+                }
+            }
+
+            if ($rule_name eq 'QualifiedIdentifier'
+                    && !($matched_text =~ /::/)
+                    && Chalk::Grammar::Perl::KeywordTable::is_keyword($matched_text)) {
+                # Hard keywords are always rejected as identifiers
+                if (Chalk::Grammar::Perl::KeywordTable::is_hard_keyword($matched_text)) {
+                    return undef;
+                }
+                # Check if any keyword-consuming rule is predicted here
+                my $keyword_rules = Chalk::Grammar::Perl::KeywordTable::keyword_rules($matched_text);
+                if ($keyword_rules) {
+                    for my $kr ($keyword_rules->@*) {
+                        my $predicted = ref($is_predicted) eq 'HASH'
+                            ? exists $is_predicted->{$kr}
+                            : $is_predicted->($kr);
+                        if ($predicted) {
+                            return undef;  # Keyword-consuming rule predicted: reject
+                        }
+                    }
+                }
+            }
+
+            # Type-tag attachment (on_scan logic): return tag hash for this scan.
+            # Lazy-init pre-cached scan Contexts on first call.
+            $self->_init_scan_cache() if !defined $_scan_regex;
+            return $self->_type_tag_for_scan($rule_name, $matched_text);
+        }
+
+        # Non-scan multiply: build a hash-consed Context tree with $left and $right
+        # as children. on_complete walks this tree via _walk_annotations to find
+        # type annotations embedded in leaf nodes' annotations->{type}.
+        # FC.is_zero calls TI.is_zero on this result — Context is always non-undef.
         my $key = "mul:" . refaddr($left) . ":" . refaddr($right);
         return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus    => undef,
             children => [$left, $right],
-            position => $right->position(),
+            position => (blessed($right) && $right->can('position')) ? $right->position() : 0,
             rule     => undef,
         ));
     }
 
-    method add($left, $right) {
-        # Return arrayref of survivors (FilterComposite convention).
-        # [$winner] means this semiring prefers one alternative.
-        # [$merged] where merged != left and merged != right means no preference
-        # (Composite detects "result equals neither input" and continues to
-        # the next semiring for tie-breaking).
-        return [$right] if !defined $left;
-        return [$left]  if !defined $right;
-
-        # Identity collapse: same refaddr → single survivor (no preference needed)
-        return [$left] if refaddr($left) == refaddr($right);
-
-        # No preference: return a merged Context (not equal to either input).
-        # FilterComposite sees "result equals neither" and defers to the next semiring.
-        return [$self->multiply($left, $right)];
-    }
-
-    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
-        # Propagate zero: undef means zero (not a shared Context)
-        return undef if !defined $value;
-
-        # Lazy-init pre-cached scan Contexts on first call
-        $self->_init_scan_cache() if !defined $_scan_regex;
-
-        # RegexLiteral → type => 'Regex' (including empty // which is
-        # ambiguous with defined-or; Earley explores both paths and
-        # disambiguation happens via CallExpression arg-type validation)
+    # _type_tag_for_scan: return the type tag hash for a scan event.
+    # Formerly the body of on_scan — extracted here so multiply can call it.
+    method _type_tag_for_scan($rule_name, $matched_text) {
+        # RegexLiteral → type => 'Regex'
         if ($rule_name eq 'RegexLiteral') {
             return $_scan_regex->extract();
         }
 
         # In QualifiedIdentifier context, tag bare builtins with their name
-        # so CallExpression can look up the full signature for validation.
-        # All QualifiedIdentifier scans also get ident_text for method name extraction.
         if ($rule_name eq 'QualifiedIdentifier') {
             if (!($matched_text =~ /::/) && $self->_lookup_builtin($matched_text)) {
                 return $self->_scan_ctx_call_ident($matched_text)->extract();
@@ -307,10 +344,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return $_scan_hash->extract();
         }
 
-        # NumericLiteral: distinguish Int vs Num based on pattern
+        # NumericLiteral: distinguish Int vs Num
         if ($rule_name eq 'NumericLiteral') {
-            # Hex (0x), binary (0b), octal (0[0-7]), or plain integer → Int
-            # Float (has .) or scientific (has e/E but not hex 0x) → Num
             if ($matched_text =~ /[.]/
                 || ($matched_text =~ /[eE]/ && !($matched_text =~ /^0[xX]/)))
             {
@@ -339,21 +374,37 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return $_scan_coderef->extract();
         }
 
-        # BinaryOp: capture operator text for later consumption at
-        # BinaryExpression on_complete.
+        # BinaryOp: capture operator text
         if ($rule_name eq 'BinaryOp') {
             return $self->_scan_ctx_op($matched_text)->extract();
         }
 
-        # UnaryExpression operator scan: capture op_text.
+        # UnaryExpression operator scan: capture op_text
         if ($rule_name eq 'UnaryExpression'
             && $matched_text =~ /^(?:[!~\\]|not|[+-])$/)
         {
             return $self->_scan_ctx_op($matched_text)->extract();
         }
 
-        # Non-QualifiedIdentifier or non-keyword: transparent
+        # Non-matching scan: transparent (no type info)
         return $self->one()->extract();
+    }
+
+    method add($left, $right) {
+        # Return arrayref of survivors (FilterComposite convention).
+        # [$winner] means this semiring prefers one alternative.
+        # [$merged] where merged != left and merged != right means no preference
+        # (Composite detects "result equals neither input" and continues to
+        # the next semiring for tie-breaking).
+        return [$right] if !defined $left;
+        return [$left]  if !defined $right;
+
+        # Identity collapse: same refaddr → single survivor (no preference needed)
+        return [$left] if refaddr($left) == refaddr($right);
+
+        # No preference: return a merged Context (not equal to either input).
+        # FilterComposite sees "result equals neither" and defers to the next semiring.
+        return [$self->multiply($left, $right)];
     }
 
     method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
@@ -426,83 +477,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $result_hash = { valid => true };
         $result_hash->{type} = $child_type if defined $child_type;
         return $result_hash;
-    }
-
-    # Builtins whose first argument is a hash or array: keys %hash, values %hash, each %hash.
-    # When these are the LHS of what looks like a BinaryExpression, the % is a hash
-    # sigil, not the modulo operator.
-    my %HASH_ARG_BUILTINS = map { $_ => true } qw(keys values each);
-
-    # should_scan: gate for scan operation, called after regex match succeeds
-    # Returns true to proceed with scan, false to skip it.
-    # Rejects keywords as QualifiedIdentifier when a keyword-consuming rule is predicted.
-    # Rejects % as BinaryOp when the LHS is a hash-taking builtin.
-    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
-        # Reject % as BinaryOp when the accumulated value has call_symbol for
-        # a hash-taking builtin. keys %hash is keys(%hash), not (keys) % (hash).
-        if ($rule_name eq 'BinaryOp' && $matched_text eq '%' && defined $value) {
-            # Check annotations->{type} directly: the shared Context carries call_symbol
-            # in annotations->{type} after TI migrated to shared Context (#707).
-            my $type_ann = $value->annotations()->{type};
-            if ($ENV{DEBUG_KEYS_PCT}) {
-                my $dump; $dump = sub ($ctx, $depth) {
-                    return 'undef' unless defined $ctx;
-                    my $ti = $ctx->annotations()->{type};
-                    my $fs = defined $ti && ref($ti) eq 'HASH' ? join(',', map { "$_=" . ($ti->{$_}//'undef') } sort keys %$ti) : 'no-type-ann';
-                    my @ch = $ctx->children()->@*;
-                    my $prefix = '  ' x $depth;
-                    warn "${prefix}type_ann={$fs} children=" . scalar(@ch) . "\n";
-                    for my $c (@ch) { $dump->($c, $depth+1) }
-                };
-                warn "should_scan BinaryOp '%' tree:\n";
-                $dump->($value, 1);
-            }
-            if (defined $type_ann && ref($type_ann) eq 'HASH'
-                    && exists $type_ann->{call_symbol}
-                    && $HASH_ARG_BUILTINS{ $type_ann->{call_symbol} }) {
-                return false;
-            }
-            # Also walk children in case the type annotation is on a descendant node
-            my $call_sym = $self->_get_call_symbol($value);
-            if (defined $call_sym && $HASH_ARG_BUILTINS{$call_sym}) {
-                return false;
-            }
-        }
-
-        # Only filter QualifiedIdentifier scans
-        return true unless $rule_name eq 'QualifiedIdentifier';
-
-        # Qualified identifiers with :: are never keywords (Foo::class is OK)
-        return true if $matched_text =~ /::/;
-
-        # Check if matched text is a keyword.
-        # Calls the package sub directly instead of through the field coderef
-        # because XS codegen drops arguments for coderef calls.
-        return true unless Chalk::Grammar::Perl::KeywordTable::is_keyword($matched_text);
-
-        # Hard keywords are always rejected as identifiers, regardless of
-        # prediction state. Prevents non-deterministic parsing when nullable
-        # rules (ElsifChain?) cause prediction order to vary.
-        return false if Chalk::Grammar::Perl::KeywordTable::is_hard_keyword($matched_text);
-
-        # Check if any keyword-consuming rule is predicted at this position
-        my $keyword_rules = Chalk::Grammar::Perl::KeywordTable::keyword_rules($matched_text);
-        return true unless $keyword_rules;
-
-        for my $kr ($keyword_rules->@*) {
-            my $predicted = ref($is_predicted) eq 'HASH'
-                ? exists $is_predicted->{$kr}
-                : $is_predicted->($kr);
-            if ($predicted) {
-                # A rule that consumes this keyword is predicted here.
-                # Reject this keyword-as-identifier scan.
-                return false;
-            }
-        }
-
-        # No keyword-consuming rule predicted — admit as identifier
-        # (e.g., fat-arrow: class => "Foo" inside an expression list)
-        return true;
     }
 
     # slot_name: TypeInference reads/writes the 'type' annotation slot.

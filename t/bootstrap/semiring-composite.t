@@ -1,5 +1,5 @@
 # ABOUTME: Tests FilterComposite semiring with staged is_zero filtering.
-# ABOUTME: Verifies _filter_compare, delegation to component semirings via on_scan/on_complete interface.
+# ABOUTME: Verifies _filter_compare, delegation to component semirings via multiply/on_complete interface.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -26,6 +26,20 @@ use constant {
 # Reset factory for clean test environment
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+# Helper: build an annotated scan Context (as Earley would create it)
+sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {
+    return Chalk::Bootstrap::Context->new(
+        focus       => $matched_text,
+        position    => 0,
+        annotations => {
+            scan      => true,
+            rule_name => $rule_name,
+            alt_idx   => 0,
+            predicted => $is_predicted_hash,
+        },
+    );
+}
 
 # Helper: build a Context with a given set of annotations (merges over defaults).
 # Used to construct test inputs for methods that take Contexts with annotation slots.
@@ -454,7 +468,7 @@ sub ctx_with_structural($focus_value, $struct_tag, $rule = undef) {
 # N-ary FilterComposite: on_scan delegation
 # ========================================================================
 
-# Test 10: on_scan delegates to SA, returns Context with scanned_text
+# Test 10: multiply with scan Context delegates to SA, returns Context with scanned_text
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -462,11 +476,11 @@ sub ctx_with_structural($focus_value, $struct_tag, $rule = undef) {
         semirings => [$bool_sr, $sem_sr],
     );
 
-    my $result = $comp->on_scan($comp->one(), 'QualifiedIdentifier', 0, 0, 'hello');
+    my $result = $comp->multiply($comp->one(), make_scan_ctx('QualifiedIdentifier', 'hello'));
 
-    isa_ok($result, 'Chalk::Bootstrap::Context', 'on_scan returns a Context');
-    ok(!$result->is_zero(), 'on_scan result is non-zero');
-    is($result->scanned_text(), 'hello', 'on_scan result contains matched text');
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'multiply with scan Context returns a Context');
+    ok(!$result->is_zero(), 'multiply with scan Context result is non-zero');
+    is($result->scanned_text(), 'hello', 'multiply with scan Context result contains matched text');
 }
 
 # ========================================================================
@@ -512,7 +526,7 @@ sub ctx_with_structural($focus_value, $struct_tag, $rule = undef) {
 # N-ary FilterComposite: 3-ary with Precedence
 # ========================================================================
 
-# Test 12: 3-ary on_scan with operator detection returns Context with precedence annotation
+# Test 12: 3-ary multiply with scan Context for operator detection returns Context with precedence annotation
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
@@ -523,11 +537,11 @@ sub ctx_with_structural($focus_value, $struct_tag, $rule = undef) {
         semirings => [$bool_sr, $prec_sr, $sem_sr],
     );
 
-    my $result = $comp->on_scan($comp->one(), 'BinaryOp', 0, 0, '+');
+    my $result = $comp->multiply($comp->one(), make_scan_ctx('BinaryOp', '+'));
 
-    isa_ok($result, 'Chalk::Bootstrap::Context', '3-ary on_scan returns a Context');
-    ok(!$result->is_zero(), '3-ary on_scan result is non-zero');
-    ok(defined $result->annotations()->{precedence}, '3-ary on_scan result has precedence annotation');
+    isa_ok($result, 'Chalk::Bootstrap::Context', '3-ary multiply with scan Context returns a Context');
+    ok(!$result->is_zero(), '3-ary multiply with scan Context result is non-zero');
+    ok(defined $result->annotations()->{precedence}, '3-ary multiply result has precedence annotation');
     ok(!$prec_sr->is_zero($result->annotations()->{precedence}), 'precedence annotation is non-zero');
 }
 
@@ -597,7 +611,8 @@ sub ctx_with_structural($focus_value, $struct_tag, $rule = undef) {
     ok($comp->is_zero($dead), 'zero Context kills parse path in 4-ary composite');
 }
 
-# Test 16: 4-ary on_scan with keyword in QualifiedIdentifier returns non-zero Context
+# Test 16: 4-ary multiply with keyword scan in QualifiedIdentifier returns non-zero Context
+# ('use' is not in KEYWORD_RULES, so it is admitted as an identifier)
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
@@ -612,10 +627,10 @@ sub ctx_with_structural($focus_value, $struct_tag, $rule = undef) {
         semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
     );
 
-    my $result = $comp->on_scan($comp->one(), 'QualifiedIdentifier', 0, 0, 'use');
-    isa_ok($result, 'Chalk::Bootstrap::Context', '4-ary on_scan returns a Context');
-    ok(!$result->is_zero(), '4-ary on_scan is non-zero (keyword rejection happens at complete)');
-    ok(defined $result->annotations()->{precedence}, '4-ary on_scan has precedence annotation');
+    my $result = $comp->multiply($comp->one(), make_scan_ctx('QualifiedIdentifier', 'use'));
+    isa_ok($result, 'Chalk::Bootstrap::Context', '4-ary multiply with scan Context returns a Context');
+    ok(!$result->is_zero(), '4-ary multiply is non-zero (use admitted when no keyword rule predicted)');
+    ok(defined $result->annotations()->{precedence}, '4-ary multiply result has precedence annotation');
 }
 
 # ========================================================================

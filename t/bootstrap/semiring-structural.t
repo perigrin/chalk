@@ -345,27 +345,34 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
 }
 
 # ========================================================================
-# Phase 2: on_scan (transparency)
+# Phase 2: multiply with scan Context (transparency)
+# Scan events arrive as multiply($left, $scan_ctx) in the unified protocol.
+# Structural is transparent at scan time: returns the left value unchanged.
 # ========================================================================
 
 {
+    use Chalk::Bootstrap::Context;
+    my $make_scan = sub ($rule, $text) {
+        return Chalk::Bootstrap::Context->new(
+            focus       => $text,
+            position    => 0,
+            annotations => { scan => true, rule_name => $rule, alt_idx => 0, predicted => {} },
+        );
+    };
+
     my $o = $sr->one();
-    my $r = $sr->on_scan($o, 'Identifier', 0, 0, 'foo');
-    ok(!$sr->is_zero($r), 'on_scan is transparent for Identifier');
-    # one() = 0, on_scan returns 0 (valid, no tags)
-    is($r, 0, 'on_scan of one() returns integer 0');
-}
+    my $r = $sr->multiply($o, $make_scan->('Identifier', 'foo'));
+    ok(!$sr->is_zero($r), 'multiply with scan Context is transparent for Identifier');
+    # one() = 0, scan passthrough returns 0 (valid, no tags)
+    is($r, 0, 'multiply with scan Context of one() returns integer 0');
 
-{
     my $z = $sr->zero();
-    my $r = $sr->on_scan($z, 'Identifier', 0, 0, 'foo');
-    ok($sr->is_zero($r), 'on_scan propagates zero');
-}
+    my $rz = $sr->multiply($z, $make_scan->('Identifier', 'foo'));
+    ok($sr->is_zero($rz), 'multiply with scan Context propagates zero from left');
 
-{
     my $block_val = STRUCT_IS_BLOCK;
-    my $r = $sr->on_scan($block_val, 'Block', 0, 0, '{');
-    ok($r & STRUCT_IS_BLOCK, 'on_scan preserves block tag through multiply');
+    my $rb = $sr->multiply($block_val, $make_scan->('Block', '{'));
+    ok($rb & STRUCT_IS_BLOCK, 'multiply with scan Context preserves block tag');
 }
 
 # ========================================================================

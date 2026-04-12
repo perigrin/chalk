@@ -227,13 +227,6 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return $result;
     }
 
-    # on_scan: create a hash-consed Context for the matched text and multiply
-    # with existing value
-    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
-        my $scan_ctx = _scan_ctx($matched_text);
-        return $self->multiply($value, $scan_ctx);
-    }
-
     # on_complete: apply semantic action for a completed rule.
     # Looks up action by rule_name via can(), applies via extend, sets rule field.
     # Not hash-consed: semantic actions may have side effects and the result
@@ -365,13 +358,6 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         # Store cfg state in the Context annotation (canonical location)
         $placeholder->annotations()->{cfg} = $parent_state if defined $parent_state;
         return $self->multiply($value, $placeholder);
-    }
-
-    # should_scan: gate for scan operation, called after regex match succeeds
-    # Returns true to proceed with scan, false to skip it.
-    # Default: always return true (no filtering).
-    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
-        return true;
     }
 
     # slot_name: SemanticAction owns the focus field + cfg annotation, not a named slot.

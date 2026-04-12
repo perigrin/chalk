@@ -115,24 +115,26 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # multiply() computes the product of two Context values.
     # Short-circuits to zero if either input is_zero or any annotation-layer
     # semiring's multiply returns zero. SA builds the tree structure.
+    #
+    # Each annotation semiring receives the full Context objects ($left, $right)
+    # and is responsible for extracting its own slot value from
+    # $left->annotations()->{slot} and $right->annotations()->{slot}.
+    # When $right carries annotations->{scan} = true, semirings interpret
+    # it as a scan event and apply their scan-time logic (e.g., Precedence
+    # validates operators; TypeInference attaches type tags; Structural
+    # performs a transparent passthrough).
     method multiply($left, $right) {
         return $self->zero() if $left->is_zero();
         return $self->zero() if $right->is_zero();
 
-        # Run each annotation-layer semiring and collect results
+        # Run each annotation-layer semiring and collect results.
+        # Pass full Context objects so each semiring can read scan metadata
+        # (annotations->{scan}, annotations->{rule_name}, etc.) and its own
+        # slot value from the shared Context's annotations hash.
         my %slot_results;
         for my $sr ($self->_annotation_semirings()) {
             my $slot = $sr->slot_name();
-            my $l_val = $left->annotations()->{$slot} // $sr->one();
-            my $r_val = $right->annotations()->{$slot} // $sr->one();
-            # TI (#707): multiply is skipped — SA builds the shared tree.
-            # TI's type tag comes from on_complete, not from multiply.
-            # Carry the left type tag forward (type is resolved at on_complete).
-            if ($slot eq 'type') {
-                $slot_results{$slot} = undef;     # type tag comes from on_complete
-                next;
-            }
-            my $result = $sr->multiply($l_val, $r_val);
+            my $result = $sr->multiply($left, $right);
             return $self->zero() if $sr->is_zero($result);
             $slot_results{$slot} = $result;
         }
@@ -257,42 +259,6 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         return $winner;
     }
 
-    # on_scan() delegates to each annotation-layer semiring and to SA.
-    # If any component returns zero, the whole result is zero.
-    # Returns a Context with annotation slots and SA tree structure.
-    method on_scan($ctx, $rule_name, $alt_idx, $pos, $matched_text) {
-        return $self->zero() if $ctx->is_zero();
-
-        # Run each annotation-layer semiring
-        my %slot_results;
-        for my $sr ($self->_annotation_semirings()) {
-            my $slot = $sr->slot_name();
-            my $val;
-            # TI (#707): pass the shared Context directly so TI's on_scan
-            # can read annotations and return a tag hash.
-            if ($slot eq 'type') {
-                $val = $ctx;
-            } else {
-                $val = $ctx->annotations()->{$slot} // $sr->one();
-            }
-            my $result = $sr->on_scan($val, $rule_name, $alt_idx, $pos, $matched_text);
-            return $self->zero() if $sr->is_zero($result);
-            if ($slot eq 'type') {
-                # TI's on_scan now returns a tag hash directly (#707).
-                # Store it as annotations->{type} on the shared Context.
-                $slot_results{type} = $result;
-            } else {
-                $slot_results{$slot} = $result;
-            }
-        }
-
-        # SA builds the tree structure
-        my $sa_result = $self->_sa()->on_scan($ctx, $rule_name, $alt_idx, $pos, $matched_text);
-        return $self->zero() if $self->_sa()->is_zero($sa_result);
-
-        return $self->_wrap_sa_result($sa_result, %slot_results);
-    }
-
     # on_complete() delegates to each annotation-layer semiring and to SA.
     # Threads TI result to SA via set_type_context so SA actions can read
     # type annotations.
@@ -393,30 +359,4 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         return $self->_wrap_sa_result($sa_result, %slot_results);
     }
 
-    # should_scan() delegates to ALL component semirings (not just annotation-layer).
-    # First-false short-circuit: if ANY component returns false, return false.
-    # This allows any semiring to veto a scan before on_scan is called.
-    # Each semiring receives its slot value (or the full Context for TI/SA).
-    method should_scan($ctx, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
-        for my $sr ($semirings->@*) {
-            my $val;
-            if (blessed($sr) && $sr->can('slot_name') && defined $sr->slot_name()) {
-                my $slot = $sr->slot_name();
-                if ($slot eq 'type') {
-                    # TI (#707): pass the shared Context directly so TI's should_scan
-                    # can walk annotations->{type} for call_symbol and other tags.
-                    $val = $ctx;
-                } else {
-                    $val = $ctx->annotations()->{$slot} // $sr->one();
-                }
-            } else {
-                # SA and non-annotation semirings receive the full Context
-                $val = $ctx;
-            }
-            return false unless $sr->should_scan(
-                $val, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted
-            );
-        }
-        return true;
-    }
 }
