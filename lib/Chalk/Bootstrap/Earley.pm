@@ -617,11 +617,7 @@ class Chalk::Bootstrap::Earley {
                         # items (dot=0 advancement); this handles mid-rule
                         # optionals where the dot reaches B? during parsing.
                         if ($symbol->is_quantified() && $symbol->quantifier() eq '?') {
-                            my $skip_value = $semiring->can('on_skip_optional')
-                                ? $semiring->on_skip_optional(
-                                    $value, $rule_name,
-                                    $alt_idx, $pos, $w_rule)
-                                : $semiring->multiply($value, $semiring->one());
+                            my $skip_value = $semiring->multiply($value, $semiring->one());
                             my $skip_is_zero = defined $skip_value ? $semiring->is_zero($skip_value) : true;
                             if (defined $skip_value && !$skip_is_zero) {
                                 my $skip_core = $core_index->advance($core_id);
@@ -1125,8 +1121,9 @@ class Chalk::Bootstrap::Earley {
     # The DFA provides [$core_id, $skip_symbols] pairs where $skip_symbols
     # lists nullable symbol names (both ?-quantified and epsilon-nullable
     # nonterminals) skipped to reach that dot position
-    # (Aycock nullable optimization). For dot>0 items, on_skip_optional is
-    # called to create SemanticAction placeholders for each skipped symbol.
+    # (Aycock nullable optimization). For dot>0 items with skipped nullable
+    # symbols, absent optionals produce multiply(value, one()) which creates
+    # an unfocused Context node for each skipped symbol.
     # Tracks which rules have been predicted at each position to avoid
     # re-iterating the prediction set on redundant calls.
     method _predict($rule_name, $pos, $chart, $agenda, $predicted_at = undef) {
@@ -1146,20 +1143,13 @@ class Chalk::Bootstrap::Earley {
                 my $info = $core_index->item_for($core_id);
 
                 # Build initial value. For dot>0 items with skipped nullable symbols,
-                # call on_skip_optional for each skipped symbol to create
-                # SemanticAction placeholder contexts.
+                # absent optionals produce multiply(value, one()) which creates
+                # an unfocused Context node.
                 my $value = $semiring->one();
                 if ($skip_symbols && $skip_symbols->@*) {
                     for my $sym_name ($skip_symbols->@*) {
-                        if ($semiring->can('on_skip_optional')) {
-                            $value = $semiring->on_skip_optional(
-                                $value, $info->{rule_name},
-                                $info->{alt_idx}, $pos, $sym_name
-                            );
-                            last if !defined $value || $semiring->is_zero($value);
-                        } else {
-                            $value = $semiring->multiply($value, $semiring->one());
-                        }
+                        $value = $semiring->multiply($value, $semiring->one());
+                        last if !defined $value || $semiring->is_zero($value);
                     }
                     next if !defined $value || $semiring->is_zero($value);
                 }

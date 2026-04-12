@@ -64,30 +64,18 @@ subtest 'one() sets cfg annotation on singleton context' => sub {
         "one() cfg annotation has scope key" );
 };
 
-subtest 'on_skip_optional propagates cfg annotation onto placeholder' => sub {
+subtest 'multiply(one, one()) for absent optional propagates cfg annotation' => sub {
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
     $sa->reset_cache();
 
     my $one = $sa->one();
-    my $result = $sa->on_skip_optional( $one, 'FooOpt', 0, 5, 'Foo' );
+    # Absent optionals now use multiply(value, one()) — no placeholder Context.
+    # The result is an unfocused Context node; cfg annotation is inherited from left.
+    my $result = $sa->multiply( $one, $sa->one() );
 
-    ok( defined $result, "on_skip_optional returns defined value" );
-
-    # Walk children to find the placeholder (last child in the multiply tree)
-    my $placeholder;
-    my @stack = ($result);
-    while (@stack) {
-        my $node = pop @stack;
-        if ( defined $node->rule() && $node->rule() eq 'Foo_opt' ) {
-            $placeholder = $node;
-            last;
-        }
-        push @stack, $node->children()->@*;
-    }
-
-    ok( defined $placeholder, "placeholder context found" );
-    ok( defined $placeholder->annotations()->{cfg},
-        "placeholder has cfg annotation" );
+    ok( defined $result, "multiply(one, one()) returns defined value" );
+    ok( defined $result->annotations()->{cfg},
+        "multiply result has cfg annotation propagated from left" );
 };
 
 subtest 'multiply propagates cfg annotation to result' => sub {
@@ -185,17 +173,29 @@ subtest 'cfg_state works when only annotation is set (no side-table entry)' => s
         "cfg_state returns annotation-only state without side-table" );
 };
 
-subtest 'on_complete propagates cfg annotation from value to result' => sub {
+subtest 'multiply with complete Context propagates cfg annotation from value to result' => sub {
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
     $sa->reset_cache();
 
     my $one = $sa->one();
-    # on_complete wraps value via extend, then propagates cfg state
-    my $result = $sa->on_complete( $one, 'TestRule', 0, 0, 0 );
+    # Complete events now flow through multiply with complete-annotated Context.
+    my $complete_ctx = Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => [$one],
+        position    => 0,
+        annotations => {
+            complete  => true,
+            rule_name => 'TestRule',
+            alt_idx   => 0,
+            pos       => 0,
+            origin    => 0,
+        },
+    );
+    my $result = $sa->multiply( $one, $complete_ctx );
 
-    ok( defined $result, "on_complete returns defined result" );
+    ok( defined $result, "multiply with complete Context returns defined result" );
     ok( defined $result->annotations()->{cfg},
-        "on_complete propagates cfg annotation to result" );
+        "multiply with complete Context propagates cfg annotation to result" );
 };
 
 # ---------------------------------------------------------------------------
@@ -204,7 +204,7 @@ subtest 'on_complete propagates cfg annotation from value to result' => sub {
 # After Phase 3, the side-table is removed entirely; annotation is canonical.
 # ---------------------------------------------------------------------------
 
-subtest 'update_cfg propagates to result annotation via on_complete' => sub {
+subtest 'update_cfg propagates to result annotation via multiply with complete Context' => sub {
     # Create a package with a Foo method that calls update_cfg
     {
         no warnings 'once';
@@ -225,9 +225,22 @@ subtest 'update_cfg propagates to result annotation via on_complete' => sub {
     $sa_with_action->reset_cache();
 
     my $one = $sa_with_action->one();
-    my $result = $sa_with_action->on_complete( $one, 'Foo', 0, 0, 0 );
+    # Complete events now flow through multiply with complete-annotated Context.
+    my $complete_ctx = Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => [$one],
+        position    => 0,
+        annotations => {
+            complete  => true,
+            rule_name => 'Foo',
+            alt_idx   => 0,
+            pos       => 0,
+            origin    => 0,
+        },
+    );
+    my $result = $sa_with_action->multiply( $one, $complete_ctx );
 
-    ok( defined $result, "on_complete with update_cfg returns defined result" );
+    ok( defined $result, "multiply with complete Context and update_cfg returns defined result" );
     ok( defined $result->annotations()->{cfg},
         "update_cfg result is in annotations->{cfg}" );
     is( $result->annotations()->{cfg}{from_action}, 1,
