@@ -128,7 +128,7 @@ END
             my $result = $parser->parse_value($source);
             ok(defined $result, 'try/catch parses to IR');
 
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             ok(defined $sem_ctx, 'SemanticAction context exists');
 
             my $ir_node = $sem_ctx->extract();

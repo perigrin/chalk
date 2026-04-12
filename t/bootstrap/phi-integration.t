@@ -49,7 +49,7 @@ SKIP: {
         my $result = $parser->parse_value($src);
         ok(defined $result, 'integer accumulator loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         skip 'no semantic context for Test 1', 3 unless defined $sem_ctx;
 
         my $state = $sa->cfg_state($sem_ctx);
@@ -75,7 +75,7 @@ SKIP: {
         my $result = $parser->parse_value($src);
         ok(defined $result, 'string concatenation loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         skip 'no semantic context for Test 2', 3 unless defined $sem_ctx;
 
         my $state = $sa->cfg_state($sem_ctx);
@@ -101,7 +101,7 @@ SKIP: {
         my $result = $parser->parse_value($src);
         ok(defined $result, 'backedge wiring loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         skip 'no semantic context for Test 3', 4 unless defined $sem_ctx;
 
         my $state = $sa->cfg_state($sem_ctx);
@@ -142,7 +142,7 @@ SKIP: {
         my $result = $parser->parse_value($source);
         ok(defined $result, 'Scope.pm parses with lazy Phi enabled');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         ok(defined $sem_ctx, 'Scope.pm produces a semantic context');
     }
 
@@ -161,7 +161,7 @@ SKIP: {
         my $result = $parser->parse_value($source);
         ok(defined $result, 'ConciseTree.pm parses with lazy Phi enabled');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         ok(defined $sem_ctx, 'ConciseTree.pm produces a semantic context');
     }
 
@@ -179,7 +179,7 @@ SKIP: {
         my $result = $parser->parse_value($src);
         ok(defined $result, 'loop with trailing statement parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         skip 'no semantic context for Test 6', 1 unless defined $sem_ctx;
 
         my $state = $sa->cfg_state($sem_ctx);

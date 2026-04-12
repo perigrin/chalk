@@ -43,7 +43,7 @@ SKIP: {
         my $result = $parser->parse_value('my $x = 42;');
         ok(defined $result, 'my $x = 42 parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         ok(defined $sem_ctx, 'SemanticAction context exists');
 
         # cfg_state scope should contain $x from parse-time propagation
@@ -62,7 +62,7 @@ SKIP: {
         my $result = $parser->parse_value('my $a = 1; my $b = 2;');
         ok(defined $result, 'two declarations parse');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $state = $sa->cfg_state($sem_ctx);
         ok(defined $state, 'cfg_state available');
         ok($state->{scope} isa Chalk::Bootstrap::Scope, 'state has a Scope');

@@ -43,7 +43,7 @@ SKIP: {
         my $result = $parser->parse_value('my $x = 1; if (1) { $x = 2; } else { $x = 3; }');
         ok(defined $result, 'if/else with branch assignments parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         ok(defined $sem_ctx, 'SemanticAction context exists');
 
         my $state = $sa->cfg_state($sem_ctx);
@@ -74,7 +74,7 @@ SKIP: {
         my $result = $parser->parse_value('my $x = 1; if (1) { $x = 2; }');
         ok(defined $result, 'if-without-else with branch assignment parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $state = $sa->cfg_state($sem_ctx);
         ok(defined $state, 'cfg_state is set after if-without-else');
 
@@ -103,7 +103,7 @@ SKIP: {
         my $result = $parser->parse_value('my $x = 1; if (1) { my $y = 2; } else { my $y = 3; }');
         ok(defined $result, 'if/else without $x assignment parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $state = $sa->cfg_state($sem_ctx);
         ok(defined $state, 'cfg_state is set');
 

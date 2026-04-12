@@ -40,7 +40,7 @@ SKIP: {
         my $result = $parser->parse_value('for my $x (1, 2, 3) { $x }');
         ok(defined $result, 'foreach loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         ok(defined $sem_ctx, 'SemanticAction context exists');
 
         # cfg_state should reflect the Loop/If/Region CFG structure
@@ -81,7 +81,7 @@ SKIP: {
         my $result = $parser->parse_value('$x++ for 1, 2, 3;');
         ok(defined $result, 'postfix for parses');
 
-        my $sem_ctx = $result ? $result->[4] : undef;
+        my $sem_ctx = $result;
         my $state = defined $sem_ctx ? $sa->cfg_state($sem_ctx) : undef;
         ok(defined $state, 'cfg_state returns state for postfix for');
 
@@ -98,7 +98,7 @@ SKIP: {
         my $result = $parser->parse_value('my $x = 1; while ($x > 0) { $x; }');
         ok(defined $result, 'while loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         ok(defined $sem_ctx, 'while: SemanticAction context exists');
 
         # cfg_state should reflect the Loop/If/Region CFG structure
@@ -139,7 +139,7 @@ SKIP: {
         my $result = $parser->parse_value('my $x = 1; while ($x > 0) { $x; }');
         ok(defined $result, 'while body cfg: parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         ok(defined $sem_ctx, 'while body cfg: context exists');
 
         my $state = $sa->cfg_state($sem_ctx);

@@ -231,7 +231,7 @@ SKIP: {
         my $result = $parser->parse_value('if (1) { 42 } else { 99 }');
         ok(defined $result, 'if/else parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $state = $sa->cfg_state($sem_ctx);
         ok(defined $state, 'cfg_state exists after if/else');
 
@@ -261,7 +261,7 @@ SKIP: {
         my $result = $parser->parse_value('if (1) { 42 }');
         ok(defined $result, 'if without else parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $state = $sa->cfg_state($sem_ctx);
         ok(defined $state, 'cfg_state exists after if');
 
@@ -278,7 +278,7 @@ SKIP: {
         my $result = $parser->parse_value('if (1) { 42 } elsif (2) { 99 } else { 0 }');
         ok(defined $result, 'if/elsif/else parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $state = $sa->cfg_state($sem_ctx);
         ok(defined $state, 'cfg_state exists after if/elsif/else');
 
@@ -296,7 +296,7 @@ SKIP: {
         my $result = $parser->parse_value('for my $x (1, 2, 3) { $x }');
         ok(defined $result, 'foreach parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $state = $sa->cfg_state($sem_ctx);
         ok(defined $state, 'cfg_state exists after foreach');
 
@@ -342,7 +342,7 @@ SKIP: {
         my $result = $parser2->parse_value('if (1) { 42 } else { 99 }');
         ok(defined $result, 'if/else parses for generate test');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         ok(defined $ir_node, 'IR node extracted');
 
@@ -363,7 +363,7 @@ SKIP: {
         my $result = $parser2->parse_value('if (1) { 42 }');
         ok(defined $result, 'if-no-else parses for generate test');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         ok(defined $ir_node, 'IR node extracted for if-no-else');
 
@@ -382,7 +382,7 @@ SKIP: {
         my $result = $parser2->parse_value('for my $x (1, 2, 3) { $x }');
         ok(defined $result, 'foreach parses for generate test');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         ok(defined $ir_node, 'IR node extracted for foreach');
 
@@ -418,7 +418,7 @@ SKIP: {
         my $result = $parser3->parse_value('if (1) { 42 } else { 99 }');
         ok(defined $result, 'if/else parses for CFG node test');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         ok(defined $ir_node, 'IR node extracted for if/else');
 
@@ -450,7 +450,7 @@ SKIP: {
         my $result = $parser3->parse_value('for my $x (1, 2, 3) { $x }');
         ok(defined $result, 'foreach parses for CFG node test');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         ok(defined $ir_node, 'IR node extracted for foreach');
 
@@ -556,7 +556,7 @@ SKIP: {
         my $result = $parser_u->parse_value('unless (1) { 42 }');
         ok(defined $result, 'unless parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $state = $sa_u->cfg_state($sem_ctx);
         ok(defined $state, 'cfg_state exists after unless');
         ok(defined $state->{if_node}, 'if_node present for unless');
@@ -577,7 +577,7 @@ SKIP: {
         my $result = $parser_u->parse_value('unless (1) { 42 }');
         ok(defined $result, 'unless parses for codegen test');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
         my $code = $perl_target->generate_with_cfg($ir_node, $sa_u, $sem_ctx);
@@ -610,7 +610,7 @@ SKIP: {
         my $result = $parser_ne->parse_value('if (1) { 42 }');
         ok(defined $result, 'if-no-else parses for empty-else test');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
         my $code = $perl_target->generate_with_cfg($ir_node, $sa_ne, $sem_ctx);
@@ -643,7 +643,7 @@ SKIP: {
         my $result = $parser_el->parse_value('if (1) { 42 } elsif (2) { 99 } else { 0 }');
         ok(defined $result, 'if/elsif/else parses for elsif test');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
         my $code = $perl_target->generate_with_cfg($ir_node, $sa_el, $sem_ctx);
@@ -676,7 +676,7 @@ SKIP: {
         my $result = $parser_f->parse_value('for my $x (1, 2, 3) { $x }');
         ok(defined $result, 'foreach parses for syntax test');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
         my $code = $perl_target->generate_with_cfg($ir_node, $sa_f, $sem_ctx);
@@ -711,7 +711,7 @@ SKIP: {
 
         SKIP: {
             skip 'deep elsif chain did not parse', 4 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_de, $sem_ctx);
@@ -751,7 +751,7 @@ SKIP: {
 
         SKIP: {
             skip 'postfix if did not parse', 2 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_f, $sem_ctx);
@@ -787,7 +787,7 @@ SKIP: {
 
         SKIP: {
             skip 'postfix unless did not parse', 2 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_pu, $sem_ctx);
@@ -824,7 +824,7 @@ SKIP: {
 
         SKIP: {
             skip 'postfix until did not parse', 2 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_pt, $sem_ctx);
@@ -861,7 +861,7 @@ SKIP: {
 
         SKIP: {
             skip 'unless+else did not parse', 3 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_ue, $sem_ctx);
@@ -898,7 +898,7 @@ SKIP: {
 
         SKIP: {
             skip 'foreach with @array did not parse', 2 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_fa, $sem_ctx);
@@ -934,7 +934,7 @@ SKIP: {
 
         SKIP: {
             skip 'postfix unless with && did not parse', 2 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_ub, $sem_ctx);
@@ -971,7 +971,7 @@ SKIP: {
 
         SKIP: {
             skip 'postfix until with > did not parse', 2 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_uc, $sem_ctx);
@@ -1009,7 +1009,7 @@ SKIP: {
 
         SKIP: {
             skip 'next unless did not parse', 5 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
 
             # Walk Context tree looking for cfg_state with loop_jump
             my @ctx_stack = ($sem_ctx);
@@ -1064,7 +1064,7 @@ SKIP: {
 
         SKIP: {
             skip 'next unless did not parse', 1 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
 
             # Walk IR tree looking for NextUnless Constructors
@@ -1115,7 +1115,7 @@ SKIP: {
 
         SKIP: {
             skip 'last unless did not parse', 4 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
 
             # Walk Context tree looking for cfg_state with loop_jump
             my @ctx_stack = ($sem_ctx);
@@ -1169,7 +1169,7 @@ SKIP: {
 
         SKIP: {
             skip 'last if did not parse', 2 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_li, $sem_ctx);
@@ -1205,7 +1205,7 @@ SKIP: {
 
         SKIP: {
             skip 'bare next did not parse', 2 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_bn, $sem_ctx);
@@ -1249,7 +1249,7 @@ SKIP: {
 
         SKIP: {
             skip 'shared-subscript postfix-if did not parse', 3 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $state = $sa_cc->cfg_state($sem_ctx);
             ok(defined $state, 'cfg_state exists for shared-subscript postfix-if');
 
@@ -1311,7 +1311,7 @@ SKIP: {
 
         SKIP: {
             skip '_chart_set did not parse', 4 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $state = $sa_cc->cfg_state($sem_ctx);
             ok(defined $state && defined $state->{if_node}, 'if_node present');
 
@@ -1363,7 +1363,7 @@ SKIP: {
 
         SKIP: {
             skip 'simple shared-subscript did not parse', 2 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $state = $sa_cc->cfg_state($sem_ctx);
             ok(defined $state, 'cfg_state exists for simple shared-subscript');
 
@@ -1396,7 +1396,7 @@ SKIP: {
 
         SKIP: {
             skip 'legitimate subscript did not parse', 2 unless defined $result;
-            my $sem_ctx = $result->[4];
+            my $sem_ctx = $result;
             my $state = $sa_cc->cfg_state($sem_ctx);
             ok(defined $state, 'cfg_state exists for subscript condition');
 

@@ -45,7 +45,7 @@ SKIP: {
         my $result = $parser->parse_value($src);
         ok(defined $result, 'postfix for loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         skip 'no semantic context', 2 unless defined $sem_ctx;
 
         my $state = $sa->cfg_state($sem_ctx);
@@ -69,7 +69,7 @@ SKIP: {
         my $result = $parser->parse_value($src);
         ok(defined $result, 'postfix while loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         skip 'no semantic context', 2 unless defined $sem_ctx;
 
         my $state = $sa->cfg_state($sem_ctx);

@@ -159,7 +159,7 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
     ok(defined $result, 'single statement parse with GC succeeds');
     ok(!$semiring->is_zero($result), 'result is not zero');
     # Check the SemanticAction produced a valid IR
-    my $sa_val = $result->[4];
+    my $sa_val = $result;
     ok(defined $sa_val, 'SemanticAction component has value');
     if (defined $sa_val) {
         my $ir = $sa_val->extract();

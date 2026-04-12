@@ -41,7 +41,7 @@ SKIP: {
         my $result = $parser->parse_value($src);
         ok(defined $result, 'read-only loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         skip 'no semantic context', 4 unless defined $sem_ctx;
 
         my $state = $sa->cfg_state($sem_ctx);
@@ -67,7 +67,7 @@ SKIP: {
         my $result = $parser->parse_value($src);
         ok(defined $result, 'read-write loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         skip 'no semantic context', 5 unless defined $sem_ctx;
 
         my $state = $sa->cfg_state($sem_ctx);
@@ -97,7 +97,7 @@ SKIP: {
         my $result = $parser->parse_value($src);
         ok(defined $result, 'unread variable loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         skip 'no semantic context', 2 unless defined $sem_ctx;
 
         my $state = $sa->cfg_state($sem_ctx);
@@ -124,7 +124,7 @@ SKIP: {
         my $result = $parser->parse_value($src);
         ok(defined $result, 'nested loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         skip 'no semantic context', 2 unless defined $sem_ctx;
 
         my $state = $sa->cfg_state($sem_ctx);
@@ -149,7 +149,7 @@ SKIP: {
         my $result = $parser->parse_value($src);
         ok(defined $result, 'multi-var loop parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         skip 'no semantic context', 4 unless defined $sem_ctx;
 
         my $state = $sa->cfg_state($sem_ctx);

@@ -40,7 +40,7 @@ SKIP: {
         my $result = $parser->parse_value('if (1) { 2 } else { 3 }');
         ok(defined $result, 'if/else parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         ok(defined $sem_ctx, 'SemanticAction context exists');
 
         # cfg_state should have been propagated through the parse
@@ -83,7 +83,7 @@ SKIP: {
         my $result = $parser->parse_value('if (1) { 2 }');
         ok(defined $result, 'if-without-else parses');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $state = $sa->cfg_state($sem_ctx);
         ok(defined $state, 'cfg_state returns state for if-no-else');
 
@@ -100,7 +100,7 @@ SKIP: {
         my $result = $parser->parse_value('if (1) { 2 } else { 3 }');
         ok(defined $result, 'if/else parses for cfg_state check');
 
-        my $sem_ctx = $result->[4];
+        my $sem_ctx = $result;
         my $state = $sa->cfg_state($sem_ctx);
         ok(defined $state, 'cfg_state propagated to outermost context');
         is($state->{control}->operation(), 'Region',
