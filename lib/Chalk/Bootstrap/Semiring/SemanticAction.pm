@@ -83,20 +83,6 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return $copy;
     }
 
-    # Return a hash-consed scan leaf Context for the given text.
-    # Position-independent: two calls with the same text return the same object
-    # regardless of position, since position is bookkeeping not semantics.
-    # The tree structure preserves source ordering; leaf identity does not.
-    my sub _scan_ctx($text) {
-        my $key = defined($text) ? "scan:t:$text" : "scan:u";
-        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
-            focus    => $text,
-            children => [],
-            position => 0,
-            rule     => undef,
-        ));
-    }
-
     # Return a hash-consed multiply Context for the given left+right children.
     # Two calls with the same children (same refaddrs) return the same object.
     my sub _mul_ctx($left, $right) {
