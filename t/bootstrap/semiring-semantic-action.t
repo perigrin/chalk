@@ -22,6 +22,26 @@ sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {
         },
     );
 }
+
+# Helper: build a complete-annotated Context for multiply() calls.
+# Replaces on_complete($value, $rule_name, $alt_idx, $pos, $origin).
+sub make_complete_ctx($value, $rule_name, $alt_idx, $pos, $origin) {
+    $pos    //= 0;
+    $origin //= 0;
+    $alt_idx //= 0;
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => [$value],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+}
 # Reset factory for clean test environment
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -208,14 +228,14 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => undef,
     );
 
-    my $result = $sr->on_complete($ctx, 'TestRule', 0, 5, 0);
+    my $result = $sr->multiply($ctx, make_complete_ctx($ctx, 'TestRule', 0, 5, 0));
 
-    isa_ok($result, 'Chalk::Bootstrap::Context', 'on_complete returns Context');
-    is($result->extract(), 'HELLO', 'on_complete applies action to compute new focus');
-    is($result->rule(), 'TestRule', 'on_complete sets rule name on result');
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'multiply with complete Context returns Context');
+    is($result->extract(), 'HELLO', 'multiply with complete Context applies action to compute new focus');
+    is($result->rule(), 'TestRule', 'multiply with complete Context sets rule name on result');
 }
 
-# Test 10: on_complete with unknown rule returns value with rule set
+# Test 10: multiply with complete Context for unknown rule returns value with rule set
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
@@ -226,19 +246,20 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => undef,
     );
 
-    my $result = $sr->on_complete($ctx, 'UnknownRule', 0, 5, 0);
+    my $result = $sr->multiply($ctx, make_complete_ctx($ctx, 'UnknownRule', 0, 5, 0));
 
-    isa_ok($result, 'Chalk::Bootstrap::Context', 'on_complete returns Context for unknown rule');
-    is($result->rule(), 'UnknownRule', 'on_complete sets rule even without action');
-    is($result->extract(), 'hello', 'on_complete preserves focus for unknown rule');
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'multiply with complete Context returns Context for unknown rule');
+    is($result->rule(), 'UnknownRule', 'multiply with complete Context sets rule even without action');
+    is($result->extract(), 'hello', 'multiply with complete Context preserves focus for unknown rule');
 }
 
-# Test 11: on_complete with undef value (zero) returns undef
+# Test 11: multiply with undef left (zero) returns undef
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $result = $sr->on_complete(undef, 'TestRule', 0, 5, 0);
+    # undef is zero for SA; multiply propagates zero immediately without touching $right
+    my $result = $sr->multiply(undef, make_complete_ctx($sr->one(), 'TestRule', 0, 5, 0));
 
-    ok(!defined $result, 'on_complete with undef value returns undef');
+    ok(!defined $result, 'multiply with undef left (zero) returns undef');
 }
 
 # Test 12: one() is a singleton — same refaddr on repeated calls
@@ -309,8 +330,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         'multiply with different children produces different refaddr');
 }
 
-# Test 17: on_complete produces a new Context each call (not hash-consed)
-# on_complete is not hash-consed because semantic actions depend on the
+# Test 17: multiply with complete Context produces a new Context each call (not hash-consed)
+# SA._complete_sa is not hash-consed because semantic actions depend on the
 # actions object and the result focus is not stable across different parses.
 # Each call produces a new Context with the rule name and focus set correctly.
 {
@@ -323,21 +344,21 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => undef,
     );
 
-    my $result_a = $sr->on_complete($ctx, 'SomeRule', 0, 5, 0);
-    my $result_b = $sr->on_complete($ctx, 'SomeRule', 0, 5, 0);
+    my $result_a = $sr->multiply($ctx, make_complete_ctx($ctx, 'SomeRule', 0, 5, 0));
+    my $result_b = $sr->multiply($ctx, make_complete_ctx($ctx, 'SomeRule', 0, 5, 0));
 
     isa_ok($result_a, 'Chalk::Bootstrap::Context',
-        'on_complete returns Context');
+        'multiply with complete Context returns Context');
     is($result_a->rule(), 'SomeRule',
-        'on_complete sets rule name');
+        'multiply with complete Context sets rule name');
     is($result_a->extract(), 'hello',
-        'on_complete preserves focus (no action registered)');
+        'multiply with complete Context preserves focus (no action registered)');
     # Two separate calls produce structurally equivalent but distinct objects
     # (not hash-consed — unsafe to cache due to actions-object dependency)
     is($result_b->rule(), 'SomeRule',
-        'second on_complete call also sets rule name');
+        'second multiply with complete Context also sets rule name');
     is($result_b->extract(), 'hello',
-        'second on_complete call also preserves focus');
+        'second multiply with complete Context also preserves focus');
 }
 
 # Test 18: add() returns arrayref for zero/non-zero cases
