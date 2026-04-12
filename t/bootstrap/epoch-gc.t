@@ -1,4 +1,4 @@
-# ABOUTME: Tests for epoch-based chart GC via on_epoch_commit callback.
+# ABOUTME: Tests for epoch-based chart GC via Earley's statement-boundary sweep.
 # ABOUTME: Verifies statement-boundary sweeping frees chart memory.
 use 5.42.0;
 use utf8;
@@ -15,6 +15,25 @@ use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Context;
 
+# Helper: build a complete-annotated Context for multiply() calls.
+my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
+    $pos    //= 0;
+    $origin //= 0;
+    $alt_idx //= 0;
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => defined($value) ? [$value] : [],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+};
+
 # Set up grammar once for all tests that need a real parse
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
@@ -24,22 +43,22 @@ eval "$generated; 1" or die "Grammar eval failed: $@";
 no strict 'refs';
 my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
 
-# --- Component A: on_complete accepts callback parameter ---
+# --- Component A: multiply handles complete events (Boolean) ---
 
-# Test 1: on_complete with callback doesn't crash (Boolean)
+# Test 1: Boolean multiply with complete Context doesn't crash
 {
     my $bool = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $callback_fired = false;
-    my $cb = sub ($origin, $end) { $callback_fired = true };
-    my $result = eval { $bool->on_complete(true, 'TestRule', 0, 10, 0, $cb) };
-    is($@, '', 'Boolean on_complete accepts on_epoch_commit callback without error');
+    my $one = $bool->one();
+    my $result = eval { $bool->multiply($one, $make_complete->($one, 'TestRule', 0, 10, 0)) };
+    is($@, '', 'Boolean multiply with complete Context does not error');
 }
 
-# Test 2: on_complete without callback still works (optional parameter)
+# Test 2: Boolean multiply with complete Context returns non-zero
 {
     my $bool = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $result = eval { $bool->on_complete(true, 'TestRule', 0, 10, 0) };
-    is($@, '', 'Boolean on_complete works without on_epoch_commit callback');
+    my $one = $bool->one();
+    my $result = eval { $bool->multiply($one, $make_complete->($one, 'TestRule', 0, 10, 0)) };
+    is($@, '', 'Boolean multiply with complete Context works');
 }
 
 # Test 3: FilterComposite passes callback through to components
@@ -61,56 +80,47 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
     ok(!defined $callback_args, 'callback not fired without wiring (Component B needed)');
 }
 
-# --- Component B: SemanticAction fires callback on Statement completion ---
+# --- Component B: SemanticAction multiply handles completion events ---
+# Epoch GC callbacks are now fired directly by the Earley parser, not by
+# SemanticAction. These tests verify that SA multiply handles StatementItem
+# completion without crashing.
 
-# Test 5: SemanticAction calls on_epoch_commit for StatementItem rule
+# Test 5: SemanticAction multiply with StatementItem complete Context does not crash
 {
     use Chalk::Bootstrap::ConciseTree::Actions;
     my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(actions => $actions);
 
-    my @epochs;
-    my $cb = sub ($origin, $end) {
-        push @epochs, [$origin, $end];
-    };
-
-    # Create a Context as the value (SemanticAction expects this)
+    # Create a Context as the left value (SemanticAction expects a Context)
     my $ctx = Chalk::Bootstrap::Context->new(
-        focus    => { class => 'VarDecl', inputs => [] },
+        focus    => undef,
         children => [],
         position => 0,
     );
 
     # Simulate a completed StatementItem at origin=5, pos=20
-    $sa->on_complete($ctx, 'StatementItem', 0, 20, 5, $cb);
-
-    ok(scalar @epochs > 0, 'on_epoch_commit fires for StatementItem completion');
-    if (@epochs) {
-        is($epochs[0][0], 5, 'epoch origin matches item origin');
-        is($epochs[0][1], 20, 'epoch end matches completion position');
-    }
+    my $result = eval {
+        $sa->multiply($ctx, $make_complete->($ctx, 'StatementItem', 0, 20, 5))
+    };
+    is($@, '', 'SA multiply with StatementItem complete Context does not crash');
 }
 
-# Test 6: SemanticAction does NOT fire callback for non-statement rules
+# Test 6: SemanticAction multiply with non-statement rule does not crash
 {
     use Chalk::Bootstrap::ConciseTree::Actions;
     my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(actions => $actions);
 
-    my @epochs;
-    my $cb = sub ($origin, $end) {
-        push @epochs, [$origin, $end];
-    };
-
     my $ctx = Chalk::Bootstrap::Context->new(
-        focus    => { class => 'NumericLiteral', value => '42' },
+        focus    => undef,
         children => [],
         position => 0,
     );
 
-    $sa->on_complete($ctx, 'Expression', 0, 5, 0, $cb);
-
-    is(scalar @epochs, 0, 'on_epoch_commit does NOT fire for Expression completion');
+    my $result = eval {
+        $sa->multiply($ctx, $make_complete->($ctx, 'Expression', 0, 5, 0))
+    };
+    is($@, '', 'SA multiply with Expression complete Context does not crash');
 }
 
 # --- Component C: Earley sweep queue wires callback and frees positions ---

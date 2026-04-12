@@ -16,6 +16,25 @@ use Chalk::IR::Node::Return;
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
+# Helper: build a complete-annotated Context for multiply() calls.
+my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
+    $pos    //= 0;
+    $origin //= 0;
+    $alt_idx //= 0;
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => defined($value) ? [$value] : [],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+};
+
 # Helper: build a leaf Context wrapping an IR node
 my sub make_leaf_ctx($node) {
     return Chalk::Bootstrap::Context->new(
@@ -89,8 +108,8 @@ subtest 'ReturnStatement action produces Chalk::IR::Node::Return' => sub {
     my $start   = $factory->make('Start');
     $sa->set_cfg_state($ctx, { control => $start, scope => $scope });
 
-    my $result = $sa->on_complete($ctx, 'ReturnStatement', 0, 0, 0);
-    ok(defined $result, 'ReturnStatement on_complete returns a result');
+    my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ReturnStatement', 0, 0, 0));
+    ok(defined $result, 'ReturnStatement multiply returns a result');
 
     my $node = $result->extract();
     ok(defined $node, 'result has an IR node');
@@ -115,8 +134,8 @@ subtest 'ReturnStatement bare return produces Return with undef value' => sub {
     my $start = $factory->make('Start');
     $sa->set_cfg_state($ctx, { control => $start, scope => $scope });
 
-    my $result = $sa->on_complete($ctx, 'ReturnStatement', 0, 0, 0);
-    ok(defined $result, 'bare ReturnStatement returns a result');
+    my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ReturnStatement', 0, 0, 0));
+    ok(defined $result, 'bare ReturnStatement multiply returns a result');
 
     my $node = $result->extract();
     ok(defined $node, 'result has an IR node');

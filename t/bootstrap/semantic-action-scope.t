@@ -7,6 +7,26 @@ use Test::More;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::Context;
+
+# Helper: build a complete-annotated Context for multiply() calls.
+my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
+    $pos    //= 0;
+    $origin //= 0;
+    $alt_idx //= 0;
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => defined($value) ? [$value] : [],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+};
 
 # --- Test 1: cfg_state on one() context ---
 {
@@ -28,7 +48,7 @@ use Chalk::Bootstrap::IR::NodeFactory;
     ok($state->{scope} isa Chalk::Bootstrap::Scope, 'initial scope is a Scope');
 }
 
-# --- Test 2: cfg_state propagates through on_complete ---
+# --- Test 2: cfg_state propagates through multiply with complete Context ---
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -51,8 +71,8 @@ use Chalk::Bootstrap::IR::NodeFactory;
     # Build a minimal parse item
     my $one = $sa->one();
 
-    my $result = $sa->on_complete($one, 'TestRule', 0, 0, 0);
-    ok(defined $result, 'on_complete returns result');
+    my $result = $sa->multiply($one, $make_complete->($one, 'TestRule', 0, 0, 0));
+    ok(defined $result, 'multiply with complete Context returns result');
 
     # Focus is the bare IR node (action returned it)
     is($result->extract(), $const, 'focus is the action result (bare IR node)');
