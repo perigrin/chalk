@@ -41,21 +41,14 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     # Helper: collect ALL leaf items in order (both ConciseTree and text),
     # needed for fat comma detection where text tokens like '=>' matter.
     my sub _collect_items($ctx) {
-        my @items;
-        my $focus = $ctx->extract();
-        if (defined $focus && $focus isa Chalk::Bootstrap::ConciseTree) {
-            push @items, { type => 'tree', value => $focus, ctx => $ctx };
-            return @items;
-        }
-        if (defined $focus && !ref($focus)) {
-            push @items, { type => 'text', value => $focus, ctx => $ctx };
-            return @items;
-        }
-        # Recurse into children
-        for my $child ($ctx->children()->@*) {
-            push @items, __SUB__->($child);
-        }
-        return @items;
+        return $ctx->walk_all(sub ($node) {
+            my $f = $node->extract();
+            return { type => 'tree', value => $f, ctx => $node }
+                if $f isa Chalk::Bootstrap::ConciseTree;
+            return { type => 'text', value => $f, ctx => $node }
+                if !ref($f);
+            return undef;
+        });
     }
 
     # Helper: concatenate all child trees into one, filtering out empty trees

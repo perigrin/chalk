@@ -97,47 +97,21 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Returns the call_symbol string or undef.
     method _get_call_symbol($ctx) {
         return unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus) {
-            # Focused node (leaf): check for call_symbol and stop
-            return $focus->{call_symbol};
-        }
-        # Unfocused multiply node: recurse into children
-        for my $child ($ctx->children()->@*) {
-            my $found = $self->_get_call_symbol($child);
-            return $found if defined $found;
-        }
-        return;
+        return $ctx->walk(sub ($n) { $n->extract()->{call_symbol} });
     }
 
     # Search the multiply tree leaves for one with item_types in its focus.
     # Returns the item_types arrayref or undef.
     method _get_item_types($ctx) {
         return unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus) {
-            return $focus->{item_types};
-        }
-        for my $child ($ctx->children()->@*) {
-            my $found = $self->_get_item_types($child);
-            return $found if defined $found;
-        }
-        return;
+        return $ctx->walk(sub ($n) { $n->extract()->{item_types} });
     }
 
     # Search the multiply tree leaves for one with list_arity in its focus.
     # Returns the list_arity integer or undef.
     method _get_list_arity($ctx) {
         return unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus) {
-            return $focus->{list_arity};
-        }
-        for my $child ($ctx->children()->@*) {
-            my $found = $self->_get_list_arity($child);
-            return $found if defined $found;
-        }
-        return;
+        return $ctx->walk(sub ($n) { $n->extract()->{list_arity} });
     }
 
     method zero() {

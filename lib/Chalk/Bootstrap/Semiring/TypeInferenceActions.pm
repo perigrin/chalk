@@ -9,47 +9,17 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Helper: Get rightmost type from Context tree (for wrapper rules)
     my sub _get_rightmost_type($ctx) {
-        return unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus && exists $focus->{type}) {
-            return $focus->{type};
-        }
-        # Walk children right-to-left
-        my @children = $ctx->children()->@*;
-        for my $child (reverse @children) {
-            my $t = __SUB__->($child);
-            return $t if defined $t;
-        }
-        return;
+        return $ctx->walk(sub ($n) { $n->extract()->{type} }, reverse => true);
     }
 
     # Helper: Get leftmost type from Context tree (for assignment LHS)
     my sub _get_leftmost_type($ctx) {
-        return unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus && exists $focus->{type}) {
-            return $focus->{type};
-        }
-        # Walk children left-to-right
-        for my $child ($ctx->children()->@*) {
-            my $t = __SUB__->($child);
-            return $t if defined $t;
-        }
-        return;
+        return $ctx->walk(sub ($n) { $n->extract()->{type} });
     }
 
     # Helper: Get ident_text from Context tree (for method/function names)
     my sub _get_ident_text($ctx) {
-        return unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus && exists $focus->{ident_text}) {
-            return $focus->{ident_text};
-        }
-        for my $child ($ctx->children()->@*) {
-            my $found = __SUB__->($child);
-            return $found if defined $found;
-        }
-        return;
+        return $ctx->walk(sub ($n) { $n->extract()->{ident_text} });
     }
 
     # Method return type registry: method_name => return_type
@@ -60,32 +30,18 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     # Helper: Get op_text from Context tree (for operator rules)
     # Follows leaf-finding semantics: stops at focused nodes.
     my sub _get_op_text($ctx) {
-        return unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus) {
-            return $focus->{op_text};
-        }
-        for my $child ($ctx->children()->@*) {
-            my $found = __SUB__->($child);
-            return $found if defined $found;
-        }
-        return;
+        return $ctx->walk(sub ($n) { $n->extract()->{op_text} });
     }
 
     # Wrapper rules: passthrough child's type
 
     # Helper: Get call_symbol from Context tree (for builtin disambiguation)
     my sub _get_call_symbol($ctx) {
-        return unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus && ref($focus) eq 'HASH' && exists $focus->{call_symbol}) {
-            return $focus->{call_symbol};
-        }
-        for my $child ($ctx->children()->@*) {
-            my $t = __SUB__->($child);
-            return $t if defined $t;
-        }
-        return;
+        return $ctx->walk(sub ($n) {
+            my $f = $n->extract();
+            return $f->{call_symbol} if ref($f) eq 'HASH';
+            return undef;
+        });
     }
 
     method Atom($ctx) {
@@ -141,44 +97,21 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Helper: Get list_arity from Context tree
     my sub _get_list_arity($ctx) {
-        return unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus) {
-            return $focus->{list_arity};
-        }
-        for my $child ($ctx->children()->@*) {
-            my $found = __SUB__->($child);
-            return $found if defined $found;
-        }
-        return;
+        return $ctx->walk(sub ($n) { $n->extract()->{list_arity} });
     }
 
     # Helper: Get item_types from Context tree
     my sub _get_item_types($ctx) {
-        return unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus) {
-            return $focus->{item_types};
-        }
-        for my $child ($ctx->children()->@*) {
-            my $found = __SUB__->($child);
-            return $found if defined $found;
-        }
-        return;
+        return $ctx->walk(sub ($n) { $n->extract()->{item_types} });
     }
 
     # Helper: Search for item_types in previous ExpressionList children
     my sub _get_prev_item_types($ctx) {
-        return unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus && exists $focus->{item_types}) {
-            return $focus->{item_types};
-        }
-        for my $child ($ctx->children()->@*) {
-            my $found = __SUB__->($child);
-            return $found if defined $found;
-        }
-        return;
+        return $ctx->walk(sub ($n) {
+            my $f = $n->extract();
+            return $f->{item_types} if exists $f->{item_types};
+            return undef;
+        });
     }
 
     # ExpressionList: arity/item_types tracking
