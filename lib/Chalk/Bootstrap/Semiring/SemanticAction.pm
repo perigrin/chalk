@@ -334,12 +334,14 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # problem where add() picks an older value that predates a cfg_state update.
     method on_merge($winner, $loser) {
         return unless defined $winner && defined $loser;
-        my $winner_state = $_cfg_state{refaddr($winner)};
-        my $loser_state = $_cfg_state{refaddr($loser)};
+        my $winner_state = $winner->annotations()->{cfg} // $_cfg_state{refaddr($winner)};
+        my $loser_state  = $loser->annotations()->{cfg}  // $_cfg_state{refaddr($loser)};
 
         # If the loser has cfg_state but the winner doesn't, transfer it
         if (defined $loser_state && !defined $winner_state) {
             $_cfg_state{refaddr($winner)} = $loser_state;
+            # Dual-write: also store cfg state in the Context annotation
+            $winner->annotations()->{cfg} = $loser_state;
             return;
         }
 
@@ -359,7 +361,10 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 $base = $winner_state;
             }
             my $merged_scope = $winner_state->{scope}->merge($loser_state->{scope});
-            $_cfg_state{refaddr($winner)} = _copy_cfg_with_scope($base, $merged_scope);
+            my $merged = _copy_cfg_with_scope($base, $merged_scope);
+            $_cfg_state{refaddr($winner)} = $merged;
+            # Dual-write: also store cfg state in the Context annotation
+            $winner->annotations()->{cfg} = $merged;
         }
         return;
     }
