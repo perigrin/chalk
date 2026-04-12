@@ -27,6 +27,17 @@ use constant {
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
+# Helper: build a Context with a given set of annotations (merges over defaults).
+# Used to construct test inputs for methods that take Contexts with annotation slots.
+sub ctx_with_annotations($focus, $extra_annotations) {
+    return Chalk::Bootstrap::Context->new(
+        focus       => $focus,
+        children    => [],
+        position    => 0,
+        annotations => $extra_annotations,
+    );
+}
+
 # ========================================================================
 # N-ary FilterComposite: basic creation and zero/one
 # ========================================================================
@@ -56,7 +67,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     isa_ok($comp, 'Chalk::Bootstrap::Semiring::FilterComposite', 'creates 3-ary composite');
 }
 
-# Test 3: zero returns N-tuple of component zeros
+# Test 3: zero() returns a Context with is_zero=true
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -66,13 +77,11 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     my $zero = $comp->zero();
 
-    isa_ok($zero, 'ARRAY', 'zero returns array ref');
-    is(scalar($zero->@*), 2, 'zero returns 2-tuple');
-    ok($bool_sr->is_zero($zero->[0]), 'first element is bool zero');
-    ok($sem_sr->is_zero($zero->[1]), 'second element is sem zero');
+    isa_ok($zero, 'Chalk::Bootstrap::Context', 'zero returns a Context');
+    ok($zero->is_zero(), 'zero returns a Context with is_zero=true');
 }
 
-# Test 4: one returns N-tuple of component ones
+# Test 4: one() returns a Context with is_zero=false and annotation slots
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -82,17 +91,17 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     my $one = $comp->one();
 
-    isa_ok($one, 'ARRAY', 'one returns array ref');
-    is(scalar($one->@*), 2, 'one returns 2-tuple');
-    ok(!$bool_sr->is_zero($one->[0]), 'first element is bool one');
-    ok(!$sem_sr->is_zero($one->[1]), 'second element is sem one');
+    isa_ok($one, 'Chalk::Bootstrap::Context', 'one returns a Context');
+    ok(!$one->is_zero(), 'one returns a Context with is_zero=false');
+    # [Boolean, SA]: no annotation semirings, but SA's cfg annotation is present
+    ok(defined $one->annotations()->{cfg}, 'one has cfg annotation from SA');
 }
 
 # ========================================================================
-# N-ary FilterComposite: is_zero staged filter (ANY component zero)
+# N-ary FilterComposite: is_zero (Context flag)
 # ========================================================================
 
-# Test 5: is_zero when first component is zero
+# Test 5: is_zero delegates to Context->is_zero()
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -103,11 +112,11 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $zero = $comp->zero();
     my $one = $comp->one();
 
-    ok($comp->is_zero($zero), 'is_zero: all zeros → true');
-    ok(!$comp->is_zero($one), 'is_zero: all ones → false');
+    ok($comp->is_zero($zero), 'is_zero: zero Context -> true');
+    ok(!$comp->is_zero($one), 'is_zero: one Context -> false');
 }
 
-# Test 6: is_zero detects zero in ANY component (staged filter)
+# Test 6: is_zero on a Context with is_zero=true kills the parse path
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
@@ -118,24 +127,25 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         semirings => [$bool_sr, $prec_sr, $sem_sr],
     );
 
-    # Boolean one, Precedence zero, Semantic one
-    my $mixed = [$bool_sr->one(), $prec_sr->zero(), $sem_sr->one()];
-    ok($comp->is_zero($mixed), 'is_zero: precedence zero kills whole tuple');
+    # A zero Context (is_zero=true) represents a dead path regardless of annotations.
+    my $dead = Chalk::Bootstrap::Context->new(
+        focus    => undef,
+        children => [],
+        position => 0,
+        is_zero  => true,
+    );
+    ok($comp->is_zero($dead), 'is_zero: Context with is_zero=true -> true');
 
-    # Boolean one, Precedence one, Semantic zero
-    my $mixed2 = [$bool_sr->one(), $prec_sr->one(), $sem_sr->zero()];
-    ok($comp->is_zero($mixed2), 'is_zero: semantic zero kills whole tuple');
-
-    # All non-zero
-    my $all_one = [$bool_sr->one(), $prec_sr->one(), $sem_sr->one()];
-    ok(!$comp->is_zero($all_one), 'is_zero: all ones → false');
+    # A live Context (is_zero=false) is not zero even if annotation slots exist.
+    my $live = $comp->one();
+    ok(!$comp->is_zero($live), 'is_zero: Context with is_zero=false -> false');
 }
 
 # ========================================================================
 # N-ary FilterComposite: multiply delegates to all components
 # ========================================================================
 
-# Test 7: multiply delegates to both (2-ary)
+# Test 7: multiply delegates to SA (2-ary [Boolean, SA])
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -159,19 +169,14 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Right',
     );
 
-    my $val1 = [$bool_sr->one(), $ctx1];
-    my $val2 = [$bool_sr->one(), $ctx2];
+    my $result = $comp->multiply($ctx1, $ctx2);
 
-    my $result = $comp->multiply($val1, $val2);
-
-    isa_ok($result, 'ARRAY', 'multiply returns array ref');
-    is(scalar($result->@*), 2, 'multiply returns 2-tuple');
-    ok(!$bool_sr->is_zero($result->[0]), 'bool component is true');
-    isa_ok($result->[1], 'Chalk::Bootstrap::Context', 'sem component is Context');
-    is(scalar($result->[1]->children()->@*), 2, 'sem component has 2 children');
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'multiply returns a Context');
+    ok(!$result->is_zero(), 'multiply result is non-zero');
+    is(scalar($result->children()->@*), 2, 'multiply result has 2 children');
 }
 
-# Test 8: multiply with zero propagates zero
+# Test 8: multiply with zero Context propagates zero
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -190,7 +195,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 # N-ary FilterComposite: add() - FilterComposite protocol
 # ========================================================================
 
-# Test 9: add() with distinct semantic contexts picks left as deterministic tie-break
+# Test 9: add() with distinct contexts picks left as deterministic tie-break
 # FilterComposite does NOT die on ambiguity — it picks left deterministically.
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
@@ -215,16 +220,13 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Alt2',
     );
 
-    my $val1 = [$bool_sr->one(), $ctx1];
-    my $val2 = [$bool_sr->one(), $ctx2];
-
-    # FilterComposite picks left as tie-break when no semiring distinguishes
-    my $result = $comp->add($val1, $val2);
-    isa_ok($result, 'ARRAY', 'add returns array tuple for ambiguous case');
-    is($result->[1]->extract()->value(), 'alt1', 'add picks left on tie-break');
+    # FilterComposite picks left as tie-break when no annotation semiring distinguishes
+    my $result = $comp->add($ctx1, $ctx2);
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'add returns a Context for ambiguous case');
+    is($result->extract()->value(), 'alt1', 'add picks left on tie-break');
 }
 
-# Test 9b: add succeeds when same context on both sides (disambiguated)
+# Test 9b: add succeeds when same context on both sides
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -240,22 +242,30 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Winner',
     );
 
-    my $val = [$bool_sr->one(), $ctx];
-    my $result = $comp->add($val, $val);
+    my $result = $comp->add($ctx, $ctx);
 
-    isa_ok($result, 'ARRAY', 'add returns array ref for same-value merge');
-    is(scalar($result->@*), 2, 'add returns 2-tuple');
-    ok(!$bool_sr->is_zero($result->[0]), 'bool component is true');
-    is($result->[1]->extract()->value(), 'winner', 'sem component returns disambiguated value');
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'add returns a Context for same-value merge');
+    ok(!$result->is_zero(), 'add result is non-zero');
+    is($result->extract()->value(), 'winner', 'add returns the shared value');
 }
 
 # ========================================================================
-# N-ary FilterComposite: integer-semiring preference detection in add()
+# N-ary FilterComposite: annotation-semiring preference detection in add()
 # ========================================================================
 
-# Test 9c: FilterComposite picks whole left tuple when Structural integer add() returns left value
+# Helper: build a Context with a 'structural' annotation for Structural semiring tests.
+sub ctx_with_structural($focus_value, $struct_tag, $rule = undef) {
+    return Chalk::Bootstrap::Context->new(
+        focus       => $focus_value,
+        children    => [],
+        position    => 0,
+        rule        => $rule,
+        annotations => { structural => $struct_tag },
+    );
+}
+
+# Test 9c: FilterComposite picks left Context when Structural prefers left
 {
-    use Chalk::Bootstrap::Semiring::Structural;
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -263,44 +273,22 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         semirings => [$bool_sr, $struct_sr, $sem_sr],
     );
 
-    # Two alternatives where Structural can disambiguate:
-    # Left has CALL only, Right has CALL+LIST.
-    # Structural prefers non-list, so it picks Left.
-
-    my $struct_left  = STRUCT_IS_CALL;
-    my $struct_right = STRUCT_IS_CALL | STRUCT_IS_LIST;
-
+    # Left has CALL only; Right has CALL|LIST. Structural prefers non-list (left).
     my $node1 = $factory->make('Constant', const_type => 'string', value => 'winner');
-    my $ctx1 = Chalk::Bootstrap::Context->new(
-        focus    => $node1,
-        children => [],
-        position => 0,
-        rule     => 'Left',
-    );
-
     my $node2 = $factory->make('Constant', const_type => 'string', value => 'loser');
-    my $ctx2 = Chalk::Bootstrap::Context->new(
-        focus    => $node2,
-        children => [],
-        position => 0,
-        rule     => 'Right',
-    );
 
-    my $val1 = [$bool_sr->one(), $struct_left,  $ctx1];
-    my $val2 = [$bool_sr->one(), $struct_right, $ctx2];
+    my $ctx1 = ctx_with_structural($node1, STRUCT_IS_CALL,              'Left');
+    my $ctx2 = ctx_with_structural($node2, STRUCT_IS_CALL | STRUCT_IS_LIST, 'Right');
 
-    # Structural prefers non-list (left), so FilterComposite should return the left tuple.
-    my $result = $comp->add($val1, $val2);
+    my $result = $comp->add($ctx1, $ctx2);
 
-    isa_ok($result, 'ARRAY', '9c: FilterComposite returns array tuple when Structural disambiguates');
-    is(scalar($result->@*), 3, '9c: returns 3-tuple');
-    is($result->[1], STRUCT_IS_CALL, '9c: Structural component is the winner value (CALL only)');
-    is($result->[2]->extract()->value(), 'winner', '9c: SemanticAction component is from left tuple');
+    isa_ok($result, 'Chalk::Bootstrap::Context', '9c: add returns a Context when Structural disambiguates');
+    is($result->annotations()->{structural}, STRUCT_IS_CALL, '9c: structural annotation is the winner value (CALL only)');
+    is($result->extract()->value(), 'winner', '9c: focus is from left Context');
 }
 
-# Test 9d: FilterComposite picks whole right tuple when Structural prefers right
+# Test 9d: FilterComposite picks right Context when Structural prefers right
 {
-    use Chalk::Bootstrap::Semiring::Structural;
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -308,82 +296,49 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         semirings => [$bool_sr, $struct_sr, $sem_sr],
     );
 
-    # Left has CALL+LIST (is_list), Right has CALL only (no list).
-    # Structural prefers non-list, so it picks Right.
-
-    my $struct_left  = STRUCT_IS_CALL | STRUCT_IS_LIST;
-    my $struct_right = STRUCT_IS_CALL;
-
+    # Left has CALL|LIST; Right has CALL only. Structural prefers right.
     my $node1 = $factory->make('Constant', const_type => 'string', value => 'loser');
-    my $ctx1 = Chalk::Bootstrap::Context->new(
-        focus    => $node1,
-        children => [],
-        position => 0,
-        rule     => 'Left',
-    );
-
     my $node2 = $factory->make('Constant', const_type => 'string', value => 'winner');
-    my $ctx2 = Chalk::Bootstrap::Context->new(
-        focus    => $node2,
-        children => [],
-        position => 0,
-        rule     => 'Right',
-    );
 
-    my $val1 = [$bool_sr->one(), $struct_left,  $ctx1];
-    my $val2 = [$bool_sr->one(), $struct_right, $ctx2];
+    my $ctx1 = ctx_with_structural($node1, STRUCT_IS_CALL | STRUCT_IS_LIST, 'Left');
+    my $ctx2 = ctx_with_structural($node2, STRUCT_IS_CALL,                  'Right');
 
-    my $result = $comp->add($val1, $val2);
+    my $result = $comp->add($ctx1, $ctx2);
 
-    isa_ok($result, 'ARRAY', '9d: FilterComposite returns array tuple when Structural disambiguates');
-    is($result->[1], STRUCT_IS_CALL, '9d: Structural component is the winner value (CALL only)');
-    is($result->[2]->extract()->value(), 'winner', '9d: SemanticAction component is from right tuple');
+    isa_ok($result, 'Chalk::Bootstrap::Context', '9d: add returns a Context when Structural disambiguates');
+    is($result->annotations()->{structural}, STRUCT_IS_CALL, '9d: structural annotation is the winner value (CALL only)');
+    is($result->extract()->value(), 'winner', '9d: focus is from right Context');
 }
 
-# Test 9e: FilterComposite picks left tuple when Structural tags are identical (tie-break)
+# Test 9e: FilterComposite picks left Context on tie-break when Structural tags are identical
 {
-    use Chalk::Bootstrap::Semiring::Structural;
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $struct_sr, $sem_sr],
     );
-
 
     my $struct_identical = STRUCT_IS_CALL | STRUCT_IS_LIST;
 
     my $node1 = $factory->make('Constant', const_type => 'string', value => 'left-winner');
-    my $ctx1 = Chalk::Bootstrap::Context->new(
-        focus    => $node1,
-        children => [],
-        position => 0,
-        rule     => 'Left',
-    );
-
     my $node2 = $factory->make('Constant', const_type => 'string', value => 'right-loser');
-    my $ctx2 = Chalk::Bootstrap::Context->new(
-        focus    => $node2,
-        children => [],
-        position => 0,
-        rule     => 'Right',
-    );
 
-    my $val1 = [$bool_sr->one(), $struct_identical, $ctx1];
-    my $val2 = [$bool_sr->one(), $struct_identical, $ctx2];
+    my $ctx1 = ctx_with_structural($node1, $struct_identical, 'Left');
+    my $ctx2 = ctx_with_structural($node2, $struct_identical, 'Right');
 
-    my $result = $comp->add($val1, $val2);
+    my $result = $comp->add($ctx1, $ctx2);
 
-    isa_ok($result, 'ARRAY', '9e: FilterComposite returns array tuple for identical Structural tie-break');
-    is($result->[1], $struct_identical, '9e: Structural component is the identical tag value');
-    is($result->[2]->extract()->value(), 'left-winner', '9e: SemanticAction picks left on tie-break');
+    isa_ok($result, 'Chalk::Bootstrap::Context', '9e: add returns a Context for identical Structural tie-break');
+    is($result->annotations()->{structural}, $struct_identical, '9e: structural annotation is the identical tag value');
+    is($result->extract()->value(), 'left-winner', '9e: focus picks left on tie-break');
 }
 
 # ========================================================================
 # FilterComposite: _filter_compare tests
 # ========================================================================
 
-# Test FC1: _filter_compare returns 'neither' when Boolean (same on both sides)
+# Test FC1: _filter_compare returns 'neither' for [Boolean, SA] — no annotation semirings
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -400,19 +355,13 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         focus => $node2, children => [], position => 0, rule => 'B',
     );
 
-    my $val1 = [$bool_sr->one(), $ctx1];
-    my $val2 = [$bool_sr->one(), $ctx2];
-
-    # Both Bool components are true (one()) — no preference from Boolean.
-    # SemanticAction returns [$ctx1, $ctx2] for distinct contexts — no preference.
-    # So _filter_compare returns 'neither'.
-    my $verdict = $comp->_filter_compare($val1, $val2);
-    is($verdict, 'neither', 'FC1: _filter_compare neither when only bool semiring (same on both)');
+    # [Boolean, SA] has no annotation semirings — _filter_compare always returns 'neither'.
+    my $verdict = $comp->_filter_compare($ctx1, $ctx2);
+    is($verdict, 'neither', 'FC1: _filter_compare neither when no annotation semirings');
 }
 
 # Test FC2: _filter_compare returns 'right_loses' when Structural prefers left
 {
-
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -421,25 +370,18 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     my $node1 = $factory->make('Constant', const_type => 'string', value => 'left');
-    my $ctx1 = Chalk::Bootstrap::Context->new(
-        focus => $node1, children => [], position => 0, rule => 'Left',
-    );
+    my $ctx1 = ctx_with_structural($node1, STRUCT_IS_CALL,                  'Left');
+
     my $node2 = $factory->make('Constant', const_type => 'string', value => 'right');
-    my $ctx2 = Chalk::Bootstrap::Context->new(
-        focus => $node2, children => [], position => 0, rule => 'Right',
-    );
+    my $ctx2 = ctx_with_structural($node2, STRUCT_IS_CALL | STRUCT_IS_LIST, 'Right');
 
     # Left = CALL only; Right = CALL|LIST. Structural prefers left (no list wins).
-    my $val1 = [$bool_sr->one(), STRUCT_IS_CALL,              $ctx1];
-    my $val2 = [$bool_sr->one(), STRUCT_IS_CALL | STRUCT_IS_LIST, $ctx2];
-
-    my $verdict = $comp->_filter_compare($val1, $val2);
+    my $verdict = $comp->_filter_compare($ctx1, $ctx2);
     is($verdict, 'right_loses', 'FC2: _filter_compare right_loses when Structural prefers left');
 }
 
 # Test FC3: _filter_compare returns 'left_loses' when Structural prefers right
 {
-
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -448,23 +390,17 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     my $node1 = $factory->make('Constant', const_type => 'string', value => 'left');
-    my $ctx1 = Chalk::Bootstrap::Context->new(
-        focus => $node1, children => [], position => 0, rule => 'Left',
-    );
+    my $ctx1 = ctx_with_structural($node1, STRUCT_IS_CALL | STRUCT_IS_LIST, 'Left');
+
     my $node2 = $factory->make('Constant', const_type => 'string', value => 'right');
-    my $ctx2 = Chalk::Bootstrap::Context->new(
-        focus => $node2, children => [], position => 0, rule => 'Right',
-    );
+    my $ctx2 = ctx_with_structural($node2, STRUCT_IS_CALL,                  'Right');
 
     # Left = CALL|LIST; Right = CALL only. Structural prefers right.
-    my $val1 = [$bool_sr->one(), STRUCT_IS_CALL | STRUCT_IS_LIST, $ctx1];
-    my $val2 = [$bool_sr->one(), STRUCT_IS_CALL,              $ctx2];
-
-    my $verdict = $comp->_filter_compare($val1, $val2);
+    my $verdict = $comp->_filter_compare($ctx1, $ctx2);
     is($verdict, 'left_loses', 'FC3: _filter_compare left_loses when Structural prefers right');
 }
 
-# Test FC4: _filter_compare with Precedence arrayref protocol - prefers higher-level
+# Test FC4: _filter_compare returns 'neither' when Precedence values are identical
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
@@ -476,32 +412,24 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     my $node1 = $factory->make('Constant', const_type => 'string', value => 'left');
-    my $ctx1 = Chalk::Bootstrap::Context->new(
-        focus => $node1, children => [], position => 0, rule => 'Left',
-    );
     my $node2 = $factory->make('Constant', const_type => 'string', value => 'right');
-    my $ctx2 = Chalk::Bootstrap::Context->new(
-        focus => $node2, children => [], position => 0, rule => 'Right',
-    );
-
-    # Use prec->one() (no level info) for left, and a value with level for right.
-    # Precedence.add() returns [$right] when right has level and left doesn't.
-    my $prec_with_level = $prec_sr->one();
-    # Simulate: manually use _intern approach — use add() with one() and a real value
-    # Actually let's use on_scan to get real values. Use one() for both (same object).
-    my $prec_same = $prec_sr->one();
-
-    my $val1 = [$bool_sr->one(), $prec_same, $ctx1];
-    my $val2 = [$bool_sr->one(), $prec_same, $ctx2];
 
     # Both Precedence values are refaddr-equal (hash-consed one()) → no preference from Prec.
-    # SemanticAction: two different contexts → no preference.
-    # Result: 'neither'.
-    my $verdict = $comp->_filter_compare($val1, $val2);
+    my $prec_same = $prec_sr->one();
+    my $ctx1 = Chalk::Bootstrap::Context->new(
+        focus => $node1, children => [], position => 0, rule => 'Left',
+        annotations => { precedence => $prec_same },
+    );
+    my $ctx2 = Chalk::Bootstrap::Context->new(
+        focus => $node2, children => [], position => 0, rule => 'Right',
+        annotations => { precedence => $prec_same },
+    );
+
+    my $verdict = $comp->_filter_compare($ctx1, $ctx2);
     is($verdict, 'neither', 'FC4: _filter_compare neither when Precedence values are identical');
 }
 
-# Test FC5: _filter_compare returns 'neither' when Structural merges (both untagged)
+# Test FC5: _filter_compare returns 'neither' when Structural values are both untagged (identity merge)
 {
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
@@ -511,20 +439,14 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     my $node1 = $factory->make('Constant', const_type => 'string', value => 'left');
-    my $ctx1 = Chalk::Bootstrap::Context->new(
-        focus => $node1, children => [], position => 0, rule => 'Left',
-    );
     my $node2 = $factory->make('Constant', const_type => 'string', value => 'right');
-    my $ctx2 = Chalk::Bootstrap::Context->new(
-        focus => $node2, children => [], position => 0, rule => 'Right',
-    );
 
     # Both Structural values are 0 (one() = untagged). add() returns 0|0 = 0.
     # Result equals both inputs (both are 0) → identity collapse → no preference.
-    my $val1 = [$bool_sr->one(), 0, $ctx1];
-    my $val2 = [$bool_sr->one(), 0, $ctx2];
+    my $ctx1 = ctx_with_structural($node1, 0, 'Left');
+    my $ctx2 = ctx_with_structural($node2, 0, 'Right');
 
-    my $verdict = $comp->_filter_compare($val1, $val2);
+    my $verdict = $comp->_filter_compare($ctx1, $ctx2);
     is($verdict, 'neither', 'FC5: _filter_compare neither when Structural values both untagged (merge)');
 }
 
@@ -532,7 +454,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 # N-ary FilterComposite: on_scan delegation
 # ========================================================================
 
-# Test 10: on_scan delegates to all component semirings
+# Test 10: on_scan delegates to SA, returns Context with scanned_text
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -542,18 +464,16 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     my $result = $comp->on_scan($comp->one(), 'QualifiedIdentifier', 0, 0, 'hello');
 
-    isa_ok($result, 'ARRAY', 'on_scan returns array ref');
-    is(scalar($result->@*), 2, 'on_scan returns 2-tuple');
-    ok(!$bool_sr->is_zero($result->[0]), 'bool component is non-zero');
-    isa_ok($result->[1], 'Chalk::Bootstrap::Context', 'sem component is Context');
-    is($result->[1]->scanned_text(), 'hello', 'sem component contains matched text');
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'on_scan returns a Context');
+    ok(!$result->is_zero(), 'on_scan result is non-zero');
+    is($result->scanned_text(), 'hello', 'on_scan result contains matched text');
 }
 
 # ========================================================================
 # N-ary FilterComposite: on_complete delegation
 # ========================================================================
 
-# Test 11: on_complete delegates to all component semirings
+# Test 11: on_complete delegates to SA, applies action, returns Context
 {
     package CompositeTestActions {
         use 5.42.0;
@@ -580,21 +500,19 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => undef,
     );
 
-    my $result = $comp->on_complete([$bool_sr->one(), $ctx], 'TestRule', 0, 5, 0);
+    my $result = $comp->on_complete($ctx, 'TestRule', 0, 5, 0);
 
-    isa_ok($result, 'ARRAY', 'on_complete returns array ref');
-    is(scalar($result->@*), 2, 'on_complete returns 2-tuple');
-    ok(!$bool_sr->is_zero($result->[0]), 'bool component unchanged');
-    isa_ok($result->[1], 'Chalk::Bootstrap::Context', 'sem component is Context');
-    is($result->[1]->extract(), 'HELLO', 'sem component has action applied');
-    is($result->[1]->rule(), 'TestRule', 'sem component has rule name set');
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'on_complete returns a Context');
+    ok(!$result->is_zero(), 'on_complete result is non-zero');
+    is($result->extract(), 'HELLO', 'on_complete has action applied');
+    is($result->rule(), 'TestRule', 'on_complete has rule name set');
 }
 
 # ========================================================================
 # N-ary FilterComposite: 3-ary with Precedence
 # ========================================================================
 
-# Test 12: 3-ary on_scan with operator detection
+# Test 12: 3-ary on_scan with operator detection returns Context with precedence annotation
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
@@ -607,14 +525,13 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     my $result = $comp->on_scan($comp->one(), 'BinaryOp', 0, 0, '+');
 
-    isa_ok($result, 'ARRAY', '3-ary on_scan returns array ref');
-    is(scalar($result->@*), 3, '3-ary on_scan returns 3-tuple');
-    ok(!$bool_sr->is_zero($result->[0]), 'bool component non-zero');
-    ok(!$prec_sr->is_zero($result->[1]), 'prec component non-zero');
-    isa_ok($result->[2], 'Chalk::Bootstrap::Context', 'sem component is Context');
+    isa_ok($result, 'Chalk::Bootstrap::Context', '3-ary on_scan returns a Context');
+    ok(!$result->is_zero(), '3-ary on_scan result is non-zero');
+    ok(defined $result->annotations()->{precedence}, '3-ary on_scan result has precedence annotation');
+    ok(!$prec_sr->is_zero($result->annotations()->{precedence}), 'precedence annotation is non-zero');
 }
 
-# Test 13: 3-ary is_zero when precedence kills an item
+# Test 13: 3-ary: a Context with is_zero=true is detected as zero
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
@@ -625,15 +542,15 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         semirings => [$bool_sr, $prec_sr, $sem_sr],
     );
 
-    my $bad = [$bool_sr->one(), $prec_sr->zero(), $sem_sr->one()];
-    ok($comp->is_zero($bad), 'precedence zero in 3-tuple kills item');
+    my $dead = $comp->zero();
+    ok($comp->is_zero($dead), 'zero Context kills parse path');
 }
 
 # ========================================================================
 # 4-ary FilterComposite: Boolean + Precedence + TypeInference + SemanticAction
 # ========================================================================
 
-# Test 14: 4-ary creation
+# Test 14: 4-ary creation, one() and zero() return Contexts
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
@@ -651,15 +568,17 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     isa_ok($comp, 'Chalk::Bootstrap::Semiring::FilterComposite', 'creates 4-ary composite');
 
     my $one = $comp->one();
-    is(scalar($one->@*), 4, '4-ary one returns 4-tuple');
-    ok(!$comp->is_zero($one), '4-ary one is non-zero');
+    isa_ok($one, 'Chalk::Bootstrap::Context', '4-ary one returns a Context');
+    ok(!$one->is_zero(), '4-ary one is non-zero');
+    ok(defined $one->annotations()->{precedence}, '4-ary one has precedence annotation');
+    ok(defined $one->annotations()->{cfg},        '4-ary one has cfg annotation from SA');
 
     my $zero = $comp->zero();
-    is(scalar($zero->@*), 4, '4-ary zero returns 4-tuple');
-    ok($comp->is_zero($zero), '4-ary zero is zero');
+    isa_ok($zero, 'Chalk::Bootstrap::Context', '4-ary zero returns a Context');
+    ok($zero->is_zero(), '4-ary zero is zero');
 }
 
-# Test 15: 4-ary is_zero when TypeInference kills an item
+# Test 15: 4-ary: zero Context is detected by is_zero
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
@@ -674,11 +593,11 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
     );
 
-    my $bad = [$bool_sr->one(), $prec_sr->one(), $type_sr->zero(), $sem_sr->one()];
-    ok($comp->is_zero($bad), 'type inference zero in 4-tuple kills item');
+    my $dead = $comp->zero();
+    ok($comp->is_zero($dead), 'zero Context kills parse path in 4-ary composite');
 }
 
-# Test 16: 4-ary on_scan with keyword detection in QualifiedIdentifier rule
+# Test 16: 4-ary on_scan with keyword in QualifiedIdentifier returns non-zero Context
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
@@ -694,11 +613,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     my $result = $comp->on_scan($comp->one(), 'QualifiedIdentifier', 0, 0, 'use');
-    is(scalar($result->@*), 4, '4-ary on_scan returns 4-tuple');
-    ok(!$bool_sr->is_zero($result->[0]), 'bool ok for keyword scan');
-    ok(!$prec_sr->is_zero($result->[1]), 'prec ok for keyword scan');
-    ok(!$type_sr->is_zero($result->[2]), 'type non-zero at scan (rejection at complete)');
-    ok(!$type_sr->is_zero($result->[2]), 'type inference tagged (non-zero) for keyword scan');
+    isa_ok($result, 'Chalk::Bootstrap::Context', '4-ary on_scan returns a Context');
+    ok(!$result->is_zero(), '4-ary on_scan is non-zero (keyword rejection happens at complete)');
+    ok(defined $result->annotations()->{precedence}, '4-ary on_scan has precedence annotation');
 }
 
 # ========================================================================
@@ -718,10 +635,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $ctx = Chalk::Bootstrap::Context->new(
         focus => $node, children => [], position => 0, rule => 'R',
     );
-    my $one_val = [$bool_sr->one(), $ctx];
 
-    my $result = $comp->add($zero, $one_val);
-    is($result->[1]->extract()->value(), 'right', 'add(zero, right) returns right');
+    my $result = $comp->add($zero, $ctx);
+    is($result->extract()->value(), 'right', 'add(zero, right) returns right');
 }
 
 # Test FC-Z2: add() with right zero returns left
@@ -737,10 +653,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $ctx = Chalk::Bootstrap::Context->new(
         focus => $node, children => [], position => 0, rule => 'L',
     );
-    my $one_val = [$bool_sr->one(), $ctx];
 
-    my $result = $comp->add($one_val, $zero);
-    is($result->[1]->extract()->value(), 'left', 'add(left, zero) returns left');
+    my $result = $comp->add($ctx, $zero);
+    is($result->extract()->value(), 'left', 'add(left, zero) returns left');
 }
 
 # ========================================================================
@@ -773,7 +688,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 }
 
 # Test: FilterComposite.on_complete threads TI result to SA
-# Uses a mock SA that records what set_type_context receives.
+# Uses a monkey-patched SA that records what set_type_context receives.
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
@@ -802,16 +717,14 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         semirings => [$bool_sr, $prec_sr, $ti_sr, $struct_sr, $sa],
     );
 
-    my $ti_one = $ti_sr->one();
-    my $sa_one = $sa->one();
-
-    my $value = [$bool_sr->one(), $prec_sr->one(), $ti_one, $struct_sr->one(), $sa_one];
+    # Build a valid input Context for the 5-ary composite using comp->one()
+    my $value = $comp->one();
 
     # Run on_complete
     my $result = $comp->on_complete($value, 'TestRule', 0, 1, 0);
 
-    # SA is at index 4, TI is at index 2. The TI result should have been
-    # passed to SA via set_type_context before SA's on_complete ran.
+    # TI is an annotation semiring. FilterComposite should have threaded TI's
+    # on_complete result to SA via set_type_context before SA's on_complete ran.
     ok(defined $captured_type_ctx, 'FilterComposite threads TI result to SA');
 }
 
