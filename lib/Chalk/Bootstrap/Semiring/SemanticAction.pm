@@ -17,15 +17,15 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     my %_ctx_cache;
 
     # Pending CFG state update from action methods. Action methods call
-    # update_cfg() to request a state change; on_complete applies it to the
-    # result context after the action returns.
+    # update_cfg() to request a state change; multiply with a complete-annotated
+    # Context applies it to the result context after the action returns.
     my $_pending_cfg_update;
 
-    # The active SemanticAction instance during on_complete. Action methods
+    # The active SemanticAction instance during a complete event. Action methods
     # access this via current_instance() to call cfg_state/update_cfg.
     my $_current_instance;
 
-    # TypeInference Context for the current on_complete. Set by
+    # TypeInference Context for the current complete event. Set by
     # FilterComposite before SA runs, so action methods can read
     # type annotations (e.g., return_type) from TI.
     my $_type_context;
@@ -142,25 +142,25 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     }
 
     # Request a CFG state update from within an action method.
-    # Called by Actions.pm during extend(); on_complete applies the update
-    # to the result context after the action returns.
+    # Called by Actions.pm during extend(); multiply with a complete-annotated
+    # Context applies the update to the result context after the action returns.
     method update_cfg($state) {
         $_pending_cfg_update = $state;
         return;
     }
 
     # Class method: return the SemanticAction instance currently executing
-    # an on_complete action. Allows action methods in Actions.pm to access
+    # a complete event. Allows action methods in Actions.pm to access
     # cfg_state/update_cfg without needing a reference to the semiring.
     sub current_instance { return $_current_instance }
 
-    # Set the TypeInference Context for the current on_complete.
+    # Set the TypeInference Context for the current complete event.
     # Called by FilterComposite after TI (index 2) completes, before SA runs.
     method set_type_context($ctx) {
         $_type_context = $ctx;
     }
 
-    # Class method: return the TypeInference Context for the current on_complete.
+    # Class method: return the TypeInference Context for the current complete event.
     # Called by action methods (e.g. MethodDefinition in Actions.pm) to read
     # type annotations computed by TypeInference.
     sub current_type_context { return $_type_context }
@@ -190,7 +190,6 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
         # Complete event: right Context has annotations->{complete} = true.
         # Apply semantic action for the completed rule.
-        # This is the body of the former on_complete method, now inlined here.
         if (blessed($right) && $right->can('annotations')
                 && $right->annotations()->{complete}) {
             my $rule_name = $right->annotations()->{rule_name};

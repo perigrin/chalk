@@ -90,7 +90,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return undef;
     }
 
-    # Tree-walkers for on_complete.
+    # Tree-walkers for complete events.
     # Walk the shared Context tree, reading type tags from annotations->{type}.
     # Use _walk_annotations (not Context->walk) because SA scan nodes have defined
     # focus (scanned text) but no annotations — Context->walk would stop there.
@@ -129,7 +129,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     }
 
     # Search the shared tree nodes (rightmost first) for one with type in annotations->{type}.
-    # Returns the type string or undef. Used by the catch-all passthrough in on_complete.
+    # Returns the type string or undef. Used by the catch-all passthrough in _complete_type.
     method _get_rightmost_type($ctx) {
         return unless defined $ctx;
         return _walk_annotations($ctx, sub ($n) {
@@ -251,7 +251,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return undef if !defined $right;
 
         # Scan event: right Context has annotations->{scan} = true.
-        # Apply should_scan filtering then on_scan type-tag attachment.
+        # Apply keyword rejection filtering and type-tag attachment.
         # Returns a tag hash (not a Context) as the new type slot value.
         # Returns undef (zero) when the scan is rejected (e.g., keyword at
         # identifier position, or % after hash-taking builtin).
@@ -261,8 +261,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             my $matched_text = $right->focus() // '';
             my $is_predicted = $right->annotations()->{predicted} // {};
 
-            # Keyword rejection (should_scan logic): reject keywords as
-            # QualifiedIdentifier when a keyword-consuming rule is predicted.
+            # Keyword rejection: reject keywords as QualifiedIdentifier
+            # when a keyword-consuming rule is predicted.
             if ($rule_name eq 'BinaryOp' && $matched_text eq '%') {
                 # Reject % as BinaryOp when LHS has call_symbol for hash-taking builtin
                 my $type_ann = $left->annotations()->{type};
@@ -298,7 +298,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 }
             }
 
-            # Type-tag attachment (on_scan logic): return tag hash for this scan.
+            # Type-tag attachment: return tag hash for this scan.
             # Lazy-init pre-cached scan Contexts on first call.
             $self->_init_scan_cache() if !defined $_scan_regex;
             return $self->_type_tag_for_scan($rule_name, $matched_text);
@@ -306,7 +306,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
         # Complete event: right Context has annotations->{complete} = true.
         # Apply type inference for the completed rule.
-        # This is the body of the former on_complete method, now inlined here.
         if (blessed($right) && $right->can('annotations')
                 && $right->annotations()->{complete}) {
             my $rule_name = $right->annotations()->{rule_name};
@@ -328,8 +327,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     }
 
     # _complete_type: apply type inference for a completed rule.
-    # Encapsulates all rule-name dispatch formerly in on_complete.
-    # $value is the full accumulated TI Context (same as what on_complete received).
+    # Receives the accumulated TI Context and rule metadata from multiply.
     method _complete_type($value, $rule_name, $alt_idx) {
         return undef if !defined $value;
 
@@ -403,7 +401,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     }
 
     # _type_tag_for_scan: return the type tag hash for a scan event.
-    # Formerly the body of on_scan — extracted here so multiply can call it.
+    # Called from multiply when right Context has annotations->{scan}=true.
     method _type_tag_for_scan($rule_name, $matched_text) {
         # RegexLiteral → type => 'Regex'
         if ($rule_name eq 'RegexLiteral') {

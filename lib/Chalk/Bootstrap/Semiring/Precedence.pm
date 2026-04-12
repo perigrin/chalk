@@ -101,7 +101,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return $self->zero() if $self->is_zero($l_prec);
 
         # Scan event: right Context has annotations->{scan} = true.
-        # Execute the on_scan operator-validation logic inline.
+        # Apply operator-validation logic inline.
         if (blessed($right) && $right->can('annotations')
                 && $right->annotations()->{scan}) {
             my $existing  = $l_prec;
@@ -112,7 +112,6 @@ class Chalk::Bootstrap::Semiring::Precedence {
 
         # Complete event: right Context has annotations->{complete} = true.
         # Apply precedence rule-completion logic.
-        # This is the body of the former on_complete method, now inlined here.
         if (blessed($right) && $right->can('annotations')
                 && $right->annotations()->{complete}) {
             my $rule_name = $right->annotations()->{rule_name};
@@ -127,8 +126,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
     }
 
     # _scan_multiply: operator-validation logic for scan events.
-    # Formerly the body of on_scan — extracted here so multiply can call it
-    # when the right argument is a scan-annotated Context.
+    # Called from multiply when the right argument is a scan-annotated Context.
     method _scan_multiply($existing, $rule_name, $matched_text) {
         # Propagate zero
         return $self->zero() if $self->is_zero($existing);
@@ -330,7 +328,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # Both valid: prefer the value with level info (more constraining).
         # When both have levels, prefer the higher level number (lower
         # precedence = more constraining parent context). This ensures
-        # the on_scan left-operand check has the tightest possible
+        # the scan-time left-operand check has the tightest possible
         # constraint, preventing invalid parses like ($a && $b) =~ /x/.
         my $ll = $left->{level};
         my $rl = $right->{level};
@@ -353,7 +351,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
             # AssignmentExpression (level>=100), prefer the PostfixExpression
             # level. The assignment level would otherwise kill valid
             # method-call/subscript parse paths downstream (PostfixExpression
-            # on_complete rejects values with level>=0).
+            # completion rejects values with level>=0).
             if ($ll < 0 && $rl >= 100) {
                 return [$left];
             }
@@ -369,7 +367,6 @@ class Chalk::Bootstrap::Semiring::Precedence {
     }
 
     # _complete_prec: apply precedence reification for a completed rule.
-    # Encapsulates all rule-name dispatch formerly in on_complete.
     # Receives the accumulated left-side precedence hashref and rule metadata.
     method _complete_prec($value, $rule_name, $alt_idx) {
         return $self->zero() if $self->is_zero($value);

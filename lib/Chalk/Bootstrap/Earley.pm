@@ -1198,7 +1198,7 @@ class Chalk::Bootstrap::Earley {
         # Combine existing value with scan via multiply.
         # The scan Context carries matched_text (focus), rule_name, alt_idx,
         # and predicted (the predicted_at hashref) so semirings can inspect
-        # scan metadata without a separate should_scan/on_scan protocol.
+        # scan metadata inline during multiply.
         my $scan_ctx = $self->_make_scan_context($matched, $rule_name, $alt_idx, $is_predicted);
         my $new_value = $semiring->multiply($value, $scan_ctx);
 

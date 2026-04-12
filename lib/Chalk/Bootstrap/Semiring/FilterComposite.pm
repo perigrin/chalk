@@ -124,7 +124,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # validates operators; TypeInference attaches type tags; Structural
     # performs a transparent passthrough).
     # When $right carries annotations->{complete} = true, semirings apply
-    # their rule-completion logic (formerly on_complete) inline in multiply.
+    # their rule-completion logic inline in multiply.
     method multiply($left, $right) {
         return $self->zero() if $left->is_zero();
         return $self->zero() if $right->is_zero();
@@ -152,8 +152,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         }
 
         # Thread TI result to SA before SA runs so action methods can read type info.
-        # This mirrors the bridge that FC.on_complete used (set_type_context /
-        # current_type_context). SA actions fire during SA.multiply for complete events.
+        # SA actions fire during SA.multiply for complete events.
         if ($is_complete && defined $ti_result_tag_hash
                 && $self->_sa()->can('set_type_context')) {
             my $ti_ctx_wrapper = Chalk::Bootstrap::Context->new(
@@ -205,7 +204,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             # TI (#707): type tag is now a plain hash ref in annotations->{type}.
             # TI never expresses a preference via add() (its add() returns a merged
             # Context that equals neither input, which means "no preference").
-            # TI disambiguates by returning undef from on_complete (zero), not add().
+            # TI disambiguates by returning zero from multiply with complete Context, not add().
             # Skip calling add() for the type slot — identity check above is sufficient.
             next if $slot eq 'type';
 

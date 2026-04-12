@@ -77,7 +77,6 @@ class Chalk::Bootstrap::Semiring::Structural {
 
         # Complete event: right Context has annotations->{complete} = true.
         # Apply structural tagging based on the completed rule name.
-        # This is the body of the former on_complete method, now inlined here.
         if (blessed($right) && $right->can('annotations')
                 && $right->annotations()->{complete}) {
             return $ZERO if $l == $ZERO;
@@ -95,7 +94,7 @@ class Chalk::Bootstrap::Semiring::Structural {
     }
 
     # _complete_structural: apply structural bit-tagging for a completed rule.
-    # Encapsulates all rule-name dispatch formerly in on_complete.
+    # Receives the accumulated left-side integer value and the rule metadata.
     # Receives the accumulated left-side integer value and the rule metadata.
     method _complete_structural($value, $rule_name, $alt_idx) {
         return $ZERO if $value == $ZERO;

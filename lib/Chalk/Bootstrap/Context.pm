@@ -41,7 +41,7 @@ class Chalk::Bootstrap::Context {
     }
 
     # Collect leaf contexts with defined focuses from this Context tree.
-    # A "leaf" is a context that has a defined focus (from on_complete).
+    # A "leaf" is a context that has a defined focus (set by multiply with a complete-annotated Context).
     # Optional $node_class filters to only contexts whose focus isa $node_class.
     method leaves($node_class = undef) {
         return $self->walk_all(sub ($node) {
@@ -54,7 +54,7 @@ class Chalk::Bootstrap::Context {
     }
 
     # Extract concatenated scanned text from this Context tree.
-    # Walks the tree and collects all string focuses (from on_scan),
+    # Walks the tree and collects all string focuses (set by multiply with a scan-annotated Context),
     # concatenating them in order. Non-string (ref) focuses do not contribute
     # text, but their children are still walked (same as undef focus nodes).
     # Iterative (explicit stack) to avoid deep-recursion on tall parse trees.
@@ -66,12 +66,12 @@ class Chalk::Bootstrap::Context {
             my $node = pop @stack;
             my $f = $node->extract();
             if (defined $f && !ref($f)) {
-                # String focus from on_scan — accumulate text, no child recursion
+                # String focus from a scan event — accumulate text, no child recursion
                 $text .= $f;
                 next;
             }
 
-            # Undef focus (intermediate node) or ref focus (IR node from on_complete):
+            # Undef focus (intermediate node) or ref focus (IR node from a complete event):
             # either way, recurse into children to collect scanned text.
             # Push children in reverse order so leftmost child is processed first.
             push @stack, reverse $node->children()->@*;

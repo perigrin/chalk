@@ -1,4 +1,4 @@
-# ABOUTME: Type inference action methods dispatched by TypeInference on_complete.
+# ABOUTME: Type inference action methods dispatched by TypeInference multiply for complete events.
 # ABOUTME: Each method receives a Context via extend(), returns a focus hash for the completed rule.
 use 5.42.0;
 use utf8;
@@ -57,7 +57,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     }
 
     # Method return type registry: method_name => return_type
-    # Populated by MethodDefinition on_complete, consumed by MethodCall lookups.
+    # Populated by MethodDefinition complete event, consumed by MethodCall lookups.
     # Scoped per file parse (reset via reset_method_registry).
     my %_method_returns;
 
