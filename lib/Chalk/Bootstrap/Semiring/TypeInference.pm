@@ -85,7 +85,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $key = "ext:$rule_name:$focus_key:$children_key";
         return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus       => $focus,
-            children    => $value->children(),
+            children    => [$value],
             position    => $value->position(),
             rule        => $value->rule(),
             annotations => $value->annotations(),

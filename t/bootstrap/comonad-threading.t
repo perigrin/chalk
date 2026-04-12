@@ -2,7 +2,7 @@
 # ABOUTME: Verifies comonad laws: left identity, right identity, associativity
 use 5.42.0;
 use utf8;
-use Test::More tests => 14;
+use Test::More tests => 16;
 
 use lib 'lib';
 use Chalk::Bootstrap::Context;
@@ -126,9 +126,10 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     my $ctx_of_ctxs = $parent_ctx->duplicate();
 
-    is(scalar($ctx_of_ctxs->children()->@*), 2, 'duplicate preserves children count');
-    is($ctx_of_ctxs->children()->[0]->extract()->value(), 'child1',
-       'duplicate preserves first child');
+    is(scalar($ctx_of_ctxs->children()->@*), 1, 'duplicate wraps self as single child');
+    is($ctx_of_ctxs->children()->[0]->rule(), 'Parent', 'duplicate child is original context');
+    is(scalar($ctx_of_ctxs->children()->[0]->children()->@*), 2, 'original children preserved inside wrapped context');
+    is($ctx_of_ctxs->children()->[0]->children()->[0]->extract()->value(), 'child1', 'original first child accessible through wrap');
 }
 
 # Test 6: annotations field defaults to empty hashref

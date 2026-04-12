@@ -22,7 +22,7 @@ class Chalk::Bootstrap::Context {
         my $new_focus = $f->($self);
         return Chalk::Bootstrap::Context->new(
             focus       => $new_focus,
-            children    => $children,
+            children    => [$self],
             position    => $position,
             rule        => $rule,
             annotations => $annotations,

@@ -255,7 +255,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             my $new_focus = $actions->$rule_name($value);
             $result = Chalk::Bootstrap::Context->new(
                 focus    => $new_focus,
-                children => $value->children(),
+                children => [$value],
                 position => $value->position(),
                 rule     => $value->rule(),
             );
@@ -267,7 +267,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         # Set the rule name on the result context
         my $result_ctx = Chalk::Bootstrap::Context->new(
             focus    => $result->extract(),
-            children => $result->children(),
+            children => [$result],
             position => $result->position(),
             rule     => $rule_name,
         );
