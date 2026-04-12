@@ -43,21 +43,9 @@ class Chalk::Bootstrap::Semiring::Boolean {
         return $ZERO;
     }
 
-    # on_scan: combine existing item value with one() for successful scan
-    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
-        return $self->multiply($value, $self->one());
-    }
-
     # on_complete: no-op for Boolean, return value unchanged
     method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
         return $value;
-    }
-
-    # should_scan: gate for scan operation, called after regex match succeeds
-    # Returns true to proceed with scan, false to skip it.
-    # Default: always return true (no filtering).
-    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
-        return true;
     }
 
     # Leo optimization is safe for Boolean: on_complete is identity,

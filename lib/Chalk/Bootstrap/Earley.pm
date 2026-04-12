@@ -458,10 +458,11 @@ class Chalk::Bootstrap::Earley {
                                     next unless defined $oh->[$rd];
                                     my $item_origin = $prev_pos - $rd;
                                     my $val = $oh->[$rd];
-                                    # Advance the item as if the closer was scanned
-                                    my $new_value = $semiring->on_scan(
-                                        $val, $core_index->rule_name_for($cid),
-                                        $core_index->alt_idx_for($cid), $prev_pos, '');
+                                    # Advance the item as if the closer was scanned (empty text)
+                                    my $vscan_ctx = $self->_make_scan_context(
+                                        '', $core_index->rule_name_for($cid),
+                                        $core_index->alt_idx_for($cid), {});
+                                    my $new_value = $semiring->multiply($val, $vscan_ctx);
                                     next if $semiring->is_zero($new_value);
                                     my $new_cid = $core_index->advance($cid);
                                     # Place at current position (zero-width insertion)
@@ -915,9 +916,10 @@ class Chalk::Bootstrap::Earley {
                         next unless defined $oh->[$rd];
                         my $item_origin = $n - $rd;
                         my $val = $oh->[$rd];
-                        my $new_value = $semiring->on_scan(
-                            $val, $core_index->rule_name_for($cid),
-                            $core_index->alt_idx_for($cid), $n, '');
+                        my $vscan_ctx = $self->_make_scan_context(
+                            '', $core_index->rule_name_for($cid),
+                            $core_index->alt_idx_for($cid), {});
+                        my $new_value = $semiring->multiply($val, $vscan_ctx);
                         next if $semiring->is_zero($new_value);
                         my $new_cid = $core_index->advance($cid);
                         # Place at $n (zero-width virtual token)
@@ -1183,22 +1185,25 @@ class Chalk::Bootstrap::Earley {
         # Capture matched text
         my $matched = substr($input, $pos, $end_pos - $pos);
 
-        # Pass predicted_at hashref from _run_parse to should_scan.
+        # Build an annotated scan Context carrying matched text and metadata.
         # predicted_at tracks which rules have been predicted at this position,
-        # which is exactly what should_scan needs for keyword rejection.
+        # which scan-aware semirings (TypeInference, Precedence) use for
+        # keyword rejection and operator validation.
         # Using the caller's hashref avoids iterating field hash keys (which
         # the XS codegen cannot handle).
         my $is_predicted = $predicted_at // {};
 
-        # Ask semiring if scan should proceed
         my $rule_name = $core_index->rule_name_for($core_id);
         my $alt_idx = $core_index->alt_idx_for($core_id);
-        return unless $semiring->should_scan($value, $rule_name, $alt_idx, $pos, $matched, $is_predicted);
 
-        # Use on_scan to combine existing value with scan
-        my $new_value = $semiring->on_scan($value, $rule_name, $alt_idx, $pos, $matched);
+        # Combine existing value with scan via multiply.
+        # The scan Context carries matched_text (focus), rule_name, alt_idx,
+        # and predicted (the predicted_at hashref) so semirings can inspect
+        # scan metadata without a separate should_scan/on_scan protocol.
+        my $scan_ctx = $self->_make_scan_context($matched, $rule_name, $alt_idx, $is_predicted);
+        my $new_value = $semiring->multiply($value, $scan_ctx);
 
-        # on_scan returns the combined result; check for zero (semiring rejected)
+        # multiply returns zero if scan is rejected (semiring filtering)
         return if $semiring->is_zero($new_value);
 
         # Advance dot
