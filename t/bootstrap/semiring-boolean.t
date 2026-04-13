@@ -142,6 +142,33 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     ok(!$sr->is_zero("false"), "string 'false' is not zero");
 }
 
+# Test 10b: Unified-context invariant — all ops return Context objects.
+# Boolean must obey `(Context, Context) -> Context` like every other semiring.
+{
+    use Chalk::Bootstrap::Context;
+    isa_ok($sr->zero(), 'Chalk::Bootstrap::Context', 'zero() returns a Context');
+    isa_ok($sr->one(),  'Chalk::Bootstrap::Context', 'one() returns a Context');
+
+    my $one  = $sr->one();
+    my $zero = $sr->zero();
+
+    isa_ok($sr->multiply($one,  $one),  'Chalk::Bootstrap::Context',
+        'multiply(one, one) returns a Context');
+    isa_ok($sr->multiply($one,  $zero), 'Chalk::Bootstrap::Context',
+        'multiply(one, zero) returns a Context');
+    isa_ok($sr->multiply($zero, $one),  'Chalk::Bootstrap::Context',
+        'multiply(zero, one) returns a Context');
+    isa_ok($sr->add($one, $zero), 'Chalk::Bootstrap::Context',
+        'add(one, zero) returns a Context');
+    isa_ok($sr->add($zero, $zero), 'Chalk::Bootstrap::Context',
+        'add(zero, zero) returns a Context');
+
+    # multiply preserves parse shape — operands appear as children.
+    my $product = $sr->multiply($one, $one);
+    is(scalar($product->children->@*), 2,
+        'multiply builds structural Context with both operands as children');
+}
+
 # Test 11: multiply with scan Context returns non-zero value (ignores terminal text)
 # Scan events arrive as multiply($value, $scan_ctx) in the unified protocol.
 {

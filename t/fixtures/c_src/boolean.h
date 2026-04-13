@@ -1,5 +1,9 @@
 /* ABOUTME: Function prototypes for Boolean semiring C implementation.
-   ABOUTME: Included by other .c files that call boolean functions directly. */
+   ABOUTME: Included by other .c files that call boolean functions directly.
+
+   STALE (post-Step-B of the unified-context refactor, 2026-04-12):
+   Signatures match the pre-Step-B Boolean API (bare SV return). Will be
+   regenerated in Step C to produce Context-returning functions. */
 #ifndef CHALK_BOOLEAN_H
 #define CHALK_BOOLEAN_H
 #include "chalk.h"
