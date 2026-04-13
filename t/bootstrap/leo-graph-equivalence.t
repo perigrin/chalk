@@ -11,6 +11,7 @@ use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::SemanticAction;
+use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Context;
 
 # --------------------------------------------------------------------
@@ -136,11 +137,12 @@ sub rule ($name, @alternatives) {
     return Chalk::Grammar::Rule->new(name => $name, expressions => [@alternatives]);
 }
 
-# Parse input with Leo on AND off using the same grammar + fresh SA semirings.
+# Parse input with Leo on AND off using the same grammar and a fresh
+# semiring built by $sr_factory (called twice — once per parser).
 # Returns the two Context results (from parse_value).
-sub parse_both ($grammar, $input) {
-    my $sr_on  = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $sr_off = Chalk::Bootstrap::Semiring::SemanticAction->new();
+sub parse_both ($grammar, $input, $sr_factory) {
+    my $sr_on  = $sr_factory->();
+    my $sr_off = $sr_factory->();
     my $p_on = Chalk::Bootstrap::Earley->new(
         grammar      => $grammar,
         semiring     => $sr_on,
@@ -152,6 +154,28 @@ sub parse_both ($grammar, $input) {
         leo_enabled  => 0,
     );
     return ($p_on->parse_value($input), $p_off->parse_value($input));
+}
+
+sub sa_factory { sub { Chalk::Bootstrap::Semiring::SemanticAction->new() } }
+sub bool_factory { sub { Chalk::Bootstrap::Semiring::Boolean->new() } }
+
+# Assert Leo-on and Leo-off produce graph-equivalent parses for the given
+# grammar + input + semiring. Reports first structural divergence on mismatch.
+sub assert_leo_equivalent ($grammar, $input, $sr_factory, $label) {
+    my ($on, $off) = parse_both($grammar, $input, $sr_factory);
+
+    ok(defined $on,  "$label: Leo-on  parse succeeded");
+    ok(defined $off, "$label: Leo-off parse succeeded");
+
+    # Skip zero check for raw Boolean values if the semiring happens to
+    # return non-Context values for empty parses. Real Boolean + SA both
+    # return Contexts with ->is_zero.
+    return unless defined $on && defined $off;
+
+    my $ha = canonical_hash($on);
+    my $hb = canonical_hash($off);
+    is($ha, $hb, "$label: canonical hashes equal")
+        or diag(first_divergence($on, $off) // '(hashes differ but no structural diff found)');
 }
 
 # --------------------------------------------------------------------
@@ -166,15 +190,8 @@ subtest 'Tier 1: linear grammar (Leo inert)' => sub {
     ];
 
     my $input = 'abc';
-    my ($on, $off) = parse_both($grammar, $input);
-
-    ok(defined $on,  "Leo-on:  parse succeeded ($input)");
-    ok(defined $off, "Leo-off: parse succeeded ($input)");
-
-    my $ha = canonical_hash($on);
-    my $hb = canonical_hash($off);
-    is($ha, $hb, "Tier 1 '$input': canonical hashes equal")
-        or diag(first_divergence($on, $off) // '(no structural diff found, yet hashes differ)');
+    assert_leo_equivalent($grammar, $input, bool_factory(), "Tier 1 Boolean '$input'");
+    assert_leo_equivalent($grammar, $input, sa_factory(),   "Tier 1 SA      '$input'");
 };
 
 # --------------------------------------------------------------------
@@ -194,15 +211,8 @@ subtest 'Tier 2: right-recursive Chain' => sub {
 
     for my $n (1, 2, 5, 10) {
         my $input = join ',', map { "x$_" } 1 .. $n;
-        my ($on, $off) = parse_both($grammar, $input);
-
-        ok(defined $on  && !$on->is_zero,  "Leo-on:  parse succeeded (n=$n)");
-        ok(defined $off && !$off->is_zero, "Leo-off: parse succeeded (n=$n)");
-
-        my $ha = canonical_hash($on);
-        my $hb = canonical_hash($off);
-        is($ha, $hb, "Tier 2 n=$n: canonical hashes equal")
-            or diag(first_divergence($on, $off) // '(hashes differ but no structural diff found)');
+        assert_leo_equivalent($grammar, $input, bool_factory(), "Tier 2 Boolean n=$n");
+        assert_leo_equivalent($grammar, $input, sa_factory(),   "Tier 2 SA      n=$n");
     }
 };
 
@@ -222,15 +232,8 @@ subtest 'Tier 3: left-recursive List' => sub {
 
     for my $n (1, 2, 5, 10) {
         my $input = join ',', map { "y$_" } 1 .. $n;
-        my ($on, $off) = parse_both($grammar, $input);
-
-        ok(defined $on  && !$on->is_zero,  "Leo-on:  parse succeeded (n=$n)");
-        ok(defined $off && !$off->is_zero, "Leo-off: parse succeeded (n=$n)");
-
-        my $ha = canonical_hash($on);
-        my $hb = canonical_hash($off);
-        is($ha, $hb, "Tier 3 n=$n: canonical hashes equal")
-            or diag(first_divergence($on, $off) // '(hashes differ but no structural diff found)');
+        assert_leo_equivalent($grammar, $input, bool_factory(), "Tier 3 Boolean n=$n");
+        assert_leo_equivalent($grammar, $input, sa_factory(),   "Tier 3 SA      n=$n");
     }
 };
 
