@@ -7,6 +7,7 @@ use experimental 'class';
 use Chalk::Bootstrap::Terminal;
 use Chalk::Bootstrap::CoreItemIndex;
 use Chalk::Bootstrap::LR0DFA;
+use Chalk::Bootstrap::Context;
 
 class Chalk::Bootstrap::Earley {
     # Ruby Slippers: the set of terminal patterns that are closing delimiters
