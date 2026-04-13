@@ -1,5 +1,14 @@
 /* ABOUTME: C implementation of Boolean recognition semiring.
-   ABOUTME: Provides zero, one, multiply, add with reference-based zero detection. */
+   ABOUTME: Provides zero, one, multiply, add with reference-based zero detection.
+
+   STALE (post-Step-B of the unified-context refactor, 2026-04-12):
+   This file still implements the pre-Step-B Boolean API where multiply/add
+   return bare PL_sv_yes / an AV-ref ZERO sentinel. The Perl-side Boolean
+   semiring now returns Chalk::Bootstrap::Context objects so every semiring
+   obeys the `(Context, Context) -> Context` invariant. These fixtures will
+   be regenerated from lib/Chalk/Bootstrap/BNF/Target/C.pm in Step C and
+   should not be hand-edited to match the new API — the codegen path is
+   the source of truth. */
 #include "chalk.h"
 #include "boolean.h"
 

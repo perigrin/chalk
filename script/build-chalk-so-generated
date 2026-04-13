@@ -15,7 +15,6 @@ GetOptions('build-dir=s' => \$build_dir) or die "Usage: $0 [--build-dir DIR]\n";
 
 # Resolve paths relative to the script location (repo root).
 my $repo_root = abs_path(dirname(__FILE__) . '/..');
-my $c_src     = "$repo_root/c_src";
 
 # Add lib paths before loading project modules.
 use lib 'lib';
@@ -341,10 +340,15 @@ print "Phase 4: Writing files to build directory...\n";
 remove_tree($build_dir) if -d $build_dir;
 make_path("$build_dir/obj");
 
-# Copy chalk.h (shared header required by all generated .c files)
-copy("$c_src/chalk.h", "$build_dir/chalk.h")
-    or die "Cannot copy chalk.h: $!\n";
-print "  chalk.h copied\n";
+# Emit chalk.h from Target::C (shared header required by all generated .c files)
+{
+    my $target_c = Chalk::Bootstrap::BNF::Target::C->new();
+    open my $hfh, '>', "$build_dir/chalk.h"
+        or die "Cannot write $build_dir/chalk.h: $!\n";
+    print $hfh $target_c->generate_runtime_header();
+    close $hfh;
+    print "  chalk.h emitted\n";
+}
 
 # Write generated .c, .h, and .xs files
 my @xs_files;

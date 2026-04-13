@@ -19,15 +19,25 @@ my $ccflags = $Config{ccflags};
 my $archlib = $Config{archlib};
 my $so_ext  = $Config{dlext};
 
-# Locate c_src relative to this test file
+# Locate hand-crafted C fixtures relative to this test file
 my $c_src = do {
     use File::Basename qw(dirname);
     use Cwd qw(abs_path);
-    abs_path(dirname(__FILE__) . '/../../c_src');
+    abs_path(dirname(__FILE__) . '/../fixtures/c_src');
 };
 
+# Emit chalk.h from Target::C (the shared runtime header it generates for all C output)
+use lib 'lib';
+require Chalk::Bootstrap::BNF::Target::C;
+{
+    my $target_c = Chalk::Bootstrap::BNF::Target::C->new();
+    open my $fh, '>', "$tmpdir/chalk.h" or die "write chalk.h: $!";
+    print $fh $target_c->generate_runtime_header();
+    close $fh;
+}
+
 # Compile boolean.c to object
-my $cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$c_src $c_src/boolean.c -o $tmpdir/boolean.o 2>&1";
+my $cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$c_src -I$tmpdir $c_src/boolean.c -o $tmpdir/boolean.o 2>&1";
 my $out = `$cmd`;
 is($? >> 8, 0, 'boolean.c compiles') or BAIL_OUT("compile failed: $out");
 

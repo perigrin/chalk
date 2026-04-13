@@ -1,5 +1,11 @@
 /* ABOUTME: Thin XS wrapper for Boolean semiring C implementation.
-   ABOUTME: XSUBs delegate to boolean_*() functions in chalk.so. */
+   ABOUTME: XSUBs delegate to boolean_*() functions in chalk.so.
+
+   STALE (post-Step-B of the unified-context refactor, 2026-04-12):
+   This wrapper still exposes the pre-Step-B Boolean API. The Perl-side
+   Boolean semiring now returns Chalk::Bootstrap::Context objects.
+   Fixtures will be regenerated from lib/Chalk/Bootstrap/BNF/Target/C.pm
+   in Step C. Do not hand-edit; the codegen path is the source of truth. */
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"

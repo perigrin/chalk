@@ -784,10 +784,14 @@ SKIP: {
     print $hfh $h_text;
     close $hfh;
 
-    # Copy chalk.h into tempdir so the include resolves
-    my $chalk_h_src = 'c_src/chalk.h';
-    copy($chalk_h_src, "$tmpdir/chalk.h")
-        or die "Cannot copy chalk.h: $!";
+    # Emit chalk.h into tempdir so the include resolves (same source as generated code)
+    {
+        my $target_c = Chalk::Bootstrap::BNF::Target::C->new();
+        open my $fh, '>', "$tmpdir/chalk.h"
+            or die "Cannot write $tmpdir/chalk.h: $!";
+        print $fh $target_c->generate_runtime_header();
+        close $fh;
+    }
 
     # Also copy EXTERN.h and XSUB.h stubs if needed, but the perl archlib path
     # is on the include line so Perl's headers resolve from there.

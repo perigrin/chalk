@@ -14,6 +14,7 @@ use lib 't/bootstrap/lib';
 
 use TestXSHelpers qw(setup_xs_grammar parse_file_ir);
 use Chalk::Bootstrap::Perl::Target::C;
+use Chalk::Bootstrap::BNF::Target::C;
 
 my $PERL      = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $repo_root = abs_path(dirname(__FILE__) . '/../..');
@@ -149,9 +150,14 @@ SKIP: {
     my $ccflags = $Config{ccflags};
     my $archlib = $Config{archlib};
 
-    # Write chalk.h
-    copy("$repo_root/c_src/chalk.h", "$tmpdir/chalk.h")
-        or die "Cannot copy chalk.h: $!";
+    # Emit chalk.h from Target::C (same header that's bundled with generated code)
+    {
+        my $target_c = Chalk::Bootstrap::BNF::Target::C->new();
+        open my $fh, '>', "$tmpdir/chalk.h"
+            or die "Cannot write $tmpdir/chalk.h: $!";
+        print $fh $target_c->generate_runtime_header();
+        close $fh;
+    }
 
     # Write boolean files (from plain result — no cross-class refs to worry about)
     for my $pair (
