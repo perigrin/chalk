@@ -265,7 +265,6 @@ my \$a1 = \$b->add(\$zero, \$zero);
 print \$b->is_zero(\$a1)  ? 'ADD_ZERO_ZERO_OK\\n'  : 'ADD_ZERO_ZERO_FAIL\\n';
 my \$a2 = \$b->add(\$zero, \$one);
 print !\$b->is_zero(\$a2) ? 'ADD_ZERO_ONE_OK\\n'   : 'ADD_ZERO_ONE_FAIL\\n';
-print \$b->supports_leo() ? 'SUPPORTS_LEO_OK\\n' : 'SUPPORTS_LEO_FAIL\\n';
 print 'BEHAVIORAL_OK\\n';
 END_SCRIPT
     close $scfh;
@@ -284,7 +283,6 @@ END_SCRIPT
     like($sub_out, qr/MULT_ONE_ONE_OK/,   'Phase 9: multiply(one, one) = one');
     like($sub_out, qr/ADD_ZERO_ZERO_OK/,  'Phase 9: add(zero, zero) = zero');
     like($sub_out, qr/ADD_ZERO_ONE_OK/,   'Phase 9: add(zero, one) = one');
-    like($sub_out, qr/SUPPORTS_LEO_OK/,   'Phase 9: supports_leo true');
     like($sub_out, qr/BEHAVIORAL_OK/,     'Phase 9: all behavioral tests pass');
 }
 

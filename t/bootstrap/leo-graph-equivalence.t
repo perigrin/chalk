@@ -12,6 +12,7 @@ use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Semiring::Boolean;
+use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Context;
 
 # --------------------------------------------------------------------
@@ -159,6 +160,20 @@ sub parse_both ($grammar, $input, $sr_factory) {
 sub sa_factory { sub { Chalk::Bootstrap::Semiring::SemanticAction->new() } }
 sub bool_factory { sub { Chalk::Bootstrap::Semiring::Boolean->new() } }
 
+# FilterComposite of Boolean + SemanticAction — minimal composite that
+# doesn't require grammar-specific Precedence/TI/Structural setup.
+# Each factory call returns a fresh FC with fresh inner semirings.
+sub fc_factory {
+    sub {
+        return Chalk::Bootstrap::Semiring::FilterComposite->new(
+            semirings => [
+                Chalk::Bootstrap::Semiring::Boolean->new(),
+                Chalk::Bootstrap::Semiring::SemanticAction->new(),
+            ],
+        );
+    };
+}
+
 # Assert Leo-on and Leo-off produce graph-equivalent parses for the given
 # grammar + input + semiring. Reports first structural divergence on mismatch.
 sub assert_leo_equivalent ($grammar, $input, $sr_factory, $label) {
@@ -234,6 +249,56 @@ subtest 'Tier 3: left-recursive List' => sub {
         my $input = join ',', map { "y$_" } 1 .. $n;
         assert_leo_equivalent($grammar, $input, bool_factory(), "Tier 3 Boolean n=$n");
         assert_leo_equivalent($grammar, $input, sa_factory(),   "Tier 3 SA      n=$n");
+    }
+};
+
+# --------------------------------------------------------------------
+# Tier 4: FilterComposite (Boolean + SemanticAction) on all 3 patterns
+# Verifies Leo is structurally correct when dispatch goes through a
+# composite semiring. Uses the same three grammars as Tiers 1-3.
+# --------------------------------------------------------------------
+subtest 'Tier 4: FilterComposite semiring' => sub {
+    # 4a: linear (Leo inert)
+    {
+        my $grammar = [
+            rule('Start', [reference('A'), reference('B'), reference('C')]),
+            rule('A', [terminal('a')]),
+            rule('B', [terminal('b')]),
+            rule('C', [terminal('c')]),
+        ];
+        assert_leo_equivalent($grammar, 'abc', fc_factory(), "Tier 4 FC linear 'abc'");
+    }
+
+    # 4b: right-recursive Chain
+    {
+        my $grammar = [
+            rule('Chain',
+                [reference('Item')],
+                [reference('Item'), reference('Sep'), reference('Chain')],
+            ),
+            rule('Item', [terminal('\w+')]),
+            rule('Sep',  [terminal(',')]),
+        ];
+        for my $n (1, 2, 5, 10) {
+            my $input = join ',', map { "x$_" } 1 .. $n;
+            assert_leo_equivalent($grammar, $input, fc_factory(), "Tier 4 FC right-rec n=$n");
+        }
+    }
+
+    # 4c: left-recursive List
+    {
+        my $grammar = [
+            rule('List',
+                [reference('Item')],
+                [reference('List'), reference('Sep'), reference('Item')],
+            ),
+            rule('Item', [terminal('\w+')]),
+            rule('Sep',  [terminal(',')]),
+        ];
+        for my $n (1, 2, 5, 10) {
+            my $input = join ',', map { "y$_" } 1 .. $n;
+            assert_leo_equivalent($grammar, $input, fc_factory(), "Tier 4 FC left-rec n=$n");
+        }
     }
 };
 

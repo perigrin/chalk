@@ -58,14 +58,6 @@ add(self, left, right)
   OUTPUT:
     RETVAL
 
-SV *
-supports_leo(self)
-    SV *self
-  CODE:
-    RETVAL = boolean_supports_leo(aTHX_ self);
-  OUTPUT:
-    RETVAL
-
 BOOT:
 {
     HV *stash = gv_stashpv("Chalk::Bootstrap::Semiring::Boolean", GV_ADD);

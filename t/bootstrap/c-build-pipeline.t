@@ -183,7 +183,6 @@ print \$b->is_zero(\$r1) ? "MULTIPLY_CORRECT\\n"   : "MULTIPLY_WRONG\\n";
 my \$r2 = \$b->add(\$zero, \$one);
 print !\$b->is_zero(\$r2) ? "ADD_CORRECT\\n"       : "ADD_WRONG\\n";
 
-print \$b->supports_leo() ? "SUPPORTS_LEO_OK\\n" : "SUPPORTS_LEO_FAIL\\n";
 print "ALL_METHODS_OK\\n";
 END_SCRIPT
 close $mfh;
