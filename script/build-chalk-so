@@ -7,15 +7,28 @@ use Config;
 use File::Path qw(make_path);
 use File::Basename qw(dirname basename);
 use Getopt::Long qw(GetOptions);
+use Cwd qw(abs_path);
 
 # Default build directory; can be overridden via --build-dir
 my $build_dir = '.build/chalk-so';
 GetOptions('build-dir=s' => \$build_dir) or die "Usage: $0 [--build-dir DIR]\n";
 
-my $c_src     = do {
-    use Cwd qw(abs_path);
-    abs_path(dirname(__FILE__) . '/../c_src');
-};
+# Hand-crafted reference C sources for the bootstrap build live in
+# t/fixtures/c_src/. The shared runtime header chalk.h is emitted by
+# Chalk::Bootstrap::BNF::Target::C::generate_runtime_header() into the
+# build directory at Phase 0.
+my $repo_root = abs_path(dirname(__FILE__) . '/..');
+my $c_src     = "$repo_root/t/fixtures/c_src";
+unshift @INC, "$repo_root/lib";
+require Chalk::Bootstrap::BNF::Target::C;
+
+# Phase 0: emit chalk.h into the build directory (generated from Target::C).
+make_path("$build_dir");
+my $target_c = Chalk::Bootstrap::BNF::Target::C->new();
+open my $fh, '>', "$build_dir/chalk.h" or die "write chalk.h: $!";
+print $fh $target_c->generate_runtime_header();
+close $fh;
+print "Phase 0: emitted chalk.h\n";
 
 my $cc      = $Config{cc};
 my $ccflags = $Config{ccflags};
@@ -35,7 +48,7 @@ my @o_files;
 for my $c_file (@c_files) {
     my $base   = basename($c_file, '.c');
     my $o_file = "$build_dir/obj/$base.o";
-    my $cmd    = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$c_src $c_file -o $o_file 2>&1";
+    my $cmd    = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$c_src -I$build_dir $c_file -o $o_file 2>&1";
     my $out    = `$cmd`;
     if ($? >> 8 != 0) {
         die "Compile failed for $c_file:\n$out\nCommand: $cmd\n";
@@ -82,7 +95,7 @@ for my $xs_file (@xs_files) {
 
     # .c -> .o
     my $xs_o = "$build_dir/obj/${base}_xs.o";
-    $cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$c_src $xs_c -o $xs_o 2>&1";
+    $cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$c_src -I$build_dir $xs_c -o $xs_o 2>&1";
     $out = `$cmd`;
     die "Compile failed for $xs_c:\n$out\n" if $? >> 8 != 0;
 

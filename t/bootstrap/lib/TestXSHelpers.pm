@@ -135,12 +135,16 @@ sub build_and_load($ir, $sa, $sem_ctx, $module_name, %opts) {
 
     # Write files to temp directory
     my $tmpdir = tempdir(CLEANUP => 1);
-    my $repo_root = Cwd::abs_path(dirname(__FILE__) . '/../../..');
-    my $c_src = "$repo_root/c_src";
 
-    # Copy chalk.h
-    File::Copy::copy("$c_src/chalk.h", "$tmpdir/chalk.h")
-        or return (undef, "Cannot copy chalk.h: $!");
+    # Emit chalk.h via Target::C (same source as production builds)
+    require Chalk::Bootstrap::BNF::Target::C;
+    {
+        my $target_c = Chalk::Bootstrap::BNF::Target::C->new();
+        open my $fh, '>', "$tmpdir/chalk.h"
+            or return (undef, "Cannot write $tmpdir/chalk.h: $!");
+        print $fh $target_c->generate_runtime_header();
+        close $fh;
+    }
 
     # Write generated files
     _write_file("$tmpdir/${slug}.c", $c_text);
