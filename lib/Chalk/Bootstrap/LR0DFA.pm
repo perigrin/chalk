@@ -299,10 +299,10 @@ class Chalk::Bootstrap::LR0DFA {
 
                     # Is this symbol nullable (can be skipped)?
                     if ($self->_is_nullable_symbol($sym)) {
-                        # Track all nullable skips for on_skip_optional placeholders.
-                        # Both ?-quantified and epsilon-nullable nonterminals need
-                        # placeholder Context entries so SemanticAction child arrays
-                        # maintain correct positional alignment.
+                        # Track all nullable skips so Earley can apply
+                        # multiply(value, one()) for each skipped symbol.
+                        # Both ?-quantified and epsilon-nullable nonterminals
+                        # are tracked to maintain correct positional alignment.
                         my @skip_copy = @skipped;
                         push @skip_copy, $ref_name;
                         # Add dot-advanced core item

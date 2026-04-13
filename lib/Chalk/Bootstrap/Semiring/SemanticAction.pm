@@ -17,15 +17,15 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     my %_ctx_cache;
 
     # Pending CFG state update from action methods. Action methods call
-    # update_cfg() to request a state change; on_complete applies it to the
-    # result context after the action returns.
+    # update_cfg() to request a state change; multiply with a complete-annotated
+    # Context applies it to the result context after the action returns.
     my $_pending_cfg_update;
 
-    # The active SemanticAction instance during on_complete. Action methods
+    # The active SemanticAction instance during a complete event. Action methods
     # access this via current_instance() to call cfg_state/update_cfg.
     my $_current_instance;
 
-    # TypeInference Context for the current on_complete. Set by
+    # TypeInference Context for the current complete event. Set by
     # FilterComposite before SA runs, so action methods can read
     # type annotations (e.g., return_type) from TI.
     my $_type_context;
@@ -83,20 +83,6 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return $copy;
     }
 
-    # Return a hash-consed scan leaf Context for the given text.
-    # Position-independent: two calls with the same text return the same object
-    # regardless of position, since position is bookkeeping not semantics.
-    # The tree structure preserves source ordering; leaf identity does not.
-    my sub _scan_ctx($text) {
-        my $key = defined($text) ? "scan:t:$text" : "scan:u";
-        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
-            focus    => $text,
-            children => [],
-            position => 0,
-            rule     => undef,
-        ));
-    }
-
     # Return a hash-consed multiply Context for the given left+right children.
     # Two calls with the same children (same refaddrs) return the same object.
     my sub _mul_ctx($left, $right) {
@@ -142,25 +128,25 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     }
 
     # Request a CFG state update from within an action method.
-    # Called by Actions.pm during extend(); on_complete applies the update
-    # to the result context after the action returns.
+    # Called by Actions.pm during extend(); multiply with a complete-annotated
+    # Context applies the update to the result context after the action returns.
     method update_cfg($state) {
         $_pending_cfg_update = $state;
         return;
     }
 
     # Class method: return the SemanticAction instance currently executing
-    # an on_complete action. Allows action methods in Actions.pm to access
+    # a complete event. Allows action methods in Actions.pm to access
     # cfg_state/update_cfg without needing a reference to the semiring.
     sub current_instance { return $_current_instance }
 
-    # Set the TypeInference Context for the current on_complete.
+    # Set the TypeInference Context for the current complete event.
     # Called by FilterComposite after TI (index 2) completes, before SA runs.
     method set_type_context($ctx) {
         $_type_context = $ctx;
     }
 
-    # Class method: return the TypeInference Context for the current on_complete.
+    # Class method: return the TypeInference Context for the current complete event.
     # Called by action methods (e.g. MethodDefinition in Actions.pm) to read
     # type annotations computed by TypeInference.
     sub current_type_context { return $_type_context }
@@ -181,10 +167,20 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # Multiply combines two contexts in sequence.
     # Creates a parent context with both as children, hash-consed by child identity.
     # Propagates cfg_state from children: prefer right (later in sequence), fall back to left.
+    # When $right is a complete-annotated Context, applies rule-completion (semantic action)
+    # logic: looks up action by rule_name, extends the value via the action, propagates cfg.
     method multiply($left, $right) {
         # Propagate zero
         return undef if !defined $left;
         return undef if !defined $right;
+
+        # Complete event: right Context has annotations->{complete} = true.
+        # Apply semantic action for the completed rule.
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{complete}) {
+            my $rule_name = $right->annotations()->{rule_name};
+            return $self->_complete_sa($left, $rule_name);
+        }
 
         my $result = _mul_ctx($left, $right);
 
@@ -227,18 +223,12 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return $result;
     }
 
-    # on_scan: create a hash-consed Context for the matched text and multiply
-    # with existing value
-    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
-        my $scan_ctx = _scan_ctx($matched_text);
-        return $self->multiply($value, $scan_ctx);
-    }
-
-    # on_complete: apply semantic action for a completed rule.
+    # _complete_sa: apply semantic action for a completed rule.
     # Looks up action by rule_name via can(), applies via extend, sets rule field.
     # Not hash-consed: semantic actions may have side effects and the result
     # focus depends on the actions object, so caching by input refaddr is unsafe.
-    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
+    # Called from multiply() when the right argument is a complete-annotated Context.
+    method _complete_sa($value, $rule_name) {
         return undef if !defined $value;
 
         my $has_method = false;
@@ -279,14 +269,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             $result_ctx->annotations()->{cfg} = $inherited if defined $inherited;
         }
 
-        # Signal epoch boundary for statement-level completions.
-        # StatementItem wraps individual statements — its completion means
-        # the statement's internal parse positions can be swept.
-        if (defined $on_epoch_commit && $rule_name eq 'StatementItem') {
-            $on_epoch_commit->($origin, $pos);
-        }
-
-        # Clear current_instance and type_context after on_complete to prevent stale access
+        # Clear current_instance and type_context after action to prevent stale access
         $_current_instance = undef;
         $_type_context = undef;
 
@@ -347,31 +330,6 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             $winner->annotations()->{cfg} = _copy_cfg_with_scope($base, $merged_scope);
         }
         return;
-    }
-
-    # on_skip_optional: create a placeholder Context for a skipped X? symbol.
-    # Preserves positional child indexing for actions that access children by position.
-    method on_skip_optional($value, $rule_name, $alt_idx, $pos, $symbol_name) {
-        return undef if !defined $value;
-        # Create a placeholder Context representing "X was absent"
-        my $placeholder = Chalk::Bootstrap::Context->new(
-            focus    => undef,
-            children => [],
-            position => $pos,
-            rule     => "${symbol_name}_opt",
-        );
-        # Propagate cfg_state from parent to placeholder
-        my $parent_state = $self->inherited_cfg_state($value);
-        # Store cfg state in the Context annotation (canonical location)
-        $placeholder->annotations()->{cfg} = $parent_state if defined $parent_state;
-        return $self->multiply($value, $placeholder);
-    }
-
-    # should_scan: gate for scan operation, called after regex match succeeds
-    # Returns true to proceed with scan, false to skip it.
-    # Default: always return true (no filtering).
-    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
-        return true;
     }
 
     # slot_name: SemanticAction owns the focus field + cfg annotation, not a named slot.

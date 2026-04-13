@@ -119,43 +119,6 @@ class Chalk::Bootstrap::Earley {
     # the dot is immediately before that nonterminal.
     method waiting_core_ids() { return \%_waiting_core_ids; }
 
-    # Reify a scan event as an annotated Context. The focus is the matched
-    # text; annotations carry rule_name, alt_idx, matched_text, and the
-    # predicted hashref so semirings can dispatch on them during multiply.
-    # Each call returns a fresh Context object — unique refaddr preserves
-    # hash-consing correctness even when two scans share the same value.
-    # The predicted hashref is snapshotted because the parser mutates its
-    # live %predicted_at during the position loop.
-    method _make_scan_context($matched_text, $rule_name, $alt_idx, $predicted_at) {
-        return Chalk::Bootstrap::Context->new(
-            focus       => $matched_text,
-            rule        => $rule_name,
-            annotations => {
-                rule_name    => $rule_name,
-                alt_idx      => $alt_idx,
-                matched_text => $matched_text,
-                predicted    => { $predicted_at->%* },
-            },
-        );
-    }
-
-    # Reify a completion event as an annotated Context. The focus is the
-    # completed value (may be an IR node or any semiring value); annotations
-    # carry rule_name, alt_idx, pos, and origin so semirings can dispatch
-    # on the completed symbol during multiply.
-    method _make_complete_context($value, $rule_name, $alt_idx, $pos, $origin) {
-        return Chalk::Bootstrap::Context->new(
-            focus       => $value,
-            rule        => $rule_name,
-            annotations => {
-                rule_name => $rule_name,
-                alt_idx   => $alt_idx,
-                pos       => $pos,
-                origin    => $origin,
-            },
-        );
-    }
-
     # GC statistics accessor
     method gc_stats() {
         return \%_gc_stats;
@@ -496,10 +459,11 @@ class Chalk::Bootstrap::Earley {
                                     next unless defined $oh->[$rd];
                                     my $item_origin = $prev_pos - $rd;
                                     my $val = $oh->[$rd];
-                                    # Advance the item as if the closer was scanned
-                                    my $new_value = $semiring->on_scan(
-                                        $val, $core_index->rule_name_for($cid),
-                                        $core_index->alt_idx_for($cid), $prev_pos, '');
+                                    # Advance the item as if the closer was scanned (empty text)
+                                    my $vscan_ctx = $self->_make_scan_context(
+                                        '', $core_index->rule_name_for($cid),
+                                        $core_index->alt_idx_for($cid), {});
+                                    my $new_value = $semiring->multiply($val, $vscan_ctx);
                                     next if $semiring->is_zero($new_value);
                                     my $new_cid = $core_index->advance($cid);
                                     # Place at current position (zero-width insertion)
@@ -609,21 +573,30 @@ class Chalk::Bootstrap::Earley {
                 my $value = $chart[$pos][$core_id][($pos - $origin)];
 
                 if ($ci_completions->[$core_id]) {
-                    # Apply on_complete for completed rule before propagating
+                    # Apply completion reification via multiply: build an annotated
+                    # Context carrying rule metadata, then multiply the accumulated
+                    # value by it. Each semiring detects annotations->{complete}=true
+                    # in its multiply and applies its rule-completion logic.
                     my $rule_name = $ci_rule_names->[$core_id];
                     my $alt_idx = $ci_alt_idxs->[$core_id];
-                    my $completed_value = $semiring->on_complete(
-                        $value, $rule_name,
-                        $alt_idx, $pos, $origin, $on_epoch_commit
+                    my $complete_ctx = $self->_make_complete_context(
+                        $value, $rule_name, $alt_idx, $pos, $origin
                     );
-                    # Update the chart entry with the action-applied value
+                    my $completed_value = $semiring->multiply($value, $complete_ctx);
+                    # Update the chart entry with the reification-applied value
                     $chart[$pos][$core_id][($pos - $origin)] = $completed_value;
                     # Skip propagation of zero-valued completions. A zero
-                    # from on_complete (e.g. TypeInference rejecting a
+                    # from multiply (e.g. TypeInference rejecting a
                     # keyword-as-Identifier) must not poison parent items
                     # via multiply — the valid parse path will supply
                     # the correct value independently.
                     next if !defined($completed_value) || $semiring->is_zero($completed_value);
+                    # Epoch boundary: StatementItem completion signals parse-position GC.
+                    # Fired here (after reification) rather than inside SA.multiply to
+                    # keep the epoch mechanism decoupled from semiring internals.
+                    if (defined $on_epoch_commit && $rule_name eq 'StatementItem') {
+                        $on_epoch_commit->($origin, $pos);
+                    }
                     # Index this completed item for _advance_from_completed lookups.
                     # Only non-zero completions are indexed — zero-valued entries
                     # would cause wasted work in _advance_from_completed.
@@ -645,11 +618,7 @@ class Chalk::Bootstrap::Earley {
                         # items (dot=0 advancement); this handles mid-rule
                         # optionals where the dot reaches B? during parsing.
                         if ($symbol->is_quantified() && $symbol->quantifier() eq '?') {
-                            my $skip_value = $semiring->can('on_skip_optional')
-                                ? $semiring->on_skip_optional(
-                                    $value, $rule_name,
-                                    $alt_idx, $pos, $w_rule)
-                                : $semiring->multiply($value, $semiring->one());
+                            my $skip_value = $semiring->multiply($value, $semiring->one());
                             my $skip_is_zero = defined $skip_value ? $semiring->is_zero($skip_value) : true;
                             if (defined $skip_value && !$skip_is_zero) {
                                 my $skip_core = $core_index->advance($core_id);
@@ -953,9 +922,10 @@ class Chalk::Bootstrap::Earley {
                         next unless defined $oh->[$rd];
                         my $item_origin = $n - $rd;
                         my $val = $oh->[$rd];
-                        my $new_value = $semiring->on_scan(
-                            $val, $core_index->rule_name_for($cid),
-                            $core_index->alt_idx_for($cid), $n, '');
+                        my $vscan_ctx = $self->_make_scan_context(
+                            '', $core_index->rule_name_for($cid),
+                            $core_index->alt_idx_for($cid), {});
+                        my $new_value = $semiring->multiply($val, $vscan_ctx);
                         next if $semiring->is_zero($new_value);
                         my $new_cid = $core_index->advance($cid);
                         # Place at $n (zero-width virtual token)
@@ -1152,8 +1122,9 @@ class Chalk::Bootstrap::Earley {
     # The DFA provides [$core_id, $skip_symbols] pairs where $skip_symbols
     # lists nullable symbol names (both ?-quantified and epsilon-nullable
     # nonterminals) skipped to reach that dot position
-    # (Aycock nullable optimization). For dot>0 items, on_skip_optional is
-    # called to create SemanticAction placeholders for each skipped symbol.
+    # (Aycock nullable optimization). For dot>0 items with skipped nullable
+    # symbols, absent optionals produce multiply(value, one()) which creates
+    # an unfocused Context node for each skipped symbol.
     # Tracks which rules have been predicted at each position to avoid
     # re-iterating the prediction set on redundant calls.
     method _predict($rule_name, $pos, $chart, $agenda, $predicted_at = undef) {
@@ -1173,20 +1144,13 @@ class Chalk::Bootstrap::Earley {
                 my $info = $core_index->item_for($core_id);
 
                 # Build initial value. For dot>0 items with skipped nullable symbols,
-                # call on_skip_optional for each skipped symbol to create
-                # SemanticAction placeholder contexts.
+                # absent optionals produce multiply(value, one()) which creates
+                # an unfocused Context node.
                 my $value = $semiring->one();
                 if ($skip_symbols && $skip_symbols->@*) {
                     for my $sym_name ($skip_symbols->@*) {
-                        if ($semiring->can('on_skip_optional')) {
-                            $value = $semiring->on_skip_optional(
-                                $value, $info->{rule_name},
-                                $info->{alt_idx}, $pos, $sym_name
-                            );
-                            last if !defined $value || $semiring->is_zero($value);
-                        } else {
-                            $value = $semiring->multiply($value, $semiring->one());
-                        }
+                        $value = $semiring->multiply($value, $semiring->one());
+                        last if !defined $value || $semiring->is_zero($value);
                     }
                     next if !defined $value || $semiring->is_zero($value);
                 }
@@ -1221,22 +1185,25 @@ class Chalk::Bootstrap::Earley {
         # Capture matched text
         my $matched = substr($input, $pos, $end_pos - $pos);
 
-        # Pass predicted_at hashref from _run_parse to should_scan.
+        # Build an annotated scan Context carrying matched text and metadata.
         # predicted_at tracks which rules have been predicted at this position,
-        # which is exactly what should_scan needs for keyword rejection.
+        # which scan-aware semirings (TypeInference, Precedence) use for
+        # keyword rejection and operator validation.
         # Using the caller's hashref avoids iterating field hash keys (which
         # the XS codegen cannot handle).
         my $is_predicted = $predicted_at // {};
 
-        # Ask semiring if scan should proceed
         my $rule_name = $core_index->rule_name_for($core_id);
         my $alt_idx = $core_index->alt_idx_for($core_id);
-        return unless $semiring->should_scan($value, $rule_name, $alt_idx, $pos, $matched, $is_predicted);
 
-        # Use on_scan to combine existing value with scan
-        my $new_value = $semiring->on_scan($value, $rule_name, $alt_idx, $pos, $matched);
+        # Combine existing value with scan via multiply.
+        # The scan Context carries matched_text (focus), rule_name, alt_idx,
+        # and predicted (the predicted_at hashref) so semirings can inspect
+        # scan metadata inline during multiply.
+        my $scan_ctx = $self->_make_scan_context($matched, $rule_name, $alt_idx, $is_predicted);
+        my $new_value = $semiring->multiply($value, $scan_ctx);
 
-        # on_scan returns the combined result; check for zero (semiring rejected)
+        # multiply returns zero if scan is rejected (semiring filtering)
         return if $semiring->is_zero($new_value);
 
         # Advance dot
@@ -1282,9 +1249,9 @@ class Chalk::Bootstrap::Earley {
         # Leo items are keyed by (rule_name, origin) where origin is where the
         # waiting items live. When a completion has this origin, the Leo item
         # shortcuts the entire chain to the top.
-        # Leo is only used when the semiring supports it (on_complete must be
-        # trivial / identity for correctness — non-trivial on_complete would
-        # be skipped for intermediate chain steps).
+        # Leo is only used when the semiring supports it (supports_leo() must
+        # return true, indicating that multiply is identity for completions —
+        # non-trivial completion logic would be skipped for intermediate chain steps).
         my $leo_resolved_core_id;
         my $leo_resolved_origin;
         if ($_leo_enabled
@@ -1442,6 +1409,44 @@ class Chalk::Bootstrap::Earley {
                 };
             }
         }
+    }
+
+    # Create an annotated Context for a scan event.
+    # The focus is the matched text; annotations record the scan event metadata
+    # so semirings can inspect it during multiply-based reification.
+    # position defaults to 0; the caller is responsible for setting it
+    # via a subsequent Context construction if a specific position is needed.
+    method _make_scan_context($matched_text, $rule_name, $alt_idx, $predicted_at) {
+        use Chalk::Bootstrap::Context;
+        return Chalk::Bootstrap::Context->new(
+            focus       => $matched_text,
+            position    => 0,
+            annotations => {
+                scan      => true,
+                rule_name => $rule_name,
+                alt_idx   => $alt_idx,
+                predicted => $predicted_at,
+            },
+        );
+    }
+
+    # Create an annotated Context for a completion event.
+    # focus is undef because the completed value is wrapped as a child;
+    # annotations record the complete event metadata for semiring inspection.
+    method _make_complete_context($value, $rule_name, $alt_idx, $pos, $origin) {
+        use Chalk::Bootstrap::Context;
+        return Chalk::Bootstrap::Context->new(
+            focus       => undef,
+            children    => [$value],
+            position    => $pos,
+            annotations => {
+                complete  => true,
+                rule_name => $rule_name,
+                alt_idx   => $alt_idx,
+                pos       => $pos,
+                origin    => $origin,
+            },
+        );
     }
 
     # After prediction, check for already-completed items of the predicted

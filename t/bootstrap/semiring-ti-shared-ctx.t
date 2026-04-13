@@ -1,5 +1,5 @@
 # ABOUTME: Tests for TI tree-walker migration to read from annotations->{type} (#707).
-# ABOUTME: Verifies TI on_scan returns tag hash directly and on_complete walks shared Context.
+# ABOUTME: Verifies TI multiply returns tag hash directly for scan events and on_complete walks shared Context.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -22,6 +22,40 @@ use Chalk::Bootstrap::IR::NodeFactory;
 no warnings 'experimental::class';
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+# Helper: build an annotated scan Context (as Earley would create it)
+sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {
+    return Chalk::Bootstrap::Context->new(
+        focus       => $matched_text,
+        position    => 0,
+        annotations => {
+            scan      => true,
+            rule_name => $rule_name,
+            alt_idx   => 0,
+            predicted => $is_predicted_hash,
+        },
+    );
+}
+
+# Helper: build a complete-annotated Context for multiply() calls.
+# Replaces on_complete($value, $rule_name, $alt_idx, $pos, $origin).
+my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
+    $pos    //= 0;
+    $origin //= 0;
+    $alt_idx //= 0;
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => defined($value) ? [$value] : [],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+};
 
 # Build a TypeInference semiring for direct testing
 my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
@@ -47,119 +81,71 @@ sub make_5ary_comp {
 }
 
 # ========================================================================
-# TI on_scan: returns a tag hash directly (not a TI Context)
+# TI multiply with scan Context: returns a tag hash directly (not a TI Context)
 # ========================================================================
 
 {
-    my $shared_ctx = Chalk::Bootstrap::Context->new(
-        focus       => undef,
-        children    => [],
-        position    => 0,
-        is_zero     => false,
-        annotations => {},
-    );
-
-    my $result = $ti->on_scan($shared_ctx, 'RegexLiteral', 0, 0, '/foo/');
-    ok(ref($result) eq 'HASH', 'TI on_scan returns a tag hash for RegexLiteral');
-    is($result->{type}, 'Regex', 'TI on_scan RegexLiteral tag hash has type => Regex');
-    ok($result->{valid}, 'TI on_scan RegexLiteral tag hash has valid => true');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '/foo/'));
+    ok(ref($result) eq 'HASH', 'TI multiply with RegexLiteral scan returns a tag hash');
+    is($result->{type}, 'Regex', 'TI multiply RegexLiteral tag hash has type => Regex');
+    ok($result->{valid}, 'TI multiply RegexLiteral tag hash has valid => true');
 }
 
 {
-    my $shared_ctx = Chalk::Bootstrap::Context->new(
-        focus       => undef,
-        children    => [],
-        position    => 0,
-        is_zero     => false,
-        annotations => {},
-    );
-
-    my $result = $ti->on_scan($shared_ctx, 'ScalarVariable', 0, 0, '$foo');
-    ok(ref($result) eq 'HASH', 'TI on_scan returns a tag hash for ScalarVariable');
-    is($result->{type}, 'Scalar', 'TI on_scan ScalarVariable tag hash has type => Scalar');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('ScalarVariable', '$foo'));
+    ok(ref($result) eq 'HASH', 'TI multiply with ScalarVariable scan returns a tag hash');
+    is($result->{type}, 'Scalar', 'TI multiply ScalarVariable tag hash has type => Scalar');
 }
 
 {
-    my $shared_ctx = Chalk::Bootstrap::Context->new(
-        focus       => undef,
-        children    => [],
-        position    => 0,
-        is_zero     => false,
-        annotations => {},
-    );
-
-    my $result = $ti->on_scan($shared_ctx, 'QualifiedIdentifier', 0, 0, 'push');
-    ok(ref($result) eq 'HASH', 'TI on_scan returns a tag hash for builtin QualifiedIdentifier');
-    is($result->{call_symbol}, 'push', 'TI on_scan builtin has call_symbol => push');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'push'));
+    ok(ref($result) eq 'HASH', 'TI multiply with builtin QualifiedIdentifier scan returns a tag hash');
+    is($result->{call_symbol}, 'push', 'TI multiply builtin has call_symbol => push');
 }
 
 {
-    my $shared_ctx = Chalk::Bootstrap::Context->new(
-        focus       => undef,
-        children    => [],
-        position    => 0,
-        is_zero     => false,
-        annotations => {},
-    );
-
-    my $result = $ti->on_scan($shared_ctx, 'QualifiedIdentifier', 0, 0, 'myvar');
-    ok(ref($result) eq 'HASH', 'TI on_scan returns tag hash for non-builtin identifier');
-    ok(!exists $result->{call_symbol}, 'TI on_scan non-builtin has no call_symbol');
-    is($result->{ident_text}, 'myvar', 'TI on_scan identifier has ident_text => myvar');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'myvar'));
+    ok(ref($result) eq 'HASH', 'TI multiply with non-builtin identifier scan returns tag hash');
+    ok(!exists $result->{call_symbol}, 'TI multiply non-builtin has no call_symbol');
+    is($result->{ident_text}, 'myvar', 'TI multiply identifier has ident_text => myvar');
 }
 
 {
-    my $shared_ctx = Chalk::Bootstrap::Context->new(
-        focus       => undef,
-        children    => [],
-        position    => 0,
-        is_zero     => false,
-        annotations => {},
-    );
-
-    my $result = $ti->on_scan($shared_ctx, 'BinaryOp', 0, 0, '+');
-    ok(ref($result) eq 'HASH', 'TI on_scan returns tag hash for BinaryOp');
-    is($result->{op_text}, '+', 'TI on_scan BinaryOp has op_text => +');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', '+'));
+    ok(ref($result) eq 'HASH', 'TI multiply with BinaryOp scan returns tag hash');
+    is($result->{op_text}, '+', 'TI multiply BinaryOp has op_text => +');
 }
 
 {
-    my $shared_ctx = Chalk::Bootstrap::Context->new(
-        focus       => undef,
-        children    => [],
-        position    => 0,
-        is_zero     => false,
-        annotations => {},
-    );
-
     # Transparent rule: returns valid tag hash with no type
-    my $result = $ti->on_scan($shared_ctx, 'SomeOtherRule', 0, 0, 'text');
-    ok(ref($result) eq 'HASH', 'TI on_scan returns tag hash for transparent rule');
-    ok($result->{valid}, 'TI on_scan transparent result has valid => true');
-    ok(!exists $result->{type}, 'TI on_scan transparent result has no type');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('SomeOtherRule', 'text'));
+    ok(ref($result) eq 'HASH', 'TI multiply with transparent rule scan returns tag hash');
+    ok($result->{valid}, 'TI multiply transparent result has valid => true');
+    ok(!exists $result->{type}, 'TI multiply transparent result has no type');
 }
 
 # ========================================================================
-# TI on_scan undef/zero: returns undef when ctx is zero
+# TI multiply undef/zero: returns undef when left is undef
 # ========================================================================
 
 {
-    my $result = $ti->on_scan(undef, 'RegexLiteral', 0, 0, '/foo/');
-    ok(!defined $result, 'TI on_scan(undef) returns undef (zero)');
+    my $result = $ti->multiply(undef, make_scan_ctx('RegexLiteral', '/foo/'));
+    ok(!defined $result, 'TI multiply(undef, scan_ctx) returns undef (zero)');
 }
 
 # ========================================================================
-# FilterComposite: on_scan sets annotations->{type} from TI tag hash
+# FilterComposite: multiply with scan Context sets annotations->{type} from TI tag hash
 # ========================================================================
 
 {
     my $comp = make_5ary_comp();
     my $one  = $comp->one();
 
-    my $scanned = $comp->on_scan($one, 'RegexLiteral', 0, 0, '/foo/');
-    ok(!$comp->is_zero($scanned), 'on_scan RegexLiteral is not zero');
+    my $scanned = $comp->multiply($one, make_scan_ctx('RegexLiteral', '/foo/'));
+    ok(!$comp->is_zero($scanned), 'multiply RegexLiteral scan is not zero');
 
     my $type_ann = $scanned->annotations()->{type};
-    ok(ref($type_ann) eq 'HASH', 'annotations->{type} is a hash ref after on_scan');
+    ok(ref($type_ann) eq 'HASH', 'annotations->{type} is a hash ref after RegexLiteral scan');
     is($type_ann->{type}, 'Regex', 'annotations->{type}{type} = Regex after RegexLiteral scan');
 }
 
@@ -167,8 +153,8 @@ sub make_5ary_comp {
     my $comp = make_5ary_comp();
     my $one  = $comp->one();
 
-    my $scanned = $comp->on_scan($one, 'ScalarVariable', 0, 0, '$x');
-    ok(!$comp->is_zero($scanned), 'on_scan ScalarVariable is not zero');
+    my $scanned = $comp->multiply($one, make_scan_ctx('ScalarVariable', '$x'));
+    ok(!$comp->is_zero($scanned), 'multiply ScalarVariable scan is not zero');
 
     my $type_ann = $scanned->annotations()->{type};
     ok(ref($type_ann) eq 'HASH', 'annotations->{type} is a hash ref after ScalarVariable scan');
@@ -179,8 +165,8 @@ sub make_5ary_comp {
     my $comp = make_5ary_comp();
     my $one  = $comp->one();
 
-    my $scanned = $comp->on_scan($one, 'QualifiedIdentifier', 0, 0, 'push');
-    ok(!$comp->is_zero($scanned), 'on_scan push builtin is not zero');
+    my $scanned = $comp->multiply($one, make_scan_ctx('QualifiedIdentifier', 'push'));
+    ok(!$comp->is_zero($scanned), 'multiply push builtin scan is not zero');
 
     my $type_ann = $scanned->annotations()->{type};
     ok(ref($type_ann) eq 'HASH', 'annotations->{type} is a hash ref after builtin scan');
@@ -188,14 +174,14 @@ sub make_5ary_comp {
 }
 
 # ========================================================================
-# FilterComposite: _ti_raw is NOT present in on_scan result (#707 removes it)
+# FilterComposite: _ti_raw is NOT present in multiply result (#707 removes it)
 # ========================================================================
 
 {
     my $comp = make_5ary_comp();
     my $one  = $comp->one();
 
-    my $scanned = $comp->on_scan($one, 'ScalarVariable', 0, 0, '$x');
+    my $scanned = $comp->multiply($one, make_scan_ctx('ScalarVariable', '$x'));
     ok(!exists $scanned->annotations()->{_ti_raw},
         'annotations->{_ti_raw} is absent after #707 migration');
 }
@@ -227,11 +213,11 @@ sub make_5ary_comp {
         annotations => { type => undef },
     );
 
-    my $result = $ti->on_complete($shared_ctx, 'BinaryExpression', 0, 2, 0);
-    ok(ref($result) eq 'HASH', 'TI on_complete returns a tag hash for BinaryExpression');
-    ok($result->{valid}, 'TI on_complete BinaryExpression result is valid');
+    my $result = $ti->multiply($shared_ctx, $make_complete->($shared_ctx, 'BinaryExpression', 0, 2, 0));
+    ok(ref($result) eq 'HASH', 'TI multiply with complete Context returns a tag hash for BinaryExpression');
+    ok($result->{valid}, 'TI multiply BinaryExpression result is valid');
     # BinaryExpression with op_text => '+' → result type is Num
-    is($result->{type}, 'Num', 'TI on_complete BinaryExpression + → type Num');
+    is($result->{type}, 'Num', 'TI multiply BinaryExpression + → type Num');
 }
 
 {
@@ -249,13 +235,13 @@ sub make_5ary_comp {
         annotations => { type => undef },
     );
 
-    my $result = $ti->on_complete($shared_ctx, 'ExpressionList', 0, 1, 0);
-    ok(ref($result) eq 'HASH', 'TI on_complete ExpressionList returns tag hash');
-    ok($result->{valid}, 'TI on_complete ExpressionList result is valid');
-    is($result->{list_arity}, 1, 'TI on_complete ExpressionList alt 0 arity = 1');
+    my $result = $ti->multiply($shared_ctx, $make_complete->($shared_ctx, 'ExpressionList', 0, 1, 0));
+    ok(ref($result) eq 'HASH', 'TI multiply ExpressionList returns tag hash');
+    ok($result->{valid}, 'TI multiply ExpressionList result is valid');
+    is($result->{list_arity}, 1, 'TI multiply ExpressionList alt 0 arity = 1');
     # item_types should reflect the type from annotations->{type}
     is_deeply($result->{item_types}, ['Int'],
-        'TI on_complete ExpressionList reads type from annotations->{type}');
+        'TI multiply ExpressionList reads type from annotations->{type}');
 }
 
 # ========================================================================
@@ -266,14 +252,14 @@ sub make_5ary_comp {
     my $comp = make_5ary_comp();
     my $one  = $comp->one();
 
-    # Scan a BinaryOp to build up context
-    my $scanned_ident = $comp->on_scan($one, 'QualifiedIdentifier', 0, 0, 'myvar');
-    my $completed = $comp->on_complete($scanned_ident, 'Atom', 0, 1, 0);
+    # Scan an identifier to build up context
+    my $scanned_ident = $comp->multiply($one, make_scan_ctx('QualifiedIdentifier', 'myvar'));
+    my $completed = $comp->multiply($scanned_ident, $make_complete->($scanned_ident, 'Atom', 0, 1, 0));
 
-    ok(!$comp->is_zero($completed), 'on_complete Atom is not zero');
+    ok(!$comp->is_zero($completed), 'multiply with complete Context Atom is not zero');
     my $type_ann = $completed->annotations()->{type};
-    ok(ref($type_ann) eq 'HASH', 'on_complete Atom annotations->{type} is a hash ref');
-    ok($type_ann->{valid}, 'on_complete Atom annotations->{type}{valid} is true');
+    ok(ref($type_ann) eq 'HASH', 'multiply Atom annotations->{type} is a hash ref');
+    ok($type_ann->{valid}, 'multiply Atom annotations->{type}{valid} is true');
 }
 
 # ========================================================================
@@ -300,11 +286,11 @@ sub make_5ary_comp {
     # We can test indirectly: CallExpression on_complete with call_symbol in annotations
     # will look up the 'push' builtin and validate args.
     # Simulate CallExpression: pass ctx whose child has call_symbol annotation.
-    my $result = $ti->on_complete($ctx, 'CallExpression', 0, 1, 0);
+    my $result = $ti->multiply($ctx, $make_complete->($ctx, 'CallExpression', 0, 1, 0));
     # CallExpression with no item_types → passes arity check (min_arity may be 0 or > 0)
     # We just verify it runs without dying and returns a hash
     ok(!defined $result || ref($result) eq 'HASH',
-        'TI on_complete CallExpression with annotated call_symbol returns hash or undef');
+        'TI multiply CallExpression with annotated call_symbol returns hash or undef');
 }
 
 # ========================================================================

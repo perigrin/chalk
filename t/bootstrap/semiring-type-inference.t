@@ -56,6 +56,40 @@ for my $word (@non_keywords) {
 use_ok('Chalk::Bootstrap::Semiring::TypeInference');
 use_ok('Chalk::Bootstrap::Context');
 
+# Helper: build an annotated scan Context (as Earley would create it)
+sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {
+    return Chalk::Bootstrap::Context->new(
+        focus       => $matched_text,
+        position    => 0,
+        annotations => {
+            scan      => true,
+            rule_name => $rule_name,
+            alt_idx   => 0,
+            predicted => $is_predicted_hash,
+        },
+    );
+}
+
+# Helper: build a complete-annotated Context for multiply() calls.
+# Replaces on_complete($value, $rule_name, $alt_idx, $pos, $origin).
+my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
+    $pos    //= 0;
+    $origin //= 0;
+    $alt_idx //= 0;
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => defined($value) ? [$value] : [],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+};
+
 my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
     keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
     builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
@@ -182,7 +216,7 @@ use Chalk::Grammar::Symbol;
 # Disambiguation between // (regex) and // (defined-or) happens via
 # Earley ambiguity + CallExpression arg-type validation, not at scan time.
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '//'));
     ok(!$ti->is_zero($result), 'scanning "//" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "//" as RegexLiteral tags type => Regex');
@@ -190,7 +224,7 @@ use Chalk::Grammar::Symbol;
 
 # Empty regex with flags → also accepted
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//i');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '//i'));
     ok(!$ti->is_zero($result), 'scanning "//i" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "//i" as RegexLiteral tags type => Regex');
@@ -198,7 +232,7 @@ use Chalk::Grammar::Symbol;
 
 # Empty regex //msixpodualngcer → accepted (all flags)
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//msixpodualngcer');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '//msixpodualngcer'));
     ok(!$ti->is_zero($result), 'scanning "//msixpodualngcer" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "//msixpodualngcer" as RegexLiteral tags type => Regex');
@@ -206,19 +240,19 @@ use Chalk::Grammar::Symbol;
 
 # Real regex with pattern → NOT zero (accepted)
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '/pattern/');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '/pattern/'));
     ok(!$ti->is_zero($result), 'scanning "/pattern/" as RegexLiteral is NOT zero');
 }
 
 # Real regex with flags → NOT zero (accepted)
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '/pattern/gi');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '/pattern/gi'));
     ok(!$ti->is_zero($result), 'scanning "/pattern/gi" as RegexLiteral is NOT zero');
 }
 
 # Empty m// → accepted (Earley explores both regex and defined-or paths)
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, 'm//');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', 'm//'));
     ok(!$ti->is_zero($result), 'scanning "m//" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "m//" as RegexLiteral tags type => Regex');
@@ -226,7 +260,7 @@ use Chalk::Grammar::Symbol;
 
 # m// with flags → accepted
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, 'm//i');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', 'm//i'));
     ok(!$ti->is_zero($result), 'scanning "m//i" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "m//i" as RegexLiteral tags type => Regex');
@@ -234,13 +268,13 @@ use Chalk::Grammar::Symbol;
 
 # m/pattern/ → NOT zero (real regex)
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, 'm/pattern/');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', 'm/pattern/'));
     ok(!$ti->is_zero($result), 'scanning "m/pattern/" as RegexLiteral is NOT zero');
 }
 
 # BinaryOp scanning // → NOT zero (TypeInference doesn't touch BinaryOp)
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '//');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', '//'));
     ok(!$ti->is_zero($result), 'scanning "//" as BinaryOp is NOT zero');
 }
 
@@ -285,7 +319,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # UnaryExpression completion WITHOUT tag → valid (standalone unary)
 {
-    my $result = $ti->on_complete($ti->one(), 'UnaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'UnaryExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'UnaryExpression completion without tag is valid');
 }
 
@@ -373,7 +407,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ScalarVariable scanned → type => 'Scalar'
 {
-    my $result = $ti->on_scan($ti->one(), 'ScalarVariable', 0, 0, '$x');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('ScalarVariable', '$x'));
     ok(!$ti->is_zero($result), 'scanning $x as ScalarVariable is non-zero');
     my $tags = get_tags($result);
     is($tags->{type}, 'Scalar', 'scanning $x as ScalarVariable tags type => Scalar');
@@ -381,7 +415,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ArrayVariable scanned → type => 'Array'
 {
-    my $result = $ti->on_scan($ti->one(), 'ArrayVariable', 0, 0, '@arr');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('ArrayVariable', '@arr'));
     ok(!$ti->is_zero($result), 'scanning @arr as ArrayVariable is non-zero');
     my $tags = get_tags($result);
     is($tags->{type}, 'Array', 'scanning @arr as ArrayVariable tags type => Array');
@@ -389,7 +423,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # HashVariable scanned → type => 'Hash'
 {
-    my $result = $ti->on_scan($ti->one(), 'HashVariable', 0, 0, '%h');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('HashVariable', '%h'));
     ok(!$ti->is_zero($result), 'scanning %h as HashVariable is non-zero');
     my $tags = get_tags($result);
     is($tags->{type}, 'Hash', 'scanning %h as HashVariable tags type => Hash');
@@ -417,28 +451,28 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # PostfixDeref alt 0 (->@*) → type => 'Array'
 {
-    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 0, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'PostfixDeref', 0, 10, 0));
     ok(!$ti->is_zero($result), 'PostfixDeref alt 0 completion is valid');
     is(get_tags($result)->{type}, 'Array', 'PostfixDeref alt 0 (->@*) tags type => Array');
 }
 
 # PostfixDeref alt 1 (->%*) → type => 'Hash'
 {
-    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 1, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'PostfixDeref', 1, 10, 0));
     ok(!$ti->is_zero($result), 'PostfixDeref alt 1 completion is valid');
     is(get_tags($result)->{type}, 'Hash', 'PostfixDeref alt 1 (->%*) tags type => Hash');
 }
 
 # PostfixDeref alt 2 (->$*) → type => 'Scalar'
 {
-    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 2, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'PostfixDeref', 2, 10, 0));
     ok(!$ti->is_zero($result), 'PostfixDeref alt 2 completion is valid');
     is(get_tags($result)->{type}, 'Scalar', 'PostfixDeref alt 2 (->$*) tags type => Scalar');
 }
 
 # PostfixDeref alt 3 (->$#*) → type => 'Scalar' (array count is scalar)
 {
-    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 3, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'PostfixDeref', 3, 10, 0));
     ok(!$ti->is_zero($result), 'PostfixDeref alt 3 completion is valid');
     is(get_tags($result)->{type}, 'Scalar', 'PostfixDeref alt 3 (->$#*) tags type => Scalar');
 }
@@ -447,14 +481,14 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 {
     my $scalar_val = make_ctx(type => 'Scalar');
-    my $result = $ti->on_complete($scalar_val, 'Variable', 0, 5, 0);
+    my $result = $ti->multiply($scalar_val, $make_complete->($scalar_val, 'Variable', 0, 5, 0));
     ok(!$ti->is_zero($result), 'Variable completion with type => Scalar is valid');
     is(get_tags($result)->{type}, 'Scalar', 'Variable preserves type => Scalar from child');
 }
 
 {
     my $array_val = make_ctx(type => 'Array');
-    my $result = $ti->on_complete($array_val, 'Variable', 0, 5, 0);
+    my $result = $ti->multiply($array_val, $make_complete->($array_val, 'Variable', 0, 5, 0));
     ok(!$ti->is_zero($result), 'Variable completion with type => Array is valid');
     is(get_tags($result)->{type}, 'Array', 'Variable preserves type => Array from child');
 }
@@ -463,14 +497,14 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 {
     my $typed = make_ctx(type => 'Array');
-    my $result = $ti->on_complete($typed, 'ParenExpr', 0, 10, 0);
+    my $result = $ti->multiply($typed, $make_complete->($typed, 'ParenExpr', 0, 10, 0));
     ok(!$ti->is_zero($result), 'ParenExpr with type => Array is valid');
     is(get_tags($result)->{type}, 'Array', 'ParenExpr preserves type => Array');
 }
 
 {
     my $typed = make_ctx(type => 'Scalar');
-    my $result = $ti->on_complete($typed, 'Block', 0, 10, 0);
+    my $result = $ti->multiply($typed, $make_complete->($typed, 'Block', 0, 10, 0));
     ok(!$ti->is_zero($result), 'Block with type => Scalar is valid');
     is(get_tags($result)->{type}, 'Scalar', 'Block preserves type => Scalar');
 }
@@ -483,7 +517,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Scanning 'push' as QualifiedIdentifier → call_symbol = 'push'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'push');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'push'));
     ok(!$ti->is_zero($result), 'scanning "push" as QualifiedIdentifier is non-zero');
     is(get_tags($result)->{call_symbol}, 'push',
         'scanning "push" as QualifiedIdentifier tags call_symbol => push');
@@ -491,42 +525,42 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Scanning 'unshift' as QualifiedIdentifier → call_symbol = 'unshift'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'unshift');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'unshift'));
     is(get_tags($result)->{call_symbol}, 'unshift',
         'scanning "unshift" tags call_symbol => unshift');
 }
 
 # Scanning 'pop' as QualifiedIdentifier → call_symbol = 'pop'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'pop');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'pop'));
     is(get_tags($result)->{call_symbol}, 'pop',
         'scanning "pop" tags call_symbol => pop');
 }
 
 # Scanning 'shift' as QualifiedIdentifier → call_symbol = 'shift'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'shift');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'shift'));
     is(get_tags($result)->{call_symbol}, 'shift',
         'scanning "shift" tags call_symbol => shift');
 }
 
 # Scanning 'splice' as QualifiedIdentifier → call_symbol = 'splice'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'splice');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'splice'));
     is(get_tags($result)->{call_symbol}, 'splice',
         'scanning "splice" tags call_symbol => splice');
 }
 
 # Scanning 'foo' → no call_symbol
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'foo');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'foo'));
     ok(!get_tags($result)->{call_symbol},
         'scanning "foo" does NOT tag call_symbol');
 }
 
 # Qualified names (Foo::push) → no call_symbol
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'Foo::push');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'Foo::push'));
     ok(!get_tags($result)->{call_symbol},
         'scanning "Foo::push" does NOT tag call_symbol');
 }
@@ -541,7 +575,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $qi_leaf  = make_ctx(call_symbol => 'push');
     my $el_leaf  = make_ctx(item_types  => ['Array', 'Scalar'], list_arity => 2);
     my $val = $ti->multiply($qi_leaf, $el_leaf);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result),
         'CallExpression: tree-walk finds call_symbol in child leaf → valid');
     is(get_tags($result)->{type}, 'Int',
@@ -554,7 +588,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $mid     = $ti->multiply($ti->one(), $qi_leaf);
     my $el_leaf = make_ctx(item_types  => ['Array', 'Scalar'], list_arity => 2);
     my $val = $ti->multiply($mid, $el_leaf);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result),
         'CallExpression: deep tree-walk finds call_symbol → valid');
 }
@@ -564,21 +598,21 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # CallExpression with call_symbol=push, item_types [Array, Scalar], arity 2 → valid
 {
     my $val = make_ctx(call_symbol => 'push', item_types => ['Array', 'Scalar'], list_arity => 2);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: push with array,scalar item_types → valid');
 }
 
 # CallExpression with call_symbol=push, item_types [Scalar] → zero (kill)
 {
     my $val = make_ctx(call_symbol => 'push', item_types => ['Scalar']);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok($ti->is_zero($result), 'CallExpression: push with scalar-only item_types → zero (killed)');
 }
 
 # CallExpression with call_symbol=push and no item_types → valid (no per-position check)
 {
     my $val = make_ctx(call_symbol => 'push');
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok($ti->is_zero($result), 'CallExpression: push with no item_types → zero (arity check fails)');
 }
 
@@ -587,14 +621,14 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     my $val = make_ctx(call_symbol => 'push',
                 item_types => ['Array', 'Scalar'], list_arity => 2);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: push with array+scalar item_types → valid');
 }
 
 # CallExpression without call_symbol → normal (no validation)
 {
     my $val = make_ctx(type => 'Scalar');
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: non-builtin with scalar → valid (no validation)');
 }
 
@@ -603,7 +637,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ExpressionList alt 0 (single Expression) → list_arity 1
 {
     my $val = make_ctx(type => 'Array');
-    my $result = $ti->on_complete($val, 'ExpressionList', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'ExpressionList', 0, 10, 0));
     ok(!$ti->is_zero($result), 'ExpressionList alt 0: valid');
     is(get_tags($result)->{list_arity}, 1, 'ExpressionList alt 0: list_arity = 1');
 }
@@ -611,7 +645,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ExpressionList alt 1 (ExpressionList , Expression) → list_arity from child + 1
 {
     my $val = make_ctx(type => 'Array', list_arity => 1);
-    my $result = $ti->on_complete($val, 'ExpressionList', 1, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'ExpressionList', 1, 10, 0));
     ok(!$ti->is_zero($result), 'ExpressionList alt 1: valid');
     is(get_tags($result)->{list_arity}, 2, 'ExpressionList alt 1: list_arity = 2');
 }
@@ -619,7 +653,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ExpressionList alt 2 (ExpressionList => Expression) → list_arity from child + 1
 {
     my $val = make_ctx(list_arity => 2);
-    my $result = $ti->on_complete($val, 'ExpressionList', 2, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'ExpressionList', 2, 10, 0));
     ok(!$ti->is_zero($result), 'ExpressionList alt 2: valid');
     is(get_tags($result)->{list_arity}, 3, 'ExpressionList alt 2: list_arity = 3');
 }
@@ -627,7 +661,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ExpressionList alt 3 (trailing comma) → list_arity preserved
 {
     my $val = make_ctx(list_arity => 3);
-    my $result = $ti->on_complete($val, 'ExpressionList', 3, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'ExpressionList', 3, 10, 0));
     ok(!$ti->is_zero($result), 'ExpressionList alt 3: valid');
     is(get_tags($result)->{list_arity}, 3, 'ExpressionList alt 3: list_arity preserved');
 }
@@ -651,35 +685,35 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # push with list_arity 1 (only @arr, no values) → rejected (min_arity 2)
 {
     my $val = make_ctx(call_symbol => 'push', item_types => ['Array'], list_arity => 1);
-    my $result = $ti->on_complete($val, 'CallExpression', 1, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 1, 10, 0));
     ok($ti->is_zero($result), 'CallExpression: push with list_arity 1 → rejected (min_arity 2)');
 }
 
 # push with list_arity 2 (@arr, $val) → accepted
 {
     my $val = make_ctx(call_symbol => 'push', item_types => ['Array', 'Scalar'], list_arity => 2);
-    my $result = $ti->on_complete($val, 'CallExpression', 1, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 1, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: push with list_arity 2 → accepted');
 }
 
 # push with list_arity 3 (@arr, $val1, $val2) → accepted
 {
     my $val = make_ctx(call_symbol => 'push', item_types => ['Array', 'Scalar', 'Scalar'], list_arity => 3);
-    my $result = $ti->on_complete($val, 'CallExpression', 1, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 1, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: push with list_arity 3 → accepted');
 }
 
 # pop with list_arity 1 (@arr) → accepted (min_arity 1)
 {
     my $val = make_ctx(call_symbol => 'pop', item_types => ['Array'], list_arity => 1);
-    my $result = $ti->on_complete($val, 'CallExpression', 1, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 1, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: pop with list_arity 1 → accepted');
 }
 
 # list_arity cleared at boundary rules (ParenExpr, Block, etc.)
 {
     my $val = make_ctx(list_arity => 3);
-    my $result = $ti->on_complete($val, 'ParenExpr', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'ParenExpr', 0, 10, 0));
     ok(!get_tags($result)->{list_arity}, 'ParenExpr clears list_arity');
 }
 
@@ -689,7 +723,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Scanning 'keys' as QualifiedIdentifier → call_symbol = 'keys'
 {
-    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'keys');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('QualifiedIdentifier', 'keys'));
     is(get_tags($result)->{call_symbol}, 'keys',
         'scanning "keys" as QualifiedIdentifier tags call_symbol => keys');
 }
@@ -697,42 +731,42 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # CallExpression with call_symbol=keys, item_types [Hash] → valid
 {
     my $val = make_ctx(call_symbol => 'keys', item_types => ['Hash'], list_arity => 1);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: keys with hash item_types → valid');
 }
 
 # CallExpression with call_symbol=keys, item_types [Scalar] → zero (kill)
 {
     my $val = make_ctx(call_symbol => 'keys', item_types => ['Scalar'], list_arity => 1);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok($ti->is_zero($result), 'CallExpression: keys with scalar item_types → zero (killed)');
 }
 
 # CallExpression with call_symbol=keys, item_types [Array] → zero (kill)
 {
     my $val = make_ctx(call_symbol => 'keys', item_types => ['Array'], list_arity => 1);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok($ti->is_zero($result), 'CallExpression: keys with array item_types → zero (killed)');
 }
 
 # CallExpression with call_symbol=keys, no item_types → rejected (arity check)
 {
     my $val = make_ctx(call_symbol => 'keys');
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: keys with no item_types → valid (no per-position check)');
 }
 
 # CallExpression with call_symbol=values, item_types [Hash] → valid
 {
     my $val = make_ctx(call_symbol => 'values', item_types => ['Hash'], list_arity => 1);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: values with hash item_types → valid');
 }
 
 # CallExpression with call_symbol=each, item_types [Hash] → valid
 {
     my $val = make_ctx(call_symbol => 'each', item_types => ['Hash'], list_arity => 1);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: each with hash item_types → valid');
 }
 
@@ -743,21 +777,21 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # CallExpression with call_symbol=defined, item_types [Scalar] → valid (Any accepts all)
 {
     my $val = make_ctx(call_symbol => 'defined', item_types => ['Scalar'], list_arity => 1);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: defined with scalar item_types → valid');
 }
 
 # CallExpression with call_symbol=die, no item_types → valid (Any + min_arity 0)
 {
     my $val = make_ctx(call_symbol => 'die');
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: die with no args → valid');
 }
 
 # CallExpression with call_symbol=warn, item_types [Scalar] → valid
 {
     my $val = make_ctx(call_symbol => 'warn', item_types => ['Scalar'], list_arity => 1);
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'CallExpression: warn with scalar item_types → valid');
 }
 
@@ -954,21 +988,21 @@ TODO: {
 
 # ScalarVariable → type => 'Scalar'
 {
-    my $result = $ti->on_scan($ti->one(), 'ScalarVariable', 0, 0, '$x');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('ScalarVariable', '$x'));
     is(get_tags($result)->{type}, 'Scalar',
         'ScalarVariable scan tags type => Scalar');
 }
 
 # ArrayVariable → type => 'Array'
 {
-    my $result = $ti->on_scan($ti->one(), 'ArrayVariable', 0, 0, '@arr');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('ArrayVariable', '@arr'));
     is(get_tags($result)->{type}, 'Array',
         'ArrayVariable scan tags type => Array');
 }
 
 # HashVariable → type => 'Hash'
 {
-    my $result = $ti->on_scan($ti->one(), 'HashVariable', 0, 0, '%h');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('HashVariable', '%h'));
     is(get_tags($result)->{type}, 'Hash',
         'HashVariable scan tags type => Hash');
 }
@@ -977,7 +1011,7 @@ TODO: {
 
 # NumericLiteral: integer → type => 'Int'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '42');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '42'));
     ok(!$ti->is_zero($result), 'NumericLiteral scan of "42" is non-zero');
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "42" tags type => Int');
@@ -985,49 +1019,49 @@ TODO: {
 
 # NumericLiteral: hex integer → type => 'Int'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '0xFF');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '0xFF'));
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "0xFF" tags type => Int');
 }
 
 # NumericLiteral: binary integer → type => 'Int'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '0b1010');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '0b1010'));
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "0b1010" tags type => Int');
 }
 
 # NumericLiteral: octal integer → type => 'Int'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '0777');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '0777'));
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "0777" tags type => Int');
 }
 
 # NumericLiteral: float → type => 'Num'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '3.14');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '3.14'));
     is(get_tags($result)->{type}, 'Num',
         'NumericLiteral "3.14" tags type => Num');
 }
 
 # NumericLiteral: scientific notation → type => 'Num'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '1e10');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '1e10'));
     is(get_tags($result)->{type}, 'Num',
         'NumericLiteral "1e10" tags type => Num');
 }
 
 # NumericLiteral: negative exponent → type => 'Num'
 {
-    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '2.5E-3');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('NumericLiteral', '2.5E-3'));
     is(get_tags($result)->{type}, 'Num',
         'NumericLiteral "2.5E-3" tags type => Num');
 }
 
 # StringLiteral → type => 'Str'
 {
-    my $result = $ti->on_scan($ti->one(), 'StringLiteral', 0, 0, '"hello"');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('StringLiteral', '"hello"'));
     ok(!$ti->is_zero($result), 'StringLiteral scan of "hello" is non-zero');
     is(get_tags($result)->{type}, 'Str',
         'StringLiteral tags type => Str');
@@ -1035,21 +1069,21 @@ TODO: {
 
 # StringLiteral: single-quoted → type => 'Str'
 {
-    my $result = $ti->on_scan($ti->one(), 'StringLiteral', 0, 0, "'hello'");
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('StringLiteral', "'hello'"));
     is(get_tags($result)->{type}, 'Str',
         'StringLiteral single-quoted tags type => Str');
 }
 
 # RegexLiteral (non-empty) → type => 'Regex'
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '/pattern/');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '/pattern/'));
     is(get_tags($result)->{type}, 'Regex',
         'RegexLiteral "/pattern/" tags type => Regex');
 }
 
 # RegexLiteral (empty, now accepted) → Regex type
 {
-    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('RegexLiteral', '//'));
     ok(!$ti->is_zero($result), 'RegexLiteral "//" accepted');
     is(get_tags($result)->{type}, 'Regex',
         'RegexLiteral "//" tags type => Regex');
@@ -1057,7 +1091,7 @@ TODO: {
 
 # Literal: undef → type => 'Undef'
 {
-    my $result = $ti->on_scan($ti->one(), 'Literal', 0, 0, 'undef');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('Literal', 'undef'));
     ok(!$ti->is_zero($result), 'Literal "undef" scan is non-zero');
     is(get_tags($result)->{type}, 'Undef',
         'Literal "undef" tags type => Undef');
@@ -1065,21 +1099,21 @@ TODO: {
 
 # Literal: true → type => 'Bool'
 {
-    my $result = $ti->on_scan($ti->one(), 'Literal', 0, 0, 'true');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('Literal', 'true'));
     is(get_tags($result)->{type}, 'Bool',
         'Literal "true" tags type => Bool');
 }
 
 # Literal: false → type => 'Bool'
 {
-    my $result = $ti->on_scan($ti->one(), 'Literal', 0, 0, 'false');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('Literal', 'false'));
     is(get_tags($result)->{type}, 'Bool',
         'Literal "false" tags type => Bool');
 }
 
 # Atom: __SUB__ → type => 'CodeRef'
 {
-    my $result = $ti->on_scan($ti->one(), 'Atom', 0, 0, '__SUB__');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('Atom', '__SUB__'));
     ok(!$ti->is_zero($result), 'Atom __SUB__ scan is non-zero');
     is(get_tags($result)->{type}, 'CodeRef',
         'Atom "__SUB__" tags type => CodeRef');
@@ -1106,64 +1140,64 @@ TODO: {
 
 # BinaryOp scans capture op_text
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '+');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', '+'));
     ok(!$ti->is_zero($result), 'BinaryOp "+" scan is non-zero');
     is(get_tags($result)->{op_text}, '+',
         'BinaryOp "+" tags op_text => +');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '==');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', '=='));
     is(get_tags($result)->{op_text}, '==',
         'BinaryOp "==" tags op_text => ==');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '.');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', '.'));
     is(get_tags($result)->{op_text}, '.',
         'BinaryOp "." tags op_text => .');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, 'eq');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', 'eq'));
     is(get_tags($result)->{op_text}, 'eq',
         'BinaryOp "eq" tags op_text => eq');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '&&');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('BinaryOp', '&&'));
     is(get_tags($result)->{op_text}, '&&',
         'BinaryOp "&&" tags op_text => &&');
 }
 
 # UnaryExpression operator scans capture op_text
 {
-    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 200, '!');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('UnaryExpression', '!'));
     is(get_tags($result)->{op_text}, '!',
         'UnaryExpression "!" tags op_text => !');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 201, 'not');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('UnaryExpression', 'not'));
     is(get_tags($result)->{op_text}, 'not',
         'UnaryExpression "not" tags op_text => not');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 202, '~');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('UnaryExpression', '~'));
     is(get_tags($result)->{op_text}, '~',
         'UnaryExpression "~" tags op_text => ~');
 }
 
 {
-    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 203, '\\');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('UnaryExpression', '\\'));
     is(get_tags($result)->{op_text}, '\\',
         'UnaryExpression "\\" tags op_text => \\');
 }
 
 # Standalone unary - gets op_text
 {
-    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 204, '-');
+    my $result = $ti->multiply($ti->one(), make_scan_ctx('UnaryExpression', '-'));
     is(get_tags($result)->{op_text}, '-',
         'standalone UnaryExpression "-" tags op_text => -');
 }
@@ -1188,7 +1222,7 @@ TODO: {
 
 # AnonymousSub → type => 'Code'
 {
-    my $result = $ti->on_complete($ti->one(), 'AnonymousSub', 0, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'AnonymousSub', 0, 10, 0));
     ok(!$ti->is_zero($result), 'AnonymousSub completion is valid');
     is(get_tags($result)->{type}, 'Code',
         'AnonymousSub tags type => Code');
@@ -1196,7 +1230,7 @@ TODO: {
 
 # ArrayConstructor → type => 'ArrayRef'
 {
-    my $result = $ti->on_complete($ti->one(), 'ArrayConstructor', 0, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'ArrayConstructor', 0, 10, 0));
     ok(!$ti->is_zero($result), 'ArrayConstructor completion is valid');
     is(get_tags($result)->{type}, 'ArrayRef',
         'ArrayConstructor tags type => ArrayRef');
@@ -1204,7 +1238,7 @@ TODO: {
 
 # HashConstructor → type => 'HashRef'
 {
-    my $result = $ti->on_complete($ti->one(), 'HashConstructor', 0, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'HashConstructor', 0, 10, 0));
     ok(!$ti->is_zero($result), 'HashConstructor completion is valid');
     is(get_tags($result)->{type}, 'HashRef',
         'HashConstructor tags type => HashRef');
@@ -1212,7 +1246,7 @@ TODO: {
 
 # QwLiteral → type => 'List'
 {
-    my $result = $ti->on_complete($ti->one(), 'QwLiteral', 0, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'QwLiteral', 0, 10, 0));
     ok(!$ti->is_zero($result), 'QwLiteral completion is valid');
     is(get_tags($result)->{type}, 'List',
         'QwLiteral tags type => List');
@@ -1220,28 +1254,28 @@ TODO: {
 
 # PostfixDeref alt 0 (->@*) → type => 'Array'
 {
-    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 0, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'PostfixDeref', 0, 10, 0));
     is(get_tags($result)->{type}, 'Array',
         'PostfixDeref alt 0 (->@*) tags type => Array');
 }
 
 # PostfixDeref alt 1 (->%*) → type => 'Hash'
 {
-    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 1, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'PostfixDeref', 1, 10, 0));
     is(get_tags($result)->{type}, 'Hash',
         'PostfixDeref alt 1 (->%*) tags type => Hash');
 }
 
 # PostfixDeref alt 2 (->$*) → type => 'Scalar'
 {
-    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 2, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'PostfixDeref', 2, 10, 0));
     is(get_tags($result)->{type}, 'Scalar',
         'PostfixDeref alt 2 (->$*) tags type => Scalar');
 }
 
 # PostfixDeref alt 3 (->$#*) → type => 'Scalar'
 {
-    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 3, 10, 0);
+    my $result = $ti->multiply($ti->one(), $make_complete->($ti->one(), 'PostfixDeref', 3, 10, 0));
     is(get_tags($result)->{type}, 'Scalar',
         'PostfixDeref alt 3 (->$#*) tags type => Scalar');
 }
@@ -1253,7 +1287,7 @@ TODO: {
 # BinaryExpression with op_text '+' → type => 'Num' (consumes op_text)
 {
     my $val = make_ctx(op_text => '+', type => 'Int');
-    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'BinaryExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'BinaryExpression "+" is valid');
     is(get_tags($result)->{type}, 'Num',
         'BinaryExpression "+" tags type => Num');
@@ -1264,7 +1298,7 @@ TODO: {
 # BinaryExpression with op_text '==' → type => 'Bool'
 {
     my $val = make_ctx(op_text => '==');
-    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'BinaryExpression', 0, 10, 0));
     is(get_tags($result)->{type}, 'Bool',
         'BinaryExpression "==" tags type => Bool');
 }
@@ -1272,7 +1306,7 @@ TODO: {
 # BinaryExpression with op_text '.' → type => 'Str'
 {
     my $val = make_ctx(op_text => '.');
-    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'BinaryExpression', 0, 10, 0));
     is(get_tags($result)->{type}, 'Str',
         'BinaryExpression "." tags type => Str');
 }
@@ -1280,7 +1314,7 @@ TODO: {
 # BinaryExpression with op_text '&&' → type => 'Any'
 {
     my $val = make_ctx(op_text => '&&');
-    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'BinaryExpression', 0, 10, 0));
     is(get_tags($result)->{type}, undef,
         'BinaryExpression "&&" tags type => undef (Any means unknown)');
 }
@@ -1288,7 +1322,7 @@ TODO: {
 # BinaryExpression with op_text '=~' → type => 'Bool'
 {
     my $val = make_ctx(op_text => '=~');
-    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'BinaryExpression', 0, 10, 0));
     is(get_tags($result)->{type}, 'Bool',
         'BinaryExpression "=~" tags type => Bool');
 }
@@ -1296,7 +1330,7 @@ TODO: {
 # BinaryExpression with op_text '..' → type => 'List'
 {
     my $val = make_ctx(op_text => '..');
-    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'BinaryExpression', 0, 10, 0));
     is(get_tags($result)->{type}, 'List',
         'BinaryExpression ".." tags type => List');
 }
@@ -1304,7 +1338,7 @@ TODO: {
 # BinaryExpression without op_text → type preserved from children
 {
     my $val = make_ctx(type => 'Int');
-    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'BinaryExpression', 0, 10, 0));
     is(get_tags($result)->{type}, 'Int',
         'BinaryExpression without op_text preserves child type');
 }
@@ -1312,7 +1346,7 @@ TODO: {
 # UnaryExpression with op_text '!' → type => 'Bool' (consumes op_text)
 {
     my $val = make_ctx(op_text => '!');
-    my $result = $ti->on_complete($val, 'UnaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'UnaryExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'UnaryExpression "!" is valid');
     is(get_tags($result)->{type}, 'Bool',
         'UnaryExpression "!" tags type => Bool');
@@ -1323,7 +1357,7 @@ TODO: {
 # UnaryExpression with op_text '-' (standalone, no ambiguous) → type => 'Num'
 {
     my $val = make_ctx(op_text => '-');
-    my $result = $ti->on_complete($val, 'UnaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'UnaryExpression', 0, 10, 0));
     is(get_tags($result)->{type}, 'Num',
         'UnaryExpression "-" tags type => Num');
 }
@@ -1331,7 +1365,7 @@ TODO: {
 # UnaryExpression with op_text '\\' → type => 'Ref'
 {
     my $val = make_ctx(op_text => '\\');
-    my $result = $ti->on_complete($val, 'UnaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'UnaryExpression', 0, 10, 0));
     is(get_tags($result)->{type}, 'Ref',
         'UnaryExpression "\\" tags type => Ref');
 }
@@ -1339,7 +1373,7 @@ TODO: {
 # PostfixIncDec → type => 'Num'
 {
     my $val = make_ctx(type => 'Scalar');
-    my $result = $ti->on_complete($val, 'PostfixIncDec', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'PostfixIncDec', 0, 10, 0));
     ok(!$ti->is_zero($result), 'PostfixIncDec is valid');
     is(get_tags($result)->{type}, 'Num',
         'PostfixIncDec tags type => Num');
@@ -1348,7 +1382,7 @@ TODO: {
 # Subscript (array []) → type => 'Scalar'
 {
     my $val = make_ctx(type => 'Array');
-    my $result = $ti->on_complete($val, 'Subscript', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'Subscript', 0, 10, 0));
     ok(!$ti->is_zero($result), 'Subscript alt 0 is valid');
     is(get_tags($result)->{type}, 'Scalar',
         'Subscript alt 0 (array []) tags type => Scalar');
@@ -1357,7 +1391,7 @@ TODO: {
 # Subscript (hash {}) → type => 'Scalar'
 {
     my $val = make_ctx(type => 'Hash');
-    my $result = $ti->on_complete($val, 'Subscript', 1, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'Subscript', 1, 10, 0));
     is(get_tags($result)->{type}, 'Scalar',
         'Subscript alt 1 (hash {}) tags type => Scalar');
 }
@@ -1365,7 +1399,7 @@ TODO: {
 # Subscript (deref-call ->()) → type => undef
 {
     my $val = make_ctx(type => 'CodeRef');
-    my $result = $ti->on_complete($val, 'Subscript', 2, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'Subscript', 2, 10, 0));
     is(get_tags($result)->{type}, undef,
         'Subscript alt 2 (->()) tags type => undef');
 }
@@ -1373,7 +1407,7 @@ TODO: {
 # TernaryExpression → type => undef
 {
     my $val = make_ctx(type => 'Int');
-    my $result = $ti->on_complete($val, 'TernaryExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'TernaryExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'TernaryExpression is valid');
     is(get_tags($result)->{type}, undef,
         'TernaryExpression tags type => undef');
@@ -1382,7 +1416,7 @@ TODO: {
 # AssignmentExpression → type => undef
 {
     my $val = make_ctx(type => 'Scalar');
-    my $result = $ti->on_complete($val, 'AssignmentExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'AssignmentExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'AssignmentExpression is valid');
     is(get_tags($result)->{type}, undef,
         'AssignmentExpression tags type => undef');
@@ -1391,7 +1425,7 @@ TODO: {
 # MethodCall → type => undef
 {
     my $val = make_ctx(type => 'Object');
-    my $result = $ti->on_complete($val, 'MethodCall', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'MethodCall', 0, 10, 0));
     ok(!$ti->is_zero($result), 'MethodCall is valid');
     is(get_tags($result)->{type}, undef,
         'MethodCall tags type => undef');
@@ -1405,7 +1439,7 @@ TODO: {
 # → item_types => ['Array']
 {
     my $val = make_ctx(type => 'Array');
-    my $result = $ti->on_complete($val, 'ExpressionList', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'ExpressionList', 0, 10, 0));
     ok(!$ti->is_zero($result), 'ExpressionList alt 0 with type: valid');
     my $rtags = get_tags($result);
     is_deeply($rtags->{item_types}, ['Array'],
@@ -1415,7 +1449,7 @@ TODO: {
 # ExpressionList alt 0 with type => 'Int'
 {
     my $val = make_ctx(type => 'Int');
-    my $result = $ti->on_complete($val, 'ExpressionList', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'ExpressionList', 0, 10, 0));
     is_deeply(get_tags($result)->{item_types}, ['Int'],
         'ExpressionList alt 0: item_types => [Int]');
 }
@@ -1423,7 +1457,7 @@ TODO: {
 # ExpressionList alt 0 with no type tag
 {
     my $val = make_ctx();
-    my $result = $ti->on_complete($val, 'ExpressionList', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'ExpressionList', 0, 10, 0));
     is_deeply(get_tags($result)->{item_types}, [undef],
         'ExpressionList alt 0 without type: item_types => [undef]');
 }
@@ -1450,7 +1484,7 @@ TODO: {
         annotations => { type => $right_tags },
     );
     my $combined = $ti->multiply($left, $right);
-    my $result = $ti->on_complete($combined, 'ExpressionList', 1, 10, 0);
+    my $result = $ti->multiply($combined, $make_complete->($combined, 'ExpressionList', 1, 10, 0));
     ok(!$ti->is_zero($result), 'ExpressionList alt 1 (comma): valid');
     is_deeply(get_tags($result)->{item_types}, ['Array', 'Scalar'],
         'ExpressionList alt 1: item_types => [Array, Scalar]');
@@ -1475,7 +1509,7 @@ TODO: {
         annotations => { type => $right_tags },
     );
     my $combined = $ti->multiply($left, $right);
-    my $result = $ti->on_complete($combined, 'ExpressionList', 2, 10, 0);
+    my $result = $ti->multiply($combined, $make_complete->($combined, 'ExpressionList', 2, 10, 0));
     is_deeply(get_tags($result)->{item_types}, ['Str', 'Int'],
         'ExpressionList alt 2 (fat-arrow): item_types => [Str, Int]');
 }
@@ -1490,7 +1524,7 @@ TODO: {
         rule        => 'ExpressionList',
         annotations => { type => $val_tags },
     );
-    my $result = $ti->on_complete($val, 'ExpressionList', 3, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'ExpressionList', 3, 10, 0));
     is_deeply(get_tags($result)->{item_types}, ['Array', 'Scalar'],
         'ExpressionList alt 3 (trailing comma): item_types preserved');
 }
@@ -1506,7 +1540,7 @@ TODO: {
         item_types  => ['Array', 'Scalar'],
         list_arity  => 2,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'per-position: push(Array, Scalar) → valid');
     is(get_tags($result)->{type}, 'Int',
         'per-position: push return type => Int');
@@ -1519,7 +1553,7 @@ TODO: {
         item_types  => ['Scalar', 'Scalar'],
         list_arity  => 2,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok($ti->is_zero($result), 'per-position: push(Scalar, Scalar) → rejected');
 }
 
@@ -1531,7 +1565,7 @@ TODO: {
         item_types  => ['Str', 'Array'],
         list_arity  => 2,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'per-position: join(Str, Array) → valid');
     is(get_tags($result)->{type}, 'Str',
         'per-position: join return type => Str');
@@ -1544,7 +1578,7 @@ TODO: {
         item_types  => ['Int'],
         list_arity  => 1,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'per-position: chr(Int) → valid');
     is(get_tags($result)->{type}, 'Str',
         'per-position: chr return type => Str');
@@ -1566,7 +1600,7 @@ TODO: {
         item_types  => ['Str'],
         list_arity  => 1,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok($ti->is_zero($result), 'per-position: chr(Str) → rejected (Str is not Int)');
 }
 
@@ -1577,7 +1611,7 @@ TODO: {
         item_types  => [undef, undef],
         list_arity  => 2,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'per-position: push(undef, undef) → valid (permissive)');
 }
 
@@ -1588,7 +1622,7 @@ TODO: {
         item_types  => ['Hash'],
         list_arity  => 1,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'per-position: keys(Hash) → valid');
     is(get_tags($result)->{type}, 'List',
         'per-position: keys return type => List');
@@ -1601,7 +1635,7 @@ TODO: {
         item_types  => ['Scalar'],
         list_arity  => 1,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok($ti->is_zero($result), 'per-position: keys(Scalar) → rejected');
 }
 
@@ -1612,7 +1646,7 @@ TODO: {
         item_types  => ['Scalar'],
         list_arity  => 1,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'per-position: defined(Scalar) → valid');
     is(get_tags($result)->{type}, 'Bool',
         'per-position: defined return type => Bool');
@@ -1624,7 +1658,7 @@ TODO: {
         item_types => ['Int', 'Str'],
         list_arity => 2,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'per-position: non-builtin with item_types → valid');
 }
 
@@ -1635,7 +1669,7 @@ TODO: {
         item_types  => ['Array'],
         list_arity  => 1,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok($ti->is_zero($result), 'per-position: push(Array) with arity 1 → rejected (min_arity 2)');
 }
 
@@ -1648,7 +1682,7 @@ TODO: {
         item_types  => ['Array'],
         list_arity  => 2,  # Block + 1 ExpressionList arg
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 2, 10, 0);  # alt 2 = block-first with args
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 2, 10, 0));  # alt 2 = block-first with args
     ok(!$ti->is_zero($result), 'per-position: map(Block, Array) alt 2 → valid');
     # After #707: on_complete returns a tag hash directly (not a Context)
     is($result->{type}, 'List', 'per-position: map return type => List');
@@ -1661,7 +1695,7 @@ TODO: {
         call_symbol => 'map',
         # No list_arity or item_types — only a Block child
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 3, 10, 0);  # alt 3 = block-only
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 3, 10, 0));  # alt 3 = block-only
     ok(!$ti->is_zero($result), 'per-position: map(Block) alt 3 → valid');
 }
 
@@ -1672,7 +1706,7 @@ TODO: {
         item_types     => ['Scalar'],
         list_arity     => 2,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 2, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 2, 10, 0));
     ok($ti->is_zero($result), 'per-position: grep(Block, Scalar) alt 2 → rejected (Scalar is not List)');
 }
 
@@ -1685,8 +1719,8 @@ TODO: {
 # We verify the CONTENT is consistent, not the refaddr.
 {
     my $val = make_ctx(type => 'Str');
-    my $r1 = $ti->on_complete($val, 'Atom', 0, 5, 0);
-    my $r2 = $ti->on_complete($val, 'Atom', 0, 5, 0);
+    my $r1 = $ti->multiply($val, $make_complete->($val, 'Atom', 0, 5, 0));
+    my $r2 = $ti->multiply($val, $make_complete->($val, 'Atom', 0, 5, 0));
     ok(!$ti->is_zero($r1), 'on_complete Atom with Str is valid');
     ok(!$ti->is_zero($r2), 'on_complete Atom with Str (second call) is valid');
     is(get_tags($r1)->{type}, get_tags($r2)->{type},
@@ -1696,9 +1730,9 @@ TODO: {
 # Different alt_idx for PostfixDeref → different refaddrs
 {
     my $val = make_ctx();
-    my $r_array = $ti->on_complete($val, 'PostfixDeref', 0, 5, 0);  # alt 0 = ->@* → Array
-    my $r_hash  = $ti->on_complete($val, 'PostfixDeref', 1, 5, 0); # alt 1 = ->%* → Hash
-    my $r_scalar = $ti->on_complete($val, 'PostfixDeref', 2, 5, 0); # alt 2 = ->$* → Scalar
+    my $r_array = $ti->multiply($val, $make_complete->($val, 'PostfixDeref', 0, 5, 0));  # alt 0 = ->@* → Array
+    my $r_hash  = $ti->multiply($val, $make_complete->($val, 'PostfixDeref', 1, 5, 0)); # alt 1 = ->%* → Hash
+    my $r_scalar = $ti->multiply($val, $make_complete->($val, 'PostfixDeref', 2, 5, 0)); # alt 2 = ->$* → Scalar
     ok(!$ti->is_zero($r_array), 'PostfixDeref alt 0 is valid');
     ok(!$ti->is_zero($r_hash), 'PostfixDeref alt 1 is valid');
     ok(!$ti->is_zero($r_scalar), 'PostfixDeref alt 2 is valid');
@@ -1714,8 +1748,8 @@ TODO: {
 # Different alt_idx for Subscript → different refaddrs
 {
     my $val = make_ctx();
-    my $r_arr = $ti->on_complete($val, 'Subscript', 0, 5, 0);  # alt 0 = [...] → Scalar
-    my $r_call = $ti->on_complete($val, 'Subscript', 2, 5, 0); # alt 2 = ->() → no type
+    my $r_arr = $ti->multiply($val, $make_complete->($val, 'Subscript', 0, 5, 0));  # alt 0 = [...] → Scalar
+    my $r_call = $ti->multiply($val, $make_complete->($val, 'Subscript', 2, 5, 0)); # alt 2 = ->() → no type
     ok(!$ti->is_zero($r_arr), 'Subscript alt 0 is valid');
     ok(!$ti->is_zero($r_call), 'Subscript alt 2 is valid');
     is(get_tags($r_arr)->{type}, 'Scalar', 'Subscript alt 0 → Scalar');
@@ -1731,7 +1765,7 @@ TODO: {
     # Inner context has call_symbol (simulates QualifiedIdentifier scan)
     my $inner = make_ctx(call_symbol => 'push');
     # Wrap through ParenExpr on_complete (boundary rule does not propagate call_symbol)
-    my $boundary_result = $ti->on_complete($inner, 'ParenExpr', 0, 5, 0);
+    my $boundary_result = $ti->multiply($inner, $make_complete->($inner, 'ParenExpr', 0, 5, 0));
     ok(!$ti->is_zero($boundary_result), 'ParenExpr wrapping call_symbol is valid');
     # The result from ParenExpr should NOT have call_symbol in the returned tag hash
     # (TypeInferenceActions::ParenExpr only propagates type, not call_symbol)
@@ -1749,7 +1783,7 @@ TODO: {
         position    => 5,
         annotations => { type => $boundary_result },
     );
-    my $call_result = $ti->on_complete($boundary_ctx, 'CallExpression', 0, 5, 0);
+    my $call_result = $ti->multiply($boundary_ctx, $make_complete->($boundary_ctx, 'CallExpression', 0, 5, 0));
     ok(!$ti->is_zero($call_result), 'CallExpression with boundary-wrapped value (no children) is valid');
     # No call_symbol in tree → no builtin validation → returns valid with no type
     ok(!$call_result->{type},
@@ -1760,7 +1794,7 @@ TODO: {
 {
     my $o1 = $ti->one();
     my $val = make_ctx(type => 'Int');
-    my $r1 = $ti->on_complete($val, 'Expression', 0, 5, 0);
+    my $r1 = $ti->multiply($val, $make_complete->($val, 'Expression', 0, 5, 0));
 
     $ti->reset_cache();
 
@@ -1768,7 +1802,7 @@ TODO: {
     isnt(refaddr($o1), refaddr($o2),
         'reset_cache() clears one() singleton (different refaddr after reset)');
 
-    my $r2 = $ti->on_complete($val, 'Expression', 0, 5, 0);
+    my $r2 = $ti->multiply($val, $make_complete->($val, 'Expression', 0, 5, 0));
     isnt(refaddr($r1), refaddr($r2),
         'reset_cache() clears _extend_ctx cache (different refaddr after reset)');
 }
@@ -1790,7 +1824,7 @@ TODO: {
     my $mid   = $ti->multiply($left, $ti->one());
     my $val   = $ti->multiply($mid, $el_leaf);
 
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result),
         'split-tree CallExpression: finds call_symbol and item_types through unfocused nodes');
     is(get_tags($result)->{type}, 'Int',
@@ -1806,7 +1840,7 @@ TODO: {
     my $right = $ti->multiply($el_leaf, $ti->one());
     my $val = $ti->multiply($left, $right);
 
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok($ti->is_zero($result),
         'split-tree CallExpression: push with arity 1 → rejected (min_arity 2)');
 }
@@ -1819,7 +1853,7 @@ TODO: {
     my $left = $ti->multiply($qi_leaf, $ti->one());
     my $val = $ti->multiply($left, $el_leaf);
 
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok($ti->is_zero($result),
         'split-tree CallExpression: keys(Scalar) → rejected through split tree');
 }
@@ -1835,7 +1869,7 @@ TODO: {
         item_types  => ['Int'],
         list_arity  => 1,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'return(Int) is valid');
     is(get_tags($result)->{type}, 'Int',
         'return(Int) propagates Int type from argument');
@@ -1848,7 +1882,7 @@ TODO: {
         item_types  => ['Str'],
         list_arity  => 1,
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'return(Str) is valid');
     is(get_tags($result)->{type}, 'Str',
         'return(Str) propagates Str type from argument');
@@ -1859,7 +1893,7 @@ TODO: {
     my $val = make_ctx(
         call_symbol => 'return',
     );
-    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
+    my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'bare return is valid');
     ok(!exists get_tags($result)->{type},
         'bare return has no type tag');

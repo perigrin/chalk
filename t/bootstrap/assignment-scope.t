@@ -34,6 +34,26 @@ my sub make_parent_ctx(@children) {
     );
 }
 
+# Helper: build a complete-annotated Context for multiply() calls.
+# Replaces on_complete($value, $rule_name, $alt_idx, $pos, $origin).
+my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
+    $pos    //= 0;
+    $origin //= 0;
+    $alt_idx //= 0;
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => defined($value) ? [$value] : [],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+};
+
 # --- Case 1: VarDecl target assignment updates scope ---
 # AssignmentExpression(VarDecl_with_no_init, '=', Constant(42))
 # Should create a new VarDecl with initializer and bind '$x' in scope
@@ -69,7 +89,7 @@ my sub make_parent_ctx(@children) {
         scope   => $scope,
     });
 
-    my $result = $sa->on_complete($ctx, 'AssignmentExpression', 0, 0, 0);
+    my $result = $sa->multiply($ctx, $make_complete->($ctx, 'AssignmentExpression', 0, 0, 0));
     ok(defined $result, 'VarDecl assignment: on_complete returns a result');
 
     my $node = $result->extract();
@@ -119,7 +139,7 @@ my sub make_parent_ctx(@children) {
         scope   => $scope,
     });
 
-    my $result = $sa->on_complete($ctx, 'AssignmentExpression', 0, 0, 0);
+    my $result = $sa->multiply($ctx, $make_complete->($ctx, 'AssignmentExpression', 0, 0, 0));
     ok(defined $result, 'plain assignment: on_complete returns a result');
 
     my $node = $result->extract();
@@ -169,7 +189,7 @@ my sub make_parent_ctx(@children) {
         scope   => $scope,
     });
 
-    my $result = $sa->on_complete($ctx, 'AssignmentExpression', 0, 0, 0);
+    my $result = $sa->multiply($ctx, $make_complete->($ctx, 'AssignmentExpression', 0, 0, 0));
     ok(defined $result, 'compound assignment: on_complete returns a result');
 
     my $node = $result->extract();
@@ -210,7 +230,7 @@ my sub make_parent_ctx(@children) {
         make_leaf_ctx($rhs_node),
     );
 
-    my $result = $sa->on_complete($ctx, 'AssignmentExpression', 0, 0, 0);
+    my $result = $sa->multiply($ctx, $make_complete->($ctx, 'AssignmentExpression', 0, 0, 0));
     ok(defined $result, 'no-scope assignment: on_complete returns a result');
 
     my $node = $result->extract();

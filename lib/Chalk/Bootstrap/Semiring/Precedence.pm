@@ -80,7 +80,133 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return !$valid;
     }
 
+    # _slot_val: extract the precedence hashref from an argument.
+    # Accepts either a raw precedence hashref or a full Context object.
+    # Falls back to one() when no precedence annotation is present.
+    method _slot_val($val) {
+        return $self->one() unless defined $val;
+        # Context object: read from annotations->{precedence}
+        if (blessed($val) && $val->can('annotations')) {
+            return $val->annotations()->{precedence} // $self->one();
+        }
+        return $val;
+    }
+
     method multiply($left, $right) {
+        # Extract slot values from full Context objects if needed
+        my $l_prec = $self->_slot_val($left);
+        my $r_prec = $self->_slot_val($right);
+
+        # Propagate zero
+        return $self->zero() if $self->is_zero($l_prec);
+
+        # Scan event: right Context has annotations->{scan} = true.
+        # Apply operator-validation logic inline.
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{scan}) {
+            my $existing  = $l_prec;
+            my $rule_name = $right->annotations()->{rule_name} // '';
+            my $matched_text = $right->focus() // '';
+            return $self->_scan_multiply($existing, $rule_name, $matched_text);
+        }
+
+        # Complete event: right Context has annotations->{complete} = true.
+        # Apply precedence rule-completion logic.
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{complete}) {
+            my $rule_name = $right->annotations()->{rule_name};
+            my $alt_idx   = $right->annotations()->{alt_idx};
+            return $self->_complete_prec($l_prec, $rule_name, $alt_idx);
+        }
+
+        return $self->zero() if $self->is_zero($r_prec);
+
+        # Delegate to the regular multiply logic with extracted slot values
+        return $self->_prec_multiply($l_prec, $r_prec);
+    }
+
+    # _scan_multiply: operator-validation logic for scan events.
+    # Called from multiply when the right argument is a scan-annotated Context.
+    method _scan_multiply($existing, $rule_name, $matched_text) {
+        # Propagate zero
+        return $self->zero() if $self->is_zero($existing);
+
+        # In BinaryOp or AssignOp context, look up operator and validate
+        # the LEFT operand's precedence (accumulated in $existing).
+        if ($rule_name eq 'BinaryOp' || $rule_name eq 'AssignOp') {
+            my $op_info = $self->_do_lookup($matched_text);
+            if (defined $op_info) {
+                my $op_level = $op_info->{level};
+
+                # Validate: the left operand (in $existing) must have higher
+                # or equal precedence (lower or equal level number) than the
+                # operator. Otherwise, the left operand has lower precedence
+                # and can't be a direct child of this operator.
+                if (defined($existing->{level}) && $existing->{level} > $op_level) {
+                    if ($ENV{DEBUG_PRECEDENCE}) {
+                        warn "  PREC_REJECT: left_level=$existing->{level} > op_level=$op_level ($matched_text)\n";
+                    }
+                    return $self->zero();
+                }
+                if ($ENV{DEBUG_PRECEDENCE}) {
+                    my $el = $existing->{level} // 'undef';
+                    warn "  PREC_SCAN: left_level=$el op=$matched_text op_level=$op_level\n";
+                }
+
+                # Replace accumulated level with operator's level.
+                # Mark as is_operator so multiply can validate the left
+                # operand's precedence when this BinaryOp completes back
+                # into the parent BinaryExpression context.
+                return _intern(true, $op_level, $op_info->{assoc}, true, $matched_text);
+            }
+            # AssignOp operators are not in the binary precedence table.
+            # Give them level 101 (assignment precedence) with right-associativity
+            # and is_operator, so multiply can reject left-grouping of chained
+            # assignments: `(my $x = $y) //= 1` is invalid because the left
+            # operand is an AssignmentExpression (level 101, right-assoc).
+            if ($rule_name eq 'AssignOp') {
+                my $assign_level = 101;  # $EXPR_LEVELS->{AssignmentExpression}
+
+                # Validate left operand: reject if its level exceeds assignment
+                # precedence. Also reject same-level left operands (right-assoc):
+                # `(my $x = $y) //= 1` has left level=101 == op level=101.
+                if (defined($existing->{level})) {
+                    if ($existing->{level} > $assign_level) {
+                        if ($ENV{DEBUG_PRECEDENCE}) {
+                            warn "  PREC_REJECT: left_level=$existing->{level} > op_level=$assign_level ($matched_text)\n";
+                        }
+                        return $self->zero();
+                    }
+                    if ($existing->{level} == $assign_level) {
+                        if ($ENV{DEBUG_PRECEDENCE}) {
+                            warn "  PREC_REJECT_RASSOC: left_level=$existing->{level} == op_level=$assign_level ($matched_text)\n";
+                        }
+                        return $self->zero();
+                    }
+                }
+
+                return _intern(true, $assign_level, 'right', true, $matched_text);
+            }
+        }
+
+        # Subscript bracket boundary: reject if the target is a bare
+        # BinaryExpression. When `[` or `{` scans inside a Subscript rule,
+        # the accumulated level comes from the target Expression. A level
+        # in 0..99 means the target is a BinaryExpression (e.g., `$a // $b`),
+        # which cannot be a subscript target without parentheses. This kills
+        # the wrong parse of `$a->[$i] // $a->[-1]` as `($a->[$i] // $a)->[-1]`.
+        if ($rule_name eq 'Subscript' && $matched_text =~ /^[\[\{]$/
+                && defined($existing->{level}) && $existing->{level} >= 0) {
+            return $self->zero();
+        }
+
+        # Non-operator scan: multiply with one (transparent)
+        return $self->_prec_multiply($existing, $self->one());
+    }
+
+    # _prec_multiply: the core multiply logic on raw precedence hashrefs.
+    # Called from multiply() after slot extraction and scan-event dispatch.
+    method _prec_multiply($left, $right) {
         # Propagate zero
         return $self->zero() if $self->is_zero($left);
         return $self->zero() if $self->is_zero($right);
@@ -202,7 +328,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # Both valid: prefer the value with level info (more constraining).
         # When both have levels, prefer the higher level number (lower
         # precedence = more constraining parent context). This ensures
-        # the on_scan left-operand check has the tightest possible
+        # the scan-time left-operand check has the tightest possible
         # constraint, preventing invalid parses like ($a && $b) =~ /x/.
         my $ll = $left->{level};
         my $rl = $right->{level};
@@ -225,7 +351,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
             # AssignmentExpression (level>=100), prefer the PostfixExpression
             # level. The assignment level would otherwise kill valid
             # method-call/subscript parse paths downstream (PostfixExpression
-            # on_complete rejects values with level>=0).
+            # completion rejects values with level>=0).
             if ($ll < 0 && $rl >= 100) {
                 return [$left];
             }
@@ -240,86 +366,9 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return [$left];
     }
 
-    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
-        my $existing = $value;
-
-        # Propagate zero
-        return $self->zero() if $self->is_zero($existing);
-
-        # In BinaryOp or AssignOp context, look up operator and validate
-        # the LEFT operand's precedence (accumulated in $existing).
-        if ($rule_name eq 'BinaryOp' || $rule_name eq 'AssignOp') {
-            my $op_info = $self->_do_lookup($matched_text);
-            if (defined $op_info) {
-                my $op_level = $op_info->{level};
-
-                # Validate: the left operand (in $existing) must have higher
-                # or equal precedence (lower or equal level number) than the
-                # operator. Otherwise, the left operand has lower precedence
-                # and can't be a direct child of this operator.
-                if (defined($existing->{level}) && $existing->{level} > $op_level) {
-                    if ($ENV{DEBUG_PRECEDENCE}) {
-                        warn "  PREC_REJECT: left_level=$existing->{level} > op_level=$op_level ($matched_text)\n";
-                    }
-                    return $self->zero();
-                }
-                if ($ENV{DEBUG_PRECEDENCE}) {
-                    my $el = $existing->{level} // 'undef';
-                    warn "  PREC_SCAN: left_level=$el op=$matched_text op_level=$op_level\n";
-                }
-
-                # Replace accumulated level with operator's level.
-                # Mark as is_operator so multiply can validate the left
-                # operand's precedence when this BinaryOp completes back
-                # into the parent BinaryExpression context.
-                return _intern(true, $op_level, $op_info->{assoc}, true, $matched_text);
-            }
-            # AssignOp operators are not in the binary precedence table.
-            # Give them level 101 (assignment precedence) with right-associativity
-            # and is_operator, so multiply can reject left-grouping of chained
-            # assignments: `(my $x = $y) //= 1` is invalid because the left
-            # operand is an AssignmentExpression (level 101, right-assoc).
-            if ($rule_name eq 'AssignOp') {
-                my $assign_level = 101;  # $EXPR_LEVELS->{AssignmentExpression}
-
-                # Validate left operand: reject if its level exceeds assignment
-                # precedence. Also reject same-level left operands (right-assoc):
-                # `(my $x = $y) //= 1` has left level=101 == op level=101.
-                if (defined($existing->{level})) {
-                    if ($existing->{level} > $assign_level) {
-                        if ($ENV{DEBUG_PRECEDENCE}) {
-                            warn "  PREC_REJECT: left_level=$existing->{level} > op_level=$assign_level ($matched_text)\n";
-                        }
-                        return $self->zero();
-                    }
-                    if ($existing->{level} == $assign_level) {
-                        if ($ENV{DEBUG_PRECEDENCE}) {
-                            warn "  PREC_REJECT_RASSOC: left_level=$existing->{level} == op_level=$assign_level ($matched_text)\n";
-                        }
-                        return $self->zero();
-                    }
-                }
-
-                return _intern(true, $assign_level, 'right', true, $matched_text);
-            }
-        }
-
-        # Subscript bracket boundary: reject if the target is a bare
-        # BinaryExpression. When `[` or `{` scans inside a Subscript rule,
-        # the accumulated level comes from the target Expression. A level
-        # in 0..99 means the target is a BinaryExpression (e.g., `$a // $b`),
-        # which cannot be a subscript target without parentheses. This kills
-        # the wrong parse of `$a->[$i] // $a->[-1]` as `($a->[$i] // $a)->[-1]`.
-        if ($rule_name eq 'Subscript' && $matched_text =~ /^[\[\{]$/
-                && defined($existing->{level}) && $existing->{level} >= 0) {
-            return $self->zero();
-        }
-
-        # Non-operator scan: multiply with one (transparent)
-        return $self->multiply($existing, $self->one());
-    }
-
-    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
+    # _complete_prec: apply precedence reification for a completed rule.
+    # Receives the accumulated left-side precedence hashref and rule metadata.
+    method _complete_prec($value, $rule_name, $alt_idx) {
         return $self->zero() if $self->is_zero($value);
 
         # Parenthesized expressions reset precedence context
@@ -342,7 +391,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         }
 
         # BinaryOp/AssignOp completion: the value already carries operator info
-        # from on_scan. Pass it through so multiply can use is_operator.
+        # from scan. Pass it through so multiply can use is_operator.
         if ($rule_name eq 'BinaryOp' || $rule_name eq 'AssignOp') {
             return $value;
         }
@@ -379,7 +428,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         }
 
         # MethodCall/CallExpression/PostfixDeref/PostfixIncDec: pass through
-        # precedence info so PostfixExpression's on_complete can reject
+        # precedence info so PostfixExpression's completion can reject
         # invalid targets (e.g., unparenthesized BinaryExpression as target).
         if ($rule_name eq 'MethodCall'
             || $rule_name eq 'CallExpression'
@@ -390,13 +439,6 @@ class Chalk::Bootstrap::Semiring::Precedence {
 
         # Other rules: pass through value, clear operator info
         return $self->one();
-    }
-
-    # should_scan: gate for scan operation, called after regex match succeeds
-    # Returns true to proceed with scan, false to skip it.
-    # Default: always return true (no filtering).
-    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
-        return true;
     }
 
     # slot_name: Precedence reads/writes the 'precedence' annotation slot.

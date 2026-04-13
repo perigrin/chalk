@@ -1,5 +1,5 @@
 # ABOUTME: Verifies that semiring callbacks receive correct accumulated values.
-# ABOUTME: Instruments a semiring to trace every callback and validates the parse history contract.
+# ABOUTME: Instruments a semiring to trace every multiply/complete callback and validates parse history.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -25,7 +25,14 @@ sub reference ($value) {
 }
 
 # ============================================================
-# TracingSemiring: records every callback with its arguments
+# TracingSemiring: records multiply and complete callbacks
+#
+# With the unified multiply protocol, scan events arrive as:
+#   multiply($value, $scan_ctx) where $scan_ctx->annotations->{scan} is true
+#
+# The semiring detects scan Contexts by checking annotations->{scan} on the
+# right argument, logs them as 'scan' events, and returns a structured result
+# that captures the accumulated history depth.
 # ============================================================
 
 package TracingSemiring {
@@ -33,11 +40,12 @@ package TracingSemiring {
     use utf8;
 
     sub new ($class) {
-        return bless { log => [], one_val => { tag => 'one' } }, $class;
+        return bless { log => [], one_val => { tag => 'one', depth => 0 } }, $class;
     }
 
     sub log ($self) { return $self->{log} }
     sub clear_log ($self) { $self->{log} = [] }
+    sub slot_name ($self) { return undef }  # SA position — receives full Context
 
     sub _log ($self, $event, $info) {
         push $self->{log}->@*, { event => $event, %$info };
@@ -51,81 +59,25 @@ package TracingSemiring {
     # Extract raw hashref from a value that may be a Context (from FilterComposite)
     sub _raw ($self, $value) {
         return undef unless defined $value;
-        return $value->extract() if blessed($value) && $value->can('extract');
+        if (blessed($value) && $value->can('extract')) {
+            my $focus = $value->extract();
+            # Return the focus if it is a hashref (structured result)
+            return $focus if ref($focus) eq 'HASH';
+            # For scan Contexts the focus is the matched text string.
+            # Return a synthetic tag hash so callers can read -{tag} safely.
+            return { tag => "scan_leaf:$focus", depth => 0 } if defined $focus;
+            return undef;
+        }
         return $value;
     }
 
-    sub multiply ($self, $left, $right) {
-        return undef if !defined $left || !defined $right;
-        my $l_raw = $self->_raw($left);
-        my $r_raw = $self->_raw($right);
-        my $result = { tag => 'mul', children => [$l_raw, $r_raw] };
-        $self->_log('multiply', {
-            left_tag  => defined $l_raw ? ($l_raw->{tag} // '?') : 'ZERO',
-            right_tag => defined $r_raw ? ($r_raw->{tag} // '?') : 'ZERO',
-        });
-        return $result;
-    }
-
-    sub add ($self, $left, $right) {
-        return [$right] if !defined $left;
-        return [$left]  if !defined $right;
-        my $l_raw = $self->_raw($left);
-        my $r_raw = $self->_raw($right);
-        $self->_log('add', {
-            left_tag  => defined $l_raw ? ($l_raw->{tag} // '?') : 'ZERO',
-            right_tag => defined $r_raw ? ($r_raw->{tag} // '?') : 'ZERO',
-        });
-        return [$left];
-    }
-
-    sub on_scan ($self, $value, $rule_name, $alt_idx, $pos, $matched_text) {
-        return undef if !defined $value;
-        my $raw = $self->_raw($value);
-        my $scan_val = { tag => "scan:$rule_name:$matched_text" };
-        $self->_log('on_scan', {
-            rule      => $rule_name,
-            pos       => $pos,
-            text      => $matched_text,
-            value_tag => defined $raw ? ($raw->{tag} // '?') : 'ZERO',
-            depth     => defined $raw ? _depth($raw) : 0,
-        });
-        return $self->multiply($value, $scan_val);
-    }
-
-    sub should_scan ($self, $value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
-        # FilterComposite may pass a Context (unified) or raw hashref (standalone)
-        my $raw = (blessed($value) && $value->can('extract')) ? $value->extract() : $value;
-        $self->_log('should_scan', {
-            rule      => $rule_name,
-            pos       => $pos,
-            text      => $matched_text,
-            value_tag => defined $raw ? ($raw->{tag} // '?') : 'ZERO',
-            depth     => defined $raw ? _depth($raw) : 0,
-        });
-        return true;
-    }
-
-    sub on_complete ($self, $value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
-        return undef if !defined $value;
-        my $raw = $self->_raw($value);
-        my $result = { tag => "complete:$rule_name", inner => $raw };
-        $self->_log('on_complete', {
-            rule      => $rule_name,
-            pos       => $pos,
-            origin    => $origin,
-            value_tag => defined $raw ? ($raw->{tag} // '?') : 'ZERO',
-            depth     => defined $raw ? _depth($raw) : 0,
-        });
-        return $result;
-    }
-
-    # Measure depth of value tree
+    # Compute depth of a structured tag-hash result tree.
     sub _depth ($val, $seen = {}) {
         return 0 unless defined $val && ref($val) eq 'HASH';
         my $addr = refaddr($val);
         return 0 if exists $seen->{$addr};
         $seen->{$addr} = 1;
+        return $val->{depth} if exists $val->{depth};
         my $max = 0;
         for my $key (qw(children inner)) {
             next unless exists $val->{$key};
@@ -143,27 +95,73 @@ package TracingSemiring {
         return $max + 1;
     }
 
-    # Walk tree to find a tag value
-    sub find_tag ($val, $tag_name, $seen = {}) {
-        return unless defined $val && ref($val) eq 'HASH';
-        my $addr = refaddr($val);
-        return if exists $seen->{$addr};
-        $seen->{$addr} = 1;
-        return $val->{tag} if ($val->{tag} // '') =~ /^\Q$tag_name\E/;
-        for my $key (qw(children inner)) {
-            next unless exists $val->{$key};
-            my $child = $val->{$key};
-            if (ref($child) eq 'ARRAY') {
-                for my $c ($child->@*) {
-                    my $found = find_tag($c, $tag_name, $seen);
-                    return $found if defined $found;
-                }
-            } elsif (ref($child) eq 'HASH') {
-                my $found = find_tag($child, $tag_name, $seen);
-                return $found if defined $found;
-            }
+    # multiply: combines two values in sequence.
+    # Detects scan events by checking annotations->{scan} on the right argument.
+    # Detects complete events by checking annotations->{complete} on the right argument.
+    # Scan events: right is an annotated scan Context from Earley._make_scan_context.
+    # Complete events: right is an annotated complete Context from Earley._make_complete_context.
+    sub multiply ($self, $left, $right) {
+        return undef if !defined $left || !defined $right;
+        my $l_raw = $self->_raw($left);
+        my $l_depth = defined $l_raw ? (_depth($l_raw) // 0) : 0;
+        my $l_tag   = defined $l_raw ? ($l_raw->{tag} // '?') : 'ZERO';
+
+        # Detect scan Context: right has annotations->{scan} = true
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{scan}) {
+            my $matched_text = $right->focus() // '';
+            my $rule_name    = $right->annotations()->{rule_name} // '';
+            $self->_log('scan', {
+                rule      => $rule_name,
+                text      => $matched_text,
+                value_tag => $l_tag,
+                depth     => $l_depth,
+            });
+            my $result = { tag => "scan:$rule_name:$matched_text",
+                           depth => $l_depth + 1 };
+            return $result;
         }
-        return;
+
+        # Detect complete Context: right has annotations->{complete} = true
+        # Log as 'on_complete' for backward compatibility with test assertions.
+        if (blessed($right) && $right->can('annotations')
+                && $right->annotations()->{complete}) {
+            my $rule_name = $right->annotations()->{rule_name} // '';
+            my $pos       = $right->annotations()->{pos} // 0;
+            my $origin    = $right->annotations()->{origin} // 0;
+            my $result = { tag => "complete:$rule_name", depth => $l_depth + 1, inner => $l_raw };
+            $self->_log('on_complete', {
+                rule      => $rule_name,
+                pos       => $pos,
+                origin    => $origin,
+                value_tag => $l_tag,
+                depth     => $l_depth,
+            });
+            return $result;
+        }
+
+        my $r_raw   = $self->_raw($right);
+        my $r_depth = defined $r_raw ? (_depth($r_raw) // 0) : 0;
+        my $result  = { tag => 'mul',
+                        depth => ($l_depth > $r_depth ? $l_depth : $r_depth) + 1,
+                        children => [$l_raw, $r_raw] };
+        $self->_log('multiply', {
+            left_tag  => $l_tag,
+            right_tag => defined $r_raw ? ($r_raw->{tag} // '?') : 'ZERO',
+        });
+        return $result;
+    }
+
+    sub add ($self, $left, $right) {
+        return [$right] if !defined $left;
+        return [$left]  if !defined $right;
+        my $l_raw = $self->_raw($left);
+        my $r_raw = $self->_raw($right);
+        $self->_log('add', {
+            left_tag  => defined $l_raw ? ($l_raw->{tag} // '?') : 'ZERO',
+            right_tag => defined $r_raw ? ($r_raw->{tag} // '?') : 'ZERO',
+        });
+        return [$left];
     }
 }
 
@@ -171,7 +169,7 @@ package TracingSemiring {
 # Test 1: Simple two-terminal rule — A ::= /x/ /y/
 # ============================================================
 
-subtest 'two terminals: on_scan receives accumulated history' => sub {
+subtest 'two terminals: multiply called for each scan' => sub {
     my $grammar = [
         Chalk::Grammar::Rule->new(
             name        => 'A',
@@ -195,15 +193,16 @@ subtest 'two terminals: on_scan receives accumulated history' => sub {
 
     my @log = $tracer->log()->@*;
 
-    # on_scan for /x/: value should be one (start of rule)
-    my @x_scans = grep { $_->{event} eq 'on_scan' && $_->{text} eq 'x' } @log;
-    ok(scalar @x_scans >= 1, 'on_scan called for x');
-    is($x_scans[0]->{value_tag}, 'one', 'x on_scan: value is one (rule start)');
+    # Scan for /x/: the left value carries one (rule start), depth=0
+    my @x_scans = grep { $_->{event} eq 'scan' && $_->{text} eq 'x' } @log;
+    ok(scalar @x_scans >= 1, 'scan logged for x');
+    is($x_scans[0]->{value_tag}, 'one', 'x scan: left value is one (rule start)');
+    is($x_scans[0]->{depth}, 0, 'x scan: left depth is 0');
 
-    # on_scan for /y/: value should have depth > 1 (contains x scan result)
-    my @y_scans = grep { $_->{event} eq 'on_scan' && $_->{text} eq 'y' } @log;
-    ok(scalar @y_scans >= 1, 'on_scan called for y');
-    ok($y_scans[0]->{depth} > 0, 'y on_scan: value has depth (contains x history)')
+    # Scan for /y/: the left value has depth > 0 (contains x scan result)
+    my @y_scans = grep { $_->{event} eq 'scan' && $_->{text} eq 'y' } @log;
+    ok(scalar @y_scans >= 1, 'scan logged for y');
+    ok($y_scans[0]->{depth} > 0, 'y scan: left value has depth (contains x history)')
         or diag("y depth=$y_scans[0]->{depth} tag=$y_scans[0]->{value_tag}");
 
     # on_complete for A: value should have depth > 1 (contains both scans)
@@ -261,7 +260,7 @@ subtest 'nested rule: completion propagates across boundaries' => sub {
 
 # ============================================================
 # Test 3: Binary pattern — S ::= E /[+]/ E ; E ::= /\w+/
-# The + scan and second E scan must see first E's completion
+# The + scan must see first E's completion in accumulated left value
 # ============================================================
 
 subtest 'binary: operator scan sees left operand history' => sub {
@@ -292,19 +291,12 @@ subtest 'binary: operator scan sees left operand history' => sub {
 
     my @log = $tracer->log()->@*;
 
-    # should_scan for +: value must have depth > 0 (first E completed)
-    my @plus_ss = grep { $_->{event} eq 'should_scan' && $_->{text} eq '+' } @log;
-    ok(scalar @plus_ss >= 1, 'should_scan called for +');
-    ok($plus_ss[0]->{depth} > 0,
-        '+ should_scan: value has depth (first E in history)')
-        or diag("+ depth=$plus_ss[0]->{depth} tag=$plus_ss[0]->{value_tag}");
-
-    # on_scan for +: same check
-    my @plus_os = grep { $_->{event} eq 'on_scan' && $_->{text} eq '+' } @log;
-    ok(scalar @plus_os >= 1, 'on_scan called for +');
-    ok($plus_os[0]->{depth} > 0,
-        '+ on_scan: value has depth (first E in history)')
-        or diag("+ depth=$plus_os[0]->{depth} tag=$plus_os[0]->{value_tag}");
+    # scan for +: the left value must have depth > 0 (first E completed)
+    my @plus_scans = grep { $_->{event} eq 'scan' && $_->{text} eq '+' } @log;
+    ok(scalar @plus_scans >= 1, 'scan logged for +');
+    ok($plus_scans[0]->{depth} > 0,
+        '+ scan: left value has depth (first E in history)')
+        or diag("+ depth=$plus_scans[0]->{depth} tag=$plus_scans[0]->{value_tag}");
 
     # S completes with full tree
     my @s_comp = grep { $_->{event} eq 'on_complete' && $_->{rule} eq 'S' } @log;

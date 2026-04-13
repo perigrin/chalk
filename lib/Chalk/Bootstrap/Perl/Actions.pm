@@ -2708,7 +2708,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # records the scope as it stood at the end of each branch.
                 #
                 # The pre-branch scope comes from the condition leaf's cfg_state,
-                # not from state->{scope}: by the time on_complete runs, multiply()
+                # not from state->{scope}: by the time the complete event runs, multiply()
                 # has already merged the then-block's scope into the inherited state,
                 # so state->{scope} is contaminated with branch assignments.
                 my $pre_scope;

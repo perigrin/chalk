@@ -1,5 +1,5 @@
 # ABOUTME: Tests FilterComposite unified Context interface (#706).
-# ABOUTME: Verifies zero/one/is_zero/multiply/add/on_scan/on_complete return Context objects.
+# ABOUTME: Verifies zero/one/is_zero/multiply/add return Context objects; complete via multiply.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -25,6 +25,36 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 # ========================================================================
 # Helpers
 # ========================================================================
+
+# Helper: build an annotated scan Context (as Earley would create it)
+sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {
+    return Chalk::Bootstrap::Context->new(
+        focus       => $matched_text,
+        position    => 0,
+        annotations => {
+            scan      => true,
+            rule_name => $rule_name,
+            alt_idx   => 0,
+            predicted => $is_predicted_hash,
+        },
+    );
+}
+
+# Helper: build an annotated complete Context (as Earley would create it)
+sub make_complete_ctx($value, $rule_name, $alt_idx, $pos, $origin) {
+    return Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => [$value],
+        position    => $pos,
+        annotations => {
+            complete  => true,
+            rule_name => $rule_name,
+            alt_idx   => $alt_idx,
+            pos       => $pos,
+            origin    => $origin,
+        },
+    );
+}
 
 sub make_2ary_comp {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
@@ -168,88 +198,81 @@ sub make_5ary_comp {
 }
 
 # ========================================================================
-# on_scan() — returns Context or zero Context
+# multiply with scan Context — returns Context or zero Context
 # ========================================================================
 
 {
     my $comp = make_2ary_comp();
     my $one  = $comp->one();
 
-    my $result = $comp->on_scan($one, 'Identifier', 0, 0, 'foo');
-    isa_ok($result, 'Chalk::Bootstrap::Context', 'on_scan returns Context');
-    ok(!$comp->is_zero($result), 'on_scan result is not zero');
+    my $result = $comp->multiply($one, make_scan_ctx('Identifier', 'foo'));
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'multiply with scan Context returns Context');
+    ok(!$comp->is_zero($result), 'multiply with scan Context result is not zero');
 }
 
 {
     my $comp = make_2ary_comp();
     my $zero = $comp->zero();
 
-    my $result = $comp->on_scan($zero, 'Identifier', 0, 0, 'foo');
-    ok($comp->is_zero($result), 'on_scan(zero) returns zero');
+    my $result = $comp->multiply($zero, make_scan_ctx('Identifier', 'foo'));
+    ok($comp->is_zero($result), 'multiply(zero, scan_ctx) returns zero');
 }
 
 # ========================================================================
-# on_complete() — returns Context or zero Context
+# multiply with complete Context — replaces on_complete
+# Complete events are now handled by multiply with annotations->{complete}=true
 # ========================================================================
 
 {
     my $comp = make_2ary_comp();
     my $one  = $comp->one();
 
-    # First scan to build a tree node
-    my $scanned = $comp->on_scan($one, 'Identifier', 0, 0, 'foo');
+    # First multiply with scan Context to build a tree node
+    my $scanned = $comp->multiply($one, make_scan_ctx('Identifier', 'foo'));
 
-    my $result = $comp->on_complete($scanned, 'Identifier', 0, 1, 0);
-    isa_ok($result, 'Chalk::Bootstrap::Context', 'on_complete returns Context');
-    ok(!$comp->is_zero($result), 'on_complete result is not zero');
+    my $complete_ctx = make_complete_ctx($scanned, 'Identifier', 0, 1, 0);
+    my $result = $comp->multiply($scanned, $complete_ctx);
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'multiply with complete Context returns Context');
+    ok(!$comp->is_zero($result), 'multiply with complete Context result is not zero');
 }
 
 {
     my $comp = make_2ary_comp();
     my $zero = $comp->zero();
 
-    my $result = $comp->on_complete($zero, 'Identifier', 0, 1, 0);
-    ok($comp->is_zero($result), 'on_complete(zero) returns zero');
+    my $complete_ctx = make_complete_ctx($zero, 'Identifier', 0, 1, 0);
+    my $result = $comp->multiply($zero, $complete_ctx);
+    ok($comp->is_zero($result), 'multiply(zero, complete_ctx) returns zero');
 }
 
 # ========================================================================
-# on_skip_optional() — returns Context or zero Context
+# absent optional — multiply(value, one()) replaces on_skip_optional
+# Absent optionals produce multiply(value, one()) which creates an
+# unfocused Context node; action methods see one() for absent optionals.
 # ========================================================================
 
 {
     my $comp = make_2ary_comp();
     my $one  = $comp->one();
 
-    my $result = $comp->on_skip_optional($one, 'Element', 0, 0, 'Quantifier');
-    isa_ok($result, 'Chalk::Bootstrap::Context', 'on_skip_optional returns Context');
-    ok(!$comp->is_zero($result), 'on_skip_optional result is not zero');
+    my $result = $comp->multiply($one, $comp->one());
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'multiply(one, one()) for absent optional returns Context');
+    ok(!$comp->is_zero($result), 'multiply(one, one()) for absent optional is not zero');
 }
 
 # ========================================================================
-# should_scan() — returns bool
-# ========================================================================
-
-{
-    my $comp = make_2ary_comp();
-    my $one  = $comp->one();
-
-    my $result = $comp->should_scan($one, 'Identifier', 0, 0, 'foo', sub { false });
-    ok($result, 'should_scan(one,...) returns true for identifier');
-}
-
-# ========================================================================
-# 5-ary: precedence annotation survives multiply
+# 5-ary: precedence annotation survives multiply with scan Context
 # ========================================================================
 
 {
     my $comp = make_5ary_comp();
     my $one  = $comp->one();
 
-    my $scanned = $comp->on_scan($one, 'Identifier', 0, 0, 'foo');
+    my $scanned = $comp->multiply($one, make_scan_ctx('Identifier', 'foo'));
     ok(defined $scanned->annotations()->{precedence},
-        '5-ary on_scan result has precedence annotation');
+        '5-ary multiply with scan Context result has precedence annotation');
     ok(defined $scanned->annotations()->{structural},
-        '5-ary on_scan result has structural annotation');
+        '5-ary multiply with scan Context result has structural annotation');
 }
 
 # ========================================================================
@@ -260,11 +283,11 @@ sub make_5ary_comp {
     my $comp = make_5ary_comp();
     my $one  = $comp->one();
 
-    my $scanned = $comp->on_scan($one, 'Identifier', 0, 0, 'foo');
+    my $scanned = $comp->multiply($one, make_scan_ctx('Identifier', 'foo'));
     ok(!exists $scanned->annotations()->{_ti_raw},
-        '5-ary on_scan result has no _ti_raw annotation after #707 migration');
+        '5-ary multiply result has no _ti_raw annotation after #707 migration');
     ok(exists $scanned->annotations()->{type},
-        '5-ary on_scan result has type annotation');
+        '5-ary multiply result has type annotation');
 }
 
 # ========================================================================
