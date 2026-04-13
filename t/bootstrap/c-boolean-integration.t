@@ -130,20 +130,6 @@ print !\$b->is_zero(\$a2) ? 'ADD_ZERO_ONE_OK\\n'   : 'ADD_ZERO_ONE_FAIL\\n';
 my \$a3 = \$b->add(\$one, \$zero);
 print !\$b->is_zero(\$a3) ? 'ADD_ONE_ZERO_OK\\n'   : 'ADD_ONE_ZERO_FAIL\\n';
 
-# on_scan: multiply(value, one)
-my \$scanned = \$b->on_scan(\$one, 'TestRule', 0, 0, 'a');
-print !\$b->is_zero(\$scanned) ? 'ON_SCAN_OK\\n'      : 'ON_SCAN_FAIL\\n';
-
-# on_complete: identity — returns value unchanged
-my \$completed = \$b->on_complete(\$one, 'TestRule', 0, 0, 0);
-print !\$b->is_zero(\$completed) ? 'ON_COMPLETE_OK\\n' : 'ON_COMPLETE_FAIL\\n';
-
-# should_scan: always returns true for Boolean
-print \$b->should_scan(\$one, 'TestRule', 0, 0, '', {}) ? 'SHOULD_SCAN_OK\\n' : 'SHOULD_SCAN_FAIL\\n';
-
-# supports_leo: Boolean supports Leo optimization
-print \$b->supports_leo() ? 'SUPPORTS_LEO_OK\\n' : 'SUPPORTS_LEO_FAIL\\n';
-
 print 'EQUIV_OK\\n';
 END_SCRIPT
 
@@ -161,10 +147,6 @@ like($out1, qr/MULT_ONE_ONE_OK/,      'Part 1: multiply(one, one) = one');
 like($out1, qr/ADD_ZERO_ZERO_OK/,     'Part 1: add(zero, zero) = zero');
 like($out1, qr/ADD_ZERO_ONE_OK/,      'Part 1: add(zero, one) = one');
 like($out1, qr/ADD_ONE_ZERO_OK/,      'Part 1: add(one, zero) = one');
-like($out1, qr/ON_SCAN_OK/,           'Part 1: on_scan returns non-zero');
-like($out1, qr/ON_COMPLETE_OK/,       'Part 1: on_complete returns value unchanged');
-like($out1, qr/SHOULD_SCAN_OK/,       'Part 1: should_scan always returns true');
-like($out1, qr/SUPPORTS_LEO_OK/,      'Part 1: supports_leo returns true');
 like($out1, qr/EQUIV_OK/,             'Part 1: all semiring operations verified');
 
 # -------------------------------------------------------------------------

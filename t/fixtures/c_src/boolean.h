@@ -10,7 +10,6 @@ SV * boolean_is_zero(pTHX_ SV *self, SV *value);
 SV * boolean_multiply(pTHX_ SV *self, SV *left, SV *right);
 SV * boolean_one(pTHX_ SV *self);
 SV * boolean_slot_name(pTHX_ SV *self);
-SV * boolean_supports_leo(pTHX_ SV *self);
 SV * boolean_zero(pTHX_ SV *self);
 
 #endif /* CHALK_BOOLEAN_H */

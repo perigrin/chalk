@@ -51,7 +51,7 @@ SV * boolean_multiply(pTHX_ SV *self, SV *left, SV *right) {
     if (SvTRUE(({ boolean_is_zero(aTHX_ self, left); }))) {
         retval = SvREFCNT_inc(({ boolean_zero(aTHX_ self); })); goto xsreturn;
     }
-    retval = (SvTRUE(({ boolean_is_zero(aTHX_ self, right); })) ? ({ boolean_zero(aTHX_ self); }) : ({ dSP; ENTER; SAVETMPS; PUSHMARK(SP); XPUSHs(sv_2mortal(newSVpvs("Chalk::Bootstrap::Context"))); XPUSHs(sv_2mortal(newSVpvs("focus"))); XPUSHs(&PL_sv_yes); XPUSHs(sv_2mortal(newSVpvs("children"))); XPUSHs(({ AV *_arr9113 = newAV(); av_push(_arr9113, SvREFCNT_inc(left)); av_push(_arr9113, SvREFCNT_inc(right)); sv_2mortal(newRV_noinc((SV*)_arr9113)); })); XPUSHs(sv_2mortal(newSVpvs("is_zero"))); XPUSHs(&PL_sv_no); PUTBACK; call_method("new", G_SCALAR); SPAGAIN; SV *_mcr = SvREFCNT_inc(POPs); PUTBACK; FREETMPS; LEAVE; _mcr; }));
+    retval = (SvTRUE(({ boolean_is_zero(aTHX_ self, right); })) ? ({ boolean_zero(aTHX_ self); }) : ({ dSP; ENTER; SAVETMPS; PUSHMARK(SP); XPUSHs(sv_2mortal(newSVpvs("Chalk::Bootstrap::Context"))); XPUSHs(sv_2mortal(newSVpvs("focus"))); XPUSHs(&PL_sv_yes); XPUSHs(sv_2mortal(newSVpvs("children"))); XPUSHs(({ AV *_arr8407 = newAV(); av_push(_arr8407, SvREFCNT_inc(left)); av_push(_arr8407, SvREFCNT_inc(right)); sv_2mortal(newRV_noinc((SV*)_arr8407)); })); XPUSHs(sv_2mortal(newSVpvs("is_zero"))); XPUSHs(&PL_sv_no); PUTBACK; call_method("new", G_SCALAR); SPAGAIN; SV *_mcr = SvREFCNT_inc(POPs); PUTBACK; FREETMPS; LEAVE; _mcr; }));
     xsreturn:
     return retval;
 }
@@ -72,10 +72,6 @@ SV * boolean_add(pTHX_ SV *self, SV *left, SV *right) {
     retval = SvREFCNT_inc(left);
     xsreturn:
     return retval;
-}
-
-SV * boolean_supports_leo(pTHX_ SV *self) {
-    return &PL_sv_yes;
 }
 
 SV * boolean_slot_name(pTHX_ SV *self) {

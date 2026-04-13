@@ -19,12 +19,13 @@ class Chalk::Bootstrap::Earley {
     field $semiring :param :reader;
     field $_recover :param(recover) = false;
 
-    # Test scaffolding: force Leo on/off regardless of semiring's supports_leo.
-    # Used by t/bootstrap/leo-graph-equivalence.t to compare Leo-on vs Leo-off
-    # parses of the same input. When undef (normal production path), Leo is
-    # gated on $semiring->supports_leo(). Remove this once Leo is proven
-    # correct across all semirings.
-    field $_leo_override :param(leo_enabled) = undef;
+    # Leo optimization enable flag. Always true in production; can be
+    # overridden to false via the leo_enabled constructor parameter for
+    # tests (graph-equivalence harness, etc.) that need to compare Leo-on
+    # and Leo-off parses of the same input. Leo is structurally correct
+    # for all semirings (proven by t/bootstrap/leo-graph-equivalence.t);
+    # the override exists solely to run the comparison.
+    field $_leo_enabled :param(leo_enabled) = true;
 
     # Source file path for diagnostics (set per parse_value call)
     field $_parse_file;
@@ -60,8 +61,6 @@ class Chalk::Bootstrap::Earley {
     # reducing O(n) items per recursive chain to O(1).
     field %leo_items;
 
-    # Whether the semiring supports Leo optimization (cached at construction)
-    field $_leo_enabled;
 
     # Scan result cache: {pos}{pattern_string} => $end_pos (or undef)
     # Avoids redundant regex matching when multiple items scan the same
@@ -88,14 +87,6 @@ class Chalk::Bootstrap::Earley {
         $rule_table = {};
         for my $rule ($grammar->@*) {
             $rule_table->{$rule->name()} = $rule;
-        }
-
-        # Cache whether Leo optimization is supported by this semiring.
-        # Honor the $_leo_override test scaffolding when set.
-        if (defined $_leo_override) {
-            $_leo_enabled = $_leo_override ? true : false;
-        } else {
-            $_leo_enabled = ($semiring->can('supports_leo') && $semiring->supports_leo()) ? true : false;
         }
 
         # Build core item index from grammar
@@ -1260,10 +1251,13 @@ class Chalk::Bootstrap::Earley {
         # Leo resolution: check if a Leo item exists for this rule at origin.
         # Leo items are keyed by (rule_name, origin) where origin is where the
         # waiting items live. When a completion has this origin, the Leo item
-        # shortcuts the entire chain to the top.
-        # Leo is only used when the semiring supports it (supports_leo() must
-        # return true, indicating that multiply is identity for completions —
-        # non-trivial completion logic would be skipped for intermediate chain steps).
+        # shortcuts the chain by one level. Each Leo item covers exactly one
+        # chain level — resolution invokes multiply(leo->value, completed)
+        # which matches the non-Leo path's multiply(waiting_value, completed)
+        # byte for byte, so Leo-on and Leo-off produce isomorphic Context
+        # graphs. The $_leo_enabled flag is always true in production; the
+        # test harness at t/bootstrap/leo-graph-equivalence.t uses
+        # leo_enabled => 0 to get reference parses without Leo for comparison.
         my $leo_resolved_core_id;
         my $leo_resolved_origin;
         if ($_leo_enabled
