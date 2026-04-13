@@ -58,24 +58,35 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         # Collect class-scope variable metadata from ALL VarDecl items in class body.
         # These are compiled as static C variables, initialized at module load time.
+        # Consecutive bare `my $x; my $y;` declarations are stored as a chain
+        # (nested VarDecl in input[1]), so walk recursively.
         $self->_reset_class_scope_vars();
-        for my $item ($body->@*) {
-            next unless $item isa Chalk::IR::Node::VarDecl;
+        my $register_class_var; $register_class_var = sub ($item) {
+            return unless $item isa Chalk::IR::Node::VarDecl;
             my $raw_var = $item->inputs()->[0]->value();
             my $sigil = substr($raw_var, 0, 1);
             my $var = $raw_var;
             $var =~ s/^[\$\@\%]//;
             my $init = $item->inputs()->[1];
+            # If init is another VarDecl, this is a chained declaration — recurse
+            # into it before registering the current one.
+            if (defined $init && $init isa Chalk::IR::Node::VarDecl) {
+                $register_class_var->($init);
+                $init = undef;  # bare declaration with no actual init expression
+            }
             # Skip VarDecl whose init is a SubInfo (those are sub definitions)
-            next if defined $init && $init isa Chalk::IR::SubInfo;
+            return if defined $init && $init isa Chalk::IR::SubInfo;
             # Skip VarDecl for variables that are fields (ADJUST assigns them,
             # but they're already handled by the field map)
-            next if defined $self->_get_field_map() && exists $self->_get_field_map()->{$var};
+            return if defined $self->_get_field_map() && exists $self->_get_field_map()->{$var};
             $self->_set_class_scope_var($var, {
                 sigil       => $sigil,
                 init        => $init,
                 static_name => "_csv_" . $self->_get_current_slug() . "_${var}",
             });
+        };
+        for my $item ($body->@*) {
+            $register_class_var->($item);
         }
 
         # Extract `use constant { NAME => value, ... }` declarations.
@@ -495,10 +506,11 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     method _emit_method_call_expr($node, $declared_vars) {
         my ($invocant_node, $method_name, $args);
         if ($node isa Chalk::IR::Node::Call) {
-            # Typed Call node: inputs() = [invocant, arg0, arg1, ...]
+            # Typed Call node built by Shim: inputs() = [invocant, name_const, args_arrayref]
+            # name() carries the method name directly; inputs()[2] is the args array ref.
             $invocant_node = $node->inputs()->[0];
             $method_name   = $node->name();
-            $args          = [ $node->inputs()->@[1 .. $node->inputs()->$#*] ];
+            $args          = $node->inputs()->[2] // [];
         } else {
             # Constructor MethodCallExpr: inputs() = [invocant, name_const, args_arrayref]
             $invocant_node = $node->inputs()->[0];
@@ -824,8 +836,10 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     method _emit_builtin_call($node, $declared_vars) {
         my ($name, $args);
         if ($node isa Chalk::IR::Node::Call) {
+            # Typed Call node built by Shim: inputs() = [name_const, args_arrayref]
+            # name() carries the builtin name; inputs()[1] is the args array ref.
             $name = $node->name();
-            $args = $node->inputs();
+            $args = $node->inputs()->[1] // [];
         } else {
             $name = $node->inputs()->[0]->value();
             $args = $node->inputs()->[1];
@@ -841,6 +855,14 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         if ($name eq 'ref' && $args->@* == 1) {
             my $arg = $self->_emit_expr($args->[0], $declared_vars);
             return "(SvROK($arg) ? sv_2mortal(newSVpv(sv_reftype(SvRV($arg), TRUE), 0)) : sv_2mortal(newSVpvs(\"\")))";
+        }
+
+        # blessed() — return class name if blessed reference, else undef
+        if ($name eq 'blessed' && $args->@* == 1) {
+            my $arg = $self->_emit_expr($args->[0], $declared_vars);
+            return "(SvROK($arg) && sv_isobject($arg)"
+                 . " ? sv_2mortal(newSVpv(HvNAME(SvSTASH(SvRV($arg))), 0))"
+                 . " : &PL_sv_undef)";
         }
 
         # refaddr() — return the pointer value of the referent as UV

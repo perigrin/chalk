@@ -1,11 +1,5 @@
 /* ABOUTME: Thin XS wrapper for Boolean semiring C implementation.
-   ABOUTME: XSUBs delegate to boolean_*() functions in chalk.so.
-
-   STALE (post-Step-B of the unified-context refactor, 2026-04-12):
-   This wrapper still exposes the pre-Step-B Boolean API. The Perl-side
-   Boolean semiring now returns Chalk::Bootstrap::Context objects.
-   Fixtures will be regenerated from lib/Chalk/Bootstrap/BNF/Target/C.pm
-   in Step C. Do not hand-edit; the codegen path is the source of truth. */
+   ABOUTME: XSUBs delegate to boolean_*() functions in chalk.so. */
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
@@ -61,43 +55,6 @@ add(self, left, right)
     SV *right
   CODE:
     RETVAL = boolean_add(aTHX_ self, left, right);
-  OUTPUT:
-    RETVAL
-
-SV *
-on_scan(self, item, alt_idx, pos, matched_text)
-    SV *self
-    SV *item
-    SV *alt_idx
-    SV *pos
-    SV *matched_text
-  CODE:
-    RETVAL = boolean_on_scan(aTHX_ self, item, alt_idx, pos, matched_text);
-  OUTPUT:
-    RETVAL
-
-SV *
-on_complete(self, item, alt_idx, pos, ...)
-    SV *self
-    SV *item
-    SV *alt_idx
-    SV *pos
-  CODE:
-    SV *on_epoch_commit = items > 4 ? ST(4) : &PL_sv_undef;
-    RETVAL = boolean_on_complete(aTHX_ self, item, alt_idx, pos, on_epoch_commit);
-  OUTPUT:
-    RETVAL
-
-SV *
-should_scan(self, item, alt_idx, pos, matched_text, is_predicted)
-    SV *self
-    SV *item
-    SV *alt_idx
-    SV *pos
-    SV *matched_text
-    SV *is_predicted
-  CODE:
-    RETVAL = boolean_should_scan(aTHX_ self, item, alt_idx, pos, matched_text, is_predicted);
   OUTPUT:
     RETVAL
 
