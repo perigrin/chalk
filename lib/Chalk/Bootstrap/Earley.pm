@@ -1315,6 +1315,7 @@ class Chalk::Bootstrap::Earley {
         my $leo_candidate_core_id;
         my $leo_candidate_w_origin;
         my $leo_candidate_value;
+        my $leo_candidate_waiting_value;
 
         for my $w_core_id ($chart_waiting_ids->@*) {
             # Layer 2: chart liveness — confirm waiter is live at origin
@@ -1370,6 +1371,7 @@ class Chalk::Bootstrap::Earley {
                 $leo_candidate_core_id = $w_core_id;
                 $leo_candidate_w_origin = $w_origin;
                 $leo_candidate_value = $new_value;
+                $leo_candidate_waiting_value = $waiting_value;
             }
         }
 
@@ -1388,34 +1390,29 @@ class Chalk::Bootstrap::Earley {
 
             # Penultimate check: after advancing, the item would be complete
             if ($advanced_dot >= scalar $alt->@*) {
-                # Check if there's already a Leo item in the chain we can extend
-                my $top_core_id;
-                my $top_origin;
-                my $chain_value;
-
-                if (my $parent_leo = $leo_items{$w_rule_name}{$leo_candidate_w_origin}) {
-                    # Extend existing Leo chain: use the top of the parent chain
-                    $top_core_id = $parent_leo->{top_core_id};
-                    $top_origin  = $parent_leo->{top_origin};
-                    $chain_value = $semiring->multiply($parent_leo->{value}, $completed_value);
-                } else {
-                    # Start new Leo chain
-                    $top_core_id = $leo_candidate_core_id;
-                    $top_origin  = $leo_candidate_w_origin;
-                    $chain_value = $leo_candidate_value;
-                }
-
                 # Store Leo item at $origin (where the waiting items live).
-                # Future completions of $rule_name with this origin will resolve
-                # the chain in O(1).
+                # The value is the raw waiting-item value — NOT its product
+                # with the current completion. Leo resolution multiplies
+                # stored-value by the new completion, producing exactly what
+                # the non-Leo path's multiply(waiting_value, completed_value)
+                # would produce. Each Leo item covers one chain level;
+                # resolution fires once per link. This keeps Context trees
+                # isomorphic between Leo-on and Leo-off parses.
+                #
+                # Earlier versions also extended parent Leo chains into a
+                # single multi-level item. That optimization baked the old
+                # completion into the stored value, which made later
+                # resolutions produce a tree with extra intermediate nodes.
+                # Removed so graph equivalence holds across all semirings.
+                #
                 # wait_core_id/wait_origin track the immediate waiting item
-                # so _complete can skip it (distinct from top after chain extension).
+                # so _complete can skip it.
                 $leo_items{$rule_name}{$origin} = {
                     leo          => true,
                     rule_name    => $rule_name,
-                    top_origin   => $top_origin,
-                    value        => $chain_value,
-                    top_core_id  => $top_core_id,
+                    top_origin   => $leo_candidate_w_origin,
+                    value        => $leo_candidate_waiting_value,
+                    top_core_id  => $leo_candidate_core_id,
                     wait_core_id => $leo_candidate_core_id,
                     wait_origin  => $leo_candidate_w_origin,
                 };
