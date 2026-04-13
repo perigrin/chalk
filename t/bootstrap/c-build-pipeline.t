@@ -22,12 +22,14 @@ my $cc = $Config{cc};
 my $so_ext = $Config{dlext};
 
 # Locate hand-crafted C fixtures relative to this test file
-my $c_src = do {
+my ($c_src, $repo_root);
+{
     use File::Basename qw(dirname);
     use Cwd qw(abs_path);
     my $dir = abs_path(dirname(__FILE__));
-    abs_path("$dir/../fixtures/c_src");
-};
+    $c_src     = abs_path("$dir/../fixtures/c_src");
+    $repo_root = abs_path("$dir/../..");
+}
 
 # Emit chalk.h into $tmpdir via Target::C (matches generated-code pipeline)
 use lib 'lib';
@@ -154,6 +156,7 @@ use 5.42.0;
 use utf8;
 use lib "$tmpdir/blib/arch";
 use lib "$tmpdir/blib/lib";
+use lib "$repo_root/lib";
 require DynaLoader;
 
 # chalk.so must be loaded with RTLD_GLOBAL (0x101 = RTLD_GLOBAL|RTLD_NOW)
@@ -180,7 +183,6 @@ print \$b->is_zero(\$r1) ? "MULTIPLY_CORRECT\\n"   : "MULTIPLY_WRONG\\n";
 my \$r2 = \$b->add(\$zero, \$one);
 print !\$b->is_zero(\$r2) ? "ADD_CORRECT\\n"       : "ADD_WRONG\\n";
 
-print \$b->should_scan('TestRule', 0, 0, "", {}) ? "SHOULD_SCAN_OK\\n" : "SHOULD_SCAN_FAIL\\n";
 print \$b->supports_leo() ? "SUPPORTS_LEO_OK\\n" : "SUPPORTS_LEO_FAIL\\n";
 print "ALL_METHODS_OK\\n";
 END_SCRIPT

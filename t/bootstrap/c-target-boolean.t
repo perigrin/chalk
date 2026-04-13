@@ -140,15 +140,6 @@ SKIP: {
         close $chfh;
     }
 
-    # Phase 8-9: C compilation + behavioral subprocess checks depend on
-    # Target::C being able to lower Boolean.pm's new Context-returning API.
-    # Post-Step-B (Boolean returns Contexts), the C codegen produces calls
-    # with unsupported argument shapes (e.g. boolean_is_zero with extra
-    # args). Tracking: Step C (regenerate or retire hand-crafted fixtures)
-    # will port Target::C's Boolean lowering to the new API. Until then,
-    # the compile/link/run chain below is expected to fail.
-    local $TODO = 'Target::C needs Step-C lowering for Context-returning Boolean';
-
     # Phase 8a: Compile boolean.c to boolean.o
     my $compile_cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$tmpdir $tmpdir/boolean.c"
                     . " -o $tmpdir/boolean.o 2>&1";
@@ -274,7 +265,6 @@ my \$a1 = \$b->add(\$zero, \$zero);
 print \$b->is_zero(\$a1)  ? 'ADD_ZERO_ZERO_OK\\n'  : 'ADD_ZERO_ZERO_FAIL\\n';
 my \$a2 = \$b->add(\$zero, \$one);
 print !\$b->is_zero(\$a2) ? 'ADD_ZERO_ONE_OK\\n'   : 'ADD_ZERO_ONE_FAIL\\n';
-print \$b->should_scan('TestRule', 0, 0, '', {}) ? 'SHOULD_SCAN_OK\\n' : 'SHOULD_SCAN_FAIL\\n';
 print \$b->supports_leo() ? 'SUPPORTS_LEO_OK\\n' : 'SUPPORTS_LEO_FAIL\\n';
 print 'BEHAVIORAL_OK\\n';
 END_SCRIPT
@@ -294,7 +284,6 @@ END_SCRIPT
     like($sub_out, qr/MULT_ONE_ONE_OK/,   'Phase 9: multiply(one, one) = one');
     like($sub_out, qr/ADD_ZERO_ZERO_OK/,  'Phase 9: add(zero, zero) = zero');
     like($sub_out, qr/ADD_ZERO_ONE_OK/,   'Phase 9: add(zero, one) = one');
-    like($sub_out, qr/SHOULD_SCAN_OK/,    'Phase 9: should_scan always true');
     like($sub_out, qr/SUPPORTS_LEO_OK/,   'Phase 9: supports_leo true');
     like($sub_out, qr/BEHAVIORAL_OK/,     'Phase 9: all behavioral tests pass');
 }

@@ -17,6 +17,12 @@ use Chalk::IR::Node::TryCatch;
 use Chalk::IR::Node::TernaryExpr;
 use Chalk::IR::Node::StructRef;
 use Chalk::IR::Node::StructFieldAccess;
+use Chalk::IR::Node::CompoundAssign;
+use Chalk::IR::Node::Not;
+use Chalk::IR::Node::And;
+use Chalk::IR::Node::Or;
+use Chalk::IR::Node::ArrayRef;
+use Chalk::IR::Node::HashRef;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
@@ -2101,7 +2107,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             return "({ sv_setiv($tgt, SvIV($tgt) - SvIV($val)); $tgt; })";
         }
         if ($op eq '//=') {
-            return "({ if (!SvOK($tgt)) sv_setsv($tgt, $val); $tgt; })";
+            # Class-scope statics are NULL-initialized; check pointer first,
+            # then use SvREFCNT_inc to take ownership of the assigned value.
+            return "({ if (!$tgt || !SvOK($tgt)) { $tgt = SvREFCNT_inc_simple($val); } $tgt; })";
         }
 
         return "/* $op not supported */";
@@ -2348,6 +2356,41 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         if ($node isa Chalk::IR::Node::TernaryExpr)       { return $self->_emit_ternary_expr($node, $declared_vars); }
         if ($node isa Chalk::IR::Node::StructRef)         { return $self->_emit_struct_ref_expr($node, $declared_vars); }
         if ($node isa Chalk::IR::Node::StructFieldAccess) { return $self->_emit_field_access_expr($node, $declared_vars); }
+        if ($node isa Chalk::IR::Node::CompoundAssign)    { return $self->_emit_compound_assign_expr($node, $declared_vars); }
+        if ($node isa Chalk::IR::Node::Not) {
+            # Logical negation: emit as ternary that swaps yes/no.
+            my $operand_expr = $self->_emit_expr($node->operand(), $declared_vars);
+            return "(SvTRUE($operand_expr) ? &PL_sv_no : &PL_sv_yes)";
+        }
+        if ($node isa Chalk::IR::Node::And) {
+            # Short-circuit &&: evaluate left; if true return right, else return PL_sv_no.
+            my $left_expr  = $self->_emit_expr($node->left(),  $declared_vars);
+            my $right_expr = $self->_emit_expr($node->right(), $declared_vars);
+            return "(SvTRUE($left_expr) ? $right_expr : &PL_sv_no)";
+        }
+        if ($node isa Chalk::IR::Node::Or) {
+            # Short-circuit ||: evaluate left; if true return left, else return right.
+            my $left_expr  = $self->_emit_expr($node->left(),  $declared_vars);
+            my $right_expr = $self->_emit_expr($node->right(), $declared_vars);
+            return "(SvTRUE($left_expr) ? $left_expr : $right_expr)";
+        }
+        if ($node isa Chalk::IR::Node::ArrayRef) {
+            # Array reference constructor: build a new AV and populate with elements.
+            my $elems = $node->inputs()->[0];
+            my @elem_nodes = (ref($elems) eq 'ARRAY') ? $elems->@* : ();
+            if (!@elem_nodes) {
+                return "sv_2mortal(newRV_noinc((SV*)newAV()))";
+            }
+            my @pushes;
+            my $av_var = '_arr' . refaddr($node) % 9999;
+            push @pushes, "AV *$av_var = newAV()";
+            for my $elem (@elem_nodes) {
+                my $elem_expr = $self->_emit_expr($elem, $declared_vars);
+                push @pushes, "av_push($av_var, SvREFCNT_inc($elem_expr))";
+            }
+            push @pushes, "sv_2mortal(newRV_noinc((SV*)$av_var))";
+            return '({ ' . join('; ', @pushes) . '; })';
+        }
 
         # All computation types are now typed (via shim).
         # No Constructor computation nodes reach here.
