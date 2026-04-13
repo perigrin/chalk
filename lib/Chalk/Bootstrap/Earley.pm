@@ -19,6 +19,13 @@ class Chalk::Bootstrap::Earley {
     field $semiring :param :reader;
     field $_recover :param(recover) = false;
 
+    # Test scaffolding: force Leo on/off regardless of semiring's supports_leo.
+    # Used by t/bootstrap/leo-graph-equivalence.t to compare Leo-on vs Leo-off
+    # parses of the same input. When undef (normal production path), Leo is
+    # gated on $semiring->supports_leo(). Remove this once Leo is proven
+    # correct across all semirings.
+    field $_leo_override :param(leo_enabled) = undef;
+
     # Source file path for diagnostics (set per parse_value call)
     field $_parse_file;
     field $_last_active_pos;
@@ -83,8 +90,13 @@ class Chalk::Bootstrap::Earley {
             $rule_table->{$rule->name()} = $rule;
         }
 
-        # Cache whether Leo optimization is supported by this semiring
-        $_leo_enabled = ($semiring->can('supports_leo') && $semiring->supports_leo()) ? true : false;
+        # Cache whether Leo optimization is supported by this semiring.
+        # Honor the $_leo_override test scaffolding when set.
+        if (defined $_leo_override) {
+            $_leo_enabled = $_leo_override ? true : false;
+        } else {
+            $_leo_enabled = ($semiring->can('supports_leo') && $semiring->supports_leo()) ? true : false;
+        }
 
         # Build core item index from grammar
         $core_index = Chalk::Bootstrap::CoreItemIndex->new();
