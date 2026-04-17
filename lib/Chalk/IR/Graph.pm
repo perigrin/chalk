@@ -14,7 +14,12 @@ class Chalk::IR::Graph {
         my @order;
         my %visited;
 
-        # BFS to find all reachable nodes
+        # BFS to find all nodes reachable via inputs() from start and returns.
+        # Following consumers() is intentionally excluded: shared hash-consed
+        # nodes (e.g., a Start constant used as a control token by multiple
+        # methods) accumulate consumers from every method graph that references
+        # them. Traversing consumers() would pull foreign Return/Unwind nodes
+        # from other method graphs into this one.
         my @worklist = ($start, $returns->@*);
         my @all;
         my %seen;
@@ -24,8 +29,6 @@ class Chalk::IR::Graph {
             next if $seen{$node->id()}++;
             push @all, $node;
             push @worklist, $node->inputs()->@*;
-            # consumers() may contain stale weak refs (unblessed); filter them
-            push @worklist, grep { defined $_ && blessed($_) } $node->consumers()->@*;
         }
 
         # Topological sort via DFS post-order
