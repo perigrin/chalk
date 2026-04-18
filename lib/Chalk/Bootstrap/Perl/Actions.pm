@@ -1451,6 +1451,20 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
+        # Perl's implicit-return semantics: if no explicit Return/Unwind node
+        # was found and the body is non-empty, the last expression in the body
+        # is the implicit return value. Wrap it in a Return CFG node so the
+        # graph is always properly terminated.
+        if (!@returns && $fixed_body->@*) {
+            my $last = $fixed_body->[-1];
+            if (ref($last) && blessed($last) && $last->isa('Chalk::IR::Node')) {
+                my $implicit_return = $factory->make_cfg('Return',
+                    inputs => [$start, $last],
+                );
+                push @returns, $implicit_return;
+            }
+        }
+
         return Chalk::IR::Graph->new(
             start    => $start,
             returns  => \@returns,
