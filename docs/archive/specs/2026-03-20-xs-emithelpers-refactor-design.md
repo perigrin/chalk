@@ -1,5 +1,14 @@
 # XS.pm EmitHelpers Refactor Design
 
+> **ARCHIVED.** Step A (extract shared code into `EmitHelpers` as a class)
+> **landed** — `EmitHelpers.pm` is a `feature class` that `Target/C.pm`
+> inherits from. Step B (have `XS.pm` inherit from `EmitHelpers`) became
+> **moot**: Chalk pivoted away from a hand-written `Target/XS.pm` class
+> toward generating C from the IR and using per-class thin XS wrappers
+> that bind into a shared `chalk.so` library. No `Target/XS.pm` exists
+> to inherit. See memory note `xs_target_evolution.md` for the narrative.
+> Preserved for history.
+
 **Goal:** Eliminate code duplication between XS.pm and EmitHelpers/C.pm in two steps.
 
 **Architecture:** Two-phase refactor:

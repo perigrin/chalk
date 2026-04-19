@@ -1,5 +1,9 @@
 # TypeInference Extend-Based Redesign
 
+> **ARCHIVED.** Superseded by
+> [`../../plans/2026-02-20-typeinference-redesign.md`](../../plans/2026-02-20-typeinference-redesign.md).
+> Preserved for history.
+
 ## Problem
 
 TypeInference uses `_tags()` (flat merge) to read child information in `on_complete`.
