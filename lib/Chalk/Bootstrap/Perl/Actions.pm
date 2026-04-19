@@ -1465,10 +1465,33 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
+        # Collect all body statements as BFS seeds so that side-effect nodes
+        # (VarDecl, Assign, Call, If) without explicit control inputs are still
+        # reachable via graph->nodes().  Filters out undef and non-Node items.
+        my @body_stmts = grep {
+            defined $_ && ref($_) && blessed($_) && $_->isa('Chalk::IR::Node')
+        } $fixed_body->@*;
+
+        # Also seed from statements inside control-flow regions (if/loop/try
+        # bodies) stored in the schedule.  These statements are the then_stmts,
+        # else_stmts, loop body statements, etc. that are not directly reachable
+        # via inputs() from the If/Loop node itself.
+        for my $state (values %schedule) {
+            for my $key (qw(then_stmts else_stmts statements body_stmts)) {
+                next unless defined $state->{$key} && ref($state->{$key}) eq 'ARRAY';
+                for my $stmt ($state->{$key}->@*) {
+                    next unless defined $stmt && ref($stmt) && blessed($stmt);
+                    next unless $stmt->isa('Chalk::IR::Node');
+                    push @body_stmts, $stmt;
+                }
+            }
+        }
+
         return Chalk::IR::Graph->new(
-            start    => $start,
-            returns  => \@returns,
-            schedule => \%schedule,
+            start      => $start,
+            returns    => \@returns,
+            schedule   => \%schedule,
+            body_stmts => \@body_stmts,
         );
     }
 
