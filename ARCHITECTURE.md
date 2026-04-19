@@ -1,8 +1,12 @@
 # Chalk Architecture
 
-Chalk is a self-hosting Perl compiler built on a scanless Earley parser
-with semiring-based disambiguation. This document provides a high-level
-overview; detailed descriptions live in `docs/architecture/`.
+Chalk is a self-hosted optimizing compiler for Perl, written in Perl.
+It is built on a scanless Earley parser with semiring-based
+disambiguation, targeting a Sea-of-Nodes IR following Cliff Click's
+design. The parser emits SoN IR directly; there is no intermediate
+parse tree or Shared Packed Parse Forest stage. This document provides
+a high-level overview; detailed descriptions live in
+`docs/architecture/`.
 
 ## System Overview
 
@@ -14,8 +18,8 @@ Perl Source
 |  Earley Parser            |  Scanless parser with LR(0) DFA
 |  + Semiring Pipeline      |  prediction and Aycock optimizations
 |    1. Boolean             |  Structural validity
-|    2. TypeInference       |  Semantic validity
-|    3. Precedence          |  Operator ordering
+|    2. Precedence          |  Operator ordering
+|    3. TypeInference       |  Semantic validity
 |    4. Structural          |  Residual disambiguation
 |    5. SemanticAction      |  IR construction
 +---------------------------+
@@ -42,14 +46,18 @@ disambiguate.
 | Layer | Role | Question Answered |
 |-------|------|-------------------|
 | Grammar + Boolean | Structural validity | Could this be Perl? |
-| TypeInference | Semantic validity | Does this make type sense? |
 | Precedence | Operator ordering | Are operators binding correctly? |
+| TypeInference | Semantic validity | Does this make type sense? |
 | Structural | Residual disambiguation | Any remaining ambiguities? |
 | SemanticAction | IR construction | Build the Sea of Nodes graph |
 
-Semiring operations are commutative — ordering affects performance,
-not correctness. TypeInference runs before Precedence because it
-prunes more aggressively.
+The filtering semirings (Boolean, Precedence, TypeInference, Structural)
+are algebraically order-agnostic — they commute, so their relative
+order is a performance choice rather than a correctness constraint.
+SemanticAction runs last because it is the most expensive (it builds IR
+nodes); deferring it avoids work on branches the filtering semirings
+will kill. Swapping TypeInference and Precedence is a possible future
+optimization, since TypeInference may prune more aggressively.
 
 See [Parsing Pipeline](docs/architecture/parsing-pipeline.md) for the
 full design rationale.
@@ -60,9 +68,10 @@ full design rationale.
 |----------|--------|
 | [Earley Parser](docs/architecture/earley-parser.md) | Core parser, DFA prediction, Aycock optimizations, chart structure, error recovery |
 | [Parsing Pipeline](docs/architecture/parsing-pipeline.md) | Semiring layers, FilterComposite, disambiguation strategy |
-| [Context Comonad](docs/architecture/context-comonad.md) | EvalContext, extract/extend/duplicate, parse history threading |
+| [Context Comonad](docs/architecture/context-comonad.md) | Context, extract/extend/duplicate, parse history threading |
 | [Sea of Nodes IR](docs/architecture/sea-of-nodes-ir.md) | IR node types, hash consing, use-def chains, Graph container |
-| [IR Lowering](docs/architecture/ir-lowering.md) | Target backends, Perl/XS/C code generation |
+| [IR Lowering](docs/architecture/ir-lowering.md) | Target backends, Perl/XS/C code generation (LLVM IR planned) |
+| [Optimization](docs/architecture/optimization.md) | Implemented and planned IR-level passes |
 
 ## Key Design Principles
 
@@ -73,6 +82,14 @@ full design rationale.
   in the grammar; semantic constraints in the semirings.
 - **Progressive filtering.** Each layer sees fewer candidates than the
   previous one. By SemanticAction, exactly one parse survives.
+- **Immutability.** IR nodes and parse contexts are immutable.
+  Operations return new objects rather than mutating existing ones; this
+  enables hash consing, safe sharing across passes, and
+  refaddr-based identity comparison in FilterComposite.
+- **Determinism.** Code generation produces byte-identical output across
+  runs. Hash iteration is sorted, node identity is content-addressed
+  (not allocation-order), and helper-rule names derive from source
+  position.
 
 ## File Map
 
@@ -93,6 +110,9 @@ full design rationale.
 | IR Nodes | `lib/Chalk/IR/Node/*.pm` |
 | IR NodeFactory | `lib/Chalk/IR/NodeFactory.pm` |
 | IR Graph | `lib/Chalk/IR/Graph.pm` |
-| Perl Target | `lib/Chalk/Bootstrap/Perl/Target/Perl.pm` |
-| XS Target | `lib/Chalk/Bootstrap/BNF/Target/XS.pm` |
-| C Target | `lib/Chalk/Bootstrap/BNF/Target/C.pm` |
+| BNF → Perl Target | `lib/Chalk/Bootstrap/BNF/Target/Perl.pm` |
+| BNF → XS Target | `lib/Chalk/Bootstrap/BNF/Target/XS.pm` |
+| BNF → C Target | `lib/Chalk/Bootstrap/BNF/Target/C.pm` |
+| Perl → Perl Target | `lib/Chalk/Bootstrap/Perl/Target/Perl.pm` |
+| Perl → C Target (+ XS wrappers) | `lib/Chalk/Bootstrap/Perl/Target/C.pm` |
+| EmitHelpers (shared base) | `lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm` |
