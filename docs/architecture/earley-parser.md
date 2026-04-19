@@ -71,7 +71,7 @@ Introduced scanless Earley parsing (terminal matching integrated into the Earley
 
 **Local design documents**:
 - `docs/chalk-ayock-optimizations.md` — Pseudo-code walkthrough of Aycock integration into Chalk's semiring architecture, with implementation status table.
-- `docs/bootstrap-meta-grammar.md` — The 10-rule BNF meta-grammar that the bootstrap parser processes.
+- `docs/bootstrap-meta-grammar.md` — The 10-rule BNF meta-grammar the parser bootstraps from.
 - `docs/ir-node-types.md` — Sea of Nodes IR taxonomy produced by the semantic semiring.
 
 ---
@@ -177,7 +177,7 @@ These bulk accessors return the underlying array references. Inside the hot agen
 
 `advance($id)` returns the ID for the same `(rule_name, alt_idx, dot+1)` triple, memoizing the result in `%advance_map`. This is called on every Scan and Complete step to move the dot forward.
 
-For a grammar with R rules, an average of A alternatives per rule, and an average RHS length of L symbols, the total number of core items is approximately R * A * (L + 1). For the Chalk Perl grammar (~960 rules, ~3-4 average RHS length), this yields roughly 5,000-6,000 core items.
+For a grammar with R rules, an average of A alternatives per rule, and an average RHS length of L symbols, the total number of core items is approximately R * A * (L + 1). The count scales linearly with the grammar; for Chalk's current Perl subset grammar (`docs/chalk-bootstrap.bnf`) the core-item set is small enough that the `@id_is_complete` and `@id_symbol_after` caches fit comfortably in L1 cache, which is the property the optimization depends on.
 
 ---
 

@@ -4,9 +4,11 @@
 # IR Lowering and Code Generation
 
 This document describes Chalk's intermediate representation (IR) lowering pipeline and
-the three code generation targets: Perl (primary), XS (performance), and C (native
-table compilation). It covers the full pipeline from grammar and parse results through
-IR construction, IR fixups, and final source emission.
+its code generation targets: Perl (primary), XS (performance), and C (native
+table compilation). An LLVM IR target is planned but deferred pending C/XS
+completion; see [`../llvm-target.md`](../llvm-target.md) for the rationale. This
+document covers the full pipeline from grammar and parse results through IR
+construction, IR fixups, and final source emission.
 
 ---
 
