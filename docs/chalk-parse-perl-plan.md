@@ -1,8 +1,12 @@
-# Chalk Self-Hosting: Bootstrap Branch Roadmap
+# Chalk Self-Hosting Roadmap
+
+> **Scope:** This document is the multi-phase implementation plan for
+> extending Chalk to parse Perl 5.42 source. For the Chalk project as
+> a whole, see [`../README.md`](../README.md).
 
 ## Strategy
 
-Extend the existing BNF-to-Perl bootstrap pipeline to parse Perl 5.42.0 source
+Extend the existing BNF-to-Perl pipeline to parse Perl 5.42.0 source
 code, ultimately self-hosting by compiling the 37+ `.pm` files under `lib/Chalk/`.
 
 The approach has two major stages:
@@ -12,7 +16,7 @@ The approach has two major stages:
    existing BNF pipeline. Use synthetic test inputs. Add disambiguation semirings
    and Aycock parser optimizations as needed — not before.
 
-2. **File-driven compilation (Phases 6-8)**: Walk through actual bootstrap source
+2. **File-driven compilation (Phases 6-8)**: Walk through actual Chalk source
    files from simplest to most complex, building IR, then lowering to Perl, then
    lowering to XS. Same phasing as the BNF pipeline that already works.
 
@@ -36,42 +40,47 @@ work is done; this plan is the authoritative source for what work to do.
 
 ### Semiring Composition
 
-Two composite semirings, following the pattern established in mainline Chalk:
+The canonical five-semiring FilterComposite pipeline is documented in
+[`architecture/parsing-pipeline.md`](architecture/parsing-pipeline.md). This
+plan assembles its phases against that pipeline.
 
-**ChalkSyntax** — The disambiguating recognizer:
+**ChalkSyntax** — The disambiguating recognizer (the four filtering semirings):
 
 ```
-ChalkSyntax = Composite(Boolean, Precedence, Structural, [Arity/TypeInference])
+ChalkSyntax = FilterComposite(Boolean, Precedence, TypeInference, Structural)
 ```
 
 Produces exactly ONE unambiguous parse. All disambiguation happens during the
 parse via `add()`. No post-parse filtering.
 
-**ChalkIR** (name TBD) — Layers IR construction on top:
+**ChalkIR** — Layers IR construction on top:
 
 ```
-ChalkIR = Composite(ChalkSyntax, SemanticAction)
+ChalkIR = FilterComposite(Boolean, Precedence, TypeInference, Structural, SemanticAction)
 ```
 
-ChalkSyntax MUST produce one unambiguous parse before SemanticAction generates
-IR. This is the cardinal rule from `docs/semiring-architecture.md`.
+The four filtering semirings MUST produce one unambiguous parse before
+SemanticAction generates IR. This is the cardinal rule from
+`docs/architecture/parsing-pipeline.md`.
 
 ### Staged Filter in `add()`
 
 When two alternative parses meet at the same chart item, ChalkSyntax's `add()`
-consults component semirings as a staged filter with short-circuit rejection:
+consults component semirings as a staged filter with short-circuit rejection.
+The four filtering semirings commute — reordering them does not change which
+parses are accepted, only how quickly they are rejected. The canonical order
+is a performance choice (cheapest/most-discriminating filters first):
 
 ```
-Boolean     → reject? done (cheapest check)
-Precedence  → reject? done
-Structural  → reject? done
-TypeInfer   → reject? done (most expensive)
+Boolean        → reject? done (cheapest check)
+Precedence     → reject? done
+TypeInference  → reject? done
+Structural     → reject? done
 keep the survivor
 ```
 
-The semirings are order-agnostic for correctness — each independently votes
-valid/invalid. The ordering is purely a performance concern (cheapest/most-
-discriminating filters first). This can be tuned later via profiling.
+Any future reordering (e.g. moving TypeInference earlier to prune more
+aggressively) is a performance tuning decision, not a correctness one.
 
 ### ConciseTree Semiring
 
@@ -159,7 +168,7 @@ The Precedence semiring uses this table for its active/passive validation model
 
 ### B. Builtin Type Library
 
-Signatures for all Perl builtins used in bootstrap source, derived from perldoc.
+Signatures for all Perl builtins used in Chalk source, derived from perldoc.
 Feeds the Arity/TypeInference semiring for disambiguation and type validation.
 
 | Builtin   | Arity | Argument Types        | Return Type  | Call Style    |
@@ -189,7 +198,7 @@ Feeds the Arity/TypeInference semiring for disambiguation and type validation.
 | `sprintf` | 2+    | (Str, List)           | Str          | Parenthesized |
 | `substr`  | 3+    | (Str, Int, Int, Str?) | Str          | Parenthesized |
 
-**Key observation**: Bootstrap source consistently uses parenthesized calls for
+**Key observation**: Chalk source consistently uses parenthesized calls for
 most builtins (`defined($x)`, `ref($x)`, `length($x)`). The exceptions are
 `push`, `shift`, `keys`, `sort`, `die`, and loop control (`next`, `last`,
 `return`). The Arity/TypeInference semiring may be deferrable if these patterns
@@ -573,7 +582,7 @@ file under `lib/Chalk/`. This is the first time the recognizer touches real code
 
 ## Phases 6-8: Tier-Driven Compilation
 
-These phases compile actual bootstrap source files end-to-end, organized by
+These phases compile actual Chalk source files end-to-end, organized by
 **tier** (vertical slices) rather than by phase (horizontal slices). Each tier
 takes its files through all three stages — IR, Perl lowering, XS lowering —
 before the next tier begins.
@@ -784,12 +793,22 @@ targeted IR extensions.
 
 ## Decision Log
 
-**Arity/TypeInference semiring: DEFERRED (possibly permanently)**
+**Arity/TypeInference semiring: Initially deferred, implemented during Phase 4**
 
-Bootstrap source consistently uses parenthesized builtin calls (`defined($x)`,
-`ref($x)`, `length($x)`). No bare `time + 1` style ambiguity. Exceptions
-(`push`, `shift`, `keys`, `die`) use postfix deref or have unambiguous context.
-Build it only if Phase 5 full-file recognition reveals actual ambiguity.
+Initial reasoning: Chalk source consistently uses parenthesized builtin
+calls (`defined($x)`, `ref($x)`, `length($x)`), with no bare `time + 1` style
+ambiguity. Exceptions (`push`, `shift`, `keys`, `die`) use postfix deref or
+have unambiguous context. The plan was to build TypeInference only if Phase 5
+full-file recognition revealed actual ambiguity.
+
+Outcome: the ambiguity surfaced earlier than expected — during Phase 4
+expression parsing, not Phase 5. Three drivers converged: regex-vs-division
+disambiguation (`/pattern/` vs division), fat-arrow type assertion (`class =>
+"Foo"` casts the LHS to String, so keyword-starting rules can be rejected),
+and keyword rejection in concrete syntax (blocking `concise-actions.t` test
+29 on `use 5.42.0`). TypeInference is now live as one of the five
+FilterComposite semirings. See `docs/architecture/parsing-pipeline.md` and
+`docs/plans/2026-02-20-typeinference-redesign.md`.
 
 **Structural semiring: Needed at Phase 4**
 

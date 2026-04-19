@@ -1,5 +1,10 @@
 # BNF Meta-Grammar Specification
 
+> **Scope:** This document describes the 10-rule BNF meta-grammar that
+> Chalk's parser bootstraps from. The full Perl grammar that Chalk
+> compiles lives in [`perlish-grammar-spec.md`](perlish-grammar-spec.md).
+> For the Chalk project as a whole, see [`../README.md`](../README.md).
+
 This document specifies the 10-rule BNF meta-grammar used for bootstrapping the Chalk::Bootstrap compiler.
 
 ## Source

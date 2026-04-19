@@ -113,8 +113,10 @@ use experimental qw(class builtin keyword_any keyword_all);
 # a single bit check in a fixed-size bitmap.
 #
 # For a grammar with R rules and average RHS length L, the number of
-# core items is roughly R * (L + 1). For Chalk's 960 rules with ~3-4 avg
-# RHS symbols, that's ~4000-5000 core items = ~600 bytes per bitmap.
+# core items is roughly R * (L + 1), so the bitmap size scales linearly
+# with the grammar. At typical programming-language grammar scales the
+# bitmap remains on the order of hundreds of bytes — small enough to
+# make single-bit membership checks the dominant cost model.
 
 class Chalk::CoreItemIndex {
     field %item_to_id;    # "rule_id|dot_pos" => integer
@@ -560,8 +562,9 @@ class Chalk::AycockParser {
             #   - TypeInference: create top-type element
             #
             # AYCOCK OPTIMIZATION: Most predicted items are dead ends.
-            # Aycock measured 16% unused items in Java; with Chalk's 960
-            # rules and flat expression grammar, it's likely higher.
+            # Aycock measured 16% unused items in Java; with Chalk's
+            # flat expression grammar and heavy semiring filtering, the
+            # unused-item ratio is likely higher.
             #
             # STRATEGY: Create a LIGHTWEIGHT placeholder element for
             # predicted items. Only materialize the full composite

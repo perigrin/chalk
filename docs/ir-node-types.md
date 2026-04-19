@@ -1,5 +1,11 @@
 # Sea of Nodes IR: Node Type Taxonomy
 
+> **Scope:** This document describes an early, 4-node IR used only for
+> compiling the BNF meta-grammar. The production IR has ~76 node types;
+> see [`architecture/sea-of-nodes-ir.md`](architecture/sea-of-nodes-ir.md)
+> for the current taxonomy. For the Chalk project as a whole, see
+> [`../README.md`](../README.md).
+
 ## Overview
 
 The Chalk::Bootstrap IR uses a "Sea of Nodes" representation where the program is a directed graph of operations with explicit data-flow edges. This document specifies the 4 node types needed for grammar compilation.

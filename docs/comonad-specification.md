@@ -142,11 +142,7 @@ This provides detailed parse error messages with rule stack traces.
 
 ## Integration with Semirings
 
-The comonad operates **inside** the semantic action semiring:
-
-- **Boolean semiring**: No context needed (just true/false)
-- **Semantic action semiring**: Each value is a `Context`
-- **Composite semiring**: Boolean × SemanticAction = (Bool, Context)
+The comonad operates inside the semantic-action branch of Chalk's five-semiring FilterComposite pipeline: Boolean, Precedence, TypeInference, Structural, and SemanticAction. The full pipeline and its ordering rationale are documented in [`architecture/parsing-pipeline.md`](architecture/parsing-pipeline.md); only SemanticAction carries Context values — the filtering semirings write their results into `Context.annotations` slots.
 
 The semiring's `multiply` operation chains contexts:
 ```perl

@@ -1,38 +1,58 @@
-# Perl 5.42.0 Bootstrap Subset Grammar Specification
+# Perl 5.42.0 Subset Grammar Specification
 
 ## 1. Purpose
 
-This document specifies a grammar in Chalk::Bootstrap BNF format for recognizing
-the Perl 5.42.0 subset used in the Chalk::Bootstrap codebase (~31 `.pm` files
+This document specifies a grammar in Chalk's BNF format for recognizing
+the Perl 5.42.0 subset used in the Chalk codebase (~31 `.pm` files
 under `lib/Chalk/`).
 
 The grammar is intentionally ambiguous — disambiguation is delegated to semirings
 (Precedence, Arity/TypeInference, Structural) rather than encoded in grammar
 structure.
 
-**Status**: Future specification. Not yet wired into the Earley parser pipeline.
+**Status**: Live. Wired into the Earley parser pipeline; used by Tier D codegen against real source files.
 
 ## 2. Scope
+
+Chalk accepts a strict subset of Perl 5.42. All Chalk source is valid Perl
+and runs unchanged under a standard Perl interpreter. The subset is chosen
+to enable static analysis: features whose behavior depends on runtime
+metaprogramming or on symbol-table manipulation are excluded.
 
 ### Included
 
 - `feature class` syntax: `class`, `field`, `method`, `ADJUST`, `:isa()`,
-  `:param`, `:reader`
-- Modern Perl: signatures, `true`/`false`, postfix deref (`->@*`, `->%*`),
-  `isa` operator
-- Standard constructs: `use`, `my`/`our`/`local`, `sub`
+  `:param`, `:reader`, `:writer`
+- Modern Perl: subroutine signatures, `true`/`false`, postfix deref
+  (`->@*`, `->%*`, `->$*`), `isa` operator
+- Standard constructs: `use`, `my`/`our`/`state`, `sub`
 - Control flow: `if`/`elsif`/`else`, `unless`, `while`/`until`, `for`/`foreach`,
-  postfix modifiers
+  postfix modifiers, `try`/`catch`
 - Expressions: arithmetic, string, comparison, logical, bitwise, ternary,
   assignment, method calls, subscripts
 - Literals: strings (single/double quoted), numbers, regex, `qw()`, `qr//`,
   `undef`, `true`, `false`
+- References: `\$x`, `\@a`, `\%h`, `\&sub`; anonymous subs and closures
 
 ### Excluded
 
+Features that defeat static analysis:
+
+- Symbolic references (`$$name`, `&{$code}`) — breaks static dispatch analysis
+- String `eval` — runtime code generation
+- Typeglobs (`*foo`) — dynamic symbol-table manipulation
+- `AUTOLOAD` — dynamic method generation
+- Indirect object syntax (`new Foo`) — ambiguous parsing
+- Runtime `require` and runtime `use` — no runtime module loading
+- Prefix dereference (`@$ref`) — use postfix instead
+- `package` — use `class` instead for clear object semantics
+- `bless` / old-style OO / Moose — use `class` instead
+
+Features that are opaque to the grammar or out of scope:
+
 - Heredocs (eliminate from source; use string concatenation instead)
 - Regex/string interpolation internals (treated as opaque terminals)
-- `format`, `tie`, `dbmopen`, symbolic refs, `goto`
+- `format`, `tie`, `dbmopen`, `goto`
 - Alternate regex delimiters beyond `//` and `{}`
 - Special variables beyond `$_`
 - Pod documentation
@@ -54,6 +74,8 @@ structure.
 | Signatures | Own nonterminal | Structurally distinct from expression lists |
 
 ## 4. Semiring Requirements
+
+Chalk's full semiring pipeline has five components — Boolean, Precedence, TypeInference, Structural, and SemanticAction — documented authoritatively in [`architecture/parsing-pipeline.md`](architecture/parsing-pipeline.md). This section describes only the three filtering semirings whose disambiguation rules are shaped specifically by this grammar (Precedence, TypeInference, Structural). Boolean (recognition) is always present but grammar-agnostic; SemanticAction (IR construction) consumes the disambiguated parse produced by the filtering stack.
 
 ### 4.1 Precedence Semiring
 
@@ -90,7 +112,7 @@ Handles context-dependent disambiguation:
 
 ## 5. Grammar Format
 
-The grammar uses Chalk::Bootstrap BNF format (parseable by the BNF meta-grammar
+The grammar uses Chalk's BNF format (parseable by the BNF meta-grammar
 compiler):
 
 - Rules: `Name ::= alternatives ;`
@@ -606,7 +628,7 @@ parses (multiple parses expected due to intentional ambiguity).
 "$x ? $y : $z"       → accept
 ```
 
-**Layer 4 — Full File Recognition**: Parse each bootstrap `.pm` file.
+**Layer 4 — Full File Recognition**: Parse each `.pm` file in the Chalk codebase.
 
 ```
 # Each file should be accepted:
@@ -619,7 +641,7 @@ lib/Chalk/Bootstrap/Context.pm    → accept
 
 ### 8.2 Source Preparation
 
-Before Layer 4 testing, eliminate heredocs from bootstrap source files.
+Before Layer 4 testing, eliminate heredocs from Chalk source files.
 Replace heredoc usage in `Target::Perl.pm` and `Target::XS.pm` with
 string concatenation or `join()` equivalents.
 
@@ -647,7 +669,7 @@ Track the set of accepted files and ensure it never shrinks.
    are matched as blobs. Internal syntax errors won't be caught by this grammar.
 
 3. **No format declarations**: The `format` keyword's special body syntax is
-   not supported. Not used in bootstrap code.
+   not supported. Not used in Chalk code.
 
 4. **Limited special variables**: Only `$name`, `@name`, `%name` forms. No `$!`,
    `$$`, `$?`, `@_`, `%ENV`, etc. (Can be extended with broader terminal patterns.)
@@ -670,7 +692,7 @@ Track the set of accepted files and ensure it never shrinks.
    Earley parser as a Composite semiring.
 
 2. **Wire into pipeline**: Make this grammar parseable by the BNF meta-grammar
-   compiler, generating a recognizer that can be tested against bootstrap source.
+   compiler, generating a recognizer that can be tested against Chalk source.
 
 3. **Heredoc elimination**: Refactor `Target::Perl.pm` and `Target::XS.pm` to
    replace heredocs with string concatenation.
@@ -679,7 +701,7 @@ Track the set of accepted files and ensure it never shrinks.
    flat ambiguous grammar. If too slow, consider selectively encoding some
    precedence levels in grammar structure (hybrid approach).
 
-5. **Extend to full Chalk**: Once the bootstrap subset works, extend to cover
+5. **Extend coverage**: Once the current subset works, extend to cover
    the broader Chalk codebase syntax.
 
 6. **CST construction**: Add a CST semiring to preserve comments and whitespace
