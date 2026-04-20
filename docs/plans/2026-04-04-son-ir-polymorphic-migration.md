@@ -20,7 +20,8 @@ field on `Chalk::IR::Node`, the `body` field on `MethodInfo`, and 61
 `lib/Chalk/Bootstrap/Perl/Actions.pm`. The largest outstanding piece is
 codegen: 17 `->body()` call sites across the Perl and C targets, plus
 `StructPromotion`, still read `MethodInfo->body` instead of walking the
-`Graph`. See "Outstanding Work" and "Acceptance Criteria" below.
+`Graph` (18 `->body()` call sites total). See "Outstanding Work" and
+"Acceptance Criteria" below.
 
 **Deeper structural issue** (scoped as design task D3): Chalk's IR is
 currently a tree of metadata structs (`Program` → `ClassInfo` →
@@ -50,12 +51,18 @@ close the gap.
   Shim and read by `Node::class()` to override the default class name.
 - **`body` field on `Chalk::IR::MethodInfo`** remains. All codegen and
   optimizer passes still read it instead of the `graph`.
-- **Codegen has not migrated.** 17 `->body()` call sites across four
+- **`body` field on `Chalk::IR::ClassInfo`** remains. Holds source-order
+  body items as parallel state to the typed `fields`/`methods`/`subs`
+  collections. `StructPromotion` reads it to walk body items in source
+  order. Removal depends on the program-level graph design (D3) — once
+  `ClassInfo` becomes graph-shaped, source order is preserved by graph
+  edges and the redundant `body` field can be dropped.
+- **Codegen has not migrated.** 18 `->body()` call sites across four
   files:
   - `lib/Chalk/Bootstrap/Perl/Target/Perl.pm` (4 sites)
   - `lib/Chalk/Bootstrap/Perl/Target/C.pm` (6 sites)
   - `lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm` (2 sites)
-  - `lib/Chalk/Bootstrap/Optimizer/StructPromotion.pm` (5 sites)
+  - `lib/Chalk/Bootstrap/Optimizer/StructPromotion.pm` (6 sites)
 - **`_build_method_graph` is a graph-seeding pass, not a full SSA
   builder.** It stitches control nodes, collects explicit and implicit
   `Return`/`Unwind` exits, and seeds `body_stmts` so side-effect nodes
@@ -90,6 +97,11 @@ The migration is complete when all of the following hold:
 - The `compat_class` field is removed from `Chalk::IR::Node`.
 - The `body` field is removed from `Chalk::IR::MethodInfo`; all readers
   have migrated to `graph`.
+- The `body` field on `Chalk::IR::ClassInfo` is either removed (if D3
+  lands first and source order is carried by graph edges) or explicitly
+  deferred to the D3 graph-shaped Program work with a tracked issue.
+  Do not declare this migration complete with `ClassInfo.body` still
+  present and no deferral path documented.
 - All codegen and optimizer passes walk the `Graph` instead of
   `->body()`. Target files: `Perl/Target/Perl.pm`, `Perl/Target/C.pm`,
   `Perl/Target/EmitHelpers.pm`, `Optimizer/StructPromotion.pm`.
@@ -104,7 +116,7 @@ The migration is complete when all of the following hold:
 
 ## Target Architecture
 
-### Typed Computation Nodes (76 classes under Chalk::IR::Node/)
+### Typed Computation Nodes (79 classes under Chalk::IR::Node/: 74 concrete + 5 intermediate bases)
 
 ```
 Chalk::IR::Node (base: id, inputs, consumers, stamp, operation, content_hash)
@@ -168,7 +180,7 @@ and exits correctly but does not yet perform full SSA construction
 
 ## Phase History
 
-1. **Phase 1**: 76 typed node classes, NodeFactory, Graph, metadata structs.
+1. **Phase 1**: 79 typed node classes (74 concrete + 5 intermediate bases), NodeFactory, Graph, metadata structs.
 2. **Phase 2**: Shim translates all computation Constructor classes.
 3. **Phase 3**: All non-Actions.pm consumer files migrated to typed isa checks.
 4. **Phase 4a**: SSA scope (reassignment tracking, if/else Phis, loop Phis).

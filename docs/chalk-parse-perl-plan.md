@@ -720,7 +720,11 @@ existing source (diff-able or behaviorally equivalent).
 to existing Perl source.
 
 **Work**:
-- Build `Target::XS` for Perl-domain IR (extend from previous tiers)
+- Extend `Target::C` for Perl-domain IR with `generate_xs_wrapper()`
+  emitting thin per-class XS wrappers that bind into the shared
+  `chalk.so` library. (A standalone `Perl/Target/XS.pm` was evaluated
+  and abandoned — see `xs_target_evolution` memory note and
+  `docs/archive/specs/xs-target.md`.)
 - Compile generated XS with `perl Build.PL && ./Build`
 
 **Validation per file**:
@@ -731,8 +735,8 @@ to existing Perl source.
 
 **Tier A** establishes the foundational IR type system and lowering patterns.
 These 4 files are pure data classes — the simplest possible end-to-end path.
-The IR node types, Target::Perl, and Target::XS created here form the base
-that subsequent tiers extend.
+The IR node types, `Target::Perl`, and `Target::C` with XS-wrapper emission
+created here form the base that subsequent tiers extend.
 
 **Tier B** adds `field` declarations and string interpolation. The IR gains
 field-related node types. Lowering must handle interpolated strings.
@@ -783,7 +787,7 @@ targeted IR extensions.
 | 3          | Class definitions              | —                                                  | Parses class/method/field            |
 | 4          | Expressions                    | **Precedence + Structural semirings**, ChalkSyntax | Disambiguated expression parsing     |
 | 5          | Control flow + full grammar    | TypeInference semiring                             | All 37 .pm files recognized          |
-| 6-8 Tier A | Pure data classes (4 files)    | Perl IR node types, Target::Perl, Target::XS       | End-to-end IR → Perl → XS            |
+| 6-8 Tier A | Pure data classes (4 files)    | Perl IR node types, Target::Perl, Target::C + XS wrapper | End-to-end IR → Perl → C + XS      |
 | 6-8 Tier B | Field declarations (5 files)   | Field IR nodes                                     | Interpolation + fields lowered       |
 | 6-8 Tier C | Runtime method logic (5 files) | Control flow + builtin IR nodes                    | Conditionals + regex lowered         |
 | 6-8 Tier D | All remaining (23 files)       | Targeted IR extensions                             | Full self-hosting compilation        |

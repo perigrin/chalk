@@ -269,7 +269,7 @@ Metadata for a single class declaration.
 | `fields` | Ordered list of `FieldInfo` objects. |
 | `methods` | Ordered list of `MethodInfo` objects. |
 | `subs` | Ordered list of `SubInfo` objects for lexically-scoped subs inside the class. |
-| `body` | All body items in source order (union of `fields`, `methods`, `subs`, and ADJUST blocks). |
+| `body` | All body items in source order (union of `fields`, `methods`, `subs`, and ADJUST blocks). **Transitional**: parallel state to the typed collections above, scheduled for removal once the program-level graph (D3) preserves source order via graph edges. See `docs/plans/2026-04-04-son-ir-polymorphic-migration.md`. |
 
 ### `Chalk::IR::MethodInfo`
 
@@ -280,8 +280,8 @@ Metadata for a method declaration, with an optional per-method computation graph
 | `name` | Method name string. |
 | `params` | Ordered list of parameter names. |
 | `return_type` | Optional declared return type string. |
-| `body` | Ordered list of statement IR nodes. |
-| `graph` | Optional `Chalk::IR::Graph` for the method body. `undef` until graph construction is complete. |
+| `body` | Ordered list of statement IR nodes. **Transitional**: scheduled for removal once codegen migrates to walking the `graph` instead; see `docs/plans/2026-04-04-son-ir-polymorphic-migration.md` Outstanding Work. |
+| `graph` | `Chalk::IR::Graph` for the method body. Once `body` is removed, this is the sole representation. |
 
 ### `Chalk::IR::SubInfo`
 
@@ -410,7 +410,7 @@ Chalk's Sea of Nodes IR and the `perl5-son` B::SoN backend have been aligned to 
 
 ### Node Count Parity
 
-As of the most recent alignment milestone, perl5-son defines 70 operation types and Chalk defines 76. The gap consists primarily of Chalk-specific optimization nodes (`StructRef`, `StructFieldAccess`) and intermediate base classes (`BinOp`, `UnaryOp`, `Access`, `Aggregate`, `Regex`) that Chalk represents as distinct concrete classes but perl5-son folds into broader categories.
+As of the most recent alignment milestone, perl5-son defines 70 operation types and Chalk defines 74 concrete operation types plus 5 intermediate base classes (`BinOp`, `UnaryOp`, `Access`, `Aggregate`, `Regex`) for 79 total `.pm` files under `lib/Chalk/IR/Node/`. The gap against perl5-son consists primarily of Chalk-specific optimization nodes (`StructRef`, `StructFieldAccess`) and the intermediate base classes, which perl5-son folds into broader categories.
 
 ### Cross-Load Validation
 
