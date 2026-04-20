@@ -120,7 +120,7 @@ compiler):
 - Terminals: `/regex/` (anchored at `\G` during scanning)
 - Nonterminals: identifiers (`[A-Za-z_][A-Za-z_0-9]*`)
 - Quantifiers: `?` (zero or one), `*` (zero or more), `+` (one or more)
-- Quantifiers desugar to helper rules (e.g., `X?` → `X_opt ::= X | epsilon`)
+- Quantifiers: `X*` and `X+` desugar to helper rules; `X?` passes through unchanged and is handled inline by the parser via `multiply(value, one())`
 
 ## 6. Grammar Rules
 

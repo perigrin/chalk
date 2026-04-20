@@ -59,9 +59,10 @@
 #   │ Scan result cache               │ DONE       │ Earley.pm $_scan_cache   │
 #   │ (per-position regex memoization)│            │ in _scan() at line 824   │
 #   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Terminal clustering             │ NOT DONE   │ (pseudocode below)       │
-#   │ (group terminals by DFA state,  │            │                          │
-#   │  match once per unique pattern) │            │                          │
+#   │ Terminal clustering             │ DONE       │ Earley.pm _scan()        │
+#   │ (group terminals by DFA state,  │            │ clustered pre-scan using │
+#   │  match once per unique pattern) │            │ LR0DFA terminal_map      │
+#   │                                 │            │ (line ~549)              │
 #   ├─────────────────────────────────┼────────────┼──────────────────────────┤
 #   │ Lazy semiring init              │ NOT DONE   │ (pseudocode below)       │
 #   │ (defer init until item is used) │            │                          │
@@ -73,18 +74,17 @@
 #   │ (dead state pruning)            │            │                          │
 #   └─────────────────────────────────┴────────────┴──────────────────────────┘
 #
-# The scan result cache (not in Aycock's dissertation) partially mitigates
-# the lack of terminal clustering — regex matching is memoized per
-# (position, pattern) pair. However, without terminal clustering the
-# parser still iterates all items waiting for a terminal and calls
-# should_scan/on_scan per item, even when items share the same pattern.
+# The scan result cache (not in Aycock's dissertation) complements terminal
+# clustering: the clustered pre-scan populates the cache with one match per
+# unique pattern per position, and subsequent scans for items sharing the
+# same pattern at that position reuse the cached result.
 #
-# The LR0DFA implementation uses a simpler approach than the full NFA→DFA
-# subset construction described in the pseudocode below. It computes
-# prediction closures (epsilon-closure per nonterminal) and nullable
-# sets via fixed-point iteration, without constructing explicit DFA
-# states or transitions. This gives the prediction clustering benefit
-# without the full DFA machinery.
+# The LR0DFA implementation performs full DFA subset construction: a
+# worklist-driven state exploration that builds explicit DFA states with
+# terminal_map, completion_map, goto_table, and core_ids fields
+# (LR0DFA.pm _build_dfa_states / _register_state). Prediction clustering,
+# terminal clustering, and goto-based state transitions all consume these
+# precomputed structures at parse time.
 #
 # ============================================================================
 

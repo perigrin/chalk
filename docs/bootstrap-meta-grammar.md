@@ -41,7 +41,7 @@ Total rules: 10 (Grammar, Rule, Alternatives, Sequence, Element, Atom, Quantifie
 The `*`, `+`, and `?` quantifiers are expanded during grammar compilation to helper rules:
 - `X*` → deterministic helper rule for zero-or-more repetition
 - `X+` → deterministic helper rule for one-or-more repetition
-- `X?` → deterministic helper rule for optional element
+- `X?` → passes through unchanged; handled inline by the parser via `multiply(value, one())`
 
 This expansion increases effective rule count to ~12-16 rules during parsing.
 

@@ -46,9 +46,21 @@ codegen: 17 `->body()` call sites across the Perl and C targets, plus
   `Return`/`Unwind` exits, and seeds `body_stmts` so side-effect nodes
   are reachable. It does not perform Phi insertion, dominator analysis,
   or rewrite data-flow edges. Codegen consumers do not yet walk the
-  resulting graph.
+  resulting graph. The `body_stmts` seeding in `Chalk::IR::Graph` and
+  the `consumers`-traversal exclusion in `Graph::nodes()` are both
+  workarounds that disappear when full SSA construction lands and
+  hash-consing distinguishes graph-local nodes from globally-shared
+  constants.
 - **2 pipeline tests crash** after passing assertions:
   `ir-program-pipeline`, `ir-sub-info-pipeline`.
+- **Codegen targets do not conform to the uniform `Target` interface.**
+  `Perl/Target/C.pm` exposes only `generate_c_files($ir, $sa, $ctx)` and
+  `generate_xs_wrapper($ir, ...)`, and `Perl/Target/Perl.pm` has a
+  `generate_with_cfg($ir, $sa, $ctx)` alongside its `generate($ir)`.
+  These context-aware methods exist because codegen needs to recover
+  `cfg_state` annotations by walking the parse-time Context tree;
+  once the graph is a complete SSA representation, codegen can walk it
+  directly and the `($sa, $ctx)` backchannel can be removed.
 - **Design docs need updating** to reflect implementation divergences
   (this document is part of that update).
 
@@ -69,6 +81,11 @@ The migration is complete when all of the following hold:
 - `_build_method_graph` constructs a complete SoN graph with Phi
   insertion.
 - `ir-program-pipeline` and `ir-sub-info-pipeline` tests pass.
+- Every codegen target derives its output purely from the IR — no target
+  exposes context-aware entry points that require `$sa` or `$ctx` arguments.
+  (The final interface shape is subject to the separate D1 design work;
+  this criterion is about eliminating the parse-time backchannel, not about
+  the `generate` / `generate_distribution` split.)
 
 ## Target Architecture
 
