@@ -22,6 +22,21 @@ codegen: 17 `->body()` call sites across the Perl and C targets, plus
 `StructPromotion`, still read `MethodInfo->body` instead of walking the
 `Graph`. See "Outstanding Work" and "Acceptance Criteria" below.
 
+**Deeper structural issue** (scoped as design task D3): Chalk's IR is
+currently a tree of metadata structs (`Program` → `ClassInfo` →
+`MethodInfo`) with a SoN `Graph` only at method scope. The metadata
+structs don't participate in the use-def chain — they're scaffolding
+that lets typed nodes reference them without breaking the factory
+protocol. A correct Sea of Nodes is a single graph where method, class,
+and program boundaries are subgraph structure. Reaching that shape
+(Program-as-graph-of-class-graphs-of-method-graphs) is load-bearing for
+fixing problems surfaced during alignment review — consumer-traversal
+safety in `Graph.nodes()`, eliminating the parse-time backchannel in
+codegen, class-body context tracking for declarator enforcement,
+program-scope optimization passes, and more. The polymorphic migration
+tracked here is a prerequisite for that work but does not by itself
+close the gap.
+
 ## Outstanding Work
 
 - **61 `make('Constructor', ...)` call sites** in
