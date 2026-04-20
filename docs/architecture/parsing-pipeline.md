@@ -82,6 +82,12 @@ Parse events (scan, complete, absent optional) are communicated to semirings via
 
 This design eliminates separate callback methods (`on_scan`, `should_scan`, `on_complete`, `on_skip_optional`). All semiring logic runs inline during `multiply`, with event type determined by inspection of the right argument's annotations.
 
+### Transitional: slot-based dispatch in FilterComposite
+
+The target signature of `multiply` and `add` is `Context -> Context`: each semiring reads whatever slots it needs from the input Context and returns a new Context with its output written back. Under that design, `FilterComposite` is a pure composition wrapper that threads one Context through each component in order.
+
+Current code is partway there. Component semirings (Precedence, TypeInference, Structural) have narrower signatures — their `multiply` takes a slot value (the hashref stored at `annotations->{their_slot}`) and returns a slot value, not a Context. `FilterComposite` does the Context unwrapping and re-wrapping on each component's behalf, using a `slot_name()` method on each component to know which annotation key to extract and re-stuff. `slot_name()` is not part of the target interface; it's residue from the callback-based pipeline that should go away as component semirings are migrated to true `Context -> Context` signatures. Tracked as X9.
+
 ---
 
 ## 4. FilterComposite
