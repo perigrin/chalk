@@ -47,6 +47,8 @@ my $value = $ctx->extract();  # Returns $ir_node
 
 **Semantics**: For parsing, `extend` applies a semantic action to all children of the current parse node, aggregating their IR nodes into a new parent node.
 
+**Implementation convenience — `%opts`**: The implementation of `extend` accepts an optional `%opts` hash: `$ctx->extend($f, rule => $name, annotations => $ann, token => $tok, is_zero => $flag)`. Any field passed in `%opts` overrides the value propagated from the original context. This is an implementation extension for cases where a semantic action wants to override a single field without re-allocating from scratch; it does not change the formal comonad signature.
+
 **Example**:
 ```perl
 # Semantic action that combines child IR nodes
@@ -88,6 +90,10 @@ A `Context` contains:
 2. **Children**: List of child contexts (for sequences/alternatives)
 3. **Position**: Current input position (for error reporting)
 4. **Rule**: Current grammar rule being evaluated (for debugging)
+5. **Annotations**: Hash keyed by slot name (e.g. `type`, `precedence`, `structural`, `cfg`) that filtering semirings populate during the parse (see `architecture/parsing-pipeline.md` for the slot protocol)
+6. **Token**: Scan token payload, carried through `extend` so downstream consumers can reach the original scan
+7. **is_zero**: Boolean flag marking the algebraic zero element — a parse-rejection value that propagates through `multiply` and short-circuits FilterComposite dispatch. Normal during backtracking; not an error.
+8. **error** (planned, tracked as X1): Optional structured error value for system failures (malformed IR, semantic action raised, invariant violations) that are distinct from parse-rejection. An errored Context keeps propagating through composition; because `extend` preserves the children chain, the Context tree below serves as the error trace without a separate stack-trace mechanism.
 
 ## Threading Through Semantic Actions
 
@@ -130,23 +136,27 @@ All context operations return **new contexts**. The original context is never mu
 - Ability to backtrack in ambiguous parses
 - Deterministic evaluation order
 
-## Error Handling
+## Failure Modes
 
-If a semantic action fails during `extend`:
+Chalk distinguishes two kinds of failure on a Context, and handles them separately so they do not conflate.
 
-1. Capture the error with context information (position, rule, input)
-2. Return a special `Error` context that propagates upward
-3. `extract` on an `Error` context throws with full context trace
+**Parse rejection (algebraic).** A semiring's `multiply` may return a zero Context, represented by `is_zero=true`. This means "this branch is not a valid parse" and is a normal value in the algebra — FilterComposite short-circuits, the branch is discarded, the parser backtracks. No error is raised. `extract` on a zero Context is total and simply returns whatever focus the zero has (typically `undef`). This is the right primitive for parse rejection because rejection is a value, not an exception.
 
-This provides detailed parse error messages with rule stack traces.
+**System failure (recorded).** A semantic action may raise because the IR is malformed, an invariant is violated, or some other real problem occurred. For these cases the Context carries an `error` slot (see Context Structure above — planned, tracked as X1) that records the structured error alongside the history. Because `extend` preserves the children chain, the Context tree below an errored Context is the error trace: walking down gives you "where we were when the error happened" for free.
+
+**`extract` stays total in both cases.** It is a projection (`Context<T> -> T`) and never throws. This preserves the comonad laws:
+
+- Left identity: `extract(extend(f, w)) == f(w)`
+- Right identity: `extend(extract, w) == w` (at the value level)
+- Associativity: `extend(f, extend(g, w)) == extend(compose(f, g), w)` (for reachable content)
+
+A throwing `extract` would break totality and, through it, break the composition laws that make the comonad framework useful. Errors are therefore data carried on the Context, not exceptions thrown from its projection.
+
+An earlier version of this specification described a distinct `Error` subclass of Context whose `extract` threw on failure. That design is superseded: it conflated parse rejection with system failure, and its throwing `extract` violated the comonad laws.
 
 ## Integration with Semirings
 
-The comonad operates **inside** the semantic action semiring:
-
-- **Boolean semiring**: No context needed (just true/false)
-- **Semantic action semiring**: Each value is a `Context`
-- **Composite semiring**: Boolean × SemanticAction = (Bool, Context)
+The comonad operates inside the semantic-action branch of Chalk's five-semiring FilterComposite pipeline: Boolean, Precedence, TypeInference, Structural, and SemanticAction. The full pipeline and its ordering rationale are documented in [`architecture/parsing-pipeline.md`](architecture/parsing-pipeline.md); only SemanticAction carries Context values — the filtering semirings write their results into `Context.annotations` slots.
 
 The semiring's `multiply` operation chains contexts:
 ```perl
@@ -160,38 +170,9 @@ sub multiply($left_ctx, $right_ctx) {
 }
 ```
 
-## Implementation Phases
+## Testing
 
-### Phase 1a (Earley Parser)
-
-Implement only `extract`:
-- Context holds a single IR node (or undef for Boolean semiring)
-- `extract` returns that node
-- Defer `extend` and `duplicate`
-
-### Phase 2b (Semantic Actions)
-
-Implement full comonad:
-- Add `children` field to Context
-- Implement `extend` to map semantic actions over children
-- Implement `duplicate` (if needed for ambiguous parses)
-- Add position/rule fields for error reporting
-
-## Testing Strategy
-
-Create `t/bootstrap/comonad-threading.t` with these test cases:
-
-1. **Simple extract**: Context with single IR node
-2. **Sequence extend**: Two-child context with combining action
-3. **Alternative extend**: Multiple alternatives, action chooses/merges
-4. **Nested extend**: Three-level rule hierarchy (e.g., Grammar → Rule → Alternatives)
-5. **Error propagation**: Failed semantic action creates Error context
-
-Each test should:
-- Create contexts manually (no parser needed)
-- Apply semantic actions via `extend`
-- Verify `extract` returns expected IR node
-- Verify comonad laws hold
+Test coverage for the comonad implementation lives in `t/bootstrap/` — principally `t/bootstrap/semiring-value-propagation.t` for the tree-depth contract and `t/bootstrap/context-visitor.t`, `context-extend-wrap.t`, `context-extend-opts.t` for individual behaviors. Tests exercise the laws against small hand-built contexts and verify that complete parse pipelines produce expected Context shapes. See the test files for the current coverage surface.
 
 ## References
 

@@ -18,6 +18,10 @@ class Chalk::Grammar::Perl::KeywordTable {
     #   Literals:     undef true false
     #   Quoting:      qw q qq m s qr (prefix tokens for quoting/regex)
     #   Special:      __SUB__
+    #   Control flow: return (dedicated grammar rule; must not parse as identifier)
+    #   Note: 'die' is NOT listed here because its only parse path is through
+    #   CallExpression(QualifiedIdentifier ...), which requires 'die' to scan
+    #   as a QualifiedIdentifier. Adding 'die' here would block that path.
     my %KEYWORDS = map { $_ => true } qw(
         use no class sub method ADJUST package
         if unless elsif else
@@ -30,6 +34,7 @@ class Chalk::Grammar::Perl::KeywordTable {
         undef true false
         qw q qq m s qr
         __SUB__
+        return
     );
 
     # Returns true if the word is a grammar keyword, false otherwise.
@@ -84,6 +89,13 @@ class Chalk::Grammar::Perl::KeywordTable {
         'false'     => [qw(Literal)],
         'qw'        => [qw(QwLiteral)],
         '__SUB__'   => [qw(Atom)],
+        # Control-flow keyword with a dedicated grammar rule.
+        # Without this entry, CallExpression(QualifiedIdentifier WS ExpressionList)
+        # also matches 'return EXPR', producing duplicate Return CFG nodes
+        # alongside ReturnStatement.
+        # 'die' is intentionally NOT listed here: its only parse path is through
+        # CallExpression, which requires 'die' to scan as QualifiedIdentifier.
+        'return'    => [qw(ReturnStatement)],
         # Quoting/regex prefix keywords: these are consumed by terminal regex
         # patterns inside StringLiteral/RegexLiteral, not by named grammar rules.
         # Mapping them here lets should_scan reject them as QualifiedIdentifier

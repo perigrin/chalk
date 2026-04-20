@@ -214,7 +214,85 @@ sub _load_named_methods {
 }
 
 # =============================================================================
-# Test 6: Schema incompatibility report
+# Test 6: Length node — sub { length(shift) }
+# B::SoN lowers length() to a Length data node with a single input.
+# Verifies: Length node round-trips through Chalk::IR NodeFactory.
+# =============================================================================
+
+{
+    my $json = _run_son_json('sub lenny { my $s = shift; length($s) }');
+    ok(defined $json, 'Test 6: B::SoN produced JSON for length sub');
+
+  SKIP: {
+        skip 'no B::SoN JSON produced', 2 unless defined $json;
+
+        require JSON::PP;
+        my $data = eval { JSON::PP->new->decode($json) };
+        # Scan all methods to find one that actually contains a Length node.
+        my ($length_method) = grep {
+            grep { $_->{op} eq 'Length' } $data->{methods}{$_}{nodes}->@*
+        } sort keys $data->{methods}->%*;
+
+      SKIP: {
+            skip 'no Length node produced by B::SoN', 2 unless defined $length_method;
+
+            my $loaded = _load_named_methods($json, $length_method);
+            ok(defined $loaded, 'Test 6: from_json loaded length-bearing method');
+
+          SKIP: {
+                skip 'load failed', 1 unless defined $loaded;
+
+                my $g    = $loaded->{$length_method};
+                my %seen = map { $_->operation() => 1 } $g->nodes()->@*;
+
+                ok($seen{Length}, 'Test 6: Length node present');
+            }
+        }
+    }
+}
+
+# =============================================================================
+# Test 7: Slice node — sub { my @a = (1..10); @a[2,3,4] }
+# B::SoN lowers array/hash slice operations to a Slice data node with
+# (container, indices...) inputs.
+# Verifies: Slice node round-trips through Chalk::IR NodeFactory.
+# =============================================================================
+
+{
+    my $json = _run_son_json('sub slicer { my @a = (1..10); @a[2,3,4] }');
+    ok(defined $json, 'Test 7: B::SoN produced JSON for slice sub');
+
+  SKIP: {
+        skip 'no B::SoN JSON produced', 3 unless defined $json;
+
+        require JSON::PP;
+        my $data = eval { JSON::PP->new->decode($json) };
+        # B::SoN often loses the sub name for slice-heavy bodies; scan all
+        # methods to find one that actually contains a Slice node.
+        my ($slice_method) = grep {
+            grep { $_->{op} eq 'Slice' } $data->{methods}{$_}{nodes}->@*
+        } sort keys $data->{methods}->%*;
+
+      SKIP: {
+            skip 'no Slice node produced by B::SoN', 2 unless defined $slice_method;
+
+            my $loaded = _load_named_methods($json, $slice_method);
+            ok(defined $loaded, 'Test 7: from_json loaded slice-bearing method');
+
+          SKIP: {
+                skip 'load failed', 1 unless defined $loaded;
+
+                my $g    = $loaded->{$slice_method};
+                my %seen = map { $_->operation() => 1 } $g->nodes()->@*;
+
+                ok($seen{Slice}, 'Test 7: Slice node present');
+            }
+        }
+    }
+}
+
+# =============================================================================
+# Test 8: Schema incompatibility report
 # Documents node types that appear in B::SoN output but are not supported
 # by Chalk::IR::NodeFactory, verifying no regressions as coverage expands.
 # =============================================================================
@@ -228,7 +306,7 @@ sub _load_named_methods {
         StrEq StrNe StrLt StrGt StrLe StrGe StrCmp
         And Or BitAnd BitOr BitXor LeftShift RightShift
         Assign Repeat Match NotMatch DefinedOr Xor Range Yada IsaOp
-        Not Negate Complement Defined UnaryPlus Ref
+        Not Negate Complement Defined UnaryPlus Ref Length Slice
         PadAccess FieldAccess StashAccess Subscript
         Call HashRef ArrayRef Interpolate AnonSub
         RegexMatch RegexSubst TryCatch
@@ -266,7 +344,7 @@ sub _load_named_methods {
 
         # All node types in B::SoN output should now be supported by Chalk.
         ok(!@unsupported,
-            'Test 6: all B::SoN node types supported by Chalk NodeFactory')
+            'Test 8: all B::SoN node types supported by Chalk NodeFactory')
             or diag "Unsupported ops: @unsupported";
     }
 }

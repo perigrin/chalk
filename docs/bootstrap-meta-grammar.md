@@ -1,5 +1,10 @@
 # BNF Meta-Grammar Specification
 
+> **Scope:** This document describes the 10-rule BNF meta-grammar that
+> Chalk's parser bootstraps from. The full Perl grammar that Chalk
+> compiles lives in [`chalk-grammar-spec.md`](chalk-grammar-spec.md).
+> For the Chalk project as a whole, see [`../README.md`](../README.md).
+
 This document specifies the 10-rule BNF meta-grammar used for bootstrapping the Chalk::Bootstrap compiler.
 
 ## Source
@@ -36,7 +41,7 @@ Total rules: 10 (Grammar, Rule, Alternatives, Sequence, Element, Atom, Quantifie
 The `*`, `+`, and `?` quantifiers are expanded during grammar compilation to helper rules:
 - `X*` → deterministic helper rule for zero-or-more repetition
 - `X+` → deterministic helper rule for one-or-more repetition
-- `X?` → deterministic helper rule for optional element
+- `X?` → passes through unchanged; handled inline by the parser via `multiply(value, one())`
 
 This expansion increases effective rule count to ~12-16 rules during parsing.
 

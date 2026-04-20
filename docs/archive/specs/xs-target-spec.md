@@ -1,5 +1,13 @@
 # Chalk::Bootstrap — XS Target Implementation Specification
 
+> **ARCHIVED.** This spec described the implementation of a standalone
+> `Target/XS.pm` class. That approach was abandoned: Chalk evolved to
+> emit C from the IR and generate thin per-class XS wrappers that bind
+> to a shared `chalk.so` library (GitHub issue #662). No `Target/XS.pm`
+> exists. See memory note `xs_target_evolution.md` and
+> [`../../architecture/ir-lowering.md`](../../architecture/ir-lowering.md)
+> for the current architecture. Preserved for history.
+
 **Compiled from brainstorming session, February 2026**
 
 | | |

@@ -4,9 +4,11 @@
 # IR Lowering and Code Generation
 
 This document describes Chalk's intermediate representation (IR) lowering pipeline and
-the three code generation targets: Perl (primary), XS (performance), and C (native
-table compilation). It covers the full pipeline from grammar and parse results through
-IR construction, IR fixups, and final source emission.
+its code generation targets: Perl (primary), XS (performance), and C (native
+table compilation). An LLVM IR target is planned but deferred pending C/XS
+completion; see [`../llvm-target.md`](../llvm-target.md) for the rationale. This
+document covers the full pipeline from grammar and parse results through IR
+construction, IR fixups, and final source emission.
 
 ---
 
@@ -25,8 +27,44 @@ different purposes:
    generated source compiles and behaves identically to the original, the compiler
    is correct.
 
-Both pipelines use the same base class, `Chalk::Bootstrap::Target`, and expose the same
-interface: `generate($ir)` and `generate_distribution($ir)`.
+Both pipelines use the same base class, `Chalk::Bootstrap::Target`. The target
+interface is `generate($ir) -> HashRef[Str]` — a map of output path to source
+content. Single-file targets return a one-entry hash; multi-file targets return
+the full file set. Distribution packaging (`Build.PL`, `MANIFEST`, `.pm` stubs,
+`XSLoader` shims) is a separate layer that consumes `generate()` output and
+produces a CPAN-shaped distribution; it does not belong on the target interface.
+
+The current code does not yet conform to this target shape. The base class
+still has `die`-stubs for both `generate($ir)` and `generate_distribution($ir)`,
+and individual targets diverge:
+
+- **BNF targets** (`BNF/Target/Perl.pm`, `BNF/Target/XS.pm`, `BNF/Target/C.pm`)
+  implement both `generate` and `generate_distribution`. `generate` sometimes
+  returns a string and sometimes a hashref (e.g., `BNF/Target/C::generate`
+  returns `{'dfa_tables.c' => ..., 'dfa_tables.h' => ...}`), so the return
+  shape is already leaky.
+- **`Perl/Target/Perl.pm`** implements both methods, plus a CFG-aware
+  `generate_with_cfg($ir, $sa, $ctx)` that walks the parse-time Context tree
+  to recover `cfg_state` annotations the IR graph does not yet carry.
+- **`Perl/Target/C.pm`** implements neither `generate` nor
+  `generate_distribution`. Its entry points are `generate_c_files($ir, $sa, $ctx)`
+  and `generate_xs_wrapper($ir, $exported_functions, $anon_sub_registrations)`,
+  which also require parse-time context.
+
+Two distinct migrations are needed to reach the target shape:
+
+1. **Remove the parse-time backchannel.** The context-aware methods
+   (`generate_with_cfg`, `generate_c_files`, `generate_xs_wrapper`) exist
+   because codegen reaches back into the SemanticAction semiring and the
+   parse-time Context to recover `cfg_state` annotations that should live on
+   IR nodes. Once `_build_method_graph` performs full SSA construction (Phi
+   insertion, dominator analysis, data-flow rewriting) and codegen walks the
+   `Graph` instead of `MethodInfo->body`, the backchannel becomes unnecessary.
+   The polymorphic-migration plan tracks this work.
+2. **Collapse the interface to `generate($ir) -> HashRef[Str]`.** Remove
+   `generate_distribution` from the target interface; hoist distribution
+   packaging into a separate layer. The design for this lives in task D1
+   (`docs/plans/` once the design doc lands).
 
 ---
 
@@ -387,16 +425,21 @@ boundary rather than inside expressions, which is where `_emit_node` expects the
 
 ---
 
-## XS Target for Perl Source
+## XS Wrappers for Perl Source
 
-**File**: `lib/Chalk/Bootstrap/Perl/Target/XS.pm` (referenced from `TestXSHelpers`)
+**File**: `lib/Chalk/Bootstrap/Perl/Target/C.pm` (method `generate_xs_wrapper`)
 
-The XS target for parsed Perl source compiles each class into a separate `.xs` file
-using per-class XS compilation. This is distinct from the BNF XS target: instead of
-emitting grammar construction code, it emits XSUBs that correspond to each method
-in the source class.
+The XS path for parsed Perl source is not a standalone target class. `Target/C.pm`
+emits C code from the IR and also emits thin per-class XS wrappers that bind into
+a shared `chalk.so` library via `generate_xs_wrapper()`. This is distinct from the
+BNF XS target (`BNF/Target/XS.pm`), which emits grammar recognizer XSUBs; the
+wrappers described here instead expose the compiled Perl class's public methods.
 
-Key design decisions (documented in `xs_bootstrap_approach.md`):
+A hand-written standalone `Perl/Target/XS.pm` was evaluated and abandoned (GitHub
+issue #662) in favor of the unified C-with-XS-wrappers approach above. See
+`xs_target_evolution.md` in project memory for the narrative.
+
+Key design decisions:
 
 - **Per-class XS, not multi-class bundles**: Multi-class XS was evaluated and abandoned.
   Bundling all classes into one `.so` provides no speedup because `_run_parse` still
@@ -413,6 +456,25 @@ Key design decisions (documented in `xs_bootstrap_approach.md`):
 - **UTF-8 string handling**: `sv_len_utf8()` is used for character-count length
   rather than `SvCUR()` (which returns byte length). `sv_pos_u2b()` converts character
   offsets to byte offsets for `substr()` operations.
+
+---
+
+## Dependency Resolution
+
+**File**: `lib/Chalk/Bootstrap/DepChaser.pm`
+
+XS-wrapper and `chalk.so` compilation needs to know which Chalk classes a given class depends on — you can't compile `Chalk::Bootstrap::Earley` to XS without also compiling its `use`d Chalk modules. `DepChaser` resolves the transitive closure of Chalk module dependencies starting from a root file.
+
+Mechanism (IR-driven, not source-scanning):
+
+1. Parse the root file through the full Chalk pipeline into a `Chalk::IR::Program`.
+2. Call `extract_use_decls($ir)` on the Program to get the list of module names from its `UseInfo` children.
+3. Filter to `Chalk::*` names only — core and CPAN modules are assumed available via the runtime Perl environment and don't need Chalk compilation.
+4. Map each module name to a `lib/X/Y/Z.pm` path via `module_to_path($name)`.
+5. Recurse: for each dependency file, parse its IR, extract its `UseDecl`s, add to the queue.
+6. Return the ordered list of transitive Chalk dependencies, excluding the root.
+
+The `chalk.so` build script uses this result to decide which `.c` files to compile and link into the shared library. Because dependency extraction runs against the IR (not a text scan of `use` lines), it inherits the same grammar-level accuracy as the rest of the pipeline — no false positives from commented-out `use` statements or misparsed strings.
 
 ---
 

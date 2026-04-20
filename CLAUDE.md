@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is the **Chalk::Bootstrap** worktree - a clean-room implementation of a BNF-to-Perl compiler designed as an experimental foundation that could evolve into the main Chalk compiler if it proves superior.
+This is the mainline Chalk worktree. Chalk is a self-hosted optimizing compiler for Perl, written in Perl. It began as a clean-room reimplementation ("Chalk::Bootstrap") undertaken to resolve architectural constraints in an earlier implementation; that reimplementation has since replaced the earlier version and is now the only Chalk. Many code paths still carry the `Bootstrap` name (`lib/Chalk/Bootstrap/`, `t/bootstrap/`, `docs/chalk-bootstrap.bnf`) — those are historical and do not indicate a separate project.
 
-**Goal**: Build a self-hosting BNF meta-grammar compiler that passes validation by generating a recognizer equivalent to the hand-written version.
+**Goal**: A self-hosted optimizing compiler for Perl. Chalk parses a restricted Perl subset into a Sea-of-Nodes IR and lowers it to Perl, XS/C, and (planned) LLVM IR backends. The BNF-meta-grammar self-hosting validation gate (generating a recognizer equivalent to the hand-written version) has been passed; self-hosted compilation of the full Perl subset is ongoing.
 
-**Source**: Implementation follows the PRD at https://gist.githubusercontent.com/perigrin/eb2b536c312b6fee3584bb0f7d97cde0/raw/af1e52bd340ce7b588a6c2fca4b0de141c74f8f9/cleanroom.md
+**Origin doc**: The original clean-room PRD lives at https://gist.githubusercontent.com/perigrin/eb2b536c312b6fee3584bb0f7d97cde0/raw/af1e52bd340ce7b588a6c2fca4b0de141c74f8f9/cleanroom.md — useful as history, not as current spec.
 
-**Design Philosophy**: Correctness > Learn from Chalk patterns > Simplicity
+**Design Philosophy**: Correctness > Simplicity. See `ARCHITECTURE.md` Design Principles for the current principle set (immutability, determinism, progressive filtering, correctness over performance).
 
 **Architecture**: Read [ARCHITECTURE.md](ARCHITECTURE.md) for the layered
 parsing pipeline design. Read [CONTRIBUTING.md](CONTRIBUTING.md) for where
@@ -257,3 +257,36 @@ Reference files in main Chalk (read-only):
 4. **Test progressively**: Each layer independently before integration
 5. **Commit frequently**: After each sub-phase or working feature
 6. **Validate determinism**: Run codegen tests multiple times, diff outputs
+
+## Plan Discipline (Chalk-specific)
+
+Before any "next step" discussion, check `docs/plans/` for relevant existing
+plans. This project has a documented history of 80-90% migrations that drift
+before completion — do not contribute to that pattern.
+
+Specifically:
+
+1. **Check `docs/plans/` first**: before proposing IR, parser, codegen, or
+   semiring work, grep the plan files for existing coverage. Quote the
+   relevant "Remaining Work" or equivalent sections.
+2. **Audit against plan acceptance criteria, not commits**: when asked "is X
+   done?", answer against what the plan says needs to happen, not what has
+   been committed. The April 4-7 migration was declared "Final" while its own
+   plan listed outstanding Remaining Work.
+3. **Known stalled migration**: the April 4-7 SoN IR polymorphic migration
+   (see `docs/plans/2026-04-04-son-ir-polymorphic-migration.md` and
+   `docs/plans/2026-04-04-phase4-structural-split.md`) is approximately 80%
+   complete. Remaining: ~61 `make('Constructor', ...)` calls in Actions.pm,
+   Shim.pm deletion, codegen migration from `body()` to graph-walk, removal
+   of `body` field from MethodInfo, removal of `compat_class` from
+   Chalk::IR::Node, `_build_method_graph` completion (currently a
+   Return-collector, not a real SoN construction pass). Commit c7361f3c is
+   explicitly a prototype, not a fix.
+4. **Prototype commits are promises**: commits labeled "prototype:", "draft:",
+   "stopgap:", or "WIP:" in Chalk's git history must have a follow-up plan
+   or issue. Do not treat prototype state as final. When summarizing work
+   that includes prototype commits, preserve the prototype status — do not
+   use completion-oriented language.
+5. **Use `/paad:alignment` before new spec work**: the paad:alignment skill
+   exists specifically for auditing plan-vs-code drift. Run it against
+   relevant plans before proposing new specs.

@@ -1,5 +1,14 @@
 # SoN IR Phase 3 Batch 2: EmitHelpers Migration
 
+> **ARCHIVED — LANDED.** Zero `isa Constructor` sites remain in
+> `EmitHelpers.pm`; 69 typed-node `isa Chalk::IR::Node::*` checks are in
+> place. The dual-path transitional pattern has been collapsed to
+> typed-node-only dispatch. Relevant commits:
+> `716f8c3a feat: migrate EmitHelpers isa checks to typed nodes (dual-path)`,
+> `ae1229e6 refactor: remove dead Constructor fallbacks from EmitHelpers`,
+> `1b90daa8 feat: zero isa Constructor checks in lib — Constructor eliminated from Chalk pipeline`.
+> Preserved for history.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Migrate `lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm` (30 `isa Constructor` sites, 27 `->class() eq` checks) from Constructor dispatch to typed `isa Chalk::IR::Node::*` checks with dual-path fallback.

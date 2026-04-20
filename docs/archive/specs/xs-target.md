@@ -1,5 +1,14 @@
 # Chalk::Bootstrap — XS Target
 
+> **ARCHIVED.** This PRD described a standalone `Target/XS.pm` class
+> emitting XS directly, parallel to `Target/C.pm`. That approach was
+> abandoned: Chalk evolved to emit C from the IR and generate thin
+> per-class XS wrappers that bind to a shared `chalk.so` library
+> (GitHub issue #662). No `Target/XS.pm` exists. See memory note
+> `xs_target_evolution.md` and
+> [`../../architecture/ir-lowering.md`](../../architecture/ir-lowering.md)
+> for the current architecture. Preserved for history.
+
 **Extending the BNF Compiler to Generate XS — Product Requirements Document**
 
 | | |

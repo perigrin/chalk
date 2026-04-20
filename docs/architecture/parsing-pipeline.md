@@ -23,9 +23,9 @@ The five semirings, applied in order through a `FilterComposite` wrapper, are:
 
 Each semiring operates on its own "slice" of a 5-tuple value that the `FilterComposite` manages. The parse chart stores one 5-tuple per Earley item.
 
-### Current vs. Target Ordering
+### Ordering Rationale
 
-The semirings are currently instantiated in the order `[Boolean, Precedence, TypeInference, Structural, SemanticAction]`. The target order per the architecture decision is `[Boolean, TypeInference, Precedence, Structural, SemanticAction]`. In the target ordering, TypeInference has higher priority than Precedence in disambiguation decisions, which allows TypeInference's semantic knowledge (keyword rejection, builtin signature validation) to take precedence over purely syntactic operator level preferences. The reordering has not been performed because a known limitation of TypeInference's value propagation (described in Section 10) prevents it from fully exercising that priority.
+The canonical order is `[Boolean, Precedence, TypeInference, Structural, SemanticAction]`. The four filtering semirings (Boolean, Precedence, TypeInference, Structural) commute: because disambiguation decisions are gated by zero-propagation and refaddr-based first-wins preference, any ordering of the filters produces the same accepted parse set. The chosen order is a performance decision — cheaper checks run first so expensive ones short-circuit on already-killed derivations. SemanticAction is structurally last (enforced by `FilterComposite._sa()` returning `$semirings->[-1]`) because it is the only component that constructs IR rather than filtering.
 
 ---
 
@@ -43,7 +43,7 @@ The grammar permits all of these. Semirings are responsible for rejecting the in
 
 ### Commutativity and the Earley Invariant
 
-Earley parsing merges chart items that span the same input positions via the `add` operation. For disambiguation to be correct, the result must not depend on the order in which alternatives are encountered. All semirings are designed to be deterministic under reordering, and the FilterComposite applies a deterministic tie-breaking rule (prefer left) when no semiring expresses a preference.
+Earley parsing merges chart items that span the same input positions via the `add` operation. For disambiguation to be correct, the result must not depend on the order in which alternatives are encountered. All semirings are deterministic under reordering. The four filtering semirings commute with each other: reordering them within `FilterComposite` does not change which parses are accepted, only how quickly they are rejected. FilterComposite applies a deterministic tie-breaking rule (prefer left) when no semiring expresses a preference.
 
 ### Correctness Over Performance
 
@@ -81,6 +81,20 @@ Parse events (scan, complete, absent optional) are communicated to semirings via
 - **Absent optional**: The parser calls `multiply($value, one())` when an optional symbol (`X?`) is skipped. No special annotation is needed; `one()` is the identity element and the result is an unfocused Context node.
 
 This design eliminates separate callback methods (`on_scan`, `should_scan`, `on_complete`, `on_skip_optional`). All semiring logic runs inline during `multiply`, with event type determined by inspection of the right argument's annotations.
+
+### Transitional: slot-based dispatch in FilterComposite
+
+The target signature of `multiply` and `add` is `Context -> Context`: each semiring reads whatever slots it needs from the input Context and returns a new Context with its output written back. Under that design, `FilterComposite` is a pure composition wrapper that threads one Context through each component in order.
+
+Current code is partway there. Component semirings (Precedence, TypeInference, Structural) have narrower signatures — their `multiply` takes a slot value (the hashref stored at `annotations->{their_slot}`) and returns a slot value, not a Context. `FilterComposite` does the Context unwrapping and re-wrapping on each component's behalf, using a `slot_name()` method on each component to know which annotation key to extract and re-stuff. `slot_name()` is not part of the target interface; it's residue from the callback-based pipeline that should go away as component semirings are migrated to true `Context -> Context` signatures. Tracked as X9.
+
+### Lifecycle: `reset_cache()`
+
+Semirings that maintain hash-cons caches (Precedence, TypeInference, SemanticAction, FilterComposite) implement an optional `reset_cache()` method. It clears the cache so it doesn't grow without bound across successive parses and doesn't leak values from a previous parse into the next one.
+
+`FilterComposite::reset_cache()` delegates to each component: `$sr->reset_cache() if $sr->can('reset_cache')`. Boolean and Structural don't implement it — Boolean has no cache; Structural operates on a fixed-size bitfield that doesn't accumulate. The `can` guard keeps the method optional.
+
+Callers (test harnesses, pipeline drivers) should invoke `reset_cache()` on the top-level FilterComposite between distinct parses.
 
 ---
 
@@ -254,7 +268,7 @@ Assignment operators (`=`, `+=`, `//=`, etc.) use a synthetic level of 101, righ
 
 ### Conceptual Expression Levels
 
-In addition to operator levels, `on_complete` assigns conceptual levels to expression-type rules:
+In addition to operator levels, the complete branch of `multiply` assigns conceptual levels to expression-type rules:
 
 | Rule                  | Level | Meaning                                   |
 |-----------------------|-------|-------------------------------------------|
@@ -362,7 +376,7 @@ SemanticAction values are Context objects. The Context type is defined in `Chalk
 - `extract`: returns the focus value (an IR node or `undef` for unfocused multiply nodes).
 - `children`: returns the child Contexts.
 - `position`: the source position (bookkeeping only, not semantic).
-- `rule`: the grammar rule name that produced this Context (set by `on_complete`).
+- `rule`: the grammar rule name that produced this Context (set by the complete branch of `multiply`).
 
 `zero`: `undef`. `one`: a singleton Context with `undef` focus, no children, and a `cfg_state` entry pointing to a fresh `Start` node and empty `Scope`.
 
@@ -415,7 +429,7 @@ In the current implementation, the `keys %hash` case works because `Atom` and `E
 
 The consequence is that TypeInference cannot reliably reject semantically invalid parses where the invalidity depends on type context that spans multiple rule completions before the point where the scan branch needs to act. For example, rejecting a bareword as a binary operand based on its position in a fully-typed expression would require type information from a higher-level completion that has not yet occurred when the scan branch is processing the bareword.
 
-This is the primary reason the current semiring order (`[Boolean, Precedence, TypeInference, Structural, SemanticAction]`) has not been changed to the target order (`[Boolean, TypeInference, Precedence, Structural, SemanticAction]`): TypeInference cannot fully exercise higher-priority disambiguation with its current value propagation model, and placing it before Precedence would introduce a risk of changing disambiguation outcomes without corresponding correctness gains.
+This limitation does not affect the canonical semiring order, because the four filtering semirings commute: any filter that can kill a derivation eventually does so regardless of its position in the chain. The limitation matters for future work that might want TypeInference to prune earlier (reducing downstream semiring work on doomed derivations), which is a performance concern, not a correctness one.
 
 Resolving this limitation would require either (a) a richer tree representation that carries completion-focused nodes at every intermediate step (increasing memory pressure), or (b) a two-pass architecture where TypeInference re-validates completed spans against a finalized type context, similar to the extend-based redesign described in `docs/plans/2026-02-20-typeinference-redesign.md`.
 

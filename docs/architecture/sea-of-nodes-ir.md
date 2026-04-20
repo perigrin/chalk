@@ -220,14 +220,24 @@ The factory is a regular Perl object; tests that need a clean cache simply insta
 | `start` | The `Start` CFG node that is the graph's unique entry point. |
 | `returns` | Arrayref of `Return` (and optionally `Unwind`) nodes that are the graph's exit points. |
 | `schedule` | Hashref reserved for scheduling information populated by later optimization passes. Not used by the base graph. |
+| `body_stmts` | Arrayref of body statement nodes used as additional BFS seeds. Transitional: see note below. |
 
 ### `nodes()`
 
-Returns an arrayref of all nodes in the graph in topological order (inputs before consumers). The implementation uses a two-phase algorithm:
+Returns an arrayref of all nodes in the graph in topological order (inputs before consumers).
 
-1. **BFS reachability.** Starting from `start` and all `returns`, the BFS traverses both `inputs` and `consumers` edges to collect every node reachable from the graph's entry and exits. Stale or unblessed weak references in `consumers` are filtered out.
+**Target behavior.** A correctly constructed Sea of Nodes graph enumerates all its nodes by traversing both edge directions: `inputs` from the graph's exits (`returns`, `unwinds`) to pick up the data dependencies feeding the exits, and `consumers` from the graph's entry (`start`) to pick up side-effect nodes reached via the control-token chain (`VarDecl`, `Assign`, `Call`, and other nodes whose results are not consumed by downstream data flow). Because use-def edges and def-use edges are duals, enumerating from both terminals produces the complete set.
 
-2. **DFS post-order.** A recursive DFS over `inputs` edges only (not consumers) collects nodes in post-order. Because post-order places each node after all of its inputs, the result is a valid topological ordering: if node A is an input to node B, A appears before B in the output.
+**Current behavior.** The current `nodes()` implementation follows only `inputs`, seeded from `start`, every node in `returns`, and every node in `body_stmts`. Walking `consumers` is disabled; `body_stmts` carries side-effect nodes explicitly so they are not lost.
+
+This divergence is a workaround, not a design decision. Two problems make consumers-traversal unsafe today:
+
+- **Incomplete control-flow stitching.** `_build_method_graph` does not yet thread every side-effect node onto the control-token chain from `Start`. Side-effect nodes currently have no control input and would be orphaned by any traversal that relies on them being reachable from `Start` via `consumers`.
+- **Global hash-consing collisions.** Chalk's hash-consing is currently global. Shared constants — for example, the `Start` node used as a control token — accumulate `consumers` from every method graph that references them. Walking `consumers` from such a shared node would pull `Return`/`Unwind` nodes from foreign method graphs into the current one.
+
+`body_stmts` seeding and the `consumers`-exclusion together paper over both gaps. Once `_build_method_graph` performs full SSA construction with explicit control edges to every side-effect node, and hash-consing distinguishes graph-local nodes from globally-shared constants (or attributes `consumers` per graph), the target bidirectional-traversal behavior can be restored and `body_stmts` becomes unnecessary. The polymorphic-migration plan at `docs/plans/2026-04-04-son-ir-polymorphic-migration.md` tracks this work.
+
+**DFS post-order.** After the reachability pass, a recursive DFS over `inputs` edges collects nodes in post-order. Because post-order places each node after all of its inputs, the result is a valid topological ordering: if node A is an input to node B, A appears before B in the output.
 
 The `Chalk::IR::Serialize::JSON` module uses a refined version of this traversal (`_all_nodes_topo`) that also ensures `Region` nodes referenced by `Phi.region` appear before their `Phi` nodes, since `Phi.region` is not an `inputs` edge.
 
@@ -259,7 +269,7 @@ Metadata for a single class declaration.
 | `fields` | Ordered list of `FieldInfo` objects. |
 | `methods` | Ordered list of `MethodInfo` objects. |
 | `subs` | Ordered list of `SubInfo` objects for lexically-scoped subs inside the class. |
-| `body` | All body items in source order (union of `fields`, `methods`, `subs`, and ADJUST blocks). |
+| `body` | All body items in source order (union of `fields`, `methods`, `subs`, and ADJUST blocks). **Transitional**: parallel state to the typed collections above, scheduled for removal once the program-level graph (D3) preserves source order via graph edges. See `docs/plans/2026-04-04-son-ir-polymorphic-migration.md`. |
 
 ### `Chalk::IR::MethodInfo`
 
@@ -270,8 +280,8 @@ Metadata for a method declaration, with an optional per-method computation graph
 | `name` | Method name string. |
 | `params` | Ordered list of parameter names. |
 | `return_type` | Optional declared return type string. |
-| `body` | Ordered list of statement IR nodes. |
-| `graph` | Optional `Chalk::IR::Graph` for the method body. `undef` until graph construction is complete. |
+| `body` | Ordered list of statement IR nodes. **Transitional**: scheduled for removal once codegen migrates to walking the `graph` instead; see `docs/plans/2026-04-04-son-ir-polymorphic-migration.md` Outstanding Work. |
+| `graph` | `Chalk::IR::Graph` for the method body. Once `body` is removed, this is the sole representation. |
 
 ### `Chalk::IR::SubInfo`
 
@@ -400,7 +410,7 @@ Chalk's Sea of Nodes IR and the `perl5-son` B::SoN backend have been aligned to 
 
 ### Node Count Parity
 
-As of the most recent alignment milestone, perl5-son defines 70 operation types and Chalk defines 76. The gap consists primarily of Chalk-specific optimization nodes (`StructRef`, `StructFieldAccess`) and intermediate base classes (`BinOp`, `UnaryOp`, `Access`, `Aggregate`, `Regex`) that Chalk represents as distinct concrete classes but perl5-son folds into broader categories.
+As of the most recent alignment milestone, perl5-son defines 70 operation types and Chalk defines 74 concrete operation types plus 5 intermediate base classes (`BinOp`, `UnaryOp`, `Access`, `Aggregate`, `Regex`) for 79 total `.pm` files under `lib/Chalk/IR/Node/`. The gap against perl5-son consists primarily of Chalk-specific optimization nodes (`StructRef`, `StructFieldAccess`) and the intermediate base classes, which perl5-son folds into broader categories.
 
 ### Cross-Load Validation
 

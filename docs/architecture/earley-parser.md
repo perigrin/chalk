@@ -71,7 +71,7 @@ Introduced scanless Earley parsing (terminal matching integrated into the Earley
 
 **Local design documents**:
 - `docs/chalk-ayock-optimizations.md` — Pseudo-code walkthrough of Aycock integration into Chalk's semiring architecture, with implementation status table.
-- `docs/bootstrap-meta-grammar.md` — The 10-rule BNF meta-grammar that the bootstrap parser processes.
+- `docs/bootstrap-meta-grammar.md` — The 10-rule BNF meta-grammar the parser bootstraps from.
 - `docs/ir-node-types.md` — Sea of Nodes IR taxonomy produced by the semantic semiring.
 
 ---
@@ -177,7 +177,7 @@ These bulk accessors return the underlying array references. Inside the hot agen
 
 `advance($id)` returns the ID for the same `(rule_name, alt_idx, dot+1)` triple, memoizing the result in `%advance_map`. This is called on every Scan and Complete step to move the dot forward.
 
-For a grammar with R rules, an average of A alternatives per rule, and an average RHS length of L symbols, the total number of core items is approximately R * A * (L + 1). For the Chalk Perl grammar (~960 rules, ~3-4 average RHS length), this yields roughly 5,000-6,000 core items.
+For a grammar with R rules, an average of A alternatives per rule, and an average RHS length of L symbols, the total number of core items is approximately R * A * (L + 1). The count scales linearly with the grammar; for Chalk's current Perl subset grammar (`docs/chalk-bootstrap.bnf`) the core-item set is small enough that the `@id_is_complete` and `@id_symbol_after` caches fit comfortably in L1 cache, which is the property the optimization depends on.
 
 ---
 
@@ -337,7 +337,7 @@ method _predict($rule_name, $pos, $chart, $agenda, $predicted_at)
 `_predict` is called when an incomplete item's next symbol is a nonterminal. It looks up `$lr0_dfa->prediction_items_for($rule_name)`, which returns the precomputed `[$core_id, $skip_symbols]` pairs for that nonterminal.
 
 For each pair:
-- If the item is not already in the chart at `(pos, core_id, origin=pos)`, it is added with value `$semiring->one()` (possibly modified by `on_skip_optional` for each skipped nullable symbol — see Nullable Handling).
+- If the item is not already in the chart at `(pos, core_id, origin=pos)`, it is added with value `$semiring->one()` (possibly combined via `multiply(value, one())` for each skipped nullable symbol — see Nullable Handling).
 - The item is pushed to the agenda.
 
 A `%predicted_at` hash prevents redundant prediction: if a nonterminal has already been predicted at the current position, subsequent calls for the same nonterminal at the same position return immediately.
@@ -352,8 +352,8 @@ Scan is called for incomplete items whose next symbol is a terminal. It:
 
 1. Checks the scan cache for a previously computed `(pos, pattern)` match result.
 2. If not cached, calls `Chalk::Bootstrap::Terminal::match($input, $pos, $pattern)` which performs `\G`-anchored matching at `$pos`. The result (end position or undef on failure) is stored in the cache.
-3. If the match succeeds, calls `$semiring->should_scan($value, $rule_name, $alt_idx, $pos, $matched, $is_predicted)` to check whether the semiring permits this scan (used for keyword rejection by the TypeInference semiring).
-4. If permitted, calls `$semiring->on_scan($value, $rule_name, $alt_idx, $pos, $matched)` to produce the new semiring value.
+3. If the match succeeds, builds a scan-annotated `Chalk::Bootstrap::Context` via `_make_scan_context($rule_name, $alt_idx, $pos, $matched, $is_predicted)`. The Context carries the scan event's information in its `annotations` slots.
+4. Calls `$semiring->multiply($value, $scan_ctx)` to produce the new semiring value. Semirings that reject the scan (e.g., TypeInference rejecting a keyword as an identifier) return their zero element from `multiply`; the result is filtered out via `is_zero` and not added to the chart.
 5. Advances the core ID via `$core_index->advance($core_id)` and stores the new value at `$chart[$end_pos][$new_core_id][$end_pos - $origin]`.
 6. If the match is zero-width (end_pos == pos), the advanced item is pushed to the current position's agenda for immediate processing.
 
@@ -367,7 +367,7 @@ method _complete($completed_core_id, $origin, $completed_value, $pos, $chart, $a
 
 Complete is called for items where `$ci_completions->[$core_id]` is true (dot has reached the end of the alternative). It advances all waiting items at `$origin` that are expecting the completed nonterminal.
 
-The `on_complete` callback fires first (before the value is propagated to waiting items), and the chart entry is updated in-place with the action-applied value. Items for which `on_complete` returns semiring zero are not indexed in `%completed_at` and do not propagate.
+A completion-annotated `Chalk::Bootstrap::Context` is built via `_make_complete_context($rule_name, $alt_idx, $pos, $origin)`. The parser calls `$semiring->multiply($completed_value, $complete_ctx)` to produce the final completion value. Semirings that reject the completion (e.g., SemanticAction applying an action that returns zero) produce the semiring's zero element; rejected completions are not indexed in `%completed_at` and do not propagate.
 
 The actual completion search uses `%_waiting_core_ids{$rule_name}`, a precomputed map from nonterminal name to the list of core IDs that have their dot immediately before that nonterminal. This is built once at construction time from the `CoreItemIndex` and never mutated.
 
@@ -396,54 +396,55 @@ A defined value at `$chart[$n][$core_id][$n]` (where `$n` is both the end positi
 
 ## Semiring Integration
 
-The parser is parameterized by a semiring object that extends pure recognition with arbitrary semantics. Every semiring must implement a set of required callbacks; additional optional callbacks are checked with `$semiring->can(...)` before calling.
+The parser is parameterized by a semiring object that extends pure recognition with arbitrary semantics. The semiring interface follows Goodman's (1999) formalism: four algebraic operations (`one`, `is_zero`, `multiply`, `add`) are sufficient to express all parse computations. Scan, completion, and optional-skip events are represented as specially-annotated `Chalk::Bootstrap::Context` values passed as the right operand to `multiply`; there are no separate callbacks.
+
+This is a deliberate reduction from an earlier callback-based interface (`on_scan`, `on_complete`, `should_scan`, `on_skip_optional`, `on_epoch_commit`) that was eliminated in Milestones 17-18 (PRs #702, #715) as premature optimization — the `multiply` path produces the same semantic results, and the callbacks added complexity without earning it. See `docs/plans/2026-04-12-unified-context-design.md` and `docs/plans/2026-04-12-on-complete-elimination-design.md` for the rationale, and the Appendix: History of `context-comonad.md` for the narrative.
 
 ### Required Methods
 
-**`one()`**  
-Returns the semiring's multiplicative identity. Used to initialize new items when they are first predicted or scanned. For the Boolean semiring, `one()` returns a true value. For the Semantic semiring, `one()` returns a fresh `Context` with no children.
+**`one()`**
+Returns the semiring's multiplicative identity. Used to initialize new items when they are first predicted or scanned. For the Boolean semiring, `one()` returns a true value. For the SemanticAction semiring, `one()` returns a fresh `Context` with no children.
 
-**`is_zero($value)`**  
-Returns true if `$value` is the semiring's additive identity (the absorbing element). A zero value means the parse path is rejected. Items with zero values are not propagated. The parser checks `is_zero` after every `on_complete`, `on_scan`, `multiply`, and `add` result.
+**`is_zero($value)`**
+Returns true if `$value` is the semiring's additive identity (the absorbing element). A zero value means the parse path is rejected. Items with zero values are not propagated. The parser checks `is_zero` after every `multiply` and `add` result.
 
-**`multiply($left, $right)`**  
-Combines a waiting item's value with a completed item's value during the Complete step. Represents sequential composition: `$left` is the value of the item up to the point where it started waiting, and `$right` is the value of the completed sub-parse. The result is the combined value of recognizing both in sequence.
+**`multiply($left, $right)`**
+The core combining operation. Called in three distinct situations, distinguished by the right operand:
 
-**`add($existing, $new)`**  
-Merges two values for the same chart cell when a second derivation reaches it. Represents choice (ambiguity): the two derivations are combined into one value. For the Boolean semiring, `add` is logical OR. For more structured semirings, `add` must resolve ambiguity — it may throw if both derivations are non-zero and the semiring cannot distinguish them.
+- **Completion:** `$left` is a waiting item's value and `$right` is a completed item's value. Represents sequential composition: recognize `$left` then the completed sub-parse.
+- **Scan event:** `$right` is a scan-annotated `Context` built by `_make_scan_context`. The semiring inspects the Context's `annotations` to read the matched text, rule name, alt index, position, and `is_predicted` set, and produces an updated value. Semirings that reject the scan (e.g., TypeInference rejecting a keyword as an identifier) return `zero()`.
+- **Completion event:** `$right` is a completion-annotated `Context` built by `_make_complete_context`. The semiring reads the completing rule's identity and position span, applies any per-rule semantic action, and produces an updated value. Rejection returns `zero()`.
+- **Skip-optional event:** `$right` is `one()` — no event-carrying Context is needed because skipping a `?`-quantified symbol is algebraically identity composition; semirings that want positional placeholders (e.g., SemanticAction) detect this through their `multiply` implementation and insert an undef child.
 
-**`on_scan($value, $rule_name, $alt_idx, $pos, $matched_text)`**  
-Called when a terminal is successfully matched. `$value` is the current semiring value of the item before the scan (the value accumulated up to position `$pos`). `$matched_text` is the substring matched. Returns the new semiring value after incorporating the scan. For the Boolean semiring, this is a no-op returning the existing value. For the Semantic semiring, this records the matched token in the Context.
+**`add($existing, $new)`**
+Merges two values for the same chart cell when a second derivation reaches it. Represents choice (ambiguity): the two derivations are combined into one value. For the Boolean semiring, `add` is logical OR. For filtering semirings, `add` may use refaddr-based first-wins preference to select a survivor. For SemanticAction, it appends to an arrayref of alternatives.
 
-**`on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit)`**  
-Called when an item completes (dot reaches the end of its alternative). `$value` is the accumulated semiring value of the completed item. `$rule_name` and `$alt_idx` identify which rule completed. `$pos` and `$origin` are the end and start positions of the recognized span. `$on_epoch_commit` is a callback for epoch GC (see Epoch GC). Returns the semiring value to store in the chart (and propagate to waiting items). Returning semiring zero causes the completion to be silently discarded.
+### Surviving Callbacks
 
-**`should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted)`**  
-Called before `on_scan` to check whether scanning is permitted. The Earley parser calls this unconditionally (no `can()` guard), so every semiring must implement it. `$is_predicted` is a hash reference keyed by rule names that have been predicted at the current position (this is the `%predicted_at` hash from the parse loop). Returns true to proceed with the scan, false to reject it. Used by the TypeInference semiring to reject keyword tokens when they appear in contexts where only identifiers are valid (e.g., rejecting `class` as a `QualifiedIdentifier` when `ClassDeclaration` is predicted).
+One callback survived the Milestone 17-18 elimination:
 
-### Optional Methods
-
-**`on_skip_optional($value, $rule_name, $alt_idx, $pos, $skipped_symbol_name)`**  
-Called when the parser advances past a nullable (optional) symbol without matching it. `$value` is the current semiring value. `$skipped_symbol_name` is the name of the symbol being skipped. Returns the new semiring value after recording the skip. For the Semantic semiring, this inserts a placeholder `Context` entry so that child arrays maintain correct positional alignment (children at position k always correspond to the kth symbol of the alternative, even when earlier symbols were skipped).
-
-**`supports_leo()`**  
-Returns true if the semiring is compatible with the Leo optimization. Leo compresses intermediate completion steps and skips `on_complete` for the intermediate items in a chain. A semiring that relies on `on_complete` for every step (e.g., one that accumulates state) must return false here to disable Leo.
+**`on_merge($winner, $loser)` (optional)**
+Called by `FilterComposite` after `add` selects a survivor, as a workaround for an Earley stale-value merge bug where CFG-state updates on the loser could otherwise be dropped. Only `SemanticAction` implements it. See `docs/architecture/context-comonad.md` Appendix for the history.
 
 ### Value Lifecycle
 
 ```
 predict:   item value = semiring->one()
-           (adjusted by on_skip_optional for each nullable prefix)
+           (for each nullable prefix: value = multiply(value, one()))
 
-scan:      new_value = semiring->on_scan(prev_value, rule, alt, pos, matched)
-           stored at chart[$end_pos][$new_core_id][$end_pos - $origin]
+scan:      scan_ctx = _make_scan_context(rule, alt, pos, matched, is_predicted)
+           new_value = semiring->multiply(prev_value, scan_ctx)
+           if is_zero(new_value): skip
+           else: store at chart[$end_pos][$new_core_id][$end_pos - $origin]
 
-complete:  completed_value = semiring->on_complete(chart_value, rule, alt, pos, origin, epoch_cb)
-           stored back into chart[$pos][$core_id][$pos - $origin]
-           for each waiting item:
-               new_value = semiring->multiply(waiting_value, completed_value)
-               if existing: merged = semiring->add(existing, new_value)
-               else: store new_value
+complete:  complete_ctx = _make_complete_context(rule, alt, pos, origin)
+           completed_value = semiring->multiply(chart_value, complete_ctx)
+           if is_zero(completed_value): skip
+           else: store back into chart[$pos][$core_id][$pos - $origin]
+                 for each waiting item:
+                     new_value = semiring->multiply(waiting_value, completed_value)
+                     if existing: merged = semiring->add(existing, new_value)
+                     else: store new_value
 ```
 
 ---
@@ -480,13 +481,13 @@ $leo_items{$rule_name}{$origin} = {
 - `value`: the accumulated semiring value for the entire chain from the current origin to the top.
 - `wait_core_id` / `wait_origin`: the immediate waiting item (the first link). Stored so `_complete` can skip it in the standard completion loop (to avoid double-advancing).
 
-### Chain Extension
+### Chain Extension (Disabled)
 
-When a new Leo-eligible completion arrives and a Leo item already exists for the rule at the candidate waiting item's origin, the chains are merged: the new Leo item inherits the top of the parent chain, and the chain value is extended by multiplying the parent chain's value with the new completed value.
+Earlier Leo implementations extended parent chains: when a Leo-eligible completion arrived and a parent Leo item existed, the chains were merged into a single multi-level item by multiplying the parent's chain value with the new completed value. Chalk disabled this behavior (see `Earley.pm:1396-1400`). The reason is semiring-value equivalence: baking intermediate completions into the stored value produced parse trees with extra intermediate nodes that did not match the non-Leo path's output. Each Leo item now covers exactly one chain level, so the Leo-optimized parse and the non-optimized parse produce the same tree for every semiring. The test `t/bootstrap/leo-graph-equivalence.t` enforces this invariant.
 
-### Semiring Constraint
+### Semiring Compatibility
 
-The Leo optimization skips `on_complete` callbacks for intermediate chain steps. Only the top-level completion fires `on_complete` (indirectly, when the resolved Leo item is processed as a new chart entry and enters the agenda). This is correct for semirings where `on_complete` is identity or trivially composable, but incorrect for semirings that accumulate non-associative state at each step. The `supports_leo()` check gates the optimization.
+Leo is structurally correct for every semiring Chalk uses (proven by `t/bootstrap/leo-graph-equivalence.t`). The constructor parameter `leo_enabled` exists solely as a test-time override so that the Leo and non-Leo paths can be compared; there is no runtime capability gate on the semiring. (The disabled chain-extension optimization, described above, is what preserves this equivalence.)
 
 ---
 
@@ -512,9 +513,7 @@ When the agenda processes an item `[A -> alpha . B? beta]` where B is `?`-quanti
 
 ```perl
 if ($symbol->is_quantified() && $symbol->quantifier() eq '?') {
-    my $skip_value = $semiring->on_skip_optional(
-        $value, $rule_name, $alt_idx, $pos, $w_rule
-    );
+    my $skip_value = $semiring->multiply($value, $semiring->one());
     if (defined $skip_value && !$semiring->is_zero($skip_value)) {
         my $skip_core = $core_index->advance($core_id);
         # add/merge skip_value into chart[$pos][$skip_core][$pos - $origin]
@@ -522,17 +521,13 @@ if ($symbol->is_quantified() && $symbol->quantifier() eq '?') {
 }
 ```
 
-This advances the dot past B without matching anything. The skipped symbol name is passed to `on_skip_optional` so the Semantic semiring can insert a placeholder context entry.
+This advances the dot past B without matching anything. Skipping a `?`-quantified symbol is algebraically identity composition — `multiply(value, one())` — which is the whole reason the old `on_skip_optional` callback could be eliminated.
 
-### on_skip_optional Semantics
+### Positional Child Alignment
 
-When `on_skip_optional` is called, the semiring receives:
-- `$value`: the current context up to this point.
-- `$rule_name`, `$alt_idx`: the rule being parsed.
-- `$pos`: the current position.
-- `$skipped_symbol_name`: the name of the optional symbol being skipped.
+Semirings that care about positional child indexing (e.g., SemanticAction, whose action methods access children by position) detect skip events through their `multiply` implementation. When SemanticAction's `multiply` sees an `one()` right operand during rule parsing, it inserts a synthetic undef child into the Context so that all children maintain their expected positional index. Without this, a rule `A ::= B? C` where B is skipped would produce a Context with C at child index 0 instead of child index 1, misaligning the semantic action's positional access.
 
-The SemanticAction semiring uses this to insert a synthetic undef or empty child into the Context so that all children maintain their expected positional index. Without these placeholders, a rule `A ::= B? C` where B is skipped would produce a Context with C at child index 0 instead of child index 1, misaligning the semantic action's positional access.
+Semirings that do not care about positional indexing (e.g., Boolean) naturally do nothing on `multiply(value, one())` by the multiplicative-identity law, so the machinery has no cost for them.
 
 ---
 

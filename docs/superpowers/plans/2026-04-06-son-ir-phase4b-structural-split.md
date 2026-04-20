@@ -12,6 +12,8 @@
 
 **Migration order:** UseDecl → _Attribute → FieldDecl → MethodDecl → SubDecl → ClassDecl → Program
 
+**Scope:** This plan covers the structural-split migration only — producing metadata structs from the seven structural Constructor types. It does NOT cover the remaining migration completion work: Shim.pm deletion, codegen migration from `body()` to graph-walk, removal of the `body` field from `MethodInfo` and `compat_class` from `Chalk::IR::Node`, or `_build_method_graph` SSA completion. Those acceptance criteria live in `docs/plans/2026-04-04-son-ir-polymorphic-migration.md`.
+
 ---
 
 ## Task 1: UseDecl → Chalk::IR::UseInfo

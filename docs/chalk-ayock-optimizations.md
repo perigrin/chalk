@@ -35,56 +35,27 @@
 # IMPLEMENTATION STATUS
 # ============================================================================
 #
-#   ┌─────────────────────────────────┬────────────┬──────────────────────────┐
-#   │ Optimization                    │ Status     │ Location                 │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ CoreItemIndex                   │ DONE       │ Earley.pm (field         │
-#   │ (integer IDs for rule+dot)      │            │ $core_index)             │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ LR(0) DFA prediction clustering │ DONE       │ LR0DFA.pm               │
-#   │ (epsilon-closure, nullable set, │            │ Earley.pm _predict()     │
-#   │  dot-advance past ?-quantified) │            │ uses prediction_items_   │
-#   │                                 │            │ for() at line 782        │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Safe-set GC                     │ DONE       │ Earley.pm _is_safe_set() │
-#   │ (locally unambiguous sets)      │            │                          │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Epoch GC                        │ DONE       │ Earley.pm                │
-#   │ (statement-boundary sweeping    │            │ on_epoch_commit callback │
-#   │  via StatementItem completions) │            │ + @pending_sweeps        │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Leo optimization                │ DONE       │ Earley.pm                │
-#   │ (right-recursive shortcutting)  │            │ _complete Leo path       │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Scan result cache               │ DONE       │ Earley.pm $_scan_cache   │
-#   │ (per-position regex memoization)│            │ in _scan() at line 824   │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Terminal clustering             │ NOT DONE   │ (pseudocode below)       │
-#   │ (group terminals by DFA state,  │            │                          │
-#   │  match once per unique pattern) │            │                          │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Lazy semiring init              │ NOT DONE   │ (pseudocode below)       │
-#   │ (defer init until item is used) │            │                          │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Bitmap set membership           │ NOT DONE   │ (pseudocode below)       │
-#   │ (vec() bitmaps instead of hash) │            │                          │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Earley set compression          │ NOT DONE   │ (pseudocode below)       │
-#   │ (dead state pruning)            │            │                          │
-#   └─────────────────────────────────┴────────────┴──────────────────────────┘
+# The canonical status table for Aycock optimizations lives in
+# `docs/architecture/earley-parser.md` under "Appendix: Optimization Status
+# Summary" and is maintained alongside the parser module. See that table for
+# the current DONE / Not-implemented state of every optimization, with code
+# locations.
 #
-# The scan result cache (not in Aycock's dissertation) partially mitigates
-# the lack of terminal clustering — regex matching is memoized per
-# (position, pattern) pair. However, without terminal clustering the
-# parser still iterates all items waiting for a terminal and calls
-# should_scan/on_scan per item, even when items share the same pattern.
+# The pseudocode below describes how each optimization integrates with
+# Chalk's composite-semiring architecture — the design walkthrough, not
+# the status.
 #
-# The LR0DFA implementation uses a simpler approach than the full NFA→DFA
-# subset construction described in the pseudocode below. It computes
-# prediction closures (epsilon-closure per nonterminal) and nullable
-# sets via fixed-point iteration, without constructing explicit DFA
-# states or transitions. This gives the prediction clustering benefit
-# without the full DFA machinery.
+# The scan result cache (not in Aycock's dissertation) complements terminal
+# clustering: the clustered pre-scan populates the cache with one match per
+# unique pattern per position, and subsequent scans for items sharing the
+# same pattern at that position reuse the cached result.
+#
+# The LR0DFA implementation performs full DFA subset construction: a
+# worklist-driven state exploration that builds explicit DFA states with
+# terminal_map, completion_map, goto_table, and core_ids fields
+# (LR0DFA.pm _build_dfa_states / _register_state). Prediction clustering,
+# terminal clustering, and goto-based state transitions all consume these
+# precomputed structures at parse time.
 #
 # ============================================================================
 
@@ -113,8 +84,10 @@ use experimental qw(class builtin keyword_any keyword_all);
 # a single bit check in a fixed-size bitmap.
 #
 # For a grammar with R rules and average RHS length L, the number of
-# core items is roughly R * (L + 1). For Chalk's 960 rules with ~3-4 avg
-# RHS symbols, that's ~4000-5000 core items = ~600 bytes per bitmap.
+# core items is roughly R * (L + 1), so the bitmap size scales linearly
+# with the grammar. At typical programming-language grammar scales the
+# bitmap remains on the order of hundreds of bytes — small enough to
+# make single-bit membership checks the dominant cost model.
 
 class Chalk::CoreItemIndex {
     field %item_to_id;    # "rule_id|dot_pos" => integer
@@ -560,8 +533,9 @@ class Chalk::AycockParser {
             #   - TypeInference: create top-type element
             #
             # AYCOCK OPTIMIZATION: Most predicted items are dead ends.
-            # Aycock measured 16% unused items in Java; with Chalk's 960
-            # rules and flat expression grammar, it's likely higher.
+            # Aycock measured 16% unused items in Java; with Chalk's
+            # flat expression grammar and heavy semiring filtering, the
+            # unused-item ratio is likely higher.
             #
             # STRATEGY: Create a LIGHTWEIGHT placeholder element for
             # predicted items. Only materialize the full composite
