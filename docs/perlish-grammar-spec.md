@@ -32,19 +32,18 @@ metaprogramming or on symbol-table manipulation are excluded.
   assignment, method calls, subscripts
 - Literals: strings (single/double quoted), numbers, regex, `qw()`, `qr//`,
   `undef`, `true`, `false`
-- References: `\$x`, `\@a`, `\%h`, `\&sub`; anonymous subs and closures
+- References: `\$x`, `\@a`, `\%h`; anonymous subs and closures
 
 ### Excluded
 
 Features that defeat static analysis:
 
-- Symbolic references (`$$name`, `&{$code}`) — breaks static dispatch analysis
-- String `eval` — runtime code generation
+- Symbolic references via dispatch syntax (`&{$code}`, `@{$name}`, `%{$name}`) — breaks static dispatch analysis. Note: the grammar cannot syntactically distinguish symbolic references from scalar dereference (`$$ref` is parseable as either "the scalar referenced by `$ref`" or "the global scalar whose name is the string in `$ref`"); enforcement of the dereference-only reading is a semantic-analysis responsibility, not a grammar-level one.
+- `eval` in any form — string `eval "CODE"` (runtime code generation) and block `eval { ... }` (exception handling). Use `try`/`catch` for exception handling instead.
 - Typeglobs (`*foo`) — dynamic symbol-table manipulation
 - `AUTOLOAD` — dynamic method generation
 - Indirect object syntax (`new Foo`) — ambiguous parsing
 - Runtime `require` and runtime `use` — no runtime module loading
-- Prefix dereference (`@$ref`) — use postfix instead
 - `package` — use `class` instead for clear object semantics
 - `bless` / old-style OO / Moose — use `class` instead
 
