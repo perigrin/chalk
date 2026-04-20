@@ -1,5 +1,6 @@
 # ABOUTME: Pre-parse grammar transformation that expands quantified symbols into helper rules.
-# ABOUTME: Desugars X+ and X* into helper rules; X? passes through for inline parser handling.
+# ABOUTME: X+ and X* desugar to recursive helpers. X? passes through unchanged and is handled
+# ABOUTME: inline by the parser via multiply(value, one()).
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -62,24 +63,25 @@ sub desugar_grammar($grammar) {
 }
 
 # Generate deterministic helper rule name from base symbol and quantifier.
+# Only '+' and '*' produce helpers; '?' is handled inline by the parser.
 sub _helper_name($base, $quant) {
     my %suffix = (
         '+' => 'plus',
-        '?' => 'opt',
         '*' => 'star',
     );
-    die "Unknown quantifier '$quant' on symbol '$base'"
+    die "Unknown or non-desugared quantifier '$quant' on symbol '$base'"
         unless exists $suffix{$quant};
     return "${base}_$suffix{$quant}";
 }
 
 # Create helper rule(s) for a desugared quantifier and register them in %helpers.
-# Per PRD: X+ generates both X_plus and X_star; X* and X? each generate one rule.
+# X+ generates both X_plus and X_star; X* generates X_star.
+# X? is NOT desugared — see ABOUTME.
 sub _create_helpers($helpers, $base, $quant, $type) {
     my $base_sym = Chalk::Grammar::Symbol->new(type => $type, value => $base);
 
-    die "Unknown quantifier '$quant' on symbol '$base'"
-        unless $quant eq '+' || $quant eq '?' || $quant eq '*';
+    die "Unknown or non-desugared quantifier '$quant' on symbol '$base'"
+        unless $quant eq '+' || $quant eq '*';
 
     if ($quant eq '+') {
         # X_plus ::= X X_star (single alternative, reuses X_star)
@@ -103,16 +105,6 @@ sub _create_helpers($helpers, $base, $quant, $type) {
             name        => $plus_name,
             expressions => [
                 [$base_sym, $star_ref],
-            ],
-        );
-    } elsif ($quant eq '?') {
-        # X_opt ::= X | (epsilon)
-        my $opt_name = _helper_name($base, '?');
-        $helpers->{$opt_name} = Chalk::Grammar::Rule->new(
-            name        => $opt_name,
-            expressions => [
-                [$base_sym],
-                [],
             ],
         );
     } elsif ($quant eq '*') {
