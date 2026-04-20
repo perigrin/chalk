@@ -3,7 +3,7 @@
 # ============================================================================
 #
 # FORMAT: Chalk::Bootstrap BNF (::= rules, ; terminators, /regex/ terminals)
-# SPEC:   docs/perlish-grammar-spec.md
+# SPEC:   docs/chalk-grammar-spec.md
 #
 # This grammar is intentionally ambiguous. Disambiguation is delegated to
 # semirings (Precedence, Arity/TypeInference, Structural) not grammar

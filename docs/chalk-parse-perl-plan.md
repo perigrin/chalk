@@ -117,7 +117,7 @@ that's the signal.
 | Perl Types (Practical) | `pu:docs/perl-types-practical.md`     | Round-trip + behavioral membership tests  |
 | Aycock Optimizations   | `docs/chalk-ayock-optimizations.md`   | Parser performance techniques             |
 | Aycock Dissertation    | `docs/Aycock_JohnDaniel_PhD_2001.pdf` | Parser design + performance               |
-| Perl Grammar Spec      | `docs/perlish-grammar-spec.md`        | 65-rule grammar, 20 sections              |
+| Perl Grammar Spec      | `docs/chalk-grammar-spec.md`          | 65-rule grammar, 20 sections              |
 | BNF Grammar File       | `docs/chalk-bootstrap.bnf`            | Machine-readable grammar                  |
 
 -----
