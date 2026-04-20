@@ -35,44 +35,15 @@
 # IMPLEMENTATION STATUS
 # ============================================================================
 #
-#   ┌─────────────────────────────────┬────────────┬──────────────────────────┐
-#   │ Optimization                    │ Status     │ Location                 │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ CoreItemIndex                   │ DONE       │ Earley.pm (field         │
-#   │ (integer IDs for rule+dot)      │            │ $core_index)             │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ LR(0) DFA prediction clustering │ DONE       │ LR0DFA.pm               │
-#   │ (epsilon-closure, nullable set, │            │ Earley.pm _predict()     │
-#   │  dot-advance past ?-quantified) │            │ uses prediction_items_   │
-#   │                                 │            │ for() at line 782        │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Safe-set GC                     │ DONE       │ Earley.pm _is_safe_set() │
-#   │ (locally unambiguous sets)      │            │                          │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Epoch GC                        │ DONE       │ Earley.pm                │
-#   │ (statement-boundary sweeping    │            │ on_epoch_commit callback │
-#   │  via StatementItem completions) │            │ + @pending_sweeps        │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Leo optimization                │ DONE       │ Earley.pm                │
-#   │ (right-recursive shortcutting)  │            │ _complete Leo path       │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Scan result cache               │ DONE       │ Earley.pm $_scan_cache   │
-#   │ (per-position regex memoization)│            │ in _scan() at line 824   │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Terminal clustering             │ DONE       │ Earley.pm _scan()        │
-#   │ (group terminals by DFA state,  │            │ clustered pre-scan using │
-#   │  match once per unique pattern) │            │ LR0DFA terminal_map      │
-#   │                                 │            │ (line ~549)              │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Lazy semiring init              │ NOT DONE   │ (pseudocode below)       │
-#   │ (defer init until item is used) │            │                          │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Bitmap set membership           │ NOT DONE   │ (pseudocode below)       │
-#   │ (vec() bitmaps instead of hash) │            │                          │
-#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
-#   │ Earley set compression          │ NOT DONE   │ (pseudocode below)       │
-#   │ (dead state pruning)            │            │                          │
-#   └─────────────────────────────────┴────────────┴──────────────────────────┘
+# The canonical status table for Aycock optimizations lives in
+# `docs/architecture/earley-parser.md` under "Appendix: Optimization Status
+# Summary" and is maintained alongside the parser module. See that table for
+# the current DONE / Not-implemented state of every optimization, with code
+# locations.
+#
+# The pseudocode below describes how each optimization integrates with
+# Chalk's composite-semiring architecture — the design walkthrough, not
+# the status.
 #
 # The scan result cache (not in Aycock's dissertation) complements terminal
 # clustering: the clustered pre-scan populates the cache with one match per

@@ -88,6 +88,14 @@ The target signature of `multiply` and `add` is `Context -> Context`: each semir
 
 Current code is partway there. Component semirings (Precedence, TypeInference, Structural) have narrower signatures — their `multiply` takes a slot value (the hashref stored at `annotations->{their_slot}`) and returns a slot value, not a Context. `FilterComposite` does the Context unwrapping and re-wrapping on each component's behalf, using a `slot_name()` method on each component to know which annotation key to extract and re-stuff. `slot_name()` is not part of the target interface; it's residue from the callback-based pipeline that should go away as component semirings are migrated to true `Context -> Context` signatures. Tracked as X9.
 
+### Lifecycle: `reset_cache()`
+
+Semirings that maintain hash-cons caches (Precedence, TypeInference, SemanticAction, FilterComposite) implement an optional `reset_cache()` method. It clears the cache so it doesn't grow without bound across successive parses and doesn't leak values from a previous parse into the next one.
+
+`FilterComposite::reset_cache()` delegates to each component: `$sr->reset_cache() if $sr->can('reset_cache')`. Boolean and Structural don't implement it — Boolean has no cache; Structural operates on a fixed-size bitfield that doesn't accumulate. The `can` guard keeps the method optional.
+
+Callers (test harnesses, pipeline drivers) should invoke `reset_cache()` on the top-level FilterComposite between distinct parses.
+
 ---
 
 ## 4. FilterComposite

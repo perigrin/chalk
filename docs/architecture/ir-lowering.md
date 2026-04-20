@@ -459,6 +459,25 @@ Key design decisions:
 
 ---
 
+## Dependency Resolution
+
+**File**: `lib/Chalk/Bootstrap/DepChaser.pm`
+
+XS-wrapper and `chalk.so` compilation needs to know which Chalk classes a given class depends on — you can't compile `Chalk::Bootstrap::Earley` to XS without also compiling its `use`d Chalk modules. `DepChaser` resolves the transitive closure of Chalk module dependencies starting from a root file.
+
+Mechanism (IR-driven, not source-scanning):
+
+1. Parse the root file through the full Chalk pipeline into a `Chalk::IR::Program`.
+2. Call `extract_use_decls($ir)` on the Program to get the list of module names from its `UseInfo` children.
+3. Filter to `Chalk::*` names only — core and CPAN modules are assumed available via the runtime Perl environment and don't need Chalk compilation.
+4. Map each module name to a `lib/X/Y/Z.pm` path via `module_to_path($name)`.
+5. Recurse: for each dependency file, parse its IR, extract its `UseDecl`s, add to the queue.
+6. Return the ordered list of transitive Chalk dependencies, excluding the root.
+
+The `chalk.so` build script uses this result to decide which `.c` files to compile and link into the shared library. Because dependency extraction runs against the IR (not a text scan of `use` lines), it inherits the same grammar-level accuracy as the rest of the pipeline — no false positives from commented-out `use` statements or misparsed strings.
+
+---
+
 ## C Target: chalk.so Pipeline
 
 The C target produces `dfa_tables.c`/`dfa_tables.h` as part of the `chalk.so` pipeline.

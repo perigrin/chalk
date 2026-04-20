@@ -47,6 +47,8 @@ my $value = $ctx->extract();  # Returns $ir_node
 
 **Semantics**: For parsing, `extend` applies a semantic action to all children of the current parse node, aggregating their IR nodes into a new parent node.
 
+**Implementation convenience — `%opts`**: The implementation of `extend` accepts an optional `%opts` hash: `$ctx->extend($f, rule => $name, annotations => $ann, token => $tok, is_zero => $flag)`. Any field passed in `%opts` overrides the value propagated from the original context. This is an implementation extension for cases where a semantic action wants to override a single field without re-allocating from scratch; it does not change the formal comonad signature.
+
 **Example**:
 ```perl
 # Semantic action that combines child IR nodes
@@ -168,38 +170,9 @@ sub multiply($left_ctx, $right_ctx) {
 }
 ```
 
-## Implementation Phases
+## Testing
 
-### Phase 1a (Earley Parser)
-
-Implement only `extract`:
-- Context holds a single IR node (or undef for Boolean semiring)
-- `extract` returns that node
-- Defer `extend` and `duplicate`
-
-### Phase 2b (Semantic Actions)
-
-Implement full comonad:
-- Add `children` field to Context
-- Implement `extend` to map semantic actions over children
-- Implement `duplicate` (if needed for ambiguous parses)
-- Add position/rule fields for error reporting
-
-## Testing Strategy
-
-Create `t/bootstrap/comonad-threading.t` with these test cases:
-
-1. **Simple extract**: Context with single IR node
-2. **Sequence extend**: Two-child context with combining action
-3. **Alternative extend**: Multiple alternatives, action chooses/merges
-4. **Nested extend**: Three-level rule hierarchy (e.g., Grammar → Rule → Alternatives)
-5. **Error propagation**: Failed semantic action creates Error context
-
-Each test should:
-- Create contexts manually (no parser needed)
-- Apply semantic actions via `extend`
-- Verify `extract` returns expected IR node
-- Verify comonad laws hold
+Test coverage for the comonad implementation lives in `t/bootstrap/` — principally `t/bootstrap/semiring-value-propagation.t` for the tree-depth contract and `t/bootstrap/context-visitor.t`, `context-extend-wrap.t`, `context-extend-opts.t` for individual behaviors. Tests exercise the laws against small hand-built contexts and verify that complete parse pipelines produce expected Context shapes. See the test files for the current coverage surface.
 
 ## References
 

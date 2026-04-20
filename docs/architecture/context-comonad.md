@@ -72,7 +72,7 @@ method extract() {
 extend : (Context -> Value) -> Context -> Context
 ```
 
-Applies a function to this context and returns a new context whose focus is the function's return value. All other fields (`children`, `position`, `rule`, `annotations`) are copied from the original.
+Applies a function to this context and returns a new context whose focus is the function's return value. All other fields (`children`, `position`, `rule`, `annotations`, `token`, `is_zero`) are copied from the original.
 
 ```perl
 method extend($f, %opts) {
@@ -83,6 +83,8 @@ method extend($f, %opts) {
         position    => $position,
         rule        => (exists $opts{rule} ? $opts{rule} : $rule),
         annotations => (exists $opts{annotations} ? $opts{annotations} : $annotations),
+        token       => (exists $opts{token}       ? $opts{token}       : $token),
+        is_zero     => (exists $opts{is_zero}     ? $opts{is_zero}     : $is_zero),
     );
 }
 ```
@@ -186,8 +188,8 @@ Context provides both legacy tree-walking methods and a visitor API.
 
 The visitor API added in #699 provides three methods:
 
-- `walk($callback, %opts)` — depth-first traversal; returns the first focused node for which `$callback` returns true. Accepts `reverse => true` for right-to-left traversal.
-- `walk_all($callback, %opts)` — same traversal; returns an arrayref of all focused nodes matching `$callback`.
+- `walk($callback, %opts)` — depth-first traversal; returns the first defined value returned by `$callback` on any focused node. A callback returning `0` (defined) counts as a match; returning `undef` does not. Accepts `reverse => true` for right-to-left traversal.
+- `walk_all($callback, %opts)` — same traversal; returns an arrayref of every defined value returned by `$callback`.
 - `walk_acc($init, $callback, %opts)` — accumulator variant; threads an accumulator value through all focused matching nodes, returning the final accumulated value.
 
 All visitor methods stop descent when they reach a focused node (they do not recurse below it). All three support `reverse => true`. Recursive tree-walkers previously scattered across TypeInference, TypeInferenceActions, and ConciseTree have been replaced with `walk()` calls, removing approximately 100 lines of duplicated traversal logic.
@@ -228,6 +230,7 @@ Keyword-as-identifier rejection is handled by `multiply` returning a zero Contex
 | extract returns focus | Yes | Yes |
 | extend produces new context with function result as focus | Yes | Yes |
 | extend preserves children from original | Yes (copies) | Yes (wraps self as child) |
+| extend propagates `annotations`, `token`, `is_zero` | Yes | Yes (both parameter and field-default paths) |
 | duplicate derived from extend(id) | Yes | Yes |
 | Comonad left identity law | Required | Holds |
 | Comonad right identity (value equality) | Required | Holds at value level, not identity level |
