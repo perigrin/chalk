@@ -255,10 +255,10 @@ Initialization (`my $x = 1`, `my ($x, $y) = @list`) is handled by
 ```bnf
 ClassBlock ::= /class\b/ WS QualifiedIdentifier AttributeList? _ Block ;
 
-SubroutineDefinition ::= /sub\b/ WS Identifier _ Signature? _ Block
-    | /(?:my|our|state)\b/ WS /sub\b/ WS Identifier _ Signature? _ Block ;
+SubroutineDefinition ::= /sub\b/ WS QualifiedIdentifier _ Signature? _ Block
+    | /(?:my|our|state)\b/ WS /sub\b/ WS QualifiedIdentifier _ Signature? _ Block ;
 
-MethodDefinition ::= /method\b/ WS Identifier AttributeList? _ Signature? _ Block ;
+MethodDefinition ::= /method\b/ WS QualifiedIdentifier AttributeList? _ Signature? _ Block ;
 
 AdjustBlock ::= /ADJUST\b/ _ Block ;
 ```
@@ -272,8 +272,8 @@ The second `SubroutineDefinition` alternative handles lexically scoped subs:
 AttributeList ::= WS Attribute
     | AttributeList WS Attribute ;
 
-Attribute ::= /:/ _ Identifier
-    | /:/ _ Identifier _ /\(/ _ QualifiedIdentifier _ /\)/ ;
+Attribute ::= /:/ _ QualifiedIdentifier
+    | /:/ _ QualifiedIdentifier _ /\(/ _ QualifiedIdentifier _ /\)/ ;
 ```
 
 `AttributeList` includes leading whitespace so `AttributeList?` at call sites
@@ -333,8 +333,7 @@ Atom ::= Variable
     | HashConstructor
     | QwLiteral
     | AnonymousSub
-    | QualifiedIdentifier
-    | Identifier ;
+    | QualifiedIdentifier ;
 
 ParenExpr ::= /\(/ _ Expression _ /\)/
     | /\(/ _ ExpressionList _ /\)/
@@ -408,8 +407,8 @@ PostfixExpression ::= MethodCall
     | CallExpression
     | PostfixIncDec ;
 
-MethodCall ::= Expression _ /->/ _ Identifier _ /\(/ _ ExpressionList? _ /\)/
-    | Expression _ /->/ _ Identifier
+MethodCall ::= Expression _ /->/ _ QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
+    | Expression _ /->/ _ QualifiedIdentifier
     | Expression _ /->/ _ ScalarVariable _ /\(/ _ ExpressionList? _ /\)/
     | Expression _ /->/ _ ScalarVariable ;
 
@@ -424,11 +423,10 @@ PostfixDeref ::= Expression _ /->/ _ /@\*/
     | Expression _ /->/ _ /\$\*/
     | Expression _ /->/ _ /\$#\*/ ;
 
-CallExpression ::= Identifier _ /\(/ _ ExpressionList? _ /\)/
-    | QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
-    | Identifier WS ExpressionList
-    | Identifier WS Block WS ExpressionList
-    | Identifier WS Block ;
+CallExpression ::= QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
+    | QualifiedIdentifier WS ExpressionList
+    | QualifiedIdentifier WS Block WS ExpressionList
+    | QualifiedIdentifier WS Block ;
 
 PostfixIncDec ::= Expression _ /\+\+/
     | Expression _ /--/ ;
@@ -525,8 +523,6 @@ digit separators.
 ### §20 Identifiers and Helpers
 
 ```bnf
-Identifier ::= /[a-zA-Z_]\w*/ ;
-
 QualifiedIdentifier ::= /[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*/ ;
 
 Block ::= /\{/ _ StatementList? _ /\}/ ;
@@ -565,8 +561,7 @@ Summary of all terminal regex patterns used:
 | Scalar | `/\$[a-zA-Z_]\w*/` | Scalar variable |
 | Array | `/@[a-zA-Z_]\w*/` | Array variable |
 | Hash | `/%[a-zA-Z_]\w*/` | Hash variable |
-| Identifier | `/[a-zA-Z_]\w*/` | Simple name |
-| Qualified | `/[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*/` | Package::Name |
+| QualifiedIdentifier | `/[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*/` | Name (simple or qualified) |
 | Version | `/v?[0-9]+(?:\.[0-9]+){2,}/` | Version literal |
 | Number | `/0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*/` | Hex integer |
 | Number | `/0[bB][01](?:_?[01])*/` | Binary integer |
@@ -731,8 +726,8 @@ Track the set of accepted files and ensure it never shrinks.
 | §17 Ternary/Assignment | `TernaryExpression`, `AssignmentExpression`, `AssignOp` | 3 |
 | §18 Variables | `Variable`, `ScalarVariable`, `ArrayVariable`, `HashVariable` | 4 |
 | §19 Literals | `Literal`, `NumericLiteral`, `StringLiteral`, `RegexLiteral` | 4 |
-| §20 Helpers | `Identifier`, `QualifiedIdentifier`, `Block`, `Version` | 4 |
-| **Total** | | **65** |
+| §20 Helpers | `QualifiedIdentifier`, `Block`, `Version` | 3 |
+| **Total** | | **64** |
 
 With quantifier desugaring (`?`, `*`, `+` → helper rules), the effective
 rule count at parse time will be approximately 74 rules.
