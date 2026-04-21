@@ -159,9 +159,9 @@ which naturally allows trailing and repeated semicolons.
 ### §3 Statement Categories
 
 ```bnf
-SimpleStatement ::= ExpressionStatement
-    | UseDeclaration
-    | FieldDeclaration ;
+SimpleStatement ::= ReturnStatement
+    | ExpressionStatement
+    | UseDeclaration ;
 
 CompoundStatement ::= Block
     | IfStatement
@@ -173,6 +173,16 @@ CompoundStatement ::= Block
     | MethodDefinition
     | AdjustBlock ;
 ```
+
+### §3a Return Statement
+
+```bnf
+ReturnStatement ::= /return\b/ WS Expression
+    | /return\b/ ;
+```
+
+Handles: `return $value`, `return`. Bare `return` (no expression)
+returns an empty list.
 
 ### §4 Expression Statements
 
@@ -234,21 +244,25 @@ Handles: `use 5.42.0`, `use utf8`, `use experimental 'class'`.
 ### §8 Variable and Field Declarations
 
 ```bnf
-VariableDeclaration ::= /(?:my|our|state|local)\b/ WS Variable
-    | /(?:my|our|state|local)\b/ WS /\(/ _ VariableList _ /\)/ ;
+VariableDeclaration ::= /(?:my|our|state|local|field)\b/ WS Variable AttributeList?
+    | /(?:my|our|state|local|field)\b/ WS /\(/ _ VariableList _ /\)/ ;
 
 VariableList ::= Variable
     | VariableList _ /,/ _ Variable ;
-
-FieldDeclaration ::= /field\b/ WS Variable AttributeList? DefaultValue? ;
-
-DefaultValue ::= _ /=/ _ Expression ;
 ```
 
-Handles: `my $x`, `our @EXPORT_OK`, `my ($x, $y)`.
-Initialization (`my $x = 1`, `my ($x, $y) = @list`) is handled by
+`field` is a declarator keyword alongside `my`, `our`, `state`, and
+`local` — not a separate grammar rule. The grammar accepts `field` in
+the same positions as any other declarator. Enforcement of
+field-specific constraints (field only inside class body, attribute
+vocabulary like `:param`/`:reader`/`:writer` only on fields) is
+structural at the `Chalk::MOP` layer, not in the grammar or
+semirings.
+
+Handles: `my $x`, `our @EXPORT_OK`, `my ($x, $y)`,
+`field $name :param :reader`.
+Initialization (`my $x = 1`, `field $x = undef`) is handled by
 `AssignmentExpression` since `VariableDeclaration` is an `Expression`.
-`field $name :param :reader = undef` uses `DefaultValue`.
 
 ### §9 Definitions
 
@@ -709,12 +723,12 @@ Track the set of accepted files and ensure it never shrinks.
 |---|---|---|
 | §1 Whitespace | `_`, `WS` | 2 |
 | §2 Program Structure | `Program`, `StatementList`, `StatementItem` | 3 |
-| §3 Statement Categories | `SimpleStatement`, `CompoundStatement` | 2 |
+| §3 Statement Categories | `SimpleStatement`, `CompoundStatement`, `ReturnStatement` | 3 |
 | §4 Expression Statements | `ExpressionStatement`, `PostfixModifier` | 2 |
 | §5 Conditionals | `IfStatement`, `ElsifChain` | 2 |
 | §6 Loops | `WhileStatement`, `ForStatement`, `ForeachStatement`, `IteratorVariable` | 4 |
 | §7 Use | `UseDeclaration`, `ModuleName`, `ImportList` | 3 |
-| §8 Variables/Fields | `VariableDeclaration`, `VariableList`, `FieldDeclaration`, `DefaultValue` | 4 |
+| §8 Variables/Fields | `VariableDeclaration`, `VariableList` | 2 |
 | §9 Definitions | `ClassBlock`, `SubroutineDefinition`, `MethodDefinition`, `AdjustBlock` | 4 |
 | §10 Attributes | `AttributeList`, `Attribute` | 2 |
 | §11 Signatures | `Signature`, `SignatureParams`, `SignatureParam`, `ScalarSignatureParam`, `SlurpySignatureParam` | 5 |
@@ -727,7 +741,7 @@ Track the set of accepted files and ensure it never shrinks.
 | §18 Variables | `Variable`, `ScalarVariable`, `ArrayVariable`, `HashVariable` | 4 |
 | §19 Literals | `Literal`, `NumericLiteral`, `StringLiteral`, `RegexLiteral` | 4 |
 | §20 Helpers | `QualifiedIdentifier`, `Block`, `Version` | 3 |
-| **Total** | | **64** |
+| **Total** | | **63** |
 
 With quantifier desugaring (`?`, `*`, `+` → helper rules), the effective
 rule count at parse time will be approximately 74 rules.
