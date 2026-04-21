@@ -144,4 +144,62 @@ subtest 'extend copies annotations — child mutation does not affect parent' =>
         "child annotations reflect the write" );
 };
 
+subtest 'error field — accepts param and has reader' => sub {
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus => "val",
+        error => "invariant violated",
+    );
+
+    is( $ctx->error(), "invariant violated", "error reader returns value" );
+};
+
+subtest 'error field — defaults to undef' => sub {
+    my $ctx = Chalk::Bootstrap::Context->new( focus => "val" );
+
+    is( $ctx->error(), undef, "error defaults to undef" );
+};
+
+subtest 'extend passes through error' => sub {
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus => "orig",
+        error => "upstream failure",
+    );
+
+    my $new = $ctx->extend( sub { "new" } );
+
+    is( $new->error(), "upstream failure", "error preserved through extend" );
+};
+
+subtest 'extend with error override' => sub {
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus => "orig",
+        error => undef,
+    );
+
+    my $new = $ctx->extend( sub { "new" }, error => "new failure" );
+
+    is( $new->error(), "new failure",  "error overridden via opts" );
+    is( $ctx->error(), undef,          "original error unchanged" );
+};
+
+subtest 'error is independent of is_zero' => sub {
+    # is_zero is algebraic parse-rejection; error is system-failure.
+    # A Context can be errored without is_zero being true, and vice versa.
+    my $errored_not_zero = Chalk::Bootstrap::Context->new(
+        focus   => "val",
+        error   => "bad thing",
+        is_zero => false,
+    );
+    ok( defined $errored_not_zero->error(), "errored context has error" );
+    ok( !$errored_not_zero->is_zero(),       "errored context can be non-zero" );
+
+    my $zero_not_errored = Chalk::Bootstrap::Context->new(
+        focus   => "val",
+        error   => undef,
+        is_zero => true,
+    );
+    ok( !defined $zero_not_errored->error(), "zero context can have no error" );
+    ok( $zero_not_errored->is_zero(),         "zero context is_zero" );
+};
+
 done_testing();
