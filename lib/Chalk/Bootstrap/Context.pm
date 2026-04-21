@@ -13,6 +13,7 @@ class Chalk::Bootstrap::Context {
     field $token       :param :reader = undef;
     field $is_zero     :param :reader = false;
     field $error       :param :reader = undef;
+    field $mop         :param :reader = undef;
 
     # Extract the current focus value from the context
     method extract() {
@@ -33,6 +34,7 @@ class Chalk::Bootstrap::Context {
             token       => (exists $opts{token} ? $opts{token} : $token),
             is_zero     => (exists $opts{is_zero} ? $opts{is_zero} : $is_zero),
             error       => (exists $opts{error} ? $opts{error} : $error),
+            mop         => (exists $opts{mop} ? $opts{mop} : $mop),
         );
     }
 
