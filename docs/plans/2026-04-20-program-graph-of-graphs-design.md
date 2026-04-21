@@ -115,6 +115,38 @@ compilers universally handle cross-scope references: HotSpot's call
 nodes carry `ciMethod*`, Graal's carry `HostedMethod`, TurboFan's
 carry `SharedFunctionInfoRef`.
 
+### MOP as a compile-time coordination surface
+
+The MOP is not a SemanticAction-private concern. It is the
+compile-time coordination surface for every layer of the compiler:
+the parser builds it, semirings enrich it, optimizer passes consume
+and transform it, code generators read it.
+
+Reachability reflects this. The MOP is accessible via Context
+(`$ctx->mop()`) during parsing, so semirings beyond SemanticAction
+— TypeInference, Structural, and any future layer — can reach
+metaobjects and enrich them directly. TypeInference, for example,
+can record an inferred return type on `Chalk::MOP::Method::return_type`
+during parsing rather than leaving the information in a transient
+Context annotation for codegen to re-derive.
+
+Chalk::MOP is in the AMOP tradition (Kiczales, Stevan Little).
+Metaobjects are live objects in the language's own object system,
+and meta-circularity — the MOP describing itself — is a correctness
+property of self-hosting, not a separate feature. After self-hosting
+closes, Chalk's runtime IS a target runtime: the distinction between
+"compile-time MOP" and "target-runtime class system" collapses
+because the target program IS Chalk. The MOP is not an analog of
+HotSpot's ci-layer; it is the object system itself. The
+metaobject types specified below cover class-scope structure
+(Class, Method, Field, Sub, Import, Phaser::Adjust). The MOP is
+extensible downward — `Chalk::MOP::LocalVar`, `Chalk::MOP::Scope`,
+per-expression type metaobjects, and other compile-time entities
+that multiple layers coordinate on are structurally admissible.
+Downward extension is out of scope for the initial MOP and will be
+specified separately when the coordination benefit justifies the
+new metaobjects.
+
 ## Metaobject types
 
 ### `Chalk::MOP`

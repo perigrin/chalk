@@ -1,5 +1,13 @@
 # Target Interface — generate($mop) → HashRef[Str]
 
+> **SUPERSEDED** — this interface design is absorbed into Phase 4 of
+> [2026-04-21-chalk-mop-migration-plan.md](2026-04-21-chalk-mop-migration-plan.md).
+> The migration plan sequences the target-interface cutover
+> alongside the MOP introduction so that codegen migrates from the
+> `($sa, $ctx)` backchannel to `generate($mop)` in a single step
+> rather than through an intermediate state. This document remains
+> as the interface-contract reference.
+
 ## Overview
 
 Code generation targets accept a `Chalk::MOP` and return a
