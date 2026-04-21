@@ -23,8 +23,9 @@ class Chalk::MOP::Class {
     method declare_field($field_name, %opts) {
         require Chalk::MOP::Field;
         my $field = Chalk::MOP::Field->new(
-            name  => $field_name,
-            class => $self,
+            name    => $field_name,
+            class   => $self,
+            fieldix => scalar(@fields),
             %opts,
         );
         push @fields, $field;
