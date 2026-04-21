@@ -6,6 +6,7 @@ use experimental 'class';
 
 use Scalar::Util 'refaddr';
 use Chalk::IR::Node::Phi;
+use Chalk::Bootstrap::Scope::Sentinel;
 
 class Chalk::Bootstrap::Scope {
     # Hash mapping variable names (strings like '$x', '@arr', '%hash') to IR nodes
@@ -89,11 +90,10 @@ class Chalk::Bootstrap::Scope {
     method fork_for_loop($loop_node) {
         my %sentinel_bindings;
         for my $name (keys $bindings->%*) {
-            $sentinel_bindings{$name} = bless {
-                sentinel  => true,
+            $sentinel_bindings{$name} = Chalk::Bootstrap::Scope::Sentinel->new(
                 loop      => $loop_node,
                 pre_value => $bindings->{$name},
-            }, 'Chalk::Bootstrap::Scope::Sentinel';
+            );
         }
         return Chalk::Bootstrap::Scope->new(bindings => \%sentinel_bindings);
     }
@@ -114,8 +114,8 @@ class Chalk::Bootstrap::Scope {
 
         # Sentinel: create a Phi node with backedge placeholder
         my $phi = $factory->make('Phi',
-            region => $binding->{loop},
-            values => [$binding->{pre_value}, undef],
+            region => $binding->loop(),
+            values => [$binding->pre_value(), undef],
         );
 
         # Replace sentinel with Phi in a new scope

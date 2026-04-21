@@ -28,9 +28,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->new();
     # raw_lookup returns sentinel hashref, not original node
     my $sentinel_a = $forked->raw_lookup('$a');
     ok(ref $sentinel_a eq 'Chalk::Bootstrap::Scope::Sentinel', '$a binding is a blessed sentinel');
-    ok($sentinel_a->{sentinel}, 'sentinel flag is set');
-    is($sentinel_a->{pre_value}, $node_a, 'sentinel pre_value is original node');
-    is($sentinel_a->{loop}, $loop, 'sentinel loop is the Loop node');
+    is($sentinel_a->pre_value(), $node_a, 'sentinel pre_value is original node');
+    is($sentinel_a->loop(), $loop, 'sentinel loop is the Loop node');
 }
 
 # --- resolve_sentinel: creates Phi on first read ---
@@ -96,6 +95,21 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->new();
     # regular lookup also returns sentinel (no auto-resolve)
     my $regular = $forked->lookup('$x');
     ok(ref $regular eq 'Chalk::Bootstrap::Scope::Sentinel', 'lookup returns sentinel too');
+}
+
+# --- Sentinel is a proper class with accessor methods ---
+{
+    my $node = $factory->make('Constant', const_type => 'integer', value => '99');
+    my $scope = Chalk::Bootstrap::Scope->new();
+    $scope = $scope->define('$v', $node);
+
+    my $loop = $factory->make('Loop', entry_ctrl => $factory->make('Start'), backedge_ctrl => undef);
+    my $forked = $scope->fork_for_loop($loop);
+
+    my $sentinel = $forked->raw_lookup('$v');
+    ok($sentinel isa Chalk::Bootstrap::Scope::Sentinel, 'sentinel isa Chalk::Bootstrap::Scope::Sentinel');
+    is($sentinel->loop(), $loop, 'sentinel->loop() returns the Loop node');
+    is($sentinel->pre_value(), $node, 'sentinel->pre_value() returns the pre-loop binding');
 }
 
 done_testing();
