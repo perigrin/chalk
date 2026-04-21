@@ -1,6 +1,6 @@
 # Target Interface — generate($mop) → HashRef[Str]
 
-> **SUPERSEDED** — this interface design is absorbed into Phase 4 of
+> **ARCHIVED** — superseded by
 > [2026-04-21-chalk-mop-migration-plan.md](2026-04-21-chalk-mop-migration-plan.md).
 > The migration plan sequences the target-interface cutover
 > alongside the MOP introduction so that codegen migrates from the

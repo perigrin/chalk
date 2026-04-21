@@ -1,6 +1,6 @@
 # Polymorphic SoN IR Migration — In Progress
 
-> **SUPERSEDED** — this plan's sequencing is superseded by
+> **ARCHIVED** — superseded by
 > [2026-04-21-chalk-mop-migration-plan.md](2026-04-21-chalk-mop-migration-plan.md).
 > The remaining work (Constructor call sites, Shim deletion,
 > codegen migration, full SSA) lands through the MOP migration's

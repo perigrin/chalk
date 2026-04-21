@@ -1,12 +1,10 @@
 # Phase 4: SSA Scope + Structural Split
 
-> **SUPERSEDED** — Phase 4b (structural split) is complete. Phase 4a
-> (SSA scope with Phi insertion) is outstanding and is absorbed into
-> Phase 3 of
+> **ARCHIVED** — superseded by
 > [2026-04-21-chalk-mop-migration-plan.md](2026-04-21-chalk-mop-migration-plan.md).
-> The Hybrid Phi Strategy section of this document (eager if/else
-> Phis via Earley completion order, lazy loop Phis via sentinel
-> mechanism) remains the reference design for the MOP plan's Phase 3
+> Phase 4b (structural split) is complete. Phase 4a (SSA scope with
+> Phi insertion) is absorbed into the MOP migration's Phase 3. The
+> Hybrid Phi Strategy section remains the reference design for that
 > implementation.
 
 ## Problem
