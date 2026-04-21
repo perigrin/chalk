@@ -106,8 +106,10 @@ Handles context-dependent disambiguation:
 
 - **Block vs hash**: `{ ... }` after `if (...)` is a block; `{ ... }` after `=`
   is a hash constructor. Uses position and preceding tokens to decide.
-- **Statement context**: `field` is only valid inside a `class` body. The grammar
-  allows it everywhere; this semiring prunes invalid placements.
+- **Statement context**: `field` is only valid inside a `class` body.
+  Enforcement is structural: the `Chalk::MOP` construction API requires
+  a class handle to declare a field (`$class->declare_field(...)`),
+  making it impossible to construct a field outside a class context.
 
 ## 5. Grammar Format
 
