@@ -21,6 +21,7 @@ use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
 use Chalk::IR::Graph;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Program;
 
 # Builtin keyword sets used by _fixup_stmts for statement merging
@@ -32,9 +33,11 @@ my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless 
 
 class Chalk::Bootstrap::Perl::Actions {
     field $factory;
+    field $typed;
 
     ADJUST {
         $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+        $typed   = Chalk::IR::NodeFactory->new();
     }
 
     # Helper: collect all leaves with defined IR focuses (Constructor or Constant nodes)
