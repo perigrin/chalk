@@ -383,7 +383,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my $prev_return_context = $self->_get_return_context();
         $self->_set_current_sub_name($name);
 
-        my $result = eval {
+        my $result;
+        my $caught_error;
+        try {
 
         my $last_item = $body->[-1];
         my $last_is_return = (defined $last_item
@@ -477,14 +479,16 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
         push @helper, '}';
 
-        { helper => \@helper };
-        }; # end eval
+        $result = { helper => \@helper };
+        } catch ($e) {
+            $caught_error = $e;
+        }
 
         # Always restore state, even if body compilation threw
         $self->_set_current_sub_name($prev_sub_name);
         $self->_set_return_context($prev_return_context);
 
-        die $@ if $@;
+        die $caught_error if defined $caught_error;
         return $result;
     }
 
@@ -1577,7 +1581,12 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 my $sname   = $item->name();
                 my $sparams = $item->params();   # plain strings
                 my $sbody   = $item->body();
-                my $result = eval { $self->_emit_sub($sname, $sparams, $sbody) };
+                my $result;
+                try {
+                    $result = $self->_emit_sub($sname, $sparams, $sbody);
+                } catch ($e) {
+                    # Emission failed — mark sub as not compiled
+                }
                 if (defined $result && ref $result eq 'HASH') {
                     push @static_lines, $result->{helper}->@*;
                     push @static_lines, '';
@@ -1592,8 +1601,14 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 next unless $item isa Chalk::IR::MethodInfo;
                 my $mname = $item->name();
 
-                my $result = eval { $self->_emit_method($item) };
-                if (!defined $result || $@) {
+                my $result;
+                try {
+                    $result = $self->_emit_method($item);
+                } catch ($e) {
+                    push @_skipped_methods, $mname;
+                    next;
+                }
+                if (!defined $result) {
                     push @_skipped_methods, $mname;
                     next;
                 }
