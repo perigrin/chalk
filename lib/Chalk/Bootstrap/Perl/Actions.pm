@@ -119,7 +119,7 @@ class Chalk::Bootstrap::Perl::Actions {
     #   PostfixDeref(BuiltinCall(scalar, [X]), @) → BuiltinCall(scalar, [PostfixDeref(X, @)])
     #   PostfixDeref(MethodCall(BuiltinCall(push, [A, B]), m, []), @)
     #     → BuiltinCall(push, [A, PostfixDeref(MethodCall(B, m, []), @)])
-    my sub _push_deref_inward($factory, $target, $sigil_node) {
+    my sub _push_deref_inward($factory, $typed, $target, $sigil_node) {
         # Collect wrappers to rewrap later
         my @wrappers;
         my $current = $target;
@@ -147,10 +147,10 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         # Create deref at the innermost target
-        my $result = $factory->make('Constructor',
-            'class'  => 'PostfixDerefExpr',
-            target => $current,
-            sigil  => $sigil_node,
+        my $result = $typed->make('PostfixDeref',
+            sigil        => (ref($sigil_node) ? $sigil_node->value() : $sigil_node),
+            inputs       => (ref($sigil_node) ? [$current, $sigil_node] : [$current]),
+            compat_class => 'PostfixDerefExpr',
         );
 
         # Rewrap layers from inside out
@@ -170,17 +170,20 @@ class Chalk::Bootstrap::Perl::Actions {
             } elsif ($wrapper->[0] eq 'BuiltinCall') {
                 my @args = ($wrapper->[2]->@*);
                 $args[-1] = $result;
-                $result = $factory->make('Constructor',
-                    'class' => 'BuiltinCall',
-                    name    => $wrapper->[1],
-                    args    => \@args,
+                my $n = $wrapper->[1];
+                $result = $typed->make('Call',
+                    dispatch_kind => 'builtin',
+                    name          => $n->value(),
+                    inputs        => [$n, \@args],
+                    compat_class  => 'BuiltinCall',
                 );
             } elsif ($wrapper->[0] eq 'MethodCallExpr') {
-                $result = $factory->make('Constructor',
-                    'class'       => 'MethodCallExpr',
-                    invocant    => $result,
-                    method_name => $wrapper->[1],
-                    args        => $wrapper->[2],
+                my $mn = $wrapper->[1];
+                $result = $typed->make('Call',
+                    dispatch_kind => 'method',
+                    name          => $mn->value(),
+                    inputs        => [$result, $mn, $wrapper->[2]],
+                    compat_class  => 'MethodCallExpr',
                 );
             }
         }
@@ -195,7 +198,7 @@ class Chalk::Bootstrap::Perl::Actions {
     # wrapping the method call.
     #   MethodCall(BuiltinCall(push, [A, B]), m, [])
     #     → BuiltinCall(push, [A, MethodCall(B, m, [])])
-    my sub _push_methodcall_inward($factory, $invocant, $method_name, $args) {
+    my sub _push_methodcall_inward($factory, $typed, $invocant, $method_name, $args) {
         my @wrappers;
         my $current = $invocant;
         while (defined $current && $current isa Chalk::IR::Node) {
@@ -223,20 +226,20 @@ class Chalk::Bootstrap::Perl::Actions {
 
         # No wrappers found — return plain MethodCallExpr
         unless (@wrappers) {
-            return $factory->make('Constructor',
-                'class'       => 'MethodCallExpr',
-                invocant    => $invocant,
-                method_name => $method_name,
-                args        => $args,
+            return $typed->make('Call',
+                dispatch_kind => 'method',
+                name          => $method_name->value(),
+                inputs        => [$invocant, $method_name, $args],
+                compat_class  => 'MethodCallExpr',
             );
         }
 
         # Create method call at the innermost invocant
-        my $result = $factory->make('Constructor',
-            'class'       => 'MethodCallExpr',
-            invocant    => $current,
-            method_name => $method_name,
-            args        => $args,
+        my $result = $typed->make('Call',
+            dispatch_kind => 'method',
+            name          => $method_name->value(),
+            inputs        => [$current, $method_name, $args],
+            compat_class  => 'MethodCallExpr',
         );
 
         # Rewrap layers from inside out
@@ -256,16 +259,19 @@ class Chalk::Bootstrap::Perl::Actions {
             } elsif ($wrapper->[0] eq 'BuiltinCall') {
                 my @bi_args = ($wrapper->[2]->@*);
                 $bi_args[-1] = $result;
-                $result = $factory->make('Constructor',
-                    'class' => 'BuiltinCall',
-                    name    => $wrapper->[1],
-                    args    => \@bi_args,
+                my $n = $wrapper->[1];
+                $result = $typed->make('Call',
+                    dispatch_kind => 'builtin',
+                    name          => $n->value(),
+                    inputs        => [$n, \@bi_args],
+                    compat_class  => 'BuiltinCall',
                 );
             } elsif ($wrapper->[0] eq 'PostfixDerefExpr') {
-                $result = $factory->make('Constructor',
-                    'class'  => 'PostfixDerefExpr',
-                    target => $result,
-                    sigil  => $wrapper->[1],
+                my $s = $wrapper->[1];
+                $result = $typed->make('PostfixDeref',
+                    sigil        => (ref($s) ? $s->value() : $s),
+                    inputs       => (ref($s) ? [$result, $s] : [$result]),
+                    compat_class => 'PostfixDerefExpr',
                 );
             }
         }
@@ -2229,7 +2235,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Set invocant to current result, pushing inward
                 # past any prefix wrappers from stale-value merge
                 $result = _push_methodcall_inward(
-                    $factory, $result, $op->inputs()->[1], $op->inputs()->[2],
+                    $factory, $typed, $result, $op->inputs()->[1], $op->inputs()->[2],
                 );
             } elsif ($op isa Chalk::IR::Node::Subscript) {
                 # Push subscript inside exists/delete BuiltinCall so the
@@ -2311,7 +2317,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         # Push MethodCall inward past prefix wrappers when the Earley
         # stale-value merge misparents a BuiltinCall as the invocant
-        return _push_methodcall_inward($factory, $invocant, $method_name, \@args);
+        return _push_methodcall_inward($factory, $typed, $invocant, $method_name, \@args);
     }
 
     # §16 Subscript ::= Expression _ /->/ _ /\[/ _ Expression _ /\]/
@@ -2395,7 +2401,7 @@ class Chalk::Bootstrap::Perl::Actions {
         #     → BuiltinCall(scalar, [PostfixDeref(X, @)])
         #   PostfixDeref(Return(ctrl, BuiltinCall(scalar, [X])), @)
         #     → Return(ctrl, BuiltinCall(scalar, [PostfixDeref(X, @)]))
-        return _push_deref_inward($factory, $target, $sigil_node);
+        return _push_deref_inward($factory, $typed, $target, $sigil_node);
     }
 
     # §16 PostfixIncDec ::= Expression _ /\+\+/ | Expression _ /--/
