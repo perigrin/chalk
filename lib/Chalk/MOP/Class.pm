@@ -56,6 +56,11 @@ class Chalk::MOP::Class {
 
     method declare_import($module, %opts) {
         require Chalk::MOP::Import;
+        # Deduplicate: return existing import if the same module is already registered.
+        # Earley parse ambiguity can cause semantic actions to fire multiple times.
+        for my $existing (@imports) {
+            return $existing if $existing->module() eq $module;
+        }
         my $import = Chalk::MOP::Import->new(
             module => $module,
             class  => $self,

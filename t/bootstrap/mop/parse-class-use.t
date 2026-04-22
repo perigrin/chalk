@@ -9,20 +9,12 @@ use lib 't/bootstrap/lib';
 use Chalk::MOP;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 
-# Test MOP current_class on construction
+# Test MOP initialises with main class
 {
     my $mop = Chalk::MOP->new;
-    my $current = $mop->current_class;
-    ok(defined $current, 'current_class is set on construction');
-    is($current->name, 'main', 'current_class starts as main');
-}
-
-# Test set_current_class
-{
-    my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('Foo');
-    $mop->set_current_class($cls);
-    is($mop->current_class->name, 'Foo', 'set_current_class works');
+    my $main = $mop->for_class('main');
+    ok(defined $main, 'main class is registered on construction');
+    is($main->name, 'main', 'main class name is correct');
 }
 
 done_testing();

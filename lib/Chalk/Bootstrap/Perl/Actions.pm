@@ -973,6 +973,11 @@ class Chalk::Bootstrap::Perl::Actions {
         if (defined $mop) {
             my $main = $mop->for_class('main');
             if (defined $main) {
+                for my $use (@use_decls) {
+                    $main->declare_import($use->name(),
+                        args => [$use->args->@*],
+                    );
+                }
                 for my $sub (@top_level_subs) {
                     $main->declare_sub($sub->name(),
                         params => $sub->params(),
@@ -1216,17 +1221,6 @@ class Chalk::Bootstrap::Perl::Actions {
 
         my $name_str = defined $module_name ? $module_name->value() : '';
 
-        # Populate MOP with the use/no declaration on the current class when a MOP is present.
-        # current_mop() is used instead of $ctx->mop() because intermediate
-        # multiply contexts do not propagate the mop field.
-        my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
-        if (defined $mop) {
-            my $target_class = $mop->current_class() // $mop->for_class('main');
-            $target_class->declare_import($name_str,
-                args => ($import_args // []),
-            );
-        }
-
         return Chalk::IR::UseInfo->new(
             name    => $name_str,
             args    => $import_args // [],
@@ -1358,6 +1352,10 @@ class Chalk::Bootstrap::Perl::Actions {
                 } elsif ($item isa Chalk::IR::SubInfo) {
                     $mop_class->declare_sub($item->name(),
                         params => $item->params(),
+                    );
+                } elsif ($item isa Chalk::IR::UseInfo) {
+                    $mop_class->declare_import($item->name(),
+                        args => [$item->args->@*],
                     );
                 } elsif (ref($item) eq 'HASH' && exists $item->{__adjust_body}) {
                     $mop_class->declare_adjust();
