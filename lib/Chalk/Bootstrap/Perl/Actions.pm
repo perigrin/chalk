@@ -1591,11 +1591,9 @@ class Chalk::Bootstrap::Perl::Actions {
                     const_type => 'variable',
                     value      => $catch_var,
                 );
-                my $try_node = $factory->make('Constructor',
-                    'class'     => 'TryCatchStmt',
-                    try_body    => $try_body,
-                    catch_var   => $catch_var_const,
-                    catch_body  => $catch_body,
+                my $try_node = $typed->make('TryCatch',
+                    inputs       => [$try_body, $catch_var_const, $catch_body],
+                    compat_class => 'TryCatchStmt',
                 );
 
                 $sa->update_cfg({
@@ -1769,10 +1767,9 @@ class Chalk::Bootstrap::Perl::Actions {
             # Block argument (map { BLOCK } LIST form): wrap as AnonSubExpr
             if (defined $rule && $rule eq 'Block') {
                 my @body = ref($focus) eq 'ARRAY' ? $focus->@* : (defined $focus ? ($focus) : ());
-                my $block_node = $factory->make('Constructor',
-                    'class' => 'AnonSubExpr',
-                    params => [],
-                    body   => \@body,
+                my $block_node = $typed->make('AnonSub',
+                    inputs       => [[], \@body],
+                    compat_class => 'AnonSubExpr',
                 );
                 unshift @args, $block_node;
                 $has_block = true;
@@ -1817,10 +1814,12 @@ class Chalk::Bootstrap::Perl::Actions {
 
         # Generic builtin or function call → BuiltinCall
         if (defined $func_name) {
-            return $factory->make('Constructor',
-                'class' => 'BuiltinCall',
-                name  => _make_const($factory, $func_name),
-                args  => \@args,
+            my $name_node = _make_const($factory, $func_name);
+            return $typed->make('Call',
+                dispatch_kind => 'builtin',
+                name          => $name_node->value(),
+                inputs        => [$name_node, \@args],
+                compat_class  => 'BuiltinCall',
             );
         }
 
@@ -1880,9 +1879,9 @@ class Chalk::Bootstrap::Perl::Actions {
                     push @parts, $factory->make('Constant',
                         const_type => 'string', value => $lit);
                 }
-                return $factory->make('Constructor',
-                    'class' => 'InterpolatedString',
-                    parts => \@parts,
+                return $typed->make('Interpolate',
+                    inputs       => [\@parts],
+                    compat_class => 'InterpolatedString',
                 );
             }
             # No interpolation — plain constant
@@ -2049,10 +2048,9 @@ class Chalk::Bootstrap::Perl::Actions {
             );
         }
 
-        my $var_decl = $factory->make('Constructor',
-            'class'       => 'VarDecl',
-            variable    => $var_name,
-            initializer => undef,
+        my $var_decl = $typed->make('VarDecl',
+            inputs       => [$var_name, undef],
+            compat_class => 'VarDecl',
         );
 
         # Update CFG scope with the new variable binding
@@ -2093,9 +2091,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @elements, $val;
             }
         }
-        return $factory->make('Constructor',
-            'class'    => 'ArrayRefExpr',
-            elements => \@elements,
+        return $typed->make('ArrayRef',
+            inputs       => [\@elements],
+            compat_class => 'ArrayRefExpr',
         );
     }
 
@@ -2111,9 +2109,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @pairs, $val;
             }
         }
-        return $factory->make('Constructor',
-            'class' => 'HashRefExpr',
-            pairs => \@pairs,
+        return $typed->make('HashRef',
+            inputs       => [\@pairs],
+            compat_class => 'HashRefExpr',
         );
     }
 
@@ -2139,10 +2137,9 @@ class Chalk::Bootstrap::Perl::Actions {
 
         $body = _fixup_stmts($factory, $typed, $body // []);
 
-        return $factory->make('Constructor',
-            'class'  => 'AnonSubExpr',
-            params => \@params,
-            body   => $body,
+        return $typed->make('AnonSub',
+            inputs       => [\@params, $body],
+            compat_class => 'AnonSubExpr',
         );
     }
 
@@ -2173,10 +2170,13 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return undef unless defined $op && defined $operand;
 
-        return $factory->make('Constructor',
-            'class'   => 'UnaryExpr',
-            op      => _make_const($factory, $op),
-            operand => $operand,
+        my $op_node  = _make_const($factory, $op);
+        my $op_str   = $op_node->value();
+        my $unop_type = $UNOP_MAP{$op_str} // die "Unknown unary op: $op_str";
+        return $typed->make($unop_type,
+            inputs       => [$op_node, $operand],
+            operand      => $operand,
+            compat_class => 'UnaryExpr',
         );
     }
 
@@ -2216,30 +2216,33 @@ class Chalk::Bootstrap::Perl::Actions {
             if ($pat =~ m{^s/}) {
                 # s/pat/repl/flags
                 if ($pat =~ m{^s/((?:[^/\\]|\\.)*)/((?:[^/\\]|\\.)*)/([\w]*)$}) {
-                    return $factory->make('Constructor',
-                        'class'       => 'RegexSubst',
-                        target      => $left,
-                        pattern     => _make_const($factory, $1),
-                        replacement => _make_const($factory, $2),
-                        flags       => _make_const($factory, $3),
+                    my $flags_node = _make_const($factory, $3);
+                    my $flags_str  = (defined $flags_node ? $flags_node->value() : '') // '';
+                    return $typed->make('RegexSubst',
+                        flags        => $flags_str,
+                        inputs       => [$left, _make_const($factory, $1), _make_const($factory, $2), $flags_node],
+                        compat_class => 'RegexSubst',
                     );
                 }
             } else {
                 # /pattern/flags or m/pattern/flags
-                return $factory->make('Constructor',
-                    'class'   => 'RegexMatch',
-                    target  => $left,
-                    pattern => $right,
-                    flags   => _make_const($factory, ''),
+                my $flags_node = _make_const($factory, '');
+                my $flags_str  = (defined $flags_node ? $flags_node->value() : '') // '';
+                return $typed->make('RegexMatch',
+                    flags        => $flags_str,
+                    inputs       => [$left, $right, $flags_node],
+                    compat_class => 'RegexMatch',
                 );
             }
         }
 
-        return $factory->make('Constructor',
-            'class' => 'BinaryExpr',
-            op    => $op,
-            left  => $left,
-            right => $right,
+        my $op_str    = $op->value();
+        my $binop_type = $BINOP_MAP{$op_str} // die "Unknown binary op: $op_str";
+        return $typed->make($binop_type,
+            inputs       => [$op, $left, $right],
+            left         => $left,
+            right        => $right,
+            compat_class => 'BinaryExpr',
         );
     }
 
