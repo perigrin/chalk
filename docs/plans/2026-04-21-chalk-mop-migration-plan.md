@@ -65,9 +65,9 @@ The SSA construction algorithm currently lives as `_build_method_graph`
 in Actions.pm. This is a historical accident — the method does
 method-scoped work (building a method's graph) but was placed in the
 semantic-action class because `MethodDefinition()` calls it. This
-plan moves graph construction to its structural home: a shared
-graph-owner role implemented by `Chalk::MOP::Method`, `Sub`, and
-`Phaser::Adjust`.
+plan moves graph construction to its structural home:
+`Chalk::IR::Graph::build(...)`, invoked via each graph-owner's
+`$self->graph->build(...)` delegation.
 
 ### AMOP tradition, not wrapper layer
 
@@ -85,25 +85,40 @@ implementation of the MOP protocol in C is downstream work tracked
 separately from this migration. The MOP's protocol is designed to
 support both paths without change.
 
-### Per-class hash-cons scope
+### Per-graph hash-cons scope
 
-In Perl, the compilation unit is the class. `class Foo { ... }`
-creates a discrete bounded scope with its own namespace, fields,
-methods, and phasers. Hash-consing scope follows: each
-`Chalk::MOP::Class` owns the node factory shared by all of its
-graph-owners. Nodes within a class are deduplicated naturally; nodes
-across classes are never shared. This structurally fixes the
-`Graph.nodes()` consumer-contamination problem without the
-consumer-traversal workaround.
+> **AMENDED** — originally "Per-class hash-cons scope" with a
+> class-owned factory. Revised to per-graph-owner scope. See Phase 2
+> amendment for rationale.
 
-### GraphOwner as shared role
+Each graph-owner (Method, Sub, Phaser::Adjust) owns a
+`Chalk::IR::Graph` with its own hash-cons cache and CFG id
+allocator. Nodes constructed via `$graph->merge($node)` are
+deduplicated within the graph; identical content across graphs
+yields distinct objects. Consumer lists are bounded to the graph
+scope, structurally fixing the `Graph.nodes()` consumer-
+contamination problem that required the `body_stmts` BFS workaround
+and inputs-only traversal.
 
-`Chalk::MOP::Method`, `Chalk::MOP::Sub`, and `Chalk::MOP::Phaser::Adjust`
-share a graph-owner role: a `graph()` accessor, a `build_graph()`
-method, and delegation of `make()`/`make_cfg()` to their owning
-class's factory. Perl 5.42 `feature class` does not yet have native
-roles; this plan implements the role as an abstract parent class
-(`Chalk::MOP::GraphOwner`) that concrete graph-owners inherit from.
+Hash-consing scope is per-graph-owner, not per-class. Two methods
+within the same class each have their own cache. This is the
+correct granularity for the consumer-contamination fix — per-class
+would still share nodes across methods within a class.
+
+### Composition over inheritance for graph-owners
+
+> **AMENDED** — originally "GraphOwner as shared role" implemented
+> as an abstract parent class. Revised to composition.
+
+`Chalk::MOP::Method`, `Chalk::MOP::Sub`, and `Chalk::MOP::Phaser`
+(inherited by `Phaser::Adjust`) each have a
+`field $graph = Chalk::IR::Graph->new` and delegation methods
+`merge($node)` / `next_cfg_id()` routing to their graph. No
+`Chalk::MOP::GraphOwner` abstract parent class — Perl 5.42
+`feature class` lacks roles, and `Phaser::Adjust :isa(Phaser)`
+already occupies the single-inheritance slot. Composition (has-a
+graph) avoids the conflict and expresses the relationship correctly:
+a Method is not a kind of graph — it has a graph.
 
 ## Current state
 
@@ -485,59 +500,113 @@ sites).
 
 ---
 
-### Phase 2: Per-class hash-cons factory
+### Phase 2: Per-graph hash-cons scope
 
-**Goal:** move the hash-cons factory from the shared singleton
-(`Chalk::IR::NodeFactory`) to per-class ownership
-(`Chalk::MOP::Class::make` / `make_cfg`). Methods and phasers
-delegate to their class.
+> **AMENDED** — original spec called for per-class factory via
+> `Chalk::MOP::GraphOwner` abstract parent class. During
+> implementation (2026-04-21), design review concluded:
+>
+> 1. Per-class scoping doesn't actually fix the consumer-contamination
+>    bug (`Graph.nodes()` can't follow consumers because methods
+>    within the same class still share nodes). Per-graph-owner
+>    scoping does — each Method/Sub/Phaser gets its own cache, so
+>    consumer lists are bounded to a single graph.
+>
+> 2. `GraphOwner` as a parent class conflicts with `Phaser::Adjust
+>    :isa(Phaser)` (Perl 5.42 `feature class` lacks roles/multiple
+>    inheritance). Composition (has-a graph) replaces inheritance.
+>
+> 3. The factory pattern (`$factory->make('TypedOp', ...)` with
+>    string-dispatch) was unnecessary — callers construct typed node
+>    classes directly (`Chalk::IR::Node::Call->new(...)`) and the
+>    graph hash-conses via `merge()`.
+>
+> 4. Migrating Actions.pm call sites from `$factory->make(...)` to
+>    `$graph_owner->merge(...)` requires solving the Earley
+>    bottom-up ordering problem (body nodes are constructed before
+>    the graph-owner metaobject exists). This migration is deferred
+>    to Phase 3, where `build_graph` rewrites the construction flow.
+
+**Goal:** give each graph-owner (`Method`, `Sub`, `Phaser::Adjust`)
+its own `Chalk::IR::Graph` with per-graph hash-cons scope. Nodes
+constructed via `$graph->merge($node)` are deduplicated within the
+graph; identical content across graphs yields distinct objects with
+bounded consumer lists.
 
 **Entry:** Phase 1 complete.
 
 **Scope:**
 
-- Implement `Chalk::MOP::Class::make($op, %args)` and
-  `make_cfg($op, %args)` with per-class cache and CFG counter.
-- Implement `Chalk::MOP::GraphOwner` as an abstract parent class
-  providing `make` and `make_cfg` that delegate to
-  `$self->class->make(...)`.
-- Make `Chalk::MOP::Method`, `Sub`, `Phaser::Adjust` inherit from
-  `GraphOwner`.
-- Migrate graph-construction sites in Actions.pm from
-  `$factory->make(...)` to `$graph_owner->make(...)`.
-- Verify hash-cons scope is per-class: a test constructs two methods
-  in different classes each referencing `Constant 0`, asserts the
-  resulting nodes have distinct identities and disjoint `consumers`
-  lists.
+- Add `merge($node)` and `next_cfg_id()` to `Chalk::IR::Graph`.
+  `merge` hash-conses by `content_hash`; `next_cfg_id` allocates
+  unique CFG node ids. `nodes()` returns the cache contents directly
+  when the cache is populated (no BFS needed). Legacy constructor
+  params (`start`, `returns`, `body_stmts`) remain for backward
+  compatibility; `start()` and `returns()` derive from the cache
+  when legacy params aren't provided.
+- Add `field $graph = Chalk::IR::Graph->new` to `Method`, `Sub`,
+  and `Phaser` (abstract base — `Phaser::Adjust` inherits). Each
+  graph-owner constructs a fresh graph at instantiation.
+- Add `merge($node)` and `next_cfg_id()` delegation methods on each
+  graph-owner, routing to `$self->graph->...`.
+- No `Chalk::MOP::GraphOwner` abstract parent class. Composition
+  (has-a graph) replaces inheritance, avoiding the `:isa` conflict
+  with the Phaser hierarchy.
+- No Actions.pm migration in this phase. Body-node construction
+  stays on `$factory` / `$typed` (Phase 1B's typed factory). Phase 3
+  rewrites body construction to use the graph-owner's `merge()`.
+- Verify per-graph hash-cons isolation: a test constructs two
+  methods each merging `Constant 0`, asserts the resulting nodes
+  have distinct identities.
+- Remove `current_class` from `Chalk::MOP` (Phase 1 design
+  mistake — was always `main`). Move UseDeclaration MOP registration
+  into ClassBlock/Program body iteration, matching the pattern used
+  for fields/methods/subs/ADJUST.
 - **Tests (TDD, before implementation):**
-  - `t/bootstrap/mop/per-class-hash-cons.t` — hash-cons isolation
-    across classes (core Phase 2 deliverable); same-class
-    deduplication within a class
-  - `t/bootstrap/mop/graph-owner.t` — `GraphOwner::make` and
-    `make_cfg` delegate to `$self->class->make`; CFG unique-id
-    allocation is per-class
+  - `t/bootstrap/mop/graph-merge.t` — `merge()` deduplicates
+    within a graph; per-graph isolation (identical content across
+    graphs yields distinct objects); `next_cfg_id()` allocates
+    independently per graph
+  - `t/bootstrap/mop/per-graph-hash-cons.t` — end-to-end isolation
+    through MOP metaobjects: Method/Sub/Phaser::Adjust each own
+    their own cache, across classes
   - Regression invariant: every existing test green at Phase 1
     exit remains green at Phase 2 exit.
 
 **Implementation notes:**
 - `Chalk::IR::NodeFactory` continues to exist for any remaining
-  direct-call consumers (tests, etc.) but stops being the primary
-  construction path.
-- `Chalk::IR::Graph` BFS still uses inputs-only traversal at this
-  phase (restored to bidirectional in Phase 7).
+  direct-call consumers (tests, Actions.pm body construction, etc.)
+  but is no longer the long-term construction path.
+- `Chalk::IR::Graph` BFS legacy path still uses inputs-only
+  traversal as a fallback for pre-Phase 2 callers (restored to
+  bidirectional in Phase 7 once all graphs are constructed via
+  `merge()`).
+- Call sites construct typed node classes directly (e.g.,
+  `Chalk::IR::Node::Constant->new(value => 0)`) and pass them to
+  `$graph->merge(...)`. No string-dispatch factory pattern.
 
 **Exit criteria:**
-- All graph construction in Actions.pm goes through
-  `$graph_owner->make(...)` / `make_cfg(...)`.
-- Per-class hash-cons isolation verified by test.
+- Per-graph hash-cons isolation verified by test.
+- Every graph-owner metaobject (Method, Sub, Phaser::Adjust)
+  constructs a fresh `Chalk::IR::Graph` on instantiation.
+- `current_class` removed from `Chalk::MOP`.
 - Existing test suite passes.
 
 **Polymorphic-migration criteria addressed:** partial — foundation
-for #7 (full SSA).
+for #7 (full SSA). Per-graph isolation structurally enables
+bidirectional consumer traversal within a graph (Phase 7).
 
 ---
 
-### Phase 3: GraphOwner::build_graph (full SSA)
+### Phase 3: Graph::build (full SSA)
+
+> **AMENDED** — original spec referenced `Chalk::MOP::GraphOwner::build_graph`.
+> Phase 2 eliminated GraphOwner (see Phase 2 amendment). `build_graph`
+> lives on `Chalk::IR::Graph` instead — graph-owners delegate via
+> `$self->graph->build(...)`. This also absorbs the Actions.pm
+> migration deferred from Phase 2: body-node construction moves from
+> `$factory->make(...)` to `$graph->merge(Node::Foo->new(...))` as
+> part of the `build` rewrite.
 
 Phase 3 is the largest single piece of compiler work in the plan —
 SSA construction algorithm implementation. It is split into three
@@ -557,9 +626,13 @@ after 3a completes, the codebase is in a defined, testable state.
 - The Context tree holds `cfg_state` annotations per-node; the
   builder extracts the ones belonging to the current method via
   refaddr-keyed walk.
-- `Chalk::MOP::GraphOwner::build_graph(...)` is introduced in 3a
-  with a minimal implementation; 3b and 3c extend it with Phi
-  insertion paths.
+- `Chalk::IR::Graph::build(...)` is introduced in 3a with a minimal
+  implementation; 3b and 3c extend it with Phi insertion paths.
+  Graph-owners (Method, Sub, Phaser::Adjust) delegate via
+  `$self->graph->build(...)`.
+- Call sites within `build` construct typed node classes directly
+  (`Chalk::IR::Node::Start->new(...)`) and merge them into the graph
+  via `$self->merge(...)` — no factory string-dispatch.
 
 ---
 
@@ -573,18 +646,22 @@ linear code (no if/else, no loops).
 
 **Scope:**
 
-- Implement `Chalk::MOP::GraphOwner::build_graph($body_stmts,
-  $cfg_state, $start_ctrl)` with the control-chain layer:
+- Implement `Chalk::IR::Graph::build($body_stmts, $cfg_state,
+  $start_ctrl)` with the control-chain layer:
+  - Construct typed node objects directly
+    (`Chalk::IR::Node::Start->new(...)`) and `merge()` them into
+    the graph — no factory string-dispatch.
   - Thread a linear control chain through side-effect statements
     (VarDecl, Assign, Call, etc.).
   - Each side-effect node's control input is the previous side-
     effect node (or `start` for the first).
-  - Return a `Chalk::IR::Graph` where every linear-code statement is
-    reachable from `start` through inputs.
+  - After `build` completes, `$graph->nodes()` reaches every
+    linear-code statement from `start` via the cache (no
+    `body_stmts` BFS needed).
   - If/else and loop bodies produce graphs but without Phi nodes at
     merge points yet — that's 3b and 3c.
 - Migrate `MethodDefinition()`, `SubroutineDefinition()`, and ADJUST
-  block actions to call `$graph_owner->build_graph(...)` instead of
+  block actions to call `$method->graph->build(...)` instead of
   Actions.pm's `_build_method_graph`.
 - Delete `_build_method_graph` from Actions.pm.
 - **Tests (TDD, before implementation):**
@@ -619,7 +696,7 @@ differ between branches, via eager Click-style merging.
 
 **Scope:**
 
-- Extend `build_graph` with if/else Phi insertion:
+- Extend `Graph::build` with if/else Phi insertion:
   - At Region merge (after both branches complete), diff the branch
     scopes against the pre-if scope.
   - For each variable that differs between the two branches, emit a
@@ -661,7 +738,7 @@ loop body completes.
 
 **Scope:**
 
-- Extend `build_graph` with loop Phi insertion:
+- Extend `Graph::build` with loop Phi insertion:
   - At loop entry, fork the scope into sentinels via
     `Scope::fork_for_loop` (already implemented).
   - When a variable is read inside the loop body, resolve its
@@ -885,8 +962,8 @@ and delete the `body_stmts` BFS seeding.
 **Scope:**
 
 - Restore bidirectional traversal in `Graph::nodes()` — follows both
-  `inputs()` and `consumers()`. Safe now because per-class hash-cons
-  scope (Phase 2) guarantees consumer lists are class-local.
+  `inputs()` and `consumers()`. Safe now because per-graph hash-cons
+  scope (Phase 2) guarantees consumer lists are graph-local.
 - Delete the `body_stmts` field from `Chalk::IR::Graph` and the
   seeding logic. Safe now because Phase 3's full SSA reaches every
   node from `start`.
@@ -936,8 +1013,8 @@ the docs drift out of sync the day Phase 7 lands.
     methods)
   - Resolution protocol (find_method, ancestors,
     resolve_adjust_blocks)
-  - GraphOwner role and `build_graph` algorithm summary
-  - Per-class hash-cons scope
+  - Graph-owner composition pattern and `Graph::build` algorithm summary
+  - Per-graph hash-cons scope
   - Prior art references (B::MOP, HotSpot ci-layer, Graal
     HostedUniverse, TurboFan JSHeapBroker)
 
@@ -953,7 +1030,8 @@ the docs drift out of sync the day Phase 7 lands.
     structs).
   - The MOP is the output of parsing.
   - Update examples that show `$factory->make(...)` to show
-    `$class->make(...)` or `$method->make(...)`.
+    `$method->merge(Node::Foo->new(...))` or
+    `$method->graph->merge(...)`.
 
 - **Update `docs/architecture/ir-lowering.md`:**
   - Codegen reads the MOP. `generate($mop)` is the entry point.
@@ -1086,12 +1164,11 @@ plan.
 
 - **`body_stmts` BFS seeding** (prototype workaround for incomplete
   SSA) → **Click's SSA construction algorithm** implemented in
-  `GraphOwner::build_graph` (Phase 3). The graph is reachable from
-  `start` through inputs alone, the way SoN graphs are supposed to
-  be.
+  `Graph::build` (Phase 3). The graph is reachable from `start`
+  through the cache, the way SoN graphs are supposed to be.
 - **`Graph::nodes()` consumer-traversal exclusion** (workaround for
-  shared hash-cons scope) → **per-class hash-cons factory** (Phase
-  2). Consumers are class-local by construction; bidirectional
+  shared hash-cons scope) → **per-graph hash-cons scope** (Phase
+  2). Consumers are graph-local by construction; bidirectional
   traversal is restored safely (Phase 7). Precedent: HotSpot's
   `Compile` scope, `PhaseGVN` table.
 - **Symbolic name strings on Call nodes** (resolved later by name
@@ -1104,8 +1181,8 @@ plan.
   the invariant.
 - **`_build_method_graph` as a helper on Actions.pm** (graph
   construction scattered across the SemanticAction class) → **a
-  `GraphOwner::build_graph` method on the metaobject that owns the
-  graph** (Phase 3). The algorithm lives with the thing it builds.
+  `Graph::build` method on the graph that the metaobject owns**
+  (Phase 3). The algorithm lives with the thing it builds.
 
 ### Invariants structurally enforced
 
