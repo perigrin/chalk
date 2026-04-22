@@ -70,6 +70,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             position => 0,
             is_zero  => false,
             annotations => $annotations,
+            mop      => ($is_ctx ? $sa_one->mop() : undef),
         );
     }
 

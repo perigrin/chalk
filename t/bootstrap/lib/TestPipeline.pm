@@ -30,6 +30,7 @@ use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Grammar::Perl::TypeLibrary;
 use Chalk::Bootstrap::Semiring::Structural;
 use Chalk::Bootstrap::Perl::Actions;
+use Chalk::MOP;
 
 # Returns the canonical 10-rule BNF meta-grammar as a string
 sub bnf_text {
@@ -147,6 +148,9 @@ my sub _build_perl_parser_with_actions($grammar, $actions, %opts) {
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
         actions => $actions,
     );
+
+    my $mop = Chalk::MOP->new;
+    Chalk::Bootstrap::Semiring::SemanticAction::set_mop($mop);
 
     my $comp_sr = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],

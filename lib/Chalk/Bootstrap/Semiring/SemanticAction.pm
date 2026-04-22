@@ -33,6 +33,10 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # Singleton for one(): a Context with undef focus and no children.
     my $_one_singleton;
 
+    # MOP instance to thread through parse contexts. Set via set_mop() before
+    # parsing; invalidates the singleton so _one_ctx() recreates it with the MOP.
+    my $_mop;
+
     # Return a singleton one() Context, creating it on first call.
     # Also initializes the cfg annotation for this context.
     # Implemented as a method (not my sub) so the XS codegen can compile it
@@ -44,6 +48,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 children => [],
                 position => 0,
                 rule     => undef,
+                mop      => $_mop,
             );
             my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
             my $state = {
@@ -139,6 +144,13 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # a complete event. Allows action methods in Actions.pm to access
     # cfg_state/update_cfg without needing a reference to the semiring.
     sub current_instance { return $_current_instance }
+
+    # Class method: set the MOP instance to thread through parse Contexts.
+    # Invalidates the one() singleton so the next call recreates it with the MOP.
+    sub set_mop($mop) { $_mop = $mop; $_one_singleton = undef; }
+
+    # Class method: return the currently set MOP instance (may be undef).
+    sub current_mop() { return $_mop }
 
     # Set the TypeInference Context for the current complete event.
     # Called by FilterComposite after TI (index 2) completes, before SA runs.
