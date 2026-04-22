@@ -21,7 +21,7 @@ my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'perl_pipeline produces grammar IR');
 
 SKIP: {
-    skip 'perl_pipeline returned undef', 20 unless defined $raw_ir;
+    skip 'perl_pipeline returned undef', 21 unless defined $raw_ir;
 
     my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated  = $bnf_target->generate($raw_ir);
@@ -50,6 +50,10 @@ use strict;
 class Point {
     field $x :param :reader;
 
+    ADJUST {
+        $x = 0;
+    }
+
     method magnitude() {
         return 1;
     }
@@ -67,7 +71,7 @@ class Point {
         or diag('parse returned ' . (defined $result ? 'zero' : 'undef'));
 
     SKIP: {
-        skip 'parse returned undef or zero', 16
+        skip 'parse returned undef or zero', 17
             unless defined $result && !$result->is_zero();
 
         # MOP class count: main + Point
@@ -80,7 +84,7 @@ class Point {
         ok(defined $point, 'Point class is registered on MOP');
 
         SKIP: {
-            skip 'Point class not found', 6 unless defined $point;
+            skip 'Point class not found', 7 unless defined $point;
 
             my @fields = $point->fields();
             is(scalar @fields, 1, 'Point has exactly 1 field');
@@ -97,6 +101,9 @@ class Point {
                 skip 'no methods on Point', 2 unless scalar @methods >= 1;
                 is($methods[0]->name, 'magnitude', 'Point method is named magnitude');
             }
+
+            my @adjust = $point->adjust_blocks();
+            is(scalar @adjust, 1, 'Point has exactly 1 ADJUST block');
 
             my @point_imports = $point->imports();
             is(scalar @point_imports, 0, 'Point has no imports (use belongs to main)');

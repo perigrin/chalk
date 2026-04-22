@@ -700,6 +700,12 @@ class Chalk::Bootstrap::Perl::Actions {
         my $i = 0;
         while ($i <= $#$stmts) {
             my $item = $stmts->[$i];
+            # Pass through ADJUST markers without merging
+            if (ref($item) eq 'HASH' && exists $item->{__adjust_body}) {
+                push @result, $item;
+                $i++;
+                next;
+            }
             if ($item isa Chalk::IR::Node::Constant
                     && defined $item->value()
                     && $item->value() eq 'return'
@@ -996,13 +1002,18 @@ class Chalk::Bootstrap::Perl::Actions {
                      || $val isa Chalk::IR::ClassInfo
                      || $val isa Chalk::IR::FieldInfo
                      || $val isa Chalk::IR::MethodInfo
-                     || $val isa Chalk::IR::SubInfo) {
+                     || $val isa Chalk::IR::SubInfo
+                     || (ref($val) eq 'HASH' && exists $val->{__adjust_body})) {
                 push @stmts, $val;
             }
         }
         my $fixed = _fixup_stmts($factory, $typed, \@stmts);
         # Fix misparented postfix chains from Earley stale-value merge
-        return [ map { _fix_postfix_chain($factory, $typed, $_) } $fixed->@* ];
+        return [ map {
+            (ref($_) eq 'HASH' && exists $_->{__adjust_body})
+                ? $_
+                : _fix_postfix_chain($factory, $typed, $_)
+        } $fixed->@* ];
     }
 
     # §2 StatementItem — collect all IR values for fixup in StatementList/Block
@@ -1015,7 +1026,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     || $val isa Chalk::IR::ClassInfo
                     || $val isa Chalk::IR::FieldInfo
                     || $val isa Chalk::IR::MethodInfo
-                    || $val isa Chalk::IR::SubInfo) {
+                    || $val isa Chalk::IR::SubInfo
+                    || (ref($val) eq 'HASH' && exists $val->{__adjust_body})) {
                 push @ir_nodes, $val;
             }
         }
@@ -1347,6 +1359,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     $mop_class->declare_sub($item->name(),
                         params => $item->params(),
                     );
+                } elsif (ref($item) eq 'HASH' && exists $item->{__adjust_body}) {
+                    $mop_class->declare_adjust();
                 }
             }
         }
@@ -1625,9 +1639,18 @@ class Chalk::Bootstrap::Perl::Actions {
         );
     }
 
-    # §9 AdjustBlock — not in Tier A
+    # §9 AdjustBlock ::= /ADJUST\b/ _ Block
+    # Returns a hashref marker so ClassBlock can identify and register ADJUST blocks.
     method AdjustBlock($ctx) {
-        return undef;
+        my @body;
+        for my $leaf (_collect_ir_leaves($ctx)) {
+            my $focus = $leaf->extract();
+            if (ref($focus) eq 'ARRAY') {
+                @body = $focus->@*;
+            }
+        }
+
+        return { __adjust_body => \@body };
     }
 
     # §9 TryCatchStatement — try/catch error handling
@@ -2025,11 +2048,17 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val->@*;
             } elsif ($val isa Chalk::IR::Node) {
                 push @stmts, $val;
+            } elsif (ref($val) eq 'HASH' && exists $val->{__adjust_body}) {
+                push @stmts, $val;
             }
         }
         my $fixed = _fixup_stmts($factory, $typed, \@stmts);
         # Fix misparented postfix chains from Earley stale-value merge
-        return [ map { _fix_postfix_chain($factory, $typed, $_) } $fixed->@* ];
+        return [ map {
+            (ref($_) eq 'HASH' && exists $_->{__adjust_body})
+                ? $_
+                : _fix_postfix_chain($factory, $typed, $_)
+        } $fixed->@* ];
     }
 
     # §18 Variable — resolve from scope if available, else Constant
