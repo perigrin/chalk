@@ -37,13 +37,13 @@ use Chalk::MOP;
     is_deeply($sub->params, [], 'params default to empty');
 }
 
-# graph defaults to undef
+# graph defaults to a fresh Chalk::IR::Graph instance
 {
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Graphless');
     my $sub = $cls->declare_sub('stub');
 
-    ok(!defined $sub->graph, 'graph defaults to undef in Phase 0');
+    isa_ok($sub->graph, 'Chalk::IR::Graph', 'graph is a Chalk::IR::Graph');
 }
 
 # top-level subs belong to main

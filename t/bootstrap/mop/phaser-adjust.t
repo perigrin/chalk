@@ -31,13 +31,13 @@ use Chalk::MOP;
     is($a2->source_position, 2, 'third adjust at position 2');
 }
 
-# graph defaults to undef
+# graph defaults to a fresh Chalk::IR::Graph instance
 {
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Stub');
     my $adjust = $cls->declare_adjust();
 
-    ok(!defined $adjust->graph, 'graph defaults to undef in Phase 0');
+    isa_ok($adjust->graph, 'Chalk::IR::Graph', 'graph is a Chalk::IR::Graph');
 }
 
 # adjust_blocks enumeration

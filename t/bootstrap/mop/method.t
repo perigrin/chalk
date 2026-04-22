@@ -46,13 +46,13 @@ use Chalk::MOP;
     is_deeply($method->params, [], 'params default to empty');
 }
 
-# graph defaults to undef (no graph construction in Phase 0)
+# graph defaults to a fresh Chalk::IR::Graph instance
 {
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Stub');
     my $method = $cls->declare_method('stub');
 
-    ok(!defined $method->graph, 'graph defaults to undef in Phase 0');
+    isa_ok($method->graph, 'Chalk::IR::Graph', 'graph is a Chalk::IR::Graph');
 }
 
 # multiple methods on one class
