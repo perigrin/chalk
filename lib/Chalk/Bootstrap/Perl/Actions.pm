@@ -757,10 +757,9 @@ class Chalk::Bootstrap::Perl::Actions {
                     && !defined $item->inputs()->[1]->inputs()->[1]) {
                 # Merge BinaryExpr(=, VarDecl(var, undef), expr) → VarDecl(var, expr)
                 my $var_decl = $item->inputs()->[1];
-                push @result, $factory->make('Constructor',
-                    'class'       => 'VarDecl',
-                    variable    => $var_decl->inputs()->[0],
-                    initializer => $item->inputs()->[2],
+                push @result, $typed->make('VarDecl',
+                    inputs      => [$var_decl->inputs()->[0], $item->inputs()->[2]],
+                    compat_class => 'VarDecl',
                 );
             } elsif ($item isa Chalk::IR::Node::BinOp
                     && $item->inputs()->[1] isa Chalk::IR::Node::Call
@@ -777,17 +776,20 @@ class Chalk::Bootstrap::Perl::Actions {
                 my $name = $builtin->inputs()->[0];
                 my @args = $builtin->inputs()->[1]->@*;
                 my $last_arg = pop @args;
-                my $new_last = $factory->make('Constructor',
-                    'class' => 'BinaryExpr',
-                    op      => $binop,
-                    left    => $last_arg,
-                    right   => $right,
+                my $op_str = $binop->value();
+                my $binop_type = $BINOP_MAP{$op_str} // die "Unknown binary op: $op_str";
+                my $new_last = $typed->make($binop_type,
+                    inputs       => [$binop, $last_arg, $right],
+                    left         => $last_arg,
+                    right        => $right,
+                    compat_class => 'BinaryExpr',
                 );
                 push @args, $new_last;
-                push @result, $factory->make('Constructor',
-                    'class' => 'BuiltinCall',
-                    name    => $name,
-                    args    => \@args,
+                push @result, $typed->make('Call',
+                    dispatch_kind => 'builtin',
+                    name          => $name->value(),
+                    inputs        => [$name, \@args],
+                    compat_class  => 'BuiltinCall',
                 );
             } elsif ($item isa Chalk::IR::Node::VarDecl
                     && !defined $item->inputs()->[1]
@@ -822,10 +824,9 @@ class Chalk::Bootstrap::Perl::Actions {
                         || $next->dispatch_kind() eq 'builtin');
                 if (!$is_boundary) {
                     $i++;
-                    push @result, $factory->make('Constructor',
-                        'class'       => 'VarDecl',
-                        variable    => $item->inputs()->[0],
-                        initializer => $next,
+                    push @result, $typed->make('VarDecl',
+                        inputs       => [$item->inputs()->[0], $next],
+                        compat_class => 'VarDecl',
                     );
                 } else {
                     push @result, $item;
@@ -863,20 +864,24 @@ class Chalk::Bootstrap::Perl::Actions {
                         my $prefix_name = $next->value();
                         $i += 2;
                         my $prefix_arg = $stmts->[$i];
-                        push @args, $factory->make('Constructor',
-                            'class' => 'BuiltinCall',
-                            name  => _make_const($factory, $prefix_name),
-                            args  => [$prefix_arg],
+                        my $prefix_name_node = _make_const($factory, $prefix_name);
+                        push @args, $typed->make('Call',
+                            dispatch_kind => 'builtin',
+                            name          => $prefix_name,
+                            inputs        => [$prefix_name_node, [$prefix_arg]],
+                            compat_class  => 'BuiltinCall',
                         );
                         next;
                     }
                     $i++;
                     push @args, $next;
                 }
-                push @result, $factory->make('Constructor',
-                    'class' => 'BuiltinCall',
-                    name  => _make_const($factory, $builtin),
-                    args  => \@args,
+                my $builtin_name_node = _make_const($factory, $builtin);
+                push @result, $typed->make('Call',
+                    dispatch_kind => 'builtin',
+                    name          => $builtin,
+                    inputs        => [$builtin_name_node, \@args],
+                    compat_class  => 'BuiltinCall',
                 );
             } elsif ($item isa Chalk::IR::Node::Constant
                     && defined $item->value()
@@ -886,10 +891,12 @@ class Chalk::Bootstrap::Perl::Actions {
                 my $builtin = $item->value();
                 $i++;
                 my $arg = $stmts->[$i];
-                push @result, $factory->make('Constructor',
-                    'class' => 'BuiltinCall',
-                    name  => _make_const($factory, $builtin),
-                    args  => [$arg],
+                my $builtin_name_node = _make_const($factory, $builtin);
+                push @result, $typed->make('Call',
+                    dispatch_kind => 'builtin',
+                    name          => $builtin,
+                    inputs        => [$builtin_name_node, [$arg]],
+                    compat_class  => 'BuiltinCall',
                 );
             } else {
                 push @result, $_unwrap_stmt_from_expr->($factory, $typed, $item);
