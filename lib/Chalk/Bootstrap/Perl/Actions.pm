@@ -312,7 +312,7 @@ class Chalk::Bootstrap::Perl::Actions {
     # structure is PostfixDerefExpr(MethodCallExpr(X, M, A), S).
     # This walks the tree and swaps any such misparentings.
     sub _fix_postfix_chain {
-        my ($factory, $node) = @_;
+        my ($factory, $typed, $node) = @_;
         return $node unless defined $node;
         return $node unless $node isa Chalk::IR::Node;
 
@@ -323,13 +323,13 @@ class Chalk::Bootstrap::Perl::Actions {
             if (ref($inp) eq 'ARRAY') {
                 my @fixed;
                 for my $elem ($inp->@*) {
-                    my $f = _fix_postfix_chain($factory, $elem);
+                    my $f = _fix_postfix_chain($factory, $typed, $elem);
                     push @fixed, $f;
                     $changed = true if !defined $f || !defined $elem || $f != $elem;
                 }
                 push @new_inputs, \@fixed;
             } else {
-                my $f = _fix_postfix_chain($factory, $inp);
+                my $f = _fix_postfix_chain($factory, $typed, $inp);
                 push @new_inputs, $f;
                 $changed = true if !defined $f || !defined $inp
                     || (ref($f) && ref($inp) && $f != $inp);
@@ -339,30 +339,30 @@ class Chalk::Bootstrap::Perl::Actions {
         if ($changed) {
             # Rebuild the node with fixed inputs
             if ($node->class() eq 'MethodCallExpr') {
-                $node = $factory->make('Constructor',
-                    'class'       => 'MethodCallExpr',
-                    invocant    => $new_inputs[0],
-                    method_name => $new_inputs[1],
-                    args        => $new_inputs[2],
+                $node = $typed->make('Call',
+                    dispatch_kind => 'method',
+                    name          => $new_inputs[1]->value(),
+                    inputs        => [$new_inputs[0], $new_inputs[1], $new_inputs[2]],
+                    compat_class  => 'MethodCallExpr',
                 );
             } elsif ($node->class() eq 'PostfixDerefExpr') {
-                $node = $factory->make('Constructor',
-                    'class'  => 'PostfixDerefExpr',
-                    target => $new_inputs[0],
-                    sigil  => $new_inputs[1],
+                my $sigil = $new_inputs[1];
+                $node = $typed->make('PostfixDeref',
+                    sigil        => (ref($sigil) ? $sigil->value() : $sigil),
+                    inputs       => (ref($sigil) ? [$new_inputs[0], $sigil] : [$new_inputs[0]]),
+                    compat_class => 'PostfixDerefExpr',
                 );
             } elsif ($node->class() eq 'BuiltinCall') {
-                $node = $factory->make('Constructor',
-                    'class' => 'BuiltinCall',
-                    name    => $new_inputs[0],
-                    args    => $new_inputs[1],
+                $node = $typed->make('Call',
+                    dispatch_kind => 'builtin',
+                    name          => $new_inputs[0]->value(),
+                    inputs        => [$new_inputs[0], $new_inputs[1]],
+                    compat_class  => 'BuiltinCall',
                 );
             } elsif ($node->class() eq 'SubscriptExpr') {
-                $node = $factory->make('Constructor',
-                    'class'  => 'SubscriptExpr',
-                    target => $new_inputs[0],
-                    index  => $new_inputs[1],
-                    style  => $new_inputs[2],
+                $node = $typed->make('Subscript',
+                    inputs       => [$new_inputs[0], $new_inputs[1], $new_inputs[2]],
+                    compat_class => 'SubscriptExpr',
                 );
             }
             # Other classes: leave unchanged (inputs are positional anyway)
@@ -377,16 +377,16 @@ class Chalk::Bootstrap::Perl::Actions {
                     && $invocant isa Chalk::IR::Node::PostfixDeref) {
                 my $inner_target = $invocant->inputs()->[0];
                 my $sigil = $invocant->inputs()->[1];
-                my $new_method = $factory->make('Constructor',
-                    'class'       => 'MethodCallExpr',
-                    invocant    => $inner_target,
-                    method_name => $node->inputs()->[1],
-                    args        => $node->inputs()->[2],
+                my $new_method = $typed->make('Call',
+                    dispatch_kind => 'method',
+                    name          => $node->inputs()->[1]->value(),
+                    inputs        => [$inner_target, $node->inputs()->[1], $node->inputs()->[2]],
+                    compat_class  => 'MethodCallExpr',
                 );
-                return $factory->make('Constructor',
-                    'class'  => 'PostfixDerefExpr',
-                    target => $new_method,
-                    sigil  => $sigil,
+                return $typed->make('PostfixDeref',
+                    sigil        => (ref($sigil) ? $sigil->value() : $sigil),
+                    inputs       => (ref($sigil) ? [$new_method, $sigil] : [$new_method]),
+                    compat_class => 'PostfixDerefExpr',
                 );
             }
         }
@@ -425,16 +425,15 @@ class Chalk::Bootstrap::Perl::Actions {
                 if ($PREFIX_BUILTINS{$bname}) {
                     my @args = $builtin_call->inputs()->[1]->@*;
                     my $inner_target = $args[-1];
-                    $args[-1] = $factory->make('Constructor',
-                        'class'  => 'SubscriptExpr',
-                        target => $inner_target,
-                        index  => $node->inputs()->[1],
-                        style  => $node->inputs()->[2],
+                    $args[-1] = $typed->make('Subscript',
+                        inputs       => [$inner_target, $node->inputs()->[1], $node->inputs()->[2]],
+                        compat_class => 'SubscriptExpr',
                     );
-                    my $new_builtin = $factory->make('Constructor',
-                        'class' => 'BuiltinCall',
-                        name    => $builtin_call->inputs()->[0],
-                        args    => \@args,
+                    my $new_builtin = $typed->make('Call',
+                        dispatch_kind => 'builtin',
+                        name          => $builtin_call->inputs()->[0]->value(),
+                        inputs        => [$builtin_call->inputs()->[0], \@args],
+                        compat_class  => 'BuiltinCall',
                     );
                     if (defined $stmt_wrapper) {
                         return _rewrap_stmt($factory, $stmt_wrapper, $new_builtin);
@@ -450,18 +449,17 @@ class Chalk::Bootstrap::Perl::Actions {
             if (defined $target
                     && $target isa Chalk::IR::Node::UnaryOp) {
                 my $operand = $target->inputs()->[1];
-                my $new_operand = $factory->make('Constructor',
-                    'class'  => 'SubscriptExpr',
-                    target => $operand,
-                    index  => $node->inputs()->[1],
-                    style  => $node->inputs()->[2],
+                my $new_operand = $typed->make('Subscript',
+                    inputs       => [$operand, $node->inputs()->[1], $node->inputs()->[2]],
+                    compat_class => 'SubscriptExpr',
                 );
                 # Re-run fix to push deeper if needed
-                $new_operand = _fix_postfix_chain($factory, $new_operand);
-                return $factory->make('Constructor',
-                    'class'    => 'UnaryExpr',
-                    op       => $target->inputs()->[0],
-                    operand  => $new_operand,
+                $new_operand = _fix_postfix_chain($factory, $typed, $new_operand);
+                my $unop_type = ref($target) =~ s/^Chalk::IR::Node:://r;
+                return $typed->make($unop_type,
+                    inputs       => [$target->inputs()->[0], $new_operand],
+                    operand      => $new_operand,
+                    compat_class => 'UnaryExpr',
                 );
             }
 
@@ -476,19 +474,18 @@ class Chalk::Bootstrap::Perl::Actions {
             if (defined $target
                     && $target isa Chalk::IR::Node::BinOp) {
                 my $right = $target->inputs()->[2];
-                my $new_right = $factory->make('Constructor',
-                    'class'  => 'SubscriptExpr',
-                    target => $right,
-                    index  => $node->inputs()->[1],
-                    style  => $node->inputs()->[2],
+                my $new_right = $typed->make('Subscript',
+                    inputs       => [$right, $node->inputs()->[1], $node->inputs()->[2]],
+                    compat_class => 'SubscriptExpr',
                 );
                 # Re-run fix on the new SubscriptExpr to push deeper if needed
-                $new_right = _fix_postfix_chain($factory, $new_right);
-                return $factory->make('Constructor',
-                    'class'    => 'BinaryExpr',
-                    op       => $target->inputs()->[0],
-                    left     => $target->inputs()->[1],
-                    right    => $new_right,
+                $new_right = _fix_postfix_chain($factory, $typed, $new_right);
+                my $binop_type = ref($target) =~ s/^Chalk::IR::Node:://r;
+                return $typed->make($binop_type,
+                    inputs       => [$target->inputs()->[0], $target->inputs()->[1], $new_right],
+                    left         => $target->inputs()->[1],
+                    right        => $new_right,
+                    compat_class => 'BinaryExpr',
                 );
             }
         }
@@ -501,15 +498,15 @@ class Chalk::Bootstrap::Perl::Actions {
     # this walks into BinaryExpr/UnaryExpr/BuiltinCall children so that
     # inner SubscriptExpr corruption gets fixed too.
     my $_fix_postfix_chain_deep;
-    $_fix_postfix_chain_deep = sub($f, $node) {
+    $_fix_postfix_chain_deep = sub($f, $t, $node) {
         return $node unless defined $node;
         return $node unless $node isa Chalk::IR::Node;
 
         # First, apply the top-level fix
-        my $fixed = _fix_postfix_chain($f, $node);
+        my $fixed = _fix_postfix_chain($f, $t, $node);
 
         # If the top-level fix changed the node, recurse on the result
-        return $_fix_postfix_chain_deep->($f, $fixed)
+        return $_fix_postfix_chain_deep->($f, $t, $fixed)
             if refaddr($fixed) != refaddr($node);
 
         # Otherwise, recurse into children
@@ -517,8 +514,8 @@ class Chalk::Bootstrap::Perl::Actions {
         if ($class eq 'BinaryExpr') {
             my $orig_left  = $node->inputs()->[1];
             my $orig_right = $node->inputs()->[2];
-            my $left  = $_fix_postfix_chain_deep->($f, $orig_left);
-            my $right = $_fix_postfix_chain_deep->($f, $orig_right);
+            my $left  = $_fix_postfix_chain_deep->($f, $t, $orig_left);
+            my $right = $_fix_postfix_chain_deep->($f, $t, $orig_right);
             if ((defined $left && defined $orig_left && refaddr($left) != refaddr($orig_left))
                 || (defined $right && defined $orig_right && refaddr($right) != refaddr($orig_right))) {
                 return $f->make('Constructor',
@@ -529,7 +526,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
             }
         } elsif ($class eq 'UnaryExpr') {
-            my $operand = $_fix_postfix_chain_deep->($f, $node->inputs()->[1]);
+            my $operand = $_fix_postfix_chain_deep->($f, $t, $node->inputs()->[1]);
             if (refaddr($operand) != refaddr($node->inputs()->[1])) {
                 return $f->make('Constructor',
                     'class'   => 'UnaryExpr',
@@ -541,7 +538,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my @args = $node->inputs()->[1]->@*;
             my $changed = false;
             for my $i (0 .. $#args) {
-                my $fixed_arg = $_fix_postfix_chain_deep->($f, $args[$i]);
+                my $fixed_arg = $_fix_postfix_chain_deep->($f, $t, $args[$i]);
                 if (refaddr($fixed_arg) != refaddr($args[$i])) {
                     $args[$i] = $fixed_arg;
                     $changed = true;
@@ -887,7 +884,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Only IR nodes (with inputs()) need this — metadata structs skip it.
         @stmts = map {
             ($_ isa Chalk::IR::Node)
-                ? _fix_postfix_chain($factory, $_)
+                ? _fix_postfix_chain($factory, $typed, $_)
                 : $_
         } @stmts;
 
@@ -938,7 +935,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         my $fixed = _fixup_stmts($factory, \@stmts);
         # Fix misparented postfix chains from Earley stale-value merge
-        return [ map { _fix_postfix_chain($factory, $_) } $fixed->@* ];
+        return [ map { _fix_postfix_chain($factory, $typed, $_) } $fixed->@* ];
     }
 
     # §2 StatementItem — collect all IR values for fixup in StatementList/Block
@@ -1292,7 +1289,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Fix stale-value merge artifacts in method body (return/die inside
         # expression wrappers, prefix builtin subscript chains, etc.)
         # Use _deep variant to reach nested expressions (e.g., if-conditions).
-        @body = map { $_fix_postfix_chain_deep->($factory, $_) } @body;
+        @body = map { $_fix_postfix_chain_deep->($factory, $typed, $_) } @body;
         my $fixed_body = _fixup_stmts($factory, \@body);
 
         my $method_name_val = defined $method_name ? $method_name->value() : '<unknown>';
@@ -1392,7 +1389,7 @@ class Chalk::Bootstrap::Perl::Actions {
         return unless defined $sub_name;
 
         # Fix stale-value merge artifacts in sub body
-        @body = map { $_fix_postfix_chain_deep->($factory, $_) } @body;
+        @body = map { $_fix_postfix_chain_deep->($factory, $typed, $_) } @body;
         my $fixed_body = _fixup_stmts($factory, \@body);
 
         my $sub_name_val = $sub_name->value();
@@ -1909,7 +1906,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         my $fixed = _fixup_stmts($factory, \@stmts);
         # Fix misparented postfix chains from Earley stale-value merge
-        return [ map { _fix_postfix_chain($factory, $_) } $fixed->@* ];
+        return [ map { _fix_postfix_chain($factory, $typed, $_) } $fixed->@* ];
     }
 
     # §18 Variable — resolve from scope if available, else Constant
@@ -2586,7 +2583,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # operands, UnaryExpr operands). Since If nodes are not Constructors,
         # _fix_postfix_chain won't reach the condition from _fixup_stmts.
         if (defined $condition) {
-            $condition = $_fix_postfix_chain_deep->($factory, $condition);
+            $condition = $_fix_postfix_chain_deep->($factory, $typed, $condition);
         }
 
         return undef unless defined $keyword;
@@ -2992,7 +2989,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Fix postfix deref chains in the list expression (e.g.,
         # $tree->ops()->@* parsed as $tree->@*->ops() due to Earley merge)
         if (defined $list && $list isa Chalk::IR::Node) {
-            $list = _fix_postfix_chain($factory, $list);
+            $list = _fix_postfix_chain($factory, $typed, $list);
         }
 
         $body = _fixup_stmts($factory, $body // []);
