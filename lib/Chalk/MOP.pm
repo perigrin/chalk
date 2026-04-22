@@ -8,11 +8,17 @@ use Chalk::MOP::Class;
 
 class Chalk::MOP {
     field %classes;
+    field $current_class :reader(current_class);
 
     ADJUST {
         # Seed implicit main class — all code belongs to a class
         my $main = Chalk::MOP::Class->new(name => 'main', mop => $self);
         $classes{main} = $main;
+        $current_class = $main;
+    }
+
+    method set_current_class($class) {
+        $current_class = $class;
     }
 
     method declare_class($name, %opts) {

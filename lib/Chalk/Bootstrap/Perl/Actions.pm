@@ -1186,6 +1186,16 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         my $name_str = defined $module_name ? $module_name->value() : '';
+
+        # Populate MOP with the use/no declaration on the current class when a MOP is present.
+        my $mop = $ctx->mop();
+        if (defined $mop) {
+            my $target_class = $mop->current_class() // $mop->for_class('main');
+            $target_class->declare_import($name_str,
+                args => ($import_args // []),
+            );
+        }
+
         return Chalk::IR::UseInfo->new(
             name    => $name_str,
             args    => $import_args // [],
@@ -1274,6 +1284,33 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @methods, $item;
             } elsif ($item isa Chalk::IR::SubInfo) {
                 push @subs, $item;
+            }
+        }
+
+        # Populate MOP with the class and its members when a MOP is present.
+        my $mop = $ctx->mop();
+        if (defined $mop) {
+            my $superclass_obj = defined $parent_str
+                ? $mop->for_class($parent_str)
+                : undef;
+            my $mop_class = $mop->declare_class($name_str,
+                (defined $superclass_obj ? (superclass => $superclass_obj) : ()),
+            );
+
+            for my $item (@body) {
+                if ($item isa Chalk::IR::FieldInfo) {
+                    my $sigil = substr($item->name(), 0, 1);
+                    $mop_class->declare_field($item->name(), sigil => $sigil);
+                } elsif ($item isa Chalk::IR::MethodInfo) {
+                    $mop_class->declare_method($item->name(),
+                        params      => $item->params(),
+                        return_type => $item->return_type(),
+                    );
+                } elsif ($item isa Chalk::IR::SubInfo) {
+                    $mop_class->declare_sub($item->name(),
+                        params => $item->params(),
+                    );
+                }
             }
         }
 
