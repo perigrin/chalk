@@ -97,6 +97,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             children => [$left, $right],
             position => $right->position(),
             rule     => undef,
+            mop      => $_mop,
         ));
     }
 
