@@ -552,20 +552,24 @@ class Chalk::Bootstrap::Perl::Actions {
             my $right = $_fix_postfix_chain_deep->($f, $t, $orig_right);
             if ((defined $left && defined $orig_left && refaddr($left) != refaddr($orig_left))
                 || (defined $right && defined $orig_right && refaddr($right) != refaddr($orig_right))) {
-                return $f->make('Constructor',
-                    'class' => 'BinaryExpr',
-                    op    => $node->inputs()->[0],
-                    left  => $left,
-                    right => $right,
+                my $op_str = $node->inputs()->[0]->value();
+                my $binop_type = $BINOP_MAP{$op_str} // die "Unknown binary op: $op_str";
+                return $t->make($binop_type,
+                    inputs       => [$node->inputs()->[0], $left, $right],
+                    left         => $left,
+                    right        => $right,
+                    compat_class => 'BinaryExpr',
                 );
             }
         } elsif ($class eq 'UnaryExpr') {
             my $operand = $_fix_postfix_chain_deep->($f, $t, $node->inputs()->[1]);
             if (refaddr($operand) != refaddr($node->inputs()->[1])) {
-                return $f->make('Constructor',
-                    'class'   => 'UnaryExpr',
-                    op      => $node->inputs()->[0],
-                    operand => $operand,
+                my $uop_str = $node->inputs()->[0]->value();
+                my $unop_type = $UNOP_MAP{$uop_str} // die "Unknown unary op: $uop_str";
+                return $t->make($unop_type,
+                    inputs       => [$node->inputs()->[0], $operand],
+                    operand      => $operand,
+                    compat_class => 'UnaryExpr',
                 );
             }
         } elsif ($class eq 'BuiltinCall') {
@@ -579,10 +583,11 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
             }
             if ($changed) {
-                return $f->make('Constructor',
-                    'class' => 'BuiltinCall',
-                    name  => $node->inputs()->[0],
-                    args  => \@args,
+                return $t->make('Call',
+                    dispatch_kind => 'builtin',
+                    name          => $node->inputs()->[0]->value(),
+                    inputs        => [$node->inputs()->[0], \@args],
+                    compat_class  => 'BuiltinCall',
                 );
             }
         }
@@ -2293,31 +2298,29 @@ class Chalk::Bootstrap::Perl::Actions {
                     if ($bname eq 'exists' || $bname eq 'delete') {
                         my @args = $result->inputs()->[1]->@*;
                         my $inner_target = $args[-1];
-                        $args[-1] = $factory->make('Constructor',
-                            'class'  => 'SubscriptExpr',
-                            target => $inner_target,
-                            index  => $op->inputs()->[1],
-                            style  => $op->inputs()->[2],
+                        $args[-1] = $typed->make('Subscript',
+                            inputs       => [$inner_target, $op->inputs()->[1], $op->inputs()->[2]],
+                            compat_class => 'SubscriptExpr',
                         );
-                        $result = $factory->make('Constructor',
-                            'class' => 'BuiltinCall',
-                            name    => $result->inputs()->[0],
-                            args    => \@args,
+                        $result = $typed->make('Call',
+                            dispatch_kind => 'builtin',
+                            name          => $result->inputs()->[0]->value(),
+                            inputs        => [$result->inputs()->[0], \@args],
+                            compat_class  => 'BuiltinCall',
                         );
                         next;
                     }
                 }
-                $result = $factory->make('Constructor',
-                    'class'  => 'SubscriptExpr',
-                    target => $result,
-                    index  => $op->inputs()->[1],
-                    style  => $op->inputs()->[2],
+                $result = $typed->make('Subscript',
+                    inputs       => [$result, $op->inputs()->[1], $op->inputs()->[2]],
+                    compat_class => 'SubscriptExpr',
                 );
             } elsif ($op isa Chalk::IR::Node::PostfixDeref) {
-                $result = $factory->make('Constructor',
-                    'class'  => 'PostfixDerefExpr',
-                    target => $result,
-                    sigil  => $op->inputs()->[1],
+                my $s = $op->inputs()->[1];
+                $result = $typed->make('PostfixDeref',
+                    sigil        => (ref($s) ? $s->value() : $s),
+                    inputs       => (ref($s) ? [$result, $s] : [$result]),
+                    compat_class => 'PostfixDerefExpr',
                 );
             }
         }
@@ -2399,11 +2402,9 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        return $factory->make('Constructor',
-            'class'  => 'SubscriptExpr',
-            target => $target,
-            index  => $index,
-            style  => _make_const($factory, $style),
+        return $typed->make('Subscript',
+            inputs       => [$target, $index, _make_const($factory, $style)],
+            compat_class => 'SubscriptExpr',
         );
     }
 
@@ -2463,11 +2464,12 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef unless defined $target;
         my $scanned = $ctx->scanned_text() // '';
         my $op_str = ($scanned =~ /--/) ? '-=' : '+=';
-        return $factory->make('Constructor',
-            'class'  => 'CompoundAssign',
-            op     => $factory->make('Constant', value => $op_str, const_type => 'string'),
-            target => $target,
-            value  => $factory->make('Constant', value => '1', const_type => 'number'),
+        my $op_node  = $factory->make('Constant', value => $op_str,  const_type => 'string');
+        my $one_node = $factory->make('Constant', value => '1',      const_type => 'number');
+        return $typed->make('CompoundAssign',
+            op           => $op_node,
+            inputs       => [$op_node, $target, $one_node],
+            compat_class => 'CompoundAssign',
         );
     }
 
@@ -2485,11 +2487,9 @@ class Chalk::Bootstrap::Perl::Actions {
         # Should have exactly 3 IR nodes: condition, true_expr, false_expr
         return undef unless @ir_nodes >= 3;
 
-        return $factory->make('Constructor',
-            'class'      => 'TernaryExpr',
-            condition  => $ir_nodes[0],
-            true_expr  => $ir_nodes[1],
-            false_expr => $ir_nodes[2],
+        return $typed->make('TernaryExpr',
+            inputs       => [$ir_nodes[0], $ir_nodes[1], $ir_nodes[2]],
+            compat_class => 'TernaryExpr',
         );
     }
 
@@ -2550,15 +2550,14 @@ class Chalk::Bootstrap::Perl::Actions {
                 # The emitter will render it as (k, v, ...) for hash variable init.
                 my $init_value = $value;
                 if (ref($value) eq 'ARRAY') {
-                    $init_value = $factory->make('Constructor',
-                        'class' => 'HashRefExpr',
-                        pairs => $value,
+                    $init_value = $typed->make('HashRef',
+                        inputs       => [$value],
+                        compat_class => 'HashRefExpr',
                     );
                 }
-                my $result = $factory->make('Constructor',
-                    'class'       => 'VarDecl',
-                    variable    => $target->inputs()->[0],
-                    initializer => $init_value,
+                my $result = $typed->make('VarDecl',
+                    inputs       => [$target->inputs()->[0], $init_value],
+                    compat_class => 'VarDecl',
                 );
                 my $var_name_node = $target->inputs()->[0];
                 if ($var_name_node isa Chalk::IR::Node::Constant
@@ -2570,11 +2569,13 @@ class Chalk::Bootstrap::Perl::Actions {
             }
             # Plain variable assignment ($var = expr) — emit as BinaryExpr (Assign).
             # VarDecl is only for my/our/state declarations (handled above).
-            my $assign_result = $factory->make('Constructor',
-                'class' => 'BinaryExpr',
-                op    => $op,
-                left  => $target,
-                right => $value,
+            my $assign_op_str = $op->value();
+            my $assign_binop_type = $BINOP_MAP{$assign_op_str} // die "Unknown binary op: $assign_op_str";
+            my $assign_result = $typed->make($assign_binop_type,
+                inputs       => [$op, $target, $value],
+                left         => $target,
+                right        => $value,
+                compat_class => 'BinaryExpr',
             );
             # SSA: track reassignment in scope (new value per assignment)
             if ($target isa Chalk::IR::Node::Constant
@@ -2586,11 +2587,10 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         # Compound assignment (.=, //=, +=, etc.)
-        my $compound_result = $factory->make('Constructor',
-            'class'  => 'CompoundAssign',
-            op     => $op,
-            target => $target,
-            value  => $value,
+        my $compound_result = $typed->make('CompoundAssign',
+            op           => $op,
+            inputs       => [$op, $target, $value],
+            compat_class => 'CompoundAssign',
         );
         if ($target isa Chalk::IR::Node::Constant
                 && defined $target->value()
@@ -2646,10 +2646,12 @@ class Chalk::Bootstrap::Perl::Actions {
                         const_type => 'string', value => '__loop_bound__');
                     # For 'until', negate the condition (until X = while !X)
                     if ($keyword eq 'until') {
-                        $loop_cond = $factory->make('Constructor',
-                            'class'   => 'UnaryExpr',
-                            op      => _make_const($factory, '!'),
-                            operand => $loop_cond,
+                        my $not_op = _make_const($factory, '!');
+                        my $not_type = $UNOP_MAP{'!'} // die "Unknown unary op: !";
+                        $loop_cond = $typed->make($not_type,
+                            inputs       => [$not_op, $loop_cond],
+                            operand      => $loop_cond,
+                            compat_class => 'UnaryExpr',
                         );
                     }
                     my $loop = $factory->make('Loop',
@@ -2686,10 +2688,12 @@ class Chalk::Bootstrap::Perl::Actions {
                     # For 'unless', negate the condition (unless X = if !X)
                     my $cond = $condition;
                     if ($keyword eq 'unless') {
-                        $cond = $factory->make('Constructor',
-                            'class'   => 'UnaryExpr',
-                            op      => _make_const($factory, '!'),
-                            operand => $condition,
+                        my $not_op2 = _make_const($factory, '!');
+                        my $not_type2 = $UNOP_MAP{'!'} // die "Unknown unary op: !";
+                        $cond = $typed->make($not_type2,
+                            inputs       => [$not_op2, $condition],
+                            operand      => $condition,
+                            compat_class => 'UnaryExpr',
                         );
                     }
                     my $if_node = $factory->make('If',
@@ -2772,10 +2776,12 @@ class Chalk::Bootstrap::Perl::Actions {
 
         # For 'unless', wrap condition in UnaryExpr with '!'
         if (defined $keyword && $keyword eq 'unless') {
-            $condition = $factory->make('Constructor',
-                'class'   => 'UnaryExpr',
-                op      => _make_const($factory, '!'),
-                operand => $condition,
+            my $not_op3 = _make_const($factory, '!');
+            my $not_type3 = $UNOP_MAP{'!'} // die "Unknown unary op: !";
+            $condition = $typed->make($not_type3,
+                inputs       => [$not_op3, $condition],
+                operand      => $condition,
+                compat_class => 'UnaryExpr',
             );
         }
 
