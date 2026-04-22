@@ -958,6 +958,23 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
+        # Register top-level subs on the MOP's main class.
+        # These are SubInfo objects that appear at program scope (not inside a ClassBlock).
+        # ClassBlock separately registers in-class subs on the declared class.
+        # current_mop() is used instead of $ctx->mop() because intermediate
+        # multiply contexts do not propagate the mop field.
+        my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
+        if (defined $mop) {
+            my $main = $mop->for_class('main');
+            if (defined $main) {
+                for my $sub (@top_level_subs) {
+                    $main->declare_sub($sub->name(),
+                        params => $sub->params(),
+                    );
+                }
+            }
+        }
+
         return Chalk::IR::Program->new(
             use_decls      => \@use_decls,
             classes        => \@classes,
@@ -1188,7 +1205,9 @@ class Chalk::Bootstrap::Perl::Actions {
         my $name_str = defined $module_name ? $module_name->value() : '';
 
         # Populate MOP with the use/no declaration on the current class when a MOP is present.
-        my $mop = $ctx->mop();
+        # current_mop() is used instead of $ctx->mop() because intermediate
+        # multiply contexts do not propagate the mop field.
+        my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
         if (defined $mop) {
             my $target_class = $mop->current_class() // $mop->for_class('main');
             $target_class->declare_import($name_str,
@@ -1288,7 +1307,9 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         # Populate MOP with the class and its members when a MOP is present.
-        my $mop = $ctx->mop();
+        # current_mop() is used instead of $ctx->mop() because intermediate
+        # multiply contexts do not propagate the mop field.
+        my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
         if (defined $mop) {
             my $superclass_obj = defined $parent_str
                 ? $mop->for_class($parent_str)
@@ -1300,7 +1321,23 @@ class Chalk::Bootstrap::Perl::Actions {
             for my $item (@body) {
                 if ($item isa Chalk::IR::FieldInfo) {
                     my $sigil = substr($item->name(), 0, 1);
-                    $mop_class->declare_field($item->name(), sigil => $sigil);
+                    # Extract :param name and build attribute string list from FieldInfo.
+                    # FieldInfo attributes are hashrefs with {name, value}.
+                    my $param_name = undef;
+                    my @attr_list;
+                    for my $attr ($item->attributes()->@*) {
+                        if (ref($attr) eq 'HASH' && defined $attr->{name}) {
+                            push @attr_list, ":$attr->{name}";
+                            if ($attr->{name} eq 'param') {
+                                $param_name = $attr->{value} // substr($item->name(), 1);
+                            }
+                        }
+                    }
+                    $mop_class->declare_field($item->name(),
+                        sigil      => $sigil,
+                        param_name => $param_name,
+                        attributes => \@attr_list,
+                    );
                 } elsif ($item isa Chalk::IR::MethodInfo) {
                     $mop_class->declare_method($item->name(),
                         params      => $item->params(),
