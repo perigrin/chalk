@@ -16,8 +16,8 @@ scope optimization passes.
 The MOP does not own or replace the Sea of Nodes IR. Expression-level
 computation and control flow live in per-method `Chalk::IR::Graph`
 instances. The MOP owns those graphs as attributes of their
-containing methods/subs/phasers, and provides the hash-consing scope
-for constructing graph nodes within them.
+containing methods/subs/phasers; each graph provides its own
+hash-consing scope for the nodes it contains.
 
 ## Design principles
 
@@ -84,26 +84,30 @@ the object graph, not by runtime checks in a centralized factory.
 
 Any metaobject that has a body of executable code (methods,
 subroutines, ADJUST blocks, field defaults) owns a `Chalk::IR::Graph`.
-The hash-consing factory for constructing graph nodes lives on the
-**class**, not on each individual graph-owner. Methods, ADJUST blocks,
-and field defaults within a class all delegate node construction to
-`$class->make()` / `$class->make_cfg()`.
+The hash-consing cache for constructing graph nodes lives on the
+**graph**, not on the class. Each graph-owner (Method, Sub,
+Phaser::Adjust) constructs a fresh `Chalk::IR::Graph` at
+instantiation and merges nodes into it via `$graph->merge($node)`.
+Graph-owners expose `merge()` / `next_cfg_id()` delegation methods
+routing to `$self->graph`.
 
-In Perl, the compilation unit is the class: `class Foo { ... }`
-creates a discrete bounded scope with its own namespace, fields,
-methods, and phasers. Hash-consing scope follows that boundary. Nodes
-within a class are deduplicated (methods referencing the same
-constants or field-access patterns share nodes naturally). Nodes
-across classes are never shared. Consumer lists stay bounded to the
-class scope.
+In Perl, the class defines a bounded scope for structural metadata
+(fields, methods, phasers), and each graph-owner within the class
+defines a bounded scope for graph-node identity. Nodes within a
+single graph are deduplicated (a method referencing the same
+constant twice shares one node). Nodes across graphs — including
+across two methods in the same class — are never shared. Consumer
+lists stay bounded to a single graph, structurally eliminating the
+consumer-contamination problem that previously required the
+`body_stmts` BFS workaround.
 
 Top-level subs and statements (outside any explicit `class`
 declaration) belong to the implicit `main` class, which the MOP
 seeds on construction. There is no code outside a class; `main` is
 always present.
 
-`Chalk::IR::NodeFactory` as a standalone class is replaced by this
-per-class ownership.
+`Chalk::IR::NodeFactory` as a standalone singleton is replaced by
+this per-graph ownership.
 
 ### Resolved references, not symbolic names
 
@@ -177,10 +181,8 @@ present from construction.
 
 A class declaration. Owns fields, methods, subs, imports,
 and ADJUST blocks declared directly on this class (not inherited).
-Also owns the hash-cons factory shared by all graph-owners within
-the class. The implicit `main` class is a `Chalk::MOP::Class` like
-any other — it just has no fields, no superclass, and no ADJUST
-blocks.
+The implicit `main` class is a `Chalk::MOP::Class` like any other —
+it just has no fields, no superclass, and no ADJUST blocks.
 
 ```
 class Chalk::MOP::Class {
@@ -207,12 +209,14 @@ class Chalk::MOP::Class {
     method find_method($name)  → Chalk::MOP::Method | undef
     method ancestors()         → list of Chalk::MOP::Class
     method resolve_adjust_blocks() → list of Chalk::MOP::Phaser::Adjust
-
-    # Node factory (hash-cons scope for the class compilation unit)
-    method make($op, %args)    → Chalk::IR::Node      # hash-consed data nodes
-    method make_cfg($op, %args)→ Chalk::IR::Node      # unique-id CFG nodes
 }
 ```
+
+Node construction is not on `Chalk::MOP::Class`. Graph-owners
+(Method, Sub, Phaser::Adjust) each own a `Chalk::IR::Graph` and
+expose `merge($node)` / `next_cfg_id()` delegating to their graph.
+Hash-consing scope is per-graph, not per-class — two methods in the
+same class each have their own cache.
 
 `fields()` / `methods()` / `adjust_blocks()` return direct-declared
 metaobjects only, following `B::MOP`'s convention.
@@ -249,13 +253,16 @@ attribute, a first-class concept in Perl's `feature class`.
 `has_default` because it cannot see the expression body.
 
 When a field has a default expression, the field is a graph-owner
-(it has `make()` / `make_cfg()` for constructing its default graph).
+(it owns a `Chalk::IR::Graph` with per-field hash-cons scope for
+constructing its default graph).
 
 ### `Chalk::MOP::Method`
 
 A method declaration within a class. Graph-owner: owns the method's
-`Chalk::IR::Graph`. Node construction delegates to the owning class's
-factory (`$self->class->make(...)`) so that hash-consing is per-class.
+`Chalk::IR::Graph` with its own hash-cons cache. Node construction
+via `$self->merge($node)` delegates to `$self->graph->merge($node)`.
+Hash-consing scope is per-method — nodes are not shared across
+methods, even within the same class.
 
 ```
 class Chalk::MOP::Method {
@@ -271,8 +278,8 @@ class Chalk::MOP::Method {
 
 A subroutine declaration within a class. Distinguished from a method
 by having no implicit `$self` and not participating in method
-dispatch. Graph-owner: node construction delegates to the owning
-class's factory.
+dispatch. Graph-owner: owns its own `Chalk::IR::Graph` with per-sub
+hash-cons scope.
 
 ```
 class Chalk::MOP::Sub {
@@ -443,13 +450,11 @@ Graph granularity varies; the wrapper layer is universal.
    `B::MOP`. Alternatives: `Chalk::IR::MOP`, `Chalk::Meta`,
    `Chalk::CompilationUnit`.
 
-2. **Graph traversal with shared nodes.** Per-class hash-consing
-   means a shared node (e.g., `Constant 0`) can have consumers from
-   multiple methods within the same class. Per-method
-   `Graph.nodes()` should follow `inputs()` only (scoped to the
-   method's subgraph). A class-level `all_nodes()` traversal can
-   safely follow both directions since everything in scope belongs
-   to the same compilation unit.
+2. **Graph traversal.** Per-graph hash-consing means consumer lists
+   are bounded to a single graph by construction. `Graph.nodes()`
+   can safely follow both `inputs()` and `consumers()` — nothing
+   outside the graph's own scope is reachable. A class-level
+   `all_nodes()` traversal walks every graph-owner's graph in turn.
 
 3. **Field default ownership.** Fields with default expressions need
    a graph. This spec makes the field itself a graph-owner when

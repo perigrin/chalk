@@ -59,15 +59,65 @@ out of the IR graph, following Cliff Click's Sea of Nodes design.
 This plan preserves that separation. The MOP wraps and owns the
 metadata structs; it does not make them graph nodes.
 
-### Graph construction belongs to the graph-owner
+### Graph construction is bottom-up through semantic actions
+
+> **AMENDED** — original spec placed SSA construction in
+> `Chalk::IR::Graph::build(...)`, a post-hoc aggregation pass invoked
+> by `MethodDefinition()`. Per the bottom-up design insight (see
+> memory: "Bottom-Up Context/Graph Design"), this is the
+> `_build_method_graph` anti-pattern relocated — build the tree, then
+> walk it again. The deforested solution: graph construction happens
+> incrementally inside each semantic action. Computation actions
+> (`VariableDeclaration`, `Assign`, `IfStatement`, etc.) merge nodes
+> into `$ctx->graph` via `$graph->merge(...)` as they fire. Structural
+> actions (`MethodDefinition`, `ClassBlock`, `Program`) read the
+> completed graph from their children's Context. No `Graph::build`
+> method, no `body_stmts` parameter, no `cfg_state` extraction pass.
+>
+> **Context carries graph, scope, and mop as first-class fields.**
+> The `annotations->{cfg}` side-channel and `$_pending_cfg_update`
+> mutable state on SemanticAction are eliminated. `$graph` and
+> `$scope` thread through multiply (left-to-right) and extend
+> (bottom-to-top) the same way `$mop` does. Block-boundary actions
+> (MethodDefinition, SubroutineDefinition) provide scope containment
+> by not propagating children's scope — Context immutability makes
+> this automatic, not something you remember to reset.
+>
+> **Two kinds of variable tracking:**
+> - Lexical binding (MOP metadata): Method metaobject records what
+>   variables exist. Populated when MethodDefinition collects VarDecl
+>   nodes from its children.
+> - SSA definitions (Scope on Context): Braun-style per-block
+>   definition map tracking which IR node is the current reaching
+>   definition for each variable. Graph construction state, not
+>   metadata.
+>
+> **References:**
+> - Vaillant, "Earley Parsing: Semantic Actions" — deforestation
+> - Click, "A Simple Graph-Based IR" (1995) — structural metadata
+>   outside the graph
+> - Braun et al., "Simple and Efficient Construction of SSA" (2013)
+>   — SSA construction during IR building
+> - Kiczales et al., "The Art of the Metaobject Protocol" (1991)
 
 The SSA construction algorithm currently lives as `_build_method_graph`
 in Actions.pm. This is a historical accident — the method does
 method-scoped work (building a method's graph) but was placed in the
-semantic-action class because `MethodDefinition()` calls it. This
-plan moves graph construction to its structural home:
-`Chalk::IR::Graph::build(...)`, invoked via each graph-owner's
-`$self->graph->build(...)` delegation.
+semantic-action class because `MethodDefinition()` calls it.
+
+Earley semantic actions are purely synthesized — values flow bottom-up
+from children to parents. Chalk's Context comonad IS the mechanism for
+this flow. Each computation action receives its children's results
+via `$ctx`, constructs its IR nodes, merges them into `$ctx->graph`,
+and extends the Context with the updated graph and scope. Structural
+actions (`MethodDefinition`, `ClassBlock`) read the completed graph
+from their children's Context — the graph is already built by the
+time the structural rule fires. Each rule owns the graph-
+construction semantics of its own construct: a loop rule inserts
+Phis and wires backedges, a method rule synthesizes an implicit
+Return if needed. The anti-pattern avoided here is a method-level
+aggregation pass that reaches into unrelated rules' state (the old
+`_build_method_graph` walking the whole Context tree).
 
 ### AMOP tradition, not wrapper layer
 
@@ -138,7 +188,7 @@ As of 2026-04-21:
 **Missing (this plan delivers):**
 - `Chalk::MOP` and its metaobject family
 - Per-class hash-cons scope
-- Full SSA construction (`build_graph`)
+- Full SSA construction (bottom-up in semantic actions)
 - Resolved MOP-handle references on Call nodes
 - `generate($mop) → HashRef[Str]` target interface
 
@@ -420,7 +470,7 @@ directly.
   not via delegation to `ClassInfo` et al. Phase 0 builds them in
   isolation (no integration with Actions.pm yet).
 - No graph construction surface yet (`make`/`make_cfg` come in Phase 2).
-- No `build_graph` yet (comes in Phase 3).
+- No SSA construction yet (comes in Phase 3 via bottom-up actions).
 - No integration with Actions.pm yet (comes in Phase 1).
 
 **Exit criteria:**
@@ -525,7 +575,8 @@ sites).
 >    `$graph_owner->merge(...)` requires solving the Earley
 >    bottom-up ordering problem (body nodes are constructed before
 >    the graph-owner metaobject exists). This migration is deferred
->    to Phase 3, where `build_graph` rewrites the construction flow.
+>    to Phase 3, where bottom-up SSA construction in semantic actions
+>    rewrites the construction flow.
 
 **Goal:** give each graph-owner (`Method`, `Sub`, `Phaser::Adjust`)
 its own `Chalk::IR::Graph` with per-graph hash-cons scope. Nodes
@@ -554,7 +605,8 @@ bounded consumer lists.
   with the Phaser hierarchy.
 - No Actions.pm migration in this phase. Body-node construction
   stays on `$factory` / `$typed` (Phase 1B's typed factory). Phase 3
-  rewrites body construction to use the graph-owner's `merge()`.
+  rewrites body construction: each computation action merges nodes
+  into `$ctx->graph` directly via `$graph->merge(...)`.
 - Verify per-graph hash-cons isolation: a test constructs two
   methods each merging `Constant 0`, asserts the resulting nodes
   have distinct identities.
@@ -598,15 +650,70 @@ bidirectional consumer traversal within a graph (Phase 7).
 
 ---
 
-### Phase 3: Graph::build (full SSA)
+### Phase 3: Bottom-up SSA construction (full SSA)
 
-> **AMENDED** — original spec referenced `Chalk::MOP::GraphOwner::build_graph`.
-> Phase 2 eliminated GraphOwner (see Phase 2 amendment). `build_graph`
-> lives on `Chalk::IR::Graph` instead — graph-owners delegate via
-> `$self->graph->build(...)`. This also absorbs the Actions.pm
-> migration deferred from Phase 2: body-node construction moves from
-> `$factory->make(...)` to `$graph->merge(Node::Foo->new(...))` as
-> part of the `build` rewrite.
+> **AMENDED (2nd)** — original spec placed SSA construction in
+> `Chalk::IR::Graph::build(...)`, a post-hoc aggregation pass.
+> Previous amendment moved it from `GraphOwner::build_graph` to
+> `Graph::build`; this amendment eliminates the `build` pass entirely.
+>
+> Earley semantic actions are purely synthesized — values flow
+> bottom-up from children to parents (Vaillant, "Earley Parsing:
+> Semantic Actions"). Chalk's Context comonad IS the mechanism for
+> this flow. A `Graph::build` pass that receives accumulated
+> `body_stmts` and `cfg_state` and walks them top-down is exactly the
+> `_build_method_graph` anti-pattern relocated — build the tree, then
+> walk it again to extract the graph.
+>
+> The deforested solution: each computation action constructs its IR
+> nodes, merges them into `$ctx->graph` via `$graph->merge(...)`, and
+> extends the Context with the updated graph. Structural actions
+> (`MethodDefinition`, `ClassBlock`, `Program`) read the completed
+> graph from their children's Context — it's already built by the
+> time the structural rule fires.
+>
+> Each rule owns the graph-construction semantics of its own
+> construct. A loop rule knows its children form a loop — it is the
+> right place to insert Phis and wire backedges. A loop rule
+> processing its children with loop-specific semantics is not a
+> second pass; it is the loop rule doing its job. The anti-pattern
+> avoided here is a *method-level* aggregation pass that walks
+> unrelated rules' Contexts to extract state that belongs to them
+> (e.g., the old `_build_method_graph` reaching into every child's
+> `cfg_state` annotation via refaddr-keyed walk).
+>
+> This also absorbs the Actions.pm migration deferred from Phase 2:
+> body-node construction moves from `$factory->make(...)` to
+> `$graph->merge(Node::Foo->new(...))` inside each action, not inside
+> a separate `build` method.
+>
+> **Context field additions:** `$graph` and `$scope` are promoted to
+> first-class Context fields alongside `$mop`. This eliminates the
+> `annotations->{cfg}` side-channel, the `$_pending_cfg_update`
+> mutable state on SemanticAction, and the `update_cfg` /
+> `cfg_state` / `inherited_cfg_state` methods. Context immutability
+> provides scope containment for free: block-boundary actions
+> (MethodDefinition, SubroutineDefinition) return MOP metaobjects as
+> focus without propagating children's scope, so the scope naturally
+> stays contained within the block.
+>
+> **Two kinds of variable tracking:**
+> - **Lexical binding** (structural, MOP): Method metaobject tracks
+>   what variables exist in its scope. Populated when MethodDefinition
+>   collects VarDecl nodes from its children. This is metadata.
+> - **SSA definitions** (control-flow, Scope): Braun-style per-block
+>   definition map tracking which IR node is the current reaching
+>   definition for each variable. Threaded left-to-right via multiply,
+>   consumed at control-flow merge points for Phi insertion. This is
+>   graph construction state.
+>
+> **References:**
+> - Vaillant, "Earley Parsing: Semantic Actions" — deforestation
+> - Click, "A Simple Graph-Based IR" (1995) — structural metadata
+>   outside the graph
+> - Braun et al., "Simple and Efficient Construction of Static Single
+>   Assignment Form" (2013) — SSA construction during IR building
+> - Kiczales et al., "The Art of the Metaobject Protocol" (1991)
 
 Phase 3 is the largest single piece of compiler work in the plan —
 SSA construction algorithm implementation. It is split into three
@@ -622,60 +729,279 @@ after 3a completes, the codebase is in a defined, testable state.
 - The `Scope` class (`Chalk::Bootstrap::Scope`) already has the
   `fork_for_loop`, `resolve_sentinel`, `merge_with_phis`,
   `merge_for_loop` machinery. Each sub-phase invokes the relevant
-  pieces.
-- The Context tree holds `cfg_state` annotations per-node; the
-  builder extracts the ones belonging to the current method via
-  refaddr-keyed walk.
-- `Chalk::IR::Graph::build(...)` is introduced in 3a with a minimal
-  implementation; 3b and 3c extend it with Phi insertion paths.
-  Graph-owners (Method, Sub, Phaser::Adjust) delegate via
-  `$self->graph->build(...)`.
-- Call sites within `build` construct typed node classes directly
-  (`Chalk::IR::Node::Start->new(...)`) and merge them into the graph
-  via `$self->merge(...)` — no factory string-dispatch.
+  pieces from within the corresponding semantic actions.
+
+**Context threading model:**
+
+Three fields on `Chalk::Bootstrap::Context` carry state through the
+parse. Each threads via the same mechanism — left-to-right through
+`multiply`, bottom-to-top through `extend` — with containment
+provided by Context immutability.
+
+- **`field $graph`** — the computation graph being built. Computation
+  actions (VarDecl, Assign, BinaryExpression, etc.) merge nodes via
+  `$ctx->graph->merge(...)` and extend with the updated graph.
+  Structural actions (MethodDefinition) read the completed graph
+  from their children and attach it to the Method metaobject. The
+  graph does not propagate past the structural boundary because
+  MethodDefinition does not include it in its result Context.
+
+- **`field $scope`** — Braun-style SSA definition map (variable name
+  → current reaching IR node). Threaded left-to-right via multiply
+  so each statement sees the definitions from prior statements.
+  `VariableDeclaration` extends with an updated scope (new binding).
+  Control-flow actions (IfStatement, ForLoop) fork/merge the scope
+  for Phi insertion. Block-boundary actions (MethodDefinition,
+  SubroutineDefinition) do not propagate children's scope — it stays
+  contained by Context immutability.
+
+- **`field $mop`** — already exists. Unchanged.
+
+**Propagation rules for `multiply($left, $right)`:**
+
+- `$graph`: prefer right (later in sequence), fall back to left.
+  Follows the same left-to-right accumulation as existing multiply
+  semantics.
+- `$scope`: prefer right, fall back to left. Same pattern. The
+  right side has the most recent variable definitions.
+- `$mop`: already works this way.
+
+**Propagation rules for `extend` (action completion):**
+
+- The action's return value becomes the new Context's focus.
+- `$graph` and `$scope` propagate from the child Context by default.
+- Structural actions (MethodDefinition, SubroutineDefinition, ADJUST)
+  consume the graph (attach to metaobject) and do not propagate
+  scope. The result Context has an empty/fresh graph and no scope.
+  This is how block boundaries naturally contain scope — not by
+  explicit reset, but by the action choosing what to include.
+
+**Deletions (Phase 3a-infra):**
+
+- `$_pending_cfg_update` on SemanticAction — replaced by Context
+  `$scope` field with proper immutable propagation.
+- `update_cfg()` method — no longer needed.
+- `cfg_state()` method — no longer needed.
+- `inherited_cfg_state()` method — no longer needed.
+- `annotations->{cfg}` convention — replaced by Context fields.
+- The multiply cfg-propagation logic (SemanticAction.pm lines
+  200-234) — replaced by Context field propagation in multiply.
+
+**Block type is the union of exit values:**
+
+A `Block` rule produces `{graph, type}` as its synthesized result.
+The block's type is the union of the types of all its exits:
+
+- Every explicit Return/Unwind node's value type
+- The implicit return (final expression's type) if a fall-through
+  path exists
+
+In Perl, almost everything is an expression that produces a value
+(assignment, declaration, even loops). The fall-through path
+effectively always exists unless every control-flow path ends in
+an explicit Return/Unwind.
+
+Callers consume the block's type according to their context:
+
+- **MethodDefinition / SubroutineDefinition:** reads the body
+  Block's `{graph, type}`. The block's type IS the method's return
+  type. If a fall-through path exists and there's no Return node
+  on it, synthesizes a Return CFG node wrapping the final value
+  (graph-structural concern — the graph needs a Return node so
+  control flow is well-formed). Collects all Return/Unwind nodes
+  from the body's graph as the method's exit points. Nested
+  closures (inner subs/methods) are already graph-owners with
+  their own metaobjects; their Return nodes do not appear in the
+  outer method's graph.
+- **IfStatement branches:** reads each branch Block's
+  `{graph, type}`. The types become Phi operands at the Region
+  (see Phase 3b).
+- **Loop bodies (ForeachLoop, WhileLoop, ForLoop):** the body
+  Block's type is ignored — loops are in Void context. An explicit
+  Return inside the body is a method-level exit (collected by
+  MethodDefinition from the method's graph), unrelated to the
+  loop's semantics.
+- **Bare `do { ... }` expression:** the block's type is the
+  expression's type.
+
+**Return nodes are method-level, not block-level.** Return/Unwind
+nodes in a method's graph belong to the innermost enclosing method
+or sub, regardless of which block they appear inside. Nested
+for/if/while do not scope Returns; only method/sub/ADJUST
+boundaries do. MethodDefinition collects Return nodes from its
+entire graph at action time.
+
+**Rule-owned structural correctness (Earley stale-value merge
+workarounds):**
+
+Today, `MethodDefinition` calls `_fix_postfix_chain_deep` and
+`_fixup_stmts` (Actions.pm:1428-1429) on the body before graph
+construction. These are structural corrections for Earley's
+`add()` merging stale pre-merge values — a parser-level issue that
+produces malformed IR trees (PostfixDerefExpr wrapping MethodCallExpr
+when it should be the other way around, etc.).
+
+Under the "each rule owns its own semantics" principle, the fixes
+move into the rules whose children come out wrong:
+`MethodCallExpr` restructures an invocant that arrives as a
+PostfixDerefExpr; `SubscriptExpr` handles being wrapped incorrectly
+by BuiltinCall; etc. Each rule asserts what shape its children must
+have, and corrects them if necessary — the same way the loop rule
+owns Phi insertion over its body.
+
+This distributes the fixup logic to where the structural
+assertions belong. The shared helpers (`_fix_postfix_chain`,
+`_fix_postfix_chain_deep`, `_fixup_stmts`) are deleted; their
+cases land in the relevant rules' actions.
+
+Phase 3a-migration's scope includes this distribution as part of
+migrating computation actions to build graphs incrementally (the
+fixups and graph construction run in the same place).
 
 ---
 
-#### Phase 3a: Control-chain threading
+#### Phase 3a-infra: Context fields and side-channel removal
 
-**Goal:** every side-effect statement in a graph-owner's body has a
-control input chaining back to `start`. No Phi insertion. Works for
-linear code (no if/else, no loops).
+**Goal:** promote graph and scope to first-class Context fields.
+Delete the `annotations->{cfg}` side-channel. This is pure
+infrastructure — no action logic changes, no graph construction
+changes. The existing actions continue to work via a thin
+compatibility shim that reads/writes the new Context fields where
+they previously used `cfg_state`/`update_cfg`.
 
 **Entry:** Phase 2 complete.
 
 **Scope:**
 
-- Implement `Chalk::IR::Graph::build($body_stmts, $cfg_state,
-  $start_ctrl)` with the control-chain layer:
-  - Construct typed node objects directly
-    (`Chalk::IR::Node::Start->new(...)`) and `merge()` them into
-    the graph — no factory string-dispatch.
-  - Thread a linear control chain through side-effect statements
-    (VarDecl, Assign, Call, etc.).
+- Add `field $graph` and `field $scope` to
+  `Chalk::Bootstrap::Context`. Update `extend` and `multiply` to
+  propagate these fields per the rules above.
+- Delete the `annotations->{cfg}` side-channel:
+  `$_pending_cfg_update`, `update_cfg()`, `cfg_state()`,
+  `inherited_cfg_state()`, and the cfg-propagation block in
+  `multiply()` on SemanticAction.pm.
+- Migrate existing action call sites that use `$sa->update_cfg()`
+  or `$sa->cfg_state()` / `$sa->inherited_cfg_state()` to
+  read/write the Context fields directly. This is a mechanical
+  replacement — the action logic is unchanged, only the state
+  access path changes.
+- **Tests (TDD, before implementation):**
+  - `t/bootstrap/context/graph-scope-fields.t` — Context carries
+    `$graph` and `$scope` fields; multiply propagates them
+    left-to-right; extend propagates from children
+  - `t/bootstrap/context/scope-containment.t` — a structural action
+    (MethodDefinition) that doesn't propagate scope produces a
+    result Context with no scope; subsequent multiply does not see
+    the body's variable bindings
+  - Regression invariant: every existing test green at Phase 2
+    exit remains green at Phase 3a-infra exit.
+
+**Exit criteria:**
+- `$graph` and `$scope` are Context fields with proper propagation.
+- `annotations->{cfg}`, `$_pending_cfg_update`, `update_cfg`,
+  `cfg_state`, and `inherited_cfg_state` are deleted.
+- All existing tests pass with the new field-based access path.
+
+---
+
+#### Phase 3a-migration: Bottom-up graph construction
+
+**Goal:** migrate computation actions to build graphs incrementally
+via Context fields, migrate Block to synthesize `{graph, type}`,
+migrate structural actions to consume it, distribute stale-value-
+merge fixups, and thread linear control chains so every side-effect
+statement chains back to `start`. No Phi insertion. Works for
+linear code (no if/else, no loops).
+
+**Entry:** Phase 3a-infra complete.
+
+**Scope:**
+
+- Migrate computation actions in Actions.pm to build graphs
+  incrementally:
+  - Each side-effect action (`VariableDeclaration`, `Assign`,
+    `Call`, etc.) reads `$ctx->scope` for variable resolution,
+    constructs its typed node, merges it into `$ctx->graph`, and
+    extends the Context with the updated graph and scope.
+  - `VariableDeclaration` extends with an updated scope containing
+    the new variable binding. It also returns a VarDecl IR node as
+    focus. Lexical binding (registering the variable on the Method
+    metaobject) happens when `MethodDefinition` collects its
+    children.
   - Each side-effect node's control input is the previous side-
-    effect node (or `start` for the first).
-  - After `build` completes, `$graph->nodes()` reaches every
-    linear-code statement from `start` via the cache (no
-    `body_stmts` BFS needed).
+    effect node (or `start` for the first). The current control
+    input threads through scope or as a distinguished field — TBD
+    during implementation whether it rides on Scope or gets its
+    own Context field.
+  - Pure-value actions (`Constant`, `BinaryExpression` without side
+    effects) merge their nodes into the graph without updating the
+    control chain.
   - If/else and loop bodies produce graphs but without Phi nodes at
     merge points yet — that's 3b and 3c.
-- Migrate `MethodDefinition()`, `SubroutineDefinition()`, and ADJUST
-  block actions to call `$method->graph->build(...)` instead of
-  Actions.pm's `_build_method_graph`.
+- Migrate the `Block` action to synthesize `{graph, type}`:
+  - The block's type is the union of the types of all its exits:
+    every explicit Return/Unwind value type, plus the implicit
+    return (final expression's type) if a fall-through path exists.
+  - The block's graph is the accumulated computation graph from its
+    statements (already built by computation actions as they fire).
+- Migrate structural actions (`MethodDefinition()`,
+  `SubroutineDefinition()`, ADJUST block) to read `{graph, type}`
+  from their body Block child's Context. The block's type IS the
+  method's return type. Attach the graph to the MOP metaobject
+  and register variable bindings (VarDecl nodes) on the Method
+  metaobject as lexical binding metadata. Return the metaobject
+  as focus without propagating scope or graph.
+- Implicit-return synthesis in `MethodDefinition` and
+  `SubroutineDefinition` (graph-structural concern, matching
+  current behavior at Actions.pm:1596-1608): if a fall-through
+  path exists and the graph has no Return node on it, synthesize
+  a Return CFG node wrapping the final value and merge it into
+  the graph so control flow is well-formed. Collect all
+  Return/Unwind nodes from the entire graph as method exits.
+- Distribute Earley stale-value-merge fixups into the rules whose
+  children come out malformed: MethodCallExpr, PostfixDerefExpr,
+  SubscriptExpr, etc., each assert and restructure their own
+  children. Delete `_fix_postfix_chain`, `_fix_postfix_chain_deep`,
+  and `_fixup_stmts` from Actions.pm.
 - Delete `_build_method_graph` from Actions.pm.
 - **Tests (TDD, before implementation):**
+  - `t/bootstrap/mop/block-type.t` — Block synthesizes
+    `{graph, type}`; type is the union of all exit values (explicit
+    Returns plus implicit fall-through)
   - `t/bootstrap/mop/build-graph-control-chain.t` — side-effect
     statements (VarDecl, Assign, Call) have control inputs chaining
     back to Start in a purely-linear method body
   - `t/bootstrap/mop/build-graph-linear-reachability.t` — for a
     linear method body, `$method->graph->nodes()` reaches every
     statement from `start` via inputs alone (no `body_stmts` needed)
-  - Regression invariant: every existing test green at Phase 2
-    exit remains green at Phase 3a exit.
+  - `t/bootstrap/mop/method-lexical-bindings.t` — MethodDefinition
+    registers VarDecl nodes on the Method metaobject as lexical
+    binding metadata
+  - `t/bootstrap/mop/method-implicit-return.t` — MethodDefinition
+    synthesizes a Return node on the fall-through path when one is
+    missing; preserves explicit Return/Unwind nodes; collects Return
+    nodes from nested loops/branches as method exits; does not
+    collect Returns from inner nested subs/methods
+  - `t/bootstrap/actions/rule-local-fixups.t` — postfix/methodcall/
+    subscript rules restructure their own malformed children from
+    Earley stale-value merge, replacing the old shared fixup
+    helpers. Covers the cases previously handled by
+    `_fix_postfix_chain` and `_fixup_stmts`.
+  - Regression invariant: every existing test green at Phase
+    3a-infra exit remains green at Phase 3a-migration exit.
 
 **Exit criteria:**
+- Block synthesizes `{graph, type}` where type is the union of
+  all exit values.
+- MethodDefinition/SubroutineDefinition read the block's type as
+  the method's return type, synthesize fall-through Return nodes
+  where needed, and collect Return/Unwind nodes from their graph.
+- Stale-value-merge fixups are distributed into the rules whose
+  children come out wrong; `_fix_postfix_chain`,
+  `_fix_postfix_chain_deep`, and `_fixup_stmts` are deleted.
 - `_build_method_graph` is deleted from Actions.pm.
+- Computation actions build the graph incrementally via
+  `$graph->merge(...)` inside each action.
 - Linear-code graphs are fully reachable from `start` through
   inputs alone.
 - Branching and looping code still works (uses older scope logic
@@ -690,21 +1016,31 @@ case of full SSA).
 #### Phase 3b: If/else Phi insertion
 
 **Goal:** if/else merge points produce Phi nodes for variables that
-differ between branches, via eager Click-style merging.
+differ between branches, via eager Click-style merging (Braun et
+al.).
 
-**Entry:** Phase 3a complete.
+**Entry:** Phase 3a-migration complete.
 
 **Scope:**
 
-- Extend `Graph::build` with if/else Phi insertion:
-  - At Region merge (after both branches complete), diff the branch
-    scopes against the pre-if scope.
+- Extend the `IfStatement` (and related branching) semantic actions
+  with Phi insertion using the Scope field on Context:
+  - `IfStatement`'s action receives its children's Contexts. The
+    condition's Context carries the pre-branch scope. Each branch
+    block's Context carries its own scope (accumulated
+    left-to-right within the branch via multiply, contained by
+    the block boundary).
+  - At Region merge (after both branches complete), the
+    `IfStatement` action diffs the branch scopes against the
+    pre-branch scope (from the condition child's Context).
   - For each variable that differs between the two branches, emit a
     Phi node at the Region with the branch-final values as operands.
   - Apply trivial-Phi elimination inline: if both Phi operands are
     identical, replace the Phi with the common value.
   - Handle nested if/else correctly (Phi inside a branch produces
     the branch-final value feeding the outer merge).
+  - Extend with the merged scope and merged graph (containing the
+    new Phi nodes).
 - **Tests (TDD, before implementation):**
   - `t/bootstrap/mop/build-graph-ifelse-phi.t` — if/else merge
     creates Phi for variables that differ between branches
@@ -714,8 +1050,8 @@ differ between branches, via eager Click-style merging.
     if/else produces correct Phi at each merge point
   - `t/bootstrap/mop/build-graph-ifelse-unchanged-vars.t` —
     variables unchanged in both branches get no Phi
-  - Regression invariant: every existing test green at Phase 3a
-    exit remains green at Phase 3b exit.
+  - Regression invariant: every existing test green at Phase
+    3a-migration exit remains green at Phase 3b exit.
 
 **Exit criteria:**
 - If/else constructs in method bodies produce correct Phi nodes at
@@ -730,25 +1066,50 @@ differ between branches, via eager Click-style merging.
 
 #### Phase 3c: Loop Phi insertion
 
-**Goal:** loop headers produce Phi nodes for loop-carried variables
-via lazy sentinel-based resolution. Backedges are wired after the
-loop body completes.
+**Goal:** loop headers produce Phi nodes for loop-carried variables.
+The loop action does a local post-hoc pass over its own body to
+identify changed variables, insert Phis at the header, and rewrite
+body references to reach through the Phis.
 
 **Entry:** Phase 3b complete.
 
+**Design note:** The loop rule knows its children form a loop —
+only the loop rule has that information. Processing the body with
+loop-specific semantics (diffing scopes, inserting Phis, wiring
+backedges) is what the loop rule is for. This is the first time
+that information is available in the parse; the loop action is the
+right and only place to apply it.
+
+Braun's lazy-sentinel variant requires sentinel scope to be visible
+*during* body construction, which the bottom-up model cannot
+provide. The eager-merge variant used here produces the same
+correct SSA graph — diff the pre-loop and body-final scopes,
+insert Phis at the header, rewrite body references. Functionally
+equivalent, cleaner fit for Earley's completion order.
+
 **Scope:**
 
-- Extend `Graph::build` with loop Phi insertion:
-  - At loop entry, fork the scope into sentinels via
-    `Scope::fork_for_loop` (already implemented).
-  - When a variable is read inside the loop body, resolve its
-    sentinel into a Phi on demand via `Scope::resolve_sentinel`
-    (already implemented).
-  - At loop exit, wire backedges: for each loop-carried Phi, set
-    its second operand to the body-final value via
-    `Scope::merge_for_loop`.
+- Extend the loop semantic actions (`ForeachLoop`, `WhileLoop`, etc.)
+  with local-pass Phi insertion:
+  - Read the pre-loop scope from the enclosing context (the
+    left-multiply child) and the body-final scope from the body
+    child's Context.
+  - Diff the two scopes. For each variable that changed, create a
+    Phi node at the loop header (Region) with two operands: the
+    pre-loop value and the body-final value.
+  - Walk the loop body's IR subgraph and rewrite uses of the
+    pre-loop definition to use the Phi instead. This is the loop
+    action's local graph rewrite over its own body. Use
+    `Scope::merge_for_loop` if its existing interface matches, or
+    replace it with a simpler diff-and-rewrite if it doesn't.
+  - Apply trivial-Phi elimination inline (same rule as 3b): if both
+    Phi operands are identical, the variable didn't actually change
+    in the loop — skip the Phi.
   - Handle iterator variables (foreach loops) — the iterator itself
-    is not a loop-carried Phi.
+    is not a loop-carried Phi. It gets a dedicated iterator node
+    that the loop action constructs.
+  - Extend with the post-loop scope and the body's graph with Phis
+    inserted.
 - Revive `t/bootstrap/ir-program-pipeline.t` and
   `t/bootstrap/ir-sub-info-pipeline.t` (currently crashing per the
   2026-04-21 audit); they should pass once full SSA is in place.
@@ -1013,7 +1374,7 @@ the docs drift out of sync the day Phase 7 lands.
     methods)
   - Resolution protocol (find_method, ancestors,
     resolve_adjust_blocks)
-  - Graph-owner composition pattern and `Graph::build` algorithm summary
+  - Graph-owner composition pattern and bottom-up SSA construction summary
   - Per-graph hash-cons scope
   - Prior art references (B::MOP, HotSpot ci-layer, Graal
     HostedUniverse, TurboFan JSHeapBroker)
@@ -1163,9 +1524,10 @@ plan.
 ### Ad-hoc patches replaced with grounded solutions
 
 - **`body_stmts` BFS seeding** (prototype workaround for incomplete
-  SSA) → **Click's SSA construction algorithm** implemented in
-  `Graph::build` (Phase 3). The graph is reachable from `start`
-  through the cache, the way SoN graphs are supposed to be.
+  SSA) → **Click's SSA construction algorithm** implemented
+  bottom-up in semantic actions (Phase 3). The graph is reachable
+  from `start` through the cache, the way SoN graphs are supposed
+  to be.
 - **`Graph::nodes()` consumer-traversal exclusion** (workaround for
   shared hash-cons scope) → **per-graph hash-cons scope** (Phase
   2). Consumers are graph-local by construction; bidirectional
@@ -1180,9 +1542,16 @@ plan.
   a `$class` handle** (already delivered in D2). The API shape is
   the invariant.
 - **`_build_method_graph` as a helper on Actions.pm** (graph
-  construction scattered across the SemanticAction class) → **a
-  `Graph::build` method on the graph that the metaobject owns**
-  (Phase 3). The algorithm lives with the thing it builds.
+  construction as a post-hoc aggregation pass) → **incremental
+  bottom-up graph construction inside each semantic action**
+  (Phase 3). The graph builds itself as actions fire, carried
+  upward through Context — no second pass.
+- **`annotations->{cfg}` + `$_pending_cfg_update` side-channel**
+  (mutable state on SemanticAction threading control/scope outside
+  the comonad contract) → **`$graph` and `$scope` as first-class
+  Context fields** (Phase 3a-infra). Propagation through multiply/extend
+  follows the same immutable pattern as `$mop`. Block-boundary
+  containment is structural, not manual.
 
 ### Invariants structurally enforced
 
@@ -1233,18 +1602,23 @@ The migration is complete when:
 ### Full SSA is the hardest phase
 
 Phase 3 is the only phase that is genuinely new compiler work rather
-than plumbing redirection. The algorithm design exists (Click's
-Phase 4a, sketched in the phase4 plan doc) and the Scope class
-already has the sentinel machinery, but writing a correct SSA
-construction pass is non-trivial. If Phase 3 stalls, Phases 4–7
-stall with it.
+than plumbing redirection. It has two risk surfaces: (1) promoting
+`$graph` and `$scope` to Context fields and migrating the
+`annotations->{cfg}` side-channel — this touches multiply/extend
+propagation, which affects every semiring; (2) distributing
+Braun-style SSA construction across individual semantic actions.
+The Scope class already has the sentinel machinery, but wiring it
+through Context fields rather than the side-channel is non-trivial.
+If Phase 3 stalls, Phases 4–7 stall with it.
 
 Mitigation: Phase 3 is split into three sub-phases (3a, 3b, 3c),
 each with independent acceptance criteria and its own test set. A
 migration interrupted between sub-phases is in a defined, testable
-state — not in a half-built SSA pass. 3a delivers control-chain
-threading for linear code; 3b adds if/else Phi insertion; 3c adds
-loop Phi insertion.
+state — not a half-finished SSA migration. 3a-infra delivers the
+Context field migration and side-channel removal; 3a-migration
+delivers bottom-up graph construction and control-chain threading
+for linear code; 3b adds if/else Phi insertion; 3c adds loop Phi
+insertion.
 
 ### Per-class hash-cons boundaries
 
