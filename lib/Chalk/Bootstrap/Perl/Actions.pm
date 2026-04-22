@@ -31,6 +31,40 @@ my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl Su
 my %STMT_BOUNDARY_OPS = map { $_ => 1 } qw(If Loop Return Unwind);
 my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless while until);
 
+# Operator-to-typed-node translation tables used by _unwrap_stmt_from_expr
+my %BINOP_MAP = (
+    '+'   => 'Add',        '-'   => 'Subtract',  '*'   => 'Multiply',
+    '/'   => 'Divide',     '%'   => 'Modulo',     '**'  => 'Power',
+    '.'   => 'Concat',
+    '=='  => 'NumEq',      '!='  => 'NumNe',      '<'   => 'NumLt',
+    '>'   => 'NumGt',      '<='  => 'NumLe',      '>='  => 'NumGe',
+    '<=>' => 'NumCmp',
+    'eq'  => 'StrEq',      'ne'  => 'StrNe',      'lt'  => 'StrLt',
+    'gt'  => 'StrGt',      'le'  => 'StrLe',      'ge'  => 'StrGe',
+    'cmp' => 'StrCmp',
+    '&&'  => 'And',        '||'  => 'Or',
+    'and' => 'And',        'or'  => 'Or',
+    '&'   => 'BitAnd',     '|'   => 'BitOr',      '^'   => 'BitXor',
+    '<<'  => 'LeftShift',  '>>'  => 'RightShift',
+    '='   => 'Assign',
+    'x'   => 'Repeat',
+    '=~'  => 'Match',      '!~'  => 'NotMatch',
+    '//'  => 'DefinedOr',
+    'xor' => 'Xor',
+    '..'  => 'Range',      '...' => 'Yada',
+    'isa' => 'IsaOp',
+);
+
+my %UNOP_MAP = (
+    '!'       => 'Not',
+    'not'     => 'Not',
+    '-'       => 'Negate',
+    '~'       => 'Complement',
+    'defined' => 'Defined',
+    '+'       => 'UnaryPlus',
+    '\\'      => 'Ref',
+);
+
 class Chalk::Bootstrap::Perl::Actions {
     field $factory;
     field $typed;
@@ -559,31 +593,35 @@ class Chalk::Bootstrap::Perl::Actions {
     # (helpers moved before _fix_postfix_chain for lexical visibility)
 
     my $_unwrap_stmt_from_expr;
-    $_unwrap_stmt_from_expr = sub ($factory, $node) {
+    $_unwrap_stmt_from_expr = sub ($factory, $typed, $node) {
         return $node unless $node isa Chalk::IR::Node;
         my $class = $node->class();
 
         if ($class eq 'BinaryExpr') {
             # Recurse into left child first to handle nested cases like
             # BinaryExpr(|, BinaryExpr(&, Return(ctrl,X), Y), Z)
-            my $left = $_unwrap_stmt_from_expr->($factory, $node->inputs()->[1]);
+            my $left = $_unwrap_stmt_from_expr->($factory, $typed, $node->inputs()->[1]);
             if (_is_stmt_node($left)) {
                 my ($inner_val) = _stmt_inner($left);
-                my $new_expr = $factory->make('Constructor',
-                    'class' => 'BinaryExpr',
-                    op      => $node->inputs()->[0],
-                    left    => $inner_val,
-                    right   => $node->inputs()->[2],
+                my $op_str     = $node->inputs()->[0]->value();
+                my $binop_type = $BINOP_MAP{$op_str} // die "Unknown binary op: $op_str";
+                my $new_expr   = $typed->make($binop_type,
+                    inputs       => [$node->inputs()->[0], $inner_val, $node->inputs()->[2]],
+                    left         => $inner_val,
+                    right        => $node->inputs()->[2],
+                    compat_class => 'BinaryExpr',
                 );
                 return _rewrap_stmt($factory, $left, $new_expr);
             }
             # Left was recursively fixed but isn't a stmt — rebuild if changed
             if (refaddr($left) != refaddr($node->inputs()->[1])) {
-                return $factory->make('Constructor',
-                    'class' => 'BinaryExpr',
-                    op      => $node->inputs()->[0],
-                    left    => $left,
-                    right   => $node->inputs()->[2],
+                my $op_str     = $node->inputs()->[0]->value();
+                my $binop_type = $BINOP_MAP{$op_str} // die "Unknown binary op: $op_str";
+                return $typed->make($binop_type,
+                    inputs       => [$node->inputs()->[0], $left, $node->inputs()->[2]],
+                    left         => $left,
+                    right        => $node->inputs()->[2],
+                    compat_class => 'BinaryExpr',
                 );
             }
         }
@@ -592,11 +630,9 @@ class Chalk::Bootstrap::Perl::Actions {
             my $base = $node->inputs()->[0];
             if (_is_stmt_node($base)) {
                 my ($inner_val) = _stmt_inner($base);
-                my $new_expr = $factory->make('Constructor',
-                    'class' => 'SubscriptExpr',
-                    target  => $inner_val,
-                    index   => $node->inputs()->[1],
-                    style   => $node->inputs()->[2],
+                my $new_expr = $typed->make('Subscript',
+                    inputs       => [$inner_val, $node->inputs()->[1], $node->inputs()->[2]],
+                    compat_class => 'SubscriptExpr',
                 );
                 return _rewrap_stmt($factory, $base, $new_expr);
             }
@@ -606,10 +642,14 @@ class Chalk::Bootstrap::Perl::Actions {
             my $base = $node->inputs()->[0];
             if (_is_stmt_node($base)) {
                 my ($inner_val) = _stmt_inner($base);
-                my $new_expr = $factory->make('Constructor',
-                    'class' => 'PostfixDerefExpr',
-                    target  => $inner_val,
-                    sigil   => $node->inputs()->[1],
+                my $sigil_param = $node->inputs()->[1];
+                my $is_node     = ref($sigil_param) ? 1 : 0;
+                my $sigil_str   = $is_node ? $sigil_param->value() : $sigil_param;
+                my @inputs      = $is_node ? ($inner_val, $sigil_param) : ($inner_val);
+                my $new_expr    = $typed->make('PostfixDeref',
+                    sigil        => $sigil_str,
+                    inputs       => \@inputs,
+                    compat_class => 'PostfixDerefExpr',
                 );
                 return _rewrap_stmt($factory, $base, $new_expr);
             }
@@ -619,11 +659,9 @@ class Chalk::Bootstrap::Perl::Actions {
             my $cond = $node->inputs()->[0];
             if (_is_stmt_node($cond)) {
                 my ($inner_val) = _stmt_inner($cond);
-                my $new_expr = $factory->make('Constructor',
-                    'class'      => 'TernaryExpr',
-                    condition  => $inner_val,
-                    true_expr  => $node->inputs()->[1],
-                    false_expr => $node->inputs()->[2],
+                my $new_expr = $typed->make('TernaryExpr',
+                    inputs       => [$inner_val, $node->inputs()->[1], $node->inputs()->[2]],
+                    compat_class => 'TernaryExpr',
                 );
                 return _rewrap_stmt($factory, $cond, $new_expr);
             }
@@ -633,11 +671,11 @@ class Chalk::Bootstrap::Perl::Actions {
             my $invocant = $node->inputs()->[0];
             if (_is_stmt_node($invocant)) {
                 my ($inner_val) = _stmt_inner($invocant);
-                my $new_expr = $factory->make('Constructor',
-                    'class'     => 'MethodCallExpr',
-                    invocant    => $inner_val,
-                    method_name => $node->inputs()->[1],
-                    args        => $node->inputs()->[2],
+                my $new_expr = $typed->make('Call',
+                    dispatch_kind => 'method',
+                    name          => $node->inputs()->[1]->value(),
+                    inputs        => [$inner_val, $node->inputs()->[1], $node->inputs()->[2]],
+                    compat_class  => 'MethodCallExpr',
                 );
                 return _rewrap_stmt($factory, $invocant, $new_expr);
             }
@@ -652,7 +690,7 @@ class Chalk::Bootstrap::Perl::Actions {
     # - `return 'Start'` → Return(ctrl, Constant('Start'))
     # - `die "message"` → Unwind(ctrl, Constant('message'))
     # - `use Foo 'bar'` (split) → UseDecl(Foo, ['bar'])
-    my sub _fixup_stmts($factory, $stmts) {
+    my sub _fixup_stmts($factory, $typed, $stmts) {
         my @result;
         my $i = 0;
         while ($i <= $#$stmts) {
@@ -854,7 +892,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     args  => [$arg],
                 );
             } else {
-                push @result, $_unwrap_stmt_from_expr->($factory, $item);
+                push @result, $_unwrap_stmt_from_expr->($factory, $typed, $item);
             }
             $i++;
         }
@@ -933,7 +971,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val;
             }
         }
-        my $fixed = _fixup_stmts($factory, \@stmts);
+        my $fixed = _fixup_stmts($factory, $typed, \@stmts);
         # Fix misparented postfix chains from Earley stale-value merge
         return [ map { _fix_postfix_chain($factory, $typed, $_) } $fixed->@* ];
     }
@@ -1290,7 +1328,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # expression wrappers, prefix builtin subscript chains, etc.)
         # Use _deep variant to reach nested expressions (e.g., if-conditions).
         @body = map { $_fix_postfix_chain_deep->($factory, $typed, $_) } @body;
-        my $fixed_body = _fixup_stmts($factory, \@body);
+        my $fixed_body = _fixup_stmts($factory, $typed, \@body);
 
         my $method_name_val = defined $method_name ? $method_name->value() : '<unknown>';
         my @param_strs = map { $_->value() } @params;
@@ -1390,7 +1428,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         # Fix stale-value merge artifacts in sub body
         @body = map { $_fix_postfix_chain_deep->($factory, $typed, $_) } @body;
-        my $fixed_body = _fixup_stmts($factory, \@body);
+        my $fixed_body = _fixup_stmts($factory, $typed, \@body);
 
         my $sub_name_val = $sub_name->value();
         my @param_strs = map { $_->value() } @params;
@@ -1533,8 +1571,8 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef unless defined $try_body;
 
         # Apply fixup to bodies
-        $try_body = _fixup_stmts($factory, $try_body);
-        $catch_body = _fixup_stmts($factory, $catch_body // []);
+        $try_body = _fixup_stmts($factory, $typed, $try_body);
+        $catch_body = _fixup_stmts($factory, $typed, $catch_body // []);
         $catch_var //= '$_';
 
         # Build cfg_state with try_node key (same pattern as IfStatement)
@@ -1904,7 +1942,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val;
             }
         }
-        my $fixed = _fixup_stmts($factory, \@stmts);
+        my $fixed = _fixup_stmts($factory, $typed, \@stmts);
         # Fix misparented postfix chains from Earley stale-value merge
         return [ map { _fix_postfix_chain($factory, $typed, $_) } $fixed->@* ];
     }
@@ -2092,7 +2130,7 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        $body = _fixup_stmts($factory, $body // []);
+        $body = _fixup_stmts($factory, $typed, $body // []);
 
         return $factory->make('Constructor',
             'class'  => 'AnonSubExpr',
@@ -2719,8 +2757,8 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef unless defined $condition;
 
         # Apply fixup to bodies
-        $then_body = _fixup_stmts($factory, $then_body // []);
-        $else_body = defined $else_body ? _fixup_stmts($factory, $else_body) : undef;
+        $then_body = _fixup_stmts($factory, $typed, $then_body // []);
+        $else_body = defined $else_body ? _fixup_stmts($factory, $typed, $else_body) : undef;
 
         # For 'unless', wrap condition in UnaryExpr with '!'
         if (defined $keyword && $keyword eq 'unless') {
@@ -2826,8 +2864,8 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return undef unless defined $condition;
 
-        $then_body = _fixup_stmts($factory, $then_body // []);
-        $else_body = defined $else_body ? _fixup_stmts($factory, $else_body) : undef;
+        $then_body = _fixup_stmts($factory, $typed, $then_body // []);
+        $else_body = defined $else_body ? _fixup_stmts($factory, $typed, $else_body) : undef;
 
         # Build CFG nodes for the elsif branch
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
@@ -2891,7 +2929,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return undef unless defined $keyword && defined $condition;
 
-        $body = _fixup_stmts($factory, $body // []);
+        $body = _fixup_stmts($factory, $typed, $body // []);
 
         # Build CFG nodes: Loop/If/Proj/Region for control flow
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
@@ -2992,7 +3030,7 @@ class Chalk::Bootstrap::Perl::Actions {
             $list = _fix_postfix_chain($factory, $typed, $list);
         }
 
-        $body = _fixup_stmts($factory, $body // []);
+        $body = _fixup_stmts($factory, $typed, $body // []);
 
         # Build CFG nodes: Loop/If/Proj/Region for control flow
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
