@@ -156,6 +156,52 @@ admits. Blocking one on the other creates artificial serialization.
    with the precedence case as the first TDD cycle.
 4. Proceed with one class per cycle as originally planned.
 
+## Synthetic grammar verification
+
+To rule out the possibility that Earley was producing spurious merges
+(inflating the 40 count on `1 + 2 * 3;` beyond the grammar's real
+ambiguity), five tiny synthetic grammars were exercised with
+hand-computed expected merge counts. Results are now locked in as
+assertions in `t/bootstrap/ambiguity-synthetic.t`:
+
+| Grammar | Shape | Inputs | Expected merges | Observed |
+|---|---|---|---|---|
+| `E ::= E '+' E \| /\d+/` | both-recursive, ambiguous | `1`, `1+2`, `1+2+3`, `1+2+3+4` | 0, 0, 1, 4 (Catalan-C(n-1)) | match |
+| `E ::= N '+' E \| N` | right-recursive, unambiguous | same | 0, 0, 0, 0 | match |
+| `E ::= E '+' N \| N` | left-recursive, unambiguous | same | 0, 0, 0, 0 | match |
+| `S ::= E ';' ; E ::= E '+' E \| /\d+/` | wrapped ambig | `1;`, `1+2;`, `1+2+3;`, `1+2+3+4;` | 0, 0, 1, 4 | match |
+| `S ::= E \| E` | duplicate top-level alternatives | `42` | n/a (see note) | 0 |
+
+The first four grammars confirm Earley invokes `add` **exactly** where
+nested-nonterminal ambiguity occurs — no inflation, no omission. The
+40-merge count on `1 + 2 * 3;` in the Perl grammar is therefore real
+ambiguity from the grammar itself, not parser pathology.
+
+### Two-level distinction discovered via G5
+
+The final grammar surfaced a second, **separate** form of ambiguity that
+Boolean's `add` does not observe at all:
+
+- **Top-level start-rule alternative selection** — different alternatives
+  of the start rule land in different chart slots (different `core_id`,
+  because `core_id` encodes `alt_idx`). They never converge on a single
+  slot, so `add` is never invoked. `_run_parse`'s final-slot extraction
+  iterates alternatives at lines 897/977/992 and returns the first one
+  that completes, silently dropping later alternatives.
+
+- **Nested nonterminal ambiguity** — two derivations of the same
+  `(rule, alt, span)` land in the same chart slot. This is what `add`
+  merges and what our `annotations->{ambiguous}` tagging is designed to
+  expose.
+
+The seven ambiguity classes documented in
+`docs/architecture/ambiguity-classes.md` are all of the nested variety.
+The reification-overwrite at line 590 discards their merges; G5's
+top-level-alt case is out of scope for this investigation but worth
+keeping recorded because any future refactor that changes the first-match
+extraction behavior may make it visible, and we want that change to be
+deliberate rather than accidental.
+
 ## Artifacts from the investigation
 
 - Diagnostic harness ran `Boolean::add` with a call-counter monkey-patch
@@ -164,4 +210,5 @@ admits. Blocking one on the other creates artificial serialization.
 - Context-tree walk over the same inputs: 3702 / 31606 / 143222 total
   nodes; 1589 / 13621 / 61749 two-child; 0 with `ambiguous`
   annotation on any input.
-- The diagnostic test was not committed (deleted after investigation).
+- Ad-hoc diagnostic tests were not committed (deleted after investigation).
+- Assert-based regression guard committed as `t/bootstrap/ambiguity-synthetic.t`.
