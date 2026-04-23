@@ -883,51 +883,104 @@ begins.
 
 ---
 
-#### Phase 2.5: Fixup redistribution (and Earley merge investigation)
+#### Phase 2.5: Fixup classification and redistribution
 
-**Goal:** distribute the Earley stale-value-merge fixup helpers
-(`_fix_postfix_chain`, `_fix_postfix_chain_deep`, `_fixup_stmts`,
-`_push_deref_inward`, `_push_methodcall_inward`,
-`_unwrap_stmt_from_expr`, `_is_unwrappable_builtin`) into the
-individual rule actions whose children come out malformed. Delete
-the shared helpers from Actions.pm.
+> **INVESTIGATION RESULT (2026-04-23):** The Earley merge bug is
+> not fixable at the parser level. Earley's `add()` merges chart
+> items by time of creation; when a later derivation adds a
+> wrapping node (prefix builtin, return, postfix deref), `add()`
+> may have already chosen the pre-wrapping derivation.
+> `SemanticAction::on_merge()` transfers CFG state but cannot
+> repair IR structure — the winning Context's focus is baked in.
+>
+> The fixups fall into two categories that need different treatment:
+>
+> **Structural fixups** — wrong parent/child ordering. PostfixDeref
+> or MethodCall wrapping a Return/BuiltinCall/etc. when it should
+> be the other way around. These are already called from the right
+> rule actions (PostfixDeref, MethodCall, PostfixExpression) via
+> `_push_deref_inward` / `_push_methodcall_inward`. The
+> tree-walking variants (`_fix_postfix_chain`,
+> `_fix_postfix_chain_deep`) handle cases where the corruption is
+> deeper — SubscriptExpr inside BinaryExpr/UnaryExpr/BuiltinCall.
+>
+> **Statement-assembly fixups** — grammar ambiguity splitting one
+> logical statement across multiple IR values. `return` + expr →
+> `Return(ctrl, expr)`, `die` + expr → `Unwind(ctrl, [expr])`,
+> `VarDecl(var, undef)` + expr → `VarDecl(var, expr)`,
+> `Constant(builtin_name)` + args → `BuiltinCall(name, args)`.
+> These are grammar-resolution semantics, not stale-merge
+> compensation. They belong in the statement-sequencing rules
+> (StatementList, Block) and already live there. They are NOT
+> redistributable to individual expression rules because the
+> ambiguity is at the statement boundary level.
+>
+> `_unwrap_stmt_from_expr` is also statement-assembly: it lifts
+> Return/Unwind nodes trapped inside expressions back to statement
+> position. Called from `_fixup_stmts`'s else branch.
 
-This is a refactor that can be done and tested independently of the
-Phase 3 Context field changes. Doing it first keeps Phase 3a
-strictly focused on infrastructure and graph construction.
+**Goal:** clarify the ownership of fixup logic. Structural fixups
+stay in (or move to) the postfix/method/subscript rule actions.
+Statement-assembly logic stays in StatementList/Block. The shared
+helpers are preserved as private utilities of the rules that call
+them — inlining is optional; the important thing is that each
+helper's callers are the right rule actions.
+
+This phase is primarily a *classification and documentation* pass,
+with targeted refactoring where callers are wrong. The big
+structural change (removing `_fix_postfix_chain_deep` calls from
+MethodDefinition/SubroutineDefinition) happens in Phase 3a-migration
+when those actions stop assembling body statement lists.
 
 **Entry:** Phase 2 complete.
 
 **Scope:**
 
-- **Investigate the underlying Earley merge bug.** The fixups exist
-  because Earley's `add()` merges stale pre-merge values. Scoped
-  investigation (timeboxed): can the parser-level issue be fixed or
-  mitigated? If yes, the fixups become unnecessary and this phase
-  reduces to deletion. If no, proceed with redistribution.
-- **Map each fixup case to its target rule.** Walk through the
-  existing helper code and identify which rule action should own
-  each correction. Document the mapping explicitly before
-  implementing.
-- **Redistribute:** move each case into the rule action that
-  receives the malformed child. Each rule asserts what shape its
-  children must have and restructures if necessary.
-- **Delete the shared helpers** from Actions.pm once all cases are
-  distributed.
+- **Document the fixup classification** (structural vs.
+  statement-assembly) and the mapping of each helper to its owning
+  rule actions. This document exists as the investigation result
+  above; add a summary to `docs/architecture/` for future reference.
+- **Verify caller ownership is correct.** The structural fixups
+  (`_push_deref_inward`, `_push_methodcall_inward`) are already
+  called from PostfixDeref and MethodCall actions — correct.
+  `_fixup_stmts` is called from StatementList, Block,
+  MethodDefinition, SubroutineDefinition, IfStatement, WhileLoop,
+  ForeachLoop, TryCatch — correct for statement-sequencing rules.
+  `_fix_postfix_chain` / `_fix_postfix_chain_deep` are called from
+  Program, StatementList, Block, ForeachStatement,
+  MethodDefinition, SubroutineDefinition, PostfixModifier — most
+  correct; MethodDefinition/SubroutineDefinition callers will be
+  removed in Phase 3a-migration.
+- **Move SubscriptExpr restructuring from `_fix_postfix_chain` into
+  the SubscriptExpr action** (patterns B, C, D from the
+  investigation). SubscriptExpr receives a base that is a
+  BuiltinCall, UnaryExpr, or BinaryExpr — it should restructure
+  those children itself. The tree-walking in `_fix_postfix_chain`
+  for these cases becomes unnecessary once SubscriptExpr handles
+  them directly.
+- **Move MethodCallExpr(PostfixDerefExpr(...)) swap (pattern A)
+  into the MethodCallExpr action.** MethodCallExpr already calls
+  `_push_methodcall_inward` for deeper cases; this surface-level
+  pattern should be handled there too.
 - **Tests (TDD, before implementation):**
-  - `t/bootstrap/actions/rule-local-fixups.t` — postfix/methodcall/
-    subscript rules restructure their own malformed children from
-    Earley stale-value merge, replacing the old shared fixup
-    helpers. Covers the cases previously handled by
-    `_fix_postfix_chain` and `_fixup_stmts`.
+  - `t/bootstrap/actions/subscript-restructure.t` — SubscriptExpr
+    action handles BuiltinCall/UnaryExpr/BinaryExpr bases directly
+  - `t/bootstrap/actions/methodcall-postfixderef-swap.t` —
+    MethodCallExpr action swaps with PostfixDerefExpr invocant
   - Regression invariant: every existing test green at Phase 2
     exit remains green at Phase 2.5 exit.
 
 **Exit criteria:**
-- `_fix_postfix_chain`, `_fix_postfix_chain_deep`, `_fixup_stmts`,
-  `_push_deref_inward`, `_push_methodcall_inward`,
-  `_unwrap_stmt_from_expr` are deleted from Actions.pm.
-- Each fixup case lives in the rule action that owns it.
+- SubscriptExpr restructuring (patterns B, C, D) lives in the
+  SubscriptExpr action.
+- MethodCallExpr/PostfixDerefExpr swap (pattern A) lives in the
+  MethodCallExpr action.
+- Fixup classification is documented.
+- `_fix_postfix_chain` no longer handles patterns A-D (they are
+  owned by the relevant rule actions). What remains in
+  `_fix_postfix_chain` is the input-recursion rebuild pass
+  (Phase 1 from the investigation), which may still be needed
+  for edge cases until Phase 3a-migration removes the callers.
 - All existing tests pass.
 
 ---
