@@ -57,9 +57,12 @@ class Chalk::Bootstrap::Semiring::Boolean {
 
     # add combines two alternatives. When both are non-zero, both
     # derivations are preserved as children so downstream semirings
-    # can see the ambiguity and disambiguate. When only one is
-    # non-zero, it is returned directly (no wrapper). When both are
-    # zero, zero is returned.
+    # can see the ambiguity and disambiguate. The wrapper is tagged
+    # annotations->{ambiguous} so tree walkers can distinguish
+    # ambiguity from structural multiply-composition (both produce
+    # two-child Contexts with focus=true). When only one is non-zero,
+    # it is returned directly (no wrapper). When both are zero, zero
+    # is returned.
     method add($left, $right) {
         my $lz = $self->is_zero($left);
         my $rz = $self->is_zero($right);
@@ -67,9 +70,10 @@ class Chalk::Bootstrap::Semiring::Boolean {
         return $right if $lz;
         return $left  if $rz;
         return Chalk::Bootstrap::Context->new(
-            focus    => true,
-            children => [$left, $right],
-            is_zero  => false,
+            focus       => true,
+            children    => [$left, $right],
+            is_zero     => false,
+            annotations => { ambiguous => true },
         );
     }
 

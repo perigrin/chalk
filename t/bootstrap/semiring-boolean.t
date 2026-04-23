@@ -222,7 +222,9 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
 
 # Test 13: add preserves both derivations when both are non-zero.
 # When two non-zero values are added, the result should contain both
-# as children so downstream semirings can see the ambiguity.
+# as children so downstream semirings can see the ambiguity, and the
+# wrapper must carry annotations->{ambiguous} so a tree walker can
+# distinguish ambiguity from structural multiply-composition.
 {
     use Chalk::Bootstrap::Context;
     my $left = Chalk::Bootstrap::Context->new(
@@ -245,6 +247,9 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
         'add(non-zero, non-zero) preserves both derivations as children');
     is($kids[0], $left,  'first child is left derivation');
     is($kids[1], $right, 'second child is right derivation');
+
+    ok($result->annotations->{ambiguous},
+        'add wrapper is tagged annotations->{ambiguous}');
 }
 
 # Test 14: add with one zero still returns just the survivor, not a wrapper.
