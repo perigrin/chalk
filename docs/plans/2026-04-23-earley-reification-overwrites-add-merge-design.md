@@ -119,6 +119,86 @@ Concerns to verify before committing to this shape:
    already handles merge correctly. Need to verify the 590 path and
    the Leo path don't stack their merges in a way that double-counts.
 
+## Concern investigation results (2026-04-23)
+
+All four concerns have been investigated read-only. Results:
+
+### Concern 1: Idempotence — SAFE, with one subtlety
+
+The outer parse loop runs `while ($pos <= $n)` with `$pos` monotonic
+(the only `$pos = ...` assignment at line 509 is in panic-recovery
+and sets `$pos = $sync_pos` where `$sync_pos >= $pos`). Inside each
+position, `@processed` (declared fresh at line 524) gates out re-entry
+of any `(core_id, origin)` via the check at lines 566-572. So the
+reification at line 590 fires **exactly once per `(pos, core_id,
+origin)` tuple** for the entire parse.
+
+**Subtlety**: `$value` at line 576 is read from the chart slot at the
+top of the loop. The naive sketch `add($existing, $completed_value)`
+where `$existing` is re-read from that slot would, in the common case,
+see `$existing == $value` (no prior merge). That would produce
+`add($value, multiply($value, $complete_ctx))` — wrapping the
+pre-reified and reified values as "ambiguity" when they are actually
+the same derivation with and without reification.
+
+The correct shape uses `refaddr` comparison to detect whether the slot
+was modified by an intervening `add`-merge:
+
+```perl
+my $completed_value = $semiring->multiply($value, $complete_ctx);
+my $existing = $chart[$pos][$core_id][($pos - $origin)];
+if (defined $existing && refaddr($existing) != refaddr($value)) {
+    $completed_value = $semiring->add($existing, $completed_value);
+}
+$chart[$pos][$core_id][($pos - $origin)] = $completed_value;
+```
+
+This mirrors Precedence::add's `refaddr` identity-collapse (line 324)
+and Structural's `==` on integer IDs — the Chalk semiring family already
+relies on reference identity to tell "same derivation" from "different
+derivation".
+
+### Concern 2: Filter-semiring ambiguity death — RESOLVED, no deaths exist
+
+Inspection of every semiring's `add`:
+
+- `Boolean::add` — never dies; returns a wrapped Context with both children.
+- `FilterComposite::add` — never dies; picks winner via `_filter_compare`
+  with deterministic tie-break-left if no filter expresses a preference.
+- `Precedence::add` — never dies; picks higher-level or left.
+- `TypeInference::add` — never dies; returns `[merged]` (no-preference marker).
+- `Structural::add` — never dies; prefers non-list over list, is_call over not.
+- `SemanticAction::add` — never dies; returns `[$left]` on identity or
+  `[$left, $right]` otherwise.
+
+The `try { ... } catch { die "Ambiguity in..." }` blocks at six call
+sites in Earley are legacy defensive scaffolding from an earlier
+semiring design where filtering was expected to fail on ambiguity.
+That design was superseded (see FilterComposite.pm line 256-260 comment:
+"conflicts between semirings have not been observed across the full
+1,867-test regression suite"). The new `add` call proposed at line 590
+will never trigger any of those `catch` blocks because no semiring's
+`add` throws.
+
+### Concern 3: Performance — NEGLIGIBLE
+
+Per call, the added cost is: one chart slot read (array index, O(1)),
+one `defined` check, one `refaddr` pair compare, and at most one `add`
+call. Boolean's `add` costs ~2 `is_zero` checks + 1 Context
+construction. For the 40-merge Perl probe on `1 + 2 * 3;`, this adds
+on the order of microseconds. The Perl grammar corpus is Boolean-only,
+so FilterComposite's more expensive `_filter_compare` is not on the
+path for this change.
+
+### Concern 4: Leo interaction — DISJOINT
+
+The Leo `add`-merge at lines 1275-1280 writes to `[$pos][$new_core_id]
+[$top_origin]` — the *waiting parent's* slot after `$core_index->advance`.
+The proposed line-590 `add`-merge writes to `[$pos][$core_id][$pos-$origin]`
+— the *current completed item's* slot. These are different slots (the
+advance transforms `core_id` into a different `new_core_id`). No
+double-counting.
+
 ## Alternative approaches considered
 
 ### A. Hash-cons Context so ambiguous wrappers survive by identity
@@ -148,13 +228,21 @@ admits. Blocking one on the other creates artificial serialization.
 
 ## Next steps
 
-1. Review this note — confirm the diagnosis is right and the proposed
-   fix sketch is the direction we want.
-2. If approved, write the fix with all four concerns above investigated
-   first, each recorded in the commit message or a follow-up note.
-3. After the fix, re-enable `t/bootstrap/grammar-ambiguity-corpus.t`
-   with the precedence case as the first TDD cycle.
-4. Proceed with one class per cycle as originally planned.
+1. Concerns 1-4 have been investigated; see section above. The fix
+   shape is known and all four concerns are either safe or disjoint
+   from this change.
+2. Implement the fix at `Earley.pm:590` using the refaddr-compare
+   pattern shown in Concern 1's resolution.
+3. Verify:
+   - `t/bootstrap/ambiguity-synthetic.t` still passes (no change in
+     merge counts — the fix only preserves existing merges that were
+     being overwritten).
+   - A new targeted test that parses `1 + 2 * 3;` with the Perl
+     grammar and asserts `ambiguity_sites()` returns `>= 1` site.
+   - Full test suite to check no regression.
+4. Write `t/bootstrap/grammar-ambiguity-corpus.t` with the precedence
+   case as the first TDD cycle.
+5. Proceed with one ambiguity class per cycle as originally planned.
 
 ## Synthetic grammar verification
 
