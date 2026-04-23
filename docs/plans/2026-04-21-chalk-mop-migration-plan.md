@@ -734,47 +734,71 @@ after 3a completes, the codebase is in a defined, testable state.
 **Context threading model:**
 
 Three fields on `Chalk::Bootstrap::Context` carry state through the
-parse. Each threads via the same mechanism — left-to-right through
-`multiply`, bottom-to-top through `extend` — with containment
-provided by Context immutability.
+parse. The three fields have genuinely different semantics — this
+section specifies each explicitly rather than invoking "follows the
+same pattern as mop."
 
-- **`field $graph`** — the computation graph being built. Computation
-  actions (VarDecl, Assign, BinaryExpression, etc.) merge nodes via
-  `$ctx->graph->merge(...)` and extend with the updated graph.
-  Structural actions (MethodDefinition) read the completed graph
-  from their children and attach it to the Method metaobject. The
-  graph does not propagate past the structural boundary because
-  MethodDefinition does not include it in its result Context.
+- **`field $mop`** — already exists. Compile-time singleton, set
+  via `SemanticAction::set_mop()` before parsing begins. Every
+  Context gets the same `$_mop` reference copied at construction;
+  there is no child-to-parent propagation because the value never
+  varies. Not a precedent for graph or scope propagation.
 
-- **`field $scope`** — Braun-style SSA definition map (variable name
-  → current reaching IR node). Threaded left-to-right via multiply
-  so each statement sees the definitions from prior statements.
-  `VariableDeclaration` extends with an updated scope (new binding).
-  Control-flow actions (IfStatement, ForLoop) fork/merge the scope
-  for Phi insertion. Block-boundary actions (MethodDefinition,
-  SubroutineDefinition) do not propagate children's scope — it stays
-  contained by Context immutability.
+- **`field $graph`** — the computation graph being built for the
+  current graph-owner. `Chalk::IR::Graph` is a *mutable builder*:
+  its `%cache` and `$cfg_counter` are updated by `merge()` and
+  `next_cfg_id()`. The Context field holds a *reference* to the
+  shared graph; computation actions mutate it via
+  `$ctx->graph->merge(...)`. "Propagation" is really
+  reference-sharing: every Context inside a graph-owner's body
+  carries the same `$graph` reference, so every action mutates the
+  same graph. Graph-owner actions (MethodDefinition,
+  SubroutineDefinition, ADJUST) construct a fresh Graph for their
+  body scope; at their result Context, the graph field is dropped
+  (attached to the MOP metaobject instead of propagating outward).
 
-- **`field $mop`** — already exists. Unchanged.
+- **`field $scope`** — Braun-style SSA definition map (variable
+  name → current reaching IR node) plus the current control input
+  (the last side-effect node emitted, to which the next side-effect
+  node chains). `Chalk::Bootstrap::Scope` is *immutable*:
+  `Scope::define($name, $node)` returns a new Scope object;
+  `Scope::with_control($node)` returns a new Scope with the control
+  input replaced; `merge_with_phis` returns a new Scope; etc.
+  Control-flow state and SSA state travel together because they are
+  always forked/merged together (at if/else branches, at loop
+  headers, at graph-owner boundaries). Propagation is genuinely
+  bottom-to-top / left-to-right: each action's extended Context
+  carries the action's updated scope, and later siblings see it via
+  multiply. Control-flow actions (IfStatement, ForLoop) fork/merge
+  scope. Graph-owner actions do not propagate scope out of their
+  body — the result Context has no scope.
 
 **Propagation rules for `multiply($left, $right)`:**
 
-- `$graph`: prefer right (later in sequence), fall back to left.
-  Follows the same left-to-right accumulation as existing multiply
-  semantics.
-- `$scope`: prefer right, fall back to left. Same pattern. The
-  right side has the most recent variable definitions.
-- `$mop`: already works this way.
+- `$graph`: both Contexts inside the same graph-owner body share
+  the same `$graph` reference — it's not a "choice." The rule is
+  "if either has a graph, the result has that graph; they must
+  agree if both are set." (Two graph references colliding indicates
+  a bug: a graph-owner boundary was crossed without dropping the
+  graph.)
+- `$scope`: prefer right, fall back to left. Right is later in
+  sequence and has the most recent bindings. Immutable, so there's
+  nothing to mutate — just pick the later one.
+- `$mop`: unchanged. Every multiplied Context gets the
+  class-level singleton `$_mop`.
 
 **Propagation rules for `extend` (action completion):**
 
 - The action's return value becomes the new Context's focus.
-- `$graph` and `$scope` propagate from the child Context by default.
-- Structural actions (MethodDefinition, SubroutineDefinition, ADJUST)
-  consume the graph (attach to metaobject) and do not propagate
-  scope. The result Context has an empty/fresh graph and no scope.
-  This is how block boundaries naturally contain scope — not by
-  explicit reset, but by the action choosing what to include.
+- `$graph` and `$scope` propagate from the child Context by default
+  — the action extends with the state its children built up.
+- Graph-owner actions (MethodDefinition, SubroutineDefinition,
+  ADJUST) do not propagate graph or scope outward. They consume
+  the graph (attach to the MOP metaobject) and drop the scope
+  (block-scope containment is structural — the action's result
+  Context simply has no scope). This is how graph-owner boundaries
+  naturally contain body state — not by explicit reset, but by the
+  action choosing what to include.
 
 **Deletions (Phase 3a-infra):**
 
@@ -854,9 +878,57 @@ assertions belong. The shared helpers (`_fix_postfix_chain`,
 `_fix_postfix_chain_deep`, `_fixup_stmts`) are deleted; their
 cases land in the relevant rules' actions.
 
-Phase 3a-migration's scope includes this distribution as part of
-migrating computation actions to build graphs incrementally (the
-fixups and graph construction run in the same place).
+Phase 2.5 handles this distribution independently, before Phase 3
+begins.
+
+---
+
+#### Phase 2.5: Fixup redistribution (and Earley merge investigation)
+
+**Goal:** distribute the Earley stale-value-merge fixup helpers
+(`_fix_postfix_chain`, `_fix_postfix_chain_deep`, `_fixup_stmts`,
+`_push_deref_inward`, `_push_methodcall_inward`,
+`_unwrap_stmt_from_expr`, `_is_unwrappable_builtin`) into the
+individual rule actions whose children come out malformed. Delete
+the shared helpers from Actions.pm.
+
+This is a refactor that can be done and tested independently of the
+Phase 3 Context field changes. Doing it first keeps Phase 3a
+strictly focused on infrastructure and graph construction.
+
+**Entry:** Phase 2 complete.
+
+**Scope:**
+
+- **Investigate the underlying Earley merge bug.** The fixups exist
+  because Earley's `add()` merges stale pre-merge values. Scoped
+  investigation (timeboxed): can the parser-level issue be fixed or
+  mitigated? If yes, the fixups become unnecessary and this phase
+  reduces to deletion. If no, proceed with redistribution.
+- **Map each fixup case to its target rule.** Walk through the
+  existing helper code and identify which rule action should own
+  each correction. Document the mapping explicitly before
+  implementing.
+- **Redistribute:** move each case into the rule action that
+  receives the malformed child. Each rule asserts what shape its
+  children must have and restructures if necessary.
+- **Delete the shared helpers** from Actions.pm once all cases are
+  distributed.
+- **Tests (TDD, before implementation):**
+  - `t/bootstrap/actions/rule-local-fixups.t` — postfix/methodcall/
+    subscript rules restructure their own malformed children from
+    Earley stale-value merge, replacing the old shared fixup
+    helpers. Covers the cases previously handled by
+    `_fix_postfix_chain` and `_fixup_stmts`.
+  - Regression invariant: every existing test green at Phase 2
+    exit remains green at Phase 2.5 exit.
+
+**Exit criteria:**
+- `_fix_postfix_chain`, `_fix_postfix_chain_deep`, `_fixup_stmts`,
+  `_push_deref_inward`, `_push_methodcall_inward`,
+  `_unwrap_stmt_from_expr` are deleted from Actions.pm.
+- Each fixup case lives in the rule action that owns it.
+- All existing tests pass.
 
 ---
 
@@ -869,13 +941,20 @@ changes. The existing actions continue to work via a thin
 compatibility shim that reads/writes the new Context fields where
 they previously used `cfg_state`/`update_cfg`.
 
-**Entry:** Phase 2 complete.
+**Entry:** Phase 2.5 complete.
 
 **Scope:**
 
 - Add `field $graph` and `field $scope` to
   `Chalk::Bootstrap::Context`. Update `extend` and `multiply` to
   propagate these fields per the rules above.
+- Extend `Chalk::Bootstrap::Scope` with control-input tracking:
+  add a `control` field and a `with_control($node)` method
+  returning a new Scope with the control input replaced. The
+  existing `fork_for_loop`, `merge_with_phis`, `merge_for_loop`
+  methods preserve/merge control alongside their scope-diffing
+  logic. This is the mechanism by which side-effect actions thread
+  the linear control chain.
 - Delete the `annotations->{cfg}` side-channel:
   `$_pending_cfg_update`, `update_cfg()`, `cfg_state()`,
   `inherited_cfg_state()`, and the cfg-propagation block in
@@ -888,16 +967,24 @@ they previously used `cfg_state`/`update_cfg`.
 - **Tests (TDD, before implementation):**
   - `t/bootstrap/context/graph-scope-fields.t` — Context carries
     `$graph` and `$scope` fields; multiply propagates them
-    left-to-right; extend propagates from children
+    left-to-right; extend propagates from children; graph
+    reference-sharing (two Contexts inside the same body share the
+    same graph reference, must agree when both are set)
   - `t/bootstrap/context/scope-containment.t` — a structural action
     (MethodDefinition) that doesn't propagate scope produces a
     result Context with no scope; subsequent multiply does not see
     the body's variable bindings
+  - `t/bootstrap/scope/control-input.t` — `Scope::with_control($node)`
+    returns a new Scope with control replaced; `control()` reads the
+    current control input; fork/merge operations preserve control
+    alongside bindings
   - Regression invariant: every existing test green at Phase 2
     exit remains green at Phase 3a-infra exit.
 
 **Exit criteria:**
 - `$graph` and `$scope` are Context fields with proper propagation.
+- `Scope` carries the current control input alongside variable
+  bindings; `with_control()` returns an updated immutable Scope.
 - `annotations->{cfg}`, `$_pending_cfg_update`, `update_cfg`,
   `cfg_state`, and `inherited_cfg_state` are deleted.
 - All existing tests pass with the new field-based access path.
@@ -930,9 +1017,12 @@ linear code (no if/else, no loops).
     children.
   - Each side-effect node's control input is the previous side-
     effect node (or `start` for the first). The current control
-    input threads through scope or as a distinguished field — TBD
-    during implementation whether it rides on Scope or gets its
-    own Context field.
+    input rides on `Scope` — control-flow state and SSA state are
+    always forked/merged together, so they share an immutable
+    bundle. Side-effect actions read the control input via
+    `$ctx->scope->control`, construct their node with that as the
+    control operand, and extend with
+    `$scope->with_control($new_node)`.
   - Pure-value actions (`Constant`, `BinaryExpression` without side
     effects) merge their nodes into the graph without updating the
     control chain.
@@ -958,12 +1048,8 @@ linear code (no if/else, no loops).
   a Return CFG node wrapping the final value and merge it into
   the graph so control flow is well-formed. Collect all
   Return/Unwind nodes from the entire graph as method exits.
-- Distribute Earley stale-value-merge fixups into the rules whose
-  children come out malformed: MethodCallExpr, PostfixDerefExpr,
-  SubscriptExpr, etc., each assert and restructure their own
-  children. Delete `_fix_postfix_chain`, `_fix_postfix_chain_deep`,
-  and `_fixup_stmts` from Actions.pm.
-- Delete `_build_method_graph` from Actions.pm.
+- Delete `_build_method_graph` from Actions.pm. (Earley stale-value-
+  merge fixups were already redistributed in Phase 2.5.)
 - **Tests (TDD, before implementation):**
   - `t/bootstrap/mop/block-type.t` — Block synthesizes
     `{graph, type}`; type is the union of all exit values (explicit
@@ -982,11 +1068,6 @@ linear code (no if/else, no loops).
     missing; preserves explicit Return/Unwind nodes; collects Return
     nodes from nested loops/branches as method exits; does not
     collect Returns from inner nested subs/methods
-  - `t/bootstrap/actions/rule-local-fixups.t` — postfix/methodcall/
-    subscript rules restructure their own malformed children from
-    Earley stale-value merge, replacing the old shared fixup
-    helpers. Covers the cases previously handled by
-    `_fix_postfix_chain` and `_fixup_stmts`.
   - Regression invariant: every existing test green at Phase
     3a-infra exit remains green at Phase 3a-migration exit.
 
@@ -996,10 +1077,8 @@ linear code (no if/else, no loops).
 - MethodDefinition/SubroutineDefinition read the block's type as
   the method's return type, synthesize fall-through Return nodes
   where needed, and collect Return/Unwind nodes from their graph.
-- Stale-value-merge fixups are distributed into the rules whose
-  children come out wrong; `_fix_postfix_chain`,
-  `_fix_postfix_chain_deep`, and `_fixup_stmts` are deleted.
-- `_build_method_graph` is deleted from Actions.pm.
+- `_build_method_graph` is deleted from Actions.pm. (Stale-value-
+  merge fixups already distributed in Phase 2.5.)
 - Computation actions build the graph incrementally via
   `$graph->merge(...)` inside each action.
 - Linear-code graphs are fully reachable from `start` through
@@ -1614,11 +1693,12 @@ If Phase 3 stalls, Phases 4–7 stall with it.
 Mitigation: Phase 3 is split into three sub-phases (3a, 3b, 3c),
 each with independent acceptance criteria and its own test set. A
 migration interrupted between sub-phases is in a defined, testable
-state — not a half-finished SSA migration. 3a-infra delivers the
-Context field migration and side-channel removal; 3a-migration
-delivers bottom-up graph construction and control-chain threading
-for linear code; 3b adds if/else Phi insertion; 3c adds loop Phi
-insertion.
+state — not a half-finished SSA migration. Phase 2.5 redistributes
+stale-value-merge fixups (or eliminates them if the Earley bug is
+fixable). 3a-infra delivers the Context field migration and
+side-channel removal; 3a-migration delivers bottom-up graph
+construction and control-chain threading for linear code; 3b adds
+if/else Phi insertion; 3c adds loop Phi insertion.
 
 ### Per-class hash-cons boundaries
 
