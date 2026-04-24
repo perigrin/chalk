@@ -9,6 +9,11 @@ use Chalk::Bootstrap::Context;
 class Chalk::Bootstrap::Semiring::FilterComposite {
     field $semirings :param :reader;  # arrayref of semirings
 
+    # Tie instrumentation: records unresolved ties when CHALK_COUNT_FILTER_TIES is set.
+    # Each entry is a hashref: { semiring => $sr, slot => $slot_name }.
+    # Enabled only when the env var is non-empty; zero production impact otherwise.
+    field $_tie_log = [];
+
     # SA is always the last semiring by convention.
     # All semirings before SA are annotation-layer semirings that write to
     # named slots in the Context's annotations hash.
@@ -20,6 +25,15 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             blessed($_) && $_->can('slot_name') && defined $_->slot_name()
         } $semirings->@[0 .. $#{ $semirings } - 1];
     }
+
+    # tie_log() returns the current tie log (arrayref of tie entries).
+    # Each entry: { semiring => $sr, slot => $slot_name }.
+    # Only populated when CHALK_COUNT_FILTER_TIES env var is set.
+    method tie_log() { return $_tie_log }
+
+    # flush_tie_log() resets the tie log to empty.
+    # Call before each parse to attribute ties to the correct file.
+    method flush_tie_log() { $_tie_log = [] }
 
     # Clear hash-cons caches in all component semirings that support it.
     # Called between file parses to prevent unbounded memory growth.
@@ -223,7 +237,12 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             next if $result->@* == 0;
 
             # Multi-element result: semiring genuinely cannot choose → no preference.
-            next if $result->@* > 1;
+            if ($result->@* > 1) {
+                if ($ENV{CHALK_COUNT_FILTER_TIES}) {
+                    push $_tie_log->@*, { semiring => $sr, slot => $slot };
+                }
+                next;
+            }
 
             # Single-element result: semiring picked one side.
             my $r = $result->[0];
@@ -239,13 +258,26 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             next if $r_eq_left && $r_eq_right;
 
             # Result equals neither: semiring synthesized a new value — no preference.
-            next unless $r_eq_left || $r_eq_right;
+            if (!($r_eq_left || $r_eq_right)) {
+                if ($ENV{CHALK_COUNT_FILTER_TIES}) {
+                    push $_tie_log->@*, { semiring => $sr, slot => $slot };
+                }
+                next;
+            }
 
             # First semiring to express a preference determines the correct
             # derivation; the other is rejected as an invalid parse.
             return $r_eq_left ? 'right_loses' : 'left_loses';
         }
 
+        # All annotation semirings had no preference: unresolved tie.
+        # Record the tie for audit purposes when instrumentation is enabled.
+        if ($ENV{CHALK_COUNT_FILTER_TIES}) {
+            push $_tie_log->@*, {
+                semiring => 'all',
+                slot     => 'unresolved',
+            };
+        }
         return 'neither';
     }
 
