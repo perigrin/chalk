@@ -557,26 +557,28 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     # Fix list destructuring in FilterComposite::add where
-    # ($winner, $loser) = ($left, $right) gets compiled as bare "=" strings.
+    # ($correct, $rejected) = ($left, $right) gets compiled as bare "=" strings.
+    # Verdict string protocol ('right_loses'/'left_loses') is kept stable; only
+    # the output C variable names follow the Perl source ($correct/$rejected).
     method _fixup_filtercomposite_add_destructuring($xs_text) {
         $xs_text =~ s{
             (if \s* \(SvTRUE\(\(sv_eq\(verdict_sv, \s* sv_2mortal\(newSVpvs\("right_loses"\)\)\) \s* \? \s* &PL_sv_yes \s* : \s* &PL_sv_no\)\)\)) \s* \{
             \s* sv_2mortal\(newSVpvs\("="\)\);
             \s* \}
-        }{$1 \{\n        winner_sv = left; loser_sv = right;\n    \}}sx;
+        }{$1 \{\n        correct_sv = left; rejected_sv = right;\n    \}}sx;
 
         $xs_text =~ s{
             (else \s+ if \s* \(SvTRUE\(\(sv_eq\(verdict_sv, \s* sv_2mortal\(newSVpvs\("left_loses"\)\)\) \s* \? \s* &PL_sv_yes \s* : \s* &PL_sv_no\)\)\)) \s* \{
             \s* sv_2mortal\(newSVpvs\("="\)\);
             \s* \}
-        }{$1 \{\n        winner_sv = right; loser_sv = left;\n    \}}sx;
+        }{$1 \{\n        correct_sv = right; rejected_sv = left;\n    \}}sx;
 
         $xs_text =~ s{
             (else) \s* \{
             \s* sv_2mortal\(newSVpvs\("="\)\);
             \s* \}
             (\s* \{)
-        }{$1 \{\n        winner_sv = left; loser_sv = right;\n    \}$2}sx;
+        }{$1 \{\n        correct_sv = left; rejected_sv = right;\n    \}$2}sx;
 
         return $xs_text;
     }
