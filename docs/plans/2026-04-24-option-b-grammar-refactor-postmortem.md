@@ -1,6 +1,10 @@
 # Option B Grammar Refactor — Postmortem & Deferred Work
 
 **Status:** Rolled back 2026-04-24. Work deferred pending deeper design.
+**Follow-up:** 2026-04-24 later same day — Boolean::add wrapper commits
+(`2c066ae8`, `eafd6cc3`) also reverted, along with the survival test and
+the walker, after discovering the entire investigation premise was
+false. See "2026-04-24 follow-up" section below.
 
 **Author:** perigrin + Claude, 2026-04-24.
 
@@ -197,3 +201,80 @@ system is flaw-free. The work items above would establish it. Roughly
 ordered: class 4 (1-2 days) → class 2 (2-3 days) → class 1 (open-ended,
 bound by reference-impl choice) → class 3 (blocked on wrapper-loss) →
 class 5 (ongoing).
+
+## 2026-04-24 follow-up: the premise was false
+
+After the rollback, we asked: "wait, does Boolean even run in the
+FilterComposite production path?" Investigation of
+`lib/Chalk/Bootstrap/Semiring/FilterComposite.pm:16-22`:
+
+```perl
+method _annotation_semirings() {
+    return grep {
+        blessed($_) && $_->can('slot_name') && defined $_->slot_name()
+    } $semirings->@[0 .. $#{ $semirings } - 1];
+}
+```
+
+Boolean's `slot_name()` returns `undef` (documented at
+`lib/Chalk/Bootstrap/Semiring/Boolean.pm:80-83` and in commit
+`d0ddfb44`'s message). Therefore `_annotation_semirings()` filters it
+out. FilterComposite never calls Boolean's `multiply` or `add` on
+anything.
+
+Boolean is vestigial in FilterComposite — present in the constructor
+array for symbolic symmetry but never executed. The actual
+yes/no-recognition role is played by `Chalk::Bootstrap::Context`'s
+`is_zero` field, which every semiring respects.
+
+**Implications for wrapper-loss**:
+
+1. The commits `2c066ae8` and `eafd6cc3` added wrapper behavior to
+   `Boolean::add`. FilterComposite never calls that code path.
+2. The wrappers only appear when Boolean is used *standalone* (via
+   `build_perl_recognizer`, which constructs Earley with Boolean as
+   the semiring parameter, bypassing FilterComposite).
+3. The "wrapper-loss" phenomenon is specific to the Boolean-standalone
+   codepath. It does not affect production parsing.
+4. The use case for Boolean-standalone-with-wrappers was the ambiguity
+   corpus (verify Invariant #1 in `ambiguity-classes.md`). That use
+   case has better alternatives: (a) count-only audit via `add`
+   instrumentation without wrapping, (b) classify-at-creation via
+   side channel, (c) capture FilterComposite's `_filter_compare`
+   losers.
+
+**What we reverted in the follow-up**:
+
+- Commit `2c066ae8` (Boolean::add preserves both derivations).
+- Commit `eafd6cc3` (Boolean::add tags wrapper with `ambiguous`).
+- `t/bootstrap/ambiguity-perl-survival.t` — the red test measuring a
+  fix we no longer need.
+- `t/bootstrap/ambiguity-analysis.t` — tests for the walker that
+  inspected the no-longer-existing tags.
+- `t/bootstrap/lib/AmbiguityAnalysis.pm` — the walker itself.
+
+**What we kept**:
+
+- `t/bootstrap/ambiguity-synthetic.t` — the Earley merge-count
+  regression guard is still useful; it counts `add` calls not wrappers.
+- `t/bootstrap/filtercomposite-production-check.t` — confirms
+  production IR is sound; orthogonal to the wrapper investigation.
+- This postmortem — captures both the Option B attempt and the
+  Boolean-standalone premise discovery.
+- The design note
+  `docs/plans/2026-04-23-earley-reification-overwrites-add-merge-design.md`
+  is left in place as history, but its conclusion (that line 590 in
+  Earley.pm overwrites wrappers) is moot — wrappers no longer exist.
+
+**Removing Boolean's vestigial presence in FilterComposite**: a follow-up
+cleanup. Boolean is still in the `semirings` array but never invoked.
+Removing it from the constructor would simplify the design. That's a
+separate, smaller change tracked as a follow-up task.
+
+**Lesson of the follow-up**: we spent a session chasing a bug in a
+codepath that isn't used. The red flag was present earlier (`slot_name
+=> undef` documented in commit `d0ddfb44`), but I didn't connect it to
+wrapper-loss until perigrin asked "what?" on my offhand statement that
+FilterComposite bypasses Boolean's `add`. Reading Boolean as an input
+to every disambiguation decision was wrong; Context's `is_zero` flag
+already fills that role.
