@@ -84,55 +84,90 @@ I wrote in earlier drafts of this postmortem:
 > "Class 5 ambiguity is inherent to Perl and cannot be resolved at
 >  grammar shape alone."
 
-**That was wrong.** Two things I overstated:
+**That was wrong in a specific way.** There *is* a real ambiguity at
+the grammar level in the refactored shape — `push @arr, $x` admits two
+derivation trees. What I got wrong was the framing of *why* the grammar
+can't resolve it.
 
-1. **I never established this was Class 5.** The ambiguity I hit
-   (`CallExpression alt 4 vs alt 5` on `push @arr, $x`) has a similar
-   flavor to Class 5 (named-unary vs list-op) but I never verified it
-   was the same phenomenon. I labeled it and moved on.
+The accurate framing (per perigrin): **the ambiguity needs to be
+decided by a semiring with access to a type library that knows the
+arity of all functions in scope.** `push` is a list-op in Perl's type
+library; its signature says it consumes its argument list. The grammar
+doesn't carry arity information, so the grammar alone can't decide
+which derivation is correct. But a semiring that consults the type
+library can.
 
-2. **I never established "inherent to Perl."** Perl *as written* has
-   unambiguous semantics (`push @arr, $x` is one call). Whether our
-   *grammar* can encode that unambiguously is a grammar-design
-   question, not a language-inherent property. Other grammar shapes
-   might well avoid this ambiguity at the rule level rather than
-   requiring semiring resolution.
+This is a crucial distinction from my earlier "inherent to Perl"
+framing. The ambiguity isn't mystical — it's fully resolvable. The
+resolution just belongs to the **TypeInference semiring**, which
+already has `builtin_lookup` access to the type library and already
+tracks `list_arity` on `ExpressionList`. TypeInference should zero
+out derivations where the call's argument count doesn't match the
+builtin's signature. Structural should not be making this call — it
+doesn't have access to signatures.
 
-The accurate finding:
+What I actually did wrong in the Option B attempt:
 
-> **My specific grammar-rewrite approach — splitting `CallExpression`'s
-> no-paren form into separate `Expression` and `ExpressionList` alts —
-> introduced an ambiguity that wasn't present under the old shape and
-> that the existing disambiguation infrastructure wasn't tuned for.
-> Rather than work through alternative grammar shapes or update the
-> disambiguation infrastructure for the new shape, I gave up and called
-> the whole approach unworkable. That was premature generalization.**
+1. **I never established this was Class 5** (named-unary vs list-op)
+   specifically. The ambiguity I hit has the same flavor but I didn't
+   verify the mechanism.
+2. **I didn't reach for TypeInference.** When test 6 failed, I tried
+   to patch it via Structural tagging updates and gave up when that
+   proved fiddly. The principled fix is updating TypeInference's
+   `CallExpression` handling to be signature-aware, which is where
+   the type library lives and where this decision belongs.
+3. **I generalized prematurely.** One failing test became "Option B
+   can't work"; in reality it was "Option B, with Structural-only
+   disambiguation, doesn't work — but I never tried moving the
+   disambiguation to TypeInference where it belongs."
 
-## Alternatives I didn't explore
+## The principled path forward (not explored in this session)
 
-Each of these might make Option B work without the CallExpression
-ambiguity:
+The `CallExpression alt 4 vs alt 5` ambiguity that test 6 exposed is
+resolvable at the TypeInference layer, not the grammar layer. Specifically:
+
+**TypeInference becomes signature-aware at CallExpression completion.**
+
+When `CallExpression` completes, TypeInference already knows the
+`call_symbol` (the QualifiedIdentifier text, e.g., `"push"`) and has
+access to the type library via `builtin_lookup`. It also knows the
+`list_arity` of its ExpressionList child (if any) or the single-value
+arity of its Expression child. The missing piece: TypeInference should
+consult the builtin's signature and **zero out derivations whose
+argument shape doesn't match**.
+
+For `push @arr, $x`:
+- `CallExpression alt 4` (push with single arg `@arr`, leftover `, $x`)
+  — signature says push takes a list ≥1, but the argument presented to
+  THIS CallExpression is arity 1. More importantly, the grammar-level
+  problem is that the leftover `, $x` ends up parsed by an outer rule.
+  TypeInference needs to recognize that a list-op with more input
+  available should consume it — i.e., prefer the longer match.
+- `CallExpression alt 5` (push with ExpressionList `@arr, $x`)
+  — signature says push takes a list, arity 2 satisfies. Valid.
+
+The right TypeInference rule is roughly: "for a list-op builtin in
+`QualifiedIdentifier WS ExpressionList` position, prefer the derivation
+with higher arity." That's a few lines in TypeInferenceActions, not a
+grammar refactor.
+
+Alternative grammar shapes that might avoid the ambiguity entirely:
 
 1. **Keep `ExpressionList?` unchanged at CallExpression call sites.**
    Restrict `ExpressionList` to ≥2 only where the original
-   pseudo-ambiguity lives (ExpressionStatement). This is the
-   minimum-scope version of Option B.
+   pseudo-ambiguity lives (ExpressionStatement). Minimum-scope.
 
 2. **Introduce a helper rule `ArgList` that admits 1+ expressions**
-   for use at call sites, and keep `ExpressionList` as strict ≥2 at
-   list contexts. `ArgList ::= Expression | ArgList _ sep _ Expression
-   | ArgList _ /,/`. This preserves "1+ args" semantics without
-   re-introducing the overlap at list contexts.
+   for use at call sites; keep `ExpressionList` as strict ≥2 at list
+   contexts. `ArgList ::= Expression | ArgList _ sep _ Expression | ...`.
+   Preserves "1+ args" semantics without re-introducing the overlap
+   at list contexts.
 
-3. **Accept the new CallExpression ambiguity and write a targeted
-   Structural rule** preferring the multi-arg form (longer-match-wins
-   at CallExpression's no-paren branch). A narrower disambiguation
-   than the grammar-shape fix.
-
-4. **Update the disambiguation infrastructure for the new alt indices**
-   and keep the grammar change as written. Requires (1)-(4) from the
-   list above under "What actually happened" to be coherent with
-   each other.
+These are grammar workarounds for what is fundamentally a semantic
+question (what's the arity of this call?). The principled answer puts
+the decision at TypeInference. The grammar workarounds are acceptable
+if TypeInference-signature-awareness proves more work than expected,
+but they are workarounds, not the right fix.
 
 None of these were attempted. The correct story is that we ran out of
 time/appetite in the session, not that the approach is impossible.
