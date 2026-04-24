@@ -90,4 +90,28 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     is($sites[0]{context}, $amb, 'found site is the inner add wrapper');
 }
 
+# Test 8: shared ambiguous subtree — the same add() wrapper reached from
+# two different parents in the Context DAG must be reported only once.
+# This mirrors what happens in real parses, where Earley reuses values:
+# a single ambiguous merge can be reachable from multiple paths through
+# the returned Context tree.
+{
+    my $a   = Chalk::Bootstrap::Context->new(focus => true, is_zero => false);
+    my $b   = Chalk::Bootstrap::Context->new(focus => true, is_zero => false);
+    my $amb = $sr->add($a, $b);
+
+    # Two different multiply contexts that both reference $amb as a child.
+    my $one = $sr->one();
+    my $parent_left  = $sr->multiply($amb, $one);
+    my $parent_right = $sr->multiply($one, $amb);
+
+    # Root has both parents as children, so $amb is reachable via two paths.
+    my $root = $sr->multiply($parent_left, $parent_right);
+
+    my @sites = ambiguity_sites($root);
+    is(scalar @sites, 1,
+        'shared ambiguous subtree reported exactly once (not once per path)');
+    is($sites[0]{context}, $amb, 'found site is the shared wrapper');
+}
+
 done_testing();

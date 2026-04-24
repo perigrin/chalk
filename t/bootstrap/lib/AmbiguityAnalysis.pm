@@ -8,7 +8,7 @@ package AmbiguityAnalysis;
 use Exporter 'import';
 our @EXPORT_OK = qw(ambiguity_sites classify_site);
 
-use Scalar::Util qw(blessed);
+use Scalar::Util qw(blessed refaddr);
 
 # Walk a Boolean-parse result Context and return one hashref per
 # ambiguous wrapper encountered. Each site is:
@@ -17,14 +17,21 @@ use Scalar::Util qw(blessed);
 # walker descends into both ambiguous and non-ambiguous two-child
 # nodes so ambiguity buried beneath structural multiply composition
 # is still discovered. Non-Context inputs return an empty list.
+#
+# Context values form a DAG, not a tree — Earley and the semirings
+# reuse Context objects across multiple parents. A %seen refaddr guard
+# ensures each node is inspected at most once, so a shared ambiguous
+# wrapper reported once regardless of how many paths reach it.
 sub ambiguity_sites($root) {
     return () unless blessed($root) && $root->isa('Chalk::Bootstrap::Context');
 
     my @sites;
+    my %seen;
     my @queue = ($root);
     while (@queue) {
         my $node = shift @queue;
         next unless blessed($node) && $node->isa('Chalk::Bootstrap::Context');
+        next if $seen{refaddr($node)}++;
 
         if ($node->annotations->{ambiguous}) {
             my @kids = $node->children->@*;
