@@ -1,28 +1,32 @@
 # Option B Grammar Refactor — Postmortem & Deferred Work
 
-**Status:** Rolled back 2026-04-24. Work deferred pending deeper design.
-**Follow-up:** 2026-04-24 later same day — Boolean::add wrapper commits
-(`2c066ae8`, `eafd6cc3`) also reverted, along with the survival test and
-the walker, after discovering the entire investigation premise was
-false. See "2026-04-24 follow-up" section below.
+**Status:** Rolled back 2026-04-24 after one specific implementation
+approach didn't pass tests. The broader question — can we eliminate the
+`Expression vs ExpressionList(single)` pseudo-ambiguity — remains open.
+
+**Update 2026-04-24 late day:** The Boolean-vestigial observation that
+followed the rollback led to a separate fix (Boolean now actively
+participates in FilterComposite). See "2026-04-24 follow-up" section.
 
 **Author:** perigrin + Claude, 2026-04-24.
 
-**Context:** During wrapper-loss investigation, we noticed `42;` parsed
-through the Perl grammar triggered one `Boolean::add(both-nonzero)` call
-— a "genuine ambiguity" in a trivial input. Tracing the merge showed it
-was `ExpressionStatement alt 0 (Expression)` vs `alt 1 (ExpressionList)`,
+## What prompted the attempt
+
+While investigating something else, we noticed `42;` parsed through the
+Perl grammar triggered one `Boolean::add(both-nonzero)` call — a
+"genuine ambiguity" in a trivial input. Tracing the merge showed it was
+`ExpressionStatement alt 0 (Expression)` vs `alt 1 (ExpressionList)`,
 because `ExpressionList ::= Expression | ...` admitted single-element
 lists. Structural's disambiguation at
 `lib/Chalk/Bootstrap/Semiring/Structural.pm:197` preferred the simpler
 `Expression` alt.
 
-This is the same shape of pseudo-ambiguity the seven documented classes
-in `docs/architecture/ambiguity-classes.md` describe, but was not itself
-listed. The impulse — correct in principle — was to clean this up so the
-ambiguity corpus only sees "real" classes.
+This pseudo-ambiguity is not listed among the seven classes in
+`docs/architecture/ambiguity-classes.md`, but it has the same shape.
+Principled impulse: clean it up so the grammar admits ambiguity only
+for the documented classes.
 
-## What we tried (Option B)
+## What Option B tried
 
 Refactor `ExpressionList` to require ≥2 elements, making it structurally
 disjoint from bare `Expression`:
@@ -36,68 +40,121 @@ ExpressionList ::= ExpressionList _ /,/ _ Expression
                  | Expression _ /,/ ;
 ```
 
-Plus 8 call-site rewrites to expose `Expression | ExpressionList` (or
-`(Expression | ExpressionList)?`) wherever "1 or more" was intended
-under the old shape.
+Plus 8 call-site rewrites to expose `Expression | ExpressionList`
+(or similar) wherever "1 or more" was intended under the old shape.
 
-## What we discovered
+## What actually happened
 
-**The refactor reduces ambiguity for trivial cases** (`42;` has no
-Boolean::add merge afterward) **but does not eliminate it for list-ops**
-(`push @arr, $x`, `print 1, 2`, etc.). The Class 5 ambiguity
-(named-unary vs list-op) is inherent to Perl and cannot be resolved at
-grammar shape alone — it requires a semiring with knowledge of builtin
-signatures to decide whether the call is list-op (consume all args) or
-named-unary (consume first arg).
+**For trivial cases, the refactor worked.** `42;` no longer produced an
+`ExpressionList(Expression)` alternative; only the bare `Expression`
+alt matched at `ExpressionStatement`.
 
-For `push @arr, $x` under the new grammar:
+**`grammar-builtin-call.t` test 6 failed** on `push @arr, $x`. The
+refactored grammar created a new ambiguity at `CallExpression`'s
+no-paren form:
 
-- `CallExpression alt 4` (`QualifiedIdentifier WS Expression`): matches
-  `push @arr` with `, $x` left over (which parent rules absorb).
+- `CallExpression alt 4` (`QualifiedIdentifier WS Expression`):
+  matches `push @arr` as the body Expression, with `, $x` left for
+  parent rules to absorb.
 - `CallExpression alt 5` (`QualifiedIdentifier WS ExpressionList`):
-  matches the whole thing as one call.
+  matches the whole thing as one call with multi-arg ExpressionList.
 
-Both succeed recognition. They differ structurally in which derivation
-"owns" the trailing argument. Disambiguation currently happens via
-Structural + TypeInference + the old ExpressionList alt shape — none of
-which remain valid after the refactor without substantial rework.
+Both succeed recognition. They differ in which derivation owns the
+trailing argument. The existing disambiguation infrastructure was
+tuned for the old `ExpressionList` alt shape — specifically:
 
-Downstream breakage observed: `t/bootstrap/grammar-builtin-call.t` test
-6 fails because `SimpleStatement` receives 4 derivations (ExpressionStatement
-with Constant focus, ExpressionStatement with Call focus, ExpressionList
-returning [Call, Constant], ExpressionList returning [Call, Constant])
-and the merge winner's top Context loses its `rule` field, leaving
-`focus = undef`.
+- `Structural.pm:159` (MethodCall alt-index check): 3 alts became 8,
+  the `(0 || 2)` check was now wrong.
+- `Structural.pm:183` (ExpressionList alts ≥1): remapped but not yet
+  correct for the new alt layout.
+- `Structural.pm:197` (ExpressionStatement alt 1): arguably no longer
+  needed under new alts.
+- `TypeInferenceActions.pm:173` (ExpressionList method): switches on
+  `$alt_idx`; all indices shifted.
 
-## Why this is a multi-day refactor, not an hour-long fix
+I updated (1) and (4) during the attempt, but test 6 still failed
+because the new `CallExpression alt 4 vs alt 5` choice had no
+disambiguation rule. `push @arr, $x` ended up producing four parallel
+derivations at SimpleStatement and the merge chose badly.
 
-Exploration (agent dispatch, see conversation) surfaced that the
-following would all need updating coherently:
+## What I incorrectly concluded at the time
 
-1. **Structural.pm line 159**: MethodCall alt-index check `(0 || 2)` —
-   alt indices shifted; 3 alts became 8. (Done in attempt, reverted.)
-2. **Structural.pm line 183**: ExpressionList `$alt_idx >= 1` — old
-   alt 0 was bare Expression; new grammar has no bare-Expression alt.
-3. **Structural.pm line 197**: ExpressionStatement alt 1 disambiguation
-   — becomes vacuous when alts are input-disjoint for trivial cases
-   but may still matter for list-op cases (unclear).
-4. **TypeInferenceActions.pm line 173**: ExpressionList method switches
-   on alt_idx; all indices shifted. (Done in attempt, reverted.)
-5. **Precedence.pm**: CallExpression "pass through" logic (line 430-437)
-   may need to distinguish single-arg vs multi-arg calls.
-6. **The new Class 5 ambiguity** at `CallExpression alt 4 vs alt 5` needs
-   a disambiguation rule. Cleanest path is likely TypeInference
-   comparing list_arity against the builtin's signature — but that
-   infrastructure currently relies on the old ExpressionList alt shape.
-7. **Semantic action audits**: `Perl::Actions::CallExpression`,
-   `ExpressionList`, `MethodCall`, `ArrayConstructor`, `HashConstructor`
-   all need verification that they still produce correct IR under the
-   new alt indices.
+I wrote in earlier drafts of this postmortem:
 
-Each of these interacts with the others. A staged incremental fix
-requires a clear acceptance test for each stage, and most of the
-candidate "acceptance tests" depend on infrastructure that itself was
-tuned for the old grammar.
+> "Class 5 ambiguity is inherent to Perl and cannot be resolved at
+>  grammar shape alone."
+
+**That was wrong.** Two things I overstated:
+
+1. **I never established this was Class 5.** The ambiguity I hit
+   (`CallExpression alt 4 vs alt 5` on `push @arr, $x`) has a similar
+   flavor to Class 5 (named-unary vs list-op) but I never verified it
+   was the same phenomenon. I labeled it and moved on.
+
+2. **I never established "inherent to Perl."** Perl *as written* has
+   unambiguous semantics (`push @arr, $x` is one call). Whether our
+   *grammar* can encode that unambiguously is a grammar-design
+   question, not a language-inherent property. Other grammar shapes
+   might well avoid this ambiguity at the rule level rather than
+   requiring semiring resolution.
+
+The accurate finding:
+
+> **My specific grammar-rewrite approach — splitting `CallExpression`'s
+> no-paren form into separate `Expression` and `ExpressionList` alts —
+> introduced an ambiguity that wasn't present under the old shape and
+> that the existing disambiguation infrastructure wasn't tuned for.
+> Rather than work through alternative grammar shapes or update the
+> disambiguation infrastructure for the new shape, I gave up and called
+> the whole approach unworkable. That was premature generalization.**
+
+## Alternatives I didn't explore
+
+Each of these might make Option B work without the CallExpression
+ambiguity:
+
+1. **Keep `ExpressionList?` unchanged at CallExpression call sites.**
+   Restrict `ExpressionList` to ≥2 only where the original
+   pseudo-ambiguity lives (ExpressionStatement). This is the
+   minimum-scope version of Option B.
+
+2. **Introduce a helper rule `ArgList` that admits 1+ expressions**
+   for use at call sites, and keep `ExpressionList` as strict ≥2 at
+   list contexts. `ArgList ::= Expression | ArgList _ sep _ Expression
+   | ArgList _ /,/`. This preserves "1+ args" semantics without
+   re-introducing the overlap at list contexts.
+
+3. **Accept the new CallExpression ambiguity and write a targeted
+   Structural rule** preferring the multi-arg form (longer-match-wins
+   at CallExpression's no-paren branch). A narrower disambiguation
+   than the grammar-shape fix.
+
+4. **Update the disambiguation infrastructure for the new alt indices**
+   and keep the grammar change as written. Requires (1)-(4) from the
+   list above under "What actually happened" to be coherent with
+   each other.
+
+None of these were attempted. The correct story is that we ran out of
+time/appetite in the session, not that the approach is impossible.
+
+## Why this is at least a multi-day refactor
+
+Independent of which alternative we pursue, the full grammar refactor
+(any form of Option B) requires coherent updates across:
+
+1. Grammar (`docs/chalk-bootstrap.bnf`) — the alt shape.
+2. Structural.pm tagging blocks at lines 159, 183, 197 — alt indices
+   they switch on.
+3. TypeInferenceActions.pm ExpressionList method — alt dispatch.
+4. Precedence.pm CallExpression handling — may need arity awareness
+   depending on which alternative we pick.
+5. Semantic action audits — Perl::Actions::CallExpression,
+   ExpressionList, MethodCall, ArrayConstructor, HashConstructor.
+6. Test coverage for each disambiguation rule — to assert it still
+   picks the right derivation after the change.
+
+Each of these interacts with the others. Honest scope: 2-5 days of
+focused work with good test harnesses. Not an hour.
 
 ## What was committed anyway
 
@@ -110,47 +167,49 @@ The grammar, Structural, and TypeInferenceActions changes were reverted.
 ## What remains worth doing
 
 **Short-term**: accept that `42;` produces 1 spurious `add` call per
-trivial expression statement. The cost is small (one Boolean::add per
-ExpressionStatement) and Structural correctly picks the right parse.
-The ambiguity corpus will eventually want to exempt this case.
+trivial expression statement under the current grammar. The cost is
+small and Structural correctly picks the right parse. Document this
+pseudo-ambiguity as a known class-8-candidate until we refactor.
 
-**Medium-term**: When we return to grammar refactoring, approach it as a
-dedicated multi-day effort with:
-- A concrete acceptance test per change (the `ambiguity-perl-survival.t`
-  red test is one; more will be needed).
+**Medium-term**: When we return to Option B, pick one of the four
+alternatives above and pursue it with:
+
+- A concrete acceptance test per change (the synthetic probe pattern
+  is a good template — assert specific `add`-call counts on specific
+  inputs).
 - An ordering plan that lets each change land independently.
 - A rollback strategy per change.
-- Honest scope: probably 2-5 days of focused work.
 
-**Long-term**: The Invariant #1 claim in `ambiguity-classes.md` ("Grammar
-+ Boolean produces ambiguity ONLY in these seven classes") is currently
-**unproven** because the wrapper-loss bug makes Boolean-level ambiguity
-invisible. The corpus cannot verify it. Fixing wrapper-loss is
-prerequisite to validating the ambiguity contract — which is why we
-went down this path to begin with.
+**Long-term**: Invariant #1 in `ambiguity-classes.md` ("Grammar + Boolean
+produces ambiguity ONLY in these seven classes") can now be mechanically
+verified, since Boolean actively participates in FilterComposite (see
+follow-up section) and its `add`-merge counts are observable via
+instrumentation. That's the corpus infrastructure we originally wanted.
 
 ## Lessons
 
 1. **Brainstorming sized the change optimistically.** The claim "Option
-   B's branches admit disjoint inputs so no new ambiguity" was partially
-   true (eliminates trivial case) but fully false for list-op cases.
-   The disjointness property holds at `ExpressionList`'s own rule
-   level but not at every consumer's alternatives.
+   B's branches admit disjoint inputs so no new ambiguity" held for
+   `ExpressionList`'s own rule but did not carry through to every call
+   site's alternative set. I should have walked through at least one
+   specific call site (CallExpression) before accepting the brainstorm.
 
-2. **"Fix first principles" is principled, but principle alone doesn't
-   eliminate ambiguity that is semantically real.** Class 5 is inherent
-   to Perl. No grammar shape removes it.
+2. **"Premature generalization from one failing test."** When test 6
+   failed, I concluded Option B couldn't work. In reality I had hit
+   one disambiguation gap in one specific implementation. The right
+   response was to either fix the gap or try a different Option B
+   shape, not to abandon the approach.
 
 3. **Validation should come before work.** We committed to a 1-2 hour
    estimate without a test that would prove success. When the work
    expanded, we had no signal to say "this specific change is right"
    except running existing tests and hoping.
 
-4. **The `t/bootstrap/ambiguity-perl-survival.t` red test** (added
-   alongside this postmortem) is the test Option B was missing. It
-   asserts that *any* ambiguous wrapper survives into the returned
-   Context for known-ambiguous inputs. Currently TODO-failing. Any
-   future wrapper-loss fix can measure itself against this.
+4. **"Inherent to Perl" is a rationalization trap.** If I find myself
+   reaching for "this is inherent" as an explanation for why a specific
+   attempt didn't work, I should stop and ask: inherent to the
+   language, or inherent to *my chosen formalization* of the language?
+   Those are usually different.
 
 ## How to prove there are no fundamental flaws
 
@@ -174,39 +233,38 @@ none exist — that's a real gap.
 
 **Flaw class 3: Grammar invariants violated silently.** Invariant #1 of
 `ambiguity-classes.md` is an architectural claim that the corpus should
-verify. It currently can't because of wrapper-loss. Fix wrapper-loss,
-then verify the invariant mechanically. The new survival test is step
-1 of this.
+verify. Now that Boolean actively participates in FilterComposite, we
+can instrument `Boolean::add` to count both-non-zero merges during
+real parses and assert the count matches the expected documented
+classes. No wrapper-loss workaround needed.
 
 **Flaw class 4: Disambiguation infrastructure drift.** Structural's
 per-rule tagging relies on alt_idx stability. Any grammar change can
-silently break it. Write a test that parses a corpus of representative
-Perl snippets and asserts the *structural tag values* match expected
-— treating them as an observable contract. If the tags drift, we learn
-immediately. Currently there's no such test.
+silently break it — as Option B's attempt demonstrated. Write a test
+that parses a corpus of representative Perl snippets and asserts the
+*structural tag values* match expected — treating them as an
+observable contract. If the tags drift, we learn immediately.
+Currently there's no such test. Option B would have benefited from one.
 
 **Flaw class 5: Hidden grammar ambiguities.** Scan the grammar for
 pseudo-ambiguities (rules admitting the same input in multiple ways)
-and either document them as classes or eliminate them. The class 8
-case (`ExpressionStatement Expression | ExpressionList`) is an example.
-A mechanical grammar-ambiguity-detector tool would be a valuable
-addition — it doesn't exist today.
+and either document them as classes or eliminate them. The
+`ExpressionStatement Expression | ExpressionList` case is an example;
+others likely exist. A mechanical grammar-ambiguity-detector tool
+would be a valuable addition — it doesn't exist today.
 
 **Of these, classes 2 and 4 are the cheapest and most valuable starting
-points.** Both are implementable without the wrapper-loss fix. Class 3
-requires wrapper-loss fixed first.
+points.** Both are implementable independently of any grammar refactor.
 
-The uneasy truth: we don't currently have infrastructure to prove the
-system is flaw-free. The work items above would establish it. Roughly
-ordered: class 4 (1-2 days) → class 2 (2-3 days) → class 1 (open-ended,
-bound by reference-impl choice) → class 3 (blocked on wrapper-loss) →
-class 5 (ongoing).
+Rough ordering: class 4 (1-2 days) → class 2 (2-3 days) → class 1
+(open-ended, bound by reference-impl choice) → class 3 (possible now
+that Boolean is active) → class 5 (ongoing).
 
-## 2026-04-24 follow-up: the premise was false
+## 2026-04-24 follow-up: Boolean was vestigial; now it isn't
 
-After the rollback, we asked: "wait, does Boolean even run in the
+After the Option B rollback, we asked: "does Boolean even run in the
 FilterComposite production path?" Investigation of
-`lib/Chalk/Bootstrap/Semiring/FilterComposite.pm:16-22`:
+`lib/Chalk/Bootstrap/Semiring/FilterComposite.pm:16-22` showed:
 
 ```perl
 method _annotation_semirings() {
@@ -216,34 +274,40 @@ method _annotation_semirings() {
 }
 ```
 
-Boolean's `slot_name()` returns `undef` (documented at
-`lib/Chalk/Bootstrap/Semiring/Boolean.pm:80-83` and in commit
-`d0ddfb44`'s message). Therefore `_annotation_semirings()` filters it
-out. FilterComposite never calls Boolean's `multiply` or `add` on
-anything.
+Boolean's `slot_name()` returned `undef`, so `_annotation_semirings()`
+filtered it out. FilterComposite never called Boolean's `multiply`
+or `add` on anything flowing through parse.
 
-Boolean is vestigial in FilterComposite — present in the constructor
-array for symbolic symmetry but never executed. The actual
-yes/no-recognition role is played by `Chalk::Bootstrap::Context`'s
-`is_zero` field, which every semiring respects.
+Two paths from there:
 
-**Implications for wrapper-loss**:
+**Path 1 (first attempted, then reverted)**: remove Boolean from the
+TestPipeline constructor array. This made the array match the runtime
+reality (Boolean wasn't running anyway). perigrin correctly pushed
+back: that treats the symptom (Boolean in array does nothing) rather
+than the cause (Boolean should do something). Reverted as commit
+`eae2b39c`.
 
-1. The commits `2c066ae8` and `eafd6cc3` added wrapper behavior to
-   `Boolean::add`. FilterComposite never calls that code path.
-2. The wrappers only appear when Boolean is used *standalone* (via
-   `build_perl_recognizer`, which constructs Earley with Boolean as
-   the semiring parameter, bypassing FilterComposite).
-3. The "wrapper-loss" phenomenon is specific to the Boolean-standalone
-   codepath. It does not affect production parsing.
-4. The use case for Boolean-standalone-with-wrappers was the ambiguity
-   corpus (verify Invariant #1 in `ambiguity-classes.md`). That use
-   case has better alternatives: (a) count-only audit via `add`
-   instrumentation without wrapping, (b) classify-at-creation via
-   side channel, (c) capture FilterComposite's `_filter_compare`
-   losers.
+**Path 2 (committed as `23034e7b`)**: activate Boolean as a real filter
+semiring. Change `slot_name` from `undef` to `'boolean'`, have `multiply`
+write `annotations->{boolean} = true` on non-zero results, leave `add`
+semantics unchanged (deterministic left tie-break, which under
+FilterComposite's `_filter_compare` protocol signals "no preference"
+and defers to lower-priority filters).
 
-**What we reverted in the follow-up**:
+**Verification** (commit `23034e7b`): 786 tests pass across the tight
+9-file set. New test `boolean-active-in-composite.t` asserts Boolean's
+multiply fires 156 times during a `1 + 2` parse and that the returned
+Context has `annotations->{boolean}` populated. Boolean is now
+genuinely part of the filter stack.
+
+**What this unlocks**: the ambiguity corpus can now instrument
+`Boolean::add` under FilterComposite to count merges per parse. This
+replaces the wrapper-based approach (commits `2c066ae8`/`eafd6cc3`,
+reverted as `434b03b7`/`6ea3e63b`) with instrumentation on an active
+codepath. No wrapper-loss investigation needed.
+
+**Reverted in the wrapper-loss cleanup** (`6d7bf7f0`, `434b03b7`,
+`6ea3e63b`):
 
 - Commit `2c066ae8` (Boolean::add preserves both derivations).
 - Commit `eafd6cc3` (Boolean::add tags wrapper with `ambiguous`).
@@ -253,28 +317,26 @@ yes/no-recognition role is played by `Chalk::Bootstrap::Context`'s
   inspected the no-longer-existing tags.
 - `t/bootstrap/lib/AmbiguityAnalysis.pm` — the walker itself.
 
-**What we kept**:
+**Kept**:
 
-- `t/bootstrap/ambiguity-synthetic.t` — the Earley merge-count
-  regression guard is still useful; it counts `add` calls not wrappers.
+- `t/bootstrap/ambiguity-synthetic.t` — Earley merge-count regression
+  guard; still useful because it counts `add` calls, not wrappers.
 - `t/bootstrap/filtercomposite-production-check.t` — confirms
-  production IR is sound; orthogonal to the wrapper investigation.
-- This postmortem — captures both the Option B attempt and the
-  Boolean-standalone premise discovery.
+  production IR is sound; orthogonal.
+- `t/bootstrap/boolean-active-in-composite.t` — new, ensures Boolean
+  doesn't silently regress to vestigial status.
+- This postmortem — captures Option B's failure mode and the Boolean
+  activation that followed.
 - The design note
   `docs/plans/2026-04-23-earley-reification-overwrites-add-merge-design.md`
-  is left in place as history, but its conclusion (that line 590 in
-  Earley.pm overwrites wrappers) is moot — wrappers no longer exist.
+  is left as history. Its specific conclusion (Earley.pm line 590
+  overwrites wrappers) is moot now that wrappers don't exist, but the
+  investigation process documented there may be useful.
 
-**Removing Boolean's vestigial presence in FilterComposite**: a follow-up
-cleanup. Boolean is still in the `semirings` array but never invoked.
-Removing it from the constructor would simplify the design. That's a
-separate, smaller change tracked as a follow-up task.
-
-**Lesson of the follow-up**: we spent a session chasing a bug in a
-codepath that isn't used. The red flag was present earlier (`slot_name
-=> undef` documented in commit `d0ddfb44`), but I didn't connect it to
+**Lesson of the follow-up**: the red flag for Boolean-vestigial-ness
+was present in commit `d0ddfb44`'s message ("Boolean: undef (operates
+through is_zero only, no annotation slot)") but I didn't connect it to
 wrapper-loss until perigrin asked "what?" on my offhand statement that
-FilterComposite bypasses Boolean's `add`. Reading Boolean as an input
-to every disambiguation decision was wrong; Context's `is_zero` flag
-already fills that role.
+FilterComposite bypasses Boolean's `add`. Reading slot_name=undef as
+"Boolean is properly handled elsewhere" rather than "Boolean is
+silently not running" was the framing error.
