@@ -136,7 +136,11 @@ my sub _build_perl_parser_with_actions($grammar, $actions, %opts) {
     my $ordered = _reorder_grammar($grammar, %opts);
     my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($ordered);
 
-    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    # Boolean is NOT included here. FilterComposite filters out any semiring
+    # without a defined slot_name (see FilterComposite::_annotation_semirings),
+    # and Boolean's slot_name is undef. Recognition (yes/no) is provided by
+    # Context's is_zero flag, which every semiring respects. Boolean-standalone
+    # recognition uses build_perl_recognizer, not this path.
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
         lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
     );
@@ -153,7 +157,7 @@ my sub _build_perl_parser_with_actions($grammar, $actions, %opts) {
     Chalk::Bootstrap::Semiring::SemanticAction::set_mop($mop);
 
     my $comp_sr = Chalk::Bootstrap::Semiring::FilterComposite->new(
-        semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],
+        semirings => [$prec_sr, $type_sr, $struct_sr, $sem_sr],
     );
 
     return Chalk::Bootstrap::Earley->new(
