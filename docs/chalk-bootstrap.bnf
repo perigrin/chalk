@@ -31,7 +31,8 @@ StatementItem ::= SimpleStatement _ /;/
 
 # §3  STATEMENT CATEGORIES
 
-SimpleStatement ::= ReturnStatement
+SimpleStatement ::= ReturnStatement WS PostfixModifier
+    | ReturnStatement
     | ExpressionStatement
     | UseDeclaration ;
 
@@ -178,6 +179,7 @@ QwLiteral ::= /qw\s*\([^)]*\)/ ;
 # §14  UNARY EXPRESSIONS
 
 UnaryExpression ::= /!/ _ Expression
+    | /-[efdrwxRWXoOzslpSbcugktTBAMC]\b/ _ Expression
     | /-/ _ Expression
     | /\+/ _ Expression
     | /~/ _ Expression
@@ -232,6 +234,7 @@ Subscript ::= Expression _ /->/ _ /\[/ _ Expression _ /\]/
     | Expression _ /\{/ _ Expression _ /\}/ ;
 
 PostfixDeref ::= Expression _ /->/ _ /@\*/
+    | Expression _ /->/ _ /@/ _ /\[/ _ Expression _ /\]/
     | Expression _ /->/ _ /%\*/
     | Expression _ /->/ _ /\$\*/
     | Expression _ /->/ _ /\$#\*/ ;
@@ -266,10 +269,10 @@ Variable ::= ScalarVariable
     | ArrayVariable
     | HashVariable ;
 
-ScalarVariable ::= /\$[a-zA-Z_]\w*/
+ScalarVariable ::= /\$[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*/
     | /\$\d+/
     | /\$\$[a-zA-Z_]\w*/
-    | /\$#[a-zA-Z_]\w*/
+    | /\$#[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*/
     | /\$#\$[a-zA-Z_]\w*/ ;
 
 ArrayVariable ::= /@[a-zA-Z_]\w*/
