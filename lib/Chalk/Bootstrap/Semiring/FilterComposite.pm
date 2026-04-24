@@ -176,15 +176,20 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # between left and right Context values.
     #
     # Semirings are checked in priority order. The FIRST semiring that expresses
-    # a clear preference determines the winner — subsequent semirings are not
-    # consulted. This matches the ordered-filter semantics: earlier semirings
-    # have higher priority.
+    # a clear preference determines which derivation is the correct parse —
+    # subsequent semirings are not consulted. This matches the ordered-filter
+    # semantics: earlier semirings have higher priority.
     #
     # For each annotation-layer semiring, extracts the slot value from each
     # Context, calls $semiring->add($li, $ri), and inspects the result:
     #   - If the result matches $li but not $ri → prefers left ('right_loses')
     #   - If the result matches $ri but not $li → prefers right ('left_loses')
     #   - If result matches both or neither    → no preference, try next semiring
+    #
+    # Verdict string names ('left_loses', 'right_loses') are kept as-is for
+    # compatibility with XS codegen in EmitHelpers.pm, which pattern-matches
+    # them in generated C code. The Perl-level variable names use
+    # $correct/$rejected terminology.
     #
     # Identity comparison: scalars compare numerically; refs compare by refaddr.
     # Semiring add() returns are normalized to arrayrefs for uniform handling.
@@ -236,14 +241,15 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             # Result equals neither: semiring synthesized a new value — no preference.
             next unless $r_eq_left || $r_eq_right;
 
-            # First semiring to express a preference wins.
+            # First semiring to express a preference determines the correct
+            # derivation; the other is rejected as an invalid parse.
             return $r_eq_left ? 'right_loses' : 'left_loses';
         }
 
         return 'neither';
     }
 
-    # add() returns a single winning Context, not a survivor list.
+    # add() returns a single correct Context, not a survivor list.
     #
     # The design doc specifies survivor lists where multiple alternatives can
     # survive, with an end-of-parse assertion catching genuine ambiguities.
@@ -262,27 +268,31 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         return $right if $left->is_zero();
         return $left  if $right->is_zero();
 
-        # Determine which Context wins by scanning for annotation-layer preferences.
+        # Ask the filter semirings which derivation is the correct parse.
         my $verdict = $self->_filter_compare($left, $right);
 
-        my ($winner, $loser);
+        my ($correct, $rejected);
         if ($verdict eq 'right_loses') {
-            ($winner, $loser) = ($left, $right);
+            ($correct, $rejected) = ($left, $right);
         } elsif ($verdict eq 'left_loses') {
-            ($winner, $loser) = ($right, $left);
+            ($correct, $rejected) = ($right, $left);
         } else {
-            # No semiring expressed a preference: deterministic tie-break picks left.
-            ($winner, $loser) = ($left, $right);
+            # No semiring expressed a preference: deterministic tie-break
+            # picks left. This is a grammar-audit red flag — ambiguity that
+            # no documented class claims to resolve. See Invariant #1 in
+            # docs/architecture/ambiguity-classes.md.
+            ($correct, $rejected) = ($left, $right);
         }
 
-        # Post-merge hook: allow SA to transfer side-table state from
-        # loser to winner. This fixes the Earley stale-value merge problem
-        # where cfg_state updates are lost when add() picks the older value.
+        # Post-merge hook: allow SA to transfer side-table state from the
+        # rejected derivation to the correct one. This fixes the Earley
+        # stale-value merge problem where cfg_state updates are lost when
+        # add() picks the older value.
         if ($self->_sa()->can('on_merge')) {
-            $self->_sa()->on_merge($winner, $loser);
+            $self->_sa()->on_merge($correct, $rejected);
         }
 
-        return $winner;
+        return $correct;
     }
 
 }

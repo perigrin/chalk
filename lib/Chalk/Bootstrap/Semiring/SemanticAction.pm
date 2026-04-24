@@ -290,7 +290,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     }
 
     # Add combines alternative derivations, returning an arrayref of survivors.
-    # This follows the FilterComposite convention: [$winner] for one survivor,
+    # This follows the FilterComposite convention: [$correct] for one survivor,
     # [$left, $right] when both survive (genuine ambiguity that FilterComposite
     # resolves by picking left as a deterministic tie-break).
     method add($left, $right) {
@@ -298,7 +298,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return [$left]  if !defined $right;
 
         # Identity collapse: same refaddr means same derivation (FilterComposite
-        # preference-detection protocol passes the winner to both sides)
+        # preference-detection protocol passes the same value to both sides)
         return [$left] if refaddr($left) == refaddr($right);
 
         # Both non-zero and different: return both as survivors.
@@ -308,39 +308,41 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return [$left, $right];
     }
 
-    # Post-merge hook: transfer cfg_state from loser to winner when the winner
-    # lacks state that the loser has. This fixes the Earley stale-value merge
-    # problem where add() picks an older value that predates a cfg_state update.
-    method on_merge($winner, $loser) {
-        return unless defined $winner && defined $loser;
-        my $winner_state = $winner->annotations()->{cfg};
-        my $loser_state  = $loser->annotations()->{cfg};
+    # Post-merge hook: transfer cfg_state from the rejected derivation to the
+    # correct one when the correct side lacks state that the rejected side has.
+    # This fixes the Earley stale-value merge problem where add() picks an
+    # older value that predates a cfg_state update.
+    method on_merge($correct, $rejected) {
+        return unless defined $correct && defined $rejected;
+        my $correct_state  = $correct->annotations()->{cfg};
+        my $rejected_state = $rejected->annotations()->{cfg};
 
-        # If the loser has cfg_state but the winner doesn't, transfer it
-        if (defined $loser_state && !defined $winner_state) {
+        # If the rejected side has cfg_state but the correct side doesn't,
+        # transfer it
+        if (defined $rejected_state && !defined $correct_state) {
             # Store cfg state in the Context annotation (canonical location)
-            $winner->annotations()->{cfg} = $loser_state;
+            $correct->annotations()->{cfg} = $rejected_state;
             return;
         }
 
         # If both have cfg_state, merge them:
         # Control: prefer non-Start over Start
-        # Scope: merge both sides (loser may have bindings winner lacks)
-        my $can_merge = _can_merge_cfg($winner_state, $loser_state);
+        # Scope: merge both sides (rejected may have bindings correct lacks)
+        my $can_merge = _can_merge_cfg($correct_state, $rejected_state);
         if ($can_merge) {
-            my $w_ctrl = $winner_state->{control}->operation();
-            my $l_ctrl = $loser_state->{control}->operation();
+            my $c_ctrl = $correct_state->{control}->operation();
+            my $r_ctrl = $rejected_state->{control}->operation();
             # Pick the side with the more advanced control and preserve
             # all extra fields (then_stmts, if_node, etc.)
             my $base;
-            if ($w_ctrl eq 'Start' && $l_ctrl ne 'Start') {
-                $base = $loser_state;
+            if ($c_ctrl eq 'Start' && $r_ctrl ne 'Start') {
+                $base = $rejected_state;
             } else {
-                $base = $winner_state;
+                $base = $correct_state;
             }
-            my $merged_scope = $winner_state->{scope}->merge($loser_state->{scope});
+            my $merged_scope = $correct_state->{scope}->merge($rejected_state->{scope});
             # Store cfg state in the Context annotation (canonical location)
-            $winner->annotations()->{cfg} = _copy_cfg_with_scope($base, $merged_scope);
+            $correct->annotations()->{cfg} = _copy_cfg_with_scope($base, $merged_scope);
         }
         return;
     }
