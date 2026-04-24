@@ -180,11 +180,15 @@ arguments bind correctly to the builtin.
    classes.** Any input that produces ambiguity outside these
    classes is a grammar bug.
 
-2. **Each filtering semiring resolves exactly its own class(es).**
-   Precedence resolves operator binding and builtin arity (classes
-   1, 5, 6). TypeInference resolves keyword/identifier and
-   regex/division (classes 2, 4). Structural resolves block/hash
-   (classes 3, 7).
+2. **Each ambiguity class has one or more competent resolvers in
+   the filter stack.** Which specific semiring produces the
+   preference first depends on filter priority order (performance
+   optimization, not correctness). Primary associations under the
+   current ordering (Precedence → TypeInference → Structural):
+   Precedence for classes 1, 5, 6; TypeInference for classes 2, 4;
+   Structural for classes 3, 7. Other semirings may have relevant
+   domain knowledge; the correctness invariant is that no semiring
+   produces a wrong resolution.
 
 3. **SemanticAction never disambiguates.** By the time SA fires,
    exactly one derivation survives. SA transforms a Context into
@@ -216,3 +220,91 @@ disambiguation across separate semirings:
 This separation is deliberate: each concern is testable in
 isolation, composable via FilterComposite, and extensible without
 modifying the grammar.
+
+## Additional ambiguity points identified but out of scope
+
+A 2026-04-24 sweep of `toke.c` (see
+`docs/plans/2026-04-24-toke-sweep-undocumented-ambiguity.md`)
+identified 22 additional Perl ambiguity points beyond the nine
+documented above. Of those, a self-hosting scope audit (see
+`docs/plans/2026-04-24-self-hosting-scope-audit.md`) established
+that only a small subset affect Chalk's ability to parse its own
+source in `lib/`.
+
+### In scope for self-hosting
+
+These are grammar gaps that lib/ actually exercises and must be
+addressed to complete self-hosting:
+
+- **`-X` file test operators** (`-f $path`, `-d`, `-e`, etc.) —
+  used in `lib/Chalk/Bootstrap/Runtime.pm`. Grammar's
+  `UnaryExpression` doesn't admit filetest operators. Grammar
+  extension needed.
+
+- **Paren-delimited quote-like operators** (`q(...)`, `qq(...)`)
+  — used in `lib/Chalk/Bootstrap/BNF/Target/C.pm` and `XS.pm`.
+  Grammar admits `{}` and `[]` delimiters for `q`/`qq` but not
+  `()`. Grammar extension needed.
+
+### Planned via preprocessor hooks (not grammar)
+
+Features whose body semantics are non-local and don't fit BNF
+rules. These will be handled by a pre-lex transformation layer
+before the Earley parser sees the input:
+
+- **POD blocks** (`=head1 ... =cut`)
+- **Heredocs** (`<<EOF`)
+- **Formats** (`format NAME = ... .`) — likely same treatment
+
+Preprocessor hooks are a named architectural layer distinct from
+the grammar layer. Features handled here are outside the grammar
+by design, not by incomplete support.
+
+### Out of scope for current self-hosting goal
+
+Not exercised in `lib/`, deferred until scope expands beyond
+self-hosting (e.g., compiling arbitrary CPAN modules):
+
+- `FUNC` vs `LSTOP` whitespace distinction (`print(1,2)+3` vs
+  `print (1,2)+3`)
+- Comma-list array/hash slices (`@arr[0, 1, 2]`, `@hash{'a', 'b'}`)
+- Structured attribute arguments (`:param(name)`, `:prototype($$)`)
+- `\&foo` sub references
+- Version strings in expressions (outside `use` declarations)
+- `<FH>` readline vs less-than (would be a new Class-4-style
+  position-based ambiguity)
+- `%` modulo vs `%` hash sigil (same pattern, admitted silently
+  by the current grammar via Precedence)
+- `?PATTERN?` one-time match (deprecated in Perl)
+- `&foo` sub call, `\&foo` sub reference
+- `package NAME { ... }` block form
+- `eval "STRING"` — Chalk uses try/catch; string eval excluded
+- Prototype-driven parsing (`sub NAME ($$)`) — same runtime
+  symbol-table requirement as Class 8
+
+### Partial / backend-dependent
+
+- **Interpolated string internals** (`"$foo[0]"`, `"${foo}bar"`) —
+  currently opaque (strings are atomic regex-matched tokens). Works
+  for the Perl backend, which emits source unchanged. Becomes a
+  concern when the XS/C backend needs to analyze interpolation
+  targets.
+
+### Discovered gaps specific to `DepChaser.pm`
+
+`lib/Chalk/Bootstrap/DepChaser.pm` uses several features the
+grammar doesn't support: readline `<$fh>`, `local $/;` (punctuation
+variables), `eval "STRING"`. DepChaser is a transitional workaround
+for incomplete MOP/introspection. The proper resolution is MOP
+completion, which retires DepChaser rather than teaching the
+grammar features Chalk's subset doesn't aim to support.
+
+## Scope note
+
+The nine classes above are not a complete enumeration of Perl's
+ambiguities. They are the ambiguities that Chalk's current
+grammar admits *and* considers in scope for resolution by its
+filter-semiring architecture. Other ambiguity points exist (see
+the 22-point sweep); they are addressed by grammar extension,
+preprocessor hooks, restriction, or exclusion depending on the
+specific case and Chalk's scope.

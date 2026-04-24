@@ -1,5 +1,5 @@
 # ABOUTME: IR-driven dependency resolver for XS bootstrap compilation.
-# ABOUTME: Extracts UseDecl module names from IR and resolves transitive closure.
+# ABOUTME: Transitional workaround for incomplete MOP/introspection — likely removed once MOP can answer dependency queries directly.
 use 5.42.0;
 use utf8;
 use experimental 'class';
