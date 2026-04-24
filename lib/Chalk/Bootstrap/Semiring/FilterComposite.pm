@@ -21,9 +21,14 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     method _annotation_semirings() {
         # All semirings except the last (SA) that have a defined slot_name.
         # Non-object semirings (legacy test stubs without slot_name) are skipped.
+        # Build the list of all-but-last semirings without ->@[...] slice syntax
+        # (postfix array slice is grammatically correct but TypeInference filters
+        # it in the full pipeline; see docs/plans/2026-04-24-maturity-audit-plan.md).
+        my @without_sa = $semirings->@*;
+        pop @without_sa;
         return grep {
             blessed($_) && $_->can('slot_name') && defined $_->slot_name()
-        } $semirings->@[0 .. $#{ $semirings } - 1];
+        } @without_sa;
     }
 
     # tie_log() returns the current tie log (arrayref of tie entries).
