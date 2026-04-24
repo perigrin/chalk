@@ -15,18 +15,8 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     method _sa() { return $semirings->[-1] }
     method _annotation_semirings() {
         # All semirings except the last (SA) that have a defined slot_name.
+        # Boolean has slot_name=undef and is handled through is_zero flag only.
         # Non-object semirings (legacy test stubs) are skipped.
-        #
-        # NOTE on Boolean: Boolean's slot_name is undef, so any Boolean
-        # instance passed in the semirings array is silently filtered out
-        # here. Boolean's yes/no role in recognition is fulfilled by
-        # Context's is_zero flag (respected by every semiring's multiply
-        # and add), not by any Boolean method running under FilterComposite.
-        # Boolean is therefore NOT included in the production
-        # FilterComposite construction (see TestPipeline.pm). Some legacy
-        # tests still pass it; those tests are unaffected because of this
-        # filter, but new code should not add Boolean to the array — it
-        # does nothing.
         return grep {
             blessed($_) && $_->can('slot_name') && defined $_->slot_name()
         } $semirings->@[0 .. $#{ $semirings } - 1];
