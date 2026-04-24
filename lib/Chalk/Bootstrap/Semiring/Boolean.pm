@@ -55,22 +55,16 @@ class Chalk::Bootstrap::Semiring::Boolean {
         );
     }
 
-    # add combines two alternatives. When both are non-zero, both
-    # derivations are preserved as children so downstream semirings
-    # can see the ambiguity and disambiguate. When only one is
-    # non-zero, it is returned directly (no wrapper). When both are
-    # zero, zero is returned.
+    # add combines two alternatives. For pure recognition we only care whether
+    # at least one alternative succeeded. If both are non-zero we keep $left
+    # (deterministic tie-break); if only one is non-zero it wins; if both are
+    # zero we return zero.
     method add($left, $right) {
         my $lz = $self->is_zero($left);
         my $rz = $self->is_zero($right);
         return $self->zero() if $lz && $rz;
         return $right if $lz;
-        return $left  if $rz;
-        return Chalk::Bootstrap::Context->new(
-            focus    => true,
-            children => [$left, $right],
-            is_zero  => false,
-        );
+        return $left;
     }
 
     # slot_name: Boolean operates through is_zero only — no annotation slot.
