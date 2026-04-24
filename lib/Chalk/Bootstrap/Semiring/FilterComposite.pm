@@ -15,8 +15,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     method _sa() { return $semirings->[-1] }
     method _annotation_semirings() {
         # All semirings except the last (SA) that have a defined slot_name.
-        # Boolean has slot_name=undef and is handled through is_zero flag only.
-        # Non-object semirings (legacy test stubs) are skipped.
+        # Non-object semirings (legacy test stubs without slot_name) are skipped.
         return grep {
             blessed($_) && $_->can('slot_name') && defined $_->slot_name()
         } $semirings->@[0 .. $#{ $semirings } - 1];

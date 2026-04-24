@@ -1,5 +1,5 @@
 # ABOUTME: Boolean recognition semiring for parse acceptance/rejection.
-# ABOUTME: Returns Context objects so the parse tree shape survives for graph-equivalence testing.
+# ABOUTME: Participates in FilterComposite via the 'boolean' annotation slot.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -16,59 +16,58 @@ class Chalk::Bootstrap::Semiring::Boolean {
 
     method zero() {
         $ZERO_CTX //= Chalk::Bootstrap::Context->new(
-            focus    => undef,
-            children => [],
-            is_zero  => true,
+            focus       => undef,
+            children    => [],
+            is_zero     => true,
+            annotations => { boolean => false },
         );
         return $ZERO_CTX;
     }
 
     method one() {
         $ONE_CTX //= Chalk::Bootstrap::Context->new(
-            focus    => true,
-            children => [],
-            is_zero  => false,
+            focus       => true,
+            children    => [],
+            is_zero     => false,
+            annotations => { boolean => true },
         );
         return $ONE_CTX;
     }
 
-    # is_zero reads the Context's is_zero flag. Non-Context values are never
-    # considered zero — they're foreign to this semiring's protocol and the
-    # safest reading is "not zero" so we don't poison parses that leak them in.
+    # is_zero reads the Context's is_zero flag directly.
     method is_zero($value) {
-        return false unless defined $value;
-        return false unless ref($value);
-        return false unless blessed($value) && $value->isa('Chalk::Bootstrap::Context');
-        return $value->is_zero() ? true : false;
+        return $value->is_zero();
     }
 
-    # multiply builds a structural Context wrapping $left and $right as children.
-    # The resulting tree preserves parse shape, which is what the Leo
-    # graph-equivalence test needs to compare Leo-on vs Leo-off runs.
-    # Short-circuits to the zero singleton if either operand is zero.
+    # multiply combines two live parse branches. Both must be live for the
+    # product to be live (boolean AND). Returns a two-child Context so parse
+    # shape is preserved for Leo graph-equivalence testing, tagged with
+    # annotations->{boolean} = true so FilterComposite can read the slot.
     method multiply($left, $right) {
-        return $self->zero() if $self->is_zero($left);
-        return $self->is_zero($right) ? $self->zero() : Chalk::Bootstrap::Context->new(
-            focus    => true,
-            children => [$left, $right],
-            is_zero  => false,
+        return $self->zero() if $left->is_zero();
+        return $self->zero() if $right->is_zero();
+        return Chalk::Bootstrap::Context->new(
+            focus       => true,
+            children    => [$left, $right],
+            is_zero     => false,
+            annotations => { boolean => true },
         );
     }
 
     # add combines two alternatives. For pure recognition we only care whether
-    # at least one alternative succeeded. If both are non-zero we keep $left
-    # (deterministic tie-break); if only one is non-zero it wins; if both are
-    # zero we return zero.
+    # at least one alternative succeeded. Deterministic tie-break: return the
+    # left operand when both are non-zero. Under FilterComposite, returning
+    # $left when both are non-zero means "no preference" — the composite's
+    # _filter_compare sees result-equals-left-not-right and defers to the
+    # next filter semiring.
     method add($left, $right) {
-        my $lz = $self->is_zero($left);
-        my $rz = $self->is_zero($right);
-        return $self->zero() if $lz && $rz;
-        return $right if $lz;
+        return $self->zero() if $left->is_zero() && $right->is_zero();
+        return $right if $left->is_zero();
         return $left;
     }
 
-    # slot_name: Boolean operates through is_zero only — no annotation slot.
+    # slot_name: Boolean reads/writes the 'boolean' annotation slot.
     method slot_name() {
-        return undef;
+        return 'boolean';
     }
 }

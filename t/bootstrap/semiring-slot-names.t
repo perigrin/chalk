@@ -16,13 +16,13 @@ use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 
 # =========================================================================
-# Boolean: no annotation slot (operates through is_zero only)
+# Boolean: writes 'boolean' annotation slot (active under FilterComposite)
 # =========================================================================
 
 {
     my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     ok($sr->can('slot_name'), 'Boolean has slot_name() method');
-    is($sr->slot_name(), undef, 'Boolean slot_name() returns undef');
+    is($sr->slot_name(), 'boolean', "Boolean slot_name() returns 'boolean'");
 }
 
 # =========================================================================

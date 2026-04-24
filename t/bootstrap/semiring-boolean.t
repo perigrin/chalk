@@ -134,14 +134,6 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     ok($sr->is_zero($result), "sequence fails when any element fails");
 }
 
-# Test 10: Is_zero with non-semiring values (should handle gracefully)
-{
-    ok(!$sr->is_zero(undef), "undef is not zero");
-    ok(!$sr->is_zero(1), "arbitrary value 1 is not zero");
-    ok(!$sr->is_zero(0), "arbitrary value 0 is not zero");
-    ok(!$sr->is_zero("false"), "string 'false' is not zero");
-}
-
 # Test 10b: Unified-context invariant — all ops return Context objects.
 # Boolean must obey `(Context, Context) -> Context` like every other semiring.
 {
