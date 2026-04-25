@@ -3,7 +3,7 @@
 **Date:** 2026-04-25
 **Inputs:**
 - 2026-04-25-audit-1-grammar-findings.md (8399ec0e)
-- 2026-04-25-audit-2-semirings-findings.md (0166a24e)
+- 2026-04-25-audit-2-semirings-findings.md (0166a24e + addendum 0c19b8fb)
 - 2026-04-25-audit-3-mop-ir-findings.md (736281f1)
 
 **Status:** Synthesis. Proposes ordering. Decisions belong to perigrin.
@@ -70,16 +70,25 @@ they cross-validate.
    doc's examples illustrate what each class is about but do not let a
    future auditor verify ownership empirically.
 
-3. **The 27 conformance-failing files are not fully explained by the
-   three seed bugs (Audit 1 + Audit 2).** Audit 1 reports 121/148 files
-   pass the conformance harness; Audit 2 narrows the brief's "12-15
+3. **The 27 conformance-failing files are dominated by an interaction
+   bug (Audit 1 + Audit 2 + addendum).** Audit 1 reports 121/148 files
+   pass the conformance harness; Audit 2 narrowed the brief's "12-15
    files" estimate for Bug 1 by showing the dominant `map BLOCK
-   $ref->@*` pattern PASSES the per-stage probe. The bug count remains
-   3 (or arguably 2 since Bugs 1 and 2 share a single TI site), but the
-   27 failures are not enumerated against the bugs; some unknown
-   fraction of the 27 has a different root cause not yet identified.
-   The IR-cluster addendum probe was scheduled to investigate this;
-   [addendum probe pending; integrate when complete].
+   $ref->@*` pattern PASSES the per-stage probe. The IR-cluster
+   addendum (commit `0c19b8fb`) then identified the actual root cause:
+   **Bug 4 — TypeInference + SemanticAction interaction**. Neither TI
+   alone nor SA alone rejects; only `[B, T, A]` rejects. The trigger
+   is a named-unary or list-op builtin (`defined`, `ref`, `length`,
+   `uc`, `lc`, `scalar`, `exists`, `delete`, `chr`, `ord`, `join`,
+   `split`, `substr`, `sprintf`, `bless`, `chomp`, `chop`, `warn`,
+   `print`, `say`, `push`) inside a `map`/`grep`/`sort` BLOCK parsed
+   via `CallExpression` alt 3 (`Identifier WS Block WS ExpressionList`).
+   Minimal failing case: `my @x = map { defined $_ } @arr;`. This is
+   the first interaction-class bug in the audit; Bugs 1-3 each pinned
+   to a single semiring. Site count: 9/9 IR-cluster files plus 5+
+   non-cluster files (`Earley.pm`, `Optimizer/DCE.pm`, `EmitHelpers.pm`,
+   `FilterComposite.pm`, `IR/Serialize/JSON.pm`). One trigger explains
+   the cluster; no sub-patterns identified.
 
 4. **CLAUDE.md migration estimate is materially overstated (Audit 3 +
    inferred from Audit 1 grammar gap state).** Audit 3 directly
@@ -170,10 +179,10 @@ Four items not in `ambiguity-classes.md`'s seven classes:
 - **Item 4 — `q(...)` admitted as CallExpression-shaped** (subset of
   Gap 3).
 
-### Semiring filter bugs (Audit 2)
+### Semiring filter bugs (Audit 2 + IR-cluster addendum)
 
-Three confirmed filter bugs; Bugs 1 and 2 share a TypeInference site so
-one fix retires both:
+Four confirmed filter bugs. Bugs 1 and 2 share a TypeInference site so
+one fix retires both. Bug 4 is the first interaction-class bug.
 
 - **Bug 1 — TypeInference rejects parenthesized literal LIST as
   block-form-builtin argument.** Site: `TypeInference.pm:340-365`.
@@ -185,12 +194,23 @@ one fix retires both:
   `for` header.** Site: `Precedence.pm:170-186` (hypothesis from
   reading, not instrumentation). Pattern: `for (my $x = 0; …; $x +=
   2)`. Affects 1 file in `lib/`. Audit 2 Bug 3.
-
-[addendum probe pending; integrate when complete] — Audit 2 left open
-the question of what failure mechanism explains the IR-cluster files
-that the brief originally attributed to Bug 1. The per-stage probe
-showed the dominant pattern PASSES, so the cluster's rejections have a
-different cause not identified by the audit.
+- **Bug 4 — TypeInference + SemanticAction interaction rejects
+  named-unary/list-op builtin inside `map`/`grep`/`sort` BLOCK parsed
+  via `CallExpression` alt 3.** Per-stage shows `[B] [B,P] [B,P,T]
+  [B,P,T,S]` all PASS; only `[B,P,T,S,A]` rejects. Subset bisection
+  confirms `[B,T,A]` is the minimal failing combo. Trigger builtins:
+  `defined`, `ref`, `length`, `uc`, `lc`, `scalar`, `exists`, `delete`,
+  `chr`, `ord`, `join`, `split`, `substr`, `sprintf`, `bless`, `chomp`,
+  `chop`, `warn`, `print`, `say`, `push`. Non-trigger builtins:
+  `return`, `die`, `pop`, `shift`, `keys`, `values`, `each`, `sort`,
+  `reverse`. Minimal failing case: `my @x = map { defined $_ } @arr;`.
+  Sites: 9/9 IR-cluster files + 5+ non-cluster (`Earley.pm`,
+  `Optimizer/DCE.pm`, `EmitHelpers.pm`, `FilterComposite.pm`,
+  `IR/Serialize/JSON.pm`). RCA of *why* TI+SA together reject
+  (when neither alone does) is out of scope for the read-only probe;
+  the addendum sketches three remediation directions without endorsing
+  any. This is the dominant pattern in the 27 conformance failures.
+  Audit 2 addendum (commit `0c19b8fb`).
 
 ### Semiring contract drift (Audit 2)
 
@@ -292,7 +312,17 @@ These items have the largest blast-radius unblock per unit of work:
   boundary (`Context.pm`, `SemanticAction.pm`, ~50 Actions.pm
   callers). Unblocks Phase 3a-migration through Phase 8 (eight
   downstream phases).
-- **TypeInference CallExpression site fix** — single site
+- **Bug 4 (TI+SA interaction) RCA and fix** — promoted to Tier 1
+  after the IR-cluster addendum identified it as the dominant pattern
+  across the 27 conformance failures. Affects 14+ files (9 IR cluster
+  + 5+ non-cluster). The audit punted RCA to remediation phase since
+  it requires instrumenting `_complete_sa` action returns paired with
+  TI annotations. Without this, no IR-cluster file parses
+  end-to-end. **Should be resolved before Tier 4 migration phases
+  start**, because Phase 3c plans to revive `ir-program-pipeline.t`
+  and `ir-sub-info-pipeline.t`, which fail on the same pattern that
+  Bug 4 triggers (parsing Shim.pm, NodeFactory.pm, etc.).
+- **TypeInference CallExpression site fix (Bugs 1+2)** — single site
   (`TypeInference.pm:340-365`) retires both Bug 1 and Bug 2. Likely
   involves either changing `type_satisfies` (treat List as the union
   of List and any sequence of Scalars) or changing `_complete_type`
@@ -404,15 +434,15 @@ this synthesis covers:
 
 The audits surfaced decisions that this synthesis cannot make alone.
 
-1. **IR-cluster failure mechanism.** Audit 2's per-stage probe shows
-   the dominant `map BLOCK $ref->@*` pattern PASSES the filter stack;
-   the brief's "12-15 files affected by Bug 1" estimate was attributed
-   to that pattern but doesn't match the probe. Some unknown fraction
-   of the 27 conformance-failing files has a root cause not yet
-   identified by the audits. The Audit 2 addendum probe was scheduled
-   to investigate this; if it hasn't run yet, do you want it queued as
-   a Tier 1 item or deferred? If the addendum probe has run, this
-   synthesis should integrate its findings — please confirm.
+1. **IR-cluster failure mechanism — ANSWERED.** The Audit 2 addendum
+   probe (commit `0c19b8fb`) ran and identified Bug 4: a TypeInference
+   + SemanticAction interaction that rejects named-unary/list-op
+   builtins inside `map`/`grep`/`sort` BLOCK parsed via `CallExpression`
+   alt 3. Bug 4 is now integrated as a Tier 1 item. The remaining
+   open question on Bug 4 is the RCA: *why* TI+SA together reject
+   when neither alone does. The addendum sketches three remediation
+   directions without endorsing one — that decision belongs to the
+   remediation phase.
 
 2. **Documentation reconciliation strategy.** Tier 0 lists four
    documentation drifts. Should they be one consolidated commit ("Phase
