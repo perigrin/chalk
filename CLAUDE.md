@@ -275,13 +275,40 @@ Specifically:
    plan listed outstanding Remaining Work.
 3. **Known stalled migration**: the April 4-7 SoN IR polymorphic migration
    (see `docs/plans/2026-04-04-son-ir-polymorphic-migration.md` and
-   `docs/plans/2026-04-04-phase4-structural-split.md`) is approximately 80%
-   complete. Remaining: ~61 `make('Constructor', ...)` calls in Actions.pm,
-   Shim.pm deletion, codegen migration from `body()` to graph-walk, removal
-   of `body` field from MethodInfo, removal of `compat_class` from
-   Chalk::IR::Node, `_build_method_graph` completion (currently a
-   Return-collector, not a real SoN construction pass). Commit c7361f3c is
-   explicitly a prototype, not a fix.
+   `docs/plans/2026-04-04-phase4-structural-split.md`, both superseded by
+   `docs/plans/2026-04-21-chalk-mop-migration-plan.md`) has substantial
+   *infrastructure* in place (typed nodes, NodeFactory, Graph.merge, MOP
+   scaffolding) but the cutover has not landed. Per Audit 3 findings
+   (`docs/plans/2026-04-25-audit-3-mop-ir-findings.md`), only **~30–40% of
+   acceptance criteria** are met — not the previously-claimed ~80%. Of the
+   polymorphic plan's 9 acceptance criteria, 0 are fully done, 2 are
+   partial, and 7 are not-started.
+
+   Remaining work — the legacy class-name dispatch surface to retire — is
+   **92 sites total**: 61 `compat_class` setters in Actions.pm + 19
+   setters in Shim.pm + 12 `$node->class()` string-compare reader sites
+   across Actions.pm, EmitHelpers.pm, and StructPromotion.pm. Note: the
+   prior framing of "61 `make('Constructor', ...)` calls remaining" is
+   misleading — those literal calls *were* renamed to
+   `$typed->make('OpClass', ..., compat_class => 'BinaryExpr', ...)`,
+   but the contract (legacy class-name dispatch via `compat_class`) was
+   preserved. The literal moved; the contract did not.
+
+   Other open items: Shim.pm deletion (1 production consumer + 4 test
+   files), codegen migration from `body()` to graph-walk (18 reader
+   sites), removal of `body` field from MethodInfo / ClassInfo / SubInfo,
+   removal of `compat_class` from Chalk::IR::Node, `_build_method_graph`
+   completion (currently a Return-collector + body_stmts seeder, not a
+   real SoN construction pass). Commit c7361f3c is explicitly a
+   prototype, not a fix; its behavior (Graph::body_stmts seeding) is
+   still in production.
+
+   **Highest-leverage single unblock:** Phase 3a-infra of the MOP
+   migration plan — promote `$graph` and `$scope` to Context fields and
+   delete the `update_cfg`/`cfg_state`/`inherited_cfg_state` side
+   channel. Mechanical, well-scoped, and unblocks every later phase
+   (3a-migration, 3b, 3c, 4, 5, 6, 7). Without it, bottom-up SSA
+   construction cannot start.
 4. **Prototype commits are promises**: commits labeled "prototype:", "draft:",
    "stopgap:", or "WIP:" in Chalk's git history must have a follow-up plan
    or issue. Do not treat prototype state as final. When summarizing work
