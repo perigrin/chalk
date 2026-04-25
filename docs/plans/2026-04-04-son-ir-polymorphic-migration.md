@@ -8,6 +8,17 @@
 > is kept as reference for the Target Architecture and Outstanding
 > Work sections, which describe the pre-MOP state this work
 > replaces.
+>
+> **For current state**, see
+> [2026-04-25-audit-3-mop-ir-findings.md](2026-04-25-audit-3-mop-ir-findings.md).
+> The "61 `make('Constructor', ...)` call sites" referenced below
+> describe a *prior* call shape: those literals were renamed to
+> `$typed->make('OpClass', ..., compat_class => 'LegacyClass', ...)`
+> and the legacy class-name dispatch contract is preserved through
+> `compat_class`. The total dispatch surface to retire is 92 sites
+> (61 setters in Actions.pm + 19 setters in Shim + 12
+> `$node->class()` string-compare readers), not 61. The literal
+> changed; the contract did not.
 
 ## Status
 

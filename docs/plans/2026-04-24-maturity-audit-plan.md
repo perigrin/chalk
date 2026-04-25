@@ -115,7 +115,13 @@ semiring to reach contract compliance and full role implementation.
 **Key questions** (from CLAUDE.md's own warnings):
 - Is the polymorphic migration complete? (Reported ~80% complete,
   with ~61 `make('Constructor', ...)` calls remaining in
-  `Actions.pm`.)
+  `Actions.pm`.) See current state in
+  `docs/plans/2026-04-25-audit-3-mop-ir-findings.md` — Audit 3
+  found ~30–40% complete by acceptance criteria, and the 61
+  `make('Constructor', ...)` calls were renamed to
+  `$typed->make('OpClass', ..., compat_class => 'LegacyClass',
+  ...)`. The legacy class-name dispatch surface to retire is 92
+  sites total (61 + 19 in Shim + 12 `$node->class()` readers).
 - Is `Shim.pm` still present? Can it be deleted?
 - Does codegen use graph-walk (`_build_method_graph`) or still
   fall back to `body()`?

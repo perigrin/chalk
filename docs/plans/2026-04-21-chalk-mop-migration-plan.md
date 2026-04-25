@@ -1,5 +1,21 @@
 # Chalk::MOP Migration Plan
 
+> **Current-state addendum (2026-04-25):** see
+> [2026-04-25-audit-3-mop-ir-findings.md](2026-04-25-audit-3-mop-ir-findings.md)
+> for per-phase verdicts. References below to "61
+> `make('Constructor', ...)` sites in Actions.pm" describe a prior
+> call shape: those literals have been renamed to
+> `$typed->make('OpClass', ..., compat_class => 'LegacyClass', ...)`
+> on `Chalk::IR::NodeFactory`. The legacy class-name dispatch
+> contract is preserved through `compat_class`, so the total
+> dispatch surface to retire is 92 sites (61 setters in Actions.pm +
+> 19 setters in Shim + 12 `$node->class()` string-compare readers
+> across Actions.pm, EmitHelpers.pm, and StructPromotion.pm), not
+> 61. The plan's phase ordering is unaffected by this reframing —
+> the same sites are still being routed through the MOP — but the
+> "Blocking residue" enumeration below understates the dispatch
+> work.
+
 ## Overview
 
 This plan sequences the implementation of `Chalk::MOP` — Chalk's
