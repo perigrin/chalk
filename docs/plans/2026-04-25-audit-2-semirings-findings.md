@@ -582,4 +582,229 @@ The brief's six acceptance criteria:
    Possibly consumed by SA Actions for context-narrowing; if so,
    should be documented as a TI→SA contract.
 
+## Addendum: IR-cluster rejection pattern (2026-04-25 follow-up probe)
+
+The main audit explicitly noted (line 119) that the IR-metadata cluster's
+failure mechanism is *not* Bug 1 — `map BLOCK $ref->@*` passes BOTH stages
+in `/tmp/pattern-a-probe.pl`. This addendum identifies the actual mechanism
+via per-stage stack discrimination on the IR-cluster files.
+
+**Methodology summary.** Built FilterComposite parsers with all 2^4 subsets
+of {Precedence, TypeInference, Structural, SemanticAction} (Boolean is
+unconditional; SA-last is enforced when present). Ran each subset against
+canonical IR-cluster files (`MethodInfo.pm`, `SubInfo.pm`, `UseInfo.pm`)
+and against synthesised minimal cases. The first subset where the input
+transitions PASS → FAIL identifies the rejection mechanism.
+
+Probe scripts: `/tmp/audit2-followup-stage.pl`,
+`/tmp/audit2-followup-localize.pl`, `/tmp/audit2-followup-isolate.pl`,
+`/tmp/audit2-followup-defined.pl`, `/tmp/audit2-followup-stage2.pl`,
+`/tmp/audit2-followup-combo.pl`, `/tmp/audit2-followup-bt.pl`,
+`/tmp/audit2-followup-narrow.pl`, `/tmp/audit2-followup-isa.pl`,
+`/tmp/audit2-followup-cross.pl`, `/tmp/audit2-followup-final.pl`,
+`/tmp/audit2-followup-bisect-block.pl`. Deleted at end of session.
+
+### Bug 4: Named-unary / list-op builtin in `map`/`grep`/`sort` BLOCK rejected only when both TypeInference and SemanticAction are present
+
+**Trigger / minimal failing case:**
+
+```perl
+my @arr;
+my @x = map { defined $_ } @arr;     # FAILS at full stack
+my @x = map { $_ } @arr;             # PASSES
+```
+
+**Per-stage discrimination on `lib/Chalk/IR/MethodInfo.pm`:**
+
+| Stack | Result |
+|---|---|
+| [Boolean] | PASS |
+| [Boolean, Precedence] | PASS |
+| [Boolean, Precedence, TypeInference] | PASS |
+| [Boolean, Precedence, TypeInference, Structural] | PASS |
+| [Boolean, Precedence, TypeInference, Structural, SemanticAction] | **FAIL** |
+
+`SubInfo.pm` and `UseInfo.pm` show the identical PASS-PASS-PASS-PASS-FAIL
+shape. SA-last is the failing addition.
+
+**Subset bisection on the minimal case** (`/tmp/audit2-followup-combo.pl`):
+
+| Stack | Result |
+|---|---|
+| [B] | PASS |
+| [B, A] | PASS |
+| [B, P, A] | PASS |
+| [B, T, A] | **FAIL** |
+| [B, S, A] | PASS |
+| [B, P, T, A] | FAIL |
+| [B, P, S, A] | PASS |
+| [B, T, S, A] | FAIL |
+| [B, P, T, S, A] | FAIL |
+
+Cross-confirmed with `[B, T]` alone (`/tmp/audit2-followup-bt.pl`) — passes.
+
+**Rejecting semiring (single-name claim is wrong here): the rejection is an
+*interaction* between TypeInference's annotations and SemanticAction's
+action dispatch.** TI alone does not return zero from `multiply` — `[B, T]`
+parses cleanly. SA alone does not reject — `[B, A]` parses cleanly. The
+rejection arises only when both are in the stack.
+
+**Site count:** Bug 4 affects every IR-cluster file confirmed-failing
+in `t/grammar-conformance.t`, plus additional files outside the cluster
+that use the same pattern. Whole-file probes confirm:
+
+- `lib/Chalk/IR/MethodInfo.pm` — FAIL (one trigger site, in `id()`).
+- `lib/Chalk/IR/SubInfo.pm` — FAIL. Stripping `defined` from `id()` makes
+  it parse (`/tmp/audit2-followup-cross.pl`), confirming `defined` is the
+  trigger.
+- `lib/Chalk/IR/UseInfo.pm` — FAIL.
+- `lib/Chalk/IR/FieldInfo.pm` — FAIL. Has multiple trigger sites in `id()`
+  (nested map with `ref`, `join`, `keys`); stripping just `defined` is
+  insufficient to make it parse, but stubbing the entire `id()` body does.
+- `lib/Chalk/IR/Node.pm` — FAIL.
+- `lib/Chalk/Bootstrap/IR/NodeFactory.pm` — FAIL.
+- `lib/Chalk/Bootstrap/BNF/Target/XS/AST/XSUB.pm` — FAIL.
+- `lib/Chalk/Grammar/Rule.pm` — has the pattern, expected FAIL (probe
+  not run individually but pattern matches).
+
+Files outside the IR cluster that share the pattern:
+`lib/Chalk/Bootstrap/Perl/Actions.pm`, `lib/Chalk/Bootstrap/Earley.pm`,
+`lib/Chalk/Bootstrap/Optimizer/DCE.pm`, `lib/Chalk/Bootstrap/DepChaser.pm`
+(skipped per audit policy),
+`lib/Chalk/Bootstrap/Perl/Target/ClassRegistry.pm`,
+`lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm`,
+`lib/Chalk/Bootstrap/Perl/Target/Perl.pm`,
+`lib/Chalk/Bootstrap/Semiring/FilterComposite.pm`,
+`lib/Chalk/IR/Serialize/JSON.pm`. Some of these may have additional
+unrelated bugs that mask Bug 4 in the conformance corpus.
+
+**Trigger-builtin classification** (`/tmp/audit2-followup-isa.pl`): not
+every builtin in a `map`/`grep`/`sort` BLOCK triggers Bug 4. Behaviour by
+builtin:
+
+- **Trigger (FAIL)**: `warn`, `print`, `say`, `push`, `defined`, `ref`,
+  `length`, `uc`, `lc`, `scalar`, `chr`, `ord`, `exists`, `delete`,
+  `join`, `split`, `substr`, `index`, `sprintf`, `bless`, `chomp`, `chop`.
+- **No trigger (PASS)**: `return`, `die`, `pop`, `shift`, `keys`,
+  `values`, `each`, `sort`, `reverse`, `local`. (`isa` is an operator,
+  not a builtin, also passes.)
+
+The split correlates roughly but not exactly with TypeLibrary signatures
+(see `lib/Chalk/Grammar/Perl/TypeLibrary.pm:90-145`). `pop`/`shift` (which
+take Array) pass; `delete` (which takes Scalar) fails. `return` (return_type
+'Any', and listed in KEYWORD_RULES as a dedicated rule) passes; `defined`
+(return_type 'Bool', not in KEYWORD_RULES) fails. The classification
+likely tracks which builtins reach `_complete_type`'s CallExpression
+branch with a tagged call_symbol and which take a code path that bypasses
+it; full RCA was not pursued.
+
+**Trigger context** (`/tmp/audit2-followup-narrow.pl`): the failure is
+specific to the **Block-form CallExpression** (`Identifier WS Block WS
+ExpressionList`, alt 3). Variants:
+
+| Form | Result |
+|---|---|
+| `defined $_;` (top-level statement) | PASS |
+| `defined $_` in `if` / `for` / `while` cond | PASS |
+| `defined $_` in `do { ... }` block | PASS |
+| `defined $_` as last expression in sub body | PASS |
+| `map { defined $_ } @arr` | FAIL |
+| `grep { defined $_ } @arr` | FAIL |
+| `sort { defined $a } @arr` | FAIL |
+| `map { sub { defined $_ }->() } @arr` (anon sub call) | FAIL |
+| `my $f = sub { defined $_ }; map { $f->() } @arr` (sub var) | PASS |
+| `map(sub { defined $_ }, @arr)` (paren-call form) | PASS |
+
+The last two cases pinpoint the rule shape: it is `Identifier WS Block WS
+ExpressionList` (alt 3 of `CallExpression`, see `docs/chalk-bootstrap.bnf`)
+that breaks. Anonymous sub bodies inside this form still fail (the outer
+shape, not the inner code, is the trigger). Routing the same code through
+a different parse rule (assigned to a variable, or paren-call form) makes
+it pass.
+
+**Code path of rejection (hypothesis from code reading, not instrumented):**
+
+The actual zero-return is from `FilterComposite::multiply` line 184:
+`return $self->zero() if $self->_sa()->is_zero($sa_result);`. SA's
+`_complete_sa` calls the action method for the rule (e.g. `Block`,
+`CallExpression`, or `MapGrepExpression`) via `extend()`. A returned
+`undef` from the action would propagate as zero.
+
+What changes between `[B, T]` and `[B, T, A]`:
+- `[B, T]`: TI annotations are computed and stored in the shared Context's
+  `annotations->{type}`. No action methods run. `_filter_compare` skips
+  TI (line 228), so TI's annotations don't directly disambiguate. With
+  no other annotation semiring expressing a preference and no SA, the
+  parse forest collapses to whichever derivation FC's tie-break selects
+  (left-prefer in `_filter_compare`).
+- `[B, T, A]`: TI annotations are computed *and* SA actions run. SA's
+  `set_type_context($ti_ctx_wrapper)` (FC line 178) threads TI's tag
+  hash into SA's per-action state. `ConciseTree::Actions` does not read
+  `current_type_context` (verified by `ag` — no callers in Actions.pm),
+  so the threaded context is unused. But the *action dispatch* itself
+  may differ: with TI flagging certain alts as kept and others as zero
+  via its multiply, the parse forest reaching SA contains different
+  alternatives than `[B, A]` would see.
+
+The concrete failure surfaces with diagnostic "parse failed at line N,
+column C" pointing past the closing brace of the `map` BLOCK + LIST,
+unable to accept the trailing `;`. Combined with the per-stage data,
+this suggests SA's action for some inner rule (likely `CallExpression`
+for the Block-form alt, or the implicit `Block`/`Statement` chain inside
+the map BLOCK) fails to *complete* the rule — leaves the parse in a state
+that can't transition to "end of expression."
+
+A definitive RCA would require instrumenting SA's `_complete_sa` and
+ConciseTree::Actions methods to log returns of `undef` per rule per
+position, with TI annotations attached. That instrumentation was not
+performed for this probe (out of scope — read-only).
+
+**Suggested remediation shape (NOT proposed work, just shape):** Three
+candidate directions:
+
+1. SA-side: If a specific action in `ConciseTree::Actions` or
+   `Chalk::Bootstrap::Perl::Actions` returns `undef` for the
+   Block-form-CallExpression-with-builtin shape, audit those actions
+   and ensure they handle the call_symbol-tagged path that TI creates.
+2. FC-side: The `set_type_context` plumbing routes TI's tag hash to SA,
+   but `ConciseTree::Actions` doesn't consume it. If the threaded context
+   is causing side effects via some action's input handling, consider
+   gating the threading on whether the active actions object actually
+   reads it.
+3. TI-side: TI's CallExpression complete-type may be tagging the outer
+   `map {...} @arr` invocation in a way that the outer Statement/Block
+   action then trips on. Specifically: when the BLOCK contains a builtin
+   call that produces a typed result, the outer CallExpression's
+   `_get_item_types` walk reads that type into the item_types array,
+   which may then satisfy the `Code` slot incorrectly.
+
+**Side effects:** Bug 4 explains the bulk of `t/grammar-conformance.t`
+failures that the brief attributed to "Pattern A" (`map BLOCK $ref->@*`)
+but Audit 2's per-stage probe ruled out — Pattern A passed, but the
+*specific* shape `map { BUILTIN ... } LIST` is the actual trigger and
+appears in ~9 of the same files. Site-count overlap with Bug 1 and
+Bug 2 in the brief is partial: Bug 1 (paren-list LIST arg) and Bug 2
+(`=>` in BLOCK) are independent triggers that this probe did not
+re-check; they may also fire on the same files alongside Bug 4.
+
+**Cross-effect on Audit 2's other bugs:**
+
+- Bug 1 (paren-list as LIST): independent. Bug 4 fires regardless of LIST
+  shape (verified with `@arr`, `$ref->@*`, `qw(a b c)` — all FAIL when
+  BLOCK has a triggering builtin).
+- Bug 2 (`=>` in BLOCK): independent but overlapping mechanism — both
+  are TI's CallExpression complete-type interaction with the BLOCK
+  position, but Bug 2 is about the BLOCK's *return type* not satisfying
+  `List`, while Bug 4 is about TI's annotations causing SA to fail.
+  Some IR-cluster files have both patterns.
+- Bug 3 (two AssignmentExpressions in `for` header): fully independent;
+  different rule, different semiring (Precedence).
+- Contract violations (Sec. "Contract violations" of main findings): TI
+  returns mixed types (Context vs. tag hash vs. undef). Bug 4 may be a
+  surface-level symptom of TI's tag-hash-in-annotations design
+  interacting with SA actions that expect Context-shaped inputs. The
+  remediation work for the contract violations and for Bug 4 might
+  share a root cause.
+
 End of findings.
+
