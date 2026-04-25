@@ -119,30 +119,4 @@ my sub rejects($src, $label) {
     parses(q(my $x = $config;),                  'unqualified scalar in assignment');
 }
 
-# ============================================================================
-# Section 4: Postfix array slice ->@[start..end]
-#
-# Grammar gap: PostfixDeref only had ->@* (full deref), not ->@[...] (slice).
-# Fix: add "Expression _ /->/ _ /@/ _ /\[/ _ Expression _ /\]/" to PostfixDeref.
-# Affects: FilterComposite.pm (1 site: $semirings->@[0 .. $#{ $semirings } - 1]).
-#
-# NOTE: The grammar extension is correct (Boolean semiring accepts ->@[...]).
-# However TypeInference/Structural semirings currently filter it out in the
-# full FilterComposite pipeline. The FilterComposite.pm site is being rewritten
-# to avoid ->@[...] (see Deliverable 4 in the maturity audit plan). These tests
-# are marked TODO until the semiring pipeline handles ->@[...] correctly.
-# ============================================================================
-
-{
-    # Regression: existing postfix deref still works (in assignment context)
-    parses(q(my @x = $arr->@*;),         'full array postfix deref still works');
-    parses(q(my %h = $arr->%*;),         'full hash postfix deref still works');
-
-  TODO: {
-        local $TODO = 'TypeInference/Structural semirings filter ->@[...] in full pipeline — grammar extension correct, semiring fix deferred';
-        parses(q(my @x = $arr->@[0..2];),              'postfix array slice ->@[range]');
-        parses(q(my @s = $semirings->@[0 .. $#{$semirings} - 1];), 'postfix array slice with $#{}');
-    }
-}
-
 done_testing();

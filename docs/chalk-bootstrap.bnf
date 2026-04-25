@@ -234,7 +234,6 @@ Subscript ::= Expression _ /->/ _ /\[/ _ Expression _ /\]/
     | Expression _ /\{/ _ Expression _ /\}/ ;
 
 PostfixDeref ::= Expression _ /->/ _ /@\*/
-    | Expression _ /->/ _ /@/ _ /\[/ _ Expression _ /\]/
     | Expression _ /->/ _ /%\*/
     | Expression _ /->/ _ /\$\*/
     | Expression _ /->/ _ /\$#\*/ ;
