@@ -354,20 +354,32 @@ The six confirmed grammar gaps, ordered by site count and blast radius:
 
 ### Tier 3: Semiring contract bring-into-spec
 
-The four contract violators, ordered by structural cost:
+Per Decision 4, all four violators wrap their carriers in Contexts.
+Ordered by cost (cheapest first):
 
 - **SemanticAction `zero()` → return Context** — cosmetic fix, matches
   Boolean/FilterComposite pattern.
 - **TypeInference contract migration** — three sub-cases per Audit 2:
   make `zero()` return Context; make `multiply()` consistently return
   Contexts; decide whether tag hashes are carrier or focus. Bulk of
-  work is the third sub-case.
+  work is the third sub-case. Couples to Decision 5's flow-typing
+  completion — if TI's data shapes are about to change for flow-typing,
+  the contract migration should land alongside or after, not before.
 - **Precedence contract migration** — wrap hash-consed slot values in
   Contexts. Hardest issue is `add()`'s `refaddr()` identity check,
   which wrapping breaks.
-- **Structural contract migration** — relax the contract per the
-  contract-drift doc's "Option 2" rather than wrap integers in
-  Contexts. Wrapping would 100x allocations.
+- **Structural contract migration** — wrap integer bitfields in
+  Contexts. Most expensive: ~100x allocations at the semiring
+  boundary, accepted per Decision 4 as the price of a uniform
+  contract. Bitwise OR shortcut becomes a Context-method call.
+
+Each migration removes its FilterComposite compensation surface
+(`_slot_val` helper, `_filter_compare` special-case, `_wrap_sa_result`
+branch). Acceptance test per migration: the slot contract is uniform
+across all call paths for that semiring. Final acceptance after all
+four: write a mechanical test that asserts `is_zero($x)` iff
+`$x->is_zero()` for every semiring, per
+`2026-04-24-semiring-contract-drift.md` §"Long-term."
 
 ### Tier 4: Migration phase work
 
@@ -430,59 +442,58 @@ this synthesis covers:
   Out of scope by construction.
 - **Performance optimization** — correctness-first per CLAUDE.md.
 
+## Decisions recorded 2026-04-25
+
+After Phase A.2 completed, perigrin made the following decisions on the
+open questions below.
+
+**Decision 4 — Strengthen the semiring contract.** All four violators
+(Precedence, Structural, TypeInference, SemanticAction.zero()) wrap
+their carriers in Contexts. The drift becomes a list of debts to repay,
+not a design choice. Structural's ~100x allocation cost is accepted as
+the price of a uniform contract — correctness over performance, per
+CLAUDE.md. Bring-into-spec ordering follows
+`2026-04-24-semiring-contract-drift.md` §"Proposed direction": cheapest
+first (SemanticAction zero, then TypeInference, then Precedence, then
+Structural). Each can be done independently. The four `_slot_val`
+helpers and FilterComposite's special-case branches become removable
+as each violator migrates.
+
+**Decision 5 — TypeInference is flow-typing à la TypeScript, not
+Hindley-Milner.** The current implementation is mid-completion of a
+flow-following type-inference engine, not a misnamed annotation layer.
+Audit 2's framing ("closer to type-checked annotation than
+type-inference engine") describes what the code does *today*, not what
+the layer is supposed to be. The `_method_returns` registry is
+producer-landed-early infrastructure for flow-typing's return-type
+inference; the consumer lands during TypeInference completion, not as
+"dead code to delete." Prior art: `~/dev/pvm` (Go implementation, CST
+instead of parse tree). The algorithm carries over; the data
+structures don't. Whoever picks up TypeInference completion should
+read pvm's Go implementation as reference. Likely lives between MOP
+Phase 3c (typed-node SSA graphs land) and Phase 5 (optimizer
+signatures benefit from flow-typed return values). The TI+SA
+interaction bug (Bug 4) may naturally resolve as part of flow-typing
+completion, depending on what specifically TI is rejecting today.
+
+**Decision 6 — DepChaser retirement lands with MOP Phase 6.** Not as a
+follow-up after Phase 8.
+
 ## Open questions for perigrin
 
-The audits surfaced decisions that this synthesis cannot make alone.
+Question 1 was answered by the IR-cluster addendum (see Cross-audit
+signals §3 above). Questions 4, 5, 6 are settled by the decisions
+above. Remaining open:
 
-1. **IR-cluster failure mechanism — ANSWERED.** The Audit 2 addendum
-   probe (commit `0c19b8fb`) ran and identified Bug 4: a TypeInference
-   + SemanticAction interaction that rejects named-unary/list-op
-   builtins inside `map`/`grep`/`sort` BLOCK parsed via `CallExpression`
-   alt 3. Bug 4 is now integrated as a Tier 1 item. The remaining
-   open question on Bug 4 is the RCA: *why* TI+SA together reject
-   when neither alone does. The addendum sketches three remediation
-   directions without endorsing one — that decision belongs to the
-   remediation phase.
-
-2. **Documentation reconciliation strategy.** Tier 0 lists four
-   documentation drifts. Should they be one consolidated commit ("Phase
-   A.2 reconciliation"), or four discrete commits (one per drift),
-   each cross-referencing its originating audit? The atomic-commit
-   discipline of CLAUDE.md suggests four; the cross-cutting nature
-   suggests one. No strong preference from the synthesis side.
-
-3. **Tier 1 / Tier 2 parallelism.** Phase 3a-infra and the TI Bug 1+2
-   fix are both Tier 1; Tier 2's grammar gaps are smaller-scope. Can
-   Tier 2 run in parallel with Tier 1? The audits don't show a hidden
-   dependency, but TI Bug 1+2 might shift TypeInference's
-   `_get_item_types` semantics in a way that interacts with Gap 1's
-   `cf14d82e` revert reason (TI/Structural filtering interaction).
-   Worth clarifying before paralleling.
-
-4. **Contract drift Option 1 vs Option 2.** Tier 3 lists Structural's
-   bring-into-spec cost as highest, with the practical fix being
-   "relax the contract per the contract-drift doc's Option 2" rather
-   than wrapping integers in Contexts. That is a normative choice
-   about what the semiring contract should be. Should the contract be
-   *strengthened* (all four violators wrap their carriers in Contexts)
-   or *relaxed* (carriers are per-semiring T types and the contract is
-   `(T, T) → T`)? This decision affects all four contract-violation
-   fixes.
-
-5. **Architectural surfacing from audit findings.** Two Audit 2
-   findings touch the design rather than implementation:
-   (a) TI is "closer to type-checked annotation than type inference,"
-   (b) the `_method_returns` registry has a producer but no consumer.
-   Both could be implementation gaps to close, *or* signals that TI's
-   role in the semiring stack should be re-examined. Do you want a
-   design-level review before Tier 3, or should the audits' framing
-   (gaps to close) stand?
-
-6. **DepChaser retirement timing.** The MOP migration's Phase 1
-   completion is a precondition for DepChaser retirement. Phase 1 is
-   "partial" today; Phase 6 deletes `compat_class` and the legacy
-   structs. Do you want DepChaser retirement to land with Phase 6, or
-   as a follow-up after Phase 8 is done?
+1. **Tier 1 / Tier 2 parallelism.** Phase 3a-infra, the TI Bug 1+2
+   fix, and Bug 4 RCA are all Tier 1; Tier 2's grammar gaps are
+   smaller-scope. Can Tier 2 run in parallel with Tier 1? The audits
+   don't show a hidden dependency, but TI Bug 1+2 might shift
+   TypeInference's `_get_item_types` semantics in a way that interacts
+   with Gap 1's `cf14d82e` revert reason (TI/Structural filtering
+   interaction). Bug 4's TI+SA interaction RCA might also touch
+   TypeInference. Worth clarifying before paralleling — the two TI
+   touches probably want to be sequenced rather than parallel.
 
 ## Cross-references
 

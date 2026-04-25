@@ -1,6 +1,7 @@
 # Semiring Contract Drift — Three Semirings Violate (Context, Context) -> Context
 
-**Status:** Finding / design note. No code changes yet.
+**Status:** Finding / design note. Decision recorded 2026-04-25 (see
+addendum at bottom). Migration sequencing per the addendum.
 
 **Author:** perigrin + Claude, 2026-04-24.
 
@@ -108,3 +109,48 @@ The direct trigger for this note was my claim:
 perigrin correctly challenged: "Validate this." The validation found the opposite — Boolean is compliant; others aren't. I had invented an explanation that reversed the actual situation, and would have reverted a correct commit on that basis.
 
 The lesson: **when a claim about system design contradicts a documented design, check the document before acting on the claim.** The record said `(Context, Context) -> Context`. I claimed Boolean violated it. I should have read the record first.
+
+## Addendum 2026-04-25: Strengthen-the-contract decision
+
+After Phase A.2 of the maturity audit (see
+`2026-04-25-phase-a2-synthesis.md` §"Decisions recorded"), perigrin
+chose **Option 1 — strengthen the contract**. All four violators
+(Precedence, Structural, TypeInference, SemanticAction.zero()) wrap
+their carriers in Contexts. The drift becomes a list of debts to
+repay, not a per-semiring `T` design choice.
+
+**Cost accepted.** Structural's wrap costs ~100x allocations at the
+semiring boundary. This is accepted as the price of a uniform
+contract — correctness over performance, per CLAUDE.md.
+
+**Migration ordering (cheapest first).** From this document's
+"Proposed direction" §"Medium-term":
+
+1. **SemanticAction `zero()`** → returns Context. Cosmetic.
+2. **TypeInference** → eliminate mixed return types; decide tag
+   hashes are carrier or focus. Couples to flow-typing completion
+   (see Decision 5 in the synthesis); if TI's data shapes are about
+   to change for flow-typing, the contract migration should land
+   alongside or after, not before.
+3. **Precedence** → wrap hash refs in Contexts. Hash-cons identity
+   has to survive wrapping (likely via Context-with-hashref-focus
+   that hash-conses on the focus refaddr).
+4. **Structural** → wrap integer bitfields in Contexts. Bitwise OR
+   shortcut becomes a Context-method call. Most expensive but
+   well-bounded (one semiring, one carrier type).
+
+**Acceptance per migration.** The slot contract is uniform across all
+call paths for that semiring — no `_slot_val` helper required, no
+FilterComposite special-case branch needed.
+
+**Final acceptance after all four.** Write a mechanical test that
+asserts `is_zero($x)` iff `$x->is_zero()` for every semiring, per
+this document's "Long-term" item. The four `_slot_val` helpers and
+FilterComposite's three special-case branches (per the table at line
+38 above) all become removable.
+
+**The Option 2 alternative is closed.** This document's
+"Optional long-term alternative" (relax to `(T, T) -> T`) is
+explicitly NOT the path taken. Future readers should treat the
+"Option 1 vs Option 2" framing in this document as a record of the
+2026-04-24 deliberation; the 2026-04-25 decision is Option 1.
