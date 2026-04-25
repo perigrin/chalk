@@ -2,25 +2,32 @@
 
 ## Overview
 
-Chalk's grammar is intentionally ambiguous in seven known classes.
-The grammar + Boolean semiring produces multiple derivations only
-for inputs that fall into one of these classes. Any other ambiguity
-is a grammar bug.
+Chalk recognises **nine ambiguity classes total** from the general
+Perl-parsing landscape. Of these, **seven are resolved by filtering
+semirings** (Classes 1–7 below) and **two are excluded by
+restriction** (Classes 8 and 9, listed immediately below). The
+grammar + Boolean semiring produces multiple derivations only for
+inputs that fall into one of the seven semiring-resolved classes;
+any other ambiguity at the Boolean level is a grammar bug.
 
-Each class has a dedicated filtering semiring responsible for
-resolving it. By the time SemanticAction fires, the parse is
-unambiguous — SemanticAction never disambiguates.
+Each of the seven semiring-resolved classes has a dedicated
+filtering semiring responsible for it. By the time SemanticAction
+fires, the parse is unambiguous — SemanticAction never
+disambiguates.
 
-Two classes from the general Perl-parsing landscape are **excluded
-by restriction** rather than resolved by a semiring:
+The two **excluded-by-restriction** classes are listed here for
+completeness; they have no associated semiring because Chalk's
+grammar simply doesn't admit them:
 
-- **Indirect object notation** (`new Foo` vs `new(Foo)`) — not
-  supported in Chalk.
-- **Bareword resolution** (filehandle vs class name vs function vs
-  hash key vs label) — Chalk restricts this: hash keys must be
-  quoted, filehandles are not barewords, labels are not yet
-  supported. The remaining bareword case is "function name" and
-  is handled as `QualifiedIdentifier`.
+- **Class 8 — Indirect object notation** (`new Foo` vs `new(Foo)`) —
+  not supported in Chalk.
+- **Class 9 — Bareword resolution** (filehandle vs class name vs
+  function vs hash key vs label) — Chalk restricts this: hash keys
+  must be quoted, filehandles are not barewords, labels are not yet
+  supported. The remaining bareword case is "function name" and is
+  handled as `QualifiedIdentifier`.
+
+The seven semiring-resolved classes follow.
 
 ## Class 1: Precedence
 
@@ -301,10 +308,12 @@ grammar features Chalk's subset doesn't aim to support.
 
 ## Scope note
 
-The nine classes above are not a complete enumeration of Perl's
-ambiguities. They are the ambiguities that Chalk's current
-grammar admits *and* considers in scope for resolution by its
-filter-semiring architecture. Other ambiguity points exist (see
-the 22-point sweep); they are addressed by grammar extension,
-preprocessor hooks, restriction, or exclusion depending on the
-specific case and Chalk's scope.
+The nine classes documented in this file (seven resolved by
+semirings, two excluded by restriction) are not a complete
+enumeration of Perl's ambiguities. They are the ambiguities that
+Chalk currently considers in scope — the seven that the
+filter-semiring architecture resolves, plus the two excluded by
+grammar restriction. Other ambiguity points exist (see the 22-point
+sweep); they are addressed by grammar extension, preprocessor
+hooks, restriction, or exclusion depending on the specific case
+and Chalk's scope.

@@ -5,10 +5,12 @@
 **Author:** perigrin + Claude, 2026-04-24.
 
 **Scope context:** Earley parsing, the nine documented ambiguity
-classes, and the filter-semiring architecture are all verified
-sound. What remains is implementation maturity across four layers
-— grammar, semirings, MOP+IR, and codegen — plus a small,
-well-scoped list of grammar gaps blocking self-hosting.
+classes (seven resolved by filtering semirings, two excluded by
+grammar restriction — see `docs/architecture/ambiguity-classes.md`),
+and the filter-semiring architecture are all verified sound. What
+remains is implementation maturity across four layers — grammar,
+semirings, MOP+IR, and codegen — plus a small, well-scoped list of
+grammar gaps blocking self-hosting.
 
 ## What this session produced
 
@@ -98,9 +100,10 @@ architectural role.
   responsibility (code and test behavior).
 - Inventory `_slot_val` helpers and FilterComposite's special-
   cased handling — each of these is evidence of contract drift.
-- Build a corpus that exercises each of the nine ambiguity classes
-  with canonical inputs; verify each is resolved by the declared
-  resolver.
+- Build a corpus that exercises each of the seven semiring-resolved
+  ambiguity classes with canonical inputs; verify each is resolved
+  by the declared resolver. (Classes 8 and 9 are excluded by
+  grammar restriction and have no semiring resolver to exercise.)
 
 **Expected outcome**: Per-semiring gap list. Estimated work per
 semiring to reach contract compliance and full role implementation.
