@@ -73,12 +73,16 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # ones) because SA scan nodes have defined focus (scanned text) but no annotations.
     # The TI type information is in annotations->{type}, not in the focus.
     # Traversal order: left-to-right (reverse=false) or right-to-left (reverse=true).
+    # Optional $prune callback: when defined and $prune->($node) returns true,
+    # the node and its entire subtree are skipped (pruned from the walk).
     # Returns the first non-undef result from $callback.
-    my sub _walk_annotations($ctx, $callback, $reverse = false) {
+    my sub _walk_annotations($ctx, $callback, $reverse = false, $prune = undef) {
         return undef unless defined $ctx;
         my @stack = ($ctx);
         while (@stack) {
             my $node = pop @stack;
+            # Skip this node and its subtree if pruned.
+            next if defined $prune && $prune->($node);
             # Always check this node's annotations (regardless of focus state)
             my $result = $callback->($node);
             return $result if defined $result;
@@ -106,26 +110,42 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         });
     }
 
+    # _is_completed_sub_expr: prune callback for item_types / list_arity walkers.
+    # Returns true when a node represents a completed sub-expression result
+    # (has annotations->{type} with 'valid' but without 'item_types').
+    # Such nodes are the output of an inner CallExpression or other rule
+    # completion; their subtrees contain argument types that belong to the
+    # inner call, not to the outer call whose ExpressionList we are seeking.
+    # Treating these nodes as opaque leaves prevents the walker from finding
+    # a nested ExpressionList's item_types in place of the outer one.
+    my $is_completed_sub_expr = sub ($n) {
+        my $type = $n->annotations()->{type};
+        return false unless defined $type && ref($type) eq 'HASH';
+        return exists $type->{valid} && !exists $type->{item_types};
+    };
+
     # Search the shared tree nodes for one with item_types in annotations->{type}.
     # Returns the item_types arrayref or undef.
+    # Uses $is_completed_sub_expr as prune callback to stop at inner call boundaries.
     method _get_item_types($ctx) {
         return unless defined $ctx;
         return _walk_annotations($ctx, sub ($n) {
             my $type = $n->annotations()->{type};
             return undef unless defined $type && ref($type) eq 'HASH';
             return $type->{item_types};
-        });
+        }, false, $is_completed_sub_expr);
     }
 
     # Search the shared tree nodes for one with list_arity in annotations->{type}.
     # Returns the list_arity integer or undef.
+    # Uses $is_completed_sub_expr as prune callback to stop at inner call boundaries.
     method _get_list_arity($ctx) {
         return unless defined $ctx;
         return _walk_annotations($ctx, sub ($n) {
             my $type = $n->annotations()->{type};
             return undef unless defined $type && ref($type) eq 'HASH';
             return $type->{list_arity};
-        });
+        }, false, $is_completed_sub_expr);
     }
 
     # Search the shared tree nodes (rightmost first) for one with type in annotations->{type}.
