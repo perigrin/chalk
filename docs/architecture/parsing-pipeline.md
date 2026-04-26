@@ -25,7 +25,15 @@ Each semiring operates on its own "slice" of a 5-tuple value that the `FilterCom
 
 ### Ordering Rationale
 
-The canonical order is `[Boolean, Precedence, TypeInference, Structural, SemanticAction]`. The four filtering semirings (Boolean, Precedence, TypeInference, Structural) commute: because disambiguation decisions are gated by zero-propagation and refaddr-based first-wins preference, any ordering of the filters produces the same accepted parse set. The chosen order is a performance decision — cheaper checks run first so expensive ones short-circuit on already-killed derivations. SemanticAction is structurally last (enforced by `FilterComposite._sa()` returning `$semirings->[-1]`) because it is the only component that constructs IR rather than filtering.
+The canonical order is `[Boolean, Precedence, TypeInference, Structural, SemanticAction]`. Two distinct ordering rules apply, and they are not the same kind of rule:
+
+1. **Filter ↔ filter swaps commute.** The four filtering semirings (Boolean, Precedence, TypeInference, Structural) commute pairwise *with each other* when SemanticAction is last. Disambiguation decisions are gated by zero-propagation and refaddr-based first-wins preference, so any pairwise reordering of the filters produces the same accepted parse set. Audit 5 verified this empirically: across all six permutations of the four filters (with Boolean first and SA last), every test input produced identical parse outcomes. The relative order of the four filters is therefore a performance choice — cheaper checks first so expensive ones short-circuit on already-killed derivations.
+
+2. **SemanticAction-last is structural correctness, not performance.** SA being at index `-1` is enforced by `FilterComposite._sa()` returning `$semirings->[-1]`, and the consequence of violating it is silent total IR loss, not slowdown. SA's `slot_name()` returns `undef`, which causes `_annotation_semirings()` to exclude it; if SA is placed in a non-last slot, its `multiply` is never invoked, no action methods run, and the parse "succeeds" at recognition level while building no IR. Whatever semiring is at `[-1]` is treated as "the SA" by the rest of FilterComposite, regardless of whether it can actually produce IR. There is no error or warning. Audit 5 Finding 2 documents this in detail.
+
+   A related structural rule: TypeInference's behavior is binary position-dependent on the `_sa()` boundary. When TI is at position `[-1]`, its tag-hash output is not stored in `annotations->{type}` on shared Context nodes, and TI's tree-walking signature validation in `_complete_type` becomes a no-op. When TI is in any filter position, that storage happens and signature validation runs. This is not an ordinal dependency — TI's relative position among the filters does not matter — but the last-vs-not-last boundary is structurally significant. Audit 5 Finding 1 documents this; Decision 5 (flow-typing completion) is the architectural resolution.
+
+For full investigation results, see `docs/plans/2026-04-25-audit-5-semiring-contract-reality-findings.md`.
 
 ---
 
@@ -43,7 +51,9 @@ The grammar permits all of these. Semirings are responsible for rejecting the in
 
 ### Commutativity and the Earley Invariant
 
-Earley parsing merges chart items that span the same input positions via the `add` operation. For disambiguation to be correct, the result must not depend on the order in which alternatives are encountered. All semirings are deterministic under reordering. The four filtering semirings commute with each other: reordering them within `FilterComposite` does not change which parses are accepted, only how quickly they are rejected. FilterComposite applies a deterministic tie-breaking rule (prefer left) when no semiring expresses a preference.
+Earley parsing merges chart items that span the same input positions via the `add` operation. For disambiguation to be correct, the result must not depend on the order in which alternatives are encountered. All semirings are deterministic under reordering. The four filtering semirings commute pairwise with each other (with SemanticAction last): reordering them within `FilterComposite` does not change which parses are accepted, only how quickly they are rejected. FilterComposite applies a deterministic tie-breaking rule (prefer left) when no semiring expresses a preference.
+
+The "filters commute" claim does *not* extend across the SA boundary: SA must be at `[-1]` for IR to be built, and TI's signature-validation behavior depends on whether TI itself is in last position or in a filter slot (see "Ordering Rationale" above). Filter↔filter commutativity holds; filter↔SA position swaps do not.
 
 ### Correctness Over Performance
 
@@ -155,6 +165,8 @@ The Boolean semiring supports Leo optimization (`supports_leo` returns true). Le
 ## 6. TypeInference Semiring
 
 `Chalk::Bootstrap::Semiring::TypeInference` injects semantic knowledge into the parsing process. It operates on Context objects (from `Chalk::Bootstrap::Context`), which are hash-consed immutable trees.
+
+TypeInference is also a producer of type information consumed downstream of the parser. `lib/Chalk/Bootstrap/Perl/Actions.pm:1411` reads TI's `method_return_type` slot via `current_type_context()` to populate `MethodInfo->return_type` on the IR. The data flow is: TI computes `method_return_type` → stores in TI focus hash → FilterComposite threads to SemanticAction via `set_type_context()` → action method reads via `current_type_context()`. TI is therefore not a parser-internal filter only; it is also a typed-data producer for compiler stages, structurally similar to SA's IR production. Decision 5 (flow-typing completion) extends this producer role: TI's output flows through typed nodes rather than `annotations->{type}` slots, dissolving the position-dependence described in §1's Ordering Rationale. See Audit 5 Finding 3 (`docs/plans/2026-04-25-audit-5-semiring-contract-reality-findings.md`) for full evidence.
 
 ### Values: Hash-Consed Context Trees
 
@@ -429,7 +441,7 @@ In the current implementation, the `keys %hash` case works because `Atom` and `E
 
 The consequence is that TypeInference cannot reliably reject semantically invalid parses where the invalidity depends on type context that spans multiple rule completions before the point where the scan branch needs to act. For example, rejecting a bareword as a binary operand based on its position in a fully-typed expression would require type information from a higher-level completion that has not yet occurred when the scan branch is processing the bareword.
 
-This limitation does not affect the canonical semiring order, because the four filtering semirings commute: any filter that can kill a derivation eventually does so regardless of its position in the chain. The limitation matters for future work that might want TypeInference to prune earlier (reducing downstream semiring work on doomed derivations), which is a performance concern, not a correctness one.
+This limitation does not affect the canonical semiring order, because the four filtering semirings commute pairwise (with SA last): any filter that can kill a derivation eventually does so regardless of its relative position among the filters. The limitation matters for future work that might want TypeInference to prune earlier (reducing downstream semiring work on doomed derivations), which is a performance concern, not a correctness one.
 
 Resolving this limitation would require either (a) a richer tree representation that carries completion-focused nodes at every intermediate step (increasing memory pressure), or (b) a two-pass architecture where TypeInference re-validates completed spans against a finalized type context, similar to the extend-based redesign described in `docs/plans/2026-02-20-typeinference-redesign.md`.
 
