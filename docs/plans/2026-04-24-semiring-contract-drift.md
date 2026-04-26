@@ -154,3 +154,44 @@ FilterComposite's three special-case branches (per the table at line
 explicitly NOT the path taken. Future readers should treat the
 "Option 1 vs Option 2" framing in this document as a record of the
 2026-04-24 deliberation; the 2026-04-25 decision is Option 1.
+
+## Addendum 2026-04-25b: Audit 5 implications for the migration
+
+Audit 5 (`docs/plans/2026-04-25-audit-5-semiring-contract-reality-findings.md`)
+verified the read/write graph among the four filter semirings. Three points
+from that audit affect this document:
+
+1. **No inter-filter cross-slot reads exist.** Each filter semiring reads only
+   its own annotation slot plus parser-event metadata (`scan`, `complete`,
+   `rule_name`, `alt_idx`, `predicted`). The "drift is known to FilterComposite
+   and accommodated" framing in §"How the system still works" is correct, but
+   the accommodation is purely about slot-value type, not about cross-slot
+   dependencies. Audit 5 Finding 4 has the per-semiring read/write table.
+
+2. **TypeInference's contract migration is cosmetic with respect to external
+   consumers.** `lib/Chalk/Bootstrap/Perl/Actions.pm:1411` reads TI's
+   `method_return_type` via `current_type_context()`, not via the slot. Wrapping
+   the slot value in a Context does not change what `Perl::Actions` sees. This
+   reinforces this document's "Migration ordering" item 2: TI's contract
+   migration couples to flow-typing completion (Decision 5) and should land
+   alongside or after, not before. Audit 5 Finding 3 documents the
+   producer/consumer relationship.
+
+3. **SemanticAction.zero() is not the only contract issue for SA.** Audit 5
+   Finding 5 inventories side-effect mutations during SA's multiply/add (MOP
+   declare_*, NodeFactory cfg_counter, on_merge in-place mutation of winner
+   Context's `annotations->{cfg}`, class-level `$_pending_cfg_update` /
+   `$_type_context` / `$_mop`). The (Context, Context) → Context contract
+   covers return shape; it does not cover purity. SA's contract migration
+   (item 1 in "Migration ordering": fix `zero()` to return Context) is
+   cosmetic for return shape but does not address the side-effect class. That
+   class is a separate remediation track (Audit 5 Finding 5 §"Suggested
+   remediation shape"); it does not block this document's bring-into-spec
+   ordering, but readers should not conflate "SA honors (Context, Context) →
+   Context" with "SA is pure."
+
+The migration ordering in the 2026-04-25a addendum still holds (cheapest first:
+SemanticAction.zero, then TypeInference, then Precedence, then Structural).
+Audit 5 sharpens the TypeInference step's coupling to Decision 5 and
+clarifies that the drift this document tracks is one of three architectural
+issues at the semiring layer, not the only one.
