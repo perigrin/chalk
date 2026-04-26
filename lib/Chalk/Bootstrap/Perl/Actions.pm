@@ -119,18 +119,32 @@ class Chalk::Bootstrap::Perl::Actions {
         return $factory->make('Constant', const_type => 'string', value => $value);
     }
 
+    # Helper: get the effective scope from a Context.
+    # Reads the $scope field directly; returns undef if no scope is set.
+    my sub _ctx_scope($ctx) {
+        return $ctx->scope();
+    }
+
+    # Helper: get the control node from a Context's scope, or undef.
+    my sub _ctx_control($ctx) {
+        my $scope = $ctx->scope();
+        return defined $scope ? $scope->control() : undef;
+    }
+
     # Helper: resolve a variable name from scope, creating a Phi if needed.
     # Returns the resolved IR node if the variable is in scope (regular or sentinel),
     # or undef if no scope is active or the variable is not bound.
-    # When a sentinel is resolved to a Phi, updates the cfg_state in SemanticAction.
+    # When a sentinel is resolved to a Phi, updates the scope via update_scope.
     my sub _resolve_from_scope($ctx, $sa, $var_name, $factory) {
         return undef unless defined $sa;
-        my $state = $sa->inherited_cfg_state($ctx);
-        return undef unless defined $state && defined $state->{scope};
-        my ($value, $new_scope) = $state->{scope}->resolve_sentinel($var_name, $factory);
+        my $scope = _ctx_scope($ctx);
+        return undef unless defined $scope;
+        my ($value, $new_scope) = $scope->resolve_sentinel($var_name, $factory);
         return undef unless defined $value;
         if ($new_scope) {
-            $sa->update_cfg({ $state->%*, scope => $new_scope });
+            # Preserve control when updating scope after sentinel resolution
+            $new_scope = $new_scope->with_control($scope->control()) if defined $scope->control();
+            $sa->update_scope($new_scope);
         }
         return $value;
     }
@@ -1059,16 +1073,10 @@ class Chalk::Bootstrap::Perl::Actions {
                 last;
             }
         }
-        # Retrieve the current control token from cfg_state for CFG edge.
-        # Fall back to a fresh Start node when no cfg_state is available
+        # Retrieve the current control token from scope for CFG edge.
+        # Fall back to a fresh Start node when no scope is available
         # (e.g., in tests or early-parse contexts without scope tracking).
-        my $control;
-        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
-        if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            $control = $state->{control} if defined $state;
-        }
-        $control //= $factory->make('Start');
+        my $control = _ctx_control($ctx) // $factory->make('Start');
         return $factory->make_cfg('Return',
             inputs => [$control, $value // _make_const($factory, 'undef')],
         );
@@ -1123,29 +1131,29 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # Wire body expression into PostfixModifier's cfg_state.
-        # The cfg_state is propagated to $ctx via multiply() during Earley processing,
-        # so cfg_state($ctx) returns the PostfixModifier's state directly.
+        # Wire body expression into PostfixModifier's annotations.
+        # Structural cfg data (loop, if_node, etc.) is on the PostfixModifier leaf
+        # context's annotations — not on the outer ExpressionStatement context,
+        # since _mul_ctx does not propagate individual annotation keys through
+        # the multiply chain. Read annotations from postfix_leaf directly.
         if (defined $postfix_leaf && defined $body_expr) {
             my $postfix_node = $postfix_leaf->extract();
             my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
             if (defined $sa) {
-                my $state = $sa->cfg_state($ctx);
-                if (defined $state && (defined $state->{loop} || defined $state->{if_node})) {
-                    my $updated = { $state->%* };
-                    if (defined $updated->{loop}) {
-                        $updated->{body_stmts} = [$body_expr];
-
+                my $ann = $postfix_leaf->annotations();
+                if (defined $ann && (defined $ann->{loop} || defined $ann->{if_node})) {
+                    my $scope = _ctx_scope($ctx);
+                    if (defined $ann->{loop}) {
                         # Collect post-body scope bindings for Phi backedge wiring.
                         # Walk leaves of this context to find any scope updates
                         # that occurred while parsing the body expression.
-                        my $loop = $updated->{loop};
+                        my $loop = $ann->{loop};
                         my %body_final_bindings;
                         for my $leaf (_collect_ir_leaves($ctx)) {
-                            my $leaf_state = $sa->cfg_state($leaf);
-                            if (defined $leaf_state && defined $leaf_state->{scope}) {
-                                for my $name ($leaf_state->{scope}->variable_names()) {
-                                    my $binding = $leaf_state->{scope}->lookup($name);
+                            my $leaf_scope = _ctx_scope($leaf);
+                            if (defined $leaf_scope) {
+                                for my $name ($leaf_scope->variable_names()) {
+                                    my $binding = $leaf_scope->lookup($name);
                                     $body_final_bindings{$name} = $binding if defined $binding;
                                 }
                             }
@@ -1153,30 +1161,32 @@ class Chalk::Bootstrap::Perl::Actions {
 
                         # Create Phi nodes for loop-carried variables directly here.
                         # Postfix loops have no iterator variable, so pass undef.
-                        if (defined $updated->{scope}) {
-                            $updated->{scope} = $updated->{scope}->merge_for_loop(
+                        my $new_scope = $scope;
+                        if (defined $scope) {
+                            $new_scope = $scope->merge_for_loop(
                                 \%body_final_bindings, $loop, $factory, undef,
                             );
                         }
-                    } elsif (defined $updated->{if_node}) {
+                        $sa->update_scope($new_scope) if defined $new_scope;
+                        $sa->update_annotations({ body_stmts => [$body_expr] });
+                    } elsif (defined $ann->{if_node}) {
                         # Detect loop jump keywords (next/last) as body:
                         # set loop_jump marker instead of then_stmts so
                         # targets emit 'next if/unless' instead of 'if { next }'.
-                        # NOTE: The If CFG node lives in cfg_state metadata
+                        # NOTE: The If CFG node lives in annotation metadata
                         # (keyed by the IR node's refaddr), not directly in
                         # body_stmts. _build_cfg_lookup resolves this at codegen
                         # time. Future GCM/DCE passes that walk only the IR tree
-                        # (not cfg_state) will need to be extended to see it.
+                        # (not annotations) will need to be extended to see it.
                         if ($body_expr isa Chalk::IR::Node::Constant
                                 && defined $body_expr->value()
                                 && ($body_expr->value() eq 'next'
                                     || $body_expr->value() eq 'last')) {
-                            $updated->{loop_jump} = $body_expr->value();
+                            $sa->update_annotations({ loop_jump => $body_expr->value() });
                         } else {
-                            $updated->{then_stmts} = [$body_expr];
+                            $sa->update_annotations({ then_stmts => [$body_expr] });
                         }
                     }
-                    $sa->update_cfg($updated);
                 }
             }
             return $postfix_node;
@@ -1543,46 +1553,37 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # Build a per-method/sub Graph from Context tree and body statements.
-    # Walks the Context subtree to collect cfg_state entries that carry
+    # Walks the Context subtree to collect annotation entries that carry
     # control-flow information (if_node, loop, try_node). Maps each
-    # associated IR node's refaddr to the cfg_state hashref.
+    # associated IR node's refaddr to the annotation hashref.
     # Also collects Return/Unwind nodes from the fixed body as graph exits.
     # Returns a Chalk::IR::Graph with start, returns, and schedule.
     method _build_method_graph($ctx, $fixed_body) {
-        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
-
-        # Walk Context subtree to collect cfg_state entries for this scope.
+        # Walk Context subtree to collect annotation entries for this scope.
         my %schedule;
-        if (defined $sa) {
-            my @stack = ($ctx);
-            while (@stack) {
-                my $c = pop @stack;
-                my $state = $sa->cfg_state($c);
-                if (defined $state
-                        && (defined $state->{if_node}
-                            || defined $state->{loop}
-                            || defined $state->{try_node})) {
-                    my $ir_node = $c->extract();
-                    if (defined $ir_node && ref($ir_node)) {
-                        $schedule{refaddr($ir_node)} = $state;
-                    }
-                    # try_node is the Constructor; also register by its refaddr.
-                    if (defined $state->{try_node} && ref($state->{try_node})) {
-                        $schedule{refaddr($state->{try_node})} = $state;
-                    }
+        my @stack = ($ctx);
+        while (@stack) {
+            my $c = pop @stack;
+            my $ann = $c->annotations();
+            if (defined $ann
+                    && (defined $ann->{if_node}
+                        || defined $ann->{loop}
+                        || defined $ann->{try_node})) {
+                my $ir_node = $c->extract();
+                if (defined $ir_node && ref($ir_node)) {
+                    $schedule{refaddr($ir_node)} = $ann;
                 }
-                push @stack, reverse $c->children()->@*;
+                # try_node is the Constructor; also register by its refaddr.
+                if (defined $ann->{try_node} && ref($ann->{try_node})) {
+                    $schedule{refaddr($ann->{try_node})} = $ann;
+                }
             }
+            push @stack, reverse $c->children()->@*;
         }
 
-        # Determine graph start node: use inherited control from context,
+        # Determine graph start node: use control from context's scope,
         # or create a fresh Start node.
-        my $start;
-        if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            $start = $state->{control} if defined $state && defined $state->{control};
-        }
-        $start //= $factory->make('Start');
+        my $start = _ctx_control($ctx) // $factory->make('Start');
 
         # Collect Return and Unwind nodes from the fixed body as graph exits.
         my @returns;
@@ -1682,11 +1683,11 @@ class Chalk::Bootstrap::Perl::Actions {
         $catch_body = _fixup_stmts($factory, $typed, $catch_body // []);
         $catch_var //= '$_';
 
-        # Build cfg_state with try_node key (same pattern as IfStatement)
+        # Build annotation entry with try_node key (same pattern as IfStatement)
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            if (defined $state) {
+            my $scope = _ctx_scope($ctx);
+            if (defined $scope) {
                 my $catch_var_const = $factory->make('Constant',
                     const_type => 'variable',
                     value      => $catch_var,
@@ -1696,9 +1697,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     compat_class => 'TryCatchStmt',
                 );
 
-                $sa->update_cfg({
-                    control     => $state->{control},
-                    scope       => $state->{scope},
+                $sa->update_annotations({
                     try_node    => $try_node,
                     try_stmts   => $try_body,
                     catch_var   => $catch_var,
@@ -1885,14 +1884,8 @@ class Chalk::Bootstrap::Perl::Actions {
 
         if (defined $func_name && $func_name eq 'return') {
             # return EXPR → Return CFG node
-            my $value = $args[0]; # single value for Tier A
-            my $control;
-            my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
-            if (defined $sa) {
-                my $state = $sa->inherited_cfg_state($ctx);
-                $control = $state->{control} if defined $state;
-            }
-            $control //= $factory->make('Start');
+            my $value   = $args[0]; # single value for Tier A
+            my $control = _ctx_control($ctx) // $factory->make('Start');
             return $factory->make_cfg('Return',
                 inputs => [$control, $value],
             );
@@ -1900,13 +1893,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         if (defined $func_name && $func_name eq 'die') {
             # die EXPR → Unwind CFG node (exceptional exit)
-            my $control;
-            my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
-            if (defined $sa) {
-                my $state = $sa->inherited_cfg_state($ctx);
-                $control = $state->{control} if defined $state;
-            }
-            $control //= $factory->make('Start');
+            my $control = _ctx_control($ctx) // $factory->make('Start');
             return $factory->make_cfg('Unwind',
                 inputs => [$control, \@args],
             );
@@ -2159,16 +2146,13 @@ class Chalk::Bootstrap::Perl::Actions {
             compat_class => 'VarDecl',
         );
 
-        # Update CFG scope with the new variable binding
+        # Update scope with the new variable binding
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            if (defined $state) {
-                my $new_scope = $state->{scope}->define($var_name->value(), $var_decl);
-                $sa->update_cfg({
-                    control => $state->{control},
-                    scope   => $new_scope,
-                });
+            my $scope = _ctx_scope($ctx);
+            if (defined $scope) {
+                my $new_scope = $scope->define($var_name->value(), $var_decl);
+                $sa->update_scope($new_scope);
             }
         }
 
@@ -2628,10 +2612,10 @@ class Chalk::Bootstrap::Perl::Actions {
         my $update_scope = sub ($var_name, $ir_node) {
             my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
             return unless defined $sa;
-            my $state = $sa->inherited_cfg_state($ctx);
-            return unless defined $state;
-            my $new_scope = $state->{scope}->define($var_name, $ir_node);
-            $sa->update_cfg({ $state->%*, scope => $new_scope });
+            my $scope = _ctx_scope($ctx);
+            return unless defined $scope;
+            my $new_scope = $scope->define($var_name, $ir_node);
+            $sa->update_scope($new_scope);
         };
 
         my $op_val = $op->value();
@@ -2741,8 +2725,9 @@ class Chalk::Bootstrap::Perl::Actions {
         if ($keyword =~ /^(?:for|foreach|while|until)$/) {
             my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
             if (defined $sa) {
-                my $state = $sa->inherited_cfg_state($ctx);
-                if (defined $state) {
+                my $scope   = _ctx_scope($ctx);
+                my $control = _ctx_control($ctx) // $factory->make('Start');
+                if (defined $scope) {
                     my $loop_cond = $condition // $factory->make('Constant',
                         const_type => 'string', value => '__loop_bound__');
                     # For 'until', negate the condition (until X = while !X)
@@ -2756,7 +2741,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         );
                     }
                     my $loop = $factory->make('Loop',
-                        entry_ctrl    => $state->{control},
+                        entry_ctrl    => $control,
                         backedge_ctrl => undef,
                     );
                     my $if_node = $factory->make('If',
@@ -2768,9 +2753,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     my $region = $factory->make('Region',
                         controls => [$exit_proj],
                     );
-                    $sa->update_cfg({
-                        control    => $region,
-                        scope      => $state->{scope},
+                    $sa->update_scope($scope->with_control($region));
+                    $sa->update_annotations({
                         loop       => $loop,
                         loop_if    => $if_node,
                         body_proj  => $body_proj,
@@ -2784,8 +2768,9 @@ class Chalk::Bootstrap::Perl::Actions {
             # Postfix if/unless: builds If/Proj/Region like IfStatement
             my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
             if (defined $sa) {
-                my $state = $sa->inherited_cfg_state($ctx);
-                if (defined $state) {
+                my $scope   = _ctx_scope($ctx);
+                my $control = _ctx_control($ctx) // $factory->make('Start');
+                if (defined $scope) {
                     # For 'unless', negate the condition (unless X = if !X)
                     my $cond = $condition;
                     if ($keyword eq 'unless') {
@@ -2798,7 +2783,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         );
                     }
                     my $if_node = $factory->make('If',
-                        control   => $state->{control},
+                        control   => $control,
                         condition => $cond,
                     );
                     my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
@@ -2806,9 +2791,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     my $region = $factory->make('Region',
                         controls => [$true_proj, $false_proj],
                     );
-                    $sa->update_cfg({
-                        control    => $region,
-                        scope      => $state->{scope},
+                    $sa->update_scope($scope->with_control($region));
+                    $sa->update_annotations({
                         then_stmts => [],
                         else_stmts => undef,
                         if_node    => $if_node,
@@ -2889,10 +2873,11 @@ class Chalk::Bootstrap::Perl::Actions {
         # Build CFG nodes: If/Proj/Region for control flow
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            if (defined $state) {
+            my $scope   = _ctx_scope($ctx);
+            my $control = _ctx_control($ctx) // $factory->make('Start');
+            if (defined $scope) {
                 my $if_node = $factory->make('If',
-                    control   => $state->{control},
+                    control   => $control,
                     condition => $condition,
                 );
                 my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
@@ -2902,29 +2887,26 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
 
                 # Extract per-branch final scopes from the leaf Contexts that
-                # provided then_body and else_body.  cfg_state on those leaves
+                # provided then_body and else_body. The scope field on those leaves
                 # records the scope as it stood at the end of each branch.
                 #
-                # The pre-branch scope comes from the condition leaf's cfg_state,
-                # not from state->{scope}: by the time the complete event runs, multiply()
+                # The pre-branch scope comes from the condition leaf's scope field,
+                # not from scope directly: by the time the complete event runs, multiply()
                 # has already merged the then-block's scope into the inherited state,
-                # so state->{scope} is contaminated with branch assignments.
+                # so scope may be contaminated with branch assignments.
                 my $pre_scope;
                 if (defined $cond_leaf) {
-                    my $cs = $sa->cfg_state($cond_leaf);
-                    $pre_scope = $cs->{scope} if defined $cs && defined $cs->{scope};
+                    $pre_scope = _ctx_scope($cond_leaf);
                 }
-                $pre_scope //= $state->{scope};
+                $pre_scope //= $scope;
 
                 my $then_scope  = $pre_scope;
                 my $else_scope  = $pre_scope;
                 if (defined $then_leaf) {
-                    my $ts = $sa->cfg_state($then_leaf);
-                    $then_scope = $ts->{scope} if defined $ts && defined $ts->{scope};
+                    $then_scope = _ctx_scope($then_leaf) // $pre_scope;
                 }
                 if (defined $else_leaf) {
-                    my $es = $sa->cfg_state($else_leaf);
-                    $else_scope = $es->{scope} if defined $es && defined $es->{scope};
+                    $else_scope = _ctx_scope($else_leaf) // $pre_scope;
                 }
 
                 # Merge branch scopes with eager Phi creation for variables
@@ -2933,9 +2915,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     $then_scope, $else_scope, $region, $factory,
                 );
 
-                $sa->update_cfg({
-                    control    => $region,
-                    scope      => $merged_scope,
+                $sa->update_scope($merged_scope->with_control($region));
+                $sa->update_annotations({
                     then_stmts => $then_body,
                     else_stmts => $else_body,
                     if_node    => $if_node,
@@ -2987,10 +2968,11 @@ class Chalk::Bootstrap::Perl::Actions {
         # Build CFG nodes for the elsif branch
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            if (defined $state) {
+            my $scope   = _ctx_scope($ctx);
+            my $control = _ctx_control($ctx) // $factory->make('Start');
+            if (defined $scope) {
                 my $if_node = $factory->make('If',
-                    control   => $state->{control},
+                    control   => $control,
                     condition => $condition,
                 );
                 my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
@@ -2998,9 +2980,8 @@ class Chalk::Bootstrap::Perl::Actions {
                 my $region = $factory->make('Region',
                     controls => [$true_proj, $false_proj],
                 );
-                $sa->update_cfg({
-                    control    => $region,
-                    scope      => $state->{scope},
+                $sa->update_scope($scope->with_control($region));
+                $sa->update_annotations({
                     then_stmts => $then_body,
                     else_stmts => $else_body,
                     if_node    => $if_node,
@@ -3051,12 +3032,13 @@ class Chalk::Bootstrap::Perl::Actions {
         # Build CFG nodes: Loop/If/Proj/Region for control flow
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            if (defined $state) {
-                my $pre_loop_scope = $state->{scope};
+            my $scope   = _ctx_scope($ctx);
+            my $control = _ctx_control($ctx) // $factory->make('Start');
+            if (defined $scope) {
+                my $pre_loop_scope = $scope;
 
                 my $loop = $factory->make('Loop',
-                    entry_ctrl    => $state->{control},
+                    entry_ctrl    => $control,
                     backedge_ctrl => undef,
                 );
                 my $if_node = $factory->make('If',
@@ -3069,10 +3051,10 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Collect post-body scope bindings for Phi backedge wiring.
                 my %body_final_bindings;
                 for my $leaf (_collect_ir_leaves($ctx)) {
-                    my $leaf_state = $sa->cfg_state($leaf);
-                    if (defined $leaf_state && defined $leaf_state->{scope}) {
-                        for my $name ($leaf_state->{scope}->variable_names()) {
-                            my $binding = $leaf_state->{scope}->lookup($name);
+                    my $leaf_scope = _ctx_scope($leaf);
+                    if (defined $leaf_scope) {
+                        for my $name ($leaf_scope->variable_names()) {
+                            my $binding = $leaf_scope->lookup($name);
                             $body_final_bindings{$name} = $binding if defined $binding;
                         }
                     }
@@ -3080,18 +3062,15 @@ class Chalk::Bootstrap::Perl::Actions {
 
                 # Create Phi nodes for loop-carried variables directly here.
                 # While loops have no iterator variable, so pass undef.
-                my $post_loop_scope = defined $pre_loop_scope
-                    ? $pre_loop_scope->merge_for_loop(
-                        \%body_final_bindings, $loop, $factory, undef,
-                      )
-                    : $pre_loop_scope;
+                my $post_loop_scope = $pre_loop_scope->merge_for_loop(
+                    \%body_final_bindings, $loop, $factory, undef,
+                );
 
                 my $region = $factory->make('Region',
                     controls => [$exit_proj],
                 );
-                $sa->update_cfg({
-                    control    => $region,
-                    scope      => $post_loop_scope,
+                $sa->update_scope($post_loop_scope->with_control($region));
+                $sa->update_annotations({
                     body_stmts => $body,
                     loop       => $loop,
                     loop_if    => $if_node,
@@ -3152,14 +3131,15 @@ class Chalk::Bootstrap::Perl::Actions {
         # Build CFG nodes: Loop/If/Proj/Region for control flow
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            if (defined $state) {
-                my $pre_loop_scope = $state->{scope};
+            my $scope   = _ctx_scope($ctx);
+            my $control = _ctx_control($ctx) // $factory->make('Start');
+            if (defined $scope) {
+                my $pre_loop_scope = $scope;
 
                 my $loop_cond = $factory->make('Constant',
                     const_type => 'string', value => '__loop_bound__');
                 my $loop = $factory->make('Loop',
-                    entry_ctrl    => $state->{control},
+                    entry_ctrl    => $control,
                     backedge_ctrl => undef,
                 );
                 my $if_node = $factory->make('If',
@@ -3171,14 +3151,14 @@ class Chalk::Bootstrap::Perl::Actions {
 
                 # Collect post-body scope bindings for Phi backedge wiring.
                 # If a variable was assigned inside the loop body (e.g., $sum = $sum + $x),
-                # the body leaf cfg_state will have a scope binding that differs from the
+                # the body leaf scope field will have a scope binding that differs from the
                 # pre-loop value. These become the backedge values in the Phi nodes.
                 my %body_final_bindings;
                 for my $leaf (_collect_ir_leaves($ctx)) {
-                    my $leaf_state = $sa->cfg_state($leaf);
-                    if (defined $leaf_state && defined $leaf_state->{scope}) {
-                        for my $name ($leaf_state->{scope}->variable_names()) {
-                            my $binding = $leaf_state->{scope}->lookup($name);
+                    my $leaf_scope = _ctx_scope($leaf);
+                    if (defined $leaf_scope) {
+                        for my $name ($leaf_scope->variable_names()) {
+                            my $binding = $leaf_scope->lookup($name);
                             $body_final_bindings{$name} = $binding if defined $binding;
                         }
                     }
@@ -3187,18 +3167,15 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Create Phi nodes for loop-carried variables directly here.
                 # The iterator variable is defined by the loop itself and excluded.
                 my $iterator_name = defined $iterator ? $iterator->value() : undef;
-                my $post_loop_scope = defined $pre_loop_scope
-                    ? $pre_loop_scope->merge_for_loop(
-                        \%body_final_bindings, $loop, $factory, $iterator_name,
-                      )
-                    : $pre_loop_scope;
+                my $post_loop_scope = $pre_loop_scope->merge_for_loop(
+                    \%body_final_bindings, $loop, $factory, $iterator_name,
+                );
 
                 my $region = $factory->make('Region',
                     controls => [$exit_proj],
                 );
-                $sa->update_cfg({
-                    control    => $region,
-                    scope      => $post_loop_scope,
+                $sa->update_scope($post_loop_scope->with_control($region));
+                $sa->update_annotations({
                     body_stmts => $body,
                     loop       => $loop,
                     loop_if    => $if_node,

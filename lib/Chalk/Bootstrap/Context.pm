@@ -14,6 +14,8 @@ class Chalk::Bootstrap::Context {
     field $is_zero     :param :reader = false;
     field $error       :param :reader = undef;
     field $mop         :param :reader = undef;
+    field $graph       :param :reader = undef;
+    field $scope       :param :reader = undef;
 
     # Extract the current focus value from the context
     method extract() {
@@ -22,7 +24,7 @@ class Chalk::Bootstrap::Context {
 
     # Apply a function to this context, creating a new context with the result as focus
     # This is the comonad 'extend' operation: (Context -> a) -> Context -> Context
-    # Optional %opts may include rule => $name and annotations => $hashref overrides.
+    # Optional %opts may include rule, annotations, graph, scope, and other field overrides.
     method extend($f, %opts) {
         my $new_focus = $f->($self);
         return Chalk::Bootstrap::Context->new(
@@ -35,6 +37,8 @@ class Chalk::Bootstrap::Context {
             is_zero     => (exists $opts{is_zero} ? $opts{is_zero} : $is_zero),
             error       => (exists $opts{error} ? $opts{error} : $error),
             mop         => (exists $opts{mop} ? $opts{mop} : $mop),
+            graph       => (exists $opts{graph} ? $opts{graph} : $graph),
+            scope       => (exists $opts{scope} ? $opts{scope} : $scope),
         );
     }
 

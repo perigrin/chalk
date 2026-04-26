@@ -6,6 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
+use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Scope;
@@ -19,21 +20,25 @@ use Chalk::Bootstrap::BNF::Target::Perl;
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
-    my $ctx = $sa->one();
     my $start = $factory->make('Start');
     my $try_stmt = $factory->make('Constant', const_type => 'integer', value => 1);
     my $catch_stmt = $factory->make('Constant', const_type => 'string', value => 'error');
     # Use a Constant as a marker node for try_node in cfg_state
     my $try_marker = $factory->make('Constant', const_type => 'string', value => '__try__');
 
-    $sa->set_cfg_state($ctx, {
-        control     => $start,
-        scope       => Chalk::Bootstrap::Scope->new(),
-        try_node    => $try_marker,
-        try_stmts   => [$try_stmt],
-        catch_var   => '$e',
-        catch_stmts => [$catch_stmt],
-    });
+    # Build context with scope (Start as control) and structural annotations directly.
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => [],
+        position    => 0,
+        scope       => Chalk::Bootstrap::Scope->new()->with_control($start),
+        annotations => {
+            try_node    => $try_marker,
+            try_stmts   => [$try_stmt],
+            catch_var   => '$e',
+            catch_stmts => [$catch_stmt],
+        },
+    );
 
     my $state = $sa->cfg_state($ctx);
     ok(defined $state, 'cfg_state returns state with try_node');
@@ -54,15 +59,19 @@ use Chalk::Bootstrap::BNF::Target::Perl;
     my $catch_stmt = $factory->make('Constant', const_type => 'string', value => 'handle_error');
     my $try_marker = $factory->make('Constant', const_type => 'string', value => '__try__');
 
-    my $ctx = $sa->one();
-    $sa->set_cfg_state($ctx, {
-        control     => $start,
-        scope       => Chalk::Bootstrap::Scope->new(),
-        try_node    => $try_marker,
-        try_stmts   => [$try_stmt],
-        catch_var   => '$e',
-        catch_stmts => [$catch_stmt],
-    });
+    # Build context with scope (Start as control) and structural annotations directly.
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => [],
+        position    => 0,
+        scope       => Chalk::Bootstrap::Scope->new()->with_control($start),
+        annotations => {
+            try_node    => $try_marker,
+            try_stmts   => [$try_stmt],
+            catch_var   => '$e',
+            catch_stmts => [$catch_stmt],
+        },
+    );
 
     my $target = Chalk::Bootstrap::Perl::Target::Perl->new();
     my $code = $target->emit_from_cfg_state($sa, $ctx);

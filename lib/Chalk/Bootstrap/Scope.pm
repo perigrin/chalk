@@ -12,6 +12,10 @@ class Chalk::Bootstrap::Scope {
     # Hash mapping variable names (strings like '$x', '@arr', '%hash') to IR nodes
     field $bindings :param = undef;
 
+    # Current control input: the most recent side-effect node in this scope's
+    # linear control chain, or undef for the scope before any side effects.
+    field $control :param :reader = undef;
+
     # Initialize bindings to empty hash if not provided
     ADJUST {
         $bindings //= {};
@@ -23,6 +27,15 @@ class Chalk::Bootstrap::Scope {
         return $bindings->{$name};
     }
 
+    # Return a new Scope with the control input replaced.
+    # Preserves all existing bindings. This is an immutable operation.
+    method with_control($new_control) {
+        return Chalk::Bootstrap::Scope->new(
+            bindings => { $bindings->%* },
+            control  => $new_control,
+        );
+    }
+
     # Define a new binding (or overwrite existing)
     # Returns a NEW Scope with the binding added (immutable operation)
     method define($name, $node) {
@@ -30,8 +43,11 @@ class Chalk::Bootstrap::Scope {
         my %new_bindings = $bindings->%*;
         $new_bindings{$name} = $node;
 
-        # Return new Scope with updated bindings
-        return Chalk::Bootstrap::Scope->new(bindings => \%new_bindings);
+        # Return new Scope with updated bindings, preserving control
+        return Chalk::Bootstrap::Scope->new(
+            bindings => \%new_bindings,
+            control  => $control,
+        );
     }
 
     # Return a plain hashref copy of current bindings
@@ -69,12 +85,16 @@ class Chalk::Bootstrap::Scope {
 
     # Merge another scope's bindings into this one, returning a new Scope.
     # The other scope's bindings take precedence for duplicate names.
+    # Control comes from self (the left/base scope).
     method merge($other) {
         my %new_bindings = $bindings->%*;
         for my $name ($other->variable_names()) {
             $new_bindings{$name} = $other->lookup($name);
         }
-        return Chalk::Bootstrap::Scope->new(bindings => \%new_bindings);
+        return Chalk::Bootstrap::Scope->new(
+            bindings => \%new_bindings,
+            control  => $control,
+        );
     }
 
     # Return list of all bound variable names
@@ -95,7 +115,7 @@ class Chalk::Bootstrap::Scope {
                 pre_value => $bindings->{$name},
             );
         }
-        return Chalk::Bootstrap::Scope->new(bindings => \%sentinel_bindings);
+        return Chalk::Bootstrap::Scope->new(bindings => \%sentinel_bindings, control => $control);
     }
 
     # Resolve a sentinel for a variable, creating a Phi on demand.
@@ -118,7 +138,7 @@ class Chalk::Bootstrap::Scope {
             values => [$binding->pre_value(), undef],
         );
 
-        # Replace sentinel with Phi in a new scope
+        # Replace sentinel with Phi in a new scope (define preserves control)
         my $new_scope = $self->define($name, $phi);
         return ($phi, $new_scope);
     }
@@ -195,7 +215,7 @@ class Chalk::Bootstrap::Scope {
             $merged{$name} = $phi;
         }
 
-        return Chalk::Bootstrap::Scope->new(bindings => \%merged);
+        return Chalk::Bootstrap::Scope->new(bindings => \%merged, control => $control);
     }
 
     # Merge two branch scopes at a Region node, creating Phi nodes for variables
@@ -238,7 +258,7 @@ class Chalk::Bootstrap::Scope {
             $merged{$name} = _remove_trivial_phi($phi);
         }
 
-        return Chalk::Bootstrap::Scope->new(bindings => \%merged);
+        return Chalk::Bootstrap::Scope->new(bindings => \%merged, control => $control);
     }
 }
 

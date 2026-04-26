@@ -1,4 +1,4 @@
-# ABOUTME: Tests that AssignmentExpression updates cfg_state scope on variable assignment
+# ABOUTME: Tests that AssignmentExpression updates scope on variable assignment
 # ABOUTME: Covers VarDecl target, plain variable assignment, and compound assignment
 use 5.42.0;
 use utf8;
@@ -24,13 +24,15 @@ my sub make_leaf_ctx($node) {
     );
 }
 
-# Helper: build a parent Context with specified leaf children (focus=undef)
-my sub make_parent_ctx(@children) {
+# Helper: build a parent Context with specified leaf children (focus=undef) and scope.
+# Scope carries the control input node as per the new scope-based API.
+my sub make_parent_ctx($scope, @children) {
     return Chalk::Bootstrap::Context->new(
         focus    => undef,
         children => \@children,
         position => 0,
         rule     => undef,
+        scope    => $scope,
     );
 }
 
@@ -75,19 +77,13 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $op_node   = $factory->make('Constant', const_type => 'string', value => '=');
     my $rhs_node  = $factory->make('Constant', const_type => 'integer', value => '42');
 
-    # Build a parent context with leaves: [VarDecl, '=', 42]
-    my $ctx = make_parent_ctx(
+    # Build a parent context with leaves: [VarDecl, '=', 42], scope carries Start control.
+    my $scope = Chalk::Bootstrap::Scope->new()->with_control($factory->make('Start'));
+    my $ctx = make_parent_ctx($scope,
         make_leaf_ctx($vardecl),
         make_leaf_ctx($op_node),
         make_leaf_ctx($rhs_node),
     );
-
-    # Set cfg_state with an empty scope on the input context
-    my $scope = Chalk::Bootstrap::Scope->new();
-    $sa->set_cfg_state($ctx, {
-        control => $factory->make('Start'),
-        scope   => $scope,
-    });
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'AssignmentExpression', 0, 0, 0));
     ok(defined $result, 'VarDecl assignment: on_complete returns a result');
@@ -97,11 +93,11 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     ok($node isa Chalk::IR::Node, 'result is an IR node');
     is($node->class(), 'VarDecl', 'result is a VarDecl');
 
-    # Verify the scope was updated
-    my $state = $sa->cfg_state($result);
-    ok(defined $state, 'result context has cfg_state');
-    if (defined $state) {
-        my $x_binding = $state->{scope}->lookup('$x');
+    # Verify the scope was updated via scope field on result
+    my $result_scope = $result->scope();
+    ok(defined $result_scope, 'result context has scope');
+    if (defined $result_scope) {
+        my $x_binding = $result_scope->lookup('$x');
         ok(defined $x_binding, '$x is in scope after VarDecl assignment');
         is($x_binding, $node, '$x is bound to the VarDecl IR node');
     }
@@ -123,21 +119,16 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $op_node   = $factory->make('Constant', const_type => 'string', value => '=');
     my $rhs_node  = $factory->make('Constant', const_type => 'integer', value => '2');
 
-    my $ctx = make_parent_ctx(
+    # Pre-populate scope with existing $x binding (value 1)
+    my $old_x = $factory->make('Constant', const_type => 'integer', value => '1');
+    my $scope = Chalk::Bootstrap::Scope->new()->define('$x', $old_x)
+                                               ->with_control($factory->make('Start'));
+
+    my $ctx = make_parent_ctx($scope,
         make_leaf_ctx($var_node),
         make_leaf_ctx($op_node),
         make_leaf_ctx($rhs_node),
     );
-
-    # Pre-populate scope with existing $x binding (value 1)
-    my $old_x = $factory->make('Constant', const_type => 'integer', value => '1');
-    my $scope = Chalk::Bootstrap::Scope->new();
-    $scope = $scope->define('$x', $old_x);
-
-    $sa->set_cfg_state($ctx, {
-        control => $factory->make('Start'),
-        scope   => $scope,
-    });
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'AssignmentExpression', 0, 0, 0));
     ok(defined $result, 'plain assignment: on_complete returns a result');
@@ -148,10 +139,10 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     is($node->class(), 'BinaryExpr', 'plain assignment: result is a BinaryExpr (Assign)');
 
     # Verify scope was updated with the Assign node
-    my $state = $sa->cfg_state($result);
-    ok(defined $state, 'plain assignment: result has cfg_state');
-    if (defined $state) {
-        my $x_binding = $state->{scope}->lookup('$x');
+    my $result_scope = $result->scope();
+    ok(defined $result_scope, 'plain assignment: result has scope');
+    if (defined $result_scope) {
+        my $x_binding = $result_scope->lookup('$x');
         ok(defined $x_binding, '$x is in scope after plain assignment');
         is($x_binding, $node, '$x binding is updated to the new VarDecl node');
         isnt($x_binding, $old_x, '$x binding is not the old value anymore');
@@ -173,21 +164,16 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $op_node   = $factory->make('Constant', const_type => 'string', value => '+=');
     my $rhs_node  = $factory->make('Constant', const_type => 'integer', value => '5');
 
-    my $ctx = make_parent_ctx(
+    # Pre-populate scope
+    my $old_x = $factory->make('Constant', const_type => 'integer', value => '0');
+    my $scope = Chalk::Bootstrap::Scope->new()->define('$x', $old_x)
+                                               ->with_control($factory->make('Start'));
+
+    my $ctx = make_parent_ctx($scope,
         make_leaf_ctx($var_node),
         make_leaf_ctx($op_node),
         make_leaf_ctx($rhs_node),
     );
-
-    # Pre-populate scope
-    my $old_x = $factory->make('Constant', const_type => 'integer', value => '0');
-    my $scope = Chalk::Bootstrap::Scope->new();
-    $scope = $scope->define('$x', $old_x);
-
-    $sa->set_cfg_state($ctx, {
-        control => $factory->make('Start'),
-        scope   => $scope,
-    });
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'AssignmentExpression', 0, 0, 0));
     ok(defined $result, 'compound assignment: on_complete returns a result');
@@ -198,18 +184,18 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     is($node->class(), 'CompoundAssign', 'compound assignment: result is a CompoundAssign');
 
     # Verify scope was updated with the CompoundAssign node
-    my $state = $sa->cfg_state($result);
-    ok(defined $state, 'compound assignment: result has cfg_state');
-    if (defined $state) {
-        my $x_binding = $state->{scope}->lookup('$x');
+    my $result_scope = $result->scope();
+    ok(defined $result_scope, 'compound assignment: result has scope');
+    if (defined $result_scope) {
+        my $x_binding = $result_scope->lookup('$x');
         ok(defined $x_binding, '$x is in scope after compound assignment');
         is($x_binding, $node, '$x binding is updated to the CompoundAssign node');
         isnt($x_binding, $old_x, '$x binding is not the old value anymore');
     }
 }
 
-# --- Case 4: Assignment with no scope (no cfg_state) — backward compat ---
-# If no cfg_state, AssignmentExpression should still produce a VarDecl/CompoundAssign
+# --- Case 4: Assignment with no scope — backward compat ---
+# If no scope on context, AssignmentExpression should still produce a VarDecl/CompoundAssign
 # but without crashing, and with no scope update
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -223,8 +209,8 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $op_node  = $factory->make('Constant', const_type => 'string', value => '=');
     my $rhs_node = $factory->make('Constant', const_type => 'integer', value => '99');
 
-    # No cfg_state set on this context
-    my $ctx = make_parent_ctx(
+    # No scope on this context
+    my $ctx = make_parent_ctx(undef,
         make_leaf_ctx($var_node),
         make_leaf_ctx($op_node),
         make_leaf_ctx($rhs_node),

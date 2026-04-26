@@ -84,6 +84,8 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             is_zero  => false,
             annotations => $annotations,
             mop      => ($is_ctx ? $sa_one->mop() : undef),
+            scope    => ($is_ctx ? $sa_one->scope() : undef),
+            graph    => ($is_ctx ? $sa_one->graph() : undef),
         );
     }
 
@@ -98,6 +100,8 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # _wrap_sa_result: Build a new Context from SA's result merged with slot annotations.
     # Does NOT mutate $sa_result — it may be hash-consed or shared.
     # Handles non-Context SA results (e.g., when last semiring is Structural).
+    # Propagates SA's scope and graph fields to the outer Context so that
+    # cfg_state() can read control/scope information from the parse result.
     method _wrap_sa_result($sa_result, %slot_results) {
         my $is_ctx = blessed($sa_result) && $sa_result->can('extract');
         return Chalk::Bootstrap::Context->new(
@@ -106,6 +110,8 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             position    => $is_ctx ? $sa_result->position() : 0,
             rule        => $is_ctx ? $sa_result->rule() : undef,
             is_zero     => false,
+            scope       => ($is_ctx ? $sa_result->scope() : undef),
+            graph       => ($is_ctx ? $sa_result->graph() : undef),
             annotations => {
                 ($is_ctx ? $sa_result->annotations()->%* : ()),
                 %slot_results,
