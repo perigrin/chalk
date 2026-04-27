@@ -174,6 +174,9 @@ class Chalk::Grammar::Perl::TypeLibrary {
         if ($POLYMORPHIC_TYPES{$actual_type}) {
             return true if is_subtype($required_type, $actual_type);
         }
+        # Perl flattens any scalar/array/hash into list context at runtime.
+        # Any concrete type satisfies a `List` position.
+        return true if $required_type eq 'List';
         return false;
     }
 

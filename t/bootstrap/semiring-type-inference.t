@@ -1699,7 +1699,8 @@ TODO: {
     ok(!$ti->is_zero($result), 'per-position: map(Block) alt 3 → valid');
 }
 
-# Block-first with wrong type in ExpressionList: grep(Block, Scalar) → rejected
+# Block-first with Scalar in ExpressionList: grep(Block, Scalar) → accepted.
+# Perl flattens scalars into list context at runtime — type_satisfies(Scalar, List) is true.
 {
     my $val = make_ctx(
         call_symbol    => 'grep',
@@ -1707,7 +1708,7 @@ TODO: {
         list_arity     => 2,
     );
     my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 2, 10, 0));
-    ok($ti->is_zero($result), 'per-position: grep(Block, Scalar) alt 2 → rejected (Scalar is not List)');
+    ok(!$ti->is_zero($result), 'per-position: grep(Block, Scalar) alt 2 → accepted (Scalar flattens into List)');
 }
 
 # ========================================================================
