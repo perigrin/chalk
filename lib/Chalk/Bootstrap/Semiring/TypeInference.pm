@@ -78,18 +78,22 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Returns the first non-undef result from $callback.
     my sub _walk_annotations($ctx, $callback, $reverse = false, $prune = undef) {
         return undef unless defined $ctx;
-        my @stack = ($ctx);
+        # Stack entries are [node, depth] pairs. Root is at depth 0.
+        my @stack = ([$ctx, 0]);
         while (@stack) {
-            my $node = pop @stack;
-            # Skip this node and its subtree if pruned.
-            next if defined $prune && $prune->($node);
+            my ($node, $depth) = pop(@stack)->@*;
+            # Prune only inner nodes (depth > 0), never the root (depth 0).
+            # This preserves Bug 4's sub-expression boundary semantics while
+            # protecting the walker from self-pruning when the root carries a
+            # catch-all {valid=>1} annotation (the Bug 5 failure mode).
+            next if $depth > 0 && defined $prune && $prune->($node);
             # Always check this node's annotations (regardless of focus state)
             my $result = $callback->($node);
             return $result if defined $result;
             # Always descend into children (even if focus is defined)
             my @kids = $node->children()->@*;
             @kids = reverse @kids unless $reverse;
-            push @stack, @kids;
+            push @stack, map { [$_, $depth + 1] } @kids;
         }
         return undef;
     }
