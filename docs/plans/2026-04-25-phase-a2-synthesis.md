@@ -476,6 +476,24 @@ signatures benefit from flow-typed return values). The TI+SA
 interaction bug (Bug 4) may naturally resolve as part of flow-typing
 completion, depending on what specifically TI is rejecting today.
 
+**Type-system specification.** TI's job is to model Perl's actual
+type system as documented in `docs/architecture/perl-type-system-practical.md`
+(landed 2026-04-27, commit `ab1b3be1`) and the companion formal
+treatment `docs/architecture/perl-type-system-formal.md`. Whatever
+flow-typing builds, it builds on that vocabulary. The 2026-04-27
+TypeLibrary signature audit
+(`docs/plans/2026-04-27-typelibrary-signature-audit-findings.md`)
+is the first systematic check between the spec and `TypeLibrary.pm`'s
+runtime encoding; subsequent audits should continue to use the
+papers as the oracle. **Open architectural question (bookmarked):**
+the formal paper treats Scalar and List as siblings under Any with
+mutual circularity resolved via fixed-point semantics; a
+round-trip-preserving alternative would make `Scalar <: List` a
+linear hierarchy. Not settled. Bug 1's current `type_satisfies(X,
+'List') → true` workaround in TypeLibrary is a stopgap that
+becomes structural under the linear-hierarchy reading and remains a
+workaround under the formal-paper reading.
+
 **Decision 6 — DepChaser retirement lands with MOP Phase 6.** Not as a
 follow-up after Phase 8.
 
