@@ -131,7 +131,8 @@ SignatureParam ::= ScalarSignatureParam
     | SlurpySignatureParam ;
 
 ScalarSignatureParam ::= ScalarVariable
-    | ScalarVariable _ /=/ _ Expression ;
+    | ScalarVariable _ /=/ _ Expression
+    | /\$(?![\w{])/ ;
 
 SlurpySignatureParam ::= ArrayVariable
     | HashVariable ;
