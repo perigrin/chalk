@@ -200,6 +200,16 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $self->zero();
         }
 
+        # PostfixDeref bracket boundary: same logic as Subscript above, but
+        # for the ->@[range] slice alternative. When `[` scans inside the
+        # slice form of PostfixDeref, the accumulated level is from the target
+        # Expression. A level in 0..99 means the target is a BinaryExpression
+        # that cannot be a deref target without parentheses.
+        if ($rule_name eq 'PostfixDeref' && $matched_text eq '['
+                && defined($existing->{level}) && $existing->{level} >= 0) {
+            return $self->zero();
+        }
+
         # Non-operator scan: multiply with one (transparent)
         return $self->_prec_multiply($existing, $self->one());
     }
@@ -427,13 +437,27 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $self->one();
         }
 
-        # MethodCall/CallExpression/PostfixDeref/PostfixIncDec: pass through
-        # precedence info so PostfixExpression's completion can reject
-        # invalid targets (e.g., unparenthesized BinaryExpression as target).
+        # MethodCall/CallExpression/PostfixIncDec: pass through precedence info
+        # so PostfixExpression's completion can reject invalid targets
+        # (e.g., unparenthesized BinaryExpression as target).
         if ($rule_name eq 'MethodCall'
             || $rule_name eq 'CallExpression'
-            || $rule_name eq 'PostfixDeref'
             || $rule_name eq 'PostfixIncDec') {
+            return $value;
+        }
+
+        # PostfixDeref: bracket form (alt_idx == 4, the ->@[range] alternative)
+        # resets precedence context like Subscript — inner binary expressions
+        # (e.g., `$i + 1` in `$x->@[$i + 1]`) must not leak their operator
+        # level into the PostfixExpression wrapper. Non-bracket forms (alts 0-3:
+        # ->@*, ->%*, ->$*, ->$#*) pass through unchanged.
+        if ($rule_name eq 'PostfixDeref') {
+            if (defined($alt_idx) && $alt_idx == 4) {
+                if (defined($value->{level}) && $value->{level} >= 100) {
+                    return _intern(true, $value->{level}, $value->{assoc}, false);
+                }
+                return $self->one();
+            }
             return $value;
         }
 

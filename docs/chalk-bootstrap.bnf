@@ -237,7 +237,8 @@ Subscript ::= Expression _ /->/ _ /\[/ _ Expression _ /\]/
 PostfixDeref ::= Expression _ /->/ _ /@\*/
     | Expression _ /->/ _ /%\*/
     | Expression _ /->/ _ /\$\*/
-    | Expression _ /->/ _ /\$#\*/ ;
+    | Expression _ /->/ _ /\$#\*/
+    | Expression _ /->/ _ /@/ _ /\[/ _ Expression _ /\]/ ;
 
 CallExpression ::= QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
     | QualifiedIdentifier WS ExpressionList
