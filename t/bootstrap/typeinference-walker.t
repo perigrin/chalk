@@ -1,5 +1,5 @@
-# ABOUTME: Tests for TypeInference walker fixes — Bug 4 prune boundary, Bug 1 List-flattening,
-# ABOUTME: and Bug 5 root-prune protection for call-form builtins with parens.
+# ABOUTME: Tests for TypeInference walker fixes — prune boundary hygiene for all walker callers.
+# ABOUTME: Covers Bug 4, Bug 1, Bug 5, and walker-hygiene (Findings 7 + 8) unified prune fixes.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -195,6 +195,155 @@ SKIP: {
         my $result = parse_ok('my @a; my $s = join ",", @a;');
         ok(defined $result,
             'Bug5 guard: join ",", @a (bare form) still passes after fix');
+    }
+
+    # =========================================================================
+    # Finding 7: _get_rightmost_type in TypeInferenceActions.pm walks past the
+    # inner CallExpression boundary and picks up the array arg's type ('Array'),
+    # which leaks as the outer ExpressionList item_types, causing
+    # type_satisfies('Array','Scalar') to fail for defined/ref outer calls.
+    # Fix: add prune support to _walk_ann and apply _is_completed_sub_expr
+    # to all nine unfixed walker callers.
+    # =========================================================================
+
+    # Minimal failing case: defined wrapping a call that has an array argument
+    {
+        my $result = parse_ok('my $x; my @arr; my $r = defined func($x, @arr); return;');
+        ok(defined $result,
+            'F7: defined func($x, @arr) — outer defined must not see inner @arr type');
+    }
+
+    # Single array argument to inner call
+    {
+        my $result = parse_ok('my @arr; my $r = defined func(@arr); return;');
+        ok(defined $result,
+            'F7: defined func(@arr) — single Array arg must not pollute outer type');
+    }
+
+    # Hash argument to inner call
+    {
+        my $result = parse_ok('my $x; my %h; my $r = defined func($x, %h); return;');
+        ok(defined $result,
+            'F7: defined func($x, %h) — Hash arg must not pollute outer defined type');
+    }
+
+    # ref as outer head with array in inner args
+    {
+        my $result = parse_ok('my @arr; my $r = ref func("name", @arr); return;');
+        ok(defined $result,
+            'F7: ref func("name", @arr) — Array arg must not pollute outer ref type');
+    }
+
+    # Control: multi-scalar args — must continue to pass (was already passing)
+    {
+        my $result = parse_ok('my $x; my $y; my $r = defined func($x, $y); return;');
+        ok(defined $result,
+            'F7 control: defined func($x, $y) — scalar-only args still pass');
+    }
+
+    # Control: no args — must continue to pass
+    {
+        my $result = parse_ok('my $r = defined func(); return;');
+        ok(defined $result,
+            'F7 control: defined func() — no args still passes');
+    }
+
+    # scalar() as outer — has arg_types=['Any']; must not reject regardless of inner
+    {
+        my $result = parse_ok('my $x; my @arr; my $r = scalar func($x, @arr); return;');
+        ok(defined $result,
+            'F7 control: scalar func($x, @arr) — Any arg_type accepts Array');
+    }
+
+    # =========================================================================
+    # Finding 8: _get_call_symbol in TypeInference.pm and TypeInferenceActions.pm
+    # walks past AnonymousSub boundaries, leaking the inner builtin's call_symbol
+    # up to the outer (unknown-head) call, which then validates against the wrong
+    # (leaked) signature.
+    # Fix: apply _is_completed_sub_expr prune to _get_call_symbol in both files.
+    # =========================================================================
+
+    # Minimal failing case: anonsub with defined inside as second arg to unknown call
+    {
+        my $result = parse_ok('my $x; func($x, sub ($n) { return defined $n ? 1 : 0; }); return;');
+        ok(defined $result,
+            'F8: anonsub with ternary+defined must not leak call_symbol to outer call');
+    }
+
+    # No ternary — the actual trigger is any known-builtin call in anonsub body
+    {
+        my $result = parse_ok('my $x; func($x, sub ($n) { return defined $n; }); return;');
+        ok(defined $result,
+            'F8: anonsub with bare defined must not leak call_symbol to outer call');
+    }
+
+    # defined as statement before return in anonsub body
+    {
+        my $result = parse_ok('my $x; func($x, sub { defined $_; return 1; }); return;');
+        ok(defined $result,
+            'F8: anonsub with defined as stmt must not leak call_symbol');
+    }
+
+    # ref instead of defined as inner builtin
+    {
+        my $result = parse_ok('my $x; func($x, sub ($n) { return ref $n ? 1 : 0; }); return;');
+        ok(defined $result,
+            'F8: anonsub with ref builtin must not leak call_symbol to outer call');
+    }
+
+    # Control: known-builtin host (print) — must still pass
+    {
+        my $result = parse_ok('my $x; print($x, sub { return defined $_[0] ? 1 : 0; }); return;');
+        ok(defined $result,
+            'F8 control: known-builtin host (print) with anonsub still passes');
+    }
+
+    # Control: bare anonsub (no host call) — must still pass
+    {
+        my $result = parse_ok('my $f = sub ($n) { return defined $n ? 1 : 0; };');
+        ok(defined $result,
+            'F8 control: bare anonsub with defined still passes (no host call)');
+    }
+
+    # Control: simple anonsub body with no inner builtins — must still pass
+    {
+        my $result = parse_ok('my $x; func($x, sub ($n) { return $n; }); return;');
+        ok(defined $result,
+            'F8 control: anonsub with no inner builtins still passes');
+    }
+
+    # =========================================================================
+    # Latent risk probes: cases flagged in the RCA as potential regressions
+    # when the unified prune is applied.
+    # =========================================================================
+
+    # ParenExpr boundary: outer Atom should find the inner type via ParenExpr wrapper
+    # which carries type on itself — walker need not descend past it.
+    {
+        my $result = parse_ok('my $x; my $r = (1 + 2) * 3; return;');
+        ok(defined $result,
+            'Latent: ParenExpr boundary — outer expression still finds type');
+    }
+
+    # Block boundary: if/else branches — Structural semiring selects; TI should pass
+    {
+        my $result = parse_ok('my $x; if ($x) { foo() } else { bar() }');
+        ok(defined $result,
+            'Latent: Block boundary — if/else with function calls still passes');
+    }
+
+    # Recursive anonsub-in-call-in-anonsub: compound leak path
+    {
+        my $result = parse_ok('my $x; func($x, sub ($n) { other($n, sub ($m) { defined $m; }); }); return;');
+        ok(defined $result,
+            'Latent: nested anonsub in call in anonsub — no compound leak');
+    }
+
+    # Anonsub returning anonsub: inner-inner leak through both boundaries
+    {
+        my $result = parse_ok('my $x; func($x, sub { return sub { defined $_[0]; }; }); return;');
+        ok(defined $result,
+            'Latent: anonsub returning anonsub with inner defined — no double-boundary leak');
     }
 }
 

@@ -12,48 +12,71 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     # SA scan nodes have defined focus (text string) but no annotations->{type}.
     # Context->walk() would stop at those nodes; we must descend past them.
     # reverse=true for right-to-left traversal.
-    my sub _walk_ann($ctx, $callback, $reverse = false) {
+    # Optional $prune callback: when defined and $prune->($node) returns true at
+    # depth > 0, the node and its entire subtree are skipped. The root (depth 0)
+    # is never pruned — this preserves Bug 5's self-prune protection.
+    # Stack entries are [node, depth] pairs.
+    my sub _walk_ann($ctx, $callback, $reverse = false, $prune = undef) {
         return undef unless defined $ctx;
-        my @stack = ($ctx);
+        my @stack = ([$ctx, 0]);
         while (@stack) {
-            my $node = pop @stack;
+            my ($node, $depth) = pop(@stack)->@*;
+            # Prune only inner nodes (depth > 0), never the root.
+            next if $depth > 0 && defined $prune && $prune->($node);
             my $result = $callback->($node);
             return $result if defined $result;
             my @kids = $node->children()->@*;
             @kids = reverse @kids unless $reverse;
-            push @stack, @kids;
+            push @stack, map { [$_, $depth + 1] } @kids;
         }
         return undef;
     }
 
+    # _is_completed_sub_expr: prune predicate for all walker callers.
+    # Returns true when a node represents a completed sub-expression result
+    # (has annotations->{type} with 'valid' but without 'item_types').
+    # Treats inner CallExpression results, AnonymousSub results, ParenExpr
+    # results, Block results, and other completed rule outputs as opaque leaves.
+    # This prevents type/call_symbol/op_text etc. from leaking out of inner
+    # sub-expressions into the outer context being queried.
+    # NOTE: Must stay in sync with the identical predicate in TypeInference.pm.
+    my $is_completed_sub_expr = sub ($n) {
+        my $type = $n->annotations()->{type};
+        return false unless defined $type && ref($type) eq 'HASH';
+        return exists $type->{valid} && !exists $type->{item_types};
+    };
+
     # Helper: Get rightmost type from shared Context tree (for wrapper rules).
     # Reads from annotations->{type} since TI migrated to shared Context (#707).
+    # Uses _is_completed_sub_expr as prune to stop at inner sub-expression boundaries.
     my sub _get_rightmost_type($ctx) {
         return _walk_ann($ctx, sub ($n) {
             my $ti = $n->annotations()->{type};
             return undef unless defined $ti && ref($ti) eq 'HASH';
             return $ti->{type};
-        }, true);  # reverse=true for right-to-left
+        }, true, $is_completed_sub_expr);  # reverse=true, prune at boundaries
     }
 
     # Helper: Get leftmost type from shared Context tree (for assignment LHS).
     # Reads from annotations->{type} since TI migrated to shared Context (#707).
+    # Uses _is_completed_sub_expr as prune to stop at inner sub-expression boundaries.
     my sub _get_leftmost_type($ctx) {
         return _walk_ann($ctx, sub ($n) {
             my $ti = $n->annotations()->{type};
             return undef unless defined $ti && ref($ti) eq 'HASH';
             return $ti->{type};
-        });
+        }, false, $is_completed_sub_expr);
     }
 
     # Helper: Get ident_text from shared Context tree (for method/function names).
     # Reads from annotations->{type} since TI migrated to shared Context (#707).
+    # Uses _is_completed_sub_expr as prune to stop at inner sub-expression boundaries.
     my sub _get_ident_text($ctx) {
         return _walk_ann($ctx, sub ($n) {
             my $ti = $n->annotations()->{type};
             return undef unless defined $ti && ref($ti) eq 'HASH';
             return $ti->{ident_text};
-        });
+        }, false, $is_completed_sub_expr);
     }
 
     # Method return type registry: method_name => return_type
@@ -63,24 +86,26 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Helper: Get op_text from shared Context tree (for operator rules).
     # Reads from annotations->{type} since TI migrated to shared Context (#707).
+    # Uses _is_completed_sub_expr as prune to stop at inner sub-expression boundaries.
     my sub _get_op_text($ctx) {
         return _walk_ann($ctx, sub ($n) {
             my $ti = $n->annotations()->{type};
             return undef unless defined $ti && ref($ti) eq 'HASH';
             return $ti->{op_text};
-        });
+        }, false, $is_completed_sub_expr);
     }
 
     # Wrapper rules: passthrough child's type
 
     # Helper: Get call_symbol from shared Context tree (for builtin disambiguation).
     # Reads from annotations->{type} since TI migrated to shared Context (#707).
+    # Uses _is_completed_sub_expr as prune to stop at inner sub-expression boundaries.
     my sub _get_call_symbol($ctx) {
         return _walk_ann($ctx, sub ($n) {
             my $ti = $n->annotations()->{type};
             return undef unless defined $ti && ref($ti) eq 'HASH';
             return $ti->{call_symbol};
-        });
+        }, false, $is_completed_sub_expr);
     }
 
     method Atom($ctx) {
@@ -136,32 +161,35 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Helper: Get list_arity from shared Context tree.
     # Reads from annotations->{type} since TI migrated to shared Context (#707).
+    # Uses _is_completed_sub_expr as prune to stop at inner sub-expression boundaries.
     my sub _get_list_arity($ctx) {
         return _walk_ann($ctx, sub ($n) {
             my $ti = $n->annotations()->{type};
             return undef unless defined $ti && ref($ti) eq 'HASH';
             return $ti->{list_arity};
-        });
+        }, false, $is_completed_sub_expr);
     }
 
     # Helper: Get item_types from shared Context tree.
     # Reads from annotations->{type} since TI migrated to shared Context (#707).
+    # Uses _is_completed_sub_expr as prune to stop at inner sub-expression boundaries.
     my sub _get_item_types($ctx) {
         return _walk_ann($ctx, sub ($n) {
             my $ti = $n->annotations()->{type};
             return undef unless defined $ti && ref($ti) eq 'HASH';
             return $ti->{item_types};
-        });
+        }, false, $is_completed_sub_expr);
     }
 
     # Helper: Search for item_types in previous ExpressionList children.
     # Reads from annotations->{type} since TI migrated to shared Context (#707).
+    # Uses _is_completed_sub_expr as prune to stop at inner sub-expression boundaries.
     my sub _get_prev_item_types($ctx) {
         return _walk_ann($ctx, sub ($n) {
             my $ti = $n->annotations()->{type};
             return undef unless defined $ti && ref($ti) eq 'HASH';
             return exists $ti->{item_types} ? $ti->{item_types} : undef;
-        });
+        }, false, $is_completed_sub_expr);
     }
 
     # ExpressionList: arity/item_types tracking
