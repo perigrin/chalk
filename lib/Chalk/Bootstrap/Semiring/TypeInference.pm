@@ -74,7 +74,11 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # The TI type information is in annotations->{type}, not in the focus.
     # Traversal order: left-to-right (reverse=false) or right-to-left (reverse=true).
     # Optional $prune callback: when defined and $prune->($node) returns true,
-    # the node and its entire subtree are skipped (pruned from the walk).
+    # the node's children are NOT enqueued (descent is blocked). The callback still
+    # runs on the pruned node itself — this lets walkers find a value set directly
+    # on a completed sub-expression result (e.g. the `type` field of a CallExpression
+    # or AnonymousSub result) while preventing descent into that result's children.
+    # The root node (depth 0) is never pruned to preserve Bug 5's self-prune protection.
     # Returns the first non-undef result from $callback.
     my sub _walk_annotations($ctx, $callback, $reverse = false, $prune = undef) {
         return undef unless defined $ctx;
@@ -82,15 +86,15 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my @stack = ([$ctx, 0]);
         while (@stack) {
             my ($node, $depth) = pop(@stack)->@*;
-            # Prune only inner nodes (depth > 0), never the root (depth 0).
-            # This preserves Bug 4's sub-expression boundary semantics while
-            # protecting the walker from self-pruning when the root carries a
-            # catch-all {valid=>1} annotation (the Bug 5 failure mode).
-            next if $depth > 0 && defined $prune && $prune->($node);
             # Always check this node's annotations (regardless of focus state)
             my $result = $callback->($node);
             return $result if defined $result;
-            # Always descend into children (even if focus is defined)
+            # Prune only inner nodes (depth > 0), never the root (depth 0).
+            # This preserves Bug 5's self-prune protection (root is never pruned).
+            # When prune fires, we stop descending into children but have already
+            # called the callback on this node above.
+            next if $depth > 0 && defined $prune && $prune->($node);
+            # Descend into children (unless pruned above)
             my @kids = $node->children()->@*;
             @kids = reverse @kids unless $reverse;
             push @stack, map { [$_, $depth + 1] } @kids;

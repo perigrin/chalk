@@ -13,18 +13,21 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     # Context->walk() would stop at those nodes; we must descend past them.
     # reverse=true for right-to-left traversal.
     # Optional $prune callback: when defined and $prune->($node) returns true at
-    # depth > 0, the node and its entire subtree are skipped. The root (depth 0)
-    # is never pruned — this preserves Bug 5's self-prune protection.
-    # Stack entries are [node, depth] pairs.
+    # depth > 0, the callback has already run on that node but its children are
+    # not pushed. The root (depth 0) is never pruned — this preserves Bug 5's
+    # self-prune protection. Stack entries are [node, depth] pairs.
     my sub _walk_ann($ctx, $callback, $reverse = false, $prune = undef) {
         return undef unless defined $ctx;
         my @stack = ([$ctx, 0]);
         while (@stack) {
             my ($node, $depth) = pop(@stack)->@*;
-            # Prune only inner nodes (depth > 0), never the root.
-            next if $depth > 0 && defined $prune && $prune->($node);
+            # Always run callback first (finds type values on scan leaf nodes).
             my $result = $callback->($node);
             return $result if defined $result;
+            # Prune only inner nodes (depth > 0), never the root.
+            # When prune fires, stop descending into children but the callback
+            # above has already run on this node.
+            next if $depth > 0 && defined $prune && $prune->($node);
             my @kids = $node->children()->@*;
             @kids = reverse @kids unless $reverse;
             push @stack, map { [$_, $depth + 1] } @kids;
@@ -37,8 +40,10 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     # (has annotations->{type} with 'valid' but without 'item_types').
     # Treats inner CallExpression results, AnonymousSub results, ParenExpr
     # results, Block results, and other completed rule outputs as opaque leaves.
-    # This prevents type/call_symbol/op_text etc. from leaking out of inner
-    # sub-expressions into the outer context being queried.
+    # Prune fires AFTER the callback has run on the node (see _walk_ann semantics).
+    # This stops descent into inner sub-expression children without skipping the
+    # node's own annotations, preventing type/call_symbol leakage from inner
+    # sub-expressions while still reading the boundary node's own type.
     # NOTE: Must stay in sync with the identical predicate in TypeInference.pm.
     my $is_completed_sub_expr = sub ($n) {
         my $type = $n->annotations()->{type};
