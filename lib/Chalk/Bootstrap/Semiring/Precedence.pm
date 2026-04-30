@@ -53,15 +53,17 @@ class Chalk::Bootstrap::Semiring::Precedence {
         %_cache = ();
     }
 
-    # Expression-type precedence levels (relative to binary operators).
+    # Expression-type precedence levels and associativity (relative to binary operators).
     # PostfixExpression is highest, AssignmentExpression is lowest.
     # These are conceptual levels above/below the binary operator table.
+    # Format: rule_name => [level, assoc]
+    # Negative levels never hit the same-level reject path; assoc=undef is fine for them.
     my $EXPR_LEVELS = {
-        PostfixExpression    => -2,  # higher than any binary op
-        UnaryExpression      => -1,  # higher than any binary op
+        PostfixExpression    => [-2,  undef  ],  # higher than any binary op
+        UnaryExpression      => [-1,  undef  ],  # higher than any binary op
         # BinaryExpression uses the operator's level from PrecedenceTable
-        TernaryExpression    => 100, # lower than any binary op
-        AssignmentExpression => 101, # lowest
+        TernaryExpression    => [100, 'right'],   # lower than any binary op; ?: is right-assoc
+        AssignmentExpression => [101, 'right'],   # lowest; = and compound ops are right-assoc
     };
 
     # Rules that reset precedence context (parenthesized expressions)
@@ -386,18 +388,21 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $self->one();
         }
 
-        # Expression-type rules get their conceptual precedence level.
+        # Expression-type rules get their conceptual precedence level and associativity.
         # PostfixExpression rejects targets that carry a BinaryExpression
         # level (level >= 0): an unparenthesized BinaryExpression cannot
         # be a postfix target. This kills `($a && $b)->foo()` where
         # `$a && $b` has level=10, while allowing `$x->foo()` (no level)
         # and `($a + $b)->foo()` via parenthesized ParenExpr (resets level).
-        if (defined($EXPR_LEVELS->{$rule_name})) {
-            my $expr_level = $EXPR_LEVELS->{$rule_name};
+        # AssignmentExpression and TernaryExpression carry assoc='right' so
+        # the same-level reject in _prec_multiply does not misfire when two
+        # such completions meet in a chart-complete multiply.
+        if (my $info = $EXPR_LEVELS->{$rule_name}) {
+            my ($expr_level, $expr_assoc) = $info->@*;
             if ($expr_level < 0 && defined($value->{level}) && $value->{level} >= 0) {
                 return $self->zero();
             }
-            return _intern(true, $expr_level, undef, false);
+            return _intern(true, $expr_level, $expr_assoc, false);
         }
 
         # BinaryOp/AssignOp completion: the value already carries operator info
@@ -409,11 +414,6 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # BinaryExpression completion: carries the operator's level
         if ($rule_name eq 'BinaryExpression') {
             return $value;
-        }
-
-        # AssignmentExpression: low precedence
-        if ($rule_name eq 'AssignmentExpression') {
-            return _intern(true, $EXPR_LEVELS->{AssignmentExpression}, 'right', false, $value->{op});
         }
 
         # Expression: pass through precedence info from child so that
