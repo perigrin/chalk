@@ -194,6 +194,12 @@ one fix retires both. Bug 4 is the first interaction-class bug.
   `for` header.** Site: `Precedence.pm:170-186` (hypothesis from
   reading, not instrumentation). Pattern: `for (my $x = 0; …; $x +=
   2)`. Affects 1 file in `lib/`. Audit 2 Bug 3.
+  _Addendum 2026-04-30: The site reference (`Precedence.pm:170-186`) and
+  per-stage attribution (`[B,P]` FAIL) in Audit 2 were both wrong — see
+  `docs/plans/2026-04-25-audit-2-semirings-findings.md` § "Addendum
+  2026-04-30: Bug 3 reframed post-RCA" for the corrected framing and
+  `docs/plans/2026-04-29-bug-3-rca.md` for the full root-cause analysis.
+  Fixed in commit `25364037`._
 - **Bug 4 — TypeInference + SemanticAction interaction rejects
   named-unary/list-op builtin inside `map`/`grep`/`sort` BLOCK parsed
   via `CallExpression` alt 3.** Per-stage shows `[B] [B,P] [B,P,T]

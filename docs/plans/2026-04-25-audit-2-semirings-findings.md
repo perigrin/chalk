@@ -282,6 +282,47 @@ assignments (not the dominant pattern in `lib/`). Per the brief's
 seed data, only 1 file affected: `lib/Chalk/Bootstrap/Perl/Target/C.pm:107`.
 Audit confirms this is a narrow trigger.
 
+### Addendum 2026-04-30: Bug 3 reframed post-RCA
+
+The Bug 3 section above contains three incorrect claims, identified by the
+RCA at `docs/plans/2026-04-29-bug-3-rca.md` and confirmed by instrumented
+probes run against commit `89001c63`.
+
+**Claim 1 (per-stage table) — wrong.** The table above shows `[Boolean,
+Precedence]` as FAIL. Instrumentation (`/tmp/bug3-audit2-verify.pl`)
+confirms `[Boolean, Precedence]` PASSES. The minimum failing combination is
+`[Boolean, Precedence, TypeInference]` or `[Boolean, Precedence, Structural]`.
+Bug 3 is a Category-C interaction bug: Precedence has a latent defect (see
+below) that is only exposed when a second annotation semiring alters
+chart-cell identity and reveals chart-complete multiply paths that `[B, P]`
+alone never takes.
+
+**Claim 2 (code path) — wrong.** The hypothesis above points to
+`_scan_multiply` lines 170–186 (AssignOp same-level branch). Instrumented
+tracing shows that branch does not fire on any of the Bug 3 inputs. The
+rejection is in `_prec_multiply` (lines 305–308), reached via a
+chart-complete multiply at `Earley.pm:1337`, not a scan-time multiply.
+
+**Claim 3 (remediation shape) — wrong.** The suggested fix above recommends
+adding `ForStatement` to `$RESETS`. The RCA rejects this: the rejection
+occurs during an in-flight chart-complete multiply, not at `ForStatement`
+completion; `$RESETS` fires on rule-completion and is therefore too late.
+The actual defect is a dead-code bug in `_complete_prec`: the intended
+`assoc='right'` clause at the old lines 414–417 (`if ($rule_name eq
+'AssignmentExpression') { return _intern(..., 'right', ...) }`) was
+unreachable because the `$EXPR_LEVELS` lookup above it matched first and
+returned `assoc=undef`. With `assoc=undef`, `_prec_multiply` defaulted to
+`'left'`, causing the same-level reject to misfire.
+
+**Implemented fix (commit `25364037`):** `$EXPR_LEVELS` converted to a
+`rule => [level, assoc]` table; `_complete_prec` returns the per-rule assoc;
+the dead `AssignmentExpression` clause deleted. `TernaryExpression`
+simultaneously corrected to `assoc='right'` (Perl's `?:` is right-assoc,
+same latent shape). See `docs/plans/2026-04-29-bug-3-rca.md` for the full
+root-cause analysis and probe results.
+
+The original Bug 3 section is preserved as the historical audit record.
+
 ## Contract violations
 
 Verified empirically by calling `zero()`, `one()`, and
