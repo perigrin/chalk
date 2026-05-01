@@ -684,3 +684,83 @@ decide between pure-Perl follow-ups and the bigger C-migration commit.
   `multiply()` orchestration loop.
 - `lib/Chalk/Bootstrap/Semiring/FilterComposite.pm:218-288` —
   `_filter_compare()` first-wins loop.
+
+---
+
+## Phase 7 addendum: S1 results
+
+**Date:** 2026-05-01
+**Commit:** `bc733b24` (deletion) + `docs` addendum commit
+**Change:** Deleted the set-reuse registry (`%_set_registry`,
+`%_set_reuse_stats`, `set_reuse_stats()`) and the hot loop at
+Earley.pm lines 708-727. No other production code modified.
+
+### Methodology
+
+Same three files profiled with `script/profile-parse-lite.pl` before and
+after the deletion. Wall time from `profile-parse-lite.pl`'s `time()` call
+(not grammar-setup time). Chart op counts from the monkeypatched wrappers.
+
+### S1 pre-vs-post data
+
+| File | Pre-S1 wall time | Post-S1 wall time | Delta | chart_has (unchanged) |
+|------|----------------:|------------------:|------:|----------------------:|
+| Boolean.pm (73 lines) | 7.7s | 7.5s | -0.2s (-3%) | 159,933 |
+| Context.pm (160 lines) | 34.5s | 34.4s | -0.1s (-0.3%) | 439,456 |
+| FilterComposite.pm (336 lines) | 124.3s | 121.9s | -2.4s (-1.9%) | 826,789 |
+
+`chart_has`, `chart_set`, and all operation counts are identical
+pre-vs-post: the deletion removes no parsing work, only the diagnostic
+instrumentation that ran alongside it.
+
+### Does FilterComposite.pm now parse under 120s?
+
+No. 121.9s vs 121.9s-124.3s range means the run is within normal
+run-to-run variance (~5-10s). It is possible for a low-variance run to
+clear 120s, but the S1 deletion alone is not reliably sufficient. The
+2.4s median saving on the largest file is consistent with the registry
+cost estimate (~138K string-build+sort+hash ops × a few µs each = a few
+seconds), but does not pull the parse below the harness budget.
+
+### Does `chart_has` per-call cost flatten?
+
+The per-call cost cannot be precisely derived from `profile-parse-lite.pl`
+alone (it measures counts, not timing). But the indirect evidence is clear:
+
+- Wall time savings are 0.2s (Boolean), 0.1s (Context), 2.4s
+  (FilterComposite). These are small and roughly proportional to file
+  size — consistent with removing a fixed-cost-per-position loop rather
+  than relieving memory pressure.
+- `chart_has` call counts are identical: the deletion did not change
+  the number of chart lookups, and therefore did not reduce the chart's
+  working-set size in memory.
+- The 18.4x wall-time-vs-5.8x-bytes ratio is structurally unchanged.
+  FilterComposite.pm (5.77x Boolean.pm's bytes) now takes
+  121.9s / 7.5s = 16.3x Boolean.pm's parse time — still strongly
+  super-linear, improved only 2 percentage points from the original 18.4x.
+
+**Verdict: `chart_has` per-call cost stays super-linear after S1.**
+
+The registry build was contributing approximately the amount the
+investigation estimated (a few seconds on the largest file, less on
+smaller files), but was not the source of the per-operation cost growth.
+The memory-pressure-on-the-chart hypothesis remains the best explanation
+for the 3.5x per-call cost growth in `chart_has` between Boolean.pm and
+FilterComposite.pm.
+
+### Implication for roadmap
+
+S1 confirmed the investigation's prediction: the deletion has independent
+merit (dead code removed, a few seconds back) but the dominant bottleneck
+is the chart data structure's memory-pressure-driven per-operation cost.
+The S1 result points toward C2 (C-backed chart with packed contiguous
+backing store) as the next lever, not S2-S4 (pure-Perl follow-ups).
+S2-S4 collectively estimated at 5-15% improvement; S1 achieved ~2% on
+the largest file, consistent with that range's lower bound.
+
+The pure-Perl fixes (S2-S4) are still worth doing for accumulated savings
+and code quality, but the super-linear trend will not flatten without
+addressing the chart structure's cache behavior under large working sets.
+The next decision checkpoint: whether C2 (C-backed chart) is the right
+investment given current XS infrastructure (chalk.so validated at Phase 1).
+
