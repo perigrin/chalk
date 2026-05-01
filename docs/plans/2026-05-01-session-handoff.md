@@ -281,36 +281,150 @@ Phase ordering: 3a-migration → 3b → 3c → 4 → 5 → 6.
 
 **Reference:** Audit 3 findings doc, MOP migration plan.
 
-### G5: Behavioral-equivalence harness (the oracle gap)
+### G5: Equivalence oracles (the oracle gap)
 
-**Status:** Not started. Audit 3 explicitly named this gap.
+**Status:** Splits into two pieces with different dependencies. Refined
+during the 2026-05-01 scoping session.
 
-There is currently **no oracle** for "does the generated code behave
-the same as the source code." The conformance harness checks parse
-acceptance, not semantic equivalence. Without behavioral equivalence,
-"correctness" is unmeasurable for code generation.
+The original framing — "no oracle for codegen behaviour" — is correct
+but conflated two different oracles. Separating them:
 
-This is the biggest missing piece. Building it is substantial work:
+#### G5a: Structural oracle — SoN-JSON comparison
 
-- Run `lib/` files through Chalk's Perl backend
-- Redirect `@INC` to compiled output
-- Run the existing test suite against compiled `lib/`
-- Compare to test suite against source `lib/`
+Compares Chalk's IR to perl(1)'s optree-derived IR via JSON
+serialization. Substantially built:
 
-If they match, codegen is behaviorally equivalent for that file. This
-is also the self-hosting gate.
+- 70-node parity between `Chalk::IR::Node::*` and perl5-son
+- `Chalk::IR::Serialize::JSON` (`to_json`/`from_json`) — Chalk side
+- `B::SoN` backend (`perl -MO=SoN,json,package=Foo file.pm`) — perl(1) side
+- 25-test cross-load harness validating JSON loads cleanly into Chalk IR
+- 6-file pilot run (2026-04-11) producing the divergence catalogue
+- `script/chalk-emit-son-json` CLI
 
-**Reference:** Audit 3's "Oracle situation" section.
+Oracle architecture: cross-process IR comparison requires serialization.
+JSON IS the oracle interface — both processes emit the same schema, the
+diff is the oracle. There is no "in-process IR comparison" alternative.
+
+**Remaining work for G5a:**
+- Divergence-triage annotation mechanism (mark expected divergences —
+  Perl folds `+=` to `add+STACKED`, etc. — vs. real bugs)
+- Corpus expansion from 6-file pilot to full `lib/` (the
+  `map BLOCK LIST` blocker, issue #691, is retired post-Tier-A;
+  see "2026-05-01 verification" below)
+- Decide whether `--emit-son-json` joins the codegen Target hierarchy
+  (cleanup, not a precondition)
+
+**Dependencies:** G5a-as-functional-harness is parallel-able with G1
+and G4. Does not require single-representation IR or clean codegen
+contract — JSON diff works against current dual-representation IR,
+the `compat_class` artifacts are noise but not a blocker.
+
+**G5a-as-contract-proof** (using the oracle to prove "IR is the
+contract") wants G4-Phase-6 (single-representation IR) to land first.
+That makes the comparison meaningful as evidence of correctness, not
+just "two different IR encodings happen to roundtrip."
+
+#### G5b: Behavioural oracle — run-and-diff
+
+Compares stdout/stderr/exit code between perl(1) and chalk-compiled
+output on the same input. Not started; greenfield.
+
+**Two sub-readings:**
+- **Synthetic corpus** (Phase 1-5 idiom catalogue from
+  `docs/chalk-parse-perl-plan.md`): wrap each idiom in a runnable
+  program, diff outputs.
+- **Real-file corpus** (`lib/*.pm`): compile, redirect `@INC`, run
+  existing test suite against compiled `lib/`. This is the
+  self-hosting gate.
+
+**Dependencies:** Both readings depend on **G4-Phase-4** (clean
+codegen contract). Today, `Perl::Target::C` takes
+`generate_c_files($ir, $sa, $ctx)` — three arguments, two of which
+are parse-time leakage from the Context comonad because the IR
+doesn't yet carry CFG shape in walkable form. That's not a stylistic
+issue; it's evidence that the IR-as-codegen-contract isn't real yet.
+G4-Phase-4 ("codegen reads MOP, migrate `body()` readers to graph
+walks; eliminate `($sa, $ctx)` backchannel") fixes this. Building
+G5b before G4-Phase-4 means anchoring the oracle to a broken
+contract — either the oracle accommodates the leakage (baking it in)
+or it tests a contract codegen doesn't honor (failing for reasons
+unrelated to codegen correctness).
+
+**Reference:** Audit 3's "Oracle situation" section; 2026-05-01
+scoping conversation.
 
 ### G6: Audit 4 (codegen)
 
-**Status:** Not started. Deferred from Phase A.2 pending G5.
+**Status:** Not started. Deferred from Phase A.2 pending G5b.
 
 The maturity plan named four audits; only three completed. Codegen
-audit was deferred because it requires the behavioral-equivalence
-harness as its oracle. After G5 lands, G6 can run.
+audit was deferred because it requires the behavioural-equivalence
+harness as its oracle. Specifically G5b — G5a's structural oracle
+isn't sufficient because it tests IR construction, not codegen.
 
 **Reference:** Maturity audit plan, original brief deferral.
+
+## Codegen Target hierarchy — adjacent finding
+
+Surfaced during the 2026-05-01 scoping conversation, not in the
+original audit set. Not a separate gate item, but informs G4-Phase-4
+scope and G5a's `--emit-son-json` integration question.
+
+**Current state:** `Chalk::Bootstrap::Target` exists as a 15-line
+abstract base with `generate($ir)` and `generate_distribution($ir)`
+named as abstract methods. Subclass conformance is partial:
+
+| Class | Entry method | Conforms to base? |
+|---|---|---|
+| `BNF::Target::Perl` | `generate($ir)` | yes |
+| `BNF::Target::C` | `generate($ir)` | yes |
+| `Perl::Target::Perl` | `generate($ir)` + `generate_with_cfg($ir, $sa, $ctx)` | partial — extends contract |
+| `Perl::Target::C` | `generate_c_files($ir, $sa, $ctx)` + `generate_xs_wrapper(...)` | **no** — doesn't override `generate()` |
+| `EmitHelpers` | `generate_typedefs()` (no IR) | no — different shape |
+| `IR::Serialize::JSON` | `to_json(\%named_graphs)` (exported sub, no class) | not in hierarchy |
+
+`Perl::Target::C` extends `Perl::Target::EmitHelpers`, not `Target`
+directly. EmitHelpers is misnamed — it's not "shared by Perl and C
+targets," it's the C target's parent class with ~50 helper methods
+(field maps, slugs, regex statics, etc.). `Perl::Target::Perl` does
+NOT extend EmitHelpers. So Perl-target and C-target share the
+abstract base only, not helper plumbing.
+
+**Implication for G4-Phase-4:** The phase isn't just "migrate
+`body()` readers to graph walks." It's also where the codegen
+contract becomes structurally enforceable. After Phase 4, every
+codegen target's signature is uniform (`generate($graph)` or
+`generate($mop)`), the abstract base class is honored by all
+subclasses, and joining `IR::Serialize::JSON` to the hierarchy as
+a peer becomes meaningful.
+
+**Implication for G5a:** Don't unify `--emit-son-json` into the
+codegen hierarchy now — the hierarchy is in mid-fix. JSON emission
+correctly lives outside until G4-Phase-4 gives the hierarchy a real
+contract for it to join.
+
+## 2026-05-01 verification — issue #691 closed
+
+Issue #691 ("Grammar: map BLOCK LIST cannot terminate") was open at
+the time of this handoff doc's first writing and named as a blocker
+for SoN-comparison corpus expansion in
+`son_comparison_divergences.md` (memory note, 17 days old: "4/6
+files fail Chalk-parse on `map { ... } LIST`").
+
+Verified during the 2026-05-01 scoping session: all five
+reproductions from the issue body PASS on current branch under both
+Boolean-only and full FilterComposite stack. Closed as retired by
+Tier-A's Bug 4 fix (commit `1ec8cae1`) and A3 walker hygiene
+(commits `fc4524ef`, `45d8c131`).
+
+The memory note's "4/6 files fail Chalk-parse on `map { ... } LIST`"
+claim is **stale** — that surface is cleared post-Tier-A. Earley.pm
+remains slow (TIMEOUT-class) but that's the C2 chart-memory-pressure
+perf-gate item, not a grammar gap.
+
+**Implication for G5a corpus expansion:** the parse-failure blocker
+the memory note named is gone. Other parse failures may exist in
+`lib/`, but they're independent grammar issues, not G5 work.
 
 ## Performance gate (depends on correctness clearing)
 
@@ -336,25 +450,36 @@ item to tackle first:
    `docs/plans/2026-04-30-parser-performance-investigation.md`.
 2. Decide which of G1-G6 to start with.
 
-Some sequencing thoughts:
+Sequencing — refined 2026-05-01:
 
-- **G1 (semiring contract) and G4 (MOP through Phase 6) are independent.**
-  Could run in parallel.
-- **G2 (type hierarchy) blocks G3** (TypeLibrary fixes) because the
-  hierarchy decision shapes signature semantics.
-- **G5 (behavioral-equivalence harness) is the most strategically
-  important** — it's the oracle every other correctness check needs.
-  But it's also the hardest design problem.
-- **G6 depends on G5.** Sequential.
+| Track | Depends on | Parallel-safe with |
+|---|---|---|
+| G1 (SA-zero, Prec, Struct) | none | G4, G5a |
+| G1 (TI) | wants alignment with Decision 5 flow-typing | G4, G5a (but may want sequencing) |
+| G4 (each phase sequential within) | prior G4 phase | G1, G5a |
+| G5a (harness functional) | #691 (cleared); divergence triage TODO | G1, G4 |
+| G5b (oracle-as-contract-proof) | G4-Phase-6 (single-rep IR) | sequential after G4 |
+| G5b (behavioural oracle) | G4-Phase-4 (codegen contract) | sequential after G4 |
+| G2 / G3 (type hierarchy + signatures) | G2 blocks G3 | partial parallel |
+| G6 (codegen audit) | G5b + G4-Phase-4 | sequential |
 
-If picking one: G5 unlocks G6, validates G1's effects empirically, and
-builds the regression check that all other correctness work needs.
-That's the highest-leverage starting point. But it's a multi-session
-design + implementation arc.
+**Three parallel tracks are viable now: G1, G4, G5a.** G1 and G4
+touch different files; G5a is harness work that doesn't touch IR or
+semirings. The bottleneck is human review bandwidth, not technical
+parallelism.
+
+If picking two tracks: **G4 (mechanical, highest leverage, unblocks
+the most) + G5a (gives empirical signal everything else can be
+measured against)**. G1 waits and lands in G4 lulls.
+
+If picking one: **G4-Phase-3a-migration**, the next phase in the G4
+spine. Audit 3 names this as the next sequential phase after
+3a-infra (already done).
 
 If picking quick wins instead: G3's `keys`/`values`/`each` Hash→List
-fix is small (3 lines, 151 sites of latent rejection retired). Doesn't
-clear a correctness gate by itself, but starts moving the punch list.
+fix is small (3 lines, 151 sites of latent rejection retired).
+Doesn't clear a correctness gate by itself, but starts moving the
+punch list.
 
 The session-resumption pattern that's worked well: start by reading
 the relevant findings docs, surface any framing corrections needed
