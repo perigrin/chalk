@@ -46,13 +46,14 @@ sub make_complete_ctx($value, $rule_name, $alt_idx, $pos, $origin) {
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
-# Test 1: zero creates error/undef context
+# Test 1: zero creates a Context with is_zero=true (per Decision 4 contract migration)
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $zero = $sr->zero();
 
     ok($sr->is_zero($zero), 'zero creates zero context');
-    ok(!defined $zero, 'zero is undef');
+    isa_ok($zero, 'Chalk::Bootstrap::Context', 'zero returns Context');
+    ok($zero->is_zero(), 'zero Context has is_zero=true');
 }
 
 # Test 2: one creates empty context
@@ -253,13 +254,15 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($result->extract(), 'hello', 'multiply with complete Context preserves focus for unknown rule');
 }
 
-# Test 11: multiply with undef left (zero) returns undef
+# Test 11: multiply with zero left propagates zero (per Decision 4 contract migration)
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    # undef is zero for SA; multiply propagates zero immediately without touching $right
-    my $result = $sr->multiply(undef, make_complete_ctx($sr->one(), 'TestRule', 0, 5, 0));
+    # zero() is a Context with is_zero=true; multiply propagates zero
+    # immediately without touching $right.
+    my $result = $sr->multiply($sr->zero(), make_complete_ctx($sr->one(), 'TestRule', 0, 5, 0));
 
-    ok(!defined $result, 'multiply with undef left (zero) returns undef');
+    ok($sr->is_zero($result), 'multiply with zero left propagates zero');
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'multiply with zero left returns Context');
 }
 
 # Test 12: one() is a singleton — same refaddr on repeated calls

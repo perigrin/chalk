@@ -38,6 +38,11 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # Singleton for one(): a Context with undef focus and no children.
     my $_one_singleton;
 
+    # Singleton for zero(): a Context with is_zero=true. Identity-stable so
+    # callers that hash-cons on semiring results (FilterComposite) get
+    # ref-eq behavior on parse failure.
+    my $_zero_singleton;
+
     # MOP instance to thread through parse contexts. Set via set_mop() before
     # parsing; invalidates the singleton so _one_ctx() recreates it with the MOP.
     my $_mop;
@@ -112,9 +117,18 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         });
     }
 
-    # zero returns undef (parse failure)
+    # zero returns a Context with is_zero=true (parse failure).
+    # Honors the (Context, Context) -> Context contract per Decision 4 in
+    # docs/plans/2026-04-24-semiring-contract-drift.md.
     method zero() {
-        return undef;
+        $_zero_singleton //= Chalk::Bootstrap::Context->new(
+            focus    => undef,
+            children => [],
+            position => 0,
+            rule     => undef,
+            is_zero  => true,
+        );
+        return $_zero_singleton;
     }
 
     # one returns the singleton empty context with undef focus
@@ -128,6 +142,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     method reset_cache() {
         %_ctx_cache = ();
         $_one_singleton = undef;
+        $_zero_singleton = undef;
     }
 
     # Request a scope update from within an action method.
@@ -170,9 +185,9 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # type annotations computed by TypeInference.
     sub current_type_context { return $_type_context }
 
-    # Check if value is zero (undef)
+    # Check if value is zero by reading the Context's is_zero flag.
     method is_zero($value) {
-        return !defined $value;
+        return $value->is_zero();
     }
 
     # Multiply combines two contexts in sequence.
@@ -182,8 +197,8 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # logic: looks up action by rule_name, extends the value via the action, propagates scope.
     method multiply($left, $right) {
         # Propagate zero
-        return undef if !defined $left;
-        return undef if !defined $right;
+        return $self->zero() if $left->is_zero();
+        return $self->zero() if $right->is_zero();
 
         # Complete event: right Context has annotations->{complete} = true.
         # Apply semantic action for the completed rule.
@@ -202,7 +217,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # focus depends on the actions object, so caching by input refaddr is unsafe.
     # Called from multiply() when the right argument is a complete-annotated Context.
     method _complete_sa($value, $rule_name) {
-        return undef if !defined $value;
+        return $self->zero() if $value->is_zero();
 
         my $has_method = false;
         if ($actions) {
@@ -289,8 +304,8 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # [$left, $right] when both survive (genuine ambiguity that FilterComposite
     # resolves by picking left as a deterministic tie-break).
     method add($left, $right) {
-        return [$right] if !defined $left;
-        return [$left]  if !defined $right;
+        return [$right] if $left->is_zero();
+        return [$left]  if $right->is_zero();
 
         # Identity collapse: same refaddr means same derivation (FilterComposite
         # preference-detection protocol passes the same value to both sides)
@@ -308,7 +323,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # This fixes the Earley stale-value merge problem where add() picks an
     # older value that predates a scope update.
     method on_merge($correct, $rejected) {
-        return unless defined $correct && defined $rejected;
+        return if $correct->is_zero() || $rejected->is_zero();
         my $correct_scope  = $correct->scope();
         my $rejected_scope = $rejected->scope();
 
