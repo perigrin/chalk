@@ -1,6 +1,7 @@
 t/bootstrap/.oracle-cache/
 .build/
 .worktrees/
+.prove
 
 # External tool state (IDE/agent configs, submodule checkouts)
 .claire/
