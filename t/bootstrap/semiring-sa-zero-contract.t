@@ -55,4 +55,33 @@ subtest 'add of zero with non-zero returns the non-zero survivor' => sub {
     ok(!$right_add->[0]->is_zero(), 'surviving member from add(one, zero) is non-zero');
 };
 
+subtest '_complete_sa with zero value short-circuits to zero' => sub {
+    # FilterComposite short-circuits zero before _complete_sa is ever called,
+    # so the defensive guard at SemanticAction.pm:220 is not exercised on the
+    # hot path. Lock the documented behavior anyway.
+    my $z = $sa->zero();
+
+    my $result = $sa->_complete_sa($z, 'AnyRule');
+
+    isa_ok($result, 'Chalk::Bootstrap::Context', '_complete_sa($zero, ...) result');
+    ok($result->is_zero(), '_complete_sa($zero, ...) returns zero Context');
+};
+
+subtest 'on_merge with zero on either side is a no-op' => sub {
+    # FilterComposite short-circuits zero before on_merge is ever called,
+    # so the defensive guard at SemanticAction.pm:326 is not exercised on the
+    # hot path. Lock the documented behavior anyway.
+    my $z   = $sa->zero();
+    my $one = $sa->one();
+
+    # All three should return without dying or mutating.
+    my $r1 = $sa->on_merge($z, $one);
+    my $r2 = $sa->on_merge($one, $z);
+    my $r3 = $sa->on_merge($z, $z);
+
+    is($r1, undef, 'on_merge($zero, $one) returns undef (no-op)');
+    is($r2, undef, 'on_merge($one, $zero) returns undef (no-op)');
+    is($r3, undef, 'on_merge($zero, $zero) returns undef (no-op)');
+};
+
 done_testing;
