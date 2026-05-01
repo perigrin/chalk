@@ -196,72 +196,170 @@ Per Audit 3 (`736281f1`) and Decision 6:
    makes parses faster. Metric isn't reliable for measuring progress
    until this is addressed.
 
-## What the next session should consider doing
+## Strategic framing — correctness before performance
 
-Three reasonable directions, listed by what each gates:
+The C-library/XS-shim work is paused (not abandoned), and resuming it
+remains the right long-arc direction. **But Phase A.2's pattern shows
+why correctness work has to clear first**: every audit pass corrected
+upstream framings, often substantially. Bug attributions were wrong six
+or seven times. The migration completion estimate was off by 2x.
+Performance bottlenecks weren't where prior memory notes assumed.
 
-### Direction 1: Resume C-library/XS path (long arc)
+If we resume C-library/XS work while the foundations are still surfacing
+surprises, three failure modes are likely:
 
-**Triggers:** S1 confirmed C-backed chart is the right next perf lever.
-Phase A.2's foundations are stable.
+1. **Re-implementing wrongness in C.** The C parser would faithfully
+   reproduce whatever bug the Perl parser has. Now there are two
+   implementations to fix instead of one.
+2. **Mid-implementation correctness discoveries.** Either the C work
+   pauses (wasted bootstrap effort) or it hacks around the issue
+   (architectural debt that's worse than the original problem).
+3. **Premature optimization.** S1's profiling result was "memory
+   pressure on the chart" — but that finding presumes the chart is
+   *correct*. If the chart structure itself has bugs we haven't found,
+   C-backed chart locks them in at lower level.
 
-**Substantial design work needed:**
-- Bootstrap strategy: chicken-and-egg between Chalk-building-Chalk and
-  the C parser
-- Chart packed-store layout
-- API surface for FilterComposite ↔ chart
-- Sequencing relative to MOP Phases 3a-migration through 8
+**Therefore: the C work is gated until correctness work clears.**
 
-**Cost:** Multi-week project. High value if it lands; high coordination
-overhead.
+## Correctness gate (work that must clear before C)
 
-### Direction 2: Continue MOP migration (medium arc)
+These are the real correctness questions still open. None are "small
+fixes" — each is a phase of work in itself.
 
-**Triggers:** Phase 3a-infra is done; 3a-migration retires the
-`cfg_state()` shim and unblocks 3b/3c.
+### G1: Decision 4 — semiring contract migration
 
-**Cost:** Per-phase work, each phase ~1-2 days. Orderly progression
-through Phases 3a-migration → 3b → 3c → 4 → 5 → 6 (Decision 6 lands here)
-→ 7 → 8.
+**Status:** Decided 2026-04-25, not started.
 
-**Trade-off:** Each phase is concrete; the C-backed chart can run in
-parallel without conflict.
+Three semirings violate `(Context, Context) → Context`. FilterComposite
+papers over with special cases. Until they're brought into contract,
+the semiring layer's algebraic properties are aspirational. Migration
+ordering already specified: SemanticAction → TypeInference → Precedence
+→ Structural.
 
-### Direction 3: Tier-2 cleanup (short arc)
+**Reference:** `docs/plans/2026-04-24-semiring-contract-drift.md`'s
+2026-04-25 addendum.
 
-**Triggers:** TypeLibrary signature audit's punch list has high-leverage
-small items.
+### G2: Type hierarchy decision (Position A vs Position C)
 
-- `keys`/`values`/`each` Hash → List (151 sites, 3-line change)
-- Other `min_arity` and `Num`→`Int` fixes
+**Status:** Bookmarked, not settled.
 
-**Cost:** Bounded. Each fix retires latent rejection sites. Several can
-land in one session.
+The formal type-system paper treats Scalar and List as siblings with
+mutual circularity. The round-trip-preserving framing would make
+`Scalar <: List` a linear hierarchy. Bug 1's current
+`type_satisfies(X, 'List') → true` is a workaround pending this
+decision. Affects the formal paper, the practical guide,
+`TypeLibrary.pm`, and flow-typing's design.
 
-**Trade-off:** Doesn't unblock anything strategic; just cleans up. But
-keeps the project healthy and reduces future surprise rejections.
+**Reference:** Discussion in this session's handoff context;
+`docs/architecture/perl-type-system-{practical,formal}.md`.
+
+### G3: TypeLibrary signature audit fixes (correctness-relevant subset)
+
+**Status:** Audit complete, fixes not started.
+
+22 of 28 signatures have at least one defect. Subset relevant to
+correctness (latent rejection sites in real code):
+
+- `keys`/`values`/`each` first arg — 151 sites in `lib/`
+- `defined`/`pop`/`shift`/`chr`/`ref` `min_arity` defects — 840+ sites
+- `Num` → `Int` for integer-only positions
+- `split` first arg (Bug 6 anchor) — couples to G2 (union types)
+
+**Reference:** `docs/plans/2026-04-27-typelibrary-signature-audit-findings.md`.
+
+### G4: MOP migration through Phase 6 (eliminates dual representation)
+
+**Status:** 3a-infra done; 3a-migration through 6 not started.
+
+Until Phase 6 lands (deletes Shim, `compat_class`, legacy structs +
+DepChaser per Decision 6), the IR layer has dual representation
+(typed nodes + legacy class-name dispatch via `compat_class`). Dual
+representation obscures correctness reasoning — every codegen change
+has to consider both paths.
+
+Phase ordering: 3a-migration → 3b → 3c → 4 → 5 → 6.
+
+**Reference:** Audit 3 findings doc, MOP migration plan.
+
+### G5: Behavioral-equivalence harness (the oracle gap)
+
+**Status:** Not started. Audit 3 explicitly named this gap.
+
+There is currently **no oracle** for "does the generated code behave
+the same as the source code." The conformance harness checks parse
+acceptance, not semantic equivalence. Without behavioral equivalence,
+"correctness" is unmeasurable for code generation.
+
+This is the biggest missing piece. Building it is substantial work:
+
+- Run `lib/` files through Chalk's Perl backend
+- Redirect `@INC` to compiled output
+- Run the existing test suite against compiled `lib/`
+- Compare to test suite against source `lib/`
+
+If they match, codegen is behaviorally equivalent for that file. This
+is also the self-hosting gate.
+
+**Reference:** Audit 3's "Oracle situation" section.
+
+### G6: Audit 4 (codegen)
+
+**Status:** Not started. Deferred from Phase A.2 pending G5.
+
+The maturity plan named four audits; only three completed. Codegen
+audit was deferred because it requires the behavioral-equivalence
+harness as its oracle. After G5 lands, G6 can run.
+
+**Reference:** Maturity audit plan, original brief deferral.
+
+## Performance gate (depends on correctness clearing)
+
+After correctness gate clears: C-backed chart, C-library/XS path
+resumption. The S1 profiling result confirms this is the right next
+perf lever, but it's gated, not next.
+
+## Quality cleanup (parallel-able anytime, low priority)
+
+Items that don't affect correctness and don't unblock C work:
+
+- Dead IR node removal (`Slice`, `Length`, `Stringify`, `Yada`)
+- `${EXPR}` block-form scalar deref grammar gap
+- Doc reconciliation polish
+- Performance follow-ups S2-S4 (per the perf doc) — minor wins
 
 ## Recommendation for the next session
 
-I'd suggest starting with a **scoping conversation** rather than diving
-into implementation:
+Start with a **scoping conversation** to pick which correctness gate
+item to tackle first:
 
-1. Read this handoff doc + the synthesis at
-   `docs/plans/2026-04-25-phase-a2-synthesis.md` + perf investigation at
+1. Read this handoff doc + `docs/plans/2026-04-25-phase-a2-synthesis.md` +
    `docs/plans/2026-04-30-parser-performance-investigation.md`.
-2. Decide between Direction 1, 2, or 3 (or a combination).
-3. If Direction 1: a separate planning session for the C-bootstrap design
-   probably comes first. Don't dive into implementation without the
-   design.
-4. If Direction 2: Phase 3a-migration is the natural next implementation
-   step.
-5. If Direction 3: TypeLibrary `keys`/`values`/`each` fix is the
-   smallest, highest-leverage starting point.
+2. Decide which of G1-G6 to start with.
 
-The session-resumption pattern that's worked well: start by reading the
-relevant findings docs, surface any framing corrections needed (they
-will exist), then dispatch with strict TDD + brief skepticism + latent
-probes.
+Some sequencing thoughts:
+
+- **G1 (semiring contract) and G4 (MOP through Phase 6) are independent.**
+  Could run in parallel.
+- **G2 (type hierarchy) blocks G3** (TypeLibrary fixes) because the
+  hierarchy decision shapes signature semantics.
+- **G5 (behavioral-equivalence harness) is the most strategically
+  important** — it's the oracle every other correctness check needs.
+  But it's also the hardest design problem.
+- **G6 depends on G5.** Sequential.
+
+If picking one: G5 unlocks G6, validates G1's effects empirically, and
+builds the regression check that all other correctness work needs.
+That's the highest-leverage starting point. But it's a multi-session
+design + implementation arc.
+
+If picking quick wins instead: G3's `keys`/`values`/`each` Hash→List
+fix is small (3 lines, 151 sites of latent rejection retired). Doesn't
+clear a correctness gate by itself, but starts moving the punch list.
+
+The session-resumption pattern that's worked well: start by reading
+the relevant findings docs, surface any framing corrections needed
+(they will exist), then dispatch with strict TDD + brief skepticism +
+latent-rejection probes.
 
 ## Cross-references
 
