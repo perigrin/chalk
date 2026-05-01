@@ -1,5 +1,5 @@
-# ABOUTME: Tests for distance vector set registry — measures structural reuse
-# ABOUTME: across parse positions by computing set_keys from (core_id, rel_dist) pairs.
+# ABOUTME: Documents that the distance vector set registry was removed (S1 deletion).
+# ABOUTME: The set_reuse_stats accessor no longer exists; callers must not call it.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -26,7 +26,6 @@ sub reference($value) {
     );
 }
 
-# Repetitive grammar: identical statements separated by semicolons
 my $grammar = [
     Chalk::Grammar::Rule->new(
         name        => 'Program',
@@ -43,73 +42,53 @@ my $grammar = [
 
 my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
 
-# Test 1: set_reuse_stats accessor exists and returns a hashref
+# S1 deletion: the set-reuse registry (Earley.pm lines 708-727) was removed
+# because it built position key strings that no parsing logic ever consumed.
+# The set_reuse_stats() accessor was removed with it. These tests confirm:
+#   1. The parser still constructs and runs correctly without the registry.
+#   2. The set_reuse_stats() method no longer exists on the parser.
+
+# Test 1: parser constructs without error
 {
     my $parser = Chalk::Bootstrap::Earley->new(
         grammar  => $grammar,
         semiring => $semiring,
     );
-
-    my $stats = $parser->set_reuse_stats();
-    ok(defined $stats, "set_reuse_stats returns a defined value");
-    is(ref $stats, 'HASH', "set_reuse_stats returns a hashref");
+    ok(defined $parser, "parser constructs without set-registry fields");
 }
 
-# Test 2: after parsing, stats contain unique_sets and reuse_hits
+# Test 2: parsing still works correctly after deletion
 {
     my $parser = Chalk::Bootstrap::Earley->new(
         grammar  => $grammar,
         semiring => $semiring,
     );
-
-    ok($parser->parse('x=1'), "parse single statement");
-
-    my $stats = $parser->set_reuse_stats();
-    ok(exists $stats->{unique_sets}, "stats has unique_sets key");
-    ok(exists $stats->{reuse_hits}, "stats has reuse_hits key");
-    cmp_ok($stats->{unique_sets}, '>', 0, "unique_sets > 0 after parse");
+    ok($parser->parse('x=1'), "single statement parses correctly");
+    ok($parser->parse('x=1;y=2;z=3;a=4;b=5'), "repetitive input parses correctly");
 }
 
-# Test 3: repetitive input produces reuse hits
-# "x=1;y=2;z=3" has three identical statements — the positions after
-# each semicolon should have the same DFA state and similar distance
-# vectors, producing set_key collisions.
+# Test 3: set_reuse_stats accessor is gone — the method must not exist
 {
     my $parser = Chalk::Bootstrap::Earley->new(
         grammar  => $grammar,
         semiring => $semiring,
     );
-
-    ok($parser->parse('x=1;y=2;z=3;a=4;b=5'), "parse 5 repetitive statements");
-
-    my $stats = $parser->set_reuse_stats();
-    cmp_ok($stats->{reuse_hits}, '>', 0,
-        "repetitive input produces set reuse hits");
-    cmp_ok($stats->{reuse_hits}, '>=', 2,
-        "at least 2 reuse hits for 5 identical statements");
-
-    # Reuse rate should be meaningful
-    my $total = $stats->{unique_sets} + $stats->{reuse_hits};
-    cmp_ok($total, '>', 0, "total positions tracked > 0");
+    ok(!$parser->can('set_reuse_stats'),
+        "set_reuse_stats accessor removed along with registry");
 }
 
-# Test 4: stats reset between parses
+# Test 4: other stats accessors still work
 {
     my $parser = Chalk::Bootstrap::Earley->new(
         grammar  => $grammar,
         semiring => $semiring,
     );
-
-    $parser->parse('x=1;y=2;z=3');
-    my $stats1 = { $parser->set_reuse_stats()->%* };  # copy
-
-    $parser->reset_parse_state();
-    $parser->parse('a=1');
-    my $stats2 = $parser->set_reuse_stats();
-
-    # After reset + re-parse, stats should reflect only the second parse
-    cmp_ok($stats2->{unique_sets}, '<', $stats1->{unique_sets},
-        "stats reset between parses - fewer unique sets for shorter input");
+    $parser->parse('x=1');
+    ok($parser->can('scan_stats'),  "scan_stats accessor still present");
+    ok($parser->can('gc_stats'),    "gc_stats accessor still present");
+    my $scan = $parser->scan_stats();
+    ok(defined $scan, "scan_stats returns defined value");
+    ok(exists $scan->{total_matches}, "scan_stats has total_matches key");
 }
 
 done_testing;

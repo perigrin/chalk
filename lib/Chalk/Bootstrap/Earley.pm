@@ -76,9 +76,6 @@ class Chalk::Bootstrap::Earley {
     # Scan statistics for terminal clustering
     field %_scan_stats;
 
-    # Set registry: tracks distance vector set_keys per position (Section 6.3)
-    field %_set_registry;
-    field %_set_reuse_stats;
 
     # Detailed parse profiling (parse-lifetime, only populated when EARLEY_PROFILE is set)
     field %_profile_data;
@@ -141,8 +138,6 @@ class Chalk::Bootstrap::Earley {
         $_diag_expected = {};
         %_scan_stats = ();
         %_profile_data = ();
-        %_set_registry = ();
-        %_set_reuse_stats = ();
         @_errors = ();
     }
 
@@ -291,9 +286,6 @@ class Chalk::Bootstrap::Earley {
     # Accessor for scan statistics
     method scan_stats() { return \%_scan_stats; }
 
-    # Accessor for set reuse statistics (Section 6.3 distance vector registry)
-    method set_reuse_stats() { return \%_set_reuse_stats; }
-
     # Accessor for errors collected during recovery
     method errors() { return \@_errors; }
 
@@ -378,8 +370,6 @@ class Chalk::Bootstrap::Earley {
         %_scan_cache = ();
         %_gc_stats = (positions_freed => 0, safe_sets_found => 0);
         %_scan_stats = (total_matches => 0, cache_hits => 0, clustered_scans => 0);
-        %_set_registry = ();
-        %_set_reuse_stats = (unique_sets => 0, reuse_hits => 0);
         %_profile_data = ();
         $_last_active_pos = 0;
         $_diag_expected = {};
@@ -694,34 +684,6 @@ class Chalk::Bootstrap::Earley {
                     my $sym = $self->_symbol_after_dot_for($core_id);
                     if (defined $sym && !$sym->is_reference()) {
                         $_diag_expected->{$sym->value()} = 1;
-                    }
-                }
-            }
-
-            # Set registry: compute distance vector set_key for this position.
-            # Two positions with the same set_key are structurally identical —
-            # same active items and same relative distances (Section 6.3).
-            # The spec uses "$state_id:$dist_key" assuming one DFA state per
-            # position, but positions can contain items from multiple states
-            # (Section 7). Using the full (core_id, rel_dist) pair set is
-            # equivalent and handles multi-state positions correctly.
-            {
-                my @pairs;
-                for my $core_id (0 .. $chart[$pos]->$#*) {
-                    my $oh = $chart[$pos][$core_id];
-                    next unless defined $oh;
-                    for my $rd (0 .. $oh->$#*) {
-                        next unless defined $oh->[$rd];
-                        push @pairs, "$core_id:$rd";
-                    }
-                }
-                if (@pairs) {
-                    my $set_key = join(';', sort @pairs);
-                    if (exists $_set_registry{$set_key}) {
-                        $_set_reuse_stats{reuse_hits}++;
-                    } else {
-                        $_set_registry{$set_key} = $pos;
-                        $_set_reuse_stats{unique_sets}++;
                     }
                 }
             }

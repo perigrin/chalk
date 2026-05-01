@@ -63,7 +63,6 @@ sub parse_file_timed($grammar_ref, $file) {
     my $earley = $parser;
     my $scan = $earley->scan_stats();
     my $gc   = $earley->gc_stats();
-    my $reuse = $earley->set_reuse_stats();
 
     return {
         file    => $file,
@@ -73,7 +72,6 @@ sub parse_file_timed($grammar_ref, $file) {
         success => defined($result) ? true : false,
         scan_stats  => { $scan->%* },
         gc_stats    => { $gc->%* },
-        reuse_stats => { $reuse->%* },
     };
 }
 
@@ -92,7 +90,6 @@ subtest 'Single-file detail: Boolean.pm' => sub {
     # Operation counts must be positive (parser did work)
     cmp_ok($r->{scan_stats}{total_matches}, '>', 0, 'scan: total_matches > 0');
     cmp_ok($r->{scan_stats}{clustered_scans}, '>', 0, 'scan: clustered_scans > 0');
-    cmp_ok($r->{reuse_stats}{unique_sets}, '>', 0, 'reuse: unique_sets > 0');
 
     diag '';
     diag "--- Single-file detail: Boolean.pm ---";
@@ -108,15 +105,6 @@ subtest 'Single-file detail: Boolean.pm' => sub {
     diag "  GC stats:";
     diag sprintf("    positions_freed: %d", $r->{gc_stats}{positions_freed});
     diag sprintf("    safe_sets_found: %d", $r->{gc_stats}{safe_sets_found});
-    diag '';
-    diag "  Set reuse stats:";
-    diag sprintf("    unique_sets:  %d", $r->{reuse_stats}{unique_sets});
-    diag sprintf("    reuse_hits:   %d", $r->{reuse_stats}{reuse_hits});
-    diag sprintf("    reuse_ratio:  %.1f%%",
-        $r->{reuse_stats}{reuse_hits}
-            ? 100.0 * $r->{reuse_stats}{reuse_hits}
-                / ($r->{reuse_stats}{reuse_hits} + $r->{reuse_stats}{unique_sets})
-            : 0);
     diag '';
 };
 
