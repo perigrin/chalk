@@ -74,6 +74,47 @@ class Chalk::Bootstrap::Perl::Actions {
         $typed   = Chalk::IR::NodeFactory->new();
     }
 
+    # Disambiguation-fixup instrumentation.
+    #
+    # Each fixup in this file corrects a parser-derivation that the
+    # filter-stack (Boolean/Precedence/TypeInference/Structural semirings)
+    # should ideally have rejected before SemanticAction fires. Per the
+    # 2026-05-09 architectural framing in 2026-04-24-semiring-contract-drift.md,
+    # the filter stack is "complete" iff no fixup fires during a parse.
+    #
+    # The class-level counter accumulates fires across all parses in the
+    # process. Tests/harnesses that want per-parse granularity should call
+    # reset_fixup_counts() between parses.
+    #
+    # If $ENV{CHALK_FIXUP_AUDIT} is set at process exit, an audit table is
+    # emitted to STDERR. Empty table = filter stack is complete for the
+    # corpus parsed in this process.
+    my %_fixup_counts;
+    my %_known_fixups = map { $_ => 1 } qw(
+        _fix_postfix_chain
+        _fix_postfix_chain_deep
+        _push_deref_inward
+        _push_methodcall_inward
+        _fixup_stmts
+    );
+
+    sub _bump_fixup($class, $name) {
+        $_fixup_counts{$name}++;
+    }
+
+    sub fixup_counts { return { %_fixup_counts } }
+    sub reset_fixup_counts { %_fixup_counts = (); }
+    sub known_fixups { return { %_known_fixups } }
+
+    END {
+        if ($ENV{CHALK_FIXUP_AUDIT} && %_fixup_counts) {
+            warn "fixup-audit:\n";
+            for my $name (sort keys %_fixup_counts) {
+                warn "  $name = $_fixup_counts{$name}\n";
+            }
+        }
+    }
+
     # Helper: collect all leaves with defined IR focuses (Constructor or Constant nodes)
     my sub _collect_ir_leaves($ctx) {
         my @results;
@@ -168,6 +209,7 @@ class Chalk::Bootstrap::Perl::Actions {
     #   PostfixDeref(MethodCall(BuiltinCall(push, [A, B]), m, []), @)
     #     → BuiltinCall(push, [A, PostfixDeref(MethodCall(B, m, []), @)])
     my sub _push_deref_inward($factory, $typed, $target, $sigil_node) {
+        Chalk::Bootstrap::Perl::Actions->_bump_fixup('_push_deref_inward');
         # Collect wrappers to rewrap later
         my @wrappers;
         my $current = $target;
@@ -247,6 +289,7 @@ class Chalk::Bootstrap::Perl::Actions {
     #   MethodCall(BuiltinCall(push, [A, B]), m, [])
     #     → BuiltinCall(push, [A, MethodCall(B, m, [])])
     my sub _push_methodcall_inward($factory, $typed, $invocant, $method_name, $args) {
+        Chalk::Bootstrap::Perl::Actions->_bump_fixup('_push_methodcall_inward');
         my @wrappers;
         my $current = $invocant;
         while (defined $current && $current isa Chalk::IR::Node) {
@@ -363,6 +406,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my ($factory, $typed, $node) = @_;
         return $node unless defined $node;
         return $node unless $node isa Chalk::IR::Node;
+        Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fix_postfix_chain');
 
         # Recursively fix inputs first (bottom-up)
         my @new_inputs;
@@ -549,6 +593,7 @@ class Chalk::Bootstrap::Perl::Actions {
     $_fix_postfix_chain_deep = sub($f, $t, $node) {
         return $node unless defined $node;
         return $node unless $node isa Chalk::IR::Node;
+        Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fix_postfix_chain_deep');
 
         # First, apply the top-level fix
         my $fixed = _fix_postfix_chain($f, $t, $node);
@@ -710,6 +755,7 @@ class Chalk::Bootstrap::Perl::Actions {
     # - `die "message"` → Unwind(ctrl, Constant('message'))
     # - `use Foo 'bar'` (split) → UseDecl(Foo, ['bar'])
     my sub _fixup_stmts($factory, $typed, $stmts) {
+        Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fixup_stmts');
         my @result;
         my $i = 0;
         while ($i <= $#$stmts) {
