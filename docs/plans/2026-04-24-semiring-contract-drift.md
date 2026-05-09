@@ -195,3 +195,59 @@ SemanticAction.zero, then TypeInference, then Precedence, then Structural).
 Audit 5 sharpens the TypeInference step's coupling to Decision 5 and
 clarifies that the drift this document tracks is one of three architectural
 issues at the semiring layer, not the only one.
+
+## Addendum 2026-05-09: filter-stack completeness, measured by fixups
+
+This addendum extends the contract framing from semiring-internal shape
+(zero/one/multiply return Contexts) to the filter-stack's responsibility
+to disambiguate before SemanticAction fires.
+
+**The framing:** the filter-stack (Boolean + Precedence + TypeInference +
+Structural) exists to reject wrong parser derivations before SA runs. Any
+ambiguity that survives filtering and reaches SA produces a wrong value
+that SA cannot detect — Earley's `add()` merges sibling derivations and
+the merged value carries stale child references. Today's
+`lib/Chalk/Bootstrap/Perl/Actions.pm` works around this with
+disambiguation-fixup helpers (`_fix_postfix_chain`,
+`_fix_postfix_chain_deep`, `_push_deref_inward`,
+`_push_methodcall_inward`, `_fixup_stmts`) that walk the post-parse IR
+and correct the merge artifact.
+
+**The contract claim:** the filter-stack is "complete" iff zero
+disambiguation fixups fire during a parse. The fixups exist *because of*
+filter-stack incompleteness; their existence is evidence of a contract
+violation upstream of SA.
+
+**Operationalization (commit `dc92cb61`):** each disambiguation fixup is
+class-level instrumented; `script/chalk-fixup-audit` runs the parser
+over a corpus and produces a per-file fixup-fire count. Empty count
+table = filter-stack complete for that corpus.
+
+**Baseline 2026-05-09 (105 files, lib/Chalk/IR + lib/Chalk/MOP +
+lib/Chalk/Grammar):** every file fires at least one fixup; cumulative
+total is 251,569 fires across the corpus, dominated by
+`_fix_postfix_chain` at 247,355 fires (84% of those from
+`lib/Chalk/IR/Serialize/JSON.pm` alone). The full baseline lives at
+`docs/plans/2026-05-09-fixup-audit-baseline.md`.
+
+**Implication for Decision 4 migration ordering:** unchanged. The
+return-shape contract (zero/one/multiply) and the disambiguation-completeness
+contract are independent. The first is migrated semiring-by-semiring per
+the 2026-04-25 addendum; the second is migrated by extending each
+filtering semiring to catch the ambiguity classes that today require
+fixups. They share no migration sequencing — both can advance in
+parallel, both have the same fixup-audit script as a regression check
+("did my migration step accidentally break something?").
+
+**Implication for the MOP migration plan's Phase 2.5:** the original
+phrasing was "fixup classification & redistribution," implying the
+fixups would *move* to a different home. Under this addendum, the
+goal is **fixup retirement**: extend filtering to catch the ambiguity
+class, verify via the audit that the corresponding fixup's count
+drops, then delete the fixup method. Phase 2.5 in the MOP migration
+plan should be re-read with this framing.
+
+**The completeness signal:** when `script/chalk-fixup-audit lib/Chalk/`
+emits the empty-table message ("no fixups fired across corpus — filter
+stack is complete for this corpus"), the contract is honored for that
+corpus. That is the success criterion.
