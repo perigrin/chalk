@@ -1056,10 +1056,11 @@ SKIP: {
                 }
                 push @ctx_stack, reverse $ctx->children()->@*;
             }
-            # TODO: loop_jump not propagated through for-loop context due to stale-merge
-            # disambiguation picking parse tree without loop_jump annotation.
+            # TODO: loop_jump not propagated through for-loop context — filter-gap
+            # merge admits a derivation without the loop_jump annotation; the
+            # resulting IR shape lacks the data we need.
             TODO: {
-                local $TODO = 'loop_jump lost in for-loop context due to stale-merge disambiguation';
+                local $TODO = 'loop_jump absent in for-loop context — filter-gap merge admits derivation without annotation';
                 ok($found_loop_jump, 'cfg_state has loop_jump for next unless');
                 is($loop_jump_value, 'next', 'loop_jump value is next');
             }
@@ -1070,7 +1071,7 @@ SKIP: {
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_nu, $sem_ctx);
             ok(defined $code, 'next unless generates code');
             TODO: {
-                local $TODO = 'loop_jump codegen requires loop_jump in cfg_state (stale-merge issue)';
+                local $TODO = 'loop_jump codegen requires loop_jump in cfg_state (filter-gap merge issue)';
                 like($code, qr/next\s+(if|unless)\s/, 'codegen emits next if/unless');
             }
             unlike($code, qr/\{\s*next\s*;?\s*\}/, 'codegen does NOT emit { next } block');
@@ -1170,9 +1171,9 @@ SKIP: {
                 }
                 push @ctx_stack, reverse $ctx->children()->@*;
             }
-            # TODO: loop_jump not propagated through for-loop context (stale-merge disambiguation)
+            # TODO: loop_jump not propagated through for-loop context (filter-gap merge)
             TODO: {
-                local $TODO = 'loop_jump lost in for-loop context due to stale-merge disambiguation';
+                local $TODO = 'loop_jump absent in for-loop context — filter-gap merge admits derivation without annotation';
                 ok($found_loop_jump, 'cfg_state has loop_jump for last unless');
                 is($loop_jump_value, 'last', 'loop_jump value is last');
             }
@@ -1183,7 +1184,7 @@ SKIP: {
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_lu, $sem_ctx);
             ok(defined $code, 'last unless generates code');
             TODO: {
-                local $TODO = 'loop_jump codegen requires loop_jump in cfg_state (stale-merge issue)';
+                local $TODO = 'loop_jump codegen requires loop_jump in cfg_state (filter-gap merge issue)';
                 like($code, qr/last\s+(if|unless)\s/, 'codegen emits last if/unless');
             }
         }
@@ -1267,7 +1268,7 @@ SKIP: {
 }
 
 # --- Test 25: Shared-subscript postfix-if condition not wrapped in SubscriptExpr ---
-# Earley stale-value merge can wrap the postfix-if condition in a spurious
+# Filter-gap merge can produce a postfix-if condition wrapped in a spurious
 # SubscriptExpr from the body's assignment target when both sides share a
 # subscripted array reference. Verify the unwrapping fix.
 SKIP: {
@@ -1314,7 +1315,7 @@ SKIP: {
                     my $cond = $if_node->inputs()->[1];
                     ok(defined $cond, 'If condition exists');
                     # The condition must NOT be wrapped in spurious SubscriptExpr
-                    # from the assignment target leaking through Earley stale-value merge
+                    # from the assignment target via filter-gap merge
                     if ($cond isa Chalk::IR::Node::Constructor) {
                         isnt($cond->class(), 'SubscriptExpr',
                             'top-level condition not wrapped in SubscriptExpr');

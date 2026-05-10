@@ -198,10 +198,11 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # Helper: push PostfixDerefExpr inward past prefix wrappers.
-    # The Earley parser's stale-value merge can misparent prefix constructs
-    # (return, scalar, die, list builtins) and method calls inside
-    # PostfixDeref's target. Iteratively unwraps wrapper layers, creates
-    # the deref at the innermost target, then rewraps in correct order.
+    # Filter-gap merge can leave prefix constructs (return, scalar, die,
+    # list builtins) and method calls misparented inside PostfixDeref's
+    # target. Iteratively unwraps wrapper layers, creates the deref at the
+    # innermost target, then rewraps in correct order. (See the canonical
+    # filter-gap-merge explanation at _fix_postfix_chain below.)
     #
     # Handles these misparenting patterns:
     #   PostfixDeref(Return(ctrl, X), @) → Return(ctrl, PostfixDeref(X, @))
@@ -282,10 +283,10 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # Helper: push MethodCallExpr inward past prefix wrappers.
-    # Same Earley stale-value merge issue as PostfixDeref: a MethodCall
-    # can end up with a BuiltinCall or other prefix construct as its
-    # invocant when the correct structure should have the prefix
-    # wrapping the method call.
+    # Same filter-gap merge class as PostfixDeref: a MethodCall can end up
+    # with a BuiltinCall or other prefix construct as its invocant when the
+    # correct structure should have the prefix wrapping the method call.
+    # (See the canonical filter-gap-merge explanation at _fix_postfix_chain.)
     #   MethodCall(BuiltinCall(push, [A, B]), m, [])
     #     → BuiltinCall(push, [A, MethodCall(B, m, [])])
     my sub _push_methodcall_inward($factory, $typed, $invocant, $method_name, $args) {
@@ -371,7 +372,7 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # Helpers for unwrapping Return/Unwind trapped inside expression nodes
-    # by stale-value merge.  Declared here so they are visible to both
+    # by filter-gap merge. Declared here so they are visible to both
     # _fix_postfix_chain and $_unwrap_stmt_from_expr.
     my sub _stmt_inner($node) {
         if ($node isa Chalk::IR::Node::Return) {
@@ -397,11 +398,36 @@ class Chalk::Bootstrap::Perl::Actions {
         return $factory->make_cfg('Unwind', inputs => [$ctrl, $args]);
     }
 
-    # Post-process: fix misparented postfix chains in the IR tree.
-    # The Earley parser's stale-value merge can produce
-    # MethodCallExpr(PostfixDerefExpr(X, S), M, A) when the correct
-    # structure is PostfixDerefExpr(MethodCallExpr(X, M, A), S).
-    # This walks the tree and swaps any such misparentings.
+    # Post-process: rewrite IR shapes produced by filter-gap merge.
+    #
+    # ## Filter-gap merge (canonical explanation)
+    #
+    # When the filter stack (Boolean → Precedence → TypeInference →
+    # Structural) admits two derivations of the same span, Earley's add()
+    # returns both as survivors — neither was eliminated because no semiring
+    # expressed a preference. FilterComposite currently picks one via a
+    # deterministic tie-break (a separate bug — composition shouldn't have
+    # an opinion), and the chosen derivation's IR can embed child references
+    # from the other survivor because the merge happens at the chart level
+    # after both have constructed values.
+    #
+    # This walker is a second parse over a partial CST: it pattern-matches
+    # known-bad IR shapes and rewrites them using hard-coded structural
+    # rules. It cannot consult the source text and cannot intuit programmer
+    # intent — it can only encode "if the IR has shape X, the parser
+    # almost-certainly meant shape Y for ambiguity class Z." That this
+    # walker exists at all is a layering violation: parsing belongs to the
+    # parser, not to a post-pass. Each fire is evidence of a filter-stack
+    # gap that should be closed upstream so this walker can be deleted.
+    #
+    # The four branches below correspond to specific gap classes; per the
+    # 2026-05-10 analysis, three of them (subscript-over-builtin,
+    # subscript-over-unary, subscript-over-binary) are precedence inversions
+    # that belong in the Precedence semiring. The fourth (MethodCall over
+    # PostfixDeref) acts on a syntactically-admitted but semantically
+    # invalid shape (method call on a list) — it should be rejected at
+    # parse, not rewritten. See docs/plans/2026-05-09-fixup-audit-baseline.md
+    # for the retirement framing and per-fixup metrics.
     sub _fix_postfix_chain {
         my ($factory, $typed, $node) = @_;
         return $node unless defined $node;
@@ -483,10 +509,11 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # Fix prefix builtin subscript chain misparenting:
+        # Fix prefix builtin subscript chain misparenting (precedence-inversion
+        # filter-gap class — Precedence semiring should disambiguate this):
         # SubscriptExpr(BuiltinCall(defined/exists/ref/etc, [$var]), $key, style)
         #   → BuiltinCall(defined/exists/ref/etc, [SubscriptExpr($var, $key, style)])
-        # Also handles Return/Unwind wrapper from stale-value merge:
+        # Also handles Return/Unwind wrapper from filter-gap merge:
         # SubscriptExpr(Return(ctrl, BuiltinCall(..., [$var])), $key, style)
         #   → Return(ctrl, BuiltinCall(..., [SubscriptExpr($var, $key, style)]))
         if ($node->class() eq 'SubscriptExpr') {
@@ -534,7 +561,8 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
             }
 
-            # Fix subscript chain wrapping UnaryExpr from stale-value merge:
+            # Fix subscript chain wrapping UnaryExpr (precedence-inversion
+            # filter-gap class — Precedence semiring should disambiguate this):
             # SubscriptExpr(UnaryExpr(op, X), $key, style)
             # → UnaryExpr(op, SubscriptExpr(X, $key, style))
             # The subscript belongs on the operand, not wrapping the negation.
@@ -555,14 +583,13 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
             }
 
-            # Fix subscript chain wrapping BinaryExpr from stale-value merge:
+            # Fix subscript chain wrapping BinaryExpr (precedence-inversion
+            # filter-gap class — Precedence semiring should disambiguate this):
             # SubscriptExpr(BinaryExpr(op, L, R), $key, style)
             # → BinaryExpr(op, L, SubscriptExpr(R, $key, style))
-            # Stale-value merge wraps the entire expression in a SubscriptExpr
-            # from the assignment target. The subscript belongs on the right
-            # operand (the one that lost its subscript during merge).
-            # Handles both logical (||, &&) and comparison (<, >, etc.) ops
-            # since SubscriptExpr wrapping any BinaryExpr is always corruption.
+            # The subscript belongs on the right operand. Handles both logical
+            # (||, &&) and comparison (<, >, etc.) ops since SubscriptExpr
+            # wrapping any BinaryExpr is always a precedence inversion.
             if (defined $target
                     && $target isa Chalk::IR::Node::BinOp) {
                 my $right = $target->inputs()->[2];
@@ -996,7 +1023,8 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val;
             }
         }
-        # Fix misparented postfix chains from Earley stale-value merge.
+        # Fix misparented postfix chains (filter-gap merge — see
+        # _fix_postfix_chain canonical comment for full explanation).
         # Only IR nodes (with inputs()) need this — metadata structs skip it.
         @stmts = map {
             ($_ isa Chalk::IR::Node)
@@ -1073,7 +1101,8 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
         my $fixed = _fixup_stmts($factory, $typed, \@stmts);
-        # Fix misparented postfix chains from Earley stale-value merge
+        # Fix misparented postfix chains (filter-gap merge — see
+        # _fix_postfix_chain canonical comment).
         return [ map {
             (ref($_) eq 'HASH' && exists $_->{__adjust_body})
                 ? $_
@@ -1478,7 +1507,7 @@ class Chalk::Bootstrap::Perl::Actions {
             $return_type = 'Void';
         }
 
-        # Fix stale-value merge artifacts in method body (return/die inside
+        # Fix filter-gap merge artifacts in method body (return/die inside
         # expression wrappers, prefix builtin subscript chains, etc.)
         # Use _deep variant to reach nested expressions (e.g., if-conditions).
         @body = map { $_fix_postfix_chain_deep->($factory, $typed, $_) } @body;
@@ -1498,7 +1527,7 @@ class Chalk::Bootstrap::Perl::Actions {
         );
     }
 
-    # Detect stale-merge artifact: `return unless COND` mis-parsed as
+    # Detect filter-gap merge artifact: `return unless COND` admitted as
     # Return(ctrl, value: ...BuiltinCall("unless",...)).
     # Walks the value tree looking for a BuiltinCall node whose name is
     # a postfix modifier keyword (unless/if/while/until/for/foreach).
@@ -1580,7 +1609,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # If we couldn't find the sub name, skip this node
         return unless defined $sub_name;
 
-        # Fix stale-value merge artifacts in sub body
+        # Fix filter-gap merge artifacts in sub body
         @body = map { $_fix_postfix_chain_deep->($factory, $typed, $_) } @body;
         my $fixed_body = _fixup_stmts($factory, $typed, \@body);
 
@@ -2084,7 +2113,8 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
         my $fixed = _fixup_stmts($factory, $typed, \@stmts);
-        # Fix misparented postfix chains from Earley stale-value merge
+        # Fix misparented postfix chains (filter-gap merge — see
+        # _fix_postfix_chain canonical comment).
         return [ map {
             (ref($_) eq 'HASH' && exists $_->{__adjust_body})
                 ? $_
@@ -2414,7 +2444,7 @@ class Chalk::Bootstrap::Perl::Actions {
         for my $op (@postfix_ops) {
             if ($op isa Chalk::IR::Node::Call && $op->dispatch_kind() eq 'method') {
                 # Set invocant to current result, pushing inward
-                # past any prefix wrappers from stale-value merge
+                # past any prefix wrappers from filter-gap merge
                 $result = _push_methodcall_inward(
                     $factory, $typed, $result, $op->inputs()->[1], $op->inputs()->[2],
                 );
@@ -2494,8 +2524,8 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return undef unless defined $method_name;
 
-        # Push MethodCall inward past prefix wrappers when the Earley
-        # stale-value merge misparents a BuiltinCall as the invocant
+        # Push MethodCall inward past prefix wrappers when filter-gap merge
+        # has admitted a BuiltinCall as the invocant.
         return _push_methodcall_inward($factory, $typed, $invocant, $method_name, \@args);
     }
 
@@ -2568,10 +2598,10 @@ class Chalk::Bootstrap::Perl::Actions {
 
         my $sigil_node = _make_const($factory, $sigil // '@');
 
-        # When the Earley parser produces a stale-value merge, prefix
-        # constructs (return, scalar, etc.) can end up as the target of
-        # PostfixDeref instead of wrapping it. Recursively push the deref
-        # inward past prefix wrappers until it reaches the actual target:
+        # When filter-gap merge admits both derivations, prefix constructs
+        # (return, scalar, etc.) can end up as the target of PostfixDeref
+        # instead of wrapping it. Recursively push the deref inward past
+        # prefix wrappers until it reaches the actual target:
         #   PostfixDeref(Return(ctrl, X), @)
         #     → Return(ctrl, PostfixDeref(X, @))
         #   PostfixDeref(BuiltinCall(scalar, [X]), @)
@@ -2756,7 +2786,7 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # Fix stale-value merge corruption in condition:
+        # Fix filter-gap merge artifacts in condition:
         # _fix_postfix_chain_deep recursively pushes SubscriptExpr wrappers
         # into the correct positions (BuiltinCall args, BinaryExpr right
         # operands, UnaryExpr operands). Since If nodes are not Constructors,

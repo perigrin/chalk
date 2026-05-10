@@ -322,10 +322,13 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             ($correct, $rejected) = ($left, $right);
         }
 
-        # Post-merge hook: allow SA to transfer side-table state from the
-        # rejected derivation to the correct one. This fixes the Earley
-        # stale-value merge problem where cfg_state updates are lost when
-        # add() picks the older value.
+        # Post-merge hook: allow SA to transfer side-table state between the
+        # two survivors when filter-gap merge admits both derivations and
+        # composition picks one (a separate bug — composition shouldn't
+        # have an opinion). The picked side may lack cfg_state info that
+        # the other survivor carries; on_merge transfers it. See
+        # _fix_postfix_chain in Perl/Actions.pm for the canonical
+        # filter-gap-merge explanation.
         if ($self->_sa()->can('on_merge')) {
             $self->_sa()->on_merge($correct, $rejected);
         }

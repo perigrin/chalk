@@ -187,7 +187,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                     $_cfg_lookup{refaddr($ir_node)} = $state;
                 }
                 # For try/catch, also register by try_node refaddr. The Context
-                # extract() may return undef or ARRAY (stale-value merge), but
+                # extract() may return undef or ARRAY (filter-gap merge), but
                 # the TryCatchStmt Constructor in state->{try_node} is what
                 # appears as VarDecl init in the IR tree.
                 if (defined $state->{try_node} && ref($state->{try_node})
@@ -355,8 +355,11 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return false;
     }
 
-    # Detect stale-value merge corruption in a method's output:
+    # Detect filter-gap merge artifact in a method's output:
     # method body has call_method (real work) but RETVAL is a bare string.
+    # (Method name retains historical "stale_merge" naming pending rename;
+    # see _fix_postfix_chain in Perl/Actions.pm for the canonical
+    # filter-gap-merge explanation.)
     method _is_stale_merge($xs_output) {
         my $has_dispatch = $xs_output =~ /(?:call_method|${_current_slug}_\w+)\(/;
         my $has_bare_str = $xs_output =~ /(?:RETVAL|retval) = newSVpvs\("/;
@@ -369,8 +372,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return ($has_dispatch && $has_bare_str);
     }
 
-    # Repair stale-value merge corruption in method output.
-    # The IR hashref constructor was corrupted into a bare string constant.
+    # Repair filter-gap merge artifact in method output.
+    # The IR hashref constructor came out as a bare string constant.
     # We reconstruct the hashref from the method's parameters and local vars.
     method _repair_stale_merge($xs_lines, $method_decl) {
         my $params = $method_decl->inputs()->[1];
@@ -718,7 +721,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return false;
     }
 
-    # Check if a body array's last item is a bare return expression (stale-merge)
+    # Check if a body array's last item is a bare return expression
+    # (filter-gap merge artifact).
     method _body_contains_bare_return($body) {
         return false unless ref($body) eq 'ARRAY' && $body->@*;
         my $last = $body->[-1];
@@ -726,7 +730,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     # Detect if an IR node is a bare expression that was likely a return value
-    # stripped by the Earley stale-value merge.
+    # absent its return wrapper because filter-gap merge admitted both
+    # derivations.
     method _is_bare_return_expr($node) {
         return false unless defined $node;
         # Typed node fast-path: check typed nodes before falling through to
@@ -953,7 +958,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 $cur = $cur->inputs()->[0];
                 next;
             }
-            # Unwrap Return/Unwind wrappers (stale-value merge artifacts)
+            # Unwrap Return/Unwind wrappers (filter-gap merge artifacts)
             if ($cur isa Chalk::IR::Node::Return) {
                 $cur = $cur->inputs()->[1];  # inputs[1] is the value
                 next;
@@ -989,7 +994,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 $base_node = $args->[0] if $args->@* > 0;
                 last;
             }
-            # Unwrap Return/Unwind wrappers (stale-value merge artifacts)
+            # Unwrap Return/Unwind wrappers (filter-gap merge artifacts)
             if ($cur isa Chalk::IR::Node::Return) {
                 $cur = $cur->inputs()->[1];  # inputs[1] is the value
                 next;
@@ -1729,7 +1734,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         }
 
         # Range operator — construct an AV from integer start to end.
-        # Guard against arrayrefs: stale-value merge in the IR can replace
+        # Guard against arrayrefs: filter-gap merge in the IR can replace
         # `$obj->method()->@* - 1` with just `$obj->method()` which returns
         # an arrayref. SvIV on a reference gives a pointer address (huge),
         # causing infinite for loops. Use av_len(SvRV(x)) for references.
@@ -1786,7 +1791,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             }
         }
 
-        # Handle stale-merge parse artifact: return [EXPR] is parsed as
+        # Handle filter-gap merge artifact: return [EXPR] admitted as
         # SubscriptExpr("return", EXPR, "array") instead of Return(ctrl, [EXPR]).
         # The inner EXPR (e.g., map builtin) already produces the array content,
         # so emit it directly — the map handler wraps results in newRV_noinc(AV*).
@@ -1800,12 +1805,13 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # Coderef call: $f->($arg1, $arg2) — emit call_sv with arguments.
         if ($style eq 'call') {
             # __SUB__->() recursion: emit direct C call to current static helper.
-            # The Earley parser loses the __SUB__ invocant via stale-value merge,
-            # so target is undef. Detect: undef target + inside a my sub body.
-            # ASSUMPTION: the only coderef calls with undef target inside my-sub
-            # bodies are __SUB__ recursion. If a different coderef call (e.g.,
-            # $callback->($arg)) also loses its target to stale-value merge,
-            # this heuristic would incorrectly emit a self-recursive call.
+            # The Earley parser admits a derivation without an __SUB__ invocant
+            # via filter-gap merge, so target is undef. Detect: undef target +
+            # inside a my sub body. ASSUMPTION: the only coderef calls with
+            # undef target inside my-sub bodies are __SUB__ recursion. If a
+            # different coderef call (e.g., $callback->($arg)) is similarly
+            # missing its target via filter-gap merge, this heuristic would
+            # incorrectly emit a self-recursive call.
             my $is_sub_recursion = (!defined $target
                 && length $self->_get_current_sub_name());
             if ($is_sub_recursion) {
@@ -2247,7 +2253,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         }
 
         if (defined $init) {
-            # TryCatchStmt as VarDecl init is a stale-value merge artifact.
+            # TryCatchStmt as VarDecl init is a filter-gap merge artifact.
             # The variable is declared with undef, then assigned inside the
             # try block. Split into: declare var, then emit try/catch statement.
             if ($init isa Chalk::IR::Node::TryCatch) {
@@ -2341,12 +2347,12 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         if ($node isa Chalk::IR::Node::PostfixDeref) { return $self->_emit_postfix_deref_expr($node, $declared_vars); }
         if ($node isa Chalk::IR::Node::VarDecl)      { return $self->_emit_var_decl_expr($node, $declared_vars); }
         if ($node isa Chalk::IR::Node::Return) {
-            # Return used as expression: stale-value merge artifact from Earley parser.
+            # Return used as expression: filter-gap merge artifact.
             # Unwrap and emit the inner value (inputs[1]) as an expression.
             return $self->_emit_expr($node->inputs()->[1], $declared_vars);
         }
         if ($node isa Chalk::IR::Node::Unwind) {
-            # Unwind used as expression: stale-value merge artifact.
+            # Unwind used as expression: filter-gap merge artifact.
             # Emit croak in a statement expression — croak never returns.
             my $croak = $self->_emit_die_call($node, $declared_vars);
             return "({ $croak &PL_sv_undef; })";

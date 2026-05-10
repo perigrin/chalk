@@ -313,15 +313,25 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
         # Both non-zero and different: return both as survivors.
         # In practice, upstream semirings (Precedence, TypeInference, Structural)
-        # should disambiguate before reaching here. FilterComposite picks left
-        # as a deterministic tie-break when no semiring expresses a preference.
+        # should disambiguate before reaching here. When all four admit both
+        # derivations, FilterComposite currently picks one via a deterministic
+        # tie-break — that is a separate bug (composition should have no opinion;
+        # genuine ambiguity that survives all filtering should surface as such,
+        # not be silently resolved). Tracked separately from the filter-gap
+        # work; see docs/plans/2026-05-09-fixup-audit-baseline.md.
         return [$left, $right];
     }
 
-    # Post-merge hook: transfer scope from the rejected derivation to the
-    # correct one when the correct side lacks scope that the rejected side has.
-    # This fixes the Earley stale-value merge problem where add() picks an
-    # older value that predates a scope update.
+    # Post-merge hook: when the filter stack admitted both derivations of a
+    # span (no semiring expressed a preference), Earley's add() returned both
+    # as survivors and FilterComposite then picked one via a deterministic
+    # tie-break (a separate bug — composition shouldn't have an opinion).
+    # The picked side may lack scope information that the other survivor
+    # carries, because both were built independently before the chart-level
+    # merge. This hook transfers scope from the other survivor when the
+    # picked one lacks it. See _fix_postfix_chain in Perl/Actions.pm for the
+    # canonical filter-gap-merge explanation; tracked by the fixup audit at
+    # docs/plans/2026-05-09-fixup-audit-baseline.md.
     method on_merge($correct, $rejected) {
         return if $correct->is_zero() || $rejected->is_zero();
         my $correct_scope  = $correct->scope();

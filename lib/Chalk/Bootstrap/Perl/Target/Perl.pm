@@ -365,7 +365,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         # Merge per-method graph schedule into cfg_lookup (additive).
         # The global cfg_lookup (built from the Context tree) is already
         # populated; the graph schedule supplements it for nodes that may
-        # have been missed due to stale-value merges in the parser.
+        # have been missed due to filter-gap merges in the parser (see
+        # _fix_postfix_chain in Perl/Actions.pm for the canonical
+        # filter-gap-merge explanation).
         if (defined $node->graph()) {
             my $sched = $node->graph()->schedule();
             for my $key (keys $sched->%*) {
@@ -658,9 +660,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $index  = $node->inputs()->[1];
         my $style  = $node->inputs()->[2]->value();
 
-        # Fix stale-value merge: SubscriptExpr(BuiltinCall(exists, [$var]), $key)
+        # Filter-gap merge artifact: SubscriptExpr(BuiltinCall(exists, [$var]), $key)
         # should emit as exists($var->{$key}), not exists($var)->{$key}.
-        # Push the subscript inside the builtin argument.
+        # Push the subscript inside the builtin argument. (Precedence-inversion
+        # gap class — see _fix_postfix_chain in Perl/Actions.pm.)
         if (defined $target
                 && ($target isa Chalk::IR::Node::Call && $target->dispatch_kind() eq 'builtin')) {
             my $bname = $target->inputs()->[0]->value();
@@ -674,7 +677,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        # Fix stale-value merge: SubscriptExpr(UnaryExpr(!, BuiltinCall(exists, ...)), $key)
+        # Filter-gap merge artifact: SubscriptExpr(UnaryExpr(!, BuiltinCall(exists, ...)), $key)
         # Push the subscript past the unary op into the builtin argument.
         if (defined $target
                 && ($target isa Chalk::IR::Node::UnaryOp)) {

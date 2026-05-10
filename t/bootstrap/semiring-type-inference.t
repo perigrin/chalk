@@ -918,12 +918,13 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # Integration: push @arr, $x produces single BuiltinCall with 2 args
 # (Validates that Earley fixed-point iteration propagates merged values
 # to parent items, rather than fragmenting into separate statements.)
-# TODO: push fragmentation bug — Earley stale-value merge causes @arr, $x
-# to produce two statements instead of one BuiltinCall. Pre-existing failure.
+# TODO: push fragmentation — filter-gap merge admits a derivation in which
+# @arr, $x produces two statements instead of one BuiltinCall. Pre-existing
+# failure tracked separately from the comment-rewrite work.
 # ========================================================================
 
 TODO: {
-    local $TODO = 'push fragmentation: Earley stale-value merge produces wrong IR (pre-existing)';
+    local $TODO = 'push fragmentation: filter-gap merge admits wrong IR (pre-existing)';
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir = perl_pipeline();
     my $target = Chalk::Bootstrap::BNF::Target::Perl->new();

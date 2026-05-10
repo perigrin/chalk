@@ -435,8 +435,9 @@ my sub method_name($method) {
 }
 
 # === push with method chain PostfixDeref: push $ops->@*, $other->ops()->@* ===
-# The Earley stale-value merge can cause MethodCallExpr to wrap BuiltinCall
-# instead of being a standalone argument. Verify the IR is correctly structured.
+# Filter-gap merge can admit a derivation where MethodCallExpr wraps
+# BuiltinCall instead of being a standalone argument. Verify the IR is
+# correctly structured.
 
 {
     subtest 'push with method-chain PostfixDeref arg' => sub {
