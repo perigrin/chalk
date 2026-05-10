@@ -177,3 +177,106 @@ trajectory.
   `docs/plans/2026-05-01-phase-3a-migration-scope-reframe.md`
 - Perf-gate constraint affecting Bootstrap audit:
   `docs/plans/2026-04-30-parser-performance-investigation.md`
+
+## 2026-05-10 update — per-branch instrumentation in `_fix_postfix_chain`
+
+Commit `fe920dff` adds four sub-counters inside the four
+transformation branches of `_fix_postfix_chain`, distinguishing
+walker entries (the original 247K fires) from actual tree rewrites.
+The audit was rerun on the same 105-file corpus. **The headline
+247K-fire number is ~99.98% noise — only 44 actual rewrites occur
+across the entire corpus.**
+
+### Per-branch totals
+
+| Branch | Source pattern matched | Fires |
+|---|---|---:|
+| `.method_over_deref` | `MethodCallExpr(PostfixDerefExpr(X, S), M, A)` swap | **25** |
+| `.subscript_over_builtin` | `SubscriptExpr(BuiltinCall(prefix, [$var]), $key)` push | **19** |
+| `.subscript_over_unary` | `SubscriptExpr(UnaryOp(op, X), $key)` push | **0** |
+| `.subscript_over_binary` | `SubscriptExpr(BinOp(op, L, R), $key)` push | **0** |
+
+Total actual transforms: **44**. Compare to walker entries: **247,355**.
+Hit rate: 0.018%.
+
+### Per-file distribution
+
+`.method_over_deref` (25 total):
+
+| File | Fires |
+|---|---:|
+| `lib/Chalk/IR/Serialize/JSON.pm` | 22 |
+| `lib/Chalk/IR/Graph.pm` | 2 |
+| `lib/Chalk/IR/Node.pm` | 1 |
+
+`.subscript_over_builtin` (19 total):
+
+| File | Fires |
+|---|---:|
+| `lib/Chalk/IR/Graph.pm` | 7 |
+| `lib/Chalk/IR/Serialize/JSON.pm` | 5 |
+| `lib/Chalk/Grammar/Perl/TypeLibrary.pm` | 4 |
+| `lib/Chalk/IR/Shim.pm` | 2 |
+| `lib/Chalk/IR/NodeFactory.pm` | 1 |
+
+### Interpretation: the architectural picture flips
+
+1. **The 247K headline number was misleading.** It conflated walker
+   entries with actual rewrites. Per the 2026-05-09 framing, every
+   fire was supposed to indicate a filter-stack gap; in practice
+   ~99.98% of those "fires" were the walker descending into nodes
+   it didn't transform.
+
+2. **`_fix_postfix_chain` is not the load-bearing fixup.** With
+   only 44 real transforms across 207K source lines, this walker
+   barely does anything. Removing it should produce a small,
+   measurable change — not a corpus-wide regression.
+
+3. **Two of four branches never fire.** `.subscript_over_unary` and
+   `.subscript_over_binary` had zero hits across the corpus. Either
+   Precedence already handles those cases, or the patterns simply
+   don't appear in the code we ship. Either way, deletion candidate
+   pending a regression test.
+
+4. **`.method_over_deref` is suspect on architectural grounds.** The
+   25 files that trigger it do not contain the `$x->@*->method()`
+   pattern in source (verified via `ag '\->@\*\->\w+\('`). The
+   branch is therefore rewriting IR shapes that the parser produces
+   for *something else* — and silently changing program meaning. Per
+   perigrin's 2026-05-10 review: this is a layering violation (the
+   walker is a second parse over a partial CST and cannot intuit
+   source intent). The branch should be disabled, tests run, and
+   either the failures investigated as real bugs or the branch
+   deleted.
+
+5. **The real disambiguation volume lives in other fixups.** The
+   non-`_fix_postfix_chain` counts from the 2026-05-09 baseline
+   stand:
+   - `_fixup_stmts`: 2,594 (split-token reconstitution)
+   - `_fix_postfix_chain_deep`: 798 (recursive walker — same noise
+     pattern as `_fix_postfix_chain`; needs its own per-branch
+     instrumentation to know the real transform count)
+   - `_push_methodcall_inward`: 727
+   - `_push_deref_inward`: 95
+
+   When attacking volume, those are the targets. `_fix_postfix_chain`
+   is a near-no-op walker.
+
+### Implications for the retirement plan
+
+The 2026-05-09 framing — "drive the totals table to empty" — still
+holds, but the numbers it should track are the per-branch transform
+counts, not the walker-entry counts. The walker-entry count is a
+profiling artifact, not a correctness signal.
+
+**Suggested next moves (read-only investigation):**
+
+1. Disable the `.method_over_deref` branch in a feature branch, run
+   `./prove`, see what breaks. The 25 affected sites concentrate in
+   3 files (JSON.pm, Graph.pm, Node.pm) — failures should be tractable.
+2. Same for `.subscript_over_builtin` — 5 files, 19 fires.
+3. Add per-branch instrumentation to `_fix_postfix_chain_deep` so its
+   798-fire number can be decomposed the same way.
+4. Investigate the non-zero `_push_*` and `_fixup_stmts` fixups to
+   understand which ambiguity classes drive their volume. Those are
+   the real filter-stack gaps under the per-branch lens.
