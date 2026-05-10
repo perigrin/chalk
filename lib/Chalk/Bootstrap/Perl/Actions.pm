@@ -92,6 +92,10 @@ class Chalk::Bootstrap::Perl::Actions {
     my %_fixup_counts;
     my %_known_fixups = map { $_ => 1 } qw(
         _fix_postfix_chain
+        _fix_postfix_chain.method_over_deref
+        _fix_postfix_chain.subscript_over_builtin
+        _fix_postfix_chain.subscript_over_unary
+        _fix_postfix_chain.subscript_over_binary
         _fix_postfix_chain_deep
         _push_deref_inward
         _push_methodcall_inward
@@ -493,6 +497,8 @@ class Chalk::Bootstrap::Perl::Actions {
             my $invocant = $node->inputs()->[0];
             if (defined $invocant
                     && $invocant isa Chalk::IR::Node::PostfixDeref) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fix_postfix_chain.method_over_deref');
                 my $inner_target = $invocant->inputs()->[0];
                 my $sigil = $invocant->inputs()->[1];
                 my $new_method = $typed->make('Call',
@@ -542,6 +548,8 @@ class Chalk::Bootstrap::Perl::Actions {
             if (defined $builtin_call) {
                 my $bname = $builtin_call->inputs()->[0]->value();
                 if ($PREFIX_BUILTINS{$bname}) {
+                    Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                        '_fix_postfix_chain.subscript_over_builtin');
                     my @args = $builtin_call->inputs()->[1]->@*;
                     my $inner_target = $args[-1];
                     $args[-1] = $typed->make('Subscript',
@@ -568,6 +576,8 @@ class Chalk::Bootstrap::Perl::Actions {
             # The subscript belongs on the operand, not wrapping the negation.
             if (defined $target
                     && $target isa Chalk::IR::Node::UnaryOp) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fix_postfix_chain.subscript_over_unary');
                 my $operand = $target->inputs()->[1];
                 my $new_operand = $typed->make('Subscript',
                     inputs       => [$operand, $node->inputs()->[1], $node->inputs()->[2]],
@@ -592,6 +602,8 @@ class Chalk::Bootstrap::Perl::Actions {
             # wrapping any BinaryExpr is always a precedence inversion.
             if (defined $target
                     && $target isa Chalk::IR::Node::BinOp) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fix_postfix_chain.subscript_over_binary');
                 my $right = $target->inputs()->[2];
                 my $new_right = $typed->make('Subscript',
                     inputs       => [$right, $node->inputs()->[1], $node->inputs()->[2]],

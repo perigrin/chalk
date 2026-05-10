@@ -50,4 +50,29 @@ subtest 'instrumented fixup names cover all five disambiguation fixups' => sub {
     }
 };
 
+subtest 'per-branch counters distinguish walk vs transform in _fix_postfix_chain' => sub {
+    # _fix_postfix_chain bumps once per recursive entry (every node walked).
+    # That count conflates "ran the walker" with "actually rewrote a tree."
+    # Per-branch sub-counters expose the true transformation rate per
+    # ambiguity class:
+    #   .method_over_deref       — MethodCall(PostfixDeref(...), ...) swap
+    #   .subscript_over_builtin  — Subscript(BuiltinCall(prefix, ...), ...)
+    #   .subscript_over_unary    — Subscript(UnaryOp(...), ...)
+    #   .subscript_over_binary   — Subscript(BinOp(...), ...)
+    # As Precedence is extended to disambiguate each class, the matching
+    # sub-counter's count should drop, and that branch can be deleted from
+    # the walker.
+    my @sub_counters = qw(
+        _fix_postfix_chain.method_over_deref
+        _fix_postfix_chain.subscript_over_builtin
+        _fix_postfix_chain.subscript_over_unary
+        _fix_postfix_chain.subscript_over_binary
+    );
+
+    my %known = Chalk::Bootstrap::Perl::Actions->known_fixups()->%*;
+    for my $name (@sub_counters) {
+        ok($known{$name}, "per-branch counter $name is registered as known");
+    }
+};
+
 done_testing;
