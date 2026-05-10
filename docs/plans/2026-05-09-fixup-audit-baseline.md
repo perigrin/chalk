@@ -274,7 +274,10 @@ profiling artifact, not a correctness signal.
 1. Disable the `.method_over_deref` branch in a feature branch, run
    `./prove`, see what breaks. The 25 affected sites concentrate in
    3 files (JSON.pm, Graph.pm, Node.pm) — failures should be tractable.
+   **NOTE 2026-05-10b: this number was a corpus-sampling artifact.
+   See the Bootstrap addendum below.**
 2. Same for `.subscript_over_builtin` — 5 files, 19 fires.
+   **NOTE 2026-05-10b: same — see Bootstrap addendum.**
 3. Add per-branch instrumentation to `_fix_postfix_chain_deep` so its
    798-fire number can be decomposed the same way.
 4. Investigate the non-zero `_push_*` and `_fixup_stmts` fixups to
@@ -417,3 +420,151 @@ the right shape directly).
    volume is "prefix builtin binding looser than postfix dispatch."
    That's the move that makes the audit numbers actually approach
    zero, and it's a real semiring extension (not a fixup retirement).
+
+## 2026-05-10b update — Bootstrap audit (partial); the "dead branch" claim was wrong
+
+Per perigrin's challenge ("`lib/Chalk/Bootstrap` is where most of
+the code is implemented — why is it excluded?"), the audit was
+re-run against `lib/Chalk/Bootstrap` (the actual compiler source).
+Prior runs excluded it for measurement-cost reasons documented in
+"Why Bootstrap is excluded from this baseline" above; that exclusion
+was a shortcut, not a principled choice, and the framing in the
+2026-05-10 addendum overgeneralized from the IR/MOP/Grammar sample.
+
+The Bootstrap audit ran 2 hours of CPU under an 8 GB vmem cap and
+2 h CPU ulimit before being terminated by the CPU cap. **27 of 44
+files completed** before kill — including most of the gnarly ones
+(`Earley.pm`, `Desugar.pm`, `ConciseTree/Actions.pm`,
+`LR0DFA.pm`, all four BNF targets). Files that did NOT complete
+include `Perl/Actions.pm` (3,356 lines — the home of
+`_fix_postfix_chain` itself), `Perl/Target/EmitHelpers.pm`,
+`Perl/Target/C.pm`, all four semirings, and several others.
+
+The script (`script/chalk-fixup-audit`) was refactored in commit
+`3eb8d7c2` to print per-file rows incrementally so partial results
+survive a cap-kill. Raw output saved at
+`docs/plans/2026-05-10-fixup-audit-bootstrap-partial.txt`.
+
+### Headline: the "dead branches" weren't dead, they were unsampled
+
+| Counter | IR/MOP/Grammar (105 files) | Bootstrap (27 of 44) | Multiplier |
+|---|---:|---:|---:|
+| `_fix_postfix_chain.subscript_over_builtin` | 19 | **827** | **44×** |
+| `_fix_postfix_chain.method_over_deref` | 25 | **117** | **5×** |
+| `_fix_postfix_chain.subscript_over_unary` | 0 | **96** | **was "dead"** |
+| `_fix_postfix_chain.subscript_over_binary` | 0 | 0 | (still no fires) |
+| `_push_deref_inward.peel_builtin` | 10 | 65 | 7× |
+| `_push_deref_inward.peel_method` | 11 | 39 | 4× |
+| `_push_methodcall_inward.peel_builtin` | 51 | 62 | 1.2× |
+| `_fixup_stmts.vardecl_init_merge` | 14 | 46 | 3× |
+| `_fixup_stmts.binop_into_list_builtin` | 0 | **1** | **was "dead"** |
+
+**Two of the four `_fix_postfix_chain` "dead branches" became
+live-and-frequent on Bootstrap source:**
+
+- `.subscript_over_unary` jumped from 0 → 96. `Desugar.pm` alone
+  fires it 59 times (`!$x->{key}`-style patterns); `LR0DFA.pm`
+  fires it 30 times.
+- `_fixup_stmts.binop_into_list_builtin` went from 0 → 1.
+
+**One branch remains zero across both corpora:**
+`_fix_postfix_chain.subscript_over_binary` (0/0). That one might
+genuinely be unreachable, but the call-graph hasn't been verified.
+
+### Total real transforms: ~1,250 in 27 files vs 130 in 105 narrower files
+
+Bootstrap-partial total real transforms (per-class):
+
+| Counter | Fires (Bootstrap partial) |
+|---|---:|
+| `_fix_postfix_chain.subscript_over_builtin` | 827 |
+| `_fix_postfix_chain.method_over_deref` | 117 |
+| `_fix_postfix_chain.subscript_over_unary` | 96 |
+| `_push_deref_inward.peel_builtin` | 65 |
+| `_push_methodcall_inward.peel_builtin` | 62 |
+| `_fixup_stmts.vardecl_init_merge` | 46 |
+| `_push_deref_inward.peel_method` | 39 |
+| `_fixup_stmts.binop_into_list_builtin` | 1 |
+| **Total real transforms (partial)** | **~1,250** |
+
+That's almost 10× the 130 from the prior corpus, with 17 files
+still unaudited (including the largest). Extrapolating naively
+from line-count ratios, the full Bootstrap audit would likely
+report 3,000–5,000 real transforms.
+
+### Why one file (`Earley.pm`) dominates `subscript_over_builtin`
+
+Of the 827 `subscript_over_builtin` fires in Bootstrap-partial,
+**547 (66%) are from `Earley.pm` alone.** That file has the
+`defined $chart[...]->{key}` / `exists $waiting_for{...}->[idx]`
+patterns characteristic of bookkeeping over the Earley chart — the
+exact precedence inversion the branch was written to handle. The
+high concentration confirms the architectural diagnosis: this isn't
+"random parser shapes the walker happens to match"; it's a
+genuine ambiguity class our grammar admits and our filter stack
+fails to disambiguate.
+
+### Architectural picture (revised, 2026-05-10b)
+
+1. **The 13-dead-branches claim was a sampling artifact.** Eleven
+   of those branches likely fire on the unaudited 17 Bootstrap files
+   too. Don't delete them without per-pattern regression tests
+   exercising the patterns — the patterns exist in real Perl, the
+   prior corpus just didn't contain them.
+
+2. **The precedence-inversion class is even more dominant than
+   previously thought.** Of ~1,250 partial-Bootstrap transforms,
+   1,050 (84%) are prefix-builtin-vs-postfix-dispatch precedence
+   inversions. Volume is large enough that extending Precedence to
+   handle this class would meaningfully reduce the fixup walker's
+   actual work, not just trim dead code.
+
+3. **Method-over-deref is still suspect.** 117 fires across 27 files,
+   most concentrated in single-digit per-file counts. Per the prior
+   addendum: this branch silently rewrites `$x->@*->method()` to
+   `($x->method())->@*` and changes program meaning. The Bootstrap
+   files where it fires (Earley, Desugar, ConciseTree/Actions, etc.)
+   are exactly the kind of compiler code where silent
+   meaning-changes would be hardest to detect. **Investigation of
+   what the parser is producing those shapes from** is now higher
+   priority — the volume is meaningful.
+
+4. **`Perl/Actions.pm` was never audited.** It's the home of
+   `_fix_postfix_chain` itself. We don't know whether the walker
+   audits its own source cleanly. That's a meta-question worth
+   answering separately.
+
+5. **Grammar gap surfaced as side-effect:** `DepChaser.pm` fails
+   to parse on `local $/;` (line 168). Chalk's grammar doesn't
+   accept the `$/` punctuation variable (and presumably `$@`, `$!`,
+   `$,`, `$"`, `$;`, `$0`, etc.). This is a real grammar gap that
+   blocks self-hosting of any code using these variables, but is
+   out of scope for the fixup-audit work.
+
+### Implications for next moves
+
+The earlier "Option 3: demolition first, then precedence" plan is
+no longer viable — there's almost nothing safe to demolish. The
+right reframe:
+
+1. **Investigate `_fix_postfix_chain.method_over_deref` first.** 117
+   fires across files where silent meaning-change would be
+   catastrophic. Either it's matching the right shapes and the
+   rewrite is correct (in which case we need to understand *why*
+   the parser produces them), or it's matching wrong shapes and
+   silently breaking compilation. Read-only investigation.
+
+2. **Hold off on dead-branch deletion.** Only `subscript_over_binary`
+   (0 fires across both corpora) is still a candidate, and verifying
+   it's truly unreachable requires call-graph analysis.
+
+3. **Complete the Bootstrap audit when feasible.** The remaining 17
+   files include the largest (`Perl/Actions.pm` 3,356, `EmitHelpers.pm`
+   2,527, `Perl/Target/C.pm` 2,119). Running each individually with
+   its own CPU budget avoids the all-or-nothing cap-kill. Lower
+   priority than #1.
+
+4. **The Precedence work is still the load-bearing target** — but now
+   the volume case is overwhelming (~1,050 precedence inversions in
+   partial Bootstrap, likely 2,500+ in full Bootstrap). This should
+   be the eventual destination once the investigation steps complete.
