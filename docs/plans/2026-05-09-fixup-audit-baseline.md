@@ -519,15 +519,30 @@ fails to disambiguate.
    handle this class would meaningfully reduce the fixup walker's
    actual work, not just trim dead code.
 
-3. **Method-over-deref is still suspect.** 117 fires across 27 files,
-   most concentrated in single-digit per-file counts. Per the prior
-   addendum: this branch silently rewrites `$x->@*->method()` to
-   `($x->method())->@*` and changes program meaning. The Bootstrap
-   files where it fires (Earley, Desugar, ConciseTree/Actions, etc.)
-   are exactly the kind of compiler code where silent
-   meaning-changes would be hardest to detect. **Investigation of
-   what the parser is producing those shapes from** is now higher
-   priority — the volume is meaningful.
+3. **Method-over-deref turns out to be real disambiguation, not a
+   silent meaning-change.** Initial hypothesis (recorded in the
+   2026-05-10 addendum and committed in `f7626351`) was that the
+   branch silently rewrote invalid `$x->@*->method()` (method-on-list)
+   into `($x->method())->@*`. Verification on Bootstrap-partial files
+   where the branch fires shows the actual source pattern is the
+   reverse: **valid Perl `$obj->method()->@*` (12 occurrences in
+   ConciseTree/Actions.pm, 4 in Context.pm, 1 in Desugar.pm, etc.)
+   that the parser misparses as `MethodCall(PostfixDeref($obj, ?),
+   method, ?)` instead of `PostfixDeref(MethodCall($obj, method, []),
+   @)`.** The walker rewrites the wrong derivation back to the right
+   one. This is the same precedence-inversion class as
+   `subscript_over_*` — `->` ambiguity between postfix-deref and
+   method-call when both start with `Expression _ /->/`.
+
+   Implication: the branch is doing real and correct work. The
+   architectural problem is the layer (post-parse walker instead of
+   in-parse filter), not the rewrite logic. Earlier framing of "this
+   branch silently changes program meaning" was wrong and is
+   superseded by this addendum.
+
+   Anomaly: 5 fires in `Earley.pm` with zero direct
+   `->method()->@*` source matches. Likely chain across line breaks
+   or intermediate non-method postfix; small enough to defer.
 
 4. **`Perl/Actions.pm` was never audited.** It's the home of
    `_fix_postfix_chain` itself. We don't know whether the walker
@@ -554,6 +569,11 @@ right reframe:
    the parser produces them), or it's matching wrong shapes and
    silently breaking compilation. Read-only investigation.
 
+   **Result (2026-05-10c, this addendum):** investigation done,
+   conclusion is "real disambiguation, not silent rewrite." See
+   item 3 in the architectural picture above and the cross-fire-pattern
+   table below.
+
 2. **Hold off on dead-branch deletion.** Only `subscript_over_binary`
    (0 fires across both corpora) is still a candidate, and verifying
    it's truly unreachable requires call-graph analysis.
@@ -568,3 +588,47 @@ right reframe:
    the volume case is overwhelming (~1,050 precedence inversions in
    partial Bootstrap, likely 2,500+ in full Bootstrap). This should
    be the eventual destination once the investigation steps complete.
+
+### Cross-fire-pattern verification (2026-05-10c)
+
+For each branch that fires meaningfully on Bootstrap-partial,
+verified that the source files contain real Perl patterns the
+branch is rewriting. All three branches match the same architectural
+class: `->` precedence ambiguity where the parser admits a
+wrong derivation alongside the right one and FilterComposite picks
+the wrong one.
+
+| Branch | Source pattern | Files (sample) | Source occurrences | Walker fires |
+|---|---|---|---:|---:|
+| `.method_over_deref` | `$obj->method()->@*` | ConciseTree/Actions.pm | 12 | 79 |
+| `.method_over_deref` | `$obj->method()->@*` | Context.pm | 4 | 13 |
+| `.method_over_deref` | `$obj->method()->@*` | Desugar.pm | 1 | 1 |
+| `.subscript_over_builtin` | `defined $x->{k}` etc. | Earley.pm | 24 | 547 |
+| `.subscript_over_builtin` | `defined $x->{k}` etc. | Desugar.pm | 3 | 60 |
+| `.subscript_over_builtin` | `defined $x->{k}` etc. | Context.pm | 8 | 24 |
+| `.subscript_over_unary` | `!exists $h{k}` (stacked) | Desugar.pm | 2 | 59 |
+
+The fire-to-source ratio is 6×–23×, consistent with the parser
+exploring multiple derivations during ambiguity resolution and the
+walker recursing through nested constructs.
+
+**Architectural unification:** all three `_fix_postfix_chain`
+branches that fire meaningfully (and `_push_*_inward.peel_builtin`)
+are rewriting the same precedence-inversion class:
+
+> `->` is overloaded between postfix-deref/subscript and
+> method-call/subscript. When chained patterns like
+> `$x->method()->@*` or `defined $x->{k}` appear, the parser
+> admits both orderings; nothing in the filter stack expresses
+> the correct binding precedence; FilterComposite picks one
+> arbitrarily; the walker corrects it.
+
+The right architectural fix is a single rule in the Precedence
+semiring: when both a postfix-deref and a method-call (or
+prefix-builtin and subscript) derivation are admitted at the same
+span, prefer the binding that matches the source-token order. This
+single change retires four branches simultaneously and reduces
+walker volume from ~1,050 fires to (target) zero on Bootstrap.
+
+**Status:** investigation complete; design and implementation of
+the Precedence rule remains.
