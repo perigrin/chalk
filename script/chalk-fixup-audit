@@ -10,6 +10,9 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Actions;
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 
+STDOUT->autoflush(1);
+STDERR->autoflush(1);
+
 my @roots = @ARGV ? @ARGV : ('lib');
 my @files;
 File::Find::find(sub {
@@ -17,6 +20,11 @@ File::Find::find(sub {
     push @files, $File::Find::name;
 }, @roots);
 @files = sort @files;
+
+say "# Per-file fixup audit";
+say "# Format: STATUS  file  [fixup1=count fixup2=count ...]";
+say "# Files queued: ", scalar @files;
+say "";
 
 # Build the Perl grammar once.
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -33,58 +41,57 @@ my $grammar = Chalk::Grammar::Perl::FixupAudit::grammar();
 my $parser  = build_perl_ir_parser($grammar, start => 'Program');
 
 my %totals;
-my @per_file;
+my $clean_count = 0;
+my $with_fixups_count = 0;
+my $parse_fail_count = 0;
+my $err_open_count = 0;
+my $processed = 0;
 
 for my $file (@files) {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     Chalk::Bootstrap::Perl::Actions->reset_fixup_counts();
 
     open my $fh, '<:utf8', $file or do {
-        push @per_file, [$file, 'ERROR_OPEN', $!];
+        say "ERR_OPEN  $file  ($!)";
+        $err_open_count++;
         next;
     };
-    local $/;
-    my $source = <$fh>;
+    my $source = do { local $/; <$fh> };
     close $fh;
 
     my $result = eval { $parser->parse_value($source) };
     my $err = $@;
 
     my $counts = Chalk::Bootstrap::Perl::Actions->fixup_counts();
-
     my $status = !$err && defined $result && !$result->is_zero() ? 'OK' : 'PARSE_FAIL';
-
-    push @per_file, [$file, $status, { %$counts }];
-    for my $name (keys %$counts) {
-        $totals{$name} += $counts->{$name};
-    }
-}
-
-say "# Per-file fixup audit";
-say "# Format: STATUS  file  [fixup1=count fixup2=count ...]";
-say "";
-for my $row (@per_file) {
-    my ($file, $status, $counts_or_err) = @$row;
-    if ($status eq 'ERROR_OPEN') {
-        say "ERR_OPEN  $file  ($counts_or_err)";
-        next;
-    }
-    my $counts = $counts_or_err;
     my $detail = %$counts
         ? join(' ', map { "$_=$counts->{$_}" } sort keys %$counts)
         : '(none)';
+
     say "$status  $file  [$detail]";
+
+    if ($status eq 'OK' && %$counts) {
+        $with_fixups_count++;
+    } elsif ($status eq 'OK') {
+        $clean_count++;
+    } else {
+        $parse_fail_count++;
+    }
+
+    for my $name (keys %$counts) {
+        $totals{$name} += $counts->{$name};
+    }
+
+    $processed++;
 }
 
 say "";
 say "# Totals across corpus";
-say "# Files audited: ", scalar @per_file;
-my $clean = grep { $_->[1] eq 'OK' && !%{$_->[2]} } @per_file;
-my $with_fixups = grep { $_->[1] eq 'OK' && %{$_->[2]} } @per_file;
-my $parse_fail = grep { $_->[1] eq 'PARSE_FAIL' } @per_file;
-say "# Files OK with no fixups fired: $clean";
-say "# Files OK with fixups fired:    $with_fixups";
-say "# Files PARSE_FAIL:              $parse_fail";
+say "# Files audited: $processed";
+say "# Files OK with no fixups fired: $clean_count";
+say "# Files OK with fixups fired:    $with_fixups_count";
+say "# Files PARSE_FAIL:              $parse_fail_count";
+say "# Files ERR_OPEN:                $err_open_count" if $err_open_count;
 say "";
 if (%totals) {
     for my $name (sort keys %totals) {
