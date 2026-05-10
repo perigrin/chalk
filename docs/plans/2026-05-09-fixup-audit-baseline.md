@@ -280,3 +280,140 @@ profiling artifact, not a correctness signal.
 4. Investigate the non-zero `_push_*` and `_fixup_stmts` fixups to
    understand which ambiguity classes drive their volume. Those are
    the real filter-stack gaps under the per-branch lens.
+
+## 2026-05-10 update (continued) — `_fixup_stmts` and `_push_*_inward` decomposition
+
+Commit `3c8843ee` adds 19 new sub-counters across `_fixup_stmts`
+(10 branches), `_push_methodcall_inward` (5 wrapper-kind counters),
+and `_push_deref_inward` (4 wrapper-kind counters). Audit re-run on
+the same 105-file corpus.
+
+**Headline: the same noise pattern as `_fix_postfix_chain` repeats.
+Of 130 real disambiguations across the corpus, most concentrate on
+one precedence-inversion class.**
+
+### `_fixup_stmts` — 8 of 10 branches never fire
+
+| Sub-counter | Fires |
+|---|---:|
+| `.unwrap_pass_through` | **10,836** (per-loop-iteration counter, not per-call) |
+| `.vardecl_init_merge` | **14** |
+| `.return_with_value` | 0 |
+| `.return_bare` | 0 |
+| `.die_with_arg` | 0 |
+| `.use_with_args` | 0 |
+| `.assign_init_to_vardecl` | 0 |
+| `.binop_into_list_builtin` | 0 |
+| `.list_builtin_call` | 0 |
+| `.prefix_builtin_call` | 0 |
+
+The aggregate `_fixup_stmts = 2,594` is a per-call counter; the loop
+iterates ~4× per call on average. Only **14 actual statement
+merges** happen across the corpus, all of them the same kind
+(`VarDecl(undef) + expr → VarDecl(var, expr)` declaration-init
+merge). Eight of the ten merge classes are dead code.
+
+### `_push_methodcall_inward` — 93% pure pass-through
+
+| Sub-counter | Fires |
+|---|---:|
+| `.no_wrappers` | **676** |
+| `.peel_builtin` | **51** |
+| `.peel_return` | 0 |
+| `.peel_unwind` | 0 |
+| `.peel_postfixderef` | 0 |
+
+Of 727 calls, 676 (93%) peel nothing — the function builds a plain
+`MethodCallExpr` and returns. The remaining 51 calls all peel a
+single wrapper kind: `BuiltinCall`. The `Return`/`Unwind`/
+`PostfixDerefExpr` peel paths never fire.
+
+### `_push_deref_inward` — only two peel kinds fire
+
+| Sub-counter | Fires |
+|---|---:|
+| `.peel_method` | **11** |
+| `.peel_builtin` | **10** |
+| `.peel_return` | 0 |
+| `.peel_unwind` | 0 |
+
+Of 95 calls, only 21 peel any wrapper, split between `BuiltinCall`
+(10) and `MethodCall` (11). The `Return`/`Unwind` peel paths never
+fire.
+
+### Cross-fixup synthesis
+
+Combining yesterday's `_fix_postfix_chain` decomposition with today's
+results, the **total real disambiguation work performed across the
+entire 105-file corpus is 130 transformations**:
+
+| Fixup | Aggregate "fires" | Real transforms |
+|---|---:|---:|
+| `_fix_postfix_chain` | 247,355 | 44 |
+| `_fix_postfix_chain_deep` | 798 | unmeasured (same noise pattern likely) |
+| `_fixup_stmts` | 2,594 | 14 |
+| `_push_methodcall_inward` | 727 | 51 |
+| `_push_deref_inward` | 95 | 21 |
+| **Total real transforms** | — | **130** |
+
+The original 2026-05-09 framing — "every fire is evidence of a
+filter-stack gap" — was measuring the wrong number. The 247K-fire
+narrative was 99.95% measurement artifact (walker descent / call
+overhead). Actual filter-stack work happens in ~0.05% of fires.
+
+### The pattern that emerges
+
+Of the 130 real disambiguations:
+
+- **44** are `_fix_postfix_chain` transforms (25 method-over-deref
+  + 19 subscript-over-builtin)
+- **51** are `_push_methodcall_inward.peel_builtin` (BuiltinCall
+  wrapping a method invocant)
+- **21** are `_push_deref_inward` peels (10 builtin + 11 method
+  wrapping a deref target)
+- **14** are `_fixup_stmts.vardecl_init_merge` (declaration-init
+  reconstitution)
+
+Three of the four categories — accounting for **86 of 130 real
+transforms (66%)** — are the same precedence-inversion family:
+**a prefix builtin (defined/exists/scalar/ref/etc.) parsed at lower
+precedence than the postfix `->method()`, `->{key}`, or `->@*` it
+should bind tighter than.** That ambiguity class is large enough,
+focused enough, and in the right semiring (Precedence) to be a
+worthwhile attack target.
+
+### 13 dead branches across the fixup suite
+
+| Fixup | Dead branches (zero fires across corpus) |
+|---|---|
+| `_fix_postfix_chain` | `.subscript_over_unary`, `.subscript_over_binary` |
+| `_fixup_stmts` | `.return_with_value`, `.return_bare`, `.die_with_arg`, `.use_with_args`, `.assign_init_to_vardecl`, `.binop_into_list_builtin`, `.list_builtin_call`, `.prefix_builtin_call` |
+| `_push_methodcall_inward` | `.peel_return`, `.peel_unwind`, `.peel_postfixderef` |
+| `_push_deref_inward` | `.peel_return`, `.peel_unwind` |
+
+Total: **13 transformation branches that never fire on the corpus.**
+Each is a deletion candidate pending a regression test that exercises
+the corresponding pattern (to confirm the parser already produces
+the right shape directly).
+
+### Implications for retirement work
+
+1. **The 247K headline in the 2026-05-09 baseline is a profiling
+   artifact.** Future audit reports should lead with per-branch
+   transform counts, not aggregate fire counts.
+
+2. **Most of the "filter-stack gap" surface area doesn't exist.**
+   The fixup suite contains 13 dead branches and 3 mostly-noop
+   walkers. The actual gap is concentrated in one precedence-inversion
+   class (prefix builtin vs postfix dispatch), 86 instances corpus-wide.
+
+3. **Deletion is the right next move for the dead branches.** Per
+   regression test (one per branch), confirm the pattern produces
+   correct IR without the branch, then delete. Mechanical, well-
+   scoped, reduces fixup-suite size by ~70%.
+
+4. **The Precedence semiring has a single concrete target.** Once the
+   dead branches are gone, the only ambiguity class with non-trivial
+   volume is "prefix builtin binding looser than postfix dispatch."
+   That's the move that makes the audit numbers actually approach
+   zero, and it's a real semiring extension (not a fixup retirement).
