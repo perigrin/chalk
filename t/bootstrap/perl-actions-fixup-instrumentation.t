@@ -50,6 +50,69 @@ subtest 'instrumented fixup names cover all five disambiguation fixups' => sub {
     }
 };
 
+subtest 'per-branch counters distinguish merge classes in _fixup_stmts' => sub {
+    # _fixup_stmts dispatches on ten distinct merge patterns. The aggregate
+    # counter tells us how often the function ran; the per-branch counters
+    # tell us which split-token reconstitution patterns drive volume. As
+    # filtering work eliminates each ambiguity class (e.g., grammar fix so
+    # `return EXPR` is never split into Constant('return') + EXPR), the
+    # corresponding sub-counter drops and the branch can be deleted.
+    my @sub_counters = qw(
+        _fixup_stmts.return_with_value
+        _fixup_stmts.return_bare
+        _fixup_stmts.die_with_arg
+        _fixup_stmts.use_with_args
+        _fixup_stmts.assign_init_to_vardecl
+        _fixup_stmts.binop_into_list_builtin
+        _fixup_stmts.vardecl_init_merge
+        _fixup_stmts.list_builtin_call
+        _fixup_stmts.prefix_builtin_call
+        _fixup_stmts.unwrap_pass_through
+    );
+
+    my %known = Chalk::Bootstrap::Perl::Actions->known_fixups()->%*;
+    for my $name (@sub_counters) {
+        ok($known{$name}, "per-branch counter $name is registered as known");
+    }
+};
+
+subtest 'per-branch counters track wrapper peels in _push_methodcall_inward' => sub {
+    # _push_methodcall_inward peels wrapper layers (Return/Unwind/BuiltinCall/
+    # PostfixDerefExpr) off a MethodCall's invocant. Each wrapper kind
+    # corresponds to a distinct filter-stack gap class. The .no_wrappers
+    # counter tracks calls where nothing was peeled — the helper became a
+    # pass-through that returned a plain MethodCallExpr unchanged.
+    my @sub_counters = qw(
+        _push_methodcall_inward.peel_return
+        _push_methodcall_inward.peel_unwind
+        _push_methodcall_inward.peel_builtin
+        _push_methodcall_inward.peel_postfixderef
+        _push_methodcall_inward.no_wrappers
+    );
+
+    my %known = Chalk::Bootstrap::Perl::Actions->known_fixups()->%*;
+    for my $name (@sub_counters) {
+        ok($known{$name}, "per-branch counter $name is registered as known");
+    }
+};
+
+subtest 'per-branch counters track wrapper peels in _push_deref_inward' => sub {
+    # _push_deref_inward peels wrapper layers off a PostfixDeref's target.
+    # Same per-wrapper-kind decomposition as _push_methodcall_inward, plus
+    # MethodCallExpr (which can wrap a deref target as well).
+    my @sub_counters = qw(
+        _push_deref_inward.peel_return
+        _push_deref_inward.peel_unwind
+        _push_deref_inward.peel_builtin
+        _push_deref_inward.peel_method
+    );
+
+    my %known = Chalk::Bootstrap::Perl::Actions->known_fixups()->%*;
+    for my $name (@sub_counters) {
+        ok($known{$name}, "per-branch counter $name is registered as known");
+    }
+};
+
 subtest 'per-branch counters distinguish walk vs transform in _fix_postfix_chain' => sub {
     # _fix_postfix_chain bumps once per recursive entry (every node walked).
     # That count conflates "ran the walker" with "actually rewrote a tree."

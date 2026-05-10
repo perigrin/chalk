@@ -98,8 +98,27 @@ class Chalk::Bootstrap::Perl::Actions {
         _fix_postfix_chain.subscript_over_binary
         _fix_postfix_chain_deep
         _push_deref_inward
+        _push_deref_inward.peel_return
+        _push_deref_inward.peel_unwind
+        _push_deref_inward.peel_builtin
+        _push_deref_inward.peel_method
         _push_methodcall_inward
+        _push_methodcall_inward.peel_return
+        _push_methodcall_inward.peel_unwind
+        _push_methodcall_inward.peel_builtin
+        _push_methodcall_inward.peel_postfixderef
+        _push_methodcall_inward.no_wrappers
         _fixup_stmts
+        _fixup_stmts.return_with_value
+        _fixup_stmts.return_bare
+        _fixup_stmts.die_with_arg
+        _fixup_stmts.use_with_args
+        _fixup_stmts.assign_init_to_vardecl
+        _fixup_stmts.binop_into_list_builtin
+        _fixup_stmts.vardecl_init_merge
+        _fixup_stmts.list_builtin_call
+        _fixup_stmts.prefix_builtin_call
+        _fixup_stmts.unwrap_pass_through
     );
 
     sub _bump_fixup($class, $name) {
@@ -220,19 +239,27 @@ class Chalk::Bootstrap::Perl::Actions {
         my $current = $target;
         while (defined $current && $current isa Chalk::IR::Node) {
             if ($current isa Chalk::IR::Node::Return) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_push_deref_inward.peel_return');
                 # Save the control token so it can be restored when re-wrapping.
                 push @wrappers, ['Return', $current->inputs()->[0]];
                 $current = $current->inputs()->[1];  # value is inputs[1]
             } elsif ($current isa Chalk::IR::Node::Unwind) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_push_deref_inward.peel_unwind');
                 # Save control token so it can be restored when re-wrapping.
                 push @wrappers, ['Unwind', $current->inputs()->[0], $current->inputs()->[1]];
                 my $args = $current->inputs()->[1];
                 $current = $args->[-1];
             } elsif (_is_unwrappable_builtin($current)) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_push_deref_inward.peel_builtin');
                 push @wrappers, ['BuiltinCall', $current->inputs()->[0], $current->inputs()->[1]];
                 my $args = $current->inputs()->[1];
                 $current = $args->[-1];
             } elsif ($current isa Chalk::IR::Node::Call && $current->dispatch_kind() eq 'method') {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_push_deref_inward.peel_method');
                 # MethodCall wrapping a prefix construct — peel it off
                 push @wrappers, ['MethodCallExpr', $current->inputs()->[1], $current->inputs()->[2]];
                 $current = $current->inputs()->[0];  # invocant
@@ -299,19 +326,27 @@ class Chalk::Bootstrap::Perl::Actions {
         my $current = $invocant;
         while (defined $current && $current isa Chalk::IR::Node) {
             if ($current isa Chalk::IR::Node::Return) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_push_methodcall_inward.peel_return');
                 # Save control token for re-wrapping later.
                 push @wrappers, ['Return', $current->inputs()->[0]];
                 $current = $current->inputs()->[1];  # value is inputs[1]
             } elsif ($current isa Chalk::IR::Node::Unwind) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_push_methodcall_inward.peel_unwind');
                 # Save control token so it can be restored when re-wrapping.
                 push @wrappers, ['Unwind', $current->inputs()->[0], $current->inputs()->[1]];
                 my $die_args = $current->inputs()->[1];
                 $current = $die_args->[-1];
             } elsif (_is_unwrappable_builtin($current)) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_push_methodcall_inward.peel_builtin');
                 push @wrappers, ['BuiltinCall', $current->inputs()->[0], $current->inputs()->[1]];
                 my $bi_args = $current->inputs()->[1];
                 $current = $bi_args->[-1];
             } elsif ($current isa Chalk::IR::Node::PostfixDeref) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_push_methodcall_inward.peel_postfixderef');
                 # PostfixDeref wrapping target — peel off and rewrap outside
                 push @wrappers, ['PostfixDerefExpr', $current->inputs()->[1]];
                 $current = $current->inputs()->[0];  # target
@@ -322,6 +357,8 @@ class Chalk::Bootstrap::Perl::Actions {
 
         # No wrappers found — return plain MethodCallExpr
         unless (@wrappers) {
+            Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                '_push_methodcall_inward.no_wrappers');
             return $typed->make('Call',
                 dispatch_kind => 'method',
                 name          => $method_name->value(),
@@ -809,6 +846,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     && defined $item->value()
                     && $item->value() eq 'return'
                     && $i + 1 <= $#$stmts) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fixup_stmts.return_with_value');
                 # Merge return + value into a Return CFG node.
                 # No cfg_state is available here (fixup runs post-parse),
                 # so a fresh Start node serves as the control token.
@@ -820,6 +859,8 @@ class Chalk::Bootstrap::Perl::Actions {
             } elsif ($item isa Chalk::IR::Node::Constant
                     && defined $item->value()
                     && $item->value() eq 'return') {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fixup_stmts.return_bare');
                 # Bare return; with no following value — emit Return CFG node.
                 push @result, $factory->make_cfg('Return',
                     inputs => [$factory->make('Start'), _make_const($factory, 'undef')],
@@ -828,6 +869,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     && defined $item->value()
                     && $item->value() eq 'die'
                     && $i + 1 <= $#$stmts) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fixup_stmts.die_with_arg');
                 # Merge die + single argument into an Unwind CFG node.
                 # No cfg_state is available here (fixup runs post-parse),
                 # so a fresh Start node serves as the control token.
@@ -842,6 +885,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     && !scalar($item->args()->@*)
                     && $i + 1 <= $#$stmts
                     && $stmts->[$i + 1] isa Chalk::IR::Node::Constant) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fixup_stmts.use_with_args');
                 # Merge UseInfo(module, []) + bare Constant into
                 # UseInfo(module, [Constant]). Grammar ambiguity sometimes
                 # splits `use Foo 'bar'` into separate statements.
@@ -865,6 +910,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     && $item->inputs()->[0]->value() eq '='
                     && $item->inputs()->[1] isa Chalk::IR::Node::VarDecl
                     && !defined $item->inputs()->[1]->inputs()->[1]) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fixup_stmts.assign_init_to_vardecl');
                 # Merge BinaryExpr(=, VarDecl(var, undef), expr) → VarDecl(var, expr)
                 my $var_decl = $item->inputs()->[1];
                 push @result, $typed->make('VarDecl',
@@ -875,6 +922,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     && $item->inputs()->[1] isa Chalk::IR::Node::Call
                     && $item->inputs()->[1]->dispatch_kind() eq 'builtin'
                     && $LIST_BUILTINS{$item->inputs()->[1]->inputs()->[0]->value()}) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fixup_stmts.binop_into_list_builtin');
                 # Restructure BinaryExpr(op, BuiltinCall(name, [..., last]), right)
                 # into BuiltinCall(name, [..., BinaryExpr(op, last, right)])
                 # Fixes grammar ambiguity where `push @arr, EXPR . EXPR` is
@@ -933,6 +982,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     && ($next->dispatch_kind() eq 'method'
                         || $next->dispatch_kind() eq 'builtin');
                 if (!$is_boundary) {
+                    Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                        '_fixup_stmts.vardecl_init_merge');
                     $i++;
                     push @result, $typed->make('VarDecl',
                         inputs       => [$item->inputs()->[0], $next],
@@ -945,6 +996,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     && defined $item->value()
                     && $LIST_BUILTINS{$item->value()}
                     && $i + 1 <= $#$stmts) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fixup_stmts.list_builtin_call');
                 # Merge bare builtin keyword + following args → BuiltinCall
                 my $builtin = $item->value();
                 my @args;
@@ -997,6 +1050,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     && defined $item->value()
                     && $PREFIX_BUILTINS{$item->value()}
                     && $i + 1 <= $#$stmts) {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fixup_stmts.prefix_builtin_call');
                 # Merge bare prefix-builtin + following expression → BuiltinCall
                 my $builtin = $item->value();
                 $i++;
@@ -1009,6 +1064,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     compat_class  => 'BuiltinCall',
                 );
             } else {
+                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
+                    '_fixup_stmts.unwrap_pass_through');
                 push @result, $_unwrap_stmt_from_expr->($factory, $typed, $item);
             }
             $i++;
