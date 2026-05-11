@@ -3,7 +3,6 @@
 use 5.42.0;
 use utf8;
 use experimental 'class';
-use Chalk::Grammar::Perl::PrecedenceTable ();
 
 class Chalk::Bootstrap::Semiring::Precedence {
     # Callback: op_string => { level => N, assoc => str } or undef
@@ -110,8 +109,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
             my $existing  = $l_prec;
             my $rule_name = $right->annotations()->{rule_name} // '';
             my $matched_text = $right->focus() // '';
-            my $predicted = $right->annotations()->{predicted};
-            return $self->_scan_multiply($existing, $rule_name, $matched_text, $predicted);
+            return $self->_scan_multiply($existing, $rule_name, $matched_text);
         }
 
         # Complete event: right Context has annotations->{complete} = true.
@@ -131,30 +129,9 @@ class Chalk::Bootstrap::Semiring::Precedence {
 
     # _scan_multiply: operator-validation logic for scan events.
     # Called from multiply when the right argument is a scan-annotated Context.
-    method _scan_multiply($existing, $rule_name, $matched_text, $predicted = undef) {
+    method _scan_multiply($existing, $rule_name, $matched_text) {
         # Propagate zero
         return $self->zero() if $self->is_zero($existing);
-
-        # Named-unary detection: QualifiedIdentifier scanning a named-unary
-        # token while CallExpression is predicted marks it with L10 precedence
-        # (level=50, nonassoc, is_operator=true). The Subscript bracket-boundary
-        # check below uses this to reject named-unary CallExpressions as
-        # Subscript targets; PostfixExpression completion exempts level=50 so
-        # the named-unary call itself can be a valid PostfixExpression.
-        if ($rule_name eq 'QualifiedIdentifier'
-                && Chalk::Grammar::Perl::PrecedenceTable::is_named_unary($matched_text)) {
-            my $in_call = ref($predicted) eq 'HASH'
-                ? exists $predicted->{CallExpression}
-                : (defined $predicted ? $predicted->('CallExpression') : 0);
-            if ($in_call) {
-                my $nu_level = Chalk::Grammar::Perl::PrecedenceTable::named_unary_level();
-                my $nu_assoc = Chalk::Grammar::Perl::PrecedenceTable::named_unary_assoc();
-                if ($ENV{DEBUG_PRECEDENCE}) {
-                    warn "  PREC_NAMED_UNARY: $matched_text level=$nu_level assoc=$nu_assoc\n";
-                }
-                return _intern(true, $nu_level, $nu_assoc, true, $matched_text);
-            }
-        }
 
         # In BinaryOp or AssignOp context, look up operator and validate
         # the LEFT operand's precedence (accumulated in $existing).
@@ -212,23 +189,6 @@ class Chalk::Bootstrap::Semiring::Precedence {
 
                 return _intern(true, $assign_level, 'right', true, $matched_text);
             }
-        }
-
-        # Named-unary CallExpression cannot be a Subscript target.
-        # `defined $h{key}` must parse as defined($h{key}) (the call wraps the
-        # subscript), not (defined $h){key} (subscript on the call). This
-        # rejection at Subscript scan of [ or { blocks the wrong derivation.
-        # Level 50 is uniquely assigned by the named-unary detection in this
-        # method; no other code path produces level=50. is_operator gets
-        # stripped by _prec_multiply when non-operator tokens multiply in, so
-        # we check only the level, not is_operator.
-        if ($rule_name eq 'Subscript' && $matched_text =~ /^[\[\{]$/
-                && defined($existing->{level})
-                && $existing->{level} == Chalk::Grammar::Perl::PrecedenceTable::named_unary_level()) {
-            if ($ENV{DEBUG_PRECEDENCE}) {
-                warn "  PREC_REJECT_NAMED_UNARY_TARGET: matched=$matched_text level=$existing->{level}\n";
-            }
-            return $self->zero();
         }
 
         # Subscript bracket boundary: reject if the target is a bare
@@ -440,16 +400,6 @@ class Chalk::Bootstrap::Semiring::Precedence {
         if (my $info = $EXPR_LEVELS->{$rule_name}) {
             my ($expr_level, $expr_assoc) = $info->@*;
             if ($expr_level < 0 && defined($value->{level}) && $value->{level} >= 0) {
-                my $nu_level = Chalk::Grammar::Perl::PrecedenceTable::named_unary_level();
-                # Exempt named-unary level: a named-unary CallExpression IS a
-                # legitimate PostfixExpression. Preserve level=50 so that the
-                # Subscript bracket-boundary scan in _scan_multiply can detect
-                # a named-unary PostfixExpression being used as a Subscript
-                # target and reject it. Note: is_operator gets stripped by
-                # _prec_multiply, so only the level (50) is checked below.
-                if ($value->{level} == $nu_level) {
-                    return _intern(true, $nu_level, $value->{assoc}, false);
-                }
                 return $self->zero();
             }
             return _intern(true, $expr_level, $expr_assoc, false);
@@ -487,26 +437,12 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $self->one();
         }
 
-        # MethodCall/PostfixIncDec: pass through precedence info so
-        # PostfixExpression's completion can reject invalid targets.
-        if ($rule_name eq 'MethodCall' || $rule_name eq 'PostfixIncDec') {
-            return $value;
-        }
-
-        # CallExpression: pass through precedence info, but reset the
-        # named-unary level (50) for the parenthesized alternative (alt 0:
-        # QualifiedIdentifier _ \( ExpressionList? \)). When named-unary
-        # operators use explicit parens, e.g. scalar(@arr), the parens bound
-        # the argument and the result behaves as a regular term. Alts 1-3
-        # (space-delimited) are named-unary calls without explicit delimiter;
-        # these preserve level=50 so the Subscript boundary check can fire.
-        if ($rule_name eq 'CallExpression') {
-            my $nu_level = Chalk::Grammar::Perl::PrecedenceTable::named_unary_level();
-            if (defined($alt_idx) && $alt_idx == 0
-                    && defined($value->{level})
-                    && $value->{level} == $nu_level) {
-                return $self->one();
-            }
+        # MethodCall/CallExpression/PostfixIncDec: pass through precedence info
+        # so PostfixExpression's completion can reject invalid targets
+        # (e.g., unparenthesized BinaryExpression as target).
+        if ($rule_name eq 'MethodCall'
+            || $rule_name eq 'CallExpression'
+            || $rule_name eq 'PostfixIncDec') {
             return $value;
         }
 
@@ -522,16 +458,6 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 }
                 return $self->one();
             }
-            return $value;
-        }
-
-        # Atom and QualifiedIdentifier preserve a named-unary marker so the
-        # level=50 from _scan_multiply survives through to the CallExpression
-        # wrapping it. Without this, the catch-all below clears the marker.
-        if (($rule_name eq 'Atom' || $rule_name eq 'QualifiedIdentifier')
-                && $value->{is_operator}
-                && defined($value->{level})
-                && $value->{level} == Chalk::Grammar::Perl::PrecedenceTable::named_unary_level()) {
             return $value;
         }
 
