@@ -43,6 +43,8 @@ use lib 't/bootstrap/lib';
 use PrecedenceSpecHelpers qw(parse_expr shape_of isa_with_shape);
 
 use Chalk::IR::Node;
+use Chalk::IR::Node::Add;
+use Chalk::IR::Node::And;
 use Chalk::IR::Node::Assign;
 use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::TernaryExpr;
@@ -145,35 +147,26 @@ subtest 'L20 x= produces CompoundAssign with op "x="' => sub {
 #   $a ? $b : ($c ? $d : $e)
 # = TernaryExpr($a, $b, TernaryExpr($c, $d, $e)).
 #
-# Probing shows Chalk currently produces the LEFT-associated form:
-#   TernaryExpr(TernaryExpr($a, $b, $c), $d, $e)
-# i.e., the inner ternary is on the *condition* side, not the false-branch.
-# Mark TODO.
-#
 # Source wrapped in parens so parse_expr's "my \$_ = ..." wrapper isn't
-# absorbed by the top-level ternary (see "ternary absorbs surrounding
-# assignment" subtests below).
+# a bare assignment that the ternary condition check would reject.
 # ============================================================================
 
 subtest 'L19 ?: is right-associative: $a ? $b : $c ? $d : $e' => sub {
     my $expr = parse_expr('($a ? $b : $c ? $d : $e)');
     my $outer = isa_with_shape($expr, 'Chalk::IR::Node::TernaryExpr',
         'top is TernaryExpr') or return;
-    TODO: {
-        local $TODO = 'L19 ?: is left-associated in current Chalk; should be right-assoc';
-        is(shape_of($outer->inputs()->[0]), 'Const($a)',
-            'outer condition is $a (right-assoc)');
-        is(shape_of($outer->inputs()->[1]), 'Const($b)',
-            'outer then-branch is $b');
-        my $else_branch = $outer->inputs()->[2];
-        ok(defined($else_branch) && ref($else_branch)
-            && $else_branch->isa('Chalk::IR::Node::TernaryExpr'),
-            'outer else-branch is the nested ternary (right-assoc)')
-            or diag('  got shape: ' . shape_of($else_branch));
-        is(ref($else_branch) && $else_branch->isa('Chalk::IR::Node::TernaryExpr')
-            ? shape_of($else_branch->inputs()->[0]) : '<n/a>',
-            'Const($c)', 'inner condition is $c');
-    }
+    is(shape_of($outer->inputs()->[0]), 'Const($a)',
+        'outer condition is $a (right-assoc)');
+    is(shape_of($outer->inputs()->[1]), 'Const($b)',
+        'outer then-branch is $b');
+    my $else_branch = $outer->inputs()->[2];
+    ok(defined($else_branch) && ref($else_branch)
+        && $else_branch->isa('Chalk::IR::Node::TernaryExpr'),
+        'outer else-branch is the nested ternary (right-assoc)')
+        or diag('  got shape: ' . shape_of($else_branch));
+    is(ref($else_branch) && $else_branch->isa('Chalk::IR::Node::TernaryExpr')
+        ? shape_of($else_branch->inputs()->[0]) : '<n/a>',
+        'Const($c)', 'inner condition is $c');
 };
 
 # ============================================================================
@@ -214,54 +207,37 @@ subtest 'L19 vs L17: $a || $b ? $c : $d is TernaryExpr(Or($a,$b), $c, $d)' => su
 # "Because this operator produces an assignable result, using assignments
 # without parentheses will get you in trouble.").
 #
-# Probe shows current Chalk produces the WRONG shape:
-#   TernaryExpr(Assign($a, $b), $c, $d)
-# i.e., the assignment is on the condition side. Mark TODO.
-#
-# Furthermore: in the un-parenthesized form, the ternary even absorbs the
-# surrounding "my \$_ = ..." VarDecl. We test the parenthesized form so we
-# at least get back an IR tree.
+# The precedence semiring enforces this: when '?' scans in a TernaryExpression,
+# the accumulated condition level is checked and level>=100 (AssignmentExpression
+# or nested TernaryExpression) is rejected.
 # ============================================================================
 
 subtest 'L19 vs L20: $a = $b ? $c : $d is Assign($a, TernaryExpr($b, $c, $d))' => sub {
     my $expr = parse_expr('($a = $b ? $c : $d)');
-    TODO: {
-        local $TODO = 'L19 ?: should bind tighter than L20 =; current Chalk inverts';
-        ok(defined($expr) && ref($expr) && $expr->isa('Chalk::IR::Node::Assign'),
-            'top is Assign')
-            or diag('  got shape: ' . shape_of($expr));
-        my $is_assign = ref($expr) && $expr->isa('Chalk::IR::Node::Assign');
-        is($is_assign ? $expr->left()->value() : '<n/a>', '$a',
-            'left of Assign is $a');
-        my $right = $is_assign ? $expr->right() : undef;
-        ok(defined($right) && ref($right)
-            && $right->isa('Chalk::IR::Node::TernaryExpr'),
-            'right of Assign is TernaryExpr (?: tighter than =)')
-            or diag('  got shape: ' . shape_of($right));
-    }
+    my $is_assign = isa_with_shape($expr, 'Chalk::IR::Node::Assign',
+        'top is Assign') or return;
+    is($expr->left()->value(), '$a', 'left of Assign is $a');
+    isa_with_shape($expr->right(), 'Chalk::IR::Node::TernaryExpr',
+        'right of Assign is TernaryExpr (?: tighter than =)');
 };
 
 # ============================================================================
-# L19 ?: absorbs surrounding L20 = without parens (no-paren footgun)
+# L19 ?: without parens: $a = $b ? $c : $d parses as Assign($a, TernaryExpr)
 # ----------------------------------------------------------------------------
-# perlop L1340: "Because this operator produces an assignable result, using
-# assignments without parentheses will get you in trouble." Worked example:
-#   $x % 2 ? $x += 10 : $x += 2
-# really means
-#   (($x % 2) ? ($x += 10) : $x) += 2
-#
-# Probing without parens shows Chalk's ternary swallows the surrounding
-# "my \$_ = ..." VarDecl and puts it on the condition side, so parse_expr
-# returns undef (the top stmt is not a VarDecl). This is a separate symptom
-# of the same L19/L20 inversion. Mark TODO with the diagnostic.
+# perlop L19 < L20: ternary binds tighter than assignment. So without parens,
+# `$a = $b ? $c : $d` still parses as `$a = ($b ? $c : $d)` = Assign($a,
+# TernaryExpr($b, $c, $d)). The scan-time check at '?' ensures assignment
+# cannot become the condition of a ternary without parentheses.
 # ============================================================================
 
-subtest 'L19 ?: no-paren absorbs L20 = (footgun, parse_expr returns undef)' => sub {
+subtest 'L19 ?: no-paren: $a = $b ? $c : $d parses as Assign($a, TernaryExpr($b,$c,$d))' => sub {
     my $expr = parse_expr('$a = $b ? $c : $d');
-    TODO: {
-        local $TODO = 'L19 ?: absorbs surrounding L20 = at top level; parse_expr returns undef';
-        ok(defined $expr, 'parse_expr returns defined IR for un-parenthesized form');
-    }
+    ok(defined $expr, 'parse_expr returns defined IR for un-parenthesized form');
+    my $is_assign = isa_with_shape($expr, 'Chalk::IR::Node::Assign',
+        'top is Assign') or return;
+    is($expr->left()->value(), '$a', 'left of Assign is $a');
+    isa_with_shape($expr->right(), 'Chalk::IR::Node::TernaryExpr',
+        'right of Assign is TernaryExpr');
 };
 
 # ============================================================================
@@ -282,6 +258,79 @@ subtest 'Lvalue ternary: ($x ? $y : $z) = 1 is Assign(TernaryExpr(...), 1)' => s
     isa_with_shape($assign->left(), 'Chalk::IR::Node::TernaryExpr',
         'left of Assign is TernaryExpr (lvalue ternary)');
     is($assign->right()->value(), '1', 'right of Assign is 1');
+};
+
+# ============================================================================
+# L19 (?:) bilateral coverage
+# ----------------------------------------------------------------------------
+# These tests confirm ternary interacts correctly with other operators in both
+# directions: ternary is looser than binary ops (they are tighter), and
+# ternary is tighter than assignment (assignment is looser).
+# ============================================================================
+
+subtest 'L19 vs L8 (+): + binds tighter than ?: — $a + $b ? $c : $d is TernaryExpr(Add,c,d)' => sub {
+    # + at L8 binds tighter than ?: at L19.
+    # So `$a + $b ? $c : $d` = TernaryExpr(Add($a,$b), $c, $d).
+    my $expr = parse_expr('$a + $b ? $c : $d');
+    my $tern = isa_with_shape($expr, 'Chalk::IR::Node::TernaryExpr',
+        'top is TernaryExpr') or return;
+    isa_with_shape($tern->inputs()->[0], 'Chalk::IR::Node::Add',
+        'condition is Add (+ binds tighter than ?:)');
+    is(shape_of($tern->inputs()->[1]), 'Const($c)', 'then-branch is $c');
+    is(shape_of($tern->inputs()->[2]), 'Const($d)', 'else-branch is $d');
+};
+
+subtest 'L19 vs L10 (&&): && binds tighter than ?: — $a && $b ? $c : $d is TernaryExpr(And,c,d)' => sub {
+    # && at L10 binds tighter than ?: at L19.
+    # So `$a && $b ? $c : $d` = TernaryExpr(And($a,$b), $c, $d).
+    my $expr = parse_expr('$a && $b ? $c : $d');
+    my $tern = isa_with_shape($expr, 'Chalk::IR::Node::TernaryExpr',
+        'top is TernaryExpr') or return;
+    isa_with_shape($tern->inputs()->[0], 'Chalk::IR::Node::And',
+        'condition is And (&& binds tighter than ?:)');
+    is(shape_of($tern->inputs()->[1]), 'Const($c)', 'then-branch is $c');
+    is(shape_of($tern->inputs()->[2]), 'Const($d)', 'else-branch is $d');
+};
+
+subtest 'L19 ternary branches can contain + without parens' => sub {
+    # The then/else branches of ternary accept binary expressions freely.
+    # `$a ? $b + $c : $d - $e` = TernaryExpr($a, Add($b,$c), Sub($d,$e)).
+    my $expr = parse_expr('$a ? $b + $c : $d');
+    my $tern = isa_with_shape($expr, 'Chalk::IR::Node::TernaryExpr',
+        'top is TernaryExpr') or return;
+    is(shape_of($tern->inputs()->[0]), 'Const($a)', 'condition is $a');
+    isa_with_shape($tern->inputs()->[1], 'Chalk::IR::Node::Add',
+        'then-branch is Add (binary op inside ternary branch)');
+    is(shape_of($tern->inputs()->[2]), 'Const($d)', 'else-branch is $d');
+};
+
+subtest 'L19 nested ternary three levels: $a ? $b : $c ? $d : $e ? $f : $g' => sub {
+    # Three-level right-assoc chain:
+    #   $a ? $b : ($c ? $d : ($e ? $f : $g))
+    my $expr = parse_expr('($a ? $b : $c ? $d : $e ? $f : $g)');
+    my $t1 = isa_with_shape($expr, 'Chalk::IR::Node::TernaryExpr',
+        'top is TernaryExpr') or return;
+    is(shape_of($t1->inputs()->[0]), 'Const($a)', 'outer condition is $a');
+    is(shape_of($t1->inputs()->[1]), 'Const($b)', 'outer then is $b');
+    my $t2 = isa_with_shape($t1->inputs()->[2], 'Chalk::IR::Node::TernaryExpr',
+        'outer else is TernaryExpr (right-assoc level 2)') or return;
+    is(shape_of($t2->inputs()->[0]), 'Const($c)', 'mid condition is $c');
+    is(shape_of($t2->inputs()->[1]), 'Const($d)', 'mid then is $d');
+    my $t3 = isa_with_shape($t2->inputs()->[2], 'Chalk::IR::Node::TernaryExpr',
+        'mid else is TernaryExpr (right-assoc level 3)') or return;
+    is(shape_of($t3->inputs()->[0]), 'Const($e)', 'inner condition is $e');
+    is(shape_of($t3->inputs()->[1]), 'Const($f)', 'inner then is $f');
+    is(shape_of($t3->inputs()->[2]), 'Const($g)', 'inner else is $g');
+};
+
+subtest 'L19 ternary in assignment RHS: $x = $a ? $b : $c is Assign($x, TernaryExpr)' => sub {
+    # = at L20 is looser; ternary builds the RHS first.
+    my $expr = parse_expr('$x = $a ? $b : $c');
+    my $assign = isa_with_shape($expr, 'Chalk::IR::Node::Assign',
+        'top is Assign') or return;
+    is($assign->left()->value(), '$x', 'left of Assign is $x');
+    isa_with_shape($assign->right(), 'Chalk::IR::Node::TernaryExpr',
+        'right of Assign is TernaryExpr');
 };
 
 # ============================================================================

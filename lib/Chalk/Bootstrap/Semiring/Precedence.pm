@@ -170,6 +170,42 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return _intern(true, $not_level, 'right', true, $matched_text);
         }
 
+        # TernaryExpression scanning '?' validates that the condition expression
+        # (accumulated in $existing) has tighter binding than ?:, then resets
+        # the accumulated level for the then/else branches.
+        #
+        # This enforces two related rules:
+        #
+        # 1. Right-associativity (perlop L19): reject a TernaryExpression (level=100)
+        #    as the direct condition.  `$a ? $b : $c ? $d : $e` must parse as
+        #    TernaryExpr($a,$b, TernaryExpr($c,$d,$e)), not the left-assoc form.
+        #    Killing level=100 in the condition slot forces the right-assoc reading
+        #    (the nested ternary goes on the else-branch instead).
+        #
+        # 2. ?: tighter than = (L19 < L20): reject an AssignmentExpression (level=101)
+        #    as the condition.  `$a = $b ? $c : $d` must parse as
+        #    Assign($a, TernaryExpr($b,$c,$d)), not TernaryExpr(Assign($a,$b),$c,$d).
+        #
+        # After validation, return one() to reset the accumulated level.  The
+        # condition's level (e.g., $a==1 at level 7) must not constrain what
+        # can appear in the then/else branches — those branches accept any
+        # expression, including nested TernaryExpressions.  Without the reset,
+        # the else-branch `$a==2 ? "two" : "other"` fails because
+        # TernaryExpression (level=100) > condition-level (7).
+        if ($rule_name eq 'TernaryExpression' && $matched_text eq '?') {
+            if (defined($existing->{level}) && $existing->{level} >= 100) {
+                if ($ENV{DEBUG_PRECEDENCE}) {
+                    warn "  PREC_REJECT_TERNARY_COND: cond_level=$existing->{level} >= 100 at '?'\n";
+                }
+                return $self->zero();
+            }
+            if ($ENV{DEBUG_PRECEDENCE}) {
+                my $el = $existing->{level} // 'undef';
+                warn "  PREC_TERNARY_RESET: cond_level=$el at '?' -> reset to one()\n";
+            }
+            return $self->one();
+        }
+
         # In BinaryOp or AssignOp context, look up operator and validate
         # the LEFT operand's precedence (accumulated in $existing).
         if ($rule_name eq 'BinaryOp' || $rule_name eq 'AssignOp') {
@@ -184,6 +220,17 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 if (defined($existing->{level}) && $existing->{level} > $op_level) {
                     if ($ENV{DEBUG_PRECEDENCE}) {
                         warn "  PREC_REJECT: left_level=$existing->{level} > op_level=$op_level ($matched_text)\n";
+                    }
+                    return $self->zero();
+                }
+                # Non-associative: reject same-level left operand.
+                # `$a isa Foo isa Bar` and `1 .. 10 .. 100` are syntax errors
+                # in Perl — the left operand of a nonassoc operator cannot
+                # itself be an expression at the same precedence level.
+                if (defined($existing->{level}) && $existing->{level} == $op_level
+                        && $op_info->{assoc} eq 'nonassoc') {
+                    if ($ENV{DEBUG_PRECEDENCE}) {
+                        warn "  PREC_REJECT_NONASSOC: left_level=$existing->{level} == op_level=$op_level ($matched_text)\n";
                     }
                     return $self->zero();
                 }
@@ -317,8 +364,11 @@ class Chalk::Bootstrap::Semiring::Precedence {
             # Same level: check associativity direction.
             # Right-associative operators reject same-level left operands:
             # `($a ** $b) ** $c` is invalid — must be `$a ** ($b ** $c)`.
+            # Non-associative operators also reject same-level left operands:
+            # `$a isa Foo isa Bar` and `1 .. 10 .. 100` are syntax errors in Perl.
             my $op_assoc = $right->{assoc} // 'left';
-            if ($left_level == $op_level && $op_assoc eq 'right') {
+            if ($left_level == $op_level
+                    && ($op_assoc eq 'right' || $op_assoc eq 'nonassoc')) {
                 if ($ENV{DEBUG_PRECEDENCE}) {
                     warn "  PREC_REJECT_RASSOC: left_level=$left_level == op_level=$op_level ($right->{op})\n";
                 }
