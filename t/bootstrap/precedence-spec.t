@@ -35,6 +35,15 @@
 #     L25  left      or xor
 #
 # Lower number = tighter binding. Tests below cite this table by L-number.
+#
+# ## Coverage discipline
+#
+# When adding subtests for a new precedence level, include AT LEAST one test
+# against operators on each side of the new level (one tighter, one looser).
+# A single-direction test can pass even when the level is misnumbered, because
+# the wrong number is still numerically defined and compares correctly in one
+# direction. See docs/plans/2026-05-11-step2-second-blocker.md for an example
+# of where this discipline would have prevented a two-rollback cycle.
 
 use 5.42.0;
 use utf8;
@@ -451,6 +460,124 @@ subtest '$refref->{"key"}[2][0] mixed hash/array chain' => sub {
         'middle is Subscript') or return;
     isa_with_shape($mid->inputs()->[0], 'Chalk::IR::Node::Subscript',
         'innermost is Subscript');
+};
+
+# ============================================================================
+# Bilateral L10 named-unary coverage: operators tighter and looser than L10
+# ----------------------------------------------------------------------------
+# Per docs/plans/2026-05-11-step2-second-blocker.md "Open question": the
+# original L2-vs-L10 cluster tested only one direction. These tests cover
+# both sides of L10 to catch future numbering mistakes.
+#
+# B::Concise oracle used to establish expected grouping for each expression.
+# Chalk emits Call nodes for named-unary calls (defined, exists, etc.), not
+# Chalk::IR::Node::Defined. Assertions match parser output, not eventual IR.
+# ============================================================================
+
+# --- L7/L8 tighter than L10 (arithmetic slurped into named-unary argument) ---
+# perlop: + at L8, * at L7 — both TIGHTER than L10 named-unary.
+# B::Concise: `defined $a + 1` → add[t2] then defined; Defined(Add($a, 1))
+# B::Concise: `defined $a * 2` → multiply[t2] then defined; Defined(Multiply($a, 2))
+
+subtest 'L8 + tighter than L10 named-unary: defined $a + 1 is Call(defined,[Add($a,1)])' => sub {
+    # perlop: L8 (+) tighter than L10 (defined); "defined $a + 1" is
+    # Defined(Add($a, 1)) per B::Concise. Named-unary slurps the arithmetic.
+    TODO: {
+        local $TODO = 'L10 vs L8 — perlop says named-unary slurps arithmetic; awaits Precedence semiring change';
+        my $expr = parse_expr('defined $a + 1');
+        my $call = isa_with_shape($expr, 'Chalk::IR::Node::Call',
+            'top is Call (defined)') or return;
+        is($call->name(), 'defined', 'callee is defined');
+        my $args = $call->inputs()->[1];
+        ok(ref($args) eq 'ARRAY' && @$args, 'defined has args') or return;
+        isa_with_shape($args->[0], 'Chalk::IR::Node::Add',
+            'arg of defined is Add($a, 1)');
+    }
+};
+
+subtest 'L7 * tighter than L10 named-unary: defined $a * 2 is Call(defined,[Multiply($a,2)])' => sub {
+    # perlop: L7 (*) tighter than L10 (defined); "defined $a * 2" is
+    # Defined(Multiply($a, 2)) per B::Concise. Named-unary slurps the multiplication.
+    TODO: {
+        local $TODO = 'L10 vs L7 — perlop says named-unary slurps arithmetic; awaits Precedence semiring change';
+        my $expr = parse_expr('defined $a * 2');
+        my $call = isa_with_shape($expr, 'Chalk::IR::Node::Call',
+            'top is Call (defined)') or return;
+        is($call->name(), 'defined', 'callee is defined');
+        my $args = $call->inputs()->[1];
+        ok(ref($args) eq 'ARRAY' && @$args, 'defined has args') or return;
+        isa_with_shape($args->[0], 'Chalk::IR::Node::Multiply',
+            'arg of defined is Multiply($a, 2)');
+    }
+};
+
+# --- L11 looser than L10 (isa does NOT get slurped into named-unary argument) ---
+# perlop: isa at L11 — LOOSER than L10 named-unary.
+# B::Concise: `defined $a isa Foo` → defined sK/1 then isa; IsaOp(Defined($a), Foo)
+
+subtest 'L11 isa looser than L10 named-unary: defined $a isa Foo is IsaOp(Call(defined,$a),Foo)' => sub {
+    # perlop: L11 (isa) looser than L10 (defined); "defined $a isa Foo" is
+    # IsaOp(Defined($a), Foo) per B::Concise. Named-unary applies only to $a.
+    my $expr = parse_expr('defined $a isa "Foo"');
+    my $isa = isa_with_shape($expr, 'Chalk::IR::Node::IsaOp',
+        'top is IsaOp') or return;
+    my $call = isa_with_shape($isa->inputs()->[1], 'Chalk::IR::Node::Call',
+        'left of IsaOp is Call (defined)') or return;
+    is($call->name(), 'defined', 'callee is defined');
+};
+
+# --- L13 looser than L10 (comparison does NOT get slurped) ---
+# perlop: == at L13, eq at L13 — LOOSER than L10 named-unary.
+# B::Concise: `defined $a == 1` → defined sK/1 then eq vK/2; NumEq(Defined($a), 1)
+# B::Concise: `defined $a eq "x"` → defined sK/1 then seq vK/2; StrEq(Defined($a), "x")
+
+subtest 'L13 == looser than L10 named-unary: defined $a == 1 is NumEq(Call(defined,$a),1)' => sub {
+    # perlop: L13 (==) looser than L10 (defined); "defined $a == 1" is
+    # NumEq(Defined($a), 1) per B::Concise. Named-unary applies only to $a.
+    my $expr = parse_expr('defined $a == 1');
+    my $cmp = isa_with_shape($expr, 'Chalk::IR::Node::NumEq',
+        'top is NumEq') or return;
+    my $call = isa_with_shape($cmp->inputs()->[1], 'Chalk::IR::Node::Call',
+        'left of NumEq is Call (defined)') or return;
+    is($call->name(), 'defined', 'callee is defined');
+};
+
+subtest 'L13 eq looser than L10 named-unary: defined $a eq "x" is StrEq(Call(defined,$a),"x")' => sub {
+    # perlop: L13 (eq) looser than L10 (defined); "defined $a eq \"x\"" is
+    # StrEq(Defined($a), "x") per B::Concise. Named-unary applies only to $a.
+    my $expr = parse_expr('defined $a eq "x"');
+    my $cmp = isa_with_shape($expr, 'Chalk::IR::Node::StrEq',
+        'top is StrEq') or return;
+    my $call = isa_with_shape($cmp->inputs()->[1], 'Chalk::IR::Node::Call',
+        'left of StrEq is Call (defined)') or return;
+    is($call->name(), 'defined', 'callee is defined');
+};
+
+# --- L16/L17 looser than L10 (logical does NOT get slurped) ---
+# perlop: && at L16, || at L17 — LOOSER than L10 named-unary.
+# B::Concise: `defined $a && $b` → defined sK/1 then and; And(Defined($a), $b)
+# B::Concise: `defined $a || 0` → defined sK/1 then or; Or(Defined($a), 0)
+
+subtest 'L16 && looser than L10 named-unary: defined $a && $b is And(Call(defined,$a),$b)' => sub {
+    # perlop: L16 (&&) looser than L10 (defined); "defined $a && $b" is
+    # And(Defined($a), $b) per B::Concise. Named-unary applies only to $a.
+    my $expr = parse_expr('defined $a && $b');
+    my $and = isa_with_shape($expr, 'Chalk::IR::Node::And',
+        'top is And') or return;
+    my $call = isa_with_shape($and->inputs()->[1], 'Chalk::IR::Node::Call',
+        'left of And is Call (defined)') or return;
+    is($call->name(), 'defined', 'callee is defined');
+};
+
+subtest 'L17 || looser than L10 named-unary: defined $a || 0 is Or(Call(defined,$a),0)' => sub {
+    # perlop: L17 (||) looser than L10 (defined); "defined $a || 0" is
+    # Or(Defined($a), 0) per B::Concise. Named-unary applies only to $a.
+    my $expr = parse_expr('defined $a || 0');
+    my $or = isa_with_shape($expr, 'Chalk::IR::Node::Or',
+        'top is Or') or return;
+    my $call = isa_with_shape($or->inputs()->[1], 'Chalk::IR::Node::Call',
+        'left of Or is Call (defined)') or return;
+    is($call->name(), 'defined', 'callee is defined');
 };
 
 done_testing;

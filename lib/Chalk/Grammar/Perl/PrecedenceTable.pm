@@ -62,9 +62,13 @@ class Chalk::Grammar::Perl::PrecedenceTable {
         fileno tell wantarray caller
     );
 
-    # perlop L10 sits between binary-op levels 0..14 and assignment 100.
-    # Level 50 leaves room for future intermediate levels.
-    sub named_unary_level() { return 50; }
+    # perlop L10 (named-unary) sits between Chalk binary-op level 4 (<< >>)
+    # and level 5 (isa). No integer slot exists between 4 and 5, so 4.5 is
+    # used. Perl's numeric comparison handles fractional values natively.
+    # The principled long-term fix is to renumber the entire table to leave
+    # an integer gap (Option A in step2-second-blocker.md); 4.5 unblocks
+    # Step 2 without requiring a table-wide renumber.
+    sub named_unary_level() { return 4.5; }
 
     # Named unary operators do not chain: `defined defined $x` is a syntax
     # error in Perl, so the associativity is 'nonassoc'.

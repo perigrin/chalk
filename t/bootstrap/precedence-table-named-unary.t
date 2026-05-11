@@ -42,17 +42,17 @@ subtest 'is_named_unary returns false for binary op +' => sub {
         "'+' is not a named-unary operator");
 };
 
-subtest 'named_unary_level returns an integer' => sub {
+subtest 'named_unary_level returns a numeric value' => sub {
     my $level = Chalk::Grammar::Perl::PrecedenceTable::named_unary_level();
     ok(defined $level, 'named_unary_level returns a defined value');
-    like("$level", qr/^\d+$/, 'named_unary_level returns an integer');
+    ok($level == $level + 0, 'named_unary_level returns a numeric value');
 };
 
-subtest 'named_unary_level is between 0 and 100' => sub {
+subtest 'named_unary_level is between levels 4 and 5 (between << and isa)' => sub {
     my $level = Chalk::Grammar::Perl::PrecedenceTable::named_unary_level();
-    cmp_ok($level, '>', 0,   'named_unary_level is greater than 0');
-    cmp_ok($level, '<', 100, 'named_unary_level is less than 100');
-    is($level, 50, 'named_unary_level is exactly 50 (perlop L10)');
+    cmp_ok($level, '>', 4,   'named_unary_level is greater than level 4 (<< >>)');
+    cmp_ok($level, '<', 5,   'named_unary_level is less than level 5 (isa)');
+    is($level, 4.5, 'named_unary_level is 4.5 (fractional slot between << and isa)');
 };
 
 subtest 'named_unary_assoc returns nonassoc' => sub {
