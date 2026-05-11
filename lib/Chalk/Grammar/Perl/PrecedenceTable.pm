@@ -70,6 +70,12 @@ class Chalk::Grammar::Perl::PrecedenceTable {
     # Step 2 without requiring a table-wide renumber.
     sub named_unary_level() { return 4.5; }
 
+    # perlop L23 (not) sits between Chalk binary-op level 12 (.. ...) and
+    # level 13 (and). No integer slot exists between 12 and 13, so 12.5 is
+    # used. This gives `not` a level tighter than `and` (13) and `or`/`xor`
+    # (14), but looser than all binary operators through level 12.
+    sub not_level() { return 12.5; }
+
     # Named unary operators do not chain: `defined defined $x` is a syntax
     # error in Perl, so the associativity is 'nonassoc'.
     sub named_unary_assoc() { return 'nonassoc'; }

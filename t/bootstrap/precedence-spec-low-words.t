@@ -62,20 +62,21 @@ use Chalk::IR::Node::Constant;
 # ============================================================================
 
 subtest 'L23 not is looser than L13 ==: not $a == $b is Not(NumEq($a,$b))' => sub {
+    # perlop: "not" is L23, "==" is L13 (nonassoc). L23 is looser than L13,
+    # so "not" binds last: `not $a == $b` groups as `not ($a == $b)`.
+    # Contrast with `!$a == $b` where "!" is L5 (tighter than "=="),
+    # giving `(!$a) == $b`.
     my $expr = parse_expr('not $a == $b');
 
-    TODO: {
-        local $TODO = 'L23 (not) precedence currently equals L5 (!), parses as (not $a) == $b';
-        # Direct ok() so $TODO is honored in main package; isa_with_shape
-        # lives in another package and would not see this $TODO.
-        my $is_not = ref($expr) && $expr->isa('Chalk::IR::Node::Not');
-        ok($is_not, 'top is Not') or diag('  got shape: ' . shape_of($expr));
-        # Not has op_text at inputs->[0], operand at inputs->[1].
-        my $operand = $is_not ? $expr->inputs()->[1] : undef;
-        my $is_numeq = ref($operand) && $operand->isa('Chalk::IR::Node::NumEq');
-        ok($is_numeq, 'operand of Not is NumEq')
-            or diag('  got shape: ' . shape_of($operand));
-    }
+    my $is_not = ref($expr) && $expr->isa('Chalk::IR::Node::Not');
+    ok($is_not, 'top is Not') or do {
+        diag('  got shape: ' . shape_of($expr));
+        return;
+    };
+    # Not has op_text at inputs->[0], operand at inputs->[1].
+    my $operand = $expr->inputs()->[1];
+    isa_with_shape($operand, 'Chalk::IR::Node::NumEq',
+        'operand of Not is NumEq');
 };
 
 subtest 'L5 ! is tighter than L13 ==: !$a == $b is NumEq(Not($a), $b) (baseline)' => sub {
@@ -90,6 +91,38 @@ subtest 'L5 ! is tighter than L13 ==: !$a == $b is NumEq(Not($a), $b) (baseline)
     isa_with_shape($eq->inputs()->[1], 'Chalk::IR::Node::Not',
         'left of NumEq is Not');
     is($eq->inputs()->[2]->value(), '$b', 'right of NumEq is $b');
+};
+
+# ============================================================================
+# L23 (not) bilateral coverage: not is tighter than and (L24) and or (L25)
+# ----------------------------------------------------------------------------
+# perlop: "not" is L23; "and" is L24, "or"/"xor" are L25. So "not" binds
+# tighter than "and" and "or". `not $a and $b` must parse as (not $a) and $b,
+# not as not ($a and $b). Same for `not $a or $b`.
+# ============================================================================
+
+subtest 'L23 not tighter than L24 and: not $a and $b is And(Not($a),$b)' => sub {
+    # perlop: not at L23, and at L24 — not is tighter, so not $a and $b
+    # groups as (not $a) and $b, not as not ($a and $b).
+    my $expr = parse_expr('not $a and $b');
+
+    my $and = isa_with_shape($expr, 'Chalk::IR::Node::And',
+        'top is And') or return;
+    isa_with_shape($and->inputs()->[1], 'Chalk::IR::Node::Not',
+        'left of And is Not');
+    is($and->inputs()->[2]->value(), '$b', 'right of And is $b');
+};
+
+subtest 'L23 not tighter than L25 or: not $a or $b is Or(Not($a),$b)' => sub {
+    # perlop: not at L23, or at L25 — not is tighter, so not $a or $b
+    # groups as (not $a) or $b, not as not ($a or $b).
+    my $expr = parse_expr('not $a or $b');
+
+    my $or = isa_with_shape($expr, 'Chalk::IR::Node::Or',
+        'top is Or') or return;
+    isa_with_shape($or->inputs()->[1], 'Chalk::IR::Node::Not',
+        'left of Or is Not');
+    is($or->inputs()->[2]->value(), '$b', 'right of Or is $b');
 };
 
 # ============================================================================
