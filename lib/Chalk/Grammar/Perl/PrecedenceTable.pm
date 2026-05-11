@@ -50,4 +50,38 @@ class Chalk::Grammar::Perl::PrecedenceTable {
         _build_lookup();
         return $op_lookup{$op};
     }
+
+    # Named-unary operators at perlop L10.
+    # These sit between binary-op levels (0-14) and assignment (100).
+    # Source: perlop "Named Unary Operators" + PREFIX_BUILTINS cross-check.
+    my @NAMED_UNARY = qw(
+        defined exists ref scalar length chr ord
+        keys values each delete substr sprintf join split
+        abs int hex oct sqrt sin cos exp log
+        lc uc lcfirst ucfirst quotemeta
+        fileno tell wantarray caller
+    );
+
+    # perlop L10 sits between binary-op levels 0..14 and assignment 100.
+    # Level 50 leaves room for future intermediate levels.
+    sub named_unary_level() { return 50; }
+
+    # Named unary operators do not chain: `defined defined $x` is a syntax
+    # error in Perl, so the associativity is 'nonassoc'.
+    sub named_unary_assoc() { return 'nonassoc'; }
+
+    my %_named_unary_lookup;
+    my $_named_unary_built = false;
+
+    sub _build_named_unary_lookup() {
+        return if $_named_unary_built;
+        $_named_unary_lookup{$_} = 1 for @NAMED_UNARY;
+        $_named_unary_built = true;
+    }
+
+    # Returns true if $name is a named-unary operator.
+    sub is_named_unary($name) {
+        _build_named_unary_lookup();
+        return exists $_named_unary_lookup{$name};
+    }
 }
