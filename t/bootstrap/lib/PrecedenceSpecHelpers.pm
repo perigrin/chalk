@@ -90,7 +90,15 @@ sub shape_of($node) {
 #   my $outer = isa_with_shape($expr, 'Chalk::IR::Node::Add', 'top is Add')
 #       or return;
 #   isa_with_shape($outer->inputs()->[2], 'Chalk::IR::Node::Multiply', 'right is Multiply');
+#
+# The local $Test::Builder::Level bump tells Test::Builder to look one stack
+# frame higher when resolving $TODO and the failure-line caller. Without it,
+# Test::Builder reads $TODO from PrecedenceSpecHelpers' package (where it's
+# never set) and reports the helper itself as the failure site. With the
+# bump, callers can wrap isa_with_shape in TODO blocks and the failure is
+# reported as a TODO failure pointing at the calling test file.
 sub isa_with_shape($node, $type, $label) {
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
     if (ref($node) && $node->isa($type)) {
         Test::More::pass($label);
         return $node;
