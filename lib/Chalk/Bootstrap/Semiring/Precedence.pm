@@ -156,6 +156,20 @@ class Chalk::Bootstrap::Semiring::Precedence {
             }
         }
 
+        # `not` detection: UnaryExpression scanning /not\b/ gets L23 precedence
+        # (level=12.5, right-associative, is_operator). This places `not` between
+        # `..` (level 12) and `and` (level 13), matching perlop L23. Without this,
+        # `not` inherits UnaryExpression's default level=-1 (tighter than all binary
+        # ops), causing `not $a == $b` to misparse as `(not $a) == $b` rather than
+        # `not ($a == $b)`.
+        if ($rule_name eq 'UnaryExpression' && $matched_text =~ /^not\b/) {
+            my $not_level = Chalk::Grammar::Perl::PrecedenceTable::not_level();
+            if ($ENV{DEBUG_PRECEDENCE}) {
+                warn "  PREC_NOT: matched=$matched_text level=$not_level\n";
+            }
+            return _intern(true, $not_level, 'right', true, $matched_text);
+        }
+
         # In BinaryOp or AssignOp context, look up operator and validate
         # the LEFT operand's precedence (accumulated in $existing).
         if ($rule_name eq 'BinaryOp' || $rule_name eq 'AssignOp') {
@@ -227,6 +241,25 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 && $existing->{level} == Chalk::Grammar::Perl::PrecedenceTable::named_unary_level()) {
             if ($ENV{DEBUG_PRECEDENCE}) {
                 warn "  PREC_REJECT_NAMED_UNARY_TARGET: matched=$matched_text level=$existing->{level}\n";
+            }
+            return $self->zero();
+        }
+
+        # UnaryExpression cannot be a Subscript target.
+        # `!$h{key}` must parse as !($h{key}) = Not(Subscript($h, key)), not
+        # (!$h){key} = Subscript(Not($h), key). Per perlop, postfix subscript
+        # (L2) binds tighter than unary ! / - / ~ (L5). UnaryExpression carries
+        # level=-1 in $EXPR_LEVELS (tighter than all binary ops but looser than
+        # PostfixExpression at level=-2). The level >= 0 check below does not
+        # catch level=-1, so we add an explicit rejection here.
+        # PostfixExpression (level=-2) IS a valid subscript target and must not
+        # be rejected by this clause.
+        if (($rule_name eq 'Subscript' || $rule_name eq 'PostfixDeref')
+                && $matched_text =~ /^[\[\{]$/
+                && defined($existing->{level})
+                && $existing->{level} == -1) {
+            if ($ENV{DEBUG_PRECEDENCE}) {
+                warn "  PREC_REJECT_UNARY_TARGET: $rule_name matched=$matched_text level=$existing->{level}\n";
             }
             return $self->zero();
         }
@@ -449,6 +482,14 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 # _prec_multiply, so only the level (4.5) is checked below.
                 if ($value->{level} == $nu_level) {
                     return _intern(true, $nu_level, $value->{assoc}, false);
+                }
+                # Exempt `not` level: a `not` UnaryExpression carries level=12.5
+                # (L23) so that outer binary operators can correctly reject it as
+                # a left operand (e.g., `==` at level 7 rejects not-expression at
+                # 12.5 as its left child, forcing `not ($a == $b)` grouping).
+                my $not_level = Chalk::Grammar::Perl::PrecedenceTable::not_level();
+                if ($value->{level} == $not_level) {
+                    return _intern(true, $not_level, 'right', false);
                 }
                 return $self->zero();
             }

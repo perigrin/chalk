@@ -283,16 +283,12 @@ subtest 'L2 (->) tighter than L10 ("exists"): exists $h{key}' => sub {
 subtest 'L2 (->) tighter than L5 (unary !): !$x->{key}' => sub {
     # perlop: -> at L2, ! at L5. Subscript binds tighter than negation:
     # !($x->{key}) = Not(Subscript($x, key)).
-    # Current Chalk produces Subscript(Not($x), key) — backward.
     my $expr = parse_expr('!$x->{key}');
 
-    TODO: {
-        local $TODO = 'L2 (->) precedence missing from PrecedenceTable';
-        my $not = isa_with_shape($expr, 'Chalk::IR::Node::Not',
-            'top is Not') or return;
-        isa_with_shape($not->inputs()->[1], 'Chalk::IR::Node::Subscript',
-            'operand of Not is Subscript');
-    }
+    my $not = isa_with_shape($expr, 'Chalk::IR::Node::Not',
+        'top is Not') or return;
+    isa_with_shape($not->inputs()->[1], 'Chalk::IR::Node::Subscript',
+        'operand of Not is Subscript');
 };
 
 subtest 'L2 (->) tighter than L5 (unary !) without arrow: !$h{key}' => sub {
@@ -300,13 +296,10 @@ subtest 'L2 (->) tighter than L5 (unary !) without arrow: !$h{key}' => sub {
     # Expected: Not(Subscript($h, key)).
     my $expr = parse_expr('!$h{key}');
 
-    TODO: {
-        local $TODO = 'L2 (->) precedence missing from PrecedenceTable';
-        my $not = isa_with_shape($expr, 'Chalk::IR::Node::Not',
-            'top is Not') or return;
-        isa_with_shape($not->inputs()->[1], 'Chalk::IR::Node::Subscript',
-            'operand of Not is Subscript');
-    }
+    my $not = isa_with_shape($expr, 'Chalk::IR::Node::Not',
+        'top is Not') or return;
+    isa_with_shape($not->inputs()->[1], 'Chalk::IR::Node::Subscript',
+        'operand of Not is Subscript');
 };
 
 subtest 'L2 (->) tighter than L5 (unary -): -$x->{key}' => sub {
@@ -314,13 +307,46 @@ subtest 'L2 (->) tighter than L5 (unary -): -$x->{key}' => sub {
     # -($x->{key}) = Negate(Subscript($x, key)).
     my $expr = parse_expr('-$x->{key}');
 
-    TODO: {
-        local $TODO = 'L2 (->) precedence missing from PrecedenceTable';
-        my $neg = isa_with_shape($expr, 'Chalk::IR::Node::Negate',
-            'top is Negate') or return;
-        isa_with_shape($neg->inputs()->[1], 'Chalk::IR::Node::Subscript',
-            'operand of Negate is Subscript');
-    }
+    my $neg = isa_with_shape($expr, 'Chalk::IR::Node::Negate',
+        'top is Negate') or return;
+    isa_with_shape($neg->inputs()->[1], 'Chalk::IR::Node::Subscript',
+        'operand of Negate is Subscript');
+};
+
+# ============================================================================
+# Bilateral L5 coverage: operator tighter than L5 (subscript) and looser
+# ----------------------------------------------------------------------------
+# Per coverage discipline: test both directions of L5 to catch future
+# numbering mistakes. L2 subscript is tighter (tested above); L8 + and L16
+# && are looser. Both must NOT be absorbed into the unary operand.
+#
+# B::Concise oracle:
+#   `!$x + 1`   → not[$x] then add — so Add(Not($x), 1): ! tighter than +
+#   `!$a && $b` → not[$a] then or(other) — so And(Not($a), $b): ! tighter than &&
+# ============================================================================
+
+subtest 'L5 ! tighter than L8 +: !$x + 1 is Add(Not($x), 1)' => sub {
+    # perlop: ! at L5, + at L8. Unary ! binds tighter than addition.
+    # B::Concise: `!$x + 1` → not then add → Add(Not($x), 1).
+    my $expr = parse_expr('!$x + 1');
+
+    my $add = isa_with_shape($expr, 'Chalk::IR::Node::Add',
+        'top is Add') or return;
+    isa_with_shape($add->inputs()->[1], 'Chalk::IR::Node::Not',
+        'left of Add is Not');
+    is($add->inputs()->[2]->value(), '1', 'right of Add is 1');
+};
+
+subtest 'L5 ! tighter than L16 &&: !$a && $b is And(Not($a), $b)' => sub {
+    # perlop: ! at L5, && at L16. Unary ! binds tighter than logical and.
+    # B::Concise: `!$a && $b` → not[$a] then and-or tree → And(Not($a), $b).
+    my $expr = parse_expr('!$a && $b');
+
+    my $and = isa_with_shape($expr, 'Chalk::IR::Node::And',
+        'top is And') or return;
+    isa_with_shape($and->inputs()->[1], 'Chalk::IR::Node::Not',
+        'left of And is Not');
+    is($and->inputs()->[2]->value(), '$b', 'right of And is $b');
 };
 
 subtest 'L2 (->) chains: method-then-deref: $obj->method()->@*' => sub {
