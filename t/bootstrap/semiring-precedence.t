@@ -281,6 +281,23 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
     my $result = $prec->multiply($parent_value, $child_value);
     ok($prec->is_zero($result), 'nonassoc: isa inside isa is invalid');
+
+    # Test 19b: nonassoc same-level left operand via is_operator is also INVALID.
+    # Covers the is_operator=true branch: when a BinaryOp completion (is_operator)
+    # multiplies into an accumulated left operand at the same nonassoc level, it
+    # must be rejected. This is the operator-scan path for `$a isa Foo isa Bar`.
+    my $isa_left   = { valid => true, op => 'isa', level => $isa_level, assoc => 'nonassoc' };
+    my $isa_op     = { valid => true, op => 'isa', level => $isa_level, assoc => 'nonassoc',
+                       is_operator => true };
+    my $left_reject = $prec->multiply($isa_left, $isa_op);
+    ok($prec->is_zero($left_reject),
+        'nonassoc: same-level left operand with is_operator is invalid (prevents left-grouping)');
+
+    # Baseline: single isa application is valid (left operand has no level)
+    my $no_level = { valid => true };
+    my $single_ok = $prec->multiply($no_level, $isa_op);
+    ok(!$prec->is_zero($single_ok),
+        'nonassoc: isa applied once (no prior level) is valid');
 }
 
 # Test 20: right-associative operators nest on the right

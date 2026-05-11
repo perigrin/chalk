@@ -384,10 +384,7 @@ subtest 'L18 basic .. : 1 .. 10 is Range(1, 10)' => sub {
 
 subtest 'L18 .. is non-associative: 1 .. 10 .. 100 should not parse' => sub {
     my $expr = parse_expr('1 .. 10 .. 100');
-    TODO: {
-        local $TODO = 'L18 .. nonassoc not enforced; Chalk accepts as left-assoc';
-        ok(!defined $expr, 'chained .. should be a parse error per perlop nonassoc');
-    }
+    ok(!defined $expr, 'chained .. should be a parse error per perlop nonassoc');
 };
 
 # ============================================================================
