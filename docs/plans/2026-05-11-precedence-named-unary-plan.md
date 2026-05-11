@@ -1,6 +1,27 @@
 # Precedence semiring: named-unary level (perlop L10)
 
-**Status:** Plan, not executed. Read-only investigation done 2026-05-11.
+## Status (2026-05-11 end of day)
+
+This plan is superseded by `docs/plans/2026-05-11-step2-second-blocker.md`
+Option B for the numeric level choice. The implementation history:
+
+- **Step 1** (PrecedenceTable extension with named-unary list and accessors)
+  landed cleanly at commit `2e9e5739`.
+- **Step 2** was attempted twice and reverted twice (`d6d5a195` then
+  `662d169c`). The original plan proposed `named_unary_level = 50`, which
+  sits outside the binary-op range (0–14) and therefore makes named-unary
+  looser than every binary operator — the opposite of perlop's intent.
+- The third attempt uses `level = 4.5` (between Chalk levels 4 and 5, i.e.,
+  between perlop L9 and L11), per Option B in the second-blocker doc.
+
+See `docs/plans/2026-05-11-step2-blocker-findings.md` for the first blocker
+diagnosis (the PostfixExpression reject-vs-preserve problem, resolved by
+design B1). See `docs/plans/2026-05-11-step2-second-blocker.md` for the
+second blocker diagnosis (wrong numeric level, resolved by Option B).
+
+---
+
+**Original plan status:** Plan, not executed. Read-only investigation done 2026-05-11.
 
 **Goal:** Teach the Precedence semiring that `defined`, `exists`, `ref`,
 `scalar`, etc. are named-unary operators at perlop L10, so the parser
@@ -221,3 +242,45 @@ Total: 4-6 hours of focused work, likely 2 sessions.
 - Audit baseline: `docs/plans/2026-05-09-fixup-audit-baseline.md`
 - Architectural framing: this is the same "filter-gap merge" class
   documented across the 2026-05-10 audit addenda.
+
+## Lessons learned
+
+### Lesson 1: numbering matters
+
+When inserting a new precedence level into an existing numbered table,
+identify which existing Chalk levels neighbor it on each side. A new level
+placed OUTSIDE the existing range (e.g., 50 in a 0–14 system) does not
+slot in neutrally — it is looser than every value in the range. In this
+case, `named_unary_level = 50` made named-unary operators looser than `&&`
+(level 10), `||` (level 11), and `==` (level 7), silently inverting every
+comparison that should have made named-unary tighter. The correct slot for
+perlop L10 is between Chalk levels 4 (`<<`/`>>`) and 5 (`isa`), which
+requires either a renumber (Option A) or a fractional value like `4.5`
+(Option B).
+
+### Lesson 2: defense-in-depth requires bilateral coverage
+
+Spec tests that check only ONE side of a new precedence level can pass even
+when the level is grossly misnumbered. For named-unary at perlop L10, three
+relationships matter:
+
+- vs L2 (`->`): postfix is tighter; tested by the four spec TODOs that
+  motivated this work
+- vs L7–L9 (arithmetic `*`, `+`, `<<`): arithmetic is tighter; named-unary
+  should slurp the whole arithmetic expression — UNTESTED until the audit
+  broke it
+- vs L11–L17 (comparison, logical `&&`, `||`): named-unary is tighter;
+  these operators should NOT be slurped into the argument — UNTESTED until
+  the audit broke it
+
+Both Step 2 attempts tested only the L2-vs-L10 direction and therefore
+passed a spec-green check while the level was wrong by a factor of five.
+The full-corpus audit (`script/chalk-fixup-audit`) caught three PARSE_FAILs
+that were previously PARSE_OK, but the audit runs for 30 minutes and was
+only triggered after the commit was already in.
+
+**Discipline rule:** before committing a new precedence level, the spec test
+must cover at least one operator on each side of the new level. Unilateral
+coverage is not sufficient — a wrong number is still numerically defined,
+and a one-sided test cannot distinguish "correct number" from "wrong number
+that happens to compare correctly in one direction."

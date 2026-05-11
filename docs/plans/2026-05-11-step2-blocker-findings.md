@@ -1,5 +1,19 @@
 # Step 2 implementation: blocker findings (2026-05-11)
 
+## Superseded by 2026-05-11-step2-second-blocker.md
+
+The B1 design documented in this file landed in commit `d6d5a195` but the
+numeric level it specified (`named_unary_level = 50`) was wrong: 50 sits
+outside Chalk's binary-op range (0–14) and makes named-unary looser than
+every binary operator, causing `&&`/`||`/`==` to be incorrectly slurped
+into named-unary arguments. The B1 design itself (separate rejection site
+at Subscript boundary rather than PostfixExpression) is still correct;
+only the level value needs to change. See
+`docs/plans/2026-05-11-step2-second-blocker.md` Option B (`level = 4.5`)
+for the fix.
+
+---
+
 **Status:** Investigation, partial implementation reverted. Step 2 work
 paused for design rethink.
 

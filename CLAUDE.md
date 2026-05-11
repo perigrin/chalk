@@ -129,6 +129,15 @@ Follow TDD (test-driven-development skill). Write failing test, implement
 minimal code to pass, refactor, commit. Use the required skills
 (`writing-perl-5.42.0`, `test-driven-development`). Commit frequently.
 
+**Bilateral coverage rule for precedence levels:** When adding spec tests
+for a new precedence level (or any new comparable numeric ranking among
+operators), the test must cover at least one operator on EACH side of the
+new level — one that is tighter and one that is looser. A test that checks
+only one direction can pass even when the new level is grossly misnumbered,
+because the wrong number is still numerically defined and compares correctly
+in one direction. See `docs/plans/2026-05-11-step2-second-blocker.md` for
+the case study where this rule would have caught a 2-attempt rollback cycle.
+
 ### Step 2: Review (after every issue completes)
 
 Run `/paad:agentic-review` after completing each milestone issue. This dispatches
