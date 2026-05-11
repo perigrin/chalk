@@ -353,12 +353,15 @@ subtest 'L2 (->) chains: method-then-deref: $obj->method()->@*' => sub {
     # perlop: -> at L2, both method-call and postfix-deref are at L2 — they
     # group left-to-right within the level. So $obj->method()->@* binds as
     # ($obj->method())->@* = PostfixDeref(Call($obj, method, []), @).
-    # Current Chalk produces Call(method, PostfixDeref($obj, @), [])
-    # — i.e., the deref binds first, which is the wrong order.
+    # Root cause: Earley stale-value merge in the SemanticAction semiring
+    # causes the wrong IR shape: Call(PostfixDeref($obj,@), method, []).
+    # The Precedence semiring cannot fix this; the parse is grammatically
+    # unambiguous. The walker's method_over_deref branch corrects the shape
+    # post-parse. Fix belongs in SemanticAction/Actions layer, not Precedence.
     my $expr = parse_expr('$obj->method()->@*');
 
     TODO: {
-        local $TODO = 'L2 (->) left-to-right grouping missing';
+        local $TODO = 'L2 method-then-deref: stale-value merge in SemanticAction; needs Actions.pm fix, not Precedence semiring';
         my $deref = isa_with_shape($expr, 'Chalk::IR::Node::PostfixDeref',
             'top is PostfixDeref') or return;
         is($deref->sigil(), '@', 'sigil is @');
@@ -369,15 +372,36 @@ subtest 'L2 (->) chains: method-then-deref: $obj->method()->@*' => sub {
 };
 
 subtest 'L2 (->) chains: subscript-then-deref: $obj->{key}->@*' => sub {
-    # Both operations at L2; left-to-right so ($obj->{key})->@*.
+    # perlop: both subscript and postfix-deref at L2; left-to-right so
+    # ($obj->{key})->@* = PostfixDeref(Subscript($obj, key), @).
+    # Already produces the correct shape via the Precedence semiring's
+    # PostfixExpression level=-2 rejection of invalid subscript targets.
     my $expr = parse_expr('$obj->{key}->@*');
 
+    my $deref = isa_with_shape($expr, 'Chalk::IR::Node::PostfixDeref',
+        'top is PostfixDeref') or return;
+    isa_with_shape($deref->inputs()->[0], 'Chalk::IR::Node::Subscript',
+        'inner is Subscript');
+};
+
+subtest 'L2 (->) chains: deref-then-method: $obj->@*->method()' => sub {
+    # perlop: $obj->@* deref first (L2, left-to-right), then ->method() on
+    # the result. B::Concise oracle: rv2av then entersub (method on array).
+    # Correct shape: Call(PostfixDeref($obj, @), method, []).
+    # Root cause gap: _fix_postfix_chain.method_over_deref unconditionally
+    # rewrites MethodCall(PostfixDeref(X,S)) → PostfixDeref(MethodCall(X),S),
+    # which is wrong when the source is deref-then-method rather than
+    # method-then-deref. Both cases produce the same pre-walker IR shape and
+    # cannot be distinguished post-parse without source position information.
+    my $expr = parse_expr('$obj->@*->method()');
+
     TODO: {
-        local $TODO = 'L2 (->) left-to-right grouping missing';
-        my $deref = isa_with_shape($expr, 'Chalk::IR::Node::PostfixDeref',
-            'top is PostfixDeref') or return;
-        isa_with_shape($deref->inputs()->[0], 'Chalk::IR::Node::Subscript',
-            'inner is Subscript');
+        local $TODO = 'L2 deref-then-method: walker method_over_deref branch over-applies; needs source-position gating';
+        my $call = isa_with_shape($expr, 'Chalk::IR::Node::Call',
+            'top is Call (method)') or return;
+        is($call->dispatch_kind(), 'method', 'dispatch_kind is method');
+        isa_with_shape($call->inputs()->[0], 'Chalk::IR::Node::PostfixDeref',
+            'invocant is PostfixDeref');
     }
 };
 
