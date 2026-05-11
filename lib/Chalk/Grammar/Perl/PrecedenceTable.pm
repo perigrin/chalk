@@ -18,10 +18,10 @@ class Chalk::Grammar::Perl::PrecedenceTable {
             { assoc => 'nonassoc', ops => ['isa'] },                                    # 5
             { assoc => 'chained',  ops => ['<', '>', '<=', '>=', 'lt', 'gt', 'le', 'ge'] }, # 6
             { assoc => 'nonassoc', ops => ['==', '!=', '<=>', 'eq', 'ne', 'cmp'] },    # 7
-            { assoc => 'left',     ops => ['&'] },                                      # 8
-            { assoc => 'left',     ops => ['|', '^'] },                                 # 9
+            { assoc => 'left',     ops => ['&', '&.'] },                                  # 8
+            { assoc => 'left',     ops => ['|', '^', '|.', '^.'] },                    # 9
             { assoc => 'left',     ops => ['&&'] },                                     # 10
-            { assoc => 'left',     ops => ['||', '//'] },                               # 11
+            { assoc => 'left',     ops => ['||', '//', '^^'] },                         # 11
             { assoc => 'nonassoc', ops => ['..', '...'] },                              # 12
             { assoc => 'left',     ops => ['and'] },                                    # 13
             { assoc => 'left',     ops => ['or', 'xor'] },                              # 14

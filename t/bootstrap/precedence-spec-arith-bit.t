@@ -233,18 +233,13 @@ subtest 'L14 & is left-associative: 1 & 2 & 3 is (1 & 2) & 3' => sub {
 
 subtest 'L14 &. (string-bitwise-AND) parses: 1 &. 2' => sub {
     # perlop: L14 — &. is the string-bitwise-AND operator, same level as &.
-    # Currently fails to parse; documented as a TODO so the gap is visible.
-    # Avoid isa_with_shape here so $TODO from this scope is honored — the
-    # helper lives in a different package and Test::More's $TODO lookup
-    # doesn't reach across packages reliably.
+    # Avoid isa_with_shape here — the helper lives in a different package and
+    # Test::More's $TODO lookup doesn't reach across packages reliably.
     my $expr = parse_expr('1 &. 2');
 
-    TODO: {
-        local $TODO = 'L14 &. string-bitwise-AND not in current grammar';
-        ok(defined $expr && ref($expr) && $expr->isa('Chalk::IR::Node::BitAnd'),
-            'top is BitAnd-equivalent for &.')
-            or diag("  got shape: " . shape_of($expr));
-    }
+    ok(defined $expr && ref($expr) && $expr->isa('Chalk::IR::Node::BitAnd'),
+        'top is BitAnd-equivalent for &.')
+        or diag("  got shape: " . shape_of($expr));
 };
 
 # ============================================================================

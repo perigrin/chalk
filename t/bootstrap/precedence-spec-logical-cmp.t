@@ -385,18 +385,14 @@ subtest 'L17 || is Or (distinct from //): 0 || $x' => sub {
 # observed behavior as a TODO so the gap is explicit.
 # ============================================================================
 
-subtest 'L17 ^^ logical-xor: parse currently fails (grammar gap)' => sub {
-    # perlop lists ^^ alongside || and // at L17. If Chalk grew the operator,
-    # Chalk::IR::Node::Xor would be the natural target (^^-as-Xor parallels
-    # &&-as-And and ||-as-Or). Today the grammar does not admit it.
+subtest 'L17 ^^ logical-xor: $a ^^ $b' => sub {
+    # perlop lists ^^ alongside || and // at L17. ^^ (Perl 5.40+ logical-xor)
+    # maps to Chalk::IR::Node::Xor, paralleling &&-as-And and ||-as-Or.
     my $expr = parse_expr('$a ^^ $b');
 
-    TODO: {
-        local $TODO = 'L17 ^^ (Perl 5.40+ logical-xor) not in Chalk grammar';
-        ok(ref($expr) && $expr->isa('Chalk::IR::Node::Xor'),
-            'top is Xor (^^ admitted by grammar)')
-            or diag("  got shape: " . shape_of($expr));
-    }
+    ok(ref($expr) && $expr->isa('Chalk::IR::Node::Xor'),
+        'top is Xor (^^ admitted by grammar)')
+        or diag("  got shape: " . shape_of($expr));
 };
 
 # ============================================================================

@@ -45,6 +45,8 @@ my %BINOP_MAP = (
     '&&'  => 'And',        '||'  => 'Or',
     'and' => 'And',        'or'  => 'Or',
     '&'   => 'BitAnd',     '|'   => 'BitOr',      '^'   => 'BitXor',
+    '&.'  => 'BitAnd',     '|.'  => 'BitOr',      '^.'  => 'BitXor',
+    '^^'  => 'Xor',
     '<<'  => 'LeftShift',  '>>'  => 'RightShift',
     '='   => 'Assign',
     'x'   => 'Repeat',

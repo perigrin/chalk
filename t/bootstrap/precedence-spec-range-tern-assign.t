@@ -129,14 +129,11 @@ subtest 'L20 **= produces CompoundAssign with op "**="' => sub {
 
 subtest 'L20 x= produces CompoundAssign with op "x="' => sub {
     my $expr = parse_expr('$a x= $b');
-    TODO: {
-        local $TODO = 'x= compound assignment not yet recognized by Chalk grammar';
-        ok(defined($expr) && ref($expr) && $expr->isa('Chalk::IR::Node::CompoundAssign'),
-            'top is CompoundAssign')
-            or diag('  got shape: ' . shape_of($expr));
-        is(ref($expr) ? $expr->inputs()->[0]->value() : '<undef>', 'x=',
-            'op is x=');
-    }
+    ok(defined($expr) && ref($expr) && $expr->isa('Chalk::IR::Node::CompoundAssign'),
+        'top is CompoundAssign')
+        or diag('  got shape: ' . shape_of($expr));
+    is(ref($expr) ? $expr->inputs()->[0]->value() : '<undef>', 'x=',
+        'op is x=');
 };
 
 # ============================================================================

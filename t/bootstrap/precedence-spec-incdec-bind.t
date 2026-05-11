@@ -310,10 +310,7 @@ subtest 'L6 =~ with s///: $x =~ s/a/b/ produces RegexSubst' => sub {
 subtest 'L6 =~ with tr///: $x =~ tr/a/b/ should parse' => sub {
     my $expr = parse_expr('$x =~ tr/a/b/');
 
-    TODO: {
-        local $TODO = 'tr/// not yet recognized by the grammar';
-        ok(defined $expr, 'tr/// parses') or diag('  parse failed');
-    }
+    ok(defined $expr, 'tr/// parses') or diag('  parse failed');
 };
 
 done_testing;
