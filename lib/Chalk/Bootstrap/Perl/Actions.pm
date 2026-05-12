@@ -1201,6 +1201,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @ir_nodes, $val;
             }
         }
+        # Single value — return directly
         return $ir_nodes[0] if @ir_nodes == 1;
         # Multiple values — return as arrayref for StatementList to flatten
         return \@ir_nodes if @ir_nodes > 1;
