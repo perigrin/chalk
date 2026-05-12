@@ -116,11 +116,15 @@ class Chalk::Bootstrap::Semiring::Precedence {
 
         # Complete event: right Context has annotations->{complete} = true.
         # Apply precedence rule-completion logic.
+        # Pass $r_prec (the completed child's accumulated precedence) so that
+        # pass-through rules (ExpressionStatement, SimpleStatement, etc.) can
+        # propagate a child's list-op or named-unary marker even when the
+        # parent's accumulated value $l_prec carries no level (= one()).
         if (blessed($right) && $right->can('annotations')
                 && $right->annotations()->{complete}) {
             my $rule_name = $right->annotations()->{rule_name};
             my $alt_idx   = $right->annotations()->{alt_idx};
-            return $self->_complete_prec($l_prec, $rule_name, $alt_idx);
+            return $self->_complete_prec($l_prec, $rule_name, $alt_idx, $r_prec);
         }
 
         return $self->zero() if $self->is_zero($r_prec);
@@ -149,10 +153,27 @@ class Chalk::Bootstrap::Semiring::Precedence {
             if ($in_call) {
                 my $nu_level = Chalk::Grammar::Perl::PrecedenceTable::named_unary_level();
                 my $nu_assoc = Chalk::Grammar::Perl::PrecedenceTable::named_unary_assoc();
-                if ($ENV{DEBUG_PRECEDENCE}) {
-                    warn "  PREC_NAMED_UNARY: $matched_text level=$nu_level assoc=$nu_assoc\n";
-                }
                 return _intern(true, $nu_level, $nu_assoc, true, $matched_text);
+            }
+        }
+
+        # List-operator detection: QualifiedIdentifier scanning a list operator
+        # (perlop L22 rightward) while CallExpression is predicted marks the
+        # identifier with list_op_level() and is_operator=false. This marker
+        # propagates through Atom and CallExpression to ExpressionStatement,
+        # where it disambiguates the space-delimited list-call reading
+        # (ExpressionStatement → Expression → CallExpression(name, ExpressionList))
+        # from the flat comma-list reading (ExpressionStatement → ExpressionList).
+        # Using is_operator=false distinguishes list_op from named-unary
+        # (is_operator=true) so the Subscript boundary rejection does not fire.
+        if ($rule_name eq 'QualifiedIdentifier'
+                && Chalk::Grammar::Perl::PrecedenceTable::is_list_op($matched_text)) {
+            my $in_call = ref($predicted) eq 'HASH'
+                ? exists $predicted->{CallExpression}
+                : (defined $predicted ? $predicted->('CallExpression') : 0);
+            if ($in_call) {
+                my $lo_level = Chalk::Grammar::Perl::PrecedenceTable::list_op_level();
+                return _intern(true, $lo_level, 'nonassoc', false, $matched_text);
             }
         }
 
@@ -164,9 +185,6 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # `not ($a == $b)`.
         if ($rule_name eq 'UnaryExpression' && $matched_text =~ /^not\b/) {
             my $not_level = Chalk::Grammar::Perl::PrecedenceTable::not_level();
-            if ($ENV{DEBUG_PRECEDENCE}) {
-                warn "  PREC_NOT: matched=$matched_text level=$not_level\n";
-            }
             return _intern(true, $not_level, 'right', true, $matched_text);
         }
 
@@ -275,17 +293,17 @@ class Chalk::Bootstrap::Semiring::Precedence {
             }
         }
 
-        # Named-unary CallExpression cannot be a Subscript target.
-        # `defined $h{key}` must parse as defined($h{key}) (the call wraps the
-        # subscript), not (defined $h){key} (subscript on the call). This
-        # rejection at Subscript scan of [ or { blocks the wrong derivation.
-        # Level 4.5 is uniquely assigned by the named-unary detection in this
-        # method; no other code path produces level=4.5. is_operator gets
-        # stripped by _prec_multiply when non-operator tokens multiply in, so
-        # we check only the level, not is_operator.
+        # Named-unary (level=4.5) and list-op (level=4.4) CallExpressions cannot
+        # be Subscript targets in the unparenthesized form.
+        # `defined $h{key}` must parse as defined($h{key}), not (defined $h){key}.
+        # This rejection at Subscript scan of [ or { blocks the wrong derivation.
+        # Level 4.5 (named-unary) and 4.4 (list-op) are uniquely assigned by the
+        # detection blocks above. is_operator gets stripped by _prec_multiply, so
+        # we check only the level.
         if ($rule_name eq 'Subscript' && $matched_text =~ /^[\[\{]$/
                 && defined($existing->{level})
-                && $existing->{level} == Chalk::Grammar::Perl::PrecedenceTable::named_unary_level()) {
+                && ($existing->{level} == Chalk::Grammar::Perl::PrecedenceTable::named_unary_level()
+                    || $existing->{level} == Chalk::Grammar::Perl::PrecedenceTable::list_op_level())) {
             if ($ENV{DEBUG_PRECEDENCE}) {
                 warn "  PREC_REJECT_NAMED_UNARY_TARGET: matched=$matched_text level=$existing->{level}\n";
             }
@@ -329,6 +347,21 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # that cannot be a deref target without parentheses.
         if ($rule_name eq 'PostfixDeref' && $matched_text eq '['
                 && defined($existing->{level}) && $existing->{level} >= 0) {
+            return $self->zero();
+        }
+
+        # ExpressionList comma boundary: when a comma scans inside ExpressionList
+        # and the accumulated level is a list-op marker (level=4.4), reject it.
+        # This forces commas to be consumed only by the inner ExpressionList
+        # (inside the list-op CallExpression), not by the outer ExpressionList.
+        # Named-unary uses level=4.5 (not 4.4), so named-unary calls like
+        # `defined $a, $b` are unaffected: their outer ExpressionList accumulates
+        # 4.5, which does not match list_op_level()=4.4, so the comma is kept.
+        # The inner ExpressionList (fresh prediction, $existing=one()) is unaffected
+        # because one() has no level, so the defined-level check below does not fire.
+        if ($rule_name eq 'ExpressionList' && $matched_text eq ','
+                && defined($existing->{level})
+                && $existing->{level} == Chalk::Grammar::Perl::PrecedenceTable::list_op_level()) {
             return $self->zero();
         }
 
@@ -403,8 +436,18 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return _intern(true, $parent_level, $parent_assoc, false, $left->{op});
         }
 
-        # Child with higher precedence (lower level number) inside parent is always valid
+        # Child with higher precedence (lower level number) inside parent is always valid.
+        # Special case: a list-op child (level=4.4) inside an assignment or ternary
+        # parent (level >= 100) propagates as 4.4 rather than being subsumed by the
+        # parent's level. This preserves the list-op marker through
+        # `my $_ = chmod 0755, $f1, $f2` so that the outer ExpressionList can detect
+        # it and reject the outer comma. Perl semantics: list operators slurp their
+        # rightward argument list regardless of an enclosing assignment operator.
         if ($child_level < $parent_level) {
+            my $lo_level = Chalk::Grammar::Perl::PrecedenceTable::list_op_level();
+            if ($child_level == $lo_level && $parent_level >= 100) {
+                return _intern(true, $lo_level, $right->{assoc}, false, $right->{op});
+            }
             # Child binds tighter — valid. Carry parent's operator info.
             return _intern(true, $parent_level, $parent_assoc, false, $left->{op});
         }
@@ -467,14 +510,6 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # constraint, preventing invalid parses like ($a && $b) =~ /x/.
         my $ll = $left->{level};
         my $rl = $right->{level};
-        if ($ENV{DEBUG_PRECEDENCE}) {
-            my $lls = $ll // 'undef';
-            my $rls = $rl // 'undef';
-            my $lo = $left->{op} // 'undef';
-            my $ro = $right->{op} // 'undef';
-            warn "  PREC_ADD: left(level=$lls,op=$lo) right(level=$rls,op=$ro)\n"
-                if $lls ne 'undef' || $rls ne 'undef';
-        }
         if (defined $ll && !defined $rl) {
             return [$left];
         }
@@ -502,13 +537,32 @@ class Chalk::Bootstrap::Semiring::Precedence {
     }
 
     # _complete_prec: apply precedence reification for a completed rule.
-    # Receives the accumulated left-side precedence hashref and rule metadata.
-    method _complete_prec($value, $rule_name, $alt_idx) {
+    # $value    = the parent's accumulated precedence (l_prec from multiply).
+    # $r_prec   = the completed child's accumulated precedence. Used by
+    #             pass-through rules (ExpressionStatement, etc.) that need to
+    #             propagate a child's list-op/named-unary level even when the
+    #             parent has no accumulated level (l_prec = one()).
+    method _complete_prec($value, $rule_name, $alt_idx, $r_prec = undef) {
         return $self->zero() if $self->is_zero($value);
 
         # Parenthesized expressions reset precedence context
         if ($RESETS->{$rule_name}) {
             return $self->one();
+        }
+
+        # AssignmentExpression special case: when the RHS of an assignment is a
+        # list-op CallExpression (e.g., `my $_ = chmod 0755, $f1, $f2`), the
+        # list-op level=4.4 is preserved through _prec_multiply into the accumulated
+        # $value here (because _prec_multiply carries the child 4.4 level through
+        # assignment context rather than subsuming it). The EXPR_LEVELS block below
+        # would overwrite it with level=101, losing the list_op marker. Instead,
+        # check $value and return it as-is so the outer ExpressionList can detect
+        # and reject the flat-ExpressionList reading.
+        if ($rule_name eq 'AssignmentExpression') {
+            my $lo_level = Chalk::Grammar::Perl::PrecedenceTable::list_op_level();
+            if (defined($value->{level}) && $value->{level} == $lo_level) {
+                return $value;
+            }
         }
 
         # Expression-type rules get their conceptual precedence level and associativity.
@@ -532,6 +586,14 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 # _prec_multiply, so only the level (4.5) is checked below.
                 if ($value->{level} == $nu_level) {
                     return _intern(true, $nu_level, $value->{assoc}, false);
+                }
+                # Exempt list-op level: a list-op CallExpression IS a legitimate
+                # PostfixExpression. Preserve level=4.4 so that the Subscript
+                # bracket-boundary scan in _scan_multiply can reject list-op
+                # calls used as subscript targets (same rationale as named-unary).
+                my $lo_level = Chalk::Grammar::Perl::PrecedenceTable::list_op_level();
+                if ($value->{level} == $lo_level) {
+                    return _intern(true, $lo_level, $value->{assoc}, false);
                 }
                 # Exempt `not` level: a `not` UnaryExpression carries level=12.5
                 # (L23) so that outer binary operators can correctly reject it as
@@ -560,6 +622,10 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # Expression: pass through precedence info from child so that
         # a BinaryExpression's operator level survives the Expression
         # wrapper and can be checked by an outer BinaryExpression.
+        # A list-op CallExpression (level=4.5, is_operator=false) accumulates
+        # 4.5/false into $value here via _prec_multiply; return $value directly
+        # so that outer rules (AssignmentExpression, ExpressionList) see the
+        # list_op marker and not the default one().
         if ($rule_name eq 'Expression') {
             return $value;
         }
@@ -585,17 +651,19 @@ class Chalk::Bootstrap::Semiring::Precedence {
         }
 
         # CallExpression: pass through precedence info, but reset the
-        # named-unary level (4.5) for the parenthesized alternative (alt 0:
-        # QualifiedIdentifier _ \( ExpressionList? \)). When named-unary
-        # operators use explicit parens, e.g. scalar(@arr), the parens bound
-        # the argument and the result behaves as a regular term. Alts 1-3
-        # (space-delimited) are named-unary calls without explicit delimiter;
-        # these preserve level=4.5 so the Subscript boundary check can fire.
+        # named-unary (4.5) and list-op (4.4) levels for the parenthesized
+        # alternative (alt 0: QualifiedIdentifier _ \( ExpressionList? \)).
+        # When named-unary or list-op operators use explicit parens, e.g.
+        # scalar(@arr) or chmod(0755, $f), the parens bound the argument
+        # and the result behaves as a regular term. Alts 1-3 (space-delimited)
+        # are unparenthesized calls; these preserve level=4.5 or 4.4 so the
+        # Subscript boundary check and comma-boundary check can fire.
         if ($rule_name eq 'CallExpression') {
             my $nu_level = Chalk::Grammar::Perl::PrecedenceTable::named_unary_level();
+            my $lo_level = Chalk::Grammar::Perl::PrecedenceTable::list_op_level();
             if (defined($alt_idx) && $alt_idx == 0
                     && defined($value->{level})
-                    && $value->{level} == $nu_level) {
+                    && ($value->{level} == $nu_level || $value->{level} == $lo_level)) {
                 return $self->one();
             }
             return $value;
@@ -616,14 +684,36 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $value;
         }
 
-        # Atom and QualifiedIdentifier preserve a named-unary marker so the
-        # level=4.5 from _scan_multiply survives through to the CallExpression
-        # wrapping it. Without this, the catch-all below clears the marker.
-        if (($rule_name eq 'Atom' || $rule_name eq 'QualifiedIdentifier')
-                && $value->{is_operator}
-                && defined($value->{level})
-                && $value->{level} == Chalk::Grammar::Perl::PrecedenceTable::named_unary_level()) {
-            return $value;
+        # Atom and QualifiedIdentifier preserve named-unary (level=4.5) and
+        # list-op (level=4.4) markers so they survive through to the CallExpression
+        # wrapping them. Without this, the catch-all below clears the marker.
+        if ($rule_name eq 'Atom' || $rule_name eq 'QualifiedIdentifier') {
+            my $nu_level = Chalk::Grammar::Perl::PrecedenceTable::named_unary_level();
+            my $lo_level = Chalk::Grammar::Perl::PrecedenceTable::list_op_level();
+            if (defined($value->{level})
+                    && ($value->{level} == $nu_level || $value->{level} == $lo_level)) {
+                return $value;
+            }
+        }
+
+        # ExpressionList: when the accumulated value ($value) carries a list-op
+        # marker (level=4.4), propagate it as the self-reified value. This is the
+        # case for the outer ExpressionList that starts with a list-op CallExpression:
+        # the accumulated value carries 4.4 after the leading list-op call's value
+        # (4.4) multiplies in via _prec_multiply. The outer ExpressionList item's
+        # reified value then becomes 4.4, so the subsequent `,` scan in
+        # ExpressionList alt_1 sees $existing=4.4 and is rejected by the
+        # comma-boundary check in _scan_multiply.
+        # Named-unary uses level=4.5 (not 4.4), so `defined $a, $b` outer lists
+        # are unaffected — their accumulated value is 4.5, which doesn't match
+        # list_op_level()=4.4, so the ExpressionList self-reifies to one() and
+        # the comma is not rejected.
+        if ($rule_name eq 'ExpressionList') {
+            my $lo_level = Chalk::Grammar::Perl::PrecedenceTable::list_op_level();
+            if (defined($value->{level}) && $value->{level} == $lo_level) {
+                return $value;
+            }
+            return $self->one();
         }
 
         # Other rules: pass through value, clear operator info

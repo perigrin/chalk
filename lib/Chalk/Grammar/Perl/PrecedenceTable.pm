@@ -94,4 +94,44 @@ class Chalk::Grammar::Perl::PrecedenceTable {
         _build_named_unary_lookup();
         return exists $_named_unary_lookup{$name};
     }
+
+    # List operators (rightward) at perlop L22.
+    # These slurp all comma-separated arguments to their right. Per perlop:
+    # "the comma has very low precedence [on the right side of a list operator],
+    # such that it controls all comma-separated expressions found there."
+    # On the LEFT side they have very high precedence (treated as terms).
+    # Source: perlop "Terms and List Operators (Leftward)".
+    my @LIST_OPS = qw(
+        print say printf warn
+        push pop shift unshift splice
+        sort reverse chomp chop
+        chmod chown chdir link unlink rename
+        kill system exec
+        join map grep
+        open close read write truncate seek
+        send recv
+    );
+
+    # perlop L22 list operators use level 4.4 — one tenth-point below the
+    # named-unary level (4.5). Both are between binary-op levels 4 (<<, >>)
+    # and 5 (isa), so operator-precedence comparisons behave identically for
+    # both. Using a distinct value lets Precedence.pm identify the list-op
+    # context without relying on the is_operator flag (which gets stripped by
+    # _prec_multiply's carry-through logic for non-operator values).
+    sub list_op_level() { return 4.4; }
+
+    my %_list_op_lookup;
+    my $_list_op_built = false;
+
+    sub _build_list_op_lookup() {
+        return if $_list_op_built;
+        $_list_op_lookup{$_} = 1 for @LIST_OPS;
+        $_list_op_built = true;
+    }
+
+    # Returns true if $name is a list operator (rightward, perlop L22).
+    sub is_list_op($name) {
+        _build_list_op_lookup();
+        return exists $_list_op_lookup{$name};
+    }
 }

@@ -286,16 +286,13 @@ subtest 'L22 rightward chmod slurps comma list: chmod 0755, $f1, $f2' => sub {
     my $call = isa_with_shape($expr, 'Chalk::IR::Node::Call',
         'top is Call (chmod)') or return;
 
-    TODO: {
-        local $TODO = 'List operator inside `my $_ = ...;` only slurps first arg; trailing , falls outside';
-        is($call->name(), 'chmod', 'callee is chmod');
-        my $args = $call->inputs()->[1];
-        my $argc = (ref($args) eq 'ARRAY') ? scalar($args->@*) : 0;
-        is($argc, 3, 'chmod has three args');
-        is(($args && $args->[0] ? $args->[0]->value() : undef), '0755', 'arg 0 is 0755');
-        is(($args && $args->[1] ? $args->[1]->value() : undef), '$f1',  'arg 1 is $f1');
-        is(($args && $args->[2] ? $args->[2]->value() : undef), '$f2',  'arg 2 is $f2');
-    }
+    is($call->name(), 'chmod', 'callee is chmod');
+    my $args = $call->inputs()->[1];
+    my $argc = (ref($args) eq 'ARRAY') ? scalar($args->@*) : 0;
+    is($argc, 3, 'chmod has three args');
+    is(($args && $args->[0] ? $args->[0]->value() : undef), '0755', 'arg 0 is 0755');
+    is(($args && $args->[1] ? $args->[1]->value() : undef), '$f1',  'arg 1 is $f1');
+    is(($args && $args->[2] ? $args->[2]->value() : undef), '$f2',  'arg 2 is $f2');
 };
 
 subtest 'L22 rightward sort slurps comma list: sort $a, $b, $c' => sub {
@@ -304,13 +301,10 @@ subtest 'L22 rightward sort slurps comma list: sort $a, $b, $c' => sub {
     my $call = isa_with_shape($expr, 'Chalk::IR::Node::Call',
         'top is Call (sort)') or return;
 
-    TODO: {
-        local $TODO = 'List operator inside `my $_ = ...;` only slurps first arg; trailing , falls outside';
-        is($call->name(), 'sort', 'callee is sort');
-        my $args = $call->inputs()->[1];
-        my $argc = (ref($args) eq 'ARRAY') ? scalar($args->@*) : 0;
-        is($argc, 3, 'sort has three args');
-    }
+    is($call->name(), 'sort', 'callee is sort');
+    my $args = $call->inputs()->[1];
+    my $argc = (ref($args) eq 'ARRAY') ? scalar($args->@*) : 0;
+    is($argc, 3, 'sort has three args');
 };
 
 subtest 'L22 rightward reverse slurps comma list: reverse 1, 2, 3' => sub {
@@ -319,13 +313,10 @@ subtest 'L22 rightward reverse slurps comma list: reverse 1, 2, 3' => sub {
     my $call = isa_with_shape($expr, 'Chalk::IR::Node::Call',
         'top is Call (reverse)') or return;
 
-    TODO: {
-        local $TODO = 'List operator inside `my $_ = ...;` only slurps first arg; trailing , falls outside';
-        is($call->name(), 'reverse', 'callee is reverse');
-        my $args = $call->inputs()->[1];
-        my $argc = (ref($args) eq 'ARRAY') ? scalar($args->@*) : 0;
-        is($argc, 3, 'reverse has three args');
-    }
+    is($call->name(), 'reverse', 'callee is reverse');
+    my $args = $call->inputs()->[1];
+    my $argc = (ref($args) eq 'ARRAY') ? scalar($args->@*) : 0;
+    is($argc, 3, 'reverse has three args');
 };
 
 # ============================================================================
