@@ -53,7 +53,12 @@ my %BINOP_MAP = (
     '=~'  => 'Match',      '!~'  => 'NotMatch',
     '//'  => 'DefinedOr',
     'xor' => 'Xor',
-    '..'  => 'Range',      '...' => 'Yada',
+    '..'  => 'Range',
+    # '...' in binary-expression context is the flip-flop range operator, not
+    # the yada-yada placeholder (which is a bare statement, not a binary op).
+    # Both '..' and '...' produce Range nodes; the '..' vs '...' semantic
+    # distinction (lazy flip-flop vs eager range) is elided in the IR for now.
+    '...' => 'Range',
     'isa' => 'IsaOp',
 );
 
@@ -2696,6 +2701,31 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef unless defined $target;
         my $scanned = $ctx->scanned_text() // '';
         my $op_str = ($scanned =~ /--/) ? '-=' : '+=';
+        my $op_node  = $factory->make('Constant', value => $op_str,  const_type => 'string');
+        my $one_node = $factory->make('Constant', value => '1',      const_type => 'number');
+        return $typed->make('CompoundAssign',
+            op           => $op_node,
+            inputs       => [$op_node, $target, $one_node],
+            compat_class => 'CompoundAssign',
+        );
+    }
+
+    # §16 PreIncDec ::= /\+\+/ _ Expression | /--/ _ Expression
+    # Mirror of PostfixIncDec: emit CompoundAssign(+=/-=, target, 1).
+    # Pre/post distinction is elided here (both become CompoundAssign); a typed
+    # PreIncrement/PostIncrement node distinction is deferred to a future pass.
+    method PreIncDec($ctx) {
+        my $scanned = $ctx->scanned_text() // '';
+        my $op_str = ($scanned =~ /--/) ? '-=' : '+=';
+        my @leaves = _collect_ir_leaves($ctx);
+        my $target;
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            if (defined $focus && $focus isa Chalk::IR::Node) {
+                $target //= $focus;
+            }
+        }
+        return undef unless defined $target;
         my $op_node  = $factory->make('Constant', value => $op_str,  const_type => 'string');
         my $one_node = $factory->make('Constant', value => '1',      const_type => 'number');
         return $typed->make('CompoundAssign',

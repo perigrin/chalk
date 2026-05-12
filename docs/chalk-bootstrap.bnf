@@ -144,6 +144,7 @@ Expression ::= Atom
     | UnaryExpression
     | BinaryExpression
     | PostfixExpression
+    | PreIncDec
     | TernaryExpression
     | AssignmentExpression
     | VariableDeclaration ;
@@ -252,6 +253,9 @@ CallExpression ::= QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
 
 PostfixIncDec ::= Expression _ /\+\+/
     | Expression _ /--/ ;
+
+PreIncDec ::= /\+\+/ _ Expression
+    | /--/ _ Expression ;
 
 # §17  TERNARY AND ASSIGNMENT
 

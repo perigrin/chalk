@@ -94,8 +94,9 @@ subtest 'L3 pre-increment ++$x is structurally distinct from post $x++' => sub {
     my $post = parse_expr('$x++');
 
     TODO: {
-        local $TODO = 'Pre-increment ++$x silently drops the operator '
-                    . '(parse returns bare $x), losing pre/post distinction';
+        local $TODO = 'Pre/post-increment both desugar to CompoundAssign; '
+                    . 'typed PreIncrement/PostIncrement nodes needed to '
+                    . 'preserve the pre/post distinction in IR';
         ok(defined $pre, 'pre-increment parses');
         ok(defined $post, 'post-increment parses');
         if (defined $pre && defined $post) {
@@ -103,6 +104,48 @@ subtest 'L3 pre-increment ++$x is structurally distinct from post $x++' => sub {
                 'pre and post produce different IR shapes');
         }
     }
+};
+
+# ============================================================================
+# Pre-increment and pre-decrement desugaring (bilateral coverage)
+# ----------------------------------------------------------------------------
+# PreIncDec desugars to CompoundAssign, mirroring PostfixIncDec. The pre/post
+# distinction within the IR is a known elision (both use CompoundAssign);
+# the tests here assert only the desugar shape.
+# ============================================================================
+
+subtest 'L3 pre-increment ++$x desugars to CompoundAssign(+=, $x, 1)' => sub {
+    my $expr = parse_expr('++$x');
+    my $ca = isa_with_shape($expr, 'Chalk::IR::Node::CompoundAssign',
+        'top is CompoundAssign') or return;
+    is($ca->inputs()->[0]->value(), '+=', 'op is +=');
+    is($ca->inputs()->[1]->value(), '$x', 'operand is $x');
+    is($ca->inputs()->[2]->value(), '1',  'rhs is 1');
+};
+
+subtest 'L3 pre-decrement --$x desugars to CompoundAssign(-=, $x, 1)' => sub {
+    my $expr = parse_expr('--$x');
+    my $ca = isa_with_shape($expr, 'Chalk::IR::Node::CompoundAssign',
+        'top is CompoundAssign') or return;
+    is($ca->inputs()->[0]->value(), '-=', 'op is -=');
+    is($ca->inputs()->[1]->value(), '$x', 'operand is $x');
+    is($ca->inputs()->[2]->value(), '1',  'rhs is 1');
+};
+
+# ============================================================================
+# L3 (++) tighter than L8 (+): ++$x + 1 is (++$x) + 1
+# ----------------------------------------------------------------------------
+# perlop: ++ at L3, + at L8 — pre-increment binds tighter than addition.
+# Expected: Add(CompoundAssign(+=, $x, 1), 1)
+# ============================================================================
+
+subtest 'L3 pre-++ tighter than L8 +: ++$x + 1 is (++$x) + 1' => sub {
+    my $expr = parse_expr('++$x + 1');
+    my $add = isa_with_shape($expr, 'Chalk::IR::Node::Add',
+        'top is Add') or return;
+    isa_with_shape($add->inputs()->[1], 'Chalk::IR::Node::CompoundAssign',
+        'left of Add is CompoundAssign (the pre-increment)');
+    is($add->inputs()->[2]->value(), '1', 'right of Add is 1');
 };
 
 # ============================================================================

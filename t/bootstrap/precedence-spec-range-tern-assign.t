@@ -395,21 +395,19 @@ subtest 'L18 .. is non-associative: 1 .. 10 .. 100 should not parse' => sub {
 # next evaluation, as in sed, just use three dots ('...') instead of two.
 # In all other regards, '...' behaves just like '..' does."
 #
-# Probe shows current Chalk parses "1 ... 10" as a Yada (yada-yada operator)
-# node, NOT as a Range with op="...". The yada-yada operator (statement
-# placeholder) is a different construct that overlaps lexically. Mark TODO:
-# the precedence tests will need to disambiguate "..." in expression context
-# (range/flip-flop) vs statement position (yada-yada placeholder).
+# '...' in binary-expression context is the flip-flop range operator.
+# The yada-yada placeholder ('...') is a bare statement, not a binary op,
+# and is handled separately. BINOP_MAP maps '...' to Range so that
+# expression-context '...' produces the same Range node class as '..'.
+# The '..' vs '...' semantic distinction (lazy flip-flop vs eager range)
+# is elided in the IR; a future FlipFlop typed node can restore it.
 # ============================================================================
 
 subtest 'L18 ... is the flip-flop range, not yada-yada: 1 ... 10 is Range' => sub {
     my $expr = parse_expr('1 ... 10');
-    TODO: {
-        local $TODO = '... in expression context should be flip-flop Range, not Yada';
-        ok(defined($expr) && ref($expr) && $expr->isa('Chalk::IR::Node::Range'),
-            'top is Range (flip-flop ...)')
-            or diag('  got shape: ' . shape_of($expr));
-    }
+    ok(defined($expr) && ref($expr) && $expr->isa('Chalk::IR::Node::Range'),
+        'top is Range (flip-flop ...)')
+        or diag('  got shape: ' . shape_of($expr));
 };
 
 # ============================================================================
