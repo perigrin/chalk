@@ -287,7 +287,11 @@ subtest 'L22 rightward chmod slurps comma list: chmod 0755, $f1, $f2' => sub {
         'top is Call (chmod)') or return;
 
     TODO: {
-        local $TODO = 'List operator inside `my $_ = ...;` only slurps first arg; trailing , falls outside';
+        local $TODO = 'Comma-slurping ambiguity universal across bare calls (NOT a list-op-specific bug). '
+                    . 'Class I (commit 9966de8c) tried fixing this in the Precedence semiring as a level=4.4 '
+                    . 'marker; reverted in 61ecb184 because chained list-op contexts broke. '
+                    . 'See docs/plans/2026-05-12-list-operators-as-predeclared.md. '
+                    . 'Bypass: write parens.';
         is($call->name(), 'chmod', 'callee is chmod');
         my $args = $call->inputs()->[1];
         my $argc = (ref($args) eq 'ARRAY') ? scalar($args->@*) : 0;
@@ -305,7 +309,11 @@ subtest 'L22 rightward sort slurps comma list: sort $a, $b, $c' => sub {
         'top is Call (sort)') or return;
 
     TODO: {
-        local $TODO = 'List operator inside `my $_ = ...;` only slurps first arg; trailing , falls outside';
+        local $TODO = 'Comma-slurping ambiguity universal across bare calls (NOT a list-op-specific bug). '
+                    . 'Class I (commit 9966de8c) tried fixing this in the Precedence semiring as a level=4.4 '
+                    . 'marker; reverted in 61ecb184 because chained list-op contexts broke. '
+                    . 'See docs/plans/2026-05-12-list-operators-as-predeclared.md. '
+                    . 'Bypass: write parens.';
         is($call->name(), 'sort', 'callee is sort');
         my $args = $call->inputs()->[1];
         my $argc = (ref($args) eq 'ARRAY') ? scalar($args->@*) : 0;
@@ -320,7 +328,11 @@ subtest 'L22 rightward reverse slurps comma list: reverse 1, 2, 3' => sub {
         'top is Call (reverse)') or return;
 
     TODO: {
-        local $TODO = 'List operator inside `my $_ = ...;` only slurps first arg; trailing , falls outside';
+        local $TODO = 'Comma-slurping ambiguity universal across bare calls (NOT a list-op-specific bug). '
+                    . 'Class I (commit 9966de8c) tried fixing this in the Precedence semiring as a level=4.4 '
+                    . 'marker; reverted in 61ecb184 because chained list-op contexts broke. '
+                    . 'See docs/plans/2026-05-12-list-operators-as-predeclared.md. '
+                    . 'Bypass: write parens.';
         is($call->name(), 'reverse', 'callee is reverse');
         my $args = $call->inputs()->[1];
         my $argc = (ref($args) eq 'ARRAY') ? scalar($args->@*) : 0;

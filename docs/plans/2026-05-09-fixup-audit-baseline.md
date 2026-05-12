@@ -632,3 +632,143 @@ walker volume from ~1,050 fires to (target) zero on Bootstrap.
 
 **Status:** investigation complete; design and implementation of
 the Precedence rule remains.
+
+## 2026-05-12 update — after Round 1+2+3 precedence-spec TODO cleanup (Class I reverted)
+
+Today's session completed three rounds of precedence-spec TODO
+cleanup work, then reverted one item that introduced regressions.
+Landed work:
+
+- **Step 1+2** of the named-unary precedence implementation
+  (commits `2e9e5739`, `4bbe6308`, `dd2df9cf`)
+- **Round 1**: Class B (unary vs subscript), Class D (grammar
+  gaps), Class H (`not` at L23) — `5114f869`, `f13834a1`,
+  `2ed5cd7b`
+- **Round 2**: Class C (method-chain — design issue, no semiring
+  change), Class E subset (nonassoc), Class G (ternary) —
+  `c9837dbe`, `13da05e7`, `c914a81d`
+- **Round 3**: Class F (pre-increment grammar), Class J (... as
+  Range) — `f5e3b911`. Class I (list-op slurping) attempted at
+  `9966de8c`, **reverted at `61ecb184`** because it broke 3
+  previously-OK files in the corpus.
+
+Audit raw output saved at
+`docs/plans/2026-05-12-fixup-audit-raw.txt`. Bootstrap audit not
+re-run this session (the regression caught at IR/MOP/Grammar
+level made it unnecessary; once Class I was reverted the corpus
+returned to clean state).
+
+### Headline numbers (105-file IR/MOP/Grammar)
+
+| Counter | 2026-05-10 | 2026-05-12 | Δ |
+|---|---:|---:|---:|
+| Files PARSE_OK | 105 | 105 | 0 |
+| Files PARSE_FAIL | 0 | 0 | 0 |
+| `_fix_postfix_chain.subscript_over_builtin` | 19 | **0** | **-19** |
+| `_fix_postfix_chain.method_over_deref` | 25 | 25 | 0 |
+| `_fix_postfix_chain.subscript_over_unary` | 0 | 0 | 0 |
+| `_fix_postfix_chain` (walker entries) | 247,355 | 247,835 | +480 (noise) |
+| `_push_methodcall_inward.peel_builtin` | 51 | 51 | 0 |
+| `_push_deref_inward.peel_method` | 11 | 11 | 0 |
+| `_push_deref_inward.peel_builtin` | 10 | 11 | +1 (noise) |
+| `_fixup_stmts.vardecl_init_merge` | 14 | 15 | +1 (noise) |
+
+The named-unary work delivered the headline drop:
+`_fix_postfix_chain.subscript_over_builtin` went from 19 to **0**
+on this corpus. That's the expected outcome — `defined $h{key}`
+and `exists $h->{key}` style patterns now produce the perlop-
+correct shape directly from the parser instead of requiring the
+walker to fix them.
+
+The other counters are unchanged or moved by noise (+1, etc.) —
+the Round 1+2 work for Class B, C, E, G, H targets patterns
+that don't appear in this corpus. Their value will only show on
+Bootstrap (next audit, future session).
+
+### What did NOT change and why
+
+`_fix_postfix_chain.subscript_over_unary` stays at 0 because the
+IR/MOP/Grammar corpus doesn't contain `!$h{k}` / `-$x->{k}`
+patterns. Class B's fix targets these but the corpus doesn't
+exercise them; expect the impact on the Bootstrap audit
+(particularly Desugar.pm, where 59 fires were observed in the
+2026-05-10b Bootstrap-partial audit).
+
+`_fix_postfix_chain.method_over_deref` stays at 25 because Class C
+discovered it's NOT a Precedence question — it's filter-gap merge
+in SemanticAction (per commit `25c01a28`'s framing). No semiring
+change attempted.
+
+### Class I post-mortem
+
+The reverted Class I implementation tried to encode list-operator
+context as a precedence-level marker (level 4.4) and propagate it
+through 8 sites in `Precedence.pm`. The named-unary spec tests
+passed; chained list-op patterns broke. Three real Chalk files
+that previously parsed (`lib/Chalk/IR/FieldInfo.pm`,
+`lib/Chalk/IR/Serialize/JSON.pm`,
+`lib/Chalk/Grammar/Perl/TypeLibrary.pm`) failed on patterns like
+`map { $_ } sort keys %h` after Class I.
+
+Architectural finding documented in
+`docs/plans/2026-05-12-list-operators-as-predeclared.md`:
+list-operator slurping is parser greediness, not operator
+precedence. Built-in list operators are predeclared functions and
+behave like user-defined functions for parsing purposes. The
+"comma-slurping" bug is universal across all parens-free calls
+(built-in AND user-defined) — affecting `sort 1, 2`,
+`my_func 1, 2` identically — and belongs in chart-merge
+preference logic OR a fixup walker, NOT a precedence-level
+marker.
+
+The L22 TODOs in `t/bootstrap/precedence-spec-low-words.t`
+(chmod, sort, reverse) were updated with refined diagnostic
+messages pointing to the design note.
+
+### Lesson recorded in CLAUDE.md
+
+Two new rules added under TDD section:
+
+1. **Nested-context coverage extension to bilateral coverage rule**:
+   when a feature affects how rules combine in chains (list-op
+   after list-op, ternary in ternary, etc.), the bilateral
+   coverage must include multi-level invocations. Class I had
+   bilateral tests for individual list operators but not for
+   chained patterns; the chained patterns broke.
+
+2. **Precedence semiring scope rule**: precedence levels are for
+   operator binding-priority, not for parser-state markers,
+   symbol-table info, or parser-greediness rules. Heuristic: if
+   implementing a "precedence rule" needs more than ~5
+   special-case sites in the semiring, the rule is probably not
+   precedence — try grammar (add a rule), fixup walker, or
+   another semantic layer.
+
+### Recommendation: branch is mergeable
+
+The branch `fixup-audit-baseline` is in a clean known-good state
+at `61ecb184` (Class I revert) plus this session's docs commits.
+105/105 PARSE_OK; the load-bearing precedence work delivered
+(`subscript_over_builtin = 0`); architectural lessons recorded.
+Suitable for ff-merge to `pu`.
+
+**Future work** (NOT blocking merge):
+
+- Bootstrap audit re-run (~2h with ulimit; would quantify Class
+  B's impact on `subscript_over_unary` patterns)
+- Walker retirement: `subscript_over_builtin = 0` on
+  IR/MOP/Grammar means the branch is deletable on this corpus;
+  verify on Bootstrap before deleting
+- Class I redesign: chart-merge preference rule or fixup walker,
+  per the design note
+- Remaining 13 real TODOs across the spec files (covered in the
+  session-end summary)
+
+### Cross-references
+
+- Class I revert: commit `61ecb184`
+- Architectural framing: `docs/plans/2026-05-12-list-operators-as-predeclared.md`
+- The named-unary lesson: `docs/plans/2026-05-11-step2-second-blocker.md`
+- Raw audit output: `docs/plans/2026-05-12-fixup-audit-raw.txt`
+- Updated CLAUDE.md rules: see CLAUDE.md "Bilateral coverage" and
+  "Precedence semiring scope" sections under TDD

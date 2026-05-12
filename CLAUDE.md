@@ -138,6 +138,26 @@ because the wrong number is still numerically defined and compares correctly
 in one direction. See `docs/plans/2026-05-11-step2-second-blocker.md` for
 the case study where this rule would have caught a 2-attempt rollback cycle.
 
+**Nested-context coverage extension:** when the feature affects how rules
+combine in chains (e.g., a list-op-after-list-op), the bilateral coverage
+must also include multi-level invocations. Test `f X`, then `f g X`, then
+`f { ... } g X`. A flat-only test set can pass while chained contexts
+break — a single-level rule that assigns a marker may interact incorrectly
+with the same rule firing again at the next level. See
+`docs/plans/2026-05-12-list-operators-as-predeclared.md` for the case
+study where this rule would have caught a 1-attempt rollback cycle.
+
+**Precedence semiring scope rule:** precedence levels in the Precedence
+semiring describe operator binding-priority — "X binds tighter than Y."
+They are NOT for parser-state markers, symbol-table info, or
+parser-greediness rules. Heuristic: if implementing a "precedence rule"
+needs more than ~5 special-case sites in the semiring (multiple
+`_complete_prec` exemptions, multiple `_scan_multiply` rejections, marker
+"propagation" through unrelated rules), the rule is probably not
+precedence. It's likely either grammar (add a rule) or a different
+parser/semantic layer (fixup walker, symbol table, TypeInference). See
+`docs/plans/2026-05-12-list-operators-as-predeclared.md` Lesson 1.
+
 ### Step 2: Review (after every issue completes)
 
 Run `/paad:agentic-review` after completing each milestone issue. This dispatches
