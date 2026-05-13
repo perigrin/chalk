@@ -227,6 +227,23 @@ class Chalk::Bootstrap::Perl::Actions {
         return $PREFIX_BUILTINS{$name} || $LIST_BUILTINS{$name};
     }
 
+    # Helper: check if a MethodCall's invocant is itself a peelable wrapper
+    # (i.e. the MethodCall genuinely WRAPS a prefix construct that the deref
+    # needs to push past). When the invocant is a plain expression like a
+    # variable or hash element, the MethodCall IS the legitimate target of
+    # ->@* — peeling it inverts source order (turning $obj->method()->@*
+    # into MethodCall(PostfixDeref($obj,@), method, [])). Without this guard,
+    # _push_deref_inward over-peels and the walker's method_over_deref branch
+    # has to undo the damage post-parse. See 2026-05-12 investigation.
+    my sub _method_invocant_needs_peel($node) {
+        my $invocant = $node->inputs()->[0];
+        return false unless defined $invocant;
+        return true if $invocant isa Chalk::IR::Node::Return;
+        return true if $invocant isa Chalk::IR::Node::Unwind;
+        return true if _is_unwrappable_builtin($invocant);
+        return false;
+    }
+
     # Helper: push PostfixDerefExpr inward past prefix wrappers.
     # Filter-gap merge can leave prefix constructs (return, scalar, die,
     # list builtins) and method calls misparented inside PostfixDeref's
@@ -264,10 +281,17 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @wrappers, ['BuiltinCall', $current->inputs()->[0], $current->inputs()->[1]];
                 my $args = $current->inputs()->[1];
                 $current = $args->[-1];
-            } elsif ($current isa Chalk::IR::Node::Call && $current->dispatch_kind() eq 'method') {
+            } elsif ($current isa Chalk::IR::Node::Call && $current->dispatch_kind() eq 'method'
+                    && _method_invocant_needs_peel($current)) {
                 Chalk::Bootstrap::Perl::Actions->_bump_fixup(
                     '_push_deref_inward.peel_method');
-                # MethodCall wrapping a prefix construct — peel it off
+                # MethodCall wrapping a prefix construct — peel it off.
+                # Guarded by _method_invocant_needs_peel so we only peel when
+                # the invocant itself is a peelable wrapper. Without the guard
+                # this branch fired on every MethodCall, including the case
+                # where MethodCall is the legitimate target of ->@* (e.g.
+                # $obj->method()->@*), inverting source order. The walker's
+                # method_over_deref branch had to undo that damage post-parse.
                 push @wrappers, ['MethodCallExpr', $current->inputs()->[1], $current->inputs()->[2]];
                 $current = $current->inputs()->[0];  # invocant
             } else {

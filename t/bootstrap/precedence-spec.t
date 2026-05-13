@@ -353,22 +353,25 @@ subtest 'L2 (->) chains: method-then-deref: $obj->method()->@*' => sub {
     # perlop: -> at L2, both method-call and postfix-deref are at L2 — they
     # group left-to-right within the level. So $obj->method()->@* binds as
     # ($obj->method())->@* = PostfixDeref(Call($obj, method, []), @).
-    # Root cause: Earley stale-value merge in the SemanticAction semiring
-    # causes the wrong IR shape: Call(PostfixDeref($obj,@), method, []).
-    # The Precedence semiring cannot fix this; the parse is grammatically
-    # unambiguous. The walker's method_over_deref branch corrects the shape
-    # post-parse. Fix belongs in SemanticAction/Actions layer, not Precedence.
+    #
+    # Root cause: 2026-05-12 investigation found this is NOT a chart-level
+    # ambiguity — the grammar admits exactly one derivation for the full
+    # span (PostfixDeref ends with /@\*/, MethodCall ends with /\)/, they
+    # cannot both match the input). The wrong shape is produced by
+    # _push_deref_inward in Actions.pm, which unconditionally peels MethodCall
+    # wrappers — including the case where MethodCall is the legitimate target
+    # of ->@*. The walker's method_over_deref branch then undoes the damage
+    # post-parse. The fix is to gate the MethodCall-peel branch in
+    # _push_deref_inward to fire only when the MethodCall's invocant is
+    # itself a peelable wrapper (BuiltinCall/Return/Unwind).
     my $expr = parse_expr('$obj->method()->@*');
 
-    TODO: {
-        local $TODO = 'L2 method-then-deref: stale-value merge in SemanticAction; needs Actions.pm fix, not Precedence semiring';
-        my $deref = isa_with_shape($expr, 'Chalk::IR::Node::PostfixDeref',
-            'top is PostfixDeref') or return;
-        is($deref->sigil(), '@', 'sigil is @');
-        my $call = isa_with_shape($deref->inputs()->[0], 'Chalk::IR::Node::Call',
-            'inner is Call (method)') or return;
-        is($call->dispatch_kind(), 'method', 'dispatch_kind is method');
-    }
+    my $deref = isa_with_shape($expr, 'Chalk::IR::Node::PostfixDeref',
+        'top is PostfixDeref') or return;
+    is($deref->sigil(), '@', 'sigil is @');
+    my $call = isa_with_shape($deref->inputs()->[0], 'Chalk::IR::Node::Call',
+        'inner is Call (method)') or return;
+    is($call->dispatch_kind(), 'method', 'dispatch_kind is method');
 };
 
 subtest 'L2 (->) chains: subscript-then-deref: $obj->{key}->@*' => sub {
