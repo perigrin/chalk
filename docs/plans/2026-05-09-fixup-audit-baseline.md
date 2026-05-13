@@ -772,3 +772,227 @@ Suitable for ff-merge to `pu`.
 - Raw audit output: `docs/plans/2026-05-12-fixup-audit-raw.txt`
 - Updated CLAUDE.md rules: see CLAUDE.md "Bilateral coverage" and
   "Precedence semiring scope" sections under TDD
+
+## 2026-05-13 update — Bootstrap audit after Round 1+2+3 merge to pu (partial; cap-killed)
+
+Re-runs `script/chalk-fixup-audit` on `lib/Chalk/Bootstrap` after the
+Round 1+2+3 precedence work merged to `pu` (commit `e8ccf3e1`).
+**Cap-killed by the 7200s CPU ulimit during `Earley.pm` (file 22 of
+44).** 19 files completed (18 PARSE_OK + 1 PARSE_FAIL: DepChaser.pm,
+same `local $/;` grammar gap as the 2026-05-10b run). The prior
+2026-05-10b Bootstrap-partial baseline completed 26 PARSE_OK + 1
+PARSE_FAIL = 27 files; this run is short by 7 files including the
+load-bearing `Earley.pm` (which by itself contributed 547 of the 827
+prior-partial `subscript_over_builtin` fires).
+
+**Per the stop condition for this audit task, this section
+documents findings but does NOT commit them.** The 19-file overlap
+is sufficient to confirm the headline trend but insufficient to
+quote final Bootstrap totals. A future re-run with the full
+prior-partial 27 (or per-file CPU budgets to bypass the all-or-
+nothing cap-kill) is needed before final retirement decisions.
+
+Raw audit output saved at
+`docs/plans/2026-05-13-fixup-audit-bootstrap-partial.txt`.
+
+### Headline (19-file overlap)
+
+| Counter | 2026-05-10b (overlap) | 2026-05-13 (overlap) | Δ |
+|---|---:|---:|---:|
+| `_fix_postfix_chain.subscript_over_builtin` | **269** | **18** | **-251 (-93%)** |
+| `_fix_postfix_chain.subscript_over_unary` | **59** | **0** | **-59 (-100%)** |
+| `_fix_postfix_chain.method_over_deref` | 102 | 102 | 0 |
+| `_fix_postfix_chain.subscript_over_binary` | 0 | 0 | 0 |
+| `_push_methodcall_inward.peel_builtin` | 58 | 58 | 0 |
+| `_push_deref_inward.peel_builtin` | 40 | 40 | 0 |
+| `_push_deref_inward.peel_method` | 28 | 28 | 0 |
+| `_fixup_stmts.vardecl_init_merge` | 28 | 28 | 0 |
+| `_fixup_stmts.binop_into_list_builtin` | 1 | 1 | 0 |
+| Files PARSE_OK | 18 | 18 | 0 |
+| Files PARSE_FAIL | 1 | 1 | 0 |
+
+**No regressions.** No file that PARSE_OK on 2026-05-10b became
+PARSE_FAIL on 2026-05-13. DepChaser.pm remains PARSE_FAIL on the
+same `local $/;` grammar gap (out of scope for this work).
+
+### Per-file: `subscript_over_builtin` drop
+
+| File | 2026-05-10b | 2026-05-13 | Δ |
+|---|---:|---:|---:|
+| `lib/Chalk/Bootstrap/BNF/Target/C.pm` | 128 | **0** | -128 |
+| `lib/Chalk/Bootstrap/Desugar.pm` | 60 | **0** | -60 |
+| `lib/Chalk/Bootstrap/ConciseTree/Actions.pm` | 36 | **0** | -36 |
+| `lib/Chalk/Bootstrap/Context.pm` | 24 | **0** | -24 |
+| `lib/Chalk/Bootstrap/CoreItemIndex.pm` | 2 | **0** | -2 |
+| `lib/Chalk/Bootstrap/DepChaser.pm` | 1 | **0** | -1 |
+| `lib/Chalk/Bootstrap/BNF/Target/XS/AST/XSUB.pm` | 18 | 18 | 0 |
+| **All 19 overlap files** | **269** | **18** | **-251** |
+
+The named-unary precedence work fired exactly as predicted on the
+files where the source pattern (`defined $h{k}`, `exists $h->{k}`,
+etc.) lives in real code. Six of seven previously-firing files
+dropped to zero. The seventh — `BNF/Target/XS/AST/XSUB.pm` — held
+at 18 (unchanged), and that file contains zero `defined`/`exists`/
+`scalar`/`ref`/`length`/`keys`/`values`/`chomp`/`chop` source
+patterns at all (verified via grep). The 18 fires there are
+synthetic SubscriptExpr-of-BuiltinCall shapes the parser explores
+during chart-walk that the walker rewrites even though no source
+pattern matches; these are not addressed by Step 1+2 named-unary
+because Step 1+2 fixes precedence at scan time, but the synthetic
+shapes likely arise from intermediate Earley merges. Worth a
+narrow investigation but lower priority than the Earley.pm
+re-audit.
+
+### Per-file: `subscript_over_unary` drop
+
+| File | 2026-05-10b | 2026-05-13 | Δ |
+|---|---:|---:|---:|
+| `lib/Chalk/Bootstrap/Desugar.pm` | 59 | **0** | -59 |
+
+Class B (Round 1: reject UnaryExpression as Subscript/PostfixDeref
+target, commit `5114f869`) lands cleanly on Desugar.pm — the only
+file in the 19-file overlap that previously fired this counter.
+
+Caveat: the prior-partial run also reported `subscript_over_unary`
+fires on `LR0DFA.pm` (30 fires) and `Earley.pm` (7 fires). Neither
+file completed in this run, so the impact of Class B on those
+files is unmeasured. Expectation based on the IR/MOP/Grammar
+results: same-class drop, but unverified without a re-run.
+
+### Per-file: `method_over_deref` (Class C — unchanged)
+
+| File | 2026-05-10b | 2026-05-13 | Δ |
+|---|---:|---:|---:|
+| `lib/Chalk/Bootstrap/ConciseTree/Actions.pm` | 79 | 79 | 0 |
+| `lib/Chalk/Bootstrap/Context.pm` | 13 | 13 | 0 |
+| `lib/Chalk/Bootstrap/BNF/Target/C.pm` | 5 | 5 | 0 |
+| `lib/Chalk/Bootstrap/DepChaser.pm` | 2 | 2 | 0 |
+| `lib/Chalk/Bootstrap/ConciseTree.pm` | 1 | 1 | 0 |
+| `lib/Chalk/Bootstrap/ConciseTree/Comparator.pm` | 1 | 1 | 0 |
+| `lib/Chalk/Bootstrap/Desugar.pm` | 1 | 1 | 0 |
+| **All 19 overlap files** | **102** | **102** | **0** |
+
+Per the 2026-05-12 update (commit `25c01a28` framing), Class C is
+not a precedence question — it's a filter-gap merge in
+SemanticAction. No semiring change was attempted, and the audit
+confirms zero movement. This branch remains the highest-volume
+non-zero target post-fix.
+
+### `_push_*` and `_fixup_stmts` (unchanged)
+
+All `_push_methodcall_inward.peel_builtin`, `_push_deref_inward.*`,
+and `_fixup_stmts.vardecl_init_merge` per-file counts are
+byte-identical between the two runs over the 19-file overlap. None
+of the Round 1+2+3 work targeted these classes; the audit
+confirms zero collateral effect (no regression, no improvement).
+
+### Walker branch ranking (overlap totals; Earley.pm and 6 others not measured)
+
+| Branch | Overlap fires post-fix | Status |
+|---|---:|---|
+| `_fix_postfix_chain.method_over_deref` | **102** | **highest non-zero — next correctness target** |
+| `_push_methodcall_inward.peel_builtin` | 58 | unchanged |
+| `_push_deref_inward.peel_builtin` | 40 | unchanged |
+| `_push_deref_inward.peel_method` | 28 | unchanged |
+| `_fixup_stmts.vardecl_init_merge` | 28 | unchanged |
+| `_fix_postfix_chain.subscript_over_builtin` | 18 | dropped 93%; XSUB.pm synthetic-shape residue |
+| `_fixup_stmts.binop_into_list_builtin` | 1 | unchanged |
+| `_fix_postfix_chain.subscript_over_unary` | **0** | dropped 100% on overlap |
+| `_fix_postfix_chain.subscript_over_binary` | 0 | unchanged (still zero everywhere) |
+
+(Plus the `_push_methodcall_inward.no_wrappers` pass-through and
+`_fixup_stmts.unwrap_pass_through` which are noise, not real
+transforms.)
+
+### Walker retirement candidates (subject to Earley.pm re-audit)
+
+Branches at zero on the 19-file overlap:
+
+- `_fix_postfix_chain.subscript_over_unary` — 0 fires post-fix on
+  Desugar.pm (was 59). **Caveat**: LR0DFA.pm (30 fires prior) and
+  Earley.pm (7 fires prior) were not re-measured; until they are,
+  treating this as deletable is premature.
+- `_fix_postfix_chain.subscript_over_binary` — 0 fires across both
+  runs on the overlap, and 0 in the prior-partial Bootstrap, and 0
+  in the IR/MOP/Grammar baseline. Strongest deletion candidate;
+  still requires call-graph verification that the pattern is truly
+  unreachable, not merely unsampled.
+
+`_fix_postfix_chain.subscript_over_builtin` is NOT a retirement
+candidate yet. The XSUB.pm synthetic-shape residue (18 fires
+unchanged) and the unmeasured Earley.pm contribution (was 547
+prior) mean the branch still does real work somewhere; deletion
+would re-introduce regressions that the named-unary fix doesn't
+cover.
+
+### Why the audit cap-killed before Earley.pm completed
+
+Wall + CPU times for this run:
+- Wall: 23:58:13 → 01:58:13 = exactly 2h (cap-killed by ulimit -t)
+- CPU: 1h59m18s observed at last live check, then exit
+
+Earley.pm took >50 minutes of single-core CPU before being killed
+mid-parse. The prior 2026-05-10b run completed Earley.pm with
+`_fix_postfix_chain=62,438` walker entries — that file is the
+single largest CPU sink in the corpus. The post-merge code is
+slightly slower (named-unary precedence checking adds work to the
+scan loop), pushing Earley.pm over the cap-kill horizon.
+
+**Recommended mitigation for next re-run:** drop the `ulimit -t
+7200` and either (a) raise to 14400s (4h), (b) split the corpus
+and run each file with a per-file CPU budget, or (c) profile
+Earley.pm to find the per-merge cost regression. Option (b) makes
+the audit robust to single-file blow-ups; the script already
+prints incrementally so partial results survive.
+
+### Recommendation for the next correctness target
+
+**`_fix_postfix_chain.method_over_deref` is the highest-volume
+non-zero walker branch on the measured Bootstrap surface (102
+fires across 7 files, dominated by ConciseTree/Actions.pm at 79
+and Context.pm at 13).** Per the 2026-05-12 framing
+(commit `25c01a28`), this is NOT a Precedence question — both
+candidates have the same operator-binding shape. It's a filter-gap
+merge in SemanticAction: when the parser admits both
+`PostfixDeref(MethodCall($obj, m, []), @)` and
+`MethodCall(PostfixDeref($obj, ?), m, ?)` for the source pattern
+`$obj->m()->@*`, FilterComposite picks the wrong one.
+
+The investigation needed is:
+1. Reproduce the ambiguity at minimum-test-case scale (one
+   `->method()->@*` chain in a synthetic file) and capture both
+   parse-tree shapes from the chart.
+2. Identify which filter (Boolean/Precedence/TypeInference/
+   Structural) currently distinguishes them, and which would need
+   to.
+3. Determine whether this is a Structural-tag question (e.g., a
+   missing `is_method_target` tag on the inner expression that
+   would let Structural prefer the right shape) or a SemanticAction
+   merge-order question (e.g., `add()` ordering picking the wrong
+   alternative).
+
+Until that investigation produces a concrete fix design, the
+`method_over_deref` branch must remain in production. It's doing
+real disambiguation, not silent rewriting (verified in the
+2026-05-10b/c addendum above).
+
+**Secondary targets (volume 28-58):** the `_push_*_inward.peel_*`
+branches and `_fixup_stmts.vardecl_init_merge` are all in the same
+"prefix wrapper around dispatch" architectural class as
+`subscript_over_builtin`, but no Round 1+2+3 work touched them.
+They're candidates for the next round of precedence work once the
+Earley.pm re-audit confirms the headline drops.
+
+### Cross-references
+
+- Round 1+2+3 merge to pu: commit `e8ccf3e1`
+- Class B (subscript_over_unary fix): commit `5114f869`
+- Named-unary Step 1+2 (subscript_over_builtin fix):
+  commits `2e9e5739`, `4bbe6308`, `dd2df9cf`
+- 2026-05-10b Bootstrap-partial baseline (this section's
+  comparison source): see "## 2026-05-10b update" above
+- 2026-05-12 IR/MOP/Grammar audit (already showed
+  subscript_over_builtin: 19 → 0 on that corpus): see
+  "## 2026-05-12 update" above
+- Cap-kill mitigation deferred: see "Why the audit cap-killed
+  before Earley.pm completed" above
