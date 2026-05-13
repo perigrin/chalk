@@ -221,8 +221,21 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # Helper: check if a BuiltinCall node should be unwrapped during push-inward
+    # by _push_methodcall_inward or _push_deref_inward.
+    #
+    # Returns false when the call is paren-form (e.g., `push(@arr, $x)`): the
+    # source-level parens bounded the call, so it's a complete expression
+    # whose result should be the method/deref invocant verbatim. Peeling it
+    # would produce wrong shape `Call(push, [@arr, MethodCall($x)])` instead
+    # of `MethodCall(Call(push, [@arr, $x]))`.
+    #
+    # Returns true for bare-form list/prefix builtins (e.g., `push @arr, $x`)
+    # only — these are the cases where filter-gap merge can produce
+    # `MethodCall(Call(push, [...]))` artifacts that the helper must rebuild.
+    # See docs/plans/2026-05-12-peel-builtin-investigation.md.
     my sub _is_unwrappable_builtin($node) {
         return false unless $node isa Chalk::IR::Node::Call && $node->dispatch_kind() eq 'builtin';
+        return false if $node->paren_form();
         my $name = $node->inputs()->[0]->value();
         return $PREFIX_BUILTINS{$name} || $LIST_BUILTINS{$name};
     }
@@ -2077,9 +2090,21 @@ class Chalk::Bootstrap::Perl::Actions {
         # Generic builtin or function call → BuiltinCall
         if (defined $func_name) {
             my $name_node = _make_const($factory, $func_name);
+            # Detect paren-form vs bare-form call from scanned text.
+            # Alt 0 is `QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/`:
+            # the identifier is immediately followed by `(` (with optional
+            # whitespace). Alts 1-3 are bare forms (no immediate paren).
+            # This provenance is used by _push_methodcall_inward and
+            # _push_deref_inward to distinguish paren-form chains (which
+            # should not have their builtin invocant peeled) from
+            # filter-gap-merge artifacts (which should). See
+            # docs/plans/2026-05-12-peel-builtin-investigation.md.
+            my $text = $ctx->scanned_text() // '';
+            my $is_paren_form = $text =~ /^\s*[\w:]+\s*\(/ ? true : false;
             return $typed->make('Call',
                 dispatch_kind => 'builtin',
                 name          => $name_node->value(),
+                paren_form    => $is_paren_form,
                 inputs        => [$name_node, \@args],
                 compat_class  => 'BuiltinCall',
             );
