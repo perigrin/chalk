@@ -10,6 +10,14 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Actions;
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 
+# Enable FilterComposite tie-log instrumentation for the duration of the
+# audit so we can detect cases where _filter_compare returns 'neither'
+# and FilterComposite silently picks left as a tie-break. Per the task #4
+# investigation (docs/plans/2026-05-12-filter-composite-tie-break-investigation.md),
+# this path fires zero times on the IR/MOP/Grammar corpus today; tracking
+# it here makes regressions visible immediately on any future corpus.
+$ENV{CHALK_COUNT_FILTER_TIES} = 1;
+
 STDOUT->autoflush(1);
 STDERR->autoflush(1);
 
@@ -46,10 +54,17 @@ my $with_fixups_count = 0;
 my $parse_fail_count = 0;
 my $err_open_count = 0;
 my $processed = 0;
+my $unresolved_total = 0;
+
+# Cache the FilterComposite semiring object for tie_log access.
+# Earlier semirings in the stack don't expose tie_log; the composite does.
+my $semiring = $parser->semiring();
+my $can_tie_log = $semiring && $semiring->can('flush_tie_log') && $semiring->can('tie_log');
 
 for my $file (@files) {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     Chalk::Bootstrap::Perl::Actions->reset_fixup_counts();
+    $semiring->flush_tie_log() if $can_tie_log;
 
     open my $fh, '<:utf8', $file or do {
         say "ERR_OPEN  $file  ($!)";
@@ -64,8 +79,21 @@ for my $file (@files) {
 
     my $counts = Chalk::Bootstrap::Perl::Actions->fixup_counts();
     my $status = !$err && defined $result && !$result->is_zero() ? 'OK' : 'PARSE_FAIL';
-    my $detail = %$counts
-        ? join(' ', map { "$_=$counts->{$_}" } sort keys %$counts)
+
+    # Count FilterComposite ties: 'unresolved' = silent left-pick, all
+    # other slot names = mid-loop non-verdict from a specific semiring.
+    # Per task #4 investigation, only 'unresolved' represents a true
+    # composition-shouldn't-have-an-opinion case.
+    my $ties_unresolved = 0;
+    if ($can_tie_log) {
+        my $log = $semiring->tie_log() // [];
+        $ties_unresolved = scalar grep { ($_->{slot} // '') eq 'unresolved' } $log->@*;
+    }
+
+    my %display_counts = %$counts;
+    $display_counts{_ties_unresolved} = $ties_unresolved if $ties_unresolved;
+    my $detail = %display_counts
+        ? join(' ', map { "$_=$display_counts{$_}" } sort keys %display_counts)
         : '(none)';
 
     say "$status  $file  [$detail]";
@@ -81,6 +109,7 @@ for my $file (@files) {
     for my $name (keys %$counts) {
         $totals{$name} += $counts->{$name};
     }
+    $unresolved_total += $ties_unresolved;
 
     $processed++;
 }
@@ -92,11 +121,13 @@ say "# Files OK with no fixups fired: $clean_count";
 say "# Files OK with fixups fired:    $with_fixups_count";
 say "# Files PARSE_FAIL:              $parse_fail_count";
 say "# Files ERR_OPEN:                $err_open_count" if $err_open_count;
+say "# FilterComposite silent-pick ties: $unresolved_total" if $can_tie_log;
 say "";
 if (%totals) {
     for my $name (sort keys %totals) {
         say "  $name = $totals{$name}";
     }
+    say "  _ties_unresolved = $unresolved_total" if $unresolved_total;
 } else {
     say "  (no fixups fired across corpus — filter stack is complete for this corpus)";
 }
