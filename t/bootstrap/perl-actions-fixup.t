@@ -12,6 +12,7 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::Program;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
+use Chalk::IR::Node::VarDecl;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -302,6 +303,38 @@ my sub method_name($method) {
 
         my $args = $call->inputs()->[1];
         is(scalar $args->@*, 2, 'push multi-arg: BuiltinCall has 2 args');
+    }
+}
+
+# ============================================================
+# 7. my $x; $x = 1; produces TWO statements, not a merged VarDecl
+#    Regression for _fixup_stmts.vardecl_init_merge bug: the walker
+#    was unconditionally gluing a bare VarDecl with the next sibling
+#    statement, producing VarDecl($x, Assign(=, $x, 1)) which reads
+#    $x before initialization. The two source statements must stay
+#    distinct.
+# ============================================================
+
+{
+    my $source = qq{my \$x; \$x = 1;\n};
+    my $ir = parse_source($source);
+    ok(defined $ir, 'bare-decl-then-assign: parses');
+
+    SKIP: {
+        skip 'bare-decl-then-assign: no IR', 4 unless defined $ir;
+
+        my $stmts = get_all_stmts($ir);
+        is(scalar $stmts->@*, 2,
+            'bare-decl-then-assign: two distinct statements');
+
+        my ($decl, $assign) = $stmts->@*;
+        ok($decl isa Chalk::IR::Node::VarDecl,
+            'bare-decl-then-assign: first statement is VarDecl');
+        ok(!defined $decl->inputs()->[1],
+            'bare-decl-then-assign: VarDecl has no initializer (undef)');
+        ok($assign isa Chalk::IR::Node
+                && $assign->operation() eq 'Assign',
+            'bare-decl-then-assign: second statement is Assign');
     }
 }
 

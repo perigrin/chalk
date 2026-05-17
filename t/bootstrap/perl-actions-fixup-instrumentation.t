@@ -64,7 +64,6 @@ subtest 'per-branch counters distinguish merge classes in _fixup_stmts' => sub {
         _fixup_stmts.use_with_args
         _fixup_stmts.assign_init_to_vardecl
         _fixup_stmts.binop_into_list_builtin
-        _fixup_stmts.vardecl_init_merge
         _fixup_stmts.list_builtin_call
         _fixup_stmts.prefix_builtin_call
         _fixup_stmts.unwrap_pass_through

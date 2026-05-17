@@ -122,7 +122,6 @@ class Chalk::Bootstrap::Perl::Actions {
         _fixup_stmts.use_with_args
         _fixup_stmts.assign_init_to_vardecl
         _fixup_stmts.binop_into_list_builtin
-        _fixup_stmts.vardecl_init_merge
         _fixup_stmts.list_builtin_call
         _fixup_stmts.prefix_builtin_call
         _fixup_stmts.unwrap_pass_through
@@ -994,48 +993,6 @@ class Chalk::Bootstrap::Perl::Actions {
                     inputs        => [$name, \@args],
                     compat_class  => 'BuiltinCall',
                 );
-            } elsif ($item isa Chalk::IR::Node::VarDecl
-                    && !defined $item->inputs()->[1]
-                    && $i + 1 <= $#$stmts
-                    && $stmts->[$i + 1] isa Chalk::IR::Node) {
-                # Merge bare VarDecl(var, undef) + following expression → VarDecl(var, expr)
-                # Only merge when the next item is actually an initializer, not a
-                # separate statement. Block merge for known statement-starting patterns.
-                my $next = $stmts->[$i + 1];
-                my $is_boundary = false;
-                # Statement-level boundary: metadata structs and Return/Unwind CFG nodes
-                $is_boundary = true if $next isa Chalk::IR::Node::Return
-                    || $next isa Chalk::IR::Node::Unwind;
-                # ClassInfo/FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
-                $is_boundary = true if $next isa Chalk::IR::ClassInfo;
-                $is_boundary = true if $next isa Chalk::IR::FieldInfo;
-                $is_boundary = true if $next isa Chalk::IR::MethodInfo;
-                $is_boundary = true if $next isa Chalk::IR::SubInfo;
-                # CFG control flow nodes (both Bootstrap and new Chalk::IR hierarchies)
-                $is_boundary = true if ($next isa Chalk::IR::Node
-                        || $next isa Chalk::IR::Node)
-                    && $STMT_BOUNDARY_OPS{$next->operation() // ''};
-                # Bare keyword Constants (push, return, die, for, etc.)
-                $is_boundary = true if $next isa Chalk::IR::Node::Constant
-                    && defined $next->value()
-                    && ($STOP_KEYWORDS{$next->value()}
-                        || $LIST_BUILTINS{$next->value()}
-                        || $PREFIX_BUILTINS{$next->value()});
-                # MethodCallExpr and BuiltinCall are always separate statements
-                $is_boundary = true if $next isa Chalk::IR::Node::Call
-                    && ($next->dispatch_kind() eq 'method'
-                        || $next->dispatch_kind() eq 'builtin');
-                if (!$is_boundary) {
-                    Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                        '_fixup_stmts.vardecl_init_merge');
-                    $i++;
-                    push @result, $typed->make('VarDecl',
-                        inputs       => [$item->inputs()->[0], $next],
-                        compat_class => 'VarDecl',
-                    );
-                } else {
-                    push @result, $item;
-                }
             } elsif ($item isa Chalk::IR::Node::Constant
                     && defined $item->value()
                     && $LIST_BUILTINS{$item->value()}
