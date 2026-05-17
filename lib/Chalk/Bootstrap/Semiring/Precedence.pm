@@ -479,7 +479,12 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return [$left];
         }
         if (defined $rl && !defined $ll) {
-            return [$right];
+            # Negative levels (-1 = UnaryExpression, -2 = PostfixExpression) are
+            # marker levels that prevent certain completions — not real precedence
+            # values for disambiguation. When only the right side carries a marker
+            # level and left has no level, prefer left (no change in constraint).
+            # Real positive levels on the right are genuinely more constraining.
+            return $rl < 0 ? [$left] : [$right];
         }
         if (defined $ll && defined $rl) {
             # When a PostfixExpression (level<0) merges with an

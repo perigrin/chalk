@@ -82,6 +82,52 @@ package SASemiring {
     }
 }
 
+package AbstainSemiring {
+    # A semiring whose add() returns an arrayref [$l, $r] — no opinion (like new Boolean).
+    use 5.42.0;
+    use utf8;
+    no warnings 'experimental::class';
+    use experimental 'class';
+
+    class AbstainSemiring {
+        field $slot_name_val :param;
+        method slot_name() { return $slot_name_val }
+        method zero()      { return Chalk::Bootstrap::Context->new(
+            focus => 0, children => [], position => 0, is_zero => true
+        ) }
+        method one()       { return Chalk::Bootstrap::Context->new(
+            focus => 1, children => [], position => 0, is_zero => false
+        ) }
+        method is_zero($v) { return !defined($v) }
+        method multiply($l, $r) { return $r }
+        # Returns [$l, $r] — honest "no opinion" (multi-element → abstain in FC)
+        method add($l, $r)  { return [$l, $r] }
+    }
+}
+
+package ZeroSemiring {
+    # A semiring whose add() returns [] — both alternatives are zero/eliminated.
+    use 5.42.0;
+    use utf8;
+    no warnings 'experimental::class';
+    use experimental 'class';
+
+    class ZeroSemiring {
+        field $slot_name_val :param;
+        method slot_name() { return $slot_name_val }
+        method zero()      { return Chalk::Bootstrap::Context->new(
+            focus => 0, children => [], position => 0, is_zero => true
+        ) }
+        method one()       { return Chalk::Bootstrap::Context->new(
+            focus => 1, children => [], position => 0, is_zero => false
+        ) }
+        method is_zero($v) { return !defined($v) }
+        method multiply($l, $r) { return $r }
+        # Returns [] — signals that both alternatives are eliminated
+        method add($l, $r)  { return [] }
+    }
+}
+
 # Helper: build two Contexts with distinct annotation slot values
 my sub make_ctx($focus_val, %annotations) {
     return Chalk::Bootstrap::Context->new(
@@ -115,8 +161,8 @@ subtest 'default behavior unchanged without env var' => sub {
 
     my $verdict = $comp->_filter_compare($left, $right);
 
-    # First-wins sees LeftSemiring return $left (==10) which matches $li — right_loses
-    is($verdict, 'right_loses', 'default: first-wins behavior preserved');
+    # LeftSemiring returns $left (==10) which matches $li — first opinionated says left → right_loses
+    is($verdict, 'right_loses', 'default: LeftSemiring opinion → right_loses');
 
     # audit_log should be empty / not populated when env var absent
     my $log = $comp->audit_log();
@@ -144,20 +190,20 @@ subtest 'audit_log populated with CHALK_AUDIT_FILTER=1' => sub {
 
     my $verdict = $comp->_filter_compare($left, $right);
 
-    # Return value must be unchanged
-    is($verdict, 'right_loses', 'with CHALK_AUDIT_FILTER: first-wins result preserved');
+    # LeftSemiring opinion → right_loses (consistent with and without audit env var)
+    is($verdict, 'right_loses', 'with CHALK_AUDIT_FILTER: verdict consistent');
 
     my $log = $comp->audit_log();
     is(ref($log), 'ARRAY', 'audit_log() is arrayref');
     ok(scalar($log->@*) > 0, 'audit_log has at least one entry');
 
     my $entry = $log->[0];
-    ok(defined $entry->{verdict_first_wins}, 'entry has verdict_first_wins');
+    ok(defined $entry->{verdict_actual}, 'entry has verdict_actual');
     ok(defined $entry->{verdict_product},    'entry has verdict_product');
     ok(defined $entry->{per_component},      'entry has per_component');
     is(ref($entry->{per_component}), 'ARRAY', 'per_component is arrayref');
 
-    is($entry->{verdict_first_wins}, 'right_loses', 'first_wins recorded correctly');
+    is($entry->{verdict_actual}, 'right_loses', 'verdict_actual recorded correctly');
 };
 
 # ============================================================
@@ -222,19 +268,17 @@ subtest 'per_component records slot and verdict per semiring' => sub {
 };
 
 # ============================================================
-# Test 5: audit captures disagreement — verdict_first_wins != verdict_product
-# Scenario: LeftSemiring returns $left (first-wins reads as "right_loses")
-# but a subsequent RightSemiring returns $right ("left_loses").
-# product should detect the conflict and record a different verdict.
+# Test 5: audit captures conflict — verdict_actual != verdict_product
+# Scenario: LeftSemiring (slot_a, higher priority) says left; RightSemiring (slot_b)
+# says right. Product semantics: first opinionated component (slot_a→left) wins →
+# verdict_actual='right_loses'. verdict_product='conflict' because both opinions present.
+# They differ, demonstrating the audit captures conflict cases.
 # ============================================================
-subtest 'audit captures first_wins vs product disagreement' => sub {
+subtest 'audit captures actual vs product disagreement on conflict' => sub {
     local $ENV{CHALK_AUDIT_FILTER} = '1';
 
-    # LeftSemiring at slot_a returns $l — first-wins terminates here: right_loses
-    # RightSemiring at slot_b returns $r — product would also see this
-    # When both inputs differ:
-    # - first_wins: sees slot_a → $l == $li → right_loses (stops)
-    # - product sees slot_a → left, slot_b → right → conflict
+    # slot_a (higher priority): LeftSemiring → 'left' opinion → verdict_actual='right_loses'
+    # slot_b (lower priority):  RightSemiring → 'right' opinion → conflict in product
     my $left_sr  = LeftSemiring->new(slot_name_val  => 'slot_a');
     my $right_sr = RightSemiring->new(slot_name_val => 'slot_b');
     my $sa_sr    = SASemiring->new();
@@ -245,35 +289,30 @@ subtest 'audit captures first_wins vs product disagreement' => sub {
 
     $comp->flush_audit_log();
 
-    # slot_a: LeftSemiring returns $l (= li value 1) → product sees 'left'
-    # slot_b: RightSemiring returns $r (= ri value 20) → product sees 'right'
-    # first-wins: sees slot_a → left wins → terminates as 'right_loses'
-    # product: sees left (slot_a) AND right (slot_b) → conflict
     my $left  = make_ctx('L', slot_a => 1, slot_b => 10);
     my $right = make_ctx('R', slot_a => 2, slot_b => 20);
 
     my $verdict = $comp->_filter_compare($left, $right);
 
-    # First-wins behavior unchanged
-    is($verdict, 'right_loses', 'return value is first-wins result (unchanged)');
+    # Product semantics: first opinionated component (slot_a→left) wins → right_loses
+    is($verdict, 'right_loses', 'product semantics: first opinionated (slot_a→left) wins');
 
     my $log = $comp->audit_log();
     ok(scalar($log->@*) > 0, 'audit log has entry for this merge');
 
-    # Find an entry where they disagree
-    my @disagreements = grep {
-        $_->{verdict_first_wins} ne $_->{verdict_product}
+    # Audit records the conflict: verdict_product='conflict', verdict_actual='right_loses'
+    my @conflicts = grep {
+        $_->{verdict_product} eq 'conflict'
     } $log->@*;
 
-    ok(scalar(@disagreements) > 0,
-        'at least one merge where verdict_first_wins != verdict_product');
+    ok(scalar(@conflicts) > 0,
+        'audit log records conflict when components disagree');
 
-    my $d = $disagreements[0];
-    is($d->{verdict_first_wins}, 'right_loses',
-        'disagreement entry: first_wins is right_loses');
-    # product sees both slot_a→left and slot_b→right → conflict
-    is($d->{verdict_product}, 'conflict',
-        'disagreement entry: product detects conflict between components');
+    my $c = $conflicts[0];
+    is($c->{verdict_actual}, 'right_loses',
+        'conflict entry: verdict_actual is right_loses (slot_a wins)');
+    is($c->{verdict_product}, 'conflict',
+        'conflict entry: verdict_product is conflict');
 };
 
 # ============================================================
@@ -418,13 +457,160 @@ subtest 'real parse captures disagreement on push @arr, $obj->method()' => sub {
     ok(defined $log, 'audit_log defined after real parse');
 
     my @disagreements = grep {
-        defined $_->{verdict_first_wins}
+        defined $_->{verdict_actual}
         && defined $_->{verdict_product}
-        && $_->{verdict_first_wins} ne $_->{verdict_product}
+        && $_->{verdict_actual} ne $_->{verdict_product}
     } $log->@*;
 
     ok(scalar(@disagreements) > 0,
-        'real parse of push @arr, $obj->method(); captures at least one first_wins/product disagreement');
+        'real parse of push @arr, $obj->method(); captures at least one verdict_actual/product disagreement (conflict)');
+};
+
+# ============================================================
+# Product semantics tests (Phase 3 acceptance criteria)
+# These verify _filter_compare uses product semantics:
+# - abstaining components (arrayref return) are skipped, NOT treated as opinions
+# - conflict between opinionated components resolved by priority order
+# ============================================================
+
+# Test 9: abstain-then-right: first component abstains, second has right-opinion.
+# Under first-wins: AbstainSemiring returns [$l,$r] (>1 element → skip), so
+# RightSemiring is consulted too. Both first-wins and product should produce left_loses.
+# This tests that abstaining via arrayref does NOT short-circuit.
+subtest 'product: abstain-first then right-opinion → left_loses' => sub {
+    my $abstain_sr = AbstainSemiring->new(slot_name_val => 'slot_a');
+    my $right_sr   = RightSemiring->new(slot_name_val  => 'slot_b');
+    my $sa_sr      = SASemiring->new();
+
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$abstain_sr, $right_sr, $sa_sr],
+    );
+
+    my $left  = make_ctx('L', slot_a => 1, slot_b => 10);
+    my $right = make_ctx('R', slot_a => 2, slot_b => 20);
+
+    my $verdict = $comp->_filter_compare($left, $right);
+    is($verdict, 'left_loses',
+        'abstain-first, right-opinion-second: right wins → left_loses');
+};
+
+# Test 10: the key behavior change — real Boolean + real Structural.
+# With OLD Boolean.add returning $left for two non-zero inputs:
+#   _filter_compare sees boolean slot result = $li → 'right_loses' (short-circuits).
+#   Structural slot (which says right) is NEVER consulted.
+# With NEW Boolean.add returning a synthesized Context (not $left, not $right):
+#   _filter_compare sees boolean slot result ≠ $li and ≠ $ri → abstain.
+#   Structural slot is consulted and returns right → 'left_loses'.
+# This test uses real Boolean + real Structural to catch the actual bug.
+subtest 'product: real Boolean abstain allows real Structural right-opinion to be heard' => sub {
+    eval { require Chalk::Bootstrap::Semiring::Boolean };
+    eval { require Chalk::Bootstrap::Semiring::Structural };
+
+    my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+    my $sa_sr     = SASemiring->new();
+
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$bool_sr, $struct_sr, $sa_sr],
+    );
+
+    # Build two non-zero Boolean Contexts with distinct structural annotations.
+    # boolean slot: both non-zero → OLD Boolean.add returns $li (left opinion, wrong).
+    #                               NEW Boolean.add returns synthesized ≠ $li,≠$ri (abstain).
+    # structural slot: left=STRUCT_IS_BLOCK (1), right=STRUCT_IS_HASH (2)
+    # Structural.add: BLOCK vs HASH → hash wins → returns $ri → right opinion → left_loses.
+    #
+    # Under OLD Boolean (returns $li): first-wins sees left opinion → 'right_loses' (WRONG).
+    # Under NEW Boolean (abstains): Structural IS consulted → 'left_loses' (CORRECT).
+
+    use Chalk::Bootstrap::Semiring::Structural;
+    my $block_val = Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_BLOCK();   # 1
+    my $hash_val  = Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_HASH();    # 2
+
+    # Make two DISTINCT non-zero Boolean contexts (different objects so
+    # _same_value returns false and Boolean.add is actually called).
+    my $bool_left  = $bool_sr->multiply($bool_sr->one(), $bool_sr->one());
+    my $bool_right = $bool_sr->multiply($bool_sr->one(), $bool_sr->one());
+
+    my $left  = Chalk::Bootstrap::Context->new(
+        focus       => true,
+        children    => [$bool_left],
+        is_zero     => false,
+        annotations => {
+            boolean    => $bool_left,
+            structural => $block_val,
+        },
+    );
+    my $right = Chalk::Bootstrap::Context->new(
+        focus       => true,
+        children    => [$bool_right],
+        is_zero     => false,
+        annotations => {
+            boolean    => $bool_right,
+            structural => $hash_val,
+        },
+    );
+
+    my $verdict = $comp->_filter_compare($left, $right);
+    # NEW Boolean abstains → Structural consulted → hash beats block → right wins → left_loses.
+    is($verdict, 'left_loses',
+        'new-Boolean abstains: Structural HASH beats BLOCK → right wins → left_loses');
+};
+
+# Test 11: conflict resolved by priority order (first opinionated component wins).
+# slot_a (higher priority) says left; slot_b (lower priority) says right.
+# Product with priority tiebreak: slot_a wins → right_loses.
+subtest 'product: conflict resolved by priority-order tiebreak' => sub {
+    my $left_sr  = LeftSemiring->new(slot_name_val  => 'slot_a');
+    my $right_sr = RightSemiring->new(slot_name_val => 'slot_b');
+    my $sa_sr    = SASemiring->new();
+
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$left_sr, $right_sr, $sa_sr],
+    );
+
+    my $left  = make_ctx('L', slot_a => 1, slot_b => 10);
+    my $right = make_ctx('R', slot_a => 2, slot_b => 20);
+
+    my $verdict = $comp->_filter_compare($left, $right);
+    is($verdict, 'right_loses',
+        'conflict: higher-priority (slot_a→left) wins over lower (slot_b→right)');
+};
+
+# Test 12: reverse conflict — higher-priority says right, lower says left.
+subtest 'product: reverse conflict resolved by priority order' => sub {
+    my $right_sr = RightSemiring->new(slot_name_val => 'slot_a');
+    my $left_sr  = LeftSemiring->new(slot_name_val  => 'slot_b');
+    my $sa_sr    = SASemiring->new();
+
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$right_sr, $left_sr, $sa_sr],
+    );
+
+    my $left  = make_ctx('L', slot_a => 1, slot_b => 10);
+    my $right = make_ctx('R', slot_a => 2, slot_b => 20);
+
+    my $verdict = $comp->_filter_compare($left, $right);
+    is($verdict, 'left_loses',
+        'conflict: higher-priority (slot_a→right) wins over lower (slot_b→left)');
+};
+
+# Test 13: all_abstain — all components return arrayref → 'neither'
+subtest 'product: all_abstain returns neither' => sub {
+    my $abstain_a = AbstainSemiring->new(slot_name_val => 'slot_a');
+    my $abstain_b = AbstainSemiring->new(slot_name_val => 'slot_b');
+    my $sa_sr     = SASemiring->new();
+
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$abstain_a, $abstain_b, $sa_sr],
+    );
+
+    my $left  = make_ctx('L', slot_a => 1, slot_b => 5);
+    my $right = make_ctx('R', slot_a => 2, slot_b => 6);
+
+    my $verdict = $comp->_filter_compare($left, $right);
+    is($verdict, 'neither',
+        'all_abstain: all components abstain → neither (deterministic tie-break)');
 };
 
 done_testing();

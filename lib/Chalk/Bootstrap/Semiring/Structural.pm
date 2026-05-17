@@ -180,13 +180,21 @@ class Chalk::Bootstrap::Semiring::Structural {
         # with is_list so add() can prefer the simpler single-Expression
         # alt 0 when both match. Without this, two ExpressionList alternatives
         # ending in PostfixDeref would have identical tags.
+        # IS_METHOD is intentionally cleared here: a MethodCall that appears
+        # as an *argument* inside an ExpressionList should not propagate
+        # its IS_METHOD tag outward. If it did, add() at a higher level
+        # would see IS_METHOD+IS_CALL on the CallExpression containing the
+        # list, triggering the "prefer non-method" rule and eliminating the
+        # correct parse in favour of an incomplete one. IS_METHOD at a higher
+        # level should only indicate that the outermost call is itself a
+        # MethodCall (e.g. `push(@arr)->method()`), not that an argument
+        # inside the call was a method call.
         if ($rule_name eq 'ExpressionList' && $alt_idx >= 1) {
             return STRUCT_IS_LIST
                 | ($value & STRUCT_IS_BLOCK)
                 | ($value & STRUCT_IS_HASH)
                 | ($value & STRUCT_IS_CALL)
                 | ($value & STRUCT_IS_DEREF)
-                | ($value & STRUCT_IS_METHOD)
                 | ($value & STRUCT_IS_VARDECL);
         }
 
@@ -291,8 +299,17 @@ class Chalk::Bootstrap::Semiring::Structural {
         }
 
         # Both valid, both is_call: prefer non-method over method.
-        # CallExpression (direct function call consuming full arg list) wins
-        # over MethodCall (method on shorter expression result).
+        # When the right side has IS_METHOD and left does not: prefer left
+        # (CallExpression wins over MethodCall). This is the typical case where
+        # a shorter func-call (left, discovered first) competes with a longer
+        # MethodCall (right).
+        # When the LEFT side has IS_METHOD and right does not: abstain.
+        # The left may have been restructured by _push_methodcall_inward.peel_builtin
+        # into the correct shape. Eliminating left would destroy the built IR or
+        # introduce a derivation path whose SA has not yet fired. FilterComposite's
+        # tie-break (keep left) is the safe default: the IS_LIST-over-IS_METHOD
+        # perlop priority is enforced by the walker (_push_methodcall_inward.peel_builtin)
+        # in Perl/Actions.pm rather than at the structural disambiguation level.
         my $left_method  = $left  & STRUCT_IS_METHOD;
         my $right_method = $right & STRUCT_IS_METHOD;
         if ($left_call && $right_call) {
@@ -300,7 +317,7 @@ class Chalk::Bootstrap::Semiring::Structural {
                 return $left;
             }
             if ($left_method && !$right_method) {
-                return $right;
+                return [$left, $right];
             }
         }
 
@@ -383,8 +400,10 @@ class Chalk::Bootstrap::Semiring::Structural {
             if ($right_hash && !$left_hash) {
                 return $right;
             }
-            # Both have is_hash — pick left
-            return $left;
+            # Both have is_block with same hash status — no structural preference.
+            # Return arrayref so FilterComposite sees "Structural abstains" and
+            # consults other semirings (Precedence, SemanticAction) for the verdict.
+            return [$left, $right];
         }
 
         # Both valid: prefer is_vardecl over non-is_vardecl.
@@ -399,8 +418,10 @@ class Chalk::Bootstrap::Semiring::Structural {
             return $right;
         }
 
-        # Both valid, untagged: merge all bits
-        return $left | $right;
+        # Both valid, no tag preference: return arrayref to signal abstention.
+        # FilterComposite reads multi-element arrays as "no opinion," which lets
+        # subsequent semirings or the tie-break handle disambiguation.
+        return [$left, $right];
     }
 
     # slot_name: Structural reads/writes the 'structural' annotation slot.

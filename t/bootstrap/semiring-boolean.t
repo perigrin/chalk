@@ -212,4 +212,25 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     ok($sr->is_zero($result2), "multiply with complete Context returns zero for zero input");
 }
 
+# Test 13: add(non_zero_a, non_zero_b) returns a Context distinct from both inputs.
+# Boolean's contract: when both sides are live parses, it has no opinion on which
+# derivation to prefer. The result must NOT be refaddr-equal to either input so
+# FilterComposite cannot mistake "no opinion" for "left wins."
+{
+    use Chalk::Bootstrap::Context;
+    use Scalar::Util qw(refaddr);
+
+    my $a = $sr->multiply($sr->one(), $sr->one());  # distinct non-zero Context
+    my $b = $sr->multiply($sr->one(), $sr->one());  # another distinct non-zero Context
+
+    my $result = $sr->add($a, $b);
+
+    ok(!$sr->is_zero($result),
+        'add(non_zero_a, non_zero_b): result is non-zero');
+    ok(refaddr($result) != refaddr($a),
+        'add(non_zero_a, non_zero_b): result is not refaddr-identical to left input');
+    ok(refaddr($result) != refaddr($b),
+        'add(non_zero_a, non_zero_b): result is not refaddr-identical to right input');
+}
+
 done_testing();

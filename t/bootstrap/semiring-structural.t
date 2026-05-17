@@ -241,9 +241,15 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     ok(!($r2 & STRUCT_IS_DEREF), 'add(call+deref, call): prefers no is_deref');
 }
 
-# --- add: prefer is_call over is_call+is_method ---
-# When both alternatives have is_call, prefer the one WITHOUT is_method.
-# This disambiguates CallExpression vs MethodCall at PostfixExpression level.
+# --- add: prefer is_call over is_call+is_method (one direction only) ---
+# When both alternatives have is_call:
+# - add(call, call+method): left has no IS_METHOD, right does → prefer left (non-method).
+#   "non-method over method": CallExpression wins over MethodCall in the typical case
+#   where the non-method parse was discovered first.
+# - add(call+method, call): left already has IS_METHOD, right does not → abstain.
+#   The left may be a restructured BuiltinCall (from _push_methodcall_inward.peel_builtin)
+#   that is already in the correct shape. Eliminating it would destroy the correctly-built
+#   IR. FilterComposite's tie-break keeps left (the existing item).
 {
     my $call_only   = STRUCT_IS_CALL;
     my $call_method = STRUCT_IS_CALL | STRUCT_IS_METHOD;
@@ -253,11 +259,14 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     ok(!($r1 & STRUCT_IS_METHOD), 'add(call, call+method): prefers no is_method');
 
     my $r2 = $sr->add($call_method, $call_only);
-    ok($r2 & STRUCT_IS_CALL,     'add(call+method, call): has is_call');
-    ok(!($r2 & STRUCT_IS_METHOD), 'add(call+method, call): prefers no is_method');
+    ok(ref($r2) eq 'ARRAY',
+        'add(call+method, call): abstain (arrayref) — left may be peel_builtin-restructured');
+    if (ref($r2) eq 'ARRAY') {
+        is(scalar($r2->@*), 2, 'add(call+method, call): abstain has two elements');
+    }
 }
 
-# --- add: is_call+is_list beats is_call+is_method (perlop: `,` < `->`) ---
+# --- add: IS_METHOD on left, IS_LIST on right — abstain ---
 # When BOTH alternatives have is_call and the disambiguation is between
 # (a) IS_LIST  — list-form builtin Call holding the method-call as last arg
 #     e.g.,  Call(push, [@arr, MethodCall($obj, method)])
@@ -265,30 +274,34 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 #     e.g.,  MethodCall(Call(push, [@arr, $obj]), method)
 # perlop dictates `,` (L21) binds looser than `->` (L2), so $obj->method() must
 # cohere as a single expression BEFORE the comma makes it a push arg. That is
-# shape (a). The IS_METHOD wrapping in shape (b) is a chart-merge artifact.
+# shape (a).
 #
-# Bilateral coverage: shape (a) is what perlop demands, and the add() must
-# prefer it whichever side it lands on.
-#
-# This case currently fails: the IS_LIST-first check on line ~247 elides
-# shape (a) before the IS_METHOD-prefer-non-method check on line ~282
-# can fire. See _push_methodcall_inward.peel_builtin walker — it corrects
-# this 51× across the IR/MOP corpus today.
+# Design note: Structural.add() ABSTAINS for add(IS_CALL+IS_METHOD, IS_CALL+IS_LIST)
+# (and for all add(left_has_METHOD, right_has_no_METHOD) cases) rather than picking
+# the IS_LIST side directly. The reason: the left-has-IS_METHOD Context may have
+# already been restructured by _push_methodcall_inward.peel_builtin into the correct
+# shape. Eliminating it based on tag comparison would discard correctly-built IR or
+# pick a derivation whose SA has not yet fired. The IS_LIST-over-IS_METHOD perlop
+# priority is enforced by _push_methodcall_inward.peel_builtin in Perl/Actions.pm
+# rather than at the structural disambiguation level. FilterComposite's tie-break
+# (keep left, the existing item) is the safe default for both orderings.
 {
     my $call_list   = STRUCT_IS_CALL | STRUCT_IS_LIST;
     my $call_method = STRUCT_IS_CALL | STRUCT_IS_METHOD;
 
     my $r1 = $sr->add($call_list, $call_method);
     ok($r1 & STRUCT_IS_LIST,
-        'add(call+list, call+method): prefers is_list (list-form Call as receiver)');
+        'add(call+list, call+method): prefers is_list (right_method && !left_method fires)');
     ok(!($r1 & STRUCT_IS_METHOD),
         'add(call+list, call+method): does NOT carry is_method');
 
     my $r2 = $sr->add($call_method, $call_list);
-    ok($r2 & STRUCT_IS_LIST,
-        'add(call+method, call+list): prefers is_list whichever side it is');
-    ok(!($r2 & STRUCT_IS_METHOD),
-        'add(call+method, call+list): does NOT carry is_method');
+    ok(ref($r2) eq 'ARRAY',
+        'add(call+method, call+list): abstain (left_method && !right_method → arrayref)');
+    if (ref($r2) eq 'ARRAY') {
+        is(scalar($r2->@*), 2,
+            'add(call+method, call+list): abstain arrayref has two elements');
+    }
 }
 
 # --- add: prefer is_call over is_call+is_binop ---
@@ -323,62 +336,66 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     ok($r2 & STRUCT_IS_VARDECL, 'add(binop+vardecl, binop): prefers is_vardecl');
 }
 
-# --- add: both valid, neither tagged ---
+# --- add: both valid, neither tagged — abstain (no-opinion signal) ---
+# When both inputs have no structural tags (both are one()), no preference rule fires.
+# add() returns an arrayref [$left, $right] so FilterComposite sees "Structural abstains"
+# and consults other semirings (Precedence, SemanticAction) for the verdict.
 {
     my $o1 = $sr->one();
     my $o2 = $sr->one();
 
     my $r = $sr->add($o1, $o2);
-    ok(!$sr->is_zero($r), 'add(one, one) is not zero');
-    # Both are 0 (one), result should be 0 (valid, no tags)
-    is($r, 0, 'add(one, one) is valid (integer 0)');
+    ok(ref($r) eq 'ARRAY', 'add(one, one) returns arrayref (no-opinion signal)');
+    if (ref($r) eq 'ARRAY') {
+        is(scalar($r->@*), 2, 'add(one, one) arrayref has two elements');
+        is($r->[0], $o1, 'add(one, one) first element is left');
+        is($r->[1], $o2, 'add(one, one) second element is right');
+    }
 }
 
-# --- add: identical is_call+is_deref tags — pick left (case 7 tie-breaker) ---
-# When both alternatives have identical Structural tags (same bitfield integer),
-# add() picks left to break the tie deterministically. This is load-bearing:
-# the two alternatives may differ in other semiring components (Precedence,
-# SemanticAction) and FilterComposite uses the result to return the whole left tuple.
+# --- add: identical is_call+is_deref tags — abstain (no-opinion signal) ---
+# When both alternatives have identical Structural tags, no preference rule fires.
+# add() returns an arrayref so FilterComposite can consult other semirings.
 {
     my $call_deref = STRUCT_IS_CALL | STRUCT_IS_DEREF;
     my $r = $sr->add($call_deref, $call_deref);
-    is($r, $call_deref, 'add(call+deref, call+deref): identical tags returns left');
+    ok(ref($r) eq 'ARRAY', 'add(call+deref, call+deref): identical tags returns arrayref');
 }
 
-# --- add: identical is_call+is_method tags — pick left (case 7 tie-breaker) ---
+# --- add: identical is_call+is_method tags — abstain (no-opinion signal) ---
 {
     my $call_method = STRUCT_IS_CALL | STRUCT_IS_METHOD;
     my $r = $sr->add($call_method, $call_method);
-    is($r, $call_method, 'add(call+method, call+method): identical tags returns left');
+    ok(ref($r) eq 'ARRAY', 'add(call+method, call+method): identical tags returns arrayref');
 }
 
-# --- add: identical is_call+is_binop tags — pick left (case 7 tie-breaker) ---
+# --- add: identical is_call+is_binop tags — abstain (no-opinion signal) ---
 {
     my $call_binop = STRUCT_IS_CALL | STRUCT_IS_BINOP;
     my $r = $sr->add($call_binop, $call_binop);
-    is($r, $call_binop, 'add(call+binop, call+binop): identical tags returns left');
+    ok(ref($r) eq 'ARRAY', 'add(call+binop, call+binop): identical tags returns arrayref');
 }
 
-# --- add: identical is_list tags — pick left (case 2 tie-breaker) ---
-# Two ExpressionList alternatives with identical Structural tags: pick left.
+# --- add: identical is_list tags — abstain (no-opinion signal) ---
+# Two ExpressionList alternatives with identical Structural tags: abstain.
 {
     my $list_only = STRUCT_IS_LIST;
     my $r = $sr->add($list_only, $list_only);
-    is($r, $list_only, 'add(list, list): identical tags returns left');
+    ok(ref($r) eq 'ARRAY', 'add(list, list): identical tags returns arrayref');
 }
 
-# --- add: identical is_binop tags — pick left (case 14 tie-breaker) ---
+# --- add: identical is_binop tags — abstain (no-opinion signal) ---
 {
     my $binop_only = STRUCT_IS_BINOP;
     my $r = $sr->add($binop_only, $binop_only);
-    is($r, $binop_only, 'add(binop, binop): identical tags returns left');
+    ok(ref($r) eq 'ARRAY', 'add(binop, binop): identical tags returns arrayref');
 }
 
-# --- add: identical is_binop+is_deref tags — pick left (case 14 tie-breaker) ---
+# --- add: identical is_binop+is_deref tags — abstain (no-opinion signal) ---
 {
     my $binop_deref = STRUCT_IS_BINOP | STRUCT_IS_DEREF;
     my $r = $sr->add($binop_deref, $binop_deref);
-    is($r, $binop_deref, 'add(binop+deref, binop+deref): identical tags returns left');
+    ok(ref($r) eq 'ARRAY', 'add(binop+deref, binop+deref): identical tags returns arrayref');
 }
 
 # --- add: returns actual winner object (not synthesized constants) ---
@@ -656,6 +673,31 @@ for my $preserve_rule (qw(Program StatementList)) {
 
     my $r1 = $sr->multiply($o, $make_complete->($o, 'StatementList', 1, 0, 0));
     ok(!$sr->is_zero($r1), 'StatementList alt 1 is valid');
+}
+
+# --- add: fallback "no opinion" case returns arrayref when both non-zero and no tag-rule fires ---
+# When both inputs have identical structural tags (same bitfield integer), no preference
+# rule fires. The fallback must return an arrayref [$left, $right] so FilterComposite
+# can distinguish "Structural has no preference" from "Structural prefers left."
+{
+    # STRUCT_IS_BLOCK (1) vs STRUCT_IS_BLOCK (1) — identical tags, no rule prefers one side.
+    # The only currently-tested path for this: add(IS_BLOCK, IS_BLOCK).
+    my $block_a = STRUCT_IS_BLOCK;   # 1
+    my $block_b = STRUCT_IS_BLOCK;   # 1
+
+    my $result = $sr->add($block_a, $block_b);
+
+    ok(ref($result) eq 'ARRAY',
+        'add(IS_BLOCK, IS_BLOCK) fallback: returns an arrayref (no-opinion signal)');
+
+    if (ref($result) eq 'ARRAY') {
+        is(scalar($result->@*), 2,
+            'add(IS_BLOCK, IS_BLOCK) fallback: arrayref has two elements');
+        is($result->[0], $block_a,
+            'add(IS_BLOCK, IS_BLOCK) fallback: first element is left');
+        is($result->[1], $block_b,
+            'add(IS_BLOCK, IS_BLOCK) fallback: second element is right');
+    }
 }
 
 # ========================================================================

@@ -55,15 +55,20 @@ class Chalk::Bootstrap::Semiring::Boolean {
     }
 
     # add combines two alternatives. For pure recognition we only care whether
-    # at least one alternative succeeded. Deterministic tie-break: return the
-    # left operand when both are non-zero. Under FilterComposite, returning
-    # $left when both are non-zero means "no preference" — the composite's
-    # _filter_compare sees result-equals-left-not-right and defers to the
-    # next filter semiring.
+    # at least one alternative succeeded. When both are non-zero, Boolean has
+    # no opinion on which derivation to prefer — both are valid recognitions.
+    # Returning a synthesized Context (not $left, not $right) lets
+    # FilterComposite distinguish "Boolean abstains" from "Boolean picked left."
     method add($left, $right) {
         return $self->zero() if $left->is_zero() && $right->is_zero();
         return $right if $left->is_zero();
-        return $left;
+        return $left  if $right->is_zero();
+        return Chalk::Bootstrap::Context->new(
+            focus       => true,
+            children    => [$left, $right],
+            is_zero     => false,
+            annotations => { boolean => true },
+        );
     }
 
     # slot_name: Boolean reads/writes the 'boolean' annotation slot.
