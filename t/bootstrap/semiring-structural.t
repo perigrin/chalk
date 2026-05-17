@@ -257,6 +257,40 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     ok(!($r2 & STRUCT_IS_METHOD), 'add(call+method, call): prefers no is_method');
 }
 
+# --- add: is_call+is_list beats is_call+is_method (perlop: `,` < `->`) ---
+# When BOTH alternatives have is_call and the disambiguation is between
+# (a) IS_LIST  — list-form builtin Call holding the method-call as last arg
+#     e.g.,  Call(push, [@arr, MethodCall($obj, method)])
+# (b) IS_METHOD — method-call wrapping a list-form builtin Call as receiver
+#     e.g.,  MethodCall(Call(push, [@arr, $obj]), method)
+# perlop dictates `,` (L21) binds looser than `->` (L2), so $obj->method() must
+# cohere as a single expression BEFORE the comma makes it a push arg. That is
+# shape (a). The IS_METHOD wrapping in shape (b) is a chart-merge artifact.
+#
+# Bilateral coverage: shape (a) is what perlop demands, and the add() must
+# prefer it whichever side it lands on.
+#
+# This case currently fails: the IS_LIST-first check on line ~247 elides
+# shape (a) before the IS_METHOD-prefer-non-method check on line ~282
+# can fire. See _push_methodcall_inward.peel_builtin walker — it corrects
+# this 51× across the IR/MOP corpus today.
+{
+    my $call_list   = STRUCT_IS_CALL | STRUCT_IS_LIST;
+    my $call_method = STRUCT_IS_CALL | STRUCT_IS_METHOD;
+
+    my $r1 = $sr->add($call_list, $call_method);
+    ok($r1 & STRUCT_IS_LIST,
+        'add(call+list, call+method): prefers is_list (list-form Call as receiver)');
+    ok(!($r1 & STRUCT_IS_METHOD),
+        'add(call+list, call+method): does NOT carry is_method');
+
+    my $r2 = $sr->add($call_method, $call_list);
+    ok($r2 & STRUCT_IS_LIST,
+        'add(call+method, call+list): prefers is_list whichever side it is');
+    ok(!($r2 & STRUCT_IS_METHOD),
+        'add(call+method, call+list): does NOT carry is_method');
+}
+
 # --- add: prefer is_call over is_call+is_binop ---
 # When both alternatives have is_call, prefer the one WITHOUT is_binop.
 # This disambiguates CallExpression vs BinaryExpression with inherited is_call.

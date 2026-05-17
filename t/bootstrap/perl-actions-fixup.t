@@ -338,6 +338,50 @@ my sub method_name($method) {
     }
 }
 
+# ============================================================
+# 8. push @arr, $obj->method(); produces Call(push, [@arr, MethodCall])
+#    NOT MethodCall(Call(push, [@arr, $obj]), method)
+#    Per perlop, `->` (L2) binds tighter than `,` (L21), so
+#    $obj->method() must cohere as a single expression before being
+#    passed as a push arg. This is the bilateral pair to the
+#    paren-form case at section "push(@arr, $y)->method()"
+#    documented in t/bootstrap/precedence-spec.t.
+# ============================================================
+
+{
+    my $source = qq{push \@arr, \$obj->method();\n};
+    my $ir = parse_source($source);
+    ok(defined $ir, 'bare-list-builtin + method-arg: parses');
+
+    SKIP: {
+        skip 'bare-list-builtin + method-arg: no IR', 5 unless defined $ir;
+
+        my $stmts = get_all_stmts($ir);
+        is(scalar $stmts->@*, 1,
+            'bare-list-builtin + method-arg: one top-level statement');
+
+        my $top = $stmts->[0];
+        ok($top isa Chalk::IR::Node
+                && $top->can('dispatch_kind')
+                && $top->dispatch_kind() eq 'builtin',
+            'bare-list-builtin + method-arg: top is a builtin Call');
+
+        # The push args should be [@arr, MethodCall(...)]
+        my $args = $top->inputs()->[1];
+        is(scalar $args->@*, 2,
+            'bare-list-builtin + method-arg: push has 2 args');
+
+        my $last_arg = $args->[1];
+        ok($last_arg isa Chalk::IR::Node
+                && $last_arg->can('dispatch_kind')
+                && $last_arg->dispatch_kind() eq 'method',
+            'bare-list-builtin + method-arg: last arg is a MethodCall');
+
+        ok($last_arg->can('name') && $last_arg->name() eq 'method',
+            'bare-list-builtin + method-arg: method name is "method"');
+    }
+}
+
 # === PostfixDeref base expression capture ===
 # PostfixDeref grammar: Expression _ /->/ _ /@\*/
 # The base Expression must be captured as the target of PostfixDerefExpr.

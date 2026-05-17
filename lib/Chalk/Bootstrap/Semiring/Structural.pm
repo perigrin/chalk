@@ -244,20 +244,31 @@ class Chalk::Bootstrap::Semiring::Structural {
         return $right if $left == $ZERO;
         return $left  if $right == $ZERO;
 
-        # Both valid: prefer non-list over list (Expression vs ExpressionList)
-        my $left_list  = $left  & STRUCT_IS_LIST;
-        my $right_list = $right & STRUCT_IS_LIST;
-        if ($left_list && !$right_list) {
-            return $right;
-        }
-        if ($right_list && !$left_list) {
-            return $left;
-        }
-
         # Both valid: prefer is_call over non-call
         # CallExpression consumes more input than bare QualifiedIdentifier.
         my $left_call  = $left  & STRUCT_IS_CALL;
         my $right_call = $right & STRUCT_IS_CALL;
+
+        # Both valid: prefer non-list over list (Expression vs ExpressionList).
+        # GATED on NOT both being is_call: when both sides are calls, the
+        # IS_LIST distinction is about which derivation wraps which (list-form
+        # Call holding a method-arg vs method-call wrapping a list-form Call),
+        # and per perlop `,` (L21) binds looser than `->` (L2), so the
+        # list-form Call (holding the method-arg) is the perlop-correct shape
+        # and must reach the IS_METHOD-prefer-non-method check below. The
+        # original non-list-over-list rule was for Expression-vs-ExpressionList
+        # in non-call contexts, which this gate preserves.
+        my $left_list  = $left  & STRUCT_IS_LIST;
+        my $right_list = $right & STRUCT_IS_LIST;
+        if (!($left_call && $right_call)) {
+            if ($left_list && !$right_list) {
+                return $right;
+            }
+            if ($right_list && !$left_list) {
+                return $left;
+            }
+        }
+
         if ($left_call && !$right_call) {
             return $left;
         }
