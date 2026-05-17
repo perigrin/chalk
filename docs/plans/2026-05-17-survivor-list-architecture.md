@@ -426,3 +426,47 @@ addendum 2026-05-17b).
 The 13,374 `left_wins` cases (90.6% of merges) are where every
 later-priority component agrees with Boolean's $left return —
 behavior unchanged.
+
+## Addendum 2026-05-17d: Phase 2+3 landed; walker NOT retired
+
+Phase 2+3 landed as commit `b6756ada`. Critical caveat: **Structural
+deliberately abstains on `left_method && !right_method`** to preserve
+the walker's role. The carve-out is documented in Structural.pm as:
+
+> When the LEFT side has IS_METHOD and right does not: abstain.
+> The left may have been restructured by _push_methodcall_inward.peel_builtin
+> into the correct shape. Eliminating left would destroy the built IR or
+> introduce a derivation path whose SA has not yet fired.
+
+This means peel_builtin (51 + 11 fires) is NOT retired by Phase 2+3.
+The walker remains load-bearing for that case.
+
+Attempted to remove the carve-out (make Structural's IS_METHOD rule
+symmetric: `right` wins whichever side has IS_METHOD). Result: same
+regression as the Phase 2-alone attempt — `push @arr, $obj->method();`
+fragments into two top-level statements `Call(push, [@arr])` and
+`MethodCall($obj, method)`. Reverted.
+
+**Why the symmetric Structural fix regresses**: changing Structural's
+verdict for IS_METHOD-vs-non-method admits a different derivation that
+the chart was previously rejecting via the Boolean-suppression
+accident. The new derivation has incompatible structural shape (fragments
+into siblings) and the walker can't fix it because the walker can only
+restructure within a single statement.
+
+**Implication**: the walker retirement requires Phase 4 (downstream
+multiply distribution) and possibly Phase 5 (Program-rule packing) to
+land FIRST. Phase 2+3's value: it makes Boolean honest and replaces
+first-wins with product semantics — architectural cleanup. But the
+walker stays.
+
+**Status of the 1394 audit conflicts after Phase 2+3**: under the now-live
+product algorithm, the 672 "silent suppression" cases produce `right_wins`
+correctly (Structural's opinion now reaches the verdict). The 721
+prec-left/struct-right cases resolve to `left_wins` via Precedence priority.
+The remaining 1 case (prec-right/struct-left) resolves to `right_wins`
+via Precedence priority. No actual conflicts surface (no hard errors).
+
+**Phase 6 (walker retirement) blocked on Phase 4-5.** The walker
+cannot be retired until packed-ambiguous Contexts flow through
+downstream multiplies and resolve at Program-rule completion.
