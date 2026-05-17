@@ -278,3 +278,78 @@ may need iteration.
   current `_filter_compare` does not implement.
 - **2026-05-09-fixup-audit-baseline.md**: this plan's success criterion
   is the reduction of the per-fixup-branch counters from that baseline.
+
+## Addendum 2026-05-17b: Phase 2 is not independently shippable
+
+Attempted Phase 2 in isolation (TDD red, change Boolean's `add` to
+return a synthesized non-zero Context for two-non-zero inputs, change
+the unit test). Result:
+
+- The TDD test went GREEN as expected
+- The wider spec-test sweep showed regressions:
+  - `t/bootstrap/precedence-spec-incdec-bind.t`: 17/18 passing → 17/18
+    with `++$x + 1` now producing wrong shape (`++$x` no longer the
+    left of the Add)
+  - `t/bootstrap/perl-actions-fixup.t`: bilateral push-method-arg case
+    produced TWO top-level statements instead of one
+    (`Call(push, [@arr])` and `MethodCall($obj, method)` as siblings),
+    plus an existing test went from passing to failing
+- Probe of `push @arr, $obj->method();` showed the parse now fragments
+  into `Call(push, [@arr])` and `MethodCall($obj, method)` as separate
+  top-level statements — strictly worse than the pre-fix behavior
+  (which was the wrong-shape-but-single-statement that the walker
+  corrected)
+
+### Why
+
+Boolean's `$left`-by-convention return wasn't just suppressing
+verdicts for the 51 peel_builtin cases — it was also serving as the
+de-facto tie-break for many other ambiguous merges where Boolean
+happened to return the "right" derivation by luck of iteration order.
+When Boolean stops returning `$left`, all those merges fall through
+to subsequent components, and either:
+
+1. A subsequent component DOES express a verdict that happens to be
+   wrong for those cases (the precedence-spec-incdec-bind regression)
+2. NO subsequent component expresses a verdict, and FilterComposite's
+   "all components abstained" fallback kicks in (line 285-292: "left
+   is returned as a deterministic tie-break") — but with *different*
+   iteration timing because the chart now has more surviving
+   derivations to merge
+
+The walker stack is more entangled with Boolean's accident-of-convention
+than the original phase decomposition accounted for. Phase 2 in
+isolation makes the system strictly worse: it doesn't enable walker
+retirement (other components' verdicts don't reliably produce the
+right shape either), and it breaks previously-passing parses.
+
+### Implication for migration ordering
+
+**Phase 2 must land together with Phase 3 + Phase 5**, not as a
+standalone change. The combined change set is:
+
+- Boolean and Structural return honest no-opinion (Phase 2)
+- FilterComposite uses product semantics, packs ambiguous when all
+  components abstain (Phase 3)
+- Packed-ambiguous Contexts in chart cells propagate to next multiply
+  (Phase 4 — Earley call sites + Context.multiply distribution)
+- `Program` rule completion raises structured exception on remaining
+  ambiguity (Phase 5)
+
+Only with all four in place does the system have a working policy
+for the cases Phase 2 alone breaks. The audit instrumentation (Phase
+1) remains the right first standalone deliverable; it bounds the
+work for the combined Phase 2-5 commit without changing behavior.
+
+### What was tried and reverted
+
+- Boolean.pm `add`: changed to return new Context for two non-zero,
+  reverted (the trigger-case parse fragmented worse, plus 4
+  previously-passing tests regressed)
+- semiring-boolean.t: added bilateral no-opinion test, reverted (test
+  was correct in isolation but cannot pass without the rest of the
+  Phase 2-5 stack)
+
+The intent and direction were correct; the scoping was wrong. The
+revised plan: Phase 1 first (instrumentation), then Phase 2-5
+combined.
