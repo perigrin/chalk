@@ -353,3 +353,76 @@ work for the combined Phase 2-5 commit without changing behavior.
 The intent and direction were correct; the scoping was wrong. The
 revised plan: Phase 1 first (instrumentation), then Phase 2-5
 combined.
+
+## Addendum 2026-05-17c: Phase 1 corpus audit results
+
+Phase 1 landed as commit `33f20d20`. Ran the audit
+(CHALK_AUDIT_FILTER=1) over the IR/MOP/Grammar corpus (105 files):
+
+**Total filter-stack merges**: 14,768
+
+**By first-wins verdict**: 100% `right_loses` (every merge resolved
+by Boolean's `$left`-by-convention).
+
+**By product verdict**: 90.6% `left_wins` (13,374), 9.4% `conflict`
+(1,394). Zero `eliminated_*`, zero `all_abstain`.
+
+**Conflict signatures**:
+
+| boolean | precedence | type | structural | count |
+|---------|------------|------|------------|------:|
+| left | left | (skip) | right | 721 |
+| left | (skip) | (skip) | right | 476 |
+| left | right | (skip) | right | 168 |
+| left | right | (skip) | (skip) | 28 |
+| left | right | (skip) | left | 1 |
+
+**After Phase 2 (boolean → abstain) the conflicts re-classify as**:
+
+| precedence | structural | count | resulting product verdict |
+|------------|------------|------:|---------------------------|
+| left | right | 721 | **conflict** (real disagreement) |
+| (skip) | right | 476 | right_wins (was suppressed) |
+| right | right | 168 | right_wins (was suppressed) |
+| right | (skip) | 28 | right_wins (was suppressed) |
+| right | left | 1 | **conflict** (real disagreement) |
+
+**Critical numbers**:
+
+- **672 merges (4.5%)** are silent suppression bugs: Precedence and/or
+  Structural have a clear "right" verdict that Boolean overrides.
+  Post-Phase-2 these become correct `right_wins`. The peel_builtin
+  walker fires are a subset of these.
+- **722 merges (4.9%)** are REAL disagreements between Precedence and
+  Structural that the current system resolves by accidentally letting
+  Boolean veto both. Phase 3 needs a policy for these.
+
+**Implication for Phase 3 design**: the design doc's "conflict = hard
+error" policy would break 722 corpus merges. Either:
+
+a. Re-investigate each of the 722 cases — they may be real bugs in
+   Precedence's or Structural's `_complete_*` logic that the Boolean
+   accident has been hiding. The two real-conflict signatures
+   (`prec=left/struct=right` and `prec=right/struct=left`) likely have
+   distinct root causes worth digging into separately.
+b. Establish a priority order: Precedence wins ties with Structural
+   (or vice versa). Per the design doc's "first-wins is short-circuit
+   of product" framing, the priority order in `_annotation_semirings()`
+   (Boolean < Precedence < TI < Structural < SA) IS a documented
+   priority; Precedence > Structural per current ordering.
+c. Pack as ambiguous (defer to Phase 4-5), with the understanding that
+   Phase 5's Program-rule error would fire for 722 corpus parses
+   unless higher-rule multiplies resolve them.
+
+**Recommended Phase 3 policy**: (b) Precedence wins, with audit log
+entries flagging the cases for follow-up investigation in a separate
+plan. This preserves the documented priority order while making the
+"silent suppression" cases (672) work correctly. The 722 real
+conflicts get a deterministic resolution AND visibility.
+
+Phase 2+3 land as one commit because Phase 2 alone regresses (per
+addendum 2026-05-17b).
+
+The 13,374 `left_wins` cases (90.6% of merges) are where every
+later-priority component agrees with Boolean's $left return —
+behavior unchanged.
