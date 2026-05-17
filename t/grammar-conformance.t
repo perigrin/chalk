@@ -18,9 +18,6 @@ use Chalk::Bootstrap::Semiring::FilterComposite;
 # The comment after each entry is the required explanation.
 # ============================================================================
 my %SKIP = (
-    # excluded — transitional, slated for retirement when MOP completes
-    # (per docs/plans/2026-04-24-maturity-audit-plan.md)
-    'lib/Chalk/Bootstrap/DepChaser.pm' => 'transitional: DepChaser retired by MOP completion',
 );
 
 # ============================================================================

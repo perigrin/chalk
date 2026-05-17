@@ -85,7 +85,7 @@ my sub rejects($src, $label) {
 #
 # Grammar gap: UnaryExpression did not include file test operators.
 # Fix: add /-[efdrwxRWXoOzslpSbcugktTBAMC]\b/ alternative to UnaryExpression.
-# Affects: Runtime.pm (2 sites with -f), DepChaser.pm (excluded).
+# Affects: Runtime.pm (2 sites with -f).
 # ============================================================================
 
 {
