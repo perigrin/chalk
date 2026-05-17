@@ -14,6 +14,11 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # Enabled only when the env var is non-empty; zero production impact otherwise.
     field $_tie_log = [];
 
+    # Audit instrumentation: records per-merge verdict comparison when CHALK_AUDIT_FILTER is set.
+    # Each entry is a hashref with verdict_first_wins, verdict_product, and per_component.
+    # No Context refs are stored — only slot names and verdict strings (avoids memory bloat).
+    field $_audit_log = [];
+
     # SA is always the last semiring by convention.
     # All semirings before SA are annotation-layer semirings that write to
     # named slots in the Context's annotations hash.
@@ -34,6 +39,15 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # flush_tie_log() resets the tie log to empty.
     # Call before each parse to attribute ties to the correct file.
     method flush_tie_log() { $_tie_log = [] }
+
+    # audit_log() returns the current audit log (arrayref of merge records).
+    # Each entry: { verdict_first_wins, verdict_product, per_component }.
+    # Only populated when CHALK_AUDIT_FILTER env var is set.
+    method audit_log() { return $_audit_log }
+
+    # flush_audit_log() empties the audit log.
+    # Call before each parse to attribute records to the correct file.
+    method flush_audit_log() { $_audit_log = [] }
 
     # Clear hash-cons caches in all component semirings that support it.
     # Called between file parses to prevent unbounded memory growth.
@@ -216,43 +230,22 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     #
     # Returns: 'right_loses' | 'left_loses' | 'neither'
     method _filter_compare($left, $right) {
-        for my $sr ($self->_annotation_semirings()) {
+        # _slot_verdict: classify one semiring's add() result against ($li, $ri).
+        # Returns: 'identity_skip' | 'left' | 'right' | 'abstain' | 'zero'
+        # Does NOT call add() for the 'type' slot (TI contract, same as main loop).
+        # Does NOT call add() when $li eq $ri (same reason as main loop).
+        my $slot_verdict = sub($sr, $li, $ri) {
             my $slot = $sr->slot_name();
+            return 'identity_skip' if _same_value($li, $ri);
+            return 'identity_skip' if $slot eq 'type';
 
-            my ($li, $ri);
-            $li = $left->annotations()->{$slot};
-            $ri = $right->annotations()->{$slot};
-
-            # Skip identity: same value means this semiring cannot distinguish.
-            next if _same_value($li, $ri);
-
-            # TI (#707): type tag is now a plain hash ref in annotations->{type}.
-            # TI never expresses a preference via add() (its add() returns a merged
-            # Context that equals neither input, which means "no preference").
-            # TI disambiguates by returning zero from multiply with complete Context, not add().
-            # Skip calling add() for the type slot — identity check above is sufficient.
-            next if $slot eq 'type';
-
-            # Invoke semiring add() and normalize result to arrayref.
-            # Semirings using the scalar protocol (Structural) return bare scalars;
-            # we wrap them so the comparison below is uniform.
             my $result = $sr->add($li, $ri);
             $result = [$result] unless ref($result) eq 'ARRAY';
 
-            # Empty result: semiring rejects both alternatives.
-            next if $result->@* == 0;
+            return 'zero' if $result->@* == 0;
+            return 'abstain' if $result->@* > 1;
 
-            # Multi-element result: semiring genuinely cannot choose → no preference.
-            if ($result->@* > 1) {
-                if ($ENV{CHALK_COUNT_FILTER_TIES}) {
-                    push $_tie_log->@*, { semiring => $sr, slot => $slot };
-                }
-                next;
-            }
-
-            # Single-element result: semiring picked one side.
             my $r = $result->[0];
-
             my $r_eq_left  = ref($r) && ref($li)  ? refaddr($r) == refaddr($li)
                            : !ref($r) && !ref($li) ? $r == $li
                            :                         false;
@@ -260,31 +253,113 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
                            : !ref($r) && !ref($ri) ? $r == $ri
                            :                         false;
 
-            # Result equals both: identity collapse, no preference.
-            next if $r_eq_left && $r_eq_right;
+            return 'abstain' if $r_eq_left && $r_eq_right;
+            return 'abstain' if !$r_eq_left && !$r_eq_right;
+            return $r_eq_left ? 'left' : 'right';
+        };
 
-            # Result equals neither: semiring synthesized a new value — no preference.
-            if (!($r_eq_left || $r_eq_right)) {
-                if ($ENV{CHALK_COUNT_FILTER_TIES}) {
-                    push $_tie_log->@*, { semiring => $sr, slot => $slot };
+        # Run the existing first-wins algorithm. Capture the result for the
+        # audit record without altering control flow.
+        my $first_wins_result = do {
+            my $fw = 'neither';
+            FIRST_WINS: for my $sr ($self->_annotation_semirings()) {
+                my $slot = $sr->slot_name();
+
+                my ($li, $ri);
+                $li = $left->annotations()->{$slot};
+                $ri = $right->annotations()->{$slot};
+
+                next if _same_value($li, $ri);
+                next if $slot eq 'type';
+
+                my $result = $sr->add($li, $ri);
+                $result = [$result] unless ref($result) eq 'ARRAY';
+
+                next if $result->@* == 0;
+
+                if ($result->@* > 1) {
+                    if ($ENV{CHALK_COUNT_FILTER_TIES}) {
+                        push $_tie_log->@*, { semiring => $sr, slot => $slot };
+                    }
+                    next;
                 }
-                next;
+
+                my $r = $result->[0];
+
+                my $r_eq_left  = ref($r) && ref($li)  ? refaddr($r) == refaddr($li)
+                               : !ref($r) && !ref($li) ? $r == $li
+                               :                         false;
+                my $r_eq_right = ref($r) && ref($ri)  ? refaddr($r) == refaddr($ri)
+                               : !ref($r) && !ref($ri) ? $r == $ri
+                               :                         false;
+
+                next if $r_eq_left && $r_eq_right;
+
+                if (!($r_eq_left || $r_eq_right)) {
+                    if ($ENV{CHALK_COUNT_FILTER_TIES}) {
+                        push $_tie_log->@*, { semiring => $sr, slot => $slot };
+                    }
+                    next;
+                }
+
+                $fw = $r_eq_left ? 'right_loses' : 'left_loses';
+                last FIRST_WINS;
             }
 
-            # First semiring to express a preference determines the correct
-            # derivation; the other is rejected as an invalid parse.
-            return $r_eq_left ? 'right_loses' : 'left_loses';
-        }
+            if ($fw eq 'neither' && $ENV{CHALK_COUNT_FILTER_TIES}) {
+                push $_tie_log->@*, {
+                    semiring => 'all',
+                    slot     => 'unresolved',
+                };
+            }
+            $fw;
+        };
 
-        # All annotation semirings had no preference: unresolved tie.
-        # Record the tie for audit purposes when instrumentation is enabled.
-        if ($ENV{CHALK_COUNT_FILTER_TIES}) {
-            push $_tie_log->@*, {
-                semiring => 'all',
-                slot     => 'unresolved',
+        # Product-algorithm audit: runs only when CHALK_AUDIT_FILTER is set.
+        # Consults every component and records per-slot verdicts independently.
+        # The actual return value is always $first_wins_result.
+        if ($ENV{CHALK_AUDIT_FILTER}) {
+            my @per_component;
+            my @opinions;   # 'left' or 'right' verdicts seen across components
+            my $any_zero = false;
+
+            for my $sr ($self->_annotation_semirings()) {
+                my $slot = $sr->slot_name();
+                my $li   = $left->annotations()->{$slot};
+                my $ri   = $right->annotations()->{$slot};
+
+                my $v = $slot_verdict->($sr, $li, $ri);
+                push @per_component, { slot => $slot, verdict => $v };
+
+                $any_zero = true if $v eq 'zero';
+                push @opinions, $v if $v eq 'left' || $v eq 'right';
+            }
+
+            my $verdict_product;
+            if ($any_zero) {
+                # Any component eliminating both → cannot determine left vs right
+                $verdict_product = 'eliminated_left';
+            } else {
+                my %seen = map { $_ => 1 } @opinions;
+                if ($seen{left} && $seen{right}) {
+                    $verdict_product = 'conflict';
+                } elsif ($seen{left}) {
+                    $verdict_product = 'left_wins';
+                } elsif ($seen{right}) {
+                    $verdict_product = 'right_wins';
+                } else {
+                    $verdict_product = 'all_abstain';
+                }
+            }
+
+            push $_audit_log->@*, {
+                verdict_first_wins => $first_wins_result,
+                verdict_product    => $verdict_product,
+                per_component      => \@per_component,
             };
         }
-        return 'neither';
+
+        return $first_wins_result;
     }
 
     # add() returns a single correct Context, not a survivor list.
