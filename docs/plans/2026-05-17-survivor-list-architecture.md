@@ -593,3 +593,61 @@ IR-shape correction is still needed.
 
 **Status**: investigation complete; Phase 6 closed as not-applicable
 under current grammar+action design.
+
+## Addendum 2026-05-17g: ExpressionList IR-node promotion (action-layer reification)
+
+Subagent commit `59b332e4` (action-layer fix): promoted ExpressionList
+from a Perl arrayref to a first-class `Chalk::IR::Node::ExpressionList`
+IR node. StatementItem action detects "first item is bare list-builtin
+Call + more items" and merges trailing items into that call's args at
+SA-construction time.
+
+Results:
+- 2 of 6 pre-existing `perl-actions-fixup.t` failures NOW PASS
+  (push multi-arg cases)
+- All other spec tests unchanged
+- Spot-check audit (5 files): peel_builtin reduced from approx 30 to 18
+
+This is action-layer reification of the ExpressionList → Call args
+pattern. Walker not yet retired but no longer load-bearing for these cases.
+
+## Addendum 2026-05-17h: User clarified — meant grammar-rule reification
+
+User's intent was grammar-rule level, not IR-node level. The principle:
+ExpressionList should appear in the grammar ONLY as a child of rules
+that consume it as parameters (CallExpression args, MethodCall args,
+ParenExpr contents, ArrayConstructor contents, etc.). The grammar rule
+`ExpressionStatement ::= ExpressionList` at `docs/chalk-bootstrap.bnf:55-56`
+is the structural mistake — it lets ExpressionList float to statement
+context without being captured by a reifying parent.
+
+Attempted: remove the `ExpressionStatement ::= ExpressionList` alt
+plus the corresponding `Structural._complete_structural` rule. Result:
+4 test regressions in:
+- `precedence-spec-low-words.t`: `$a = 1, 2;` is ($a = 1), 2
+- `precedence-spec-range-tern-assign.t`: same
+- `grammar-ambiguity-fixes.t`: `map { fat_comma } qw(...)`
+- `semiring-structural.t`: `map with fat-comma block and qw list`
+
+These are legitimate Perl bare-list-statement forms. The test suite
+explicitly asserts they parse. The grammar-rule restriction is too
+aggressive.
+
+Reverted the grammar change. The action-layer reification (commit
+`59b332e4`) stands as the practical fix.
+
+**Path forward**: a more nuanced grammar-rule fix would admit
+`ExpressionStatement ::= ExpressionList` only when no enclosing rule
+reifies the list — but this is hard to express in BNF directly. The
+filter-stack (Structural) could enforce "prefer single Expression
+over ExpressionList in statement context" — which IT ALREADY DOES via
+the IS_LIST tagging at `Structural.pm:201-211`. That rule is
+load-bearing for the `$a = 1, 2;` case to pick alt-0 (Expression with
+binary `,`) over alt-1 (ExpressionList of 2 items).
+
+The current state: action-layer reification cleans up the
+specific peel_builtin trigger pattern; grammar admits bare-list
+statements; Structural picks the right alt at the statement-level
+disambiguation. The walker stays for the residual cases that the
+filter stack cannot disambiguate (likely zero remaining post commit
+`59b332e4` — pending audit confirmation).
