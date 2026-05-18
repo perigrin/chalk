@@ -15,6 +15,7 @@ use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
 use Chalk::IR::Node::TernaryExpr;
+use Chalk::IR::Node::ExpressionList;
 use Chalk::IR::UseInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
@@ -1180,12 +1181,40 @@ class Chalk::Bootstrap::Perl::Actions {
         } $fixed->@* ];
     }
 
-    # §2 StatementItem — collect all IR values for fixup in StatementList/Block
+    # §2 StatementItem — collect all IR values for fixup in StatementList/Block.
+    # When an ExpressionList node arrives at statement context and its first
+    # item is a bare list-builtin call, the remaining items are the call's
+    # arguments — merge them into that call rather than emitting N siblings.
+    # This is the statement-level "reification" that prevents fragmentation
+    # of `push @arr, EXPR` into separate IR nodes.
     method StatementItem($ctx) {
         my @values = _collect_ir_values($ctx);
         my @ir_nodes;
         for my $val (@values) {
-            if ($val isa Chalk::IR::Node
+            if ($val isa Chalk::IR::Node::ExpressionList) {
+                # Reify: check if items[0] is a bare list-builtin call
+                my $items = $val->items();
+                my $first = $items->[0];
+                if (defined $first
+                        && $first isa Chalk::IR::Node::Call
+                        && $first->dispatch_kind() eq 'builtin'
+                        && !$first->paren_form()
+                        && $LIST_BUILTINS{$first->name()}) {
+                    # Merge remaining items into the list-builtin's args
+                    my @merged_args = ($first->inputs()->[1]->@*, $items->@[1..$items->$#*]);
+                    my $name_node = $first->inputs()->[0];
+                    push @ir_nodes, $typed->make('Call',
+                        dispatch_kind => 'builtin',
+                        name          => $name_node->value(),
+                        paren_form    => false,
+                        inputs        => [$name_node, \@merged_args],
+                        compat_class  => 'BuiltinCall',
+                    );
+                } else {
+                    # No list-builtin merge — push each item as its own statement
+                    push @ir_nodes, $items->@*;
+                }
+            } elsif ($val isa Chalk::IR::Node
                     || $val isa Chalk::IR::UseInfo
                     || $val isa Chalk::IR::ClassInfo
                     || $val isa Chalk::IR::FieldInfo
@@ -1398,7 +1427,9 @@ class Chalk::Bootstrap::Perl::Actions {
         my @values = _collect_ir_values($ctx);
         my @imports;
         for my $val (@values) {
-            if (ref($val) eq 'ARRAY') {
+            if ($val isa Chalk::IR::Node::ExpressionList) {
+                push @imports, $val->items()->@*;
+            } elsif (ref($val) eq 'ARRAY') {
                 push @imports, $val->@*;
             } elsif ($val isa Chalk::IR::Node) {
                 push @imports, $val;
@@ -1943,17 +1974,25 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
-    # §12 ExpressionList — collect into arrayref
+    # §12 ExpressionList — collect items into a first-class ExpressionList IR node.
+    # Previously returned a plain arrayref; now returns an IR node so
+    # statement-context callers receive ONE value instead of N siblings.
+    # Consumers that need the raw list call ->items() on the node.
     method ExpressionList($ctx) {
         my @items;
         for my $val (_collect_ir_values($ctx)) {
-            if (ref($val) eq 'ARRAY') {
+            if ($val isa Chalk::IR::Node::ExpressionList) {
+                push @items, $val->items()->@*;
+            } elsif (ref($val) eq 'ARRAY') {
                 push @items, $val->@*;
             } elsif ($val isa Chalk::IR::Node) {
                 push @items, $val;
             }
         }
-        return \@items;
+        return $typed->make('ExpressionList',
+            inputs       => [\@items],
+            compat_class => 'ExpressionList',
+        );
     }
 
     # §13 Atom — transparent pass-through
@@ -2020,7 +2059,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 next;
             }
 
-            if (ref($focus) eq 'ARRAY') {
+            if ($focus isa Chalk::IR::Node::ExpressionList) {
+                push @args, $focus->items()->@*;
+            } elsif (ref($focus) eq 'ARRAY') {
                 push @args, $focus->@*;
             } elsif ($focus isa Chalk::IR::Node) {
                 push @args, $focus;
@@ -2321,6 +2362,10 @@ class Chalk::Bootstrap::Perl::Actions {
     method ParenExpr($ctx) {
         my @values = _collect_ir_values($ctx);
         for my $val (@values) {
+            if ($val isa Chalk::IR::Node::ExpressionList) {
+                # Multi-element paren: return items as arrayref (hash init, etc.)
+                return $val->items();
+            }
             return $val if $val isa Chalk::IR::Node;
             return $val if ref($val) eq 'ARRAY';
         }
@@ -2333,7 +2378,9 @@ class Chalk::Bootstrap::Perl::Actions {
         my @values = _collect_ir_values($ctx);
         my @elements;
         for my $val (@values) {
-            if (ref($val) eq 'ARRAY') {
+            if ($val isa Chalk::IR::Node::ExpressionList) {
+                push @elements, $val->items()->@*;
+            } elsif (ref($val) eq 'ARRAY') {
                 push @elements, $val->@*;
             } elsif ($val isa Chalk::IR::Node) {
                 push @elements, $val;
@@ -2351,7 +2398,9 @@ class Chalk::Bootstrap::Perl::Actions {
         my @values = _collect_ir_values($ctx);
         my @pairs;
         for my $val (@values) {
-            if (ref($val) eq 'ARRAY') {
+            if ($val isa Chalk::IR::Node::ExpressionList) {
+                push @pairs, $val->items()->@*;
+            } elsif (ref($val) eq 'ARRAY') {
                 push @pairs, $val->@*;
             } elsif ($val isa Chalk::IR::Node) {
                 push @pairs, $val;
@@ -2596,7 +2645,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Leaves before QualifiedIdentifier are the invocant expression
                 $invocant = $focus;
             } elsif (defined $method_name) {
-                if (ref($focus) eq 'ARRAY') {
+                if ($focus isa Chalk::IR::Node::ExpressionList) {
+                    push @args, $focus->items()->@*;
+                } elsif (ref($focus) eq 'ARRAY') {
                     push @args, $focus->@*;
                 } elsif ($focus isa Chalk::IR::Node) {
                     push @args, $focus;
@@ -2638,8 +2689,12 @@ class Chalk::Bootstrap::Perl::Actions {
                     $index = $val;
                     last;
                 }
+            } elsif ($val isa Chalk::IR::Node::ExpressionList && $style eq 'call' && !defined $index) {
+                # ExpressionList IR node — unwrap items as call arguments
+                $index = $val->items();
+                last;
             } elsif (ref($val) eq 'ARRAY' && $style eq 'call' && !defined $index) {
-                # ExpressionList returns arrayref — capture as call arguments
+                # Legacy arrayref path — capture as call arguments
                 $index = $val;
                 last;
             }
