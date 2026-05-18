@@ -517,3 +517,79 @@ Phase 4 packing. The fragmentation appears at a chart cell other than
 the IS_METHOD merge — find it, classify it, then decide whether to
 extend the filter stack to disambiguate or to widen the walker
 retirement scope to acknowledge it as a known not-yet-fixable case.
+
+## Addendum 2026-05-17f: Derivation C identified — not a filter problem
+
+Investigation 2026-05-18: ran chart-instrumentation probe
+(`/tmp/probe-find-c2.pl`) to trace `push @arr, $obj->method();` parse
+with Structural's IS_METHOD carve-out removed.
+
+**Finding**: the chart works correctly. Structural votes the right way
+at every merge (4 merges flip from left to right per Phase 4's design).
+ONE derivation survives to Program with the perlop-correct
+`struct=IS_CALL|IS_LIST` tags. **But that derivation's
+SemanticAction-constructed IR is already fragmented** — it carries
+`other_stmts = [BuiltinCall(push @arr), MethodCallExpr($obj->method())]`
+as two separate IR nodes.
+
+**Root cause**: the ExpressionStatement alt-1 grammar path
+(`ExpressionStatement ::= ExpressionList`, `docs/chalk-bootstrap.bnf:55`)
+combined with the ExpressionList action treats `, ` as a list separator.
+For `push @arr, $obj->method();` the chart accepts BOTH:
+- alt-0: single Expression of `push @arr, $obj->method()` (a CallExpression with 2 args)
+- alt-1: ExpressionList of two items (`push @arr` + `$obj->method()`)
+
+These don't merge at the ExpressionStatement chart level because the
+chart key (pos, core_id, origin) has different core_ids for different
+alts — the merge happens at SimpleStatement (one level up). At
+SimpleStatement, Structural correctly picks alt-1 (IS_LIST). But alt-1's
+SA tree was built earlier during multiply events and is two-item.
+
+The walker `_push_methodcall_inward.peel_builtin` was correcting the
+shape AFTER parse by rewriting the chosen winner's IR tree into the
+single-call shape. **The walker is doing IR rewriting, not parse
+disambiguation.** It is genuinely necessary for this case under the
+current grammar + action design.
+
+**Fix candidates** (none are filter-stack):
+
+1. **Extend `_fixup_stmts.list_builtin_call`** in Perl/Actions.pm to
+   merge `BuiltinCall(name, [args])` followed by trailing expression
+   into `BuiltinCall(name, [args..., trailing])`. Currently the rule
+   only merges bare `Constant('push')` followed by args; doesn't handle
+   a BuiltinCall already built from a single-arg ExpressionList.
+
+2. **Grammar restructure**: make `CallExpression` not match `push @arr`
+   (single-arg without parens) when followed by `, EXPR` at statement
+   level. Substantial grammar work; risks other regressions.
+
+3. **Action restructure**: have ExpressionList action detect "first item
+   is a list-builtin call with N args, second item could be the N+1th
+   arg" and produce a single BuiltinCall instead of a list. This is
+   essentially what option 1 does but at a different layer.
+
+4. **Keep the walker**: accept that the
+   `_push_methodcall_inward.peel_builtin` walker is the right home for
+   this correction under the current grammar.
+
+**Recommendation**: keep the walker. The filter stack now correctly
+admits both derivations and picks the IS_LIST one. The walker's job is
+to fix the IR shape of the chosen derivation — that's a different
+concern from disambiguation. Phase 6 should be re-scoped:
+
+- **Walker retirement applies only to walkers correcting derivations
+  picked WRONG by the filter stack.** That class is now empty post
+  Phase 1-4 (filter stack correctly picks the right structural shape).
+- **Walkers correcting IR-construction artifacts within the right
+  shape are a different class and should stay.** Including
+  `_push_methodcall_inward.peel_builtin`.
+
+**Re-classify the original 51-fire `peel_builtin` count**: those fires
+were doing structural correction (peeling MethodCall off a wrongly-
+chosen IS_METHOD derivation) AND IR-shape correction (merging the
+ExpressionList back into a BuiltinCall). Post Phase 1-4, the
+structural correction is unnecessary (Structural picks right) but the
+IR-shape correction is still needed.
+
+**Status**: investigation complete; Phase 6 closed as not-applicable
+under current grammar+action design.
