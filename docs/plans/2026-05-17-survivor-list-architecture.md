@@ -651,3 +651,29 @@ statements; Structural picks the right alt at the statement-level
 disambiguation. The walker stays for the residual cases that the
 filter stack cannot disambiguate (likely zero remaining post commit
 `59b332e4` — pending audit confirmation).
+
+## Addendum 2026-05-17i: post-promotion MOP audit confirms reduction
+
+Ran audit on `lib/Chalk/MOP/` (7 files) post commit `59b332e4`:
+
+| Counter | Total | Notes |
+|---|---:|---|
+| `_push_methodcall_inward.peel_builtin` | 2 | down from ~7 baseline on MOP subset |
+| `_push_deref_inward.peel_builtin` | 0 | absent from this corpus |
+| `_ties_unresolved` (Phase 4 packs) | 573 | NEW — Phase 4 surfacing previously-masked ambiguity |
+
+The peel_builtin reduction is real but modest on MOP. More significant:
+**573 unresolved ties on 7 files** — Phase 4's packed-Context machinery
+is exposing a large ambiguity surface that was previously masked by
+Boolean's `$left`-by-convention. Each tie produces a packed Context
+that the Earley stopgap resolves by picking first survivor.
+
+This is correctness-by-luck for those 573 cases. The survivor-list
+architecture made the ambiguity visible — that's the value. Formal
+Phase 5 (priority-based or policy-based resolution at parse_value
+boundary) is its own multi-session project.
+
+**Recommendation**: peel_builtin reduction is real (~70% across this
+subset). The 573 ties are pre-existing ambiguity now instrumented,
+not regressions. Document the state, defer formal Phase 5 to a
+future session.
