@@ -677,3 +677,50 @@ boundary) is its own multi-session project.
 subset). The 573 ties are pre-existing ambiguity now instrumented,
 not regressions. Document the state, defer formal Phase 5 to a
 future session.
+
+## Addendum 2026-05-17j: IR audit confirms modest reduction, large tie surface
+
+Ran audit on a 4-file IR subset (Graph.pm, Program.pm, Serialize/JSON.pm,
+Shim.pm) post commit `59b332e4`:
+
+| Counter | Total | Notes |
+|---|---:|---|
+| `_push_methodcall_inward.peel_builtin` | 5 | was ~8 on this subset pre-promotion |
+| `_push_deref_inward.peel_builtin` | 5 | was ~5 |
+| `_ties_unresolved` | 4459 | JSON.pm alone: 2376 |
+
+Combined with MOP audit (peel_builtin 2+0, ties 573):
+
+| Subset | peel_methodcall | peel_deref | ties |
+|---|---:|---:|---:|
+| MOP (7 files) | 2 | 0 | 573 |
+| IR (4 files) | 5 | 5 | 4459 |
+
+Baseline (full IR/MOP/Grammar corpus): 51 methodcall + 11 deref = 62
+peel_builtin fires. Audited subsets give a partial picture but show
+modest peel_builtin reduction (estimate ~30 across full corpus, down
+from 62) AND massive tie surface (>5000 cases where the filter stack
+abstains and the Earley first-survivor stopgap resolves).
+
+**Conclusion**: Phase 6 (walker retirement) is NOT possible from
+this state — 30+ residual fires across the corpus means deleting the
+walker would silently miscompile that many cases. The walker stays.
+
+**What changed**: the survivor-list architecture (commits 33f20d20
+through 59b332e4) made the ambiguity surface visible and properly
+classified. The peel_builtin walker is no longer load-bearing for the
+ExpressionList-fragmentation case (handled at the action layer), but
+remains load-bearing for ~30 other residual cases. Future Phase 5
+work would investigate and classify those residual cases the same way
+this session classified derivation C.
+
+Session deliverables:
+- Phase 1 audit instrumentation (`33f20d20`)
+- Phase 2+3 product semantics + Boolean honest (`b6756ada`)
+- Phase 4 packed-Context distribution (`0315b319` + `b21e1a20`)
+- ExpressionList IR-node promotion (`59b332e4`) — 2 of 6 pre-existing
+  fixup failures resolved
+- 10 plan addendums recording findings at each phase
+- 4459+ ties surfaced for future investigation
+
+The walker keeps doing its job. The architecture is better.
