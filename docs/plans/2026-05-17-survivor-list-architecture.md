@@ -470,3 +470,50 @@ via Precedence priority. No actual conflicts surface (no hard errors).
 **Phase 6 (walker retirement) blocked on Phase 4-5.** The walker
 cannot be retired until packed-ambiguous Contexts flow through
 downstream multiplies and resolve at Program-rule completion.
+
+## Addendum 2026-05-17e: Phase 4 landed; walker retirement requires more discovery
+
+Phase 4 landed as commit `0315b319` plus Earley stopgap `b21e1a20`:
+- Context.pm gained `is_ambiguous` field
+- FilterComposite.multiply and .add distribute over packed operands
+- FilterComposite.add packs when all components abstain
+- Earley.parse_value unpacks (first-survivor stopgap) at result boundary
+- All spec tests pass (same 6 pre-existing fixup failures)
+
+Walker fires for peel_builtin UNCHANGED on the corpus — Structural still
+abstains for IS_METHOD per its carve-out.
+
+**Tried removing the Structural IS_METHOD carve-out** (made the rule
+symmetric: `right` wins whichever side has IS_METHOD). Even WITH Phase
+4 packed-Context infrastructure in place, the integration parse of
+`push @arr, $obj->method();` STILL fragments into two top-level
+statements.
+
+The audit log shows Structural correctly votes right at the IS_METHOD
+merge (4 of 26 merges flip from left_wins → right_wins). But the parse
+result is still wrong. This means there is at least one **other ambiguity
+class** entangled with the IS_METHOD case that the walker also corrects
+— and that ambiguity is invisible to the IS_METHOD-vs-IS_LIST analysis.
+
+Reverted the Structural change.
+
+**Implication**: walker retirement is not "just" a missing infrastructure
+problem (Phase 4 + Structural fix). There's at least one more ambiguity
+class in the chart that fragments the `push @arr, $obj->method();` parse
+when we stop the walker from correcting it. Identifying and fixing that
+class requires a separate investigation cycle.
+
+**What this session delivered for the survivor-list plan**:
+- Phase 1 ✅ instrumentation (commit 33f20d20)
+- Phase 2+3 ✅ Boolean honest, FilterComposite product semantics (b6756ada)
+- Phase 4 ✅ packed-Context distribution infrastructure (0315b319)
+- Earley stopgap ✅ unpack-on-result for compatibility (b21e1a20)
+- Phase 5 partial: stopgap in place, real Program-rule resolution deferred
+- Phase 6 blocked: needs the second ambiguity class identified first
+
+**Suggested next investigation**: instrument the chart cells during the
+trigger parse to see which derivations are surviving at each cell after
+Phase 4 packing. The fragmentation appears at a chart cell other than
+the IS_METHOD merge — find it, classify it, then decide whether to
+extend the filter stack to disambiguate or to widen the walker
+retirement scope to acknowledge it as a known not-yet-fixable case.
