@@ -983,6 +983,16 @@ class Chalk::Bootstrap::Earley {
         if (!defined $result) {
             $self->_emit_parse_diagnostic($input, $_last_active_pos);
         }
+        # Phase 4 stopgap: if the final result is packed-ambiguous, the
+        # filter stack admitted multiple derivations none of which were
+        # disambiguated by Phase 1-4. Pick the first survivor. Phase 5
+        # will replace this with structured Program-rule resolution.
+        if (defined $result
+                && $result->can('is_ambiguous')
+                && $result->is_ambiguous()) {
+            my $survivors = $result->children();
+            $result = $survivors->[0] if $survivors && $survivors->@*;
+        }
         return $result;
     }
 
