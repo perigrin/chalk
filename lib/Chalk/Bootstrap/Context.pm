@@ -11,8 +11,9 @@ class Chalk::Bootstrap::Context {
     field $rule        :param :reader = undef;
     field $annotations :param :reader = {};
     field $token       :param :reader = undef;
-    field $is_zero     :param :reader = false;
-    field $error       :param :reader = undef;
+    field $is_zero      :param :reader = false;
+    field $is_ambiguous :param :reader = false;
+    field $error        :param :reader = undef;
     field $mop         :param :reader = undef;
     field $graph       :param :reader = undef;
     field $scope       :param :reader = undef;

@@ -133,6 +133,30 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         );
     }
 
+    # _is_packed: returns true when a Context is a packed-ambiguous carrier.
+    # Packed Contexts are created by add() when all components abstain; they
+    # carry multiple alternative Contexts in their children list.
+    my sub _is_packed($ctx) {
+        return blessed($ctx) && $ctx->can('is_ambiguous') && $ctx->is_ambiguous();
+    }
+
+    # _pack_survivors: given a list of non-zero Contexts, return:
+    #   zero Context  — if the list is empty
+    #   the single ctx — if exactly one survivor
+    #   packed Context — if more than one survivor
+    method _pack_survivors(@survivors) {
+        return $self->zero()  if @survivors == 0;
+        return $survivors[0]  if @survivors == 1;
+        return Chalk::Bootstrap::Context->new(
+            focus        => undef,
+            children     => \@survivors,
+            position     => 0,
+            is_zero      => false,
+            is_ambiguous => true,
+            annotations  => {},
+        );
+    }
+
     # _same_value: identity comparison suitable for both refs and scalars.
     my sub _same_value($a, $b) {
         return true  if !defined($a) && !defined($b);
@@ -159,9 +183,30 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # performs a transparent passthrough).
     # When $right carries annotations->{complete} = true, semirings apply
     # their rule-completion logic inline in multiply.
+    #
+    # Packed-ambiguous Contexts (is_ambiguous=true) distribute over multiply:
+    #   multiply(packed(A,B), C)    → pack(multiply(A,C), multiply(B,C))
+    #   multiply(A, packed(C,D))    → pack(multiply(A,C), multiply(A,D))
+    #   multiply(packed(A,B), packed(C,D)) → pack of all 4 sub-products
+    # Each sub-product goes through the normal multiply path so component
+    # semirings always see unpacked operands.
     method multiply($left, $right) {
         return $self->zero() if $left->is_zero();
         return $self->zero() if $right->is_zero();
+
+        # Distribute multiply over packed Contexts.
+        if (_is_packed($left) || _is_packed($right)) {
+            my @lefts  = _is_packed($left)  ? $left->children()->@*  : ($left);
+            my @rights = _is_packed($right) ? $right->children()->@* : ($right);
+            my @survivors;
+            for my $l (@lefts) {
+                for my $r (@rights) {
+                    my $sub = $self->multiply($l, $r);
+                    push @survivors, $sub unless $sub->is_zero();
+                }
+            }
+            return $self->_pack_survivors(@survivors);
+        }
 
         my $is_complete = blessed($right) && $right->can('annotations')
             && $right->annotations()->{complete};
@@ -314,25 +359,33 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         return $verdict;
     }
 
-    # add() returns a single correct Context, not a survivor list.
+    # _has_real_annotation_difference: returns true when at least one annotation
+    # slot has a semantically meaningful distinct value between $left and $right.
+    # When all semantically-comparable slots are identity-equal, the two Contexts
+    # are indistinguishable and packing is not warranted.
     #
-    # The design doc specifies survivor lists where multiple alternatives can
-    # survive, with an end-of-parse assertion catching genuine ambiguities.
-    # This implementation uses single-Context representation because the Earley
-    # parser (Earley.pm) stores one value per chart item — supporting survivor
-    # lists would require deep changes to the parser's data structures.
-    #
-    # _filter_compare uses first-wins early return rather than the design doc's
-    # check-all-with-conflict-detection. This is safe because all semirings are
-    # ordered by priority (Boolean > Precedence > TypeInference > Structural >
-    # SemanticAction) and conflicts between semirings have not been observed
-    # across the full 1,867-test regression suite. Conflict detection can be
-    # added later if needed for debugging.
-    method add($left, $right) {
-        # Zero handling: is_zero flag on Context
-        return $right if $left->is_zero();
-        return $left  if $right->is_zero();
+    # Slots excluded from the check:
+    #   'type'    — TI updates types in multiply, not add; add never compares type slots.
+    #   'boolean' — Boolean.add always creates a new Context object for two non-zero
+    #               inputs (so refaddrs always differ even when semantically identical).
+    #               The meaningful boolean distinction (zero vs non-zero) is handled by
+    #               the is_zero guard before _add_unpacked is called.
+    method _has_real_annotation_difference($left, $right) {
+        for my $sr ($self->_annotation_semirings()) {
+            my $slot = $sr->slot_name();
+            next if $slot eq 'type';
+            next if $slot eq 'boolean';
+            my $li = $left->annotations()->{$slot};
+            my $ri = $right->annotations()->{$slot};
+            return true unless _same_value($li, $ri);
+        }
+        return false;
+    }
 
+    # _add_unpacked: core add logic for two non-packed Contexts.
+    # Returns a single Context (left, right, or packed-ambiguous).
+    # Called by add() after packed distribution is handled.
+    method _add_unpacked($left, $right) {
         # Ask the filter semirings which derivation is the correct parse.
         my $verdict = $self->_filter_compare($left, $right);
 
@@ -342,17 +395,37 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         } elsif ($verdict eq 'left_loses') {
             ($correct, $rejected) = ($right, $left);
         } else {
-            # No semiring expressed a preference: deterministic tie-break
-            # picks left. This is a grammar-audit red flag — ambiguity that
-            # no documented class claims to resolve. See Invariant #1 in
-            # docs/architecture/ambiguity-classes.md.
+            # 'neither': no component expressed a preference.
+            #
+            # Only pack as ambiguous when the alternatives actually differ in at
+            # least one annotation slot — that is when genuine component-level
+            # abstention is occurring. When all slots are identity-equal the two
+            # Contexts are indistinguishable and returning $left preserves the
+            # existing deterministic tie-break without inflating the chart.
+            if ($self->_has_real_annotation_difference($left, $right)) {
+                # Genuine abstention: both alternatives survive as a packed Context.
+                # Downstream multiply will distribute over the packed set; Phase 5
+                # will raise a structured error if ambiguity reaches Program rule
+                # completion. See docs/plans/2026-05-17-survivor-list-architecture.md.
+                if ($self->_sa()->can('on_merge')) {
+                    $self->_sa()->on_merge($left, $right);
+                }
+                return Chalk::Bootstrap::Context->new(
+                    focus        => undef,
+                    children     => [$left, $right],
+                    position     => 0,
+                    is_zero      => false,
+                    is_ambiguous => true,
+                    annotations  => {},
+                );
+            }
+            # All slots identical: deterministic tie-break picks left.
             ($correct, $rejected) = ($left, $right);
         }
 
         # Post-merge hook: allow SA to transfer side-table state between the
         # two survivors when filter-gap merge admits both derivations and
-        # composition picks one (a separate bug — composition shouldn't
-        # have an opinion). The picked side may lack cfg_state info that
+        # composition picks one. The picked side may lack cfg_state info that
         # the other survivor carries; on_merge transfers it. See
         # _fix_postfix_chain in Perl/Actions.pm for the canonical
         # filter-gap-merge explanation.
@@ -361,6 +434,56 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         }
 
         return $correct;
+    }
+
+    # add() merges two alternative Contexts, returning the survivor.
+    #
+    # When all annotation-layer semirings abstain (no component expresses a
+    # preference), both alternatives survive as a packed-ambiguous Context.
+    # Downstream multiply distributes over the packed set; Phase 5 will raise
+    # a structured error if ambiguity reaches Program rule completion.
+    #
+    # Packed Contexts on either side are distributed:
+    #   add(packed(A,B), C)    → merge each of A,B against C; collect unique survivors
+    #   add(A, packed(C,D))    → merge A against each of C,D; collect unique survivors
+    #   add(packed(A,B), packed(C,D)) → all pairwise merges; collect unique survivors
+    method add($left, $right) {
+        # Zero handling: is_zero flag on Context
+        return $right if $left->is_zero();
+        return $left  if $right->is_zero();
+
+        # Distribute add over packed Contexts.
+        if (_is_packed($left) || _is_packed($right)) {
+            my @lefts  = _is_packed($left)  ? $left->children()->@*  : ($left);
+            my @rights = _is_packed($right) ? $right->children()->@* : ($right);
+
+            # Collect unique survivors: merge each left alt against each right alt.
+            # Dedup by refaddr to avoid storing the same derivation twice.
+            my %seen;
+            my @survivors;
+            for my $l (@lefts) {
+                for my $r (@rights) {
+                    my $sub = $self->_add_unpacked($l, $r);
+                    if ($sub->is_ambiguous()) {
+                        # _add_unpacked returned a packed — absorb its children
+                        for my $child ($sub->children()->@*) {
+                            my $addr = refaddr($child);
+                            unless ($seen{$addr}++) {
+                                push @survivors, $child;
+                            }
+                        }
+                    } elsif (!$sub->is_zero()) {
+                        my $addr = refaddr($sub);
+                        unless ($seen{$addr}++) {
+                            push @survivors, $sub;
+                        }
+                    }
+                }
+            }
+            return $self->_pack_survivors(@survivors);
+        }
+
+        return $self->_add_unpacked($left, $right);
     }
 
 }
