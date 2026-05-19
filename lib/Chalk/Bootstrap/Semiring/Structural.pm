@@ -355,6 +355,27 @@ class Chalk::Bootstrap::Semiring::Structural {
             }
         }
 
+        # Both valid, both is_call: prefer non-barecall over barecall.
+        # When two derivations of the same span both have IS_CALL and differ
+        # only on IS_BARECALL (paren-form vs bare-form CallExpression), prefer
+        # the paren-form. The paren-form is unambiguous about argument bounds;
+        # the bare-form can spuriously absorb following tokens (postfix
+        # modifiers, keywords admitted by TypeInference's should_scan when
+        # the keyword's primary rule isn't predicted in the current context).
+        # Example: `next unless ref($n)` admits two derivations differing only
+        # in this bit — the paren-form (next as a bare Atom + PostfixModifier
+        # with paren-form ref call) is the perlop-correct shape.
+        my $left_bare  = $left  & STRUCT_IS_BARECALL;
+        my $right_bare = $right & STRUCT_IS_BARECALL;
+        if ($left_call && $right_call) {
+            if ($right_bare && !$left_bare) {
+                return $left;
+            }
+            if ($left_bare && !$right_bare) {
+                return $right;
+            }
+        }
+
         # Prefer non-binop over binop when is_call is absent.
         # Chained BinaryExpressions with hash subscripts on both sides
         # produce two Expression alternatives that differ only in grouping.
