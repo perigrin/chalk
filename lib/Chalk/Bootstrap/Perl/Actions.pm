@@ -271,7 +271,7 @@ class Chalk::Bootstrap::Perl::Actions {
                      || $val isa Chalk::IR::FieldInfo
                      || $val isa Chalk::IR::MethodInfo
                      || $val isa Chalk::IR::SubInfo
-                     || (ref($val) eq 'HASH' && exists $val->{__adjust_body})) {
+                     || (ref($val) eq 'HASH' && (exists $val->{__adjust_body} || exists $val->{__phaser_block}))) {
                 push @stmts, $val;
             }
         }
@@ -317,7 +317,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     || $val isa Chalk::IR::FieldInfo
                     || $val isa Chalk::IR::MethodInfo
                     || $val isa Chalk::IR::SubInfo
-                    || (ref($val) eq 'HASH' && exists $val->{__adjust_body})) {
+                    || (ref($val) eq 'HASH' && (exists $val->{__adjust_body} || exists $val->{__phaser_block}))) {
                 push @ir_nodes, $val;
             }
         }
@@ -643,6 +643,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 } elsif (ref($item) eq 'HASH' && exists $item->{__adjust_body}) {
                     $mop_class->declare_adjust();
                 }
+                # __phaser_block markers in class body intentionally ignored —
+                # full phaser MOP integration deferred. The PhaserBlock is
+                # captured as a marker so parse succeeds; codegen drops it.
             }
         }
 
@@ -917,6 +920,27 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return { __adjust_body => \@body };
+    }
+
+    # §9 PhaserBlock ::= /(?:BEGIN|END|INIT|CHECK|UNITCHECK)\b/ _ Block
+    # Phaser blocks are runtime-side-effect constructs (Perl phase hooks).
+    # Captured as a marker for now; full phaser-IR integration deferred.
+    # Returning the marker rather than undef so StatementItem can include
+    # it (matches AdjustBlock pattern).
+    method PhaserBlock($ctx) {
+        my $name;
+        my @body;
+        my $text = $ctx->scanned_text() // '';
+        if ($text =~ /^(BEGIN|END|INIT|CHECK|UNITCHECK)\b/) {
+            $name = $1;
+        }
+        for my $leaf (_collect_ir_leaves($ctx)) {
+            my $focus = $leaf->extract();
+            if (ref($focus) eq 'ARRAY') {
+                @body = $focus->@*;
+            }
+        }
+        return { __phaser_block => { name => $name, body => \@body } };
     }
 
     # §9 TryCatchStatement — try/catch error handling
@@ -1318,7 +1342,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val->@*;
             } elsif ($val isa Chalk::IR::Node) {
                 push @stmts, $val;
-            } elsif (ref($val) eq 'HASH' && exists $val->{__adjust_body}) {
+            } elsif (ref($val) eq 'HASH' && (exists $val->{__adjust_body} || exists $val->{__phaser_block})) {
                 push @stmts, $val;
             }
         }

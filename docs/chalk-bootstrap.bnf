@@ -48,6 +48,7 @@ CompoundStatement ::= Block
     | SubroutineDefinition
     | MethodDefinition
     | AdjustBlock
+    | PhaserBlock
     | TryCatchStatement ;
 
 # §4  EXPRESSION STATEMENTS
@@ -107,6 +108,8 @@ SubroutineDefinition ::= /sub\b/ WS QualifiedIdentifier _ Signature? _ Block
 MethodDefinition ::= /method\b/ WS QualifiedIdentifier AttributeList? _ Signature? _ Block ;
 
 AdjustBlock ::= /ADJUST\b/ _ Block ;
+
+PhaserBlock ::= /(?:BEGIN|END|INIT|CHECK|UNITCHECK)\b/ _ Block ;
 
 TryCatchStatement ::= /try\b/ _ Block _ /catch\b/ _ /\(/ _ ScalarVariable _ /\)/ _ Block ;
 
