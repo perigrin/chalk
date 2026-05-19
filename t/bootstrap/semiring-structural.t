@@ -241,15 +241,12 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     ok(!($r2 & STRUCT_IS_DEREF), 'add(call+deref, call): prefers no is_deref');
 }
 
-# --- add: prefer is_call over is_call+is_method (one direction only) ---
-# When both alternatives have is_call:
-# - add(call, call+method): left has no IS_METHOD, right does → prefer left (non-method).
-#   "non-method over method": CallExpression wins over MethodCall in the typical case
-#   where the non-method parse was discovered first.
-# - add(call+method, call): left already has IS_METHOD, right does not → abstain.
-#   The left may be a restructured BuiltinCall (from _push_methodcall_inward.peel_builtin)
-#   that is already in the correct shape. Eliminating it would destroy the correctly-built
-#   IR. FilterComposite's tie-break keeps left (the existing item).
+# --- add: prefer is_call over is_call+is_method — bilateral ---
+# When both alternatives have is_call: whichever side has IS_METHOD,
+# the other wins. CallExpression (direct function call consuming full
+# arg list) wins over MethodCall (method on shorter expression result).
+# Per perlop, `->` (L2) binds tighter than `,` (L21), so when these
+# compete the CallExpression-flavor (IS_CALL only) shape is perlop-correct.
 {
     my $call_only   = STRUCT_IS_CALL;
     my $call_method = STRUCT_IS_CALL | STRUCT_IS_METHOD;
@@ -259,32 +256,16 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     ok(!($r1 & STRUCT_IS_METHOD), 'add(call, call+method): prefers no is_method');
 
     my $r2 = $sr->add($call_method, $call_only);
-    ok(ref($r2) eq 'ARRAY',
-        'add(call+method, call): abstain (arrayref) — left may be peel_builtin-restructured');
-    if (ref($r2) eq 'ARRAY') {
-        is(scalar($r2->@*), 2, 'add(call+method, call): abstain has two elements');
-    }
+    ok($r2 & STRUCT_IS_CALL,     'add(call+method, call): has is_call (bilateral)');
+    ok(!($r2 & STRUCT_IS_METHOD), 'add(call+method, call): prefers no is_method (bilateral)');
 }
 
-# --- add: IS_METHOD on left, IS_LIST on right — abstain ---
-# When BOTH alternatives have is_call and the disambiguation is between
-# (a) IS_LIST  — list-form builtin Call holding the method-call as last arg
-#     e.g.,  Call(push, [@arr, MethodCall($obj, method)])
-# (b) IS_METHOD — method-call wrapping a list-form builtin Call as receiver
-#     e.g.,  MethodCall(Call(push, [@arr, $obj]), method)
-# perlop dictates `,` (L21) binds looser than `->` (L2), so $obj->method() must
-# cohere as a single expression BEFORE the comma makes it a push arg. That is
-# shape (a).
-#
-# Design note: Structural.add() ABSTAINS for add(IS_CALL+IS_METHOD, IS_CALL+IS_LIST)
-# (and for all add(left_has_METHOD, right_has_no_METHOD) cases) rather than picking
-# the IS_LIST side directly. The reason: the left-has-IS_METHOD Context may have
-# already been restructured by _push_methodcall_inward.peel_builtin into the correct
-# shape. Eliminating it based on tag comparison would discard correctly-built IR or
-# pick a derivation whose SA has not yet fired. The IS_LIST-over-IS_METHOD perlop
-# priority is enforced by _push_methodcall_inward.peel_builtin in Perl/Actions.pm
-# rather than at the structural disambiguation level. FilterComposite's tie-break
-# (keep left, the existing item) is the safe default for both orderings.
+# --- add: IS_METHOD vs IS_LIST — bilateral non-method preference ---
+# perlop dictates `,` (L21) binds looser than `->` (L2), so $obj->method()
+# must cohere as a single expression BEFORE the comma makes it a push
+# arg. The IS_LIST (BuiltinCall holding method-call as last arg) shape
+# is perlop-correct; IS_METHOD (MethodCall wrapping BuiltinCall) is
+# the artifact.
 {
     my $call_list   = STRUCT_IS_CALL | STRUCT_IS_LIST;
     my $call_method = STRUCT_IS_CALL | STRUCT_IS_METHOD;
@@ -296,12 +277,10 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
         'add(call+list, call+method): does NOT carry is_method');
 
     my $r2 = $sr->add($call_method, $call_list);
-    ok(ref($r2) eq 'ARRAY',
-        'add(call+method, call+list): abstain (left_method && !right_method → arrayref)');
-    if (ref($r2) eq 'ARRAY') {
-        is(scalar($r2->@*), 2,
-            'add(call+method, call+list): abstain arrayref has two elements');
-    }
+    ok($r2 & STRUCT_IS_LIST,
+        'add(call+method, call+list): prefers is_list (bilateral)');
+    ok(!($r2 & STRUCT_IS_METHOD),
+        'add(call+method, call+list): does NOT carry is_method (bilateral)');
 }
 
 # --- add: prefer is_call over is_call+is_binop ---

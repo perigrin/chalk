@@ -306,23 +306,17 @@ class Chalk::Bootstrap::Semiring::Structural {
         }
 
         # Both valid, both is_call: prefer non-method over method.
-        # When the right side has IS_METHOD and left does not: prefer left
-        # (CallExpression wins over MethodCall). This is the typical case where
-        # a shorter func-call (left, discovered first) competes with a longer
-        # MethodCall (right).
-        # When the LEFT side has IS_METHOD and right does not: abstain.
-        # The left may have been restructured by _push_methodcall_inward.peel_builtin
-        # into the correct shape. Eliminating left would destroy the built IR or
-        # introduce a derivation path whose SA has not yet fired. FilterComposite's
-        # tie-break (keep left) is the safe default: the IS_LIST-over-IS_METHOD
-        # perlop priority is enforced by the walker (_push_methodcall_inward.peel_builtin)
-        # in Perl/Actions.pm rather than at the structural disambiguation level.
+        # Bilateral: whichever side has IS_METHOD, the OTHER wins.
+        # Per perlop, `->` (L2) binds tighter than `,` (L21), so when a
+        # CallExpression-flavor derivation (IS_CALL only) competes with a
+        # MethodCall-wrapping-call derivation (IS_CALL|IS_METHOD), the
+        # CallExpression-flavor is perlop-correct.
         if ($left_call && $right_call) {
             if ($right_method && !$left_method) {
                 return $left;
             }
             if ($left_method && !$right_method) {
-                return [$left, $right];
+                return $right;
             }
         }
 
