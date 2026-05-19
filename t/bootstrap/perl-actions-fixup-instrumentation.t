@@ -84,7 +84,6 @@ subtest 'per-branch counters track wrapper peels in _push_methodcall_inward' => 
     my @sub_counters = qw(
         _push_methodcall_inward.peel_return
         _push_methodcall_inward.peel_unwind
-        _push_methodcall_inward.peel_builtin
         _push_methodcall_inward.peel_postfixderef
         _push_methodcall_inward.no_wrappers
     );
@@ -102,7 +101,6 @@ subtest 'per-branch counters track wrapper peels in _push_deref_inward' => sub {
     my @sub_counters = qw(
         _push_deref_inward.peel_return
         _push_deref_inward.peel_unwind
-        _push_deref_inward.peel_builtin
         _push_deref_inward.peel_method
     );
 

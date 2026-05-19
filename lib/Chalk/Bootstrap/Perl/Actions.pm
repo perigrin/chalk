@@ -108,12 +108,10 @@ class Chalk::Bootstrap::Perl::Actions {
         _push_deref_inward
         _push_deref_inward.peel_return
         _push_deref_inward.peel_unwind
-        _push_deref_inward.peel_builtin
         _push_deref_inward.peel_method
         _push_methodcall_inward
         _push_methodcall_inward.peel_return
         _push_methodcall_inward.peel_unwind
-        _push_methodcall_inward.peel_builtin
         _push_methodcall_inward.peel_postfixderef
         _push_methodcall_inward.no_wrappers
         _fixup_stmts
@@ -288,12 +286,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @wrappers, ['Unwind', $current->inputs()->[0], $current->inputs()->[1]];
                 my $args = $current->inputs()->[1];
                 $current = $args->[-1];
-            } elsif (_is_unwrappable_builtin($current)) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_push_deref_inward.peel_builtin');
-                push @wrappers, ['BuiltinCall', $current->inputs()->[0], $current->inputs()->[1]];
-                my $args = $current->inputs()->[1];
-                $current = $args->[-1];
             } elsif ($current isa Chalk::IR::Node::Call && $current->dispatch_kind() eq 'method'
                     && _method_invocant_needs_peel($current)) {
                 Chalk::Bootstrap::Perl::Actions->_bump_fixup(
@@ -382,12 +374,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @wrappers, ['Unwind', $current->inputs()->[0], $current->inputs()->[1]];
                 my $die_args = $current->inputs()->[1];
                 $current = $die_args->[-1];
-            } elsif (_is_unwrappable_builtin($current)) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_push_methodcall_inward.peel_builtin');
-                push @wrappers, ['BuiltinCall', $current->inputs()->[0], $current->inputs()->[1]];
-                my $bi_args = $current->inputs()->[1];
-                $current = $bi_args->[-1];
             } elsif ($current isa Chalk::IR::Node::PostfixDeref) {
                 Chalk::Bootstrap::Perl::Actions->_bump_fixup(
                     '_push_methodcall_inward.peel_postfixderef');

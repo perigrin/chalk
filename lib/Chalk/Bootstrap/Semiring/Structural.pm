@@ -17,14 +17,15 @@ class Chalk::Bootstrap::Semiring::Structural {
     # Bit 6: is_binop    (64)  - item completed a BinaryExpression rule
     # Bit 7: is_vardecl  (128) - item completed a VariableDeclaration rule
     use constant {
-        STRUCT_IS_BLOCK   => 1,
-        STRUCT_IS_HASH    => 2,
-        STRUCT_IS_CALL    => 4,
-        STRUCT_IS_LIST    => 8,
-        STRUCT_IS_DEREF   => 16,
-        STRUCT_IS_METHOD  => 32,
-        STRUCT_IS_BINOP   => 64,
-        STRUCT_IS_VARDECL => 128,
+        STRUCT_IS_BLOCK    => 1,
+        STRUCT_IS_HASH     => 2,
+        STRUCT_IS_CALL     => 4,
+        STRUCT_IS_LIST     => 8,
+        STRUCT_IS_DEREF    => 16,
+        STRUCT_IS_METHOD   => 32,
+        STRUCT_IS_BINOP    => 64,
+        STRUCT_IS_VARDECL  => 128,
+        STRUCT_IS_BARECALL => 256,
     };
 
     # Constants are accessed via fully-qualified names
@@ -126,7 +127,13 @@ class Chalk::Bootstrap::Semiring::Structural {
         # not a function call. This allows add() to prefer CallExpression
         # (is_call) over PostfixDeref-on-CallExpression (is_deref, no is_call)
         # via the existing "prefer is_call over non-call" rule.
+        #
+        # Reject postfix on bare-form CallExpression: per perlop, `foo @args->@*`
+        # cannot deref the call's result without explicit parens around the call.
+        # The bare-form CallExpression has no injected `()` boundary, so the
+        # postfix has nothing to attach to.
         if ($rule_name eq 'PostfixDeref') {
+            return $ZERO if $value & STRUCT_IS_BARECALL;
             return STRUCT_IS_DEREF | ($value & STRUCT_IS_BLOCK);
         }
 
@@ -136,7 +143,9 @@ class Chalk::Bootstrap::Semiring::Structural {
         # Both are dereference operations. Tagging them allows add() to
         # prefer CallExpression (is_call, no is_deref) over
         # Subscript(CallExpression, ...) (is_call + is_deref).
+        # IS_BARECALL rejection same as PostfixDeref above.
         if ($rule_name eq 'Subscript') {
+            return $ZERO if $value & STRUCT_IS_BARECALL;
             return STRUCT_IS_DEREF
                 | ($value & STRUCT_IS_CALL)
                 | ($value & STRUCT_IS_BLOCK);
@@ -147,15 +156,25 @@ class Chalk::Bootstrap::Semiring::Structural {
         # prefer CallExpression-with-Block over CallExpression-with-Hash.
         # Clear is_deref/is_method: CallExpression is a direct function call,
         # deref/method tags from arguments should not leak outward.
+        #
+        # IS_BARECALL marks alts WITHOUT injected `()` boundary (bare-form
+        # list-op `foo ARGS`, `map BLOCK ARGS`, `map BLOCK`). Per perlop,
+        # postfix `->` after a bare-form call cannot bind without explicit
+        # parens around the call. Multiply rejects postfix-on-bare-call at
+        # MethodCall/Subscript/PostfixDeref completion below.
         if ($rule_name eq 'CallExpression') {
-            return STRUCT_IS_CALL | ($value & STRUCT_IS_BLOCK);
+            my $bare = ($alt_idx == 0) ? 0 : STRUCT_IS_BARECALL;
+            return STRUCT_IS_CALL | $bare | ($value & STRUCT_IS_BLOCK);
         }
 
         # Tag MethodCall completions with parens (alts 0, 2) — preferred over
         # bare method access (alts 1, 3) so args aren't lost as separate stmts.
         # All MethodCall alts get is_method so add() prefers CallExpression
         # over MethodCall when both compete at the same PostfixExpression position.
+        # IS_BARECALL rejection: per perlop, `foo @args->method()` cannot
+        # method-call the bare-form call's result without explicit parens.
         if ($rule_name eq 'MethodCall') {
+            return $ZERO if $value & STRUCT_IS_BARECALL;
             my $call_from_alt   = ($alt_idx == 0 || $alt_idx == 2) ? STRUCT_IS_CALL : 0;
             my $call_from_child = $value & STRUCT_IS_CALL;
             return STRUCT_IS_METHOD | $call_from_alt | $call_from_child;
@@ -243,7 +262,8 @@ class Chalk::Bootstrap::Semiring::Structural {
         # Other rules: pass through all tags from value
         return $value & (
             STRUCT_IS_BLOCK | STRUCT_IS_HASH | STRUCT_IS_CALL  | STRUCT_IS_LIST  |
-            STRUCT_IS_DEREF | STRUCT_IS_METHOD | STRUCT_IS_BINOP | STRUCT_IS_VARDECL
+            STRUCT_IS_DEREF | STRUCT_IS_METHOD | STRUCT_IS_BINOP | STRUCT_IS_VARDECL |
+            STRUCT_IS_BARECALL
         );
     }
 
