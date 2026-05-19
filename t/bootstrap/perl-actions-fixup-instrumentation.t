@@ -17,11 +17,11 @@ subtest 'fixup_counts() records each instrumented fixup name' => sub {
 
     Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fix_postfix_chain');
     Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fix_postfix_chain');
-    Chalk::Bootstrap::Perl::Actions->_bump_fixup('_push_deref_inward');
+    Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fixup_stmts');
 
     my $counts = Chalk::Bootstrap::Perl::Actions->fixup_counts();
     is($counts->{_fix_postfix_chain}, 2, '_fix_postfix_chain fired twice');
-    is($counts->{_push_deref_inward}, 1, '_push_deref_inward fired once');
+    is($counts->{_fixup_stmts}, 1, '_fixup_stmts fired once');
     ok(!exists $counts->{_fix_postfix_chain_deep}, 'unfired fixups not present');
 };
 
@@ -32,15 +32,13 @@ subtest 'reset_fixup_counts() clears all entries' => sub {
         'counts empty after reset');
 };
 
-subtest 'instrumented fixup names cover all five disambiguation fixups' => sub {
+subtest 'instrumented fixup names cover all active disambiguation fixups' => sub {
     # The known disambiguation fixups in Actions.pm. As filtering-stack work
     # retires each ambiguity class, the corresponding fixup gets deleted and
     # the entry should be removed from this list.
     my @expected = qw(
         _fix_postfix_chain
         _fix_postfix_chain_deep
-        _push_deref_inward
-        _push_methodcall_inward
         _fixup_stmts
     );
 
@@ -67,41 +65,6 @@ subtest 'per-branch counters distinguish merge classes in _fixup_stmts' => sub {
         _fixup_stmts.list_builtin_call
         _fixup_stmts.prefix_builtin_call
         _fixup_stmts.unwrap_pass_through
-    );
-
-    my %known = Chalk::Bootstrap::Perl::Actions->known_fixups()->%*;
-    for my $name (@sub_counters) {
-        ok($known{$name}, "per-branch counter $name is registered as known");
-    }
-};
-
-subtest 'per-branch counters track wrapper peels in _push_methodcall_inward' => sub {
-    # _push_methodcall_inward peels wrapper layers (Return/Unwind/BuiltinCall/
-    # PostfixDerefExpr) off a MethodCall's invocant. Each wrapper kind
-    # corresponds to a distinct filter-stack gap class. The .no_wrappers
-    # counter tracks calls where nothing was peeled — the helper became a
-    # pass-through that returned a plain MethodCallExpr unchanged.
-    my @sub_counters = qw(
-        _push_methodcall_inward.peel_return
-        _push_methodcall_inward.peel_unwind
-        _push_methodcall_inward.peel_postfixderef
-        _push_methodcall_inward.no_wrappers
-    );
-
-    my %known = Chalk::Bootstrap::Perl::Actions->known_fixups()->%*;
-    for my $name (@sub_counters) {
-        ok($known{$name}, "per-branch counter $name is registered as known");
-    }
-};
-
-subtest 'per-branch counters track wrapper peels in _push_deref_inward' => sub {
-    # _push_deref_inward peels wrapper layers off a PostfixDeref's target.
-    # Same per-wrapper-kind decomposition as _push_methodcall_inward, plus
-    # MethodCallExpr (which can wrap a deref target as well).
-    my @sub_counters = qw(
-        _push_deref_inward.peel_return
-        _push_deref_inward.peel_unwind
-        _push_deref_inward.peel_method
     );
 
     my %known = Chalk::Bootstrap::Perl::Actions->known_fixups()->%*;

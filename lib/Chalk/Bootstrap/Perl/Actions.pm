@@ -105,15 +105,6 @@ class Chalk::Bootstrap::Perl::Actions {
         _fix_postfix_chain.subscript_over_unary
         _fix_postfix_chain.subscript_over_binary
         _fix_postfix_chain_deep
-        _push_deref_inward
-        _push_deref_inward.peel_return
-        _push_deref_inward.peel_unwind
-        _push_deref_inward.peel_method
-        _push_methodcall_inward
-        _push_methodcall_inward.peel_return
-        _push_methodcall_inward.peel_unwind
-        _push_methodcall_inward.peel_postfixderef
-        _push_methodcall_inward.no_wrappers
         _fixup_stmts
         _fixup_stmts.return_with_value
         _fixup_stmts.return_bare
@@ -216,230 +207,6 @@ class Chalk::Bootstrap::Perl::Actions {
             $sa->update_scope($new_scope);
         }
         return $value;
-    }
-
-    # Helper: check if a BuiltinCall node should be unwrapped during push-inward
-    # by _push_methodcall_inward or _push_deref_inward.
-    #
-    # Returns false when the call is paren-form (e.g., `push(@arr, $x)`): the
-    # source-level parens bounded the call, so it's a complete expression
-    # whose result should be the method/deref invocant verbatim. Peeling it
-    # would produce wrong shape `Call(push, [@arr, MethodCall($x)])` instead
-    # of `MethodCall(Call(push, [@arr, $x]))`.
-    #
-    # Returns true for bare-form list/prefix builtins (e.g., `push @arr, $x`)
-    # only — these are the cases where filter-gap merge can produce
-    # `MethodCall(Call(push, [...]))` artifacts that the helper must rebuild.
-    # See docs/plans/2026-05-12-peel-builtin-investigation.md.
-    my sub _is_unwrappable_builtin($node) {
-        return false unless $node isa Chalk::IR::Node::Call && $node->dispatch_kind() eq 'builtin';
-        return false if $node->paren_form();
-        my $name = $node->inputs()->[0]->value();
-        return $PREFIX_BUILTINS{$name} || $LIST_BUILTINS{$name};
-    }
-
-    # Helper: check if a MethodCall's invocant is itself a peelable wrapper
-    # (i.e. the MethodCall genuinely WRAPS a prefix construct that the deref
-    # needs to push past). When the invocant is a plain expression like a
-    # variable or hash element, the MethodCall IS the legitimate target of
-    # ->@* — peeling it inverts source order (turning $obj->method()->@*
-    # into MethodCall(PostfixDeref($obj,@), method, [])). Without this guard,
-    # _push_deref_inward over-peels and the walker's method_over_deref branch
-    # has to undo the damage post-parse. See 2026-05-12 investigation.
-    my sub _method_invocant_needs_peel($node) {
-        my $invocant = $node->inputs()->[0];
-        return false unless defined $invocant;
-        return true if $invocant isa Chalk::IR::Node::Return;
-        return true if $invocant isa Chalk::IR::Node::Unwind;
-        return true if _is_unwrappable_builtin($invocant);
-        return false;
-    }
-
-    # Helper: push PostfixDerefExpr inward past prefix wrappers.
-    # Filter-gap merge can leave prefix constructs (return, scalar, die,
-    # list builtins) and method calls misparented inside PostfixDeref's
-    # target. Iteratively unwraps wrapper layers, creates the deref at the
-    # innermost target, then rewraps in correct order. (See the canonical
-    # filter-gap-merge explanation at _fix_postfix_chain below.)
-    #
-    # Handles these misparenting patterns:
-    #   PostfixDeref(Return(ctrl, X), @) → Return(ctrl, PostfixDeref(X, @))
-    #   PostfixDeref(BuiltinCall(scalar, [X]), @) → BuiltinCall(scalar, [PostfixDeref(X, @)])
-    #   PostfixDeref(MethodCall(BuiltinCall(push, [A, B]), m, []), @)
-    #     → BuiltinCall(push, [A, PostfixDeref(MethodCall(B, m, []), @)])
-    my sub _push_deref_inward($factory, $typed, $target, $sigil_node) {
-        Chalk::Bootstrap::Perl::Actions->_bump_fixup('_push_deref_inward');
-        # Collect wrappers to rewrap later
-        my @wrappers;
-        my $current = $target;
-        while (defined $current && $current isa Chalk::IR::Node) {
-            if ($current isa Chalk::IR::Node::Return) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_push_deref_inward.peel_return');
-                # Save the control token so it can be restored when re-wrapping.
-                push @wrappers, ['Return', $current->inputs()->[0]];
-                $current = $current->inputs()->[1];  # value is inputs[1]
-            } elsif ($current isa Chalk::IR::Node::Unwind) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_push_deref_inward.peel_unwind');
-                # Save control token so it can be restored when re-wrapping.
-                push @wrappers, ['Unwind', $current->inputs()->[0], $current->inputs()->[1]];
-                my $args = $current->inputs()->[1];
-                $current = $args->[-1];
-            } elsif ($current isa Chalk::IR::Node::Call && $current->dispatch_kind() eq 'method'
-                    && _method_invocant_needs_peel($current)) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_push_deref_inward.peel_method');
-                # MethodCall wrapping a prefix construct — peel it off.
-                # Guarded by _method_invocant_needs_peel so we only peel when
-                # the invocant itself is a peelable wrapper. Without the guard
-                # this branch fired on every MethodCall, including the case
-                # where MethodCall is the legitimate target of ->@* (e.g.
-                # $obj->method()->@*), inverting source order. The walker's
-                # method_over_deref branch had to undo that damage post-parse.
-                push @wrappers, ['MethodCallExpr', $current->inputs()->[1], $current->inputs()->[2]];
-                $current = $current->inputs()->[0];  # invocant
-            } else {
-                last;
-            }
-        }
-
-        # Create deref at the innermost target
-        my $result = $typed->make('PostfixDeref',
-            sigil        => (ref($sigil_node) ? $sigil_node->value() : $sigil_node),
-            inputs       => (ref($sigil_node) ? [$current, $sigil_node] : [$current]),
-            compat_class => 'PostfixDerefExpr',
-        );
-
-        # Rewrap layers from inside out
-        for my $wrapper (reverse @wrappers) {
-            if ($wrapper->[0] eq 'Return') {
-                # Restore the original control token saved during unwrap.
-                $result = $factory->make_cfg('Return',
-                    inputs => [$wrapper->[1], $result],
-                );
-            } elsif ($wrapper->[0] eq 'Unwind') {
-                # Restore the control token saved during unwrap.
-                my @args = ($wrapper->[2]->@*);
-                $args[-1] = $result;
-                $result = $factory->make_cfg('Unwind',
-                    inputs => [$wrapper->[1], \@args],
-                );
-            } elsif ($wrapper->[0] eq 'BuiltinCall') {
-                my @args = ($wrapper->[2]->@*);
-                $args[-1] = $result;
-                my $n = $wrapper->[1];
-                $result = $typed->make('Call',
-                    dispatch_kind => 'builtin',
-                    name          => $n->value(),
-                    inputs        => [$n, \@args],
-                    compat_class  => 'BuiltinCall',
-                );
-            } elsif ($wrapper->[0] eq 'MethodCallExpr') {
-                my $mn = $wrapper->[1];
-                $result = $typed->make('Call',
-                    dispatch_kind => 'method',
-                    name          => $mn->value(),
-                    inputs        => [$result, $mn, $wrapper->[2]],
-                    compat_class  => 'MethodCallExpr',
-                );
-            }
-        }
-
-        return $result;
-    }
-
-    # Helper: push MethodCallExpr inward past prefix wrappers.
-    # Same filter-gap merge class as PostfixDeref: a MethodCall can end up
-    # with a BuiltinCall or other prefix construct as its invocant when the
-    # correct structure should have the prefix wrapping the method call.
-    # (See the canonical filter-gap-merge explanation at _fix_postfix_chain.)
-    #   MethodCall(BuiltinCall(push, [A, B]), m, [])
-    #     → BuiltinCall(push, [A, MethodCall(B, m, [])])
-    my sub _push_methodcall_inward($factory, $typed, $invocant, $method_name, $args) {
-        Chalk::Bootstrap::Perl::Actions->_bump_fixup('_push_methodcall_inward');
-        my @wrappers;
-        my $current = $invocant;
-        while (defined $current && $current isa Chalk::IR::Node) {
-            if ($current isa Chalk::IR::Node::Return) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_push_methodcall_inward.peel_return');
-                # Save control token for re-wrapping later.
-                push @wrappers, ['Return', $current->inputs()->[0]];
-                $current = $current->inputs()->[1];  # value is inputs[1]
-            } elsif ($current isa Chalk::IR::Node::Unwind) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_push_methodcall_inward.peel_unwind');
-                # Save control token so it can be restored when re-wrapping.
-                push @wrappers, ['Unwind', $current->inputs()->[0], $current->inputs()->[1]];
-                my $die_args = $current->inputs()->[1];
-                $current = $die_args->[-1];
-            } elsif ($current isa Chalk::IR::Node::PostfixDeref) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_push_methodcall_inward.peel_postfixderef');
-                # PostfixDeref wrapping target — peel off and rewrap outside
-                push @wrappers, ['PostfixDerefExpr', $current->inputs()->[1]];
-                $current = $current->inputs()->[0];  # target
-            } else {
-                last;
-            }
-        }
-
-        # No wrappers found — return plain MethodCallExpr
-        unless (@wrappers) {
-            Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                '_push_methodcall_inward.no_wrappers');
-            return $typed->make('Call',
-                dispatch_kind => 'method',
-                name          => $method_name->value(),
-                inputs        => [$invocant, $method_name, $args],
-                compat_class  => 'MethodCallExpr',
-            );
-        }
-
-        # Create method call at the innermost invocant
-        my $result = $typed->make('Call',
-            dispatch_kind => 'method',
-            name          => $method_name->value(),
-            inputs        => [$current, $method_name, $args],
-            compat_class  => 'MethodCallExpr',
-        );
-
-        # Rewrap layers from inside out
-        for my $wrapper (reverse @wrappers) {
-            if ($wrapper->[0] eq 'Return') {
-                # Restore the original control token saved during unwrap.
-                $result = $factory->make_cfg('Return',
-                    inputs => [$wrapper->[1], $result],
-                );
-            } elsif ($wrapper->[0] eq 'Unwind') {
-                # Restore the control token saved during unwrap.
-                my @die_args = ($wrapper->[2]->@*);
-                $die_args[-1] = $result;
-                $result = $factory->make_cfg('Unwind',
-                    inputs => [$wrapper->[1], \@die_args],
-                );
-            } elsif ($wrapper->[0] eq 'BuiltinCall') {
-                my @bi_args = ($wrapper->[2]->@*);
-                $bi_args[-1] = $result;
-                my $n = $wrapper->[1];
-                $result = $typed->make('Call',
-                    dispatch_kind => 'builtin',
-                    name          => $n->value(),
-                    inputs        => [$n, \@bi_args],
-                    compat_class  => 'BuiltinCall',
-                );
-            } elsif ($wrapper->[0] eq 'PostfixDerefExpr') {
-                my $s = $wrapper->[1];
-                $result = $typed->make('PostfixDeref',
-                    sigil        => (ref($s) ? $s->value() : $s),
-                    inputs       => (ref($s) ? [$result, $s] : [$result]),
-                    compat_class => 'PostfixDerefExpr',
-                );
-            }
-        }
-
-        return $result;
     }
 
     # Helpers for unwrapping Return/Unwind trapped inside expression nodes
@@ -2078,11 +1845,9 @@ class Chalk::Bootstrap::Perl::Actions {
             # Alt 0 is `QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/`:
             # the identifier is immediately followed by `(` (with optional
             # whitespace). Alts 1-3 are bare forms (no immediate paren).
-            # This provenance is used by _push_methodcall_inward and
-            # _push_deref_inward to distinguish paren-form chains (which
-            # should not have their builtin invocant peeled) from
-            # filter-gap-merge artifacts (which should). See
-            # docs/plans/2026-05-12-peel-builtin-investigation.md.
+            # paren_form is recorded on the Call node so consumers can
+            # distinguish bounded calls (should not unwrap) from bare-form
+            # calls that may participate in postfix-chain stitching.
             my $text = $ctx->scanned_text() // '';
             my $is_paren_form = $text =~ /^\s*[\w:]+\s*\(/ ? true : false;
             return $typed->make('Call',
@@ -2560,10 +2325,11 @@ class Chalk::Bootstrap::Perl::Actions {
         my $result = $base;
         for my $op (@postfix_ops) {
             if ($op isa Chalk::IR::Node::Call && $op->dispatch_kind() eq 'method') {
-                # Set invocant to current result, pushing inward
-                # past any prefix wrappers from filter-gap merge
-                $result = _push_methodcall_inward(
-                    $factory, $typed, $result, $op->inputs()->[1], $op->inputs()->[2],
+                $result = $typed->make('Call',
+                    dispatch_kind => 'method',
+                    name          => $op->inputs()->[1]->value(),
+                    inputs        => [$result, $op->inputs()->[1], $op->inputs()->[2]],
+                    compat_class  => 'MethodCallExpr',
                 );
             } elsif ($op isa Chalk::IR::Node::Subscript) {
                 # Push subscript inside exists/delete BuiltinCall so the
@@ -2643,9 +2409,12 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return undef unless defined $method_name;
 
-        # Push MethodCall inward past prefix wrappers when filter-gap merge
-        # has admitted a BuiltinCall as the invocant.
-        return _push_methodcall_inward($factory, $typed, $invocant, $method_name, \@args);
+        return $typed->make('Call',
+            dispatch_kind => 'method',
+            name          => $method_name->value(),
+            inputs        => [$invocant, $method_name, \@args],
+            compat_class  => 'MethodCallExpr',
+        );
     }
 
     # §16 Subscript ::= Expression _ /->/ _ /\[/ _ Expression _ /\]/
@@ -2721,17 +2490,11 @@ class Chalk::Bootstrap::Perl::Actions {
 
         my $sigil_node = _make_const($factory, $sigil // '@');
 
-        # When filter-gap merge admits both derivations, prefix constructs
-        # (return, scalar, etc.) can end up as the target of PostfixDeref
-        # instead of wrapping it. Recursively push the deref inward past
-        # prefix wrappers until it reaches the actual target:
-        #   PostfixDeref(Return(ctrl, X), @)
-        #     → Return(ctrl, PostfixDeref(X, @))
-        #   PostfixDeref(BuiltinCall(scalar, [X]), @)
-        #     → BuiltinCall(scalar, [PostfixDeref(X, @)])
-        #   PostfixDeref(Return(ctrl, BuiltinCall(scalar, [X])), @)
-        #     → Return(ctrl, BuiltinCall(scalar, [PostfixDeref(X, @)]))
-        return _push_deref_inward($factory, $typed, $target, $sigil_node);
+        return $typed->make('PostfixDeref',
+            sigil        => $sigil_node->value(),
+            inputs       => [$target, $sigil_node],
+            compat_class => 'PostfixDerefExpr',
+        );
     }
 
     # §16 PostfixIncDec ::= Expression _ /\+\+/ | Expression _ /--/
