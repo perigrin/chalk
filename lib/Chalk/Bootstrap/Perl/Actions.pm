@@ -99,12 +99,6 @@ class Chalk::Bootstrap::Perl::Actions {
     # corpus parsed in this process.
     my %_fixup_counts;
     my %_known_fixups = map { $_ => 1 } qw(
-        _fix_postfix_chain
-        _fix_postfix_chain.method_over_deref
-        _fix_postfix_chain.subscript_over_builtin
-        _fix_postfix_chain.subscript_over_unary
-        _fix_postfix_chain.subscript_over_binary
-        _fix_postfix_chain_deep
         _fixup_stmts
         _fixup_stmts.return_with_value
         _fixup_stmts.return_bare
@@ -210,8 +204,7 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # Helpers for unwrapping Return/Unwind trapped inside expression nodes
-    # by filter-gap merge. Declared here so they are visible to both
-    # _fix_postfix_chain and $_unwrap_stmt_from_expr.
+    # by filter-gap merge. Used by $_unwrap_stmt_from_expr.
     my sub _stmt_inner($node) {
         if ($node isa Chalk::IR::Node::Return) {
             return ($node->inputs()->[1], $node->inputs()->[0]);  # value, control
@@ -235,299 +228,6 @@ class Chalk::Bootstrap::Perl::Actions {
         my $args = ref($new_inner) eq 'ARRAY' ? $new_inner : [$new_inner];
         return $factory->make_cfg('Unwind', inputs => [$ctrl, $args]);
     }
-
-    # Post-process: rewrite IR shapes produced by filter-gap merge.
-    #
-    # ## Filter-gap merge (canonical explanation)
-    #
-    # When the filter stack (Boolean → Precedence → TypeInference →
-    # Structural) admits two derivations of the same span, Earley's add()
-    # returns both as survivors — neither was eliminated because no semiring
-    # expressed a preference. FilterComposite currently picks one via a
-    # deterministic tie-break (a separate bug — composition shouldn't have
-    # an opinion), and the chosen derivation's IR can embed child references
-    # from the other survivor because the merge happens at the chart level
-    # after both have constructed values.
-    #
-    # This walker is a second parse over a partial CST: it pattern-matches
-    # known-bad IR shapes and rewrites them using hard-coded structural
-    # rules. It cannot consult the source text and cannot intuit programmer
-    # intent — it can only encode "if the IR has shape X, the parser
-    # almost-certainly meant shape Y for ambiguity class Z." That this
-    # walker exists at all is a layering violation: parsing belongs to the
-    # parser, not to a post-pass. Each fire is evidence of a filter-stack
-    # gap that should be closed upstream so this walker can be deleted.
-    #
-    # The four branches below correspond to specific gap classes; per the
-    # 2026-05-10 analysis, three of them (subscript-over-builtin,
-    # subscript-over-unary, subscript-over-binary) are precedence inversions
-    # that belong in the Precedence semiring. The fourth (MethodCall over
-    # PostfixDeref) acts on a syntactically-admitted but semantically
-    # invalid shape (method call on a list) — it should be rejected at
-    # parse, not rewritten. See docs/plans/2026-05-09-fixup-audit-baseline.md
-    # for the retirement framing and per-fixup metrics.
-    sub _fix_postfix_chain {
-        my ($factory, $typed, $node) = @_;
-        return $node unless defined $node;
-        return $node unless $node isa Chalk::IR::Node;
-        Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fix_postfix_chain');
-
-        # Recursively fix inputs first (bottom-up)
-        my @new_inputs;
-        my $changed = false;
-        for my $inp ($node->inputs()->@*) {
-            if (ref($inp) eq 'ARRAY') {
-                my @fixed;
-                for my $elem ($inp->@*) {
-                    my $f = _fix_postfix_chain($factory, $typed, $elem);
-                    push @fixed, $f;
-                    $changed = true if !defined $f || !defined $elem || $f != $elem;
-                }
-                push @new_inputs, \@fixed;
-            } else {
-                my $f = _fix_postfix_chain($factory, $typed, $inp);
-                push @new_inputs, $f;
-                $changed = true if !defined $f || !defined $inp
-                    || (ref($f) && ref($inp) && $f != $inp);
-            }
-        }
-
-        if ($changed) {
-            # Rebuild the node with fixed inputs
-            if ($node->class() eq 'MethodCallExpr') {
-                $node = $typed->make('Call',
-                    dispatch_kind => 'method',
-                    name          => $new_inputs[1]->value(),
-                    inputs        => [$new_inputs[0], $new_inputs[1], $new_inputs[2]],
-                    compat_class  => 'MethodCallExpr',
-                );
-            } elsif ($node->class() eq 'PostfixDerefExpr') {
-                my $sigil = $new_inputs[1];
-                $node = $typed->make('PostfixDeref',
-                    sigil        => (ref($sigil) ? $sigil->value() : $sigil),
-                    inputs       => (ref($sigil) ? [$new_inputs[0], $sigil] : [$new_inputs[0]]),
-                    compat_class => 'PostfixDerefExpr',
-                );
-            } elsif ($node->class() eq 'BuiltinCall') {
-                $node = $typed->make('Call',
-                    dispatch_kind => 'builtin',
-                    name          => $new_inputs[0]->value(),
-                    inputs        => [$new_inputs[0], $new_inputs[1]],
-                    compat_class  => 'BuiltinCall',
-                );
-            } elsif ($node->class() eq 'SubscriptExpr') {
-                $node = $typed->make('Subscript',
-                    inputs       => [$new_inputs[0], $new_inputs[1], $new_inputs[2]],
-                    compat_class => 'SubscriptExpr',
-                );
-            }
-            # Other classes: leave unchanged (inputs are positional anyway)
-        }
-
-        # Fix the actual misparenting:
-        # MethodCallExpr(PostfixDerefExpr(X, S), M, A)
-        #   → PostfixDerefExpr(MethodCallExpr(X, M, A), S)
-        if ($node->class() eq 'MethodCallExpr') {
-            my $invocant = $node->inputs()->[0];
-            if (defined $invocant
-                    && $invocant isa Chalk::IR::Node::PostfixDeref) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fix_postfix_chain.method_over_deref');
-                my $inner_target = $invocant->inputs()->[0];
-                my $sigil = $invocant->inputs()->[1];
-                my $new_method = $typed->make('Call',
-                    dispatch_kind => 'method',
-                    name          => $node->inputs()->[1]->value(),
-                    inputs        => [$inner_target, $node->inputs()->[1], $node->inputs()->[2]],
-                    compat_class  => 'MethodCallExpr',
-                );
-                return $typed->make('PostfixDeref',
-                    sigil        => (ref($sigil) ? $sigil->value() : $sigil),
-                    inputs       => (ref($sigil) ? [$new_method, $sigil] : [$new_method]),
-                    compat_class => 'PostfixDerefExpr',
-                );
-            }
-        }
-
-        # Fix prefix builtin subscript chain misparenting (precedence-inversion
-        # filter-gap class — Precedence semiring should disambiguate this):
-        # SubscriptExpr(BuiltinCall(defined/exists/ref/etc, [$var]), $key, style)
-        #   → BuiltinCall(defined/exists/ref/etc, [SubscriptExpr($var, $key, style)])
-        # Also handles Return/Unwind wrapper from filter-gap merge:
-        # SubscriptExpr(Return(ctrl, BuiltinCall(..., [$var])), $key, style)
-        #   → Return(ctrl, BuiltinCall(..., [SubscriptExpr($var, $key, style)]))
-        if ($node->class() eq 'SubscriptExpr') {
-            my $target = $node->inputs()->[0];
-            my $builtin_call;
-            my $stmt_wrapper;  # Return or Unwind node if wrapped, undef if direct
-
-            if (defined $target
-                    && (($target isa Chalk::IR::Node::Call
-                            && $target->dispatch_kind() eq 'builtin')
-                        || _is_stmt_node($target))) {
-                if ($target isa Chalk::IR::Node::Call
-                        && $target->dispatch_kind() eq 'builtin') {
-                    $builtin_call = $target;
-                } elsif (_is_stmt_node($target)) {
-                    my ($inner_val) = _stmt_inner($target);
-                    if (defined $inner_val
-                            && $inner_val isa Chalk::IR::Node::Call
-                            && $inner_val->dispatch_kind() eq 'builtin') {
-                        $builtin_call = $inner_val;
-                        $stmt_wrapper = $target;
-                    }
-                }
-            }
-
-            if (defined $builtin_call) {
-                my $bname = $builtin_call->inputs()->[0]->value();
-                if ($PREFIX_BUILTINS{$bname}) {
-                    Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                        '_fix_postfix_chain.subscript_over_builtin');
-                    my @args = $builtin_call->inputs()->[1]->@*;
-                    my $inner_target = $args[-1];
-                    $args[-1] = $typed->make('Subscript',
-                        inputs       => [$inner_target, $node->inputs()->[1], $node->inputs()->[2]],
-                        compat_class => 'SubscriptExpr',
-                    );
-                    my $new_builtin = $typed->make('Call',
-                        dispatch_kind => 'builtin',
-                        name          => $builtin_call->inputs()->[0]->value(),
-                        inputs        => [$builtin_call->inputs()->[0], \@args],
-                        compat_class  => 'BuiltinCall',
-                    );
-                    if (defined $stmt_wrapper) {
-                        return _rewrap_stmt($factory, $stmt_wrapper, $new_builtin);
-                    }
-                    return $new_builtin;
-                }
-            }
-
-            # Fix subscript chain wrapping UnaryExpr (precedence-inversion
-            # filter-gap class — Precedence semiring should disambiguate this):
-            # SubscriptExpr(UnaryExpr(op, X), $key, style)
-            # → UnaryExpr(op, SubscriptExpr(X, $key, style))
-            # The subscript belongs on the operand, not wrapping the negation.
-            if (defined $target
-                    && $target isa Chalk::IR::Node::UnaryOp) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fix_postfix_chain.subscript_over_unary');
-                my $operand = $target->inputs()->[1];
-                my $new_operand = $typed->make('Subscript',
-                    inputs       => [$operand, $node->inputs()->[1], $node->inputs()->[2]],
-                    compat_class => 'SubscriptExpr',
-                );
-                # Re-run fix to push deeper if needed
-                $new_operand = _fix_postfix_chain($factory, $typed, $new_operand);
-                my $unop_type = ref($target) =~ s/^Chalk::IR::Node:://r;
-                return $typed->make($unop_type,
-                    inputs       => [$target->inputs()->[0], $new_operand],
-                    operand      => $new_operand,
-                    compat_class => 'UnaryExpr',
-                );
-            }
-
-            # Fix subscript chain wrapping BinaryExpr (precedence-inversion
-            # filter-gap class — Precedence semiring should disambiguate this):
-            # SubscriptExpr(BinaryExpr(op, L, R), $key, style)
-            # → BinaryExpr(op, L, SubscriptExpr(R, $key, style))
-            # The subscript belongs on the right operand. Handles both logical
-            # (||, &&) and comparison (<, >, etc.) ops since SubscriptExpr
-            # wrapping any BinaryExpr is always a precedence inversion.
-            if (defined $target
-                    && $target isa Chalk::IR::Node::BinOp) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fix_postfix_chain.subscript_over_binary');
-                my $right = $target->inputs()->[2];
-                my $new_right = $typed->make('Subscript',
-                    inputs       => [$right, $node->inputs()->[1], $node->inputs()->[2]],
-                    compat_class => 'SubscriptExpr',
-                );
-                # Re-run fix on the new SubscriptExpr to push deeper if needed
-                $new_right = _fix_postfix_chain($factory, $typed, $new_right);
-                my $binop_type = ref($target) =~ s/^Chalk::IR::Node:://r;
-                return $typed->make($binop_type,
-                    inputs       => [$target->inputs()->[0], $target->inputs()->[1], $new_right],
-                    left         => $target->inputs()->[1],
-                    right        => $new_right,
-                    compat_class => 'BinaryExpr',
-                );
-            }
-        }
-
-        return $node;
-    }
-
-    # Recursively apply _fix_postfix_chain to all nodes in a tree.
-    # Unlike _fix_postfix_chain (which only transforms the top node),
-    # this walks into BinaryExpr/UnaryExpr/BuiltinCall children so that
-    # inner SubscriptExpr corruption gets fixed too.
-    my $_fix_postfix_chain_deep;
-    $_fix_postfix_chain_deep = sub($f, $t, $node) {
-        return $node unless defined $node;
-        return $node unless $node isa Chalk::IR::Node;
-        Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fix_postfix_chain_deep');
-
-        # First, apply the top-level fix
-        my $fixed = _fix_postfix_chain($f, $t, $node);
-
-        # If the top-level fix changed the node, recurse on the result
-        return $_fix_postfix_chain_deep->($f, $t, $fixed)
-            if refaddr($fixed) != refaddr($node);
-
-        # Otherwise, recurse into children
-        my $class = $node->class();
-        if ($class eq 'BinaryExpr') {
-            my $orig_left  = $node->inputs()->[1];
-            my $orig_right = $node->inputs()->[2];
-            my $left  = $_fix_postfix_chain_deep->($f, $t, $orig_left);
-            my $right = $_fix_postfix_chain_deep->($f, $t, $orig_right);
-            if ((defined $left && defined $orig_left && refaddr($left) != refaddr($orig_left))
-                || (defined $right && defined $orig_right && refaddr($right) != refaddr($orig_right))) {
-                my $op_str = $node->inputs()->[0]->value();
-                my $binop_type = $BINOP_MAP{$op_str} // die "Unknown binary op: $op_str";
-                return $t->make($binop_type,
-                    inputs       => [$node->inputs()->[0], $left, $right],
-                    left         => $left,
-                    right        => $right,
-                    compat_class => 'BinaryExpr',
-                );
-            }
-        } elsif ($class eq 'UnaryExpr') {
-            my $operand = $_fix_postfix_chain_deep->($f, $t, $node->inputs()->[1]);
-            if (refaddr($operand) != refaddr($node->inputs()->[1])) {
-                my $uop_str = $node->inputs()->[0]->value();
-                my $unop_type = $UNOP_MAP{$uop_str} // die "Unknown unary op: $uop_str";
-                return $t->make($unop_type,
-                    inputs       => [$node->inputs()->[0], $operand],
-                    operand      => $operand,
-                    compat_class => 'UnaryExpr',
-                );
-            }
-        } elsif ($class eq 'BuiltinCall') {
-            my @args = $node->inputs()->[1]->@*;
-            my $changed = false;
-            for my $i (0 .. $#args) {
-                my $fixed_arg = $_fix_postfix_chain_deep->($f, $t, $args[$i]);
-                if (refaddr($fixed_arg) != refaddr($args[$i])) {
-                    $args[$i] = $fixed_arg;
-                    $changed = true;
-                }
-            }
-            if ($changed) {
-                return $t->make('Call',
-                    dispatch_kind => 'builtin',
-                    name          => $node->inputs()->[0]->value(),
-                    inputs        => [$node->inputs()->[0], \@args],
-                    compat_class  => 'BuiltinCall',
-                );
-            }
-        }
-
-        return $node;
-    };
-
-    # (helpers moved before _fix_postfix_chain for lexical visibility)
 
     my $_unwrap_stmt_from_expr;
     $_unwrap_stmt_from_expr = sub ($factory, $typed, $node) {
@@ -847,15 +547,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val;
             }
         }
-        # Fix misparented postfix chains (filter-gap merge — see
-        # _fix_postfix_chain canonical comment for full explanation).
-        # Only IR nodes (with inputs()) need this — metadata structs skip it.
-        @stmts = map {
-            ($_ isa Chalk::IR::Node)
-                ? _fix_postfix_chain($factory, $typed, $_)
-                : $_
-        } @stmts;
-
         # Partition statements into Program metadata categories
         my @use_decls;
         my @classes;
@@ -925,13 +616,7 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
         my $fixed = _fixup_stmts($factory, $typed, \@stmts);
-        # Fix misparented postfix chains (filter-gap merge — see
-        # _fix_postfix_chain canonical comment).
-        return [ map {
-            (ref($_) eq 'HASH' && exists $_->{__adjust_body})
-                ? $_
-                : _fix_postfix_chain($factory, $typed, $_)
-        } $fixed->@* ];
+        return $fixed;
     }
 
     # §2 StatementItem — collect all IR values for fixup in StatementList/Block.
@@ -1361,10 +1046,6 @@ class Chalk::Bootstrap::Perl::Actions {
             $return_type = 'Void';
         }
 
-        # Fix filter-gap merge artifacts in method body (return/die inside
-        # expression wrappers, prefix builtin subscript chains, etc.)
-        # Use _deep variant to reach nested expressions (e.g., if-conditions).
-        @body = map { $_fix_postfix_chain_deep->($factory, $typed, $_) } @body;
         my $fixed_body = _fixup_stmts($factory, $typed, \@body);
 
         my $method_name_val = defined $method_name ? $method_name->value() : '<unknown>';
@@ -1463,8 +1144,6 @@ class Chalk::Bootstrap::Perl::Actions {
         # If we couldn't find the sub name, skip this node
         return unless defined $sub_name;
 
-        # Fix filter-gap merge artifacts in sub body
-        @body = map { $_fix_postfix_chain_deep->($factory, $typed, $_) } @body;
         my $fixed_body = _fixup_stmts($factory, $typed, \@body);
 
         my $sub_name_val = $sub_name->value();
@@ -1987,13 +1666,7 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
         my $fixed = _fixup_stmts($factory, $typed, \@stmts);
-        # Fix misparented postfix chains (filter-gap merge — see
-        # _fix_postfix_chain canonical comment).
-        return [ map {
-            (ref($_) eq 'HASH' && exists $_->{__adjust_body})
-                ? $_
-                : _fix_postfix_chain($factory, $typed, $_)
-        } $fixed->@* ];
+        return $fixed;
     }
 
     # §18 Variable — resolve from scope if available, else Constant
@@ -2697,15 +2370,6 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # Fix filter-gap merge artifacts in condition:
-        # _fix_postfix_chain_deep recursively pushes SubscriptExpr wrappers
-        # into the correct positions (BuiltinCall args, BinaryExpr right
-        # operands, UnaryExpr operands). Since If nodes are not Constructors,
-        # _fix_postfix_chain won't reach the condition from _fixup_stmts.
-        if (defined $condition) {
-            $condition = $_fix_postfix_chain_deep->($factory, $typed, $condition);
-        }
-
         return undef unless defined $keyword;
 
         # Build CFG nodes for loop-type modifiers (for/foreach/while/until)
@@ -3106,12 +2770,6 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return undef unless defined $iterator;
-
-        # Fix postfix deref chains in the list expression (e.g.,
-        # $tree->ops()->@* parsed as $tree->@*->ops() due to Earley merge)
-        if (defined $list && $list isa Chalk::IR::Node) {
-            $list = _fix_postfix_chain($factory, $typed, $list);
-        }
 
         $body = _fixup_stmts($factory, $typed, $body // []);
 
