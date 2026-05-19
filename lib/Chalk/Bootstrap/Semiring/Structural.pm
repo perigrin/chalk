@@ -258,17 +258,24 @@ class Chalk::Bootstrap::Semiring::Structural {
         my $right_call = $right & STRUCT_IS_CALL;
 
         # Both valid: prefer non-list over list (Expression vs ExpressionList).
-        # GATED on NOT both being is_call: when both sides are calls, the
-        # IS_LIST distinction is about which derivation wraps which (list-form
-        # Call holding a method-arg vs method-call wrapping a list-form Call),
-        # and per perlop `,` (L21) binds looser than `->` (L2), so the
-        # list-form Call (holding the method-arg) is the perlop-correct shape
-        # and must reach the IS_METHOD-prefer-non-method check below. The
-        # original non-list-over-list rule was for Expression-vs-ExpressionList
-        # in non-call contexts, which this gate preserves.
-        my $left_list  = $left  & STRUCT_IS_LIST;
-        my $right_list = $right & STRUCT_IS_LIST;
-        if (!($left_call && $right_call)) {
+        # Ranks ExpressionStatement alt-1 (ExpressionList) BELOW alt-0
+        # (single Expression, even if that Expression is itself a CallExpression
+        # with comma-separated args). The bare-list-statement form
+        # `@a, @b;` remains supported as the fallback when alt-0 doesn't match.
+        #
+        # SKIPPED only when both sides have IS_METHOD-vs-IS_LIST competition
+        # (one is_call has IS_METHOD, the other is_call has IS_LIST without
+        # IS_METHOD): per perlop `,` (L21) binds looser than `->` (L2), so
+        # the IS_LIST side is perlop-correct there and the IS_METHOD-prefer-
+        # non-method rule below must fire instead.
+        my $left_list   = $left  & STRUCT_IS_LIST;
+        my $right_list  = $right & STRUCT_IS_LIST;
+        my $left_method = $left  & STRUCT_IS_METHOD;
+        my $right_method = $right & STRUCT_IS_METHOD;
+        my $is_method_vs_list_competition = $left_call && $right_call
+            && (($left_method && $right_list && !$left_list)
+                || ($right_method && $left_list && !$right_list));
+        if (!$is_method_vs_list_competition) {
             if ($left_list && !$right_list) {
                 return $right;
             }
@@ -310,8 +317,6 @@ class Chalk::Bootstrap::Semiring::Structural {
         # tie-break (keep left) is the safe default: the IS_LIST-over-IS_METHOD
         # perlop priority is enforced by the walker (_push_methodcall_inward.peel_builtin)
         # in Perl/Actions.pm rather than at the structural disambiguation level.
-        my $left_method  = $left  & STRUCT_IS_METHOD;
-        my $right_method = $right & STRUCT_IS_METHOD;
         if ($left_call && $right_call) {
             if ($right_method && !$left_method) {
                 return $left;
