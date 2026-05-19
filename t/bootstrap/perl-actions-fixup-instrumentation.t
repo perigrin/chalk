@@ -44,29 +44,4 @@ subtest 'instrumented fixup names cover all active disambiguation fixups' => sub
     }
 };
 
-subtest 'per-branch counters distinguish merge classes in _fixup_stmts' => sub {
-    # _fixup_stmts dispatches on ten distinct merge patterns. The aggregate
-    # counter tells us how often the function ran; the per-branch counters
-    # tell us which split-token reconstitution patterns drive volume. As
-    # filtering work eliminates each ambiguity class (e.g., grammar fix so
-    # `return EXPR` is never split into Constant('return') + EXPR), the
-    # corresponding sub-counter drops and the branch can be deleted.
-    my @sub_counters = qw(
-        _fixup_stmts.return_with_value
-        _fixup_stmts.return_bare
-        _fixup_stmts.die_with_arg
-        _fixup_stmts.use_with_args
-        _fixup_stmts.assign_init_to_vardecl
-        _fixup_stmts.binop_into_list_builtin
-        _fixup_stmts.list_builtin_call
-        _fixup_stmts.prefix_builtin_call
-        _fixup_stmts.unwrap_pass_through
-    );
-
-    my %known = Chalk::Bootstrap::Perl::Actions->known_fixups()->%*;
-    for my $name (@sub_counters) {
-        ok($known{$name}, "per-branch counter $name is registered as known");
-    }
-};
-
 done_testing;

@@ -25,12 +25,10 @@ use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Program;
 
-# Builtin keyword sets used by _fixup_stmts for statement merging
+# Builtin keyword sets used by StatementItem and _unwrap_stmt_from_expr
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
 my %PREFIX_BUILTINS = map { $_ => 1 } qw(scalar defined ref exists delete keys values each length chr ord substr sprintf join split);
 my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl SubDecl VarDecl);
-my %STMT_BOUNDARY_OPS = map { $_ => 1 } qw(If Loop Return Unwind);
-my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless while until);
 
 # Operator-to-typed-node translation tables used by _unwrap_stmt_from_expr
 my %BINOP_MAP = (
@@ -100,15 +98,6 @@ class Chalk::Bootstrap::Perl::Actions {
     my %_fixup_counts;
     my %_known_fixups = map { $_ => 1 } qw(
         _fixup_stmts
-        _fixup_stmts.return_with_value
-        _fixup_stmts.return_bare
-        _fixup_stmts.die_with_arg
-        _fixup_stmts.use_with_args
-        _fixup_stmts.assign_init_to_vardecl
-        _fixup_stmts.binop_into_list_builtin
-        _fixup_stmts.list_builtin_call
-        _fixup_stmts.prefix_builtin_call
-        _fixup_stmts.unwrap_pass_through
     );
 
     sub _bump_fixup($class, $name) {
@@ -321,209 +310,19 @@ class Chalk::Bootstrap::Perl::Actions {
         return $node;
     };
 
-    # Post-process statement list to fix grammar ambiguity artifacts.
-    # The ambiguous grammar sometimes parses compound statements as
-    # separate items. These fixups merge them back together:
-    # - `return 'Start'` → Return(ctrl, Constant('Start'))
-    # - `die "message"` → Unwind(ctrl, Constant('message'))
-    # - `use Foo 'bar'` (split) → UseDecl(Foo, ['bar'])
+    # Post-process statement list: pass each item through $_unwrap_stmt_from_expr
+    # to lift Return/Unwind CFG nodes trapped inside expression wrapper nodes.
+    # ADJUST markers are passed through unchanged.
     my sub _fixup_stmts($factory, $typed, $stmts) {
         Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fixup_stmts');
         my @result;
-        my $i = 0;
-        while ($i <= $#$stmts) {
-            my $item = $stmts->[$i];
+        for my $item (@$stmts) {
             # Pass through ADJUST markers without merging
             if (ref($item) eq 'HASH' && exists $item->{__adjust_body}) {
                 push @result, $item;
-                $i++;
                 next;
             }
-            if ($item isa Chalk::IR::Node::Constant
-                    && defined $item->value()
-                    && $item->value() eq 'return'
-                    && $i + 1 <= $#$stmts) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fixup_stmts.return_with_value');
-                # Merge return + value into a Return CFG node.
-                # No cfg_state is available here (fixup runs post-parse),
-                # so a fresh Start node serves as the control token.
-                $i++;
-                my $value = $stmts->[$i];
-                push @result, $factory->make_cfg('Return',
-                    inputs => [$factory->make('Start'), $value],
-                );
-            } elsif ($item isa Chalk::IR::Node::Constant
-                    && defined $item->value()
-                    && $item->value() eq 'return') {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fixup_stmts.return_bare');
-                # Bare return; with no following value — emit Return CFG node.
-                push @result, $factory->make_cfg('Return',
-                    inputs => [$factory->make('Start'), _make_const($factory, 'undef')],
-                );
-            } elsif ($item isa Chalk::IR::Node::Constant
-                    && defined $item->value()
-                    && $item->value() eq 'die'
-                    && $i + 1 <= $#$stmts) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fixup_stmts.die_with_arg');
-                # Merge die + single argument into an Unwind CFG node.
-                # No cfg_state is available here (fixup runs post-parse),
-                # so a fresh Start node serves as the control token.
-                # Consumes only one following node to avoid absorbing
-                # unrelated statements in multi-statement bodies.
-                # inputs->[1] is an arrayref of exception args.
-                $i++;
-                push @result, $factory->make_cfg('Unwind',
-                    inputs => [$factory->make('Start'), [$stmts->[$i]]],
-                );
-            } elsif ($item isa Chalk::IR::UseInfo
-                    && !scalar($item->args()->@*)
-                    && $i + 1 <= $#$stmts
-                    && $stmts->[$i + 1] isa Chalk::IR::Node::Constant) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fixup_stmts.use_with_args');
-                # Merge UseInfo(module, []) + bare Constant into
-                # UseInfo(module, [Constant]). Grammar ambiguity sometimes
-                # splits `use Foo 'bar'` into separate statements.
-                my @import_args;
-                while ($i + 1 <= $#$stmts
-                        && $stmts->[$i + 1] isa Chalk::IR::Node::Constant
-                        && !($stmts->[$i + 1]->value() =~ /^[a-zA-Z_]/
-                             && $i + 2 <= $#$stmts)) {
-                    $i++;
-                    push @import_args, $stmts->[$i];
-                }
-                if (@import_args) {
-                    push @result, Chalk::IR::UseInfo->new(
-                        name => $item->name(),
-                        args => \@import_args,
-                    );
-                } else {
-                    push @result, $item;
-                }
-            } elsif ($item isa Chalk::IR::Node::BinOp
-                    && $item->inputs()->[0]->value() eq '='
-                    && $item->inputs()->[1] isa Chalk::IR::Node::VarDecl
-                    && !defined $item->inputs()->[1]->inputs()->[1]) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fixup_stmts.assign_init_to_vardecl');
-                # Merge BinaryExpr(=, VarDecl(var, undef), expr) → VarDecl(var, expr)
-                my $var_decl = $item->inputs()->[1];
-                push @result, $typed->make('VarDecl',
-                    inputs      => [$var_decl->inputs()->[0], $item->inputs()->[2]],
-                    compat_class => 'VarDecl',
-                );
-            } elsif ($item isa Chalk::IR::Node::BinOp
-                    && $item->inputs()->[1] isa Chalk::IR::Node::Call
-                    && $item->inputs()->[1]->dispatch_kind() eq 'builtin'
-                    && $LIST_BUILTINS{$item->inputs()->[1]->inputs()->[0]->value()}) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fixup_stmts.binop_into_list_builtin');
-                # Restructure BinaryExpr(op, BuiltinCall(name, [..., last]), right)
-                # into BuiltinCall(name, [..., BinaryExpr(op, last, right)])
-                # Fixes grammar ambiguity where `push @arr, EXPR . EXPR` is
-                # parsed as BinaryExpr(".", push(@arr, EXPR), EXPR) instead of
-                # push(@arr, BinaryExpr(".", EXPR, EXPR))
-                my $binop = $item->inputs()->[0];
-                my $builtin = $item->inputs()->[1];
-                my $right = $item->inputs()->[2];
-                my $name = $builtin->inputs()->[0];
-                my @args = $builtin->inputs()->[1]->@*;
-                my $last_arg = pop @args;
-                my $op_str = $binop->value();
-                my $binop_type = $BINOP_MAP{$op_str} // die "Unknown binary op: $op_str";
-                my $new_last = $typed->make($binop_type,
-                    inputs       => [$binop, $last_arg, $right],
-                    left         => $last_arg,
-                    right        => $right,
-                    compat_class => 'BinaryExpr',
-                );
-                push @args, $new_last;
-                push @result, $typed->make('Call',
-                    dispatch_kind => 'builtin',
-                    name          => $name->value(),
-                    inputs        => [$name, \@args],
-                    compat_class  => 'BuiltinCall',
-                );
-            } elsif ($item isa Chalk::IR::Node::Constant
-                    && defined $item->value()
-                    && $LIST_BUILTINS{$item->value()}
-                    && $i + 1 <= $#$stmts) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fixup_stmts.list_builtin_call');
-                # Merge bare builtin keyword + following args → BuiltinCall
-                my $builtin = $item->value();
-                my @args;
-                while ($i + 1 <= $#$stmts) {
-                    my $next = $stmts->[$i + 1];
-                    # Stop at statement-level constructs (Return/Unwind CFG nodes)
-                    last if $next isa Chalk::IR::Node::Return
-                        || $next isa Chalk::IR::Node::Unwind;
-                    # ClassInfo/FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
-                    last if $next isa Chalk::IR::ClassInfo;
-                    last if $next isa Chalk::IR::FieldInfo;
-                    last if $next isa Chalk::IR::MethodInfo;
-                    last if $next isa Chalk::IR::SubInfo;
-                    # Stop at CFG control flow nodes (both Bootstrap and new Chalk::IR hierarchies)
-                    last if ($next isa Chalk::IR::Node
-                            || $next isa Chalk::IR::Node)
-                        && $STMT_BOUNDARY_OPS{$next->operation() // ''};
-                    # Stop at other bare builtins
-                    last if $next isa Chalk::IR::Node::Constant
-                        && defined $next->value()
-                        && $STOP_KEYWORDS{$next->value()};
-                    # Nest PREFIX_BUILTIN inside LIST_BUILTIN: sort keys %$h → sort(keys(%$h))
-                    if ($next isa Chalk::IR::Node::Constant
-                            && defined $next->value()
-                            && $PREFIX_BUILTINS{$next->value()}
-                            && $i + 2 <= $#$stmts) {
-                        my $prefix_name = $next->value();
-                        $i += 2;
-                        my $prefix_arg = $stmts->[$i];
-                        my $prefix_name_node = _make_const($factory, $prefix_name);
-                        push @args, $typed->make('Call',
-                            dispatch_kind => 'builtin',
-                            name          => $prefix_name,
-                            inputs        => [$prefix_name_node, [$prefix_arg]],
-                            compat_class  => 'BuiltinCall',
-                        );
-                        next;
-                    }
-                    $i++;
-                    push @args, $next;
-                }
-                my $builtin_name_node = _make_const($factory, $builtin);
-                push @result, $typed->make('Call',
-                    dispatch_kind => 'builtin',
-                    name          => $builtin,
-                    inputs        => [$builtin_name_node, \@args],
-                    compat_class  => 'BuiltinCall',
-                );
-            } elsif ($item isa Chalk::IR::Node::Constant
-                    && defined $item->value()
-                    && $PREFIX_BUILTINS{$item->value()}
-                    && $i + 1 <= $#$stmts) {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fixup_stmts.prefix_builtin_call');
-                # Merge bare prefix-builtin + following expression → BuiltinCall
-                my $builtin = $item->value();
-                $i++;
-                my $arg = $stmts->[$i];
-                my $builtin_name_node = _make_const($factory, $builtin);
-                push @result, $typed->make('Call',
-                    dispatch_kind => 'builtin',
-                    name          => $builtin,
-                    inputs        => [$builtin_name_node, [$arg]],
-                    compat_class  => 'BuiltinCall',
-                );
-            } else {
-                Chalk::Bootstrap::Perl::Actions->_bump_fixup(
-                    '_fixup_stmts.unwrap_pass_through');
-                push @result, $_unwrap_stmt_from_expr->($factory, $typed, $item);
-            }
-            $i++;
+            push @result, $_unwrap_stmt_from_expr->($factory, $typed, $item);
         }
         return \@result;
     }
