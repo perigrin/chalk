@@ -281,6 +281,17 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             my $slot = $sr->slot_name();
             return 'identity_skip' if _same_value($li, $ri);
             return 'identity_skip' if $slot eq 'type';
+            # Boolean is a recognizer (yes/no). Any two non-zero values are
+            # equivalent at the recognizer level — they only differ in refaddr
+            # because Boolean.add returns a fresh Context to signal abstention
+            # (per Phase 2 of survivor-list plan). Without this skip, every
+            # chart-merge of two non-zero parses creates an unresolved tie
+            # even when all OTHER slots are identical.
+            if ($slot eq 'boolean'
+                && defined $li && defined $ri
+                && !$sr->is_zero($li) && !$sr->is_zero($ri)) {
+                return 'identity_skip';
+            }
 
             my $result = $sr->add($li, $ri);
             $result = [$result] unless ref($result) eq 'ARRAY';
@@ -324,11 +335,31 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             $verdict = $first_opinion eq 'left' ? 'right_loses' : 'left_loses';
         }
 
-        if ($verdict eq 'neither' && $ENV{CHALK_COUNT_FILTER_TIES}) {
-            push $_tie_log->@*, {
+        # Distinguish "all identity_skip" (the two derivations are semantically
+        # identical for every slot — not a tie, just a redundant merge) from
+        # "all abstain" (the two ARE different but no component has an opinion
+        # — a real unresolved tie that needs investigation).
+        my $all_identity = !grep { $_->{verdict} ne 'identity_skip' } @per_component;
+
+        if ($verdict eq 'neither' && !$all_identity && $ENV{CHALK_COUNT_FILTER_TIES}) {
+            my $entry = {
                 semiring => 'all',
                 slot     => 'unresolved',
             };
+            if ($ENV{CHALK_TIE_CONTEXT}) {
+                # Capture (rule, position, scanned-text-fragment) for tie investigation.
+                # Helps categorize ties by source pattern.
+                $entry->{left_rule}  = $left->can('rule')  ? $left->rule()  : undef;
+                $entry->{right_rule} = $right->can('rule') ? $right->rule() : undef;
+                $entry->{left_pos}   = $left->can('position')  ? $left->position()  : undef;
+                $entry->{right_pos}  = $right->can('position') ? $right->position() : undef;
+                my $lt = eval { $left->scanned_text() // '' };
+                my $rt = eval { $right->scanned_text() // '' };
+                $entry->{left_text}  = (length($lt) > 40) ? substr($lt, 0, 37) . '...' : $lt;
+                $entry->{right_text} = (length($rt) > 40) ? substr($rt, 0, 37) . '...' : $rt;
+                $entry->{per_component} = [map { { slot => $_->{slot}, verdict => $_->{verdict} } } @per_component];
+            }
+            push $_tie_log->@*, $entry;
         }
 
         # Audit log: record actual verdict + per-component analysis.
