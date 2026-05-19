@@ -1,5 +1,5 @@
-# ABOUTME: Tests _fixup_stmts() ambiguity resolution in Perl::Actions.
-# ABOUTME: Validates return/die merging and UseDecl import arg merging across hash seeds.
+# ABOUTME: Tests Perl::Actions IR shape for statement-level constructs.
+# ABOUTME: Validates return/die, UseDecl import args, and expression IR structure across hash seeds.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -308,11 +308,9 @@ my sub method_name($method) {
 
 # ============================================================
 # 7. my $x; $x = 1; produces TWO statements, not a merged VarDecl
-#    Regression for _fixup_stmts.vardecl_init_merge bug: the walker
-#    was unconditionally gluing a bare VarDecl with the next sibling
-#    statement, producing VarDecl($x, Assign(=, $x, 1)) which reads
-#    $x before initialization. The two source statements must stay
-#    distinct.
+#    A bare VarDecl and the following assignment must remain distinct
+#    statements. Merging them into VarDecl($x, Assign(=, $x, 1)) would
+#    read $x before initialization.
 # ============================================================
 
 {
@@ -546,9 +544,9 @@ my sub method_name($method) {
 }
 
 # === Test: prefix builtins with subscripted args get correct IR ===
-# _fix_postfix_chain handles SubscriptExpr(BuiltinCall(exists/delete, [var]), key, style)
-# by pushing the subscript inward. The same corruption pattern occurs for all prefix
-# builtins (defined, ref, scalar, etc.) and must be handled identically.
+# Prefix builtins (defined, ref, scalar, etc.) with a subscripted argument should
+# produce BuiltinCall(name, [SubscriptExpr(...)]) at the top level, not
+# SubscriptExpr(BuiltinCall(...), key) wrapping the call.
 {
     my @builtins_with_subscript = (
         ['defined $arr[$i];', 'defined'],

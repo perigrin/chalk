@@ -12,36 +12,29 @@ subtest 'fixup_counts() starts empty after reset' => sub {
     is_deeply($counts, {}, 'counts are empty after reset');
 };
 
-subtest 'fixup_counts() records each instrumented fixup name' => sub {
+subtest 'fixup_counts() records any bumped fixup name' => sub {
     Chalk::Bootstrap::Perl::Actions->reset_fixup_counts();
 
-    Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fixup_stmts');
-    Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fixup_stmts');
+    Chalk::Bootstrap::Perl::Actions->_bump_fixup('_some_fixup');
+    Chalk::Bootstrap::Perl::Actions->_bump_fixup('_some_fixup');
 
     my $counts = Chalk::Bootstrap::Perl::Actions->fixup_counts();
-    is($counts->{_fixup_stmts}, 2, '_fixup_stmts fired twice');
+    is($counts->{_some_fixup}, 2, '_some_fixup fired twice');
     ok(!exists $counts->{_fix_postfix_chain}, 'retired fixup not present');
 };
 
 subtest 'reset_fixup_counts() clears all entries' => sub {
-    Chalk::Bootstrap::Perl::Actions->_bump_fixup('_fixup_stmts');
+    Chalk::Bootstrap::Perl::Actions->_bump_fixup('_some_fixup');
     Chalk::Bootstrap::Perl::Actions->reset_fixup_counts();
     is_deeply(Chalk::Bootstrap::Perl::Actions->fixup_counts(), {},
         'counts empty after reset');
 };
 
-subtest 'instrumented fixup names cover all active disambiguation fixups' => sub {
-    # The known disambiguation fixups in Actions.pm. As filtering-stack work
-    # retires each ambiguity class, the corresponding fixup gets deleted and
-    # the entry should be removed from this list.
-    my @expected = qw(
-        _fixup_stmts
-    );
-
+subtest 'known_fixups() is empty when no fixups are registered' => sub {
+    # All disambiguation fixups have been deleted. The known_fixups registry
+    # should be empty until new fixups are added.
     my %known = Chalk::Bootstrap::Perl::Actions->known_fixups()->%*;
-    for my $name (@expected) {
-        ok($known{$name}, "fixup $name is registered as known");
-    }
+    is(scalar keys %known, 0, 'no known fixups registered');
 };
 
 done_testing;
