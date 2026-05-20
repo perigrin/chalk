@@ -125,7 +125,7 @@ my sub parse_file($file) {
 # ============================================================
 
 {
-    my $ir = parse_file('lib/Chalk/Bootstrap/IR/Node/Constant.pm');
+    my $ir = parse_file('lib/Chalk/IR/Node/Constant.pm');
     ok(defined $ir, 'Constant.pm: parse produces IR');
 
     SKIP: {

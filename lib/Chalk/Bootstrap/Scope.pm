@@ -188,11 +188,21 @@ class Chalk::Bootstrap::Scope {
     method merge_for_loop($body_scope, $loop, $factory, $iterator) {
         my %merged;
 
-        for my $name ($self->variable_names()) {
+        # Union of pre-loop and body-final names. Pre-loop scope alone is
+        # insufficient because Chalk's Scope.bindings does not propagate
+        # sibling-to-sibling at leaf entry: the loop action sees an empty
+        # pre-loop bindings hash, while the body leaf has captured the
+        # post-body Assigns. Mirrors merge_with_phis' union over both
+        # branches.
+        my %all_names;
+        $all_names{$_} = 1 for $self->variable_names();
+        $all_names{$_} = 1 for keys $body_scope->%*;
+
+        for my $name (sort keys %all_names) {
             my $pre_val  = $bindings->{$name};
             my $body_val = $body_scope->{$name};
 
-            # Iterator variable is defined by the loop itself — exclude from Phi creation
+            # Iterator variable is defined by the loop itself - exclude from Phi creation
             if (defined $iterator && $name eq $iterator) {
                 $merged{$name} = $pre_val;
                 next;
@@ -205,7 +215,7 @@ class Chalk::Bootstrap::Scope {
                 next;
             }
 
-            # Values differ — create a Phi and wire the backedge immediately
+            # Values differ - create a Phi and wire the backedge immediately
             my $phi = $factory->make('Phi',
                 region => $loop,
                 values => [$pre_val, undef],

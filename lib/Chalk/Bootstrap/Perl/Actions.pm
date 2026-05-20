@@ -2548,6 +2548,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $keyword;
         my $condition;
         my $body;
+        my $cond_leaf;
 
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -2561,9 +2562,11 @@ class Chalk::Bootstrap::Perl::Actions {
                 # First IR node after keyword is the condition (from ParenExpr/Expression)
                 if ($focus isa Chalk::IR::Node) {
                     $condition = $focus;
+                    $cond_leaf = $leaf;
                 } elsif (ref($focus) eq 'ARRAY' && $focus->@*) {
                     # ParenExpr may produce an array; take first element as condition
                     $condition = $focus->[0];
+                    $cond_leaf = $leaf;
                 }
             } elsif (defined $condition && !defined $body
                     && defined $rule && $rule eq 'Block') {
@@ -2585,7 +2588,17 @@ class Chalk::Bootstrap::Perl::Actions {
             my $scope   = _ctx_scope($ctx);
             my $control = _ctx_control($ctx) // $factory->make('Start');
             if (defined $scope) {
+                # Pre-loop scope: read from the condition leaf, not from
+                # $ctx directly. By the time WhileStatement's complete event
+                # runs, multiply() has already merged the body's scope into
+                # $ctx, contaminating the pre-loop view. The condition leaf
+                # captured scope before the body was multiplied in. Same
+                # workaround as IfStatement uses.
                 my $pre_loop_scope = $scope;
+                if (defined $cond_leaf) {
+                    my $cond_scope = _ctx_scope($cond_leaf);
+                    $pre_loop_scope = $cond_scope if defined $cond_scope;
+                }
 
                 my $loop = $factory->make('Loop',
                     entry_ctrl    => $control,
@@ -2612,6 +2625,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
                 # Create Phi nodes for loop-carried variables directly here.
                 # While loops have no iterator variable, so pass undef.
+                my $pre_snapshot = $pre_loop_scope->snapshot();
                 my $post_loop_scope = $pre_loop_scope->merge_for_loop(
                     \%body_final_bindings, $loop, $factory, undef,
                 );
@@ -2619,6 +2633,24 @@ class Chalk::Bootstrap::Perl::Actions {
                 my $region = $factory->make('Region',
                     controls => [$exit_proj],
                 );
+
+                # Merge CFG and Phi nodes into the in-flight graph so they
+                # reach the method graph via $graph->nodes().
+                my $graph = $ctx->graph() // Chalk::IR::Graph->new;
+                $graph->merge($loop);
+                $graph->merge($if_node);
+                $graph->merge($body_proj);
+                $graph->merge($exit_proj);
+                $graph->merge($region);
+                my $diff = $post_loop_scope->diff($pre_snapshot);
+                for my $var_name (keys $diff->%*) {
+                    my $node = $diff->{$var_name};
+                    next unless defined $node && blessed($node);
+                    next unless $node isa Chalk::IR::Node::Phi;
+                    $graph->merge($node);
+                }
+                $sa->update_graph($graph);
+
                 $sa->update_scope($post_loop_scope->with_control($region));
                 $sa->update_annotations({
                     body_stmts => $body,
@@ -2646,6 +2678,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $iterator;
         my $list;
         my $body;
+        my $list_leaf;
 
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -2662,12 +2695,14 @@ class Chalk::Bootstrap::Perl::Actions {
             } elsif (ref($focus) eq 'ARRAY' && defined $iterator && !defined $list) {
                 # First array after iterator is the list (from ParenExpr)
                 $list = $focus;
+                $list_leaf = $leaf;
             } elsif (ref($focus) eq 'ARRAY' && defined $list) {
                 # Second array is the body (from Block)
                 $body //= $focus;
             } elsif ($focus isa Chalk::IR::Node && !defined $list
                     && defined $iterator) {
                 $list = $focus;
+                $list_leaf = $leaf;
             }
         }
 
@@ -2681,7 +2716,16 @@ class Chalk::Bootstrap::Perl::Actions {
             my $scope   = _ctx_scope($ctx);
             my $control = _ctx_control($ctx) // $factory->make('Start');
             if (defined $scope) {
+                # Pre-loop scope: read from the list-leaf, not from $ctx
+                # directly. By the time ForeachStatement's complete event
+                # runs, multiply() has already merged the body's scope into
+                # $ctx, contaminating the pre-loop view. The list leaf
+                # captured scope before the body was multiplied in.
                 my $pre_loop_scope = $scope;
+                if (defined $list_leaf) {
+                    my $ls = _ctx_scope($list_leaf);
+                    $pre_loop_scope = $ls if defined $ls;
+                }
 
                 my $loop_cond = $factory->make('Constant',
                     const_type => 'string', value => '__loop_bound__');
@@ -2714,6 +2758,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Create Phi nodes for loop-carried variables directly here.
                 # The iterator variable is defined by the loop itself and excluded.
                 my $iterator_name = defined $iterator ? $iterator->value() : undef;
+                my $pre_snapshot = $pre_loop_scope->snapshot();
                 my $post_loop_scope = $pre_loop_scope->merge_for_loop(
                     \%body_final_bindings, $loop, $factory, $iterator_name,
                 );
@@ -2721,6 +2766,23 @@ class Chalk::Bootstrap::Perl::Actions {
                 my $region = $factory->make('Region',
                     controls => [$exit_proj],
                 );
+
+                # Merge CFG and Phi nodes into the in-flight graph.
+                my $graph = $ctx->graph() // Chalk::IR::Graph->new;
+                $graph->merge($loop);
+                $graph->merge($if_node);
+                $graph->merge($body_proj);
+                $graph->merge($exit_proj);
+                $graph->merge($region);
+                my $diff = $post_loop_scope->diff($pre_snapshot);
+                for my $var_name (keys $diff->%*) {
+                    my $node = $diff->{$var_name};
+                    next unless defined $node && blessed($node);
+                    next unless $node isa Chalk::IR::Node::Phi;
+                    $graph->merge($node);
+                }
+                $sa->update_graph($graph);
+
                 $sa->update_scope($post_loop_scope->with_control($region));
                 $sa->update_annotations({
                     body_stmts => $body,
