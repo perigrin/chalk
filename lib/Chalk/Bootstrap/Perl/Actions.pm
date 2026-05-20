@@ -853,9 +853,15 @@ class Chalk::Bootstrap::Perl::Actions {
             push @stack, reverse $c->children()->@*;
         }
 
-        # Determine graph start node: use control from context's scope,
-        # or create a fresh Start node.
-        my $start = _ctx_control($ctx) // $factory->make('Start');
+        # Determine graph start node: prefer the existing graph's Start
+        # (already present in cache from inner VariableDeclaration merges)
+        # to avoid pulling in stale pre-fixup nodes via _ctx_control.
+        my $start;
+        if (defined $existing_graph) {
+            $start = $existing_graph->start() // $factory->make('Start');
+        } else {
+            $start = _ctx_control($ctx) // $factory->make('Start');
+        }
 
         # Collect Return and Unwind nodes from the fixed body as graph exits.
         my @returns;
@@ -869,12 +875,25 @@ class Chalk::Bootstrap::Perl::Actions {
         # Perl's implicit-return semantics: if no explicit Return/Unwind node
         # was found and the body is non-empty, the last expression in the body
         # is the implicit return value. Wrap it in a Return CFG node so the
-        # graph is always properly terminated.
+        # graph is always properly terminated. Control input for the Return
+        # is the last side-effect node in the body (the chain tail), or
+        # $start when no side-effect node precedes it.
         if (!@returns && $fixed_body->@*) {
             my $last = $fixed_body->[-1];
             if (ref($last) && blessed($last) && $last->isa('Chalk::IR::Node')) {
+                my $return_ctrl = $start;
+                # Find the last side-effect node (VarDecl, etc.) in the body
+                # to use as the Return's control predecessor.
+                for my $stmt (reverse $fixed_body->@*) {
+                    next unless ref($stmt) && blessed($stmt)
+                        && $stmt->isa('Chalk::IR::Node');
+                    if ($stmt isa Chalk::IR::Node::VarDecl) {
+                        $return_ctrl = $stmt;
+                        last;
+                    }
+                }
                 my $implicit_return = $factory->make_cfg('Return',
-                    inputs => [$start, $last],
+                    inputs => [$return_ctrl, $last],
                 );
                 push @returns, $implicit_return;
             }
@@ -902,11 +921,14 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # If Block synthesized a graph, augment it in place: seed Start,
-        # Returns, and body_stmts so all reachable nodes are in the cache.
-        # Otherwise create a fresh graph (legacy path; deleted in commit 6).
+        # If Block synthesized a graph, augment it in place: seed Returns
+        # and body_stmts so all reachable nodes are in the cache. Start is
+        # already present in the graph (merged by inner VariableDeclaration
+        # actions); seeding $start from $ctx->scope->control here would
+        # pull in the stale OLD-refined last-statement node because the
+        # SA's scope was last updated by AssignmentExpression before
+        # Block's control-chain fixup rewrote those nodes.
         if (defined $existing_graph) {
-            $existing_graph->_seed($start);
             $existing_graph->_seed($_) for @returns;
             $existing_graph->_seed($_) for @body_stmts;
             return $existing_graph;
@@ -1434,6 +1456,56 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         my $graph = $ctx->graph() // Chalk::IR::Graph->new;
+
+        # Control-chain post-processing: rebuild side-effect nodes in
+        # source order so each one's inputs[0] points at the previous
+        # side-effect node (or Start for the first). The action layer
+        # cannot chain across sibling statements because Scope.control
+        # does not propagate sibling-to-sibling within a StatementList -
+        # _merge_scope only fires at the parent rule's multiply, which
+        # is too late for the child action to see. See
+        # phase_3a_migration_cross_stmt_scope.md.
+        my $start = $graph->start() // $factory->make('Start');
+        $graph->merge($start);
+        my $current_control = $start;
+        for my $i (0..$#stmts) {
+            my $s = $stmts[$i];
+            next unless blessed($s);
+            if ($s isa Chalk::IR::Node::VarDecl) {
+                my $existing_ctrl = $s->control();
+                if (!defined $existing_ctrl
+                        || refaddr($existing_ctrl) != refaddr($current_control)) {
+                    my $rebuilt = $typed->make('VarDecl',
+                        inputs       => [$current_control, $s->name(), $s->init()],
+                        compat_class => 'VarDecl',
+                    );
+                    $graph->unmerge($s);
+                    $graph->merge($rebuilt);
+                    $stmts[$i] = $rebuilt;
+                    $s = $rebuilt;
+                }
+                $current_control = $s;
+            } elsif ($s isa Chalk::IR::Node::Return
+                        || $s isa Chalk::IR::Node::Unwind) {
+                # Return/Unwind also need their control input updated to
+                # the current chain tail. The ReturnStatement action sees
+                # only its own multiply context and falls back to Start.
+                my $existing_ctrl = $s->inputs->[0];
+                if (!defined $existing_ctrl
+                        || refaddr($existing_ctrl) != refaddr($current_control)) {
+                    my $op = $s isa Chalk::IR::Node::Return
+                        ? 'Return' : 'Unwind';
+                    my $rebuilt = $factory->make_cfg($op,
+                        inputs => [$current_control, $s->inputs->[1]],
+                    );
+                    $graph->unmerge($s);
+                    $graph->merge($rebuilt);
+                    $stmts[$i] = $rebuilt;
+                    $s = $rebuilt;
+                }
+                # Return/Unwind terminate the chain - don't advance control.
+            }
+        }
 
         return {
             stmts => \@stmts,

@@ -145,8 +145,9 @@ class C {
 
             ok(defined $x_chain, '$x VarDecl chain reaches Start');
             # $y's chain should include $x as a predecessor
+            my $x_ra = defined $by_name{'$x'} ? refaddr($by_name{'$x'}) : 0;
             ok(defined $y_chain
-                && grep { defined && refaddr($_) == refaddr($by_name{'$x'}) }
+                && grep { defined($_) && refaddr($_) == $x_ra }
                     $y_chain->@*,
                 '$y VarDecl chain passes through $x VarDecl');
         }
