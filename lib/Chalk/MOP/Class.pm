@@ -4,6 +4,12 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
+use Chalk::MOP::Field;
+use Chalk::MOP::Method;
+use Chalk::MOP::Sub;
+use Chalk::MOP::Import;
+use Chalk::MOP::Phaser::Adjust;
+
 class Chalk::MOP::Class {
     field $name       :param :reader;
     field $superclass :param :reader = undef;
@@ -21,7 +27,6 @@ class Chalk::MOP::Class {
     method adjust_blocks() { return @adjust_blocks }
 
     method declare_field($field_name, %opts) {
-        require Chalk::MOP::Field;
         my $field = Chalk::MOP::Field->new(
             name    => $field_name,
             class   => $self,
@@ -33,7 +38,6 @@ class Chalk::MOP::Class {
     }
 
     method declare_method($method_name, %opts) {
-        require Chalk::MOP::Method;
         my $method = Chalk::MOP::Method->new(
             name  => $method_name,
             class => $self,
@@ -44,7 +48,6 @@ class Chalk::MOP::Class {
     }
 
     method declare_sub($sub_name, %opts) {
-        require Chalk::MOP::Sub;
         my $sub = Chalk::MOP::Sub->new(
             name  => $sub_name,
             class => $self,
@@ -55,7 +58,6 @@ class Chalk::MOP::Class {
     }
 
     method declare_import($module, %opts) {
-        require Chalk::MOP::Import;
         # Deduplicate: return existing import if the same module is already registered.
         # Earley parse ambiguity can cause semantic actions to fire multiple times.
         for my $existing (@imports) {
@@ -71,7 +73,6 @@ class Chalk::MOP::Class {
     }
 
     method declare_adjust(%opts) {
-        require Chalk::MOP::Phaser::Adjust;
         my $adjust = Chalk::MOP::Phaser::Adjust->new(
             class           => $self,
             source_position => scalar(@adjust_blocks),
