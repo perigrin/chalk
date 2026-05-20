@@ -8,12 +8,15 @@ use Scalar::Util qw(blessed);
 
 use Chalk::Bootstrap::Optimizer::Pass;
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::HashRef;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::Subscript;
+use Chalk::IR::Node::StructRef;
+use Chalk::IR::Node::StructFieldAccess;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
@@ -30,6 +33,11 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
     # Per-field usage tracking for C type inference
     # var_key => { field_name => { integer_ctx => bool } }
     field $field_usage = {};
+
+    # Typed factory for direct node construction. Replaces the Shim
+    # path which is being retired in Phase 6.
+    field $typed;
+    ADJUST { $typed = Chalk::IR::NodeFactory->new }
 
     method name()  { return 'StructPromotion' }
     method scope() { return 'mop' }
@@ -729,17 +737,14 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
                         value      => $schema_name,
                     );
 
-                    my $struct_ref = $factory->make('Constructor',
-                        class  => 'StructRef',
-                        schema => $schema_node,
-                        fields => \@field_vals,
+                    my $struct_ref = $typed->make('StructRef',
+                        inputs       => [$schema_node, \@field_vals],
+                        compat_class => 'StructRef',
                     );
 
-                    my $new_var_decl = $factory->make('Constructor',
-                        class       => 'VarDecl',
-                        control     => $stmt->control(),
-                        variable    => $var_node,
-                        initializer => $struct_ref,
+                    my $new_var_decl = $typed->make('VarDecl',
+                        inputs       => [$stmt->control(), $var_node, $struct_ref],
+                        compat_class => 'VarDecl',
                     );
 
                     push @new_body, $new_var_decl;
@@ -787,11 +792,9 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
                     value      => $schema_name,
                 );
 
-                return $factory->make('Constructor',
-                    class      => 'FieldAccess',
-                    schema     => $schema_node,
-                    field_name => $index,
-                    target     => $target,
+                return $typed->make('StructFieldAccess',
+                    inputs       => [$schema_node, $index, $target],
+                    compat_class => 'FieldAccess',
                 );
             }
         }
@@ -834,47 +837,31 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
         return $self->_rebuild_constructor($factory, $node, \@new_inputs);
     }
 
-    # Rebuild a typed computation node with new inputs, preserving class and attributes.
-    # Only called for nodes that are Chalk::IR::Node instances (computation types).
+    # Rebuild a typed computation node with new inputs, preserving the
+    # original node's operation() (the typed class name) and any
+    # node-specific attributes (e.g. Call.dispatch_kind, AnonSub params).
+    # Calls the typed factory directly - no Shim involvement.
     method _rebuild_constructor($factory, $original, $new_inputs) {
-        my $class = $original->class();
+        my $op = $original->operation();
 
-        # Map input positions back to named parameters.
-        # These mirror the input order used by each shim translation in Chalk::IR::Shim.
-        my %input_specs = (
-            'VarDecl'        => ['control', 'variable', 'initializer'],
-            'BinaryExpr'     => ['op', 'left', 'right'],
-            'UnaryExpr'      => ['op', 'operand'],
-            'SubscriptExpr'  => ['target', 'index', 'style'],
-            'MethodCallExpr' => ['invocant', 'method_name', 'args'],
-            'BuiltinCall'    => ['name', 'args'],
-            'HashRefExpr'    => ['pairs'],
-            'ArrayRefExpr'   => ['elements'],
-            'TernaryExpr'    => ['condition', 'true_expr', 'false_expr'],
-            'PostfixDerefExpr' => ['target', 'sigil'],
-            'CompoundAssign' => ['op', 'target', 'value'],
-            'AnonSubExpr'    => ['params', 'body'],
-            'RegexMatch'     => ['target', 'pattern', 'flags'],
-            'RegexSubst'     => ['target', 'pattern', 'replacement', 'flags'],
-            'TryCatchStmt'   => ['try_body', 'catch_var', 'catch_body'],
-            'InterpolatedString' => ['parts'],
-            'BacktickExpr'   => ['command'],
-            'StructRef'      => ['schema', 'fields'],
-            'FieldAccess'    => ['schema', 'field_name', 'target'],
+        # Most node classes accept just inputs + compat_class as
+        # constructor params. A few (Call, AnonSub, etc.) carry typed
+        # fields that we must forward explicitly so the rebuilt node
+        # behaves identically.
+        my %extra;
+        if ($op eq 'Call' && $original->can('dispatch_kind')) {
+            $extra{dispatch_kind} = $original->dispatch_kind;
+            $extra{name}          = $original->name;
+            $extra{paren_form}    = $original->paren_form
+                if $original->can('paren_form');
+        }
+        my $compat = $original->can('compat_class')
+            ? $original->compat_class : undef;
+        return $typed->make($op,
+            inputs => $new_inputs,
+            (defined $compat ? (compat_class => $compat) : ()),
+            %extra,
         );
-
-        my $names = $input_specs{$class};
-        unless ($names) {
-            # Unknown class — return original
-            return $original;
-        }
-
-        my %params = (class => $class);
-        for my $i (0 .. $#{$names}) {
-            $params{$names->[$i]} = $new_inputs->[$i];
-        }
-
-        return $factory->make('Constructor', %params);
     }
 
     # Find the ClassInfo node from an IR tree root.
