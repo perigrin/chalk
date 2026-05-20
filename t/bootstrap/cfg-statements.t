@@ -510,15 +510,15 @@ SKIP: {
 
     my $gen_grammar = Chalk::Grammar::Perl::PostfixCfgTest::grammar();
 
-    # Parse ConciseOp.pm which uses postfix if in method bodies
+    # Parse Symbol.pm which uses postfix `if defined $quantifier` in to_string()
     use TestXSHelpers qw(parse_file_ir);
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my ($file_ir, $file_sa, $file_ctx) = parse_file_ir($gen_grammar,
-        'lib/Chalk/Bootstrap/ConciseOp.pm');
-    ok(defined $file_ir, 'ConciseOp.pm parses for postfix CFG test');
+        'lib/Chalk/Grammar/Symbol.pm');
+    ok(defined $file_ir, 'Symbol.pm parses for postfix CFG test');
 
     SKIP: {
-        skip 'ConciseOp.pm: no IR', 2 unless defined $file_ir;
+        skip 'Symbol.pm: no IR', 2 unless defined $file_ir;
 
         # Walk all IR nodes looking for PostfixLoop Constructors
         my @stack = ($file_ir);
@@ -536,9 +536,9 @@ SKIP: {
                 }
             }
         }
-        ok(!$found_postfix_loop, 'no PostfixLoop Constructor in ConciseOp IR');
+        ok(!$found_postfix_loop, 'no PostfixLoop Constructor in Symbol IR');
 
-        # Verify cfg_state has if_node entries (from postfix if in method bodies)
+        # Verify cfg_state has if_node entries (from postfix `if` in method bodies)
         my @ctx_stack = ($file_ctx);
         my $cfg_if_count = 0;
         while (@ctx_stack) {
@@ -549,7 +549,7 @@ SKIP: {
             }
             push @ctx_stack, reverse $ctx->children()->@*;
         }
-        ok($cfg_if_count > 0, "ConciseOp has cfg_state If entries ($cfg_if_count)");
+        ok($cfg_if_count > 0, "Symbol has cfg_state If entries ($cfg_if_count)");
     }
 }
 

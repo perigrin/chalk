@@ -133,7 +133,7 @@ my @grammars = (
 my @test_files = (
     'lib/Chalk/Bootstrap/IR/Node/Start.pm',      # Tier A (smallest)
     'lib/Chalk/Bootstrap/IR/Node/Constant.pm',    # Tier B
-    'lib/Chalk/Bootstrap/ConciseOp.pm',           # Tier C
+    'lib/Chalk/Grammar/Symbol.pm',                # Tier C
     'lib/Chalk/Grammar/Rule.pm',                  # Tier D
 );
 

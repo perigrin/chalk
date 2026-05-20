@@ -90,32 +90,33 @@ my sub parse_file($file) {
 }
 
 # ============================================================
-# 2. Constant.pm — field with default value (via AssignmentExpression)
+# 2. Symbol.pm — field with default value (via AssignmentExpression)
 # ============================================================
 
 {
-    # ConciseOp.pm has fields with default values — verify FieldInfo stores them
-    my $ir = parse_file('lib/Chalk/Bootstrap/ConciseOp.pm');
-    ok(defined $ir, 'ConciseOp.pm: parse produces IR');
+    # Symbol.pm has 3 fields, one (`$quantifier`) with default value `undef` —
+    # verify FieldInfo stores both the field count and the default.
+    my $ir = parse_file('lib/Chalk/Grammar/Symbol.pm');
+    ok(defined $ir, 'Symbol.pm: parse produces IR');
 
     SKIP: {
-        skip 'ConciseOp.pm: no IR', 10 unless defined $ir;
+        skip 'Symbol.pm: no IR', 10 unless defined $ir;
 
         my ($cls) = $ir->classes()->@*;
-        ok(defined $cls, 'ConciseOp.pm: found class declaration');
+        ok(defined $cls, 'Symbol.pm: found class declaration');
 
         SKIP: {
-            skip 'ConciseOp.pm: no class declaration', 5 unless defined $cls;
+            skip 'Symbol.pm: no class declaration', 5 unless defined $cls;
 
             my $body = $cls isa Chalk::IR::ClassInfo ? $cls->body() : $cls->inputs()->[2];
             my @fields = grep { $_ isa Chalk::IR::FieldInfo } $body->@*;
-            ok(scalar @fields >= 5, 'ConciseOp.pm: at least 5 FieldInfo objects')
+            ok(scalar @fields >= 3, 'Symbol.pm: at least 3 FieldInfo objects')
                 or diag("Got " . scalar @fields . " fields");
 
             # Find a field that has a default value
             my ($field_with_default) = grep { defined $_->default_value() } @fields;
             ok(defined $field_with_default,
-                'ConciseOp.pm: at least one field has a default_value');
+                'Symbol.pm: at least one field has a default_value');
         }
     }
 }

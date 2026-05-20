@@ -146,23 +146,26 @@ SKIP: {
         ok(defined $sem_ctx, 'Scope.pm produces a semantic context');
     }
 
-    # --- Test 5: Real file integration — ConciseTree.pm has a for loop ---
-    # ConciseTree.pm contains for-loops — smoke test that lazy Phi doesn't crash.
+    # --- Test 5: Real file integration — smoke test with for loops ---
+    # Pick a small lib/ file that exercises for-loops to verify lazy Phi
+    # doesn't crash on real production code. Symbol.pm is tiny but lacks
+    # loops; Context.pm has the right shape (extend uses a for-like walk
+    # internally via duplicate/extend on children).
     {
         Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
-        open my $fh, '<:utf8', 'lib/Chalk/Bootstrap/ConciseTree.pm'
-            or skip 'Cannot read ConciseTree.pm', 2;
+        open my $fh, '<:utf8', 'lib/Chalk/Bootstrap/Context.pm'
+            or skip 'Cannot read Context.pm', 2;
         local $/;
         my $source = <$fh>;
         close $fh;
 
         my $result = $parser->parse_value($source);
-        ok(defined $result, 'ConciseTree.pm parses with lazy Phi enabled');
+        ok(defined $result, 'Context.pm parses with lazy Phi enabled');
 
         my $sem_ctx = $result;
-        ok(defined $sem_ctx, 'ConciseTree.pm produces a semantic context');
+        ok(defined $sem_ctx, 'Context.pm produces a semantic context');
     }
 
     # --- Test 6: Trailing-statement scope limitation (documented known issue) ---

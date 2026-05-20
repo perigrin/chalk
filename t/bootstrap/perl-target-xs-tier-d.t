@@ -434,16 +434,6 @@ test_file(
 );
 
 test_file(
-    file       => 'lib/Chalk/Bootstrap/ConciseTree/Actions.pm',
-    label      => 'ConciseTree::Actions.pm',
-    module     => 'Chalk::Bootstrap::XS::TierD::ConciseTreeActions',
-    skip_build => 'XS emitter: AV*/SV* type mismatch, RETVAL/xsreturn issues',
-    structural => [
-        { pattern => qr/ConciseTreeActions|Actions/, label => 'has Actions class', todo => 'structural check may not match after codegen changes' },
-    ],
-);
-
-test_file(
     file   => 'lib/Chalk/Bootstrap/Desugar.pm',
     label  => 'Desugar.pm',
     module => 'Chalk::Bootstrap::XS::TierD::Desugar',

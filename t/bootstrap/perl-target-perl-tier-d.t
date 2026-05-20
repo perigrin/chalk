@@ -34,8 +34,6 @@ ok(scalar @pm_files > 0, 'found .pm files to test');
 my %TODO_PARSE = (
     'lib/Chalk/Bootstrap/Perl/Actions.pm'
         => 'complex anonymous sub/hash patterns',
-    'lib/Chalk/Bootstrap/ConciseTree/Actions.pm'
-        => 'parse fails at line 82 (#681)',
     'lib/Chalk/Bootstrap/BNF/Target/XS.pm'
         => 'pre-existing parse failure',
 );
