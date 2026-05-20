@@ -1600,7 +1600,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # Resolve `use constant` names to their numeric values.
         # Without this, constants like STRUCT_IS_LIST become string literals
         # in the generated C, producing "isn't numeric" warnings and wrong results.
-        if (%{$self->_get_use_constants()} && exists $self->_get_use_constants()->{$val}) {
+        if ($self->_get_use_constants()->%* && exists $self->_get_use_constants()->{$val}) {
             return "sv_2mortal(newSViv(${\$self->_get_use_constants()->{$val}}))";
         }
 
