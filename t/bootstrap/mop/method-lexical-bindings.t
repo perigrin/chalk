@@ -46,7 +46,7 @@ sub parse_method($source) {
 sub vardecl_name($node) {
     return undef unless defined $node && blessed($node)
         && $node->operation() eq 'VarDecl';
-    my $name_input = $node->inputs->[0];
+    my $name_input = $node->name();
     return undef unless defined $name_input && blessed($name_input)
         && $name_input->can('value');
     return $name_input->value();

@@ -636,12 +636,16 @@ class Chalk::Bootstrap::Perl::Actions {
                         attributes => \@attr_list,
                     );
                 } elsif ($item isa Chalk::IR::MethodInfo) {
+                    my @bindings = grep {
+                        blessed($_) && $_ isa Chalk::IR::Node::VarDecl
+                    } $item->body->@*;
                     $mop_class->declare_method($item->name(),
                         params      => $item->params(),
                         return_type => $item->return_type(),
                         (defined $item->graph()
                             ? (graph => $item->graph())
                             : ()),
+                        lexical_bindings => \@bindings,
                     );
                 } elsif ($item isa Chalk::IR::SubInfo) {
                     $mop_class->declare_sub($item->name(),
