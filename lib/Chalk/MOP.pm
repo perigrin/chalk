@@ -8,11 +8,20 @@ use Chalk::MOP::Class;
 
 class Chalk::MOP {
     field %classes;
+    field $struct_promotion_schemas :reader = {};
 
     ADJUST {
         # Seed implicit main class — all code belongs to a class
         my $main = Chalk::MOP::Class->new(name => 'main', mop => $self);
         $classes{main} = $main;
+    }
+
+    # Side structure populated by the Phase 5 StructPromotion pass.
+    # Holds the analyzed-but-not-yet-rewritten schema table; passed
+    # downstream to codegen for struct emission.
+    method set_struct_promotion_schemas($schemas) {
+        $struct_promotion_schemas = $schemas;
+        return;
     }
 
     method declare_class($name, %opts) {

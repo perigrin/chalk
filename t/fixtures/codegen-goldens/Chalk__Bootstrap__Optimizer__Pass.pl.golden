@@ -5,7 +5,10 @@ class Chalk::Bootstrap::Optimizer::Pass {
     method name() {
         die 'Subclass must implement name()';
     }
-    method run($ir) {
+    method scope() {
+        die 'Subclass must implement scope()';
+    }
+    method run($input) {
         die 'Subclass must implement run()';
     }
 }

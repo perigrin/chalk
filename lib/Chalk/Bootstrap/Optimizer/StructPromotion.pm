@@ -4,6 +4,9 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
+use Scalar::Util qw(blessed);
+
+use Chalk::Bootstrap::Optimizer::Pass;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::Node;
 use Chalk::IR::Node::Return;
@@ -15,8 +18,11 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
 use Chalk::IR::Program;
+use Chalk::MOP;
 
-class Chalk::Bootstrap::Optimizer::StructPromotion {
+class Chalk::Bootstrap::Optimizer::StructPromotion
+    :isa(Chalk::Bootstrap::Optimizer::Pass)
+{
 
     # Set of compiled class names — used by escape analysis
     field $compiled_classes = {};
@@ -25,10 +31,44 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
     # var_key => { field_name => { integer_ctx => bool } }
     field $field_usage = {};
 
-    # Top-level entry point: analyze schemas, then rewrite IR.
-    # Input: arrayref of { class_name, ir, ... } hashes.
-    # Returns: (rewritten_classes, schemas) in list context.
-    method run($parsed_classes) {
+    method name()  { return 'StructPromotion' }
+    method scope() { return 'mop' }
+
+    # Top-level entry point. Polymorphic on input:
+    #   - Chalk::MOP: Phase 5 contract. Schemas are attached as a side
+    #     structure accessible via $mop->struct_promotion_schemas.
+    #     Returns the MOP (no rewriting yet - rewrite_mop is a follow-up
+    #     once MOP carries enough body shape to be rewritten in place).
+    #   - arrayref of { class_name, ir } hashes: legacy contract.
+    #     Returns (rewritten, schemas) in list context, $rewritten in
+    #     scalar context.
+    method run($input) {
+        if (defined($input) && blessed($input) && $input isa Chalk::MOP) {
+            return $self->_run_mop($input);
+        }
+        return $self->_run_legacy($input);
+    }
+
+    method _run_mop($mop) {
+        # Translate MOP::Class -> { class_name, ir } shape so the
+        # existing analyze() can run unchanged. The legacy ir is a
+        # ClassInfo - synthesize one per MOP::Class.
+        my @parsed_classes;
+        for my $cls ($mop->classes()) {
+            next if $cls->name eq 'main';
+            my $class_info = $self->_class_info_from_mop_class($cls);
+            push @parsed_classes, {
+                class_name => $cls->name,
+                ir         => $class_info,
+            };
+        }
+
+        my $schemas = $self->analyze(\@parsed_classes);
+        $mop->set_struct_promotion_schemas($schemas) if keys $schemas->%*;
+        return $mop;
+    }
+
+    method _run_legacy($parsed_classes) {
         my $schemas = $self->analyze($parsed_classes);
 
         if (!keys $schemas->%*) {
@@ -38,6 +78,34 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
         my $rewritten = $self->rewrite($parsed_classes, $schemas);
         return ($rewritten, $schemas);
+    }
+
+    # Reconstruct a minimal ClassInfo from a MOP::Class so the existing
+    # analyze() can walk its body. Methods/subs use their body arrayref
+    # captured at parse time (MOP::Method/Sub.body).
+    method _class_info_from_mop_class($cls) {
+        my @body;
+        for my $method ($cls->methods) {
+            push @body, Chalk::IR::MethodInfo->new(
+                name        => $method->name,
+                params      => $method->params,
+                return_type => $method->return_type,
+                body        => $method->body,
+            );
+        }
+        for my $sub ($cls->subs) {
+            push @body, Chalk::IR::SubInfo->new(
+                name   => $sub->name,
+                params => $sub->params,
+                body   => $sub->body,
+            );
+        }
+        return Chalk::IR::ClassInfo->new(
+            name    => $cls->name,
+            methods => [grep { $_ isa Chalk::IR::MethodInfo } @body],
+            subs    => [grep { $_ isa Chalk::IR::SubInfo } @body],
+            body    => \@body,
+        );
     }
 
     # Analyze all parsed classes and detect promotable hash schemas.
