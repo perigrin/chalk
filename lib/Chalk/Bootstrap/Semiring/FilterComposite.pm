@@ -28,10 +28,19 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # Avoids repeated grep+blessed+can on every one()/multiply call.
     field $_annotation_semirings_cache;
 
+    # Cached SA semiring reference + the SA's set_type_context method
+    # availability flag. Both are stable across the parser's lifetime —
+    # multiply() reads them on every call, so caching them avoids one
+    # method dispatch per multiply.
+    field $_sa_cache;
+    field $_sa_has_set_type_context;
+
     # SA is always the last semiring by convention.
     # All semirings before SA are annotation-layer semirings that write to
     # named slots in the Context's annotations hash.
-    method _sa() { return $semirings->[-1] }
+    method _sa() {
+        return $_sa_cache //= $semirings->[-1];
+    }
     method _annotation_semirings() {
         # All semirings except the last (SA) that have a defined slot_name.
         # Non-object semirings (legacy test stubs without slot_name) are skipped.
@@ -250,21 +259,23 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
 
         # Thread TI result to SA before SA runs so action methods can read type info.
         # SA actions fire during SA.multiply for complete events.
+        my $sa = $self->_sa();
+        $_sa_has_set_type_context //= ($sa->can('set_type_context') ? 1 : 0);
         if ($is_complete && defined $ti_result_tag_hash
-                && $self->_sa()->can('set_type_context')) {
+                && $_sa_has_set_type_context) {
             my $ti_ctx_wrapper = Chalk::Bootstrap::Context->new(
                 focus    => $ti_result_tag_hash,
                 children => [],
                 position => 0,
                 rule     => undef,
             );
-            $self->_sa()->set_type_context($ti_ctx_wrapper);
+            $sa->set_type_context($ti_ctx_wrapper);
         }
 
         # SA builds the tree structure (the shared Context) for regular multiply,
         # or applies semantic action (via _complete_sa) for complete events.
-        my $sa_result = $self->_sa()->multiply($left, $right);
-        return $self->zero() if $self->_sa()->is_zero($sa_result);
+        my $sa_result = $sa->multiply($left, $right);
+        return $self->zero() if $sa->is_zero($sa_result);
 
         return $self->_wrap_sa_result($sa_result, %slot_results);
     }
