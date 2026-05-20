@@ -77,7 +77,7 @@ sub parse_file_ir($gen_grammar, $file) {
     my @stack = ($sem_ctx);
     while (@stack) {
         my $node = pop @stack;
-        my $state = $sa->cfg_state($node);
+        my $state = $node->cfg_state();
         if (defined $state) {
             $cfg_snapshot{refaddr($node)} = $state;
         }

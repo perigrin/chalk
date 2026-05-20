@@ -40,7 +40,7 @@ use Chalk::Bootstrap::BNF::Target::Perl;
         },
     );
 
-    my $state = $sa->cfg_state($ctx);
+    my $state = $ctx->cfg_state();
     ok(defined $state, 'cfg_state returns state with try_node');
     ok(defined $state->{try_node}, 'state has try_node');
     is($state->{catch_var}, '$e', 'state has catch_var');

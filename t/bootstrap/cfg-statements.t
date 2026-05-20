@@ -30,7 +30,7 @@ use Chalk::IR::Program;
         annotations => { statements => [$stmt1] },
     );
 
-    my $state = $sa->cfg_state($ctx);
+    my $state = $ctx->cfg_state();
     ok(defined $state, 'cfg_state returns state with statements');
     is(ref($state->{statements}), 'ARRAY', 'statements is an arrayref');
     is(scalar($state->{statements}->@*), 1, 'statements has one entry');
@@ -68,7 +68,7 @@ use Chalk::IR::Program;
         },
     );
 
-    my $state = $sa->cfg_state($ctx);
+    my $state = $ctx->cfg_state();
     ok(defined $state, 'cfg_state with if structure exists');
     is($state->{control}->operation(), 'Region', 'control is Region');
     is($state->{if_node}->operation(), 'If', 'if_node is If');
@@ -115,7 +115,7 @@ use Chalk::IR::Program;
         },
     );
 
-    my $state = $sa->cfg_state($ctx);
+    my $state = $ctx->cfg_state();
     ok(defined $state, 'cfg_state with loop structure exists');
     is($state->{control}->operation(), 'Region', 'control is Region');
     is($state->{loop}->operation(), 'Loop', 'loop is Loop');
@@ -254,7 +254,7 @@ SKIP: {
         ok(defined $result, 'if/else parses');
 
         my $sem_ctx = $result;
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state exists after if/else');
 
         my $control = $state->{control};
@@ -284,7 +284,7 @@ SKIP: {
         ok(defined $result, 'if without else parses');
 
         my $sem_ctx = $result;
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state exists after if');
 
         ok(defined $state->{then_stmts}, 'then_stmts present for if-without-else');
@@ -301,7 +301,7 @@ SKIP: {
         ok(defined $result, 'if/elsif/else parses');
 
         my $sem_ctx = $result;
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state exists after if/elsif/else');
 
         # The outer if should have then_stmts and if_node
@@ -319,7 +319,7 @@ SKIP: {
         ok(defined $result, 'foreach parses');
 
         my $sem_ctx = $result;
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state exists after foreach');
 
         my $control = $state->{control};
@@ -543,7 +543,7 @@ SKIP: {
         my $cfg_if_count = 0;
         while (@ctx_stack) {
             my $ctx = pop @ctx_stack;
-            my $state = $file_sa->cfg_state($ctx);
+            my $state = $ctx->cfg_state();
             if (defined $state && defined $state->{if_node}) {
                 $cfg_if_count++;
             }
@@ -579,7 +579,7 @@ SKIP: {
         ok(defined $result, 'unless parses');
 
         my $sem_ctx = $result;
-        my $state = $sa_u->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state exists after unless');
         ok(defined $state->{if_node}, 'if_node present for unless');
 
@@ -1049,7 +1049,7 @@ SKIP: {
             my $loop_jump_value;
             while (@ctx_stack) {
                 my $ctx = pop @ctx_stack;
-                my $state = $sa_nu->cfg_state($ctx);
+                my $state = $ctx->cfg_state();
                 if (defined $state && defined $state->{loop_jump}) {
                     $found_loop_jump = true;
                     $loop_jump_value = $state->{loop_jump};
@@ -1164,7 +1164,7 @@ SKIP: {
             my $loop_jump_value;
             while (@ctx_stack) {
                 my $ctx = pop @ctx_stack;
-                my $state = $sa_lu->cfg_state($ctx);
+                my $state = $ctx->cfg_state();
                 if (defined $state && defined $state->{loop_jump}) {
                     $found_loop_jump = true;
                     $loop_jump_value = $state->{loop_jump};
@@ -1301,7 +1301,7 @@ SKIP: {
         SKIP: {
             skip 'shared-subscript postfix-if did not parse', 3 unless defined $result;
             my $sem_ctx = $result;
-            my $state = $sa_cc->cfg_state($sem_ctx);
+            my $state = $sem_ctx->cfg_state();
             ok(defined $state, 'cfg_state exists for shared-subscript postfix-if');
 
             SKIP: {
@@ -1363,7 +1363,7 @@ SKIP: {
         SKIP: {
             skip '_chart_set did not parse', 4 unless defined $result;
             my $sem_ctx = $result;
-            my $state = $sa_cc->cfg_state($sem_ctx);
+            my $state = $sem_ctx->cfg_state();
             ok(defined $state && defined $state->{if_node}, 'if_node present');
 
             SKIP: {
@@ -1420,7 +1420,7 @@ SKIP: {
         SKIP: {
             skip 'simple shared-subscript did not parse', 2 unless defined $result;
             my $sem_ctx = $result;
-            my $state = $sa_cc->cfg_state($sem_ctx);
+            my $state = $sem_ctx->cfg_state();
             ok(defined $state, 'cfg_state exists for simple shared-subscript');
 
             SKIP: {
@@ -1453,7 +1453,7 @@ SKIP: {
         SKIP: {
             skip 'legitimate subscript did not parse', 2 unless defined $result;
             my $sem_ctx = $result;
-            my $state = $sa_cc->cfg_state($sem_ctx);
+            my $state = $sem_ctx->cfg_state();
             ok(defined $state, 'cfg_state exists for subscript condition');
 
             SKIP: {

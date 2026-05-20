@@ -52,7 +52,7 @@ SKIP: {
         my $sem_ctx = $result;
         skip 'no semantic context for Test 1', 3 unless defined $sem_ctx;
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available for accumulator loop');
 
         my $x_binding = $state->{scope}->lookup('$x');
@@ -78,7 +78,7 @@ SKIP: {
         my $sem_ctx = $result;
         skip 'no semantic context for Test 2', 3 unless defined $sem_ctx;
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available for string loop');
 
         my $s_binding = $state->{scope}->lookup('$s');
@@ -104,7 +104,7 @@ SKIP: {
         my $sem_ctx = $result;
         skip 'no semantic context for Test 3', 4 unless defined $sem_ctx;
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available for backedge check');
 
         my $sum_binding = $state->{scope}->lookup('$sum');
@@ -185,7 +185,7 @@ SKIP: {
         my $sem_ctx = $result;
         skip 'no semantic context for Test 6', 1 unless defined $sem_ctx;
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         TODO: {
             local $TODO = 'trailing statement overwrites loop Phi via multiply() right-wins merge';
             my $x_binding = $state->{scope}->lookup('$x');

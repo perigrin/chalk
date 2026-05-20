@@ -172,7 +172,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     # Maps IR node refaddr to cfg_state entry for control-flow-aware emission.
     # First-found wins: parent rules that wire body expressions take priority.
     # $cfg_snapshot is an optional hashref mapping Context refaddr to cfg_state,
-    # pre-built at parse time. When provided, it is used instead of $sa->cfg_state()
+    # pre-built at parse time. When provided, it is used instead of $node->cfg_state()
     # which may have been wiped by subsequent parses (shared class-scope lexical).
     method _build_cfg_lookup($sa, $ctx, $cfg_snapshot = undef) {
         my @stack = ($ctx);
@@ -180,7 +180,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             my $node = pop @stack;
             my $state = defined $cfg_snapshot
                 ? $cfg_snapshot->{refaddr($node)}
-                : $sa->cfg_state($node);
+                : $node->cfg_state();
             if (defined $state && (defined $state->{if_node} || defined $state->{loop} || defined $state->{try_node})) {
                 my $ir_node = $node->extract();
                 if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}) {
@@ -1362,12 +1362,12 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     # Emit C code for a CFG state node (if/loop/try-catch).
-    # Uses stored $_sa and $_ctx set by generate_c_files.
+    # Uses stored $_ctx set by generate_c_files. ($_sa is no longer needed
+    # for the cfg_state lookup — Context owns the walker now.)
     method emit_from_cfg_state($declared_vars) {
-        my $sa  = $_sa;
         my $ctx = $_ctx;
 
-        my $state = $sa->cfg_state($ctx);
+        my $state = $ctx->cfg_state();
         return unless defined $state;
 
         # If/else: cfg_state has if_node

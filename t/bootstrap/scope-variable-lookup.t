@@ -154,7 +154,7 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     ok(!defined $inputs->[1], 'Phi backedge is undef (not yet wired)');
 
     # The cfg_state on the result should have the updated scope (Phi, not sentinel)
-    my $state = $sa->cfg_state($result);
+    my $state = $result->cfg_state();
     ok(defined $state, 'result context has cfg_state');
     if (defined $state) {
         my $x_after = $state->{scope}->lookup('$x');

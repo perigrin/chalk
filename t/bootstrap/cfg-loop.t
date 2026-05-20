@@ -44,7 +44,7 @@ SKIP: {
         ok(defined $sem_ctx, 'SemanticAction context exists');
 
         # cfg_state should reflect the Loop/If/Region CFG structure
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state returns state');
 
         # The control should be a Region (loop exit)
@@ -82,7 +82,7 @@ SKIP: {
         ok(defined $result, 'postfix for parses');
 
         my $sem_ctx = $result;
-        my $state = defined $sem_ctx ? $sa->cfg_state($sem_ctx) : undef;
+        my $state = defined $sem_ctx ? $sem_ctx->cfg_state() : undef;
         ok(defined $state, 'cfg_state returns state for postfix for');
 
         my $control = $state ? $state->{control} : undef;
@@ -102,7 +102,7 @@ SKIP: {
         ok(defined $sem_ctx, 'while: SemanticAction context exists');
 
         # cfg_state should reflect the Loop/If/Region CFG structure
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'while: cfg_state returns state');
 
         # The control should be a Region (loop exit)
@@ -142,7 +142,7 @@ SKIP: {
         my $sem_ctx = $result;
         ok(defined $sem_ctx, 'while body cfg: context exists');
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'while body cfg: has cfg_state');
 
         # The cfg_state should have loop-related keys for the emitter

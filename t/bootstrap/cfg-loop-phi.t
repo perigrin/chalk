@@ -44,7 +44,7 @@ SKIP: {
         my $sem_ctx = $result;
         skip 'no semantic context', 4 unless defined $sem_ctx;
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available');
 
         # $x should still be in scope after the loop
@@ -70,7 +70,7 @@ SKIP: {
         my $sem_ctx = $result;
         skip 'no semantic context', 5 unless defined $sem_ctx;
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available');
 
         my $sum_binding = $state->{scope}->lookup('$sum');
@@ -100,7 +100,7 @@ SKIP: {
         my $sem_ctx = $result;
         skip 'no semantic context', 2 unless defined $sem_ctx;
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available');
 
         my $y_binding = $state->{scope}->lookup('$y');
@@ -127,7 +127,7 @@ SKIP: {
         my $sem_ctx = $result;
         skip 'no semantic context', 2 unless defined $sem_ctx;
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available for nested loop');
 
         my $x_binding = $state->{scope}->lookup('$x');
@@ -152,7 +152,7 @@ SKIP: {
         my $sem_ctx = $result;
         skip 'no semantic context', 4 unless defined $sem_ctx;
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available for multi-var loop');
 
         my $a_binding = $state->{scope}->lookup('$a');

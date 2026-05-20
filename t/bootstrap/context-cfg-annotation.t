@@ -22,7 +22,7 @@ subtest 'cfg_state returns undef for context with no scope' => sub {
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $ctx = Chalk::Bootstrap::Context->new( focus => 'v' );
-    my $state = $sa->cfg_state($ctx);
+    my $state = $ctx->cfg_state();
     ok(!defined $state, 'cfg_state returns undef when no scope on context');
 };
 
@@ -36,7 +36,7 @@ subtest 'cfg_state reads control from scope field' => sub {
         scope => $scope,
     );
 
-    my $state = $sa->cfg_state($ctx);
+    my $state = $ctx->cfg_state();
     ok(defined $state, 'cfg_state returns state when scope present');
     is($state->{control}, $start, 'cfg_state control comes from scope->control()');
     is($state->{scope}, $scope, 'cfg_state scope is the scope object');
@@ -62,7 +62,7 @@ subtest 'cfg_state reads structural annotations from context annotations' => sub
         },
     );
 
-    my $state = $sa->cfg_state($ctx);
+    my $state = $ctx->cfg_state();
     ok(defined $state, 'cfg_state returns state');
     is($state->{control}, $region, 'control from scope');
     is($state->{if_node}, $if_node, 'if_node from annotations');
@@ -86,7 +86,7 @@ subtest 'cfg_state on one() returns state with Start control' => sub {
     $sa->reset_cache();
 
     my $one = $sa->one();
-    my $state = $sa->cfg_state($one);
+    my $state = $one->cfg_state();
 
     ok(defined $state, 'cfg_state on one() returns state');
     ok(defined $state->{control}, 'state has control');
@@ -112,7 +112,7 @@ subtest 'cfg_state walks children to find scope' => sub {
         position => 0,
     );
 
-    my $state = $sa->cfg_state($parent);
+    my $state = $parent->cfg_state();
     ok(defined $state, 'cfg_state walks children to find scope');
     is($state->{control}, $start, 'control found via child scope');
 };
@@ -138,7 +138,7 @@ subtest 'cfg_state walks children to find structural annotations' => sub {
         position => 0,
     );
 
-    my $state = $sa->cfg_state($parent);
+    my $state = $parent->cfg_state();
     ok(defined $state, 'cfg_state returns state when child has scope+annotations');
     is($state->{if_node}, $if_node, 'if_node found via child annotations');
 };

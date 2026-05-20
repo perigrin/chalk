@@ -91,7 +91,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my @stack = ($ctx);
         while (@stack) {
             my $node = pop @stack;
-            my $state = $sa->cfg_state($node);
+            my $state = $node->cfg_state();
             if (defined $state && (defined $state->{if_node} || defined $state->{loop} || defined $state->{try_node})) {
                 my $ir_node = $node->extract();
                 # Only register IR nodes that are directly associated with
@@ -1020,7 +1020,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # references are present in the state.
     # Returns undef if the state has no control flow structure to emit.
     method emit_from_cfg_state($sa, $ctx) {
-        my $state = $sa->cfg_state($ctx);
+        my $state = $ctx->cfg_state();
         return unless defined $state;
 
         # If/else: cfg_state has if_node

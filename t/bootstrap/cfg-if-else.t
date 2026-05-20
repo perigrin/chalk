@@ -44,7 +44,7 @@ SKIP: {
         ok(defined $sem_ctx, 'SemanticAction context exists');
 
         # cfg_state should have been propagated through the parse
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state returns state');
         ok(defined $state->{control}, 'state has control token');
 
@@ -84,7 +84,7 @@ SKIP: {
         ok(defined $result, 'if-without-else parses');
 
         my $sem_ctx = $result;
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state returns state for if-no-else');
 
         # Should still have Region (even without else, control merges)
@@ -101,7 +101,7 @@ SKIP: {
         ok(defined $result, 'if/else parses for cfg_state check');
 
         my $sem_ctx = $result;
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state propagated to outermost context');
         is($state->{control}->operation(), 'Region',
             'cfg_state control is Region (propagated through Earley merges)');

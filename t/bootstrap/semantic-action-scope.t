@@ -39,7 +39,7 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     is($one->extract(), undef, 'one() focus is undef (backward compatible)');
 
     # CFG state is accessible via cfg_state
-    my $state = $sa->cfg_state($one);
+    my $state = $one->cfg_state();
     ok(defined $state, 'cfg_state returns state for one() context');
     is(ref($state), 'HASH', 'cfg_state returns a hashref');
     ok(exists $state->{control}, 'state has control key');
@@ -78,7 +78,7 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     is($result->extract(), $const, 'focus is the action result (bare IR node)');
 
     # CFG state still available
-    my $state = $sa->cfg_state($result);
+    my $state = $result->cfg_state();
     ok(defined $state, 'cfg_state available on completed context');
     is($state->{control}->operation(), 'Start', 'control propagated from parent');
     ok($state->{scope} isa Chalk::Bootstrap::Scope, 'scope propagated from parent');
@@ -96,12 +96,12 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $node = $factory->make('Constant', const_type => 'integer', value => 42);
     my $new_scope = Chalk::Bootstrap::Scope->new()->define('$x', $node);
     my $new_control = $factory->make('If',
-        control => $sa->cfg_state($one)->{control},
+        control => $one->cfg_state()->{control},
         condition => $node);
 
     $sa->set_cfg_state($one, { control => $new_control, scope => $new_scope });
 
-    my $state = $sa->cfg_state($one);
+    my $state = $one->cfg_state();
     is($state->{control}, $new_control, 'control updated via set_cfg_state');
     is($state->{scope}->lookup('$x'), $node, 'scope updated via set_cfg_state');
 }
@@ -115,14 +115,14 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $old_one = $sa->one();
 
-    ok(defined $sa->cfg_state($old_one), 'cfg_state exists before reset');
+    ok(defined $old_one->cfg_state(), 'cfg_state exists before reset');
 
     $sa->reset_cache();
 
     # After reset, next one() call returns a NEW singleton
     my $new_one = $sa->one();
     isnt($old_one, $new_one, 'reset_cache creates a new singleton');
-    ok(defined $sa->cfg_state($new_one), 'new singleton has fresh cfg_state');
+    ok(defined $new_one->cfg_state(), 'new singleton has fresh cfg_state');
 }
 
 done_testing();

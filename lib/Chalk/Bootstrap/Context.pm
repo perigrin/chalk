@@ -158,4 +158,70 @@ class Chalk::Bootstrap::Context {
 
         return $acc;
     }
+
+    # Assemble a CFG-state hashref from the tree's $scope field and any
+    # structural annotations (if_node, loop, try_node, then_stmts, etc.)
+    # set on _complete_sa result nodes.
+    #
+    # Walks the whole subtree, collecting:
+    #   - the outermost scope (the one whose control is most-advanced — non-Start
+    #     wins over Start, BFS-first wins among equally-advanced)
+    #   - the first occurrence of each known structural-annotation key
+    #
+    # Returns undef when no scope is found anywhere in the tree. Otherwise
+    # returns { control => $scope->control(), scope => $scope, %structural }.
+    #
+    # Replaces the read-side of the deleted cfg_state side channel — see
+    # docs/plans/2026-05-20-mop-migration-3a-infra-status.md. The structural
+    # keys are kept as-is to avoid forcing every reader to walk the tree
+    # themselves; future work may push readers to fish out the specific keys
+    # they need directly via $ctx->annotations()->{$key}.
+    my @_cfg_struct_keys = qw(
+        if_node loop try_node
+        then_stmts else_stmts body_stmts statements
+        loop_if body_proj exit_proj
+        true_proj false_proj
+        loop_jump iterator list
+        catch_var try_stmts catch_stmts
+    );
+
+    method cfg_state() {
+        my @stack = ($self);
+        my $found_scope;
+        my %structural;
+
+        while (@stack) {
+            my $node = pop @stack;
+
+            my $ns = $node->scope();
+            if (defined $ns) {
+                if (!defined $found_scope) {
+                    $found_scope = $ns;
+                } else {
+                    # Prefer the scope whose control is non-Start over Start.
+                    my $nc = $ns->control();
+                    my $sc = $found_scope->control();
+                    if (defined $nc && (!defined $sc || $sc->operation() eq 'Start')
+                            && $nc->operation() ne 'Start') {
+                        $found_scope = $ns;
+                    }
+                }
+            }
+
+            my $ann = $node->annotations();
+            for my $key (@_cfg_struct_keys) {
+                $structural{$key} //= $ann->{$key} if exists $ann->{$key};
+            }
+
+            push @stack, $node->children()->@*;
+        }
+
+        return undef unless defined $found_scope;
+
+        return {
+            control => $found_scope->control(),
+            scope   => $found_scope,
+            %structural,
+        };
+    }
 }

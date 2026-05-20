@@ -48,7 +48,7 @@ SKIP: {
         my $sem_ctx = $result;
         skip 'no semantic context', 2 unless defined $sem_ctx;
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available after postfix for loop');
 
         my $x_binding = $state->{scope}->lookup('$x');
@@ -72,7 +72,7 @@ SKIP: {
         my $sem_ctx = $result;
         skip 'no semantic context', 2 unless defined $sem_ctx;
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available after postfix while loop');
 
         my $n_binding = $state->{scope}->lookup('$n');

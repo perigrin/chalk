@@ -46,7 +46,7 @@ SKIP: {
         my $sem_ctx = $result;
         ok(defined $sem_ctx, 'SemanticAction context exists');
 
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state is set after if/else');
 
         SKIP: {
@@ -75,7 +75,7 @@ SKIP: {
         ok(defined $result, 'if-without-else with branch assignment parses');
 
         my $sem_ctx = $result;
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state is set after if-without-else');
 
         SKIP: {
@@ -104,7 +104,7 @@ SKIP: {
         ok(defined $result, 'if/else without $x assignment parses');
 
         my $sem_ctx = $result;
-        my $state = $sa->cfg_state($sem_ctx);
+        my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state is set');
 
         SKIP: {
