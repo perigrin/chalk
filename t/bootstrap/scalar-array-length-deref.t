@@ -6,7 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
-use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parser);
+use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Earley;
@@ -16,7 +16,6 @@ use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Bootstrap::Semiring::Structural;
 use Chalk::Bootstrap::Semiring::SemanticAction;
-use Chalk::Bootstrap::ConciseTree::Actions;
 use Chalk::Bootstrap::Desugar;
 use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Grammar::Perl::KeywordTable;
@@ -139,7 +138,7 @@ my sub build_bpts_parser() {
 }
 
 my sub build_full_parser() {
-    return build_perl_concise_parser($grammar, start => 'Program');
+    return build_perl_ir_parser($grammar, start => 'Program');
 }
 
 # ---------------------------------------------------------------------------

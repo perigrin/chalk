@@ -8,7 +8,7 @@ package TestPipeline;
 use Exporter 'import';
 our @EXPORT_OK = qw(
     build_parser parse_ir bnf_text full_pipeline optimized_pipeline grammars_match
-    perl_bnf_text perl_pipeline build_perl_recognizer build_perl_concise_parser
+    perl_bnf_text perl_pipeline build_perl_recognizer
     build_perl_ir_parser
 );
 
@@ -22,7 +22,6 @@ use Chalk::Grammar::BNF;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer;
 use Chalk::Bootstrap::Optimizer::DCE;
-use Chalk::Bootstrap::ConciseTree::Actions;
 use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Grammar::Perl::PrecedenceTable;
@@ -173,16 +172,6 @@ sub build_perl_recognizer {
     return Chalk::Bootstrap::Earley->new(
         grammar  => $desugared,
         semiring => $bool_sr,
-    );
-}
-
-# Builds a FilterComposite(Boolean, Precedence, TypeInference, Structural, SemanticAction(ConciseTree::Actions))
-# parser from the generated Perl grammar IR. Accepts optional start => 'RuleName'.
-# Result is a unified Context; annotation slots: precedence, type, structural, cfg.
-sub build_perl_concise_parser {
-    my ($grammar, %opts) = @_;
-    return _build_perl_parser_with_actions(
-        $grammar, Chalk::Bootstrap::ConciseTree::Actions->new(), %opts,
     );
 }
 

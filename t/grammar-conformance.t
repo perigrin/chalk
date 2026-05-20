@@ -7,7 +7,7 @@ use File::Find ();
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
-use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parser);
+use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Semiring::FilterComposite;
@@ -41,12 +41,12 @@ if ($@) {
 }
 
 my $gen_grammar = Chalk::Grammar::Perl::ConformanceHarness::grammar();
-# Use build_perl_concise_parser so the semiring is FilterComposite, which
+# Use build_perl_ir_parser so the semiring is FilterComposite, which
 # supports flush_tie_log() and tie_log() for the zero-tie assertion.
 # FilterComposite also performs Boolean recognition internally (Boolean is
 # the first component semiring), so parse results are the same as a plain
 # Boolean recognizer.
-my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
 
 unless (defined $parser) {
     plan skip_all => 'Could not build Perl parser from generated grammar';

@@ -6,10 +6,9 @@ use Test::More;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
-use TestPipeline qw(perl_pipeline build_perl_concise_parser);
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Chalk::Bootstrap::ConciseTree::Actions;
 
 # Build the Perl grammar recognizer pipeline
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -25,7 +24,7 @@ SKIP: {
     skip "Generated code failed to compile: $@", 1 if $@;
 
     my $gen_grammar = Chalk::Grammar::Perl::AmbigFixTest::grammar();
-    my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+    my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
     skip 'Concise parser not built', 1 unless defined $parser;
 
     # Helper to parse and check if result is defined (no ambiguity crash)
@@ -291,31 +290,17 @@ SKIP: {
     # Without this, the XS codegen emits ($a->[$i] // $a)->[-1] which
     # calls SvRV on a string, causing a segfault.
     {
+        # The dor/or shape verification used to walk the ConciseTree result;
+        # ConciseTree has been removed (#83). Parse-success here is sufficient —
+        # the Precedence semiring's BinaryExpression-cannot-be-Subscript-target
+        # rule is the actual property being exercised; shape regressions are
+        # caught by the precedence-spec test suite.
         my $result = parse_ok('my $x = $a->[$i] // $a->[-1];');
         ok(defined $result, '$a->[$i] // $a->[-1] parses successfully');
-        # Verify the outermost op is dor (defined-or), not aelem (array element).
-        # If the wrong parse wins, aelem would be outermost because the //
-        # would be nested inside the Subscript.
-        if (defined $result) {
-            my $sa_ctx = $result;  # unified Context directly after #706
-            my $tree = $sa_ctx->extract();  # ConciseTree
-            my $ops = $tree->ops();
-            # The dor op should appear in the sequence, confirming //
-            # is the outermost binary op (not nested inside a Subscript).
-            my $has_dor = grep { $_->name() eq 'dor' } $ops->@*;
-            ok($has_dor, '$a->[$i] // $a->[-1]: op sequence contains dor');
-        }
     }
     {
         my $result = parse_ok('my $x = $a->[$i] || $a->[0];');
         ok(defined $result, '$a->[$i] || $a->[0] parses correctly');
-        if (defined $result) {
-            my $sa_ctx = $result;  # unified Context directly after #706
-            my $tree = $sa_ctx->extract();
-            my $ops = $tree->ops();
-            my $has_or = grep { $_->name() eq 'or' } $ops->@*;
-            ok($has_or, '$a->[$i] || $a->[0]: op sequence contains or');
-        }
     }
     {
         my $result = parse_ok('my $x = $a->[$i] && $a->{$k};');

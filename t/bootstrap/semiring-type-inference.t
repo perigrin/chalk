@@ -35,8 +35,11 @@ for my $kw (@keywords) {
 }
 
 # Non-keywords should NOT be recognized
+# 'return' was added to KEYWORD_RULES (commit 7f3e3d4f) so it's a keyword
+# now — removed from this list. Builtins (die/warn/push/etc.) are still
+# QualifiedIdentifiers, not keywords.
 my @non_keywords = qw(
-    return die warn push pop shift unshift
+    die warn push pop shift unshift
     keys values defined ref length chomp
     join split sort print say sprintf
     map grep
@@ -285,7 +288,7 @@ use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::Program;
-use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parser build_perl_ir_parser);
+use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser build_perl_ir_parser);
 
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -812,103 +815,103 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
     # push @arr, $x
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('push @arr, $x;');
         ok(defined $result && !$result->is_zero(), 'push @arr, $x: parses');
     }
 
     # push $ops->@*, $op (PostfixDeref provides array type)
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('push $ops->@*, $op;');
         ok(defined $result && !$result->is_zero(), 'push $ops->@*, $op: parses');
     }
 
     # unshift @arr, $x
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('unshift @arr, $x;');
         ok(defined $result && !$result->is_zero(), 'unshift @arr, $x: parses');
     }
 
     # pop @arr
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('pop @arr;');
         ok(defined $result && !$result->is_zero(), 'pop @arr: parses');
     }
 
     # shift @arr
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('shift @arr;');
         ok(defined $result && !$result->is_zero(), 'shift @arr: parses');
     }
 
     # splice @arr, 0, 1
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('splice @arr, 0, 1;');
         ok(defined $result && !$result->is_zero(), 'splice @arr, 0, 1: parses');
     }
 
     # Hash builtins: keys, values, each
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('keys %hash;');
         ok(defined $result && !$result->is_zero(), 'keys %hash: parses');
     }
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('values %hash;');
         ok(defined $result && !$result->is_zero(), 'values %hash: parses');
     }
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('each %hash;');
         ok(defined $result && !$result->is_zero(), 'each %hash: parses');
     }
 
     # Other new builtins: defined, warn, die, ref, length
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('defined $x;');
         ok(defined $result && !$result->is_zero(), 'defined $x: parses');
     }
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('warn "oops";');
         ok(defined $result && !$result->is_zero(), 'warn "oops": parses');
     }
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('die "fatal";');
         ok(defined $result && !$result->is_zero(), 'die "fatal": parses');
     }
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('ref $obj;');
         ok(defined $result && !$result->is_zero(), 'ref $obj: parses');
     }
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('length $str;');
         ok(defined $result && !$result->is_zero(), 'length $str: parses');
     }
 
     # Regression: existing expressions still parse
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('my $x = $a + $b;');
         ok(defined $result && !$result->is_zero(), 'regression: $a + $b still parses');
     }
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('my @r = map { $_ } @items;');
         ok(defined $result && !$result->is_zero(), 'regression: map {} @items still parses');
     }
     {
-        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('my $v = $h{$k};');
         ok(defined $result && !$result->is_zero(), 'regression: $h{$k} still parses');
     }

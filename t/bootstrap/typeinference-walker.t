@@ -6,7 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
-use TestPipeline qw(perl_pipeline build_perl_concise_parser);
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
@@ -28,7 +28,7 @@ SKIP: {
     skip "Generated code failed to compile: $@", 1 if $@;
 
     my $gen_grammar = Chalk::Grammar::Perl::WalkerFixTest::grammar();
-    my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+    my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
     skip 'Concise parser not built', 1 unless defined $parser;
 
     # Helper: parse and return defined result, or undef on failure.

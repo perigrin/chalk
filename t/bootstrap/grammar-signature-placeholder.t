@@ -6,7 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
-use TestPipeline qw(perl_pipeline build_perl_concise_parser);
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
@@ -29,7 +29,7 @@ if ($@) {
 }
 
 my $gen_grammar = Chalk::Grammar::Perl::PlaceholderTests::grammar();
-my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
 
 unless (defined $parser) {
     plan skip_all => 'Could not build parser';

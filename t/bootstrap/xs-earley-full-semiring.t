@@ -19,7 +19,7 @@ unless ($have_compiler) {
 }
 
 use TestXSHelpers qw(setup_xs_grammar parse_file_ir build_and_load);
-use TestPipeline qw(perl_pipeline build_perl_concise_parser);
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Desugar;
@@ -29,7 +29,7 @@ use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Bootstrap::Semiring::Structural;
 use Chalk::Bootstrap::Semiring::SemanticAction;
-use Chalk::Bootstrap::ConciseTree::Actions;
+use Chalk::Bootstrap::Perl::Actions;
 use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Grammar::Perl::TypeLibrary;
@@ -85,7 +85,7 @@ my sub build_full_semiring() {
     );
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
-        actions => Chalk::Bootstrap::ConciseTree::Actions->new(),
+        actions => Chalk::Bootstrap::Perl::Actions->new(),
     );
     return Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],

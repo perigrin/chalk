@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 
-use TestPipeline qw(perl_pipeline build_perl_concise_parser);
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Semiring::Precedence;
@@ -85,7 +85,7 @@ my $make_complete = sub ($value, $rule_name, $alt_idx = 0) {
 }
 
 # ========================================================================
-# Full-pipeline integration tests using build_perl_concise_parser.
+# Full-pipeline integration tests using build_perl_ir_parser.
 # These are the acceptance criteria inputs from the RCA.
 # ========================================================================
 
@@ -102,7 +102,7 @@ SKIP: {
     skip "Generated code failed to compile: $@", 1 if $@;
 
     my $gen_grammar = Chalk::Grammar::Perl::PrecAssocTest::grammar();
-    my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+    my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
     skip 'Concise parser not built', 1 unless defined $parser;
 
     my sub parse_ok($source) {

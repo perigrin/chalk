@@ -87,8 +87,8 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
 
 # Test 5: SemanticAction multiply with StatementItem complete Context does not crash
 {
-    use Chalk::Bootstrap::ConciseTree::Actions;
-    my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+    use Chalk::Bootstrap::Perl::Actions;
+    my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(actions => $actions);
 
     # Create a Context as the left value (SemanticAction expects a Context)
@@ -107,8 +107,8 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
 
 # Test 6: SemanticAction multiply with non-statement rule does not crash
 {
-    use Chalk::Bootstrap::ConciseTree::Actions;
-    my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+    use Chalk::Bootstrap::Perl::Actions;
+    my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(actions => $actions);
 
     my $ctx = Chalk::Bootstrap::Context->new(
