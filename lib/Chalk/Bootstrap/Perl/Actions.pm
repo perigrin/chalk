@@ -736,11 +736,10 @@ class Chalk::Bootstrap::Perl::Actions {
         my $method_name_val = defined $method_name ? $method_name->value() : '<unknown>';
         my @param_strs = map { $_->value() } @params;
 
-        # Use Block's synthesized graph when present; the legacy
-        # _build_method_graph still backfills Start/Returns/body_stmts
-        # so existing readers see the same shape (deletion deferred to
-        # Phase 3a-migration commit 6).
-        my $graph = $self->_build_method_graph($ctx, $fixed_body, $body_graph);
+        # Block synthesized the data-flow graph; finalize it with
+        # schedule annotations, fall-through Return synthesis, and
+        # control-flow inner-body seeding for codegen.
+        my $graph = $self->_finalize_body_graph($ctx, $fixed_body, $body_graph);
 
         return Chalk::IR::MethodInfo->new(
             name        => $method_name_val,
@@ -815,7 +814,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $sub_name_val = $sub_name->value();
         my @param_strs = map { $_->value() } @params;
 
-        my $graph = $self->_build_method_graph($ctx, $fixed_body, $body_graph);
+        my $graph = $self->_finalize_body_graph($ctx, $fixed_body, $body_graph);
 
         return Chalk::IR::SubInfo->new(
             name   => $sub_name_val,
@@ -826,17 +825,22 @@ class Chalk::Bootstrap::Perl::Actions {
         );
     }
 
-    # Build a per-method/sub Graph from Context tree and body statements.
-    # Walks the Context subtree to collect annotation entries that carry
-    # control-flow information (if_node, loop, try_node). Maps each
-    # associated IR node's refaddr to the annotation hashref.
-    # Also collects Return/Unwind nodes from the fixed body as graph exits.
-    # When $existing_graph is provided, merges Start/Returns/body_stmts into
-    # it so VarDecls and other nodes already merged by side-effect actions
-    # stay reachable.
-    method _build_method_graph($ctx, $fixed_body, $existing_graph = undef) {
-        # Walk Context subtree to collect annotation entries for this scope.
-        my %schedule;
+    # Finalize a method/sub body graph: walk the Context subtree to collect
+    # control-flow annotations (if_node, loop, try_node) into the graph's
+    # schedule, synthesize an implicit Return on fall-through bodies, and
+    # seed any control-flow inner-body statements into the cache for codegen.
+    #
+    # Block already synthesizes the data-flow graph via merge() calls from
+    # inner VariableDeclaration / AssignmentExpression actions, so this
+    # helper does NOT (and must not) re-seed Start - the graph's own
+    # start() accessor finds it via cache scan.
+    method _finalize_body_graph($ctx, $fixed_body, $body_graph) {
+        my $graph = $body_graph // Chalk::IR::Graph->new;
+
+        # Collect structural annotation entries into the graph's schedule.
+        # Codegen (Perl/Target/Perl.pm:_emit_method_decl) consumes this to
+        # populate %_cfg_lookup for if/loop/try emission.
+        my $schedule = $graph->schedule();
         my @stack = ($ctx);
         while (@stack) {
             my $c = pop @stack;
@@ -847,27 +851,16 @@ class Chalk::Bootstrap::Perl::Actions {
                         || defined $ann->{try_node})) {
                 my $ir_node = $c->extract();
                 if (defined $ir_node && ref($ir_node)) {
-                    $schedule{refaddr($ir_node)} = $ann;
+                    $schedule->{refaddr($ir_node)} = $ann;
                 }
-                # try_node is the Constructor; also register by its refaddr.
                 if (defined $ann->{try_node} && ref($ann->{try_node})) {
-                    $schedule{refaddr($ann->{try_node})} = $ann;
+                    $schedule->{refaddr($ann->{try_node})} = $ann;
                 }
             }
             push @stack, reverse $c->children()->@*;
         }
 
-        # Determine graph start node: prefer the existing graph's Start
-        # (already present in cache from inner VariableDeclaration merges)
-        # to avoid pulling in stale pre-fixup nodes via _ctx_control.
-        my $start;
-        if (defined $existing_graph) {
-            $start = $existing_graph->start() // $factory->make('Start');
-        } else {
-            $start = _ctx_control($ctx) // $factory->make('Start');
-        }
-
-        # Collect Return and Unwind nodes from the fixed body as graph exits.
+        # Collect explicit Return/Unwind nodes from the body.
         my @returns;
         for my $stmt ($fixed_body->@*) {
             if ($stmt isa Chalk::IR::Node::Return
@@ -876,18 +869,15 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # Perl's implicit-return semantics: if no explicit Return/Unwind node
-        # was found and the body is non-empty, the last expression in the body
-        # is the implicit return value. Wrap it in a Return CFG node so the
-        # graph is always properly terminated. Control input for the Return
-        # is the last side-effect node in the body (the chain tail), or
-        # $start when no side-effect node precedes it.
+        # Perl's implicit-return semantics: when no explicit Return/Unwind
+        # was found and the body is non-empty, the last expression is the
+        # implicit return value. Wrap it in a Return CFG node so the graph
+        # is always properly terminated. Use the last side-effect node as
+        # the Return's control predecessor (the chain tail).
         if (!@returns && $fixed_body->@*) {
             my $last = $fixed_body->[-1];
             if (ref($last) && blessed($last) && $last->isa('Chalk::IR::Node')) {
-                my $return_ctrl = $start;
-                # Find the last side-effect node (VarDecl, etc.) in the body
-                # to use as the Return's control predecessor.
+                my $return_ctrl = $graph->start() // $factory->make('Start');
                 for my $stmt (reverse $fixed_body->@*) {
                     next unless ref($stmt) && blessed($stmt)
                         && $stmt->isa('Chalk::IR::Node');
@@ -903,47 +893,24 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # Collect all body statements as BFS seeds so that side-effect nodes
-        # (VarDecl, Assign, Call, If) without explicit control inputs are still
-        # reachable via graph->nodes().  Filters out undef and non-Node items.
-        my @body_stmts = grep {
-            defined $_ && ref($_) && blessed($_) && $_->isa('Chalk::IR::Node')
-        } $fixed_body->@*;
-
-        # Also seed from statements inside control-flow regions (if/loop/try
-        # bodies) stored in the schedule.  These statements are the then_stmts,
-        # else_stmts, loop body statements, etc. that are not directly reachable
-        # via inputs() from the If/Loop node itself.
-        for my $state (values %schedule) {
+        # Seed Returns + control-flow inner-body statements so codegen can
+        # reach them. The Block fixup already merged the data-flow chain;
+        # this adds nodes that the schedule annotations reference but the
+        # main chain doesn't (then_stmts/else_stmts/loop bodies).
+        $graph->_seed($_) for @returns;
+        for my $state (values $schedule->%*) {
             for my $key (qw(then_stmts else_stmts statements body_stmts)) {
-                next unless defined $state->{$key} && ref($state->{$key}) eq 'ARRAY';
+                next unless defined $state->{$key}
+                    && ref($state->{$key}) eq 'ARRAY';
                 for my $stmt ($state->{$key}->@*) {
                     next unless defined $stmt && ref($stmt) && blessed($stmt);
                     next unless $stmt->isa('Chalk::IR::Node');
-                    push @body_stmts, $stmt;
+                    $graph->_seed($stmt);
                 }
             }
         }
 
-        # If Block synthesized a graph, augment it in place: seed Returns
-        # and body_stmts so all reachable nodes are in the cache. Start is
-        # already present in the graph (merged by inner VariableDeclaration
-        # actions); seeding $start from $ctx->scope->control here would
-        # pull in the stale OLD-refined last-statement node because the
-        # SA's scope was last updated by AssignmentExpression before
-        # Block's control-chain fixup rewrote those nodes.
-        if (defined $existing_graph) {
-            $existing_graph->_seed($_) for @returns;
-            $existing_graph->_seed($_) for @body_stmts;
-            return $existing_graph;
-        }
-
-        return Chalk::IR::Graph->new(
-            start      => $start,
-            returns    => \@returns,
-            schedule   => \%schedule,
-            body_stmts => \@body_stmts,
-        );
+        return $graph;
     }
 
     # §9 AdjustBlock ::= /ADJUST\b/ _ Block
