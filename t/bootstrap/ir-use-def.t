@@ -31,10 +31,12 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         initializer => $init,
     );
 
-    # Check producers (inputs) of decl
-    is(scalar($decl->inputs->@*), 2, 'decl has 2 inputs');
-    is($decl->inputs->[0], $var,  'first input is variable');
-    is($decl->inputs->[1], $init, 'second input is initializer');
+    # Check producers (inputs) of decl - side-effect-shaped:
+    # inputs[0]=control (undef when constructed via Shim without it),
+    # inputs[1]=variable, inputs[2]=initializer.
+    is(scalar($decl->inputs->@*), 3, 'decl has 3 inputs (control, variable, initializer)');
+    is($decl->inputs->[1], $var,  'second input is variable');
+    is($decl->inputs->[2], $init, 'third input is initializer');
 
     # Check consumers of var
     is(scalar($var->consumers->@*), 1, 'var has 1 consumer');
