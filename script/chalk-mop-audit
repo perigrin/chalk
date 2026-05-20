@@ -1,0 +1,335 @@
+#!/usr/bin/env perl
+# ABOUTME: Audit MOP shape across the lib/ corpus — flag structurally-invalid
+# ABOUTME: ClassInfo/MethodInfo/FieldInfo/SubInfo/UseInfo nodes that the parser produced.
+use 5.42.0;
+use utf8;
+
+use File::Find ();
+use Time::HiRes qw(time);
+use Scalar::Util qw(blessed reftype);
+
+use lib 'lib';
+use lib 't/bootstrap/lib';
+
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
+use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::Bootstrap::Perl::Actions;
+use Chalk::IR::Program;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::FieldInfo;
+use Chalk::IR::MethodInfo;
+use Chalk::IR::SubInfo;
+use Chalk::IR::UseInfo;
+
+STDOUT->autoflush(1);
+STDERR->autoflush(1);
+
+# Build the parser once.
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $raw_ir = perl_pipeline();
+my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
+my $g = $target->generate($raw_ir);
+$g =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::MOPAudit/g;
+eval $g; die $@ if $@;
+my $parser = build_perl_ir_parser(Chalk::Grammar::Perl::MOPAudit::grammar(),
+                                  start => 'Program');
+
+# Collect lib/ files (skip the 6 known timeout files unless BUDGET is set high).
+my @files;
+File::Find::find(sub { return unless /\.pm$/; push @files, $File::Find::name; },
+                 'lib');
+@files = sort @files;
+
+my $budget = $ENV{BUDGET} // 120;
+my %skip_by_default = map { $_ => 1 } (
+    'lib/Chalk/Bootstrap/Optimizer/StructPromotion.pm',
+    'lib/Chalk/Bootstrap/Perl/Target/Perl.pm',
+    'lib/Chalk/Bootstrap/Earley.pm',
+    'lib/Chalk/Bootstrap/Perl/Target/C.pm',
+    'lib/Chalk/Bootstrap/Perl/Actions.pm',
+    'lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm',
+);
+if ($budget < 600) {
+    @files = grep { !$skip_by_default{$_} } @files;
+}
+
+# Per-file findings: { file => [ {kind, message, node_id?}, ... ] }
+my %findings;
+my $total_violations = 0;
+my $files_with_violations = 0;
+my $files_audited = 0;
+my $files_failed = 0;
+
+# Invariant checkers. Each returns a list of violation hashrefs:
+#   { kind => 'mop.class.no_name', message => '...', context => '...' }
+
+my $check_program = sub ($prog, $file) {
+    my @v;
+    unless ($prog isa Chalk::IR::Program) {
+        push @v, { kind => 'mop.program.wrong_type',
+                   message => "extract() returned " . (blessed($prog) || ref($prog) || 'scalar'),
+                 };
+        return @v;
+    }
+    # No required invariants at Program level beyond shape — empty programs
+    # (e.g. tiny test stubs) are legal.
+    return @v;
+};
+
+my $check_use = sub ($use, $file) {
+    my @v;
+    my $kind_prefix = 'mop.use';
+    my $name = eval { $use->name() };
+    if (!defined $name || !length $name) {
+        push @v, { kind => "$kind_prefix.no_name",
+                   message => 'UseInfo with empty/undef module name' };
+    } elsif ($name !~ /^\w[\w:]*$/ && $name !~ /^v?\d+(?:\.\d+)*$/) {
+        # Allow both Foo::Bar style and version-pragma style (5.42.0, v5.42).
+        push @v, { kind => "$kind_prefix.bad_name",
+                   message => "UseInfo module name '$name' contains invalid characters" };
+    }
+    my $args = eval { $use->args() };
+    if (defined $args && reftype($args) ne 'ARRAY') {
+        push @v, { kind => "$kind_prefix.bad_args",
+                   message => "UseInfo args is not an arrayref" };
+    }
+    return @v;
+};
+
+my $check_field = sub ($field, $cls_name, $file) {
+    my @v;
+    my $kind_prefix = 'mop.field';
+    my $name = eval { $field->name() };
+    if (!defined $name || !length $name) {
+        push @v, { kind => "$kind_prefix.no_name",
+                   context => "in class $cls_name",
+                   message => 'FieldInfo with empty/undef name' };
+    } elsif ($name !~ /^[\$\@\%]\w+$/) {
+        push @v, { kind => "$kind_prefix.bad_sigil",
+                   context => "in class $cls_name",
+                   message => "FieldInfo name '$name' missing or has invalid sigil" };
+    }
+    my $attrs = eval { $field->attributes() };
+    if (defined $attrs && reftype($attrs) ne 'ARRAY') {
+        push @v, { kind => "$kind_prefix.bad_attrs",
+                   context => "in class $cls_name field $name",
+                   message => 'FieldInfo attributes is not an arrayref' };
+    }
+    return @v;
+};
+
+my $check_method = sub ($method, $cls_name, $file) {
+    my @v;
+    my $kind_prefix = 'mop.method';
+    my $name = eval { $method->name() };
+    if (!defined $name || !length $name) {
+        push @v, { kind => "$kind_prefix.no_name",
+                   context => "in class $cls_name",
+                   message => 'MethodInfo with empty/undef name' };
+    } elsif ($name !~ /^\w[\w_]*$/) {
+        push @v, { kind => "$kind_prefix.bad_name",
+                   context => "in class $cls_name",
+                   message => "MethodInfo name '$name' invalid identifier" };
+    }
+    my $params = eval { $method->params() };
+    if (defined $params && reftype($params) ne 'ARRAY') {
+        push @v, { kind => "$kind_prefix.bad_params",
+                   context => "in class $cls_name method $name",
+                   message => 'MethodInfo params is not an arrayref' };
+    }
+    my $body = eval { $method->body() };
+    if (defined $body && reftype($body) ne 'ARRAY') {
+        push @v, { kind => "$kind_prefix.bad_body",
+                   context => "in class $cls_name method $name",
+                   message => 'MethodInfo body is not an arrayref' };
+    }
+    return @v;
+};
+
+my $check_sub = sub ($sub, $cls_name, $file) {
+    my @v;
+    my $kind_prefix = 'mop.sub';
+    my $name = eval { $sub->name() };
+    if (!defined $name || !length $name) {
+        push @v, { kind => "$kind_prefix.no_name",
+                   context => $cls_name ? "in class $cls_name" : 'top-level',
+                   message => 'SubInfo with empty/undef name' };
+    } elsif ($name !~ /^\w[\w_]*$/) {
+        push @v, { kind => "$kind_prefix.bad_name",
+                   context => $cls_name ? "in class $cls_name" : 'top-level',
+                   message => "SubInfo name '$name' invalid identifier" };
+    }
+    my $params = eval { $sub->params() };
+    if (defined $params && reftype($params) ne 'ARRAY') {
+        push @v, { kind => "$kind_prefix.bad_params",
+                   context => "sub $name",
+                   message => 'SubInfo params is not an arrayref' };
+    }
+    my $scope = eval { $sub->scope() };
+    if (!defined $scope || $scope !~ /^(?:package|my|our|state|local)$/) {
+        push @v, { kind => "$kind_prefix.bad_scope",
+                   context => "sub $name",
+                   message => "SubInfo scope '$scope' not in (package, my, our, state, local)" };
+    }
+    return @v;
+};
+
+my $check_class = sub ($cls, $file) {
+    my @v;
+    my $kind_prefix = 'mop.class';
+    my $name = eval { $cls->name() };
+    if (!defined $name || !length $name) {
+        push @v, { kind => "$kind_prefix.no_name",
+                   message => 'ClassInfo with empty/undef name' };
+        $name = '<unnamed>';
+    } elsif ($name !~ /^\w[\w:]*$/) {
+        push @v, { kind => "$kind_prefix.bad_name",
+                   message => "ClassInfo name '$name' invalid identifier" };
+    }
+    # parent (optional) — if set, must look like a class name
+    my $parent = eval { $cls->parent() };
+    if (defined $parent && (!length $parent || $parent !~ /^\w[\w:]*$/)) {
+        push @v, { kind => "$kind_prefix.bad_parent",
+                   context => "class $name",
+                   message => "ClassInfo parent '$parent' invalid identifier" };
+    }
+    # Check fields, methods, subs
+    my $fields = eval { $cls->fields() } || [];
+    for my $f ($fields->@*) {
+        unless ($f isa Chalk::IR::FieldInfo) {
+            push @v, { kind => "$kind_prefix.bad_field_type",
+                       context => "class $name",
+                       message => "non-FieldInfo in fields list: " . (blessed($f) || ref($f) || 'scalar') };
+            next;
+        }
+        push @v, $check_field->($f, $name, $file);
+    }
+    my $methods = eval { $cls->methods() } || [];
+    for my $m ($methods->@*) {
+        unless ($m isa Chalk::IR::MethodInfo) {
+            push @v, { kind => "$kind_prefix.bad_method_type",
+                       context => "class $name",
+                       message => "non-MethodInfo in methods list: " . (blessed($m) || ref($m) || 'scalar') };
+            next;
+        }
+        push @v, $check_method->($m, $name, $file);
+    }
+    my $subs = eval { $cls->subs() } || [];
+    for my $s ($subs->@*) {
+        unless ($s isa Chalk::IR::SubInfo) {
+            push @v, { kind => "$kind_prefix.bad_sub_type",
+                       context => "class $name",
+                       message => "non-SubInfo in subs list: " . (blessed($s) || ref($s) || 'scalar') };
+            next;
+        }
+        push @v, $check_sub->($s, $name, $file);
+    }
+    return @v;
+};
+
+# Main loop
+for my $file (@files) {
+    open my $fh, '<:utf8', $file or do { warn "skip $file: $!"; next };
+    my $src = do { local $/; <$fh> };
+    close $fh;
+
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    $parser->reset_parse_state() if $parser->can('reset_parse_state');
+    $parser->semiring()->reset_cache() if $parser->semiring()->can('reset_cache');
+
+    my $t0 = time();
+    my $result;
+    my $hung = 0;
+    eval {
+        local $SIG{ALRM} = sub { $hung = 1; die "T\n"; };
+        alarm $budget;
+        $result = $parser->parse_value($src);
+        alarm 0;
+    };
+    alarm 0;
+    my $elapsed = time() - $t0;
+
+    if ($hung) {
+        warn sprintf("  TIMED OUT after %ds on %s\n", $budget, $file);
+        $files_failed++;
+        next;
+    }
+    unless (defined $result && !$result->is_zero()) {
+        warn sprintf("  PARSE_FAIL on %s\n", $file);
+        $files_failed++;
+        next;
+    }
+
+    $files_audited++;
+    my $prog = $result->extract();
+
+    my @v = $check_program->($prog, $file);
+    if ($prog isa Chalk::IR::Program) {
+        for my $u ($prog->use_decls()->@*) {
+            unless ($u isa Chalk::IR::UseInfo) {
+                push @v, { kind => 'mop.program.bad_use_type',
+                           message => "non-UseInfo in use_decls: " . (blessed($u) || ref($u)) };
+                next;
+            }
+            push @v, $check_use->($u, $file);
+        }
+        for my $c ($prog->classes()->@*) {
+            unless ($c isa Chalk::IR::ClassInfo) {
+                push @v, { kind => 'mop.program.bad_class_type',
+                           message => "non-ClassInfo in classes: " . (blessed($c) || ref($c)) };
+                next;
+            }
+            push @v, $check_class->($c, $file);
+        }
+        for my $s ($prog->top_level_subs()->@*) {
+            unless ($s isa Chalk::IR::SubInfo) {
+                push @v, { kind => 'mop.program.bad_sub_type',
+                           message => "non-SubInfo in top_level_subs: " . (blessed($s) || ref($s)) };
+                next;
+            }
+            push @v, $check_sub->($s, undef, $file);
+        }
+    }
+
+    if (@v) {
+        $findings{$file} = \@v;
+        $total_violations += scalar @v;
+        $files_with_violations++;
+    }
+    printf STDERR "  %3d/%-3d  %-60s  t=%5.1fs  violations=%d\n",
+        $files_audited, scalar(@files), $file, $elapsed, scalar @v;
+}
+
+# Summary
+say '';
+say '=== MOP Audit Summary ===';
+printf "Files audited:           %d\n", $files_audited;
+printf "Files failed/timeout:    %d\n", $files_failed;
+printf "Files with violations:   %d\n", $files_with_violations;
+printf "Total violations:        %d\n", $total_violations;
+say '';
+
+if (%findings) {
+    say '=== Findings by file ===';
+    for my $file (sort keys %findings) {
+        say "  $file (" . scalar($findings{$file}->@*) . " violations)";
+        for my $v ($findings{$file}->@*) {
+            my $ctx = $v->{context} ? " [$v->{context}]" : '';
+            say "    - $v->{kind}: $v->{message}$ctx";
+        }
+    }
+    say '';
+
+    # Categorize by kind
+    my %by_kind;
+    for my $file (keys %findings) {
+        for my $v ($findings{$file}->@*) {
+            $by_kind{$v->{kind}}++;
+        }
+    }
+    say '=== Findings by kind ===';
+    for my $kind (sort { $by_kind{$b} <=> $by_kind{$a} } keys %by_kind) {
+        printf "  %-40s  %d\n", $kind, $by_kind{$kind};
+    }
+}
