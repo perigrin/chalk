@@ -1208,7 +1208,9 @@ class Chalk::Bootstrap::Earley {
 
         for my $pred_entry ($prediction_items->@*) {
             my ($core_id, $skip_symbols) = $pred_entry->@*;
-            unless ($self->_chart_has($chart, $pos, $core_id, $pos)) {
+            # Inlined _chart_has: rd=0 since origin==pos for predicted items.
+            my $existing_oh = $chart->[$pos][$core_id];
+            unless (defined $existing_oh && defined $existing_oh->[0]) {
                 my $info = $core_index->item_for($core_id);
 
                 # Build initial value. For dot>0 items with skipped nullable symbols,
@@ -1410,9 +1412,11 @@ class Chalk::Bootstrap::Earley {
 
                 my $new_core_id = $core_index->advance($w_core_id);
 
-                if ($self->_chart_has($chart, $pos, $new_core_id, $w_origin)) {
+                my $new_rd = $pos - $w_origin;
+                my $existing_oh = $chart->[$pos][$new_core_id];
+                my $existing_val = defined($existing_oh) ? $existing_oh->[$new_rd] : undef;
+                if (defined $existing_val) {
                     # Merge with existing value using semiring add
-                    my $existing_val = $self->_chart_get($chart, $pos, $new_core_id, $w_origin);
                     my $merged_value;
                     try {
                         $merged_value = $semiring->add($existing_val, $new_value);
