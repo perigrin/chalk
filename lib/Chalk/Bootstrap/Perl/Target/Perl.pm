@@ -41,7 +41,7 @@ use Chalk::IR::Program;
 
 class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
-    # Lookup from IR node refaddr → cfg_state entry, built by generate_with_cfg
+    # Lookup from IR node refaddr → cfg_state entry, built by _generate_with_cfg
     field %_cfg_lookup;
 
     # Struct schemas for StructRef/FieldAccess lowering (schema_name → { fields => [...] })
@@ -122,7 +122,16 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 );
             }
             for my $method ($cls->methods) {
-                my @method_body = $self->_body_from_graph($method->graph);
+                # Prefer the body arrayref stored on MOP::Method when
+                # present; fall back to walking the graph for callers
+                # that built the MOP without an explicit body. Walking
+                # the chain misses non-VarDecl side-effects (e.g. a
+                # bare `push @list, $x` statement) because Block's
+                # control-chain fixup only rebuilds VarDecl/Return.
+                my $body_ref = $method->body;
+                my @method_body = (ref($body_ref) eq 'ARRAY' && $body_ref->@*)
+                    ? $body_ref->@*
+                    : $self->_body_from_graph($method->graph);
                 push @body, Chalk::IR::MethodInfo->new(
                     name        => $method->name,
                     params      => $method->params,
@@ -132,7 +141,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 );
             }
             for my $sub ($cls->subs) {
-                my @sub_body = $self->_body_from_graph($sub->graph);
+                my $body_ref = $sub->body;
+                my @sub_body = (ref($body_ref) eq 'ARRAY' && $body_ref->@*)
+                    ? $body_ref->@*
+                    : $self->_body_from_graph($sub->graph);
                 push @body, Chalk::IR::SubInfo->new(
                     name   => $sub->name,
                     params => $sub->params,
@@ -162,7 +174,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         # Top-level subs registered on `main`
         if (defined $main) {
             for my $sub ($main->subs) {
-                my @sub_body = $self->_body_from_graph($sub->graph);
+                my $body_ref = $sub->body;
+                my @sub_body = (ref($body_ref) eq 'ARRAY' && $body_ref->@*)
+                    ? $body_ref->@*
+                    : $self->_body_from_graph($sub->graph);
                 my $sub_info = Chalk::IR::SubInfo->new(
                     name   => $sub->name,
                     params => $sub->params,
@@ -241,8 +256,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # Generate code with cfg_state-aware dispatch for control flow.
     # Walks the Context tree to build IR node → cfg_state lookup,
     # then generates code using cfg_state for if/loop dispatch.
-    method generate_with_cfg($ir, $sa, $ctx) {
-        die "generate_with_cfg() requires a Program IR node"
+    method _generate_with_cfg($ir, $sa, $ctx) {
+        die "_generate_with_cfg() requires a Program IR node"
             unless defined($ir) && $ir isa Chalk::IR::Program;
 
         %_cfg_lookup = ();

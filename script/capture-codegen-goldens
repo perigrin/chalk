@@ -111,11 +111,20 @@ for my $file (@candidates) {
         next;
     }
 
+    # Capture from the MOP-driven Phase 4 path (the new contract).
+    # Legacy generate_with_cfg drops some inner-body statements when
+    # control-flow constructs are nested; the MOP path walks the full
+    # body and emits more-correct output. The goldens record what the
+    # MOP path produces, not the legacy artifact.
+    my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
     my $code;
-    {
+    if (defined $mop) {
         local $@;
-        $code = eval { $perl_target->generate_with_cfg($ir, $sa, $result) };
+        my $files = eval { $perl_target->generate($mop) };
         $err = $@;
+        if (!$err && ref($files) eq 'HASH') {
+            $code = $files->{'main.pm'};
+        }
     }
     if ($err) {
         push @skipped, "$file: generate threw: $err";

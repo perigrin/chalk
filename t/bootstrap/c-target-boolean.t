@@ -1,5 +1,5 @@
 # ABOUTME: Tests for Target::C emission pipeline using Boolean.pm as the input IR.
-# ABOUTME: Verifies generate_c_files structure, emitted C content, compilation, and behavioral correctness.
+# ABOUTME: Verifies _generate_c_files structure, emitted C content, compilation, and behavioral correctness.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -42,12 +42,12 @@ isa_ok($target, 'Chalk::Bootstrap::Perl::Target::C');
 is($target->module_name(), 'Chalk::Bootstrap::Semiring::Boolean',
     'module_name reader returns correct value');
 
-# === Phase 4: Call generate_c_files ===
+# === Phase 4: Call _generate_c_files ===
 
-my $result = eval { $target->generate_c_files($ir, $sa, $ctx) };
-is($@, '', 'Phase 4: generate_c_files does not die')
-    or BAIL_OUT("generate_c_files died: $@");
-ok(defined $result, 'generate_c_files returns a defined value');
+my $result = eval { $target->_generate_c_files($ir, $sa, $ctx) };
+is($@, '', 'Phase 4: _generate_c_files does not die')
+    or BAIL_OUT("_generate_c_files died: $@");
+ok(defined $result, '_generate_c_files returns a defined value');
 
 # === Phase 5: Verify result structure ===
 
@@ -86,8 +86,8 @@ like($h_src, qr/#ifndef CHALK_BOOLEAN_H/, 'boolean.h has include guard');
 
 # === Phase 7: Determinism check ===
 
-my $result2 = eval { $target->generate_c_files($ir, $sa, $ctx) };
-is($@, '', 'second generate_c_files call does not die');
+my $result2 = eval { $target->_generate_c_files($ir, $sa, $ctx) };
+is($@, '', 'second _generate_c_files call does not die');
 is($result2->{files}{'boolean.c'}, $result->{files}{'boolean.c'}, 'deterministic .c output');
 is($result2->{files}{'boolean.h'}, $result->{files}{'boolean.h'}, 'deterministic .h output');
 

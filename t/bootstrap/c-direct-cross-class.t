@@ -47,9 +47,9 @@ my $typed_target = eval {
 ok(defined $typed_target, 'Phase 3a: Target::C constructed with field_types');
 
 # 3b: Generate .c — should include earley.h
-my $typed_result = eval { $typed_target->generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
-is($@, '', 'Phase 3b: generate_c_files with field_types does not die');
-ok(defined $typed_result, 'Phase 3c: generate_c_files returns defined value');
+my $typed_result = eval { $typed_target->_generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
+is($@, '', 'Phase 3b: _generate_c_files with field_types does not die');
+ok(defined $typed_result, 'Phase 3c: _generate_c_files returns defined value');
 
 my $typed_c = $typed_result->{files}{'boolean.c'} // '';
 ok(length($typed_c) > 0, 'Phase 3d: boolean.c with field_types is non-empty');
@@ -75,8 +75,8 @@ my $plain_target = eval {
 };
 ok(defined $plain_target, 'Phase 4a: Target::C constructed without field_types');
 
-my $plain_result = eval { $plain_target->generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
-is($@, '', 'Phase 4b: generate_c_files without field_types does not die');
+my $plain_result = eval { $plain_target->_generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
+is($@, '', 'Phase 4b: _generate_c_files without field_types does not die');
 
 my $plain_c = $plain_result->{files}{'boolean.c'} // '';
 unlike($plain_c, qr/#include\s+"earley\.h"/,
@@ -96,8 +96,8 @@ my $multi_target = eval {
 };
 ok(defined $multi_target, 'Phase 5a: Target::C with multiple field_types constructed');
 
-my $multi_result = eval { $multi_target->generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
-is($@, '', 'Phase 5b: generate_c_files with multiple field_types does not die');
+my $multi_result = eval { $multi_target->_generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
+is($@, '', 'Phase 5b: _generate_c_files with multiple field_types does not die');
 
 my $multi_c = $multi_result->{files}{'boolean.c'} // '';
 
@@ -125,8 +125,8 @@ my $self_target = eval {
 };
 ok(defined $self_target, 'Phase 6a: Target::C with self-referencing field_types constructed');
 
-my $self_result = eval { $self_target->generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
-is($@, '', 'Phase 6b: generate_c_files with self-referencing field_types does not die');
+my $self_result = eval { $self_target->_generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
+is($@, '', 'Phase 6b: _generate_c_files with self-referencing field_types does not die');
 
 my $self_c = $self_result->{files}{'boolean.c'} // '';
 my @bool_includes = $self_c =~ /(#include\s+"boolean\.h")/g;
@@ -220,7 +220,7 @@ SKIP: {
         )
     };
     my $baseline_result = eval {
-        $baseline->generate_c_files($earley_ir, $earley_sa, $earley_ctx)
+        $baseline->_generate_c_files($earley_ir, $earley_sa, $earley_ctx)
     };
     my $baseline_c = $baseline_result->{files}{'earley.c'} // '';
     ok(length($baseline_c) > 0, 'Phase 8b: baseline earley.c generated');
@@ -239,7 +239,7 @@ SKIP: {
         )
     };
     my $typed_result = eval {
-        $typed->generate_c_files($earley_ir, $earley_sa, $earley_ctx)
+        $typed->_generate_c_files($earley_ir, $earley_sa, $earley_ctx)
     };
     my $typed_c_earley = $typed_result->{files}{'earley.c'} // '';
     ok(length($typed_c_earley) > 0, 'Phase 8d: typed earley.c generated');

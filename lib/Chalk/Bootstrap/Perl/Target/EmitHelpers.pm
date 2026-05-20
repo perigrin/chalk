@@ -1362,7 +1362,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     # Emit C code for a CFG state node (if/loop/try-catch).
-    # Uses stored $_ctx set by generate_c_files. ($_sa is no longer needed
+    # Uses stored $_ctx set by _generate_c_files. ($_sa is no longer needed
     # for the cfg_state lookup — Context owns the walker now.)
     method emit_from_cfg_state($declared_vars) {
         my $ctx = $_ctx;

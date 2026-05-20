@@ -69,17 +69,17 @@ for my $class_spec (@classes) {
     ok(defined $ir, "Phase 3a [$slug]: $source_file parsed to IR")
         or do { note "parse_file_ir failed: $@"; next };
 
-    # 3b: Construct Target::C and call generate_c_files
+    # 3b: Construct Target::C and call _generate_c_files
     my $target = eval {
         Chalk::Bootstrap::Perl::Target::C->new(module_name => $module_name)
     };
     ok(defined $target, "Phase 3b [$slug]: Target::C constructed")
         or do { note "constructor failed: $@"; next };
 
-    my $result = eval { $target->generate_c_files($ir, $sa, $ctx) };
-    is($@, '', "Phase 3c [$slug]: generate_c_files does not die")
-        or do { note "generate_c_files died: $@"; next };
-    ok(defined $result, "Phase 3c [$slug]: generate_c_files returns defined value")
+    my $result = eval { $target->_generate_c_files($ir, $sa, $ctx) };
+    is($@, '', "Phase 3c [$slug]: _generate_c_files does not die")
+        or do { note "_generate_c_files died: $@"; next };
+    ok(defined $result, "Phase 3c [$slug]: _generate_c_files returns defined value")
         or next;
 
     # 3d: Verify output structure

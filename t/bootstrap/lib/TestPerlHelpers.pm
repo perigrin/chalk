@@ -54,7 +54,7 @@ sub parse_and_generate($gen_grammar, $file) {
     my ($ir, $sa, $sem_ctx) = parse_file_with_cfg($gen_grammar, $file);
     return unless defined $ir;
 
-    return $perl_target->generate_with_cfg($ir, $sa, $sem_ctx);
+    return $perl_target->_generate_with_cfg($ir, $sa, $sem_ctx);
 }
 
 # Evals generated Perl code with namespace rewriting.

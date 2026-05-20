@@ -648,6 +648,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     $mop_class->declare_method($item->name(),
                         params      => $item->params(),
                         return_type => $item->return_type(),
+                        body        => $item->body(),
                         (defined $item->graph()
                             ? (graph => $item->graph())
                             : ()),
@@ -656,6 +657,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 } elsif ($item isa Chalk::IR::SubInfo) {
                     $mop_class->declare_sub($item->name(),
                         params => $item->params(),
+                        body   => $item->body(),
                         (defined $item->graph()
                             ? (graph => $item->graph())
                             : ()),

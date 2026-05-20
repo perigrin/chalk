@@ -51,8 +51,8 @@ my $program = $factory->make('Constructor',
 );
 
 my $target = Chalk::Bootstrap::Perl::Target::C->new(module_name => 'Test::IntSpec');
-my $c_result = eval { $target->generate_c_files($program, undef, undef) };
-ok(defined $c_result, 'generate_c_files succeeds') or do {
+my $c_result = eval { $target->_generate_c_files($program, undef, undef) };
+ok(defined $c_result, '_generate_c_files succeeds') or do {
     diag "Error: $@";
     done_testing();
     exit;
@@ -181,8 +181,8 @@ my $program2 = $factory2->make('Constructor',
 );
 
 my $target2  = Chalk::Bootstrap::Perl::Target::C->new(module_name => 'Test::ParseLoop');
-my $result2  = eval { $target2->generate_c_files($program2, undef, undef) };
-ok(defined $result2, 'parse-loop IR: generate_c_files succeeds') or do {
+my $result2  = eval { $target2->_generate_c_files($program2, undef, undef) };
+ok(defined $result2, 'parse-loop IR: _generate_c_files succeeds') or do {
     diag "Error: $@";
     done_testing();
     exit;

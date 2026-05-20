@@ -41,8 +41,8 @@ ok(defined $gen, 'grammar pipeline built')
     my $target = Chalk::Bootstrap::Perl::Target::C->new(
         module_name => 'Chalk::Grammar::Symbol',
     );
-    my $result = eval { $target->generate_c_files($ir, $sa, $ctx) };
-    is($@, '', 'Symbol generate_c_files does not die');
+    my $result = eval { $target->_generate_c_files($ir, $sa, $ctx) };
+    is($@, '', 'Symbol _generate_c_files does not die');
     ok(defined $result, 'Symbol result defined');
 
     my $c_text = $result->{files}{'symbol.c'};
@@ -75,8 +75,8 @@ ok(defined $gen, 'grammar pipeline built')
     my $target = Chalk::Bootstrap::Perl::Target::C->new(
         module_name => 'Chalk::Grammar::Rule',
     );
-    my $result = eval { $target->generate_c_files($ir, $sa, $ctx) };
-    is($@, '', 'Rule generate_c_files does not die');
+    my $result = eval { $target->_generate_c_files($ir, $sa, $ctx) };
+    is($@, '', 'Rule _generate_c_files does not die');
 
     my $c_text = $result->{files}{'rule.c'};
     ok(defined $c_text, 'rule.c generated');
@@ -100,8 +100,8 @@ ok(defined $gen, 'grammar pipeline built')
     my $target = Chalk::Bootstrap::Perl::Target::C->new(
         module_name => 'Chalk::Bootstrap::CoreItemIndex',
     );
-    my $result = eval { $target->generate_c_files($ir, $sa, $ctx) };
-    is($@, '', 'CoreItemIndex generate_c_files does not die');
+    my $result = eval { $target->_generate_c_files($ir, $sa, $ctx) };
+    is($@, '', 'CoreItemIndex _generate_c_files does not die');
 
     my $c_text = $result->{files}{'coreitemindex.c'};
     ok(defined $c_text, 'coreitemindex.c generated');
@@ -131,8 +131,8 @@ ok(defined $gen, 'grammar pipeline built')
     my $target = Chalk::Bootstrap::Perl::Target::C->new(
         module_name => 'Chalk::Bootstrap::LR0DFA',
     );
-    my $result = eval { $target->generate_c_files($ir, $sa, $ctx) };
-    is($@, '', 'LR0DFA generate_c_files does not die');
+    my $result = eval { $target->_generate_c_files($ir, $sa, $ctx) };
+    is($@, '', 'LR0DFA _generate_c_files does not die');
 
     my $c_text = $result->{files}{'lr0dfa.c'};
     ok(defined $c_text, 'lr0dfa.c generated');

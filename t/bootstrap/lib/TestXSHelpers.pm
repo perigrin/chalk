@@ -103,11 +103,11 @@ sub build_and_load($ir, $sa, $sem_ctx, $module_name, %opts) {
     try {
         $target->_reset_cfg_lookup();
         $target->_build_cfg_lookup($sa, $sem_ctx);
-        $result = $target->generate_c_files($ir, $sa, $sem_ctx);
+        $result = $target->_generate_c_files($ir, $sa, $sem_ctx);
     } catch ($e) {
-        return (undef, "generate_c_files died: $e");
+        return (undef, "_generate_c_files died: $e");
     }
-    return (undef, "generate_c_files failed") unless ref($result) eq 'HASH';
+    return (undef, "_generate_c_files failed") unless ref($result) eq 'HASH';
 
     # Generate XS wrapper
     my $xs_text;

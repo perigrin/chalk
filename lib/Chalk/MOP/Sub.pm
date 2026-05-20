@@ -12,6 +12,7 @@ class Chalk::MOP::Sub {
     field $params      :param :reader = [];
     field $return_type :param :reader = undef;
     field $graph       :param :reader = Chalk::IR::Graph->new;
+    field $body        :param :reader = [];
 
     # Delegate node construction to this sub's graph.
     # Hash-cons scope is per-graph, so identical content across subs yields

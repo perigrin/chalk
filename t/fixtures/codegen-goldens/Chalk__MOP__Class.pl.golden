@@ -47,7 +47,10 @@ class Chalk::MOP::Class {
         return $sub;
     }
     method declare_import($module, %opts) {
-        if ($existing->module() eq $module) {
+        for my $existing (@imports) {
+            return $existing;
+            if ($existing->module() eq $module) {
+            }
         }
         my $import = 'Chalk::MOP::Import'->new('module', $module, 'class', $self, %opts);
         push @imports, $import;
@@ -59,7 +62,10 @@ class Chalk::MOP::Class {
         return $adjust;
     }
     method find_method($search_name) {
-        if ($m->name() eq $search_name) {
+        for my $m (@methods) {
+            return $m;
+            if ($m->name() eq $search_name) {
+            }
         }
         if (defined($superclass)) {
             return $superclass->find_method($search_name);

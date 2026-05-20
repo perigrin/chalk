@@ -52,8 +52,8 @@ my $target = Chalk::Bootstrap::Perl::Target::C->new(
     module_name => $child_name,
 );
 
-my $c_result = eval { $target->generate_c_files($program, undef, undef) };
-ok(defined $c_result, 'generate_c_files succeeds') or do {
+my $c_result = eval { $target->_generate_c_files($program, undef, undef) };
+ok(defined $c_result, '_generate_c_files succeeds') or do {
     diag "Error: $@";
     done_testing();
     exit;

@@ -179,19 +179,19 @@ use Chalk::IR::Program;
         },
     );
 
-    # Run _build_cfg_lookup via generate_with_cfg on a wrapper Program
-    # TODO: Constructor('Program') is not supported by generate_with_cfg yet;
+    # Run _build_cfg_lookup via _generate_with_cfg on a wrapper Program
+    # TODO: Constructor('Program') is not supported by _generate_with_cfg yet;
     # NodeFactory dies with "Unknown or untranslated Constructor class: 'Program'".
     # The context tree construction above (scope + structural annotations) is correct;
     # the limitation is in the code generation layer, not the cfg_state API.
     TODO: {
-        local $TODO = 'Constructor Program not yet supported by generate_with_cfg';
+        local $TODO = 'Constructor Program not yet supported by _generate_with_cfg';
         my $code;
         try {
             my $program = $factory->make('Constructor', 'class' => 'Program',
                 statements => [$if_node]);
             my $target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            $code = $target->generate_with_cfg($program, $sa, $parent_ctx);
+            $code = $target->_generate_with_cfg($program, $sa, $parent_ctx);
         } catch ($e) {
             # Constructor Program not yet translatable — expected failure
         }
@@ -339,7 +339,7 @@ SKIP: {
     }
 }
 
-# --- Test 5: Full pipeline round-trip: generate_with_cfg produces valid Perl ---
+# --- Test 5: Full pipeline round-trip: _generate_with_cfg produces valid Perl ---
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
@@ -356,7 +356,7 @@ SKIP: {
     my $semiring2 = $parser2->semiring();
     my $sa2 = $semiring2->semirings()->[4];
 
-    # Parse if/else and verify generate_with_cfg produces valid Perl with if/else
+    # Parse if/else and verify _generate_with_cfg produces valid Perl with if/else
     {
         Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring2->reset_cache();
@@ -369,8 +369,8 @@ SKIP: {
         ok(defined $ir_node, 'IR node extracted');
 
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->generate_with_cfg($ir_node, $sa2, $sem_ctx);
-        ok(defined $code, 'generate_with_cfg produces code');
+        my $code = $perl_target->_generate_with_cfg($ir_node, $sa2, $sem_ctx);
+        ok(defined $code, '_generate_with_cfg produces code');
         like($code, qr/if\s*\(/, 'generated code contains if statement');
         like($code, qr/else/, 'generated code contains else');
         like($code, qr/'42'/, 'generated code contains then body');
@@ -390,8 +390,8 @@ SKIP: {
         ok(defined $ir_node, 'IR node extracted for if-no-else');
 
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->generate_with_cfg($ir_node, $sa2, $sem_ctx);
-        ok(defined $code, 'generate_with_cfg produces code for if-no-else');
+        my $code = $perl_target->_generate_with_cfg($ir_node, $sa2, $sem_ctx);
+        ok(defined $code, '_generate_with_cfg produces code for if-no-else');
         like($code, qr/if\s*\(/, 'generated code contains if');
         like($code, qr/'42'/, 'generated code contains then body');
     }
@@ -409,8 +409,8 @@ SKIP: {
         ok(defined $ir_node, 'IR node extracted for foreach');
 
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->generate_with_cfg($ir_node, $sa2, $sem_ctx);
-        ok(defined $code, 'generate_with_cfg produces code for foreach');
+        my $code = $perl_target->_generate_with_cfg($ir_node, $sa2, $sem_ctx);
+        ok(defined $code, '_generate_with_cfg produces code for foreach');
         like($code, qr/(?:while|for)/, 'generated code contains loop');
     }
 }
@@ -608,7 +608,7 @@ SKIP: {
         my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->generate_with_cfg($ir_node, $sa_u, $sem_ctx);
+        my $code = $perl_target->_generate_with_cfg($ir_node, $sa_u, $sem_ctx);
         ok(defined $code, 'unless generates code');
         like($code, qr/if\s*\(\s*!/, 'unless generates if (! ...) in output');
     }
@@ -641,7 +641,7 @@ SKIP: {
         my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->generate_with_cfg($ir_node, $sa_ne, $sem_ctx);
+        my $code = $perl_target->_generate_with_cfg($ir_node, $sa_ne, $sem_ctx);
         ok(defined $code, 'if-no-else generates code');
         unlike($code, qr/\}\s*else\s*\{/, 'no empty else block in output');
     }
@@ -674,7 +674,7 @@ SKIP: {
         my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->generate_with_cfg($ir_node, $sa_el, $sem_ctx);
+        my $code = $perl_target->_generate_with_cfg($ir_node, $sa_el, $sem_ctx);
         ok(defined $code, 'if/elsif/else generates code');
         like($code, qr/\}\s*elsif\s*\(/, 'output contains elsif (not nested if)');
     }
@@ -707,7 +707,7 @@ SKIP: {
         my $sem_ctx = $result;
         my $ir_node = $sem_ctx->extract();
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->generate_with_cfg($ir_node, $sa_f, $sem_ctx);
+        my $code = $perl_target->_generate_with_cfg($ir_node, $sa_f, $sem_ctx);
         ok(defined $code, 'foreach generates code');
         like($code, qr/for\s+my\s+\$/, 'output contains for my $... (not while)');
     }
@@ -742,7 +742,7 @@ SKIP: {
             my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_de, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_de, $sem_ctx);
             ok(defined $code, 'deep elsif chain generates code');
             # Count elsif occurrences — should have 2 elsif keywords
             my @elsifs = ($code =~ /elsif/g);
@@ -782,7 +782,7 @@ SKIP: {
             my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_f, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_f, $sem_ctx);
             ok(defined $code, 'postfix if generates code');
             like($code, qr/if.*\{.*42/s, 'postfix if body (42) appears inside if block');
         }
@@ -818,7 +818,7 @@ SKIP: {
             my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_pu, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_pu, $sem_ctx);
             ok(defined $code, 'postfix unless generates code');
             # Postfix unless must negate the condition (like block unless does)
             like($code, qr/if\s*\(\s*!/, 'postfix unless emits negated condition if (!)');
@@ -855,7 +855,7 @@ SKIP: {
             my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_pt, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_pt, $sem_ctx);
             ok(defined $code, 'postfix until generates code');
             # Until negates condition: while (!$done)
             like($code, qr/!\s*\$done|!\(.*\$done/, 'postfix until emits negated condition');
@@ -892,7 +892,7 @@ SKIP: {
             my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_ue, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_ue, $sem_ctx);
             ok(defined $code, 'unless+else generates code');
             like($code, qr/if\s*\(\s*!/, 'unless+else emits negated condition');
             like($code, qr/else/, 'unless+else has else block');
@@ -929,7 +929,7 @@ SKIP: {
             my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_fa, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_fa, $sem_ctx);
             ok(defined $code, 'foreach with @array generates code');
             like($code, qr/for\s+my\s+\$x/, 'foreach with @array uses for my syntax');
         }
@@ -965,7 +965,7 @@ SKIP: {
             my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_ub, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_ub, $sem_ctx);
             ok(defined $code, 'postfix unless with && generates code');
             # Must parenthesize: if (!($a && $b)), not if (!$a && $b)
             like($code, qr/!\s*\(/, 'postfix unless with && parenthesizes binary condition');
@@ -1002,7 +1002,7 @@ SKIP: {
             my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_uc, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_uc, $sem_ctx);
             ok(defined $code, 'postfix until with > generates code');
             # Must parenthesize: while (!($x > 10)), not while (!$x > 10)
             # TODO: binary condition parenthesization in postfix until not yet implemented
@@ -1068,7 +1068,7 @@ SKIP: {
             # Verify codegen emits next if/unless instead of if { next }
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_nu, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_nu, $sem_ctx);
             ok(defined $code, 'next unless generates code');
             TODO: {
                 local $TODO = 'loop_jump codegen requires loop_jump in cfg_state (filter-gap merge issue)';
@@ -1181,7 +1181,7 @@ SKIP: {
             # Verify codegen emits last if/unless
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_lu, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_lu, $sem_ctx);
             ok(defined $code, 'last unless generates code');
             TODO: {
                 local $TODO = 'loop_jump codegen requires loop_jump in cfg_state (filter-gap merge issue)';
@@ -1220,7 +1220,7 @@ SKIP: {
             my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_li, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_li, $sem_ctx);
             ok(defined $code, 'last if generates code');
             TODO: {
                 local $TODO = 'loop_jump codegen for last if requires loop_jump in cfg_state';
@@ -1259,7 +1259,7 @@ SKIP: {
             my $sem_ctx = $result;
             my $ir_node = $sem_ctx->extract();
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa_bn, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_bn, $sem_ctx);
             ok(defined $code, 'bare next generates code');
             # Bare next must emit as keyword next; not as string literal 'next'
             like($code, qr/(?<!')next(?!')/, 'bare next emitted as keyword, not quoted string');

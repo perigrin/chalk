@@ -8,6 +8,7 @@ class Chalk::MOP::Sub {
     field $params :param :reader = [];
     field $return_type :param :reader = undef;
     field $graph :param :reader = 'Chalk::IR::Graph'->new();
+    field $body :param :reader = [];
     method merge($node) {
         $graph->merge($node);
     }

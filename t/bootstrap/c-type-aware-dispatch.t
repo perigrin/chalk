@@ -35,8 +35,8 @@ ok(defined $ir, 'Earley.pm parsed to IR')
             lr0_dfa    => 'Chalk::Bootstrap::LR0DFA',
         },
     );
-    my $result = eval { $target->generate_c_files($ir, $sa, $ctx) };
-    is($@, '', 'baseline generate_c_files does not die');
+    my $result = eval { $target->_generate_c_files($ir, $sa, $ctx) };
+    is($@, '', 'baseline _generate_c_files does not die');
 
     my $c_text = $result->{files}{'earley.c'};
     ok(defined $c_text, 'baseline earley.c generated');
@@ -69,8 +69,8 @@ ok(defined $ir, 'Earley.pm parsed to IR')
             },
         },
     );
-    my $result = eval { $target->generate_c_files($ir, $sa, $ctx) };
-    is($@, '', 'type-aware generate_c_files does not die');
+    my $result = eval { $target->_generate_c_files($ir, $sa, $ctx) };
+    is($@, '', 'type-aware _generate_c_files does not die');
 
     my $c_text = $result->{files}{'earley.c'};
     ok(defined $c_text, 'type-aware earley.c generated');

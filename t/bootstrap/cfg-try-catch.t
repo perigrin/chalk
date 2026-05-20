@@ -145,7 +145,7 @@ END
 
             # Generate Perl from IR with cfg_state
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->generate_with_cfg($ir_node, $sa, $sem_ctx);
+            my $code = $perl_target->_generate_with_cfg($ir_node, $sa, $sem_ctx);
             ok(defined $code, 'Perl code generated from try/catch IR');
             like($code, qr/try\s*\{/, 'generated Perl has try block');
             like($code, qr/catch\s*\(\$e\)\s*\{/, 'generated Perl has catch ($e)');

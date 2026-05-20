@@ -30,7 +30,7 @@ my ($bool_ir, $bool_sa, $bool_ctx) = eval {
 ok(defined $bool_ir, 'Phase 2: Boolean.pm parsed to IR')
     or BAIL_OUT("Cannot continue without IR: $@");
 
-# === Phase 3: generate_c_files + generate_xs_wrapper for Boolean ===
+# === Phase 3: _generate_c_files + generate_xs_wrapper for Boolean ===
 
 my $bool_target = eval {
     Chalk::Bootstrap::Perl::Target::C->new(
@@ -40,9 +40,9 @@ my $bool_target = eval {
 ok(defined $bool_target, 'Phase 3: Target::C constructed for Boolean')
     or BAIL_OUT("Constructor failed: $@");
 
-my $bool_c_result = eval { $bool_target->generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
-is($@, '', 'Phase 3: generate_c_files for Boolean does not die')
-    or BAIL_OUT("generate_c_files died: $@");
+my $bool_c_result = eval { $bool_target->_generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
+is($@, '', 'Phase 3: _generate_c_files for Boolean does not die')
+    or BAIL_OUT("_generate_c_files died: $@");
 
 can_ok($bool_target, 'generate_xs_wrapper');
 
@@ -122,9 +122,9 @@ my $prec_target = eval {
 ok(defined $prec_target, 'Phase 5: Target::C constructed for Precedence')
     or BAIL_OUT("Constructor failed: $@");
 
-my $prec_c_result = eval { $prec_target->generate_c_files($prec_ir, $prec_sa, $prec_ctx) };
-is($@, '', 'Phase 5: generate_c_files for Precedence does not die')
-    or BAIL_OUT("generate_c_files died: $@");
+my $prec_c_result = eval { $prec_target->_generate_c_files($prec_ir, $prec_sa, $prec_ctx) };
+is($@, '', 'Phase 5: _generate_c_files for Precedence does not die')
+    or BAIL_OUT("_generate_c_files died: $@");
 
 my $prec_xs = eval {
     $prec_target->generate_xs_wrapper(

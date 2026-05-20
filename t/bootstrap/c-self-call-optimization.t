@@ -30,9 +30,9 @@ my $target = Chalk::Bootstrap::Perl::Target::C->new(
     module_name => 'Chalk::Bootstrap::Semiring::Boolean',
 );
 
-my $result = eval { $target->generate_c_files($ir, $sa, $ctx) };
-is($@, '', 'generate_c_files does not die')
-    or BAIL_OUT("generate_c_files died: $@");
+my $result = eval { $target->_generate_c_files($ir, $sa, $ctx) };
+is($@, '', '_generate_c_files does not die')
+    or BAIL_OUT("_generate_c_files died: $@");
 
 # === Part 1: Self-call optimization — direct C calls ===
 

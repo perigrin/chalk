@@ -10,7 +10,7 @@ use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
 use Chalk::IR::Node::Return;
 
-# Build a minimal IR: a class with a single no-op method so generate_c_files
+# Build a minimal IR: a class with a single no-op method so _generate_c_files
 # has something to process without hitting undef errors.
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -82,8 +82,8 @@ my $target = Chalk::Bootstrap::Perl::Target::C->new(
     compiled_class_metadata => $compiled_metadata,
 );
 
-my $result = eval { $target->generate_c_files($program, undef, undef) };
-ok(defined $result, 'generate_c_files succeeds with compiled_class_metadata') or do {
+my $result = eval { $target->_generate_c_files($program, undef, undef) };
+ok(defined $result, '_generate_c_files succeeds with compiled_class_metadata') or do {
     diag "Error: $@";
     done_testing();
     exit;
@@ -92,7 +92,7 @@ ok(defined $result, 'generate_c_files succeeds with compiled_class_metadata') or
 # --- Verify _polymorphic_dispatch ---
 
 my $poly = $target->_polymorphic_dispatch();
-ok(defined $poly, '_polymorphic_dispatch is defined after generate_c_files');
+ok(defined $poly, '_polymorphic_dispatch is defined after _generate_c_files');
 is(ref $poly, 'HASH', '_polymorphic_dispatch is a hashref');
 
 # Multi-owner methods should be in _polymorphic_dispatch
@@ -128,8 +128,8 @@ for my $meth (qw(is_zero add multiply)) {
 
 # --- Verify Component 3: stash statics, init_statics, and cross-class includes ---
 
-my $c_result = eval { $target->generate_c_files($program, undef, undef) };
-ok(defined $c_result, 'generate_c_files returns a result for Component 3 checks') or do {
+my $c_result = eval { $target->_generate_c_files($program, undef, undef) };
+ok(defined $c_result, '_generate_c_files returns a result for Component 3 checks') or do {
     diag "Error: $@";
     done_testing();
     exit;
@@ -230,8 +230,8 @@ my $target2 = Chalk::Bootstrap::Perl::Target::C->new(
     compiled_class_metadata => $compiled_metadata,
 );
 
-my $result2 = eval { $target2->generate_c_files($program2, undef, undef) };
-ok(defined $result2, 'generate_c_files succeeds for Component 2 stash-compare test') or do {
+my $result2 = eval { $target2->_generate_c_files($program2, undef, undef) };
+ok(defined $result2, '_generate_c_files succeeds for Component 2 stash-compare test') or do {
     diag "Error: $@";
     done_testing();
     exit;
@@ -314,8 +314,8 @@ for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
         },
     );
 
-    my $reader_result = eval { $reader_target->generate_c_files($program, undef, undef) };
-    ok(defined $reader_result, 'reader edge case: generate_c_files succeeds');
+    my $reader_result = eval { $reader_target->_generate_c_files($program, undef, undef) };
+    ok(defined $reader_result, 'reader edge case: _generate_c_files succeeds');
 
     my $pd = $reader_target->_polymorphic_dispatch();
     ok(!exists $pd->{name}, 'reader edge case: shared :reader "name" is NOT in polymorphic dispatch');
@@ -437,12 +437,12 @@ subtest 'Component 4: real FilterComposite.pm pipeline' => sub {
     my $fc_result = eval {
         $fc_target->_reset_cfg_lookup();
         $fc_target->_build_cfg_lookup($sa, $sem_ctx);
-        $fc_target->generate_c_files($ir, $sa, $sem_ctx);
+        $fc_target->_generate_c_files($ir, $sa, $sem_ctx);
     };
     if ($@ || !defined $fc_result) {
-        BAIL_OUT("Component 4: generate_c_files for FilterComposite failed: $@");
+        BAIL_OUT("Component 4: _generate_c_files for FilterComposite failed: $@");
     }
-    pass('Component 4: generate_c_files succeeded for FilterComposite');
+    pass('Component 4: _generate_c_files succeeded for FilterComposite');
 
     # ---- locate the generated .c file ----
     my ($c_key) = grep { /\.c$/ } sort keys $fc_result->{files}->%*;

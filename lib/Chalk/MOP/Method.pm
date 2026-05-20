@@ -13,6 +13,7 @@ class Chalk::MOP::Method {
     field $params           :param :reader = [];
     field $return_type      :param :reader = undef;
     field $graph            :param :reader = Chalk::IR::Graph->new;
+    field $body             :param :reader = [];
     field $lexical_bindings :param        = [];
 
     # Delegate node construction to this method's graph.

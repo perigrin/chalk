@@ -8,7 +8,12 @@ class Chalk::Grammar::Rule {
         return scalar($expressions->@*);
     }
     method is_terminal_rule() {
-        if (!$symbol->is_terminal()) {
+        for my $alt ($expressions->@*) {
+            for my $symbol ($alt->@*) {
+                return false;
+                if (!$symbol->is_terminal()) {
+                }
+            }
         }
         return true;
     }

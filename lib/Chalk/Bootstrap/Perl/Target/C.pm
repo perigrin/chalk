@@ -1516,7 +1516,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     #                    exported_functions => [...],
     #                    skipped_methods => [...],
     #                    anon_sub_registrations => [...] }
-    method generate_c_files($ir, $sa, $ctx) {
+    method _generate_c_files($ir, $sa, $ctx) {
         $self->_set_sa($sa);
         $self->_set_ctx($ctx);
 
@@ -1863,8 +1863,8 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     }
 
     # Generate a thin .xs wrapper for the class.
-    # Takes the IR tree, the exported_functions arrayref from generate_c_files,
-    # and the anon_sub_registrations arrayref from generate_c_files.
+    # Takes the IR tree, the exported_functions arrayref from _generate_c_files,
+    # and the anon_sub_registrations arrayref from _generate_c_files.
     # Returns the .xs file content as a string.
     #
     # The generated .xs registers the class via the Perl 5.42 C API in BOOT,

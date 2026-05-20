@@ -48,7 +48,7 @@ my sub parse_and_generate($file) {
     my $ir = $sem_ctx->extract();
     return undef unless defined $ir;
 
-    return $perl_target->generate_with_cfg($ir, $sa, $sem_ctx);
+    return $perl_target->_generate_with_cfg($ir, $sa, $sem_ctx);
 }
 
 # ============================================================
