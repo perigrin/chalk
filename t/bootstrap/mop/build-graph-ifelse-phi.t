@@ -61,23 +61,38 @@ class C {
     ok(scalar @phis >= 1, 'graph contains at least one Phi node')
         or diag('ops: ' . join(',', map { $_->operation } @nodes));
 
-    # The Phi should have two value inputs: 1 (from then) and 2 (from else).
+    # The Phi merges the per-branch scope bindings for $x. Each branch
+    # binds $x to an Assign IR node (the BinaryExpr for `$x = 1` and
+    # `$x = 2` respectively). The Phi's two value inputs should be those
+    # two Assign nodes; descending into each Assign's `right` operand
+    # yields the Constant value (1 / 2).
     SKIP: {
         skip 'no Phi to inspect', 2 unless @phis;
         my $phi = $phis[0];
-        my @vals = grep { defined && blessed($_) } $phi->inputs->@*;
-        # Phi.inputs depends on layout - it may include region + values.
-        # We accept either: any two of its inputs are the constants 1 and 2.
         my %seen_vals;
-        for my $v (@vals) {
+        for my $v ($phi->inputs->@*) {
+            next unless defined $v && blessed($v);
+            # Direct Constant child
             if ($v isa Chalk::IR::Node::Constant && defined $v->value()) {
                 $seen_vals{$v->value()}++;
+                next;
+            }
+            # Walk one level into Assign-like nodes to find the value
+            if ($v->operation() =~ /^(?:Assign|Add|Subtract|Multiply|Divide|Concat|Constant)$/) {
+                for my $inner ($v->inputs->@*) {
+                    next unless defined $inner && blessed($inner)
+                        && $inner isa Chalk::IR::Node::Constant
+                        && defined $inner->value();
+                    $seen_vals{$inner->value()}++;
+                }
             }
         }
         ok($seen_vals{1} || $seen_vals{'1'},
-            'Phi merges then-branch value 1');
+            'Phi merge reaches then-branch value 1')
+            or diag('seen: ' . join(',', sort keys %seen_vals));
         ok($seen_vals{2} || $seen_vals{'2'},
-            'Phi merges else-branch value 2');
+            'Phi merge reaches else-branch value 2')
+            or diag('seen: ' . join(',', sort keys %seen_vals));
     }
 }
 

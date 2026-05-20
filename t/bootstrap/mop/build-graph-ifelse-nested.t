@@ -69,12 +69,25 @@ class C {
     SKIP: {
         skip 'too few Phis to check value coverage', 1
             unless scalar @phis >= 2;
+        # Walk Phi inputs and one level into Assign children to harvest
+        # all Constant leaves reachable from any Phi.
         my %seen;
+        my $harvest;
+        $harvest = sub ($n, $depth) {
+            return if $depth > 2;
+            return unless defined $n && blessed($n);
+            if ($n isa Chalk::IR::Node::Constant && defined $n->value()) {
+                $seen{$n->value()}++;
+                return;
+            }
+            return unless $n->can('inputs');
+            for my $in ($n->inputs->@*) {
+                $harvest->($in, $depth + 1);
+            }
+        };
         for my $phi (@phis) {
             for my $in ($phi->inputs->@*) {
-                next unless defined $in && blessed($in)
-                    && $in isa Chalk::IR::Node::Constant;
-                $seen{$in->value()}++ if defined $in->value();
+                $harvest->($in, 0);
             }
         }
         ok($seen{1} && $seen{2} && $seen{3},

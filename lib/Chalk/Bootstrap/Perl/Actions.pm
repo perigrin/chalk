@@ -2429,9 +2429,28 @@ class Chalk::Bootstrap::Perl::Actions {
 
                 # Merge branch scopes with eager Phi creation for variables
                 # that differ between branches.
+                my $pre_snapshot = $pre_scope->snapshot();
                 my $merged_scope = $pre_scope->merge_with_phis(
                     $then_scope, $else_scope, $region, $factory,
                 );
+
+                # Merge CFG and Phi nodes into the in-flight graph so they
+                # reach the method's graph via $graph->nodes(). Phis only
+                # appear for divergent bindings; trivial Phis were already
+                # collapsed inside merge_with_phis.
+                my $graph = $ctx->graph() // Chalk::IR::Graph->new;
+                $graph->merge($if_node);
+                $graph->merge($true_proj);
+                $graph->merge($false_proj);
+                $graph->merge($region);
+                my $diff = $merged_scope->diff($pre_snapshot);
+                for my $var_name (keys $diff->%*) {
+                    my $node = $diff->{$var_name};
+                    next unless defined $node && blessed($node);
+                    next unless $node isa Chalk::IR::Node::Phi;
+                    $graph->merge($node);
+                }
+                $sa->update_graph($graph);
 
                 $sa->update_scope($merged_scope->with_control($region));
                 $sa->update_annotations({
