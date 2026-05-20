@@ -78,41 +78,6 @@ class Chalk::Bootstrap::Perl::Actions {
         $typed   = Chalk::IR::NodeFactory->new();
     }
 
-    # Disambiguation-fixup instrumentation.
-    #
-    # Each fixup in this file corrects a parser-derivation that the
-    # filter-stack (Boolean/Precedence/TypeInference/Structural semirings)
-    # should ideally have rejected before SemanticAction fires. Per the
-    # 2026-05-09 architectural framing in 2026-04-24-semiring-contract-drift.md,
-    # the filter stack is "complete" iff no fixup fires during a parse.
-    #
-    # The class-level counter accumulates fires across all parses in the
-    # process. Tests/harnesses that want per-parse granularity should call
-    # reset_fixup_counts() between parses.
-    #
-    # If $ENV{CHALK_FIXUP_AUDIT} is set at process exit, an audit table is
-    # emitted to STDERR. Empty table = filter stack is complete for the
-    # corpus parsed in this process.
-    my %_fixup_counts;
-    my %_known_fixups;
-
-    sub _bump_fixup($class, $name) {
-        $_fixup_counts{$name}++;
-    }
-
-    sub fixup_counts { return { %_fixup_counts } }
-    sub reset_fixup_counts { %_fixup_counts = (); }
-    sub known_fixups { return { %_known_fixups } }
-
-    END {
-        if ($ENV{CHALK_FIXUP_AUDIT} && %_fixup_counts) {
-            warn "fixup-audit:\n";
-            for my $name (sort keys %_fixup_counts) {
-                warn "  $name = $_fixup_counts{$name}\n";
-            }
-        }
-    }
-
     # Helper: collect all leaves with defined IR focuses (Constructor or Constant nodes)
     my sub _collect_ir_leaves($ctx) {
         my @results;
@@ -724,34 +689,6 @@ class Chalk::Bootstrap::Perl::Actions {
         );
     }
 
-    # Detect filter-gap merge artifact: `return unless COND` admitted as
-    # Return(ctrl, value: ...BuiltinCall("unless",...)).
-    # Walks the value tree looking for a BuiltinCall node whose name is
-    # a postfix modifier keyword (unless/if/while/until/for/foreach).
-    method _is_postfix_modifier_artifact($node, $keywords) {
-        my @stack = ($node);
-        while (@stack) {
-            my $n = pop @stack;
-            next unless defined $n;
-            next unless $n isa Chalk::IR::Node;
-            if ($n isa Chalk::IR::Node::Call && $n->dispatch_kind() eq 'builtin') {
-                my $name_node = $n->inputs()->[0];
-                if (defined $name_node
-                        && $name_node isa Chalk::IR::Node::Constant
-                        && $keywords->{$name_node->value()}) {
-                    return true;
-                }
-            }
-            for my $input ($n->inputs()->@*) {
-                if (ref($input) eq 'ARRAY') {
-                    push @stack, $input->@*;
-                } else {
-                    push @stack, $input;
-                }
-            }
-        }
-        return false;
-    }
 
     # §9 SubroutineDefinition — compile sub declarations into SubInfo structs.
     # Grammar: /sub\b/ WS QualifiedIdentifier _ Signature? _ Block
