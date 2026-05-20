@@ -11,9 +11,10 @@ use Chalk::MOP::Import;
 use Chalk::MOP::Phaser::Adjust;
 
 class Chalk::MOP::Class {
-    field $name       :param :reader;
-    field $superclass :param :reader = undef;
-    field $mop        :param :reader;
+    field $name        :param :reader;
+    field $superclass  :param :reader = undef;
+    field $parent_name :param :reader = undef;
+    field $mop         :param :reader;
     field @fields;
     field @methods;
     field @subs;

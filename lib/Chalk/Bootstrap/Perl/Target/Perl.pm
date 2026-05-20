@@ -33,6 +33,8 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
+use Chalk::IR::UseInfo;
+use Chalk::IR::Node::Constant;
 use Chalk::MOP;
 use Chalk::IR::Graph;
 use Chalk::IR::Program;
@@ -81,74 +83,142 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _generate_from_mop($mop) {
-        my %files;
+        # Reproduce the legacy Program-shaped emit order: top-level
+        # imports first (from `main`'s declared imports), then non-main
+        # classes in declaration order, then top-level subs.
+        # Output is a single entry under "main.pm" - the MOP holds the
+        # content of one parse (one source file), so a single-string
+        # value mirroring the legacy generate() return is the natural
+        # shape.
+        my @lines;
+
+        my $main = $mop->for_class('main');
+        if (defined $main) {
+            for my $import ($main->imports) {
+                my $use_info = Chalk::IR::UseInfo->new(
+                    name => $import->module,
+                    args => [$import->args],
+                );
+                push @lines, $self->_emit_use_decl($use_info);
+            }
+        }
+
         for my $cls ($mop->classes()) {
             my $name = $cls->name;
-            # Synthesize the wrapper structures the existing emit path
-            # needs. _emit_class_decl walks the body for FieldInfo,
-            # MethodInfo, SubInfo, etc. - build those from the MOP.
+            next if $name eq 'main';
+
+            # Reconstruct the ClassInfo body so _emit_class_decl can run.
             my @body;
             for my $field ($cls->fields) {
+                my @attrs = map {
+                    +{ name => ($_ =~ s/^://r), value => undef }
+                } $field->attributes;
                 push @body, Chalk::IR::FieldInfo->new(
                     name       => $field->name,
-                    attributes => [
-                        map { +{ name => $_ =~ s/^://r,
-                                 value => undef } }
-                        $field->attributes
-                    ],
+                    attributes => \@attrs,
                 );
             }
             for my $method ($cls->methods) {
+                my @method_body = $self->_body_from_graph($method->graph);
                 push @body, Chalk::IR::MethodInfo->new(
                     name        => $method->name,
                     params      => $method->params,
                     return_type => $method->return_type,
-                    body        => [],
+                    body        => \@method_body,
                     graph       => $method->graph,
                 );
             }
             for my $sub ($cls->subs) {
+                my @sub_body = $self->_body_from_graph($sub->graph);
                 push @body, Chalk::IR::SubInfo->new(
                     name   => $sub->name,
                     params => $sub->params,
-                    body   => [],
+                    body   => \@sub_body,
                     graph  => $sub->graph,
                 );
             }
 
+            my $parent_name;
+            if ($cls->can('superclass') && defined $cls->superclass) {
+                $parent_name = $cls->superclass->name;
+            } elsif ($cls->can('parent_name') && defined $cls->parent_name) {
+                $parent_name = $cls->parent_name;
+            }
+
             my $class_info = Chalk::IR::ClassInfo->new(
                 name    => $name,
-                parent  => undef,
+                parent  => $parent_name,
                 fields  => [grep { $_ isa Chalk::IR::FieldInfo } @body],
                 methods => [grep { $_ isa Chalk::IR::MethodInfo } @body],
                 subs    => [grep { $_ isa Chalk::IR::SubInfo } @body],
                 body    => \@body,
             );
-
-            # Emit just this class via the existing helper. For the
-            # `main` pseudo-class, emit any subs/imports at the top level
-            # without a `class Main { ... }` wrapper. Other classes wrap.
-            my $code;
-            if ($name eq 'main') {
-                my @lines;
-                for my $sub ($cls->subs) {
-                    my $sub_info = Chalk::IR::SubInfo->new(
-                        name   => $sub->name,
-                        params => $sub->params,
-                        body   => [],
-                        graph  => $sub->graph,
-                    );
-                    my $line = $self->_emit_sub_decl($sub_info);
-                    push @lines, $line if defined $line;
-                }
-                next unless @lines;
-                $code = join("\n", @lines) . "\n";
-            } else {
-                $code = $self->_emit_class_decl($class_info) . "\n";
-            }
-            $files{$name . '.pm'} = $code;
+            push @lines, $self->_emit_class_decl($class_info);
         }
-        return \%files;
+
+        # Top-level subs registered on `main`
+        if (defined $main) {
+            for my $sub ($main->subs) {
+                my @sub_body = $self->_body_from_graph($sub->graph);
+                my $sub_info = Chalk::IR::SubInfo->new(
+                    name   => $sub->name,
+                    params => $sub->params,
+                    body   => \@sub_body,
+                    graph  => $sub->graph,
+                );
+                my $line = $self->_emit_sub_decl($sub_info);
+                push @lines, $line if defined $line;
+            }
+        }
+
+        my $code = join("\n", @lines) . "\n";
+        return { 'main.pm' => $code };
+    }
+
+    # Recover ordered body statements from a method/sub graph for the
+    # legacy _emit_method_decl / _emit_sub_decl helpers, which still
+    # walk a body arrayref. Body statements are the side-effect nodes
+    # in the control chain (VarDecl, Assign, Call, etc.) plus the
+    # Return at the tail.
+    #
+    # Walks the chain from Return.inputs[0] backward through side-effect
+    # node controls, then reverses to source order. Returns ([] on
+    # absent/empty graph).
+    method _body_from_graph($graph) {
+        return () unless defined $graph;
+        my @returns = $graph->returns->@*;
+        return () unless @returns;
+        my $exit = $returns[0];
+
+        # Walk backward via inputs[0] (control), collecting non-Start
+        # nodes until we hit Start.
+        my @reverse;
+        my $cur = $exit->inputs->[0];
+        while (defined $cur && blessed($cur)) {
+            last if $cur->operation eq 'Start';
+            push @reverse, $cur;
+            my $ins = $cur->inputs;
+            last unless defined $ins && ref($ins) eq 'ARRAY';
+            $cur = $ins->[0];
+        }
+
+        # The Return's value (inputs[1]) is the final expression of the
+        # body for implicit-return cases. Include it as the last body
+        # entry so _emit_method_decl emits it. For explicit `return`
+        # (last side-effect node IS the Return itself), no extra item.
+        my @body = reverse @reverse;
+        my $val = $exit->inputs->[1];
+        if (defined $val && blessed($val)
+                && !($val isa Chalk::IR::Node::Return)
+                && !($val isa Chalk::IR::Node::Unwind)) {
+            # Only append if val isn't already represented as the chain tail
+            my $tail = $body[-1];
+            unless (defined $tail && blessed($tail)
+                    && refaddr($tail) == refaddr($val)) {
+                push @body, $val;
+            }
+        }
+        return @body;
     }
 
     # Generate code with cfg_state-aware dispatch for control flow.
