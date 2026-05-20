@@ -99,6 +99,14 @@ class Chalk::Bootstrap::Earley {
     # Populated only when CHALK_CHART_PROFILE is set; cleared per parse.
     field @_chart_snapshot;
 
+    # CoreItemIndex array caches — precomputed at construction time, used in
+    # hot loops to bypass method-dispatch overhead on every core_id lookup.
+    # Each is a direct reference to the corresponding $core_index getter result.
+    field $_ci_completions;
+    field $_ci_symbols_after;
+    field $_ci_rule_names;
+    field $_ci_alt_idxs;
+
     ADJUST {
         $rule_table = {};
         for my $rule ($grammar->@*) {
@@ -132,6 +140,12 @@ class Chalk::Bootstrap::Earley {
                 }
             }
         }
+
+        # Cache CoreItemIndex arrays for direct array access in hot loops.
+        $_ci_completions   = $core_index->completions();
+        $_ci_symbols_after = $core_index->symbols_after();
+        $_ci_rule_names    = $core_index->rule_names();
+        $_ci_alt_idxs      = $core_index->alt_idxs();
     }
 
     # Precomputed lookup: nonterminal name => arrayref of core item IDs where
@@ -199,13 +213,17 @@ class Chalk::Bootstrap::Earley {
 
         # Pass 1: collect final items and their last symbols
         my $slot = $chart->[$pos];
+        # Use cached CoreItemIndex arrays for direct lookup (no method dispatch).
+        my $ci_completions   = $_ci_completions;
+        my $ci_rule_names    = $_ci_rule_names;
+        my $ci_alt_idxs      = $_ci_alt_idxs;
         for my $core_id (0 .. $slot->$#*) {
             my $oh = $slot->[$core_id];
             next unless defined $oh;
-            next unless $self->_is_complete_id($core_id);
+            next unless $ci_completions->[$core_id];
 
-            my $alt_idx = $core_index->alt_idx_for($core_id);
-            my $rule_name = $core_index->rule_name_for($core_id);
+            my $rule_name = $ci_rule_names->[$core_id];
+            my $alt_idx   = $ci_alt_idxs->[$core_id];
             my $rule = $rule_table->{$rule_name};
             my $rhs = $rule->expressions()->[$alt_idx];
 
@@ -242,12 +260,13 @@ class Chalk::Bootstrap::Earley {
         # for grammars with zero-matching terminals (like /(?:\s|#[^\n]*)*/)
         # because predicted items at dot=0 are skipped, missing cases where
         # a newly predicted rule expects the same symbol a final rule matched.
+        my $ci_symbols_after = $_ci_symbols_after;
         for my $core_id (0 .. $slot->$#*) {
             my $oh = $slot->[$core_id];
             next unless defined $oh;
-            next if $self->_is_complete_id($core_id);
+            next if $ci_completions->[$core_id];
 
-            my $sym = $self->_symbol_after_dot_for($core_id);
+            my $sym = $ci_symbols_after->[$core_id];
             next unless defined $sym;
 
             if (exists $final_last_symbols{$sym->value()}) {
