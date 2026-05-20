@@ -19,6 +19,15 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # No Context refs are stored — only slot names and verdict strings (avoids memory bloat).
     field $_audit_log = [];
 
+    # Cached one() return value. Computed lazily on first call. Safe to cache
+    # because component semirings' one() values are stable across calls and
+    # Context objects are immutable. Cleared by reset_cache() if state changes.
+    field $_one_cache;
+
+    # Cached annotation-semiring list. Recomputed only when reset_cache() fires.
+    # Avoids repeated grep+blessed+can on every one()/multiply call.
+    field $_annotation_semirings_cache;
+
     # SA is always the last semiring by convention.
     # All semirings before SA are annotation-layer semirings that write to
     # named slots in the Context's annotations hash.
@@ -26,9 +35,13 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     method _annotation_semirings() {
         # All semirings except the last (SA) that have a defined slot_name.
         # Non-object semirings (legacy test stubs without slot_name) are skipped.
-        return grep {
-            blessed($_) && $_->can('slot_name') && defined $_->slot_name()
-        } $semirings->@[0 .. $#{ $semirings } - 1];
+        # Cached: $semirings doesn't change after construction.
+        $_annotation_semirings_cache //= [
+            grep {
+                blessed($_) && $_->can('slot_name') && defined $_->slot_name()
+            } $semirings->@[0 .. $#{ $semirings } - 1]
+        ];
+        return $_annotation_semirings_cache->@*;
     }
 
     # tie_log() returns the current tie log (arrayref of tie entries).
@@ -55,6 +68,9 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         for my $sr ($semirings->@*) {
             $sr->reset_cache() if $sr->can('reset_cache');
         }
+        # Component semirings' one() values may now point at freed Contexts;
+        # invalidate the cached composite one() so the next call rebuilds it.
+        $_one_cache = undef;
     }
 
     # zero() returns a Context with is_zero=true.
@@ -73,34 +89,36 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # SA's one() already carries the cfg annotation; we build a new Context
     # copying it plus all annotation-layer slots.
     method one() {
-        my $sa_one = $self->_sa()->one();
-        # SA must return a Context; non-Context last semirings get a plain wrapper.
-        my $is_ctx = blessed($sa_one) && $sa_one->can('annotations');
-        my $annotations = $is_ctx ? { $sa_one->annotations()->%* } : {};
-        for my $sr ($self->_annotation_semirings()) {
-            my $slot = $sr->slot_name();
-            # TI (#707): annotations->{type} holds a tag hash, not a TI Context.
-            # Extract the focus from TI's one() to get the { valid => true } hash.
-            if ($slot eq 'type') {
-                my $ti_one = $sr->one();
-                $annotations->{$slot} = (blessed($ti_one) && $ti_one->can('extract'))
-                    ? $ti_one->extract()
-                    : $ti_one;
-            } else {
-                $annotations->{$slot} = $sr->one();
+        return $_one_cache //= do {
+            my $sa_one = $self->_sa()->one();
+            # SA must return a Context; non-Context last semirings get a plain wrapper.
+            my $is_ctx = blessed($sa_one) && $sa_one->can('annotations');
+            my $annotations = $is_ctx ? { $sa_one->annotations()->%* } : {};
+            for my $sr ($self->_annotation_semirings()) {
+                my $slot = $sr->slot_name();
+                # TI (#707): annotations->{type} holds a tag hash, not a TI Context.
+                # Extract the focus from TI's one() to get the { valid => true } hash.
+                if ($slot eq 'type') {
+                    my $ti_one = $sr->one();
+                    $annotations->{$slot} = (blessed($ti_one) && $ti_one->can('extract'))
+                        ? $ti_one->extract()
+                        : $ti_one;
+                } else {
+                    $annotations->{$slot} = $sr->one();
+                }
             }
-        }
-        my $focus = $is_ctx ? $sa_one->extract() : $sa_one;
-        return Chalk::Bootstrap::Context->new(
-            focus    => $focus,
-            children => [],
-            position => 0,
-            is_zero  => false,
-            annotations => $annotations,
-            mop      => ($is_ctx ? $sa_one->mop() : undef),
-            scope    => ($is_ctx ? $sa_one->scope() : undef),
-            graph    => ($is_ctx ? $sa_one->graph() : undef),
-        );
+            my $focus = $is_ctx ? $sa_one->extract() : $sa_one;
+            Chalk::Bootstrap::Context->new(
+                focus    => $focus,
+                children => [],
+                position => 0,
+                is_zero  => false,
+                annotations => $annotations,
+                mop      => ($is_ctx ? $sa_one->mop() : undef),
+                scope    => ($is_ctx ? $sa_one->scope() : undef),
+                graph    => ($is_ctx ? $sa_one->graph() : undef),
+            );
+        };
     }
 
     # is_zero() checks the Context's is_zero flag directly.
