@@ -49,6 +49,21 @@ class Chalk::Bootstrap::Earley {
     # completed_at: {rule_name}{origin_pos}{chart_pos} = [[core_id, origin], ...] — completed items
     field %completed_at;
 
+    # GC index: {origin}{rule_name} = 1 — present whenever a {rule}{origin}{*}
+    # entry exists in %completed_at. Keyed by origin first so the safe-set GC
+    # can walk only the rules that wrote entries at the freed origin, instead
+    # of iterating all keys of %completed_at on every freed position. Without
+    # this, the GC sweep is O(freed_positions × rules × origins_ever_seen),
+    # turning an O(N) parse into O(N²) wall-time.
+    field %completed_at_origin_rules;
+
+    # Sparse rd-list per chart cell: $_chart_rd_list[$pos][$cid] is an arrayref
+    # of rel_dists that have a defined value at $chart[$pos][$cid][$rd]. Used
+    # by chart-walk sites to iterate only populated rds instead of scanning
+    # `0 .. $oh->$#*`, which is O(pos - origin) on left-recursive lists where
+    # only one rd is actually populated. Writes go through _chart_set.
+    field @_chart_rd_list;
+
     # Precomputed from CoreItemIndex: maps each nonterminal name to the list of
     # core item IDs where the dot is immediately before that nonterminal.
     # I.e., for nonterminal R, _waiting_core_ids{R} = [id, ...] where each id
@@ -79,6 +94,10 @@ class Chalk::Bootstrap::Earley {
 
     # Detailed parse profiling (parse-lifetime, only populated when EARLEY_PROFILE is set)
     field %_profile_data;
+
+    # Chart-size snapshot (per-position cell count + non-empty rel_dist count).
+    # Populated only when CHALK_CHART_PROFILE is set; cleared per parse.
+    field @_chart_snapshot;
 
     ADJUST {
         $rule_table = {};
@@ -131,6 +150,8 @@ class Chalk::Bootstrap::Earley {
     # Reset parse-lifetime state (chart, completed_at, leo_items, scan_cache),
     method reset_parse_state() {
         %completed_at = ();
+        %completed_at_origin_rules = ();
+        @_chart_rd_list = ();
         %leo_items = ();
         %_scan_cache = ();
         %_gc_stats = ();
@@ -142,6 +163,8 @@ class Chalk::Bootstrap::Earley {
     }
 
     method profile_data() { return \%_profile_data; }
+
+    method chart_snapshot() { return \@_chart_snapshot; }
 
     # Aycock Ch6: check if an Earley set is "safe" — locally unambiguous.
     # A safe set allows freeing all chart positions between the previous
@@ -277,7 +300,15 @@ class Chalk::Bootstrap::Earley {
     }
 
     method _chart_set($chart, $pos, $core_id, $origin, $value) {
-        ($chart->[$pos][$core_id] //= [])->[($pos - $origin)] = $value;
+        my $rd = $pos - $origin;
+        my $cell = ($chart->[$pos][$core_id] //= []);
+        my $was_defined = defined $cell->[$rd];
+        $cell->[$rd] = $value;
+        # Mirror new rd into the sparse rd-list so iteration sites can walk
+        # only populated rds. Overwrites (rd already defined) skip the push.
+        if (!$was_defined) {
+            push +($_chart_rd_list[$pos][$core_id] //= [])->@*, $rd;
+        }
     }
 
     # Report the chart origin dimension type (for testing)
@@ -366,11 +397,14 @@ class Chalk::Bootstrap::Earley {
 
         # Reset secondary indexes for this parse
         %completed_at = ();
+        %completed_at_origin_rules = ();
+        @_chart_rd_list = ();
         %leo_items = ();
         %_scan_cache = ();
         %_gc_stats = (positions_freed => 0, safe_sets_found => 0);
         %_scan_stats = (total_matches => 0, cache_hits => 0, clustered_scans => 0);
         %_profile_data = ();
+        @_chart_snapshot = ();
         $_last_active_pos = 0;
         $_diag_expected = {};
         @_errors = ();
@@ -383,7 +417,7 @@ class Chalk::Bootstrap::Earley {
         # rel_dist = 0 - 0 = 0 (origin and pos are both 0)
         for my $alt_idx (0 .. $start_rule->expressions()->$#*) {
             my $core_id = $core_index->id_for($start_rule->name(), $alt_idx, 0);
-            ($chart[0][$core_id] //= [])->[0] = $semiring->one();
+            $self->_chart_set(\@chart, 0, $core_id, 0, $semiring->one());
         }
 
         # GC tracking
@@ -460,8 +494,7 @@ class Chalk::Bootstrap::Earley {
                                     next if $semiring->is_zero($new_value);
                                     my $new_cid = $core_index->advance($cid);
                                     # Place at current position (zero-width insertion)
-                                    ($chart[$pos][$new_cid] //= [])->[($pos - $item_origin)]
-                                        = $new_value;
+                                    $self->_chart_set(\@chart, $pos, $new_cid, $item_origin, $new_value);
                                     $ruby_recovered = true;
                                 }
                             }
@@ -493,8 +526,7 @@ class Chalk::Bootstrap::Earley {
                             for my $alt_idx (0 .. $start_rule->expressions()->$#*) {
                                 my $seed_id = $core_index->id_for(
                                     $start_rule->name(), $alt_idx, 0);
-                                ($chart[$sync_pos][$seed_id] //= [])->[0]
-                                    = $semiring->one();
+                                $self->_chart_set(\@chart, $sync_pos, $seed_id, $sync_pos, $semiring->one());
                             }
                             $pos = $sync_pos;
                             next;
@@ -577,7 +609,7 @@ class Chalk::Bootstrap::Earley {
                     );
                     my $completed_value = $semiring->multiply($value, $complete_ctx);
                     # Update the chart entry with the reification-applied value
-                    $chart[$pos][$core_id][($pos - $origin)] = $completed_value;
+                    $self->_chart_set(\@chart, $pos, $core_id, $origin, $completed_value);
                     # Skip propagation of zero-valued completions. A zero
                     # from multiply (e.g. TypeInference rejecting a
                     # keyword-as-Identifier) must not poison parent items
@@ -595,6 +627,7 @@ class Chalk::Bootstrap::Earley {
                     # would cause wasted work in _advance_from_completed.
                     $completed_at{$rule_name}{$origin}{$pos} //= [];
                     push $completed_at{$rule_name}{$origin}{$pos}->@*, [$core_id, $origin];
+                    $completed_at_origin_rules{$origin}{$rule_name} = 1;
                     # Complete
                     $self->_complete($core_id, $origin, $completed_value, $pos, \@chart, \@agenda);
                 } else {
@@ -631,14 +664,14 @@ class Chalk::Bootstrap::Earley {
                                     }
                                     my $merged_is_zero = $semiring->is_zero($merged);
                                     if (!$merged_is_zero) {
-                                        $chart[$pos][$skip_core][$skip_rd] = $merged;
+                                        $self->_chart_set(\@chart, $pos, $skip_core, $origin, $merged);
                                         my $sp_slot = $processed[$skip_core];
                                         my $sp_done = defined $sp_slot && $sp_slot->[$origin];
                                         push @agenda, [$skip_core, $origin]
                                             unless $sp_done;
                                     }
                                 } else {
-                                    ($chart[$pos][$skip_core] //= [])->[$skip_rd] = $skip_value;
+                                    $self->_chart_set(\@chart, $pos, $skip_core, $origin, $skip_value);
                                     push @agenda, [$skip_core, $origin];
                                 }
                             }
@@ -711,6 +744,7 @@ class Chalk::Bootstrap::Earley {
                             my $oh = $slot->[$cid];
                             next unless defined $oh;
                             next unless $self->_is_complete_id($cid);
+                            my $rd_list = $_chart_rd_list[$sp][$cid];
                             for my $rd (0 .. $oh->$#*) {
                                 next unless $rd < $max_rd;
                                 next unless defined $oh->[$rd];
@@ -718,6 +752,15 @@ class Chalk::Bootstrap::Earley {
                                 # may still be needed by future completions
                                 # (e.g. ElsifChain waiting for recursive child)
                                 $oh->[$rd] = undef;
+                            }
+                            # Rebuild the rd-list for this cell from defined
+                            # entries, since epoch sweep can null arbitrary
+                            # rds. Only run when the list exists (it always
+                            # should, since values were written via _chart_set).
+                            if (defined $rd_list) {
+                                $_chart_rd_list[$sp][$cid] = [
+                                    grep { defined $oh->[$_] } $rd_list->@*
+                                ];
                             }
                         }
                     }
@@ -739,6 +782,7 @@ class Chalk::Bootstrap::Earley {
                         }
                         if ($all_null) {
                             $chart[$sp] = [];
+                            $_chart_rd_list[$sp] = undef;
                             delete $_scan_cache{$sp};
                             $_gc_stats{positions_freed}++;
                         }
@@ -783,15 +827,26 @@ class Chalk::Bootstrap::Earley {
                         for my $sp ($last_safe_pos + 1 .. $pos - 1) {
                             if (defined $chart[$sp] && $chart[$sp]->@*) {
                                 $chart[$sp] = [];
+                                $_chart_rd_list[$sp] = undef;
                                 delete $_scan_cache{$sp};
                                 $_gc_stats{positions_freed}++;
                             }
-                            # Clean up completed_at entries at freed positions
-                            for my $rule_name (keys %completed_at) {
-                                for my $origin (keys $completed_at{$rule_name}->%*) {
-                                    delete $completed_at{$rule_name}{$origin}{$sp};
+                            # Drop the origin=$sp branch for every rule that
+                            # wrote at that origin. The %completed_at_origin_rules
+                            # index lets us touch only populated (rule, origin)
+                            # pairs instead of walking all rules × all origins.
+                            #
+                            # Entries with chart_pos=$sp under {rule}{origin<sp}
+                            # are unreachable (reads use {pos}{pos} where
+                            # pos==origin) and are left in place; the per-parse
+                            # reset_parse_state at the start of the next parse
+                            # reclaims them. Adding a chart_pos index here would
+                            # restore their cleanup at the cost of an extra
+                            # write per completion.
+                            if (my $rules = delete $completed_at_origin_rules{$sp}) {
+                                for my $rule_name (keys %$rules) {
+                                    delete $completed_at{$rule_name}{$sp};
                                 }
-                                delete $completed_at{$rule_name}{$sp};
                             }
                         }
                         $oldest_live_pos = $last_safe_pos
@@ -853,6 +908,25 @@ class Chalk::Bootstrap::Earley {
             }
 
             $pos++;
+        }
+
+        if ($ENV{CHALK_CHART_PROFILE}) {
+            for my $p (0 .. $#chart) {
+                my $row = $chart[$p];
+                my $cells = 0;
+                my $entries = 0;
+                if (defined $row) {
+                    for my $cid (0 .. $row->$#*) {
+                        my $oh = $row->[$cid];
+                        next unless defined $oh;
+                        $cells++;
+                        for my $rd (0 .. $oh->$#*) {
+                            $entries++ if defined $oh->[$rd];
+                        }
+                    }
+                }
+                $_chart_snapshot[$p] = { cells => $cells, entries => $entries };
+            }
         }
 
         # Check if we have a completed start rule spanning entire input
@@ -1288,7 +1362,10 @@ class Chalk::Bootstrap::Earley {
             my $oh = $chart->[$origin][$w_core_id];
             next unless defined $oh;
 
-            for my $w_rd (0 .. $oh->$#*) {
+            my $rd_list = $_chart_rd_list[$origin][$w_core_id];
+            next unless defined $rd_list && $rd_list->@*;
+
+            for my $w_rd ($rd_list->@*) {
                 next unless defined $oh->[$w_rd];
                 my $w_origin = $origin - $w_rd;
 
