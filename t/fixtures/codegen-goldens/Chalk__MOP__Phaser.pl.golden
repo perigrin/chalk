@@ -1,0 +1,14 @@
+use 5.42.0;
+use utf8;
+use experimental 'class';
+use Chalk::IR::Graph;
+class Chalk::MOP::Phaser {
+    field $graph :param :reader = 'Chalk::IR::Graph'->new();
+    field $source_position :param :reader = 0;
+    method merge($node) {
+        $graph->merge($node);
+    }
+    method next_cfg_id() {
+        $graph->next_cfg_id();
+    }
+}

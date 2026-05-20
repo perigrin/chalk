@@ -1,0 +1,149 @@
+#!/usr/bin/env perl
+# ABOUTME: Capture codegen output for a green-eval file set as Phase 4 byte-compat goldens.
+# ABOUTME: Writes to t/fixtures/codegen-goldens/<safe-filename>.pl.golden for each file that generates successfully.
+use 5.42.0;
+use utf8;
+use Scalar::Util qw(blessed);
+use File::Path qw(make_path);
+use File::Basename qw(basename dirname);
+
+use lib 'lib';
+use lib 't/bootstrap/lib';
+
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
+use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::Bootstrap::Perl::Target::Perl;
+
+# Candidate file set: current-path versions of files referenced by the
+# tier-a, tier-b, tier-c, tier-d test sets. Whatever generates ends up
+# in goldens; whatever crashes is omitted with a warning.
+my @candidates = qw(
+    lib/Chalk/IR/Node/Start.pm
+    lib/Chalk/IR/Node/Return.pm
+    lib/Chalk/IR/Node/Constant.pm
+    lib/Chalk/Bootstrap/Target.pm
+    lib/Chalk/Bootstrap/Optimizer/Pass.pm
+    lib/Chalk/Bootstrap/BNF/Target/XS/AST/Node.pm
+    lib/Chalk/Bootstrap/BNF/Target/XS/AST/Statement.pm
+    lib/Chalk/Bootstrap/BNF/Target/XS/AST/Module.pm
+    lib/Chalk/Grammar/Symbol.pm
+    lib/Chalk/Grammar/Rule.pm
+    lib/Chalk/MOP/Field.pm
+    lib/Chalk/MOP/Method.pm
+    lib/Chalk/MOP/Sub.pm
+    lib/Chalk/MOP/Import.pm
+    lib/Chalk/MOP/Phaser.pm
+    lib/Chalk/MOP/Class.pm
+);
+
+my $goldens_dir = 't/fixtures/codegen-goldens';
+make_path($goldens_dir);
+
+# Build pipeline once
+say STDERR "Building grammar pipeline...";
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $raw_ir = perl_pipeline();
+die "perl_pipeline failed" unless defined $raw_ir;
+
+my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+my $generated = $bnf_target->generate($raw_ir);
+$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::CaptureGoldens/g;
+eval $generated;
+die "grammar eval failed: $@" if $@;
+
+my $gen_grammar = Chalk::Grammar::Perl::CaptureGoldens::grammar();
+die "grammar load failed" unless defined $gen_grammar;
+
+my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+
+sub safe_name($path) {
+    my $name = $path;
+    $name =~ s{^lib/}{};
+    $name =~ s{/}{__}g;
+    $name =~ s{\.pm$}{};
+    return $name;
+}
+
+my @captured;
+my @skipped;
+for my $file (@candidates) {
+    unless (-f $file) {
+        push @skipped, "$file: not found";
+        next;
+    }
+
+    say STDERR "Capturing: $file";
+
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    open my $fh, '<:utf8', $file or do {
+        push @skipped, "$file: open failed: $!";
+        next;
+    };
+    local $/;
+    my $source = <$fh>;
+    close $fh;
+
+    my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+
+    my $result;
+    my $err;
+    {
+        local $@;
+        $result = eval { $parser->parse_value($source) };
+        $err = $@;
+    }
+    if ($err) {
+        push @skipped, "$file: parse threw: $err";
+        next;
+    }
+    unless (defined $result && !$result->is_zero()) {
+        push @skipped, "$file: parse failed";
+        next;
+    }
+
+    my $sa = $semiring->semirings()->[4];
+    my $ir = $result->extract();
+    unless (defined $ir) {
+        push @skipped, "$file: no IR extracted";
+        next;
+    }
+
+    my $code;
+    {
+        local $@;
+        $code = eval { $perl_target->generate_with_cfg($ir, $sa, $result) };
+        $err = $@;
+    }
+    if ($err) {
+        push @skipped, "$file: generate threw: $err";
+        next;
+    }
+    unless (defined $code && length $code) {
+        push @skipped, "$file: no code generated";
+        next;
+    }
+
+    my $out_path = "$goldens_dir/" . safe_name($file) . ".pl.golden";
+    open my $out, '>:utf8', $out_path or do {
+        push @skipped, "$file: write failed: $!";
+        next;
+    };
+    print $out $code;
+    close $out;
+    push @captured, $file;
+}
+
+say STDERR "\n=== Capture summary ===";
+say STDERR "Captured: " . scalar @captured;
+say STDERR "Skipped:  " . scalar @skipped;
+say STDERR "";
+say STDERR "Captured files:";
+say STDERR "  $_" for @captured;
+say STDERR "";
+if (@skipped) {
+    say STDERR "Skipped files:";
+    say STDERR "  $_" for @skipped;
+}

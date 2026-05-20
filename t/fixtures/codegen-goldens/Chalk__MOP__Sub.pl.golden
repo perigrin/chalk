@@ -1,0 +1,17 @@
+use 5.42.0;
+use utf8;
+use experimental 'class';
+use Chalk::IR::Graph;
+class Chalk::MOP::Sub {
+    field $name :param :reader;
+    field $class :param :reader;
+    field $params :param :reader = [];
+    field $return_type :param :reader = undef;
+    field $graph :param :reader = 'Chalk::IR::Graph'->new();
+    method merge($node) {
+        $graph->merge($node);
+    }
+    method next_cfg_id() {
+        $graph->next_cfg_id();
+    }
+}

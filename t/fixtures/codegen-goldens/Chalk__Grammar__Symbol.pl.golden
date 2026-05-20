@@ -1,0 +1,27 @@
+use 5.42.0;
+use utf8;
+use experimental 'class';
+class Chalk::Grammar::Symbol {
+    field $type :param :reader;
+    field $value :param :reader;
+    field $quantifier :param :reader = undef;
+    method is_terminal() {
+        $type eq 'terminal';
+    }
+    method is_reference() {
+        $type eq 'reference';
+    }
+    method is_quantified() {
+        defined($quantifier);
+    }
+    method goto_key() {
+        $type eq 'reference' ? 'n:' : 't:' . $value;
+    }
+    method to_string() {
+        my $str = $self->is_terminal() ? "/$value/" : $value;
+        if (defined($quantifier)) {
+            $str .= $quantifier;
+        }
+        return $str;
+    }
+}

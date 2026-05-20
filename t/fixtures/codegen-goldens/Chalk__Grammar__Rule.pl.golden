@@ -1,0 +1,19 @@
+use 5.42.0;
+use utf8;
+use experimental 'class';
+class Chalk::Grammar::Rule {
+    field $name :param :reader;
+    field $expressions :param :reader;
+    method alternative_count() {
+        return scalar($expressions->@*);
+    }
+    method is_terminal_rule() {
+        if (!$symbol->is_terminal()) {
+        }
+        return true;
+    }
+    method to_string() {
+        my @alts = map { join(' ', map { $_->to_string(); } $_->@*); } $expressions->@*;
+        return "$name ::= " . join(' | ', @alts) . ' ;';
+    }
+}
