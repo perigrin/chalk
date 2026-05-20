@@ -20,6 +20,20 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
     # artifacts (peel correct).
     field $paren_form :param :reader = false;
 
+    # Resolved callee handle (Chalk::MOP::Method or Chalk::MOP::Sub).
+    # Per Phase 4, CallExpression resolves the symbolic name via
+    # $mop->find_method() and stores the metaobject reference here so
+    # codegen can read the callee's graph/params/return-type directly
+    # without going through the symbol table at emit time.
+    # May be undef for builtins or unresolved calls (still uses $name).
+    #
+    # Not part of content_hash: the SAME call signature (same dispatch,
+    # name, inputs) should hash-cons to a single node regardless of
+    # whether its target has been resolved yet. Resolution is a late
+    # decoration applied by ClassBlock's post-pass after all methods
+    # in scope have been registered on the MOP.
+    field $target :param :reader = undef;
+
     method operation() { 'Call' }
 
     method content_hash() {
@@ -28,5 +42,12 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
             "name=$name",
             ($paren_form ? "paren_form=1" : ()),
             $self->_serialize_inputs());
+    }
+
+    # Late-binding setter for the resolved callee. Used by ClassBlock's
+    # Phase 4 post-pass once the MOP has every class's methods registered.
+    method set_target($mop_method) {
+        $target = $mop_method;
+        return;
     }
 }

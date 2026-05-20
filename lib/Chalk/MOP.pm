@@ -32,4 +32,17 @@ class Chalk::MOP {
     method for_class($name) {
         return $classes{$name};
     }
+
+    # Resolve a method name across all known classes. Returns the first
+    # Chalk::MOP::Method whose name matches, or undef when not found.
+    # Used by Phase 4 CallExpression to attach a resolved callee handle
+    # to Call IR nodes.
+    method find_method($method_name) {
+        for my $cls (values %classes) {
+            for my $m ($cls->methods) {
+                return $m if $m->name eq $method_name;
+            }
+        }
+        return undef;
+    }
 }

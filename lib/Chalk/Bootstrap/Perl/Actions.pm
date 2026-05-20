@@ -665,6 +665,24 @@ class Chalk::Bootstrap::Perl::Actions {
                 # full phaser MOP integration deferred. The PhaserBlock is
                 # captured as a marker so parse succeeds; codegen drops it.
             }
+
+            # Phase 4 post-pass: now that every method in this class is
+            # registered on the MOP, walk each method's graph for Call
+            # nodes whose target is still undef and resolve them via
+            # $mop->find_method. Catches same-class self-calls that
+            # MethodCall couldn't resolve earlier (bottom-up order has
+            # the inner action firing before the outer ClassBlock).
+            for my $method ($mop_class->methods) {
+                my $graph = $method->graph;
+                next unless defined $graph;
+                for my $n ($graph->nodes->@*) {
+                    next unless blessed($n) && $n isa Chalk::IR::Node::Call;
+                    next if defined $n->target;
+                    next unless $n->dispatch_kind eq 'method';
+                    my $resolved = $mop->find_method($n->name);
+                    $n->set_target($resolved) if defined $resolved;
+                }
+            }
         }
 
         return Chalk::IR::ClassInfo->new(
@@ -1919,6 +1937,11 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return undef unless defined $method_name;
 
+        # Note: Call->target (the resolved MOP::Method handle) is set by
+        # ClassBlock's post-pass after the surrounding class registers
+        # all of its methods on the MOP. By the time this MethodCall
+        # action runs, the enclosing ClassBlock hasn't yet completed, so
+        # find_method() would miss the callee in same-class self-calls.
         return $typed->make('Call',
             dispatch_kind => 'method',
             name          => $method_name->value(),

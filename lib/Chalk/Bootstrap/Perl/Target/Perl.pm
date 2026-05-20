@@ -33,6 +33,7 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
+use Chalk::MOP;
 use Chalk::IR::Graph;
 use Chalk::IR::Program;
 
@@ -59,11 +60,95 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return $self->_emit_expr($node);
     }
 
-    method generate($ir) {
-        die "generate() requires a Program IR node"
-            unless defined($ir) && $ir isa Chalk::IR::Program;
+    # Polymorphic entry point. Accepts either:
+    #   - Chalk::IR::Program: emits a single source-string (legacy path).
+    #   - Chalk::MOP: emits a HashRef[Str] keyed by class-or-module name
+    #     (Phase 4 MOP-driven path).
+    #
+    # The MOP path uses the existing emit helpers per class, fed by the
+    # class's methods and their per-method graphs. Initial implementation
+    # walks the MOP and synthesizes ClassInfo-shaped wrappers so the
+    # existing _emit_class_decl can run unchanged. Subsequent Phase 4
+    # commits migrate emit helpers to read MOP directly.
+    method generate($input) {
+        if (defined($input) && blessed($input) && $input isa Chalk::MOP) {
+            return $self->_generate_from_mop($input);
+        }
+        die "generate() requires a Program IR node or a Chalk::MOP"
+            unless defined($input) && $input isa Chalk::IR::Program;
 
-        return $self->_emit_program($ir);
+        return $self->_emit_program($input);
+    }
+
+    method _generate_from_mop($mop) {
+        my %files;
+        for my $cls ($mop->classes()) {
+            my $name = $cls->name;
+            # Synthesize the wrapper structures the existing emit path
+            # needs. _emit_class_decl walks the body for FieldInfo,
+            # MethodInfo, SubInfo, etc. - build those from the MOP.
+            my @body;
+            for my $field ($cls->fields) {
+                push @body, Chalk::IR::FieldInfo->new(
+                    name       => $field->name,
+                    attributes => [
+                        map { +{ name => $_ =~ s/^://r,
+                                 value => undef } }
+                        $field->attributes
+                    ],
+                );
+            }
+            for my $method ($cls->methods) {
+                push @body, Chalk::IR::MethodInfo->new(
+                    name        => $method->name,
+                    params      => $method->params,
+                    return_type => $method->return_type,
+                    body        => [],
+                    graph       => $method->graph,
+                );
+            }
+            for my $sub ($cls->subs) {
+                push @body, Chalk::IR::SubInfo->new(
+                    name   => $sub->name,
+                    params => $sub->params,
+                    body   => [],
+                    graph  => $sub->graph,
+                );
+            }
+
+            my $class_info = Chalk::IR::ClassInfo->new(
+                name    => $name,
+                parent  => undef,
+                fields  => [grep { $_ isa Chalk::IR::FieldInfo } @body],
+                methods => [grep { $_ isa Chalk::IR::MethodInfo } @body],
+                subs    => [grep { $_ isa Chalk::IR::SubInfo } @body],
+                body    => \@body,
+            );
+
+            # Emit just this class via the existing helper. For the
+            # `main` pseudo-class, emit any subs/imports at the top level
+            # without a `class Main { ... }` wrapper. Other classes wrap.
+            my $code;
+            if ($name eq 'main') {
+                my @lines;
+                for my $sub ($cls->subs) {
+                    my $sub_info = Chalk::IR::SubInfo->new(
+                        name   => $sub->name,
+                        params => $sub->params,
+                        body   => [],
+                        graph  => $sub->graph,
+                    );
+                    my $line = $self->_emit_sub_decl($sub_info);
+                    push @lines, $line if defined $line;
+                }
+                next unless @lines;
+                $code = join("\n", @lines) . "\n";
+            } else {
+                $code = $self->_emit_class_decl($class_info) . "\n";
+            }
+            $files{$name . '.pm'} = $code;
+        }
+        return \%files;
     }
 
     # Generate code with cfg_state-aware dispatch for control flow.

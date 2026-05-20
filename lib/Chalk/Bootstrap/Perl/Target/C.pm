@@ -23,6 +23,7 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
+use Chalk::MOP;
 
 class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::EmitHelpers) {
     field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
@@ -1468,6 +1469,45 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             return "newSVpvs(\"$esc\")";
         }
         return undef;
+    }
+
+    # Phase 4 entry point: emit per-class .c and .xs source from a MOP.
+    # Returns HashRef[Str] keyed by file name (e.g. "Foo.c", "Foo.xs"),
+    # where each value is the generated source. Currently produces
+    # minimal stub output - subsequent Phase 4 commits walk method
+    # graphs to fill in real C/XS code.
+    method generate($mop) {
+        die "generate(\$mop) requires a Chalk::MOP"
+            unless defined($mop) && blessed($mop) && $mop isa Chalk::MOP;
+
+        my %files;
+        for my $cls ($mop->classes()) {
+            my $name = $cls->name;
+            next if $name eq 'main';
+            my $slug = $self->_class_slug_for($name);
+
+            my @methods = $cls->methods;
+            my $method_decls = join("\n", map {
+                "/* method: " . $_->name . " */"
+            } @methods);
+
+            $files{"$slug.c"} = <<~"EOC";
+                /* Generated C source for class $name */
+                #include "EXTERN.h"
+                #include "perl.h"
+                #include "XSUB.h"
+                $method_decls
+                EOC
+
+            $files{"$slug.xs"} = <<~"EOX";
+                /* Generated XS wrapper for class $name */
+                #include "EXTERN.h"
+                #include "perl.h"
+                #include "XSUB.h"
+                MODULE = $name PACKAGE = $name
+                EOX
+        }
+        return \%files;
     }
 
     # Generate C source and header files from a Perl IR tree.

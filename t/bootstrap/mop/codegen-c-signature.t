@@ -20,7 +20,7 @@ ok(Chalk::Bootstrap::Perl::Target::C->can('generate'),
     my $cls = $mop->declare_class('Tiny');
     $cls->declare_method('noop', params => []);
 
-    my $target = Chalk::Bootstrap::Perl::Target::C->new;
+    my $target = Chalk::Bootstrap::Perl::Target::C->new(module_name => 'Tiny');
     my $result = $target->generate($mop);
 
     ok(defined $result, 'generate($mop) returns a defined value');
