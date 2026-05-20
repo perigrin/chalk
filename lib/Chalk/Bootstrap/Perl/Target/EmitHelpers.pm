@@ -220,7 +220,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             push @items_to_scan, $item;
             # Check VarDecl initializer for mis-parented SubInfo
             if ($item isa Chalk::IR::Node::VarDecl) {
-                my $init = $item->inputs()->[1];
+                my $init = $item->init();
                 if (defined $init && $init isa Chalk::IR::SubInfo) {
                     push @items_to_scan, $init;
                 }
@@ -388,7 +388,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
 
         for my $item ($body->@*) {
             if ($item isa Chalk::IR::Node::VarDecl) {
-                my $var = $item->inputs()->[0]->value();
+                my $var = $item->name()->value();
                 $var =~ s/^\$//;
                 push @keys, $var unless grep { $_ eq $var } @keys;
             }
@@ -826,12 +826,12 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             next unless $is_var_decl;
 
             if ($is_var_decl) {
-                my $var = $item->inputs()->[0]->value();
+                my $var = $item->name()->value();
                 $var =~ s/^[\$\@\%]//;
                 next if defined $field_map && exists $field_map->{$var};
                 next if %_class_scope_vars && exists $_class_scope_vars{$var};
                 $declared_vars->{$var} = true;
-                my $init = $item->inputs()->[1];
+                my $init = $item->init();
                 if (defined $init && $init isa Chalk::IR::Node::VarDecl) {
                     $self->_collect_var_decls([$init], $declared_vars);
                 }
@@ -1248,9 +1248,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # VarDecl($var, BuiltinCall(shift, @array))
             # Emit: while ((var_sv = av_shift(...)) != &PL_sv_undef)
             if ($cond isa Chalk::IR::Node::VarDecl) {
-                my $var_name = $cond->inputs()->[0]->value();
+                my $var_name = $cond->name()->value();
                 $var_name =~ s/^[\$\@\%]//;
-                my $init = $cond->inputs()->[1];
+                my $init = $cond->init();
                 if (defined $init
                         && $init isa Chalk::IR::Node::Call && $init->dispatch_kind() eq 'builtin'
                         && $init->inputs()->[0]->value() eq 'shift') {
@@ -1292,7 +1292,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # Detect this by checking if the while condition created an entry var
             # and the body uses alt_idx_sv without setting it.
             if ($cond isa Chalk::IR::Node::VarDecl) {
-                my $entry_var = $cond->inputs()->[0]->value();
+                my $entry_var = $cond->name()->value();
                 $entry_var =~ s/^[\$\@\%]//;
                 my $body_code = join("\n", @lines);
                 # If body references alt_idx_sv but never assigns it,
@@ -2124,9 +2124,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     method _emit_var_decl_expr($node, $declared_vars) {
-        my $var  = $node->inputs()->[0]->value();
+        my $var  = $node->name()->value();
         $var =~ s/^[\$\@\%]//;
-        my $init = $node->inputs()->[1];
+        my $init = $node->init();
 
         # Field variables use ObjectFIELDS accessor with sv_setsv,
         # locals use direct C pointer assignment
@@ -2161,11 +2161,11 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     method _emit_var_decl($node, $declared_vars) {
-        my $raw_var = $node->inputs()->[0]->value();
+        my $raw_var = $node->name()->value();
         my ($sigil) = $raw_var =~ /^([\$\@\%])/;
         my $var = $raw_var;
         $var =~ s/^[\$\@\%]//;
-        my $init = $node->inputs()->[1];
+        my $init = $node->init();
 
         # Default value for uninitialized variables depends on sigil:
         # %hash -> empty hashref, @array -> empty arrayref, $scalar -> undef

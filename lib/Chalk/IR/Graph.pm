@@ -57,6 +57,20 @@ class Chalk::IR::Graph {
         return $node;
     }
 
+    # Remove a node from the graph's cache. Used when a side-effect action
+    # (e.g., AssignmentExpression refining a bare VarDecl) replaces an
+    # earlier node with a refined version that should be the sole reachable
+    # representative in the graph.
+    method unmerge($node) {
+        return unless defined $node && blessed($node);
+        my $hash = $node->content_hash();
+        delete $cache{$hash};
+        # Also delete by id in case the node was added via _seed().
+        my $id = $node->id();
+        delete $cache{$id} if defined $id && $id ne $hash;
+        return;
+    }
+
     # Allocate a unique CFG node id. CFG nodes (If, Proj, Region, Loop, Start,
     # Return, Unwind) are never hash-consed; each call returns a new id.
     method next_cfg_id() {

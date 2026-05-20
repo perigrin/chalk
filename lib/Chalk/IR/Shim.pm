@@ -186,8 +186,14 @@ sub translate($factory, $constructor_class, %params) {
     }
 
     if ($constructor_class eq 'VarDecl') {
+        # Side-effect shape: inputs[0]=control, [1]=name, [2]=init.
+        # If caller didn't supply control (Shim is a legacy back-compat
+        # surface), default to undef - the resulting VarDecl is not
+        # part of a control chain (e.g., optimizer-rebuilt nodes).
         return $factory->make('VarDecl',
-            inputs       => [$params{variable}, $params{initializer}],
+            inputs       => [$params{control},
+                             $params{variable},
+                             $params{initializer}],
             compat_class => 'VarDecl',
         );
     }

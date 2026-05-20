@@ -63,12 +63,12 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         $self->_reset_class_scope_vars();
         my $register_class_var; $register_class_var = sub ($item) {
             return unless $item isa Chalk::IR::Node::VarDecl;
-            my $raw_var = $item->inputs()->[0]->value();
+            my $raw_var = $item->name()->value();
             my $sigil = substr($raw_var, 0, 1);
             my $var = $raw_var;
             $var =~ s/^[\$\@\%]//;
-            my $init = $item->inputs()->[1];
-            # If init is another VarDecl, this is a chained declaration — recurse
+            my $init = $item->init();
+            # If init is another VarDecl, this is a chained declaration - recurse
             # into it before registering the current one.
             if (defined $init && $init isa Chalk::IR::Node::VarDecl) {
                 $register_class_var->($init);
@@ -1129,9 +1129,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 my @block_stmts;
                 for my $stmt (@block_body_items) {
                     if ($stmt isa Chalk::IR::Node::VarDecl) {
-                        my $vname = $stmt->inputs()->[0]->value() =~ s/^\$//r;
+                        my $vname = $stmt->name()->value() =~ s/^\$//r;
                         $map_vars{$vname} = 1;
-                        my $init = $self->_emit_expr($stmt->inputs()->[1], \%map_vars);
+                        my $init = $self->_emit_expr($stmt->init(), \%map_vars);
                         push @block_stmts, "SV *${vname}_sv = $init";
                     } else {
                         push @block_stmts, $self->_emit_expr($stmt, \%map_vars);
@@ -1149,9 +1149,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                     my @block_stmts;
                     for my $stmt ($body->@*) {
                         if ($stmt isa Chalk::IR::Node::VarDecl) {
-                            my $vname = $stmt->inputs()->[0]->value() =~ s/^\$//r;
+                            my $vname = $stmt->name()->value() =~ s/^\$//r;
                             $map_vars{$vname} = 1;
-                            my $init = $self->_emit_expr($stmt->inputs()->[1], \%map_vars);
+                            my $init = $self->_emit_expr($stmt->init(), \%map_vars);
                             push @block_stmts, "SV *${vname}_sv = $init";
                         } else {
                             push @block_stmts, $self->_emit_expr($stmt, \%map_vars);
@@ -1733,13 +1733,13 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 : $class_decl->inputs()->[2];
             for my $item ($body->@*) {
                 next unless $item isa Chalk::IR::Node::VarDecl;
-                my $raw = $item->inputs()->[0]->value();
+                my $raw = $item->name()->value();
                 my $var = $raw;
                 $var =~ s/^[\$\@\%]//;
                 next unless exists $self->_get_class_scope_vars()->{$var};
                 my $info = $self->_get_class_scope_vars()->{$var};
                 my $sname = $info->{static_name};
-                my $init_node = $item->inputs()->[1];
+                my $init_node = $item->init();
                 my $init_expr = $self->_emit_init_expr($init_node, $info->{sigil});
                 push @init_lines, "    $sname = $init_expr;" if defined $init_expr;
             }

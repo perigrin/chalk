@@ -124,7 +124,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             my $node = pop @stack;
             next unless defined $node && ref($node);
             if ($node isa Chalk::IR::Node::VarDecl) {
-                my $var = $node->inputs()->[0];
+                my $var = $node->name();
                 if (defined $var && $var isa Chalk::IR::Node::Constant) {
                     my $name = $var->value();
                     if (defined $name && $name =~ /^([\@\%])(.+)/) {
@@ -423,7 +423,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         # Add body-local aggregate VarDecls
         for my $item ($body->@*) {
             next unless $item isa Chalk::IR::Node::VarDecl;
-            my $var = $item->inputs()->[0];
+            my $var = $item->name();
             next unless defined $var && $var isa Chalk::IR::Node::Constant;
             my $vname = $var->value();
             if (defined $vname && $vname =~ /^([\@\%])(.+)/) {
@@ -559,8 +559,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_var_decl($node) {
-        my $var  = $node->inputs()->[0]->value();
-        my $init = $node->inputs()->[1];
+        my $var  = $node->name()->value();
+        my $init = $node->init();
 
         if (defined $init) {
             return "my $var = " . $self->_emit_init_expr($var, $init) . ";";
@@ -570,8 +570,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
     # VarDecl as expression (no semicolon)
     method _emit_var_decl_expr($node) {
-        my $var  = $node->inputs()->[0]->value();
-        my $init = $node->inputs()->[1];
+        my $var  = $node->name()->value();
+        my $init = $node->init();
 
         if (defined $init) {
             return "my $var = " . $self->_emit_init_expr($var, $init);

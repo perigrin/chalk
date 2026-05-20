@@ -639,10 +639,16 @@ class Chalk::Bootstrap::Perl::Actions {
                     $mop_class->declare_method($item->name(),
                         params      => $item->params(),
                         return_type => $item->return_type(),
+                        (defined $item->graph()
+                            ? (graph => $item->graph())
+                            : ()),
                     );
                 } elsif ($item isa Chalk::IR::SubInfo) {
                     $mop_class->declare_sub($item->name(),
                         params => $item->params(),
+                        (defined $item->graph()
+                            ? (graph => $item->graph())
+                            : ()),
                     );
                 } elsif ($item isa Chalk::IR::UseInfo) {
                     $mop_class->declare_import($item->name(),
@@ -673,6 +679,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $method_name;
         my @params;
         my @body;
+        my $body_graph;
 
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -684,6 +691,9 @@ class Chalk::Bootstrap::Perl::Actions {
             } elsif (defined $rule && $rule eq 'Block') {
                 my $stmts = _block_stmts($focus);
                 @body = $stmts->@* if defined $stmts;
+                if (ref($focus) eq 'HASH' && defined $focus->{graph}) {
+                    $body_graph = $focus->{graph};
+                }
             } elsif (ref($focus) eq 'ARRAY') {
                 if (defined $rule && ($rule eq 'Signature'
                         || $rule eq 'SignatureParams')) {
@@ -722,7 +732,11 @@ class Chalk::Bootstrap::Perl::Actions {
         my $method_name_val = defined $method_name ? $method_name->value() : '<unknown>';
         my @param_strs = map { $_->value() } @params;
 
-        my $graph = $self->_build_method_graph($ctx, $fixed_body);
+        # Use Block's synthesized graph when present; the legacy
+        # _build_method_graph still backfills Start/Returns/body_stmts
+        # so existing readers see the same shape (deletion deferred to
+        # Phase 3a-migration commit 6).
+        my $graph = $self->_build_method_graph($ctx, $fixed_body, $body_graph);
 
         return Chalk::IR::MethodInfo->new(
             name        => $method_name_val,
@@ -745,6 +759,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my @params;
         my @body;
         my $scope = 'package';  # default for bare `sub`
+        my $body_graph;
 
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -773,6 +788,9 @@ class Chalk::Bootstrap::Perl::Actions {
             } elsif (defined $rule && $rule eq 'Block') {
                 my $stmts = _block_stmts($focus);
                 @body = $stmts->@* if defined $stmts;
+                if (ref($focus) eq 'HASH' && defined $focus->{graph}) {
+                    $body_graph = $focus->{graph};
+                }
             } elsif (ref($focus) eq 'ARRAY') {
                 if (defined $rule && ($rule eq 'Signature'
                         || $rule eq 'SignatureParams')) {
@@ -793,7 +811,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $sub_name_val = $sub_name->value();
         my @param_strs = map { $_->value() } @params;
 
-        my $graph = $self->_build_method_graph($ctx, $fixed_body);
+        my $graph = $self->_build_method_graph($ctx, $fixed_body, $body_graph);
 
         return Chalk::IR::SubInfo->new(
             name   => $sub_name_val,
@@ -809,8 +827,10 @@ class Chalk::Bootstrap::Perl::Actions {
     # control-flow information (if_node, loop, try_node). Maps each
     # associated IR node's refaddr to the annotation hashref.
     # Also collects Return/Unwind nodes from the fixed body as graph exits.
-    # Returns a Chalk::IR::Graph with start, returns, and schedule.
-    method _build_method_graph($ctx, $fixed_body) {
+    # When $existing_graph is provided, merges Start/Returns/body_stmts into
+    # it so VarDecls and other nodes already merged by side-effect actions
+    # stay reachable.
+    method _build_method_graph($ctx, $fixed_body, $existing_graph = undef) {
         # Walk Context subtree to collect annotation entries for this scope.
         my %schedule;
         my @stack = ($ctx);
@@ -880,6 +900,16 @@ class Chalk::Bootstrap::Perl::Actions {
                     push @body_stmts, $stmt;
                 }
             }
+        }
+
+        # If Block synthesized a graph, augment it in place: seed Start,
+        # Returns, and body_stmts so all reachable nodes are in the cache.
+        # Otherwise create a fresh graph (legacy path; deleted in commit 6).
+        if (defined $existing_graph) {
+            $existing_graph->_seed($start);
+            $existing_graph->_seed($_) for @returns;
+            $existing_graph->_seed($_) for @body_stmts;
+            return $existing_graph;
         }
 
         return Chalk::IR::Graph->new(
@@ -1507,19 +1537,40 @@ class Chalk::Bootstrap::Perl::Actions {
             );
         }
 
+        # Side-effect-shaped: inputs[0]=control, [1]=name, [2]=init.
+        # Control comes from the in-scope control input - the previous
+        # side-effect node, or a fresh Start if this is the first.
+        my $control = _ctx_control($ctx) // $factory->make('Start');
         my $var_decl = $typed->make('VarDecl',
-            inputs       => [$var_name, undef],
+            inputs       => [$control, $var_name, undef],
             compat_class => 'VarDecl',
         );
 
-        # Update scope with the new variable binding
+        # Get or create the in-flight graph. If no inner action has yet
+        # published one (e.g., this is the first side-effect in a body),
+        # allocate a fresh Chalk::IR::Graph here and publish it upward
+        # via update_graph so subsequent siblings/Block see the same one.
+        my $graph = $ctx->graph() // Chalk::IR::Graph->new;
+        # Seed Start so $graph->start() finds it via cache scan rather
+        # than relying on inputs() walks (which only nodes() does).
+        if ($control->operation() eq 'Start') {
+            $graph->merge($control);
+        }
+        $graph->merge($var_decl);
+
+        # Update scope: bind variable to the VarDecl and advance control
+        # so subsequent side-effect actions chain after this one. Publish
+        # the graph so it propagates up to Block / MethodDefinition.
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         if (defined $sa) {
             my $scope = _ctx_scope($ctx);
             if (defined $scope) {
-                my $new_scope = $scope->define($var_name->value(), $var_decl);
+                my $new_scope = $scope
+                    ->define($var_name->value(), $var_decl)
+                    ->with_control($var_decl);
                 $sa->update_scope($new_scope);
             }
+            $sa->update_graph($graph);
         }
 
         return $var_decl;
@@ -2031,7 +2082,10 @@ class Chalk::Bootstrap::Perl::Actions {
                     default_value => $value,
                 );
             }
-            # VarDecl target: set its initializer and return it
+            # VarDecl target: set its initializer and return it.
+            # Preserve the original VarDecl's control input so the chain
+            # stays anchored at the same point (this replaces the bare
+            # VarDecl-without-init, not a new side-effect after it).
             if ($target isa Chalk::IR::Node::VarDecl) {
                 # If value is an arrayref (from ParenExpr/ExpressionList),
                 # wrap it in a HashRef node so it can be stored as a node input.
@@ -2043,15 +2097,35 @@ class Chalk::Bootstrap::Perl::Actions {
                         compat_class => 'HashRefExpr',
                     );
                 }
+                my $ctrl_in = $target->inputs()->[0];
+                my $name_in = $target->inputs()->[1];
                 my $result = $typed->make('VarDecl',
-                    inputs       => [$target->inputs()->[0], $init_value],
+                    inputs       => [$ctrl_in, $name_in, $init_value],
                     compat_class => 'VarDecl',
                 );
-                my $var_name_node = $target->inputs()->[0];
-                if ($var_name_node isa Chalk::IR::Node::Constant
-                        && defined $var_name_node->value()
-                        && $var_name_node->value() =~ /^[\$\@\%]/) {
-                    $update_scope->($var_name_node->value(), $result);
+
+                # Update scope: rebind the variable to the refined VarDecl
+                # and advance control so the next side-effect chains after it.
+                # Replace the bare VarDecl in the graph with the refined one
+                # (the bare version was merged by VariableDeclaration; the
+                # refined version supersedes it).
+                my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+                if (defined $sa
+                        && $name_in isa Chalk::IR::Node::Constant
+                        && defined $name_in->value()
+                        && $name_in->value() =~ /^[\$\@\%]/) {
+                    my $scope = _ctx_scope($ctx);
+                    if (defined $scope) {
+                        $sa->update_scope(
+                            $scope
+                                ->define($name_in->value(), $result)
+                                ->with_control($result)
+                        );
+                    }
+                    my $graph = $ctx->graph() // Chalk::IR::Graph->new;
+                    $graph->unmerge($target);  # drop the bare VarDecl
+                    $graph->merge($result);
+                    $sa->update_graph($graph);
                 }
                 return $result;
             }

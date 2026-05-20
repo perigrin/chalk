@@ -162,8 +162,8 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
         # Pattern 1: VarDecl with HashRefExpr initializer (empty or literal)
         if ($node isa Chalk::IR::Node::VarDecl) {
-            my $variable    = $node->inputs()->[0];
-            my $initializer = $node->inputs()->[1];
+            my $variable    = $node->name();
+            my $initializer = $node->init();
 
             if (defined $initializer
                 && $initializer isa Chalk::IR::Node::HashRef) {
@@ -584,8 +584,8 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
             # Detect VarDecl with empty HashRefExpr
             if ($stmt isa Chalk::IR::Node::VarDecl) {
-                my $var_node    = $stmt->inputs()->[0];
-                my $initializer = $stmt->inputs()->[1];
+                my $var_node    = $stmt->name();
+                my $initializer = $stmt->init();
 
                 next unless defined $initializer
                     && $initializer isa Chalk::IR::Node::HashRef;
@@ -643,7 +643,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             if (defined $stmt
                 && $stmt isa Chalk::IR::Node::VarDecl) {
 
-                my $var_node = $stmt->inputs()->[0];
+                my $var_node = $stmt->name();
                 my $var_name = $var_node->value();
 
                 if (exists $promoted_vars{$var_name}) {
@@ -669,6 +669,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
                     my $new_var_decl = $factory->make('Constructor',
                         class       => 'VarDecl',
+                        control     => $stmt->control(),
                         variable    => $var_node,
                         initializer => $struct_ref,
                     );
@@ -773,7 +774,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         # Map input positions back to named parameters.
         # These mirror the input order used by each shim translation in Chalk::IR::Shim.
         my %input_specs = (
-            'VarDecl'        => ['variable', 'initializer'],
+            'VarDecl'        => ['control', 'variable', 'initializer'],
             'BinaryExpr'     => ['op', 'left', 'right'],
             'UnaryExpr'      => ['op', 'operand'],
             'SubscriptExpr'  => ['target', 'index', 'style'],

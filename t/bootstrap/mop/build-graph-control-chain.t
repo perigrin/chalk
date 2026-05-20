@@ -129,7 +129,7 @@ class C {
         # Find them by their variable name input.
         my %by_name;
         for my $vd (@vardecls) {
-            my $name_input = $vd->inputs->[0];
+            my $name_input = $vd->name();
             next unless defined $name_input && blessed($name_input)
                 && $name_input->can('value');
             $by_name{$name_input->value()} = $vd;

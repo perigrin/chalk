@@ -21,6 +21,11 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # the result context after the action returns.
     my $_pending_scope_update;
 
+    # Pending graph update from action methods. Used by side-effect
+    # actions (VarDecl, Assign, Call) that need to publish an IR graph
+    # so MethodDefinition / Block can attach it to the MOP metaobject.
+    my $_pending_graph_update;
+
     # Pending annotations update from action methods. Action methods call
     # update_annotations() to request annotation additions to the result
     # context; _complete_sa merges them into the result context annotations.
@@ -106,6 +111,11 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             # Right is later in the sequence; if right has a non-Start control
             # and left has a Start (or no scope), prefer right. Otherwise prefer left.
             my $scope = _merge_scope($left->scope, $right->scope);
+            # Propagate graph: prefer right (later in the sequence). If right
+            # has no graph, fall back to left's graph - side-effect actions
+            # publish a graph via update_graph; the same instance should
+            # bubble up so Block/MethodDefinition see the populated graph.
+            my $graph = $right->graph() // $left->graph();
             Chalk::Bootstrap::Context->new(
                 focus    => undef,
                 children => [$left, $right],
@@ -113,6 +123,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 rule     => undef,
                 mop      => $_mop,
                 scope    => $scope,
+                graph    => $graph,
             );
         });
     }
@@ -159,6 +170,15 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # _complete_sa merges the provided hashref into the result annotations.
     method update_annotations($data) {
         $_pending_annotations_update = $data;
+        return;
+    }
+
+    # Request a graph update from within an action method.
+    # Side-effect actions call this to publish a Chalk::IR::Graph; the
+    # result context propagates it upward so MethodDefinition can attach
+    # the graph to the MOP metaobject.
+    method update_graph($graph) {
+        $_pending_graph_update = $graph;
         return;
     }
 
@@ -226,6 +246,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         my $result_ctx;
         $_pending_scope_update       = undef;  # Clear before action call
         $_pending_annotations_update = undef;  # Clear before action call
+        $_pending_graph_update       = undef;  # Clear before action call
         $_current_instance = $self;             # Make accessible to action methods
         if ($has_method) {
             # Dispatch action and wrap value in one extend call.
@@ -272,6 +293,25 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             $_pending_annotations_update = undef;
         }
 
+        # Apply pending graph update from action method, if any.
+        # Graph update overrides what extend inherited from $value.
+        if (defined $_pending_graph_update) {
+            $result_ctx = Chalk::Bootstrap::Context->new(
+                focus       => $result_ctx->focus(),
+                children    => $result_ctx->children(),
+                position    => $result_ctx->position(),
+                rule        => $result_ctx->rule(),
+                annotations => $result_ctx->annotations(),
+                token       => $result_ctx->token(),
+                is_zero     => $result_ctx->is_zero(),
+                error       => $result_ctx->error(),
+                mop         => $result_ctx->mop(),
+                scope       => $result_ctx->scope(),
+                graph       => $_pending_graph_update,
+            );
+            $_pending_graph_update = undef;
+        }
+
         # Propagate scope: inherit from $value if result has no scope.
         if (!defined $result_ctx->scope()) {
             my $inherited_scope = $value->scope();
@@ -288,6 +328,26 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                     mop         => $result_ctx->mop(),
                     graph       => $result_ctx->graph(),
                     scope       => $inherited_scope,
+                );
+            }
+        }
+
+        # Propagate graph: inherit from $value if result has no graph.
+        if (!defined $result_ctx->graph()) {
+            my $inherited_graph = $value->graph();
+            if (defined $inherited_graph) {
+                $result_ctx = Chalk::Bootstrap::Context->new(
+                    focus       => $result_ctx->focus(),
+                    children    => $result_ctx->children(),
+                    position    => $result_ctx->position(),
+                    rule        => $result_ctx->rule(),
+                    annotations => $result_ctx->annotations(),
+                    token       => $result_ctx->token(),
+                    is_zero     => $result_ctx->is_zero(),
+                    error       => $result_ctx->error(),
+                    mop         => $result_ctx->mop(),
+                    scope       => $result_ctx->scope(),
+                    graph       => $inherited_graph,
                 );
             }
         }
