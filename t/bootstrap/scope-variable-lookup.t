@@ -15,13 +15,17 @@ use Chalk::Bootstrap::Context;
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
-# Helper: build a scan context for a variable name at position 0
-my sub make_scan_ctx($text) {
+# Helper: build a scan context for a variable name at position 0.
+# Optional %extra fields are forwarded to Context::new — e.g. pass
+# scope => $s to set the scope field directly (replaces the old
+# $sa->set_cfg_state(ctx, { control, scope }) which has been removed).
+my sub make_scan_ctx($text, %extra) {
     return Chalk::Bootstrap::Context->new(
         focus    => $text,
         children => [],
         position => 0,
         rule     => undef,
+        %extra,
     );
 }
 
@@ -86,12 +90,12 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $scope = Chalk::Bootstrap::Scope->new();
     $scope = $scope->define('$x', $x_node);
 
-    # Create a Context and manually set its cfg_state in the SemanticAction
-    my $ctx = make_scan_ctx('$x');
-    $sa->set_cfg_state($ctx, {
-        control => $factory->make('Start'),
-        scope   => $scope,
-    });
+    # Build a Context with the scope (control-bearing) field set directly.
+    # Phase 3a-infra deleted set_cfg_state — Context's scope field is now
+    # the channel for control + scope state.
+    my $ctx = make_scan_ctx('$x',
+        scope => $scope->with_control($factory->make('Start')),
+    );
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ScalarVariable', 0, 0, 0));
     ok(defined $result, 'on_complete returns a result for in-scope variable');
@@ -130,12 +134,10 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $raw = $loop_scope->raw_lookup('$x');
     ok(ref $raw eq 'Chalk::Bootstrap::Scope::Sentinel', 'scope has sentinel before action runs');
 
-    # Create a Context with the sentinel scope in cfg_state
-    my $ctx = make_scan_ctx('$x');
-    $sa->set_cfg_state($ctx, {
-        control => $factory->make('Start'),
-        scope   => $loop_scope,
-    });
+    # Build a Context with the sentinel scope (control-bearing) field set.
+    my $ctx = make_scan_ctx('$x',
+        scope => $loop_scope->with_control($factory->make('Start')),
+    );
 
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ScalarVariable', 0, 0, 0));
@@ -176,11 +178,9 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $scope = Chalk::Bootstrap::Scope->new();
     $scope = $scope->define('@arr', $arr_node);
 
-    my $ctx = make_scan_ctx('@arr');
-    $sa->set_cfg_state($ctx, {
-        control => $factory->make('Start'),
-        scope   => $scope,
-    });
+    my $ctx = make_scan_ctx('@arr',
+        scope => $scope->with_control($factory->make('Start')),
+    );
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ArrayVariable', 0, 0, 0));
     ok(defined $result, 'ArrayVariable on_complete returns result');
@@ -202,11 +202,9 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $scope = Chalk::Bootstrap::Scope->new();
     $scope = $scope->define('%h', $hash_node);
 
-    my $ctx = make_scan_ctx('%h');
-    $sa->set_cfg_state($ctx, {
-        control => $factory->make('Start'),
-        scope   => $scope,
-    });
+    my $ctx = make_scan_ctx('%h',
+        scope => $scope->with_control($factory->make('Start')),
+    );
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'HashVariable', 0, 0, 0));
     ok(defined $result, 'HashVariable on_complete returns result');
