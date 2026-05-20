@@ -206,6 +206,20 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $self->one();
         }
 
+        # TernaryExpression scanning ':' resets the accumulator between
+        # the then-branch and the else-branch. Without this reset, a
+        # then-branch BinaryExpression like `$c == $d` leaves level=7 in
+        # the accumulator, and the else-branch's first scan would see
+        # that stale level. This is the mirror of the '?' reset for the
+        # condition→then-branch boundary.
+        if ($rule_name eq 'TernaryExpression' && $matched_text eq ':') {
+            if ($ENV{DEBUG_PRECEDENCE}) {
+                my $el = $existing->{level} // 'undef';
+                warn "  PREC_TERNARY_RESET: then_level=$el at ':' -> reset to one()\n";
+            }
+            return $self->one();
+        }
+
         # In BinaryOp or AssignOp context, look up operator and validate
         # the LEFT operand's precedence (accumulated in $existing).
         if ($rule_name eq 'BinaryOp' || $rule_name eq 'AssignOp') {

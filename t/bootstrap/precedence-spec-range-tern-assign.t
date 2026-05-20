@@ -532,4 +532,40 @@ subtest 'L20 vs L8 unparenthesized: $x = 5 + 10 is Assign($x, Add(5, 10))' => su
         'right of Assign is Add (+ binds tighter than =)');
 };
 
+# ============================================================================
+# Bilateral coverage: ternary `:` must reset the precedence accumulator so
+# the else-branch can carry its own binary operators independent of the
+# then-branch's. Mirror of the `?` reset for the condition→then boundary.
+# ----------------------------------------------------------------------------
+# Pre-fix, `1 ? 0 == 0 : 0 == 0;` failed because the BinaryExpression in
+# the then-branch left level=7 in the precedence accumulator, and the
+# scan at `:` propagated that level into the else-branch, breaking the
+# parse of `0 == 0` on the else side. The fix adds a `:` reset alongside
+# the `?` reset in Precedence._scan_multiply.
+#
+# Bilateral: same-class operator on BOTH branches (the discriminating case
+# — same-class on one branch alone always worked because the other branch's
+# `Atom` doesn't carry a precedence level).
+# ============================================================================
+
+subtest 'Ternary `:` resets accumulator — same-class bin-op on both branches' => sub {
+    my @cases = (
+        # (label, source, expected-IR-class for the whole expression)
+        ['==',  '1 ? 0 == 0 : 0 == 0',           'Chalk::IR::Node::TernaryExpr'],
+        ['+',   '1 ? 1 + 2 : 3 + 4',             'Chalk::IR::Node::TernaryExpr'],
+        ['*',   '1 ? 1 * 2 : 3 * 4',             'Chalk::IR::Node::TernaryExpr'],
+        ['eq',  '$a ? $b eq $c : $d eq $e',      'Chalk::IR::Node::TernaryExpr'],
+        ['&&',  '$a ? $b && $c : $d && $e',      'Chalk::IR::Node::TernaryExpr'],
+        # Mixed levels also must parse:
+        ['+/*', '1 ? 1 + 2 : 3 * 4',             'Chalk::IR::Node::TernaryExpr'],
+        ['==/&&', '$a ? $b == $c : $d && $e',    'Chalk::IR::Node::TernaryExpr'],
+    );
+    for my $case (@cases) {
+        my ($label, $src, $cls) = $case->@*;
+        my $expr = parse_expr("($src)");
+        isa_with_shape($expr, $cls,
+            "ternary with $label on both branches parses as TernaryExpr");
+    }
+};
+
 done_testing;
