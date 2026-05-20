@@ -631,10 +631,15 @@ class Chalk::Bootstrap::Perl::Actions {
                             }
                         }
                     }
+                    my $default_value = $item->default_value();
                     $mop_class->declare_field($item->name(),
-                        sigil      => $sigil,
-                        param_name => $param_name,
-                        attributes => \@attr_list,
+                        sigil       => $sigil,
+                        param_name  => $param_name,
+                        attributes  => \@attr_list,
+                        (defined $default_value
+                            ? (default_value => $default_value,
+                               has_default   => true)
+                            : ()),
                     );
                 } elsif ($item isa Chalk::IR::MethodInfo) {
                     my @bindings = grep {
@@ -906,7 +911,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     }
                 }
                 my $implicit_return = $factory->make_cfg('Return',
-                    inputs => [$return_ctrl, $last],
+                    inputs    => [$return_ctrl, $last],
+                    synthetic => true,
                 );
                 push @returns, $implicit_return;
             }
@@ -1485,8 +1491,12 @@ class Chalk::Bootstrap::Perl::Actions {
                         || refaddr($existing_ctrl) != refaddr($current_control)) {
                     my $op = $s isa Chalk::IR::Node::Return
                         ? 'Return' : 'Unwind';
+                    my $synthetic = $s isa Chalk::IR::Node::Return
+                        && $s->can('synthetic') ? $s->synthetic : false;
                     my $rebuilt = $factory->make_cfg($op,
                         inputs => [$current_control, $s->inputs->[1]],
+                        ($op eq 'Return' && $synthetic
+                            ? (synthetic => $synthetic) : ()),
                     );
                     $graph->unmerge($s);
                     $graph->merge($rebuilt);

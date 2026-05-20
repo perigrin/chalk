@@ -1,0 +1,87 @@
+#!/usr/bin/env perl
+# ABOUTME: Diff MOP-driven generate(\$mop) output vs captured goldens for each file.
+# ABOUTME: Prints a per-file diff classification so we can find shared root causes.
+use 5.42.0;
+use utf8;
+use Scalar::Util qw(blessed);
+use File::Glob qw(bsd_glob);
+use lib 'lib';
+use lib 't/bootstrap/lib';
+
+use Chalk::MOP;
+use Chalk::Bootstrap::Semiring::SemanticAction;
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
+use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::Bootstrap::Perl::Target::Perl;
+
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $raw_ir = perl_pipeline();
+die unless defined $raw_ir;
+my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+my $generated = $bnf_target->generate($raw_ir);
+$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::DiffGoldens/g;
+eval $generated;
+die "grammar eval: $@" if $@;
+my $gen_grammar = Chalk::Grammar::Perl::DiffGoldens::grammar();
+
+sub golden_to_source($name) {
+    my $stem = $name;
+    $stem =~ s{\.pl\.golden$}{};
+    $stem =~ s{__}{/}g;
+    return "lib/$stem.pm";
+}
+
+my $goldens_dir = 't/fixtures/codegen-goldens';
+my @goldens = sort grep { /\.pl\.golden$/ } map { (split m{/}, $_)[-1] }
+    bsd_glob("$goldens_dir/*.pl.golden");
+
+my $target_idx = $ARGV[0] // -1;
+for my $i (0..$#goldens) {
+    next if $target_idx >= 0 && $i != $target_idx;
+    my $golden_name = $goldens[$i];
+    my $src = golden_to_source($golden_name);
+
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    open my $fh, '<:utf8', $src or do {
+        say STDERR "[$i] $golden_name: SRC MISSING ($src)";
+        next;
+    };
+    local $/;
+    my $source = <$fh>;
+    close $fh;
+
+    my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+    my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
+    my $result = $parser->parse_value($source);
+    next unless defined $result && !$result->is_zero();
+    my $target = Chalk::Bootstrap::Perl::Target::Perl->new;
+    my $actual = $target->generate($mop)->{"main.pm"} // '';
+
+    open my $gf, '<:utf8', "$goldens_dir/$golden_name" or die;
+    local $/;
+    my $expected = <$gf>;
+    close $gf;
+
+    if ($actual eq $expected) {
+        say STDOUT "[$i] $golden_name: MATCH";
+    } else {
+        say STDOUT "[$i] $golden_name: DIFFER";
+        # Show line-by-line first differing chunk
+        my @a = split /\n/, $actual;
+        my @e = split /\n/, $expected;
+        my $max = $#a > $#e ? $#a : $#e;
+        for my $j (0..$max) {
+            my $al = $a[$j] // '<EOF>';
+            my $el = $e[$j] // '<EOF>';
+            if ($al ne $el) {
+                say STDOUT "  line $j:";
+                say STDOUT "    got: $al";
+                say STDOUT "    exp: $el";
+                last;
+            }
+        }
+    }
+}

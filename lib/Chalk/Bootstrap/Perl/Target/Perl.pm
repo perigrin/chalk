@@ -114,8 +114,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                     +{ name => ($_ =~ s/^://r), value => undef }
                 } $field->attributes;
                 push @body, Chalk::IR::FieldInfo->new(
-                    name       => $field->name,
-                    attributes => \@attrs,
+                    name          => $field->name,
+                    attributes    => \@attrs,
+                    (defined $field->default_value
+                        ? (default_value => $field->default_value)
+                        : ()),
                 );
             }
             for my $method ($cls->methods) {
@@ -202,23 +205,37 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             $cur = $ins->[0];
         }
 
-        # The Return's value (inputs[1]) is the final expression of the
-        # body for implicit-return cases. Include it as the last body
-        # entry so _emit_method_decl emits it. For explicit `return`
-        # (last side-effect node IS the Return itself), no extra item.
         my @body = reverse @reverse;
-        my $val = $exit->inputs->[1];
-        if (defined $val && blessed($val)
-                && !($val isa Chalk::IR::Node::Return)
-                && !($val isa Chalk::IR::Node::Unwind)) {
-            # Only append if val isn't already represented as the chain tail
-            my $tail = $body[-1];
-            unless (defined $tail && blessed($tail)
-                    && refaddr($tail) == refaddr($val)) {
-                push @body, $val;
+
+        # The exit itself: include the Return / Unwind so the emitter
+        # can render `return EXPR;` / `die EXPR;` as in source. For
+        # implicit-return cases (the parser synthesized this Return),
+        # the user wrote `EXPR` as a bare trailing statement - emit
+        # the bare value, not a synthesized `return EXPR;`.
+        if (_is_explicit_exit($exit)) {
+            push @body, $exit;
+        } else {
+            my $val = $exit->inputs->[1];
+            if (defined $val && blessed($val)) {
+                my $tail = $body[-1];
+                unless (defined $tail && blessed($tail)
+                        && refaddr($tail) == refaddr($val)) {
+                    push @body, $val;
+                }
             }
         }
         return @body;
+    }
+
+    # Exit classification: a Return is "synthetic" when the parser
+    # built it for the implicit-fall-through case (bare trailing
+    # expression). Marker carried on Chalk::IR::Node::Return.synthetic.
+    # Unwind is always explicit (`die EXPR`).
+    sub _is_explicit_exit($exit) {
+        return false unless defined $exit && blessed($exit);
+        return true if $exit isa Chalk::IR::Node::Unwind;
+        return false unless $exit isa Chalk::IR::Node::Return;
+        return !($exit->can('synthetic') && $exit->synthetic);
     }
 
     # Generate code with cfg_state-aware dispatch for control flow.
