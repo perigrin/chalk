@@ -123,6 +123,49 @@ class Chalk::Bootstrap::Perl::Actions {
         return $factory->make('Constant', const_type => 'string', value => $value);
     }
 
+    # Helper: extract statement arrayref from a Block focus.
+    # Block's new (Phase 3a-migration) focus is a hashref { stmts, graph, type }.
+    # Legacy callers received an arrayref; this helper normalizes both shapes
+    # so downstream actions can work with a uniform list of body statements.
+    my sub _block_stmts($focus) {
+        if (ref($focus) eq 'HASH' && exists $focus->{stmts}) {
+            return $focus->{stmts};
+        }
+        if (ref($focus) eq 'ARRAY') {
+            return $focus;
+        }
+        return undef;
+    }
+
+    # Helper: classify an IR value node into a Chalk type name for Block's
+    # exit-type-union computation. Maps Constant.const_type for literals;
+    # everything else defaults to 'Any'.
+    #
+    # Note: NumericLiteral currently produces Constants with const_type
+    # 'string' (the literal text is preserved). Inspect the value to
+    # distinguish numeric literals from quoted strings until NumericLiteral
+    # is updated to tag them as 'integer'/'float'.
+    my sub _classify_value_type($node) {
+        return 'Any' unless defined $node && blessed($node);
+        if ($node isa Chalk::IR::Node::Constant) {
+            my $ct = $node->const_type();
+            return 'Int'   if $ct eq 'integer' || $ct eq 'number';
+            return 'Num'   if $ct eq 'float';
+            return 'Regex' if $ct eq 'regex';
+            if ($ct eq 'string') {
+                my $v = $node->value();
+                if (defined $v) {
+                    return 'Int' if $v =~ /^[+-]?\d+$/;
+                    return 'Num' if $v =~ /^[+-]?\d*\.\d+(?:[eE][+-]?\d+)?$/
+                        || $v =~ /^[+-]?\d+[eE][+-]?\d+$/;
+                }
+                return 'Str';
+            }
+            return 'Any';
+        }
+        return 'Any';
+    }
+
     # Helper: get the effective scope from a Context.
     # Reads the $scope field directly; returns undef if no scope is set.
     my sub _ctx_scope($ctx) {
@@ -516,11 +559,14 @@ class Chalk::Bootstrap::Perl::Actions {
                     # First Constant is the class name (from QualifiedIdentifier)
                     $class_name = $focus;
                 }
+            } elsif (defined $rule && $rule eq 'Block') {
+                # Block returns { stmts, graph, type }; extract stmts.
+                my $stmts = _block_stmts($focus);
+                @body = $stmts->@* if defined $stmts;
             } elsif (ref($focus) eq 'ARRAY') {
-                # Body statements from Block or parent info from AttributeList
                 if (defined $rule && $rule eq 'AttributeList') {
                     # AttributeList returns arrayref of attribute data
-                    # Look for :isa(Parent) → parent name Constant
+                    # Look for :isa(Parent) -> parent name Constant
                     for my $attr ($focus->@*) {
                         if (ref($attr) eq 'HASH') {
                             if (defined $attr->{name} && $attr->{name} eq 'isa'
@@ -532,9 +578,6 @@ class Chalk::Bootstrap::Perl::Actions {
                             }
                         }
                     }
-                } elsif (defined $rule && $rule eq 'Block') {
-                    # Block returns arrayref of body statements
-                    @body = $focus->@*;
                 } else {
                     # Fallback: use as body
                     @body = $focus->@*;
@@ -638,12 +681,13 @@ class Chalk::Bootstrap::Perl::Actions {
             if ($focus isa Chalk::IR::Node::Constant
                     && !defined $method_name) {
                 $method_name = $focus;
+            } elsif (defined $rule && $rule eq 'Block') {
+                my $stmts = _block_stmts($focus);
+                @body = $stmts->@* if defined $stmts;
             } elsif (ref($focus) eq 'ARRAY') {
                 if (defined $rule && ($rule eq 'Signature'
                         || $rule eq 'SignatureParams')) {
                     @params = $focus->@*;
-                } elsif (defined $rule && $rule eq 'Block') {
-                    @body = $focus->@*;
                 } else {
                     # Ambiguous: if we haven't seen params yet and items look
                     # like param names, treat as params. Otherwise body.
@@ -726,12 +770,13 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Skip the 'sub' keyword itself
                 next if $val eq 'sub';
                 $sub_name = $focus;
+            } elsif (defined $rule && $rule eq 'Block') {
+                my $stmts = _block_stmts($focus);
+                @body = $stmts->@* if defined $stmts;
             } elsif (ref($focus) eq 'ARRAY') {
                 if (defined $rule && ($rule eq 'Signature'
                         || $rule eq 'SignatureParams')) {
                     @params = $focus->@*;
-                } elsif (defined $rule && $rule eq 'Block') {
-                    @body = $focus->@*;
                 } else {
                     if (!@body) {
                         @body = $focus->@*;
@@ -851,8 +896,9 @@ class Chalk::Bootstrap::Perl::Actions {
         my @body;
         for my $leaf (_collect_ir_leaves($ctx)) {
             my $focus = $leaf->extract();
-            if (ref($focus) eq 'ARRAY') {
-                @body = $focus->@*;
+            my $stmts = _block_stmts($focus);
+            if (defined $stmts) {
+                @body = $stmts->@*;
             }
         }
 
@@ -873,8 +919,9 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         for my $leaf (_collect_ir_leaves($ctx)) {
             my $focus = $leaf->extract();
-            if (ref($focus) eq 'ARRAY') {
-                @body = $focus->@*;
+            my $stmts = _block_stmts($focus);
+            if (defined $stmts) {
+                @body = $stmts->@*;
             }
         }
         return { __phaser_block => { name => $name, body => \@body } };
@@ -891,15 +938,24 @@ class Chalk::Bootstrap::Perl::Actions {
 
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
+            my $rule = $leaf->rule();
 
-            if (ref($focus) eq 'ARRAY' && !defined $try_body) {
-                # First arrayref is try_body (from Block)
+            # Block leaves are the try and catch bodies (in source order).
+            if (defined $rule && $rule eq 'Block') {
+                my $stmts = _block_stmts($focus);
+                if (defined $stmts) {
+                    if (!defined $try_body) {
+                        $try_body = $stmts;
+                    } else {
+                        $catch_body = $stmts;
+                    }
+                }
+            } elsif (ref($focus) eq 'ARRAY' && !defined $try_body) {
                 $try_body = $focus;
             } elsif ($focus isa Chalk::IR::Node::Constant && !defined $catch_var) {
                 # Constant node is the catch variable name
                 $catch_var = $focus->value();
             } elsif (ref($focus) eq 'ARRAY' && defined $try_body) {
-                # Second arrayref is catch_body (from Block)
                 $catch_body = $focus;
             }
         }
@@ -1099,7 +1155,10 @@ class Chalk::Bootstrap::Perl::Actions {
 
             # Block argument (map { BLOCK } LIST form): wrap as AnonSubExpr
             if (defined $rule && $rule eq 'Block') {
-                my @body = ref($focus) eq 'ARRAY' ? $focus->@* : (defined $focus ? ($focus) : ());
+                my $stmts = _block_stmts($focus);
+                my @body = defined $stmts
+                    ? $stmts->@*
+                    : (defined $focus && !ref($focus) ? ($focus) : ());
                 my $block_node = $typed->make('AnonSub',
                     inputs       => [[], \@body],
                     compat_class => 'AnonSubExpr',
@@ -1271,7 +1330,14 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §20 Block ::= /\{/ _ StatementList? _ /\}/
-    # Returns arrayref of body statement IR nodes
+    # Returns a hashref { stmts => [...], graph => Chalk::IR::Graph, type => $t }
+    # where:
+    #   - stmts: body statement IR nodes (+ __adjust_body/__phaser_block markers)
+    #   - graph: the computation graph accumulated by inner statements
+    #     (falls back to a fresh empty Graph if no inner action attached one)
+    #   - type:  the union of exit value types - every explicit Return/Unwind
+    #     value type, plus the implicit fall-through (final expression's type)
+    #     when a fall-through path exists. Empty block yields 'Void'.
     method Block($ctx) {
         my @stmts;
         for my $val (_collect_ir_values($ctx)) {
@@ -1279,11 +1345,71 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val->@*;
             } elsif ($val isa Chalk::IR::Node) {
                 push @stmts, $val;
-            } elsif (ref($val) eq 'HASH' && (exists $val->{__adjust_body} || exists $val->{__phaser_block})) {
+            } elsif (ref($val) eq 'HASH'
+                    && (exists $val->{__adjust_body}
+                        || exists $val->{__phaser_block})) {
                 push @stmts, $val;
             }
         }
-        return \@stmts;
+
+        # Collect exit-value types by walking our own SA Context subtree for
+        # Return/Unwind IR foci. Inner method/sub/anonymous-sub bodies are
+        # skipped: their returns belong to that nested scope, not to us.
+        my %exit_types;
+        my $ctx_addr = refaddr($ctx);
+        my @walk = ($ctx);
+        while (my $node = pop @walk) {
+            my $rule = $node->rule();
+            if (defined $rule
+                    && refaddr($node) != $ctx_addr
+                    && ($rule eq 'AnonymousSub'
+                        || $rule eq 'SubroutineDefinition'
+                        || $rule eq 'MethodDefinition')) {
+                next;
+            }
+            my $f = $node->extract();
+            if (defined $f && blessed($f)
+                    && ($f isa Chalk::IR::Node::Return
+                        || $f isa Chalk::IR::Node::Unwind)) {
+                my $val_in = $f->inputs->[1];
+                my $t = _classify_value_type($val_in);
+                $exit_types{$t}++ if defined $t;
+                next;
+            }
+            push @walk, $node->children->@*;
+        }
+
+        # Fall-through contribution: when the last top-level statement is
+        # neither a Return nor an Unwind, the block also exits with that
+        # expression's value. Classify the last IR node's type directly;
+        # TI's Block.type is unavailable here because TI prunes at
+        # ExpressionStatement boundaries (see _is_completed_sub_expr).
+        my $has_fall = !@stmts
+            || !(blessed($stmts[-1])
+                && ($stmts[-1] isa Chalk::IR::Node::Return
+                    || $stmts[-1] isa Chalk::IR::Node::Unwind));
+        if ($has_fall && @stmts) {
+            my $fall_t = _classify_value_type($stmts[-1]);
+            $exit_types{$fall_t}++ if defined $fall_t;
+        }
+
+        my @types = sort keys %exit_types;
+        my $type;
+        if (!@types) {
+            $type = 'Void';
+        } elsif (@types == 1) {
+            $type = $types[0];
+        } else {
+            $type = join('|', @types);
+        }
+
+        my $graph = $ctx->graph() // Chalk::IR::Graph->new;
+
+        return {
+            stmts => \@stmts,
+            graph => $graph,
+            type  => $type,
+        };
     }
 
     # §18 Variable — resolve from scope if available, else Constant
@@ -2107,16 +2233,25 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 $condition = $focus;
                 $cond_leaf = $leaf;  # remember condition leaf for pre-branch scope
+            } elsif (defined $rule && $rule eq 'Block') {
+                my $stmts = _block_stmts($focus);
+                if (defined $stmts) {
+                    if (!defined $then_body) {
+                        $then_body = $stmts;
+                        $then_leaf = $leaf;
+                    } else {
+                        $else_body = $stmts;
+                        $else_leaf = $leaf;
+                    }
+                }
             } elsif (ref($focus) eq 'ARRAY' && !defined $then_body) {
-                # First array is then_body (from Block); remember leaf for scope extraction
                 $then_body = $focus;
                 $then_leaf = $leaf;
             } elsif (ref($focus) eq 'ARRAY' && defined $then_body) {
-                # Second array is else_body (from else Block); remember leaf for scope extraction
                 $else_body = $focus;
                 $else_leaf = $leaf;
             } elsif ($focus isa Chalk::IR::Node::If) {
-                # ElsifChain returns a CFG If node — wrap as else_body
+                # ElsifChain returns a CFG If node - wrap as else_body
                 $else_body = [$focus];
             }
         }
@@ -2208,6 +2343,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
+            my $rule = $leaf->rule();
 
             if (!defined $condition && $focus isa Chalk::IR::Node) {
                 # Skip CFG If nodes from nested ElsifChain
@@ -2216,6 +2352,15 @@ class Chalk::Bootstrap::Perl::Actions {
                     next;
                 }
                 $condition = $focus;
+            } elsif (defined $rule && $rule eq 'Block') {
+                my $stmts = _block_stmts($focus);
+                if (defined $stmts) {
+                    if (!defined $then_body) {
+                        $then_body = $stmts;
+                    } else {
+                        $else_body = $stmts;
+                    }
+                }
             } elsif (ref($focus) eq 'ARRAY' && !defined $then_body) {
                 $then_body = $focus;
             } elsif (ref($focus) eq 'ARRAY' && defined $then_body) {
@@ -2284,6 +2429,10 @@ class Chalk::Bootstrap::Perl::Actions {
                     # ParenExpr may produce an array; take first element as condition
                     $condition = $focus->[0];
                 }
+            } elsif (defined $condition && !defined $body
+                    && defined $rule && $rule eq 'Block') {
+                my $stmts = _block_stmts($focus);
+                $body = $stmts if defined $stmts;
             } elsif (defined $condition && !defined $body && ref($focus) eq 'ARRAY') {
                 # Block body
                 $body = $focus;
@@ -2371,6 +2520,9 @@ class Chalk::Bootstrap::Perl::Actions {
                     && $focus->value() =~ /^[\$\@\%]/
                     && !defined $iterator) {
                 $iterator = $focus;
+            } elsif ($rule eq 'Block') {
+                my $stmts = _block_stmts($focus);
+                $body //= $stmts if defined $stmts;
             } elsif (ref($focus) eq 'ARRAY' && defined $iterator && !defined $list) {
                 # First array after iterator is the list (from ParenExpr)
                 $list = $focus;

@@ -12,6 +12,11 @@ use Chalk::Bootstrap::Semiring::SemanticAction;
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::IR::MethodInfo;
+use Chalk::IR::SubInfo;
+use Chalk::IR::FieldInfo;
+use Chalk::IR::UseInfo;
+use Chalk::IR::ClassInfo;
 
 # Build the generated Perl grammar once.
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -29,7 +34,7 @@ is($@, '', 'generated grammar code evals cleanly')
 my $gen_grammar = Chalk::Grammar::Perl::BlockTypeTest::grammar();
 ok(defined $gen_grammar, 'grammar objects loaded');
 
-# Find every leaf Context whose rule is 'Block'.
+# Find every Context whose rule is 'Block' (incl. nested).
 sub block_leaves($result) {
     my @blocks;
     my @stack = ($result);
@@ -40,11 +45,30 @@ sub block_leaves($result) {
         my $focus = $ctx->extract();
         if (defined $rule && $rule eq 'Block' && defined $focus) {
             push @blocks, $ctx;
-            next;
+            # don't `next` - keep descending so nested Block leaves are also found
         }
         push @stack, $ctx->children()->@*;
     }
     return @blocks;
+}
+
+# Find the method-body Block: a Block whose stmts contain no class-body
+# Info objects (MethodInfo/SubInfo/FieldInfo/UseInfo). Picks the deepest one.
+sub method_body_block(@blocks) {
+    my @candidates;
+    for my $b (@blocks) {
+        my $f = $b->extract;
+        next unless ref($f) eq 'HASH' && ref($f->{stmts}) eq 'ARRAY';
+        my $is_class_body = grep {
+            $_ isa Chalk::IR::MethodInfo
+            || $_ isa Chalk::IR::SubInfo
+            || $_ isa Chalk::IR::FieldInfo
+            || $_ isa Chalk::IR::UseInfo
+            || $_ isa Chalk::IR::ClassInfo
+        } $f->{stmts}->@*;
+        push @candidates, $b unless $is_class_body;
+    }
+    return $candidates[-1];
 }
 
 # Block focus shape — after migration, Block synthesizes a hashref with
@@ -85,9 +109,8 @@ class C {
         my @blocks = block_leaves($result);
         ok(scalar @blocks >= 1, 'at least one Block leaf for method foo')
             or BAIL_OUT('no Block leaves found for empty method');
-        # The innermost Block is for `method foo()`. Pick the last one
-        # (deepest in the tree).
-        my $body = $blocks[-1];
+        my $body = method_body_block(@blocks);
+        ok(defined $body, 'method-body Block identified');
         assert_block_synth($body, 'empty body');
         my $focus = $body->extract();
         is($focus->{type}, 'Void', 'empty body type is Void')
@@ -113,7 +136,8 @@ class C {
         skip 'literal-tail parse failed', 6 unless defined $result && !$result->is_zero();
         my @blocks = block_leaves($result);
         ok(scalar @blocks >= 1, 'Block leaf found for method foo');
-        my $body = $blocks[-1];
+        my $body = method_body_block(@blocks);
+        ok(defined $body, 'method-body Block identified');
         assert_block_synth($body, 'literal-final');
         my $focus = $body->extract();
         if (ref($focus) eq 'HASH') {
@@ -123,7 +147,7 @@ class C {
     }
 }
 
-# Case 3: explicit-return block — type comes from the Return value
+# Case 3: explicit-return block - type comes from the Return value
 {
     my $source = q{
 class C {
@@ -141,7 +165,8 @@ class C {
         skip 'explicit-return parse failed', 6 unless defined $result && !$result->is_zero();
         my @blocks = block_leaves($result);
         ok(scalar @blocks >= 1, 'Block leaf found for method foo');
-        my $body = $blocks[-1];
+        my $body = method_body_block(@blocks);
+        ok(defined $body, 'method-body Block identified');
         assert_block_synth($body, 'explicit-return');
         my $focus = $body->extract();
         if (ref($focus) eq 'HASH') {
@@ -171,23 +196,38 @@ class C {
         skip 'branch-fallthrough parse failed', 4 unless defined $result && !$result->is_zero();
         my @blocks = block_leaves($result);
         ok(scalar @blocks >= 1, 'Block leaves found');
-        # The outermost method body Block. Find by matching span: the body
-        # block that contains the if statement.
-        my $body;
-        for my $b (reverse @blocks) {
-            my $f = $b->extract();
-            next unless ref($f) eq 'HASH';
-            # heuristic: the method-body block has type that mentions
-            # both Int and Str (or similar union)
-            $body = $b;
-            last;
+        # The outer method-body Block (contains both the if-block and the
+        # trailing fallthrough expression). method_body_block returns the
+        # deepest candidate that isn't a class body.
+        my @method_blocks;
+        for my $b (@blocks) {
+            my $f = $b->extract;
+            next unless ref($f) eq 'HASH' && ref($f->{stmts}) eq 'ARRAY';
+            my $is_class_body = grep {
+                $_ isa Chalk::IR::MethodInfo
+                || $_ isa Chalk::IR::SubInfo
+                || $_ isa Chalk::IR::FieldInfo
+                || $_ isa Chalk::IR::UseInfo
+                || $_ isa Chalk::IR::ClassInfo
+            } $f->{stmts}->@*;
+            push @method_blocks, $b unless $is_class_body;
         }
-        $body //= $blocks[-1];
+        # The outer method body has the most statements (>1: the If plus the
+        # tail expression); the inner if-block has 1 statement (the Return).
+        my $body;
+        for my $b (@method_blocks) {
+            my $stmt_count = scalar $b->extract->{stmts}->@*;
+            if (!defined $body
+                    || $stmt_count > scalar $body->extract->{stmts}->@*) {
+                $body = $b;
+            }
+        }
+        ok(defined $body, 'method-body Block identified for branch-fallthrough');
         assert_block_synth($body, 'branch-fallthrough') if defined $body;
         my $focus = $body->extract();
         if (ref($focus) eq 'HASH') {
-            # union should mention both exit types — accept any concrete
-            # encoding; the invariant is "more than one exit class".
+            # The union should mention more than one exit type. Accept any
+            # concrete encoding; the invariant is "more than one exit class".
             ok($focus->{type} =~ /\|/ || $focus->{type} eq 'Any'
                 || $focus->{type} =~ /Union/,
                 "branch-fallthrough type encodes a union ($focus->{type})");
