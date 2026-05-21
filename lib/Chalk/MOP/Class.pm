@@ -103,6 +103,17 @@ class Chalk::MOP::Class {
         return @chain;
     }
 
+    method all_nodes() {
+        my @nodes;
+        for my $owner (@methods, @subs) {
+            next unless $owner->can('graph');
+            my $g = $owner->graph;
+            next unless defined $g;
+            push @nodes, $g->nodes->@*;
+        }
+        return @nodes;
+    }
+
     method resolve_adjust_blocks() {
         my @result;
         # Base-class-first order: ancestors in reverse, then self

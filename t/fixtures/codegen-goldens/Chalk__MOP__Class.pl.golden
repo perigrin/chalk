@@ -81,6 +81,18 @@ class Chalk::MOP::Class {
         }
         return @chain;
     }
+    method all_nodes() {
+        my @nodes;
+        for my $owner (@methods, @subs) {
+            if (!$owner->can('graph')) {
+            }
+            my $g = $owner->graph();
+            if (!defined($g)) {
+            }
+            push @nodes, $g->nodes()->@*;
+        }
+        return @nodes;
+    }
     method resolve_adjust_blocks() {
         my @result;
         my @ancestor_chain = reverse($self->ancestors());
