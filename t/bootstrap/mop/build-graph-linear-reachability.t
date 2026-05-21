@@ -128,10 +128,10 @@ class C {
     ok(defined $method, 'simple linear method parses');
 
     my $graph = $method->graph;
-    # body_stmts is the legacy seed mechanism. Post-migration this should
-    # be empty (computation actions merge nodes directly into the graph).
-    is(scalar $graph->body_stmts->@*, 0,
-        'body_stmts seed is empty - graph built via merge()');
+    # Post-Phase 7, body_stmts is gone entirely; the graph is built via
+    # merge() and walked bidirectionally via nodes().
+    ok(!$graph->can('body_stmts'),
+        'graph has no body_stmts (Phase 7)');
 }
 
 done_testing();

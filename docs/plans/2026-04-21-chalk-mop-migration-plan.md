@@ -1461,18 +1461,16 @@ phase lands pass-interface redesign that was scoped separately.
 
 ---
 
-### Phase 7: Restore bidirectional graph traversal
+### Phase 7: Trim `body_stmts` seed, add `MOP::Class::all_nodes()`
 
-**Goal:** re-enable `Chalk::IR::Graph::nodes()` consumer traversal
-and delete the `body_stmts` BFS seeding.
+**Goal:** delete the `body_stmts` BFS seed and add `all_nodes()` for
+whole-class traversal. Bidirectional consumer traversal is deferred —
+see the finding below.
 
 **Entry:** Phase 6 complete.
 
 **Scope:**
 
-- Restore bidirectional traversal in `Graph::nodes()` — follows both
-  `inputs()` and `consumers()`. Safe now because per-graph hash-cons
-  scope (Phase 2) guarantees consumer lists are graph-local.
 - Delete the `body_stmts` field from `Chalk::IR::Graph` and the
   seeding logic. Safe now because Phase 3's full SSA reaches every
   node from `start`.
@@ -1481,10 +1479,9 @@ and delete the `body_stmts` BFS seeding.
   point for class-level analysis passes.
 - Update `Chalk::IR::Graph`'s doc comment to reflect the model.
 - **Tests (TDD, before implementation):**
-  - `t/bootstrap/ir/graph-bidirectional-traversal.t` —
-    `$graph->nodes()` follows both `inputs()` and `consumers()`
-    without pulling in foreign-class nodes (per-class scope makes
-    this safe)
+  - `t/bootstrap/ir/graph-bidirectional-traversal.t` — documents
+    that `nodes()` does *not* follow consumers; rationale in the
+    test header.
   - `t/bootstrap/mop/class-all-nodes.t` —
     `$class->all_nodes()` walks every graph-owner in the class
   - `t/bootstrap/ir/graph-no-body-stmts.t` — reachability from
@@ -1492,14 +1489,32 @@ and delete the `body_stmts` BFS seeding.
   - Regression invariant: every existing test green at Phase 6
     exit remains green at Phase 7 exit.
 
+**Finding (2026-05-20): bidirectional consumer traversal deferred.**
+The plan originally proposed restoring `Graph::nodes()` to walk both
+`inputs()` and `consumers()`, with the safety argument that per-graph
+hash-cons scope keeps consumer lists graph-local. That argument does
+not hold in the current codebase: `Chalk::Bootstrap::Perl::Actions`
+constructs every Bootstrap node through the *singleton*
+`Chalk::Bootstrap::IR::NodeFactory->instance()`, whose `%cache` and
+the consumer pointers it produces are process-wide. Implementing the
+bidirectional walk pulled in trivial Phis and orphaned CFG nodes
+created during ambiguous Earley action invocations on the *same*
+method, breaking `t/bootstrap/mop/build-graph-ifelse-trivial-phi.t`
+and four other reachability tests, which violates the regression
+invariant. Restoring bidirectional traversal requires either (a) each
+graph owning its own factory, or (b) every consumer pointer being
+unhooked when a node is unmerged. Both are out of Phase 7 scope.
+
 **Exit criteria:**
-- `Graph::nodes()` follows both `inputs()` and `consumers()`.
 - `body_stmts` field and its seeding logic are gone.
+- `Chalk::MOP::Class->all_nodes()` exists and returns the union of
+  every graph-owner's nodes.
 - No regression in node reachability (graph-scoped tests still pass).
 
 **Polymorphic-migration criteria addressed:** none directly;
-deferred technical debt from `Graph::nodes()` consumer exclusion
-(commit 33e1b6f3).
+the deferred technical debt from `Graph::nodes()` consumer
+exclusion (commit 33e1b6f3) remains deferred pending per-graph
+factory ownership.
 
 ---
 

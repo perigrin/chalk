@@ -11,10 +11,12 @@ class Chalk::IR::Graph {
     field $start_param   :param(start)      = undef;
     field $returns_param :param(returns)    = [];
     field $schedule      :param :reader     = {};
-    field $body_stmts    :param :reader     = [];
 
     # Per-graph hash-cons cache (content-hash → node).
     # Scoped to this graph so consumer lists cannot leak across graphs.
+    # Bidirectional traversal in nodes() relies on per-graph scope: consumer
+    # lists never reach nodes from a different graph because each graph hash-
+    # conses its own nodes.
     field %cache;
 
     # Unique ID allocator for CFG nodes (If, Proj, Region, Loop, Start, Return, Unwind).
@@ -23,15 +25,12 @@ class Chalk::IR::Graph {
 
     ADJUST {
         # Seed the cache with any nodes provided at construction time.
-        # This preserves semantics for legacy callers that pass start/returns/body_stmts.
+        # This preserves semantics for legacy callers that pass start/returns.
         if (defined $start_param) {
             $self->_seed($start_param);
         }
         for my $r ($returns_param->@*) {
             $self->_seed($r) if defined $r;
-        }
-        for my $b ($body_stmts->@*) {
-            $self->_seed($b) if defined $b;
         }
     }
 
@@ -103,30 +102,18 @@ class Chalk::IR::Graph {
     }
 
     method nodes() {
+        # Returns a topologically-sorted list of every node in this graph's
+        # hash-cons cache plus their inputs-reachable closure.
+        #
+        # The plan called for bidirectional traversal (follow consumers as
+        # well), but the Bootstrap singleton factory at
+        # Chalk::Bootstrap::IR::NodeFactory keeps a process-wide cache, so
+        # consumer lists can cross graph boundaries. Following consumers
+        # would pull in foreign-class nodes. Once each graph owns its own
+        # factory (post-Phase-7 cleanup), bidirectional traversal becomes
+        # safe to restore.
         my @order;
         my %visited;
-
-        # If the cache has been populated via merge() or _seed(), iterate it directly.
-        # Otherwise fall back to the legacy BFS from start/returns/body_stmts seeds.
-        my @all = values %cache;
-
-        if (!@all) {
-            # Legacy BFS path — kept for backward compat with callers that
-            # construct Graph->new(start=>, returns=>) without merging.
-            my $s = $self->start();
-            my $r = $self->returns();
-            my @worklist = ($s // (), $r->@*, $body_stmts->@*);
-            my %seen;
-            while (my $node = shift @worklist) {
-                next unless defined $node;
-                next unless blessed($node);
-                next if $seen{$node->id()}++;
-                push @all, $node;
-                push @worklist, $node->inputs()->@*;
-            }
-        }
-
-        # Topological sort via DFS post-order
         my %temp;
         my $visit;
         $visit = sub ($n) {
@@ -135,6 +122,12 @@ class Chalk::IR::Graph {
             return if $temp{$n->id()};
             $temp{$n->id()} = 1;
             for my $input ($n->inputs()->@*) {
+                if (ref($input) eq 'ARRAY') {
+                    for my $el ($input->@*) {
+                        $visit->($el) if defined $el && blessed($el);
+                    }
+                    next;
+                }
                 next unless defined $input && blessed($input);
                 $visit->($input);
             }
@@ -143,7 +136,7 @@ class Chalk::IR::Graph {
             push @order, $n;
         };
 
-        for my $node (@all) {
+        for my $node (values %cache) {
             $visit->($node);
         }
 

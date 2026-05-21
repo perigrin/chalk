@@ -1,16 +1,19 @@
-# ABOUTME: Tests Graph::nodes() bidirectional traversal (inputs + consumers).
-# ABOUTME: Per Phase 7, traversal walks both directions but stays graph-scoped.
+# ABOUTME: Documents that Graph::nodes() does not follow consumers().
+# ABOUTME: Phase 7 plan called for bidirectional traversal but the shared
+# ABOUTME: Bootstrap singleton factory's process-wide cache means consumer
+# ABOUTME: lists can cross graph boundaries, so consumer-following would
+# ABOUTME: pull in foreign-class nodes. Restored when each graph owns its
+# ABOUTME: own factory.
 use 5.42.0;
 use utf8;
 use Test::More;
-use Scalar::Util qw(blessed);
 use lib 'lib';
 
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 
-# Set up: build a graph with a producer node A whose consumer B is
-# reachable only from A's consumers() list (not its inputs).
+# Graph::nodes() returns the inputs-reachable closure of the cache. A node
+# in cache plus its inputs (transitively) all appear in the result.
 {
     my $graph = Chalk::IR::Graph->new;
     my $typed = Chalk::IR::NodeFactory->new;
@@ -23,24 +26,22 @@ use Chalk::IR::NodeFactory;
         right  => $b,
     );
 
-    # Seed only the producer node A into the graph.
-    $graph->merge($a);
+    # Seeding only Add — A and B must still appear because they are
+    # inputs of Add and Add is in cache.
+    $graph->merge($add);
 
-    # A's consumer is Add. Add's consumers list (currently empty) reaches
-    # nothing further. The bidirectional walker should still find Add by
-    # following A's consumers, AND find B (via Add's inputs).
     my $nodes = $graph->nodes();
-    my %ops = map { $_->operation => 1 } $nodes->@*;
-    ok($ops{Add},
-        'nodes() follows consumers: Add reached from seeded producer A')
-        or diag('ops: ' . join(',', sort keys %ops));
-    ok($ops{Constant},
-        'nodes() includes Constants reached via Add inputs');
+    my %ops;
+    $ops{$_->operation}++ for $nodes->@*;
+    ok($ops{Add}, 'nodes() includes seeded Add');
+    is($ops{Constant}, 2,
+        'nodes() includes both Constant inputs via inputs() walk');
 }
 
-# Negative case: a node in a different graph isn't pulled in. The
-# per-graph hash-cons scope keeps consumer lists local to the graph
-# that produced them.
+# Per-graph hash-cons scope: nodes from a different graph do not appear,
+# because a factory's cache is keyed by content_hash and each Graph has
+# its own %cache. (The plan's "bidirectional safety" claim relies on
+# per-graph factory ownership, which the Bootstrap singleton breaks.)
 {
     my $graph1 = Chalk::IR::Graph->new;
     my $graph2 = Chalk::IR::Graph->new;

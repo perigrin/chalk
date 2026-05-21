@@ -77,8 +77,8 @@ sub check_reachability($method, $label) {
             or diag("missing $label VarDecls: " . scalar @missing);
     }
 
-    is(scalar $graph->body_stmts->@*, 0,
-        "$label: body_stmts seed is empty");
+    ok(!$graph->can('body_stmts'),
+        "$label: graph has no body_stmts (Phase 7)");
 }
 
 # Linear method (already tested by 3a; revalidated here)
