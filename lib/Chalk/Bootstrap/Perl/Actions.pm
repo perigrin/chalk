@@ -313,7 +313,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     # Merge remaining items into the list-builtin's args
                     my @merged_args = ($first->inputs()->[1]->@*, $items->@[1..$items->$#*]);
                     my $name_node = $first->inputs()->[0];
-                    push @ir_nodes, $typed->make('Call',
+                    push @ir_nodes, $ctx->factory->make('Call',
                         dispatch_kind => 'builtin',
                         name          => $name_node->value(),
                         paren_form    => false,
@@ -1062,7 +1062,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     const_type => 'variable',
                     value      => $catch_var,
                 );
-                my $try_node = $typed->make('TryCatch',
+                my $try_node = $ctx->factory->make('TryCatch',
                     inputs       => [$try_body, $catch_var_const, $catch_body],
                 );
 
@@ -1182,7 +1182,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @items, $val;
             }
         }
-        return $typed->make('ExpressionList',
+        return $ctx->factory->make('ExpressionList',
             inputs       => [\@items],
         );
     }
@@ -1245,7 +1245,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 my @body = defined $stmts
                     ? $stmts->@*
                     : (defined $focus && !ref($focus) ? ($focus) : ());
-                my $block_node = $typed->make('AnonSub',
+                my $block_node = $ctx->factory->make('AnonSub',
                     inputs       => [[], \@body],
                 );
                 unshift @args, $block_node;
@@ -1291,7 +1291,7 @@ class Chalk::Bootstrap::Perl::Actions {
             # calls that may participate in postfix-chain stitching.
             my $text = $ctx->scanned_text() // '';
             my $is_paren_form = $text =~ /^\s*[\w:]+\s*\(/ ? true : false;
-            return $typed->make('Call',
+            return $ctx->factory->make('Call',
                 dispatch_kind => 'builtin',
                 name          => $name_node->value(),
                 paren_form    => $is_paren_form,
@@ -1355,7 +1355,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     push @parts, $factory->make('Constant',
                         const_type => 'string', value => $lit);
                 }
-                return $typed->make('Interpolate',
+                return $ctx->factory->make('Interpolate',
                     inputs       => [\@parts],
                 );
             }
@@ -1506,7 +1506,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 my $existing_ctrl = $s->control();
                 if (!defined $existing_ctrl
                         || refaddr($existing_ctrl) != refaddr($current_control)) {
-                    my $rebuilt = $typed->make('VarDecl',
+                    my $rebuilt = $ctx->factory->make('VarDecl',
                         inputs       => [$current_control, $s->name(), $s->init()],
                     );
                     $graph->unmerge($s);
@@ -1647,7 +1647,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Control comes from the in-scope control input - the previous
         # side-effect node, or a fresh Start if this is the first.
         my $control = _ctx_control($ctx) // $factory->make('Start');
-        my $var_decl = $typed->make('VarDecl',
+        my $var_decl = $ctx->factory->make('VarDecl',
             inputs       => [$control, $var_name, undef],
         );
 
@@ -1709,7 +1709,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @elements, $val;
             }
         }
-        return $typed->make('ArrayRef',
+        return $ctx->factory->make('ArrayRef',
             inputs       => [\@elements],
         );
     }
@@ -1728,7 +1728,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @pairs, $val;
             }
         }
-        return $typed->make('HashRef',
+        return $ctx->factory->make('HashRef',
             inputs       => [\@pairs],
         );
     }
@@ -1755,7 +1755,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         $body //= [];
 
-        return $typed->make('AnonSub',
+        return $ctx->factory->make('AnonSub',
             inputs       => [\@params, $body],
         );
     }
@@ -1790,7 +1790,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $op_node  = _make_const($factory, $op);
         my $op_str   = $op_node->value();
         my $unop_type = $UNOP_MAP{$op_str} // die "Unknown unary op: $op_str";
-        return $typed->make($unop_type,
+        return $ctx->factory->make($unop_type,
             inputs       => [$op_node, $operand],
             operand      => $operand,
         );
@@ -1834,7 +1834,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 if ($pat =~ m{^s/((?:[^/\\]|\\.)*)/((?:[^/\\]|\\.)*)/([\w]*)$}) {
                     my $flags_node = _make_const($factory, $3);
                     my $flags_str  = (defined $flags_node ? $flags_node->value() : '') // '';
-                    return $typed->make('RegexSubst',
+                    return $ctx->factory->make('RegexSubst',
                         flags        => $flags_str,
                         inputs       => [$left, _make_const($factory, $1), _make_const($factory, $2), $flags_node],
                     );
@@ -1843,7 +1843,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # /pattern/flags or m/pattern/flags
                 my $flags_node = _make_const($factory, '');
                 my $flags_str  = (defined $flags_node ? $flags_node->value() : '') // '';
-                return $typed->make('RegexMatch',
+                return $ctx->factory->make('RegexMatch',
                     flags        => $flags_str,
                     inputs       => [$left, $right, $flags_node],
                 );
@@ -1852,7 +1852,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         my $op_str    = $op->value();
         my $binop_type = $BINOP_MAP{$op_str} // die "Unknown binary op: $op_str";
-        return $typed->make($binop_type,
+        return $ctx->factory->make($binop_type,
             inputs       => [$op, $left, $right],
             left         => $left,
             right        => $right,
@@ -1890,7 +1890,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $result = $base;
         for my $op (@postfix_ops) {
             if ($op isa Chalk::IR::Node::Call && $op->dispatch_kind() eq 'method') {
-                $result = $typed->make('Call',
+                $result = $ctx->factory->make('Call',
                     dispatch_kind => 'method',
                     name          => $op->inputs()->[1]->value(),
                     inputs        => [$result, $op->inputs()->[1], $op->inputs()->[2]],
@@ -1906,10 +1906,10 @@ class Chalk::Bootstrap::Perl::Actions {
                     if ($bname eq 'exists' || $bname eq 'delete') {
                         my @args = $result->inputs()->[1]->@*;
                         my $inner_target = $args[-1];
-                        $args[-1] = $typed->make('Subscript',
+                        $args[-1] = $ctx->factory->make('Subscript',
                             inputs       => [$inner_target, $op->inputs()->[1], $op->inputs()->[2]],
                         );
-                        $result = $typed->make('Call',
+                        $result = $ctx->factory->make('Call',
                             dispatch_kind => 'builtin',
                             name          => $result->inputs()->[0]->value(),
                             inputs        => [$result->inputs()->[0], \@args],
@@ -1917,12 +1917,12 @@ class Chalk::Bootstrap::Perl::Actions {
                         next;
                     }
                 }
-                $result = $typed->make('Subscript',
+                $result = $ctx->factory->make('Subscript',
                     inputs       => [$result, $op->inputs()->[1], $op->inputs()->[2]],
                 );
             } elsif ($op isa Chalk::IR::Node::PostfixDeref) {
                 my $s = $op->inputs()->[1];
-                $result = $typed->make('PostfixDeref',
+                $result = $ctx->factory->make('PostfixDeref',
                     sigil        => (ref($s) ? $s->value() : $s),
                     inputs       => (ref($s) ? [$result, $s] : [$result]),
                 );
@@ -1974,7 +1974,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # all of its methods on the MOP. By the time this MethodCall
         # action runs, the enclosing ClassBlock hasn't yet completed, so
         # find_method() would miss the callee in same-class self-calls.
-        return $typed->make('Call',
+        return $ctx->factory->make('Call',
             dispatch_kind => 'method',
             name          => $method_name->value(),
             inputs        => [$invocant, $method_name, \@args],
@@ -2019,7 +2019,7 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        return $typed->make('Subscript',
+        return $ctx->factory->make('Subscript',
             inputs       => [$target, $index, _make_const($factory, $style)],
         );
     }
@@ -2053,7 +2053,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         my $sigil_node = _make_const($factory, $sigil // '@');
 
-        return $typed->make('PostfixDeref',
+        return $ctx->factory->make('PostfixDeref',
             sigil        => $sigil_node->value(),
             inputs       => [$target, $sigil_node],
         );
@@ -2075,7 +2075,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $op_str = ($scanned =~ /--/) ? '-=' : '+=';
         my $op_node  = $factory->make('Constant', value => $op_str,  const_type => 'string');
         my $one_node = $factory->make('Constant', value => '1',      const_type => 'number');
-        return $typed->make('CompoundAssign',
+        return $ctx->factory->make('CompoundAssign',
             op           => $op_node,
             inputs       => [$op_node, $target, $one_node],
         );
@@ -2099,7 +2099,7 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef unless defined $target;
         my $op_node  = $factory->make('Constant', value => $op_str,  const_type => 'string');
         my $one_node = $factory->make('Constant', value => '1',      const_type => 'number');
-        return $typed->make('CompoundAssign',
+        return $ctx->factory->make('CompoundAssign',
             op           => $op_node,
             inputs       => [$op_node, $target, $one_node],
         );
@@ -2119,7 +2119,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Should have exactly 3 IR nodes: condition, true_expr, false_expr
         return undef unless @ir_nodes >= 3;
 
-        return $typed->make('TernaryExpr',
+        return $ctx->factory->make('TernaryExpr',
             inputs       => [$ir_nodes[0], $ir_nodes[1], $ir_nodes[2]],
         );
     }
@@ -2184,13 +2184,13 @@ class Chalk::Bootstrap::Perl::Actions {
                 # The emitter will render it as (k, v, ...) for hash variable init.
                 my $init_value = $value;
                 if (ref($value) eq 'ARRAY') {
-                    $init_value = $typed->make('HashRef',
+                    $init_value = $ctx->factory->make('HashRef',
                         inputs       => [$value],
                     );
                 }
                 my $ctrl_in = $target->inputs()->[0];
                 my $name_in = $target->inputs()->[1];
-                my $result = $typed->make('VarDecl',
+                my $result = $ctx->factory->make('VarDecl',
                     inputs       => [$ctrl_in, $name_in, $init_value],
                 );
 
@@ -2223,7 +2223,7 @@ class Chalk::Bootstrap::Perl::Actions {
             # VarDecl is only for my/our/state declarations (handled above).
             my $assign_op_str = $op->value();
             my $assign_binop_type = $BINOP_MAP{$assign_op_str} // die "Unknown binary op: $assign_op_str";
-            my $assign_result = $typed->make($assign_binop_type,
+            my $assign_result = $ctx->factory->make($assign_binop_type,
                 inputs       => [$op, $target, $value],
                 left         => $target,
                 right        => $value,
@@ -2238,7 +2238,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         # Compound assignment (.=, //=, +=, etc.)
-        my $compound_result = $typed->make('CompoundAssign',
+        my $compound_result = $ctx->factory->make('CompoundAssign',
             op           => $op,
             inputs       => [$op, $target, $value],
         );
@@ -2290,7 +2290,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     if ($keyword eq 'until') {
                         my $not_op = _make_const($factory, '!');
                         my $not_type = $UNOP_MAP{'!'} // die "Unknown unary op: !";
-                        $loop_cond = $typed->make($not_type,
+                        $loop_cond = $ctx->factory->make($not_type,
                             inputs       => [$not_op, $loop_cond],
                             operand      => $loop_cond,
                         );
@@ -2331,7 +2331,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     if ($keyword eq 'unless') {
                         my $not_op2 = _make_const($factory, '!');
                         my $not_type2 = $UNOP_MAP{'!'} // die "Unknown unary op: !";
-                        $cond = $typed->make($not_type2,
+                        $cond = $ctx->factory->make($not_type2,
                             inputs       => [$not_op2, $condition],
                             operand      => $condition,
                         );
@@ -2424,7 +2424,7 @@ class Chalk::Bootstrap::Perl::Actions {
         if (defined $keyword && $keyword eq 'unless') {
             my $not_op3 = _make_const($factory, '!');
             my $not_type3 = $UNOP_MAP{'!'} // die "Unknown unary op: !";
-            $condition = $typed->make($not_type3,
+            $condition = $ctx->factory->make($not_type3,
                 inputs       => [$not_op3, $condition],
                 operand      => $condition,
             );
