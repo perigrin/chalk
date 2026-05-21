@@ -1,9 +1,7 @@
-# ABOUTME: Documents that Graph::nodes() does not follow consumers().
-# ABOUTME: Phase 7 plan called for bidirectional traversal but the shared
-# ABOUTME: Bootstrap singleton factory's process-wide cache means consumer
-# ABOUTME: lists can cross graph boundaries, so consumer-following would
-# ABOUTME: pull in foreign-class nodes. Restored when each graph owns its
-# ABOUTME: own factory.
+# ABOUTME: Tests that Graph::nodes() walks both inputs() and consumers()
+# ABOUTME: from cached nodes, with cache-membership filtering on the
+# ABOUTME: consumer side to keep the walk graph-local even when consumer
+# ABOUTME: pointers cross graph boundaries via the Bootstrap singleton.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -12,8 +10,10 @@ use lib 'lib';
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 
-# Graph::nodes() returns the inputs-reachable closure of the cache. A node
-# in cache plus its inputs (transitively) all appear in the result.
+# Input-direction traversal: a node merged into the graph has its
+# transitive inputs visited and included, even when the inputs were
+# not separately merged. This is the legacy unidirectional behavior
+# and must be preserved.
 {
     my $graph = Chalk::IR::Graph->new;
     my $typed = Chalk::IR::NodeFactory->new;
@@ -26,8 +26,6 @@ use Chalk::IR::NodeFactory;
         right  => $b,
     );
 
-    # Seeding only Add — A and B must still appear because they are
-    # inputs of Add and Add is in cache.
     $graph->merge($add);
 
     my $nodes = $graph->nodes();
@@ -38,25 +36,93 @@ use Chalk::IR::NodeFactory;
         'nodes() includes both Constant inputs via inputs() walk');
 }
 
-# Per-graph hash-cons scope: nodes from a different graph do not appear,
-# because a factory's cache is keyed by content_hash and each Graph has
-# its own %cache. (The plan's "bidirectional safety" claim relies on
-# per-graph factory ownership, which the Bootstrap singleton breaks.)
+# Consumer-direction traversal: when a consumer is itself in the
+# graph's cache, it must be reachable via nodes() even if the seed
+# walk only touches the producer.
 {
-    my $graph1 = Chalk::IR::Graph->new;
-    my $graph2 = Chalk::IR::Graph->new;
-    my $f1 = Chalk::IR::NodeFactory->new;
-    my $f2 = Chalk::IR::NodeFactory->new;
+    my $graph = Chalk::IR::Graph->new;
+    my $typed = Chalk::IR::NodeFactory->new;
 
-    my $a1 = $f1->make('Constant', const_type => 'string', value => 'graph1');
-    my $a2 = $f2->make('Constant', const_type => 'string', value => 'graph2');
-    $graph1->merge($a1);
-    $graph2->merge($a2);
+    my $a = $typed->make('Constant', const_type => 'integer', value => 1);
+    my $b = $typed->make('Constant', const_type => 'integer', value => 2);
+    my $sum = $typed->make('Add',
+        inputs => [undef, $a, $b],
+        left   => $a,
+        right  => $b,
+    );
 
-    my @ids1 = map { $_->id } $graph1->nodes->@*;
-    my @ids2 = map { $_->id } $graph2->nodes->@*;
-    is(scalar(grep { my $a = $_; grep { $_ eq $a } @ids2 } @ids1), 0,
-        'graph1 nodes do not appear in graph2');
+    # Merge all three nodes into the graph. The walker should find
+    # them all whether starting from any of them.
+    $graph->merge($a);
+    $graph->merge($b);
+    $graph->merge($sum);
+
+    my $nodes = $graph->nodes();
+    my %ops;
+    $ops{$_->operation}++ for $nodes->@*;
+    is($ops{Add}, 1, 'in-graph Add is reachable');
+    is($ops{Constant}, 2, 'both Constants reachable');
+}
+
+# Foreign-consumer filter: a consumer pointer reaching a node that
+# is NOT in this graph's cache (e.g., from another graph sharing a
+# hash-consed Constant via the Bootstrap singleton) is filtered out.
+{
+    my $shared_factory = Chalk::IR::NodeFactory->new;
+
+    my $g_a = Chalk::IR::Graph->new;
+    my $g_b = Chalk::IR::Graph->new;
+
+    # The shared Constant lives in BOTH graphs' caches (it's
+    # hash-consed by the factory so it's the same object).
+    my $shared = $shared_factory->make('Constant',
+        const_type => 'integer', value => 7);
+    $g_a->merge($shared);
+    $g_b->merge($shared);
+
+    # Two distinct Add nodes — one for each graph — wrap the shared
+    # Constant. They are NOT hash-cons'd identical because their
+    # inputs include the (undef) control input which dedups, but
+    # let's just construct them as separate Adds with different
+    # other operands so each is unique.
+    my $extra_a = $shared_factory->make('Constant',
+        const_type => 'integer', value => 11);
+    my $extra_b = $shared_factory->make('Constant',
+        const_type => 'integer', value => 22);
+    my $add_a = $shared_factory->make('Add',
+        inputs => [undef, $shared, $extra_a],
+        left   => $shared,
+        right  => $extra_a,
+    );
+    my $add_b = $shared_factory->make('Add',
+        inputs => [undef, $shared, $extra_b],
+        left   => $shared,
+        right  => $extra_b,
+    );
+
+    # Merge add_a only into g_a, add_b only into g_b.
+    $g_a->merge($add_a);
+    $g_b->merge($add_b);
+
+    # The shared Constant's consumers list contains both Adds.
+    my @consumers = $shared->consumers->@*;
+    is(scalar @consumers, 2,
+        'shared Constant has two Add consumers across both graphs');
+
+    # g_a->nodes() must include add_a but not add_b (which is the
+    # foreign consumer reached via $shared->consumers).
+    my %ids_a = map { $_->id => 1 } $g_a->nodes->@*;
+    my %ids_b = map { $_->id => 1 } $g_b->nodes->@*;
+
+    ok($ids_a{$add_a->id}, 'g_a includes its own Add');
+    ok(!$ids_a{$add_b->id},
+        'g_a excludes foreign Add reached via shared consumer')
+        or diag('g_a saw foreign ' . $add_b->id);
+
+    ok($ids_b{$add_b->id}, 'g_b includes its own Add');
+    ok(!$ids_b{$add_a->id},
+        'g_b excludes foreign Add reached via shared consumer')
+        or diag('g_b saw foreign ' . $add_a->id);
 }
 
 done_testing();

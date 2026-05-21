@@ -102,16 +102,28 @@ class Chalk::IR::Graph {
     }
 
     method nodes() {
-        # Returns a topologically-sorted list of every node in this graph's
-        # hash-cons cache plus their inputs-reachable closure.
+        # Returns a topologically-sorted list of nodes in this graph.
         #
-        # The plan called for bidirectional traversal (follow consumers as
-        # well), but the Bootstrap singleton factory at
-        # Chalk::Bootstrap::IR::NodeFactory keeps a process-wide cache, so
-        # consumer lists can cross graph boundaries. Following consumers
-        # would pull in foreign-class nodes. Once each graph owns its own
-        # factory (post-Phase-7 cleanup), bidirectional traversal becomes
-        # safe to restore.
+        # Walks both inputs() and consumers() from every cached node.
+        # Inputs are followed unconditionally (the legacy input-closure
+        # behavior — transitive inputs of cached nodes appear in the
+        # result even if they were not separately merged in).
+        #
+        # Consumers are followed only when they are themselves in
+        # %cache. This is the membership filter that keeps the walk
+        # graph-local: consumer pointers can reach foreign nodes
+        # (the Bootstrap singleton's hash-cons cache is process-wide)
+        # or orphan nodes (built by losing Earley alternatives and
+        # never merged into any graph), and those must not appear in
+        # the result.
+        my $in_cache = sub ($n) {
+            return false unless blessed($n);
+            return true if exists $cache{$n->id()};
+            return true if $n->can('content_hash')
+                && exists $cache{$n->content_hash()};
+            return false;
+        };
+
         my @order;
         my %visited;
         my %temp;
@@ -130,6 +142,12 @@ class Chalk::IR::Graph {
                 }
                 next unless defined $input && blessed($input);
                 $visit->($input);
+            }
+            if ($n->can('consumers')) {
+                for my $c ($n->consumers()->@*) {
+                    next unless $in_cache->($c);
+                    $visit->($c);
+                }
             }
             delete $temp{$n->id()};
             $visited{$n->id()} = 1;

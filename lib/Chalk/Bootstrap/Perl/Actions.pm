@@ -939,6 +939,14 @@ class Chalk::Bootstrap::Perl::Actions {
                     && ref($state->{$key}) eq 'ARRAY';
                 push @seeds, $state->{$key}->@*;
             }
+            # CFG nodes the annotation points to (the If/Loop/Try itself
+            # and its surrounding Region/Proj structure) are seed roots
+            # even if no body data-flow reaches them.
+            for my $key (qw(if_node loop try_node region
+                             body_proj exit_proj true_proj false_proj
+                             loop_if exit_ctrl)) {
+                push @seeds, $state->{$key} if defined $state->{$key};
+            }
         }
 
         my %seen;
