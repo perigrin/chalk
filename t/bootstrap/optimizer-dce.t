@@ -157,11 +157,12 @@ sub build_mini_varnode {
     is($factory->node_count(), 0, 'all nodes removed with empty roots');
 }
 
-# Input validation: run(undef) dies
+# Input validation: run(undef, factory) dies with a useful message
 {
+    my $factory = Chalk::IR::NodeFactory->new();
     my $dce = Chalk::Bootstrap::Optimizer::DCE->new();
-    eval { $dce->run(undef) };
-    like($@, qr/requires/i, 'run(undef) dies with useful error');
+    eval { $dce->run(undef, $factory) };
+    like($@, qr/requires/i, 'run(undef, factory) dies with useful error');
 }
 
 # ===== Integration tests with full BNF pipeline =====

@@ -8,6 +8,7 @@ use lib 'lib';
 
 use Chalk::Bootstrap::Optimizer::DCE;
 use Chalk::IR::Graph;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
 
 ok(Chalk::Bootstrap::Optimizer::DCE->can('run'),
@@ -15,9 +16,10 @@ ok(Chalk::Bootstrap::Optimizer::DCE->can('run'),
 
 # Empty graph in, graph out.
 {
-    my $graph = Chalk::IR::Graph->new;
-    my $dce   = Chalk::Bootstrap::Optimizer::DCE->new;
-    my $out   = $dce->run($graph);
+    my $graph   = Chalk::IR::Graph->new;
+    my $factory = Chalk::IR::NodeFactory->new;
+    my $dce     = Chalk::Bootstrap::Optimizer::DCE->new;
+    my $out     = $dce->run($graph, $factory);
 
     ok(defined $out, 'run(graph) returns a defined value');
     ok(blessed($out) && $out isa Chalk::IR::Graph,
@@ -27,7 +29,8 @@ ok(Chalk::Bootstrap::Optimizer::DCE->can('run'),
 
 # Graph with one merged node: run preserves the live node.
 {
-    my $graph = Chalk::IR::Graph->new;
+    my $graph   = Chalk::IR::Graph->new;
+    my $factory = Chalk::IR::NodeFactory->new;
     my $live = Chalk::IR::Node::Constant->new(
         id         => 'live',
         value      => 42,
@@ -36,7 +39,7 @@ ok(Chalk::Bootstrap::Optimizer::DCE->can('run'),
     $graph->merge($live);
 
     my $dce = Chalk::Bootstrap::Optimizer::DCE->new;
-    my $out = $dce->run($graph);
+    my $out = $dce->run($graph, $factory);
     ok(defined $out && $out isa Chalk::IR::Graph,
         'run(graph-with-live) returns a graph');
 }
