@@ -274,30 +274,32 @@ Order matters; each numbered step is independently committable.
 - Trivial-phi, ifelse-reachability, and all Phase-7 regression
   tests stay green. **DONE — verified at every stage.**
 
-**Singleton retirement (Stages 2d/2e/2f) — deferred.** The original
-plan called for Actions.pm to read `$ctx->factory()` and the
-Bootstrap singleton to be deleted. Investigation during Stage 2d
-revealed an architectural mismatch: the Bootstrap singleton's
-`make()` is permissive and hash-conses Start/Return/Constant as
-data nodes (the `%INPUT_SPECS` table at lines 40-49 of
-`lib/Chalk/Bootstrap/IR/NodeFactory.pm`), while the typed
-`Chalk::IR::NodeFactory::make()` is strict and only accepts data
-classes (the `%DATA_CLASSES` table at lines 84-98 of
-`lib/Chalk/IR/NodeFactory.pm`); CFG ops go through `make_cfg()`
-with no hash-consing. Actions.pm calls `$factory->make('Start')`
-in 12 sites expecting a hash-consed shared Start; switching them
-to typed `make_cfg('Start')` would produce a fresh Start each
-time and break the implicit Start identity used by codegen and
-control-flow seeding. Repointing `$factory` to `$typed` produces
-`Unknown data node operation: Start` (Stage 2d attempt 1).
+**Singleton retirement (Stages 2d/2e/2f) — partial.** Phase 7c #1
+extended the typed factory's `make()` to accept Start/Return/Unwind
+(hash-consed like data nodes) and If/Proj/Region/Loop/Phi
+(allocated fresh per call, mirroring Bootstrap's `%CFG_OPS`).
+This means `$typed_factory->make($op, ...)` now accepts every op
+Bootstrap's `make()` accepted, and Stage 7c #2 (repointing
+Actions.pm's `$factory` at `$typed`) becomes type-compatible.
 
-A correct Stage 2d would either (a) extend typed's `%DATA_CLASSES`
-to include Start/Return-as-data (and accept that CFG nodes mixed
-data/cfg semantics in Bootstrap), or (b) bulk-edit Actions.pm's
-12 Start sites to `make_cfg` with explicit caching, or (c)
-introduce a thin "Bootstrap-API" wrapper around the typed factory
-that preserves the permissive `make()` shape. None are wrong, but
-all are wider than the bidirectional unblock Stage 1 already shipped.
+However, Phase 7c #2 attempted the flip and ran into a different
+issue: an Earley dedup regression. With Bootstrap singleton,
+identical-content `ReturnStatement` invocations from ambiguous
+Earley paths shared the same Return object via hash-cons-by-content.
+After the flip, the same source produced 3 distinct Return objects
+where baseline produced 2, and the graph cache held 2 Returns
+where the test expected 1. The root cause is likely that
+`_one_ctx`'s per-parse typed factory and Actions's typed factory
+are *different* instances post-Stage-2c, so hash-cons identity
+diverges across factories that previously collapsed via the
+process-wide singleton.
+
+Resolving this requires either unifying `_one_ctx`'s factory with
+Actions's factory (so the parse uses ONE typed factory throughout),
+or accepting the Earley regression and updating tests/code paths
+that depend on cross-factory Return identity. Both are larger than
+the per-stage scope and depend on understanding Earley's identity-
+based dedup more deeply.
 
 **Decision:** since bidirectional traversal now works (Stages 1+2a-c),
 the singleton's process-wide cache is no longer blocking — its
