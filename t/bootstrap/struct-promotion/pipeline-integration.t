@@ -6,7 +6,7 @@ use utf8;
 use Test2::V0;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer::StructPromotion;
 use Chalk::IR::Node::Return;
 use Chalk::IR::MethodInfo;
@@ -16,7 +16,7 @@ use Chalk::IR::NodeFactory;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
     return $factory->make('Constant', const_type => $type, value => $value);
 }
 
@@ -84,7 +84,7 @@ sub ctor($class, %inputs) {
 
 # Helper: create a Return CFG node
 sub ret_node($val) {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
     return $factory->make_cfg('Return',
         inputs => [ $factory->make('Start'), $val ],
     );
@@ -151,7 +151,6 @@ sub walk_ir($root, $visitor) {
 
 # === Test: run() orchestrates analyze + rewrite ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     # Build a simple class with _make_item pattern
     my $item_var = const_node('variable', '$item');
@@ -207,7 +206,6 @@ sub walk_ir($root, $visitor) {
 
 # === Test: run() with no promotable hashes returns unchanged IR ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $method = method_info('simple', [ret_node(const_node('integer', '42'))]);
     my $class_decl = class_info('TestEmpty', $method);

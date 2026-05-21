@@ -6,13 +6,12 @@ use utf8;
 use Test2::V0;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::NodeFactory;
 
 # Reset factory to ensure clean test state
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+my $factory = Chalk::IR::NodeFactory->new;
 
 # Helper: create a typed IR node by legacy Constructor class name.
 # Dispatches directly to Chalk::IR::NodeFactory and preserves compat_class

@@ -6,13 +6,13 @@ use utf8;
 use Test2::V0;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::Perl;
 use Chalk::IR::NodeFactory;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
     return $factory->make('Constant', const_type => $type, value => $value);
 }
 
@@ -38,7 +38,6 @@ sub ctor($class, %inputs) {
 
 # === Test: StructRef lowering → hash constructor ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $target = Chalk::Bootstrap::Perl::Target::Perl->new();
 
@@ -72,7 +71,6 @@ sub ctor($class, %inputs) {
 
 # === Test: FieldAccess lowering → hash key access ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $target = Chalk::Bootstrap::Perl::Target::Perl->new();
 

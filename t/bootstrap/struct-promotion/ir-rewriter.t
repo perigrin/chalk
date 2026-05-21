@@ -6,7 +6,7 @@ use utf8;
 use Test2::V0;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer::StructPromotion;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::StructFieldAccess;
@@ -17,7 +17,7 @@ use Chalk::IR::NodeFactory;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
     return $factory->make('Constant', const_type => $type, value => $value);
 }
 
@@ -93,7 +93,7 @@ sub ctor($class, %inputs) {
 
 # Helper: create a Return CFG node
 sub ret_node($val) {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
     return $factory->make_cfg('Return',
         inputs => [ $factory->make('Start'), $val ],
     );
@@ -162,7 +162,6 @@ sub walk_ir($root, $visitor) {
 
 # === Test: Constructor rewrite — empty hash + assignments → StructRef ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $item_var = const_node('variable', '$item');
     my $rule_var = const_node('variable', '$rule');
@@ -237,7 +236,6 @@ sub walk_ir($root, $visitor) {
 
 # === Test: Access site rewrite — SubscriptExpr → FieldAccess ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $item_var = const_node('variable', '$item');
     my $empty_hash = ctor('HashRefExpr', pairs => []);

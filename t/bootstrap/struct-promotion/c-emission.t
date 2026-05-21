@@ -6,13 +6,13 @@ use utf8;
 use Test2::V0;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::EmitHelpers;
 use Chalk::IR::NodeFactory;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
     return $factory->make('Constant', const_type => $type, value => $value);
 }
 
@@ -43,7 +43,6 @@ use Chalk::Bootstrap::Perl::Target::C;
 
 # === Test: StructRef allocation emission ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $target = Chalk::Bootstrap::Perl::Target::C->new(
         module_name => 'Test::StructRef',
@@ -88,7 +87,6 @@ use Chalk::Bootstrap::Perl::Target::C;
 
 # === Test: FieldAccess emission — IV field ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $target = Chalk::Bootstrap::Perl::Target::C->new(
         module_name => 'Test::FieldAccess',
@@ -131,7 +129,6 @@ use Chalk::Bootstrap::Perl::Target::C;
 
 # === Test: FieldAccess emission — SV* field (no wrapping) ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $target = Chalk::Bootstrap::Perl::Target::C->new(
         module_name => 'Test::FieldAccessSV',

@@ -10,10 +10,9 @@ use lib 't/bootstrap/lib';
 use Chalk::MOP;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir) or BAIL_OUT('pipeline');
 my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
@@ -25,7 +24,6 @@ my $gen_grammar = Chalk::Grammar::Perl::TrivialPhiTest::grammar();
 ok(defined $gen_grammar);
 
 sub parse_method($source) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
     my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
     my $result = $parser->parse_value($source);

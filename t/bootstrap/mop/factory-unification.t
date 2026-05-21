@@ -63,10 +63,8 @@ subtest 'set_factory(undef) restores allocate-fresh behavior' => sub {
 subtest 'real parse: $ctx->factory == Actions $typed' => sub {
     require TestPipeline;
     TestPipeline->import(qw(perl_pipeline build_perl_ir_parser));
-    require Chalk::Bootstrap::IR::NodeFactory;
     require Chalk::Bootstrap::BNF::Target::Perl;
 
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing;
     Chalk::Bootstrap::Semiring::SemanticAction::set_factory(undef);
 
     my $raw_ir = TestPipeline::perl_pipeline();
@@ -77,7 +75,6 @@ subtest 'real parse: $ctx->factory == Actions $typed' => sub {
     my $g = Chalk::Grammar::Perl::FactoryUnifyTest::grammar();
 
     # Build parser — this constructs Actions and runs its ADJUST.
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing;
     my $parser = TestPipeline::build_perl_ir_parser($g, start => 'Program');
 
     # After build, set_factory should have been called with Actions's $typed.

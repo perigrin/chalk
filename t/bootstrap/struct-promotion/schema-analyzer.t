@@ -6,7 +6,7 @@ use utf8;
 use Test2::V0;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer::StructPromotion;
 use Chalk::IR::Node::Return;
 use Chalk::IR::MethodInfo;
@@ -17,7 +17,7 @@ use Chalk::IR::NodeFactory;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
     return $factory->make('Constant', const_type => $type, value => $value);
 }
 
@@ -93,7 +93,7 @@ sub ctor($class, %inputs) {
 
 # Helper: create a Return CFG node
 sub ret_node($val) {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
     return $factory->make_cfg('Return',
         inputs => [ $factory->make('Start'), $val ],
     );
@@ -134,7 +134,6 @@ sub program_ir($class_info) {
 
 # === Test: Constructor detection — empty hash + literal-key assignments ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     # Build IR mimicking:
     #   my $item = {};
@@ -219,7 +218,6 @@ sub program_ir($class_info) {
 
 # === Test: Non-promotable hash — dynamic key ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $hash_var = const_node('variable', '$tags');
     my $empty_hash = ctor('HashRefExpr', pairs => []);
@@ -261,7 +259,6 @@ sub program_ir($class_info) {
 
 # === Test: Schema unification — identical key sets get same schema ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     # Two methods both create hashes with same keys {a, b}
     my @methods;
@@ -310,7 +307,6 @@ sub program_ir($class_info) {
 # A public method (not starting with _) that returns a hash variable means
 # uncompiled code could call it and see the hash.
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $var = const_node('variable', '$result');
     my $empty = ctor('HashRefExpr', pairs => []);
@@ -351,7 +347,6 @@ sub program_ir($class_info) {
 
 # === Test: Escape analysis — hash returned from private method IS promoted ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $var = const_node('variable', '$item');
     my $empty = ctor('HashRefExpr', pairs => []);
@@ -392,7 +387,6 @@ sub program_ir($class_info) {
 
 # === Test: C type inference — fields used in integer context get IV ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $item_var = const_node('variable', '$item');
     my $empty = ctor('HashRefExpr', pairs => []);
@@ -461,7 +455,6 @@ sub program_ir($class_info) {
 
 # === Test: Escape analysis — hash passed to call_method on unknown class NOT promoted ===
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $var = const_node('variable', '$data');
     my $empty = ctor('HashRefExpr', pairs => []);

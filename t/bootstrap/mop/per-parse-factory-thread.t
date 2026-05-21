@@ -44,10 +44,8 @@ subtest 'factory threads through full parse pipeline' => sub {
     lib->import('t/bootstrap/lib');
     require TestPipeline;
     TestPipeline->import(qw(perl_pipeline build_perl_ir_parser));
-    require Chalk::Bootstrap::IR::NodeFactory;
     require Chalk::Bootstrap::BNF::Target::Perl;
 
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing;
     my $raw_ir = TestPipeline::perl_pipeline();
     my $target = Chalk::Bootstrap::BNF::Target::Perl->new;
     my $generated = $target->generate($raw_ir);
@@ -55,7 +53,6 @@ subtest 'factory threads through full parse pipeline' => sub {
     eval $generated; die $@ if $@;
     my $g = Chalk::Grammar::Perl::FactoryThreadTest::grammar();
 
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing;
     my $parser = TestPipeline::build_perl_ir_parser($g, start => 'Program');
     my $result = $parser->parse_value(q{class C { method foo() { 42 } }});
 

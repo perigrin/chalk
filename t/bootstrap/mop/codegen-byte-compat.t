@@ -11,12 +11,11 @@ use lib 't/bootstrap/lib';
 use Chalk::MOP;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
 # Build the grammar pipeline once.
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'pipeline OK') or BAIL_OUT('pipeline');
 my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
@@ -36,7 +35,6 @@ sub golden_to_source($golden_name) {
 
 # Generate via the new MOP-driven path and compare to golden.
 sub regenerate($source_path) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $source_path or return undef;
     local $/;
     my $source = <$fh>;

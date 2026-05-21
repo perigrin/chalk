@@ -11,11 +11,10 @@ use lib 'lib';
 
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
 # Reset Bootstrap singleton.
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new;
 
 # Scenario 1: orphan node sharing a Constant input.
 #
@@ -58,8 +57,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 # Both Returns are on the Constant's consumer list. graph_a->nodes()
 # must contain only graph_a's Return.
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $f = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $f = Chalk::IR::NodeFactory->new;
 
     my $shared = $f->make('Constant',
         const_type => 'integer', value => 'hi');
@@ -97,8 +95,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 # This is the load-bearing Stage 1c invariant — the bidirectional
 # walk finds in-graph consumers of in-graph producers.
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $f = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $f = Chalk::IR::NodeFactory->new;
 
     my $g = Chalk::IR::Graph->new;
     my $producer = $f->make('Constant',
