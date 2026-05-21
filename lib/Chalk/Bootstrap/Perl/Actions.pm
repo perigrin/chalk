@@ -923,16 +923,42 @@ class Chalk::Bootstrap::Perl::Actions {
         # reach them. The Block fixup already merged the data-flow chain;
         # this adds nodes that the schedule annotations reference but the
         # main chain doesn't (then_stmts/else_stmts/loop bodies).
-        $graph->_seed($_) for @returns;
+        #
+        # Phase 7b Stage 1: transitively seed everything reachable from
+        # these roots via inputs(). The graph's %cache becomes the
+        # complete set of IR nodes for this body; foreign or orphan
+        # nodes built through the singleton factory but never reached
+        # from this body's roots stay out. This is what enables safe
+        # bidirectional traversal in Graph::nodes() — consumer pointers
+        # may cross graph boundaries, but cache-membership filtering
+        # keeps the result graph-local.
+        my @seeds = @returns;
         for my $state (values $schedule->%*) {
             for my $key (qw(then_stmts else_stmts statements body_stmts)) {
                 next unless defined $state->{$key}
                     && ref($state->{$key}) eq 'ARRAY';
-                for my $stmt ($state->{$key}->@*) {
-                    next unless defined $stmt && ref($stmt) && blessed($stmt);
-                    next unless $stmt->isa('Chalk::IR::Node');
-                    $graph->_seed($stmt);
+                push @seeds, $state->{$key}->@*;
+            }
+        }
+
+        my %seen;
+        my @worklist = grep { defined $_ && ref($_) && blessed($_)
+                              && $_->isa('Chalk::IR::Node') } @seeds;
+        while (my $n = shift @worklist) {
+            next if $seen{$n->id}++;
+            $graph->_seed($n);
+            for my $input ($n->inputs->@*) {
+                if (ref($input) eq 'ARRAY') {
+                    for my $el ($input->@*) {
+                        next unless defined $el && blessed($el)
+                            && $el->isa('Chalk::IR::Node');
+                        push @worklist, $el;
+                    }
+                    next;
                 }
+                next unless defined $input && blessed($input)
+                    && $input->isa('Chalk::IR::Node');
+                push @worklist, $input;
             }
         }
 
