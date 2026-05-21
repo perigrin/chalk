@@ -149,4 +149,25 @@ class Chalk::IR::NodeFactory {
         $self->_register_consumers($node, %args);
         return $node;
     }
+
+    # Cache inspection / mutation API used by passes that walk the
+    # full set of constructed data nodes (e.g. DCE). Mirrors the
+    # Bootstrap factory's interface so passes can operate on either.
+    # Cache keys are content_hash strings (same as each node's id()).
+    method all_node_ids() {
+        return [keys %cache];
+    }
+
+    method get_node($id) {
+        return $cache{$id};
+    }
+
+    method remove_node($id) {
+        my $node = delete $cache{$id};
+        return defined $node ? 1 : 0;
+    }
+
+    method node_count() {
+        return scalar keys %cache;
+    }
 }

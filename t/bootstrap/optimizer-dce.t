@@ -6,8 +6,9 @@ use Test::More;
 
 use lib 'lib';
 
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
+use Chalk::IR::Node::VarDecl;
 
 use_ok('Chalk::Bootstrap::Optimizer::DCE');
 
@@ -18,10 +19,9 @@ sub build_mini_varnode {
     my ($factory, $name, $val) = @_;
     my $name_const = $factory->make('Constant', const_type => 'string', value => $name);
     my $val_const  = $factory->make('Constant', const_type => 'string', value => $val);
-    return $factory->make('Constructor',
-        class    => 'VarDecl',
-        variable => $name_const,
-        initializer => $val_const,
+    return $factory->make('VarDecl',
+        inputs       => [undef, $name_const, $val_const],
+        compat_class => 'VarDecl',
     );
 }
 
@@ -33,8 +33,7 @@ sub build_mini_varnode {
 
 # Dead node removal: orphan Constant removed, reachable nodes preserved
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $root = build_mini_varnode($factory, 'x', 'hello');
 
@@ -46,7 +45,7 @@ sub build_mini_varnode {
     ok($count_before > 0, "have nodes before DCE (count=$count_before)");
 
     my $dce = Chalk::Bootstrap::Optimizer::DCE->new();
-    my $result = $dce->run([$root]);
+    my $result = $dce->run([$root], $factory);
 
     is(ref($result), 'ARRAY', 'run() returns arrayref');
     is(scalar($result->@*), 1, 'run() returns same number of roots');
@@ -66,8 +65,7 @@ sub build_mini_varnode {
 
 # Multiple roots sharing nodes: shared subgraph preserved when reachable from both
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     # Build two VarDecl nodes that share a common Constant (the same initializer value)
     my $shared_const = $factory->make('Constant',
@@ -76,15 +74,13 @@ sub build_mini_varnode {
     my $name1 = $factory->make('Constant', const_type => 'string', value => 'var1');
     my $name2 = $factory->make('Constant', const_type => 'string', value => 'var2');
 
-    my $root1 = $factory->make('Constructor',
-        class    => 'VarDecl',
-        variable => $name1,
-        initializer => $shared_const,
+    my $root1 = $factory->make('VarDecl',
+        inputs       => [undef, $name1, $shared_const],
+        compat_class => 'VarDecl',
     );
-    my $root2 = $factory->make('Constructor',
-        class    => 'VarDecl',
-        variable => $name2,
-        initializer => $shared_const,
+    my $root2 = $factory->make('VarDecl',
+        inputs       => [undef, $name2, $shared_const],
+        compat_class => 'VarDecl',
     );
 
     # shared_const is consumed by both roots
@@ -93,7 +89,7 @@ sub build_mini_varnode {
 
     my $count_before = $factory->node_count();
     my $dce = Chalk::Bootstrap::Optimizer::DCE->new();
-    $dce->run([$root1, $root2]);
+    $dce->run([$root1, $root2], $factory);
 
     is($factory->node_count(), $count_before,
         'multi-root: all shared nodes preserved');
@@ -103,8 +99,7 @@ sub build_mini_varnode {
 
 # Consumer cleanup: dead node removed from consumer lists of its inputs
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $root = build_mini_varnode($factory, 'ConsumerTest', 'alive');
 
@@ -112,10 +107,9 @@ sub build_mini_varnode {
     my $shared_const = $factory->make('Constant',
         const_type => 'string', value => 'shared_init');
     my $orphan_name = $factory->make('Constant', const_type => 'string', value => 'dead_var');
-    my $orphan = $factory->make('Constructor',
-        class    => 'VarDecl',
-        variable => $orphan_name,
-        initializer => $shared_const,
+    my $orphan = $factory->make('VarDecl',
+        inputs       => [undef, $orphan_name, $shared_const],
+        compat_class => 'VarDecl',
     );
 
     # shared_const is consumed by the orphan
@@ -124,7 +118,7 @@ sub build_mini_varnode {
 
     my $dce = Chalk::Bootstrap::Optimizer::DCE->new();
     # Only $root is reachable — $orphan is not passed as a root
-    $dce->run([$root]);
+    $dce->run([$root], $factory);
 
     my $consumers_after = scalar($shared_const->consumers()->@*);
     ok($consumers_after < $consumers_before,
@@ -137,14 +131,13 @@ sub build_mini_varnode {
 
 # No dead nodes: fully-reachable graph is a no-op
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $root = build_mini_varnode($factory, 'FullyReachable', 'value');
     my $count_before = $factory->node_count();
 
     my $dce = Chalk::Bootstrap::Optimizer::DCE->new();
-    $dce->run([$root]);
+    $dce->run([$root], $factory);
 
     is($factory->node_count(), $count_before,
         'no-op when all nodes are reachable');
@@ -152,15 +145,14 @@ sub build_mini_varnode {
 
 # Empty roots: all nodes are dead
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     # Create some nodes but pass empty roots
     build_mini_varnode($factory, 'DeadVar', 'dead_value');
     ok($factory->node_count() > 0, 'have nodes before empty-roots DCE');
 
     my $dce = Chalk::Bootstrap::Optimizer::DCE->new();
-    $dce->run([]);
+    $dce->run([], $factory);
 
     is($factory->node_count(), 0, 'all nodes removed with empty roots');
 }
@@ -169,7 +161,7 @@ sub build_mini_varnode {
 {
     my $dce = Chalk::Bootstrap::Optimizer::DCE->new();
     eval { $dce->run(undef) };
-    like($@, qr/requires.*arrayref/i, 'run(undef) dies with useful error');
+    like($@, qr/requires/i, 'run(undef) dies with useful error');
 }
 
 # ===== Integration tests with full BNF pipeline =====

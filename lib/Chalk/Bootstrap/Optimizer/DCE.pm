@@ -20,12 +20,18 @@ class Chalk::Bootstrap::Optimizer::DCE :isa(Chalk::Bootstrap::Optimizer::Pass) {
     # migrated yet.
     method scope() { return 'graph' }
 
-    method run($input) {
+    method run($input, $factory = undef) {
         # Polymorphic on input shape:
         #   - Chalk::IR::Graph: treat the graph's reachable nodes as
         #     roots; returns the same graph after pruning.
         #   - arrayref of nodes (legacy): treat as the root set; returns
         #     the same arrayref.
+        #
+        # $factory: optional second arg. When the caller built nodes
+        # with a particular factory (e.g. a fresh Chalk::IR::NodeFactory),
+        # pass it so DCE walks that factory's cache. Defaults to the
+        # Bootstrap singleton for back-compat with the legacy path that
+        # used make('Constructor', ...).
         my $is_graph = defined($input) && blessed($input)
             && $input isa Chalk::IR::Graph;
         my $is_roots_array = !$is_graph
@@ -36,7 +42,7 @@ class Chalk::Bootstrap::Optimizer::DCE :isa(Chalk::Bootstrap::Optimizer::Pass) {
 
         my $roots = $is_graph ? $input->nodes() : $input;
 
-        my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+        $factory //= Chalk::Bootstrap::IR::NodeFactory->instance();
 
         # Mark: collect all reachable node IDs via iterative worklist
         my %reachable;
