@@ -17,7 +17,7 @@ use Test::More;
 
 use Config;
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::C;
 
@@ -25,7 +25,6 @@ use Chalk::Bootstrap::Perl::Target::C;
 # Accepts a namespace string used to rename the generated grammar module.
 # Returns ($gen_grammar) or dies on failure.
 sub setup_xs_grammar($namespace) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $raw_ir = perl_pipeline();
     die "perl_pipeline returned undef" unless defined $raw_ir;
 
@@ -50,7 +49,6 @@ sub setup_xs_grammar($namespace) {
 # so subsequent parses (which call reset_cache) wipe earlier entries. The snapshot
 # preserves cfg_state so _build_cfg_lookup can use it in multi-class builds.
 sub parse_file_ir($gen_grammar, $file) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
     local $/;
     my $source = <$fh>;

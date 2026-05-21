@@ -10,7 +10,7 @@ use Exporter 'import';
 our @EXPORT_OK = qw(parse_expr shape_of isa_with_shape);
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::Program;
 use Chalk::IR::Node;
@@ -24,7 +24,6 @@ my $_grammar_built = 0;
 
 sub _ensure_grammar() {
     return if $_grammar_built;
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $raw_ir = perl_pipeline()
         or die "PrecedenceSpecHelpers: perl_pipeline() returned undef\n";
     my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
@@ -46,7 +45,6 @@ sub _ensure_grammar() {
 # Returns undef on parse failure (caller can mark TODO with diagnostic).
 sub parse_expr($source) {
     _ensure_grammar();
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $stmt = "my \$_ = $source;";
     my $parser = build_perl_ir_parser($_grammar, start => 'Program');
     my $result = eval { $parser->parse_value($stmt) };

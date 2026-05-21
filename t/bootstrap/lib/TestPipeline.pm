@@ -19,7 +19,7 @@ use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Grammar::BNF::Actions;
 use Chalk::Bootstrap::Desugar;
 use Chalk::Grammar::BNF;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer;
 use Chalk::Bootstrap::Optimizer::DCE;
 use Chalk::Bootstrap::Semiring::Precedence;
@@ -80,9 +80,8 @@ sub parse_ir {
     return $result->extract();
 }
 
-# Convenience function: resets factory, builds parser, parses BNF text, returns IR
+# Convenience function: builds parser, parses BNF text, returns IR
 sub full_pipeline {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_parser();
     return parse_ir($parser, bnf_text());
 }
@@ -102,9 +101,8 @@ sub perl_bnf_text {
     return <$fh>;
 }
 
-# Convenience function: resets factory, builds parser, parses Perl BNF, returns IR
+# Convenience function: builds parser, parses Perl BNF, returns IR
 sub perl_pipeline {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_parser();
     return parse_ir($parser, perl_bnf_text());
 }

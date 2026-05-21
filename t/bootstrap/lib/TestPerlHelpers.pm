@@ -9,7 +9,7 @@ use Exporter 'import';
 our @EXPORT_OK = qw(setup_perl_grammar parse_and_generate parse_file_with_cfg eval_module);
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
@@ -26,7 +26,6 @@ sub setup_perl_grammar($namespace) {
 # Parses a .pm file and returns ($ir, $sa, $sem_ctx) for cfg-aware generation.
 # Returns () on failure.
 sub parse_file_with_cfg($gen_grammar, $file) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
     local $/;
     my $source = <$fh>;
