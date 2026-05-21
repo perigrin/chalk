@@ -99,24 +99,41 @@ Return (the test that failed Phase 7c #2).
 
 ### Step 4: Retire the Bootstrap singleton
 
-Once Steps 1-3 land cleanly and no Actions site reads
-`Chalk::Bootstrap::IR::NodeFactory->instance()`, delete the singleton
-class.
+**COMPLETE 2026-05-21.** Step 4 split into 8 sub-tasks. Parallel
+agents migrated the four non-Actions production consumers (DCE,
+StructPromotion, Target/C, BNF/Actions). Sequential cleanup
+followed for SemanticAction, scripts, and the Bootstrap class itself.
 
-**Other singleton consumers** (per Phase 7c audits):
-- `Target/C.pm:131` — accept factory parameter
-- `StructPromotion.pm:491` — accept factory parameter (Stage 2g)
-- `BNF/Actions.pm:15` — verify or migrate
-- `DCE.pm:45` — already accepts factory, just remove fallback
-- `Serialize/JSON.pm:216` — accept factory parameter (Stage 2h)
-- `SemanticAction.pm:73` — `_one_ctx` Start placeholder (Stage 2e from
-  Phase 7b plan)
+What landed:
+- **4.1 DCE** (commit `3c4a5d76`): `$factory` now required parameter;
+  singleton fallback removed.
+- **4.2 StructPromotion** (commit `e36056fe`): `rewrite()` uses the
+  pre-existing `$typed` field instead of the singleton — closes the
+  pre-existing inconsistency the audit flagged.
+- **4.3 Target/C** (commit `88837d5d`): `_emit_method` constructs a
+  fresh typed factory per call.
+- **4.4 BNF/Actions** (commit `a7402b7a`): ADJUST uses
+  `Chalk::IR::NodeFactory->new()` instead of the singleton.
+- **4.5 SemanticAction/Actions cleanup** (commit `7ce48ed6`): drop
+  unused `use Chalk::Bootstrap::IR::NodeFactory` imports.
+- **4.6 Scripts** (commit `02d1ad1f`): six scripts drop the `use`
+  + `reset_for_testing` lines (no-ops post-Step-3).
+- **4.7 Bootstrap class as shim** (commit `61ae0b79`): collapse
+  `Chalk::Bootstrap::IR::NodeFactory` from 230 lines of full
+  factory implementation to ~60 lines of delegation over a wrapped
+  `Chalk::IR::NodeFactory`. Preserves `instance()` /
+  `reset_for_testing()` / `make()` / `make_cfg()` / cache-inspection
+  API for the ~120 test files still referencing them.
+- **4.8 test bulk-edit deferred indefinitely.** Step 4.7's shim
+  keeps all ~120 test files working unchanged. Bulk-editing
+  `reset_for_testing` calls out of tests is now optional cleanup
+  rather than blocking work.
 
-Plus the ~123 test files calling `reset_for_testing` (Phase 7b plan
-§Out of scope, line 180-185).
-
-**Cost:** large — ~5 production files plus ~120 test edits. Defer
-the test bulk-edit to a final cleanup commit.
+**Three typed-factory enhancements made during Step 4.7:**
+- `%INPUT_SPECS` applied for any op with an entry (not just
+  ROUTED_CFG), so Return(value)/Unwind(value) keyword shape works.
+- Phi's `add_consumer` includes the region in addition to values.
+- The shim's `remove_node` preserves the dies-on-consumers invariant.
 
 ## Acceptance criteria
 
