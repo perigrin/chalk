@@ -95,8 +95,15 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     PostfixDeref CompoundAssign BacktickExpr Stringify VarDecl
     TernaryExpr StructRef StructFieldAccess
     ExpressionList
+    Start Return Unwind
 );
 
+# CFG ops that are NEVER hash-consed via make_cfg (each call allocates fresh).
+# Start/Return/Unwind appear in %DATA_CLASSES too — they are hash-consed when
+# constructed via make() (legacy Bootstrap API shape) but allocated fresh
+# when constructed via make_cfg() (every call gets a unique cfg_counter id).
+# Callers picking between the two pick by semantic intent: make() for shared
+# entry/exit/sentinel positions, make_cfg() for per-statement control nodes.
 my %CFG_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Start Return Unwind If Proj Region Loop
 );
