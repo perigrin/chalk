@@ -53,22 +53,31 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # parsing; invalidates the singleton so _one_ctx() recreates it with the MOP.
     my $_mop;
 
+    # Typed factory injected by the parser-build wiring before parse start.
+    # When defined, _one_ctx() seeds the one() Context's factory field with
+    # this instance instead of allocating its own. This is how
+    # Chalk::Bootstrap::Perl::Actions threads its own $typed factory into
+    # the parse Context so every code path observes a single per-parse
+    # factory (Phase 7d Step 1).
+    my $_factory;
+
     # Return a singleton one() Context, creating it on first call.
     # Initializes the scope field with a fresh Start node as control.
     # Implemented as a method (not my sub) so the XS codegen can compile it
     # natively — my sub cannot access class-scope lexicals in XS.
     method _one_ctx() {
         if (!defined $_one_singleton) {
-            # Per-parse factory: each fresh _one_ctx (post reset_cache)
-            # gets its own Chalk::IR::NodeFactory. Action methods read
-            # this via $ctx->factory() and the singleton stops being
-            # the source-of-truth for parse-level IR construction.
-            #
+            # Per-parse factory: prefer the factory injected via
+            # set_factory() (Phase 7d Step 1) so Actions and _one_ctx
+            # share one instance. Fall back to allocating a fresh one
+            # when no factory was injected (test contexts that build
+            # SA directly without parser wiring).
+            my $parse_factory = $_factory // Chalk::IR::NodeFactory->new();
             # The Bootstrap singleton is still used to construct the
             # Start node here for back-compat with action sites that
             # have not yet been migrated to read $ctx->factory(). Once
-            # all production callers are migrated (Stage 2d), the Start
-            # construction will route through the per-parse factory.
+            # all production callers are migrated (Phase 7d Step 3), the
+            # Start construction will route through $parse_factory.
             my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
             my $start   = $factory->make('Start');
             my $scope   = Chalk::Bootstrap::Scope->new()->with_control($start);
@@ -79,7 +88,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 rule     => undef,
                 mop      => $_mop,
                 scope    => $scope,
-                factory  => Chalk::IR::NodeFactory->new(),
+                factory  => $parse_factory,
             );
         }
         return $_one_singleton;
@@ -210,6 +219,17 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
     # Class method: return the currently set MOP instance (may be undef).
     sub current_mop() { return $_mop }
+
+    # Class method: inject a typed factory for _one_ctx to seed into the
+    # parse Context. When undef, _one_ctx allocates a fresh one. Callers
+    # (Actions.pm via TestPipeline) inject their $typed factory here so the
+    # whole parse uses one instance. Phase 7d Step 1.
+    # Invalidates the one() singleton so the next call recreates it with
+    # the injected factory.
+    sub set_factory($f) { $_factory = $f; $_one_singleton = undef; }
+
+    # Class method: return the currently set factory (may be undef).
+    sub current_factory() { return $_factory }
 
     # Set the TypeInference Context for the current complete event.
     # Called by FilterComposite after TI (index 2) completes, before SA runs.

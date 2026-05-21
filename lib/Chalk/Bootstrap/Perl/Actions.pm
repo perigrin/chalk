@@ -76,6 +76,11 @@ class Chalk::Bootstrap::Perl::Actions {
     ADJUST {
         $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         $typed   = Chalk::IR::NodeFactory->new();
+        # Phase 7d Step 1: inject $typed into the SemanticAction so
+        # _one_ctx seeds the parse Context with the SAME factory
+        # Actions reads. After Steps 2-3, every action method reads
+        # $ctx->factory() — and that factory IS $typed.
+        Chalk::Bootstrap::Semiring::SemanticAction::set_factory($typed);
     }
 
     # Helper: collect all leaves with defined IR focuses (Constructor or Constant nodes)
