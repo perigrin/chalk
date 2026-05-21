@@ -7,6 +7,7 @@ use experimental 'class';
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
 class Chalk::Bootstrap::Semiring::SemanticAction {
     field $actions :param = undef;
@@ -58,6 +59,16 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # natively — my sub cannot access class-scope lexicals in XS.
     method _one_ctx() {
         if (!defined $_one_singleton) {
+            # Per-parse factory: each fresh _one_ctx (post reset_cache)
+            # gets its own Chalk::IR::NodeFactory. Action methods read
+            # this via $ctx->factory() and the singleton stops being
+            # the source-of-truth for parse-level IR construction.
+            #
+            # The Bootstrap singleton is still used to construct the
+            # Start node here for back-compat with action sites that
+            # have not yet been migrated to read $ctx->factory(). Once
+            # all production callers are migrated (Stage 2d), the Start
+            # construction will route through the per-parse factory.
             my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
             my $start   = $factory->make('Start');
             my $scope   = Chalk::Bootstrap::Scope->new()->with_control($start);
@@ -68,6 +79,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 rule     => undef,
                 mop      => $_mop,
                 scope    => $scope,
+                factory  => Chalk::IR::NodeFactory->new(),
             );
         }
         return $_one_singleton;
@@ -116,6 +128,10 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             # publish a graph via update_graph; the same instance should
             # bubble up so Block/MethodDefinition see the populated graph.
             my $graph = $right->graph() // $left->graph();
+            # Propagate factory: same rule as graph — prefer right (later in
+            # the sequence), fall back to left. Per-parse factory seeded by
+            # _one_ctx threads through every multiply-merged Context.
+            my $factory = $right->factory() // $left->factory();
             Chalk::Bootstrap::Context->new(
                 focus    => undef,
                 children => [$left, $right],
@@ -124,6 +140,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 mop      => $_mop,
                 scope    => $scope,
                 graph    => $graph,
+                factory  => $factory,
             );
         });
     }
@@ -279,6 +296,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 mop         => $result_ctx->mop(),
                 graph       => $result_ctx->graph(),
                 scope       => $_pending_scope_update,
+                factory     => $result_ctx->factory(),
             );
             $_pending_scope_update = undef;
         }
@@ -308,6 +326,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 mop         => $result_ctx->mop(),
                 scope       => $result_ctx->scope(),
                 graph       => $_pending_graph_update,
+                factory     => $result_ctx->factory(),
             );
             $_pending_graph_update = undef;
         }
@@ -328,6 +347,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                     mop         => $result_ctx->mop(),
                     graph       => $result_ctx->graph(),
                     scope       => $inherited_scope,
+                    factory     => $result_ctx->factory(),
                 );
             }
         }
@@ -348,6 +368,28 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                     mop         => $result_ctx->mop(),
                     scope       => $result_ctx->scope(),
                     graph       => $inherited_graph,
+                    factory     => $result_ctx->factory(),
+                );
+            }
+        }
+
+        # Propagate factory: inherit from $value if result has no factory.
+        if (!defined $result_ctx->factory()) {
+            my $inherited_factory = $value->factory();
+            if (defined $inherited_factory) {
+                $result_ctx = Chalk::Bootstrap::Context->new(
+                    focus       => $result_ctx->focus(),
+                    children    => $result_ctx->children(),
+                    position    => $result_ctx->position(),
+                    rule        => $result_ctx->rule(),
+                    annotations => $result_ctx->annotations(),
+                    token       => $result_ctx->token(),
+                    is_zero     => $result_ctx->is_zero(),
+                    error       => $result_ctx->error(),
+                    mop         => $result_ctx->mop(),
+                    scope       => $result_ctx->scope(),
+                    graph       => $result_ctx->graph(),
+                    factory     => $inherited_factory,
                 );
             }
         }
@@ -414,6 +456,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 mop         => $correct->mop(),
                 graph       => $correct->graph(),
                 scope       => $rejected_scope,
+                factory     => $correct->factory(),
             );
             # Transfer the rebuilt context's scope to the original via annotations hack:
             # We can't replace $correct's identity (caller holds a reference), so

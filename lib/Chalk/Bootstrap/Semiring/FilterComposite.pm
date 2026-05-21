@@ -126,6 +126,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
                 mop      => ($is_ctx ? $sa_one->mop() : undef),
                 scope    => ($is_ctx ? $sa_one->scope() : undef),
                 graph    => ($is_ctx ? $sa_one->graph() : undef),
+                factory  => ($is_ctx ? $sa_one->factory() : undef),
             );
         };
     }
@@ -153,6 +154,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             is_zero     => false,
             scope       => ($is_ctx ? $sa_result->scope() : undef),
             graph       => ($is_ctx ? $sa_result->graph() : undef),
+            factory     => ($is_ctx ? $sa_result->factory() : undef),
             annotations => {
                 ($is_ctx ? $sa_result->annotations()->%* : ()),
                 %slot_results,
