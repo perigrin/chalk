@@ -116,14 +116,18 @@ my %CFG_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
 my %ROUTED_CFG = map { $_ => 1 } qw(If Proj Region Phi Loop);
 
 # Per-op input-keyword mapping. Mirrors Bootstrap's %INPUT_SPECS:
-# Actions.pm passes named params (control => ..., condition => ...)
-# and make() translates those into inputs => [...] in the order listed.
-# Used only for ROUTED_CFG ops; data ops use inputs => [...] directly.
+# Actions.pm passes named params (control => ..., condition => ...,
+# value => ...) and make() translates those into inputs => [...] in the
+# order listed. Applies to both ROUTED_CFG ops and hash-consed CFG-like
+# ops (Return/Unwind), so callers can use either inputs => [...] or
+# named-keyword shape — typed factory handles both.
 my %INPUT_SPECS = (
-    If    => ['control', 'condition'],
-    Proj  => ['source'],
+    If     => ['control', 'condition'],
+    Proj   => ['source'],
     Region => ['controls'],
-    Loop  => ['entry_ctrl', 'backedge_ctrl'],
+    Loop   => ['entry_ctrl', 'backedge_ctrl'],
+    Return => ['value'],   # though Actions uses inputs => [$ctrl, $val]
+    Unwind => ['value'],
     # Phi has its own handler at make() top
 );
 
@@ -171,8 +175,13 @@ class Chalk::IR::NodeFactory {
                 inputs => (defined $values ? $values : []),
                 %args,
             );
-            # Register consumers from the values arrayref (these are the
-            # phi operands; the region is tracked separately).
+            # Register consumers from the values arrayref AND the region.
+            # The region is a use-def input even though it's tracked as a
+            # named field rather than via inputs() — Bootstrap's
+            # %INPUT_SPECS treats it the same way.
+            if (defined $region) {
+                $region->add_consumer($node);
+            }
             if (defined $values) {
                 for my $el ($values->@*) {
                     next unless defined $el;
@@ -188,19 +197,21 @@ class Chalk::IR::NodeFactory {
         # be constructed via Bootstrap::make() rather than make_cfg.
         # Treat them like make_cfg() for identity, like make() for caller
         # convenience.
+        # Translate Bootstrap's named-input keywords into inputs => [...]
+        # in declared order. Applies to any op with an INPUT_SPECS entry;
+        # callers using inputs => [...] directly pass through unchanged.
+        # Mirrors Bootstrap::IR::NodeFactory::make's behavior.
+        if (exists $INPUT_SPECS{$op_name} && !exists $args{inputs}) {
+            my @inputs;
+            for my $name ($INPUT_SPECS{$op_name}->@*) {
+                push @inputs, delete $args{$name};
+            }
+            $args{inputs} = \@inputs;
+        }
+
         if (exists $ROUTED_CFG{$op_name}) {
             my $class = $CFG_CLASSES{$op_name}
                 or die "Unknown CFG node operation: $op_name";
-            # Translate Bootstrap's named-input keywords into inputs =>
-            # [...] in declared order. Callers using the inputs => [...]
-            # shape directly pass through unchanged.
-            if (exists $INPUT_SPECS{$op_name} && !exists $args{inputs}) {
-                my @inputs;
-                for my $name ($INPUT_SPECS{$op_name}->@*) {
-                    push @inputs, delete $args{$name};
-                }
-                $args{inputs} = \@inputs;
-            }
             $cfg_counter++;
             my $id = "${op_name}#${cfg_counter}";
             my $node = $class->new( id => $id, %args );
