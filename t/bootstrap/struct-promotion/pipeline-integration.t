@@ -12,6 +12,7 @@ use Chalk::IR::Node::Return;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::Program;
+use Chalk::IR::NodeFactory;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
@@ -19,10 +20,66 @@ sub const_node($type, $value) {
     return $factory->make('Constant', const_type => $type, value => $value);
 }
 
-# Helper: create a computation IR node (VarDecl, BinaryExpr, etc.)
+# Operator-to-typed-class map used to dispatch BinaryExpr to polymorphic typed
+# nodes (Add, Assign, ...) — mirrors Chalk::IR::Shim::%BINOP_MAP.
+my %BINOP_MAP = (
+    '+'   => 'Add',        '-'   => 'Subtract',  '*'   => 'Multiply',
+    '/'   => 'Divide',     '%'   => 'Modulo',     '**'  => 'Power',
+    '.'   => 'Concat',
+    '=='  => 'NumEq',      '!='  => 'NumNe',      '<'   => 'NumLt',
+    '>'   => 'NumGt',      '<='  => 'NumLe',      '>='  => 'NumGe',
+    '<=>' => 'NumCmp',
+    'eq'  => 'StrEq',      'ne'  => 'StrNe',      'lt'  => 'StrLt',
+    'gt'  => 'StrGt',      'le'  => 'StrLe',      'ge'  => 'StrGe',
+    'cmp' => 'StrCmp',
+    '&&'  => 'And',        '||'  => 'Or',
+    'and' => 'And',        'or'  => 'Or',
+    '&'   => 'BitAnd',     '|'   => 'BitOr',      '^'   => 'BitXor',
+    '<<'  => 'LeftShift',  '>>'  => 'RightShift',
+    '='   => 'Assign',
+    'x'   => 'Repeat',
+    '=~'  => 'Match',      '!~'  => 'NotMatch',
+    '//'  => 'DefinedOr',
+    'xor' => 'Xor',
+    '..'  => 'Range',      '...' => 'Yada',
+    'isa' => 'IsaOp',
+);
+
+# Helper: create a typed IR node by legacy Constructor class name.
+# Dispatches directly to Chalk::IR::NodeFactory and preserves compat_class
+# so $node->class() still returns the legacy name expected by the optimizer.
 sub ctor($class, %inputs) {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
-    return $factory->make('Constructor', class => $class, %inputs);
+    state $typed = Chalk::IR::NodeFactory->new;
+    if ($class eq 'BinaryExpr') {
+        my $op_str = $inputs{op}->value();
+        my $type   = $BINOP_MAP{$op_str}
+            or die "ctor: unknown binary op '$op_str'";
+        return $typed->make($type,
+            inputs       => [$inputs{op}, $inputs{left}, $inputs{right}],
+            left         => $inputs{left},
+            right        => $inputs{right},
+            compat_class => 'BinaryExpr',
+        );
+    }
+    if ($class eq 'SubscriptExpr') {
+        return $typed->make('Subscript',
+            inputs       => [$inputs{target}, $inputs{index}, $inputs{style}],
+            compat_class => 'SubscriptExpr',
+        );
+    }
+    if ($class eq 'HashRefExpr') {
+        return $typed->make('HashRef',
+            inputs       => [$inputs{pairs}],
+            compat_class => 'HashRefExpr',
+        );
+    }
+    if ($class eq 'VarDecl') {
+        return $typed->make('VarDecl',
+            inputs       => [$inputs{control}, $inputs{variable}, $inputs{initializer}],
+            compat_class => 'VarDecl',
+        );
+    }
+    die "ctor: unsupported class '$class'";
 }
 
 # Helper: create a Return CFG node

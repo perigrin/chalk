@@ -12,6 +12,9 @@ use lib 't/bootstrap/lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Program;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -20,11 +23,10 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 my $parent_name = 'Test::ISA::Parent';
 my $child_name  = 'Test::ISA::Child';
 
-my $child_method = $factory->make('Constructor',
-    class  => 'MethodDecl',
-    name   => $factory->make('Constant', const_type => 'string', value => 'greet'),
-    params => [$factory->make('Constant', const_type => 'string', value => '$self')],
-    body   => [
+my $child_method = Chalk::IR::MethodInfo->new(
+    name        => 'greet',
+    params      => [$factory->make('Constant', const_type => 'string', value => '$self')],
+    body        => [
         $factory->make_cfg('Return',
             inputs => [
                 $factory->make('Start'),
@@ -35,16 +37,15 @@ my $child_method = $factory->make('Constructor',
     return_type => undef,
 );
 
-my $class_decl = $factory->make('Constructor',
-    class  => 'ClassDecl',
-    name   => $factory->make('Constant', const_type => 'string', value => $child_name),
-    parent => $factory->make('Constant', const_type => 'string', value => $parent_name),
-    body   => [$child_method],
+my $class_decl = Chalk::IR::ClassInfo->new(
+    name    => $child_name,
+    parent  => $parent_name,
+    methods => [$child_method],
+    body    => [$child_method],
 );
 
-my $program = $factory->make('Constructor',
-    class      => 'Program',
-    statements => [$class_decl],
+my $program = Chalk::IR::Program->new(
+    classes => [$class_decl],
 );
 
 # Generate XS wrapper and check it contains :isa registration

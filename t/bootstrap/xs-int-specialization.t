@@ -8,29 +8,49 @@ use lib 'lib';
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Program;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
+
+# BinaryExpr operator -> typed-node class name (subset of Shim's %BINOP_MAP
+# covering the operators used in this test).
+my %BINOP_MAP = (
+    '+' => 'Add',
+    '-' => 'Subtract',
+    '*' => 'Multiply',
+);
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory     = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $typed       = Chalk::IR::NodeFactory->new();
+
+# Helper: build a typed BinaryExpr-equivalent node from operator string + operands.
+my sub make_binop ($typed_factory, $op_str, $left, $right) {
+    my $type = $BINOP_MAP{$op_str}
+        or die "Unsupported binop in this test: '$op_str'";
+    my $op_node = $factory->make('Constant', const_type => 'string', value => $op_str);
+    return $typed_factory->make($type,
+        inputs       => [$op_node, $left, $right],
+        left         => $left,
+        right        => $right,
+        compat_class => 'BinaryExpr',
+    );
+}
 
 # Build IR: a class with a method that does integer arithmetic
 # method add_one($self, $n) { return $n + 1; }
-my $method = $factory->make('Constructor',
-    class  => 'MethodDecl',
-    name   => $factory->make('Constant', const_type => 'string', value => 'add_one'),
-    params => [
-        $factory->make('Constant', const_type => 'string', value => '$self'),
-        $factory->make('Constant', const_type => 'string', value => '$n'),
-    ],
+my $method = Chalk::IR::MethodInfo->new(
+    name   => 'add_one',
+    params => ['$self', '$n'],
     body   => [
         $factory->make_cfg('Return',
             inputs => [
                 $factory->make('Start'),
-                $factory->make('Constructor',
-                    class => 'BinaryExpr',
-                    op    => $factory->make('Constant', const_type => 'string', value => '+'),
-                    left  => $factory->make('Constant', const_type => 'variable', value => '$n'),
-                    right => $factory->make('Constant', const_type => 'string', value => '1'),
+                make_binop($typed, '+',
+                    $factory->make('Constant', const_type => 'variable', value => '$n'),
+                    $factory->make('Constant', const_type => 'string',   value => '1'),
                 ),
             ],
         ),
@@ -38,16 +58,15 @@ my $method = $factory->make('Constructor',
     return_type => undef,
 );
 
-my $class_decl = $factory->make('Constructor',
-    class  => 'ClassDecl',
-    name   => $factory->make('Constant', const_type => 'string', value => 'Test::IntSpec'),
-    parent => undef,
-    body   => [$method],
+my $class_decl = Chalk::IR::ClassInfo->new(
+    name    => 'Test::IntSpec',
+    parent  => undef,
+    methods => [$method],
+    body    => [$method],
 );
 
-my $program = $factory->make('Constructor',
-    class      => 'Program',
-    statements => [$class_decl],
+my $program = Chalk::IR::Program->new(
+    classes => [$class_decl],
 );
 
 my $target = Chalk::Bootstrap::Perl::Target::C->new(module_name => 'Test::IntSpec');
@@ -81,6 +100,7 @@ like($c_code, qr/sv_2mortal/, 'result wrapped in sv_2mortal');
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory2 = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $typed2   = Chalk::IR::NodeFactory->new();
 
 # Helper: make a Constant(variable) node
 my sub var($name) {
@@ -92,13 +112,16 @@ my sub lit($val) {
     return $factory2->make('Constant', const_type => 'string', value => $val);
 }
 
-# Helper: make a BinaryExpr node
+# Helper: make a typed binary-op node (BinaryExpr-equivalent)
 my sub binop($op, $l, $r) {
-    return $factory2->make('Constructor',
-        class => 'BinaryExpr',
-        op    => lit($op),
-        left  => $l,
-        right => $r,
+    my $type = $BINOP_MAP{$op}
+        or die "Unsupported binop in this test: '$op'";
+    my $op_node = lit($op);
+    return $typed2->make($type,
+        inputs       => [$op_node, $l, $r],
+        left         => $l,
+        right        => $r,
+        compat_class => 'BinaryExpr',
     );
 }
 
@@ -112,12 +135,11 @@ my sub ret($val) {
 # Helper: build a method returning a single expression.
 # Last element of @params_and_expr is the expression; all others are param names.
 my sub method_returning($name, @params_and_expr) {
-    my $expr       = pop @params_and_expr;
-    my @param_nodes = map { lit($_) } @params_and_expr;
-    return $factory2->make('Constructor',
-        class       => 'MethodDecl',
-        name        => lit($name),
-        params      => \@param_nodes,
+    my $expr        = pop @params_and_expr;
+    my @param_names = @params_and_expr;
+    return Chalk::IR::MethodInfo->new(
+        name        => $name,
+        params      => \@param_names,
         body        => [ ret($expr) ],
         return_type => undef,
     );
@@ -168,16 +190,16 @@ my $m7 = method_returning('chart_index', '$self', '$pos', '$origin',
     ),
 );
 
-my $class2 = $factory2->make('Constructor',
-    class  => 'ClassDecl',
-    name   => lit('Test::ParseLoop'),
-    parent => undef,
-    body   => [ $m1, $m2, $m3, $m4, $m5, $m6, $m7 ],
+my @methods2 = ($m1, $m2, $m3, $m4, $m5, $m6, $m7);
+my $class2 = Chalk::IR::ClassInfo->new(
+    name    => 'Test::ParseLoop',
+    parent  => undef,
+    methods => \@methods2,
+    body    => \@methods2,
 );
 
-my $program2 = $factory2->make('Constructor',
-    class      => 'Program',
-    statements => [$class2],
+my $program2 = Chalk::IR::Program->new(
+    classes => [$class2],
 );
 
 my $target2  = Chalk::Bootstrap::Perl::Target::C->new(module_name => 'Test::ParseLoop');

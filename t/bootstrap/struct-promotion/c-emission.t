@@ -8,6 +8,7 @@ use Test2::V0;
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::EmitHelpers;
+use Chalk::IR::NodeFactory;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
@@ -15,10 +16,24 @@ sub const_node($type, $value) {
     return $factory->make('Constant', const_type => $type, value => $value);
 }
 
-# Helper: create a Constructor node
+# Helper: create a typed IR node by legacy Constructor class name.
+# Dispatches directly to Chalk::IR::NodeFactory and preserves compat_class
+# so $node->class() still returns the legacy name expected by emitters.
 sub ctor($class, %inputs) {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
-    return $factory->make('Constructor', class => $class, %inputs);
+    state $typed = Chalk::IR::NodeFactory->new;
+    if ($class eq 'StructRef') {
+        return $typed->make('StructRef',
+            inputs       => [$inputs{schema}, $inputs{fields}],
+            compat_class => 'StructRef',
+        );
+    }
+    if ($class eq 'FieldAccess') {
+        return $typed->make('StructFieldAccess',
+            inputs       => [$inputs{schema}, $inputs{field_name}, $inputs{target}],
+            compat_class => 'FieldAccess',
+        );
+    }
+    die "ctor: unsupported class '$class'";
 }
 
 # We need an EmitHelpers instance — it's abstract but we can use Target::C

@@ -7,11 +7,32 @@ use Test2::V0;
 
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
 # Reset factory to ensure clean test state
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+
+# Helper: create a typed IR node by legacy Constructor class name.
+# Dispatches directly to Chalk::IR::NodeFactory and preserves compat_class
+# so $node->class() still returns the legacy name.
+sub ctor($class, %inputs) {
+    state $typed = Chalk::IR::NodeFactory->new;
+    if ($class eq 'StructRef') {
+        return $typed->make('StructRef',
+            inputs       => [$inputs{schema}, $inputs{fields}],
+            compat_class => 'StructRef',
+        );
+    }
+    if ($class eq 'FieldAccess') {
+        return $typed->make('StructFieldAccess',
+            inputs       => [$inputs{schema}, $inputs{field_name}, $inputs{target}],
+            compat_class => 'FieldAccess',
+        );
+    }
+    die "ctor: unsupported class '$class'";
+}
 
 # === StructRef node type ===
 
@@ -32,8 +53,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
         value      => '0',
     );
 
-    my $struct = $factory->make('Constructor',
-        class  => 'StructRef',
+    my $struct = ctor('StructRef',
         schema => $schema_node,
         fields => [$rule_val, $alt_val],
     );
@@ -62,8 +82,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
         value      => 'item_sv',
     );
 
-    my $access = $factory->make('Constructor',
-        class      => 'FieldAccess',
+    my $access = ctor('FieldAccess',
         schema     => $schema_node,
         field_name => $field_name_node,
         target     => $target_node,
@@ -88,14 +107,12 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
         value      => '42',
     );
 
-    my $struct_a = $factory->make('Constructor',
-        class  => 'StructRef',
+    my $struct_a = ctor('StructRef',
         schema => $schema1,
         fields => [$field1],
     );
 
-    my $struct_b = $factory->make('Constructor',
-        class  => 'StructRef',
+    my $struct_b = ctor('StructRef',
         schema => $schema1,
         fields => [$field1],
     );
@@ -121,15 +138,13 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
         value      => 'obj_sv',
     );
 
-    my $access_a = $factory->make('Constructor',
-        class      => 'FieldAccess',
+    my $access_a = ctor('FieldAccess',
         schema     => $schema,
         field_name => $fname,
         target     => $target,
     );
 
-    my $access_b = $factory->make('Constructor',
-        class      => 'FieldAccess',
+    my $access_b = ctor('FieldAccess',
         schema     => $schema,
         field_name => $fname,
         target     => $target,
@@ -156,14 +171,12 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
         value      => '2',
     );
 
-    my $struct_x = $factory->make('Constructor',
-        class  => 'StructRef',
+    my $struct_x = ctor('StructRef',
         schema => $schema,
         fields => [$field_a],
     );
 
-    my $struct_y = $factory->make('Constructor',
-        class  => 'StructRef',
+    my $struct_y = ctor('StructRef',
         schema => $schema,
         fields => [$field_b],
     );

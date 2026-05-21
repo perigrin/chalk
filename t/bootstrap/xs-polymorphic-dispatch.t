@@ -7,20 +7,21 @@ use Test::More;
 use lib 'lib';
 
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Program;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
 
 # Build a minimal IR: a class with a single no-op method so _generate_c_files
 # has something to process without hitting undef errors.
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
-my $method = $factory->make('Constructor',
-    class  => 'MethodDecl',
-    name   => $factory->make('Constant', const_type => 'string', value => 'stub'),
-    params => [
-        $factory->make('Constant', const_type => 'string', value => '$self'),
-    ],
+my $method = Chalk::IR::MethodInfo->new(
+    name   => 'stub',
+    params => ['$self'],
     body   => [
         $factory->make_cfg('Return',
             inputs => [
@@ -32,16 +33,15 @@ my $method = $factory->make('Constructor',
     return_type => undef,
 );
 
-my $class_decl = $factory->make('Constructor',
-    class  => 'ClassDecl',
-    name   => $factory->make('Constant', const_type => 'string', value => 'Test::Dispatch::Host'),
-    parent => undef,
-    body   => [$method],
+my $class_decl = Chalk::IR::ClassInfo->new(
+    name    => 'Test::Dispatch::Host',
+    parent  => undef,
+    methods => [$method],
+    body    => [$method],
 );
 
-my $program = $factory->make('Constructor',
-    class      => 'Program',
-    statements => [$class_decl],
+my $program = Chalk::IR::Program->new(
+    classes => [$class_decl],
 );
 
 # Three fake compiled classes all implement is_zero, add, multiply.
@@ -187,24 +187,23 @@ is($alpha_include_count, 1, '#include "testsemiringalpha.h" appears exactly once
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory2 = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $typed2   = Chalk::IR::NodeFactory->new;
 
-my $call_node = $factory2->make('Constructor',
-    class       => 'MethodCallExpr',
-    invocant    => $factory2->make('Constant', const_type => 'string', value => '$sr'),
-    method_name => $factory2->make('Constant', const_type => 'string', value => 'is_zero'),
-    args        => [
-        $factory2->make('Constant', const_type => 'string', value => '$v'),
+my $method_name_node = $factory2->make('Constant', const_type => 'string', value => 'is_zero');
+my $call_node = $typed2->make('Call',
+    dispatch_kind => 'method',
+    name          => $method_name_node->value(),
+    inputs        => [
+        $factory2->make('Constant', const_type => 'string', value => '$sr'),
+        $method_name_node,
+        [ $factory2->make('Constant', const_type => 'string', value => '$v') ],
     ],
+    compat_class  => 'MethodCallExpr',
 );
 
-my $check_method = $factory2->make('Constructor',
-    class  => 'MethodDecl',
-    name   => $factory2->make('Constant', const_type => 'string', value => 'check'),
-    params => [
-        $factory2->make('Constant', const_type => 'string', value => '$self'),
-        $factory2->make('Constant', const_type => 'string', value => '$sr'),
-        $factory2->make('Constant', const_type => 'string', value => '$v'),
-    ],
+my $check_method = Chalk::IR::MethodInfo->new(
+    name   => 'check',
+    params => ['$self', '$sr', '$v'],
     body   => [
         $factory2->make_cfg('Return',
             inputs => [ $factory2->make('Start'), $call_node ],
@@ -213,16 +212,15 @@ my $check_method = $factory2->make('Constructor',
     return_type => undef,
 );
 
-my $class_decl2 = $factory2->make('Constructor',
-    class  => 'ClassDecl',
-    name   => $factory2->make('Constant', const_type => 'string', value => 'Test::Dispatch::Host2'),
-    parent => undef,
-    body   => [$check_method],
+my $class_decl2 = Chalk::IR::ClassInfo->new(
+    name    => 'Test::Dispatch::Host2',
+    parent  => undef,
+    methods => [$check_method],
+    body    => [$check_method],
 );
 
-my $program2 = $factory2->make('Constructor',
-    class      => 'Program',
-    statements => [$class_decl2],
+my $program2 = Chalk::IR::Program->new(
+    classes => [$class_decl2],
 );
 
 my $target2 = Chalk::Bootstrap::Perl::Target::C->new(
@@ -273,10 +271,9 @@ for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $f = Chalk::Bootstrap::IR::NodeFactory->instance();
 
-    my $method_node = $f->make('Constructor',
-        class  => 'MethodDecl',
-        name   => $f->make('Constant', const_type => 'string', value => 'stub'),
-        params => [$f->make('Constant', const_type => 'string', value => '$self')],
+    my $method_node = Chalk::IR::MethodInfo->new(
+        name   => 'stub',
+        params => ['$self'],
         body   => [
             $f->make_cfg('Return',
                 inputs => [ $f->make('Start'), $f->make('Constant', const_type => 'string', value => '1') ],
@@ -285,16 +282,15 @@ for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
         return_type => undef,
     );
 
-    my $class_decl = $f->make('Constructor',
-        class  => 'ClassDecl',
-        name   => $f->make('Constant', const_type => 'string', value => 'Test::ReaderEdge'),
-        parent => undef,
-        body   => [$method_node],
+    my $class_decl = Chalk::IR::ClassInfo->new(
+        name    => 'Test::ReaderEdge',
+        parent  => undef,
+        methods => [$method_node],
+        body    => [$method_node],
     );
 
-    my $program = $f->make('Constructor',
-        class      => 'Program',
-        statements => [$class_decl],
+    my $program = Chalk::IR::Program->new(
+        classes => [$class_decl],
     );
 
     # Two classes that share a :reader 'name' — these should NOT go into poly dispatch

@@ -9,6 +9,9 @@ use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Program;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -21,22 +24,20 @@ my $method_body_return = $factory->make_cfg('Return',
         $factory->make('Constant', const_type => 'string', value => '1'),
     ],
 );
-my $method = $factory->make('Constructor',
-    class  => 'MethodDecl',
-    name   => $factory->make('Constant', const_type => 'string', value => 'hello'),
-    params => [$factory->make('Constant', const_type => 'string', value => '$self')],
-    body   => [$method_body_return],
+my $method = Chalk::IR::MethodInfo->new(
+    name        => 'hello',
+    params      => [$factory->make('Constant', const_type => 'string', value => '$self')],
+    body        => [$method_body_return],
     return_type => undef,
 );
-my $class_decl = $factory->make('Constructor',
-    class  => 'ClassDecl',
-    name   => $factory->make('Constant', const_type => 'string', value => $class_name),
-    parent => undef,
-    body   => [$method],
+my $class_decl = Chalk::IR::ClassInfo->new(
+    name    => $class_name,
+    parent  => undef,
+    methods => [$method],
+    body    => [$method],
 );
-my $program = $factory->make('Constructor',
-    class      => 'Program',
-    statements => [$class_decl],
+my $program = Chalk::IR::Program->new(
+    classes => [$class_decl],
 );
 
 # Use a module name that produces a different slug than the class name.
