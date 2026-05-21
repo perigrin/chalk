@@ -9,37 +9,30 @@ use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::Perl;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Program;
+use Chalk::IR::SubInfo;
 
 # Reset factory for clean test state
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 my $target  = Chalk::Bootstrap::Perl::Target::Perl->new();
 
-# === Helper: build a SubDecl IR node ===
+# === Helper: build a SubInfo IR node ===
 
 my sub make_sub_decl(%args) {
-    my $name = $factory->make('Constant',
-        const_type => 'string', value => $args{name});
-    my @param_nodes = map {
-        $factory->make('Constant', const_type => 'string', value => $_)
-    } ($args{params} // [])->@*;
     my @body_nodes = ($args{body} // [])->@*;
-    my $scope = $factory->make('Constant',
-        const_type => 'string', value => $args{scope} // 'package');
-    return $factory->make('Constructor',
-        class  => 'SubDecl',
-        name   => $name,
-        params => \@param_nodes,
+    return Chalk::IR::SubInfo->new(
+        name   => $args{name},
+        params => [($args{params} // [])->@*],
         body   => \@body_nodes,
-        scope  => $scope,
+        scope  => $args{scope} // 'package',
     );
 }
 
 # Helper: wrap a statement node in a Program to go through generate()
 my sub emit_via_program($stmt) {
-    my $program = $factory->make('Constructor',
-        class      => 'Program',
-        statements => [$stmt],
+    my $program = Chalk::IR::Program->new(
+        top_level_subs => [$stmt],
     );
     return $target->generate($program);
 }

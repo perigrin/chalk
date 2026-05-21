@@ -1,5 +1,5 @@
-# ABOUTME: Unit tests for Perl IR constructor types via NodeFactory.
-# ABOUTME: Validates Program, UseDecl, ClassDecl, MethodDecl, Return CFG node, Unwind CFG node creation.
+# ABOUTME: Unit tests for Perl IR Tier-A typed constructors and CFG nodes.
+# ABOUTME: Validates Program, UseInfo, ClassInfo, MethodInfo, Return CFG node, Unwind CFG node creation.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -8,6 +8,10 @@ use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
+use Chalk::IR::Program;
+use Chalk::IR::UseInfo;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
 
 # Reset factory for clean state
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -57,109 +61,97 @@ my $str_die_msg = $f->make('Constant', const_type => 'string', value => 'Subclas
     is($die->inputs()->[1][0], $str_die_msg, 'Unwind args[0] is the message');
 }
 
-# === Constructor:MethodDecl ===
+# === MethodInfo ===
 
 {
     my $ctrl = $f->make('Start');
     my $ret_stmt = $f->make_cfg('Return',
         inputs => [$ctrl, $str_start],
     );
-    my $meth = $f->make('Constructor',
-        class  => 'MethodDecl',
-        name   => $str_op,
+    my $meth = Chalk::IR::MethodInfo->new(
+        name   => 'operation',
         params => [],
         body   => [$ret_stmt],
     );
-    ok(defined $meth, 'MethodDecl created');
-    is($meth->class(), 'MethodDecl', 'MethodDecl class');
-    is(scalar $meth->inputs()->@*, 4, 'MethodDecl has 4 inputs (name, params, body, return_type)');
-    is($meth->inputs()->[0], $str_op, 'MethodDecl name is operation');
-    is(ref($meth->inputs()->[1]), 'ARRAY', 'MethodDecl params is arrayref');
-    is(scalar $meth->inputs()->[1]->@*, 0, 'MethodDecl params is empty');
-    is(ref($meth->inputs()->[2]), 'ARRAY', 'MethodDecl body is arrayref');
-    is($meth->inputs()->[2][0], $ret_stmt, 'MethodDecl body[0] is return stmt');
+    ok(defined $meth, 'MethodInfo created');
+    isa_ok($meth, 'Chalk::IR::MethodInfo', 'MethodInfo class');
+    is($meth->name(), 'operation', 'MethodInfo name is operation');
+    is(ref($meth->params()), 'ARRAY', 'MethodInfo params is arrayref');
+    is(scalar $meth->params()->@*, 0, 'MethodInfo params is empty');
+    is(ref($meth->body()), 'ARRAY', 'MethodInfo body is arrayref');
+    is($meth->body()->[0], $ret_stmt, 'MethodInfo body[0] is return stmt');
 }
 
-# === Constructor:UseDecl ===
+# === UseInfo ===
 
 {
-    my $use = $f->make('Constructor',
-        class       => 'UseDecl',
-        module_name => $str_542,
-        import_args => undef,
+    my $use = Chalk::IR::UseInfo->new(
+        name => '5.42.0',
+        args => [],
     );
-    ok(defined $use, 'UseDecl created');
-    is($use->class(), 'UseDecl', 'UseDecl class');
-    is(scalar $use->inputs()->@*, 2, 'UseDecl has 2 inputs');
-    is($use->inputs()->[0], $str_542, 'UseDecl module_name');
-    is($use->inputs()->[1], undef, 'UseDecl import_args is undef');
+    ok(defined $use, 'UseInfo created');
+    isa_ok($use, 'Chalk::IR::UseInfo', 'UseInfo class');
+    is($use->name(), '5.42.0', 'UseInfo name');
+    is(ref($use->args()), 'ARRAY', 'UseInfo args is arrayref');
+    is(scalar $use->args()->@*, 0, 'UseInfo args is empty');
 }
 
 {
-    my $use_with_args = $f->make('Constructor',
-        class       => 'UseDecl',
-        module_name => $str_exp,
-        import_args => [$str_class],
+    my $use_with_args = Chalk::IR::UseInfo->new(
+        name => 'experimental',
+        args => [$str_class],
     );
-    ok(defined $use_with_args, 'UseDecl with args created');
-    is(ref($use_with_args->inputs()->[1]), 'ARRAY', 'UseDecl import_args is arrayref');
-    is($use_with_args->inputs()->[1][0], $str_class, 'UseDecl import_args[0] is class');
+    ok(defined $use_with_args, 'UseInfo with args created');
+    is(ref($use_with_args->args()), 'ARRAY', 'UseInfo args is arrayref');
+    is($use_with_args->args()->[0], $str_class, 'UseInfo args[0] is class');
 }
 
-# === Constructor:ClassDecl ===
+# === ClassInfo ===
 
 {
-    my $method_node = $f->make('Constructor',
-        class  => 'MethodDecl',
-        name   => $str_op,
+    my $ctrl = $f->make('Start');
+    my $method_node = Chalk::IR::MethodInfo->new(
+        name   => 'operation',
         params => [],
-        body   => [$f->make_cfg('Return', inputs => [$f->make('Start'), $str_start])],
+        body   => [$f->make_cfg('Return', inputs => [$ctrl, $str_start])],
     );
-    my $cls = $f->make('Constructor',
-        class  => 'ClassDecl',
-        name   => $str_name,
-        parent => $str_parent,
-        body   => [$method_node],
+    my $cls = Chalk::IR::ClassInfo->new(
+        name    => 'Chalk::Bootstrap::IR::Node::Start',
+        parent  => 'Chalk::Bootstrap::IR::Node',
+        methods => [$method_node],
+        body    => [$method_node],
     );
-    ok(defined $cls, 'ClassDecl created');
-    is($cls->class(), 'ClassDecl', 'ClassDecl class');
-    is(scalar $cls->inputs()->@*, 3, 'ClassDecl has 3 inputs');
-    is($cls->inputs()->[0], $str_name, 'ClassDecl name');
-    is($cls->inputs()->[1], $str_parent, 'ClassDecl parent');
-    is(ref($cls->inputs()->[2]), 'ARRAY', 'ClassDecl body is arrayref');
+    ok(defined $cls, 'ClassInfo created');
+    isa_ok($cls, 'Chalk::IR::ClassInfo', 'ClassInfo class');
+    is($cls->name(), 'Chalk::Bootstrap::IR::Node::Start', 'ClassInfo name');
+    is($cls->parent(), 'Chalk::Bootstrap::IR::Node', 'ClassInfo parent');
+    is(ref($cls->body()), 'ARRAY', 'ClassInfo body is arrayref');
 }
 
 {
-    # ClassDecl without parent
-    my $cls_no_parent = $f->make('Constructor',
-        class  => 'ClassDecl',
-        name   => $str_name,
+    # ClassInfo without parent
+    my $cls_no_parent = Chalk::IR::ClassInfo->new(
+        name   => 'Chalk::Bootstrap::IR::Node::Start',
         parent => undef,
         body   => [],
     );
-    ok(defined $cls_no_parent, 'ClassDecl without parent created');
-    is($cls_no_parent->inputs()->[1], undef, 'ClassDecl parent is undef');
+    ok(defined $cls_no_parent, 'ClassInfo without parent created');
+    is($cls_no_parent->parent(), undef, 'ClassInfo parent is undef');
 }
 
-# === Constructor:Program ===
+# === Program ===
 
 {
-    my $use1 = $f->make('Constructor',
-        class => 'UseDecl', module_name => $str_542, import_args => undef,
-    );
-    my $use2 = $f->make('Constructor',
-        class => 'UseDecl', module_name => $str_utf8, import_args => undef,
-    );
-    my $prog = $f->make('Constructor',
-        class      => 'Program',
-        statements => [$use1, $use2],
+    my $use1 = Chalk::IR::UseInfo->new(name => '5.42.0', args => []);
+    my $use2 = Chalk::IR::UseInfo->new(name => 'utf8',   args => []);
+    my $prog = Chalk::IR::Program->new(
+        use_decls => [$use1, $use2],
     );
     ok(defined $prog, 'Program created');
-    is($prog->class(), 'Program', 'Program class');
-    is(scalar $prog->inputs()->@*, 1, 'Program has 1 input');
-    is(ref($prog->inputs()->[0]), 'ARRAY', 'Program statements is arrayref');
-    is(scalar $prog->inputs()->[0]->@*, 2, 'Program has 2 statements');
-    is($prog->inputs()->[0][0], $use1, 'Program statement[0] is use1');
+    isa_ok($prog, 'Chalk::IR::Program', 'Program class');
+    is(ref($prog->use_decls()), 'ARRAY', 'Program use_decls is arrayref');
+    is(scalar $prog->use_decls()->@*, 2, 'Program has 2 use_decls');
+    is($prog->use_decls()->[0], $use1, 'Program use_decls[0] is use1');
 }
 
 # === CFG uniqueness — Return nodes are always distinct (CFG semantics) ===

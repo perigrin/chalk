@@ -188,8 +188,9 @@ use Chalk::IR::Program;
         local $TODO = 'Constructor Program not yet supported by _generate_with_cfg';
         my $code;
         try {
-            my $program = $factory->make('Constructor', 'class' => 'Program',
-                statements => [$if_node]);
+            my $program = Chalk::IR::Program->new(
+                other_stmts => [$if_node],
+            );
             my $target = Chalk::Bootstrap::Perl::Target::Perl->new();
             $code = $target->_generate_with_cfg($program, $sa, $parent_ctx);
         } catch ($e) {
