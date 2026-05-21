@@ -8,8 +8,7 @@ use File::Find ();
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::IR::NodeFactory;use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Semiring::FilterComposite;
 
 # ============================================================================
@@ -23,7 +22,6 @@ my %SKIP = (
 # ============================================================================
 # Build the parse infrastructure.
 # ============================================================================
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 unless (defined $ir) {

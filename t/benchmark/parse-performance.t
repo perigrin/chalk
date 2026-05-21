@@ -14,8 +14,7 @@ use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Chalk::Bootstrap::IR::NodeFactory;
-
+use Chalk::IR::NodeFactory;
 # === Grammar pipeline setup (shared by all benchmarks) ===
 
 diag '';
@@ -23,7 +22,6 @@ diag '=== Parse Performance Benchmark ===';
 diag '';
 
 my $setup_t0 = time();
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 die "perl_pipeline returned undef" unless defined $raw_ir;
 
