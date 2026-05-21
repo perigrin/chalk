@@ -16,30 +16,31 @@ For the IR structure passes operate on, see
 The base class `Chalk::Bootstrap::Optimizer::Pass` prescribes two methods:
 
 - `name()` — returns a short string identifying the pass.
-- `run($graph) -> Graph` — takes a Sea-of-Nodes graph, returns a
-  (possibly rewritten) graph of the same scope.
+- `run($X) -> $X` — takes the input at the pass's scope and returns a
+  (possibly rewritten) value of the same shape.
 
-The input is always a SoN graph. Different passes work at different
-scopes — a local rewrite like DCE takes a per-method graph; a
-whole-program analysis like StructPromotion takes a program-level graph
-whose nodes are themselves class and method graphs — but each pass
-takes and returns a graph, not arrayrefs of roots or per-class bundles
-or other scope-dependent shapes. This keeps passes composable: the
-output of one pass is a valid input to another of the same scope.
+The input shape depends on scope:
+
+- **Method-scope passes** (local rewrites like DCE) take a
+  `Chalk::IR::Graph` and return one.
+- **Program-scope passes** (whole-program analyses like
+  StructPromotion) take a `Chalk::MOP` and return one. The MOP is the
+  program-scope container — its classes own per-method graphs that the
+  pass can walk via `$method->graph`.
+
+Either way, a pass takes and returns a value of the same type. This
+keeps passes composable: the output of one pass is a valid input to
+another of the same scope. See [`mop.md`](mop.md) for the MOP layer
+and [`sea-of-nodes-ir.md`](sea-of-nodes-ir.md) for the per-method
+Graph.
 
 Current reality diverges from this. DCE takes an arrayref of IR root
 nodes; StructPromotion takes an arrayref of `{ class_name, ir, ... }`
-bundles. These are residue from pre-Graph pass authorship and are
-tracked for reconciliation as part of the SoN polymorphic migration
+bundles. These are residue from pre-MOP pass authorship and are
+tracked for reconciliation as part of the MOP migration
 (see
-[`../plans/2026-04-04-son-ir-polymorphic-migration.md`](../plans/2026-04-04-son-ir-polymorphic-migration.md)).
-
-Reaching the target shape depends on the Graph hierarchy being fleshed
-out: `Chalk::IR::Graph` currently represents a per-method graph;
-program-level scope needs an equivalent container (probably via
-`Chalk::IR::Program` becoming graph-shaped, or a new
-`Chalk::IR::ProgramGraph` type). Until that's in place, passes have to
-operate on looser structures.
+[`../plans/2026-04-21-chalk-mop-migration-plan.md`](../plans/2026-04-21-chalk-mop-migration-plan.md),
+Phase 5).
 
 Passes preserve IR immutability: build new nodes via the `NodeFactory`
 rather than mutating existing ones; the hash-cons table automatically
@@ -69,7 +70,7 @@ nodes that are unreachable from the graph's roots.
   from the factory cache.
 - **Current I/O shape:** takes an arrayref of IR root nodes, returns
   the same arrayref. The target is `run(Graph) -> Graph` — reshape
-  pending, tracked with the SoN polymorphic migration.
+  pending with the MOP migration's Phase 5.
 
 ### Struct promotion
 
@@ -88,10 +89,8 @@ optimizations the hash form would prevent. Design:
   bundles, returns `($rewritten_classes, $schemas)` in list context.
   Does not subclass `Optimizer::Pass` — the class-bundle input shape
   doesn't fit the base class's single-input-single-output contract.
-  The target is `run(ProgramGraph) -> ProgramGraph` (or whatever the
-  program-level graph type becomes), which doesn't exist yet. Reshape
-  pending with the SoN polymorphic migration and whatever design
-  emerges for program-level graphs.
+  The target is `run($mop) -> $mop` (program-scope passes take the
+  MOP). Reshape pending with the MOP migration's Phase 5.
 
 ## Planned
 
@@ -101,7 +100,8 @@ Cliff Click's GCM algorithm schedules floating data nodes into basic
 blocks based on dominance relationships. The `schedule` field on
 `Chalk::IR::Graph` is reserved for GCM's output. Not yet implemented;
 waits on full SSA construction in `_build_method_graph` (see
-[`../plans/2026-04-04-son-ir-polymorphic-migration.md`](../plans/2026-04-04-son-ir-polymorphic-migration.md)).
+[`../plans/2026-04-21-chalk-mop-migration-plan.md`](../plans/2026-04-21-chalk-mop-migration-plan.md),
+Phase 3b/3c).
 
 ### Ternary lowering
 
@@ -128,10 +128,11 @@ and are orthogonal to the IR passes listed here.
 
 1. Subclass `Chalk::Bootstrap::Optimizer::Pass`.
 2. Implement `name()` returning a short string identifier.
-3. Implement `run($graph) -> Graph`. If your pass works at program
-   scope rather than method scope, wait for the program-level graph
-   type to land — interim workarounds are accepted for existing passes
-   but new passes should not add to the reshape debt.
+3. Implement `run($X) -> $X` where `$X` is `Chalk::IR::Graph` for
+   method-scope passes or `Chalk::MOP` for program-scope passes.
+   Interim workarounds in existing passes (root arrayrefs,
+   class-bundle hashes) are accepted but new passes should not add
+   to the reshape debt.
 4. Preserve immutability: build new nodes via the factory, don't mutate
    existing ones.
 5. Be deterministic: sort hash iteration, use content-addressed IDs.
@@ -140,5 +141,5 @@ and are orthogonal to the IR passes listed here.
 `lib/Chalk/Bootstrap/Optimizer/DCE.pm` is the closest current example;
 its root-arrayref I/O shape is residue to be reconciled.
 `lib/Chalk/Bootstrap/Optimizer/StructPromotion.pm` shows a
-program-scope pass and the class-bundle workaround it uses pending the
-program-level graph type.
+program-scope pass and the class-bundle workaround it uses pending
+the MOP-input migration.

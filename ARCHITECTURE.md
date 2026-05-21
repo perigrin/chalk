@@ -77,7 +77,7 @@ full design rationale.
 | [Parsing Pipeline](docs/architecture/parsing-pipeline.md) | Semiring layers, FilterComposite, disambiguation strategy |
 | [Context Comonad](docs/architecture/context-comonad.md) | Context, extract/extend/duplicate, parse history threading |
 | [Sea of Nodes IR](docs/architecture/sea-of-nodes-ir.md) | IR node types, hash consing, use-def chains, Graph container |
-| [MOP Layer](docs/architecture/mop-layer.md) | Class/Method/Sub/Field/Phaser containers, per-parse factory ownership |
+| [MOP Layer](docs/architecture/mop.md) | Class/Method/Sub/Field/Phaser containers, per-parse factory ownership |
 | [IR Lowering](docs/architecture/ir-lowering.md) | Target backends, Perl/XS/C code generation (LLVM IR planned) |
 | [Optimization](docs/architecture/optimization.md) | Implemented and planned IR-level passes |
 

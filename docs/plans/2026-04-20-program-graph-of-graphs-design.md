@@ -446,21 +446,30 @@ Graph granularity varies; the wrapper layer is universal.
 
 ## Open questions
 
-1. **Namespace.** `Chalk::MOP` is this spec's proposal, aligned with
-   `B::MOP`. Alternatives: `Chalk::IR::MOP`, `Chalk::Meta`,
-   `Chalk::CompilationUnit`.
+**Status (updated 2026-05-22, post-Phase-7d):** Resolutions
+recorded below. Implementation sequencing is tracked in
+[`2026-04-21-chalk-mop-migration-plan.md`](2026-04-21-chalk-mop-migration-plan.md).
 
-2. **Graph traversal.** Per-graph hash-consing means consumer lists
-   are bounded to a single graph by construction. `Graph.nodes()`
-   can safely follow both `inputs()` and `consumers()` — nothing
-   outside the graph's own scope is reachable. A class-level
-   `all_nodes()` traversal walks every graph-owner's graph in turn.
+1. **Namespace.** **RESOLVED:** `Chalk::MOP`. The MOP root is at
+   `lib/Chalk/MOP.pm`; metaobjects under `Chalk::MOP::*`. Aligned
+   with B::MOP.
 
-3. **Field default ownership.** Fields with default expressions need
-   a graph. This spec makes the field itself a graph-owner when
-   defaults are present. A dedicated `Chalk::MOP::FieldDefault`
-   sub-metaobject would keep Field simpler.
+2. **Graph traversal.** **RESOLVED:** per-graph hash consing landed
+   in Phase 7b (commit `60c269ab`). `Graph::nodes()` now follows
+   both `inputs()` and cache-filtered `consumers()`. Per-class
+   `all_nodes()` lives on `Chalk::MOP::Class` and walks every
+   method/sub graph in the class.
 
-4. **Graph-owner implementation mechanism.** Parent class, composed
-   role, or direct inclusion. Not a spec concern; the contract is
-   that graph-owners provide `make()` / `make_cfg()` / `graph()`.
+3. **Field default ownership.** **DEFERRED:** field defaults are
+   tracked on `Chalk::MOP::Field` (`has_default`, `default_value`)
+   without making Field itself a graph-owner. A dedicated
+   `FieldDefault` sub-metaobject would clarify ownership but is
+   not blocking; revisit if default expressions need their own
+   graph-walker.
+
+4. **Graph-owner implementation mechanism.** **RESOLVED:** direct
+   field inclusion. `Chalk::MOP::Method`, `Chalk::MOP::Sub`, and
+   `Chalk::MOP::Phaser` each declare `$graph` and `$factory`
+   fields directly with `make`/`make_cfg`/`merge` delegator
+   methods. No abstract parent or composed role — the contract
+   is satisfied by the field set, not by inheritance.

@@ -34,38 +34,35 @@ the full file set. Distribution packaging (`Build.PL`, `MANIFEST`, `.pm` stubs,
 `XSLoader` shims) is a separate layer that consumes `generate()` output and
 produces a CPAN-shaped distribution; it does not belong on the target interface.
 
-The current code does not yet conform to this target shape. The base class
-still has `die`-stubs for both `generate($ir)` and `generate_distribution($ir)`,
-and individual targets diverge:
+The current code does not yet fully conform to this target shape, but the
+parse-time backchannel is gone. The base class still has `die`-stubs for
+both `generate($input)` and `generate_distribution($input)`, and individual
+targets diverge:
 
 - **BNF targets** (`BNF/Target/Perl.pm`, `BNF/Target/XS.pm`, `BNF/Target/C.pm`)
   implement both `generate` and `generate_distribution`. `generate` sometimes
   returns a string and sometimes a hashref (e.g., `BNF/Target/C::generate`
   returns `{'dfa_tables.c' => ..., 'dfa_tables.h' => ...}`), so the return
   shape is already leaky.
-- **`Perl/Target/Perl.pm`** implements both methods, plus a CFG-aware
-  `generate_with_cfg($ir, $sa, $ctx)` that walks the parse-time Context tree
-  to recover `cfg_state` annotations the IR graph does not yet carry.
-- **`Perl/Target/C.pm`** implements neither `generate` nor
-  `generate_distribution`. Its entry points are `generate_c_files($ir, $sa, $ctx)`
-  and `generate_xs_wrapper($ir, $exported_functions, $anon_sub_registrations)`,
-  which also require parse-time context.
+- **`Perl/Target/Perl.pm`** implements both `generate` and
+  `generate_distribution`. `generate($input)` polymorphically accepts either
+  a `Chalk::MOP` (the post-Phase-4 path) or a `Chalk::IR::Program` (the
+  legacy path that walks `MethodInfo->body`). Both paths feed the same
+  `_emit_*_decl` helpers; the MOP path synthesizes legacy-shaped wrappers
+  around `MOP::Method->graph`/`MOP::Sub->graph` for now.
+- **`Perl/Target/C.pm`** implements `generate($mop)` and
+  `generate_xs_wrapper($ir, $exported_functions, $anon_sub_registrations)`.
 
-Two distinct migrations are needed to reach the target shape:
-
-1. **Remove the parse-time backchannel.** The context-aware methods
-   (`generate_with_cfg`, `generate_c_files`, `generate_xs_wrapper`) exist
-   because codegen reaches back into the SemanticAction semiring and the
-   parse-time Context to recover `cfg_state` annotations that should live on
-   IR nodes. Once `_build_method_graph` performs full SSA construction (Phi
-   insertion, dominator analysis, data-flow rewriting) and codegen walks the
-   per-method `MOP::Method->graph` instead of `MethodInfo->body`, the
-   backchannel becomes unnecessary. The MOP migration plan at
-   `docs/plans/2026-04-21-chalk-mop-migration-plan.md` tracks this work.
-2. **Collapse the interface to `generate($ir) -> HashRef[Str]`.** Remove
-   `generate_distribution` from the target interface; hoist distribution
-   packaging into a separate layer. The design for this lives in task D1
-   (`docs/plans/` once the design doc lands).
+The remaining migration step is to **collapse the interface to
+`generate($mop) -> HashRef[Str]`**. The `($sa, $ctx)` parse-time
+backchannel — `generate_with_cfg`, `generate_c_files`, and the
+context-aware variants — was removed during the MOP migration; codegen
+no longer reaches back into the SemanticAction semiring. What remains
+is dropping `generate_distribution` from the target interface (hoist
+distribution packaging into a separate layer) and finishing the
+codegen migration off `MethodInfo->body` to walk
+`MOP::Method->graph` directly. Tracked in
+`docs/plans/2026-04-21-chalk-mop-migration-plan.md` (Phases 4 and 6).
 
 ---
 
@@ -102,7 +99,7 @@ lib/SomeClass.pm  (original source)
          |
     Perl::Actions fixups (_fixup_stmts, _fix_postfix_chain, etc.)
          |
-    Chalk::Bootstrap::Perl::Target::Perl (generate_with_cfg)
+    Chalk::Bootstrap::Perl::Target::Perl::generate($mop)
          |
     Generated Perl source
 ```
@@ -206,14 +203,14 @@ tree and emits `feature class` Perl source.
 
 ### Entry Points
 
-- `generate($ir)`: Takes a `Chalk::IR::Program`, returns a string of Perl source.
-  Does not apply CFG-state dispatch; emits nodes using type-based dispatch only.
-- `generate_with_cfg($ir, $sa, $ctx)`: The main entry point when a `SemanticAction`
-  semiring and its `Context` tree are available. Builds the `%_cfg_lookup` side-table
-  and `%_aggregate_vars` set before calling `_emit_program`. Clears both tables after
-  emission.
-- `emit_expr($node)`: Public wrapper around `_emit_expr`, used by tests and external
-  callers.
+- `generate($input)`: Polymorphic — accepts either a `Chalk::MOP` (the
+  post-Phase-4 path) or a `Chalk::IR::Program` (legacy). The MOP path
+  synthesizes legacy-shaped wrappers around the MOP's per-method graphs
+  and feeds them through the same `_emit_*_decl` helpers. CFG-state
+  dispatch reads from the per-method `MOP::Method->graph` via
+  `MethodInfo->graph()`, which delegates to the MOP-side graph.
+- `emit_expr($node)`: Public wrapper around `_emit_expr`, used by tests
+  and external callers.
 
 ### Statement vs. Expression Context
 
@@ -283,7 +280,7 @@ Per-method CFG schedules (from `MethodInfo->graph()->schedule()`) are merged add
 into `%_cfg_lookup` during `_emit_method_decl` and `_emit_sub_decl`. Method-local
 schedules supplement the global lookup for nodes that may have been missed due to
 stale-value merges in the parser. (`MethodInfo->graph()` is a delegating accessor
-that reads from the parallel `MOP::Method->graph`; see `mop-layer.md`.)
+that reads from the parallel `MOP::Method->graph`; see `mop.md`.)
 
 ### Aggregate Variable Tracking
 

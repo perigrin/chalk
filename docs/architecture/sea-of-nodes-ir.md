@@ -31,7 +31,7 @@ All IR nodes extend `Chalk::IR::Node`. The base class holds the fields common to
 | `inputs` | arrayref of nodes | The producer nodes whose values this node consumes. Nested arrayrefs are permitted (e.g., when a node takes a list-valued input). |
 | `consumers` | arrayref of nodes | The nodes that consume the value produced by this node. Populated by `NodeFactory._register_consumers` at construction time. |
 | `stamp` | any | Optional annotation recording parse-origin or generation context. Not used in graph traversal. |
-| `compat_class` | string | Optional override for the value returned by `class()`. Used by `Chalk::IR::Shim` to present legacy constructor class names to code-generation passes while the underlying node type is the canonical IR type. |
+| `compat_class` | string | Optional override for the value returned by `class()`. **Transitional**: production setters were stripped during the MOP migration; the field is retained for legacy `->class()` string-compare reads in tests. Scheduled for removal in MOP migration Phase 6. |
 
 The `operation()` method is abstract. Every concrete subclass overrides it to return the operation name string (e.g., `'Add'`, `'Call'`, `'Start'`).
 
@@ -130,7 +130,7 @@ Unary operators extend `UnaryOp`, which provides `operand()` as a named field wi
 |------|-------------|
 | `Call` | Unified call node for method calls, subroutine calls, and builtin calls. Carries `dispatch_kind` (`'method'`, `'sub'`, `'builtin'`) and `name`. The invocant or first argument appears in `inputs`. |
 
-`Chalk::IR::Shim` maps legacy constructor classes (`MethodCallExpr`, `BuiltinCall`) to `Call` nodes with appropriate `dispatch_kind` and a `compat_class` override for backward-compatible dispatch.
+During the MOP migration, an earlier `Chalk::IR::Shim` translation layer mapped legacy constructor names (`MethodCallExpr`, `BuiltinCall`) onto `Call` nodes with appropriate `dispatch_kind`. The Shim has been deleted; Actions code now constructs `Call` nodes directly via the typed factory.
 
 #### Regex
 
@@ -211,7 +211,7 @@ The factory is a regular Perl object; tests that need a clean cache simply insta
 
 A `NodeFactory` is a per-parse instance. `Chalk::Bootstrap::Perl::Actions` allocates a fresh one in its `ADJUST` and injects it into `SemanticAction` via `set_factory($f)`. `_one_ctx` reads the injected factory and seeds the parse's root `Context` with it; from there, `Context.extend` propagates it to every derived context.
 
-In addition, each `MOP::Method`, `MOP::Sub`, and `MOP::Phaser` owns its own `NodeFactory` — node identity is meaningful only within that owner's body. See `mop-layer.md` for how the MOP carves up factory ownership per method/sub/phaser.
+In addition, each `MOP::Method`, `MOP::Sub`, and `MOP::Phaser` owns its own `NodeFactory` — node identity is meaningful only within that owner's body. See `mop.md` for how the MOP carves up factory ownership per method/sub/phaser.
 
 Cross-parse and cross-method comparison is by `content_hash`, not refaddr.
 
@@ -246,7 +246,7 @@ This bidirectional traversal is what gives `nodes()` its completeness guarantee 
 
 **DFS post-order.** A recursive DFS collects nodes in post-order, visiting `inputs` first and then the cache-filtered `consumers`. Because post-order places each node after all of its predecessors, the result is a valid topological ordering: if A is an input to B, A appears before B.
 
-**Per-parse correctness.** The membership filter is load-bearing because hash consing is per-factory but a node may be reachable from multiple factories. The Bootstrap singleton's process-wide cache (now retired) made this concrete: shared constants like `Start` accumulated consumers from every parse. With per-parse factory ownership (see `mop-layer.md`) the filter still matters — losing Earley alternatives produce orphan nodes that share a factory with surviving alternatives, and only the survivors' nodes belong in the result.
+**Per-parse correctness.** The membership filter is load-bearing because hash consing is per-factory but a node may be reachable from multiple factories. The Bootstrap singleton's process-wide cache (now retired) made this concrete: shared constants like `Start` accumulated consumers from every parse. With per-parse factory ownership (see `mop.md`) the filter still matters — losing Earley alternatives produce orphan nodes that share a factory with surviving alternatives, and only the survivors' nodes belong in the result.
 
 The `Chalk::IR::Serialize::JSON` module uses a refined version of this traversal (`_all_nodes_topo`) that also ensures `Region` nodes referenced by `Phi.region` appear before their `Phi` nodes, since `Phi.region` is not an `inputs` edge.
 
@@ -257,7 +257,7 @@ The `Chalk::IR::Serialize::JSON` module uses a refined version of this traversal
 A parsed Perl program has two parallel structural views:
 
 1. **Metadata structs** (this section). A hierarchy rooted at `Chalk::IR::Program` with `ClassInfo`, `MethodInfo`, `SubInfo`, `UseInfo`, `FieldInfo` records. These structs are still produced during parsing and are still what the code generators consume today.
-2. **MOP layer.** A parallel hierarchy rooted at `Chalk::MOP` with `MOP::Class`, `MOP::Method`, `MOP::Sub`, `MOP::Field`, `MOP::Phaser` instances. Each method/sub/phaser owns its own `Graph` and `NodeFactory`. See `mop-layer.md`.
+2. **MOP layer.** A parallel hierarchy rooted at `Chalk::MOP` with `MOP::Class`, `MOP::Method`, `MOP::Sub`, `MOP::Field`, `MOP::Phaser` instances. Each method/sub/phaser owns its own `Graph` and `NodeFactory`. See `mop.md`.
 
 The MOP is the canonical post-parse representation; migration of codegen to read from it directly is tracked in `docs/plans/2026-04-21-chalk-mop-migration-plan.md`. Until that lands, both representations coexist by design and are populated in parallel by the SemanticAction pass.
 
@@ -285,7 +285,7 @@ Metadata for a single class declaration.
 | `fields` | Ordered list of `FieldInfo` objects. |
 | `methods` | Ordered list of `MethodInfo` objects. |
 | `subs` | Ordered list of `SubInfo` objects for lexically-scoped subs inside the class. |
-| `body` | All body items in source order (union of `fields`, `methods`, `subs`, and ADJUST blocks). **Transitional**: parallel state to the typed collections above, scheduled for removal once the program-level graph (D3) preserves source order via graph edges. See `docs/plans/2026-04-04-son-ir-polymorphic-migration.md`. |
+| `body` | All body items in source order (union of `fields`, `methods`, `subs`, and ADJUST blocks). **Transitional**: parallel state to the typed collections above, scheduled for removal once codegen consumes `MOP::Class` directly. See `docs/plans/2026-04-21-chalk-mop-migration-plan.md` (Phases 4 and 6). |
 
 ### `Chalk::IR::MethodInfo`
 
@@ -296,7 +296,7 @@ Metadata for a method declaration, with an optional per-method computation graph
 | `name` | Method name string. |
 | `params` | Ordered list of parameter names. |
 | `return_type` | Optional declared return type string. |
-| `body` | Ordered list of statement IR nodes. **Transitional**: scheduled for removal once codegen migrates to walking the `graph` instead; see `docs/plans/2026-04-04-son-ir-polymorphic-migration.md` Outstanding Work. |
+| `body` | Ordered list of statement IR nodes. **Transitional**: scheduled for removal once codegen walks `MOP::Method->graph` directly. See `docs/plans/2026-04-21-chalk-mop-migration-plan.md` (Phases 4 and 6). |
 | `graph` | `Chalk::IR::Graph` for the method body. Once `body` is removed, this is the sole representation. |
 
 ### `Chalk::IR::SubInfo`

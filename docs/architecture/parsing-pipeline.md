@@ -381,7 +381,7 @@ These rules encode Perl's disambiguation defaults: a `{` in expression context i
 
 ## 9. SemanticAction Semiring
 
-`Chalk::Bootstrap::Semiring::SemanticAction` builds the Sea of Nodes IR. It operates on Context objects from `Chalk::Bootstrap::Context`. Control-flow state — the current control token and accumulated variable bindings — lives on Context's top-level `scope` field; the in-flight IR graph (when one is published by an enclosing method/sub action) lives on the `graph` field. The per-parse `Chalk::MOP` and `Chalk::IR::NodeFactory` are likewise carried on top-level `mop` and `factory` fields. See `context-comonad.md` ("Field Threading") and `mop-layer.md`.
+`Chalk::Bootstrap::Semiring::SemanticAction` builds the Sea of Nodes IR. It operates on Context objects from `Chalk::Bootstrap::Context`. Control-flow state — the current control token and accumulated variable bindings — lives on Context's top-level `scope` field; the in-flight IR graph (when one is published by an enclosing method/sub action) lives on the `graph` field. The per-parse `Chalk::MOP` and `Chalk::IR::NodeFactory` are likewise carried on top-level `mop` and `factory` fields. See `context-comonad.md` ("Field Threading") and `mop.md`.
 
 ### Values and the Context Comonad
 
@@ -406,7 +406,7 @@ The complete branch of `multiply` looks up the action method for `$rule_name` on
 
 If no action method is registered, the value passes through unchanged, preserving the Context tree for higher-level actions to consume.
 
-Action methods in `Actions.pm` access scope and control-flow state by reading `$ctx->scope`, `$ctx->graph`, and `$ctx->cfg_state` (a walker that assembles a snapshot from the subtree's scope plus structural annotation keys). They publish updated state by returning a Context whose `scope`/`graph` fields carry the new values; the right-preferring propagation in `multiply` carries those values upward. The MOP and IR factory used to construct nodes inside action methods are reached via `$ctx->mop` and `$ctx->factory` (see `mop-layer.md` and `context-comonad.md`).
+Action methods in `Actions.pm` access scope and control-flow state by reading `$ctx->scope`, `$ctx->graph`, and `$ctx->cfg_state` (a walker that assembles a snapshot from the subtree's scope plus structural annotation keys). They publish updated state by returning a Context whose `scope`/`graph` fields carry the new values; the right-preferring propagation in `multiply` carries those values upward. The MOP and IR factory used to construct nodes inside action methods are reached via `$ctx->mop` and `$ctx->factory` (see `mop.md` and `context-comonad.md`).
 
 ### `add` and Disambiguation
 
