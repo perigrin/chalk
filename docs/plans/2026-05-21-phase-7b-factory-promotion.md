@@ -129,6 +129,15 @@ collapse is Phase 7c material.
    `lib/Chalk/Bootstrap/Optimizer/StructPromotion.pm::rewrite`
    (1 site), and `lib/Chalk/Grammar/BNF/Actions.pm` if it actually
    constructs IR nodes (Audit 1 risk #6 — needs verification).
+   **Verified 2026-05-21:** BNF/Actions constructs only
+   grammar-data-model objects (Symbol/Rule), not method-body IR —
+   no bidirectional concern. Target/C creates Constant param-nodes
+   purely for the C emitter's uniform `->value()` accessor; they
+   are not attached to any graph. StructPromotion is a pre-existing
+   inconsistency (its new nodes don't merge into the original
+   graph) — deferred to Stage 2g per the audit, since codegen
+   reads `$item->body` directly and doesn't go through
+   `graph->nodes()`.
 3. **Stage 1c:** TDD test that demonstrates bidirectional traversal
    is now safe. Re-enable bidirectional in `Graph::nodes()`. The
    pre-Phase-7 test `t/bootstrap/ir/graph-bidirectional-traversal.t`
