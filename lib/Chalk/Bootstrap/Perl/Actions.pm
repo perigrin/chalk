@@ -4,8 +4,8 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::SemanticAction;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::UnaryOp;

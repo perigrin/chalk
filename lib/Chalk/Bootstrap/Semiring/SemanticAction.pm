@@ -6,7 +6,6 @@ use experimental 'class';
 
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::Scope;
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::NodeFactory;
 
 class Chalk::Bootstrap::Semiring::SemanticAction {
