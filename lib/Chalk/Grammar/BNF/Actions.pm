@@ -4,7 +4,7 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Grammar::Symbol;
 use Chalk::Grammar::Rule;
 
@@ -12,7 +12,7 @@ class Chalk::Grammar::BNF::Actions {
     field $factory;
 
     ADJUST {
-        $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+        $factory = Chalk::IR::NodeFactory->new();
     }
 
     # Shared implementation for Rule_plus and Rule_star
