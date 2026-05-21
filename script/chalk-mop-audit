@@ -12,7 +12,6 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Actions;
 use Chalk::IR::Program;
@@ -26,7 +25,6 @@ STDOUT->autoflush(1);
 STDERR->autoflush(1);
 
 # Build the parser once.
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
 my $g = $target->generate($raw_ir);
@@ -234,7 +232,6 @@ for my $file (@files) {
     my $src = do { local $/; <$fh> };
     close $fh;
 
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     $parser->reset_parse_state() if $parser->can('reset_parse_state');
     $parser->semiring()->reset_cache() if $parser->semiring()->can('reset_cache');
 

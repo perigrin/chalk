@@ -9,11 +9,9 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Build grammar once
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
 my $generated = $target->generate($raw_ir);
@@ -29,7 +27,6 @@ for my $dir (@dirs) {
 }
 
 for my $file (sort @files) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $file or next;
     local $/;
     my $source = <$fh>;

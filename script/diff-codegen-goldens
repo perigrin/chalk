@@ -11,11 +11,9 @@ use lib 't/bootstrap/lib';
 use Chalk::MOP;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 die unless defined $raw_ir;
 my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
@@ -42,7 +40,6 @@ for my $i (0..$#goldens) {
     my $golden_name = $goldens[$i];
     my $src = golden_to_source($golden_name);
 
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $src or do {
         say STDERR "[$i] $golden_name: SRC MISSING ($src)";
         next;

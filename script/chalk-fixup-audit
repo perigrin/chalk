@@ -5,7 +5,6 @@ use 5.42.0;
 use utf8;
 
 use File::Find ();
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Actions;
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
@@ -35,7 +34,6 @@ say "# Files queued: ", scalar @files;
 say "";
 
 # Build the Perl grammar once.
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 die "Failed to build Perl grammar IR\n" unless defined $raw_ir;
 
@@ -62,7 +60,6 @@ my $semiring = $parser->semiring();
 my $can_tie_log = $semiring && $semiring->can('flush_tie_log') && $semiring->can('tie_log');
 
 for my $file (@files) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     Chalk::Bootstrap::Perl::Actions->reset_fixup_counts();
     $semiring->flush_tie_log() if $can_tie_log;
 
