@@ -263,15 +263,50 @@ Order matters; each numbered step is independently committable.
 ## Acceptance criteria
 
 - `Chalk::IR::Graph::nodes()` follows both `inputs()` and
-  `consumers()`.
-- `Chalk::Bootstrap::IR::NodeFactory->instance()` does not exist.
+  `consumers()`. **DONE Stage 1c (commit 60c269ab).**
 - `Chalk::MOP::Method` and `Chalk::MOP::Sub` have `$factory` fields.
-- `Chalk::Bootstrap::Context` has a `$factory` field.
+  **DONE Stage 2b (commit 37be7ad4).**
+- `Chalk::Bootstrap::Context` has a `$factory` field. **DONE
+  Stage 2a (commit 7e0b0f33).**
+- A per-parse factory is threaded into the parse pipeline so
+  consumer pointers cannot cross parse boundaries. **DONE
+  Stage 2c (commit 9b30fd4d).**
 - Trivial-phi, ifelse-reachability, and all Phase-7 regression
-  tests stay green.
-- `t/bootstrap/mop/per-method-factory-isolation.t` passes:
-  hash-cons-identical content in two methods produces distinct
-  node identities.
+  tests stay green. **DONE — verified at every stage.**
+
+**Singleton retirement (Stages 2d/2e/2f) — deferred.** The original
+plan called for Actions.pm to read `$ctx->factory()` and the
+Bootstrap singleton to be deleted. Investigation during Stage 2d
+revealed an architectural mismatch: the Bootstrap singleton's
+`make()` is permissive and hash-conses Start/Return/Constant as
+data nodes (the `%INPUT_SPECS` table at lines 40-49 of
+`lib/Chalk/Bootstrap/IR/NodeFactory.pm`), while the typed
+`Chalk::IR::NodeFactory::make()` is strict and only accepts data
+classes (the `%DATA_CLASSES` table at lines 84-98 of
+`lib/Chalk/IR/NodeFactory.pm`); CFG ops go through `make_cfg()`
+with no hash-consing. Actions.pm calls `$factory->make('Start')`
+in 12 sites expecting a hash-consed shared Start; switching them
+to typed `make_cfg('Start')` would produce a fresh Start each
+time and break the implicit Start identity used by codegen and
+control-flow seeding. Repointing `$factory` to `$typed` produces
+`Unknown data node operation: Start` (Stage 2d attempt 1).
+
+A correct Stage 2d would either (a) extend typed's `%DATA_CLASSES`
+to include Start/Return-as-data (and accept that CFG nodes mixed
+data/cfg semantics in Bootstrap), or (b) bulk-edit Actions.pm's
+12 Start sites to `make_cfg` with explicit caching, or (c)
+introduce a thin "Bootstrap-API" wrapper around the typed factory
+that preserves the permissive `make()` shape. None are wrong, but
+all are wider than the bidirectional unblock Stage 1 already shipped.
+
+**Decision:** since bidirectional traversal now works (Stages 1+2a-c),
+the singleton's process-wide cache is no longer blocking — its
+contamination is contained at the per-parse level by reset_cache
+and at the per-graph level by the cache-membership filter in
+`Graph::nodes()`. Singleton retirement becomes a separate future
+phase (Phase 7c), driven by the architectural cleanup goal rather
+than by the bidirectional-traversal blocker. Stages 2d/2e/2f are
+deferred to that phase.
 
 ## Risks and open questions
 
