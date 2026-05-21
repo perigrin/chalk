@@ -52,4 +52,38 @@ use Chalk::IR::NodeFactory;
         'identical-input Returns are hash-consed by make()');
 }
 
+# Permissive make() now also accepts ROUTED_CFG ops (If, Proj, Region, Loop).
+# Each call allocates a fresh CFG-id node — matching Bootstrap::make()'s
+# Bootstrap::%CFG_OPS handling.
+{
+    my $f = Chalk::IR::NodeFactory->new;
+    my $start = $f->make('Start');
+    my $cond  = $f->make('Constant', const_type => 'integer', value => 1);
+    my $if1 = $f->make('If', inputs => [$start, $cond]);
+    my $if2 = $f->make('If', inputs => [$start, $cond]);
+    isa_ok($if1, 'Chalk::IR::Node::If', 'make If returns If node');
+    isnt(refaddr($if1), refaddr($if2),
+        'two make(If) calls allocate distinct objects (CFG identity)');
+}
+
+# Phi via make() has Bootstrap's legacy call shape: region => ..., values => ...
+{
+    my $f = Chalk::IR::NodeFactory->new;
+    my $start = $f->make('Start');
+    my $cond  = $f->make('Constant', const_type => 'integer', value => 1);
+    my $if_n  = $f->make('If', inputs => [$start, $cond]);
+    my $left  = $f->make('Constant', const_type => 'integer', value => 10);
+    my $right = $f->make('Constant', const_type => 'integer', value => 20);
+    my $region = $f->make('Region', inputs => [[$if_n]]);
+    my $phi = $f->make('Phi',
+        region => $region,
+        values => [$left, $right],
+    );
+    isa_ok($phi, 'Chalk::IR::Node::Phi', 'make Phi returns Phi node');
+    is(refaddr($phi->region), refaddr($region),
+        'Phi region named-param preserved');
+    is(scalar $phi->inputs->@*, 2,
+        'Phi inputs come from values arrayref');
+}
+
 done_testing;

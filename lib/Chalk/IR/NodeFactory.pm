@@ -108,6 +108,13 @@ my %CFG_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Start Return Unwind If Proj Region Loop
 );
 
+# Ops that have CFG semantics (per-position identity, never hash-consed
+# by content) but are constructed via make() rather than make_cfg().
+# Mirrors Bootstrap::IR::NodeFactory's %CFG_OPS. Start/Return/Unwind are
+# NOT in this set — they go through the hash-cons path in make() to
+# match Bootstrap's permissive-make-of-Start behavior.
+my %ROUTED_CFG = map { $_ => 1 } qw(If Proj Region Phi Loop);
+
 class Chalk::IR::NodeFactory {
     field %cache;
     field $cfg_counter = 0;
@@ -128,7 +135,58 @@ class Chalk::IR::NodeFactory {
         }
     }
 
+    # Permissive node construction. Accepts both data ops (hash-consed by
+    # content) and CFG-routed ops (If/Proj/Region/Phi/Loop — allocated
+    # fresh per call with a counter-suffixed id, mirroring Bootstrap's
+    # %CFG_OPS shape). This matches Bootstrap::IR::NodeFactory::make()'s
+    # behavior so Actions.pm can route every call through the typed
+    # factory without distinguishing between make() and make_cfg() shapes.
     method make($op_name, %args) {
+        # Phi has historical CFG-style identity in Bootstrap (never
+        # deduplicated) but Chalk::IR::Node::Phi takes `region` as a
+        # named :param and the values arrayref as `inputs`. Bootstrap's
+        # legacy call shape passes `region => ..., values => ...` — keep
+        # that shape working here.
+        if ($op_name eq 'Phi') {
+            my $class = $DATA_CLASSES{Phi};
+            my $region = delete $args{region};
+            my $values = delete $args{values};
+            $cfg_counter++;
+            my $id = "Phi#${cfg_counter}";
+            my $node = $class->new(
+                id     => $id,
+                region => $region,
+                inputs => (defined $values ? $values : []),
+                %args,
+            );
+            # Register consumers from the values arrayref (these are the
+            # phi operands; the region is tracked separately).
+            if (defined $values) {
+                for my $el ($values->@*) {
+                    next unless defined $el;
+                    $el->add_consumer($node);
+                }
+            }
+            $cache{$id} = $node;
+            return $node;
+        }
+
+        # Routed-CFG ops: allocated fresh, never hash-consed. They have
+        # CFG semantics (distinct positions in control flow) but used to
+        # be constructed via Bootstrap::make() rather than make_cfg.
+        # Treat them like make_cfg() for identity, like make() for caller
+        # convenience.
+        if (exists $ROUTED_CFG{$op_name}) {
+            my $class = $CFG_CLASSES{$op_name}
+                or die "Unknown CFG node operation: $op_name";
+            $cfg_counter++;
+            my $id = "${op_name}#${cfg_counter}";
+            my $node = $class->new( id => $id, %args );
+            $self->_register_consumers($node, %args);
+            $cache{$id} = $node;
+            return $node;
+        }
+
         my $class = $DATA_CLASSES{$op_name}
             or die "Unknown data node operation: $op_name";
 
