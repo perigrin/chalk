@@ -43,51 +43,51 @@ my sub parse_file($file) {
 }
 
 # ============================================================
-# 1. Shim.pm — Actions.pm should produce SubInfo for package subs
+# 1. Serialize/JSON.pm — Actions.pm should produce SubInfo for package subs
 # ============================================================
 
 {
-    my $ir = parse_file('lib/Chalk/IR/Shim.pm');
-    ok(defined $ir, 'Shim.pm: parse produces IR');
+    my $ir = parse_file('lib/Chalk/IR/Serialize/JSON.pm');
+    ok(defined $ir, 'Serialize/JSON.pm: parse produces IR');
 
     SKIP: {
-        skip 'Shim.pm: no IR', 15 unless defined $ir;
+        skip 'Serialize/JSON.pm: no IR', 15 unless defined $ir;
 
-        isa_ok($ir, 'Chalk::IR::Program', 'Shim.pm: IR is Chalk::IR::Program');
+        isa_ok($ir, 'Chalk::IR::Program', 'Serialize/JSON.pm: IR is Chalk::IR::Program');
 
         # Collect all top-level SubInfo nodes (package-level subs)
         my @subs = $ir->top_level_subs()->@*;
         ok(scalar @subs >= 2,
-            'Shim.pm: top_level_subs contains at least 2 SubInfo objects')
+            'Serialize/JSON.pm: top_level_subs contains at least 2 SubInfo objects')
             or diag("Got " . scalar @subs . " SubInfo objects");
 
-        # enable_class and disable_class should be SubInfo
-        my ($enable_sub) = grep { $_->name() eq 'enable_class' } @subs;
-        ok(defined $enable_sub, 'Shim.pm: found enable_class() as SubInfo');
+        # to_json and helper subs should be SubInfo
+        my ($to_json_sub) = grep { $_->name() eq 'to_json' } @subs;
+        ok(defined $to_json_sub, 'Serialize/JSON.pm: found to_json() as SubInfo');
 
         SKIP: {
-            skip 'Shim.pm: no enable_class()', 8 unless defined $enable_sub;
+            skip 'Serialize/JSON.pm: no to_json()', 8 unless defined $to_json_sub;
 
-            isa_ok($enable_sub, 'Chalk::IR::SubInfo', 'enable_class() is a SubInfo');
-            is($enable_sub->name(), 'enable_class', 'SubInfo name is plain string');
+            isa_ok($to_json_sub, 'Chalk::IR::SubInfo', 'to_json() is a SubInfo');
+            is($to_json_sub->name(), 'to_json', 'SubInfo name is plain string');
 
-            my $params = $enable_sub->params();
+            my $params = $to_json_sub->params();
             is(ref $params, 'ARRAY', 'SubInfo params is arrayref');
             ok(scalar $params->@* >= 1, 'SubInfo params is non-empty');
 
             # Params should be plain strings, not Constant nodes
             ok(!ref($params->[0]), 'SubInfo param[0] is a plain string');
 
-            my $scope = $enable_sub->scope();
+            my $scope = $to_json_sub->scope();
             is($scope, 'package', 'SubInfo scope is package for bare sub');
 
-            my $body_stmts = $enable_sub->body();
+            my $body_stmts = $to_json_sub->body();
             is(ref $body_stmts, 'ARRAY', 'SubInfo body() is arrayref');
             ok(scalar $body_stmts->@* > 0, 'SubInfo body() is non-empty');
         }
 
-        my ($disable_sub) = grep { $_->name() eq 'disable_class' } @subs;
-        ok(defined $disable_sub, 'Shim.pm: found disable_class() as SubInfo');
+        my ($other_sub) = grep { $_->name() ne 'to_json' } @subs;
+        ok(defined $other_sub, 'Serialize/JSON.pm: found at least one other top-level sub');
     }
 }
 

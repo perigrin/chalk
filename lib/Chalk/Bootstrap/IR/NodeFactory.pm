@@ -4,8 +4,6 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-# Shim translates make('Constructor', class => 'X', ...) to typed Chalk::IR::Node::*
-use Chalk::IR::Shim;
 use Chalk::IR::NodeFactory;
 
 class Chalk::Bootstrap::IR::NodeFactory {
@@ -80,27 +78,14 @@ class Chalk::Bootstrap::IR::NodeFactory {
     }
 
     # Create or retrieve a node
-    # $operation: string like 'Constant', 'Constructor', etc.
+    # $operation: string like 'Constant' or one of the CFG ops.
     # %params: named parameters (inputs and attributes)
+    #
+    # Per Phase 6, the legacy make('Constructor', class => 'X', ...)
+    # translation path is gone; callers construct typed nodes
+    # directly via Chalk::IR::NodeFactory->make($OpName, ...).
     method make($operation, %params) {
-        # For Constructor, use compound key for INPUT_SPECS lookup
         my $lookup_key = $operation;
-        if ($operation eq 'Constructor') {
-            my $class = $params{class}
-                or die "Constructor requires 'class' parameter";
-
-            # All Constructor classes are translated via the shim.
-            # The shim produces a typed Chalk::IR::Node::* object for every
-            # known class. Unknown classes cause an immediate die.
-            $self->_ensure_new_factory();
-            my $typed = Chalk::IR::Shim::translate($_new_factory, $class, %params);
-            die "Unknown or untranslated Constructor class: '$class'" unless defined $typed;
-
-            my $key = $typed->content_hash();
-            return $node_cache->{$key} if exists $node_cache->{$key};
-            $node_cache->{$key} = $typed;
-            return $typed;
-        }
 
         # Get input specification for this operation
         my $input_names = $INPUT_SPECS{$lookup_key}

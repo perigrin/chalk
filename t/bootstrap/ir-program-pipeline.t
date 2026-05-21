@@ -93,29 +93,29 @@ my sub parse_file($file) {
 }
 
 # ============================================================
-# 2. Shim.pm — package (not class) with top-level subs
+# 2. Serialize/JSON.pm — package (not class) with top-level subs
 #    Verifies top_level_subs is populated; use_decls captured; no classes
 # ============================================================
 
 {
-    my $ir = parse_file('lib/Chalk/IR/Shim.pm');
-    ok(defined $ir, 'Shim.pm: parse produces IR');
+    my $ir = parse_file('lib/Chalk/IR/Serialize/JSON.pm');
+    ok(defined $ir, 'Serialize/JSON.pm: parse produces IR');
 
     SKIP: {
-        skip 'Shim.pm: no IR', 5 unless defined $ir;
+        skip 'Serialize/JSON.pm: no IR', 5 unless defined $ir;
 
-        isa_ok($ir, 'Chalk::IR::Program', 'Shim.pm: top-level IR is Chalk::IR::Program');
+        isa_ok($ir, 'Chalk::IR::Program', 'Serialize/JSON.pm: top-level IR is Chalk::IR::Program');
 
         my $use_decls = $ir->use_decls();
-        ok(scalar $use_decls->@* >= 1, 'Shim.pm: has use_decls');
+        ok(scalar $use_decls->@* >= 1, 'Serialize/JSON.pm: has use_decls');
 
-        # Shim.pm uses 'package' not 'class', so no ClassInfo entries
+        # Serialize/JSON.pm uses 'package' not 'class', so no ClassInfo entries
         my $classes = $ir->classes();
-        is(scalar $classes->@*, 0, 'Shim.pm: no classes (uses package not class syntax)');
+        is(scalar $classes->@*, 0, 'Serialize/JSON.pm: no classes (uses package not class syntax)');
 
         # top_level_subs — check the accessor works
         my $top_subs = $ir->top_level_subs();
-        is(ref $top_subs, 'ARRAY', 'Shim.pm: top_level_subs() is arrayref');
+        is(ref $top_subs, 'ARRAY', 'Serialize/JSON.pm: top_level_subs() is arrayref');
     }
 }
 
