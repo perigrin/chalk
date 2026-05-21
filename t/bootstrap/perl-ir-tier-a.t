@@ -5,7 +5,7 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
 use Chalk::IR::Program;
@@ -14,8 +14,7 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
 
 # Reset factory for clean state
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $f = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $f = Chalk::IR::NodeFactory->new();
 
 # === Helper constants ===
 

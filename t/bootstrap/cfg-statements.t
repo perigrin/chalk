@@ -7,15 +7,14 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use Chalk::Bootstrap::Context;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Scope;
 use Chalk::IR::Program;
 
 # --- Test 1: cfg_state accepts and returns statements field ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $start = $factory->make('Start');
@@ -39,8 +38,7 @@ use Chalk::IR::Program;
 
 # --- Test 2: cfg_state accepts if_node, true_proj, false_proj references ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $start = $factory->make('Start');
@@ -82,8 +80,7 @@ use Chalk::IR::Program;
 
 # --- Test 3: cfg_state accepts loop structure references ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $start = $factory->make('Start');
@@ -132,8 +129,7 @@ use Chalk::IR::Program;
 # When parent and child contexts both have cfg_state for the same IR node,
 # the parent's state (with body wired in) must take priority.
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $start   = $factory->make('Start');
@@ -208,7 +204,6 @@ use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 if (!defined $ir) {
@@ -237,7 +232,6 @@ SKIP: {
         ok(!defined Chalk::Bootstrap::Semiring::SemanticAction->current_instance(),
             'current_instance is undef before parse');
 
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
         my $result = $parser->parse_value('42;');
         ok(defined $result, 'simple parse succeeds for lifecycle test');
@@ -248,7 +242,6 @@ SKIP: {
 
     # --- IfStatement stores then_stmts and else_stmts ---
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $result = $parser->parse_value('if (1) { 42 } else { 99 }');
@@ -278,7 +271,6 @@ SKIP: {
 
     # --- IfStatement without else stores then_stmts only ---
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $result = $parser->parse_value('if (1) { 42 }');
@@ -295,7 +287,6 @@ SKIP: {
 
     # --- ElsifChain stores body statements and has its own if_node ---
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $result = $parser->parse_value('if (1) { 42 } elsif (2) { 99 } else { 0 }');
@@ -313,7 +304,6 @@ SKIP: {
 
     # --- ForeachStatement stores body_stmts and loop structure ---
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $result = $parser->parse_value('for my $x (1, 2, 3) { $x }');
@@ -359,7 +349,6 @@ SKIP: {
 
     # Parse if/else and verify _generate_with_cfg produces valid Perl with if/else
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring2->reset_cache();
 
         my $result = $parser2->parse_value('if (1) { 42 } else { 99 }');
@@ -380,7 +369,6 @@ SKIP: {
 
     # Parse if-without-else and verify no spurious else block
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring2->reset_cache();
 
         my $result = $parser2->parse_value('if (1) { 42 }');
@@ -399,7 +387,6 @@ SKIP: {
 
     # Parse foreach and verify cfg_state dispatch
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring2->reset_cache();
 
         my $result = $parser2->parse_value('for my $x (1, 2, 3) { $x }');
@@ -435,7 +422,6 @@ SKIP: {
 
     # Parse if/else and verify the IR node doesn't contain IfStmt Constructor
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring3->reset_cache();
 
         my $result = $parser3->parse_value('if (1) { 42 } else { 99 }');
@@ -467,7 +453,6 @@ SKIP: {
 
     # Parse foreach and verify no ForeachLoop Constructor
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring3->reset_cache();
 
         my $result = $parser3->parse_value('for my $x (1, 2, 3) { $x }');
@@ -513,7 +498,6 @@ SKIP: {
 
     # Parse Symbol.pm which uses postfix `if defined $quantifier` in to_string()
     use TestXSHelpers qw(parse_file_ir);
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my ($file_ir, $file_sa, $file_ctx) = parse_file_ir($gen_grammar,
         'lib/Chalk/Grammar/Symbol.pm');
     ok(defined $file_ir, 'Symbol.pm parses for postfix CFG test');
@@ -573,7 +557,6 @@ SKIP: {
 
     # unless generates negated condition in If CFG node
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_u->reset_cache();
 
         my $result = $parser_u->parse_value('unless (1) { 42 }');
@@ -600,7 +583,6 @@ SKIP: {
 
     # Codegen: unless produces if (!...) in output
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_u->reset_cache();
 
         my $result = $parser_u->parse_value('unless (1) { 42 }');
@@ -633,7 +615,6 @@ SKIP: {
     my $sa_ne = $semiring_ne->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_ne->reset_cache();
 
         my $result = $parser_ne->parse_value('if (1) { 42 }');
@@ -666,7 +647,6 @@ SKIP: {
     my $sa_el = $semiring_el->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_el->reset_cache();
 
         my $result = $parser_el->parse_value('if (1) { 42 } elsif (2) { 99 } else { 0 }');
@@ -699,7 +679,6 @@ SKIP: {
     my $sa_f = $semiring_f->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_f->reset_cache();
 
         my $result = $parser_f->parse_value('for my $x (1, 2, 3) { $x }');
@@ -732,7 +711,6 @@ SKIP: {
     my $sa_de = $semiring_de->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_de->reset_cache();
 
         my $result = $parser_de->parse_value('if (1) { 10 } elsif (2) { 20 } elsif (3) { 30 } else { 40 }');
@@ -772,7 +750,6 @@ SKIP: {
     my $sa_f = $semiring_f->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_f->reset_cache();
 
         my $result = $parser_f->parse_value('42 if 1;');
@@ -808,7 +785,6 @@ SKIP: {
     my $sa_pu = $semiring_pu->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_pu->reset_cache();
 
         my $result = $parser_pu->parse_value('42 unless 0;');
@@ -845,7 +821,6 @@ SKIP: {
     my $sa_pt = $semiring_pt->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_pt->reset_cache();
 
         my $result = $parser_pt->parse_value('$x++ until $done;');
@@ -882,7 +857,6 @@ SKIP: {
     my $sa_ue = $semiring_ue->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_ue->reset_cache();
 
         my $result = $parser_ue->parse_value('unless (0) { 42 } else { 99 }');
@@ -919,7 +893,6 @@ SKIP: {
     my $sa_fa = $semiring_fa->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_fa->reset_cache();
 
         my $result = $parser_fa->parse_value('for my $x (@arr) { $x }');
@@ -955,7 +928,6 @@ SKIP: {
     my $sa_ub = $semiring_ub->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_ub->reset_cache();
 
         my $result = $parser_ub->parse_value('42 unless $a && $b;');
@@ -992,7 +964,6 @@ SKIP: {
     my $sa_uc = $semiring_uc->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_uc->reset_cache();
 
         my $result = $parser_uc->parse_value('$x++ until $x > 10;');
@@ -1034,7 +1005,6 @@ SKIP: {
 
     # Parse next unless inside a for loop
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_nu->reset_cache();
 
         my $result = $parser_nu->parse_value('for my $x (@arr) { next unless $x > 0; $x }');
@@ -1098,7 +1068,6 @@ SKIP: {
     my $sa_nn = $semiring_nn->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_nn->reset_cache();
 
         my $result = $parser_nn->parse_value('for my $x (@arr) { next unless $x > 0; $x }');
@@ -1149,7 +1118,6 @@ SKIP: {
 
     # Parse last unless inside a for loop
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_lu->reset_cache();
 
         my $result = $parser_lu->parse_value('for my $x (@arr) { last unless $x > 0; $x }');
@@ -1210,7 +1178,6 @@ SKIP: {
     my $sa_li = $semiring_li->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_li->reset_cache();
 
         my $result = $parser_li->parse_value('for my $x (@arr) { last if $x > 10; $x }');
@@ -1249,7 +1216,6 @@ SKIP: {
     my $sa_bn = $semiring_bn->semirings()->[4];
 
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_bn->reset_cache();
 
         my $result = $parser_bn->parse_value('for my $x (@arr) { next; $x }');
@@ -1292,7 +1258,6 @@ SKIP: {
     # Uses the exact pattern from Earley.pm _chart_set that triggers the bug:
     # $_gc_min_origin_at[$pos] = $origin if !defined $_gc_min_origin_at[$pos] || $origin < $_gc_min_origin_at[$pos];
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_cc->reset_cache();
 
         my $code = '$arr[$pos] = $origin if !defined $arr[$pos] || $origin < $arr[$pos];';
@@ -1354,7 +1319,6 @@ SKIP: {
     # Pattern: $arr[$pos] = $origin if !defined $arr[$pos] || $origin < $arr[$pos];
     # Expected: BinaryExpr(||, UnaryExpr(!, BuiltinCall(defined, ...)), BinaryExpr(<, $origin, SubscriptExpr($arr, $pos)))
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_cc->reset_cache();
 
         my $code = '$arr[$pos] = $origin if !defined $arr[$pos] || $origin < $arr[$pos];';
@@ -1412,7 +1376,6 @@ SKIP: {
 
     # Subtest A2: simple shared-subscript variant
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_cc->reset_cache();
 
         my $result = $parser_cc->parse_value('$arr[$i] = $val if $arr[$i] > 0;');
@@ -1445,7 +1408,6 @@ SKIP: {
 
     # Subtest B: legitimate SubscriptExpr condition must NOT be unwrapped
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring_cc->reset_cache();
 
         my $result = $parser_cc->parse_value('42 if $arr[$i];');

@@ -13,14 +13,13 @@ use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Bootstrap::Semiring::Structural;
 use Chalk::Bootstrap::Context;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Grammar::Perl::TypeLibrary;
 
 no warnings 'experimental::class';
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # ========================================================================
 # Helpers

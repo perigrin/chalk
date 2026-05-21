@@ -6,14 +6,13 @@ use Test::More;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Phi;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Actions;
 use Chalk::Bootstrap::Context;
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 
 # Helper: build a scan context for a variable name at position 0.
 # Optional %extra fields are forwarded to Context::new — e.g. pass
@@ -53,7 +52,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 # We test this by calling on_complete for ScalarVariable with a context that
 # has no cfg_state (or empty scope), and verify a Constant is returned.
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
@@ -76,7 +74,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 # Set up cfg_state on the input context with a scope containing $x = some_node.
 # Verify on_complete for ScalarVariable returns that node.
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
@@ -111,7 +108,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 # Set up cfg_state with a scope containing a sentinel for $x.
 # Verify on_complete for ScalarVariable creates and returns a Phi node.
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
@@ -166,7 +162,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
 # --- Case 4: ArrayVariable also resolves from scope ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
@@ -190,7 +185,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
 # --- Case 5: HashVariable also resolves from scope ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(

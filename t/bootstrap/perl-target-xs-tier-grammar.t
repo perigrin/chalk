@@ -22,11 +22,10 @@ unless ($have_compiler) {
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use TestXSHelpers qw(build_and_load);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Build Perl grammar pipeline
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'perl_pipeline produces grammar IR');
 
@@ -42,7 +41,6 @@ ok(defined $gen_grammar, 'grammar objects loaded');
 # === Helper to parse file -> IR, SemanticAction, semantic context ===
 
 my sub parse_file_ir($file) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
     local $/;
     my $source = <$fh>;

@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::FilterComposite;
@@ -23,7 +23,6 @@ use Chalk::Grammar::Perl::TypeLibrary;
 use Chalk::MOP;
 
 # Build the Perl grammar pipeline once for all tests.
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 unless (defined $ir) {

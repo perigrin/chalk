@@ -10,7 +10,7 @@ use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Earley;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use TestPipeline qw(build_parser parse_ir bnf_text perl_bnf_text);
 
 # === Test 1: GC does not affect parse correctness ===
@@ -515,7 +515,6 @@ subtest 'BNF pipeline: parse actual bootstrap grammar with GC' => sub {
     # This exercises real-world completion patterns by running the BNF
     # meta-grammar parser over the actual 65-rule chalk-bootstrap.bnf file.
     # Verifies that safe-set GC does not corrupt a large, realistic parse.
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_parser();
 
     my $bnf_text = perl_bnf_text();

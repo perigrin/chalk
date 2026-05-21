@@ -7,13 +7,12 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Phi;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 SKIP: {
@@ -34,7 +33,6 @@ SKIP: {
 
     # --- Test 1: Read-only variable in loop gets degenerate Phi ---
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $src = 'my $x = 42; for my $i (1, 2, 3) { $x; }';
@@ -60,7 +58,6 @@ SKIP: {
 
     # --- Test 2: Read-and-written variable gets real loop-carried Phi ---
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $src = 'my $sum = 0; for my $x (1, 2, 3) { $sum = $sum + $x; }';
@@ -90,7 +87,6 @@ SKIP: {
 
     # --- Test 3: Variable not read in loop gets no Phi ---
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $src = 'my $y = 99; for my $i (1, 2) { $i; }';
@@ -117,7 +113,6 @@ SKIP: {
     # The inner loop's $x usage is inside the inner ForeachStatement Constructor,
     # so the outer $collect_body_var_refs does not see it.
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $src = 'my $x = 0; for my $i (1, 2) { for my $j (3, 4) { $x = $x + $j; } }';
@@ -142,7 +137,6 @@ SKIP: {
 
     # --- Test 5: Multiple variables, only referenced ones get Phi ---
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $src = 'my $a = 0; my $b = 1; for my $i (1, 2, 3) { $a = $a + $i; }';

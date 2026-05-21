@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use Chalk::Bootstrap::Context;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Perl::Target::Perl;
@@ -16,8 +16,7 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 
 # --- Test 1: cfg_state accepts try_node, catch_var, try_stmts, catch_stmts ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $start = $factory->make('Start');
@@ -50,8 +49,7 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 
 # --- Test 2: emit_from_cfg_state dispatches try/catch ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $start = $factory->make('Start');
@@ -84,8 +82,7 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 
 # --- Test 3: emit_cfg_try_catch method directly ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $try_stmt = $factory->make('Constant', const_type => 'integer', value => 10);
     my $catch_stmt = $factory->make('Constant', const_type => 'string', value => 'rescued');
@@ -101,7 +98,6 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 
 # --- Test 4: Full pipeline: parse try/catch and emit Perl ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir = perl_pipeline();
 
     SKIP: {
@@ -122,7 +118,6 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 
         # Parse simple try/catch
         {
-            Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
             $semiring->reset_cache();
 
             my $source = <<'END';

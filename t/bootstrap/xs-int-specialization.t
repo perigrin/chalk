@@ -6,9 +6,8 @@ use Test::More;
 
 use lib 'lib';
 
-use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Perl::Target::C;
 use Chalk::IR::NodeFactory;
+use Chalk::Bootstrap::Perl::Target::C;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Program;
 use Chalk::IR::ClassInfo;
@@ -22,8 +21,7 @@ my %BINOP_MAP = (
     '*' => 'Multiply',
 );
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory     = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory     = Chalk::IR::NodeFactory->new();
 my $typed       = Chalk::IR::NodeFactory->new();
 
 # Helper: build a typed BinaryExpr-equivalent node from operator string + operands.
@@ -98,8 +96,7 @@ like($c_code, qr/sv_2mortal/, 'result wrapped in sv_2mortal');
 # newSViv confirms the specialization fires broadly on realistic code, not
 # just the trivial toy example above.
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory2 = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory2 = Chalk::IR::NodeFactory->new();
 my $typed2   = Chalk::IR::NodeFactory->new();
 
 # Helper: make a Constant(variable) node

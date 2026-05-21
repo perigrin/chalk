@@ -5,13 +5,12 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Scope;
 use Chalk::IR::Node::Phi;
 use Scalar::Util 'refaddr';
 
-Chalk::Bootstrap::IR::NodeFactory::reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 
 my $const1 = $factory->make('Constant', const_type => 'integer', value => '1');
 my $const2 = $factory->make('Constant', const_type => 'integer', value => '2');

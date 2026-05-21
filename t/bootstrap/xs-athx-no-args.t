@@ -6,15 +6,14 @@ use Test::More;
 
 use lib 'lib';
 
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Program;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 
 # Build a minimal IR: a class with one method (so we get exported_functions)
 my $class_name = 'Foo::Bar::Baz';

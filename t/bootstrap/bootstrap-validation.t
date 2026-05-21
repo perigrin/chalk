@@ -47,11 +47,10 @@ use lib 'lib';
 
 # Phase 2a: IR nodes can be constructed manually
 {
-    use_ok('Chalk::Bootstrap::IR::NodeFactory');
+    use_ok('Chalk::IR::NodeFactory');
     use_ok(q{Chalk::IR::Node::Constant});
 
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $const = $factory->make('Constant', const_type => 'string', value => 'test_value');
     isa_ok($const, 'Chalk::IR::Node::Constant', 'Phase 2a: Can create Constant node');
@@ -163,7 +162,7 @@ use lib 'lib';
 {
     use Chalk::Bootstrap::Optimizer;
     use Chalk::Bootstrap::Optimizer::DCE;
-    use Chalk::Bootstrap::IR::NodeFactory;
+    use Chalk::IR::NodeFactory;
 
     my $ir = optimized_pipeline();
     ok(defined $ir, 'Phase 4: optimized pipeline produces IR');

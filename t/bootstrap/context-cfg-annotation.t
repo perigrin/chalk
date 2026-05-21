@@ -8,11 +8,10 @@ use lib 'lib';
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Scope;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Scalar::Util 'refaddr';
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 
 # ---------------------------------------------------------------------------
 # Phase 3: New API — cfg_state reads from scope field + individual annotations
@@ -165,7 +164,7 @@ subtest 'update_scope and update_annotations propagate to result via multiply' =
         no warnings 'once';
         *FakeActionsForScope::Foo = sub ($self, $ctx) {
             my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
-            my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+            my $factory = Chalk::IR::NodeFactory->new();
             my $start = $factory->make('Start');
             my $scope = Chalk::Bootstrap::Scope->new()->with_control($start);
             $sa->update_scope($scope);

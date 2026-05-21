@@ -14,7 +14,7 @@ use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Grammar::Perl::TypeLibrary;
 use Chalk::Bootstrap::Context;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::Structural;
 
 # Local aliases for fully-qualified structural constants
@@ -24,8 +24,7 @@ use constant {
 };
 
 # Reset factory for clean test environment
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 
 # Helper: build an annotated scan Context (as Earley would create it)
 sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {

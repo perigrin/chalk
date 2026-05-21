@@ -10,7 +10,7 @@ use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_recognizer);
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Boolean;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
@@ -119,7 +119,6 @@ my sub rule($name, @alts) {
 # with indexing. We measure time for a medium-sized source file.
 
 SKIP: {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir = perl_pipeline();
     skip 'Perl grammar failed to parse', 4 unless defined $ir;
 

@@ -15,11 +15,10 @@ use Chalk::IR::Node::Unwind;
 use Chalk::IR::Node::VarDecl;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Build Perl grammar pipeline: IR -> generated Perl -> eval -> grammar objects
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'perl_pipeline produces grammar IR');
 
@@ -35,7 +34,6 @@ ok(defined $gen_grammar, 'grammar objects loaded');
 # === Helper to parse a source string and extract Perl IR ===
 
 my sub parse_source($source) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
     my $result = $parser->parse_value($source);
     return undef unless defined $result;

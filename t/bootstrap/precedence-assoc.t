@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Bootstrap::Context;
@@ -89,7 +89,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx = 0) {
 # These are the acceptance criteria inputs from the RCA.
 # ========================================================================
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 SKIP: {
@@ -106,7 +105,6 @@ SKIP: {
     skip 'Concise parser not built', 1 unless defined $parser;
 
     my sub parse_ok($source) {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         my $result = $parser->parse_value($source);
         return undef unless defined $result;
         return undef if $result->is_zero();

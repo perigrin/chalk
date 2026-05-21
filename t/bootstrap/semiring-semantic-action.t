@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib';
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Context;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
 # Helper: build an annotated scan Context (as Earley would create it)
 sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {
@@ -43,8 +43,7 @@ sub make_complete_ctx($value, $rule_name, $alt_idx, $pos, $origin) {
     );
 }
 # Reset factory for clean test environment
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 
 # Test 1: zero creates a Context with is_zero=true (per Decision 4 contract migration)
 {

@@ -9,11 +9,10 @@ use Test::More;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::Boolean;
 
 # Set up grammar once for all tests
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
 my $generated = $bnf_target->generate($raw_ir);
@@ -23,7 +22,6 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
 die "Grammar not defined" unless defined $grammar;
 
 sub make_parser() {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($grammar, start => 'Program');
     $parser->semiring->reset_cache();
     return $parser;

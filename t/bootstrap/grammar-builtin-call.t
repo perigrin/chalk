@@ -7,11 +7,10 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Build Perl grammar via the full pipeline: BNF → IR → codegen → eval → grammar objects
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 if (!defined $raw_ir) {
     plan(skip_all => 'BNF pipeline failed — cannot generate Perl grammar');
@@ -65,7 +64,6 @@ my $gen_grammar = Chalk::Grammar::Perl::BuiltinCallTest::grammar();
 # Test 6: Full IR parse — does "push @arr, $x" produce a BuiltinCall/Call node
 # when parsed through the full 5-ary semiring as a SimpleStatement?
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($gen_grammar, start => 'SimpleStatement');
     my $result = $parser->parse_value('push @arr, $x');
     if (defined $result) {

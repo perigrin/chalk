@@ -685,7 +685,7 @@ for my $preserve_rule (qw(Program StatementList)) {
 # from pre-existing nondeterminism in Precedence/TypeInference add().
 # ========================================================================
 use TestPipeline qw(perl_pipeline);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::FilterComposite;
@@ -693,7 +693,6 @@ use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::Structural;
 use Chalk::Bootstrap::Desugar;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 SKIP: {

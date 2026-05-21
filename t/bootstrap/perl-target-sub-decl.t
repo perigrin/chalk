@@ -6,15 +6,14 @@ use Test::More;
 
 use lib 'lib';
 
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::Perl;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Program;
 use Chalk::IR::SubInfo;
 
 # Reset factory for clean test state
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 my $target  = Chalk::Bootstrap::Perl::Target::Perl->new();
 
 # === Helper: build a SubInfo IR node ===

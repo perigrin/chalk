@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Build the full 5-ary FilterComposite parser with Perl grammar.
@@ -15,7 +15,6 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 # (not _sa()) so its annotations->{type} slots are populated and the
 # CallExpression walker fires the signature-validation path.
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 SKIP: {

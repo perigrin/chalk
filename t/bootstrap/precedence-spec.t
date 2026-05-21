@@ -53,7 +53,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::Program;
 use Chalk::IR::Node;
@@ -74,7 +74,6 @@ use Chalk::IR::Node::VarDecl;
 
 # === Build the Perl grammar pipeline once ===
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'perl_pipeline produces grammar IR') or BAIL_OUT('grammar build failed');
 
@@ -94,7 +93,6 @@ ok(defined $grammar, 'grammar loaded');
 # well-formed statement; the helper then unwraps the VarDecl and returns the
 # initializer expression IR.
 sub parse_expr($source) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $stmt = "my \$_ = $source;";
     my $parser = build_perl_ir_parser($grammar, start => 'Program');
     my $result = eval { $parser->parse_value($stmt) };

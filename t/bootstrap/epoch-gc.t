@@ -9,7 +9,7 @@ use Test::More;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::SemanticAction;
@@ -35,7 +35,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 };
 
 # Set up grammar once for all tests that need a real parse
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
 my $generated = $bnf_target->generate($raw_ir);
@@ -68,7 +67,6 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
         $callback_args = [$origin, $end];
     };
 
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($grammar, start => 'Program');
     my $semiring = $parser->semiring();
     $semiring->reset_cache();
@@ -127,7 +125,6 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
 
 # Test 9: gc_freed > 0 after multi-statement parse
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($grammar, start => 'Program');
     my $semiring = $parser->semiring();
     $semiring->reset_cache();
@@ -146,7 +143,6 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
 
 # Test 11: Full semiring parse frees positions
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($grammar, start => 'Program');
     my $semiring = $parser->semiring();
     $semiring->reset_cache();
@@ -160,7 +156,6 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
 
 # Test 12: Parse result is correct despite GC
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($grammar, start => 'Program');
     my $semiring = $parser->semiring();
     $semiring->reset_cache();
@@ -181,7 +176,6 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
 
 # Test 17: Boolean-only parse detects safe sets with safe-set GC
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($grammar, start => 'Program');
     my $bool = Chalk::Bootstrap::Semiring::Boolean->new();
     my $bp = Chalk::Bootstrap::Earley->new(
@@ -207,7 +201,6 @@ subtest 'epoch GC and safe-set GC coexist' => sub {
     # Uses the full 5-ary FilterComposite semiring (epoch GC via SemanticAction
     # on_epoch_commit) plus safe-set detection (Aycock Properties 1-3).
     # Verifies both contribute GC and the parse result is still correct.
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($grammar, start => 'Program');
     my $semiring = $parser->semiring();
     $semiring->reset_cache();

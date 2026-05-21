@@ -5,7 +5,7 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
@@ -13,8 +13,7 @@ use Chalk::Bootstrap::Perl::Actions;
 use Chalk::Bootstrap::Context;
 use Chalk::IR::Node::Return;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 
 # Helper: build a complete-annotated Context for multiply() calls.
 my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
@@ -57,8 +56,7 @@ my sub make_parent_ctx(@children) {
 
 # ---- Test 1: Bootstrap::IR::NodeFactory has make_cfg ----
 subtest 'Bootstrap::IR::NodeFactory has make_cfg' => sub {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $f = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $f = Chalk::IR::NodeFactory->new();
 
     ok($f->can('make_cfg'), 'factory has make_cfg method');
 
@@ -76,8 +74,7 @@ subtest 'Bootstrap::IR::NodeFactory has make_cfg' => sub {
 
 # ---- Test 2: make_cfg Return nodes are always unique (CFG semantics) ----
 subtest 'make_cfg Return nodes are always unique' => sub {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $f = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $f = Chalk::IR::NodeFactory->new();
 
     my $start = $f->make('Start');
     my $val   = $f->make('Constant', const_type => 'string', value => 'x');
@@ -89,7 +86,6 @@ subtest 'make_cfg Return nodes are always unique' => sub {
 
 # ---- Test 3: ReturnStatement action produces Chalk::IR::Node::Return ----
 subtest 'ReturnStatement action produces Chalk::IR::Node::Return' => sub {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa      = Chalk::Bootstrap::Semiring::SemanticAction->new(actions => $actions);
@@ -121,7 +117,6 @@ subtest 'ReturnStatement action produces Chalk::IR::Node::Return' => sub {
 
 # ---- Test 4: ReturnStatement with bare return (no expression) ----
 subtest 'ReturnStatement bare return produces Return with undef value' => sub {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa      = Chalk::Bootstrap::Semiring::SemanticAction->new(actions => $actions);

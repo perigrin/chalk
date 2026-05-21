@@ -6,15 +6,14 @@ use Test::More;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
 # --- Test 1: emit_from_cfg_state for if/else ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $start = $factory->make('Start');
@@ -49,8 +48,7 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 
 # --- Test 2: emit_from_cfg_state for if without else ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $start = $factory->make('Start');
@@ -82,8 +80,7 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 
 # --- Test 3: emit_from_cfg_state for loop ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $start = $factory->make('Start');
@@ -115,8 +112,7 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 
 # --- Test 4: emit_from_cfg_state for foreach loop ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $start = $factory->make('Start');
@@ -155,8 +151,7 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 
 # --- Test 5: emit_from_cfg_state returns undef for plain state ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $ctx = $sa->one();
@@ -173,7 +168,6 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 
 # --- Test 6: emit_from_cfg_state returns undef when no cfg_state exists ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
     my $ctx = $sa->one();
@@ -185,8 +179,7 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 
 # --- Test 7: emit_cfg_if with empty stmts produces no body content ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $start = $factory->make('Start');
     my $cond  = $factory->make('Constant', const_type => 'integer', value => 1);

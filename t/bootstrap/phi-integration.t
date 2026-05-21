@@ -7,14 +7,13 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Phi;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 
 # Build the Perl grammar recognizer pipeline once for all tests.
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 SKIP: {
@@ -42,7 +41,6 @@ SKIP: {
     # Note: no trailing statement after the loop — the trailing-statement case
     # exposes a known scope-propagation limitation with multiply() right-wins merge.
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $src = 'my $x = 0; for my $i (1, 2, 3, 4, 5) { $x = $x + $i; }';
@@ -68,7 +66,6 @@ SKIP: {
     # my $s = ""; for my $c ("a", "b", "c") { $s = $s . $c; }
     # $s is read and written in the loop, should be a Phi.
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $src = 'my $s = ""; for my $c ("a", "b", "c") { $s = $s . $c; }';
@@ -94,7 +91,6 @@ SKIP: {
     # The Phi for $sum must have its backedge (values->[1]) wired to the
     # post-body assignment, not left as undef.
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $src = 'my $sum = 0; for my $n (1, 2, 3) { $sum = $sum + $n; }';
@@ -130,7 +126,6 @@ SKIP: {
     # Scope.pm contains: for my $name (keys $bindings->%*) { ... }
     # This is a smoke test to verify lazy Phi doesn't crash on real code.
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         open my $fh, '<:utf8', 'lib/Chalk/Bootstrap/Scope.pm'
@@ -152,7 +147,6 @@ SKIP: {
     # loops; Context.pm has the right shape (extend uses a for-like walk
     # internally via duplicate/extend on children).
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         open my $fh, '<:utf8', 'lib/Chalk/Bootstrap/Context.pm'
@@ -175,7 +169,6 @@ SKIP: {
     # This is a known limitation of bottom-up Earley parsing with mutable scope.
     # The loop-only form (Test 1/2 above) works correctly.
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $src = 'my $x = 0; for my $i (1, 2, 3) { $x = $x + $i; } $x;';

@@ -10,7 +10,7 @@ use lib 't/bootstrap/lib';
 use TestPipeline qw(
     build_parser parse_ir perl_bnf_text perl_pipeline build_perl_recognizer
 );
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Sanity checks on the BNF file

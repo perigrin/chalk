@@ -5,7 +5,6 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::VarDecl;
@@ -13,8 +12,7 @@ use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Actions;
 use Chalk::Bootstrap::Context;
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 my $typed   = Chalk::IR::NodeFactory->new;
 
 # Helper: build a leaf Context wrapping an IR node (simulates a completed sub-rule)
@@ -63,7 +61,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 # AssignmentExpression(VarDecl_with_no_init, '=', Constant(42))
 # Should create a new VarDecl with initializer and bind '$x' in scope
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
@@ -109,7 +106,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 # AssignmentExpression(Constant(variable, '$x'), '=', Constant(2))
 # Should create a VarDecl and bind '$x' in scope with the new VarDecl
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
@@ -155,7 +151,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 # AssignmentExpression(Constant(variable, '$x'), '+=', Constant(5))
 # Should create a CompoundAssign and bind '$x' in scope
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
@@ -200,7 +195,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 # If no scope on context, AssignmentExpression should still produce a VarDecl/CompoundAssign
 # but without crashing, and with no scope update
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
     my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(

@@ -6,13 +6,11 @@ use utf8;
 use Test2::V0;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::NodeFactory;
 
 # Reset factory to ensure clean test state
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+my $factory = Chalk::IR::NodeFactory->new;
 my $typed   = Chalk::IR::NodeFactory->new;
 
 # Test 1: VarDecl creation (typed)

@@ -285,13 +285,12 @@ use Chalk::Grammar::Symbol;
 # Integration: // and //= parse deterministically with TypeInference
 # ========================================================================
 
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::Program;
 use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser build_perl_ir_parser);
 
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir = perl_pipeline();
     my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
@@ -356,7 +355,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser bui
 # ========================================================================
 
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir = perl_pipeline();
     my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
@@ -803,7 +801,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser bui
 # ========================================================================
 
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir = perl_pipeline();
     my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
@@ -928,7 +925,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser bui
 
 TODO: {
     local $TODO = 'push fragmentation: filter-gap merge admits wrong IR (pre-existing)';
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir = perl_pipeline();
     my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);

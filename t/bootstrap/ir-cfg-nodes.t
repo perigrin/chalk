@@ -6,14 +6,13 @@ use utf8;
 use Test2::V0;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
 # Reset factory to ensure clean test state
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 1: Create If node with control and condition inputs
 {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'bool', value => 'true');
@@ -31,8 +30,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 2: If node appears in consumers of its inputs
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'bool', value => 'true');
@@ -50,8 +48,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 3: Create Proj node with source input and index attribute
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'bool', value => 'true');
@@ -72,8 +69,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 4: Proj nodes with different indices are different
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'bool', value => 'true');
@@ -91,8 +87,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 5: Proj nodes with same source and index are distinct (CFG nodes not hash-consed)
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'bool', value => 'true');
@@ -110,8 +105,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 6: Create Region node with array of control inputs
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'bool', value => 'true');
@@ -137,8 +131,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 7: Region node appears in consumers of its control inputs
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'bool', value => 'true');
@@ -161,8 +154,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 8: Region nodes with same controls are distinct (CFG nodes not hash-consed)
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'bool', value => 'true');
@@ -179,8 +171,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 9: Create Phi node with region and values array
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'bool', value => 'true');
@@ -206,8 +197,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 10: Phi node appears in consumers of region and values
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'bool', value => 'true');
@@ -236,8 +226,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 # CFG nodes represent control flow positions, not data values, so each
 # creation site must produce a unique node for cfg_state mapping.
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'bool', value => 'true');
@@ -259,8 +248,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 12: Create Loop node with entry and backedge controls
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $backedge = $factory->make('Constant', const_type => 'control', value => 'placeholder');
@@ -278,8 +266,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 13: Loop node appears in consumers of its inputs
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $backedge = $factory->make('Constant', const_type => 'control', value => 'placeholder');
@@ -297,8 +284,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 14: Loop nodes with same inputs are distinct (CFG nodes not hash-consed)
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $start = $factory->make('Start');
     my $backedge = $factory->make('Constant', const_type => 'control', value => 'placeholder');
@@ -313,8 +299,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 15: Complete if-then-else pattern with Region and Phi
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     # Entry control
     my $start = $factory->make('Start');

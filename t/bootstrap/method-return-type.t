@@ -8,11 +8,10 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Build Perl grammar pipeline
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'perl_pipeline produces grammar IR');
 
@@ -27,7 +26,6 @@ ok(defined $gen_grammar, 'grammar objects loaded');
 
 # Helper to parse a class body and find MethodDecl nodes
 my sub parse_and_find_methods($source) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
     my $result = $parser->parse_value($source);
     return () unless defined $result;

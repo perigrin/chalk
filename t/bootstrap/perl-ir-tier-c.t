@@ -5,11 +5,9 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::NodeFactory;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 my $typed   = Chalk::IR::NodeFactory->new;
 
 # Helper: make a string Constant

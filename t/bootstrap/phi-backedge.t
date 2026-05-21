@@ -5,13 +5,12 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
-my $factory = Chalk::Bootstrap::IR::NodeFactory->new();
+my $factory = Chalk::IR::NodeFactory->new();
 
 # --- Phi set_backedge ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $start = $factory->make('Start');
     my $loop = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
     my $pre_value = $factory->make('Constant', const_type => 'integer', value => '0');
@@ -31,7 +30,6 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->new();
 
 # --- Loop set_backedge_ctrl ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $start = $factory->make('Start');
     my $loop = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
 

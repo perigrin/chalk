@@ -20,7 +20,7 @@ unless ($have_compiler) {
 
 use TestXSHelpers qw(setup_xs_grammar parse_file_ir build_and_load);
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Desugar;
 use Chalk::Bootstrap::Semiring::FilterComposite;
@@ -54,7 +54,6 @@ if (!defined $result) {
 }
 
 # --- Step 3: Build the Perl grammar (shared between both parsers) ---
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $perl_ir = perl_pipeline();
 ok(defined $perl_ir, 'Perl grammar pipeline produces IR') or BAIL_OUT("Grammar failed");
 

@@ -6,7 +6,6 @@ use Test::More;
 
 use lib 'lib';
 
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
 use Chalk::IR::Node::Return;
@@ -16,8 +15,7 @@ use Chalk::IR::MethodInfo;
 
 # Build a minimal IR: a class with a single no-op method so _generate_c_files
 # has something to process without hitting undef errors.
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 
 my $method = Chalk::IR::MethodInfo->new(
     name   => 'stub',
@@ -185,8 +183,7 @@ is($alpha_include_count, 1, '#include "testsemiringalpha.h" appears exactly once
 # so it must fall through to the polymorphic-dispatch tier.
 #   method check($sr, $v) { return $sr->is_zero($v); }
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory2 = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory2 = Chalk::IR::NodeFactory->new();
 my $typed2   = Chalk::IR::NodeFactory->new;
 
 my $method_name_node = $factory2->make('Constant', const_type => 'string', value => 'is_zero');
@@ -268,8 +265,7 @@ for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
 # ============================================================
 
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $f = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $f = Chalk::IR::NodeFactory->new();
 
     my $method_node = Chalk::IR::MethodInfo->new(
         name   => 'stub',

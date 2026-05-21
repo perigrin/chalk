@@ -5,13 +5,12 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::IR::Optimizer;
 
 # --- Test 1: Phi(Region, X, X) → X when all value inputs are same node ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $start = $factory->make('Start');
     my $val = $factory->make('Constant', const_type => 'integer', value => 42);
@@ -32,8 +31,7 @@ use Chalk::Bootstrap::IR::Optimizer;
 
 # --- Test 2: Phi with different values does NOT collapse ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $start = $factory->make('Start');
     my $val_a = $factory->make('Constant', const_type => 'integer', value => 1);
@@ -53,8 +51,7 @@ use Chalk::Bootstrap::IR::Optimizer;
 
 # --- Test 3: Region with single control input → bypass ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $start = $factory->make('Start');
     my $region = $factory->make('Region', controls => [$start]);
@@ -65,8 +62,7 @@ use Chalk::Bootstrap::IR::Optimizer;
 
 # --- Test 4: Region with multiple controls does NOT collapse ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $start = $factory->make('Start');
     my $cond = $factory->make('Constant', const_type => 'integer', value => 1);

@@ -4,13 +4,11 @@ use 5.42.0;
 use utf8;
 use Test::More;
 
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::NodeFactory;
 
 # Test 1: If/Else Pattern - Build `if ($cond) { $x = 2 } else { $x = 3 }`
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     # Build: if ($cond) { $x = 2 } else { $x = 3 }
     my $start   = $factory->make('Start');
@@ -55,8 +53,7 @@ use Chalk::IR::NodeFactory;
 
 # Test 2: While Loop Pattern - Build `while ($x < 10) { $x = $x + 1 }`
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $start = $factory->make('Start');
     my $init_x   = $factory->make('Constant', const_type => 'integer', value => 0);

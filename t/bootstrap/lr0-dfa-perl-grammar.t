@@ -7,14 +7,13 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Desugar;
 use Chalk::Bootstrap::CoreItemIndex;
 use Chalk::Bootstrap::LR0DFA;
 
 # Build the Perl grammar through the BNF pipeline
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 SKIP: {

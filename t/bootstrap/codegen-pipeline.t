@@ -7,11 +7,10 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(build_parser parse_ir bnf_text);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Reset factory for clean state
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 my $parser = build_parser();
 

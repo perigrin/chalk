@@ -8,11 +8,10 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Scalar::Util qw(blessed);
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 BAIL_OUT('Perl grammar failed to parse') unless defined $raw_ir;
 
@@ -40,7 +39,6 @@ my @cases = (
 
 for my $case (@cases) {
     my ($input, $expected_class, $desc) = @$case;
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Expression');
     my $result = $parser->parse_value($input);
 

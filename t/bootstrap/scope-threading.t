@@ -7,13 +7,12 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 
 # Build the Perl grammar recognizer pipeline
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 SKIP: {
@@ -37,7 +36,6 @@ SKIP: {
 
     # --- Test 1: Simple variable declaration populates scope via cfg_state ---
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $result = $parser->parse_value('my $x = 42;');
@@ -56,7 +54,6 @@ SKIP: {
 
     # --- Test 2: Multiple declarations accumulate in scope ---
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $result = $parser->parse_value('my $a = 1; my $b = 2;');

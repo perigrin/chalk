@@ -6,16 +6,14 @@ use utf8;
 use Test2::V0;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::VarDecl;
 
 # Reset factory to ensure clean test state (prevents cross-test contamination)
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 1: Simple producer-consumer relationship
 {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $var = $factory->make('Constant',
         const_type => 'string',
@@ -51,7 +49,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 2: Multiple consumers - same inputs deduplicated
 {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $shared_var  = $factory->make('Constant', const_type => 'string', value => '$shared_var');
     my $shared_init = $factory->make('Constant', const_type => 'string', value => 'shared_init');
@@ -76,7 +74,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 3: Multiple consumers (non-deduplicated due to different initializers)
 {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $shared_var = $factory->make('Constant',
         const_type => 'string',
@@ -117,7 +115,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 4: Graph traversal (VarDecl -> ArrayRefExpr chain)
 {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     # Build: var_const -> decl -> arr (decl used as element in ArrayRefExpr)
     # ArrayRefExpr takes 'elements' which is an array input
@@ -152,7 +150,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 5: Consumer removal
 {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     my $shared = $factory->make('Constant',
         const_type => 'string',
@@ -197,7 +195,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Test 6: No circular references at creation
 {
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $factory = Chalk::IR::NodeFactory->new;
 
     # Verify a node's consumers don't include itself initially
     my $const = $factory->make('Constant',

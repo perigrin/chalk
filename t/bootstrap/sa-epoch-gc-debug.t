@@ -9,11 +9,10 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Build Perl grammar pipeline
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'perl_pipeline produces grammar IR');
 
@@ -28,7 +27,6 @@ ok(defined $gen_grammar, 'grammar objects loaded');
 
 # Helper: parse with 5-ary FilterComposite (with SemanticAction)
 my sub parse_ir($source, $label) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir_parser = build_perl_ir_parser($gen_grammar, start => 'Program');
     my $ir_result = eval { $ir_parser->parse_value($source) };
     my $ir_err = $@;

@@ -7,10 +7,9 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(build_parser parse_ir);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
 # Reset factory for clean test state
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 my $parser = build_parser();
 

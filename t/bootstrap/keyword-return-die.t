@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
@@ -16,7 +16,6 @@ use Chalk::IR::MethodInfo;
 use Chalk::IR::Graph;
 
 # Build Perl grammar pipeline once
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'perl_pipeline produces grammar IR');
 
@@ -30,7 +29,6 @@ my $gen_grammar = Chalk::Grammar::Perl::KeywordReturnDieTest::grammar();
 ok(defined $gen_grammar, 'grammar objects loaded');
 
 my sub parse_snippet($source) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
     my $result = $parser->parse_value($source);
     return undef unless defined $result;

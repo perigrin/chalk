@@ -10,11 +10,10 @@ use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Grammar::BNF::Actions;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
 # Reset factory for clean test environment
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 
 # Build simple grammar for testing: Identifier ::= /[A-Z]+/
 # We'll use a simplified grammar since full BNF is complex

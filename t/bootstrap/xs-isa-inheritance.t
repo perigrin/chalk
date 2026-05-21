@@ -9,15 +9,14 @@ use File::Path qw(make_path);
 use lib 'lib';
 use lib 't/bootstrap/lib';
 
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Program;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $factory = Chalk::IR::NodeFactory->new();
 
 # Build IR for a class with :isa(Parent)
 my $parent_name = 'Test::ISA::Parent';

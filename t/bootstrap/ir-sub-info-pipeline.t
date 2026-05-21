@@ -8,13 +8,12 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::SubInfo;
 use Chalk::IR::Program;
 
 # Build Perl grammar pipeline
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'perl_pipeline produces grammar IR');
 
@@ -28,7 +27,6 @@ my $gen_grammar = Chalk::Grammar::Perl::SubInfoPipelineTest::grammar();
 ok(defined $gen_grammar, 'grammar objects loaded');
 
 my sub parse_file($file) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
     local $/;
     my $source = <$fh>;

@@ -8,10 +8,9 @@ use Scalar::Util 'refaddr';
 
 use lib 'lib';
 use Chalk::Bootstrap::Scope;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 1: define() overwrites an existing binding
 {

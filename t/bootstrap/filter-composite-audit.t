@@ -417,10 +417,9 @@ subtest 'real parse captures disagreement on push @arr, $obj->method()' => sub {
         return;
     }
 
-    require Chalk::Bootstrap::IR::NodeFactory;
+    require Chalk::IR::NodeFactory;
     require Chalk::Bootstrap::BNF::Target::Perl;
 
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $raw_ir = TestPipeline::perl_pipeline();
     unless (defined $raw_ir) {
         plan skip_all => 'perl_pipeline returned undef';
@@ -438,7 +437,6 @@ subtest 'real parse captures disagreement on push @arr, $obj->method()' => sub {
 
     my $gen_grammar = Chalk::Grammar::Perl::AuditTest::grammar();
 
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = TestPipeline::build_perl_ir_parser($gen_grammar, start => 'Program');
 
     # Grab the FilterComposite from the parser so we can inspect its audit_log

@@ -8,11 +8,10 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Semiring::Boolean;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 BAIL_OUT('Perl grammar failed to parse') unless defined $raw_ir;
 
@@ -49,7 +48,6 @@ no warnings 'redefine';
 # Parse a small Perl expression through the full FilterComposite stack.
 # Boolean::multiply must fire at least once during the parse.
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Expression');
     my $result = $parser->parse_value('1 + 2');
     ok(defined $result, 'parses "1 + 2"');
@@ -60,7 +58,6 @@ no warnings 'redefine';
 # The returned Context must carry the 'boolean' annotation slot set by Boolean.
 {
     $bool_multiply_count = 0;
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Expression');
     my $result = $parser->parse_value('42');
     ok(defined $result, 'parses "42"');

@@ -6,9 +6,9 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::Bootstrap::Scope;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
-my $factory = Chalk::Bootstrap::IR::NodeFactory->new();
+my $factory = Chalk::IR::NodeFactory->new();
 
 # --- fork_for_loop: replaces bindings with sentinels ---
 {
@@ -34,7 +34,6 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->new();
 
 # --- resolve_sentinel: creates Phi on first read ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $node_x = $factory->make('Constant', const_type => 'integer', value => '42');
     my $scope = Chalk::Bootstrap::Scope->new();
     $scope = $scope->define('$x', $node_x);

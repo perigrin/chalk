@@ -6,7 +6,7 @@ use Test::More;
 
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Scope;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Context;
 
 # Helper: build a complete-annotated Context for multiply() calls.
@@ -30,7 +30,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
 # --- Test 1: cfg_state on one() context ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $one = $sa->one();
     ok(defined $one, 'one() returns a Context');
@@ -50,8 +49,7 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
 # --- Test 2: cfg_state propagates through multiply with complete Context ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     # Create a minimal actions object that returns a bare IR node
     my $const = $factory->make('Constant', const_type => 'string', value => 'test');
@@ -86,8 +84,7 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
 # --- Test 3: set_cfg_state allows actions to update control/scope ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $one = $sa->one();
@@ -111,7 +108,6 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 # cache causes the NEXT one() call to return a new singleton — not to clear
 # annotations on the old one.
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $old_one = $sa->one();
 

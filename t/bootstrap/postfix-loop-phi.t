@@ -7,13 +7,12 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Phi;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 SKIP: {
@@ -38,7 +37,6 @@ SKIP: {
     # PostfixModifier must collect body variable refs into %_loop_body_var_refs
     # so Program's Phi insertion loop can find and create the Phi.
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $src = 'my $x = 0; $x = $x + 1 for (1, 2, 3);';
@@ -62,7 +60,6 @@ SKIP: {
     # $n is read in the while condition (part of body expression).
     # After the loop, $n should be a Phi node.
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $src = 'my $n = 10; say $n while ($n > 0);';

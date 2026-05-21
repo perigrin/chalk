@@ -7,13 +7,12 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::IR::Node::Phi;
 
 # Build the Perl grammar recognizer pipeline
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 SKIP: {
@@ -37,7 +36,6 @@ SKIP: {
     # Input: my $x = 1; if (1) { $x = 2; } else { $x = 3; }
     # Expected: after the if/else, $x is a Phi(2, 3)
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $result = $parser->parse_value('my $x = 1; if (1) { $x = 2; } else { $x = 3; }');
@@ -68,7 +66,6 @@ SKIP: {
     # Input: my $x = 1; if (1) { $x = 2; }
     # Expected: after the if, $x is a Phi(then=2, else=1) or Phi(2, pre-value)
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $result = $parser->parse_value('my $x = 1; if (1) { $x = 2; }');
@@ -97,7 +94,6 @@ SKIP: {
     # Input: my $x = 1; if (1) { my $y = 2; } else { my $y = 3; }
     # Expected: $x is NOT a Phi (unchanged in both branches)
     {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
         my $result = $parser->parse_value('my $x = 1; if (1) { my $y = 2; } else { my $y = 3; }');

@@ -17,11 +17,10 @@ use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Grammar::Perl::TypeLibrary;
 use Chalk::Grammar::Perl::PrecedenceTable;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
 no warnings 'experimental::class';
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 # Helper: build an annotated scan Context (as Earley would create it)
 sub make_scan_ctx($rule_name, $matched_text, $is_predicted_hash = {}) {

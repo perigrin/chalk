@@ -5,13 +5,12 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
 # --- Test 1: If/Region subgraph emits Perl if/else ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $start = $factory->make('Start');
     my $cond  = $factory->make('Constant', const_type => 'string', value => '$x');
@@ -34,8 +33,7 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 
 # --- Test 2: Phi node emits Perl my variable with conditional assignment ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $start = $factory->make('Start');
     my $cond  = $factory->make('Constant', const_type => 'string', value => '$flag');
@@ -60,8 +58,7 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 
 # --- Test 3: Loop subgraph emits Perl while loop ---
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $factory = Chalk::IR::NodeFactory->new();
 
     my $start     = $factory->make('Start');
     my $loop      = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
