@@ -751,21 +751,16 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return false unless defined $node;
         return false unless $node isa Chalk::IR::Node;
         return true if $node isa Chalk::IR::Node::TernaryExpr;
-        my $class = $node->class();
-        return true if $class eq 'TernaryExpr';
-        if ($class eq 'BinaryExpr') {
-            my $inputs = $node->inputs();
-            if (defined $inputs && $inputs->@* >= 1) {
-                my $op_node = $inputs->[0];
-                if ($op_node isa Chalk::IR::Node::Constant) {
-                    my $op = $op_node->value();
-                    my %value_ops = map { $_ => 1 } qw(
-                        >= <= > < == != <=> eq ne lt gt le ge cmp
-                        && || // and or
-                    );
-                    return true if $value_ops{$op};
-                }
-            }
+        # Comparison/logical binops always produce a scalar value.
+        # The typed IR uses one class per operator; group them here so
+        # this predicate is independent of the legacy 'BinaryExpr' tag.
+        my %value_binops = map { $_ => 1 } qw(
+            NumGe NumLe NumGt NumLt NumEq NumNe NumCmp
+            StrEq StrNe StrLt StrGt StrLe StrGe StrCmp
+            And Or DefinedOr
+        );
+        if ($node isa Chalk::IR::Node) {
+            return true if $value_binops{$node->operation};
         }
         return false;
     }
@@ -774,11 +769,12 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _is_single_stmt_return_expr($node) {
         return false unless defined $node;
         return false unless $node isa Chalk::IR::Node;
-        # Unwind (die) is never a return value — it exits the method exceptionally.
+        # Unwind (die) is never a return value - exits exceptionally.
         return false if $node isa Chalk::IR::Node::Unwind;
-        my $class = $node->class();
-        my %void_classes = map { $_ => 1 } qw(VarDecl CompoundAssign);
-        return false if $void_classes{$class};
+        # Side-effect statements (assignment, var-decl) are void
+        # expressions in this context.
+        return false if $node isa Chalk::IR::Node::VarDecl;
+        return false if $node isa Chalk::IR::Node::CompoundAssign;
         return true;
     }
 

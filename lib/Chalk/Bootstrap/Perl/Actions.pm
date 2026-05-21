@@ -313,7 +313,6 @@ class Chalk::Bootstrap::Perl::Actions {
                         name          => $name_node->value(),
                         paren_form    => false,
                         inputs        => [$name_node, \@merged_args],
-                        compat_class  => 'BuiltinCall',
                     );
                 } else {
                     # No list-builtin merge — push each item as its own statement
@@ -1026,7 +1025,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
                 my $try_node = $typed->make('TryCatch',
                     inputs       => [$try_body, $catch_var_const, $catch_body],
-                    compat_class => 'TryCatchStmt',
                 );
 
                 $sa->update_annotations({
@@ -1147,7 +1145,6 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         return $typed->make('ExpressionList',
             inputs       => [\@items],
-            compat_class => 'ExpressionList',
         );
     }
 
@@ -1211,7 +1208,6 @@ class Chalk::Bootstrap::Perl::Actions {
                     : (defined $focus && !ref($focus) ? ($focus) : ());
                 my $block_node = $typed->make('AnonSub',
                     inputs       => [[], \@body],
-                    compat_class => 'AnonSubExpr',
                 );
                 unshift @args, $block_node;
                 $has_block = true;
@@ -1261,7 +1257,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 name          => $name_node->value(),
                 paren_form    => $is_paren_form,
                 inputs        => [$name_node, \@args],
-                compat_class  => 'BuiltinCall',
             );
         }
 
@@ -1323,7 +1318,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 return $typed->make('Interpolate',
                     inputs       => [\@parts],
-                    compat_class => 'InterpolatedString',
                 );
             }
             # No interpolation — plain constant
@@ -1475,7 +1469,6 @@ class Chalk::Bootstrap::Perl::Actions {
                         || refaddr($existing_ctrl) != refaddr($current_control)) {
                     my $rebuilt = $typed->make('VarDecl',
                         inputs       => [$current_control, $s->name(), $s->init()],
-                        compat_class => 'VarDecl',
                     );
                     $graph->unmerge($s);
                     $graph->merge($rebuilt);
@@ -1617,7 +1610,6 @@ class Chalk::Bootstrap::Perl::Actions {
         my $control = _ctx_control($ctx) // $factory->make('Start');
         my $var_decl = $typed->make('VarDecl',
             inputs       => [$control, $var_name, undef],
-            compat_class => 'VarDecl',
         );
 
         # Get or create the in-flight graph. If no inner action has yet
@@ -1680,7 +1672,6 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         return $typed->make('ArrayRef',
             inputs       => [\@elements],
-            compat_class => 'ArrayRefExpr',
         );
     }
 
@@ -1700,7 +1691,6 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         return $typed->make('HashRef',
             inputs       => [\@pairs],
-            compat_class => 'HashRefExpr',
         );
     }
 
@@ -1728,7 +1718,6 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return $typed->make('AnonSub',
             inputs       => [\@params, $body],
-            compat_class => 'AnonSubExpr',
         );
     }
 
@@ -1765,7 +1754,6 @@ class Chalk::Bootstrap::Perl::Actions {
         return $typed->make($unop_type,
             inputs       => [$op_node, $operand],
             operand      => $operand,
-            compat_class => 'UnaryExpr',
         );
     }
 
@@ -1810,7 +1798,6 @@ class Chalk::Bootstrap::Perl::Actions {
                     return $typed->make('RegexSubst',
                         flags        => $flags_str,
                         inputs       => [$left, _make_const($factory, $1), _make_const($factory, $2), $flags_node],
-                        compat_class => 'RegexSubst',
                     );
                 }
             } else {
@@ -1820,7 +1807,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 return $typed->make('RegexMatch',
                     flags        => $flags_str,
                     inputs       => [$left, $right, $flags_node],
-                    compat_class => 'RegexMatch',
                 );
             }
         }
@@ -1831,7 +1817,6 @@ class Chalk::Bootstrap::Perl::Actions {
             inputs       => [$op, $left, $right],
             left         => $left,
             right        => $right,
-            compat_class => 'BinaryExpr',
         );
     }
 
@@ -1870,7 +1855,6 @@ class Chalk::Bootstrap::Perl::Actions {
                     dispatch_kind => 'method',
                     name          => $op->inputs()->[1]->value(),
                     inputs        => [$result, $op->inputs()->[1], $op->inputs()->[2]],
-                    compat_class  => 'MethodCallExpr',
                 );
             } elsif ($op isa Chalk::IR::Node::Subscript) {
                 # Push subscript inside exists/delete BuiltinCall so the
@@ -1885,27 +1869,23 @@ class Chalk::Bootstrap::Perl::Actions {
                         my $inner_target = $args[-1];
                         $args[-1] = $typed->make('Subscript',
                             inputs       => [$inner_target, $op->inputs()->[1], $op->inputs()->[2]],
-                            compat_class => 'SubscriptExpr',
                         );
                         $result = $typed->make('Call',
                             dispatch_kind => 'builtin',
                             name          => $result->inputs()->[0]->value(),
                             inputs        => [$result->inputs()->[0], \@args],
-                            compat_class  => 'BuiltinCall',
                         );
                         next;
                     }
                 }
                 $result = $typed->make('Subscript',
                     inputs       => [$result, $op->inputs()->[1], $op->inputs()->[2]],
-                    compat_class => 'SubscriptExpr',
                 );
             } elsif ($op isa Chalk::IR::Node::PostfixDeref) {
                 my $s = $op->inputs()->[1];
                 $result = $typed->make('PostfixDeref',
                     sigil        => (ref($s) ? $s->value() : $s),
                     inputs       => (ref($s) ? [$result, $s] : [$result]),
-                    compat_class => 'PostfixDerefExpr',
                 );
             }
         }
@@ -1959,7 +1939,6 @@ class Chalk::Bootstrap::Perl::Actions {
             dispatch_kind => 'method',
             name          => $method_name->value(),
             inputs        => [$invocant, $method_name, \@args],
-            compat_class  => 'MethodCallExpr',
         );
     }
 
@@ -2003,7 +1982,6 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return $typed->make('Subscript',
             inputs       => [$target, $index, _make_const($factory, $style)],
-            compat_class => 'SubscriptExpr',
         );
     }
 
@@ -2039,7 +2017,6 @@ class Chalk::Bootstrap::Perl::Actions {
         return $typed->make('PostfixDeref',
             sigil        => $sigil_node->value(),
             inputs       => [$target, $sigil_node],
-            compat_class => 'PostfixDerefExpr',
         );
     }
 
@@ -2062,7 +2039,6 @@ class Chalk::Bootstrap::Perl::Actions {
         return $typed->make('CompoundAssign',
             op           => $op_node,
             inputs       => [$op_node, $target, $one_node],
-            compat_class => 'CompoundAssign',
         );
     }
 
@@ -2087,7 +2063,6 @@ class Chalk::Bootstrap::Perl::Actions {
         return $typed->make('CompoundAssign',
             op           => $op_node,
             inputs       => [$op_node, $target, $one_node],
-            compat_class => 'CompoundAssign',
         );
     }
 
@@ -2107,7 +2082,6 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return $typed->make('TernaryExpr',
             inputs       => [$ir_nodes[0], $ir_nodes[1], $ir_nodes[2]],
-            compat_class => 'TernaryExpr',
         );
     }
 
@@ -2173,14 +2147,12 @@ class Chalk::Bootstrap::Perl::Actions {
                 if (ref($value) eq 'ARRAY') {
                     $init_value = $typed->make('HashRef',
                         inputs       => [$value],
-                        compat_class => 'HashRefExpr',
                     );
                 }
                 my $ctrl_in = $target->inputs()->[0];
                 my $name_in = $target->inputs()->[1];
                 my $result = $typed->make('VarDecl',
                     inputs       => [$ctrl_in, $name_in, $init_value],
-                    compat_class => 'VarDecl',
                 );
 
                 # Update scope: rebind the variable to the refined VarDecl
@@ -2216,7 +2188,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 inputs       => [$op, $target, $value],
                 left         => $target,
                 right        => $value,
-                compat_class => 'BinaryExpr',
             );
             # SSA: track reassignment in scope (new value per assignment)
             if ($target isa Chalk::IR::Node::Constant
@@ -2231,7 +2202,6 @@ class Chalk::Bootstrap::Perl::Actions {
         my $compound_result = $typed->make('CompoundAssign',
             op           => $op,
             inputs       => [$op, $target, $value],
-            compat_class => 'CompoundAssign',
         );
         if ($target isa Chalk::IR::Node::Constant
                 && defined $target->value()
@@ -2284,7 +2254,6 @@ class Chalk::Bootstrap::Perl::Actions {
                         $loop_cond = $typed->make($not_type,
                             inputs       => [$not_op, $loop_cond],
                             operand      => $loop_cond,
-                            compat_class => 'UnaryExpr',
                         );
                     }
                     my $loop = $factory->make('Loop',
@@ -2326,7 +2295,6 @@ class Chalk::Bootstrap::Perl::Actions {
                         $cond = $typed->make($not_type2,
                             inputs       => [$not_op2, $condition],
                             operand      => $condition,
-                            compat_class => 'UnaryExpr',
                         );
                     }
                     my $if_node = $factory->make('If',
@@ -2420,7 +2388,6 @@ class Chalk::Bootstrap::Perl::Actions {
             $condition = $typed->make($not_type3,
                 inputs       => [$not_op3, $condition],
                 operand      => $condition,
-                compat_class => 'UnaryExpr',
             );
         }
 

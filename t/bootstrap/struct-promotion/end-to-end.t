@@ -10,6 +10,8 @@ use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer::StructPromotion;
 use Chalk::Bootstrap::Perl::Target::C;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::StructRef;
+use Chalk::IR::Node::StructFieldAccess;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::Program;
@@ -239,11 +241,12 @@ sub walk_ir($root, $visitor) {
     like($typedefs, qr/IV\s+origin/, 'typedef has IV origin');
 
     # Step 3: Verify rewritten IR contains StructRef and FieldAccess
+    # (typed: StructFieldAccess).
     my ($struct_ref_count, $field_access_count) = (0, 0);
     walk_ir($rewritten->[0]{ir}, sub($node) {
         return unless $node isa Chalk::IR::Node;
-        $struct_ref_count++   if $node->class() eq 'StructRef';
-        $field_access_count++ if $node->class() eq 'FieldAccess';
+        $struct_ref_count++   if $node isa Chalk::IR::Node::StructRef;
+        $field_access_count++ if $node isa Chalk::IR::Node::StructFieldAccess;
     });
 
     ok($struct_ref_count > 0, "found $struct_ref_count StructRef nodes in rewritten IR");

@@ -15,6 +15,7 @@ use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::HashRef;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::Subscript;
+use Chalk::IR::Node::Call;
 use Chalk::IR::Node::StructRef;
 use Chalk::IR::Node::StructFieldAccess;
 use Chalk::IR::ClassInfo;
@@ -381,12 +382,11 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
             return;
         }
 
-        my $class = $node->class();
-
         # MethodCallExpr — check if any hash variable is passed as an argument.
         # If the invocant is $self, the call stays in compiled code (same class).
         # Otherwise, conservatively assume the target might be uncompiled.
-        if ($class eq 'MethodCallExpr') {
+        if ($node isa Chalk::IR::Node::Call
+                && $node->dispatch_kind eq 'method') {
             my $invocant = $node->inputs()->[0];
             my $is_self  = (defined $invocant
                 && $invocant isa Chalk::IR::Node::Constant
@@ -739,12 +739,10 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
 
                     my $struct_ref = $typed->make('StructRef',
                         inputs       => [$schema_node, \@field_vals],
-                        compat_class => 'StructRef',
                     );
 
                     my $new_var_decl = $typed->make('VarDecl',
                         inputs       => [$stmt->control(), $var_node, $struct_ref],
-                        compat_class => 'VarDecl',
                     );
 
                     push @new_body, $new_var_decl;
@@ -794,7 +792,6 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
 
                 return $typed->make('StructFieldAccess',
                     inputs       => [$schema_node, $index, $target],
-                    compat_class => 'FieldAccess',
                 );
             }
         }

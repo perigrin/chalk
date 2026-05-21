@@ -9,6 +9,7 @@ use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer::StructPromotion;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::StructFieldAccess;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::Program;
@@ -218,10 +219,10 @@ sub walk_ir($root, $visitor) {
         $schemas,
     );
 
-    # Walk rewritten IR to find FieldAccess
+    # Walk rewritten IR to find FieldAccess (typed: StructFieldAccess)
     my $found_field_access = false;
     walk_ir($rewritten->[0]{ir}, sub($node) {
-        if ($node isa Chalk::IR::Node && $node->class() eq 'FieldAccess') {
+        if ($node isa Chalk::IR::Node::StructFieldAccess) {
             $found_field_access = true;
         }
     });
