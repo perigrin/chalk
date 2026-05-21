@@ -5,7 +5,7 @@ use utf8;
 use experimental 'class';
 
 use Chalk::Bootstrap::Perl::Target::EmitHelpers;
-use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
@@ -128,7 +128,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             $body = $method_decl->body();
             # Normalize plain string params to Constant nodes so downstream
             # code can uniformly call ->value() on each param.
-            my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+            my $factory = Chalk::IR::NodeFactory->new();
             $params = [
                 map { $factory->make('Constant', const_type => 'variable', value => $_) }
                     $method_decl->params()->@*
