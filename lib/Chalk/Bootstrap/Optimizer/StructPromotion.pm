@@ -7,7 +7,6 @@ use experimental 'class';
 use Scalar::Util qw(blessed);
 
 use Chalk::Bootstrap::Optimizer::Pass;
-use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node;
 use Chalk::IR::Node::Return;
@@ -488,7 +487,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
     # Input: parsed_classes arrayref, schemas hashref from analyze().
     # Output: rewritten parsed_classes arrayref (shallow copies with new IR).
     method rewrite($parsed_classes, $schemas) {
-        my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+        my $factory = $typed;
 
         # Build reverse map: var_key → schema_name
         my %var_to_schema;
