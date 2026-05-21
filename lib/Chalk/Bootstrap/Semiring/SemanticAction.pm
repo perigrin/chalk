@@ -73,13 +73,14 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             # when no factory was injected (test contexts that build
             # SA directly without parser wiring).
             my $parse_factory = $_factory // Chalk::IR::NodeFactory->new();
-            # The Bootstrap singleton is still used to construct the
-            # Start node here for back-compat with action sites that
-            # have not yet been migrated to read $ctx->factory(). Once
-            # all production callers are migrated (Phase 7d Step 3), the
-            # Start construction will route through $parse_factory.
-            my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
-            my $start   = $factory->make('Start');
+            # Phase 7d Step 3: the Start node is constructed through
+            # $parse_factory so action methods that fall back to
+            # $factory->make('Start') get the SAME hash-consed Start
+            # this scope carries. Cross-factory Start identity was the
+            # final blocker for the Actions $factory flip — see
+            # docs/plans/2026-05-21-earley-identity-audit.md and
+            # docs/plans/2026-05-21-phase-7d-factory-unification.md.
+            my $start   = $parse_factory->make('Start');
             my $scope   = Chalk::Bootstrap::Scope->new()->with_control($start);
             $_one_singleton = Chalk::Bootstrap::Context->new(
                 focus    => undef,

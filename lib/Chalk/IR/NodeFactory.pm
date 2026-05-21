@@ -115,6 +115,18 @@ my %CFG_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
 # match Bootstrap's permissive-make-of-Start behavior.
 my %ROUTED_CFG = map { $_ => 1 } qw(If Proj Region Phi Loop);
 
+# Per-op input-keyword mapping. Mirrors Bootstrap's %INPUT_SPECS:
+# Actions.pm passes named params (control => ..., condition => ...)
+# and make() translates those into inputs => [...] in the order listed.
+# Used only for ROUTED_CFG ops; data ops use inputs => [...] directly.
+my %INPUT_SPECS = (
+    If    => ['control', 'condition'],
+    Proj  => ['source'],
+    Region => ['controls'],
+    Loop  => ['entry_ctrl', 'backedge_ctrl'],
+    # Phi has its own handler at make() top
+);
+
 class Chalk::IR::NodeFactory {
     field %cache;
     field $cfg_counter = 0;
@@ -179,6 +191,16 @@ class Chalk::IR::NodeFactory {
         if (exists $ROUTED_CFG{$op_name}) {
             my $class = $CFG_CLASSES{$op_name}
                 or die "Unknown CFG node operation: $op_name";
+            # Translate Bootstrap's named-input keywords into inputs =>
+            # [...] in declared order. Callers using the inputs => [...]
+            # shape directly pass through unchanged.
+            if (exists $INPUT_SPECS{$op_name} && !exists $args{inputs}) {
+                my @inputs;
+                for my $name ($INPUT_SPECS{$op_name}->@*) {
+                    push @inputs, delete $args{$name};
+                }
+                $args{inputs} = \@inputs;
+            }
             $cfg_counter++;
             my $id = "${op_name}#${cfg_counter}";
             my $node = $class->new( id => $id, %args );

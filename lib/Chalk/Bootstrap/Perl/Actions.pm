@@ -74,12 +74,15 @@ class Chalk::Bootstrap::Perl::Actions {
     field $typed;
 
     ADJUST {
-        $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+        # Phase 7d Step 3: $factory and $typed both point at the same
+        # per-Actions typed factory. The Bootstrap singleton is no
+        # longer consulted by production action methods. With Step 1
+        # injecting $typed into SemanticAction's _one_ctx, every code
+        # path (action $factory, action $typed, $ctx->factory) sees
+        # the SAME factory instance. This is the unification fix the
+        # Earley identity audit recommended.
         $typed   = Chalk::IR::NodeFactory->new();
-        # Phase 7d Step 1: inject $typed into the SemanticAction so
-        # _one_ctx seeds the parse Context with the SAME factory
-        # Actions reads. After Steps 2-3, every action method reads
-        # $ctx->factory() — and that factory IS $typed.
+        $factory = $typed;
         Chalk::Bootstrap::Semiring::SemanticAction::set_factory($typed);
     }
 
