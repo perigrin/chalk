@@ -32,4 +32,6 @@ and coding standards.
 | String won't parse at all | Grammar (`chalk-bootstrap.bnf`) |
 | Parses but wrong interpretation | TypeInference or Precedence semiring |
 | Parses correctly but wrong IR | SemanticAction / Actions.pm |
+| IR is correct but method/class metadata is wrong | MOP construction in `Actions.pm` and `lib/Chalk/MOP/*.pm` |
+| IR op exists but `Actions::$typed->make(...)` can't construct it | `%INPUT_SPECS` in `lib/Chalk/IR/NodeFactory.pm` |
 | Correct IR but wrong output | Target emitter (Target/Perl.pm, Target/XS.pm) |

@@ -29,6 +29,13 @@ Sea of Nodes IR
     |
     v
 +---------------------------+
+|  MOP Layer                |  Per-class containers (Class, Method,
+|                           |  Sub, Field, Phaser) each owning a
+|                           |  per-parse IR Graph and NodeFactory
++---------------------------+
+    |
+    v
++---------------------------+
 |  Target Lowering          |  Perl, XS, or C code generation
 +---------------------------+
     |
@@ -70,6 +77,7 @@ full design rationale.
 | [Parsing Pipeline](docs/architecture/parsing-pipeline.md) | Semiring layers, FilterComposite, disambiguation strategy |
 | [Context Comonad](docs/architecture/context-comonad.md) | Context, extract/extend/duplicate, parse history threading |
 | [Sea of Nodes IR](docs/architecture/sea-of-nodes-ir.md) | IR node types, hash consing, use-def chains, Graph container |
+| [MOP Layer](docs/architecture/mop-layer.md) | Class/Method/Sub/Field/Phaser containers, per-parse factory ownership |
 | [IR Lowering](docs/architecture/ir-lowering.md) | Target backends, Perl/XS/C code generation (LLVM IR planned) |
 | [Optimization](docs/architecture/optimization.md) | Implemented and planned IR-level passes |
 
@@ -90,6 +98,12 @@ full design rationale.
   runs. Hash iteration is sorted, node identity is content-addressed
   (not allocation-order), and helper-rule names derive from source
   position.
+- **Per-parse ownership.** The MOP, every IR Graph, and every
+  NodeFactory are per-parse instances. Hash-cons identity of nodes is
+  meaningful only within a single parse; cross-parse comparison uses
+  `content_hash`, not refaddr. This is what allows
+  `Graph::nodes()` to walk consumer edges safely without leaking into
+  other parses' graphs.
 
 ## File Map
 
@@ -110,6 +124,13 @@ full design rationale.
 | IR Nodes | `lib/Chalk/IR/Node/*.pm` |
 | IR NodeFactory | `lib/Chalk/IR/NodeFactory.pm` |
 | IR Graph | `lib/Chalk/IR/Graph.pm` |
+| MOP root (class registry) | `lib/Chalk/MOP.pm` |
+| MOP Class | `lib/Chalk/MOP/Class.pm` |
+| MOP Method | `lib/Chalk/MOP/Method.pm` |
+| MOP Sub | `lib/Chalk/MOP/Sub.pm` |
+| MOP Field | `lib/Chalk/MOP/Field.pm` |
+| MOP Phaser (abstract + Adjust) | `lib/Chalk/MOP/Phaser.pm`, `lib/Chalk/MOP/Phaser/Adjust.pm` |
+| MOP Import | `lib/Chalk/MOP/Import.pm` |
 | BNF → Perl Target | `lib/Chalk/Bootstrap/BNF/Target/Perl.pm` |
 | BNF → XS Target | `lib/Chalk/Bootstrap/BNF/Target/XS.pm` |
 | BNF → C Target | `lib/Chalk/Bootstrap/BNF/Target/C.pm` |

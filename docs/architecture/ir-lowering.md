@@ -59,8 +59,9 @@ Two distinct migrations are needed to reach the target shape:
    parse-time Context to recover `cfg_state` annotations that should live on
    IR nodes. Once `_build_method_graph` performs full SSA construction (Phi
    insertion, dominator analysis, data-flow rewriting) and codegen walks the
-   `Graph` instead of `MethodInfo->body`, the backchannel becomes unnecessary.
-   The polymorphic-migration plan tracks this work.
+   per-method `MOP::Method->graph` instead of `MethodInfo->body`, the
+   backchannel becomes unnecessary. The MOP migration plan at
+   `docs/plans/2026-04-21-chalk-mop-migration-plan.md` tracks this work.
 2. **Collapse the interface to `generate($ir) -> HashRef[Str]`.** Remove
    `generate_distribution` from the target interface; hoist distribution
    packaging into a separate layer. The design for this lives in task D1
@@ -281,7 +282,8 @@ The three CFG emission paths:
 Per-method CFG schedules (from `MethodInfo->graph()->schedule()`) are merged additively
 into `%_cfg_lookup` during `_emit_method_decl` and `_emit_sub_decl`. Method-local
 schedules supplement the global lookup for nodes that may have been missed due to
-stale-value merges in the parser.
+stale-value merges in the parser. (`MethodInfo->graph()` is a delegating accessor
+that reads from the parallel `MOP::Method->graph`; see `mop-layer.md`.)
 
 ### Aggregate Variable Tracking
 

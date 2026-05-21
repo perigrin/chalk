@@ -114,7 +114,7 @@ Callers (test harnesses, pipeline drivers) should invoke `reset_cache()` on the 
 
 ### Shared Context Representation
 
-Each chart item value is a shared `Context` object. All components inspect and annotate the same Context: annotation-layer semirings write to named slots in `annotations` (e.g., `annotations->{precedence}`, `annotations->{structural}`, `annotations->{type}`), and SemanticAction owns the focus field and `annotations->{cfg}`.
+Each chart item value is a shared `Context` object. All components inspect and annotate the same Context: annotation-layer semirings write to named slots in `annotations` (e.g., `annotations->{precedence}`, `annotations->{structural}`, `annotations->{type}`), and SemanticAction owns the focus field plus the dedicated `scope` and `graph` top-level fields that carry control-flow state.
 
 ### Zero Propagation
 
@@ -381,7 +381,7 @@ These rules encode Perl's disambiguation defaults: a `{` in expression context i
 
 ## 9. SemanticAction Semiring
 
-`Chalk::Bootstrap::Semiring::SemanticAction` builds the Sea of Nodes IR. It operates on Context objects from `Chalk::Bootstrap::Context`, with CFG state (control token and variable scope) stored in `annotations->{cfg}` on each Context.
+`Chalk::Bootstrap::Semiring::SemanticAction` builds the Sea of Nodes IR. It operates on Context objects from `Chalk::Bootstrap::Context`. Control-flow state — the current control token and accumulated variable bindings — lives on Context's top-level `scope` field; the in-flight IR graph (when one is published by an enclosing method/sub action) lives on the `graph` field. The per-parse `Chalk::MOP` and `Chalk::IR::NodeFactory` are likewise carried on top-level `mop` and `factory` fields. See `context-comonad.md` ("Field Threading") and `mop-layer.md`.
 
 ### Values and the Context Comonad
 
@@ -392,9 +392,9 @@ SemanticAction values are Context objects. The Context type is defined in `Chalk
 - `position`: the source position (bookkeeping only, not semantic).
 - `rule`: the grammar rule name that produced this Context (set by the complete branch of `multiply`).
 
-`zero`: `undef`. `one`: a singleton Context with `undef` focus, no children, and a `cfg_state` entry pointing to a fresh `Start` node and empty `Scope`.
+`zero`: `undef`. `one`: a singleton Context with `undef` focus, no children, a `scope` field carrying a fresh `Start` node and empty `Scope`, and `mop` and `factory` fields seeded from the per-parse instances set on the semiring via `set_mop()` and `set_factory()`.
 
-`multiply` creates a new Context with `undef` focus and both arguments as children. It propagates CFG state: the right child's state is preferred (it is later in sequence), but a `Start` control token from the right does not overwrite a more advanced token from the left. Scopes from both sides are merged.
+`multiply` creates a new Context with `undef` focus and both arguments as children. It propagates `scope`: the right child's scope is preferred (it is later in sequence), but a `Start` control token from the right does not overwrite a more advanced token from the left. Variable bindings from both sides are merged. The `graph` field propagates analogously (right-preferring, left-fallback).
 
 When the right argument carries `annotations->{complete}=true`, `multiply` applies semantic action dispatch for the completed rule (see below).
 
@@ -406,7 +406,7 @@ The complete branch of `multiply` looks up the action method for `$rule_name` on
 
 If no action method is registered, the value passes through unchanged, preserving the Context tree for higher-level actions to consume.
 
-Action methods in `Actions.pm` access CFG state via `Chalk::Bootstrap::Semiring::SemanticAction::current_instance()->cfg_state($ctx)` and request state updates via `->update_cfg($new_state)`. The semiring applies pending updates to the result context after the action returns.
+Action methods in `Actions.pm` access scope and control-flow state by reading `$ctx->scope`, `$ctx->graph`, and `$ctx->cfg_state` (a walker that assembles a snapshot from the subtree's scope plus structural annotation keys). They publish updated state by returning a Context whose `scope`/`graph` fields carry the new values; the right-preferring propagation in `multiply` carries those values upward. The MOP and IR factory used to construct nodes inside action methods are reached via `$ctx->mop` and `$ctx->factory` (see `mop-layer.md` and `context-comonad.md`).
 
 ### `add` and Disambiguation
 

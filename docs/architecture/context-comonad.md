@@ -21,9 +21,10 @@ accumulates as each parse step fires.
 A single shared Context tree flows through every semiring. SemanticAction
 owns the tree structure; TypeInference, Precedence, and Structural write
 their results into the node's `annotations` hash (`annotations->{type}`,
-`annotations->{precedence}`, `annotations->{structural}`); CFG state
-lives in `annotations->{cfg}`; Boolean operates via the `is_zero` flag
-on the Context. FilterComposite acts as an adapter, extracting annotation
+`annotations->{precedence}`, `annotations->{structural}`); control-flow
+state lives on dedicated top-level fields (`scope`, `graph` — see "Field
+Threading" below); Boolean operates via the `is_zero` flag on the
+Context. FilterComposite acts as an adapter, extracting annotation
 values, dispatching to each component semiring's native methods, and
 assembling results back into a new Context via `_wrap_sa_result()`. The
 unified-Context design landed in PR #702 (Milestone 17); callback
@@ -198,13 +199,30 @@ All methods are iterative (explicit stack) to avoid stack overflow on tall parse
 
 ---
 
+## Field Threading
+
+Beyond `focus`, `children`, `annotations`, and the failure-tracking fields, Context carries four threading fields used to propagate per-parse and per-method state without a side channel:
+
+| Field | What it carries | Lifetime |
+|---|---|---|
+| `mop` | The per-parse `Chalk::MOP` instance. | Seeded by `SemanticAction::_one_ctx` from the value set via `set_mop($mop)`. |
+| `factory` | The per-parse `Chalk::IR::NodeFactory` instance. | Seeded by `SemanticAction::_one_ctx` from the value set via `set_factory($f)`. The same factory is bound to `$typed` in `Chalk::Bootstrap::Perl::Actions::ADJUST`, so action code reading `$ctx->factory` and reading the action's own `$typed` field always sees the same instance. |
+| `scope` | A `Chalk::Bootstrap::Scope` carrying the current control node and accumulated variable bindings. | Seeded by `_one_ctx` with a fresh `Start`-rooted scope; updated by side-effect-producing actions; merged across `multiply` children by `_merge_scope` (prefers non-`Start` control). |
+| `graph` | The current `Chalk::IR::Graph` (for in-method actions). | Published by method/sub/phaser actions; propagated upward through `multiply` children (right-preferring, left-fallback). |
+
+The rule for the first two is simple: `_one_ctx` sets them, every `extend()` call inherits them unchanged unless an explicit override is passed. Semiring code reads them via `$ctx->mop` and `$ctx->factory`.
+
+The latter two are more dynamic: they evolve as the parse advances. `_merge_scope` and the parallel graph-propagation logic in `_mul_ctx` (in `SemanticAction.pm`) handle the merge points where two derivations meet. The `cfg_state()` reader method on Context walks the subtree to assemble a snapshot of scope plus a handful of structural annotation keys (`if_node`, `loop`, `then_stmts`, ...), replacing the read-side of the now-deleted `cfg_state` side channel.
+
+---
+
 ## Current Usage
 
 ### SemanticAction
 
 SemanticAction uses Context to build the Sea of Nodes IR. The focus of a completed Context is an IR node (or `undef` for rules with no registered action). Action methods in `Actions.pm` receive the full Context for a completed rule and call `$ctx->leaves(...)` or `$ctx->children()` to access child IR nodes by position.
 
-CFG state (control flow, scope) lives in `annotations->{cfg}` on each Context node and propagates through `multiply` chains. Action methods update this state via `update_cfg()`.
+Control-flow state is carried on Context's top-level `scope` and `graph` fields (see "Field Threading" above), not in `annotations`. Action methods publish updated scope/graph through their result Context; the `_mul_ctx` and `_merge_scope` helpers in `SemanticAction.pm` propagate them across `multiply` boundaries.
 
 ### TypeInference
 

@@ -207,6 +207,14 @@ When a `Loop` node's back edge is set via `set_backedge_ctrl()`, or a `Phi` node
 
 The factory is a regular Perl object; tests that need a clean cache simply instantiate a new `Chalk::IR::NodeFactory` object. There is no global singleton to reset.
 
+### Per-parse ownership
+
+A `NodeFactory` is a per-parse instance. `Chalk::Bootstrap::Perl::Actions` allocates a fresh one in its `ADJUST` and injects it into `SemanticAction` via `set_factory($f)`. `_one_ctx` reads the injected factory and seeds the parse's root `Context` with it; from there, `Context.extend` propagates it to every derived context.
+
+In addition, each `MOP::Method`, `MOP::Sub`, and `MOP::Phaser` owns its own `NodeFactory` — node identity is meaningful only within that owner's body. See `mop-layer.md` for how the MOP carves up factory ownership per method/sub/phaser.
+
+Cross-parse and cross-method comparison is by `content_hash`, not refaddr.
+
 ---
 
 ## Graph Container
@@ -217,27 +225,28 @@ The factory is a regular Perl object; tests that need a clean cache simply insta
 
 | Field | Description |
 |-------|-------------|
-| `start` | The `Start` CFG node that is the graph's unique entry point. |
-| `returns` | Arrayref of `Return` (and optionally `Unwind`) nodes that are the graph's exit points. |
+| `%cache` | The hash-cons table for this graph: `node id` (or `content_hash` for data nodes) → node. Populated by `merge()` and the constructor seeding logic. The cache scopes hash consing per-graph: consumer lists cannot leak across graphs because each graph hash-conses its own nodes. |
+| `$cfg_counter` | Sequential ID allocator for CFG nodes (`If`, `Proj`, `Region`, `Loop`, `Start`, `Return`, `Unwind`). CFG nodes are never hash-consed; each call to `make_cfg` produces a distinct node with a fresh sequential id. |
 | `schedule` | Hashref reserved for scheduling information populated by later optimization passes. Not used by the base graph. |
-| `body_stmts` | Arrayref of body statement nodes used as additional BFS seeds. Transitional: see note below. |
+
+Legacy callers may pass `start` and `returns` arrayrefs at construction time; the constructor seeds the cache with those nodes and otherwise discards the parameters. New code constructs an empty graph and accumulates via `merge()`.
 
 ### `nodes()`
 
 Returns an arrayref of all nodes in the graph in topological order (inputs before consumers).
 
-**Target behavior.** A correctly constructed Sea of Nodes graph enumerates all its nodes by traversing both edge directions: `inputs` from the graph's exits (`returns`, `unwinds`) to pick up the data dependencies feeding the exits, and `consumers` from the graph's entry (`start`) to pick up side-effect nodes reached via the control-token chain (`VarDecl`, `Assign`, `Call`, and other nodes whose results are not consumed by downstream data flow). Because use-def edges and def-use edges are duals, enumerating from both terminals produces the complete set.
+`nodes()` traverses both edge directions from every node in the graph's `%cache`:
 
-**Current behavior.** The current `nodes()` implementation follows only `inputs`, seeded from `start`, every node in `returns`, and every node in `body_stmts`. Walking `consumers` is disabled; `body_stmts` carries side-effect nodes explicitly so they are not lost.
+- **Inputs** are followed unconditionally. Transitive inputs of cached nodes appear in the result even if they were not separately merged in — this preserves the legacy input-closure behavior.
+- **Consumers** are followed only when the consumer is itself in `%cache`. This is a membership filter: a node's `consumers` list can reach nodes that were built by losing Earley alternatives and never merged in, or — historically — nodes that lived in foreign graphs. Both kinds of pointer must not appear in the result.
 
-This divergence is a workaround, not a design decision. Two problems make consumers-traversal unsafe today:
+A consumer is considered "in cache" when either its `id` or its `content_hash` appears as a key in the graph's `%cache`. The dual-key check handles both CFG nodes (registered by sequential id) and data nodes (registered by content hash).
 
-- **Incomplete control-flow stitching.** `_build_method_graph` does not yet thread every side-effect node onto the control-token chain from `Start`. Side-effect nodes currently have no control input and would be orphaned by any traversal that relies on them being reachable from `Start` via `consumers`.
-- **Global hash-consing collisions.** Chalk's hash-consing is currently global. Shared constants — for example, the `Start` node used as a control token — accumulate `consumers` from every method graph that references them. Walking `consumers` from such a shared node would pull `Return`/`Unwind` nodes from foreign method graphs into the current one.
+This bidirectional traversal is what gives `nodes()` its completeness guarantee for a correctly constructed graph: data dependencies feeding the exits are reached via `inputs` from `returns`, and side-effect nodes whose values are unused (`VarDecl`, `Assign`, `Call`, ...) are reached via `consumers` from `Start` along the control-token chain.
 
-`body_stmts` seeding and the `consumers`-exclusion together paper over both gaps. Once `_build_method_graph` performs full SSA construction with explicit control edges to every side-effect node, and hash-consing distinguishes graph-local nodes from globally-shared constants (or attributes `consumers` per graph), the target bidirectional-traversal behavior can be restored and `body_stmts` becomes unnecessary. The polymorphic-migration plan at `docs/plans/2026-04-04-son-ir-polymorphic-migration.md` tracks this work.
+**DFS post-order.** A recursive DFS collects nodes in post-order, visiting `inputs` first and then the cache-filtered `consumers`. Because post-order places each node after all of its predecessors, the result is a valid topological ordering: if A is an input to B, A appears before B.
 
-**DFS post-order.** After the reachability pass, a recursive DFS over `inputs` edges collects nodes in post-order. Because post-order places each node after all of its inputs, the result is a valid topological ordering: if node A is an input to node B, A appears before B in the output.
+**Per-parse correctness.** The membership filter is load-bearing because hash consing is per-factory but a node may be reachable from multiple factories. The Bootstrap singleton's process-wide cache (now retired) made this concrete: shared constants like `Start` accumulated consumers from every parse. With per-parse factory ownership (see `mop-layer.md`) the filter still matters — losing Earley alternatives produce orphan nodes that share a factory with surviving alternatives, and only the survivors' nodes belong in the result.
 
 The `Chalk::IR::Serialize::JSON` module uses a refined version of this traversal (`_all_nodes_topo`) that also ensures `Region` nodes referenced by `Phi.region` appear before their `Phi` nodes, since `Phi.region` is not an `inputs` edge.
 
@@ -245,7 +254,14 @@ The `Chalk::IR::Serialize::JSON` module uses a refined version of this traversal
 
 ## Program Structure
 
-A parsed Perl program is represented as a hierarchy of metadata structs rooted at `Chalk::IR::Program`. These structs are not hash-consed and do not participate in the use-def chain. They provide an `id()` method and a no-op `add_consumer()` method so that they can appear as inputs inside hash-consed constructor nodes without breaking the factory protocol.
+A parsed Perl program has two parallel structural views:
+
+1. **Metadata structs** (this section). A hierarchy rooted at `Chalk::IR::Program` with `ClassInfo`, `MethodInfo`, `SubInfo`, `UseInfo`, `FieldInfo` records. These structs are still produced during parsing and are still what the code generators consume today.
+2. **MOP layer.** A parallel hierarchy rooted at `Chalk::MOP` with `MOP::Class`, `MOP::Method`, `MOP::Sub`, `MOP::Field`, `MOP::Phaser` instances. Each method/sub/phaser owns its own `Graph` and `NodeFactory`. See `mop-layer.md`.
+
+The MOP is the canonical post-parse representation; migration of codegen to read from it directly is tracked in `docs/plans/2026-04-21-chalk-mop-migration-plan.md`. Until that lands, both representations coexist by design and are populated in parallel by the SemanticAction pass.
+
+The remainder of this section describes the metadata struct shape. These structs are not hash-consed and do not participate in the use-def chain. They provide an `id()` method and a no-op `add_consumer()` method so that they can appear as inputs inside hash-consed constructor nodes without breaking the factory protocol.
 
 ### `Chalk::IR::Program`
 
@@ -396,7 +412,7 @@ During deserialization, nodes are reconstructed in the same positional order. Ea
 
 ### Phi Region Ordering
 
-The base `Graph.nodes()` traversal follows only `inputs` edges in its DFS. Because `Phi.region` is a separate reference (not an input edge), a `Region` node may appear after its dependent `Phi` in the base traversal. The serializer's `_all_nodes_topo()` function corrects this by collecting all `Phi.region` references, appending any that are not already in the base node list, and re-running a full DFS that treats the `Phi.region` reference as an additional predecessor edge. This guarantees that every `Region` node is assigned a positional ID smaller than the `Phi` nodes that reference it.
+The base `Graph.nodes()` traversal follows `inputs` edges plus cache-filtered `consumers` edges in its DFS. Because `Phi.region` is neither an `inputs` edge nor a `consumers` edge — it is a separate reference field — a `Region` node may appear after its dependent `Phi` in the base traversal. The serializer's `_all_nodes_topo()` function corrects this by collecting all `Phi.region` references, appending any that are not already in the base node list, and re-running a full DFS that treats the `Phi.region` reference as an additional predecessor edge. This guarantees that every `Region` node is assigned a positional ID smaller than the `Phi` nodes that reference it.
 
 ### Field Handling Differences from perl5-son
 
