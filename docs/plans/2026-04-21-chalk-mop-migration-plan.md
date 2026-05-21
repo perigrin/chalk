@@ -188,7 +188,47 @@ a Method is not a kind of graph — it has a graph.
 
 ## Current state
 
-As of 2026-04-21:
+As of 2026-04-21 (original); **updated 2026-05-21 post-Phase-7d**:
+
+**Status of original "Blocking residue (this plan removes)" list as of
+Phase 7d closure (commit `73b23143` on `pu`):**
+
+- ~~61 `make('Constructor', ...)` sites in Actions.pm~~ **DONE** —
+  Phase 6 (e91fa574). Production is fully off `make('Constructor', ...)`.
+- ~~`Chalk::IR::Shim`~~ **DELETED** pre-Phase-7 (b530c7a1).
+- `compat_class` field on `Chalk::IR::Node` — **partial**: production
+  setters stripped, field retained for legacy `->class()` test reads.
+  Phase 8/9 territory.
+- `body` field on `Chalk::IR::MethodInfo` — **partial**: still read by
+  codegen (Phase 4 superseded by MOP-direct codegen for some paths).
+- `body` field on `Chalk::IR::ClassInfo` — same as MethodInfo.
+- 18 `->body()` reader sites — **partial**: codegen still consumes
+  metadata-struct `->body()` arrayrefs. Full migration is Phase 9
+  territory (codegen reads MOP directly).
+- `generate_with_cfg`/`generate_c_files` backchannel — **DELETED**.
+- ~~`body_stmts` BFS seeding in `Chalk::IR::Graph`~~ **DELETED**
+  Phase 7 (13f350d3).
+- ~~Consumer-traversal exclusion in `Graph::nodes()`~~ **RESTORED**
+  Phase 7b (60c269ab) with cache-membership filter.
+
+**Net Phase 7d wins beyond what this plan envisaged:**
+- Bootstrap singleton `Chalk::Bootstrap::IR::NodeFactory` **DELETED**
+  entirely (73b23143). No process-wide caches anywhere. Per-parse
+  factory ownership via `SA::set_factory` injection.
+- All 127 test files migrated off the singleton API (b7ade04c,
+  9aeb18e5, 2a275da9).
+- Cross-factory consumer-pointer leakage closed by construction
+  (factory unification + cache-membership filter in `nodes()`).
+
+**Still missing (later phases):**
+- Codegen-reads-MOP-directly migration (Phase 9 / superseded plan).
+- ClassInfo/MethodInfo/SubInfo/UseInfo struct deletion.
+- `compat_class` final removal.
+- `Chalk::IR::Program` deletion.
+
+---
+
+## Original status snapshot, 2026-04-21 (retained for history)
 
 **Exists and stable:**
 - Typed IR nodes under `Chalk::IR::Node::*` (79 classes)
