@@ -7,6 +7,7 @@ use Test2::V0;
 
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
 # Reset factory to ensure clean test state (prevents cross-test contamination)
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -50,6 +51,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 # Test 3: Complex node deduplication
 {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $typed   = Chalk::IR::NodeFactory->new;
 
     # Create shared input nodes
     my $var = $factory->make('Constant',
@@ -62,17 +64,15 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value => '42',
     );
 
-    # Create two Constructor:VarDecl nodes with same inputs
-    my $decl1 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var,
-        initializer => $init,
+    # Create two VarDecl nodes with same inputs (typed factory, post-Shim shape)
+    my $decl1 = $typed->make('VarDecl',
+        inputs       => [undef, $var, $init],
+        compat_class => 'VarDecl',
     );
 
-    my $decl2 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var,
-        initializer => $init,
+    my $decl2 = $typed->make('VarDecl',
+        inputs       => [undef, $var, $init],
+        compat_class => 'VarDecl',
     );
 
     is($decl1, $decl2, 'complex nodes with same inputs deduplicated');
@@ -81,6 +81,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 # Test 4: Hash key determinism - same data different code path
 {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $typed   = Chalk::IR::NodeFactory->new;
 
     # Create inputs in one code path
     my $var1 = $factory->make('Constant',
@@ -92,10 +93,9 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value => 'value1',
     );
 
-    my $decl1 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var1,
-        initializer => $init1,
+    my $decl1 = $typed->make('VarDecl',
+        inputs       => [undef, $var1, $init1],
+        compat_class => 'VarDecl',
     );
 
     # Create inputs in a different code path but same logical data
@@ -108,10 +108,9 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value => 'value1',
     );
 
-    my $decl2 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var2,
-        initializer => $init2,
+    my $decl2 = $typed->make('VarDecl',
+        inputs       => [undef, $var2, $init2],
+        compat_class => 'VarDecl',
     );
 
     is($decl1, $decl2, 'hash key generation is deterministic');
@@ -120,23 +119,22 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 # Test 5: Nested deduplication
 {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $typed   = Chalk::IR::NodeFactory->new;
 
     # Build a small graph twice
     my $var1  = $factory->make('Constant', const_type => 'string', value => '$z');
     my $init1 = $factory->make('Constant', const_type => 'string', value => 'nested');
-    my $decl1 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var1,
-        initializer => $init1,
+    my $decl1 = $typed->make('VarDecl',
+        inputs       => [undef, $var1, $init1],
+        compat_class => 'VarDecl',
     );
 
     # Build same graph again
     my $var2  = $factory->make('Constant', const_type => 'string', value => '$z');
     my $init2 = $factory->make('Constant', const_type => 'string', value => 'nested');
-    my $decl2 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var2,
-        initializer => $init2,
+    my $decl2 = $typed->make('VarDecl',
+        inputs       => [undef, $var2, $init2],
+        compat_class => 'VarDecl',
     );
 
     is($var1,  $var2,  'leaf variable nodes deduplicated');
@@ -232,13 +230,13 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    my $typed   = Chalk::IR::NodeFactory->new;
 
     my $var  = $factory->make('Constant', const_type => 'string', value => '$consumer_test');
     my $init = $factory->make('Constant', const_type => 'string', value => 'init_val');
-    my $decl = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var,
-        initializer => $init,
+    my $decl = $typed->make('VarDecl',
+        inputs       => [undef, $var, $init],
+        compat_class => 'VarDecl',
     );
 
     # $var has $decl as a consumer, so removing it should die

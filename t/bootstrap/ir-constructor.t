@@ -1,5 +1,5 @@
-# ABOUTME: Tests for parameterized Constructor IR node for Perl IR types
-# ABOUTME: Verifies Constructor with class parameter works for VarDecl and other Perl IR types
+# ABOUTME: Tests for typed IR node construction (post-Shim migration) for Perl IR types.
+# ABOUTME: Verifies typed Chalk::IR::Node::* constructors work for VarDecl, BinaryExpr, etc.
 use 5.42.0;
 use utf8;
 
@@ -7,13 +7,15 @@ use Test2::V0;
 
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
 # Reset factory to ensure clean test state
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+my $typed   = Chalk::IR::NodeFactory->new;
 
-# Test 1: Constructor:VarDecl creation
+# Test 1: VarDecl creation (typed)
 {
     my $var_name = $factory->make('Constant',
         const_type => 'string',
@@ -25,10 +27,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
         value      => '42',
     );
 
-    my $decl = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var_name,
-        initializer => $init,
+    my $decl = $typed->make('VarDecl',
+        inputs       => [undef, $var_name, $init],
+        compat_class => 'VarDecl',
     );
 
     isa_ok($decl, 'Chalk::IR::Node');
@@ -36,11 +37,12 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
     is($decl->operation(), 'VarDecl', 'operation is VarDecl');
 
     my $inputs = $decl->inputs();
-    is($inputs->[0], $var_name, 'first input is variable name');
-    is($inputs->[1], $init,     'second input is initializer');
+    is($inputs->[0], undef,     'first input is control (undef when not in a chain)');
+    is($inputs->[1], $var_name, 'second input is variable name');
+    is($inputs->[2], $init,     'third input is initializer');
 }
 
-# Test 2: Constructor:BinaryExpr creation
+# Test 2: BinaryExpr creation (+ becomes Add)
 {
     my $op = $factory->make('Constant',
         const_type => 'string',
@@ -57,18 +59,18 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
         value      => 'b',
     );
 
-    my $binop = $factory->make('Constructor',
-        class => 'BinaryExpr',
-        op    => $op,
-        left  => $left,
-        right => $right,
+    my $binop = $typed->make('Add',
+        inputs       => [$op, $left, $right],
+        left         => $left,
+        right        => $right,
+        compat_class => 'BinaryExpr',
     );
 
     isa_ok($binop, 'Chalk::IR::Node');
     is($binop->operation(), 'Add', 'BinaryExpr with + becomes Add operation');
 }
 
-# Test 3: Constructor:BuiltinCall creation
+# Test 3: BuiltinCall creation (Call with dispatch_kind=builtin)
 {
     my $name = $factory->make('Constant',
         const_type => 'string',
@@ -79,10 +81,11 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
         value      => 'args',
     );
 
-    my $call = $factory->make('Constructor',
-        class => 'BuiltinCall',
-        name  => $name,
-        args  => $args,
+    my $call = $typed->make('Call',
+        dispatch_kind => 'builtin',
+        name          => $name->value(),
+        inputs        => [$name, $args],
+        compat_class  => 'BuiltinCall',
     );
 
     isa_ok($call, 'Chalk::IR::Node');
@@ -101,17 +104,16 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
         value      => 'other',
     );
 
-    # Create Constructor:VarDecl
-    my $decl = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $const1,
-        initializer => $const2,
+    # Create VarDecl
+    my $decl = $typed->make('VarDecl',
+        inputs       => [undef, $const1, $const2],
+        compat_class => 'VarDecl',
     );
 
-    # Create Constructor:ArrayRefExpr with same single constant
-    my $arr = $factory->make('Constructor',
-        class     => 'ArrayRefExpr',
-        elements  => $const1,
+    # Create ArrayRef with same single constant
+    my $arr = $typed->make('ArrayRef',
+        inputs       => [$const1],
+        compat_class => 'ArrayRefExpr',
     );
 
     isnt($decl, $arr, 'different Constructor classes are different nodes');
@@ -130,42 +132,40 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
         value      => 'value',
     );
 
-    my $decl1 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var,
-        initializer => $init,
+    my $decl1 = $typed->make('VarDecl',
+        inputs       => [undef, $var, $init],
+        compat_class => 'VarDecl',
     );
 
-    my $decl2 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var,
-        initializer => $init,
+    my $decl2 = $typed->make('VarDecl',
+        inputs       => [undef, $var, $init],
+        compat_class => 'VarDecl',
     );
 
-    is($decl1, $decl2, 'identical Constructor:VarDecl nodes deduplicated');
+    is($decl1, $decl2, 'identical VarDecl nodes deduplicated');
     is(refaddr($decl1), refaddr($decl2), 'reference addresses match');
 }
 
-# Test 6: Hash consing - class attribute distinguishes nodes
+# Test 6: Hash consing - operation distinguishes nodes
 {
     my $const = $factory->make('Constant',
         const_type => 'string',
         value      => 'same',
     );
 
-    my $arr1 = $factory->make('Constructor',
-        class    => 'ArrayRefExpr',
-        elements => $const,
+    my $arr1 = $typed->make('ArrayRef',
+        inputs       => [$const],
+        compat_class => 'ArrayRefExpr',
     );
 
-    my $arr2 = $factory->make('Constructor',
-        class    => 'ArrayRefExpr',
-        elements => $const,
+    my $arr2 = $typed->make('ArrayRef',
+        inputs       => [$const],
+        compat_class => 'ArrayRefExpr',
     );
 
-    my $hash = $factory->make('Constructor',
-        class  => 'HashRefExpr',
-        pairs  => $const,
+    my $hash = $typed->make('HashRef',
+        inputs       => [$const],
+        compat_class => 'HashRefExpr',
     );
 
     is($arr1, $arr2, 'same class and inputs deduplicated');

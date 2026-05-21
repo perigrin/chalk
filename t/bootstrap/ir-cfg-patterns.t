@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 
 # Test 1: If/Else Pattern - Build `if ($cond) { $x = 2 } else { $x = 3 }`
 {
@@ -69,9 +70,14 @@ use Chalk::Bootstrap::IR::NodeFactory;
     my $phi_x = $factory->make('Phi', region => $loop, values => [$init_x, undef]);
 
     # Condition: phi_x < 10
-    my $less = $factory->make('Constructor', class => 'BinaryExpr',
-        op => $factory->make('Constant', const_type => 'string', value => '<'),
-        left => $phi_x, right => $limit);
+    my $typed = Chalk::IR::NodeFactory->new;
+    my $less_op = $factory->make('Constant', const_type => 'string', value => '<');
+    my $less = $typed->make('NumLt',
+        inputs       => [$less_op, $phi_x, $limit],
+        left         => $phi_x,
+        right        => $limit,
+        compat_class => 'BinaryExpr',
+    );
 
     # If based on condition
     my $loop_if = $factory->make('If', control => $loop, condition => $less);
@@ -79,9 +85,13 @@ use Chalk::Bootstrap::IR::NodeFactory;
     my $exit_proj = $factory->make('Proj', source => $loop_if, index => 1);
 
     # Body: phi_x + 1
-    my $add = $factory->make('Constructor', class => 'BinaryExpr',
-        op => $factory->make('Constant', const_type => 'string', value => '+'),
-        left => $phi_x, right => $one);
+    my $add_op = $factory->make('Constant', const_type => 'string', value => '+');
+    my $add = $typed->make('Add',
+        inputs       => [$add_op, $phi_x, $one],
+        left         => $phi_x,
+        right        => $one,
+        compat_class => 'BinaryExpr',
+    );
 
     # Verify graph shape
     is($loop->inputs()->[0], $start, 'Loop entry from Start');

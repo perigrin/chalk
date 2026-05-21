@@ -7,6 +7,8 @@ use Test2::V0;
 
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
+use Chalk::IR::Node::VarDecl;
 
 # Reset factory to ensure clean test state (prevents cross-test contamination)
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -25,10 +27,10 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value      => '42',
     );
 
-    my $decl = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var,
-        initializer => $init,
+    my $typed = Chalk::IR::NodeFactory->new;
+    my $decl  = $typed->make('VarDecl',
+        inputs       => [undef, $var, $init],
+        compat_class => 'VarDecl',
     );
 
     # Check producers (inputs) of decl - side-effect-shaped:
@@ -54,16 +56,15 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $shared_var  = $factory->make('Constant', const_type => 'string', value => '$shared_var');
     my $shared_init = $factory->make('Constant', const_type => 'string', value => 'shared_init');
 
-    my $decl1 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $shared_var,
-        initializer => $shared_init,
+    my $typed = Chalk::IR::NodeFactory->new;
+    my $decl1 = $typed->make('VarDecl',
+        inputs       => [undef, $shared_var, $shared_init],
+        compat_class => 'VarDecl',
     );
 
-    my $decl2 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $shared_var,
-        initializer => $shared_init,
+    my $decl2 = $typed->make('VarDecl',
+        inputs       => [undef, $shared_var, $shared_init],
+        compat_class => 'VarDecl',
     );
 
     # Because of hash consing, decl1 and decl2 are the same
@@ -92,16 +93,15 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value      => 'init_b',
     );
 
-    my $decl1 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $shared_var,
-        initializer => $init1,
+    my $typed = Chalk::IR::NodeFactory->new;
+    my $decl1 = $typed->make('VarDecl',
+        inputs       => [undef, $shared_var, $init1],
+        compat_class => 'VarDecl',
     );
 
-    my $decl2 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $shared_var,
-        initializer => $init2,
+    my $decl2 = $typed->make('VarDecl',
+        inputs       => [undef, $shared_var, $init2],
+        compat_class => 'VarDecl',
     );
 
     # Different initializers means different decls
@@ -124,16 +124,16 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $var  = $factory->make('Constant', const_type => 'string', value => '$leaf_var');
     my $init = $factory->make('Constant', const_type => 'string', value => 'leaf_val');
 
-    my $decl = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $var,
-        initializer => $init,
+    my $typed = Chalk::IR::NodeFactory->new;
+    my $decl  = $typed->make('VarDecl',
+        inputs       => [undef, $var, $init],
+        compat_class => 'VarDecl',
     );
 
     # ArrayRefExpr takes elements as its single input (an array of nodes)
-    my $arr = $factory->make('Constructor',
-        class    => 'ArrayRefExpr',
-        elements => [$decl],
+    my $arr = $typed->make('ArrayRef',
+        inputs       => [[$decl]],
+        compat_class => 'ArrayRefExpr',
     );
 
     # Traverse backward from arr
@@ -169,16 +169,15 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value      => 'init_r2',
     );
 
-    my $decl1 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $shared,
-        initializer => $init1,
+    my $typed = Chalk::IR::NodeFactory->new;
+    my $decl1 = $typed->make('VarDecl',
+        inputs       => [undef, $shared, $init1],
+        compat_class => 'VarDecl',
     );
 
-    my $decl2 = $factory->make('Constructor',
-        class       => 'VarDecl',
-        variable    => $shared,
-        initializer => $init2,
+    my $decl2 = $typed->make('VarDecl',
+        inputs       => [undef, $shared, $init2],
+        compat_class => 'VarDecl',
     );
 
     # Verify initial state

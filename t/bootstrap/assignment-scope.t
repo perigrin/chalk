@@ -6,13 +6,16 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
+use Chalk::IR::Node::VarDecl;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Actions;
 use Chalk::Bootstrap::Context;
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+my $typed   = Chalk::IR::NodeFactory->new;
 
 # Helper: build a leaf Context wrapping an IR node (simulates a completed sub-rule)
 my sub make_leaf_ctx($node) {
@@ -69,10 +72,9 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
     # Simulate a VarDecl node with no initializer yet (from 'my $x')
     my $var_node = $factory->make('Constant', const_type => 'variable', value => '$x');
-    my $vardecl = $factory->make('Constructor',
-        'class'       => 'VarDecl',
-        variable    => $var_node,
-        initializer => undef,
+    my $vardecl = $typed->make('VarDecl',
+        inputs       => [undef, $var_node, undef],
+        compat_class => 'VarDecl',
     );
     my $op_node   = $factory->make('Constant', const_type => 'string', value => '=');
     my $rhs_node  = $factory->make('Constant', const_type => 'integer', value => '42');
