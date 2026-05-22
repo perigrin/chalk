@@ -15,6 +15,7 @@ use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::RegexSubst;
 use Chalk::IR::Node::If;
 use Chalk::IR::Node::Loop;
+use Chalk::IR::Node::TryCatch;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::Return;
@@ -1549,10 +1550,12 @@ class Chalk::Bootstrap::Perl::Actions {
             } elsif ($s isa Chalk::IR::Node::Call
                         || $s isa Chalk::IR::Node::Assign
                         || $s isa Chalk::IR::Node::CompoundAssign
-                        || $s isa Chalk::IR::Node::RegexSubst) {
-                # Statement-position side-effect data node. Constructed by
-                # its action (CallExpression, AssignmentExpression, etc.)
-                # as a pure data node, sometimes without ever being merged
+                        || $s isa Chalk::IR::Node::RegexSubst
+                        || $s isa Chalk::IR::Node::TryCatch) {
+                # Statement-position side-effect node. Constructed by
+                # its action (CallExpression, AssignmentExpression,
+                # TryCatchStatement, etc.) without a control input
+                # field set, and sometimes without ever being merged
                 # into a graph. Thread it into the effect chain via the
                 # late-binding control_in setter inherited from Chalk::IR::Node;
                 # merge into the graph so $graph->nodes and reachability
