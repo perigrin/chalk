@@ -10,6 +10,9 @@ use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::UnaryOp;
 use Chalk::IR::Node::Call;
+use Chalk::IR::Node::Assign;
+use Chalk::IR::Node::CompoundAssign;
+use Chalk::IR::Node::RegexSubst;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::Return;
@@ -1541,14 +1544,17 @@ class Chalk::Bootstrap::Perl::Actions {
                     $s = $rebuilt;
                 }
                 # Return/Unwind terminate the chain - don't advance control.
-            } elsif ($s isa Chalk::IR::Node::Call) {
-                # Statement-position Call (bare push/print/etc., or a
-                # function/method call whose return value is discarded).
-                # The CallExpression action constructed this as a pure
-                # data node (no control input, not merged into the graph).
-                # Thread it into the effect chain via late-binding
-                # control_in setter; merge into the graph so $graph->nodes
-                # and downstream reachability walks see it.
+            } elsif ($s isa Chalk::IR::Node::Call
+                        || $s isa Chalk::IR::Node::Assign
+                        || $s isa Chalk::IR::Node::CompoundAssign
+                        || $s isa Chalk::IR::Node::RegexSubst) {
+                # Statement-position side-effect data node. Constructed by
+                # its action (CallExpression, AssignmentExpression, etc.)
+                # as a pure data node, sometimes without ever being merged
+                # into a graph. Thread it into the effect chain via the
+                # late-binding control_in setter inherited from Chalk::IR::Node;
+                # merge into the graph so $graph->nodes and reachability
+                # walks see it.
                 $graph->merge($s);
                 if (!defined $s->control_in
                         || refaddr($s->control_in) != refaddr($current_control)) {

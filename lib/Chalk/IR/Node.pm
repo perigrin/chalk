@@ -22,6 +22,14 @@ class Chalk::IR::Node {
     # Optional compat_class overrides the result of class() for back-compat
     field $compat_class :param :reader = undef;
 
+    # Effect-chain predecessor when this node appears as a statement-position
+    # side effect (bare Call, bare Assign, etc.). Set by the Block control-
+    # chain fixup pass via set_control_in(); undef for nodes in pure-data
+    # position. Not part of content_hash: side-effect vs pure-data uses of
+    # the same content (e.g. `foo()` as statement vs as expression) should
+    # still hash-cons to the same node; control_in is a per-use decoration.
+    field $control_in :reader = undef;
+
     # Add a consumer to this node's consumer list
     method add_consumer($node) {
         push $consumers->@*, $node;
@@ -62,5 +70,21 @@ class Chalk::IR::Node {
 
     method content_hash() {
         return join('|', $self->operation(), $self->_serialize_inputs());
+    }
+
+    # Late-binding setter for the effect-chain predecessor.
+    # Maintains the bidirectional use-def edge by adjusting consumer
+    # registration on the old and new predecessors. Called by the
+    # Block control-chain fixup pass in Perl::Actions when this node
+    # appears as a statement-position side effect.
+    method set_control_in($ctrl) {
+        if (defined $control_in) {
+            $control_in->remove_consumer($self);
+        }
+        $control_in = $ctrl;
+        if (defined $ctrl) {
+            $ctrl->add_consumer($self);
+        }
+        return;
     }
 }
