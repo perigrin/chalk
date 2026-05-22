@@ -2351,6 +2351,20 @@ class Chalk::Bootstrap::Perl::Actions {
                         controls => [$exit_proj],
                     );
                     $loop->set_region($region);
+
+                    # Merge the constructed CFG into the in-flight graph.
+                    # Without these merges the Loop/If/Proj/Region would only
+                    # be discovered via Graph::nodes() input-closure from
+                    # Return; explicit merge makes them cache members and
+                    # decouples reachability from traversal coincidence.
+                    my $graph = $ctx->graph() // Chalk::IR::Graph->new;
+                    $graph->merge($loop);
+                    $graph->merge($if_node);
+                    $graph->merge($body_proj);
+                    $graph->merge($exit_proj);
+                    $graph->merge($region);
+                    $sa->update_graph($graph);
+
                     $sa->update_scope($scope->with_control($region));
                     $sa->update_annotations({
                         loop       => $loop,
@@ -2389,6 +2403,19 @@ class Chalk::Bootstrap::Perl::Actions {
                         controls => [$true_proj, $false_proj],
                     );
                     $if_node->set_region($region);
+
+                    # Merge the constructed CFG into the in-flight graph.
+                    # Without these merges the If/Proj/Region would only be
+                    # discovered via Graph::nodes() input-closure from
+                    # Return; explicit merge makes them cache members and
+                    # decouples reachability from traversal coincidence.
+                    my $graph = $ctx->graph() // Chalk::IR::Graph->new;
+                    $graph->merge($if_node);
+                    $graph->merge($true_proj);
+                    $graph->merge($false_proj);
+                    $graph->merge($region);
+                    $sa->update_graph($graph);
+
                     $sa->update_scope($scope->with_control($region));
                     $sa->update_annotations({
                         then_stmts => [],
@@ -2892,7 +2919,6 @@ class Chalk::Bootstrap::Perl::Actions {
             loop_if    => $if_node,
             body_proj  => $body_proj,
             exit_proj  => $exit_proj,
-            for_init   => $init,
         });
 
         # Return value: for the Block fixup pass to thread the init

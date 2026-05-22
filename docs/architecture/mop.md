@@ -17,11 +17,17 @@ The MOP exists for two reasons:
 1. To give the compiler a typed structural view of the program (which
    classes exist, what their fields and methods are, what each method's
    IR graph is) rather than a soup of metadata structs.
-2. To localise hash-consing and node identity. Each `MOP::Method` and
-   `MOP::Sub` owns its own `Chalk::IR::Graph` and
-   `Chalk::IR::NodeFactory`, so two methods with structurally identical
-   bodies still produce distinct node objects with bounded consumer
-   lists.
+2. To carry the per-parse IR. Each `MOP::Method` and `MOP::Sub`
+   declares its own `Chalk::IR::Graph` field and a `$factory` field
+   (`Chalk::IR::NodeFactory`); today production code uses a single
+   per-Actions `NodeFactory` injected via `SemanticAction::set_factory`
+   for hash-consing across the parse, and the per-method `$factory`
+   field is currently unused scaffolding. The per-method
+   `MOP::Method->graph` *is* populated and is the source of truth for
+   each method's IR. True per-method hash-cons isolation is a future
+   migration (the per-method `$factory` field is the hook); today's
+   reality is per-parse factory ownership with per-method graph
+   ownership.
 
 ```
 SemanticAction semiring
@@ -91,9 +97,9 @@ own:
 | `class` | The owning `MOP::Class`. |
 | `params` | Parameter list (arrayref of parameter records). |
 | `return_type` | Resolved return type (when known). |
-| `graph` | A `Chalk::IR::Graph` containing this body's IR. |
-| `factory` | A `Chalk::IR::NodeFactory` whose hash-cons cache is scoped to this body. |
-| `body` | A legacy arrayref of statement IR nodes — see "Relationship to metadata structs" below. |
+| `graph` | A `Chalk::IR::Graph` containing this body's IR. Source of truth for this method's/sub's nodes. |
+| `factory` | A `Chalk::IR::NodeFactory` field reserved for future per-method hash-cons isolation. Currently unused — production code constructs nodes through the per-Actions `NodeFactory` injected via `SemanticAction::set_factory`. |
+| `body` | An arrayref of statement IR nodes in parser-observed source order. See "Relationship to metadata structs" below. |
 
 The distinction between `Method` and `Sub`:
 
@@ -102,20 +108,28 @@ The distinction between `Method` and `Sub`:
 - `Method` additionally tracks `lexical_bindings` — `VarDecl` IR nodes
   declared in the method body, used during scope analysis.
 
-Both classes delegate node construction to their owned factory and
-graph:
+Node construction today happens through `$ctx->factory->make($op, %a)`
+in action methods, where `$ctx->factory` is the per-parse factory
+seeded by `_one_ctx`. The constructed node is then attached to a
+specific method/sub's graph via `$ctx->graph->merge($node)`. There is
+no MOP-level node-*construction* API today; the `MOP::Method->factory`
+field is reserved for a future migration that would route construction
+through the owning method/sub.
+
+For node *membership* in a graph, `MOP::Method` and `MOP::Sub`
+expose two delegators that go through their owned `$graph`:
 
 ```perl
-$method->make($op, %args)       # delegates to $factory->make
-$method->make_cfg($op, %args)   # delegates to $factory->make_cfg
-$method->merge($node)           # delegates to $graph->merge
-$method->next_cfg_id            # delegates to $graph->next_cfg_id
+$method->merge($node)    # delegates to $method->graph->merge($node)
+$method->next_cfg_id     # delegates to $method->graph->next_cfg_id
 ```
 
-These delegators are what make per-method/per-sub ownership ergonomic in
-Actions code: any code path with a handle on the `MOP::Method` can
-construct nodes inside that method's graph without reaching for a
-sidechannel.
+These are honest: the per-method `$graph` IS the source of truth
+for which nodes belong to which method. Two methods with
+structurally identical body content produce distinct membership
+even though hash-cons identity is shared (per-parse), because each
+method's `$graph` has its own cache. See
+`t/bootstrap/mop/per-graph-hash-cons.t` for the regression guard.
 
 ## Field structure
 
@@ -177,9 +191,11 @@ The MOP and every factory it transitively owns are **per-parse**:
    `SemanticAction::set_mop($mop)`. Subsequent `_one_ctx` calls thread
    it into the root Context as the `mop` field.
 4. **Each `declare_method`/`declare_sub`/`declare_adjust`** on a
-   `MOP::Class` allocates a fresh `Graph` and `NodeFactory` for the
-   new method/sub/phaser. Identity of nodes is meaningful only within
-   that owner's scope.
+   `MOP::Class` allocates a fresh `Graph` for the new
+   method/sub/phaser. (The per-Method/Sub `factory` field is also
+   default-initialized but is currently unused — see "Method and Sub
+   structure" above.) Node identity within a method is bounded by
+   the method's own `Graph` cache.
 5. **Context's `extend`** propagates `mop`, `graph`, `scope`, and
    `factory` fields unchanged unless a caller overrides them. See
    `context-comonad.md`.
@@ -188,12 +204,14 @@ Tests that need a clean MOP simply allocate a new `Chalk::MOP->new`;
 there is no global registry to reset.
 
 This per-parse ownership is what makes the bidirectional traversal in
-`Chalk::IR::Graph::nodes()` correct. A node's `consumers` list can
-include pointers to nodes that live in a different graph (because hash
-consing is per-factory, but a node may be shared across factories if
-both happen to construct identical content via independent paths).
+`Chalk::IR::Graph::nodes()` correct. The per-parse `NodeFactory`
+hash-conses all nodes for the parse; the per-method `Graph` decides
+which nodes are *members* of which method. A node's `consumers` list
+can include pointers to nodes registered with other methods'
+graphs, because the factory shares hash-cons identity across them.
 `Graph::nodes()` walks consumers only when they are members of the
-graph's own cache; otherwise the walk would leak into foreign graphs.
+graph's own cache; otherwise the walk would leak across method
+boundaries.
 
 ## Relationship to metadata structs
 

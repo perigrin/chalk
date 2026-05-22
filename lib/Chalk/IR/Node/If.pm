@@ -15,6 +15,15 @@ class Chalk::IR::Node::If :isa(Chalk::IR::Node) {
 
     method operation() { 'If' }
 
+    # CFG nodes carry their control input in inputs[0] (convention),
+    # not in the base $control_in field. Override the reader so a
+    # walker that calls $node->control_in() gets a consistent answer
+    # regardless of whether the node is a CFG control-flow node or a
+    # statement-position data node. Without this override, the base
+    # reader would return the unset $control_in field (undef) even
+    # though the CFG control input is live at inputs[0].
+    method control_in() { return $self->inputs->[0] }
+
     # Late-binding setter for the post-construct Region. Called by
     # the IfStatement / ElsifChain action right after the Region is
     # built.

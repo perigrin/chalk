@@ -17,6 +17,15 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node) {
 
     method operation() { 'Loop' }
 
+    # CFG nodes carry their control input in inputs[0] (entry_ctrl
+    # for Loop), not in the base $control_in field. Override the
+    # reader so a walker that calls $node->control_in() gets a
+    # consistent answer across node types. Without this override,
+    # the base reader would return the unset $control_in field
+    # (undef) even though the Loop's entry control is live at
+    # inputs[0].
+    method control_in() { return $self->inputs->[0] }
+
     method set_backedge_ctrl($ctrl) {
         my $old = $self->inputs()->[1];
         $old->remove_consumer($self) if defined $old;

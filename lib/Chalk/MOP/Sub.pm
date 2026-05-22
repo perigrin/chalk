@@ -16,12 +16,9 @@ class Chalk::MOP::Sub {
     field $factory     :param :reader = Chalk::IR::NodeFactory->new;
     field $body        :param :reader = [];
 
-    # Delegate node construction to this sub's graph and factory.
-    # Hash-cons scope is per-graph (and after Phase 7b Stage 2, per-factory),
-    # so identical content across subs yields distinct node objects and
-    # consumer lists stay bounded to this sub.
-    method merge($node)      { $graph->merge($node) }
-    method make($op, %a)     { $factory->make($op, %a) }
-    method make_cfg($op, %a) { $factory->make_cfg($op, %a) }
-    method next_cfg_id()     { $graph->next_cfg_id }
+    # Delegate graph operations to this sub's $graph. See MOP::Method
+    # for rationale: $graph is per-sub (honest); $factory is currently
+    # unused scaffolding so there are no make/make_cfg delegators.
+    method merge($node)  { $graph->merge($node) }
+    method next_cfg_id() { $graph->next_cfg_id }
 }

@@ -13,7 +13,14 @@ The key properties of Chalk's Sea of Nodes IR are:
 
 - **Explicit data flow.** Every value consumed by a node is named by an edge from the producing node. There are no implicit operand stacks or register allocations at this level.
 - **Hash consing for data nodes.** Two data nodes with identical operations and identical inputs are guaranteed to be the same object. This eliminates redundant subexpressions structurally rather than as a separate pass.
-- **Immutability.** Once a node is constructed through `NodeFactory`, its operation and inputs are never changed. (The Loop node is the single exception: it exposes `set_backedge_ctrl` to wire in the back edge after the loop body is built, because the loop body cannot be constructed without a reference to the loop header.)
+- **Immutability** (with documented exemptions). Once a node is constructed through `NodeFactory`, its operation and inputs are never changed. The exemptions are all late-binding wirings of edges that the parser cannot supply at construction time:
+  - `Loop::set_backedge_ctrl` and `Phi::set_backedge` — wire the back edge after the loop body is built, because the body cannot be constructed without a reference to the loop header.
+  - `If::set_control_in` and `Loop::set_control_in` — mutate `inputs[0]` (the CFG control input) from the parser-time control to the actual chain predecessor, applied by the Block control-chain fixup pass in `Chalk/Bootstrap/Perl/Actions.pm` when a statement is positioned within its enclosing block.
+  - `If::set_region` and `Loop::set_region` — store the post-construct merge `Region` on the constructing node so the Block fixup pass can advance `control` past the CFG construct.
+  - Side-effect data nodes (`Call`, `Assign`, `CompoundAssign`, `RegexSubst`, `TryCatch`) expose `set_control_in` inherited from `Chalk::IR::Node`, which writes to a separate `control_in` field (not in `inputs`). This is the effect-chain predecessor for nodes that don't carry control in `inputs[0]`. The `control_in` field is excluded from `content_hash` so statement-position vs expression-position uses of the same operation hash-cons to the same node.
+  - `Call::set_target` — late-bind a resolved `Chalk::MOP::Method` handle after all classes' methods have been registered on the MOP.
+
+  These setters are the only post-construction mutations permitted on IR nodes.
 - **Bidirectional use-def chains.** Each node records both its inputs (producers) and its consumers (users), making it straightforward to traverse the graph in either direction.
 - **Stable content-based IDs.** Data node IDs are derived from the node's operation and its inputs' IDs, not from a creation counter. This makes IDs deterministic across runs, which is required for byte-identical code generation.
 
@@ -169,6 +176,51 @@ Aggregate nodes construct compound values from a list of sub-expressions. They e
 | `HashRef` | Constructs a hash reference from a list of key/value pairs. |
 | `ArrayRef` | Constructs an array reference from a list of elements. |
 | `Interpolate` | Constructs a double-quoted string from an ordered list of literal and variable parts. |
+
+---
+
+## Statement-position effect chain
+
+Side-effect data nodes (`Call`, `Assign`, `CompoundAssign`,
+`RegexSubst`, `TryCatch`) can appear in two positions:
+
+- **Expression position** — the node's value is consumed by a
+  containing expression. The data flow alone is enough to model the
+  computation; control ordering with respect to other side-effects
+  is implicit in the data dependencies between consumers.
+- **Statement position** — the node is a bare statement whose value
+  is discarded. Its position in the sequence of side effects matters
+  but is not captured by data dependencies.
+
+For statement-position uses, Chalk carries the effect-chain
+predecessor on a separate `control_in` field on the base
+`Chalk::IR::Node`. This is set late-binding by the Block
+control-chain fixup pass in `Chalk/Bootstrap/Perl/Actions.pm`. The
+field is not part of `inputs` and is excluded from `content_hash` —
+the same `Call(push, [@list, 3])` hash-conses to a single node
+whether it appears as a statement or as a subexpression; only the
+`control_in` field varies per use.
+
+CFG nodes (`If`, `Loop`, `TryCatch`'s outer wrapper) carry their
+control input in `inputs[0]` by convention, not in `control_in`.
+The `Chalk::IR::Node::If` and `Chalk::IR::Node::Loop` subclasses
+override the `control_in` reader so a walker that calls
+`$node->control_in()` gets a consistent answer across all
+side-effect-bearing node types: data nodes return their
+`control_in` field; CFG nodes return `inputs[0]`.
+
+A graph walker that needs the complete effect chain must follow both
+`inputs` and `control_in`. The reachability walker in
+`t/bootstrap/mop/ir-completeness.t` and the audit probe in
+`script/probe-ir.pl` follow both. The scheduler (planned) will
+consume the `control_in` edge to derive source-order emit positions
+for statement-position side-effects.
+
+The Block control-chain fixup pass is at
+`lib/Chalk/Bootstrap/Perl/Actions.pm` around line 1494. It walks the
+statement list in source order, maintaining a `$current_control`
+pointer (initially `Start`), and threads each side-effect statement
+onto the chain.
 
 ---
 

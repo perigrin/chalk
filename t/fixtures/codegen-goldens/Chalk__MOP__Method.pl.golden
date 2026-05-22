@@ -16,12 +16,6 @@ class Chalk::MOP::Method {
     method merge($node) {
         $graph->merge($node);
     }
-    method make($op, %a) {
-        $factory->make($op, %a);
-    }
-    method make_cfg($op, %a) {
-        $factory->make_cfg($op, %a);
-    }
     method next_cfg_id() {
         $graph->next_cfg_id();
     }

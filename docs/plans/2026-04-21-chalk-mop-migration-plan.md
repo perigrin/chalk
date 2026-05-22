@@ -226,6 +226,36 @@ Phase 7d closure (commit `73b23143` on `pu`):**
 - `compat_class` final removal.
 - `Chalk::IR::Program` deletion.
 
+**Phase 3d (effect chain completion) — SHIPPED 2026-05-22**
+(commits `7416a5df..ec8b7f2d`). Retroactively closed the Phase
+3a-migration gap: bare-statement `Call`, `Assign`, `CompoundAssign`,
+`RegexSubst`, `If`, `Loop`, `TryCatch` all now thread the control
+chain via the Block control-chain fixup pass in
+`lib/Chalk/Bootstrap/Perl/Actions.pm`. Mechanism: a base
+`Chalk::IR::Node::set_control_in` setter (with subclass overrides
+on `If`/`Loop` that mutate `inputs[0]`), plus `set_region` setters
+on `If`/`Loop` so the Block pass can advance past CFG constructs.
+Regression guard: `t/bootstrap/mop/ir-completeness.t` (315/316,
+M7 iterator-less foreach as documented TODO).
+
+**Phase 3e (C-style ForStatement) — SHIPPED 2026-05-22**
+(commit `0d986d1b`). Replaced the `ForStatement` `return undef`
+stub with a full Loop/If/Proj/Region/Phi construction. Init is
+returned alongside the Loop via `[init, loop]` arrayref so the
+Block fixup pass chains it like any statement-position side
+effect; incr is appended to the loop body. Regression guard:
+`t/bootstrap/mop/build-graph-for-loop.t`.
+
+**Phase 3a-migration status correction.** The 2026-05-20
+"COMPLETE" claim covered VarDecl/Return control threading only.
+Phase 3a-migration's spec claim that "computation actions build
+the graph incrementally via `$graph->merge(...)` inside each
+action" was met for VarDecl/Return only at the time; Phase 3d
+completed the remaining side-effect statement types. Phase 3b/3c
+(if/else and loop Phi insertion) shipped silently between
+2026-05-20 and 2026-05-22 and are also reflected in
+`t/bootstrap/mop/build-graph-{ifelse,loop}-*.t` (all green).
+
 ---
 
 ## Original status snapshot, 2026-04-21 (retained for history)
