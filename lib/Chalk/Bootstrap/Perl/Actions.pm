@@ -14,6 +14,7 @@ use Chalk::IR::Node::Assign;
 use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::RegexSubst;
 use Chalk::IR::Node::If;
+use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::Return;
@@ -1562,13 +1563,14 @@ class Chalk::Bootstrap::Perl::Actions {
                     $s->set_control_in($current_control);
                 }
                 $current_control = $s;
-            } elsif ($s isa Chalk::IR::Node::If) {
-                # CFG If node. Its control input lives in inputs[0]
-                # (set at construction by IfStatement to the parsing-
-                # time scope.control). Rewire it to the current chain
-                # tail if they disagree; advance past the post-If
-                # Region which the IfStatement action stashed on the
-                # If node via set_region().
+            } elsif ($s isa Chalk::IR::Node::If
+                        || $s isa Chalk::IR::Node::Loop) {
+                # CFG control-flow statement. Its control input lives
+                # in inputs[0] (set at construction by the corresponding
+                # action to the parsing-time scope.control). Rewire it
+                # to the current chain tail if they disagree; advance
+                # past the post-construct Region which the action
+                # stashed on the node via set_region().
                 my $existing_ctrl = $s->inputs->[0];
                 if (!defined $existing_ctrl
                         || refaddr($existing_ctrl) != refaddr($current_control)) {
@@ -2345,6 +2347,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     my $region = $factory->make('Region',
                         controls => [$exit_proj],
                     );
+                    $loop->set_region($region);
                     $sa->update_scope($scope->with_control($region));
                     $sa->update_annotations({
                         loop       => $loop,
@@ -2382,6 +2385,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     my $region = $factory->make('Region',
                         controls => [$true_proj, $false_proj],
                     );
+                    $if_node->set_region($region);
                     $sa->update_scope($scope->with_control($region));
                     $sa->update_annotations({
                         then_stmts => [],
@@ -2717,6 +2721,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 my $region = $factory->make('Region',
                     controls => [$exit_proj],
                 );
+                $loop->set_region($region);
 
                 # Merge CFG and Phi nodes into the in-flight graph so they
                 # reach the method graph via $graph->nodes().
@@ -2850,6 +2855,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 my $region = $factory->make('Region',
                     controls => [$exit_proj],
                 );
+                $loop->set_region($region);
 
                 # Merge CFG and Phi nodes into the in-flight graph.
                 my $graph = $ctx->graph() // Chalk::IR::Graph->new;
