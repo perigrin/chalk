@@ -13,6 +13,7 @@ use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Assign;
 use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::RegexSubst;
+use Chalk::IR::Node::If;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::Return;
@@ -1561,6 +1562,19 @@ class Chalk::Bootstrap::Perl::Actions {
                     $s->set_control_in($current_control);
                 }
                 $current_control = $s;
+            } elsif ($s isa Chalk::IR::Node::If) {
+                # CFG If node. Its control input lives in inputs[0]
+                # (set at construction by IfStatement to the parsing-
+                # time scope.control). Rewire it to the current chain
+                # tail if they disagree; advance past the post-If
+                # Region which the IfStatement action stashed on the
+                # If node via set_region().
+                my $existing_ctrl = $s->inputs->[0];
+                if (!defined $existing_ctrl
+                        || refaddr($existing_ctrl) != refaddr($current_control)) {
+                    $s->set_control_in($current_control);
+                }
+                $current_control = $s->region // $s;
             }
         }
 
@@ -2508,6 +2522,10 @@ class Chalk::Bootstrap::Perl::Actions {
                 $graph->merge($true_proj);
                 $graph->merge($false_proj);
                 $graph->merge($region);
+
+                # Tell the If node its post-construct merge point so the
+                # Block control-chain fixup pass can advance past it.
+                $if_node->set_region($region);
                 my $diff = $merged_scope->diff($pre_snapshot);
                 for my $var_name (keys $diff->%*) {
                     my $node = $diff->{$var_name};
@@ -2591,6 +2609,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 my $region = $factory->make('Region',
                     controls => [$true_proj, $false_proj],
                 );
+                $if_node->set_region($region);
                 $sa->update_scope($scope->with_control($region));
                 $sa->update_annotations({
                     then_stmts => $then_body,
