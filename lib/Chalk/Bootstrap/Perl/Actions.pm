@@ -1541,6 +1541,20 @@ class Chalk::Bootstrap::Perl::Actions {
                     $s = $rebuilt;
                 }
                 # Return/Unwind terminate the chain - don't advance control.
+            } elsif ($s isa Chalk::IR::Node::Call) {
+                # Statement-position Call (bare push/print/etc., or a
+                # function/method call whose return value is discarded).
+                # The CallExpression action constructed this as a pure
+                # data node (no control input, not merged into the graph).
+                # Thread it into the effect chain via late-binding
+                # control_in setter; merge into the graph so $graph->nodes
+                # and downstream reachability walks see it.
+                $graph->merge($s);
+                if (!defined $s->control_in
+                        || refaddr($s->control_in) != refaddr($current_control)) {
+                    $s->set_control_in($current_control);
+                }
+                $current_control = $s;
             }
         }
 

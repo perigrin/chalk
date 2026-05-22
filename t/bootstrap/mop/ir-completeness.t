@@ -77,6 +77,8 @@ sub parse_callables($source) {
 }
 
 # Walk inputs() backward from every terminator until fixpoint; return refaddr set of reached nodes.
+# Also follows control_in() when the node has one, since control_in carries effect-chain edges
+# that live outside the inputs arrayref.
 sub reachable_from_terminators(@terminators) {
     my %seen;
     my @work = @terminators;
@@ -88,6 +90,10 @@ sub reachable_from_terminators(@terminators) {
             next unless defined $in;
             if (ref($in) eq 'ARRAY') { push @work, $in->@* }
             else { push @work, $in }
+        }
+        if ($n->can('control_in')) {
+            my $cin = $n->control_in;
+            push @work, $cin if defined $cin;
         }
     }
     return \%seen;

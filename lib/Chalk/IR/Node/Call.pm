@@ -34,6 +34,14 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
     # in scope have been registered on the MOP.
     field $target :param :reader = undef;
 
+    # Effect-chain predecessor when this Call appears as a bare
+    # statement. Set by Block's control-chain fixup pass via
+    # set_control_in(); undef for Calls in pure-expression position.
+    # Not part of content_hash for the same reason as $target:
+    # statement-position and expression-position Calls with otherwise
+    # identical signatures should still hash-cons together.
+    field $control_in :reader = undef;
+
     method operation() { 'Call' }
 
     method content_hash() {
@@ -48,6 +56,22 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
     # Phase 4 post-pass once the MOP has every class's methods registered.
     method set_target($mop_method) {
         $target = $mop_method;
+        return;
+    }
+
+    # Late-binding setter for the effect-chain predecessor. Called by
+    # the Block control-chain fixup pass at statement-list construction
+    # time when this Call appears as a bare statement. Maintains the
+    # bidirectional use-def edge by adjusting consumer registration on
+    # the old and new predecessors.
+    method set_control_in($ctrl) {
+        if (defined $control_in) {
+            $control_in->remove_consumer($self);
+        }
+        $control_in = $ctrl;
+        if (defined $ctrl) {
+            $ctrl->add_consumer($self);
+        }
         return;
     }
 }
