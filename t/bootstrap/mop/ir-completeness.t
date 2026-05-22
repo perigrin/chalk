@@ -123,7 +123,17 @@ for my $entry (@snippets) {
         for my $i (0..$#body) {
             my $item = $body[$i];
             next unless ref $item;  # skip scalars
-            next unless blessed $item;  # skip non-IR-node entries (e.g., SubInfo)
+            next unless blessed $item;  # skip plain hashrefs
+
+            # Metadata structs (e.g., SubInfo from 'my sub' declarations)
+            # are not IR nodes and never enter the graph by design. They
+            # ride along in body for codegen's benefit; codegen doesn't
+            # need them to be graph-resident or terminator-reachable.
+            next if $item->isa('Chalk::IR::SubInfo');
+            next if $item->isa('Chalk::IR::MethodInfo');
+            next if $item->isa('Chalk::IR::FieldInfo');
+            next if $item->isa('Chalk::IR::ClassInfo');
+            next if $item->isa('Chalk::IR::UseInfo');
 
             my $op = $item->can('operation')
                 ? $item->operation : ref $item;
