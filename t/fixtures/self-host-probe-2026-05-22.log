@@ -1,0 +1,178 @@
+Building grammar...
+Grammar built in 4.7s
+Found 143 .pm files under lib/
+[  1/143] PARSED      0.73s     261  lib/Chalk/IR/Node/Aggregate.pm :: classes=1 methods=0 subs=0
+[  2/143] PARSED      1.01s     286  lib/Chalk/IR/Node/Start.pm :: classes=1 methods=1 subs=0
+[  3/143] PARSED      1.16s     295  lib/Chalk/IR/Node/Stringify.pm :: classes=1 methods=1 subs=0
+[  4/143] PARSED      0.84s     297  lib/Chalk/IR/Node/TryCatch.pm :: classes=1 methods=1 subs=0
+[  5/143] PARSED      1.18s     298  lib/Chalk/Bootstrap/BNF/Target/XS/AST/Node.pm :: classes=1 methods=1 subs=0
+[  6/143] PARSED      1.19s     302  lib/Chalk/IR/Node/Access.pm :: classes=1 methods=0 subs=0
+[  7/143] PARSED      0.88s     307  lib/Chalk/IR/Node/Add.pm :: classes=1 methods=2 subs=0
+[  8/143] PARSED      1.14s     309  lib/Chalk/IR/Node/Range.pm :: classes=1 methods=2 subs=0
+[  9/143] PARSED      1.48s     309  lib/Chalk/IR/Node/Or.pm :: classes=1 methods=2 subs=0
+[ 10/143] PARSED      1.01s     311  lib/Chalk/IR/Node/Modulo.pm :: classes=1 methods=2 subs=0
+[ 11/143] PARSED      1.19s     312  lib/Chalk/IR/Node/And.pm :: classes=1 methods=2 subs=0
+[ 12/143] PARSED      0.90s     313  lib/Chalk/IR/Node/Divide.pm :: classes=1 methods=2 subs=0
+[ 13/143] PARSED      0.97s     313  lib/Chalk/IR/Node/Unwind.pm :: classes=1 methods=1 subs=0
+[ 14/143] PARSED      1.12s     313  lib/Chalk/IR/Node/RegexMatch.pm :: classes=1 methods=1 subs=0
+[ 15/143] PARSED      0.93s     313  lib/Chalk/IR/Node/BitOr.pm :: classes=1 methods=2 subs=0
+[ 16/143] PARSED      1.01s     315  lib/Chalk/IR/Node/Region.pm :: classes=1 methods=1 subs=0
+[ 17/143] PARSED      1.35s     315  lib/Chalk/IR/Node/Assign.pm :: classes=1 methods=2 subs=0
+[ 18/143] PARSED      1.17s     316  lib/Chalk/IR/Node/BitXor.pm :: classes=1 methods=2 subs=0
+[ 19/143] PARSED      1.34s     316  lib/Chalk/IR/Node/BitAnd.pm :: classes=1 methods=2 subs=0
+[ 20/143] PARSED      0.98s     317  lib/Chalk/IR/Node/Slice.pm :: classes=1 methods=1 subs=0
+[ 21/143] PARSED      1.01s     317  lib/Chalk/IR/Node/IsaOp.pm :: classes=1 methods=2 subs=0
+[ 22/143] PARSED      1.21s     319  lib/Chalk/IR/Node/Power.pm :: classes=1 methods=2 subs=0
+[ 23/143] PARSED      0.96s     320  lib/Chalk/IR/Node/Subtract.pm :: classes=1 methods=2 subs=0
+[ 24/143] PARSED      1.08s     321  lib/Chalk/IR/Node/NumLt.pm :: classes=1 methods=2 subs=0
+[ 25/143] PARSED      1.45s     321  lib/Chalk/IR/Node/StrEq.pm :: classes=1 methods=2 subs=0
+[ 26/143] PARSED      0.88s     322  lib/Chalk/IR/Node/StrLt.pm :: classes=1 methods=2 subs=0
+[ 27/143] PARSED      1.26s     322  lib/Chalk/IR/Node/NumEq.pm :: classes=1 methods=2 subs=0
+[ 28/143] PARSED      1.13s     323  lib/Chalk/IR/Node/Xor.pm :: classes=1 methods=2 subs=0
+[ 29/143] PARSED      0.79s     323  lib/Chalk/IR/Node/Multiply.pm :: classes=1 methods=2 subs=0
+[ 30/143] PARSED      1.32s     323  lib/Chalk/IR/Node/StrNe.pm :: classes=1 methods=2 subs=0
+[ 31/143] PARSED      1.32s     324  lib/Chalk/IR/Node/BacktickExpr.pm :: classes=1 methods=1 subs=0
+[ 32/143] PARSED      1.35s     324  lib/Chalk/IR/Node/Ref.pm :: classes=1 methods=2 subs=0
+[ 33/143] PARSED      1.35s     324  lib/Chalk/IR/Node/NumNe.pm :: classes=1 methods=2 subs=0
+[ 34/143] PARSED      0.89s     324  lib/Chalk/IR/Node/NumGt.pm :: classes=1 methods=2 subs=0
+[ 35/143] PARSED      1.36s     324  lib/Chalk/IR/Node/Match.pm :: classes=1 methods=2 subs=0
+[ 36/143] PARSED      1.35s     325  lib/Chalk/IR/Node/StrGt.pm :: classes=1 methods=2 subs=0
+[ 37/143] PARSED      1.19s     325  lib/Chalk/IR/Node/Concat.pm :: classes=1 methods=2 subs=0
+[ 38/143] PARSED      1.09s     326  lib/Chalk/IR/Node/StrLe.pm :: classes=1 methods=2 subs=0
+[ 39/143] PARSED      0.83s     326  lib/Chalk/IR/Node/ArrayRef.pm :: classes=1 methods=1 subs=0
+[ 40/143] PARSED      1.58s     326  lib/Chalk/IR/Node/StrCmp.pm :: classes=1 methods=2 subs=0
+[ 41/143] PARSED      0.93s     327  lib/Chalk/IR/Node/NumLe.pm :: classes=1 methods=2 subs=0
+[ 42/143] PARSED      1.05s     327  lib/Chalk/IR/Node/Repeat.pm :: classes=1 methods=2 subs=0
+[ 43/143] PARSED      1.19s     327  lib/Chalk/IR/Node/LeftShift.pm :: classes=1 methods=2 subs=0
+[ 44/143] PARSED      0.84s     327  lib/Chalk/IR/Node/NumCmp.pm :: classes=1 methods=2 subs=0
+[ 45/143] PARSED      0.98s     328  lib/Chalk/IR/Node/HashRef.pm :: classes=1 methods=1 subs=0
+[ 46/143] PARSED      1.19s     329  lib/Chalk/IR/Node/StrGe.pm :: classes=1 methods=2 subs=0
+[ 47/143] PARSED      0.82s     330  lib/Chalk/IR/Node/RightShift.pm :: classes=1 methods=2 subs=0
+[ 48/143] PARSED      1.12s     330  lib/Chalk/IR/Node/NumGe.pm :: classes=1 methods=2 subs=0
+[ 49/143] PARSED      1.17s     330  lib/Chalk/IR/Node/Yada.pm :: classes=1 methods=2 subs=0
+[ 50/143] PARSED      0.90s     337  lib/Chalk/IR/Node/DefinedOr.pm :: classes=1 methods=2 subs=0
+[ 51/143] PARSED      1.12s     337  lib/Chalk/IR/Node/Interpolate.pm :: classes=1 methods=1 subs=0
+[ 52/143] PARSED      1.12s     338  lib/Chalk/MOP/Phaser/Adjust.pm :: classes=1 methods=0 subs=0
+[ 53/143] PARSED      0.77s     338  lib/Chalk/IR/Node/NotMatch.pm :: classes=1 methods=2 subs=0
+[ 54/143] PARSED      1.11s     339  lib/Chalk/IR/Node/Not.pm :: classes=1 methods=2 subs=0
+[ 55/143] PARSED      1.10s     344  lib/Chalk/IR/Node/Subscript.pm :: classes=1 methods=1 subs=0
+[ 56/143] PARSED      0.79s     347  lib/Chalk/IR/Node/Defined.pm :: classes=1 methods=2 subs=0
+[ 57/143] PARSED      1.22s     349  lib/Chalk/IR/Node/Length.pm :: classes=1 methods=2 subs=0
+[ 58/143] PARSED      1.15s     349  lib/Chalk/IR/Node/Negate.pm :: classes=1 methods=2 subs=0
+[ 59/143] PARSED      0.90s     351  lib/Chalk/IR/Node/Complement.pm :: classes=1 methods=2 subs=0
+[ 60/143] PARSED      1.35s     360  lib/Chalk/IR/Node/UnaryPlus.pm :: classes=1 methods=2 subs=0
+[ 61/143] PARSED      1.01s     366  lib/Chalk/IR/Node/StructRef.pm :: classes=1 methods=1 subs=0
+[ 62/143] PARSED      1.45s     370  lib/Chalk/MOP/Import.pm :: classes=1 methods=1 subs=0
+[ 63/143] PARSED      1.38s     378  lib/Chalk/IR/Node/TernaryExpr.pm :: classes=1 methods=1 subs=0
+[ 64/143] PARSED      0.88s     382  lib/Chalk/IR/Node/StructFieldAccess.pm :: classes=1 methods=1 subs=0
+[ 65/143] PARSED      1.41s     391  lib/Chalk/Bootstrap/Scope/Sentinel.pm :: classes=1 methods=0 subs=0
+[ 66/143] PARSED      1.09s     420  lib/Chalk/Bootstrap/Target.pm :: classes=1 methods=2 subs=0
+[ 67/143] PARSED      1.53s     439  lib/Chalk/IR/Node/UnaryOp.pm :: classes=1 methods=1 subs=0
+[ 68/143] PARSED      1.14s     443  lib/Chalk/Bootstrap/BNF/Target/XS/AST/Statement.pm :: classes=1 methods=1 subs=0
+[ 69/143] PARSED      1.45s     454  lib/Chalk/IR/Node/Proj.pm :: classes=1 methods=2 subs=0
+[ 70/143] PARSED      1.48s     455  lib/Chalk/IR/Node/PostfixDeref.pm :: classes=1 methods=2 subs=0
+[ 71/143] PARSED      1.24s     467  lib/Chalk/IR/Node/CompoundAssign.pm :: classes=1 methods=2 subs=0
+[ 72/143] PARSED      1.48s     486  lib/Chalk/Bootstrap/BNF/Target/XS/AST/CompositeNode.pm :: classes=1 methods=1 subs=0
+[ 73/143] PARSED      1.23s     500  lib/Chalk/IR/Node/Regex.pm :: classes=1 methods=1 subs=0
+[ 74/143] PARSED      1.28s     517  lib/Chalk/Bootstrap/BNF/Target/XS/AST/Module.pm :: classes=1 methods=1 subs=0
+[ 75/143] PARSED      1.68s     523  lib/Chalk/IR/Node/BinOp.pm :: classes=1 methods=1 subs=0
+[ 76/143] PARSED      1.88s     572  lib/Chalk/IR/Node/PadAccess.pm :: classes=1 methods=2 subs=0
+[ 77/143] PARSED      1.37s     577  lib/Chalk/IR/Node/RegexSubst.pm :: classes=1 methods=2 subs=0
+[ 78/143] PARSED      2.25s     593  lib/Chalk/IR/Node/Constant.pm :: classes=1 methods=2 subs=0
+[ 79/143] PARSED      1.75s     598  lib/Chalk/IR/Node/FieldAccess.pm :: classes=1 methods=2 subs=0
+[ 80/143] PARSED      1.72s     600  lib/Chalk/IR/Node/StashAccess.pm :: classes=1 methods=2 subs=0
+[ 81/143] PARSED      1.29s     606  lib/Chalk/IR/Node/Return.pm :: classes=1 methods=1 subs=0
+[ 82/143] PARSED      1.41s     609  lib/Chalk/Bootstrap/BNF/Target/XS/AST/VarDecl.pm :: classes=1 methods=1 subs=0
+[ 83/143] PARSED      1.99s     651  lib/Chalk/IR/Node/ExpressionList.pm :: classes=1 methods=2 subs=0
+[ 84/143] PARSED      1.82s     690  lib/Chalk/IR/Node/VarDecl.pm :: classes=1 methods=5 subs=0
+[ 85/143] PARSED      2.36s     702  lib/Chalk/MOP/Field.pm :: classes=1 methods=1 subs=0
+[ 86/143] PARSED      2.76s     710  lib/Chalk/IR/Node/Phi.pm :: classes=1 methods=3 subs=0
+[ 87/143] PARSED      1.61s     712  lib/Chalk/MOP/Phaser.pm :: classes=1 methods=2 subs=0
+[ 88/143] PARSED      1.46s     727  lib/Chalk/Bootstrap/Terminal.pm :: classes=1 methods=0 subs=1
+[ 89/143] PARSED      1.83s     771  lib/Chalk/IR/Node/AnonSub.pm :: classes=1 methods=2 subs=0
+[ 90/143] PARSED      0.97s     853  lib/Chalk/Bootstrap/BNF/Target/XS/AST/Preamble.pm :: classes=1 methods=1 subs=0
+[ 91/143] PARSED      2.71s     863  lib/Chalk/IR/UseInfo.pm :: classes=1 methods=2 subs=0
+[ 92/143] PARSED      1.19s     889  lib/Chalk/Bootstrap/Optimizer/Pass.pm :: classes=1 methods=3 subs=0
+[ 93/143] PARSED      2.56s     930  lib/Chalk/IR/SubInfo.pm :: classes=1 methods=2 subs=0
+[ 94/143] PARSED      2.83s     948  lib/Chalk/MOP/Sub.pm :: classes=1 methods=2 subs=0
+[ 95/143] PARSED      2.89s     976  lib/Chalk/Grammar/Rule.pm :: classes=1 methods=3 subs=0
+[ 96/143] PARSED      2.25s    1015  lib/Chalk/Bootstrap/Optimizer.pm :: classes=1 methods=3 subs=0
+[ 97/143] PARSED      2.92s    1025  lib/Chalk/IR/MethodInfo.pm :: classes=1 methods=2 subs=0
+[ 98/143] PARSED      2.22s    1050  lib/Chalk/Grammar/Symbol.pm :: classes=1 methods=5 subs=0
+[ 99/143] PARSED      3.91s    1124  lib/Chalk/IR/ClassInfo.pm :: classes=1 methods=2 subs=0
+[100/143] PARSED      2.93s    1125  lib/Chalk/Bootstrap/IR/Optimizer.pm :: classes=0 methods=0 subs=3
+[101/143] PARSED      2.63s    1148  lib/Chalk/IR/Program.pm :: classes=1 methods=2 subs=0
+[102/143] PARSED      2.92s    1220  lib/Chalk/Bootstrap/Runtime.pm :: classes=1 methods=0 subs=1
+[103/143] PARSED      3.10s    1260  lib/Chalk/IR/FieldInfo.pm :: classes=1 methods=2 subs=0
+[104/143] PARSED      2.24s    1523  lib/Chalk/MOP/Method.pm :: classes=1 methods=3 subs=0
+[105/143] PARSED      3.21s    1636  lib/Chalk/MOP.pm :: classes=1 methods=5 subs=0
+[106/143] PARSED      2.30s    1964  lib/Chalk/IR/Node/If.pm :: classes=1 methods=4 subs=0
+[107/143] PARSED      4.87s    1986  lib/Chalk/Bootstrap/BNF/Target/XS/AST/XSUB.pm :: classes=1 methods=1 subs=0
+[108/143] PARSED      3.19s    2007  lib/Chalk/IR/Node/Loop.pm :: classes=1 methods=5 subs=0
+[109/143] PARSED      1.92s    2198  lib/Chalk/IR/Node/Call.pm :: classes=1 methods=3 subs=0
+[110/143] PARSED      5.35s    2208  lib/Chalk/Bootstrap/Perl/Target/ClassRegistry.pm :: classes=1 methods=4 subs=0
+[111/143] PARSED      5.27s    2864  lib/Chalk/Bootstrap/Semiring/Boolean.pm :: classes=1 methods=6 subs=0
+[112/143] PARSED      6.60s    3198  lib/Chalk/IR/Node.pm :: classes=1 methods=7 subs=0
+[113/143] PARSED      8.80s    3423  lib/Chalk/Bootstrap/Optimizer/DCE.pm :: classes=1 methods=4 subs=0
+[114/143] PARSED      9.92s    3556  lib/Chalk/MOP/Class.pm :: classes=1 methods=14 subs=0
+[115/143] PARSED      9.00s    3613  lib/Chalk/Bootstrap/BNF/Target/Perl.pm :: classes=1 methods=9 subs=0
+[116/143] PARSED      9.73s    4402  lib/Chalk/Bootstrap/Desugar.pm :: classes=1 methods=0 subs=3
+[117/143] PARSED      7.64s    4426  lib/Chalk/Grammar/Perl/PrecedenceTable.pm :: classes=1 methods=0 subs=8
+[118/143] PARSED      9.94s    4575  lib/Chalk/Bootstrap/CoreItemIndex.pm :: classes=1 methods=19 subs=0
+[119/143] PARSED     13.06s    4701  lib/Chalk/Grammar/BNF/Generated.pm :: classes=1 methods=0 subs=1
+[120/143] PARSED     14.42s    5514  lib/Chalk/Grammar/BNF.pm :: classes=1 methods=0 subs=1
+[121/143] PARSED      6.15s    5595  lib/Chalk/Grammar/Perl/KeywordTable.pm :: classes=1 methods=0 subs=3
+[122/143] PARSED     14.46s    6130  lib/Chalk/IR/Graph.pm :: classes=1 methods=7 subs=0
+[123/143] PARSED     21.67s    8673  lib/Chalk/Bootstrap/Context.pm :: classes=1 methods=9 subs=0
+[124/143] PARSED     22.71s    9619  lib/Chalk/Grammar/BNF/Actions.pm :: classes=1 methods=13 subs=1
+[125/143] PARSED     17.66s   10045  lib/Chalk/IR/NodeFactory.pm :: classes=1 methods=7 subs=0
+[126/143] PARSED     33.91s   10263  lib/Chalk/IR/Serialize/JSON.pm :: classes=0 methods=0 subs=35
+[127/143] PARSED     20.22s   10475  lib/Chalk/Bootstrap/Scope.pm :: classes=1 methods=13 subs=1
+[128/143] PARSED     23.59s   10864  lib/Chalk/Bootstrap/BNF/Target/XS.pm :: classes=1 methods=12 subs=0
+[129/143] PARSED     35.33s   13805  lib/Chalk/Bootstrap/LR0DFA.pm :: classes=1 methods=11 subs=0
+[130/143] PARSED     37.61s   13838  lib/Chalk/Grammar/Perl/TypeLibrary.pm :: classes=1 methods=0 subs=8
+[131/143] PARSED     40.19s   14968  lib/Chalk/Bootstrap/Semiring/TypeInferenceActions.pm :: classes=1 methods=23 subs=12
+Deep recursion on anonymous subroutine at lib/Chalk/IR/Graph.pm line 139.
+Deep recursion on anonymous subroutine at lib/Chalk/IR/Graph.pm line 139.
+Deep recursion on anonymous subroutine at lib/Chalk/IR/Graph.pm line 149.
+Deep recursion on anonymous subroutine at lib/Chalk/IR/Graph.pm line 144.
+Deep recursion on anonymous subroutine at lib/Chalk/IR/Graph.pm line 149.
+Deep recursion on anonymous subroutine at lib/Chalk/IR/Graph.pm line 149.
+Deep recursion on anonymous subroutine at lib/Chalk/IR/Graph.pm line 149.
+Deep recursion on anonymous subroutine at lib/Chalk/IR/Graph.pm line 149.
+[132/143] PARSED     34.01s   21353  lib/Chalk/Bootstrap/Semiring/Structural.pm :: classes=1 methods=7 subs=1
+[133/143] PARSED     53.44s   23186  lib/Chalk/Bootstrap/Semiring/SemanticAction.pm :: classes=1 methods=14 subs=8
+[134/143] TIMEOUT    60.05s   23603  lib/Chalk/Bootstrap/Semiring/TypeInference.pm
+[135/143] TIMEOUT    60.05s   24616  lib/Chalk/Bootstrap/BNF/Target/C.pm
+[136/143] TIMEOUT    60.05s   25735  lib/Chalk/Bootstrap/Semiring/FilterComposite.pm
+[137/143] TIMEOUT    60.05s   32709  lib/Chalk/Bootstrap/Semiring/Precedence.pm
+[138/143] TIMEOUT    60.08s   34009  lib/Chalk/Bootstrap/Optimizer/StructPromotion.pm
+[139/143] TIMEOUT    60.05s   50051  lib/Chalk/Bootstrap/Perl/Target/Perl.pm
+[140/143] TIMEOUT    60.04s   75805  lib/Chalk/Bootstrap/Earley.pm
+[141/143] TIMEOUT    60.04s   97111  lib/Chalk/Bootstrap/Perl/Target/C.pm
+[142/143] TIMEOUT    60.04s  117698  lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm
+[143/143] TIMEOUT    60.08s  127489  lib/Chalk/Bootstrap/Perl/Actions.pm
+
+## Summary
+============================================================
+  PARSED     133 / 143 (93%)
+  TIMEOUT     10 / 143 (7%)
+
+## Samples by outcome
+============================================================
+
+### PARSED (showing up to 5)
+    0.73s     261  lib/Chalk/IR/Node/Aggregate.pm :: classes=1 methods=0 subs=0
+    1.01s     286  lib/Chalk/IR/Node/Start.pm :: classes=1 methods=1 subs=0
+    1.16s     295  lib/Chalk/IR/Node/Stringify.pm :: classes=1 methods=1 subs=0
+    0.84s     297  lib/Chalk/IR/Node/TryCatch.pm :: classes=1 methods=1 subs=0
+    1.18s     298  lib/Chalk/Bootstrap/BNF/Target/XS/AST/Node.pm :: classes=1 methods=1 subs=0
+
+### TIMEOUT (showing up to 5)
+   60.05s   23603  lib/Chalk/Bootstrap/Semiring/TypeInference.pm
+   60.05s   24616  lib/Chalk/Bootstrap/BNF/Target/C.pm
+   60.05s   25735  lib/Chalk/Bootstrap/Semiring/FilterComposite.pm
+   60.05s   32709  lib/Chalk/Bootstrap/Semiring/Precedence.pm
+   60.08s   34009  lib/Chalk/Bootstrap/Optimizer/StructPromotion.pm
+
+Total parse wall time: 1226.0s across 143 files (avg 8.57s/file)
