@@ -107,6 +107,9 @@ sub _dump_callable($label, $obj) {
     # ANY-inputs reachability from Return: even if a node is in the graph,
     # it must be reachable from a terminator (Return/Unwind) by walking
     # inputs() in any direction, or it's dead from codegen's perspective.
+    # Statement-position side-effect data nodes carry their effect-chain
+    # predecessor via control_in() (a separate field outside inputs); the
+    # walker follows that edge too.
     my @terminators = grep { $_->operation =~ /^(Return|Unwind)$/ } @nodes;
     if (@terminators) {
         my %reached;
@@ -119,6 +122,10 @@ sub _dump_callable($label, $obj) {
                 next unless defined $in;
                 if (ref($in) eq 'ARRAY') { push @work, $in->@* }
                 else { push @work, $in }
+            }
+            if ($n->can('control_in')) {
+                my $cin = $n->control_in;
+                push @work, $cin if defined $cin;
             }
         }
         # Which body items are unreachable?
