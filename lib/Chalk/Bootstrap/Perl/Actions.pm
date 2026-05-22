@@ -2759,8 +2759,150 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §6 ForStatement — not needed for Tier C (C-style for loops)
+    # §6 ForStatement ::= /for\b/ _ /\(/ _ Expression? _ /;/ _ Expression? _ /;/
+    #                     _ Expression? _ /\)/ _ Block
+    #
+    # C-style for loop. The three Expression slots are init, cond, and
+    # incr in source order. We build the same CFG shape as
+    # WhileStatement: Loop / If / Proj / Region (plus loop-carried Phis
+    # for variables changed in the body), with incr appended to the
+    # body so it runs each iteration. Init is left as a body item
+    # preceding the Loop in source order — the Block fixup pass
+    # threads it onto the control chain just like any other
+    # statement-position side effect.
     method ForStatement($ctx) {
-        return undef;
+        my @leaves = _collect_ir_leaves($ctx);
+
+        # The grammar slot order is: init, cond, incr. The first IR
+        # leaf is init (a VarDecl typically, or any Expression), the
+        # next is cond, the next is incr.
+        my ($init, $cond, $incr, $body, $cond_leaf, $body_leaf);
+        my $slot = 0;  # 0=init, 1=cond, 2=incr, 3=body
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            my $rule  = $leaf->rule() // '';
+
+            if ($rule eq 'Block') {
+                my $stmts = _block_stmts($focus);
+                $body = $stmts if defined $stmts;
+                $body_leaf = $leaf;
+                next;
+            }
+
+            # Skip non-IR leaves (punctuation, whitespace, scalars).
+            next unless ref($focus) || ($focus isa Chalk::IR::Node);
+            next unless ($focus isa Chalk::IR::Node) || ref($focus) eq 'ARRAY';
+
+            if ($slot == 0) {
+                $init = $focus;
+                $slot = 1;
+            } elsif ($slot == 1) {
+                $cond = $focus;
+                $cond_leaf = $leaf;
+                $slot = 2;
+            } elsif ($slot == 2) {
+                $incr = $focus;
+                $slot = 3;
+            }
+        }
+
+        $body //= [];
+
+        # cond is required for a meaningful loop; if missing, treat as
+        # while (1) — synthesize a Constant true.
+        if (!defined $cond) {
+            $cond = $factory->make('Constant',
+                const_type => 'bool', value => 'true');
+        }
+
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        return undef unless defined $sa;
+
+        my $scope   = _ctx_scope($ctx);
+        return undef unless defined $scope;
+        my $control = _ctx_control($ctx) // $factory->make('Start');
+
+        # Pre-loop scope from the condition leaf (matches WhileStatement
+        # pattern: by the time ForStatement's complete event fires,
+        # multiply() has merged the body's scope into $ctx).
+        my $pre_loop_scope = $scope;
+        if (defined $cond_leaf) {
+            my $cs = _ctx_scope($cond_leaf);
+            $pre_loop_scope = $cs if defined $cs;
+        }
+
+        my $loop = $factory->make('Loop',
+            entry_ctrl    => $control,
+            backedge_ctrl => undef,
+        );
+        my $if_node = $factory->make('If',
+            control   => $loop,
+            condition => $cond,
+        );
+        my $body_proj = $factory->make('Proj', source => $if_node, index => 0);
+        my $exit_proj = $factory->make('Proj', source => $if_node, index => 1);
+
+        # Append incr to body so it runs each iteration (before backedge).
+        my @effective_body = $body->@*;
+        push @effective_body, $incr if defined $incr;
+
+        # Collect post-body scope bindings for Phi backedge wiring.
+        my %body_final_bindings;
+        for my $leaf (_collect_ir_leaves($ctx)) {
+            my $leaf_scope = _ctx_scope($leaf);
+            if (defined $leaf_scope) {
+                for my $name ($leaf_scope->variable_names()) {
+                    my $binding = $leaf_scope->lookup($name);
+                    $body_final_bindings{$name} = $binding if defined $binding;
+                }
+            }
+        }
+
+        # Create Phi nodes for loop-carried variables.
+        my $pre_snapshot = $pre_loop_scope->snapshot();
+        my $post_loop_scope = $pre_loop_scope->merge_for_loop(
+            \%body_final_bindings, $loop, $factory, undef,
+        );
+
+        my $region = $factory->make('Region',
+            controls => [$exit_proj],
+        );
+        $loop->set_region($region);
+
+        # Merge CFG and Phi nodes into the in-flight graph.
+        my $graph = $ctx->graph() // Chalk::IR::Graph->new;
+        $graph->merge($loop);
+        $graph->merge($if_node);
+        $graph->merge($body_proj);
+        $graph->merge($exit_proj);
+        $graph->merge($region);
+        my $diff = $post_loop_scope->diff($pre_snapshot);
+        for my $var_name (keys $diff->%*) {
+            my $node = $diff->{$var_name};
+            next unless defined $node && blessed($node);
+            next unless $node isa Chalk::IR::Node::Phi;
+            $graph->merge($node);
+        }
+        $sa->update_graph($graph);
+
+        $sa->update_scope($post_loop_scope->with_control($region));
+        $sa->update_annotations({
+            body_stmts => \@effective_body,
+            loop       => $loop,
+            loop_if    => $if_node,
+            body_proj  => $body_proj,
+            exit_proj  => $exit_proj,
+            for_init   => $init,
+        });
+
+        # Return value: for the Block fixup pass to thread the init
+        # onto the control chain BEFORE the Loop, we return an arrayref
+        # [init, loop]. StatementList already flattens arrayrefs into
+        # the statement list. If there's no init, return just the loop.
+        if (defined $init) {
+            return [$init, $loop];
+        }
+        return $loop;
     }
 
     # §6 ForeachStatement ::= /for(?:each)?\b/ _ IteratorVariable _ ParenExpr _ Block
