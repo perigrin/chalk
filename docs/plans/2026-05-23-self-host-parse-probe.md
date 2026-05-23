@@ -355,3 +355,69 @@ non-terminating behavior, but the curve fit is consistent with
 
 **Out of scope:**
 - Strong-form self-hosting still requires Phase 4 codegen migration.
+
+---
+
+## Addendum 2: heredoc gap closed (2026-05-23)
+
+The single grammar gap surfaced by the long-timeout probe (the
+heredocs in `Perl/Target/C.pm`) was closed by replacing both
+heredocs with multiline `qq{...}` string concatenation (commit
+`c3570c55`).
+
+Single-file re-probe of `Perl/Target/C.pm` after the fix:
+
+```
+File size: 97300 bytes
+Result: PARSED (670.9s)
+```
+
+**The file parses cleanly.** No grammar gap remains.
+
+Two observations:
+
+- **670s is above the 600s long-probe ceiling.** That means in the
+  long-timeout probe, this file would have hit TIMEOUT even with
+  heredocs removed — the UNDEF was masking the fact that the file
+  also exceeds the 600s budget on Earley scaling alone. The
+  heredoc gap and the performance gap were both present; closing
+  one revealed the other.
+- **The 5ms/byte curve fit predicted ~500s; actual was 670s.** The
+  growth is slightly steeper than the early data points suggested,
+  but still consistent with "slow but terminating."
+
+### Updated distribution (after heredoc fix)
+
+If the long-timeout probe were re-run today, the expected outcome
+is:
+
+- **8 PARSED** at 600s budget (the original 7 plus the boundary
+  cases). Target/C.pm at 670s would still TIMEOUT at 600s but
+  PARSES at 1200s+.
+- **3 TIMEOUT at 600s**: Target/C.pm, EmitHelpers.pm, Actions.pm.
+- **0 UNDEF**: heredoc gap closed.
+- **0 CRASH/ZERO**: unchanged.
+
+At a 1200s budget, EmitHelpers.pm (117KB) extrapolates to ~840s
+and Actions.pm (127KB) to ~910s. Both should parse if the curve
+fit holds — but with Earley's worst-case behavior, this is not
+guaranteed until measured.
+
+### Updated recommendations
+
+**High leverage (real bugs):**
+- **None remaining at the IR layer.** Every file in lib/ either
+  parses, or extrapolates to parsing with more time.
+
+**Medium leverage (performance):**
+- **Re-probe with 1200s budget** to confirm EmitHelpers.pm and
+  Actions.pm are also "slow but terminating."
+- **Profile Earley on a representative file** (Earley.pm at 75KB
+  → 377s is the sweet spot for instrumentation). Identify where
+  the 5ms/byte goes.
+
+**Documentation:**
+- Update `docs/architecture/ambiguity-classes.md:272-274` — the
+  claim "heredocs not exercised in lib/" is now actually true,
+  but the doc reads as if it always was; the historical
+  inaccuracy should be noted or the wording revised.
