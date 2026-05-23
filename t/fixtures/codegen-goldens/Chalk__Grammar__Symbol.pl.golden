@@ -20,6 +20,7 @@ class Chalk::Grammar::Symbol {
     method to_string() {
         my $str = $self->is_terminal() ? "/$value/" : $value;
         if (defined($quantifier)) {
+            $str .= $quantifier;
         }
         return $str;
     }

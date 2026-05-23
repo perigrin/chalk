@@ -27,7 +27,15 @@ class Chalk::IR::Scheduler::EagerPinning {
         my @returns = $graph->returns->@*;
         return Chalk::IR::Schedule->new(items => []) unless @returns;
 
-        my $exit = $returns[0];
+        # A method with multiple `return` statements has multiple Return
+        # nodes in the graph (one per source-level `return`). The outer
+        # chain ends at exactly one of them — the chain-final Return,
+        # whose inputs[0] is on the outer chain rather than at a Start
+        # (which would mean this Return is inside an inner branch). We
+        # pick the one with the deepest chain by traversing from each
+        # candidate; the chain whose walk visits the most distinct
+        # nodes is the outer chain.
+        my $exit = $self->_pick_outer_return(\@returns);
 
         # Walk backward from the Return's control input. The chain
         # predecessor reading varies by node type:
@@ -76,6 +84,51 @@ class Chalk::IR::Scheduler::EagerPinning {
         }
 
         return Chalk::IR::Schedule->new(items => \@items);
+    }
+
+    # Pick the outer-chain Return from a list of candidates. The outer
+    # Return is the one whose inputs[0]-via-control_in chain walks back
+    # to a Start without going through another Return's inner branch.
+    # Heuristic: count the chain depth (number of distinct nodes
+    # reachable backward) for each candidate; the deepest one wins.
+    # Ties broken by the candidate that comes last in the input list
+    # (parser order typically puts the chain-final return last).
+    method _pick_outer_return($returns) {
+        return $returns->[0] if scalar $returns->@* == 1;
+
+        my $best     = $returns->[0];
+        my $best_len = 0;
+        for my $r ($returns->@*) {
+            my $len = 0;
+            my $cur = $r->inputs->[0];
+            my %seen;
+            while (defined $cur && blessed($cur)) {
+                last if $cur->operation eq 'Start';
+                last if $seen{$cur->id}++;
+                $len++;
+                my $next = $cur->can('control_in') ? $cur->control_in : undef;
+                if (!defined $next) {
+                    my $ins = $cur->inputs;
+                    last unless defined $ins && ref($ins) eq 'ARRAY';
+                    $next = $ins->[0];
+                }
+                # Region jumps: read its head.
+                if (blessed($next) && $next->can('operation')
+                        && $next->operation eq 'Region'
+                        && $next->can('head'))
+                {
+                    my $head = $next->head;
+                    $next = defined $head ? $head->control_in : undef;
+                }
+                $cur = $next;
+                last if ref($cur) eq 'ARRAY';
+            }
+            if ($len >= $best_len) {
+                $best = $r;
+                $best_len = $len;
+            }
+        }
+        return $best;
     }
 
     # Convert a single body-position node into one or more Schedule

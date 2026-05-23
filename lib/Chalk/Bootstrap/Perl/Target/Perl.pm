@@ -35,9 +35,16 @@ use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
 use Chalk::IR::UseInfo;
 use Chalk::IR::Node::Constant;
+use Chalk::IR::Node::UnaryOp;
 use Chalk::MOP;
 use Chalk::IR::Graph;
 use Chalk::IR::Program;
+use Chalk::IR::Schedule;
+use Chalk::IR::Schedule::Item;
+use Chalk::IR::Scheduler::EagerPinning;
+use Chalk::Scheduler::EagerPinning::If;
+use Chalk::Scheduler::EagerPinning::Loop;
+use Chalk::Scheduler::EagerPinning::TryCatch;
 
 class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
@@ -191,6 +198,382 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
         my $code = join("\n", @lines) . "\n";
         return { 'main.pm' => $code };
+    }
+
+    # Schedule-driven counterpart to _generate_from_mop. Walks the MOP
+    # directly (no MethodInfo/ClassInfo synthesis); runs each method
+    # body through Chalk::IR::Scheduler::EagerPinning to get a Schedule;
+    # walks Schedule items with indent-tracked output, dispatching per
+    # item kind. This is Phase 5a of the SoN scheduler migration; once
+    # byte-identical with _generate_from_mop across the golden corpus,
+    # generate($mop) switches to call this method instead.
+    method _generate_from_schedule($mop) {
+        my @lines;
+
+        my $main = $mop->for_class('main');
+        if (defined $main) {
+            for my $import ($main->imports) {
+                push @lines, $self->_emit_mop_import($import);
+            }
+        }
+
+        for my $cls ($mop->classes()) {
+            my $name = $cls->name;
+            next if $name eq 'main';
+            push @lines, $self->_emit_mop_class($cls);
+        }
+
+        if (defined $main) {
+            for my $sub ($main->subs) {
+                my $line = $self->_emit_mop_sub($sub, 'top_level');
+                push @lines, $line if defined $line;
+            }
+        }
+
+        my $code = join("\n", @lines) . "\n";
+        return { 'main.pm' => $code };
+    }
+
+    # Emit a `use` declaration from a Chalk::MOP::Import.
+    method _emit_mop_import($import) {
+        my $module = $import->module;
+        my @args   = $import->args;
+
+        # Version strings don't get quoted (matches legacy _emit_use_decl).
+        if ($module =~ /^v?[0-9]/) {
+            if (@args) {
+                my @arg_strs = map { $self->_emit_expr($_) } @args;
+                return "use $module " . join(', ', @arg_strs) . ";";
+            }
+            return "use $module;";
+        }
+
+        if (@args) {
+            my @arg_strs = map { $self->_emit_expr($_) } @args;
+            return "use $module " . join(', ', @arg_strs) . ";";
+        }
+
+        return "use $module;";
+    }
+
+    # Emit a class declaration from a Chalk::MOP::Class. Walks fields
+    # first, then methods, then subs (matching the legacy
+    # _generate_from_mop synthesis order).
+    method _emit_mop_class($cls) {
+        my $name   = $cls->name;
+        my $parent;
+        if ($cls->can('superclass') && defined $cls->superclass) {
+            $parent = $cls->superclass->name;
+        } elsif ($cls->can('parent_name') && defined $cls->parent_name) {
+            $parent = $cls->parent_name;
+        }
+
+        my $decl = "class $name";
+        $decl .= " :isa($parent)" if defined $parent;
+        $decl .= " {";
+
+        my @body_lines;
+        for my $field ($cls->fields) {
+            push @body_lines, $self->_emit_mop_field($field);
+        }
+        for my $method ($cls->methods) {
+            push @body_lines, $self->_emit_mop_method($method);
+        }
+        for my $sub ($cls->subs) {
+            push @body_lines, $self->_emit_mop_sub($sub, 'class');
+        }
+
+        my @lines = ($decl);
+        for my $b (@body_lines) {
+            next unless defined $b;
+            for my $line (split /\n/, $b) {
+                push @lines, "    $line";
+            }
+        }
+        push @lines, "}";
+        return join("\n", @lines);
+    }
+
+    # Emit a field declaration from a Chalk::MOP::Field. MOP::Field
+    # attributes are colon-prefixed strings (e.g. ':param', ':reader').
+    method _emit_mop_field($field) {
+        my $decl = "field " . $field->name;
+        for my $attr ($field->attributes) {
+            # Strip the leading ':' before emitting; _emit_field_decl
+            # in the legacy path does the same munging.
+            my $a = $attr =~ s/^://r;
+            $decl .= " :$a";
+        }
+        if (defined $field->default_value) {
+            $decl .= " = " . $self->_emit_expr($field->default_value);
+        }
+        return "$decl;";
+    }
+
+    # Emit a method declaration from a Chalk::MOP::Method, with body
+    # produced by the EagerPinning scheduler.
+    method _emit_mop_method($method) {
+        my $name   = $method->name;
+        my $params = $method->params;    # plain strings
+        my $sig    = '(' . join(', ', $params->@*) . ')';
+
+        # Scope aggregate vars: params shadow class-scope aggregate
+        # names; method body may declare more.
+        my %saved = %_aggregate_vars;
+        $self->_scope_body_vars_mop($params, $method);
+        my $body_code = $self->_emit_scheduled_body($method);
+        %_aggregate_vars = %saved;
+
+        return "method $name$sig {\n" . _indent_block($body_code) . "}";
+    }
+
+    # Emit a sub declaration from a Chalk::MOP::Sub. The $scope_kind
+    # is 'class' (within a class declaration; emit as `sub`) or
+    # 'top_level' (top-level sub; emit as `sub`). Currently both use
+    # `sub`; the distinction exists in the MOP via a future
+    # field-scope attribute and is preserved for symmetry with the
+    # legacy _emit_sub_decl signature.
+    method _emit_mop_sub($sub, $scope_kind = 'class') {
+        my $name   = $sub->name;
+        my $params = $sub->params;
+        my $sig    = '(' . join(', ', $params->@*) . ')';
+
+        my $prefix = 'sub';
+
+        my %saved = %_aggregate_vars;
+        $self->_scope_body_vars_mop($params, $sub);
+        my $body_code = $self->_emit_scheduled_body($sub);
+        %_aggregate_vars = %saved;
+
+        return "$prefix $name$sig {\n" . _indent_block($body_code) . "}";
+    }
+
+    # Run the scheduler on a MOP method/sub and emit the resulting
+    # Schedule as indented body lines. Returns the body as a single
+    # string (without the enclosing `{` `}` — the caller wraps).
+    method _emit_scheduled_body($method) {
+        my $scheduler = Chalk::IR::Scheduler::EagerPinning->new;
+        my $schedule  = $scheduler->schedule($method);
+
+        my @lines;
+        my $indent = 0;
+        for my $item ($schedule->items->@*) {
+            my $kind = $item->kind;
+            if ($kind eq 'stmt') {
+                my $node = $item->node;
+                my $code;
+                # Synthetic Return: the parser inserted this for an
+                # implicit fall-through (`{ EXPR }` with no explicit
+                # return). Emit the bare value, no `return` keyword,
+                # no trailing semicolon. Matches the legacy
+                # _is_explicit_exit handling in _body_from_graph.
+                if (blessed($node)
+                        && $node isa Chalk::IR::Node::Return
+                        && $node->can('synthetic')
+                        && $node->synthetic)
+                {
+                    my $val = $node->inputs->[1];
+                    if (defined $val) {
+                        # _emit_node would add `return ` and `;`; the
+                        # bare-value form still needs the trailing `;`.
+                        $code = $self->_emit_node($val);
+                    } else {
+                        $code = undef;
+                    }
+                } else {
+                    $code = $self->_emit_node($node);
+                }
+                next unless defined $code;
+                for my $l (split /\n/, $code) {
+                    push @lines, ('    ' x $indent) . $l;
+                }
+            } elsif ($kind eq 'block_open') {
+                my $head = $self->_emit_block_open_head($item);
+                push @lines, ('    ' x $indent) . $head;
+                $indent++;
+            } elsif ($kind eq 'block_close') {
+                $indent-- if $indent > 0;
+                push @lines, ('    ' x $indent) . '}';
+            } elsif ($kind eq 'else') {
+                $indent-- if $indent > 0;
+                push @lines, ('    ' x $indent) . '} else {';
+                $indent++;
+            } elsif ($kind eq 'elsif') {
+                $indent-- if $indent > 0;
+                push @lines, ('    ' x $indent)
+                    . '} ' . $self->_emit_elsif_head($item);
+                $indent++;
+            } elsif ($kind eq 'catch') {
+                $indent-- if $indent > 0;
+                push @lines, ('    ' x $indent)
+                    . '} ' . $self->_emit_catch_head($item);
+                $indent++;
+            } else {
+                die "Unknown Schedule Item kind: $kind";
+            }
+        }
+        return join("\n", @lines);
+    }
+
+    # Render the opening line for a block_open Item. $item->form selects
+    # the surface syntax; the IR node carries the condition / iterator
+    # / list / try info that the surface needs.
+    method _emit_block_open_head($item) {
+        my $form = $item->form // '';
+        my $node = $item->node;
+
+        if ($form eq 'if') {
+            return $self->_emit_if_head($node);
+        }
+        if ($form eq 'while') {
+            return $self->_emit_while_head($node);
+        }
+        if ($form eq 'foreach') {
+            return $self->_emit_foreach_head($node);
+        }
+        if ($form eq 'for') {
+            return $self->_emit_for_head($node);
+        }
+        if ($form eq 'try') {
+            return 'try {';
+        }
+        die "Unknown block_open form: $form";
+    }
+
+    # `if (X) {` or `unless (X) {` — the latter when the condition is
+    # a Not-wrapper around an inner expression (parser normalizes
+    # `unless` to `if !cond` per Decision B). The codegen recovers
+    # the source form.
+    method _emit_if_head($if_node) {
+        my $cond = $if_node->inputs->[1];
+        my ($form_kw, $cond_expr) = $self->_recover_if_or_unless($cond);
+        return "$form_kw ($cond_expr) {";
+    }
+
+    # `} elsif (X) {` head from an elsif-marker Item whose node is
+    # the elsif's If.
+    method _emit_elsif_head($item) {
+        my $cond = $item->node->inputs->[1];
+        my ($form_kw, $cond_expr) = $self->_recover_if_or_unless($cond);
+        return "elsif ($cond_expr) {";
+    }
+
+    # Emit the if/unless condition. Currently always emits `if (!EXPR)`
+    # for the negated form — matches the legacy codegen path exactly,
+    # which is the Phase 5a byte-compat parity goal. Decision B's
+    # codegen-side `unless` recovery target is a *future* switch we'd
+    # turn on when regenerating goldens; the legacy goldens don't
+    # exercise it. The signature returns (form_kw, expr) so callers
+    # don't need to know which branch we took.
+    method _recover_if_or_unless($cond) {
+        return ('if', $self->_emit_expr($cond));
+    }
+
+    # `while (X) {` from a Loop node.
+    method _emit_while_head($loop) {
+        # The loop-condition is on the Loop's controlled If node's
+        # inputs[1]. But Chalk::IR::Node::Loop doesn't expose the If
+        # directly — we fish it from the body_proj's source.
+        my $cond = $self->_loop_condition($loop);
+        return "while ($cond) {";
+    }
+
+    # `for my $x (LIST) {` from a Loop node with iterator/list on
+    # schedule_data.
+    method _emit_foreach_head($loop) {
+        my $sd = $loop->schedule_data;
+        my $iter = $sd->iterator;
+        my $list = $sd->list;
+        my $iter_expr = $self->_emit_expr($iter);
+        my $list_expr;
+        if (ref($list) eq 'ARRAY') {
+            $list_expr = join(', ', map { $self->_emit_expr($_) } $list->@*);
+        } else {
+            $list_expr = $self->_emit_expr($list);
+        }
+        return "for my $iter_expr ($list_expr) {";
+    }
+
+    # C-style for: `for (init; cond; step) {`. for_init and for_step
+    # came off schedule_data; the loop condition is on the inner If.
+    method _emit_for_head($loop) {
+        my $sd = $loop->schedule_data;
+        my $init_expr = defined $sd->for_init
+            ? $self->_emit_expr_or_decl($sd->for_init) : '';
+        my $cond_expr = $self->_loop_condition($loop);
+        my $step_expr = defined $sd->for_step
+            ? $self->_emit_expr_or_decl($sd->for_step) : '';
+        return "for ($init_expr; $cond_expr; $step_expr) {";
+    }
+
+    # `} catch ($var) {` head from a catch-marker Item whose node is
+    # the TryCatch.
+    method _emit_catch_head($item) {
+        my $try = $item->node;
+        my $sd  = $try->schedule_data;
+        my $var = $sd->catch_var;
+        return "catch ($var) {";
+    }
+
+    # Walk a Loop's controlled If to extract its condition as Perl.
+    method _loop_condition($loop) {
+        # Find the If node controlled by this Loop. It's a consumer
+        # of the Loop; iterate consumers and pick the first If.
+        for my $c ($loop->consumers->@*) {
+            return $self->_emit_expr($c->inputs->[1])
+                if blessed($c) && $c isa Chalk::IR::Node::If;
+        }
+        return '';
+    }
+
+    # Emit a VarDecl as `my $x = ...` (no semicolon) for for-init
+    # position. Plain expressions emit as themselves.
+    method _emit_expr_or_decl($node) {
+        if (blessed($node) && $node isa Chalk::IR::Node::VarDecl) {
+            my $name = $node->name->value;
+            my $init = $node->init;
+            return defined $init
+                ? "my $name = " . $self->_emit_expr($init)
+                : "my $name";
+        }
+        return $self->_emit_expr($node);
+    }
+
+    # Scope aggregate vars from a MOP method/sub's params + lexical
+    # bindings. The legacy _scope_body_vars walks a body arrayref;
+    # the MOP-driven path uses the method's lexical bindings list.
+    method _scope_body_vars_mop($params, $method) {
+        for my $p ($params->@*) {
+            my $pname = $p;
+            if ($pname =~ /^\$(.+)/) {
+                delete $_aggregate_vars{$1};
+            }
+        }
+        # Walk the method's graph to find VarDecls (same approach the
+        # legacy synthesis uses, just driven by MOP graph instead of
+        # the synthesized body arrayref).
+        my $graph = $method->graph;
+        return unless defined $graph;
+        for my $n ($graph->nodes->@*) {
+            next unless $n isa Chalk::IR::Node::VarDecl;
+            my $var = $n->name;
+            next unless defined $var && $var isa Chalk::IR::Node::Constant;
+            my $vname = $var->value;
+            if (defined $vname && $vname =~ /^([\@\%])(.+)/) {
+                $_aggregate_vars{$2} = $1;
+            }
+        }
+    }
+
+    # Helper: indent a multi-line code block by 4 spaces.
+    sub _indent_block($code) {
+        return '' unless defined $code && length $code;
+        my @lines = split /\n/, $code;
+        my @out;
+        for my $l (@lines) {
+            push @out, length($l) ? "    $l" : $l;
+        }
+        return join("\n", @out) . "\n";
     }
 
     # Recover ordered body statements from a method/sub graph for the
