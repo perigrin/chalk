@@ -867,6 +867,13 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::IR::Node::Return) { return $self->_emit_return_stmt($node); }
         if ($node isa Chalk::IR::Node::Unwind) { return $self->_emit_die_call($node); }
         if ($node isa Chalk::IR::Node::TryCatch) { return $self->_emit_expr($node) . ";"; }
+        if ($node isa Chalk::IR::Node::ExpressionList) {
+            # ExpressionList in statement position — emit as a parenthesized
+            # list expression. Used by ($a, $b, $c) tuple expressions at the
+            # statement level (rare; usually wraps as a Call argument).
+            my @items = $node->items->@*;
+            return '(' . join(', ', map { $self->_emit_expr($_) } @items) . ');';
+        }
 
         # Every IR node type must have an explicit handler above. If we reach
         # here, a new node type was added without a corresponding emitter —

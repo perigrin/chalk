@@ -54,7 +54,7 @@ my sub parse_and_generate($file) {
 # ============================================================
 
 {
-    my $code = parse_and_generate('lib/Chalk/Bootstrap/IR/Node/Start.pm');
+    my $code = parse_and_generate('lib/Chalk/IR/Node/Start.pm');
     ok(defined $code, 'Start.pm: generated Perl code');
 
     SKIP: {
@@ -63,19 +63,19 @@ my sub parse_and_generate($file) {
         # Structural checks
         like($code, qr/use 5\.42\.0/, 'Start.pm: contains use 5.42.0');
         like($code, qr/class\b/, 'Start.pm: contains class keyword');
-        like($code, qr/:isa\(Chalk::Bootstrap::IR::Node\)/, 'Start.pm: has :isa');
+        like($code, qr/:isa\(Chalk::IR::Node\)/, 'Start.pm: has :isa');
 
         # Rename class to avoid collision, eval
         my $renamed = $code;
-        $renamed =~ s/Chalk::Bootstrap::IR::Node::Start/Chalk::Bootstrap::IR::Node::StartGenerated/g;
-        $renamed =~ s/Chalk::Bootstrap::IR::Node\b(?!::)/Chalk::Bootstrap::IR::Node/g;
+        $renamed =~ s/Chalk::IR::Node::Start/Chalk::IR::Node::StartGenerated/g;
+        $renamed =~ s/Chalk::IR::Node\b(?!::)/Chalk::IR::Node/g;
         eval $renamed;
         is($@, '', 'Start.pm: generated code evals cleanly') or diag "Code:\n$renamed\nError: $@";
 
         # Behavioral equivalence
         SKIP: {
             skip 'Start.pm: eval failed', 1 if $@;
-            my $obj = Chalk::Bootstrap::IR::Node::StartGenerated->new(
+            my $obj = Chalk::IR::Node::StartGenerated->new(
                 id => 'test', inputs => [],
             );
             is($obj->operation(), 'Start',
@@ -89,20 +89,20 @@ my sub parse_and_generate($file) {
 # ============================================================
 
 {
-    my $code = parse_and_generate('lib/Chalk/Bootstrap/IR/Node/Return.pm');
+    my $code = parse_and_generate('lib/Chalk/IR/Node/Return.pm');
     ok(defined $code, 'Return.pm: generated Perl code');
 
     SKIP: {
         skip 'Return.pm: no code generated', 3 unless defined $code;
 
         my $renamed = $code;
-        $renamed =~ s/Chalk::Bootstrap::IR::Node::Return\b/Chalk::Bootstrap::IR::Node::ReturnGenerated/g;
+        $renamed =~ s/Chalk::IR::Node::Return\b/Chalk::IR::Node::ReturnGenerated/g;
         eval $renamed;
         is($@, '', 'Return.pm: generated code evals cleanly') or diag "Code:\n$renamed\nError: $@";
 
         SKIP: {
             skip 'Return.pm: eval failed', 1 if $@;
-            my $obj = Chalk::Bootstrap::IR::Node::ReturnGenerated->new(
+            my $obj = Chalk::IR::Node::ReturnGenerated->new(
                 id => 'test', inputs => [],
             );
             is($obj->operation(), 'Return',

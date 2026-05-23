@@ -12,6 +12,7 @@ use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::Perl;
+use Chalk::Bootstrap::Semiring::SemanticAction;
 
 my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
 
@@ -47,13 +48,29 @@ sub parse_file_with_cfg($gen_grammar, $file) {
     return ($ir, $sa, $sem_ctx);
 }
 
-# Parses a .pm file and generates Perl code from the IR using cfg_state dispatch.
-# Returns the generated Perl code string or undef on failure.
+# Parses a .pm file and generates Perl code via the MOP path
+# (the production codegen path). Returns the generated Perl code
+# string or undef on failure. The MOP path returns a HashRef[Str]
+# keyed by filename; this helper extracts the single value for the
+# caller's convenience.
 sub parse_and_generate($gen_grammar, $file) {
-    my ($ir, $sa, $sem_ctx) = parse_file_with_cfg($gen_grammar, $file);
-    return unless defined $ir;
+    open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
+    local $/;
+    my $source = <$fh>;
+    close $fh;
 
-    return $perl_target->_generate_with_cfg($ir, $sa, $sem_ctx);
+    my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+    my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
+    my $result = $parser->parse_value($source);
+    return unless defined $result && !$result->is_zero();
+    return unless defined $mop;
+
+    my $out = $perl_target->generate($mop);
+    return unless ref($out) eq 'HASH';
+    my @values = values $out->%*;
+    return $values[0];
 }
 
 # Evals generated Perl code with namespace rewriting.

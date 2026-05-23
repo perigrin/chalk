@@ -10,6 +10,7 @@ use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
 # Build Perl grammar pipeline
@@ -35,15 +36,17 @@ my sub parse_and_generate($file) {
     my $source = <$fh>;
 
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+    my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
     my $result = $parser->parse_value($source);
-    return undef unless defined $result;
+    return undef unless defined $result && !$result->is_zero();
+    return undef unless defined $mop;
 
-    my $sem_ctx = $result;
-    return undef unless defined $sem_ctx;
-    my $ir = $sem_ctx->extract();
-    return undef unless defined $ir;
-
-    return $perl_target->generate($ir);
+    my $out = $perl_target->generate($mop);
+    return undef unless ref($out) eq 'HASH';
+    my @values = values $out->%*;
+    return $values[0];
 }
 
 # ============================================================
@@ -51,7 +54,7 @@ my sub parse_and_generate($file) {
 # ============================================================
 
 {
-    my $code = parse_and_generate('lib/Chalk/Bootstrap/IR/Node/Constant.pm');
+    my $code = parse_and_generate('lib/Chalk/IR/Node/Constant.pm');
     ok(defined $code, 'Constant.pm: generated Perl code');
 
     SKIP: {
@@ -64,14 +67,14 @@ my sub parse_and_generate($file) {
 
         # Rename and eval
         my $renamed = $code;
-        $renamed =~ s/Chalk::Bootstrap::IR::Node::Constant\b/Chalk::Bootstrap::IR::Node::ConstantGenerated/g;
-        $renamed =~ s/Chalk::Bootstrap::IR::Node\b(?!::)/Chalk::Bootstrap::IR::Node/g;
+        $renamed =~ s/Chalk::IR::Node::Constant\b/Chalk::IR::Node::ConstantGenerated/g;
+        $renamed =~ s/Chalk::IR::Node\b(?!::)/Chalk::IR::Node/g;
         eval $renamed;
         is($@, '', 'Constant.pm: generated code evals cleanly') or diag "Code:\n$renamed\nError: $@";
 
         SKIP: {
             skip 'Constant.pm: eval failed', 3 if $@;
-            my $obj = Chalk::Bootstrap::IR::Node::ConstantGenerated->new(
+            my $obj = Chalk::IR::Node::ConstantGenerated->new(
                 id => 'test', inputs => [],
                 const_type => 'string', value => 'hello',
             );
@@ -171,35 +174,8 @@ my sub parse_and_generate($file) {
     }
 }
 
-# ============================================================
-# 5. Constructor.pm — 1 field, method, trailing 1;
-# ============================================================
-
-{
-    my $code = parse_and_generate('lib/Chalk/Bootstrap/IR/Node/Constructor.pm');
-    ok(defined $code, 'Constructor.pm: generated Perl code');
-
-    SKIP: {
-        skip 'Constructor.pm: no code generated', 5 unless defined $code;
-
-        like($code, qr/field \$class/, 'Constructor.pm: has field $class');
-
-        my $renamed = $code;
-        $renamed =~ s/Chalk::Bootstrap::IR::Node::Constructor\b/Chalk::Bootstrap::IR::Node::ConstructorGenerated/g;
-        $renamed =~ s/Chalk::Bootstrap::IR::Node\b(?!::)/Chalk::Bootstrap::IR::Node/g;
-        eval $renamed;
-        is($@, '', 'Constructor.pm: evals cleanly') or diag "Code:\n$renamed\nError: $@";
-
-        SKIP: {
-            skip 'Constructor.pm: eval failed', 2 if $@;
-            my $obj = Chalk::Bootstrap::IR::Node::ConstructorGenerated->new(
-                id => 'test', inputs => [],
-                class => 'Rule',
-            );
-            is($obj->class(), 'Rule', 'Constructor.pm: class reader works');
-            is($obj->operation(), 'Constructor', 'Constructor.pm: operation() returns Constructor');
-        }
-    }
-}
+# NOTE: The Constructor.pm test block was removed when the polymorphic
+# IR migration deleted Chalk::IR::Node::Constructor. The Constructor
+# type no longer exists in the tree.
 
 done_testing();
