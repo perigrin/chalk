@@ -33,6 +33,7 @@ use Chalk::IR::Program;
 
 use Chalk::Scheduler::Roundtrip::Loop;
 use Chalk::Scheduler::Roundtrip::If;
+use Chalk::Scheduler::Roundtrip::TryCatch;
 
 # Builtin keyword sets used by StatementItem
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
@@ -1088,6 +1089,19 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
                 my $try_node = $ctx->factory->make('TryCatch',
                     inputs       => [$try_body, $catch_var_const, $catch_body],
+                );
+
+                # Phase 1 migration 4: mirror try/catch metadata onto the
+                # TryCatch node's schedule_data so the scheduler can read
+                # it without consulting Context annotations. The Context
+                # annotation below is kept alive until Phase 5 cutover.
+                $try_node->set_schedule_data(
+                    Chalk::Scheduler::Roundtrip::TryCatch->new(
+                        node        => $try_node,
+                        catch_var   => $catch_var,
+                        try_stmts   => $try_body,
+                        catch_stmts => $catch_body,
+                    )
                 );
 
                 $sa->update_annotations({
