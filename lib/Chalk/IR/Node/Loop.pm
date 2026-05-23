@@ -33,9 +33,12 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node) {
         $ctrl->add_consumer($self) if defined $ctrl;
     }
 
-    # Late-binding setter for the post-Loop merge Region.
+    # Late-binding setter for the post-Loop merge Region. Also
+    # installs the back-pointer Region.head → this Loop so the
+    # scheduler can jump past the Region in the effect chain.
     method set_region($r) {
         $region = $r;
+        $r->set_head($self) if defined $r && $r->can('set_head');
         return;
     }
 

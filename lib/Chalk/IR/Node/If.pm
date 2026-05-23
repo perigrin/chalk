@@ -26,9 +26,11 @@ class Chalk::IR::Node::If :isa(Chalk::IR::Node) {
 
     # Late-binding setter for the post-construct Region. Called by
     # the IfStatement / ElsifChain action right after the Region is
-    # built.
+    # built. Also installs the back-pointer Region.head → this If
+    # so the scheduler can jump past the Region in the effect chain.
     method set_region($r) {
         $region = $r;
+        $r->set_head($self) if defined $r && $r->can('set_head');
         return;
     }
 
