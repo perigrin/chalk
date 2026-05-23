@@ -38,7 +38,7 @@ the relevant section below.
 | D | Order of operations | **Scheduler first, then incremental codegen migration.** Build `Chalk::IR::Scheduler` as a new module that consumes a `MOP::Method`/`MOP::Sub` and produces a typed schedule. Add a second `_generate_from_schedule` path next to `_generate_from_mop` in `Target::Perl`. Once both produce byte-identical output across the golden corpus, switch over and delete `_generate_from_mop` + `body`. |
 | E | Scheduler interface contract | **`Chalk::IR::Scheduler->schedule($method) → Schedule` is the contract, AND the scheduler populates `$node->schedule_data` on every node codegen will later interpret.** Any producer of a valid `Chalk::IR::Schedule` that also populates appropriate `Chalk::Scheduler::ScheduleMeta` subclasses on the nodes it emits is a drop-in replacement. The Schedule itself is minimal `{ kind, node }` items plus structural markers; the ScheduleMeta class tree IS the dialect (see G). The eager-pinning implementation and the eventual destination algorithm (GCM or whatever the survey names) are both behind this interface. This is what makes Phase 8 mechanical. |
 | F | Test gate: byte-compat vs semantic equivalence | **Byte-compat is the migration gate (Phases 1-6); semantic equivalence is the durable contract.** During cutover from `_generate_from_mop` to `_generate_from_schedule`, byte-identical output against the golden corpus is the regression gate — it lets us swap implementations without arguing about whether output changes were intentional. Post-cutover (and especially across the Phase 8 algorithm swap) the contract becomes semantic equivalence: the same IR shape on round-trip, or the same runtime behavior on a corpus with known outputs. Byte-compat is a migration safety mechanism, not a design goal. |
-| G | ScheduleMeta as the single annotation location | **All scheduler interpretations of IR nodes live in `$node->schedule_data`, an instance of a `Chalk::Scheduler::ScheduleMeta` subclass.** Schedule items carry `{ kind, node }` plus structural markers (`block_open`/`block_close`/`else`/`elsif`/`catch`) only — no `meta` dict, no `role`/`phi` fields on items. Each scheduler implementation owns its own class tree (`Chalk::Scheduler::Roundtrip::*` for the eager-pinning scheduler; `Chalk::Scheduler::GCM::*` for the Phase 8 destination, when it lands). Codegen gates ScheduleMeta access at the boundary using isa, role, can, or version checks; the gate style is implementation detail, the gating discipline is the contract. Failures are loud (codegen-for-Roundtrip given a node with no schedule_data, or with a GCM ScheduleMeta, dies at the gate) — no silent fallback, no "ignore unknown keys." This is more boilerplate than per-field IR additions, and we accept that cost for the architectural discipline of one typed location for scheduler decisions. |
+| G | ScheduleMeta as the single annotation location | **All scheduler interpretations of IR nodes live in `$node->schedule_data`, an instance of a `Chalk::Scheduler::ScheduleMeta` subclass.** Schedule items carry `{ kind, node }` plus structural markers (`block_open`/`block_close`/`else`/`elsif`/`catch`) only — no `meta` dict, no `role`/`phi` fields on items. Each scheduler implementation owns its own class tree (`Chalk::Scheduler::EagerPinning::*` for the eager-pinning scheduler; `Chalk::Scheduler::GCM::*` for the Phase 8 destination, when it lands). Codegen gates ScheduleMeta access at the boundary using isa, role, can, or version checks; the gate style is implementation detail, the gating discipline is the contract. Failures are loud (codegen-for-EagerPinning given a node with no schedule_data, or with a GCM ScheduleMeta, dies at the gate) — no silent fallback, no "ignore unknown keys." This is more boilerplate than per-field IR additions, and we accept that cost for the architectural discipline of one typed location for scheduler decisions. |
 
 ## 1. Scope
 
@@ -235,8 +235,8 @@ affecting node (`Loop`, `If`, `TryCatch`, `Phi`) and populates that
 node's `schedule_data` field with the appropriate ScheduleMeta
 subclass before emitting the `block_open` item that references it.
 For the eager-pinning (roundtrip) scheduler, the populated subclasses
-are `Chalk::Scheduler::Roundtrip::Loop`, `Roundtrip::If`,
-`Roundtrip::TryCatch`, and `Roundtrip::Phi`. For the Phase 8
+are `Chalk::Scheduler::EagerPinning::Loop`, `EagerPinning::If`,
+`EagerPinning::TryCatch`, and `EagerPinning::Phi`. For the Phase 8
 destination scheduler, the populated subclasses are
 `Chalk::Scheduler::GCM::*` (or whatever the destination algorithm's
 namespace is).
@@ -273,7 +273,7 @@ ScheduleMeta subclass *before* emitting its `block_open`:
   is VarDecls that are Phi emit-slots, where the Phi — not the
   VarDecl — carries the ScheduleMeta.)
 - `If` node → populate `$if->schedule_data` with
-  `Roundtrip::If`, then emit
+  `EagerPinning::If`, then emit
   `{ kind => 'block_open', form => 'if', node => $if }`, recurse
   into the true branch (chain walk + structured expansion
   starting from the node whose `control_in` is the `TrueProj`,
@@ -281,7 +281,7 @@ ScheduleMeta subclass *before* emitting its `block_open`:
   or `{ kind => 'elsif', node => $inner_if }` items, recurse into
   the false branch, emit `{ kind => 'block_close', form => 'if' }`.
 - `Loop` node → populate `$loop->schedule_data` with
-  `Roundtrip::Loop` (filled with iterator/list/for-style fields
+  `EagerPinning::Loop` (filled with iterator/list/for-style fields
   per the parse-time hints lifted in Phase 1), then emit
   `{ kind => 'block_open', form => 'while'|'foreach'|'for', node => $loop }`,
   recurse into the body (chain walk starting from the node whose
@@ -289,7 +289,7 @@ ScheduleMeta subclass *before* emitting its `block_open`:
   `Loop`'s backedge), emit
   `{ kind => 'block_close', form => $form }`.
 - `TryCatch` node → populate `$try->schedule_data` with
-  `Roundtrip::TryCatch`, then emit
+  `EagerPinning::TryCatch`, then emit
   `{ kind => 'block_open', form => 'try', node => $try }`,
   recurse into the try body, emit
   `{ kind => 'catch', node => $try }`, recurse into the catch
@@ -298,7 +298,7 @@ ScheduleMeta subclass *before* emitting its `block_open`:
   statements) — they are visited during structured expansion when
   the Phi-slot resolution pass walks the consumers of merge
   values. That pass populates `$phi->schedule_data` with
-  `Roundtrip::Phi`. See Section 4.
+  `EagerPinning::Phi`. See Section 4.
 
 ### Chain-walk primitive (the one operation the scheduler needs)
 
@@ -393,7 +393,7 @@ Schedule emit:
 # Before scheduling: $if->schedule_data == undef
 # During scheduling, scheduler populates:
 $if->set_schedule_data(
-    Chalk::Scheduler::Roundtrip::If->new(
+    Chalk::Scheduler::EagerPinning::If->new(
         # is_loop_jump defaults false; PostfixModifier action sets true
         # when the If is the loop-jump shortcut form
     )
@@ -443,7 +443,7 @@ a codegen surface choice, not a scheduler structural choice.
 The scheduler still emits the `If` as a normal `block_open`
 sequence; codegen reads `$if->schedule_data->is_loop_jump` and
 collapses the block to a one-liner when set. **The `loop_jump`
-flag lives on `Chalk::Scheduler::Roundtrip::If`**, not on the
+flag lives on `Chalk::Scheduler::EagerPinning::If`**, not on the
 parsing Context, and is populated by the scheduler (using
 information the `PostfixModifier` action stored on the IR during
 Phase 1) so neither scheduler nor codegen depends on Context after
@@ -469,7 +469,7 @@ Schedule emit (while):
 ```
 # During scheduling, scheduler populates:
 $loop->set_schedule_data(
-    Chalk::Scheduler::Roundtrip::Loop->new(
+    Chalk::Scheduler::EagerPinning::Loop->new(
         # is_for_style false, iterator/list/for_init/for_step absent
     )
 );
@@ -484,12 +484,12 @@ $loop->set_schedule_data(
 The body chain walk stops at the `Loop` node itself because the
 last body statement's `control_in` is wired back to `Loop` via
 `set_backedge_ctrl`. Codegen reads `$loop->schedule_data` to confirm
-it is a `Roundtrip::Loop` with no iterator/list (a plain while).
+it is a `EagerPinning::Loop` with no iterator/list (a plain while).
 
 ### Pattern: Loop + iterator/list metadata → `foreach`
 
 Same IR shape as `while`. The difference is on the Loop's
-`schedule_data`: a `Roundtrip::Loop` with `iterator` (a Constant
+`schedule_data`: a `EagerPinning::Loop` with `iterator` (a Constant
 node holding the variable name like `$n`) and `list` (the list
 expression IR node or arrayref of element nodes) populated.
 
@@ -497,7 +497,7 @@ Today these annotations live on the parsing Context
 (`update_annotations`); the codegen reads them via
 `_build_cfg_lookup` and `cfg_state`. For the scheduler we need
 them on the Loop's ScheduleMeta. Phase 1 of implementation moves
-them — destination is `Chalk::Scheduler::Roundtrip::Loop`'s
+them — destination is `Chalk::Scheduler::EagerPinning::Loop`'s
 `iterator` and `list` fields, populated by `ForeachStatement`
 action storing the values on the Loop node where the scheduler
 can later wrap them into the ScheduleMeta.
@@ -509,7 +509,7 @@ Schedule emit (foreach):
 
 # During scheduling, scheduler populates:
 $loop->set_schedule_data(
-    Chalk::Scheduler::Roundtrip::Loop->new(
+    Chalk::Scheduler::EagerPinning::Loop->new(
         iterator => $iter,
         list     => $list,
     )
@@ -537,14 +537,14 @@ Recognizing this as a `for` instead of `{ VarDecl; while }`
 requires a node-level flag on the Loop: `is_for_style => true`,
 set by `ForStatement` action on the IR node so the scheduler can
 read it and lift it (along with the init/step nodes) onto the
-Loop's `Roundtrip::Loop` ScheduleMeta.
+Loop's `EagerPinning::Loop` ScheduleMeta.
 
 Schedule emit:
 
 ```
 # During scheduling, scheduler populates:
 $loop->set_schedule_data(
-    Chalk::Scheduler::Roundtrip::Loop->new(
+    Chalk::Scheduler::EagerPinning::Loop->new(
         is_for_style => true,
         for_init     => $init_vardecl,
         for_step     => $step_node,
@@ -570,7 +570,7 @@ the Loop's ScheduleMeta) and reversible (codegen could emit the
 desugared form by ignoring `is_for_style`).
 
 If the for-init/step recognition fails (e.g. the init isn't a
-single VarDecl), the scheduler populates `Roundtrip::Loop` with
+single VarDecl), the scheduler populates `EagerPinning::Loop` with
 `is_for_style => false` and emits the desugared `{ VarDecl; while; }`
 form. Correct, not pretty.
 
@@ -594,7 +594,7 @@ Schedule emit:
 ```
 # During scheduling, scheduler populates:
 $try->set_schedule_data(
-    Chalk::Scheduler::Roundtrip::TryCatch->new(
+    Chalk::Scheduler::EagerPinning::TryCatch->new(
         catch_var => $catch_var,
     )
 );
@@ -661,7 +661,7 @@ Phi's `schedule_data` with that slot:
 
 ```
 $phi->set_schedule_data(
-    Chalk::Scheduler::Roundtrip::Phi->new(
+    Chalk::Scheduler::EagerPinning::Phi->new(
         emit_slot => $vardecl,
     )
 );
@@ -689,7 +689,7 @@ emission of the Phi is needed.
 ### When no VarDecl exists for the Phi
 
 Possible only for synthetic Phis introduced by future optimization
-passes. The scheduler populates `Roundtrip::Phi` with
+passes. The scheduler populates `EagerPinning::Phi` with
 `emit_slot => undef` and a `synthetic_name` field carrying
 `$_phi_<id>`; codegen falls back to the synthetic name when
 `emit_slot` is undef. We never hit this in the parser-produced IR
@@ -722,9 +722,9 @@ Schedule and ScheduleMeta population:
 
 ```
 # Scheduler populates:
-$if->set_schedule_data(Chalk::Scheduler::Roundtrip::If->new());
+$if->set_schedule_data(Chalk::Scheduler::EagerPinning::If->new());
 $phi->set_schedule_data(
-    Chalk::Scheduler::Roundtrip::Phi->new(emit_slot => $vardecl_x),
+    Chalk::Scheduler::EagerPinning::Phi->new(emit_slot => $vardecl_x),
 );
 
 # Schedule items:
@@ -820,12 +820,12 @@ First, define the ScheduleMeta class tree (see Section 10 for the
 full sketch):
 
 - `lib/Chalk/Scheduler/ScheduleMeta.pm` — abstract base.
-- `lib/Chalk/Scheduler/Roundtrip/Loop.pm` — fields:
+- `lib/Chalk/Scheduler/EagerPinning/Loop.pm` — fields:
   `$is_for_style`, `$iterator`, `$list`, `$for_init`, `$for_step`.
-- `lib/Chalk/Scheduler/Roundtrip/If.pm` — field: `$is_loop_jump`.
-- `lib/Chalk/Scheduler/Roundtrip/Phi.pm` — fields: `$emit_slot`,
+- `lib/Chalk/Scheduler/EagerPinning/If.pm` — field: `$is_loop_jump`.
+- `lib/Chalk/Scheduler/EagerPinning/Phi.pm` — fields: `$emit_slot`,
   `$synthetic_name`.
-- `lib/Chalk/Scheduler/Roundtrip/TryCatch.pm` — field: `$catch_var`.
+- `lib/Chalk/Scheduler/EagerPinning/TryCatch.pm` — field: `$catch_var`.
 
 Then add `schedule_data` to `Chalk::IR::Node` (or whichever level
 of the IR class hierarchy is appropriate — the field is excluded
@@ -838,15 +838,15 @@ nodes whose ScheduleMeta will later carry them:
 
 1. `iterator`, `list` from Context annotations onto `Loop` node
    fields. Set in `ForeachStatement` action. The scheduler reads
-   these in Phase 4 and wraps them into `Roundtrip::Loop` on the
+   these in Phase 4 and wraps them into `EagerPinning::Loop` on the
    Loop's `schedule_data`.
 2. `loop_jump` flag from Context annotations onto `If` node as
    `field $loop_jump_hint :reader = false;`. Set in
    `PostfixModifier` action when the loop-jump form is detected.
-   Scheduler later lifts it onto `Roundtrip::If`'s `is_loop_jump`.
+   Scheduler later lifts it onto `EagerPinning::If`'s `is_loop_jump`.
 3. `for_style` flag on `Loop` node as
    `field $for_style_hint :reader = false;`. Set in `ForStatement`
-   action. Scheduler later lifts it onto `Roundtrip::Loop`'s
+   action. Scheduler later lifts it onto `EagerPinning::Loop`'s
    `is_for_style`.
 4. `try_stmts` / `catch_stmts` / `catch_var` from Context
    annotations onto `TryCatch` node. (Today `TryCatch` is almost
@@ -854,7 +854,7 @@ nodes whose ScheduleMeta will later carry them:
    proper structure: control inputs for try-region and
    catch-region, a `var` for the caught exception name. This is a
    small but real IR change.) Scheduler later lifts `catch_var`
-   onto `Roundtrip::TryCatch`.
+   onto `EagerPinning::TryCatch`.
 
 The two-level hop (parse-time hint field on the IR node, then
 scheduler lifts it into ScheduleMeta) is the price of keeping
@@ -1140,17 +1140,17 @@ Schedule that codegen will need to interpret carries the right
 ScheduleMeta. Concretely:
 
 - Every Loop referenced by `block_open form=>'while'|'foreach'|'for'`
-  has `schedule_data` set to a `Chalk::Scheduler::Roundtrip::Loop`.
+  has `schedule_data` set to a `Chalk::Scheduler::EagerPinning::Loop`.
 - Every If referenced by `block_open form=>'if'`, by an `elsif`,
   or as the recursive-else target has `schedule_data` set to a
-  `Chalk::Scheduler::Roundtrip::If`.
+  `Chalk::Scheduler::EagerPinning::If`.
 - Every TryCatch referenced by `block_open form=>'try'` has
-  `schedule_data` set to a `Chalk::Scheduler::Roundtrip::TryCatch`.
+  `schedule_data` set to a `Chalk::Scheduler::EagerPinning::TryCatch`.
 - Every Phi node whose value is read anywhere in the Schedule has
-  `schedule_data` set to a `Chalk::Scheduler::Roundtrip::Phi`.
+  `schedule_data` set to a `Chalk::Scheduler::EagerPinning::Phi`.
 
 No node missing its ScheduleMeta; no ScheduleMeta on the wrong
-node class (e.g., a `Roundtrip::Loop` accidentally attached to an
+node class (e.g., a `EagerPinning::Loop` accidentally attached to an
 `If`). This catches scheduler bugs where a code path skips
 population, and catches incomplete migrations during Phase 1 where
 the scheduler reads an old Context annotation instead of building
@@ -1178,7 +1178,7 @@ covers every side-effect node regardless of which algorithm
 produced it. ScheduleMeta population completeness survives in
 *shape* but with the expected class tree updated: Phase 8 swaps
 the assertion from "every control node has a
-`Roundtrip::*` ScheduleMeta" to "every control node has a
+`EagerPinning::*` ScheduleMeta" to "every control node has a
 `GCM::*` ScheduleMeta" (or whatever the destination scheduler
 defines). The contract — populate, don't skip — is durable.
 
@@ -1251,7 +1251,7 @@ schedule omits (e.g., parent-form for tail-position recognition,
 type information for typed emit), the schedule path emits less
 optimal code. Found by golden mismatch.
 
-**Mitigation:** The relevant `Roundtrip::*` ScheduleMeta class is
+**Mitigation:** The relevant `EagerPinning::*` ScheduleMeta class is
 the extension point. Any context-derived data codegen needs gets
 added as a field on the appropriate ScheduleMeta subclass and
 populated by the scheduler when it builds the node's ScheduleMeta.
@@ -1328,9 +1328,9 @@ scope.
 #### R8 — ScheduleMeta schema drift
 
 Different scheduler implementations own different ScheduleMeta
-class trees (`Roundtrip::*` for the eager-pinning scheduler;
+class trees (`EagerPinning::*` for the eager-pinning scheduler;
 `GCM::*` for the eventual destination). If those trees diverge in
-field names or shapes — e.g., `Roundtrip::Loop->iterator` vs
+field names or shapes — e.g., `EagerPinning::Loop->iterator` vs
 `GCM::Loop->loop_var` for the same underlying concept — then
 codegen-per-mode has to track all the variants and the architectural
 discipline of "one typed location" buys less than promised.
@@ -1398,6 +1398,20 @@ is that there is exactly one typed location per (scheduler, IR
 node class) pair, and that codegen reads through a gated boundary
 rather than peeking at scattered fields.
 
+### Naming note: algorithm vs mode
+
+`EagerPinning` is the algorithm name — what the scheduler does
+(walk `inputs[0]`, emit in source order). It joins a family that
+will eventually include `GCM`, `ScopedElaboration`, etc. The
+user-facing orchestration *mode* is separately named: `roundtrip`
+(eager pinning + source-faithful Perl codegen), `optimize` (GCM or
+chosen successor + an optimization-aware codegen), `debug` (a
+future debug-annotation codegen). The orchestration layer above
+pairs a scheduler with a codegen per mode. The ScheduleMeta class
+tree is named for the algorithm because it's the *algorithm's*
+internal representation; orchestration concerns don't bleed into
+it.
+
 ### Abstract base
 
 ```perl
@@ -1420,25 +1434,25 @@ package Chalk::Scheduler::ScheduleMeta {
 
 The base carries no form-specific fields. Subclasses add them.
 
-### Roundtrip subtree (eager-pinning scheduler)
+### EagerPinning subtree (eager-pinning scheduler)
 
 ```
 Chalk::Scheduler::ScheduleMeta              # abstract base
-├── Chalk::Scheduler::Roundtrip::Loop
+├── Chalk::Scheduler::EagerPinning::Loop
 │     field $is_for_style :param :reader = false;
 │     field $iterator     :param :reader = undef;  # foreach
 │     field $list         :param :reader = undef;  # foreach
 │     field $for_init     :param :reader = undef;  # C-style for
 │     field $for_step     :param :reader = undef;  # C-style for
 │
-├── Chalk::Scheduler::Roundtrip::If
+├── Chalk::Scheduler::EagerPinning::If
 │     field $is_loop_jump :param :reader = false;
 │
-├── Chalk::Scheduler::Roundtrip::Phi
+├── Chalk::Scheduler::EagerPinning::Phi
 │     field $emit_slot      :param :reader = undef;  # VarDecl ref
 │     field $synthetic_name :param :reader = undef;  # fallback
 │
-└── Chalk::Scheduler::Roundtrip::TryCatch
+└── Chalk::Scheduler::EagerPinning::TryCatch
       field $catch_var :param :reader;
 ```
 
@@ -1456,11 +1470,11 @@ Chalk::Scheduler::ScheduleMeta
       # destination algorithm.
 ```
 
-The Roundtrip subtree is not deleted when the GCM subtree lands;
+The EagerPinning subtree is not deleted when the GCM subtree lands;
 both coexist for as long as both schedulers do (which may be only
 the Phase 8 cutover window, or longer if there's reason to keep
 the eager-pinning scheduler around for debugging or regression
-diff). After Phase 8 ships and stabilizes, Roundtrip subtree
+diff). After Phase 8 ships and stabilizes, EagerPinning subtree
 deletion is a follow-up.
 
 ### Population contract
@@ -1471,7 +1485,7 @@ it from. Concretely:
 
 - Every `Loop` referenced by a `block_open` with form `while`,
   `foreach`, or `for` must have `schedule_data` set to a
-  `Chalk::Scheduler::Roundtrip::Loop` (or, post-Phase-8, the
+  `Chalk::Scheduler::EagerPinning::Loop` (or, post-Phase-8, the
   destination scheduler's equivalent).
 - Every `If` referenced by a `block_open` with form `if`, an
   `elsif`, or an `else`-followed-`block_open` must have
@@ -1499,10 +1513,10 @@ style is implementation detail:
 # Illustrative; the actual codegen can use isa, role check,
 # can() probe, or version field — whichever fits the site.
 my $sd = $loop_node->schedule_data;
-die "Codegen-for-Roundtrip requires Roundtrip::Loop, got "
+die "Codegen-for-EagerPinning requires EagerPinning::Loop, got "
     . (defined $sd ? ref($sd) : '<undef>')
     unless defined $sd
-        && $sd isa Chalk::Scheduler::Roundtrip::Loop;
+        && $sd isa Chalk::Scheduler::EagerPinning::Loop;
 
 if ($sd->is_for_style) {
     my $init = $sd->for_init;
@@ -1519,14 +1533,14 @@ Different gate styles suit different situations:
   scheduler).
 - **role / capability check** when codegen accepts multiple
   ScheduleMeta variants that all expose the same method (e.g., a
-  shared `is_for_style` role across Roundtrip and GCM Loops).
+  shared `is_for_style` role across EagerPinning and GCM Loops).
 - **`can()` probe** when the codegen wants to feature-test for
   an optional ScheduleMeta capability.
 - **schema-version field** when the project gains enough
   scheduler variants that a numeric version is cheaper than an
   isa tree walk. (Not needed today; mentioned for completeness.)
 
-The gating discipline ensures that running a Roundtrip-specific
+The gating discipline ensures that running a EagerPinning-specific
 codegen path against a GCM ScheduleMeta (or vice versa) dies at
 the boundary with a useful message, not at a deep call site with
 "undefined method" or an off-by-one in an emitted string.
