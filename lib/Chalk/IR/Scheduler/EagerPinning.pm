@@ -11,8 +11,10 @@ use Chalk::IR::Schedule::Item;
 use Chalk::IR::Node::If;
 use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::Region;
+use Chalk::IR::Node::TryCatch;
 use Chalk::Scheduler::EagerPinning::If;
 use Chalk::Scheduler::EagerPinning::Loop;
+use Chalk::Scheduler::EagerPinning::TryCatch;
 
 class Chalk::IR::Scheduler::EagerPinning {
 
@@ -27,12 +29,21 @@ class Chalk::IR::Scheduler::EagerPinning {
 
         my $exit = $returns[0];
 
-        # Walk backward from the Return's control input via inputs[0],
-        # collecting body-position nodes. When the walk hits a Region,
-        # the Region has no single chain predecessor (its inputs are
-        # Projs from divergent branches); we read Region.head to find
-        # the controlling If/Loop/TryCatch, treat THAT as the body
-        # node, and continue from head.control_in.
+        # Walk backward from the Return's control input. The chain
+        # predecessor reading varies by node type:
+        #
+        #   Region: no single chain predecessor (its inputs are Projs
+        #     from divergent branches). Read $region->head to find the
+        #     controlling If/Loop and continue from head.control_in.
+        #   If, Loop: override control_in to read inputs[0] (rewired
+        #     by Block fixup).
+        #   VarDecl, Return, Unwind: base control_in field unused;
+        #     control predecessor is inputs[0].
+        #   Call, Assign, CompoundAssign, RegexSubst, TryCatch: base
+        #     control_in field set by Block fixup; that's the
+        #     predecessor.
+        #
+        # Unified reader: $cur->control_in if defined, else inputs[0].
         my @reverse;
         my $cur = $exit->inputs->[0];
         while (defined $cur && blessed($cur)) {
@@ -40,8 +51,6 @@ class Chalk::IR::Scheduler::EagerPinning {
 
             if ($cur isa Chalk::IR::Node::Region) {
                 my $head = $cur->head;
-                # Bail if Region has no head — shouldn't happen for
-                # parser-built IR, but degrade gracefully.
                 last unless defined $head;
                 push @reverse, $head;
                 $cur = $head->control_in;
@@ -49,9 +58,13 @@ class Chalk::IR::Scheduler::EagerPinning {
             }
 
             push @reverse, $cur;
-            my $ins = $cur->inputs;
-            last unless defined $ins && ref($ins) eq 'ARRAY';
-            $cur = $ins->[0];
+            my $next = $cur->control_in;
+            if (!defined $next) {
+                my $ins = $cur->inputs;
+                last unless defined $ins && ref($ins) eq 'ARRAY';
+                $next = $ins->[0];
+            }
+            $cur = $next;
         }
 
         my @body = reverse @reverse;
@@ -76,7 +89,53 @@ class Chalk::IR::Scheduler::EagerPinning {
         if ($node isa Chalk::IR::Node::Loop) {
             return $self->_expand_loop($node);
         }
+        if ($node isa Chalk::IR::Node::TryCatch) {
+            return $self->_expand_try($node);
+        }
         return Chalk::IR::Schedule::Item->new(kind => 'stmt', node => $node);
+    }
+
+    # Structured expansion for a TryCatch node. Reads
+    # try_stmts/catch_stmts/catch_var from EagerPinning::TryCatch
+    # schedule_data (mig 4). Emits:
+    #
+    #   block_open(try, node=$try)
+    #   ...try-body items...
+    #   catch
+    #   ...catch-body items...
+    #   block_close(try)
+    #
+    # The catch variable name is carried on the catch marker's node
+    # field as a Constant — codegen looks it up off the TryCatch's
+    # schedule_data when emitting the `catch ($e)` clause.
+    method _expand_try($try) {
+        my $sd = $try->schedule_data;
+
+        unless (defined $sd && $sd isa Chalk::Scheduler::EagerPinning::TryCatch) {
+            return Chalk::IR::Schedule::Item->new(kind => 'stmt', node => $try);
+        }
+
+        my @items;
+        push @items, Chalk::IR::Schedule::Item->new(
+            kind => 'block_open',
+            form => 'try',
+            node => $try,
+        );
+        for my $t ($sd->try_stmts->@*) {
+            push @items, $self->_expand_node($t);
+        }
+        push @items, Chalk::IR::Schedule::Item->new(
+            kind => 'catch',
+            node => $try,
+        );
+        for my $c ($sd->catch_stmts->@*) {
+            push @items, $self->_expand_node($c);
+        }
+        push @items, Chalk::IR::Schedule::Item->new(
+            kind => 'block_close',
+            form => 'try',
+        );
+        return @items;
     }
 
     # Structured expansion for a Loop node. Reads body_stmts and form-
