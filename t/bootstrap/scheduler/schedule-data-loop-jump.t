@@ -1,4 +1,4 @@
-# ABOUTME: Verifies PostfixModifier+ExpressionStatement populates Roundtrip::If on If.
+# ABOUTME: Verifies PostfixModifier+ExpressionStatement populates EagerPinning::If on If.
 # ABOUTME: Migration 2 of Phase 1 — moves loop_jump annotation from Context onto IR.
 use 5.42.0;
 use utf8;
@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::Node::If;
-use Chalk::Scheduler::Roundtrip::If;
+use Chalk::Scheduler::EagerPinning::If;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 my $ir = perl_pipeline();
@@ -39,7 +39,7 @@ sub _collect_loop_jump_ifs($ctx) {
                 && $focus isa Chalk::IR::Node::If
                 && !$seen{refaddr $focus}++) {
             my $sd = $focus->schedule_data;
-            if (defined $sd && $sd isa Chalk::Scheduler::Roundtrip::If
+            if (defined $sd && $sd isa Chalk::Scheduler::EagerPinning::If
                     && defined $sd->is_loop_jump) {
                 push @out, $focus;
             }
@@ -59,7 +59,7 @@ use Scalar::Util qw(refaddr);
 
     my @jumps = _collect_loop_jump_ifs($result);
     ok(scalar(@jumps) >= 1, 'at least one If with loop_jump schedule_data')
-        or diag('no Roundtrip::If with is_loop_jump found');
+        or diag('no EagerPinning::If with is_loop_jump found');
 
     my $next_if = $jumps[0];
     is($next_if->schedule_data->is_loop_jump, 'next',

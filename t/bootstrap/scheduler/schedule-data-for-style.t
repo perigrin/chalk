@@ -1,4 +1,4 @@
-# ABOUTME: Verifies ForStatement populates Roundtrip::Loop with is_for_style + init/step.
+# ABOUTME: Verifies ForStatement populates EagerPinning::Loop with is_for_style + init/step.
 # ABOUTME: Migration 3 of Phase 1 — moves C-style for recognition from Context onto IR.
 use 5.42.0;
 use utf8;
@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::Node::Loop;
-use Chalk::Scheduler::Roundtrip::Loop;
+use Chalk::Scheduler::EagerPinning::Loop;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 my $ir = perl_pipeline();
@@ -40,7 +40,7 @@ isa_ok($loop, 'Chalk::IR::Node::Loop');
 my $sd = $loop->schedule_data();
 ok(defined $sd, 'Loop has schedule_data populated')
     or BAIL_OUT('migration not applied — Loop.schedule_data still undef');
-isa_ok($sd, 'Chalk::Scheduler::Roundtrip::Loop');
+isa_ok($sd, 'Chalk::Scheduler::EagerPinning::Loop');
 
 is($sd->is_for_style(), true, 'is_for_style true for C-style for');
 ok(defined $sd->for_init(), 'for_init populated');

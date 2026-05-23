@@ -31,9 +31,9 @@ use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Program;
 
-use Chalk::Scheduler::Roundtrip::Loop;
-use Chalk::Scheduler::Roundtrip::If;
-use Chalk::Scheduler::Roundtrip::TryCatch;
+use Chalk::Scheduler::EagerPinning::Loop;
+use Chalk::Scheduler::EagerPinning::If;
+use Chalk::Scheduler::EagerPinning::TryCatch;
 
 # Builtin keyword sets used by StatementItem
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
@@ -486,7 +486,7 @@ class Chalk::Bootstrap::Perl::Actions {
                             # until Phase 5 cutover.
                             my $if_node = $ann->{if_node};
                             $if_node->set_schedule_data(
-                                Chalk::Scheduler::Roundtrip::If->new(
+                                Chalk::Scheduler::EagerPinning::If->new(
                                     node         => $if_node,
                                     is_loop_jump => $body_expr->value(),
                                 )
@@ -1096,7 +1096,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # it without consulting Context annotations. The Context
                 # annotation below is kept alive until Phase 5 cutover.
                 $try_node->set_schedule_data(
-                    Chalk::Scheduler::Roundtrip::TryCatch->new(
+                    Chalk::Scheduler::EagerPinning::TryCatch->new(
                         node        => $try_node,
                         catch_var   => $catch_var,
                         try_stmts   => $try_body,
@@ -2948,7 +2948,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # are still in the chain / body too; the scheduler will fold them
         # into the for-block when it recognizes the flag.
         $loop->set_schedule_data(
-            Chalk::Scheduler::Roundtrip::Loop->new(
+            Chalk::Scheduler::EagerPinning::Loop->new(
                 node         => $loop,
                 is_for_style => true,
                 for_init     => $init,
@@ -3088,14 +3088,14 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 $sa->update_graph($graph);
 
-                # Roundtrip-dialect ScheduleMeta on the Loop node. Phase 1
+                # EagerPinning-dialect ScheduleMeta on the Loop node. Phase 1
                 # migration 1: iterator/list are scheduler interpretations
                 # of the IR; they live on the Loop's schedule_data, not on
                 # the Loop's structural fields. The Context annotation
                 # below is kept alive until Phase 5 cutover so the existing
                 # cfg_state-driven codegen still works.
                 $loop->set_schedule_data(
-                    Chalk::Scheduler::Roundtrip::Loop->new(
+                    Chalk::Scheduler::EagerPinning::Loop->new(
                         node     => $loop,
                         iterator => $iterator,
                         list     => $list,

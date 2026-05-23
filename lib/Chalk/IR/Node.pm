@@ -32,7 +32,7 @@ class Chalk::IR::Node {
 
     # Per-node scheduler interpretation, populated lazily by the scheduler
     # via set_schedule_data(). Holds a Chalk::Scheduler::ScheduleMeta
-    # subclass instance whose dialect (Roundtrip, GCM, ...) matches the
+    # subclass instance whose dialect (EagerPinning, GCM, ...) matches the
     # scheduler that produced the current Schedule. Excluded from
     # content_hash for the same reason as control_in: it is a per-use
     # decoration, not a structural property of the node's content.

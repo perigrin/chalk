@@ -1,4 +1,4 @@
-# ABOUTME: Verifies TryCatchStatement populates Roundtrip::TryCatch on the TryCatch IR.
+# ABOUTME: Verifies TryCatchStatement populates EagerPinning::TryCatch on the TryCatch IR.
 # ABOUTME: Migration 4 of Phase 1 — moves try_stmts/catch_var/catch_stmts onto IR.
 use 5.42.0;
 use utf8;
@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::Node::TryCatch;
-use Chalk::Scheduler::Roundtrip::TryCatch;
+use Chalk::Scheduler::EagerPinning::TryCatch;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 my $ir = perl_pipeline();
@@ -40,7 +40,7 @@ isa_ok($try, 'Chalk::IR::Node::TryCatch');
 my $sd = $try->schedule_data();
 ok(defined $sd, 'TryCatch has schedule_data populated')
     or BAIL_OUT('migration not applied — TryCatch.schedule_data still undef');
-isa_ok($sd, 'Chalk::Scheduler::Roundtrip::TryCatch');
+isa_ok($sd, 'Chalk::Scheduler::EagerPinning::TryCatch');
 is($sd->node(), $try, 'schedule_data.node points back at the TryCatch');
 
 is($sd->catch_var(), '$e', 'catch_var = "$e"');

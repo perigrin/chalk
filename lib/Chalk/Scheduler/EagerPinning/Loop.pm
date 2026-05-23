@@ -1,4 +1,4 @@
-# ABOUTME: Roundtrip-dialect ScheduleMeta for IR::Node::Loop.
+# ABOUTME: EagerPinning-dialect ScheduleMeta for IR::Node::Loop.
 # ABOUTME: Carries surface-syntax recovery hints set by parser actions.
 use 5.42.0;
 use utf8;
@@ -7,7 +7,7 @@ no warnings 'experimental::class';
 
 use Chalk::Scheduler::ScheduleMeta;
 
-class Chalk::Scheduler::Roundtrip::Loop :isa(Chalk::Scheduler::ScheduleMeta) {
+class Chalk::Scheduler::EagerPinning::Loop :isa(Chalk::Scheduler::ScheduleMeta) {
     field $iterator     :param :reader = undef;
     field $list         :param :reader = undef;
     field $is_for_style :param :reader = false;

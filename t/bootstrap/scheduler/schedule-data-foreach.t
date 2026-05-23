@@ -1,4 +1,4 @@
-# ABOUTME: Verifies ForeachStatement populates Roundtrip::Loop on the Loop IR node.
+# ABOUTME: Verifies ForeachStatement populates EagerPinning::Loop on the Loop IR node.
 # ABOUTME: Migration 1 of Phase 1 — moves iterator/list annotation from Context onto IR.
 use 5.42.0;
 use utf8;
@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::Node::Loop;
-use Chalk::Scheduler::Roundtrip::Loop;
+use Chalk::Scheduler::EagerPinning::Loop;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 my $ir = perl_pipeline();
@@ -28,7 +28,7 @@ my $semiring = $parser->semiring();
 $semiring->reset_cache();
 
 # Parse a method containing a foreach. We want a single Loop node in
-# the resulting graph whose schedule_data is a populated Roundtrip::Loop.
+# the resulting graph whose schedule_data is a populated EagerPinning::Loop.
 my $src = 'my $sum = 0; for my $x (1, 2, 3) { $sum = $sum + $x; }';
 my $result = $parser->parse_value($src);
 ok(defined $result, 'foreach parses');
@@ -42,7 +42,7 @@ isa_ok($loop, 'Chalk::IR::Node::Loop');
 my $sd = $loop->schedule_data();
 ok(defined $sd, 'Loop has schedule_data populated')
     or BAIL_OUT('migration not applied — Loop.schedule_data still undef');
-isa_ok($sd, 'Chalk::Scheduler::Roundtrip::Loop');
+isa_ok($sd, 'Chalk::Scheduler::EagerPinning::Loop');
 is($sd->node(), $loop, 'schedule_data.node points back at the Loop');
 
 # Iterator should be the IR node for $x.

@@ -1,4 +1,4 @@
-# ABOUTME: Tests for Chalk::Scheduler::Roundtrip::TryCatch schedule_data.
+# ABOUTME: Tests for Chalk::Scheduler::EagerPinning::TryCatch schedule_data.
 # ABOUTME: Carries catch_var, try_stmts, catch_stmts set by TryStatement action.
 use 5.42.0;
 use utf8;
@@ -6,13 +6,13 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::IR::Node;
-use Chalk::Scheduler::Roundtrip::TryCatch;
+use Chalk::Scheduler::EagerPinning::TryCatch;
 
 my $try = Chalk::IR::Node->new(id => 'try_1');
 
 # Defaults: empty arrays, undef catch_var.
-my $bare = Chalk::Scheduler::Roundtrip::TryCatch->new(node => $try);
-isa_ok($bare, 'Chalk::Scheduler::Roundtrip::TryCatch');
+my $bare = Chalk::Scheduler::EagerPinning::TryCatch->new(node => $try);
+isa_ok($bare, 'Chalk::Scheduler::EagerPinning::TryCatch');
 isa_ok($bare, 'Chalk::Scheduler::ScheduleMeta');
 is($bare->catch_var, undef, 'catch_var defaults undef');
 is_deeply($bare->try_stmts,   [], 'try_stmts defaults empty arrayref');
@@ -21,7 +21,7 @@ is_deeply($bare->catch_stmts, [], 'catch_stmts defaults empty arrayref');
 # Populated.
 my $stmt_a = Chalk::IR::Node->new(id => 'stmt_a');
 my $stmt_b = Chalk::IR::Node->new(id => 'stmt_b');
-my $full = Chalk::Scheduler::Roundtrip::TryCatch->new(
+my $full = Chalk::Scheduler::EagerPinning::TryCatch->new(
     node        => $try,
     catch_var   => '$e',
     try_stmts   => [$stmt_a],
