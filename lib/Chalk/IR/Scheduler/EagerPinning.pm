@@ -9,8 +9,10 @@ use Scalar::Util qw(blessed refaddr);
 use Chalk::IR::Schedule;
 use Chalk::IR::Schedule::Item;
 use Chalk::IR::Node::If;
+use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::Region;
 use Chalk::Scheduler::EagerPinning::If;
+use Chalk::Scheduler::EagerPinning::Loop;
 
 class Chalk::IR::Scheduler::EagerPinning {
 
@@ -71,7 +73,48 @@ class Chalk::IR::Scheduler::EagerPinning {
         if ($node isa Chalk::IR::Node::If) {
             return $self->_expand_if($node);
         }
+        if ($node isa Chalk::IR::Node::Loop) {
+            return $self->_expand_loop($node);
+        }
         return Chalk::IR::Schedule::Item->new(kind => 'stmt', node => $node);
+    }
+
+    # Structured expansion for a Loop node. Reads body_stmts and form-
+    # determining fields from EagerPinning::Loop schedule_data (migs 1,
+    # 3, 6). Surface-form choice:
+    #
+    #   iterator defined    → form 'foreach'
+    #   is_for_style true   → form 'for'      (C-style)
+    #   otherwise           → form 'while'
+    #
+    # `until` is already normalized to `while !cond` in the IR (the
+    # PostfixModifier / WhileStatement actions wrap the condition);
+    # the scheduler emits `while` in both cases.
+    method _expand_loop($loop) {
+        my $sd = $loop->schedule_data;
+
+        unless (defined $sd && $sd isa Chalk::Scheduler::EagerPinning::Loop) {
+            return Chalk::IR::Schedule::Item->new(kind => 'stmt', node => $loop);
+        }
+
+        my $form = defined $sd->iterator    ? 'foreach'
+                 : $sd->is_for_style        ? 'for'
+                 :                            'while';
+
+        my @items;
+        push @items, Chalk::IR::Schedule::Item->new(
+            kind => 'block_open',
+            form => $form,
+            node => $loop,
+        );
+        for my $b ($sd->body_stmts->@*) {
+            push @items, $self->_expand_node($b);
+        }
+        push @items, Chalk::IR::Schedule::Item->new(
+            kind => 'block_close',
+            form => $form,
+        );
+        return @items;
     }
 
     # Structured expansion for an If node. Reads then_stmts/else_stmts
