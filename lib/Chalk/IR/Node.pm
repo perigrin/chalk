@@ -30,6 +30,14 @@ class Chalk::IR::Node {
     # still hash-cons to the same node; control_in is a per-use decoration.
     field $control_in :reader = undef;
 
+    # Per-node scheduler interpretation, populated lazily by the scheduler
+    # via set_schedule_data(). Holds a Chalk::Scheduler::ScheduleMeta
+    # subclass instance whose dialect (Roundtrip, GCM, ...) matches the
+    # scheduler that produced the current Schedule. Excluded from
+    # content_hash for the same reason as control_in: it is a per-use
+    # decoration, not a structural property of the node's content.
+    field $schedule_data :reader = undef;
+
     # Add a consumer to this node's consumer list
     method add_consumer($node) {
         push $consumers->@*, $node;
@@ -70,6 +78,14 @@ class Chalk::IR::Node {
 
     method content_hash() {
         return join('|', $self->operation(), $self->_serialize_inputs());
+    }
+
+    # Late-binding setter for the per-node scheduler interpretation.
+    # Called by the scheduler as it walks the graph and decides what
+    # surface syntax each control-affecting node should emit.
+    method set_schedule_data($meta) {
+        $schedule_data = $meta;
+        return;
     }
 
     # Late-binding setter for the effect-chain predecessor.
