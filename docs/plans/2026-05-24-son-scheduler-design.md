@@ -18,7 +18,11 @@ Rows E-F were added in the 2026-05-24 amendment, after a follow-up
 conversation surfaced that the scheduler interface itself is a
 load-bearing design decision (E) and that the byte-compat-vs-
 semantic-equivalence distinction needed to be explicit rather than
-implicit (F). Rationale for each appears in the relevant section
+implicit (F). Row G was added in a second 2026-05-24 amendment after
+a follow-up conversation about where scheduler interpretations of IR
+nodes should live; that conversation also refined E to clarify that
+the contract includes ScheduleMeta population, not just Schedule
+production. Rationale for each appears in the relevant section
 below.
 
 | # | Question | Decision |
@@ -27,8 +31,9 @@ below.
 | B | Source-form for `for` / `while` / `until` | **Preserve `foreach` vs `while`; normalize `until` to `while !cond`.** `foreach` carries iterator/list annotations on the Loop; `while` does not. `until`'s negation is already baked into the IR (PostfixModifier wraps the condition in `!`), so the distinction is unrecoverable and we accept the loss. C-style `for(init; cond; step)` emits as `for` when the pre-init VarDecl is recognizable; otherwise as `{ init; while(cond) { ...; step } }`. |
 | C | `MOP::Method->body` lifecycle | **Delete entirely**, but only after the scheduler ships and the codegen MOP path is migrated. `body` exists today because codegen needs a statement list; once codegen consumes a schedule, `body` has no callers. Do not keep it as a debug aid — debug tooling belongs in a separate dumper. |
 | D | Order of operations | **Scheduler first, then incremental codegen migration.** Build `Chalk::IR::Scheduler` as a new module that consumes a `MOP::Method`/`MOP::Sub` and produces a typed schedule. Add a second `_generate_from_schedule` path next to `_generate_from_mop` in `Target::Perl`. Once both produce byte-identical output across the golden corpus, switch over and delete `_generate_from_mop` + `body`. |
-| E | Scheduler interface contract | **`Chalk::IR::Scheduler->schedule($method) → Schedule` is the contract; the algorithm is private.** Any producer of a valid `Chalk::IR::Schedule` is a drop-in replacement. The eager-pinning implementation and the eventual destination algorithm (GCM or whatever the survey names) are both behind this interface. This is what makes Phase 8 mechanical. |
+| E | Scheduler interface contract | **`Chalk::IR::Scheduler->schedule($method) → Schedule` is the contract, AND the scheduler populates `$node->schedule_data` on every node codegen will later interpret.** Any producer of a valid `Chalk::IR::Schedule` that also populates appropriate `Chalk::Scheduler::ScheduleMeta` subclasses on the nodes it emits is a drop-in replacement. The Schedule itself is minimal `{ kind, node }` items plus structural markers; the ScheduleMeta class tree IS the dialect (see G). The eager-pinning implementation and the eventual destination algorithm (GCM or whatever the survey names) are both behind this interface. This is what makes Phase 8 mechanical. |
 | F | Test gate: byte-compat vs semantic equivalence | **Byte-compat is the migration gate (Phases 1-6); semantic equivalence is the durable contract.** During cutover from `_generate_from_mop` to `_generate_from_schedule`, byte-identical output against the golden corpus is the regression gate — it lets us swap implementations without arguing about whether output changes were intentional. Post-cutover (and especially across the Phase 8 algorithm swap) the contract becomes semantic equivalence: the same IR shape on round-trip, or the same runtime behavior on a corpus with known outputs. Byte-compat is a migration safety mechanism, not a design goal. |
+| G | ScheduleMeta as the single annotation location | **All scheduler interpretations of IR nodes live in `$node->schedule_data`, an instance of a `Chalk::Scheduler::ScheduleMeta` subclass.** Schedule items carry `{ kind, node }` plus structural markers (`block_open`/`block_close`/`else`/`elsif`/`catch`) only — no `meta` dict, no `role`/`phi` fields on items. Each scheduler implementation owns its own class tree (`Chalk::Scheduler::Roundtrip::*` for the eager-pinning scheduler; `Chalk::Scheduler::GCM::*` for the Phase 8 destination, when it lands). Codegen gates ScheduleMeta access at the boundary using isa, role, can, or version checks; the gate style is implementation detail, the gating discipline is the contract. Failures are loud (codegen-for-Roundtrip given a node with no schedule_data, or with a GCM ScheduleMeta, dies at the gate) — no silent fallback, no "ignore unknown keys." This is more boilerplate than per-field IR additions, and we accept that cost for the architectural discipline of one typed location for scheduler decisions. |
 
 ## 1. Scope
 
@@ -70,17 +75,22 @@ A `Chalk::IR::Schedule` value, with a stable shape:
 Schedule := [ Item, Item, ... ]
 
 Item := { kind => 'stmt', node => $ir_node }
-      | { kind => 'block_open', form => $form, meta => {...} }
+      | { kind => 'block_open', form => $form, node => $control_node }
       | { kind => 'block_close', form => $form }
       | { kind => 'else' }
-      | { kind => 'elsif', meta => {...} }
-      | { kind => 'catch', meta => {...} }
+      | { kind => 'elsif', node => $control_node }
+      | { kind => 'catch', node => $control_node }
 ```
 
-`$form` ∈ `qw(if while for foreach try)`. `meta` carries the
-controlling IR node refs (`If`, `Loop`, `TryCatch`) and any
-emit-time hints (foreach iterator + list nodes, for-init/for-step
-references) that codegen needs without re-walking the graph.
+`$form` ∈ `qw(if while for foreach try)`. Items are minimal —
+`{ kind, node }` plus structural markers. **Schedule items carry no
+`meta` dict and no scheduler-decision fields.** All scheduler
+interpretations of the node (form-specific data like the foreach
+iterator and list, the `for`-style init and step, the `If`'s
+`loop_jump` shortcut, the `TryCatch`'s catch variable) live on
+`$node->schedule_data`, a `Chalk::Scheduler::ScheduleMeta` instance
+populated by the scheduler. See Section 10 for the ScheduleMeta
+class tree and Decision G for the rationale.
 
 A schedule is **flat** — nested control is represented by
 matched `block_open`/`block_close` pairs in the sequence. This
@@ -184,19 +194,49 @@ The scheduler's external contract is:
 Chalk::IR::Scheduler->schedule($method) → Chalk::IR::Schedule
 ```
 
-Anything that produces a valid `Chalk::IR::Schedule` is a drop-in
-replacement. The Schedule's shape (Section 1 "Output contract") is
-the interface; the algorithm behind it is private. Codegen
-consumes `Schedule`; codegen knows nothing about how the schedule
-was produced. This is what makes Phase 8's algorithm swap
-mechanical — replace `lib/Chalk/IR/Scheduler.pm` with a new
-implementation, run the test corpus, done. No changes to codegen,
-no changes to the rest of the IR.
+plus the side effect of populating `$node->schedule_data` on every
+node codegen will later interpret. Anything that produces a valid
+`Chalk::IR::Schedule` *and* populates appropriate ScheduleMeta
+subclasses on those nodes is a drop-in replacement. The Schedule's
+shape (Section 1 "Output contract") and the ScheduleMeta class tree
+(Section 10) are the interface; the algorithm behind it is private.
+Codegen consumes `Schedule` and reads `schedule_data`; codegen
+knows nothing about how either was produced. This is what makes
+Phase 8's algorithm swap mechanical — replace
+`lib/Chalk/IR/Scheduler.pm` with a new implementation that produces
+its own ScheduleMeta subclasses, gate codegen at the boundary, run
+the test corpus, done. No changes to the rest of the IR.
 
 A corollary, called out separately as R6 below: code outside the
 scheduler must not read `inputs[0]` as if it were dominance
 information. It is emit-order information for the eager-pinning
 era. New code that wants dominance must compute it from the graph.
+
+### ScheduleMeta population
+
+The scheduler's structured-expansion pass visits each control-
+affecting node (`Loop`, `If`, `TryCatch`, `Phi`) and populates that
+node's `schedule_data` field with the appropriate ScheduleMeta
+subclass before emitting the `block_open` item that references it.
+For the eager-pinning (roundtrip) scheduler, the populated subclasses
+are `Chalk::Scheduler::Roundtrip::Loop`, `Roundtrip::If`,
+`Roundtrip::TryCatch`, and `Roundtrip::Phi`. For the Phase 8
+destination scheduler, the populated subclasses are
+`Chalk::Scheduler::GCM::*` (or whatever the destination algorithm's
+namespace is).
+
+The Schedule items themselves carry `{ kind, node }` and structural
+markers only. To recover scheduler interpretations during codegen,
+the codegen reads `$item->{node}->schedule_data` and gates the
+returned object's type. Section 10 specifies the gate contract;
+each Section 3 pattern below shows the concrete population.
+
+`schedule_data` starts life as `undef` on every newly-constructed
+IR node; the scheduler sets it during scheduling, and the node
+moves from incomplete to complete. This is lazy initialization,
+not mutation: `schedule_data` participates in no `content_hash`
+computation, the same pattern already used for `compat_class`,
+`control_in`, `If->region`, and `Loop->region`.
 
 ### Two-phase scheduling
 
@@ -207,24 +247,42 @@ list to get source order. This produces the **top-level statement
 sequence** for the method body.
 
 Phase 2 — **structured expansion**. For each statement in the
-top-level sequence, dispatch on type:
+top-level sequence, dispatch on type. Each control-node case
+populates the node's `schedule_data` with the appropriate
+ScheduleMeta subclass *before* emitting its `block_open`:
 
 - Plain side-effect node (`Call`, `Assign`, `VarDecl`, `Return`,
-  ...) → emit one `{ kind => 'stmt' }` item.
-- `If` node → emit `{ kind => 'block_open', form => 'if', ... }`,
-  recurse into the true branch (chain walk + structured expansion
+  ...) → emit one `{ kind => 'stmt', node => $n }` item. (Plain
+  side-effect nodes typically have no ScheduleMeta; the exception
+  is VarDecls that are Phi emit-slots, where the Phi — not the
+  VarDecl — carries the ScheduleMeta.)
+- `If` node → populate `$if->schedule_data` with
+  `Roundtrip::If`, then emit
+  `{ kind => 'block_open', form => 'if', node => $if }`, recurse
+  into the true branch (chain walk + structured expansion
   starting from the node whose `control_in` is the `TrueProj`,
-  stopping at the `Region` join), emit any `{ kind => 'else' }` or
-  `{ kind => 'elsif' }` items, recurse into the false branch,
-  emit `{ kind => 'block_close' }`.
-- `Loop` node → emit `{ kind => 'block_open', form => 'while' or
-  'foreach' or 'for', ... }`, recurse into the body (chain walk
-  starting from the node whose `control_in` is the loop's
-  `body_proj`, stopping at the `Loop`'s backedge), emit
-  `{ kind => 'block_close' }`.
-- `TryCatch` node → emit `{ kind => 'block_open', form => 'try' }`,
-  recurse into the try body, emit `{ kind => 'catch', ... }`,
-  recurse into the catch body, emit `{ kind => 'block_close' }`.
+  stopping at the `Region` join), emit any `{ kind => 'else' }`
+  or `{ kind => 'elsif', node => $inner_if }` items, recurse into
+  the false branch, emit `{ kind => 'block_close', form => 'if' }`.
+- `Loop` node → populate `$loop->schedule_data` with
+  `Roundtrip::Loop` (filled with iterator/list/for-style fields
+  per the parse-time hints lifted in Phase 1), then emit
+  `{ kind => 'block_open', form => 'while'|'foreach'|'for', node => $loop }`,
+  recurse into the body (chain walk starting from the node whose
+  `control_in` is the loop's `body_proj`, stopping at the
+  `Loop`'s backedge), emit
+  `{ kind => 'block_close', form => $form }`.
+- `TryCatch` node → populate `$try->schedule_data` with
+  `Roundtrip::TryCatch`, then emit
+  `{ kind => 'block_open', form => 'try', node => $try }`,
+  recurse into the try body, emit
+  `{ kind => 'catch', node => $try }`, recurse into the catch
+  body, emit `{ kind => 'block_close', form => 'try' }`.
+- `Phi` nodes are not in the chain (they are merge values, not
+  statements) — they are visited during structured expansion when
+  the Phi-slot resolution pass walks the consumers of merge
+  values. That pass populates `$phi->schedule_data` with
+  `Roundtrip::Phi`. See Section 4.
 
 ### Chain-walk primitive (the one operation the scheduler needs)
 
@@ -290,11 +348,13 @@ the loop body. This is why the stop predicates are
 
 ## 3. Structured reconstruction patterns
 
-The scheduler emits `{ kind => 'block_open', form => $form, meta => ... }`;
-codegen reads `$form` and `meta` to choose the surface syntax. The
-patterns below specify what each `(if|while|for|foreach|try)` block
-in the schedule corresponds to in IR-graph shape, so the
-implementation can verify it.
+The scheduler emits `{ kind => 'block_open', form => $form, node => $control_node }`
+and populates `$control_node->schedule_data` with the appropriate
+ScheduleMeta subclass before emitting; codegen reads `$form` to
+choose the surface syntax and `$control_node->schedule_data` for
+the form-specific details. The patterns below specify what each
+`(if|while|for|foreach|try)` block in the schedule corresponds to
+in IR-graph shape, so the implementation can verify it.
 
 ### Pattern: If + Region → `if` / `if`-`else` / `if`-`elsif`-`else`
 
@@ -314,19 +374,34 @@ segments terminate at that `Region`.
 Schedule emit:
 
 ```
-{ kind => 'block_open', form => 'if', meta => { if_node => $if } }
+# Before scheduling: $if->schedule_data == undef
+# During scheduling, scheduler populates:
+$if->set_schedule_data(
+    Chalk::Scheduler::Roundtrip::If->new(
+        # is_loop_jump defaults false; PostfixModifier action sets true
+        # when the If is the loop-jump shortcut form
+    )
+);
+
+# Schedule items emitted:
+{ kind => 'block_open', form => 'if', node => $if }
   ... true-branch items ...
 { kind => 'else' }                                                   # only if false-branch nonempty
   ... false-branch items ...
 { kind => 'block_close', form => 'if' }
 ```
 
+Codegen reads `$if->schedule_data->is_loop_jump` (see loop-jump
+shortcut below) to decide whether to collapse the block.
+
 #### `elsif` recognition
 
 If the false branch chain is exactly *one* `If` node and that
 `If`'s `Region` matches the outer `If`'s `Region` (the two
-joins are the same merge point), emit `{ kind => 'elsif', ... }`
-in place of `{ kind => 'else' }` followed by `{ kind => 'block_open' }`.
+joins are the same merge point), emit
+`{ kind => 'elsif', node => $inner_if }` in place of
+`{ kind => 'else' }` followed by `{ kind => 'block_open' }`. The
+inner `If` still gets its own `schedule_data` populated.
 
 This is identical to the elsif recognition in
 `emit_cfg_if`/`Target/Perl.pm:1102-1118`, just lifted out of
@@ -350,12 +425,13 @@ The current `_emit_loop_jump` emits `next if $cond;` for an `If`
 inside a Loop body when the `If` is marked `loop_jump`. This is
 a codegen surface choice, not a scheduler structural choice.
 The scheduler still emits the `If` as a normal `block_open`
-sequence; codegen sees the `loop_jump` annotation on the `If`
-(carried via the Context annotations the parser already wires
-up) and collapses the block to a one-liner. **Move the
-`loop_jump` annotation off Context and onto the `If` node
-itself** as part of Phase 1 (see Implementation phases) so the
-scheduler / codegen don't depend on Context after the cutover.
+sequence; codegen reads `$if->schedule_data->is_loop_jump` and
+collapses the block to a one-liner when set. **The `loop_jump`
+flag lives on `Chalk::Scheduler::Roundtrip::If`**, not on the
+parsing Context, and is populated by the scheduler (using
+information the `PostfixModifier` action stored on the IR during
+Phase 1) so neither scheduler nor codegen depends on Context after
+the cutover.
 
 ### Pattern: Loop + If + Region → `while`
 
@@ -375,7 +451,15 @@ control for the post-loop continuation.
 Schedule emit (while):
 
 ```
-{ kind => 'block_open', form => 'while', meta => { loop => $loop, cond => $cond } }
+# During scheduling, scheduler populates:
+$loop->set_schedule_data(
+    Chalk::Scheduler::Roundtrip::Loop->new(
+        # is_for_style false, iterator/list/for_init/for_step absent
+    )
+);
+
+# Schedule items emitted:
+{ kind => 'block_open', form => 'while', node => $loop }
   ... body items, found by chain walk from $body_proj's first consumer
       with stop predicate "== $loop" ...
 { kind => 'block_close', form => 'while' }
@@ -383,29 +467,46 @@ Schedule emit (while):
 
 The body chain walk stops at the `Loop` node itself because the
 last body statement's `control_in` is wired back to `Loop` via
-`set_backedge_ctrl`.
+`set_backedge_ctrl`. Codegen reads `$loop->schedule_data` to confirm
+it is a `Roundtrip::Loop` with no iterator/list (a plain while).
 
 ### Pattern: Loop + iterator/list metadata → `foreach`
 
-Same IR shape as `while`. The difference is on the Loop **node's
-parse-time annotations**: `iterator` (a Constant node holding the
-variable name like `$n`) and `list` (the list expression IR node
-or arrayref of element nodes).
+Same IR shape as `while`. The difference is on the Loop's
+`schedule_data`: a `Roundtrip::Loop` with `iterator` (a Constant
+node holding the variable name like `$n`) and `list` (the list
+expression IR node or arrayref of element nodes) populated.
 
 Today these annotations live on the parsing Context
 (`update_annotations`); the codegen reads them via
 `_build_cfg_lookup` and `cfg_state`. For the scheduler we need
-them on the **Loop node** directly. Phase 1 of implementation
-moves them.
+them on the Loop's ScheduleMeta. Phase 1 of implementation moves
+them — destination is `Chalk::Scheduler::Roundtrip::Loop`'s
+`iterator` and `list` fields, populated by `ForeachStatement`
+action storing the values on the Loop node where the scheduler
+can later wrap them into the ScheduleMeta.
 
 Schedule emit (foreach):
 
 ```
-{ kind => 'block_open', form => 'foreach',
-  meta => { loop => $loop, iterator => $iter, list => $list } }
+# Before scheduling: $loop->schedule_data == undef
+
+# During scheduling, scheduler populates:
+$loop->set_schedule_data(
+    Chalk::Scheduler::Roundtrip::Loop->new(
+        iterator => $iter,
+        list     => $list,
+    )
+);
+
+# Schedule items emitted:
+{ kind => 'block_open', form => 'foreach', node => $loop }
   ... body items ...
 { kind => 'block_close', form => 'foreach' }
 ```
+
+Codegen reads `$loop->schedule_data->iterator` and `->list` to
+generate the surface `foreach my $n (@list) { ... }`.
 
 ### Pattern: VarDecl(s) + Loop → C-style `for`
 
@@ -417,34 +518,45 @@ the *enclosing* block's chain, immediately before the `Loop`. The
 the last statement in the body (the parser wires it there).
 
 Recognizing this as a `for` instead of `{ VarDecl; while }`
-requires a node-level annotation on the Loop:
-`for_style => 1`, set by `ForStatement` action and absent on
-`WhileStatement` / `ForeachStatement`.
+requires a node-level flag on the Loop: `is_for_style => true`,
+set by `ForStatement` action on the IR node so the scheduler can
+read it and lift it (along with the init/step nodes) onto the
+Loop's `Roundtrip::Loop` ScheduleMeta.
 
 Schedule emit:
 
 ```
-{ kind => 'block_open', form => 'for',
-  meta => { loop => $loop, init => $init_vardecl, step => $step_node } }
+# During scheduling, scheduler populates:
+$loop->set_schedule_data(
+    Chalk::Scheduler::Roundtrip::Loop->new(
+        is_for_style => true,
+        for_init     => $init_vardecl,
+        for_step     => $step_node,
+    )
+);
+
+# Schedule items emitted:
+{ kind => 'block_open', form => 'for', node => $loop }
   ... body items, excluding $step ...
 { kind => 'block_close', form => 'for' }
 ```
 
 The init VarDecl is still in the enclosing chain at chain-walk
 time; the scheduler **must** remove it from the enclosing chain
-and attach it to the Loop's meta when it recognizes the for-style
-pattern. The step node is the last body-chain item; same
-treatment.
+and lift it onto the Loop's ScheduleMeta when it recognizes the
+for-style pattern. The step node is the last body-chain item;
+same treatment.
 
 **This is the one place where the scheduler does graph rewriting
 during walk**, and it's the price we pay for source-form
-preservation. The rewriting is local (one chain entry moved into
-meta) and reversible (codegen could emit the desugared form by
-ignoring `for_style`).
+preservation. The rewriting is local (one chain entry moved onto
+the Loop's ScheduleMeta) and reversible (codegen could emit the
+desugared form by ignoring `is_for_style`).
 
 If the for-init/step recognition fails (e.g. the init isn't a
-single VarDecl), emit the desugared `{ VarDecl; while; }` form.
-Correct, not pretty.
+single VarDecl), the scheduler populates `Roundtrip::Loop` with
+`is_for_style => false` and emits the desugared `{ VarDecl; while; }`
+form. Correct, not pretty.
 
 ### Pattern: TryCatch + chain → `try` / `catch`
 
@@ -452,23 +564,35 @@ IR shape (current): `TryCatch` node with `inputs[0] = control_in`,
 plus side-channel annotations `try_stmts`, `catch_var`,
 `catch_stmts` on the Context.
 
-Same migration as foreach iterator/list: move the annotations
-onto the `TryCatch` node directly, then the scheduler reads them
-without Context dependency. The `try_stmts` and `catch_stmts`
-become chain segments rooted in nodes whose `control_in` is the
-TryCatch's two output projections (or whatever the IR shape is
-post-migration; today these aren't proper Projs, and that's a
-bug-class hazard we should fix as part of Phase 1).
+Same migration as foreach iterator/list: move the annotations off
+Context onto the `TryCatch` node so the scheduler can read them
+and lift `catch_var` onto the `TryCatch`'s ScheduleMeta. The
+`try_stmts` and `catch_stmts` become chain segments rooted in
+nodes whose `control_in` is the TryCatch's two output projections
+(or whatever the IR shape is post-migration; today these aren't
+proper Projs, and that's a bug-class hazard we should fix as part
+of Phase 1).
 
 Schedule emit:
 
 ```
-{ kind => 'block_open', form => 'try', meta => { try => $try } }
+# During scheduling, scheduler populates:
+$try->set_schedule_data(
+    Chalk::Scheduler::Roundtrip::TryCatch->new(
+        catch_var => $catch_var,
+    )
+);
+
+# Schedule items emitted:
+{ kind => 'block_open', form => 'try', node => $try }
   ... try-body items ...
-{ kind => 'catch', meta => { var => $catch_var } }
+{ kind => 'catch', node => $try }
   ... catch-body items ...
 { kind => 'block_close', form => 'try' }
 ```
+
+Codegen reads `$try->schedule_data->catch_var` when emitting the
+`catch ($var) { ... }` header.
 
 ### Pattern not listed: `do { ... } while/until`
 
@@ -516,12 +640,27 @@ slot should reuse `$x`, not synthesize `$_phi_42`.
 
 The scheduler resolves Phi → emit-slot mapping by walking the
 Phi's `inputs` for the most-recent VarDecl that names the same
-variable. That VarDecl is the slot. The scheduler attaches a
-`{ kind => 'stmt', node => $vardecl, role => 'phi_slot', phi => $phi }`
-hint to the chain item, telling codegen to *initialize* the slot
-with the Phi's pre-control input value. Inside the if-branches,
-the assignments stay as plain `Assign` nodes; the Phi itself
-isn't emitted as a separate statement.
+variable. That VarDecl is the slot. The scheduler populates the
+Phi's `schedule_data` with that slot:
+
+```
+$phi->set_schedule_data(
+    Chalk::Scheduler::Roundtrip::Phi->new(
+        emit_slot => $vardecl,
+    )
+);
+```
+
+Codegen, when emitting any statement whose IR consumes the Phi
+(typically a `Return`, but also any later `Assign`/`Call` that
+reads the merged value), reads `$phi->schedule_data->emit_slot` to
+recover the surface identifier and emits the slot's variable name
+rather than a synthetic `$_phi_<id>`. Inside the if-branches, the
+assignments stay as plain `Assign` nodes; the Phi itself isn't
+emitted as a separate statement. The VarDecl's chain item remains
+a plain `{ kind => 'stmt', node => $vardecl }`; it carries no
+phi-specific role on the Schedule item — the Phi's ScheduleMeta is
+where that wiring lives.
 
 ### Loop-Phi → loop-carried variable
 
@@ -534,11 +673,15 @@ emission of the Phi is needed.
 ### When no VarDecl exists for the Phi
 
 Possible only for synthetic Phis introduced by future optimization
-passes. The scheduler falls back to `$_phi_<id>` naming. We never
-hit this in the parser-produced IR (Phi-slot recovery is the
-common case); the fallback exists so the Phase 8 destination
-scheduler — which may introduce synthetic Phis via hoisting or
-similar — has a well-defined behavior.
+passes. The scheduler populates `Roundtrip::Phi` with
+`emit_slot => undef` and a `synthetic_name` field carrying
+`$_phi_<id>`; codegen falls back to the synthetic name when
+`emit_slot` is undef. We never hit this in the parser-produced IR
+(Phi-slot recovery is the common case); the fallback exists so the
+Phase 8 destination scheduler — which may introduce synthetic Phis
+via hoisting or similar — has a well-defined behavior. (Phase 8's
+own ScheduleMeta subclass for Phi may extend this with hoisting
+provenance.)
 
 ### Concrete example
 
@@ -559,22 +702,29 @@ Start → VarDecl($x=0) → If(cond) → TrueProj → Assign($x, 1) → Region
                                   → Return(Phi($x))
 ```
 
-Schedule:
+Schedule and ScheduleMeta population:
 
 ```
+# Scheduler populates:
+$if->set_schedule_data(Chalk::Scheduler::Roundtrip::If->new());
+$phi->set_schedule_data(
+    Chalk::Scheduler::Roundtrip::Phi->new(emit_slot => $vardecl_x),
+);
+
+# Schedule items:
 { kind => 'stmt', node => VarDecl($x=0) }                  # codegen: my $x = 0;
-{ kind => 'block_open', form => 'if', meta => {...} }
+{ kind => 'block_open', form => 'if', node => $if }
   { kind => 'stmt', node => Assign($x, 1) }                # codegen: $x = 1;
 { kind => 'else' }
   { kind => 'stmt', node => Assign($x, 2) }                # codegen: $x = 2;
 { kind => 'block_close', form => 'if' }
 { kind => 'stmt', node => Return(Phi) }                    # codegen: return $x;
-                                                            # — Phi resolves to $x because
-                                                            # the slot map says so
+                                                            # — Phi resolves to $x via
+                                                            # $phi->schedule_data->emit_slot
 ```
 
 The Phi is **not** emitted as a statement; it's a *value* that the
-return reads. The Phi-slot map ensures `$x` is the surface
+return reads. The Phi's ScheduleMeta ensures `$x` is the surface
 identifier.
 
 ## 5. What `MOP::Method->body` becomes (Decision C)
@@ -644,24 +794,60 @@ ranges.
 
 ### Phase 1 — Annotation cleanup (preparation, no scheduler yet)
 
-**Goal:** Move per-control-node annotations from Context onto IR
-nodes, so the scheduler reads from IR alone.
+**Goal:** Move per-control-node annotations from Context onto
+**ScheduleMeta objects on IR nodes**, so the scheduler reads from
+IR alone and codegen reads from a typed location.
 
 **Concrete moves:**
+
+First, define the ScheduleMeta class tree (see Section 10 for the
+full sketch):
+
+- `lib/Chalk/Scheduler/ScheduleMeta.pm` — abstract base.
+- `lib/Chalk/Scheduler/Roundtrip/Loop.pm` — fields:
+  `$is_for_style`, `$iterator`, `$list`, `$for_init`, `$for_step`.
+- `lib/Chalk/Scheduler/Roundtrip/If.pm` — field: `$is_loop_jump`.
+- `lib/Chalk/Scheduler/Roundtrip/Phi.pm` — fields: `$emit_slot`,
+  `$synthetic_name`.
+- `lib/Chalk/Scheduler/Roundtrip/TryCatch.pm` — field: `$catch_var`.
+
+Then add `schedule_data` to `Chalk::IR::Node` (or whichever level
+of the IR class hierarchy is appropriate — the field is excluded
+from `content_hash` regardless of where it lives) as
+`field $schedule_data :reader = undef;` with a
+`set_schedule_data($meta)` mutator.
+
+Then move the parse-time annotations off Context onto the IR
+nodes whose ScheduleMeta will later carry them:
+
 1. `iterator`, `list` from Context annotations onto `Loop` node
-   as `field $iterator :reader; field $list :reader;`. Set in
-   `ForeachStatement` action.
-2. `loop_jump` from Context annotations onto `If` node as
-   `field $loop_jump :reader = undef;`. Set in `PostfixModifier`
-   action when the loop-jump form is detected.
-3. `for_style` flag on `Loop` node as `field $for_style :reader = false;`.
-   Set in `ForStatement` action.
+   fields. Set in `ForeachStatement` action. The scheduler reads
+   these in Phase 4 and wraps them into `Roundtrip::Loop` on the
+   Loop's `schedule_data`.
+2. `loop_jump` flag from Context annotations onto `If` node as
+   `field $loop_jump_hint :reader = false;`. Set in
+   `PostfixModifier` action when the loop-jump form is detected.
+   Scheduler later lifts it onto `Roundtrip::If`'s `is_loop_jump`.
+3. `for_style` flag on `Loop` node as
+   `field $for_style_hint :reader = false;`. Set in `ForStatement`
+   action. Scheduler later lifts it onto `Roundtrip::Loop`'s
+   `is_for_style`.
 4. `try_stmts` / `catch_stmts` / `catch_var` from Context
    annotations onto `TryCatch` node. (Today `TryCatch` is almost
    empty — just an `operation` method. It needs real fields and a
    proper structure: control inputs for try-region and
    catch-region, a `var` for the caught exception name. This is a
-   small but real IR change.)
+   small but real IR change.) Scheduler later lifts `catch_var`
+   onto `Roundtrip::TryCatch`.
+
+The two-level hop (parse-time hint field on the IR node, then
+scheduler lifts it into ScheduleMeta) is the price of keeping
+parse-time annotation work parser-local while ensuring the
+ScheduleMeta is the *single* location codegen reads. An
+alternative is to have the parser construct ScheduleMeta directly
+on the node, but that bakes scheduler-dialect knowledge into the
+parser — better to let the scheduler own the ScheduleMeta class
+tree completely.
 
 **Test gate:** byte-compat goldens pass. The codegen's existing
 `cfg_state` reader is *still* in use during Phase 1 — we move the
@@ -670,11 +856,13 @@ place of it. This is the safe order: add a new source-of-truth,
 keep the old one wired, then in Phase 2 the scheduler reads the
 new source.
 
-**Effort:** 1 session.
+**Effort:** 1-1.5 sessions (the extra half-session is the
+ScheduleMeta class definitions and the IR field plumbing).
 
 **Risk:** Low. The IR fields are additive; the Context
-annotations stay too. Failures look like missing-field accessors
-or set-to-undef being treated as set.
+annotations stay too; the ScheduleMeta classes are new code with
+no production consumers yet. Failures look like missing-field
+accessors or set-to-undef being treated as set.
 
 ### Phase 2 — Schedule data type + Phase 1 verification
 
@@ -687,11 +875,14 @@ unit-test their structure (e.g., open/close balance).
 - `lib/Chalk/IR/Schedule.pm` — class with `field @items :reader`
   and `method push_item($item)`.
 - `lib/Chalk/IR/Schedule/Item.pm` — class with `field $kind :param :reader;
-  field $form :param :reader = undef; field $node :param :reader = undef;
-  field $meta :param :reader = {};`.
+  field $form :param :reader = undef; field $node :param :reader = undef;`.
+  **No `meta` field.** All scheduler interpretations live on
+  `$item->node->schedule_data`. Item is intentionally minimal.
 
 **Test gate:** new `t/bootstrap/scheduler/schedule-shape.t` —
-hand-built schedules round-trip through items.
+hand-built schedules round-trip through items, and an item with
+a `node` carrying ScheduleMeta exposes the meta through the
+`node->schedule_data` indirection (not through any Item field).
 
 **Effort:** 0.5 session.
 
@@ -921,9 +1112,33 @@ on emit specifics.
 
 A second property test: every side-effect node in
 `$method->graph->nodes()` appears as a `{ kind => 'stmt', node => $n }`
-in the schedule (modulo for-init/for-step which get folded into
-meta). No side-effect node is missing; no node is emitted twice.
-This catches the bugs that the Phase 3d audit found.
+in the schedule (modulo for-init/for-step which get lifted onto
+the Loop's ScheduleMeta). No side-effect node is missing; no node
+is emitted twice. This catches the bugs that the Phase 3d audit
+found.
+
+### Property: ScheduleMeta population completeness
+
+A third property test: every IR node the scheduler emits in the
+Schedule that codegen will need to interpret carries the right
+ScheduleMeta. Concretely:
+
+- Every Loop referenced by `block_open form=>'while'|'foreach'|'for'`
+  has `schedule_data` set to a `Chalk::Scheduler::Roundtrip::Loop`.
+- Every If referenced by `block_open form=>'if'`, by an `elsif`,
+  or as the recursive-else target has `schedule_data` set to a
+  `Chalk::Scheduler::Roundtrip::If`.
+- Every TryCatch referenced by `block_open form=>'try'` has
+  `schedule_data` set to a `Chalk::Scheduler::Roundtrip::TryCatch`.
+- Every Phi node whose value is read anywhere in the Schedule has
+  `schedule_data` set to a `Chalk::Scheduler::Roundtrip::Phi`.
+
+No node missing its ScheduleMeta; no ScheduleMeta on the wrong
+node class (e.g., a `Roundtrip::Loop` accidentally attached to an
+`If`). This catches scheduler bugs where a code path skips
+population, and catches incomplete migrations during Phase 1 where
+the scheduler reads an old Context annotation instead of building
+the ScheduleMeta.
 
 ### Performance check
 
@@ -939,10 +1154,17 @@ the for-style recognition as exhaustive tests. Those are
 implementation details that future work may revise. We test
 *outputs* (byte-compat goldens during migration; semantic
 equivalence after Phase 8) and *structural invariants*
-(open/close balance, chain coverage), not internal hooks. The
-structural invariants survive the Phase 8 algorithm swap — a
-correctly-emitted schedule has balanced open/close brackets
-regardless of which algorithm produced it.
+(open/close balance, chain coverage, ScheduleMeta population
+completeness), not internal hooks. The first two structural
+invariants survive the Phase 8 algorithm swap unchanged — a
+correctly-emitted schedule has balanced open/close brackets and
+covers every side-effect node regardless of which algorithm
+produced it. ScheduleMeta population completeness survives in
+*shape* but with the expected class tree updated: Phase 8 swaps
+the assertion from "every control node has a
+`Roundtrip::*` ScheduleMeta" to "every control node has a
+`GCM::*` ScheduleMeta" (or whatever the destination scheduler
+defines). The contract — populate, don't skip — is durable.
 
 ## 9. Risks and prerequisites
 
@@ -1013,11 +1235,15 @@ schedule omits (e.g., parent-form for tail-position recognition,
 type information for typed emit), the schedule path emits less
 optimal code. Found by golden mismatch.
 
-**Mitigation:** The schedule's `meta` field is extensible. Any
-context-derived data codegen needs gets attached to the
-relevant schedule item when the scheduler builds it. If a
-mismatch surfaces during Phase 5, extend `meta` rather than
-fall back to Context reads.
+**Mitigation:** The relevant `Roundtrip::*` ScheduleMeta class is
+the extension point. Any context-derived data codegen needs gets
+added as a field on the appropriate ScheduleMeta subclass and
+populated by the scheduler when it builds the node's ScheduleMeta.
+If a mismatch surfaces during Phase 5, add the field to the
+ScheduleMeta class (a small, visible code change) rather than
+falling back to Context reads. Because the ScheduleMeta classes
+are typed and gated at codegen, any addition is discoverable and
+auditable.
 
 #### R5 — Big-bang risk
 
@@ -1050,15 +1276,19 @@ rather than emit order, the Phase 8 algorithm swap becomes
 proportionally harder: every external reader must be audited and
 either retired or re-pointed at a real dominator-tree query.
 
-**Mitigation:** discipline. The interface contract is that
-`inputs[0]` on a side-effect node carries the chain predecessor
-the parser put there; it is consumed by the scheduler to determine
-emit order; nothing else reads it. New code that wants dominance
-information must compute it from the graph, not read it from
-`inputs[0]`. Reviewers of code touching `inputs[0]` outside
-`lib/Chalk/IR/Scheduler.pm` should check this on intake. If
-discipline fails, Phase 8 grows a cleanup sub-phase to undo the
-violations.
+**Mitigation:** discipline, *strengthened by the ScheduleMeta
+indirection*. Codegen reads `$node->schedule_data`, not raw
+`inputs[0]`. Any non-scheduler consumer that wants emit-related
+information is now expected to look at `schedule_data` (the typed,
+gated path) rather than at the chain (the implementation detail).
+The interface contract is that `inputs[0]` on a side-effect node
+carries the chain predecessor the parser put there; it is consumed
+by the scheduler to determine emit order; nothing else reads it.
+New code that wants dominance information must compute it from the
+graph, not read it from `inputs[0]`. Reviewers of code touching
+`inputs[0]` outside `lib/Chalk/IR/Scheduler.pm` should check this
+on intake. If discipline fails, Phase 8 grows a cleanup sub-phase
+to undo the violations.
 
 #### R7 — Survey may invalidate GCM as destination
 
@@ -1079,6 +1309,28 @@ Phase 8's effort and test strategy are written generically over
 so the survey's conclusion plugs in without rewriting Phase 8's
 scope.
 
+#### R8 — ScheduleMeta schema drift
+
+Different scheduler implementations own different ScheduleMeta
+class trees (`Roundtrip::*` for the eager-pinning scheduler;
+`GCM::*` for the eventual destination). If those trees diverge in
+field names or shapes — e.g., `Roundtrip::Loop->iterator` vs
+`GCM::Loop->loop_var` for the same underlying concept — then
+codegen-per-mode has to track all the variants and the architectural
+discipline of "one typed location" buys less than promised.
+
+**Mitigation:** each scheduler owns its own class tree
+exclusively; the abstract base `Chalk::Scheduler::ScheduleMeta`
+carries no fields (or only `$node`, the back-reference to the IR
+node it annotates); codegen gates ScheduleMeta access at the
+boundary (isa/role/can/version checks) so a wrong-shape
+ScheduleMeta fails loud rather than silently miscoding. The class
+definitions are the canonical schema — there is no parallel doc
+or table to maintain, no JSON schema, no IDL. If two schedulers
+need to share a concept (e.g., both have a notion of "this Loop's
+iterator variable"), the right move is to factor a shared mixin
+or role, not to silently union the field sets.
+
 ### Rollback path
 
 If the schedule path produces wrong output for a non-golden
@@ -1090,6 +1342,148 @@ clean. The Phase 8 rollback is symmetric — the destination
 scheduler lives behind the same `Schedule` interface as the
 eager-pinning version, so reverting Phase 8 is reverting one
 file (`lib/Chalk/IR/Scheduler.pm`) plus its test-corpus updates.
+
+## 10. ScheduleMeta class tree
+
+This section specifies the class tree introduced by Decision G and
+referenced throughout Sections 3, 4, and 7. The tree is more
+boilerplate than putting fields directly on the IR nodes; the win
+is that there is exactly one typed location per (scheduler, IR
+node class) pair, and that codegen reads through a gated boundary
+rather than peeking at scattered fields.
+
+### Abstract base
+
+```perl
+# lib/Chalk/Scheduler/ScheduleMeta.pm
+package Chalk::Scheduler::ScheduleMeta {
+    use 5.42.0;
+    use utf8;
+    no warnings 'experimental::class';
+    use feature 'class';
+
+    class Chalk::Scheduler::ScheduleMeta {
+        # back-reference to the IR node this ScheduleMeta annotates.
+        # Useful for diagnostics ("which Loop did this come from?")
+        # and for codegen that wants to recover the node from the
+        # ScheduleMeta. Not load-bearing for codegen dispatch.
+        field $node :param :reader;
+    }
+}
+```
+
+The base carries no form-specific fields. Subclasses add them.
+
+### Roundtrip subtree (eager-pinning scheduler)
+
+```
+Chalk::Scheduler::ScheduleMeta              # abstract base
+├── Chalk::Scheduler::Roundtrip::Loop
+│     field $is_for_style :param :reader = false;
+│     field $iterator     :param :reader = undef;  # foreach
+│     field $list         :param :reader = undef;  # foreach
+│     field $for_init     :param :reader = undef;  # C-style for
+│     field $for_step     :param :reader = undef;  # C-style for
+│
+├── Chalk::Scheduler::Roundtrip::If
+│     field $is_loop_jump :param :reader = false;
+│
+├── Chalk::Scheduler::Roundtrip::Phi
+│     field $emit_slot      :param :reader = undef;  # VarDecl ref
+│     field $synthetic_name :param :reader = undef;  # fallback
+│
+└── Chalk::Scheduler::Roundtrip::TryCatch
+      field $catch_var :param :reader;
+```
+
+### GCM / destination subtree
+
+Defined in Phase 8 when the destination scheduler is built.
+Likely shape (illustrative, not committed):
+
+```
+Chalk::Scheduler::ScheduleMeta
+└── Chalk::Scheduler::GCM::*
+      # whatever fields GCM-style placement needs: dominator depth,
+      # loop nesting, hoisted-invariant lists, branch probabilities,
+      # etc. The Phase 8 author specifies these against the
+      # destination algorithm.
+```
+
+The Roundtrip subtree is not deleted when the GCM subtree lands;
+both coexist for as long as both schedulers do (which may be only
+the Phase 8 cutover window, or longer if there's reason to keep
+the eager-pinning scheduler around for debugging or regression
+diff). After Phase 8 ships and stabilizes, Roundtrip subtree
+deletion is a follow-up.
+
+### Population contract
+
+The scheduler that produces a `Chalk::IR::Schedule` MUST also
+populate `schedule_data` on every IR node that codegen will read
+it from. Concretely:
+
+- Every `Loop` referenced by a `block_open` with form `while`,
+  `foreach`, or `for` must have `schedule_data` set to a
+  `Chalk::Scheduler::Roundtrip::Loop` (or, post-Phase-8, the
+  destination scheduler's equivalent).
+- Every `If` referenced by a `block_open` with form `if`, an
+  `elsif`, or an `else`-followed-`block_open` must have
+  `schedule_data` set.
+- Every `TryCatch` referenced by a `block_open` with form `try`
+  must have `schedule_data` set.
+- Every `Phi` whose value is read by any node in the schedule
+  must have `schedule_data` set.
+
+Calling codegen on a Schedule whose nodes lack the appropriate
+ScheduleMeta is a fatal error: the codegen gate fires at the
+boundary. There is no silent default, no fallback to "empty
+ScheduleMeta," no inference of the missing data from the chain.
+This is intentional: missing ScheduleMeta is a scheduler bug,
+and failing loud is how we find scheduler bugs in tests rather
+than in production.
+
+### Gate contract (codegen boundary)
+
+Codegen MUST gate ScheduleMeta access at the boundary using a
+typed check. The contract is the gating discipline. The gate
+style is implementation detail:
+
+```perl
+# Illustrative; the actual codegen can use isa, role check,
+# can() probe, or version field — whichever fits the site.
+my $sd = $loop_node->schedule_data;
+die "Codegen-for-Roundtrip requires Roundtrip::Loop, got "
+    . (defined $sd ? ref($sd) : '<undef>')
+    unless defined $sd
+        && $sd isa Chalk::Scheduler::Roundtrip::Loop;
+
+if ($sd->is_for_style) {
+    my $init = $sd->for_init;
+    my $step = $sd->for_step;
+    ...
+}
+```
+
+Different gate styles suit different situations:
+
+- **isa check** when codegen knows exactly which scheduler
+  produced the input (the common case during Phases 5-7, where
+  the codegen is paired one-to-one with the eager-pinning
+  scheduler).
+- **role / capability check** when codegen accepts multiple
+  ScheduleMeta variants that all expose the same method (e.g., a
+  shared `is_for_style` role across Roundtrip and GCM Loops).
+- **`can()` probe** when the codegen wants to feature-test for
+  an optional ScheduleMeta capability.
+- **schema-version field** when the project gains enough
+  scheduler variants that a numeric version is cheaper than an
+  isa tree walk. (Not needed today; mentioned for completeness.)
+
+The gating discipline ensures that running a Roundtrip-specific
+codegen path against a GCM ScheduleMeta (or vice versa) dies at
+the boundary with a useful message, not at a deep call site with
+"undefined method" or an off-by-one in an emitted string.
 
 ## Cross-references
 
