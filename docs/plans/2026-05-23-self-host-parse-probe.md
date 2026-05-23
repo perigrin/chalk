@@ -229,8 +229,129 @@ grep "^\[" /tmp/probe-self-host.log
 
 ## Artifacts committed
 
-- `script/probe-self-host.pl` — the probe runner.
+- `script/probe-self-host.pl` — the initial probe runner (60s/file).
+- `script/probe-self-host-long.pl` — targeted re-probe of the 10
+  initially-timed-out files with a 600s/file budget.
 - `docs/plans/2026-05-23-self-host-parse-probe.md` — this document.
 - `t/fixtures/self-host-probe-2026-05-22.log` — snapshot of the
-  probe log for the 2026-05-22 23:33 UTC run. Preserved as a
-  baseline; future runs can diff against this.
+  60s/file run.
+- `t/fixtures/self-host-probe-long-2026-05-23.log` — snapshot of
+  the 600s/file targeted re-run.
+
+---
+
+## Addendum: long-timeout re-probe (2026-05-23)
+
+Followed up with `script/probe-self-host-long.pl` targeting the 10
+files that hit the 60s timeout, with a 600s/file budget. This
+distinguishes "slow but terminating" from "non-terminating" and
+also surfaces any latent issues hidden behind the 60s cutoff.
+
+### Results
+
+| Size | File | Outcome | Time |
+|---|---|---|---|
+| 23603 | TypeInference.pm | PARSED | 69.8s |
+| 24616 | BNF/Target/C.pm | PARSED | 84.9s |
+| 25735 | FilterComposite.pm | PARSED | 74.5s |
+| 32709 | Precedence.pm | PARSED | 74.2s |
+| 34009 | StructPromotion.pm | PARSED | 143.8s |
+| 50051 | Perl/Target/Perl.pm | PARSED | 289.9s |
+| 75805 | Earley.pm | PARSED | 377.4s |
+| 97111 | Perl/Target/C.pm | **UNDEF** | 394.3s |
+| 117698 | Perl/Target/EmitHelpers.pm | TIMEOUT | 600.2s |
+| 127489 | Perl/Actions.pm | TIMEOUT | 600.2s |
+
+Summary: 7 PARSED, 2 TIMEOUT, **1 UNDEF**. Total wall time: 2709s
+(45 min).
+
+### Finding 1: Earley's superlinear cost is the only barrier for 7 files
+
+Files up to 75KB parse with the 600s budget. The original 60s
+timeouts were "slow but terminating" — these are not pathological
+non-terminating Earley states; they are just expensive parses.
+Concrete benchmark points:
+
+- 23KB → 70s (3.0ms/byte)
+- 50KB → 290s (5.8ms/byte)
+- 75KB → 377s (5.0ms/byte)
+
+The cost grows roughly linearly per byte (~3-6ms/byte), with no
+obvious cliff. Optimization work has clear room.
+
+### Finding 2: `Perl/Target/C.pm` exposes a real grammar gap (heredocs)
+
+`Perl/Target/C.pm` returned UNDEF at 394s. The parse error is:
+
+```
+parse failed at line 1494, column 33
+  --> 1494 | $files{"$slug.c"} = <<~"EOC";
+            |                     ^
+parsing stopped at 67804 of 96999 bytes
+```
+
+The construct is `<<~"EOC"` — Perl's indented heredoc syntax. The
+grammar does not accept heredocs. From
+`docs/architecture/ambiguity-classes.md:262-264`:
+
+> Features whose body semantics are non-local and don't fit BNF
+> rules. These will be handled by a pre-lex transformation layer
+> before the Earley parser sees the input:
+> - **POD blocks** (`=head1 ... =cut`)
+> - **Heredocs** (`<<EOF`)
+
+Heredocs are documented as deferred to a preprocessor hook. The
+doc additionally claims (line 272-274):
+
+> Not exercised in `lib/`, deferred until scope expands beyond
+> self-hosting
+
+That claim is **incorrect** — `Perl/Target/C.pm` uses two heredocs
+(`<<~"EOC"` at line 1494 and `<<~"EOX"` at line 1502) and is part
+of the self-hosting target. The preprocessor hook IS required for
+self-hosting Chalk's own codegen.
+
+This was the only grammar-level surprise the long-timeout probe
+surfaced. The corpus alignment audit
+(`docs/plans/2026-05-22-corpus-alignment-audit.md`) missed it
+because its regex `<<["']?[A-Z_]+` did not match the indented
+form `<<~"EOC"`.
+
+### Finding 3: 117KB and 127KB files still TIMEOUT at 600s
+
+`Perl/Target/EmitHelpers.pm` (117KB) and `Actions.pm` (127KB) still
+hit the 600s ceiling. At the ~5ms/byte rate observed for Earley.pm
+(75KB → 377s), naive extrapolation gives:
+- 117KB → ~600s — right at the ceiling
+- 127KB → ~660s — just over
+
+So these are likely just barely beyond 600s. A 900s or 1200s budget
+might capture them. Without that data we can't yet rule out
+non-terminating behavior, but the curve fit is consistent with
+"slow but terminating."
+
+### Updated recommendations
+
+**High leverage (real bugs):**
+1. **Heredoc handling.** The preprocessor hook layer
+   (`ambiguity-classes.md:256-268`) is now required for
+   self-hosting, not deferred future work. Two heredocs in
+   `Perl/Target/C.pm` block IR construction. Either:
+   - Implement the preprocessor hook as designed (transform
+     heredocs to string literals before Earley sees them), or
+   - Add heredoc support to the grammar directly (fragile, but
+     unblocks self-hosting without infra work).
+2. **Correct `ambiguity-classes.md:272-274`.** The "Not exercised
+   in lib/" claim about heredocs is wrong. Update the doc to
+   reflect that heredocs ARE exercised by `Perl/Target/C.pm`.
+
+**Medium leverage (performance):**
+3. **Re-probe `EmitHelpers.pm` and `Actions.pm` with 1200s budget.**
+   Distinguishes "barely-over-600s" from "genuinely non-terminating."
+4. **Profile Earley on a representative file** (e.g., the 75KB
+   Earley.pm case). The ~5ms/byte cost has room — Aycock + Leo are
+   in place, what's left is probably FilterComposite overhead,
+   semiring evaluation cost, or hash-cons hot-path inefficiency.
+
+**Out of scope:**
+- Strong-form self-hosting still requires Phase 4 codegen migration.

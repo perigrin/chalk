@@ -1,0 +1,33 @@
+Building grammar...
+Grammar built in 4.9s
+Per-file timeout: 600s
+[1/10] PARSED       69.8s   23603  lib/Chalk/Bootstrap/Semiring/TypeInference.pm :: classes=1 methods=22 subs=1
+[2/10] PARSED       84.9s   24616  lib/Chalk/Bootstrap/BNF/Target/C.pm :: classes=1 methods=10 subs=4
+[3/10] PARSED       74.5s   25735  lib/Chalk/Bootstrap/Semiring/FilterComposite.pm :: classes=1 methods=17 subs=2
+[4/10] PARSED       74.2s   32709  lib/Chalk/Bootstrap/Semiring/Precedence.pm :: classes=1 methods=12 subs=1
+[5/10] PARSED      143.8s   34009  lib/Chalk/Bootstrap/Optimizer/StructPromotion.pm :: classes=1 methods=18 subs=0
+[6/10] PARSED      289.9s   50051  lib/Chalk/Bootstrap/Perl/Target/Perl.pm :: classes=1 methods=50 subs=1
+[7/10] PARSED      377.4s   75805  lib/Chalk/Bootstrap/Earley.pm :: classes=1 methods=28 subs=0
+error: parse failed at line 1494, column 33
+  --> <input>:1494:33
+     |
+1492 |             } @methods);
+1493 | 
+1494 |             $files{"$slug.c"} = <<~"EOC";
+     |                                 ^
+1495 |                 /* Generated C source for class $name */
+1496 |                 #include "EXTERN.h"
+     |
+   = expected: !, "(?:[^"\\]|\\.)*", %[a-zA-Z_]\w*, %\$[a-zA-Z_]\w*, '(?:[^'\\]|\\.)*', (?:my|our|state|local|field)\b, -, --, -[efdrwxRWXoOzslpSbcugktTBAMC]\b, 0[bB][01](?:_?[01])*, ...
+   = note: parsing stopped at 67804 of 96999 bytes
+[8/10] UNDEF       394.3s   97111  lib/Chalk/Bootstrap/Perl/Target/C.pm
+[9/10] TIMEOUT     600.2s  117698  lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm
+[10/10] TIMEOUT     600.2s  127489  lib/Chalk/Bootstrap/Perl/Actions.pm
+
+## Summary
+============================================================
+  PARSED    7 / 10
+  TIMEOUT   2 / 10
+  UNDEF     1 / 10
+
+Total wall time: 2709.1s across 10 files
