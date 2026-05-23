@@ -1491,21 +1491,23 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 "/* method: " . $_->name . " */"
             } @methods);
 
-            $files{"$slug.c"} = <<~"EOC";
-                /* Generated C source for class $name */
-                #include "EXTERN.h"
-                #include "perl.h"
-                #include "XSUB.h"
-                $method_decls
-                EOC
+            # Multiline qq{} rather than heredoc form: heredocs (including
+            # the indented <<~ variant) are deferred to a preprocessor
+            # layer that has not yet been built (ambiguity-classes.md),
+            # so they prevent Chalk from self-hosting this file.
+            $files{"$slug.c"} =
+                qq{/* Generated C source for class $name */\n} .
+                qq{#include "EXTERN.h"\n} .
+                qq{#include "perl.h"\n} .
+                qq{#include "XSUB.h"\n} .
+                qq{$method_decls\n};
 
-            $files{"$slug.xs"} = <<~"EOX";
-                /* Generated XS wrapper for class $name */
-                #include "EXTERN.h"
-                #include "perl.h"
-                #include "XSUB.h"
-                MODULE = $name PACKAGE = $name
-                EOX
+            $files{"$slug.xs"} =
+                qq{/* Generated XS wrapper for class $name */\n} .
+                qq{#include "EXTERN.h"\n} .
+                qq{#include "perl.h"\n} .
+                qq{#include "XSUB.h"\n} .
+                qq{MODULE = $name PACKAGE = $name\n};
         }
         return \%files;
     }
