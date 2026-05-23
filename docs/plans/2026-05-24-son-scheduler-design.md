@@ -27,13 +27,20 @@ attribution throughout (Click's *A Simple Reply* defends SoN
 broadly; it does not name Turboshaft or eager pinning) and added
 R9 (Phase 8's premise depends on Chalk having an
 optimization-consuming backend; absent C/LLVM, permanent eager
-pinning may be the right answer). Rationale for each appears in
+pinning may be the right answer). A fourth 2026-05-24 amendment
+settled two questions surfaced by the codegen-test triage
+report (`docs/plans/2026-05-24-codegen-test-triage.md`): Decision
+B was extended to specify that `unless` is parser-normalized to
+`If(!cond)` and recovered codegen-side (same shape as `until`),
+and the Phase 6 / Phase 7 deletion sequencing was tightened so
+the `cfg_state` machinery stays alive for `Target::C` until
+Phase 7 migrates the XS path. Rationale for each appears in
 the relevant section below.
 
 | # | Question | Decision |
 |---|---|---|
 | A | Eager pinning vs nesting-tree GCM | **Eager pinning, transitionally.** Phase 3d already pinned every side-effect node to its control predecessor via `inputs[0]`; the scheduler walks that pinning rather than recomputing placement. This is the *initial* scheduler, not the destination. Cliff Click's broader defense of SoN ([*A Simple Reply*](https://github.com/SeaOfNodes/Simple/blob/main/ASimpleReply.md)) argues that placement freedom is the payoff SoN's structural cost (use-def chains, hash consing, region/phi nodes) was meant to deliver; eager pinning forgoes that payoff. We accept the forfeit for the transition phase. The destination algorithm is TBD pending the literature survey at `docs/research/2026-05-24-scheduler-literature-survey.md`, which names three candidates (Click GCM with anti-dep fix; Graal fixed/floating; Cranelift scoped elaboration); Phase 8's destination choice is among those candidates, subject to R9. Phase 8 (added below) is the swap. |
-| B | Source-form for `for` / `while` / `until` | **Preserve `foreach` vs `while`; normalize `until` to `while !cond`.** `foreach` carries iterator/list annotations on the Loop; `while` does not. `until`'s negation is already baked into the IR (PostfixModifier wraps the condition in `!`), so the distinction is unrecoverable and we accept the loss. C-style `for(init; cond; step)` emits as `for` when the pre-init VarDecl is recognizable; otherwise as `{ init; while(cond) { ...; step } }`. |
+| B | Source-form for `for` / `while` / `until` / `unless` | **Preserve `foreach` vs `while`; normalize `until` to `while !cond`; recover `unless` codegen-side.** `foreach` carries iterator/list annotations on the Loop; `while` does not. `until`'s negation is already baked into the IR (PostfixModifier wraps the condition in `!`), so at the IR level the distinction from `while !cond` is unrecoverable. Same shape applies to `unless` — the parser wraps the condition in `!`, so `unless (X)` and `if (!X)` are IR-indistinguishable. Surface-syntax recovery for `unless` is codegen's responsibility, not the scheduler's; codegen detects the `!`-wrapper on an If's condition and emits `unless EXPR` accordingly. The scheduler remains form-agnostic — it emits `block_open(form='if', node=$if)` either way. C-style `for(init; cond; step)` emits as `for` when the pre-init VarDecl is recognizable; otherwise as `{ init; while(cond) { ...; step } }`. |
 | C | `MOP::Method->body` lifecycle | **Delete entirely**, but only after the scheduler ships and the codegen MOP path is migrated. `body` exists today because codegen needs a statement list; once codegen consumes a schedule, `body` has no callers. Do not keep it as a debug aid — debug tooling belongs in a separate dumper. |
 | D | Order of operations | **Scheduler first, then incremental codegen migration.** Build `Chalk::IR::Scheduler` as a new module that consumes a `MOP::Method`/`MOP::Sub` and produces a typed schedule. Add a second `_generate_from_schedule` path next to `_generate_from_mop` in `Target::Perl`. Once both produce byte-identical output across the golden corpus, switch over and delete `_generate_from_mop` + `body`. |
 | E | Scheduler interface contract | **`Chalk::IR::Scheduler->schedule($method) → Schedule` is the contract, AND the scheduler populates `$node->schedule_data` on every node codegen will later interpret.** Any producer of a valid `Chalk::IR::Schedule` that also populates appropriate `Chalk::Scheduler::ScheduleMeta` subclasses on the nodes it emits is a drop-in replacement. The Schedule itself is minimal `{ kind, node }` items plus structural markers; the ScheduleMeta class tree IS the dialect (see G). The eager-pinning implementation and the eventual destination algorithm (GCM or whatever the survey names) are both behind this interface. This is what makes Phase 8 mechanical. |
@@ -426,14 +433,24 @@ re-derive it.
 
 #### `unless`
 
-The parser does *not* normalize `unless` to `if !cond`. If we
-ever add such normalization in IR, the scheduler doesn't need
-to change — it would emit `if`, and the IR-level normalization
-would have lost the source distinction. Today: the `If` node
-carries a marker (or the condition is wrapped in a `!`
-distinguishable from `unless` by source-position annotation)
-that codegen reads. **Scheduler is form-agnostic; codegen
-makes the surface-syntax choice.**
+The parser *does* normalize `unless` to `if !cond` — the
+`PostfixModifier` action wraps the `unless` condition in `!`
+the same way it does for `until`. At the IR level, `unless (X)`
+and `if (!X)` are indistinguishable: both surface as
+`If(Not(X))`. Surface-form recovery is codegen's responsibility,
+not the scheduler's. The scheduler emits `block_open(form='if',
+node=$if)` unconditionally; codegen-for-EagerPinning, when
+emitting an `if` block, inspects `$if->inputs->[1]` (the
+condition); if that condition is a `Not`-wrapper over an inner
+expression, codegen emits `unless EXPR` over the inner
+expression rather than `if (!EXPR)`. This is the same recovery
+trick the legacy codegen uses today, lifted onto the schedule
+path. **Scheduler is form-agnostic; codegen makes the
+surface-syntax choice.** Same constraint as Decision B's
+treatment of `until`: if a future IR-level pass deliberately
+rewrites the `!`-wrapper (constant-folding, double-negation
+removal, etc.), the source distinction is lost — that is an
+explicit optimization choice, not a scheduler concern.
 
 #### Loop-jump shortcut (`next if`, `last unless`)
 
@@ -981,29 +998,48 @@ test, run on every fixture.
 
 ### Phase 6 — Switchover
 
-**Goal:** Make schedule-driven path the default. Delete:
-1. `_generate_from_mop` (synthesis layer).
-2. `_generate_with_cfg` and `_build_cfg_lookup` and
-   `_cfg_lookup` and `cfg_state()` reader.
-3. `_body_from_graph` (replaced by scheduler chain walk).
-4. `emit_cfg_if`, `emit_cfg_loop`, `emit_cfg_try_catch`,
+**Goal:** Make schedule-driven path the default for the Perl
+target. Delete the Target::Perl synthesis layer and the
+Info-struct types whose only consumer is that layer:
+
+1. `_generate_from_mop` on `Target::Perl` (synthesis layer).
+2. `_body_from_graph` on `Target::Perl` (replaced by scheduler
+   chain walk).
+3. `emit_cfg_if`, `emit_cfg_loop`, `emit_cfg_try_catch`,
    `emit_from_cfg_state`, `_emit_loop_jump`, `emit_cfg_phi_if`
-   (replaced by schedule-walking emit).
-5. `MOP::Method->body`, `MOP::Sub->body`, and the population
+   on `Target::Perl` (replaced by schedule-walking emit).
+4. `MOP::Method->body`, `MOP::Sub->body`, and the population
    code in `Perl::Actions`.
-6. `MethodInfo`, `ClassInfo`, `SubInfo`, `FieldInfo`, `UseInfo`,
+5. `MethodInfo`, `ClassInfo`, `SubInfo`, `FieldInfo`, `UseInfo`,
    `Program`, and the `_emit_program` /
    `_emit_*_decl(InfoStruct)` helpers — replaced by direct
    MOP traversal.
 
+**Explicitly kept alive until Phase 7:**
+`_generate_with_cfg`, `_build_cfg_lookup`, `_cfg_lookup`, the
+`cfg_state()` reader on `Chalk::Bootstrap::Context`, and the
+`Graph->schedule` field. `Target::C` and the XS test suite
+(TestXSHelpers's `parse_file_ir` and the ~10 XS tests that
+route through it) still depend on this machinery; Phase 7 (XS
+/ C target migration, separate plan) is what removes that
+dependency. Deleting these in Phase 6 would either break XS
+tests or force Phase 7 to ship concurrently with the Perl-target
+cutover, which we explicitly chose not to do (Decision D). They
+remain transitional infrastructure until the C-target migration
+lands.
+
 **Test gate:** all existing tests pass. Goldens unchanged. The
 codebase is meaningfully smaller (we expect ~30-40% reduction
-in `Target/Perl.pm`).
+in `Target/Perl.pm`); a second reduction wave lands when Phase 7
+finally retires the transitional `cfg_state` machinery.
 
 **Effort:** 1-2 sessions, mostly deletion + test sweep.
 
 **Risk:** Low if Phase 5 was thorough. The deletes are
-mechanical; misses show as failing tests.
+mechanical; misses show as failing tests. The transitional
+`cfg_state` machinery left alive for Target::C is a known piece
+of carried-over debt (tracked by Phase 7) rather than a
+correctness risk.
 
 ### Phase 7 — XS / C target migration (separate plan)
 
@@ -1016,6 +1052,20 @@ re-deciding the shape.
 **Out of scope for the schedule design.** The schedule is
 *target-agnostic*; what each target does with `{ form => 'while' }`
 is its own concern.
+
+**Phase 7 is the unblock for final `cfg_state` deletion.** Until
+this phase ships, the legacy `cfg_state` reader on
+`Chalk::Bootstrap::Context`, `_build_cfg_lookup` and
+`_cfg_lookup` on `Target::Perl`, `_generate_with_cfg`, and the
+`Graph->schedule` field remain alive as transitional
+infrastructure for `Target::C` and the XS test suite (see
+Phase 6's "Explicitly kept alive" list). Phase 7's deliverable
+includes migrating `Target::C` to consume `Schedule` +
+`ScheduleMeta` the way Phase 5 migrated `Target::Perl`, and the
+TestXSHelpers helper module to a Schedule-driven shape. After
+Phase 7 ships and stabilizes, the transitional `cfg_state`
+machinery can be deleted in a follow-up commit; that commit is
+the formal end of the cfg_state era.
 
 ### Phase 8 — Transition to destination scheduler
 
@@ -1278,9 +1328,12 @@ golden corpus regresses), the rollback is non-trivial.
    in the audit corpus.
 3. Phase 6 deletion is staged: first delete the synthesis
    layer (`_generate_from_mop`, `MethodInfo` etc.) while
-   leaving `body` populated; second delete `body`; third
-   delete the `cfg_state` reader. Each deletion runs the
-   full test suite.
+   leaving `body` populated; second delete `body`. The
+   `cfg_state` reader, `_build_cfg_lookup`, and
+   `_generate_with_cfg` are deliberately *not* deleted in
+   Phase 6 — they remain alive for `Target::C` until Phase 7
+   migrates the XS path. Each Phase 6 deletion sub-step runs
+   the full test suite.
 
 #### R6 — Eager-pinning becomes load-bearing
 
