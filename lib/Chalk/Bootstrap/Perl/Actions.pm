@@ -31,6 +31,8 @@ use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Program;
 
+use Chalk::Scheduler::Roundtrip::Loop;
+
 # Builtin keyword sets used by StatementItem
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
 
@@ -3043,6 +3045,20 @@ class Chalk::Bootstrap::Perl::Actions {
                     $graph->merge($node);
                 }
                 $sa->update_graph($graph);
+
+                # Roundtrip-dialect ScheduleMeta on the Loop node. Phase 1
+                # migration 1: iterator/list are scheduler interpretations
+                # of the IR; they live on the Loop's schedule_data, not on
+                # the Loop's structural fields. The Context annotation
+                # below is kept alive until Phase 5 cutover so the existing
+                # cfg_state-driven codegen still works.
+                $loop->set_schedule_data(
+                    Chalk::Scheduler::Roundtrip::Loop->new(
+                        node     => $loop,
+                        iterator => $iterator,
+                        list     => $list,
+                    )
+                );
 
                 $sa->update_scope($post_loop_scope->with_control($region));
                 $sa->update_annotations({
