@@ -5,7 +5,7 @@ use utf8;
 use experimental 'class';
 no warnings 'experimental::class';
 
-use Scalar::Util qw(blessed);
+use Scalar::Util qw(blessed refaddr);
 use Chalk::IR::Schedule;
 use Chalk::IR::Schedule::Item;
 use Chalk::IR::Node::If;
@@ -102,9 +102,26 @@ class Chalk::IR::Scheduler::EagerPinning {
             push @items, $self->_expand_node($t);
         }
         if (defined $sd->else_stmts) {
-            push @items, Chalk::IR::Schedule::Item->new(kind => 'else');
-            for my $e ($sd->else_stmts->@*) {
-                push @items, $self->_expand_node($e);
+            # Elsif recognition: the else branch is *exactly one* If
+            # node. The two source forms `if(A){} elsif(B){}` and
+            # `if(A){} else { if(B){} }` produce identical IR (a
+            # single-If else_stmts arrayref), and both emit as
+            # `} elsif (B) {` in byte-compat round-trip — they're
+            # semantically equivalent. We do NOT compare $if->region
+            # against the nested If's region because the parser
+            # creates separate Regions for nested Ifs that are never
+            # merged into the outer chain anyway.
+            my @else = $sd->else_stmts->@*;
+            if (@else == 1
+                && blessed($else[0])
+                && $else[0] isa Chalk::IR::Node::If)
+            {
+                $self->_expand_elsif_chain($else[0], \@items);
+            } else {
+                push @items, Chalk::IR::Schedule::Item->new(kind => 'else');
+                for my $e (@else) {
+                    push @items, $self->_expand_node($e);
+                }
             }
         }
         push @items, Chalk::IR::Schedule::Item->new(
@@ -112,5 +129,42 @@ class Chalk::IR::Scheduler::EagerPinning {
             form => 'if',
         );
         return @items;
+    }
+
+    # Helper for _expand_if: walk an elsif chain, pushing markers and
+    # branch items in source order without opening new blocks. The
+    # incoming $if is the chain's next-clause If; we emit its
+    # elsif marker then its then/(else | recurse-elsif) body. The
+    # block_close belongs to the outer block_open, so we don't emit
+    # one here.
+    method _expand_elsif_chain($if, $items) {
+        my $sd = $if->schedule_data;
+        unless (defined $sd && $sd isa Chalk::Scheduler::EagerPinning::If) {
+            push $items->@*, Chalk::IR::Schedule::Item->new(kind => 'stmt', node => $if);
+            return;
+        }
+
+        push $items->@*, Chalk::IR::Schedule::Item->new(
+            kind => 'elsif',
+            node => $if,
+        );
+        for my $t ($sd->then_stmts->@*) {
+            push $items->@*, $self->_expand_node($t);
+        }
+
+        if (defined $sd->else_stmts) {
+            my @else = $sd->else_stmts->@*;
+            if (@else == 1
+                && blessed($else[0])
+                && $else[0] isa Chalk::IR::Node::If)
+            {
+                $self->_expand_elsif_chain($else[0], $items);
+            } else {
+                push $items->@*, Chalk::IR::Schedule::Item->new(kind => 'else');
+                for my $e (@else) {
+                    push $items->@*, $self->_expand_node($e);
+                }
+            }
+        }
     }
 }
