@@ -10,17 +10,25 @@
 (cfg_state-based approach; cfg_state side-channel was deleted in Phase
 3a-infra)
 
-## Decisions (the 4 open questions, settled)
+## Decisions
 
 A summary up front so a reader can stop here if they only need the
-decisions. Rationale for each appears in the relevant section below.
+decisions. Rows A-D are the four open questions from the prep doc.
+Rows E-F were added in the 2026-05-24 amendment, after a follow-up
+conversation surfaced that the scheduler interface itself is a
+load-bearing design decision (E) and that the byte-compat-vs-
+semantic-equivalence distinction needed to be explicit rather than
+implicit (F). Rationale for each appears in the relevant section
+below.
 
 | # | Question | Decision |
 |---|---|---|
-| A | Eager pinning vs nesting-tree GCM | **Eager pinning.** Phase 3d already pinned every side-effect node to its control predecessor via `inputs[0]`. The scheduler walks that pinning; it does not recompute placement. |
+| A | Eager pinning vs nesting-tree GCM | **Eager pinning, transitionally.** Phase 3d already pinned every side-effect node to its control predecessor via `inputs[0]`; the scheduler walks that pinning rather than recomputing placement. This is the *initial* scheduler, not the destination. Cliff Click's critique of eager pinning — that it forfeits the optimization payoff SoN exists to deliver — is valid, and we accept it for the transition phase. The destination algorithm is TBD pending the literature survey at `docs/research/2026-05-24-scheduler-literature-survey.md`; GCM is the current frontrunner. Phase 8 (added below) is the swap. |
 | B | Source-form for `for` / `while` / `until` | **Preserve `foreach` vs `while`; normalize `until` to `while !cond`.** `foreach` carries iterator/list annotations on the Loop; `while` does not. `until`'s negation is already baked into the IR (PostfixModifier wraps the condition in `!`), so the distinction is unrecoverable and we accept the loss. C-style `for(init; cond; step)` emits as `for` when the pre-init VarDecl is recognizable; otherwise as `{ init; while(cond) { ...; step } }`. |
 | C | `MOP::Method->body` lifecycle | **Delete entirely**, but only after the scheduler ships and the codegen MOP path is migrated. `body` exists today because codegen needs a statement list; once codegen consumes a schedule, `body` has no callers. Do not keep it as a debug aid — debug tooling belongs in a separate dumper. |
 | D | Order of operations | **Scheduler first, then incremental codegen migration.** Build `Chalk::IR::Scheduler` as a new module that consumes a `MOP::Method`/`MOP::Sub` and produces a typed schedule. Add a second `_generate_from_schedule` path next to `_generate_from_mop` in `Target::Perl`. Once both produce byte-identical output across the golden corpus, switch over and delete `_generate_from_mop` + `body`. |
+| E | Scheduler interface contract | **`Chalk::IR::Scheduler->schedule($method) → Schedule` is the contract; the algorithm is private.** Any producer of a valid `Chalk::IR::Schedule` is a drop-in replacement. The eager-pinning implementation and the eventual destination algorithm (GCM or whatever the survey names) are both behind this interface. This is what makes Phase 8 mechanical. |
+| F | Test gate: byte-compat vs semantic equivalence | **Byte-compat is the migration gate (Phases 1-6); semantic equivalence is the durable contract.** During cutover from `_generate_from_mop` to `_generate_from_schedule`, byte-identical output against the golden corpus is the regression gate — it lets us swap implementations without arguing about whether output changes were intentional. Post-cutover (and especially across the Phase 8 algorithm swap) the contract becomes semantic equivalence: the same IR shape on round-trip, or the same runtime behavior on a corpus with known outputs. Byte-compat is a migration safety mechanism, not a design goal. |
 
 ## 1. Scope
 
@@ -93,8 +101,11 @@ the prep doc reiterates this. We hold that line:
   liveness pass.
 - **No hoisting / sinking.** Eager pinning means every side-effect
   node stays in the block it was constructed in. Hoisting requires
-  the kind of placement freedom that nesting-tree GCM gives, and we
-  explicitly do not need that for byte-compat-with-source codegen.
+  the kind of placement freedom that GCM (or similar) gives. We do
+  not need that during the transition — byte-compat against the
+  golden corpus is the migration gate, and byte-compat forbids
+  motion. Once the destination scheduler lands in Phase 8, motion
+  becomes available and the eager-pinning constraint dissolves.
 - **No loop normalization, no `until` recovery.** `until` is already
   baked as `while !cond` in IR; the scheduler emits whatever shape
   the IR carries.
@@ -103,20 +114,36 @@ These are not the scheduler's job. They are downstream optimization
 passes that may or may not exist, that operate on the graph before
 or after scheduling.
 
+### Durable goal vs migration gate
+
+A point worth stating plainly because the rest of the document
+talks about goldens a lot: the **durable contract** for codegen is
+*semantic equivalence* — parsing source S and emitting it produces
+either an IR isomorphic to the original parse of S, or an output
+program with the same observable behavior as S on a corpus of
+inputs. The byte-compat goldens enforce a stricter property
+(byte-identical output) during the cutover from `_generate_from_mop`
+to `_generate_from_schedule`; that strictness is a *migration safety
+mechanism*, not the long-term contract. Once Phase 8 swaps the
+scheduler implementation behind the `Schedule` interface, generated
+output is expected to change in trivial ways (variable ordering,
+choice between equivalent surface forms, fewer redundant
+temporaries), and the test gate moves from "bytes match" to
+"semantics match." See Section 7 Phase 8 and Decision F.
+
 ## 2. Algorithm
 
-### Why eager pinning, not GCM (Decision A)
+### Why eager pinning for the *initial* scheduler (Decision A)
 
 The Click GCM algorithm needs a dominator tree because it does
 late-binding placement: nodes float through the graph until they
 hit their pinned dependencies, then they're placed at the latest
-control point that still dominates all their uses.
+control point that still dominates all their uses. That's the
+algorithm we expect to want eventually. The reasons it isn't the
+algorithm we ship first are tactical, not principled.
 
-Chalk doesn't need that. The IR comes out of a structured-source
-parser. Every side-effect node is constructed *inside* a specific
-block, by a specific semantic action, with a specific predecessor.
-Phase 3d's Block control-chain fixup pass already writes that
-predecessor into `inputs[0]`:
+Phase 3d's Block control-chain fixup pass already writes a
+control predecessor into every side-effect node's `inputs[0]`:
 
 - For `VarDecl`, `Return`, `Unwind`, `Call`, `Assign`, `CompoundAssign`,
   `RegexSubst` — `inputs[0]` is the previous side-effect node in the
@@ -125,13 +152,51 @@ predecessor into `inputs[0]`:
   node, set by the same fixup pass via `set_control_in`. The post-
   control of an `If` is `$if->region`; of a `Loop` is `$loop->region`.
 
-This is precisely the "tag each IR node with its control region at
-creation time" that the Feb 23 conversation labeled *Eager Pinning*
-(the Turboshaft / V8 approach). We don't need to recompute it —
-it's the wiring we already have.
+This is the wiring the Feb 23 conversation labeled *Eager Pinning*
+(the Turboshaft / V8 approach). Because Phase 3d already paid for
+it, an eager-pinning scheduler costs us no additional infrastructure
+work to ship.
 
-The scheduler's job, therefore, is **not** to decide where nodes go.
-It is to **walk the existing pinning and emit a linear order**.
+The scheduler's job, in the eager-pinning version, is therefore
+**not** to decide where nodes go. It is to **walk the existing
+pinning and emit a linear order**.
+
+This is transitional. Cliff Click's critique of eager pinning is
+the one most worth quoting: an SSA/SoN form whose nodes are pinned
+at construction forfeits the optimization payoff that motivated
+SoN in the first place. Hoisting, sinking, and motion-based
+redundancy elimination need placement freedom that eager pinning
+denies. We are accepting that critique for the transition window
+because the alternative — building GCM (or whichever destination
+the literature survey names) and the parser-to-codegen byte-compat
+proof at the same time — fails the "one variable at a time"
+discipline that the Chalk MOP migration already taught us. See
+Phase 8 (Section 7) for the swap. The destination algorithm is
+**TBD pending the literature survey** at
+`docs/research/2026-05-24-scheduler-literature-survey.md`; GCM is
+the current frontrunner but the survey may name better candidates.
+
+### The Schedule data type is the swap point
+
+The scheduler's external contract is:
+
+```
+Chalk::IR::Scheduler->schedule($method) → Chalk::IR::Schedule
+```
+
+Anything that produces a valid `Chalk::IR::Schedule` is a drop-in
+replacement. The Schedule's shape (Section 1 "Output contract") is
+the interface; the algorithm behind it is private. Codegen
+consumes `Schedule`; codegen knows nothing about how the schedule
+was produced. This is what makes Phase 8's algorithm swap
+mechanical — replace `lib/Chalk/IR/Scheduler.pm` with a new
+implementation, run the test corpus, done. No changes to codegen,
+no changes to the rest of the IR.
+
+A corollary, called out separately as R6 below: code outside the
+scheduler must not read `inputs[0]` as if it were dominance
+information. It is emit-order information for the eager-pinning
+era. New code that wants dominance must compute it from the graph.
 
 ### Two-phase scheduling
 
@@ -436,8 +501,12 @@ if ($cond) {
 ```
 
 This works for codegen-level correctness but generates `$_phi_*`
-synthetic identifiers, which is bad for byte-compat with hand-
-written source.
+synthetic identifiers. That's both bad for the byte-compat
+migration gate (the goldens were captured from source that doesn't
+have `$_phi_*`) and bad on the merits — synthetic identifiers in
+emitted output make the result harder to read and harder to round-
+trip through the parser. The Phi-slot strategy below addresses
+both concerns simultaneously.
 
 ### Target strategy: Phi → declared-variable slot
 
@@ -466,8 +535,10 @@ emission of the Phi is needed.
 
 Possible only for synthetic Phis introduced by future optimization
 passes. The scheduler falls back to `$_phi_<id>` naming. We never
-hit this in the byte-compat corpus (Phi-slot recovery is the
-common case).
+hit this in the parser-produced IR (Phi-slot recovery is the
+common case); the fallback exists so the Phase 8 destination
+scheduler — which may introduce synthetic Phis via hoisting or
+similar — has a well-defined behavior.
 
 ### Concrete example
 
@@ -562,11 +633,14 @@ This is the right time for that deletion because:
 
 ## 7. Implementation phases
 
-Each phase produces commits independently testable against the
+Phases 1-7 produce commits independently testable against the
 existing byte-compat golden corpus
-(`t/bootstrap/mop/codegen-byte-compat.t`). No phase regresses the
-goldens. The "rough effort" estimates are for one focused session
-at the bench; treat as ranges.
+(`t/bootstrap/mop/codegen-byte-compat.t`); none of those phases
+regresses the goldens. Phase 8 is the destination-scheduler swap,
+which legitimately changes output; its gate is semantic
+equivalence, not byte-compat (Decision F). The "rough effort"
+estimates are for one focused session at the bench; treat as
+ranges.
 
 ### Phase 1 — Annotation cleanup (preparation, no scheduler yet)
 
@@ -686,7 +760,11 @@ the new path against the same goldens.
 **Test gate:** new path produces byte-identical output against
 the byte-compat golden corpus. Add a parallel test
 `t/bootstrap/mop/codegen-byte-compat-schedule.t` that runs the
-same comparison via the schedule path.
+same comparison via the schedule path. Byte-compat here is the
+*migration safety mechanism* — it lets us swap one implementation
+for another without arguing about whether output differences are
+intentional. It is not the destination contract (see Decision F
+and Phase 8).
 
 **Effort:** 2-3 sessions.
 
@@ -732,16 +810,84 @@ re-deciding the shape.
 *target-agnostic*; what each target does with `{ form => 'while' }`
 is its own concern.
 
+### Phase 8 — Transition to destination scheduler
+
+**Goal:** Replace the eager-pinning implementation of
+`Chalk::IR::Scheduler` with the destination algorithm chosen by the
+literature survey. This is the phase where Chalk starts being a
+real optimizing compiler — the eager-pinning era is a transitional
+plateau, not a stopping point.
+
+**Prerequisite:** `docs/research/2026-05-24-scheduler-literature-survey.md`
+has landed and named a destination algorithm (GCM is the current
+frontrunner; the survey may surface better candidates). Without
+the survey's conclusion this phase has no concrete algorithm to
+implement.
+
+**Concrete moves:**
+1. Replace the body of `Chalk::IR::Scheduler->schedule($method)`
+   with the destination algorithm. The class's public interface
+   does not change.
+2. If the destination needs auxiliary data structures (dominator
+   tree, loop nesting tree, etc.), build them inside the
+   scheduler — they are private to the implementation.
+3. Update or delete the `inputs[0]` "control predecessor" wiring
+   from Phase 3d. Eager pinning made `inputs[0]` load-bearing as
+   emit-order; the destination algorithm decides emit-order from
+   the graph and does not need it. The Phase 3d data may still
+   be useful as *hints* (initial placement candidates) but must
+   not be a correctness dependency.
+
+**Test gate:** *semantic equivalence*, not byte-compat. The
+generated output is expected to differ from the eager-pinning
+version (different variable ordering, fewer redundant temporaries,
+hoisted invariants — whatever the destination algorithm produces
+that the eager version did not). The test corpus checks one of:
+
+- **Round-trip IR equivalence.** Parse source S to IR_1. Emit IR_1
+  to source S'. Parse S' to IR_2. IR_1 and IR_2 are isomorphic
+  modulo node IDs and ordering of commutative inputs.
+- **Behavioral equivalence.** Run source S and emitted S' against
+  a corpus of inputs; observable outputs match.
+
+The byte-compat golden tests from Phases 5-6 are *retired* in this
+phase: the goldens are recaptured against the destination
+scheduler's output and become the new baseline for regression, but
+they no longer prove anything about the cutover — that proof is
+the responsibility of the semantic-equivalence tests added here.
+
+**Effort:** unknown until the survey lands. Order-of-magnitude
+guess: 3-5 sessions for the algorithm implementation plus 2-3 for
+the test infrastructure (round-trip equivalence checker is the new
+piece of code). The phase is *provisional* on the survey.
+
+**Risk:** This is where the real correctness work happens. R6 and
+R7 (Section 9) cover the specific failure modes — load-bearing
+`inputs[0]` reads outside the scheduler, and the survey naming
+a different destination than GCM.
+
 ## 8. Test strategy
 
-### Primary regression gate: byte-compat golden corpus
+The test strategy has two regimes. Phases 1-6 use byte-compat
+goldens as the migration safety mechanism — we are swapping one
+implementation for another, and byte-identical output is the
+sharpest way to detect that the swap is behavior-preserving.
+Phase 8 (the destination-scheduler swap) abandons byte-compat in
+favor of semantic equivalence, because the whole point of Phase
+8 is that the output *will* legitimately change. The two regimes
+correspond to Decision F: byte-compat is the migration gate;
+semantic equivalence is the durable contract.
+
+### Primary regression gate during migration: byte-compat golden corpus
 
 `t/bootstrap/mop/codegen-byte-compat.t` already exists and runs
 `generate($mop)` against ~N captured `*.pl.golden` files in
-`t/fixtures/codegen-goldens/`. The schedule-driven path **must
-not change golden output**. Any byte-level difference is either
-a scheduler bug or an intentional change (in which case the
-golden gets updated explicitly).
+`t/fixtures/codegen-goldens/`. Through Phase 6, the schedule-driven
+path **must not change golden output**. Any byte-level difference
+is either a scheduler bug or an intentional change (in which case
+the golden gets updated explicitly). This is migration safety,
+not a long-term contract on emit shape — see Phase 8 for what
+replaces it.
 
 **Side-by-side comparison test (Phase 5):** new test file
 `t/bootstrap/mop/codegen-byte-compat-schedule.t` runs the same
@@ -791,8 +937,12 @@ sharp bound — just a sanity check.
 We will NOT lock in the specific Phi-slot naming convention or
 the for-style recognition as exhaustive tests. Those are
 implementation details that future work may revise. We test
-*outputs* (byte-compat goldens) and *structural invariants*
-(open/close balance, chain coverage), not internal hooks.
+*outputs* (byte-compat goldens during migration; semantic
+equivalence after Phase 8) and *structural invariants*
+(open/close balance, chain coverage), not internal hooks. The
+structural invariants survive the Phase 8 algorithm swap — a
+correctly-emitted schedule has balanced open/close brackets
+regardless of which algorithm produced it.
 
 ## 9. Risks and prerequisites
 
@@ -890,6 +1040,45 @@ golden corpus regresses), the rollback is non-trivial.
    delete the `cfg_state` reader. Each deletion runs the
    full test suite.
 
+#### R6 — Eager-pinning becomes load-bearing
+
+The Phase 3d wiring writes a control predecessor into `inputs[0]`.
+The eager-pinning scheduler reads it as emit order. If other code
+(codegen helpers, future optimization passes, IR walkers) starts
+reading `inputs[0]` as if it conveyed *dominance* information
+rather than emit order, the Phase 8 algorithm swap becomes
+proportionally harder: every external reader must be audited and
+either retired or re-pointed at a real dominator-tree query.
+
+**Mitigation:** discipline. The interface contract is that
+`inputs[0]` on a side-effect node carries the chain predecessor
+the parser put there; it is consumed by the scheduler to determine
+emit order; nothing else reads it. New code that wants dominance
+information must compute it from the graph, not read it from
+`inputs[0]`. Reviewers of code touching `inputs[0]` outside
+`lib/Chalk/IR/Scheduler.pm` should check this on intake. If
+discipline fails, Phase 8 grows a cleanup sub-phase to undo the
+violations.
+
+#### R7 — Survey may invalidate GCM as destination
+
+The pending literature survey
+(`docs/research/2026-05-24-scheduler-literature-survey.md`) may
+name a destination algorithm other than GCM, or it may surface
+implementation cautions about GCM (e.g., Click's own follow-on
+papers, or modern work on global code motion that supersedes the
+1995 formulation). The eager-pinning interface is algorithm-
+agnostic, so this does not block Phases 1-7; it does mean Phase
+8's concrete plan is *provisional* until the survey lands.
+
+**Mitigation:** Decision E (the `Schedule` interface as swap
+point) is the structural mitigation — Phase 8's algorithm choice
+is a private implementation detail behind a stable interface.
+Phase 8's effort and test strategy are written generically over
+"the destination algorithm" rather than over GCM specifically,
+so the survey's conclusion plugs in without rewriting Phase 8's
+scope.
+
 ### Rollback path
 
 If the schedule path produces wrong output for a non-golden
@@ -897,11 +1086,16 @@ fixture discovered late, the rollback during Phase 5 is:
 toggle the test/build flag back to `_generate_from_mop`.
 After Phase 6 deletion, the rollback is the prior commit on
 the branch. Phase 6 should be a *single* commit so revert is
-clean.
+clean. The Phase 8 rollback is symmetric — the destination
+scheduler lives behind the same `Schedule` interface as the
+eager-pinning version, so reverting Phase 8 is reverting one
+file (`lib/Chalk/IR/Scheduler.pm`) plus its test-corpus updates.
 
 ## Cross-references
 
 - Prep doc: `docs/plans/2026-05-23-son-scheduler-prep.md`
+- Pending literature survey (destination algorithm input for
+  Phase 8): `docs/research/2026-05-24-scheduler-literature-survey.md`
 - Original CFG design (algorithm sketch lines 165-188):
   `docs/plans/2026-02-23-sea-of-nodes-cfg-design.md`
 - Stale eager-pinning task plan (superseded):
@@ -924,19 +1118,23 @@ clean.
 The prep doc named four external sources. We did not read three of
 them in this session because the in-tree design (Feb 23 cfg-design
 lines 165-188) already specified the algorithm at the abstraction
-level we needed, and the eager-pinning vs GCM decision (A) was
-the one place a literature check would have mattered. The Feb 23
-conversation already settled that. The unread sources remain
-relevant for the implementation session:
+level needed for the *initial* eager-pinning scheduler. The unread
+sources remain relevant — most of them are direct inputs to the
+Phase 8 destination-scheduler decision, and the pending literature
+survey (`docs/research/2026-05-24-scheduler-literature-survey.md`)
+is where they get properly digested:
 
-- **Click 1995 paper** — vocabulary for the implementation PR
-  descriptions and any future GCM discussion.
+- **Click 1995 paper** — primary reference for GCM, which is the
+  current frontrunner for the Phase 8 destination algorithm. Will
+  be consumed by the literature survey, not this design doc.
 - **Simple SoN repo, Chapters 5 and 7** — concrete code patterns
   for if/else and loop scheduling; worth a skim before writing
-  Phase 4.
+  Phase 4 of the eager-pinning scheduler.
 - **Turboshaft / V8 paper** — confirms the eager-pinning approach
-  in a production compiler; useful as a citation, not a
-  prerequisite.
+  in a production compiler; useful as a citation for the
+  transitional design, and as a data point in the survey on
+  whether eager-pinning-as-permanent is defensible.
 - **Demange & Retana** — theoretical foundation for structured
   control flow in SoN; consult if a specific question arises about
-  the semantics of `Region` or `Phi`.
+  the semantics of `Region` or `Phi`. Relevant to Phase 8's
+  semantic-equivalence checker design.
