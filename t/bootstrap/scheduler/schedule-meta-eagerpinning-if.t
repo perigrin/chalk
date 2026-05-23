@@ -29,4 +29,27 @@ my $last = Chalk::Scheduler::EagerPinning::If->new(
 );
 is($last->is_loop_jump, 'last', 'last-if preserves the keyword');
 
+# Branch-body fields default empty / undef.
+is_deeply($plain->then_stmts, [], 'then_stmts defaults []');
+is($plain->else_stmts, undef, 'else_stmts defaults undef (distinguishes "no else" from "empty else")');
+
+# Populated then/else.
+my $a = Chalk::IR::Node->new(id => 'a');
+my $b = Chalk::IR::Node->new(id => 'b');
+my $with_arms = Chalk::Scheduler::EagerPinning::If->new(
+    node       => $node,
+    then_stmts => [$a],
+    else_stmts => [$b],
+);
+is_deeply($with_arms->then_stmts, [$a], 'then_stmts preserved');
+is_deeply($with_arms->else_stmts, [$b], 'else_stmts preserved');
+
+# If with then but no else.
+my $no_else = Chalk::Scheduler::EagerPinning::If->new(
+    node       => $node,
+    then_stmts => [$a],
+);
+is_deeply($no_else->then_stmts, [$a], 'then-only: then_stmts preserved');
+is($no_else->else_stmts, undef, 'then-only: else_stmts undef');
+
 done_testing();

@@ -493,6 +493,19 @@ class Chalk::Bootstrap::Perl::Actions {
                             );
                         } else {
                             $sa->update_annotations({ then_stmts => [$body_expr] });
+                            # Phase 1 migration 5: refine the If's
+                            # schedule_data with the postfix body
+                            # expression in then_stmts. The PostfixModifier
+                            # action initialized schedule_data with
+                            # empty then_stmts; we override now that the
+                            # body is known.
+                            my $if_node = $ann->{if_node};
+                            $if_node->set_schedule_data(
+                                Chalk::Scheduler::EagerPinning::If->new(
+                                    node       => $if_node,
+                                    then_stmts => [$body_expr],
+                                )
+                            );
                         }
                     }
                 }
@@ -2445,6 +2458,18 @@ class Chalk::Bootstrap::Perl::Actions {
                     $graph->merge($region);
                     $sa->update_graph($graph);
 
+                    # Phase 1 mig 5: mirror the empty-branch info onto
+                    # the If node's schedule_data. ExpressionStatement
+                    # will override this with the postfix body expr if
+                    # the postfix-if has a (non-loop-jump) body.
+                    $if_node->set_schedule_data(
+                        Chalk::Scheduler::EagerPinning::If->new(
+                            node       => $if_node,
+                            then_stmts => [],
+                            else_stmts => undef,
+                        )
+                    );
+
                     $sa->update_scope($scope->with_control($region));
                     $sa->update_annotations({
                         then_stmts => [],
@@ -2598,6 +2623,17 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 $sa->update_graph($graph);
 
+                # Phase 1 mig 5: populate the If's schedule_data with
+                # the then/else statement lists so the scheduler can
+                # find them without consulting Context annotations.
+                $if_node->set_schedule_data(
+                    Chalk::Scheduler::EagerPinning::If->new(
+                        node       => $if_node,
+                        then_stmts => $then_body,
+                        else_stmts => $else_body,
+                    )
+                );
+
                 $sa->update_scope($merged_scope->with_control($region));
                 $sa->update_annotations({
                     then_stmts => $then_body,
@@ -2673,6 +2709,17 @@ class Chalk::Bootstrap::Perl::Actions {
                     controls => [$true_proj, $false_proj],
                 );
                 $if_node->set_region($region);
+
+                # Phase 1 mig 5: same as IfStatement — record branch
+                # bodies on the If's schedule_data.
+                $if_node->set_schedule_data(
+                    Chalk::Scheduler::EagerPinning::If->new(
+                        node       => $if_node,
+                        then_stmts => $then_body,
+                        else_stmts => $else_body,
+                    )
+                );
+
                 $sa->update_scope($scope->with_control($region));
                 $sa->update_annotations({
                     then_stmts => $then_body,
