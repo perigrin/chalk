@@ -2927,6 +2927,21 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         $sa->update_graph($graph);
 
+        # Phase 1 migration 3: tag the Loop with C-style for-shape
+        # recognition via schedule_data. The is_for_style flag tells the
+        # scheduler to emit `for (init; cond; step)` instead of
+        # `{ init; while (cond) { ...; step } }`. for_init and for_step
+        # are still in the chain / body too; the scheduler will fold them
+        # into the for-block when it recognizes the flag.
+        $loop->set_schedule_data(
+            Chalk::Scheduler::Roundtrip::Loop->new(
+                node         => $loop,
+                is_for_style => true,
+                for_init     => $init,
+                for_step     => $incr,
+            )
+        );
+
         $sa->update_scope($post_loop_scope->with_control($region));
         $sa->update_annotations({
             body_stmts => \@effective_body,
