@@ -124,38 +124,80 @@ class Chalk::IR::Graph {
             return false;
         };
 
+        # Iterative post-order DFS. Each stack frame is
+        # [$node, $emit_phase]:
+        #   $emit_phase = 0 — first visit; push children, then re-push
+        #                     self with phase=1 so we finalize after
+        #                     descendants complete (post-order).
+        #   $emit_phase = 1 — finalize: move from temp to visited,
+        #                     append to @order.
+        # The earlier recursive implementation hit Perl's deep-recursion
+        # warning at 100 frames on graphs produced by ~20KB+ source
+        # files; this iterative form has no recursion depth bound (only
+        # heap-bounded stack growth).
         my @order;
         my %visited;
         my %temp;
-        my $visit;
-        $visit = sub ($n) {
-            return unless blessed($n);
-            return if $visited{$n->id()};
-            return if $temp{$n->id()};
-            $temp{$n->id()} = 1;
+        my @stack;
+        for my $root (values %cache) {
+            push @stack, [$root, 0];
+        }
+
+        # Helper: collect the child nodes of $n in the order the
+        # recursive version would have visited them — inputs first
+        # (with array-of-arrayrefs flattening), then cache-filtered
+        # consumers. The returned list is what we push on the stack
+        # in REVERSE so pop()-LIFO yields the original left-to-right
+        # visit order.
+        my $children_of = sub ($n) {
+            my @children;
             for my $input ($n->inputs()->@*) {
                 if (ref($input) eq 'ARRAY') {
                     for my $el ($input->@*) {
-                        $visit->($el) if defined $el && blessed($el);
+                        push @children, $el
+                            if defined $el && blessed($el);
                     }
                     next;
                 }
-                next unless defined $input && blessed($input);
-                $visit->($input);
+                push @children, $input
+                    if defined $input && blessed($input);
             }
             if ($n->can('consumers')) {
                 for my $c ($n->consumers()->@*) {
-                    next unless $in_cache->($c);
-                    $visit->($c);
+                    push @children, $c if $in_cache->($c);
                 }
             }
-            delete $temp{$n->id()};
-            $visited{$n->id()} = 1;
-            push @order, $n;
+            return @children;
         };
 
-        for my $node (values %cache) {
-            $visit->($node);
+        while (@stack) {
+            my $frame = pop @stack;
+            my ($n, $phase) = $frame->@*;
+            next unless blessed($n);
+
+            if ($phase == 1) {
+                # Finalize: post-order emit.
+                delete $temp{$n->id()};
+                $visited{$n->id()} = 1;
+                push @order, $n;
+                next;
+            }
+
+            # phase == 0: pre-visit.
+            next if $visited{$n->id()};
+            next if $temp{$n->id()};
+            $temp{$n->id()} = 1;
+
+            # Push our finalize-frame first so it's processed AFTER
+            # all children — LIFO stack means children pop first.
+            push @stack, [$n, 1];
+
+            # Push children in reverse so leftmost pops first,
+            # matching the recursive visitor's left-to-right order.
+            my @children = $children_of->($n);
+            for my $c (reverse @children) {
+                push @stack, [$c, 0];
+            }
         }
 
         return \@order;
