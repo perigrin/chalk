@@ -32,6 +32,7 @@ use Chalk::IR::NodeFactory;
 use Chalk::IR::Program;
 
 use Chalk::Scheduler::Roundtrip::Loop;
+use Chalk::Scheduler::Roundtrip::If;
 
 # Builtin keyword sets used by StatementItem
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
@@ -477,6 +478,18 @@ class Chalk::Bootstrap::Perl::Actions {
                                 && ($body_expr->value() eq 'next'
                                     || $body_expr->value() eq 'last')) {
                             $sa->update_annotations({ loop_jump => $body_expr->value() });
+                            # Phase 1 migration 2: mirror the loop_jump
+                            # annotation onto the If's schedule_data so
+                            # the scheduler can detect the shortcut from
+                            # the IR alone. Context annotation kept alive
+                            # until Phase 5 cutover.
+                            my $if_node = $ann->{if_node};
+                            $if_node->set_schedule_data(
+                                Chalk::Scheduler::Roundtrip::If->new(
+                                    node         => $if_node,
+                                    is_loop_jump => $body_expr->value(),
+                                )
+                            );
                         } else {
                             $sa->update_annotations({ then_stmts => [$body_expr] });
                         }
