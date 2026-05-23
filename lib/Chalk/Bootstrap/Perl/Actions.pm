@@ -465,6 +465,15 @@ class Chalk::Bootstrap::Perl::Actions {
                         }
                         $sa->update_scope($new_scope) if defined $new_scope;
                         $sa->update_annotations({ body_stmts => [$body_expr] });
+                        # Phase 1 mig 6: refine the Loop's schedule_data
+                        # with the postfix body expression. PostfixModifier
+                        # initialized schedule_data with empty body_stmts.
+                        $loop->set_schedule_data(
+                            Chalk::Scheduler::EagerPinning::Loop->new(
+                                node       => $loop,
+                                body_stmts => [$body_expr],
+                            )
+                        );
                     } elsif (defined $ann->{if_node}) {
                         # Detect loop jump keywords (next/last) as body:
                         # set loop_jump marker instead of then_stmts so
@@ -2407,6 +2416,16 @@ class Chalk::Bootstrap::Perl::Actions {
                     $graph->merge($region);
                     $sa->update_graph($graph);
 
+                    # Phase 1 mig 6: seed the Loop's schedule_data with
+                    # empty body_stmts; ExpressionStatement will refine
+                    # with the body expr.
+                    $loop->set_schedule_data(
+                        Chalk::Scheduler::EagerPinning::Loop->new(
+                            node       => $loop,
+                            body_stmts => [],
+                        )
+                    );
+
                     $sa->update_scope($scope->with_control($region));
                     $sa->update_annotations({
                         loop       => $loop,
@@ -2846,6 +2865,16 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 $sa->update_graph($graph);
 
+                # Phase 1 mig 6: record the body statements on the
+                # Loop's schedule_data so the scheduler can find them
+                # without consulting Context annotations.
+                $loop->set_schedule_data(
+                    Chalk::Scheduler::EagerPinning::Loop->new(
+                        node       => $loop,
+                        body_stmts => $body,
+                    )
+                );
+
                 $sa->update_scope($post_loop_scope->with_control($region));
                 $sa->update_annotations({
                     body_stmts => $body,
@@ -2988,18 +3017,18 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         $sa->update_graph($graph);
 
-        # Phase 1 migration 3: tag the Loop with C-style for-shape
-        # recognition via schedule_data. The is_for_style flag tells the
-        # scheduler to emit `for (init; cond; step)` instead of
-        # `{ init; while (cond) { ...; step } }`. for_init and for_step
-        # are still in the chain / body too; the scheduler will fold them
-        # into the for-block when it recognizes the flag.
+        # Phase 1 migration 3+6: tag the Loop with C-style for-shape
+        # recognition + body statements via schedule_data. The
+        # is_for_style flag tells the scheduler to emit
+        # `for (init; cond; step)` instead of
+        # `{ init; while (cond) { ...; step } }`.
         $loop->set_schedule_data(
             Chalk::Scheduler::EagerPinning::Loop->new(
                 node         => $loop,
                 is_for_style => true,
                 for_init     => $init,
                 for_step     => $incr,
+                body_stmts   => \@effective_body,
             )
         );
 
@@ -3136,16 +3165,17 @@ class Chalk::Bootstrap::Perl::Actions {
                 $sa->update_graph($graph);
 
                 # EagerPinning-dialect ScheduleMeta on the Loop node. Phase 1
-                # migration 1: iterator/list are scheduler interpretations
-                # of the IR; they live on the Loop's schedule_data, not on
-                # the Loop's structural fields. The Context annotation
-                # below is kept alive until Phase 5 cutover so the existing
-                # cfg_state-driven codegen still works.
+                # migrations 1+6: iterator/list and body_stmts are scheduler
+                # interpretations of the IR; they live on the Loop's
+                # schedule_data, not on structural fields. The Context
+                # annotations below are kept alive until Phase 5 cutover so
+                # the existing cfg_state-driven codegen still works.
                 $loop->set_schedule_data(
                     Chalk::Scheduler::EagerPinning::Loop->new(
-                        node     => $loop,
-                        iterator => $iterator,
-                        list     => $list,
+                        node       => $loop,
+                        iterator   => $iterator,
+                        list       => $list,
+                        body_stmts => $body,
                     )
                 );
 

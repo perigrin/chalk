@@ -45,4 +45,14 @@ is($cfor->is_for_style, true, 'C-style for: is_for_style true');
 is($cfor->for_init, $init, 'C-style for: for_init preserved');
 is($cfor->for_step, $step, 'C-style for: for_step preserved');
 
+# Body statements default to empty arrayref.
+is_deeply($bare->body_stmts, [], 'body_stmts defaults []');
+
+my $b1 = Chalk::IR::Node->new(id => 'b1');
+my $with_body = Chalk::Scheduler::EagerPinning::Loop->new(
+    node       => $node,
+    body_stmts => [$b1],
+);
+is_deeply($with_body->body_stmts, [$b1], 'body_stmts preserved');
+
 done_testing();
