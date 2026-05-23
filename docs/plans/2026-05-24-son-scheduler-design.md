@@ -22,12 +22,17 @@ implicit (F). Row G was added in a second 2026-05-24 amendment after
 a follow-up conversation about where scheduler interpretations of IR
 nodes should live; that conversation also refined E to clarify that
 the contract includes ScheduleMeta population, not just Schedule
-production. Rationale for each appears in the relevant section
-below.
+production. A third 2026-05-24 amendment softened the Click
+attribution throughout (Click's *A Simple Reply* defends SoN
+broadly; it does not name Turboshaft or eager pinning) and added
+R9 (Phase 8's premise depends on Chalk having an
+optimization-consuming backend; absent C/LLVM, permanent eager
+pinning may be the right answer). Rationale for each appears in
+the relevant section below.
 
 | # | Question | Decision |
 |---|---|---|
-| A | Eager pinning vs nesting-tree GCM | **Eager pinning, transitionally.** Phase 3d already pinned every side-effect node to its control predecessor via `inputs[0]`; the scheduler walks that pinning rather than recomputing placement. This is the *initial* scheduler, not the destination. Cliff Click's critique of eager pinning — that it forfeits the optimization payoff SoN exists to deliver — is valid, and we accept it for the transition phase. The destination algorithm is TBD pending the literature survey at `docs/research/2026-05-24-scheduler-literature-survey.md`; GCM is the current frontrunner. Phase 8 (added below) is the swap. |
+| A | Eager pinning vs nesting-tree GCM | **Eager pinning, transitionally.** Phase 3d already pinned every side-effect node to its control predecessor via `inputs[0]`; the scheduler walks that pinning rather than recomputing placement. This is the *initial* scheduler, not the destination. Cliff Click's broader defense of SoN ([*A Simple Reply*](https://github.com/SeaOfNodes/Simple/blob/main/ASimpleReply.md)) argues that placement freedom is the payoff SoN's structural cost (use-def chains, hash consing, region/phi nodes) was meant to deliver; eager pinning forgoes that payoff. We accept the forfeit for the transition phase. The destination algorithm is TBD pending the literature survey at `docs/research/2026-05-24-scheduler-literature-survey.md`, which names three candidates (Click GCM with anti-dep fix; Graal fixed/floating; Cranelift scoped elaboration); Phase 8's destination choice is among those candidates, subject to R9. Phase 8 (added below) is the swap. |
 | B | Source-form for `for` / `while` / `until` | **Preserve `foreach` vs `while`; normalize `until` to `while !cond`.** `foreach` carries iterator/list annotations on the Loop; `while` does not. `until`'s negation is already baked into the IR (PostfixModifier wraps the condition in `!`), so the distinction is unrecoverable and we accept the loss. C-style `for(init; cond; step)` emits as `for` when the pre-init VarDecl is recognizable; otherwise as `{ init; while(cond) { ...; step } }`. |
 | C | `MOP::Method->body` lifecycle | **Delete entirely**, but only after the scheduler ships and the codegen MOP path is migrated. `body` exists today because codegen needs a statement list; once codegen consumes a schedule, `body` has no callers. Do not keep it as a debug aid — debug tooling belongs in a separate dumper. |
 | D | Order of operations | **Scheduler first, then incremental codegen migration.** Build `Chalk::IR::Scheduler` as a new module that consumes a `MOP::Method`/`MOP::Sub` and produces a typed schedule. Add a second `_generate_from_schedule` path next to `_generate_from_mop` in `Target::Perl`. Once both produce byte-identical output across the golden corpus, switch over and delete `_generate_from_mop` + `body`. |
@@ -171,20 +176,31 @@ The scheduler's job, in the eager-pinning version, is therefore
 **not** to decide where nodes go. It is to **walk the existing
 pinning and emit a linear order**.
 
-This is transitional. Cliff Click's critique of eager pinning is
-the one most worth quoting: an SSA/SoN form whose nodes are pinned
-at construction forfeits the optimization payoff that motivated
-SoN in the first place. Hoisting, sinking, and motion-based
+This is transitional. Cliff Click's broader defense of SoN
+([*A Simple Reply*](https://github.com/SeaOfNodes/Simple/blob/main/ASimpleReply.md))
+argues that placement freedom is the payoff SoN's structural cost
+(use-def chains, hash consing, region/phi nodes) was meant to
+deliver: an SSA/SoN form whose nodes are pinned at construction
+forfeits exactly that. Hoisting, sinking, and motion-based
 redundancy elimination need placement freedom that eager pinning
-denies. We are accepting that critique for the transition window
-because the alternative — building GCM (or whichever destination
-the literature survey names) and the parser-to-codegen byte-compat
-proof at the same time — fails the "one variable at a time"
-discipline that the Chalk MOP migration already taught us. See
-Phase 8 (Section 7) for the swap. The destination algorithm is
-**TBD pending the literature survey** at
-`docs/research/2026-05-24-scheduler-literature-survey.md`; GCM is
-the current frontrunner but the survey may name better candidates.
+denies. (Note: *A Simple Reply* is a defense of SoN against V8's
+*Land ahoy: leaving the Sea of Nodes* postmortem; it does not
+name Turboshaft or eager pinning specifically. The architectural
+point — that eager pinning forfeits SoN's reason to exist — is
+ours, framed against Click's defense.) We accept the forfeit for
+the transition window because the alternative — building GCM (or
+whichever destination the literature survey names) and the
+parser-to-codegen byte-compat proof at the same time — fails the
+"one variable at a time" discipline that the Chalk MOP migration
+already taught us. See Phase 8 (Section 7) for the swap, and R9
+(Section 9) for the open question of whether Phase 8 is worth
+doing at all if Chalk's optimization-consuming backends (C/LLVM)
+remain hypothetical. The destination algorithm is **TBD pending
+the literature survey** at
+`docs/research/2026-05-24-scheduler-literature-survey.md`, which
+names three candidates (Click GCM with anti-dep fix; Graal
+fixed/floating; Cranelift scoped elaboration); GCM is the current
+frontrunner but the survey may name better candidates.
 
 ### The Schedule data type is the swap point
 
@@ -1331,6 +1347,36 @@ need to share a concept (e.g., both have a notion of "this Loop's
 iterator variable"), the right move is to factor a shared mixin
 or role, not to silently union the field sets.
 
+#### R9 — Phase 8's premise may not hold
+
+The transition from eager pinning to a destination scheduler
+(Phase 8) is justified by the optimization payoff that placement
+freedom enables. That payoff requires *consumers* of the schedule
+that benefit from motion — fast machine code generation through
+C/LLVM backends, primarily. The Perl backend, by its
+round-trip-emit goal, actively *opposes* placement freedom:
+byte-compat goldens forbid hoisting and sinking, and even after
+the byte-compat gate is retired (Decision F), round-trip
+semantic equivalence still implies that the emitter must not
+rearrange observable side-effect order. If Chalk's C/LLVM
+backends remain hypothetical longer than expected, Phase 8 may
+not be worth doing at all — permanent eager pinning would be the
+right answer, which would invalidate all three destination
+candidates the literature survey named (Click GCM, Graal
+fixed/floating, Cranelift scoped elaboration) by removing the
+consumer that would benefit from their placement freedom.
+
+**Mitigation:** defer the Phase 8 destination-algorithm decision
+until at least one optimization-consuming backend is real enough
+to define what motion it would benefit from. Until then, treat
+Phase 8 as *provisional* — the architectural scaffolding (the
+`Schedule` interface as swap point, the ScheduleMeta gating
+discipline) stands on its own merits as the cutover safety net
+for Phases 1-6, regardless of whether Phase 8 ever fires. The
+literature survey's three named candidates and Phase 8's text in
+Section 7 should be read as "what we would do if the premise
+held," not as a committed plan.
+
 ### Rollback path
 
 If the schedule path produces wrong output for a non-golden
@@ -1488,8 +1534,14 @@ the boundary with a useful message, not at a deep call site with
 ## Cross-references
 
 - Prep doc: `docs/plans/2026-05-23-son-scheduler-prep.md`
-- Pending literature survey (destination algorithm input for
-  Phase 8): `docs/research/2026-05-24-scheduler-literature-survey.md`
+- Literature survey (destination algorithm input for Phase 8;
+  named three candidates — Click GCM with anti-dep fix, Graal
+  fixed/floating, Cranelift scoped elaboration — and surfaced
+  R9): `docs/research/2026-05-24-scheduler-literature-survey.md`
+- Cliff Click, *A Simple Reply* (defense of SoN against V8's
+  *Land ahoy* postmortem; cited in Decision A and Section 2 for
+  the placement-freedom-is-the-payoff argument):
+  https://github.com/SeaOfNodes/Simple/blob/main/ASimpleReply.md
 - Original CFG design (algorithm sketch lines 165-188):
   `docs/plans/2026-02-23-sea-of-nodes-cfg-design.md`
 - Stale eager-pinning task plan (superseded):
