@@ -70,18 +70,22 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     # Polymorphic entry point. Accepts either:
-    #   - Chalk::IR::Program: emits a single source-string (legacy path).
+    #   - Chalk::IR::Program: emits a single source-string (legacy path,
+    #     kept alive transitionally for Target::C-via-Phase-7).
     #   - Chalk::MOP: emits a HashRef[Str] keyed by class-or-module name
-    #     (Phase 4 MOP-driven path).
+    #     (production path, scheduler-driven as of Phase 5).
     #
-    # The MOP path uses the existing emit helpers per class, fed by the
-    # class's methods and their per-method graphs. Initial implementation
-    # walks the MOP and synthesizes ClassInfo-shaped wrappers so the
-    # existing _emit_class_decl can run unchanged. Subsequent Phase 4
-    # commits migrate emit helpers to read MOP directly.
+    # The MOP path used to call _generate_from_mop, which walked the
+    # MOP and synthesized legacy MethodInfo/ClassInfo wrappers so the
+    # _emit_*_decl helpers could run unchanged. As of Phase 5b HANDOFF,
+    # generate($mop) routes to _generate_from_schedule — the scheduler-
+    # driven codegen that consumes Chalk::IR::Schedule directly. The
+    # _generate_from_mop method stays alive in this commit so the
+    # legacy byte-compat test (codegen-byte-compat.t) keeps running
+    # against the old path for comparison; Phase 6 deletes it.
     method generate($input) {
         if (defined($input) && blessed($input) && $input isa Chalk::MOP) {
-            return $self->_generate_from_mop($input);
+            return $self->_generate_from_schedule($input);
         }
         die "generate() requires a Program IR node or a Chalk::MOP"
             unless defined($input) && $input isa Chalk::IR::Program;
