@@ -362,61 +362,92 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my @lines;
         my $indent = 0;
         for my $item ($schedule->items->@*) {
-            my $kind = $item->kind;
-            if ($kind eq 'stmt') {
-                my $node = $item->node;
-                my $code;
-                # Synthetic Return: the parser inserted this for an
-                # implicit fall-through (`{ EXPR }` with no explicit
-                # return). Emit the bare value, no `return` keyword,
-                # no trailing semicolon. Matches the legacy
-                # _is_explicit_exit handling in _body_from_graph.
-                if (blessed($node)
-                        && $node isa Chalk::IR::Node::Return
-                        && $node->can('synthetic')
-                        && $node->synthetic)
-                {
-                    my $val = $node->inputs->[1];
-                    if (defined $val) {
-                        # _emit_node would add `return ` and `;`; the
-                        # bare-value form still needs the trailing `;`.
-                        $code = $self->_emit_node($val);
-                    } else {
-                        $code = undef;
-                    }
-                } else {
-                    $code = $self->_emit_node($node);
-                }
-                next unless defined $code;
-                for my $l (split /\n/, $code) {
-                    push @lines, ('    ' x $indent) . $l;
-                }
-            } elsif ($kind eq 'block_open') {
-                my $head = $self->_emit_block_open_head($item);
-                push @lines, ('    ' x $indent) . $head;
-                $indent++;
-            } elsif ($kind eq 'block_close') {
-                $indent-- if $indent > 0;
-                push @lines, ('    ' x $indent) . '}';
-            } elsif ($kind eq 'else') {
-                $indent-- if $indent > 0;
-                push @lines, ('    ' x $indent) . '} else {';
-                $indent++;
-            } elsif ($kind eq 'elsif') {
-                $indent-- if $indent > 0;
-                push @lines, ('    ' x $indent)
-                    . '} ' . $self->_emit_elsif_head($item);
-                $indent++;
-            } elsif ($kind eq 'catch') {
-                $indent-- if $indent > 0;
-                push @lines, ('    ' x $indent)
-                    . '} ' . $self->_emit_catch_head($item);
-                $indent++;
-            } else {
-                die "Unknown Schedule Item kind: $kind";
-            }
+            $self->_emit_schedule_item($item, \@lines, \$indent, $scheduler);
         }
         return join("\n", @lines);
+    }
+
+    # Emit a single Schedule Item into the lines accumulator. Pulled
+    # out of _emit_scheduled_body so a synthetic Return whose value is
+    # itself a control node (If/Loop/TryCatch) can recurse — the
+    # scheduler's _expand_node turns that value into a sub-item-list
+    # and we replay each through this helper.
+    method _emit_schedule_item($item, $lines, $indent_ref, $scheduler) {
+        my $kind = $item->kind;
+        if ($kind eq 'stmt') {
+            my $node = $item->node;
+            my $code;
+            # Synthetic Return: the parser inserted this for an
+            # implicit fall-through (`{ EXPR }` with no explicit
+            # return). Emit the bare value, no `return` keyword,
+            # no trailing semicolon. Matches the legacy
+            # _is_explicit_exit handling in _body_from_graph.
+            if (blessed($node)
+                    && $node isa Chalk::IR::Node::Return
+                    && $node->can('synthetic')
+                    && $node->synthetic)
+            {
+                my $val = $node->inputs->[1];
+                if (defined $val
+                        && blessed($val)
+                        && ($val isa Chalk::IR::Node::If
+                         || $val isa Chalk::IR::Node::Loop
+                         || $val isa Chalk::IR::Node::TryCatch))
+                {
+                    # Synthetic Return whose value is a control
+                    # node: the body's last expression IS the
+                    # if/loop/try statement. Per Perl's last-
+                    # expression-value semantics, the if/else
+                    # itself is the trailing implicit-return form.
+                    # Expand via the scheduler so the structured
+                    # block_open/.../block_close sequence emits
+                    # rather than dying in _emit_node (which
+                    # doesn't accept If/Loop/TryCatch as expressions).
+                    my @sub_items = $scheduler->_expand_node($val);
+                    for my $sub_item (@sub_items) {
+                        $self->_emit_schedule_item(
+                            $sub_item, $lines, $indent_ref, $scheduler);
+                    }
+                    return;
+                }
+                if (defined $val) {
+                    # _emit_node would add `return ` and `;`; the
+                    # bare-value form still needs the trailing `;`.
+                    $code = $self->_emit_node($val);
+                } else {
+                    $code = undef;
+                }
+            } else {
+                $code = $self->_emit_node($node);
+            }
+            return unless defined $code;
+            for my $l (split /\n/, $code) {
+                push $lines->@*, ('    ' x $$indent_ref) . $l;
+            }
+        } elsif ($kind eq 'block_open') {
+            my $head = $self->_emit_block_open_head($item);
+            push $lines->@*, ('    ' x $$indent_ref) . $head;
+            $$indent_ref++;
+        } elsif ($kind eq 'block_close') {
+            $$indent_ref-- if $$indent_ref > 0;
+            push $lines->@*, ('    ' x $$indent_ref) . '}';
+        } elsif ($kind eq 'else') {
+            $$indent_ref-- if $$indent_ref > 0;
+            push $lines->@*, ('    ' x $$indent_ref) . '} else {';
+            $$indent_ref++;
+        } elsif ($kind eq 'elsif') {
+            $$indent_ref-- if $$indent_ref > 0;
+            push $lines->@*, ('    ' x $$indent_ref)
+                . '} ' . $self->_emit_elsif_head($item);
+            $$indent_ref++;
+        } elsif ($kind eq 'catch') {
+            $$indent_ref-- if $$indent_ref > 0;
+            push $lines->@*, ('    ' x $$indent_ref)
+                . '} ' . $self->_emit_catch_head($item);
+            $$indent_ref++;
+        } else {
+            die "Unknown Schedule Item kind: $kind";
+        }
     }
 
     # Render the opening line for a block_open Item. $item->form selects
