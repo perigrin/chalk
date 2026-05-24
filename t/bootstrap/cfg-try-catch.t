@@ -116,32 +116,37 @@ use Chalk::Bootstrap::BNF::Target::Perl;
         my $semiring = $parser->semiring();
         my $sa = $semiring->semirings()->[4];
 
-        # Parse simple try/catch
+        # Parse simple try/catch wrapped in a class+method so the
+        # production MOP+scheduler codegen path can handle it.
+        # (Phase 5b migration: bare top-level snippets are out of
+        # Chalk's purview; see docs/plans/2026-05-24-class-as-
+        # builtin-rejected.md.)
         {
             $semiring->reset_cache();
+            my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
 
             my $source = <<'END';
-use 5.42.0;
-use utf8;
-try {
-    my $x = 1;
-} catch ($e) {
-    die $e;
+class TestTC {
+    method m {
+        try {
+            my $x = 1;
+        } catch ($e) {
+            die $e;
+        }
+    }
 }
 END
             my $result = $parser->parse_value($source);
-            ok(defined $result, 'try/catch parses to IR');
+            ok(defined $result && !$result->is_zero(), 'try/catch parses to IR');
+            ok(defined $mop, 'MOP populated');
 
-            my $sem_ctx = $result;
-            ok(defined $sem_ctx, 'SemanticAction context exists');
-
-            my $ir_node = $sem_ctx->extract();
-            ok(defined $ir_node, 'IR node extracted');
-
-            # Generate Perl from IR with cfg_state
+            # Generate Perl from the MOP via the production path.
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->_generate_with_cfg($ir_node, $sa, $sem_ctx);
-            ok(defined $code, 'Perl code generated from try/catch IR');
+            my $out = $perl_target->generate($mop);
+            ok(ref($out) eq 'HASH', 'generate returns HashRef[Str]');
+
+            my $code = (values $out->%*)[0] // '';
+            ok(length $code, 'Perl code generated from try/catch IR');
             like($code, qr/try\s*\{/, 'generated Perl has try block');
             like($code, qr/catch\s*\(\$e\)\s*\{/, 'generated Perl has catch ($e)');
         }

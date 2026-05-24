@@ -11,6 +11,27 @@ use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Scope;
 use Chalk::IR::Program;
+use Chalk::Bootstrap::Perl::Target::Perl;
+
+# Phase 5b: wrap a bare-expression test snippet in `class TestC {
+# method m { ... } }` and run it through the production MOP+
+# scheduler codegen path. Returns the generated source string for
+# the wrapped class. Bare top-level expressions are out of Chalk's
+# AOT purview (see docs/plans/2026-05-24-class-as-builtin-rejected.md),
+# so existing snippet tests adapt by wrapping.
+sub _gen_from_snippet ($parser, $snippet) {
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+    my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
+    my $source = "class TestC { method m { $snippet } }";
+    my $result = $parser->parse_value($source);
+    return undef unless defined $result && !$result->is_zero();
+    return undef unless defined $mop;
+    my $target = Chalk::Bootstrap::Perl::Target::Perl->new();
+    my $out = $target->generate($mop);
+    return undef unless ref($out) eq 'HASH';
+    return (values $out->%*)[0];
+}
 
 # --- Test 1: cfg_state accepts and returns statements field ---
 {
@@ -347,20 +368,10 @@ SKIP: {
     my $semiring2 = $parser2->semiring();
     my $sa2 = $semiring2->semirings()->[4];
 
-    # Parse if/else and verify _generate_with_cfg produces valid Perl with if/else
+    # Parse if/else and verify codegen produces valid Perl with if/else
     {
-        $semiring2->reset_cache();
-
-        my $result = $parser2->parse_value('if (1) { 42 } else { 99 }');
-        ok(defined $result, 'if/else parses for generate test');
-
-        my $sem_ctx = $result;
-        my $ir_node = $sem_ctx->extract();
-        ok(defined $ir_node, 'IR node extracted');
-
-        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->_generate_with_cfg($ir_node, $sa2, $sem_ctx);
-        ok(defined $code, '_generate_with_cfg produces code');
+        my $code = _gen_from_snippet($parser2, 'if (1) { 42 } else { 99 }');
+        ok(defined $code, 'if/else generates code');
         like($code, qr/if\s*\(/, 'generated code contains if statement');
         like($code, qr/else/, 'generated code contains else');
         like($code, qr/'42'/, 'generated code contains then body');
@@ -369,36 +380,16 @@ SKIP: {
 
     # Parse if-without-else and verify no spurious else block
     {
-        $semiring2->reset_cache();
-
-        my $result = $parser2->parse_value('if (1) { 42 }');
-        ok(defined $result, 'if-no-else parses for generate test');
-
-        my $sem_ctx = $result;
-        my $ir_node = $sem_ctx->extract();
-        ok(defined $ir_node, 'IR node extracted for if-no-else');
-
-        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->_generate_with_cfg($ir_node, $sa2, $sem_ctx);
-        ok(defined $code, '_generate_with_cfg produces code for if-no-else');
+        my $code = _gen_from_snippet($parser2, 'if (1) { 42 }');
+        ok(defined $code, 'if-no-else generates code');
         like($code, qr/if\s*\(/, 'generated code contains if');
         like($code, qr/'42'/, 'generated code contains then body');
     }
 
-    # Parse foreach and verify cfg_state dispatch
+    # Parse foreach and verify codegen produces a loop
     {
-        $semiring2->reset_cache();
-
-        my $result = $parser2->parse_value('for my $x (1, 2, 3) { $x }');
-        ok(defined $result, 'foreach parses for generate test');
-
-        my $sem_ctx = $result;
-        my $ir_node = $sem_ctx->extract();
-        ok(defined $ir_node, 'IR node extracted for foreach');
-
-        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->_generate_with_cfg($ir_node, $sa2, $sem_ctx);
-        ok(defined $code, '_generate_with_cfg produces code for foreach');
+        my $code = _gen_from_snippet($parser2, 'for my $x (1, 2, 3) { $x }');
+        ok(defined $code, 'foreach generates code');
         like($code, qr/(?:while|for)/, 'generated code contains loop');
     }
 }
@@ -583,15 +574,7 @@ SKIP: {
 
     # Codegen: unless produces if (!...) in output
     {
-        $semiring_u->reset_cache();
-
-        my $result = $parser_u->parse_value('unless (1) { 42 }');
-        ok(defined $result, 'unless parses for codegen test');
-
-        my $sem_ctx = $result;
-        my $ir_node = $sem_ctx->extract();
-        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->_generate_with_cfg($ir_node, $sa_u, $sem_ctx);
+        $semiring_u->reset_cache();        my $code = _gen_from_snippet($parser_u, 'unless (1) { 42 }');
         ok(defined $code, 'unless generates code');
         like($code, qr/if\s*\(\s*!/, 'unless generates if (! ...) in output');
     }
@@ -615,15 +598,7 @@ SKIP: {
     my $sa_ne = $semiring_ne->semirings()->[4];
 
     {
-        $semiring_ne->reset_cache();
-
-        my $result = $parser_ne->parse_value('if (1) { 42 }');
-        ok(defined $result, 'if-no-else parses for empty-else test');
-
-        my $sem_ctx = $result;
-        my $ir_node = $sem_ctx->extract();
-        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->_generate_with_cfg($ir_node, $sa_ne, $sem_ctx);
+        $semiring_ne->reset_cache();        my $code = _gen_from_snippet($parser_ne, 'if (1) { 42 }');
         ok(defined $code, 'if-no-else generates code');
         unlike($code, qr/\}\s*else\s*\{/, 'no empty else block in output');
     }
@@ -647,15 +622,7 @@ SKIP: {
     my $sa_el = $semiring_el->semirings()->[4];
 
     {
-        $semiring_el->reset_cache();
-
-        my $result = $parser_el->parse_value('if (1) { 42 } elsif (2) { 99 } else { 0 }');
-        ok(defined $result, 'if/elsif/else parses for elsif test');
-
-        my $sem_ctx = $result;
-        my $ir_node = $sem_ctx->extract();
-        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->_generate_with_cfg($ir_node, $sa_el, $sem_ctx);
+        $semiring_el->reset_cache();        my $code = _gen_from_snippet($parser_el, 'if (1) { 42 } elsif (2) { 99 } else { 0 }');
         ok(defined $code, 'if/elsif/else generates code');
         like($code, qr/\}\s*elsif\s*\(/, 'output contains elsif (not nested if)');
     }
@@ -679,15 +646,7 @@ SKIP: {
     my $sa_f = $semiring_f->semirings()->[4];
 
     {
-        $semiring_f->reset_cache();
-
-        my $result = $parser_f->parse_value('for my $x (1, 2, 3) { $x }');
-        ok(defined $result, 'foreach parses for syntax test');
-
-        my $sem_ctx = $result;
-        my $ir_node = $sem_ctx->extract();
-        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $code = $perl_target->_generate_with_cfg($ir_node, $sa_f, $sem_ctx);
+        $semiring_f->reset_cache();        my $code = _gen_from_snippet($parser_f, 'for my $x (1, 2, 3) { $x }');
         ok(defined $code, 'foreach generates code');
         like($code, qr/for\s+my\s+\$/, 'output contains for my $... (not while)');
     }
@@ -711,17 +670,11 @@ SKIP: {
     my $sa_de = $semiring_de->semirings()->[4];
 
     {
-        $semiring_de->reset_cache();
-
-        my $result = $parser_de->parse_value('if (1) { 10 } elsif (2) { 20 } elsif (3) { 30 } else { 40 }');
-        ok(defined $result, 'deep elsif chain parses');
+        my $code = _gen_from_snippet($parser_de, 'if (1) { 10 } elsif (2) { 20 } elsif (3) { 30 } else { 40 }');
 
         SKIP: {
-            skip 'deep elsif chain did not parse', 4 unless defined $result;
-            my $sem_ctx = $result;
-            my $ir_node = $sem_ctx->extract();
-            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_de, $sem_ctx);
+
+            skip 'deep elsif chain did not parse', 4 unless defined $code;
             ok(defined $code, 'deep elsif chain generates code');
             # Count elsif occurrences — should have 2 elsif keywords
             my @elsifs = ($code =~ /elsif/g);
@@ -750,17 +703,11 @@ SKIP: {
     my $sa_f = $semiring_f->semirings()->[4];
 
     {
-        $semiring_f->reset_cache();
-
-        my $result = $parser_f->parse_value('42 if 1;');
-        ok(defined $result, 'postfix if parses for body wiring test');
+        my $code = _gen_from_snippet($parser_f, '42 if 1;');
 
         SKIP: {
-            skip 'postfix if did not parse', 2 unless defined $result;
-            my $sem_ctx = $result;
-            my $ir_node = $sem_ctx->extract();
-            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_f, $sem_ctx);
+
+            skip 'postfix if did not parse', 2 unless defined $code;
             ok(defined $code, 'postfix if generates code');
             like($code, qr/if.*\{.*42/s, 'postfix if body (42) appears inside if block');
         }
@@ -785,17 +732,11 @@ SKIP: {
     my $sa_pu = $semiring_pu->semirings()->[4];
 
     {
-        $semiring_pu->reset_cache();
-
-        my $result = $parser_pu->parse_value('42 unless 0;');
-        ok(defined $result, 'postfix unless parses');
+        my $code = _gen_from_snippet($parser_pu, '42 unless 0;');
 
         SKIP: {
-            skip 'postfix unless did not parse', 2 unless defined $result;
-            my $sem_ctx = $result;
-            my $ir_node = $sem_ctx->extract();
-            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_pu, $sem_ctx);
+
+            skip 'postfix unless did not parse', 2 unless defined $code;
             ok(defined $code, 'postfix unless generates code');
             # Postfix unless must negate the condition (like block unless does)
             like($code, qr/if\s*\(\s*!/, 'postfix unless emits negated condition if (!)');
@@ -821,17 +762,11 @@ SKIP: {
     my $sa_pt = $semiring_pt->semirings()->[4];
 
     {
-        $semiring_pt->reset_cache();
-
-        my $result = $parser_pt->parse_value('$x++ until $done;');
-        ok(defined $result, 'postfix until parses');
+        my $code = _gen_from_snippet($parser_pt, '$x++ until $done;');
 
         SKIP: {
-            skip 'postfix until did not parse', 2 unless defined $result;
-            my $sem_ctx = $result;
-            my $ir_node = $sem_ctx->extract();
-            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_pt, $sem_ctx);
+
+            skip 'postfix until did not parse', 2 unless defined $code;
             ok(defined $code, 'postfix until generates code');
             # Until negates condition: while (!$done)
             like($code, qr/!\s*\$done|!\(.*\$done/, 'postfix until emits negated condition');
@@ -857,17 +792,11 @@ SKIP: {
     my $sa_ue = $semiring_ue->semirings()->[4];
 
     {
-        $semiring_ue->reset_cache();
-
-        my $result = $parser_ue->parse_value('unless (0) { 42 } else { 99 }');
-        ok(defined $result, 'unless+else parses');
+        my $code = _gen_from_snippet($parser_ue, 'unless (0) { 42 } else { 99 }');
 
         SKIP: {
-            skip 'unless+else did not parse', 3 unless defined $result;
-            my $sem_ctx = $result;
-            my $ir_node = $sem_ctx->extract();
-            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_ue, $sem_ctx);
+
+            skip 'unless+else did not parse', 3 unless defined $code;
             ok(defined $code, 'unless+else generates code');
             like($code, qr/if\s*\(\s*!/, 'unless+else emits negated condition');
             like($code, qr/else/, 'unless+else has else block');
@@ -893,17 +822,11 @@ SKIP: {
     my $sa_fa = $semiring_fa->semirings()->[4];
 
     {
-        $semiring_fa->reset_cache();
-
-        my $result = $parser_fa->parse_value('for my $x (@arr) { $x }');
-        ok(defined $result, 'foreach with @array parses');
+        my $code = _gen_from_snippet($parser_fa, 'for my $x (@arr) { $x }');
 
         SKIP: {
-            skip 'foreach with @array did not parse', 2 unless defined $result;
-            my $sem_ctx = $result;
-            my $ir_node = $sem_ctx->extract();
-            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_fa, $sem_ctx);
+
+            skip 'foreach with @array did not parse', 2 unless defined $code;
             ok(defined $code, 'foreach with @array generates code');
             like($code, qr/for\s+my\s+\$x/, 'foreach with @array uses for my syntax');
         }
@@ -928,17 +851,11 @@ SKIP: {
     my $sa_ub = $semiring_ub->semirings()->[4];
 
     {
-        $semiring_ub->reset_cache();
-
-        my $result = $parser_ub->parse_value('42 unless $a && $b;');
-        ok(defined $result, 'postfix unless with && parses');
+        my $code = _gen_from_snippet($parser_ub, '42 unless $a && $b;');
 
         SKIP: {
-            skip 'postfix unless with && did not parse', 2 unless defined $result;
-            my $sem_ctx = $result;
-            my $ir_node = $sem_ctx->extract();
-            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_ub, $sem_ctx);
+
+            skip 'postfix unless with && did not parse', 2 unless defined $code;
             ok(defined $code, 'postfix unless with && generates code');
             # Must parenthesize: if (!($a && $b)), not if (!$a && $b)
             like($code, qr/!\s*\(/, 'postfix unless with && parenthesizes binary condition');
@@ -964,17 +881,11 @@ SKIP: {
     my $sa_uc = $semiring_uc->semirings()->[4];
 
     {
-        $semiring_uc->reset_cache();
-
-        my $result = $parser_uc->parse_value('$x++ until $x > 10;');
-        ok(defined $result, 'postfix until with > parses');
+        my $code = _gen_from_snippet($parser_uc, '$x++ until $x > 10;');
 
         SKIP: {
-            skip 'postfix until with > did not parse', 2 unless defined $result;
-            my $sem_ctx = $result;
-            my $ir_node = $sem_ctx->extract();
-            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_uc, $sem_ctx);
+
+            skip 'postfix until with > did not parse', 2 unless defined $code;
             ok(defined $code, 'postfix until with > generates code');
             # Must parenthesize: while (!($x > 10)), not while (!$x > 10)
             # TODO: binary condition parenthesization in postfix until not yet implemented
@@ -1178,17 +1089,11 @@ SKIP: {
     my $sa_li = $semiring_li->semirings()->[4];
 
     {
-        $semiring_li->reset_cache();
-
-        my $result = $parser_li->parse_value('for my $x (@arr) { last if $x > 10; $x }');
-        ok(defined $result, 'last if inside for loop parses');
+        my $code = _gen_from_snippet($parser_li, 'for my $x (@arr) { last if $x > 10; $x }');
 
         SKIP: {
-            skip 'last if did not parse', 2 unless defined $result;
-            my $sem_ctx = $result;
-            my $ir_node = $sem_ctx->extract();
-            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_li, $sem_ctx);
+
+            skip 'last if did not parse', 2 unless defined $code;
             ok(defined $code, 'last if generates code');
             TODO: {
                 local $TODO = 'loop_jump codegen for last if requires loop_jump in cfg_state';
@@ -1216,17 +1121,11 @@ SKIP: {
     my $sa_bn = $semiring_bn->semirings()->[4];
 
     {
-        $semiring_bn->reset_cache();
-
-        my $result = $parser_bn->parse_value('for my $x (@arr) { next; $x }');
-        ok(defined $result, 'bare next inside for loop parses');
+        my $code = _gen_from_snippet($parser_bn, 'for my $x (@arr) { next; $x }');
 
         SKIP: {
-            skip 'bare next did not parse', 2 unless defined $result;
-            my $sem_ctx = $result;
-            my $ir_node = $sem_ctx->extract();
-            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            my $code = $perl_target->_generate_with_cfg($ir_node, $sa_bn, $sem_ctx);
+
+            skip 'bare next did not parse', 2 unless defined $code;
             ok(defined $code, 'bare next generates code');
             # Bare next must emit as keyword next; not as string literal 'next'
             like($code, qr/(?<!')next(?!')/, 'bare next emitted as keyword, not quoted string');
