@@ -11,6 +11,7 @@ use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::Perl;
+use Chalk::Bootstrap::Semiring::SemanticAction;
 
 # Build Perl grammar pipeline: IR -> generated grammar -> eval -> grammar objects
 my $raw_ir = perl_pipeline();
@@ -37,16 +38,15 @@ my sub parse_and_generate($file) {
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
     my $semiring = $parser->semiring();
     $semiring->reset_cache();
+    my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
     my $result = $parser->parse_value($source);
-    return undef unless defined $result;
+    return undef unless defined $result && !$result->is_zero();
+    return undef unless defined $mop;
 
-    my $sa = $semiring->semirings()->[4];
-    my $sem_ctx = $result;
-    return undef unless defined $sem_ctx;
-    my $ir = $sem_ctx->extract();
-    return undef unless defined $ir;
-
-    return $perl_target->_generate_with_cfg($ir, $sa, $sem_ctx);
+    my $out = $perl_target->generate($mop);
+    return undef unless ref($out) eq 'HASH';
+    my @values = values $out->%*;
+    return $values[0];
 }
 
 # ============================================================
