@@ -143,7 +143,7 @@ my sub is_use_info($node, $expected_name, $msg) {
 # ============================================================
 
 {
-    my $ir = parse_file('lib/Chalk/Bootstrap/IR/Node/Start.pm');
+    my $ir = parse_file('lib/Chalk/IR/Node/Start.pm');
     ok(defined $ir, 'Start.pm: parse produces IR');
 
     SKIP: {
@@ -172,8 +172,8 @@ my sub is_use_info($node, $expected_name, $msg) {
         # Last: class declaration (ClassInfo or ClassDecl)
         my $cls = $stmts->[-1];
         is_class_node($cls, 'Start.pm class declaration');
-        is(class_name($cls), 'Chalk::Bootstrap::IR::Node::Start', 'Start.pm class name');
-        is(class_parent($cls), 'Chalk::Bootstrap::IR::Node', 'Start.pm parent class');
+        is(class_name($cls), 'Chalk::IR::Node::Start', 'Start.pm class name');
+        is(class_parent($cls), 'Chalk::IR::Node', 'Start.pm parent class');
 
         # Class body has 1 method
         my $body = class_body($cls);
@@ -186,14 +186,17 @@ my sub is_use_info($node, $expected_name, $msg) {
         my ($meth) = @methods;
         is(method_name($meth), 'operation', 'Start.pm method name');
 
-        # Method body has Return CFG node
+        # Method body holds the implicit-return value directly
+        # (post-Phase 3d: `{ 'Start' }` puts the Constant in body[0],
+        # not a Return; the synthetic Return is in the graph but
+        # body is the parser-collected statement list).
         my $meth_body = method_body($meth);
         is(ref $meth_body, 'ARRAY', 'Start.pm: method body is arrayref');
         is(scalar $meth_body->@*, 1, 'Start.pm: method body has 1 statement');
 
-        my $ret = $meth_body->[0];
-        is_return_node($ret, 'Start.pm return');
-        is_constant($ret->inputs()->[1], 'Start', 'Start.pm return value');
+        my $val = $meth_body->[0];
+        ok(defined $val, 'Start.pm return value: defined');
+        is_constant($val, 'Start', 'Start.pm return value');
     }
 }
 
@@ -202,7 +205,7 @@ my sub is_use_info($node, $expected_name, $msg) {
 # ============================================================
 
 {
-    my $ir = parse_file('lib/Chalk/Bootstrap/IR/Node/Return.pm');
+    my $ir = parse_file('lib/Chalk/IR/Node/Return.pm');
     ok(defined $ir, 'Return.pm: parse produces IR');
 
     SKIP: {
@@ -212,8 +215,8 @@ my sub is_use_info($node, $expected_name, $msg) {
         my $stmts = program_stmts($ir);
         my $cls = $stmts->[-1];
         is_class_node($cls, 'Return.pm class declaration');
-        is(class_name($cls), 'Chalk::Bootstrap::IR::Node::Return', 'Return.pm class name');
-        is(class_parent($cls), 'Chalk::Bootstrap::IR::Node', 'Return.pm parent class');
+        is(class_name($cls), 'Chalk::IR::Node::Return', 'Return.pm class name');
+        is(class_parent($cls), 'Chalk::IR::Node', 'Return.pm parent class');
 
         my $body = class_body($cls);
         my @methods = grep { $_ isa Chalk::IR::MethodInfo
@@ -223,10 +226,11 @@ my sub is_use_info($node, $expected_name, $msg) {
         my ($meth) = @methods;
         is(method_name($meth), 'operation', 'Return.pm method name');
 
+        # body[0] holds the bare value (implicit return; see Start.pm above).
         my $meth_body = method_body($meth);
-        my $ret = $meth_body->[0];
-        is_return_node($ret, 'Return.pm return');
-        is_constant($ret->inputs()->[1], 'Return', 'Return.pm return value');
+        my $val = $meth_body->[0];
+        ok(defined $val, 'Return.pm return value: defined');
+        is_constant($val, 'Return', 'Return.pm return value');
     }
 }
 
