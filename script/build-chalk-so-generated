@@ -137,13 +137,13 @@ for my $info (@parsed) {
     }
 
     my $result = eval {
-        $target->generate_c_files(
+        $target->_generate_c_files(
             $info->{ir},
             $info->{sa},
             $info->{ctx},
         )
     };
-    die "generate_c_files failed for $class_name: $@\n" if $@ || !defined $result;
+    die "_generate_c_files failed for $class_name: $@\n" if $@ || !defined $result;
 
     # Generate .xs wrapper from the same IR and exported function list
     my $xs_text = eval {
@@ -286,7 +286,7 @@ printf "Phase 3 total: %.1fs\n\n", time() - $t0;
             }
 
             my $result = eval {
-                $target->generate_c_files(
+                $target->_generate_c_files(
                     $earley_parsed->{ir},
                     $earley_parsed->{sa},
                     $earley_parsed->{ctx},
