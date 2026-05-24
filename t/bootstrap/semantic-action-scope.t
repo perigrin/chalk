@@ -82,26 +82,15 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     ok($state->{scope} isa Chalk::Bootstrap::Scope, 'scope propagated from parent');
 }
 
-# --- Test 3: set_cfg_state allows actions to update control/scope ---
-{
-    my $factory = Chalk::IR::NodeFactory->new();
-
-    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $one = $sa->one();
-
-    # Simulate an action that updates the scope
-    my $node = $factory->make('Constant', const_type => 'integer', value => 42);
-    my $new_scope = Chalk::Bootstrap::Scope->new()->define('$x', $node);
-    my $new_control = $factory->make('If',
-        control => $one->cfg_state()->{control},
-        condition => $node);
-
-    $sa->set_cfg_state($one, { control => $new_control, scope => $new_scope });
-
-    my $state = $one->cfg_state();
-    is($state->{control}, $new_control, 'control updated via set_cfg_state');
-    is($state->{scope}->lookup('$x'), $node, 'scope updated via set_cfg_state');
-}
+# --- Test 3 (REMOVED): set_cfg_state was deleted in Phase 3a-infra ---
+# The cfg_state side-channel was removed; cfg_state is now derived
+# from Context annotations on the read side. The legacy
+# $sa->set_cfg_state($ctx, {...}) imperative-update API is gone.
+# Equivalent coverage: action-driven scope/control updates are
+# exercised throughout the Perl::Actions actions module (every
+# IfStatement, WhileStatement, etc. populates scope/control via
+# update_scope() / update_annotations()), and the integration is
+# covered by cfg-statements.t / cfg-if-else.t / cfg-loop.t etc.
 
 # --- Test 4: reset_cache creates a fresh singleton with cfg state ---
 # Context annotations are part of the Context object itself, so resetting the
