@@ -58,20 +58,9 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
     }
 
     method _run_mop($mop) {
-        # Translate MOP::Class -> { class_name, ir } shape so the
-        # existing analyze() can run unchanged. The legacy ir is a
-        # ClassInfo - synthesize one per MOP::Class.
-        my @parsed_classes;
-        for my $cls ($mop->classes()) {
-            next if $cls->name eq 'main';
-            my $class_info = $self->_class_info_from_mop_class($cls);
-            push @parsed_classes, {
-                class_name => $cls->name,
-                ir         => $class_info,
-            };
-        }
-
-        my $schemas = $self->analyze(\@parsed_classes);
+        # Walk MOP::Class entities directly — no ClassInfo synthesis.
+        # Schemas are attached as a side structure on the MOP.
+        my $schemas = $self->_analyze_mop($mop);
         $mop->set_struct_promotion_schemas($schemas) if keys $schemas->%*;
         return $mop;
     }
@@ -88,32 +77,58 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
         return ($rewritten, $schemas);
     }
 
-    # Reconstruct a minimal ClassInfo from a MOP::Class so the existing
-    # analyze() can walk its body. Methods/subs use their body arrayref
-    # captured at parse time (MOP::Method/Sub.body).
-    method _class_info_from_mop_class($cls) {
-        my @body;
-        for my $method ($cls->methods) {
-            push @body, Chalk::IR::MethodInfo->new(
-                name        => $method->name,
-                params      => $method->params,
-                return_type => $method->return_type,
-                body        => $method->body,
-            );
+    # MOP-driven analyze: walk MOP::Class entities directly without
+    # synthesizing ClassInfo/MethodInfo wrappers. Reuses the per-method
+    # detection logic via _analyze_method_body (which operates on a
+    # body arrayref — same shape as MOP::Method.body today).
+    #
+    # When MOP::Method.body is retired in Phase 6 alongside this
+    # migration, the input source switches from $method->body to
+    # walking $method->graph (the IR side-effect chain). For now we
+    # keep reading body so this commit is purely a synthesis-layer
+    # removal, not a body-vs-graph swap.
+    method _analyze_mop($mop) {
+        my %var_schemas;
+
+        # Build compiled-class set for escape analysis.
+        $compiled_classes = {};
+        for my $cls ($mop->classes()) {
+            next if $cls->name eq 'main';
+            $compiled_classes->{$cls->name} = true;
         }
-        for my $sub ($cls->subs) {
-            push @body, Chalk::IR::SubInfo->new(
-                name   => $sub->name,
-                params => $sub->params,
-                body   => $sub->body,
-            );
+
+        $field_usage = {};
+
+        for my $cls ($mop->classes()) {
+            next if $cls->name eq 'main';
+            my $class_name = $cls->name;
+
+            for my $method ($cls->methods) {
+                my $method_name = $method->name;
+                my $method_body = $method->body;
+                next unless defined $method_body && ref($method_body) eq 'ARRAY';
+
+                my $is_public = ($method_name !~ /^_/);
+                $self->_analyze_method_body(
+                    $class_name, $method_name, $method_body,
+                    \%var_schemas, $is_public,
+                );
+            }
+
+            for my $sub ($cls->subs) {
+                my $sub_name = $sub->name;
+                my $sub_body = $sub->body;
+                next unless defined $sub_body && ref($sub_body) eq 'ARRAY';
+
+                my $is_public = ($sub_name !~ /^_/);
+                $self->_analyze_method_body(
+                    $class_name, $sub_name, $sub_body,
+                    \%var_schemas, $is_public,
+                );
+            }
         }
-        return Chalk::IR::ClassInfo->new(
-            name    => $cls->name,
-            methods => [grep { $_ isa Chalk::IR::MethodInfo } @body],
-            subs    => [grep { $_ isa Chalk::IR::SubInfo } @body],
-            body    => \@body,
-        );
+
+        return $self->_finalize_schemas(\%var_schemas);
     }
 
     # Analyze all parsed classes and detect promotable hash schemas.
@@ -163,10 +178,18 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
             }
         }
 
+        return $self->_finalize_schemas(\%var_schemas);
+    }
+
+    # Common post-processing for both analyze() (legacy parsed-classes
+    # input) and _analyze_mop() (MOP-shaped input). Both populate
+    # %var_schemas and $field_usage the same way; the schema unification
+    # logic is identical from there on.
+    method _finalize_schemas($var_schemas) {
         # Unify schemas: group variables by key set, assign schema names
         my %key_set_groups;  # sorted_key_string => [var_key, ...]
-        for my $var_key (sort keys %var_schemas) {
-            my $info = $var_schemas{$var_key};
+        for my $var_key (sort keys $var_schemas->%*) {
+            my $info = $var_schemas->{$var_key};
             next if $info->{non_promotable};
 
             my @keys = sort keys $info->{keys}->%*;
