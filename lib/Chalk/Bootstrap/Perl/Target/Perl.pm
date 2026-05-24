@@ -74,15 +74,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     #     kept alive transitionally for Target::C-via-Phase-7).
     #   - Chalk::MOP: emits a HashRef[Str] keyed by class-or-module name
     #     (production path, scheduler-driven as of Phase 5).
-    #
-    # The MOP path used to call _generate_from_mop, which walked the
-    # MOP and synthesized legacy MethodInfo/ClassInfo wrappers so the
-    # _emit_*_decl helpers could run unchanged. As of Phase 5b HANDOFF,
-    # generate($mop) routes to _generate_from_schedule — the scheduler-
-    # driven codegen that consumes Chalk::IR::Schedule directly. The
-    # _generate_from_mop method stays alive in this commit so the
-    # legacy byte-compat test (codegen-byte-compat.t) keeps running
-    # against the old path for comparison; Phase 6 deletes it.
     method generate($input) {
         if (defined($input) && blessed($input) && $input isa Chalk::MOP) {
             return $self->_generate_from_schedule($input);
@@ -93,124 +84,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return $self->_emit_program($input);
     }
 
-    method _generate_from_mop($mop) {
-        # Reproduce the legacy Program-shaped emit order: top-level
-        # imports first (from `main`'s declared imports), then non-main
-        # classes in declaration order, then top-level subs.
-        # Output is a single entry under "main.pm" - the MOP holds the
-        # content of one parse (one source file), so a single-string
-        # value mirroring the legacy generate() return is the natural
-        # shape.
-        my @lines;
-
-        my $main = $mop->for_class('main');
-        if (defined $main) {
-            for my $import ($main->imports) {
-                my $use_info = Chalk::IR::UseInfo->new(
-                    name => $import->module,
-                    args => [$import->args],
-                );
-                push @lines, $self->_emit_use_decl($use_info);
-            }
-        }
-
-        for my $cls ($mop->classes()) {
-            my $name = $cls->name;
-            next if $name eq 'main';
-
-            # Reconstruct the ClassInfo body so _emit_class_decl can run.
-            my @body;
-            for my $field ($cls->fields) {
-                my @attrs = map {
-                    +{ name => ($_ =~ s/^://r), value => undef }
-                } $field->attributes;
-                push @body, Chalk::IR::FieldInfo->new(
-                    name          => $field->name,
-                    attributes    => \@attrs,
-                    (defined $field->default_value
-                        ? (default_value => $field->default_value)
-                        : ()),
-                );
-            }
-            for my $method ($cls->methods) {
-                # Prefer the body arrayref stored on MOP::Method when
-                # present; fall back to walking the graph for callers
-                # that built the MOP without an explicit body. Walking
-                # the chain misses non-VarDecl side-effects (e.g. a
-                # bare `push @list, $x` statement) because Block's
-                # control-chain fixup only rebuilds VarDecl/Return.
-                my $body_ref = $method->body;
-                my @method_body = (ref($body_ref) eq 'ARRAY' && $body_ref->@*)
-                    ? $body_ref->@*
-                    : $self->_body_from_graph($method->graph);
-                push @body, Chalk::IR::MethodInfo->new(
-                    name        => $method->name,
-                    params      => $method->params,
-                    return_type => $method->return_type,
-                    body        => \@method_body,
-                    graph       => $method->graph,
-                );
-            }
-            for my $sub ($cls->subs) {
-                my $body_ref = $sub->body;
-                my @sub_body = (ref($body_ref) eq 'ARRAY' && $body_ref->@*)
-                    ? $body_ref->@*
-                    : $self->_body_from_graph($sub->graph);
-                push @body, Chalk::IR::SubInfo->new(
-                    name   => $sub->name,
-                    params => $sub->params,
-                    body   => \@sub_body,
-                    graph  => $sub->graph,
-                );
-            }
-
-            my $parent_name;
-            if ($cls->can('superclass') && defined $cls->superclass) {
-                $parent_name = $cls->superclass->name;
-            } elsif ($cls->can('parent_name') && defined $cls->parent_name) {
-                $parent_name = $cls->parent_name;
-            }
-
-            my $class_info = Chalk::IR::ClassInfo->new(
-                name    => $name,
-                parent  => $parent_name,
-                fields  => [grep { $_ isa Chalk::IR::FieldInfo } @body],
-                methods => [grep { $_ isa Chalk::IR::MethodInfo } @body],
-                subs    => [grep { $_ isa Chalk::IR::SubInfo } @body],
-                body    => \@body,
-            );
-            push @lines, $self->_emit_class_decl($class_info);
-        }
-
-        # Top-level subs registered on `main`
-        if (defined $main) {
-            for my $sub ($main->subs) {
-                my $body_ref = $sub->body;
-                my @sub_body = (ref($body_ref) eq 'ARRAY' && $body_ref->@*)
-                    ? $body_ref->@*
-                    : $self->_body_from_graph($sub->graph);
-                my $sub_info = Chalk::IR::SubInfo->new(
-                    name   => $sub->name,
-                    params => $sub->params,
-                    body   => \@sub_body,
-                    graph  => $sub->graph,
-                );
-                my $line = $self->_emit_sub_decl($sub_info);
-                push @lines, $line if defined $line;
-            }
-        }
-
-        my $code = join("\n", @lines) . "\n";
-        return { 'main.pm' => $code };
-    }
-
-    # Schedule-driven counterpart to _generate_from_mop. Walks the MOP
-    # directly (no MethodInfo/ClassInfo synthesis); runs each method
-    # body through Chalk::IR::Scheduler::EagerPinning to get a Schedule;
-    # walks Schedule items with indent-tracked output, dispatching per
-    # item kind. This is Phase 5a of the SoN scheduler migration; once
-    # byte-identical with _generate_from_mop across the golden corpus,
-    # generate($mop) switches to call this method instead.
+    # Schedule-driven MOP-to-Perl emitter. Walks the MOP directly;
+    # runs each method/sub body through Chalk::IR::Scheduler::EagerPinning
+    # to get a Schedule; walks Schedule items with indent-tracked output,
+    # dispatching per item kind.
     method _generate_from_schedule($mop) {
         my @lines;
 
@@ -261,8 +138,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     # Emit a class declaration from a Chalk::MOP::Class. Walks fields
-    # first, then methods, then subs (matching the legacy
-    # _generate_from_mop synthesis order).
+    # first, then methods, then subs.
     method _emit_mop_class($cls) {
         my $name   = $cls->name;
         my $parent;
@@ -380,8 +256,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             # Synthetic Return: the parser inserted this for an
             # implicit fall-through (`{ EXPR }` with no explicit
             # return). Emit the bare value, no `return` keyword,
-            # no trailing semicolon. Matches the legacy
-            # _is_explicit_exit handling in _body_from_graph.
+            # no trailing semicolon.
             if (blessed($node)
                     && $node isa Chalk::IR::Node::Return
                     && $node->can('synthetic')
@@ -609,66 +484,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             push @out, length($l) ? "    $l" : $l;
         }
         return join("\n", @out) . "\n";
-    }
-
-    # Recover ordered body statements from a method/sub graph for the
-    # legacy _emit_method_decl / _emit_sub_decl helpers, which still
-    # walk a body arrayref. Body statements are the side-effect nodes
-    # in the control chain (VarDecl, Assign, Call, etc.) plus the
-    # Return at the tail.
-    #
-    # Walks the chain from Return.inputs[0] backward through side-effect
-    # node controls, then reverses to source order. Returns ([] on
-    # absent/empty graph).
-    method _body_from_graph($graph) {
-        return () unless defined $graph;
-        my @returns = $graph->returns->@*;
-        return () unless @returns;
-        my $exit = $returns[0];
-
-        # Walk backward via inputs[0] (control), collecting non-Start
-        # nodes until we hit Start.
-        my @reverse;
-        my $cur = $exit->inputs->[0];
-        while (defined $cur && blessed($cur)) {
-            last if $cur->operation eq 'Start';
-            push @reverse, $cur;
-            my $ins = $cur->inputs;
-            last unless defined $ins && ref($ins) eq 'ARRAY';
-            $cur = $ins->[0];
-        }
-
-        my @body = reverse @reverse;
-
-        # The exit itself: include the Return / Unwind so the emitter
-        # can render `return EXPR;` / `die EXPR;` as in source. For
-        # implicit-return cases (the parser synthesized this Return),
-        # the user wrote `EXPR` as a bare trailing statement - emit
-        # the bare value, not a synthesized `return EXPR;`.
-        if (_is_explicit_exit($exit)) {
-            push @body, $exit;
-        } else {
-            my $val = $exit->inputs->[1];
-            if (defined $val && blessed($val)) {
-                my $tail = $body[-1];
-                unless (defined $tail && blessed($tail)
-                        && refaddr($tail) == refaddr($val)) {
-                    push @body, $val;
-                }
-            }
-        }
-        return @body;
-    }
-
-    # Exit classification: a Return is "synthetic" when the parser
-    # built it for the implicit-fall-through case (bare trailing
-    # expression). Marker carried on Chalk::IR::Node::Return.synthetic.
-    # Unwind is always explicit (`die EXPR`).
-    sub _is_explicit_exit($exit) {
-        return false unless defined $exit && blessed($exit);
-        return true if $exit isa Chalk::IR::Node::Unwind;
-        return false unless $exit isa Chalk::IR::Node::Return;
-        return !($exit->can('synthetic') && $exit->synthetic);
     }
 
     # Generate code with cfg_state-aware dispatch for control flow.
