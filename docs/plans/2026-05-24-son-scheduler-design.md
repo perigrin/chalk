@@ -1008,97 +1008,119 @@ test, run on every fixture.
 ### Phase 6 — Switchover
 
 **Goal:** Make schedule-driven path the default for the Perl
-target. Delete the Target::Perl synthesis layer and the
-parser-side `body` population whose only consumer is that layer:
+target. Delete the Target::Perl synthesis layer plus the one
+synthesis layer in the IR optimizer that exists solely to
+manufacture Info-struct shape from MOP.
 
-1. `_generate_from_mop` on `Target::Perl` (synthesis layer; has
-   zero callers since the HANDOFF commit `2f35121f` routed
-   `generate($mop)` through `_generate_from_schedule`).
-2. `_body_from_graph` on `Target::Perl` (called only by
-   `_generate_from_mop`; becomes dead when item 1 goes).
-3. `MOP::Method->body`, `MOP::Sub->body`, and the parser-side
-   population in `Perl::Actions.pm` (`_finalize_body_graph` and
-   related). The only consumer of `body` is item 1's body
-   synthesis; the scheduler reads the graph directly.
+**What actually shipped:**
+
+1. `_generate_from_mop` on `Target::Perl`, along with its helpers
+   `_body_from_graph` and `_is_explicit_exit` (commit `8b8ee251` —
+   about 190 lines deleted). Zero callers remained after the
+   HANDOFF commit `2f35121f` routed `generate($mop)` through
+   `_generate_from_schedule`.
+2. `_class_info_from_mop_class` on
+   `Chalk::Bootstrap::Optimizer::StructPromotion` (commit
+   `ce27c16a` — about 25 lines net deletion). The synthesis layer
+   that built `ClassInfo` / `MethodInfo` / `SubInfo` / `FieldInfo`
+   / `UseInfo` shells from MOP entities is gone; StructPromotion's
+   new `_analyze_mop` method walks the `MOP::Class` directly.
+
+**What was deferred to Phase 7:**
+
+Amendment 5 narrowed Phase 6's deletion list to four items;
+implementation surfaced that two of those four are entangled with
+`Target::C` more deeply than the audit picked up. Both defer to
+Phase 7, where the Target::C migration unblocks them:
+
+3. `MOP::Method->body` / `MOP::Sub->body` deletion (and the
+   parser-side `_finalize_body_graph` population). The migrated
+   StructPromotion path (`_analyze_mop`, the consumer that
+   replaced `_class_info_from_mop_class` in item 2) still reads
+   `$method->body` to collect a method's statement list. Migrating
+   that read to graph-walking is a real refactor, not a deletion;
+   the `body` field stays as a legitimate parser-collected
+   statement-list convenience for optimizer passes until that
+   refactor lands.
 4. `emit_cfg_if`, `emit_cfg_loop`, `emit_cfg_try_catch`,
    `emit_from_cfg_state`, `_emit_loop_jump`, `emit_cfg_phi_if`
-   on `Target::Perl` — **conditional on Target::C non-use**.
-   These are dispatched via the `%_cfg_lookup` table, which is
-   populated by both `_generate_from_mop` (going away in item 1)
-   *and* by `_build_cfg_lookup` (kept alive for `Target::C` and
-   the legacy `_generate_with_cfg` path). If `Target::C` routes
-   through `_emit_node` → `%_cfg_lookup` → `emit_cfg_*`, these
-   helpers cannot be deleted until Phase 7. The Phase 6 deletion
-   PR must verify non-use before pulling the trigger; otherwise
-   they defer.
+   on `Target::Perl`. Amendment 5 listed these as conditional on
+   `Target::C` non-use; the answer turned out to be that
+   `Target::C` *is* the user. These helpers are dispatched from
+   `_emit_node` when `%_cfg_lookup` is populated, and
+   `%_cfg_lookup` is populated by `_build_cfg_lookup`, which is
+   called from `_generate_with_cfg` — the legacy path explicitly
+   kept alive for `Target::C` until Phase 7. The helpers cannot
+   be deleted without breaking the legacy path Target::C depends
+   on.
 
-**What moves to Phase 7:**
-
-The original Phase 6 deletion list also targeted `Chalk::IR::Program`,
-the Info-struct types, and their helpers. Implementation surfaced
-that these are still consumed by production code that lives
-outside Target::Perl:
+**The wider Info-struct deletion list also still defers to Phase 7:**
 
 - `Chalk::IR::Program` is rebuilt and walked by
-  `lib/Chalk/Bootstrap/Optimizer/StructPromotion.pm`, a Phase 5
-  IR optimization pass (production code, not test scaffolding).
-- `Chalk::IR::Program` is also consumed by
   `lib/Chalk/Bootstrap/Perl/Target/C.pm`, which uses
-  Program-shaped IR for the XS path.
+  Program-shaped IR for the XS path. (StructPromotion no longer
+  consumes Program after item 2 above — that's a real win — but
+  Target::C still does.)
 - `MethodInfo` / `ClassInfo` / `SubInfo` / `FieldInfo` / `UseInfo`
-  are read by StructPromotion's `is_class_info_node` check, by
-  Target::C's `_emit_*_decl(InfoStruct)` helpers, and by the
-  kept-alive `_emit_program` path.
-- ~20 test files (XS tests + struct-promotion tests + others)
-  still route through the Program-IR shape.
+  are read by Target::C's `_emit_*_decl(InfoStruct)` helpers and
+  by the kept-alive `_emit_program` path.
+- The legacy `_generate_with_cfg` requires
+  `$ir isa Chalk::IR::Program` and cannot survive without Program
+  either.
+- ~20 test files (XS tests + others) still route through the
+  Program-IR shape.
 
-The legacy `_generate_with_cfg` is also kept alive — it requires
-`$ir isa Chalk::IR::Program` and cannot survive without Program
-either. Until StructPromotion and Target::C migrate off the
-Info-struct shape, these types stay alive as transitional
-infrastructure, parallel to the `cfg_state` machinery already on
-Phase 7's deletion list. Section 6's earlier framing ("`MethodInfo`
-… deleted in Phase 6") is superseded by Amendment 5.
+Section 6's earlier framing ("`MethodInfo` … deleted in Phase 6")
+is superseded by Amendment 5 *and* Amendment 6.
 
 The following deletions therefore move to **Phase 7**, alongside
 the Target::C migration that unblocks them:
 
+- `MOP::Method->body` / `MOP::Sub->body` and the parser-side
+  `_finalize_body_graph` population
+- `emit_cfg_if`, `emit_cfg_loop`, `emit_cfg_try_catch`,
+  `emit_from_cfg_state`, `_emit_loop_jump`, `emit_cfg_phi_if` on
+  `Target::Perl`
 - `Chalk::IR::Program`
 - `MethodInfo`, `ClassInfo`, `SubInfo`, `FieldInfo`, `UseInfo`
 - `_emit_program`, `_emit_*_decl(InfoStruct)` helpers in Target::Perl
 
 **Explicitly kept alive until Phase 7:**
 `_generate_with_cfg`, `_build_cfg_lookup`, `_cfg_lookup`, the
-`cfg_state()` reader on `Chalk::Bootstrap::Context`, the
-`Graph->schedule` field, `Chalk::IR::Program`, the Info-struct
+`emit_cfg_*` helper family on `Target::Perl`, the `cfg_state()`
+reader on `Chalk::Bootstrap::Context`, the `Graph->schedule`
+field, `MOP::Method->body` / `MOP::Sub->body` and their
+parser-side population, `Chalk::IR::Program`, the Info-struct
 types (`MethodInfo`, `ClassInfo`, `SubInfo`, `FieldInfo`,
 `UseInfo`), and the `_emit_program` / `_emit_*_decl(InfoStruct)`
-helpers. `Target::C`, `StructPromotion`, and the XS test suite
-(TestXSHelpers's `parse_file_ir` and the ~10 XS tests that
-route through it, plus ~10 more Program-IR consumers) still
-depend on this machinery; Phase 7 (XS / C target migration,
-separate plan) is what removes those dependencies. Deleting any
-of this in Phase 6 would either break XS / StructPromotion tests
-or force Phase 7 to ship concurrently with the Perl-target
-cutover, which we explicitly chose not to do (Decision D). They
-remain transitional infrastructure until the C-target migration
-lands.
+helpers. `Target::C` and the XS test suite (TestXSHelpers's
+`parse_file_ir` and the ~10 XS tests that route through it, plus
+~10 more Program-IR consumers) still depend on this machinery;
+Phase 7 (XS / C target migration, separate plan) is what removes
+those dependencies. Deleting any of this in Phase 6 would either
+break XS tests or force Phase 7 to ship concurrently with the
+Perl-target cutover, which we explicitly chose not to do
+(Decision D). They remain transitional infrastructure until the
+C-target migration lands.
 
 **Test gate:** all existing tests pass. Goldens unchanged. The
 codebase is meaningfully smaller in `Target/Perl.pm` (the
-synthesis layer and `body` population go); the larger reduction
-— Program, the Info-structs, `_emit_program`, and the
-`cfg_state` machinery — lands when Phase 7 migrates Target::C.
+synthesis layer goes) and in `StructPromotion.pm` (the
+Info-struct synthesis layer goes); the larger reduction — Program,
+the Info-structs, `_emit_program`, the `emit_cfg_*` helpers, the
+MOP `body` fields, and the `cfg_state` machinery — lands when
+Phase 7 migrates Target::C.
 
-**Effort:** 1-2 sessions, mostly deletion + test sweep. The
-narrowed scope (Amendment 5) makes this smaller than originally
-estimated.
+**Effort:** shipped in two commits (`8b8ee251`, `ce27c16a`),
+roughly one session. Smaller than Amendment 5's already-narrowed
+estimate.
 
 **Risk:** Low if Phase 5 was thorough. The deletes are
 mechanical; misses show as failing tests. The transitional
-machinery left alive for Target::C / StructPromotion (cfg_state
-*and* Program + Info-structs) is a known piece of carried-over
-debt (tracked by Phase 7) rather than a correctness risk.
+machinery left alive for Target::C (cfg_state, the `emit_cfg_*`
+helpers, MOP `body`, *and* Program + Info-structs) is a known
+piece of carried-over debt (tracked by Phase 7) rather than a
+correctness risk.
 
 ### Phase 7 — XS / C target migration (separate plan)
 
@@ -1114,27 +1136,37 @@ is its own concern.
 
 **Phase 7 is the unblock for the final transitional-infrastructure
 deletion.** Until this phase ships, the following remain alive as
-transitional infrastructure for `Target::C`, `StructPromotion`,
-and the XS test suite (see Phase 6's "Explicitly kept alive"
-list):
+transitional infrastructure for `Target::C` and the XS test suite
+(see Phase 6's "Explicitly kept alive" list):
 
 - The legacy `cfg_state` reader on `Chalk::Bootstrap::Context`,
   `_build_cfg_lookup` and `_cfg_lookup` on `Target::Perl`,
   `_generate_with_cfg`, and the `Graph->schedule` field.
+- `emit_cfg_if`, `emit_cfg_loop`, `emit_cfg_try_catch`,
+  `emit_from_cfg_state`, `_emit_loop_jump`, `emit_cfg_phi_if` on
+  `Target::Perl` (dispatched from `_emit_node` via `%_cfg_lookup`,
+  which Target::C still populates through `_generate_with_cfg`).
+- `MOP::Method->body` / `MOP::Sub->body` and the parser-side
+  `_finalize_body_graph` population. StructPromotion's
+  `_analyze_mop` still reads `body`; migrating that read to
+  graph-walking is part of Phase 7's StructPromotion follow-up.
 - `Chalk::IR::Program`.
 - `MethodInfo`, `ClassInfo`, `SubInfo`, `FieldInfo`, `UseInfo`.
 - `_emit_program` and the `_emit_*_decl(InfoStruct)` helpers on
   `Target::Perl`.
 
-Phase 7's deliverable includes migrating `Target::C` and
-`Chalk::Bootstrap::Optimizer::StructPromotion` to consume
-`Schedule` + `ScheduleMeta` (or, in StructPromotion's case, to
-walk MOP entities directly) the way Phase 5 migrated
-`Target::Perl`, plus the TestXSHelpers helper module to a
-Schedule-driven shape. After Phase 7 ships and stabilizes, the
-transitional machinery — both the `cfg_state` side and the
-Program / Info-struct side — is deleted in a follow-up commit;
-that commit is the formal end of the pre-scheduler emit era.
+Phase 7's deliverable includes migrating `Target::C` to consume
+`Schedule` + `ScheduleMeta` the way Phase 5 migrated
+`Target::Perl`, migrating `StructPromotion`'s `_analyze_mop` from
+`body`-reading to graph-walking, and migrating the TestXSHelpers
+helper module to a Schedule-driven shape. (StructPromotion's
+*Info-struct* synthesis was already removed in Phase 6 — commit
+`ce27c16a`; the remaining StructPromotion work is the `body` →
+graph migration.) After Phase 7 ships and stabilizes, the
+transitional machinery — `cfg_state`, the `emit_cfg_*` helpers,
+MOP `body`, and the Program / Info-struct side — is deleted in
+a follow-up commit; that commit is the formal end of the
+pre-scheduler emit era.
 
 ### Phase 8 — Transition to destination scheduler
 
@@ -1226,6 +1258,60 @@ boundaries (Perl emit vs C emit vs IR optimizer), each target's
 migration is its own phase. Compressing them into a single
 "switchover" phase mis-states what's actually achievable in one
 session and hides cross-target coupling.
+
+### Amendment 6 — Phase 6 actual shipped scope
+
+Phase 6 implementation surfaced that even Amendment 5's narrowed
+scope was too broad. Amendment 5 reduced Phase 6's deletion list
+to four items; only two actually shipped:
+
+**Shipped:**
+
+- `_generate_from_mop` plus `_body_from_graph` and
+  `_is_explicit_exit` on `Target::Perl` (commit `8b8ee251`,
+  about 190 lines deleted).
+- `_class_info_from_mop_class` on
+  `Chalk::Bootstrap::Optimizer::StructPromotion` (commit
+  `ce27c16a`, about 25 lines net deletion). StructPromotion's
+  new `_analyze_mop` method consumes `MOP::Class` directly,
+  without manufacturing Info-struct shells first.
+
+**Deferred to Phase 7:**
+
+- `MOP::Method->body` / `MOP::Sub->body` deletion. The migrated
+  StructPromotion path (`_analyze_mop`) still reads
+  `$method->body` to collect the statement list. Migrating that
+  read to graph-walking is a real refactor, not a deletion;
+  `body` stays as a parser-collected convenience until that
+  refactor lands.
+- `emit_cfg_if`, `emit_cfg_loop`, `emit_cfg_try_catch`,
+  `emit_from_cfg_state`, `_emit_loop_jump`, `emit_cfg_phi_if`
+  on `Target::Perl`. Amendment 5 framed these as conditional on
+  Target::C non-use; the answer is that Target::C *is* the user,
+  via the legacy `_generate_with_cfg` path that populates
+  `%_cfg_lookup` and dispatches these helpers from `_emit_node`.
+  Same logic as MOP `body`: Target::C consumes a synthesis path
+  whose helpers cannot be deleted without breaking Target::C.
+
+The lesson for Phase 7 planning: **Target::C migration is the
+actual unblock.** Until Target::C consumes `Schedule` +
+`ScheduleMeta`, the entire legacy stack — `Program` IR + the
+Info-struct types + `cfg_state` + the `emit_cfg_*` helpers + the
+MOP `body` fields — stays alive. Phase 6's residue isn't
+accidental; it's the surface area where Target::C still expects
+the pre-scheduler emit shape.
+
+The StructPromotion migration *was* a genuine win and
+demonstrates the path for Phase 7's larger lift. Removing
+`_class_info_from_mop_class` was cheap once the consumer
+(StructPromotion's analyze/rewrite logic) was willing to walk
+`MOP::Class` directly. The same shape applies to Target::C:
+once Target::C is willing to walk `Schedule` + `ScheduleMeta`
+directly, the synthesis layers that exist to manufacture
+Program / Info-struct shape for it become deletable in the same
+way. The Phase 6 pattern — synthesis-layer removal is cheap
+once the consumer migrates — is the template for Phase 7's
+Target::C work.
 
 ## 8. Test strategy
 
@@ -1430,18 +1516,31 @@ golden corpus regresses), the rollback is non-trivial.
    emits gets a `.pl.golden` captured. Phase 6 deletion is
    safe only if the new path matches goldens for every file
    in the audit corpus.
-3. Phase 6 deletion is staged: first delete the synthesis
-   layer (`_generate_from_mop`, `_body_from_graph`) while
-   leaving `body` populated; second delete `body` and the
-   parser-side population. The `cfg_state` reader,
-   `_build_cfg_lookup`, `_generate_with_cfg`, `Program`, and
-   the Info-struct types (`MethodInfo`, `ClassInfo`, `SubInfo`,
-   `FieldInfo`, `UseInfo`) are deliberately *not* deleted in
-   Phase 6 — they remain alive for `Target::C` and
-   `StructPromotion` until Phase 7 migrates the XS path and
-   the IR optimizer. See Amendment 5 (Section 7) for the
-   scope correction. Each Phase 6 deletion sub-step runs the
-   full test suite.
+3. Phase 6 deletion is staged, *and the staging must be sized
+   to the least-entangled deletable items, not the most
+   ambitious wishlist.* As shipped, Phase 6 deleted exactly two
+   items: the Target::Perl synthesis layer
+   (`_generate_from_mop` + `_body_from_graph` +
+   `_is_explicit_exit`, commit `8b8ee251`) and the
+   StructPromotion Info-struct synthesis layer
+   (`_class_info_from_mop_class`, commit `ce27c16a`). The other
+   two items on Amendment 5's narrowed list — MOP `body` and
+   the `emit_cfg_*` helpers — both turned out to be entangled
+   with `Target::C` through the legacy `_generate_with_cfg`
+   path and deferred to Phase 7. The lesson is that "staged
+   deletion" must be sized empirically: each candidate deletion
+   needs its actual call graph verified before it lands on the
+   phase's deletion list, not after. See Amendment 6 (Section
+   7) for the Phase 6 scope correction; Amendment 5 (also
+   Section 7) for the prior narrowing that moved Info-structs
+   and Program to Phase 7. The `cfg_state` reader,
+   `_build_cfg_lookup`, `_generate_with_cfg`, the `emit_cfg_*`
+   helpers, MOP `body`, `Program`, and the Info-struct types
+   (`MethodInfo`, `ClassInfo`, `SubInfo`, `FieldInfo`,
+   `UseInfo`) are deliberately *not* deleted in Phase 6 — they
+   remain alive for `Target::C` until Phase 7 migrates the XS
+   path. Each Phase 6 deletion sub-step runs the full test
+   suite.
 
 #### R6 — Eager-pinning becomes load-bearing
 
