@@ -297,10 +297,14 @@ my sub method_name($method) {
         is(scalar $stmts->@*, 1, 'push multi-arg: one statement (not fragmented)');
 
         my $call = $stmts->[0];
-        is($call->class(), 'BuiltinCall', 'push multi-arg: statement is BuiltinCall');
+        # Post-polymorphic IR migration: BuiltinCall was merged into
+        # the unified Call node type. Accept either class name for
+        # back-compat reads, but assert Call-flavored operation.
+        ok($call->class eq 'Call' || $call->class eq 'Call',
+            'push multi-arg: statement is Call (was BuiltinCall)');
 
         my $args = $call->inputs()->[1];
-        is(scalar $args->@*, 2, 'push multi-arg: BuiltinCall has 2 args');
+        is(scalar $args->@*, 2, 'push multi-arg: Call has 2 args');
     }
 }
 
@@ -326,7 +330,9 @@ my sub method_name($method) {
         my ($decl, $assign) = $stmts->@*;
         ok($decl isa Chalk::IR::Node::VarDecl,
             'bare-decl-then-assign: first statement is VarDecl');
-        ok(!defined $decl->inputs()->[1],
+        # Post-Phase-3d VarDecl shape: inputs[0]=control, inputs[1]=name,
+        # inputs[2]=init. A bare decl has init undef.
+        ok(!defined $decl->inputs()->[2],
             'bare-decl-then-assign: VarDecl has no initializer (undef)');
         ok($assign isa Chalk::IR::Node
                 && $assign->operation() eq 'Assign',
@@ -391,7 +397,8 @@ my sub method_name($method) {
         is(scalar $stmts->@*, 1, 'PostfixDeref: one statement');
 
         my $deref = $stmts->[0];
-        is($deref->class(), 'PostfixDerefExpr', 'PostfixDeref: class');
+        # Post-polymorphic IR: PostfixDerefExpr → PostfixDeref.
+        is($deref->class(), 'PostfixDeref', 'PostfixDeref: class');
 
         my $target = $deref->inputs()->[0];
         ok(defined $target, 'PostfixDeref: target is defined');
@@ -409,11 +416,12 @@ my sub method_name($method) {
         is(scalar $stmts->@*, 1, 'PostfixDeref chain: one statement');
 
         my $deref = $stmts->[0];
-        is($deref->class(), 'PostfixDerefExpr', 'PostfixDeref chain: class');
+        is($deref->class(), 'PostfixDeref', 'PostfixDeref chain: class');
 
         my $target = $deref->inputs()->[0];
         ok(defined $target, 'PostfixDeref chain: target is defined');
-        is($target->class(), 'MethodCallExpr', 'PostfixDeref chain: target is MethodCallExpr');
+        # Post-polymorphic IR: MethodCallExpr → Call.
+        is($target->class(), 'Call', 'PostfixDeref chain: target is Call (was MethodCallExpr)');
     };
 }
 
@@ -430,7 +438,8 @@ my sub method_name($method) {
         is(scalar $stmts->@*, 1, 'MethodCall: one statement');
 
         my $call = $stmts->[0];
-        is($call->class(), 'MethodCallExpr', 'MethodCall: class');
+        # Post-polymorphic IR: MethodCallExpr → Call.
+        is($call->class(), 'Call', 'MethodCall: class (was MethodCallExpr)');
 
         my $invocant = $call->inputs()->[0];
         ok(defined $invocant, 'MethodCall: invocant is defined');
@@ -448,12 +457,12 @@ my sub method_name($method) {
         is(scalar $stmts->@*, 1, 'MethodCall chain: one statement');
 
         my $call = $stmts->[0];
-        is($call->class(), 'MethodCallExpr', 'MethodCall chain: class is outer');
+        is($call->class(), 'Call', 'MethodCall chain: class is outer (was MethodCallExpr)');
         is($call->inputs()->[1]->value(), 'bar', 'MethodCall chain: outer method is bar');
 
         my $invocant = $call->inputs()->[0];
         ok(defined $invocant, 'MethodCall chain: invocant is defined');
-        is($invocant->class(), 'MethodCallExpr', 'MethodCall chain: invocant is MethodCallExpr');
+        is($invocant->class(), 'Call', 'MethodCall chain: invocant is Call (was MethodCallExpr)');
         is($invocant->inputs()->[1]->value(), 'foo', 'MethodCall chain: inner method is foo');
     };
 }
@@ -471,7 +480,8 @@ my sub method_name($method) {
         is(scalar $stmts->@*, 1, 'Subscript: one statement');
 
         my $sub = $stmts->[0];
-        is($sub->class(), 'SubscriptExpr', 'Subscript: class');
+        # Post-polymorphic IR: SubscriptExpr → Subscript.
+        is($sub->class(), 'Subscript', 'Subscript: class (was SubscriptExpr)');
 
         my $target = $sub->inputs()->[0];
         ok(defined $target, 'Subscript: target is defined');
@@ -494,12 +504,12 @@ my sub method_name($method) {
 
         my $value = $ret->inputs()->[1];  # inputs[0]=control, inputs[1]=value
         ok(defined $value, 'return scalar deref: return value defined');
-        is($value->class(), 'BuiltinCall', 'return scalar deref: value is BuiltinCall(scalar)');
+        is($value->class(), 'Call', 'return scalar deref: value is Call(scalar)');
         is($value->inputs()->[0]->value(), 'scalar', 'return scalar deref: builtin name');
 
         my $scalar_arg = $value->inputs()->[1]->[0];
         ok(defined $scalar_arg, 'return scalar deref: scalar arg defined');
-        is($scalar_arg->class(), 'PostfixDerefExpr', 'return scalar deref: arg is PostfixDerefExpr');
+        is($scalar_arg->class(), 'PostfixDeref', 'return scalar deref: arg is PostfixDeref');
 
         my $deref_target = $scalar_arg->inputs()->[0];
         ok(defined $deref_target, 'return scalar deref: deref target defined');
@@ -524,7 +534,7 @@ my sub method_name($method) {
             is(scalar $stmts->@*, 1, 'push method-deref: one statement');
 
             my $call = $stmts->[0];
-            is($call->class(), 'BuiltinCall', 'push method-deref: statement is BuiltinCall');
+            is($call->class(), 'Call', 'push method-deref: statement is Call');
             is($call->inputs()->[0]->value(), 'push', 'push method-deref: builtin name');
 
             my $args = $call->inputs()->[1];
@@ -532,11 +542,11 @@ my sub method_name($method) {
 
             # First arg should be PostfixDerefExpr($ops, @)
             my $arg1 = $args->[0];
-            is($arg1->class(), 'PostfixDerefExpr', 'push method-deref: arg1 is PostfixDerefExpr');
+            is($arg1->class(), 'PostfixDeref', 'push method-deref: arg1 is PostfixDeref');
 
             # Second arg should be PostfixDerefExpr(MethodCallExpr($other, ops, []), @)
             my $arg2 = $args->[1];
-            is($arg2->class(), 'PostfixDerefExpr', 'push method-deref: arg2 is PostfixDerefExpr');
+            is($arg2->class(), 'PostfixDeref', 'push method-deref: arg2 is PostfixDeref');
         }
     };
 }
@@ -566,24 +576,26 @@ my sub method_name($method) {
             my $stmt = $stmts->[0];
             ok(defined $stmt, "$builtin_name subscript: has statement");
 
-            # The statement should be BuiltinCall, NOT SubscriptExpr wrapping it
-            if ($stmt isa Chalk::IR::Node::Constructor) {
-                is($stmt->class(), 'BuiltinCall',
-                    "$builtin_name subscript: top-level is BuiltinCall (not SubscriptExpr)");
+            # Post-polymorphic IR: assertion is on any IR::Node (the
+            # legacy Constructor class is gone). The statement should be
+            # a Call (was BuiltinCall) wrapping a Subscript arg, not the
+            # other way around.
+            if ($stmt isa Chalk::IR::Node) {
+                is($stmt->class(), 'Call',
+                    "$builtin_name subscript: top-level is Call (not Subscript)");
 
-                # Verify the arg is a SubscriptExpr
-                if ($stmt->class() eq 'BuiltinCall') {
+                if ($stmt->class() eq 'Call') {
                     my $args = $stmt->inputs()->[1];
                     ok(ref($args) eq 'ARRAY' && $args->@* > 0,
                         "$builtin_name subscript: has arguments");
                     if (ref($args) eq 'ARRAY' && $args->@* > 0
-                        && $args->[0] isa Chalk::IR::Node::Constructor) {
-                        is($args->[0]->class(), 'SubscriptExpr',
-                            "$builtin_name subscript: arg is SubscriptExpr");
+                        && $args->[0] isa Chalk::IR::Node) {
+                        is($args->[0]->class(), 'Subscript',
+                            "$builtin_name subscript: arg is Subscript");
                     }
                 }
             } else {
-                fail("$builtin_name subscript: expected Constructor node");
+                fail("$builtin_name subscript: expected IR::Node");
             }
         }
     }
