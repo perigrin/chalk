@@ -149,13 +149,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # Detect :param attribute — these fields vary per instance
             if (ref($attrs) eq 'ARRAY') {
                 for my $attr ($attrs->@*) {
-                    my $attr_name;
-                    if (ref($attr) eq 'HASH') {
-                        $attr_name = $attr->{name};
-                    } else {
-                        # Legacy Constructor:_Attribute node
-                        $attr_name = $attr->inputs()->[0]->value();
-                    }
+                    my $attr_name = $attr->{name};
                     if (defined $attr_name && $attr_name eq 'param') {
                         $params{$field_name} = 1;
                     }
@@ -277,13 +271,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             next unless ref($attrs) eq 'ARRAY';
             my $has_reader = false;
             for my $attr ($attrs->@*) {
-                my $attr_name;
-                if (ref($attr) eq 'HASH') {
-                    $attr_name = $attr->{name};
-                } else {
-                    # Legacy Constructor:_Attribute node
-                    $attr_name = $attr->inputs()->[0]->value();
-                }
+                my $attr_name = $attr->{name};
                 if (defined $attr_name && $attr_name eq 'reader') {
                     $has_reader = true;
                     last;

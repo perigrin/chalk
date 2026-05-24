@@ -122,22 +122,15 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         return;
     }
     method _emit_method($method_decl) {
-        my ($name, $params, $body);
-        if ($method_decl isa Chalk::IR::MethodInfo) {
-            $name = $method_decl->name();
-            $body = $method_decl->body();
-            # Normalize plain string params to Constant nodes so downstream
-            # code can uniformly call ->value() on each param.
-            my $factory = Chalk::IR::NodeFactory->new();
-            $params = [
-                map { $factory->make('Constant', const_type => 'variable', value => $_) }
-                    $method_decl->params()->@*
-            ];
-        } else {
-            $name   = $method_decl->inputs()->[0]->value();
-            $params = $method_decl->inputs()->[1];  # Constant nodes
-            $body   = $method_decl->inputs()->[2];
-        }
+        my $name = $method_decl->name();
+        my $body = $method_decl->body();
+        # Normalize plain string params to Constant nodes so downstream
+        # code can uniformly call ->value() on each param.
+        my $factory = Chalk::IR::NodeFactory->new();
+        my $params = [
+            map { $factory->make('Constant', const_type => 'variable', value => $_) }
+                $method_decl->params()->@*
+        ];
 
         my $func_name = "${\  $self->_get_current_slug()}_${name}";
 
@@ -232,13 +225,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             return { helper => \@helper };
         }
 
-        my $return_type;
-        if ($method_decl isa Chalk::IR::MethodInfo) {
-            $return_type = $method_decl->return_type();  # already a plain string
-        } else {
-            my $return_type_node = $method_decl->inputs()->[3];
-            $return_type = $return_type_node ? $return_type_node->value() : undef;
-        }
+        my $return_type = $method_decl->return_type();  # already a plain string
         return $self->_emit_complex_method($name, $params, $body, $return_type);
     }
 
@@ -1613,9 +1600,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my @func_lines;     # exported C functions (methods)
 
         if (defined $class_decl) {
-            my $body = $class_decl isa Chalk::IR::ClassInfo
-                ? $class_decl->body()
-                : $class_decl->inputs()->[2];
+            my $body = $class_decl->body();
 
             # Emit class-scope subs (static helpers) before methods.
             for my $item ($body->@*) {
@@ -1770,9 +1755,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         push @init_lines, "    if (_initialized) return;";
         push @init_lines, "    _initialized = 1;";
         if (defined $class_decl && keys $self->_get_class_scope_vars()->%*) {
-            my $body = $class_decl isa Chalk::IR::ClassInfo
-                ? $class_decl->body()
-                : $class_decl->inputs()->[2];
+            my $body = $class_decl->body();
             for my $item ($body->@*) {
                 next unless $item isa Chalk::IR::Node::VarDecl;
                 my $raw = $item->name()->value();
@@ -2028,15 +2011,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         # Register :isa (parent class) if the ClassDecl has a parent
         if (defined $class_decl) {
-            my $parent_name;
-            if ($class_decl isa Chalk::IR::ClassInfo) {
-                $parent_name = $class_decl->parent();
-            } else {
-                my $parent_node = $class_decl->inputs()->[1];
-                $parent_name = defined $parent_node && $parent_node isa Chalk::IR::Node::Constant
-                    ? $parent_node->value()
-                    : undef;
-            }
+            my $parent_name = $class_decl->parent();
             if (defined $parent_name) {
                 my $escaped_parent = $self->_escape_c_string($parent_name);
                 push @lines, "    {";
@@ -2067,13 +2042,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 # Apply field attributes (:param, :reader, :writer)
                 if (ref($attrs) eq 'ARRAY') {
                     for my $attr ($attrs->@*) {
-                        my $attr_name;
-                        if (ref($attr) eq 'HASH') {
-                            $attr_name = $attr->{name};
-                        } else {
-                            # Legacy Constructor:_Attribute node
-                            $attr_name = $attr->inputs()->[0]->value();
-                        }
+                        my $attr_name = $attr->{name};
                         my $escaped_attr = $self->_escape_c_string($attr_name);
                         push @lines, '        {';
                         push @lines, "            OP *attr = newSVOP(OP_CONST, 0, newSVpvs(\"$escaped_attr\"));";
