@@ -435,7 +435,7 @@ git commit -m "feat: type-aware dispatch eliminates remaining call_method dispat
 ### Task 5: Benchmark and update design docs
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-03-19-c-codegen-redesign-design.md` (add Phase 4a/4b)
+- Modify: `docs/plans/2026-03-19-c-codegen-redesign-design.md` (add Phase 4a/4b)
 - Create: benchmark comparison data
 
 - [ ] **Step 1: Run benchmark suite**
@@ -467,7 +467,7 @@ Add "Phase 4b: Data model classes + type-aware dispatch" documenting:
 - [ ] **Step 3: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-03-19-c-codegen-redesign-design.md
+git add docs/plans/2026-03-19-c-codegen-redesign-design.md
 git commit -m "docs: update design spec with Phase 4a/4b — self-call and data model optimization"
 ```
 
@@ -483,7 +483,7 @@ git commit -m "docs: update design spec with Phase 4a/4b — self-call and data 
 | `t/bootstrap/c-data-model-classes.t` | Create | Behavioral tests for C-backed Symbol/Rule/CoreItemIndex/LR0DFA |
 | `t/bootstrap/c-type-aware-dispatch.t` | Create | Codegen shape + call_method count assertion |
 | `t/bootstrap/c-end-to-end.t` | Modify | Update @classes for 11 compiled classes |
-| `docs/superpowers/specs/2026-03-19-c-codegen-redesign-design.md` | Modify | Add Phase 4a/4b documentation |
+| `docs/plans/2026-03-19-c-codegen-redesign-design.md` | Modify | Add Phase 4a/4b documentation |
 
 ## Risk Assessment
 

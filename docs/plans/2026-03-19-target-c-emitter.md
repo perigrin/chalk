@@ -8,7 +8,7 @@
 
 **Tech Stack:** Perl 5.42.0, C (gcc/cc), Perl class C API
 
-**Spec:** `docs/superpowers/specs/2026-03-19-target-c-emitter-design.md`
+**Spec:** `docs/plans/2026-03-19-target-c-emitter-design.md`
 
 **Skills required:** `writing-perl-5.42.0`, `test-driven-development`
 

@@ -309,7 +309,9 @@ confirm the cross-reference still makes sense.
   the work that landed. Audit docs and phase-by-phase migration
   plans are by definition tied to a moment in time. Updating them
   destroys their value as a record.
-- **`docs/superpowers/plans/`.** Same reasoning — historical.
+- **Historical plan docs that were consolidated into `docs/plans/`
+  on 2026-05-25 (previously under `docs/superpowers/plans/` and
+  `docs/superpowers/specs/`).** Same reasoning — historical.
 - **Memory docs in `memory/`.** Memory is updated by the
   conversation that writes it, not by a phase doc update pass.
 - **`CLAUDE.md`.** Project-level instructions; the relevant entries

@@ -8,12 +8,12 @@
 
 **Tech Stack:** Perl 5.42.0, C (gcc/cc), xsubpp, DynaLoader, Perl class C API (ObjectFIELDS, class_setup_stash)
 
-**Spec:** `docs/superpowers/specs/2026-03-19-c-codegen-redesign-design.md`
+**Spec:** `docs/plans/2026-03-19-c-codegen-redesign-design.md`
 
 **Skills required:** `writing-perl-5.42.0`, `test-driven-development`, `writing-perl-xs`
 
 **Key docs to read first:**
-- `docs/superpowers/specs/2026-03-19-c-codegen-redesign-design.md` — full design spec
+- `docs/plans/2026-03-19-c-codegen-redesign-design.md` — full design spec
 - `lib/Chalk/Bootstrap/Semiring/Boolean.pm` — the class being compiled (68 lines, 8 methods)
 - `lib/Chalk/Bootstrap/Perl/Target/XS.pm` — existing XS codegen (5933 lines) — the source of extracted logic
 
