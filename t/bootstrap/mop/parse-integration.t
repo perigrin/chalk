@@ -127,6 +127,106 @@ class Point {
             is(scalar @main_fields,  0, 'main has no fields');
             is(scalar @main_methods, 0, 'main has no methods');
         }
+
+        # ============================================================
+        # Test: class-scope `my $VAR = expr;` populates class_scope_vars
+        # ============================================================
+        # Parse a second source against the same singleton MOP (matches
+        # the convention established by parse-toplevel-sub.t line 130:
+        # current_mop() is read by semantic actions; classes accumulate
+        # across parses on the same singleton). No reset needed.
+        {
+            my $csv_source = q{
+class Sentinel {
+    my $ZERO = -1;
+    field $x :param;
+
+    method get_zero() {
+        return $ZERO;
+    }
+}
+};
+
+            my $csv_parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+            # build_perl_ir_parser installs a fresh MOP via set_mop, so
+            # capture the new singleton after parser construction
+            # (matches the convention in parse-toplevel-sub.t line 130).
+            my $csv_mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
+            my $csv_result = $csv_parser->parse_value($csv_source);
+
+            ok(defined $csv_result && !$csv_result->is_zero(),
+                'class with class-scope `my` parses successfully');
+
+            SKIP: {
+                skip 'csv source did not parse', 3
+                    unless defined $csv_result && !$csv_result->is_zero();
+
+                my $sentinel = $csv_mop->for_class('Sentinel');
+                ok(defined $sentinel, 'Sentinel class is on MOP');
+
+                SKIP: {
+                    skip 'Sentinel not on MOP', 2 unless defined $sentinel;
+                    my @csv = $sentinel->class_scope_vars;
+                    is(scalar @csv, 1, 'Sentinel has 1 class_scope_var');
+
+                    SKIP: {
+                        skip 'no class_scope_vars on Sentinel', 1
+                            unless scalar @csv >= 1;
+                        is($csv[0]->name->value, '$ZERO',
+                            'class_scope_var name is $ZERO');
+                    }
+                }
+            }
+        }
+
+        # ============================================================
+        # Test: class-scope `use constant { K => V };` populates
+        # use_constants (and is NOT routed to imports)
+        # ============================================================
+        {
+            my $uc_source = q{
+class Counters {
+    use constant { MIN => 0, MAX => 255 };
+
+    method min() { return MIN; }
+}
+};
+
+            my $uc_parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+            # Capture fresh MOP (set_mop installs a new one per parser).
+            my $uc_mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
+            my $uc_result = $uc_parser->parse_value($uc_source);
+
+            ok(defined $uc_result && !$uc_result->is_zero(),
+                'class with `use constant` parses successfully');
+
+            SKIP: {
+                skip 'uc source did not parse', 4
+                    unless defined $uc_result && !$uc_result->is_zero();
+
+                my $counters = $uc_mop->for_class('Counters');
+                ok(defined $counters, 'Counters class is on MOP');
+
+                SKIP: {
+                    skip 'Counters not on MOP', 3 unless defined $counters;
+
+                    my @uc = $counters->use_constants;
+                    is(scalar @uc, 2, 'Counters has 2 use_constants');
+
+                    my %by_name = map { $_->{name} => $_ } @uc;
+                    ok(exists $by_name{MIN}, 'use_constants has MIN');
+                    ok(exists $by_name{MAX}, 'use_constants has MAX');
+
+                    # Critically: use_constants does NOT also leak into
+                    # imports. The pre-split code routed every UseInfo
+                    # through declare_import, so this would have failed.
+                    my @imps = $counters->imports;
+                    my @constant_imps = grep { $_->module eq 'constant' } @imps;
+                    is(scalar @constant_imps, 0,
+                        '`use constant` does not appear in imports');
+                }
+            }
+        }
     }
 }
 

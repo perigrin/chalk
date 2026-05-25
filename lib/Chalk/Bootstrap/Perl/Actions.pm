@@ -714,9 +714,37 @@ class Chalk::Bootstrap::Perl::Actions {
                             : ()),
                     );
                 } elsif ($item isa Chalk::IR::UseInfo) {
-                    $mop_class->declare_import($item->name(),
-                        args => [$item->args->@*],
-                    );
+                    if ($item->name eq 'constant') {
+                        # `use constant { K => V, ... };` — extract
+                        # constant pairs from args[0]'s HashRef and
+                        # route each to declare_use_constant. Do NOT
+                        # also declare_import; conflating the two
+                        # forced Target::C to walk the body twice.
+                        my $args = $item->args;
+                        if (ref($args) eq 'ARRAY' && @$args) {
+                            my $hash = $args->[0];
+                            if (defined $hash
+                                    && $hash isa Chalk::IR::Node::HashRef) {
+                                my $pairs = $hash->inputs->[0];
+                                if (ref($pairs) eq 'ARRAY') {
+                                    for (my $i = 0; $i < @$pairs; $i += 2) {
+                                        my $k = $pairs->[$i];
+                                        my $v = $pairs->[$i + 1];
+                                        next unless $k isa Chalk::IR::Node::Constant;
+                                        next unless $v isa Chalk::IR::Node::Constant;
+                                        $mop_class->declare_use_constant(
+                                            $k->value, $v);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        $mop_class->declare_import($item->name(),
+                            args => [$item->args->@*],
+                        );
+                    }
+                } elsif ($item isa Chalk::IR::Node::VarDecl) {
+                    $mop_class->declare_class_scope_var($item);
                 } elsif (ref($item) eq 'HASH' && exists $item->{__adjust_body}) {
                     $mop_class->declare_adjust();
                 }

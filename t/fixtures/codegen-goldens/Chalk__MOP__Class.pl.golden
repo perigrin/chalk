@@ -6,6 +6,7 @@ use Chalk::MOP::Method;
 use Chalk::MOP::Sub;
 use Chalk::MOP::Import;
 use Chalk::MOP::Phaser::Adjust;
+use Chalk::Bootstrap::Scope;
 class Chalk::MOP::Class {
     field $name :param :reader;
     field $superclass :param :reader = undef;
@@ -16,6 +17,9 @@ class Chalk::MOP::Class {
     field @subs;
     field @imports;
     field @adjust_blocks;
+    field $scope :reader = 'Chalk::Bootstrap::Scope'->new();
+    field @class_scope_vars;
+    field @use_constants;
     method fields() {
         return @fields;
     }
@@ -30,6 +34,12 @@ class Chalk::MOP::Class {
     }
     method adjust_blocks() {
         return @adjust_blocks;
+    }
+    method class_scope_vars() {
+        return @class_scope_vars;
+    }
+    method use_constants() {
+        return @use_constants;
     }
     method declare_field($field_name, %opts) {
         my $field = 'Chalk::MOP::Field'->new('name', $field_name, 'class', $self, 'fieldix', scalar(@fields), %opts);
@@ -60,6 +70,17 @@ class Chalk::MOP::Class {
         my $adjust = 'Chalk::MOP::Phaser::Adjust'->new('class', $self, 'source_position', scalar(@adjust_blocks), %opts);
         push @adjust_blocks, $adjust;
         return $adjust;
+    }
+    method declare_class_scope_var($vardecl_node) {
+        push @class_scope_vars, $vardecl_node;
+        my $name = $vardecl_node->name()->value();
+        $scope = $scope->define($name, $vardecl_node);
+        return $vardecl_node;
+    }
+    method declare_use_constant($name, $value_node) {
+        my $entry = { 'name', $name, 'value', $value_node };
+        push @use_constants, $entry;
+        return $entry;
     }
     method find_method($search_name) {
         for my $m (@methods) {
