@@ -19,7 +19,7 @@ something to iterate on the MOP side first.
 This prep commit expands MOP::Class so 7c-proper has a real target.
 It does NOT touch Target::C.
 
-## Framing: a class body is a graph
+## Framing: a class body has a lexical environment
 
 A method body is a Sea-of-Nodes graph in MOP::Method: VarDecl nodes
 pinned to a control chain, a Scope tracking variable bindings, a
@@ -33,24 +33,77 @@ shaped statements pinned to a control chain. The class-scope
 Class-scope VarDecls and use-constants are bindings in that Scope;
 field/method/sub declarations are values bound into it.
 
-MOP::Class should expose this graph the same way MOP::Method does.
-
-This prep commit puts the SSA scaffolding in place (graph, scope,
-factory fields) AND ships the two typed entity lists that 7c-proper
-actually consumes. The graph/scope fields stay populated but
-under-used until later optimization passes need them.
+This prep commit ships the **lexical-environment** half of that
+framing — `$scope` and the two typed entity lists 7c-proper needs.
+The graph-shaped half (a per-class `$graph` walked the way method
+codegen walks a method graph) is deferred until 7d-or-later
+provides a consumer; see "Why no `$graph` or `$factory`" below.
 
 ## What ships
 
-### MOP::Class new fields (parallel to MOP::Method)
+### MOP::Class new field (lexical environment only)
 
-- `field $graph   :param :reader = Chalk::IR::Graph->new;`
-- `field $factory :param :reader = Chalk::IR::NodeFactory->new;`
-- `field $scope   :param :reader = Chalk::Bootstrap::Scope->new;`
+- `field $scope :param :reader = Chalk::Bootstrap::Scope->new;`
 
-These default-construct on every MOP::Class instance — consistent
-with MOP::Method's unconditional default-construction. Empty classes
-pay the same allocation cost methods already pay.
+This is the lexical environment of the class body — the scope that
+class-scope `my $x = ...;` and `use constant` declarations extend,
+and that method/sub bodies will eventually close over (deferred
+wiring; see sub-decision 3a).
+
+**What reads `$scope` in 7c-proper.** Nothing. 7c-proper consumes
+`@class_scope_vars` and `@use_constants` as list iterators; it does
+not need to look up bindings by name. `$scope` is populated by this
+commit but unread until a later commit (the one wiring method
+bodies to close over the class scope, or any commit that wants
+name-resolution against the class's lexical environment).
+
+**Why ship `$scope` now anyway.** Three reasons:
+
+1. `declare_class_scope_var` has to bind the VarDecl into *something*
+   representing the lexical environment. Binding into `$scope` is
+   the model that matches how method scopes work today — the
+   alternative (skip the binding entirely, recover the lex-env
+   later by re-walking `@class_scope_vars`) duplicates information
+   and creates the same dual-source-of-truth pattern this prep
+   commit is trying to avoid.
+2. The cost is minimal: one field, one Scope allocation per class.
+3. The consumer is *known* (Phase 7d-or-later) and *near-term*, not
+   a hypothetical future need. Adding `$scope` now defers a
+   guaranteed future touch of MOP::Class; the alternative pays the
+   re-touch cost without saving anything.
+
+This is the YAGNI line we're drawing: ship the lexical-env field
+because its producer (`declare_class_scope_var`) needs a destination
+and the consumer is known. Do not ship `$graph` / `$factory`
+because no producer needs them yet (Risk #2) and no consumer exists
+until 7d at earliest.
+
+**Why no `$graph` or `$factory` field in this commit.** The original
+design (per the brainstorming sketch) proposed `$graph` and
+`$factory` here, paralleling MOP::Method's structure. The spec
+review surfaced two problems with that:
+
+1. **Cross-graph ownership risk** — VarDecl IR nodes are constructed
+   by Actions.pm *before* the ClassBlock action runs. By VarDecl
+   construction time (Actions.pm:1751, 1757), the VarDecl has
+   already been merged into `$ctx->graph()`. Calling
+   `$mop_class->graph->merge($vardecl_node)` later either no-ops
+   (same graph) or cross-claims the node into a second graph,
+   potentially corrupting use-def chains.
+
+2. **No consumer in 7c-proper.** Phase 7c-proper consumes the two
+   typed entity lists (`@class_scope_vars`, `@use_constants`) and
+   `$scope`. It does NOT walk `$mop_class->graph`. Shipping
+   `$graph`/`$factory` now puts unread fields on every MOP::Class
+   instance until some later phase (7d at earliest) provides a
+   consumer.
+
+YAGNI applies: ship only `$scope` now. The graph-shaped framing of
+class bodies (the original SSA framing that motivated this prep)
+returns when 7d-or-later actually needs to walk the class body as
+a graph. At that point, the resolution of the cross-graph ownership
+question is also part of that commit's contract, not a deferred
+landmine in this one.
 
 ### MOP::Class new typed entity lists
 
@@ -68,10 +121,12 @@ and `use_constants()` return lists (not arrayrefs) so callers can
 ```perl
 method declare_class_scope_var($vardecl_node) {
     # $vardecl_node is a Chalk::IR::Node::VarDecl already constructed
-    # by Actions.pm. Merge into $graph (for future SSA passes), record
-    # in @class_scope_vars (for codegen iteration), and add the
-    # binding to $scope.
-    $graph->merge($vardecl_node);
+    # by Actions.pm (already merged into $ctx->graph() upstream).
+    # Record in @class_scope_vars (for codegen iteration in 7c-proper)
+    # and bind the name in $scope (for the lexical environment).
+    # Do NOT merge into a per-class graph in this commit — no class
+    # graph exists yet, and Risk #2 (cross-graph ownership) is
+    # explicitly avoided by not duplicating the merge.
     push @class_scope_vars, $vardecl_node;
     my $name = $vardecl_node->name->value;
     $scope = $scope->define($name, $vardecl_node);
@@ -167,7 +222,6 @@ keep their current routing.
 - After `declare_class_scope_var(make_vardecl('$x', $init))`:
   - `class_scope_vars` returns a one-element list.
   - The element is the same VarDecl node passed in (identity test).
-  - `$graph->nodes` contains the VarDecl.
   - `$scope->lookup('$x')` returns the VarDecl.
 - After three `declare_class_scope_var` calls with distinct names,
   the list ordering matches insertion order; all three are findable
@@ -187,14 +241,23 @@ keep their current routing.
 **`t/bootstrap/mop/parse-integration.t`** gains assertions on a real
 parse:
 
-- Parse `lib/Chalk/Bootstrap/Semiring/Boolean.pm` (chosen because it
-  has a class-scope `my $ZERO = []`).
-- Assert `$mop->for_class('Chalk::Bootstrap::Semiring::Boolean')
+- Parse `lib/Chalk/Bootstrap/Semiring/Structural.pm` (chosen because
+  line 36 has an initialized class-scope `my $ZERO = -1;`, the
+  simplest real-world class with class-scope state in the corpus).
+- Assert `$mop->for_class('Chalk::Bootstrap::Semiring::Structural')
   ->class_scope_vars` has at least one entry whose VarDecl name is
   `'$ZERO'`.
-- Pick a class with `use constant` (if any in the corpus; if none,
-  hand-construct a tiny synthetic class string and parse it). Assert
-  `use_constants` is populated correctly.
+- For `use_constants`, scan the corpus for an existing `use constant
+  { ... }` declaration. If none exists at class scope (most likely
+  the case; `use constant` in the Chalk codebase tends to live at
+  module scope), hand-construct a tiny synthetic class string and
+  parse it. Assert `use_constants` is populated correctly.
+
+Note: uninitialized `my $x;` declarations (e.g., Boolean.pm:14
+`my $ZERO_CTX;`) also produce VarDecl IR nodes — Actions.pm:1743
+constructs VarDecl unconditionally with `init` set to undef when no
+initializer is present. So Boolean.pm would also work as a target;
+Structural.pm is chosen for the simpler single-init case.
 
 ### Existing test gates (must not regress)
 
@@ -210,27 +273,30 @@ parse:
    every UseInfo lands as `declare_import`. After this commit,
    `use constant` lands only as `declare_use_constant`. If any
    existing test asserted `imports` includes `'constant'`, it will
-   regress. Mitigation: grep tests for `->imports` accesses before
-   landing; document the semantic change in the commit message;
-   adjust any test that asserted the old conflation.
+   regress.
 
-2. **VarDecl IR nodes are already merged into a graph upstream.**
-   The class body's VarDecls were constructed by Actions.pm's
-   VarDecl handler, which already merges them into *some* graph
-   via `$ctx->graph()` or freshly allocated `Chalk::IR::Graph->new`.
-   Merging into `$mop_class->graph` may create cross-graph
-   ownership. Mitigation: probe before implementation — read the
-   VarDecl construction site and confirm whether the existing graph
-   is `$mop_class->graph` already (in which case the merge is a
-   no-op), or a separate graph (in which case the design needs to
-   reconcile: either don't merge in declare_class_scope_var, or
-   nominate `$mop_class->graph` as the canonical class-body graph
-   from VarDecl construction onward).
+   Verified during spec review: 6 test files touch `->imports`
+   (class.t, parse-integration.t, hand-constructed.t, import.t,
+   plus class-all-nodes.t and class.t which match `Constant` IR
+   ops, not `'constant'` use-decls). No site asserts the literal
+   string `'constant'` as a module name. Risk is low-to-zero in
+   practice; document the semantic change in the commit message
+   anyway in case a future test asserts the old conflation.
 
-3. **Scope contract for empty case.** `Chalk::Bootstrap::Scope->new`
-   with no bindings is the empty scope. Confirm this constructor
-   shape matches existing call sites in Actions.pm; the design
-   above assumes it does.
+2. **Cross-graph ownership — resolved by scope reduction.** The
+   original design proposed merging the VarDecl into a new
+   `$mop_class->graph`. Actions.pm:1751, 1757 already merges
+   VarDecls into `$ctx->graph()` at construction time, so a second
+   merge in `declare_class_scope_var` would either no-op or cross-
+   claim the node into two graphs.
+
+   Resolved: this commit ships only `$scope` (no `$graph` field on
+   MOP::Class). `declare_class_scope_var` does not merge into any
+   class-side graph. The VarDecl stays in its single upstream graph
+   (the per-method/per-class-body graph allocated by
+   `$ctx->graph()` during parsing). Future commits that want a
+   class-body graph as a first-class concept will reconcile the
+   ownership at that time, with a real consumer in scope.
 
 ## Out of scope (explicitly)
 
@@ -270,7 +336,7 @@ containing:
 
 This design is approved when:
 
-- All four sub-decisions (1a + 2a + 2d + 3a + 4b) are reflected
+- All four sub-question resolutions (1a; 2a + 2d; 3a; 4b) are reflected
   above with their reasoning.
 - Risks are identified with mitigations.
 - Out-of-scope items are explicit so 7c-proper has a clear
