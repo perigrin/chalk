@@ -29,7 +29,7 @@ use_ok('Chalk::Bootstrap::Perl::Target::C');
     ok($target->can('_escape_c_string'),                 '_escape_c_string is available');
     ok($target->can('_wrap_retval'),                     '_wrap_retval is available');
     ok($target->can('_class_slug'),                      '_class_slug is available');
-    ok($target->can('_find_class_decl'),                 '_find_class_decl is available');
+    ok($target->can('_find_mop_class'),                  '_find_mop_class is available');
     ok($target->can('_build_field_index_map'),           '_build_field_index_map is available');
     ok($target->can('_build_cfg_lookup'),                '_build_cfg_lookup is available');
     ok($target->can('_scan_class_methods'),              '_scan_class_methods is available');
@@ -43,7 +43,6 @@ use_ok('Chalk::Bootstrap::Perl::Target::C');
     ok($target->can('_fixup_ternary_assignment'),        '_fixup_ternary_assignment is available');
     ok($target->can('_fixup_filtercomposite_add_destructuring'),
         '_fixup_filtercomposite_add_destructuring is available');
-    ok($target->can('_scan_field_method_calls'),         '_scan_field_method_calls is available');
     ok($target->can('_is_complex_method'),               '_is_complex_method is available');
     ok($target->can('_has_early_return'),                '_has_early_return is available');
     ok($target->can('_body_contains_return'),            '_body_contains_return is available');
@@ -97,6 +96,20 @@ use_ok('Chalk::Bootstrap::Perl::Target::C');
     is($target->_needs_eval_fallback('clean code here'),       false, '_needs_eval_fallback: clean code');
     is($target->_needs_eval_fallback('NULL /* unsupported */'), true, '_needs_eval_fallback: unsupported marker');
     is($target->_needs_eval_fallback('/* unknown node */'),     true, '_needs_eval_fallback: unknown node');
+}
+
+# Test 9: _find_mop_class picks the non-main class from a MOP.
+{
+    use Chalk::MOP;
+    my $mop = Chalk::MOP->new;
+    $mop->declare_class('Some::Class');  # plus 'main' which is auto-declared
+
+    my $target = Chalk::Bootstrap::Perl::Target::C->new(
+        module_name => 'Some::Class',
+    );
+    my $cls = $target->_find_mop_class($mop);
+    ok(defined $cls, '_find_mop_class returns a class');
+    is($cls->name, 'Some::Class', '_find_mop_class returns the non-main class');
 }
 
 done_testing;

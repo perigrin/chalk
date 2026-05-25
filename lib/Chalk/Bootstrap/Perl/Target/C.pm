@@ -41,82 +41,56 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     method _class_slug_for($class_name) {
         return $self->_class_slug($class_name);
     }
-    method _analyze_class($ir) {
-        my $class_decl = $self->_find_class_decl($ir);
-        return unless defined $class_decl;
-
-        # Set the current class slug for identifier namespacing
-        my $class_name = $class_decl->name();
+    # Note: the legacy `return unless defined $class_decl` guard at
+    # the top of the previous implementation is intentionally removed.
+    # `_find_mop_class` at the caller now dies if the MOP has no
+    # non-main class, so `_analyze_class` is never called with an
+    # undef argument in production.
+    method _analyze_class($mop_class) {
+        my $class_name = $mop_class->name;
         $self->_set_current_slug($self->_class_slug($class_name));
 
-        # Build field map once and store it for use throughout code generation
-        $self->_set_field_map($self->_build_field_index_map($class_decl));
+        # Build field map once and store it.
+        $self->_set_field_map($self->_build_field_index_map($mop_class));
 
-        # Pre-scan methods to build $self->_get_class_methods_ref() for direct call optimization
-        $self->_set_class_methods($self->_scan_class_methods($class_decl));
+        # Pre-scan methods/subs/readers for direct call optimization.
+        $self->_set_class_methods($self->_scan_class_methods($mop_class));
 
-        my $body = $class_decl->body();
-
-        # Collect class-scope variable metadata from ALL VarDecl items in class body.
-        # These are compiled as static C variables, initialized at module load time.
-        # Consecutive bare `my $x; my $y;` declarations are stored as a chain
-        # (nested VarDecl in input[1]), so walk recursively.
+        # Collect class-scope variable metadata from MOP entity list.
+        # Actions.pm's ClassBlock registers each VarDecl from the body
+        # loop, so $mop_class->class_scope_vars is the complete list;
+        # no recursion into chained inits needed (per Task 1.6 discovery,
+        # the parser does not produce the chained-init shape).
         $self->_reset_class_scope_vars();
-        my $register_class_var; $register_class_var = sub ($item) {
-            return unless $item isa Chalk::IR::Node::VarDecl;
-            my $raw_var = $item->name()->value();
+        for my $vardecl ($mop_class->class_scope_vars) {
+            my $raw_var = $vardecl->name()->value();
             my $sigil = substr($raw_var, 0, 1);
-            my $var = $raw_var;
-            $var =~ s/^[\$\@\%]//;
-            my $init = $item->init();
-            # If init is another VarDecl, this is a chained declaration - recurse
-            # into it before registering the current one.
-            if (defined $init && $init isa Chalk::IR::Node::VarDecl) {
-                $register_class_var->($init);
-                $init = undef;  # bare declaration with no actual init expression
-            }
-            # Skip VarDecl whose init is a SubInfo (those are sub definitions)
-            return if defined $init && $init isa Chalk::IR::SubInfo;
-            # Skip VarDecl for variables that are fields (ADJUST assigns them,
-            # but they're already handled by the field map)
-            return if defined $self->_get_field_map() && exists $self->_get_field_map()->{$var};
+            my $var = $raw_var =~ s/^[\$\@\%]//r;
+            my $init = $vardecl->init();
+            # Skip if init is a SubInfo (those are sub definitions
+            # registered separately on the MOP).
+            next if defined $init && $init isa Chalk::IR::SubInfo;
+            # Skip if init is another VarDecl (legacy chained-decl
+            # case; per Task 1.6 verification, the parser does not
+            # produce this shape today, but the guard is cheap).
+            next if defined $init && $init isa Chalk::IR::Node::VarDecl;
+            # Skip if var is a field (ADJUST assigns them).
+            next if defined $self->_get_field_map()
+                 && exists $self->_get_field_map()->{$var};
             $self->_set_class_scope_var($var, {
                 sigil       => $sigil,
                 init        => $init,
                 static_name => "_csv_" . $self->_get_current_slug() . "_${var}",
             });
-        };
-        for my $item ($body->@*) {
-            $register_class_var->($item);
         }
 
-        # Extract `use constant { NAME => value, ... }` declarations.
-        # Constants are inlined as numeric literals in the generated C,
-        # since C doesn't have Perl's constant sub mechanism.
+        # Extract `use constant` declarations from the MOP entity list.
         $self->_reset_use_constants();
-        for my $item ($body->@*) {
-            next unless $item isa Chalk::IR::UseInfo;
-            my $use_name = $item->name();
-            my $use_args = $item->args();
-            next unless defined $use_name && $use_name eq 'constant';
-            my $args = $use_args;
-            next unless defined $args && ref($args) eq 'ARRAY';
-            my $hash_expr = $args->[0];
-            next unless $hash_expr isa Chalk::IR::Node::HashRef;
-            my $pairs = $hash_expr->inputs()->[0];
-            next unless defined $pairs && ref($pairs) eq 'ARRAY';
-            for (my $i = 0; $i < $pairs->@*; $i += 2) {
-                my $key_node = $pairs->[$i];
-                my $val_node = $pairs->[$i + 1];
-                next unless $key_node isa Chalk::IR::Node::Constant;
-                next unless $val_node isa Chalk::IR::Node::Constant;
-                my $kv = $key_node->value();
-                my $vv = $val_node->value();
-                # Only inline numeric constant values
-                if ($vv =~ /^-?[0-9]+$/) {
-                    $self->_set_use_constant($kv, $vv);
-                }
-            }
+        for my $uc ($mop_class->use_constants) {
+            my $vv = $uc->{value};
+            my $vv_value = ($vv isa Chalk::IR::Node::Constant) ? $vv->value() : undef;
+            next unless defined $vv_value && $vv_value =~ /^-?[0-9]+$/;
+            $self->_set_use_constant($uc->{name}, $vv_value);
         }
 
         return;
@@ -1591,61 +1565,65 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             $self->_build_cfg_lookup($sa, $ctx);
         }
 
-        $self->_analyze_class($ir);
+        # Source the MOP from the parse Context (post-Commit-1 propagation
+        # fix makes this reliable).
+        my $mop = $ctx->mop
+            // die "_generate_c_files requires \$ctx->mop() to be set; "
+                 . "construct \$ctx with mop => \$mop or use TestPipeline";
+        my $mop_class = $self->_find_mop_class($mop)
+            // die "MOP has no non-main class entry for module " . $self->module_name;
 
-        my $slug     = $self->_get_current_slug();
-        my $class_decl = $self->_find_class_decl($ir);
+        $self->_set_mop_class($mop_class);
+        $self->_analyze_class($mop_class);
+
+        my $slug = $self->_get_current_slug();
 
         my @static_lines;   # static file-scope variables and helpers
         my @func_lines;     # exported C functions (methods)
 
-        if (defined $class_decl) {
-            my $body = $class_decl->body();
-
-            # Emit class-scope subs (static helpers) before methods.
-            for my $item ($body->@*) {
-                next unless $item isa Chalk::IR::SubInfo;
-                my $sname   = $item->name();
-                my $sparams = $item->params();   # plain strings
-                my $sbody   = $item->body();
-                my $result;
-                try {
-                    $result = $self->_emit_sub($sname, $sparams, $sbody);
-                } catch ($e) {
-                    # Emission failed — mark sub as not compiled
-                }
-                if (defined $result && ref $result eq 'HASH') {
-                    push @static_lines, $result->{helper}->@*;
-                    push @static_lines, '';
-                    $self->_set_class_sub_compiled($sname, true);
-                } else {
-                    $self->_set_class_sub_compiled($sname, false);
-                }
+        # Emit class-scope subs (static helpers) before methods.
+        # _emit_sub still reads $sub->body — that's 7d-transitional.
+        for my $sub ($mop_class->subs) {
+            my $sname   = $sub->name;
+            my $sparams = $sub->params;   # arrayref of plain strings
+            my $sbody   = $sub->body;     # 7d-transitional read
+            my $result;
+            try {
+                $result = $self->_emit_sub($sname, $sparams, $sbody);
+            } catch ($e) {
+                # Emission failed — mark sub as not compiled
             }
+            if (defined $result && ref $result eq 'HASH') {
+                push @static_lines, $result->{helper}->@*;
+                push @static_lines, '';
+                $self->_set_class_sub_compiled($sname, true);
+            } else {
+                $self->_set_class_sub_compiled($sname, false);
+            }
+        }
 
-            # Emit MethodInfo items as exported C functions
-            for my $item ($body->@*) {
-                next unless $item isa Chalk::IR::MethodInfo;
-                my $mname = $item->name();
+        # Emit MOP::Method items as exported C functions.
+        # _emit_method now receives a MOP::Method (accessor surface
+        # matches MethodInfo: name, params, body, return_type).
+        for my $method ($mop_class->methods) {
+            my $mname = $method->name;
 
-                my $result;
-                try {
-                    $result = $self->_emit_method($item);
-                } catch ($e) {
-                    push @_skipped_methods, $mname;
-                    next;
-                }
-                if (!defined $result) {
-                    push @_skipped_methods, $mname;
-                    next;
-                }
-                if (ref $result eq 'HASH' && defined $result->{helper}) {
-                    push @func_lines, $result->{helper}->@*;
-                    push @func_lines, '';
-                } else {
-                    # Unexpected return type — skip
-                    push @_skipped_methods, $mname;
-                }
+            my $result;
+            try {
+                $result = $self->_emit_method($method);
+            } catch ($e) {
+                push @_skipped_methods, $mname;
+                next;
+            }
+            if (!defined $result) {
+                push @_skipped_methods, $mname;
+                next;
+            }
+            if (ref $result eq 'HASH' && defined $result->{helper}) {
+                push @func_lines, $result->{helper}->@*;
+                push @func_lines, '';
+            } else {
+                push @_skipped_methods, $mname;
             }
         }
 
@@ -1754,17 +1732,14 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         push @init_lines, "    static int _initialized = 0;";
         push @init_lines, "    if (_initialized) return;";
         push @init_lines, "    _initialized = 1;";
-        if (defined $class_decl && keys $self->_get_class_scope_vars()->%*) {
-            my $body = $class_decl->body();
-            for my $item ($body->@*) {
-                next unless $item isa Chalk::IR::Node::VarDecl;
-                my $raw = $item->name()->value();
-                my $var = $raw;
-                $var =~ s/^[\$\@\%]//;
+        if (keys $self->_get_class_scope_vars()->%*) {
+            for my $vardecl ($mop_class->class_scope_vars) {
+                my $raw = $vardecl->name()->value();
+                my $var = $raw =~ s/^[\$\@\%]//r;
                 next unless exists $self->_get_class_scope_vars()->{$var};
                 my $info = $self->_get_class_scope_vars()->{$var};
                 my $sname = $info->{static_name};
-                my $init_node = $item->init();
+                my $init_node = $vardecl->init();
                 my $init_expr = $self->_emit_init_expr($init_node, $info->{sigil});
                 push @init_lines, "    $sname = $init_expr;" if defined $init_expr;
             }
@@ -1857,7 +1832,12 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     # handles _ADJUST as a void XSUB if present, and calls init_statics in BOOT.
     method generate_xs_wrapper($ir, $exported_functions, $anon_sub_registrations) {
         my $slug      = $self->_class_slug($self->module_name());
-        my $class_decl = $self->_find_class_decl($ir);
+        # generate_xs_wrapper runs after _generate_c_files; reuse the
+        # MOP class found there. The legacy $ir is still passed in for
+        # historic-signature reasons; we no longer read class shape from it.
+        my $mop_class = $self->_get_mop_class()
+            // die "generate_xs_wrapper called before _generate_c_files; "
+                 . "no MOP class cached";
 
         my @lines;
 
@@ -2009,9 +1989,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         push @lines, '    ENTER;';
         push @lines, '    Perl_class_setup_stash(aTHX_ stash);';
 
-        # Register :isa (parent class) if the ClassDecl has a parent
-        if (defined $class_decl) {
-            my $parent_name = $class_decl->parent();
+        # Register :isa (parent class) if the MOP class has a parent
+        if (defined $mop_class) {
+            my $parent_name = $mop_class->parent_name;
             if (defined $parent_name) {
                 my $escaped_parent = $self->_escape_c_string($parent_name);
                 push @lines, "    {";
@@ -2022,15 +2002,11 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
         push @lines, '';
 
-        # Register fields (if the class has any FieldDecl nodes)
-        if (defined $class_decl) {
-            my $body = $class_decl->body();
-            for my $item ($body->@*) {
-                next unless $item isa Chalk::IR::FieldInfo;
-                my $field_name = $item->name();
-                my $attrs      = $item->attributes();
-                my $default    = $item->default_value();
-                # $field_name includes sigil
+        # Register fields sourced from the MOP (authoritative field list)
+        if (defined $mop_class) {
+            for my $field ($mop_class->fields) {
+                my $field_name = $field->name;       # sigil-prefixed
+                my $default    = $field->default_value;
                 my $escaped    = $self->_escape_c_string($field_name);
 
                 push @lines, '    {';
@@ -2039,19 +2015,18 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 push @lines, "        PADOFFSET padix = pad_add_name_pvs(\"$escaped\", padadd_FIELD, NULL, NULL);";
                 push @lines, '        PADNAME *pn = PadnamelistARRAY(PadlistNAMES(CvPADLIST(PL_compcv)))[padix];';
 
-                # Apply field attributes (:param, :reader, :writer)
-                if (ref($attrs) eq 'ARRAY') {
-                    for my $attr ($attrs->@*) {
-                        my $attr_name = $attr->{name};
-                        my $escaped_attr = $self->_escape_c_string($attr_name);
-                        push @lines, '        {';
-                        push @lines, "            OP *attr = newSVOP(OP_CONST, 0, newSVpvs(\"$escaped_attr\"));";
-                        push @lines, '            Perl_class_apply_field_attributes(aTHX_ pn, attr);';
-                        push @lines, '        }';
-                    }
+                # Apply field attributes (e.g., ':param', ':reader')
+                for my $attr ($field->attributes) {
+                    # MOP attributes are stored as ':param'-style strings;
+                    # strip the leading ':' for the C-side attribute name.
+                    my $attr_name = $attr =~ s/^://r;
+                    my $escaped_attr = $self->_escape_c_string($attr_name);
+                    push @lines, '        {';
+                    push @lines, "            OP *attr = newSVOP(OP_CONST, 0, newSVpvs(\"$escaped_attr\"));";
+                    push @lines, '            Perl_class_apply_field_attributes(aTHX_ pn, attr);';
+                    push @lines, '        }';
                 }
 
-                # Emit defop for default value (if present)
                 if (defined $default) {
                     my @defop_lines = $self->_emit_defop_for_xs_wrapper($default);
                     push @lines, @defop_lines;

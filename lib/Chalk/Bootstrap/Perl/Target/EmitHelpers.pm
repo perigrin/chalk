@@ -48,6 +48,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     field $_regex_statics;     # arrayref of { var, pat } for lazy-compiled REGEXP* statics
     field %_use_constants;     # constant_name => numeric_value from `use constant { ... }` declarations
     field $_struct_schemas = {}; # schema_name => { fields => [{ name, c_type }] } for struct promotion
+    field $_mop_class;  # set by _generate_c_files; read by generate_xs_wrapper
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -98,6 +99,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _set_use_constant($name, $val) { $_use_constants{$name} = $val; }
     method set_struct_schemas($val)  { $_struct_schemas = $val; }
     method _get_struct_schemas()     { return $_struct_schemas; }
+    method _set_mop_class($v) { $_mop_class = $v }
+    method _get_mop_class()    { return $_mop_class }
 
     # Derive a short lowercase slug from a class name for identifier namespacing.
     # Takes the last component of a qualified name and lowercases it.
@@ -115,45 +118,40 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return 'SV *';
     }
 
-    # Extract ClassInfo from Program IR.
-    method _find_class_decl($ir) {
-        for my $stmt ($ir->classes()->@*) {
-            return $stmt if $stmt isa Chalk::IR::ClassInfo;
+    # Extract the (typically one) compilable class from a MOP.
+    # Mirrors _find_class_decl semantics: each Target::C instance
+    # compiles one class; 'main' is the import-bucket, the
+    # remaining class is the target. Returns undef if no non-main
+    # class is registered.
+    #
+    # Sorts by class name to make the choice deterministic when a
+    # file declares multiple non-main classes (rare in the current
+    # corpus; possible future). Without the sort, $mop->classes
+    # returns hash values in unspecified order.
+    method _find_mop_class($mop) {
+        for my $cls (sort { $a->name cmp $b->name } $mop->classes) {
+            return $cls if $cls->name ne 'main';
         }
         return undef;
     }
 
-    # Build field index map from ClassInfo IR.
+    # Build field index map from a MOP::Class.
     # Returns hashref mapping field name (without sigil) to integer index.
     # Fields are numbered in declaration order starting from 0.
-    method _build_field_index_map($class_decl) {
-        my $body = $class_decl->body();
+    method _build_field_index_map($mop_class) {
         my %field_map;
         my %sigils;
         my %params;
         my $index = 0;
 
-        for my $item ($body->@*) {
-            my ($raw_name, $attrs);
-            if ($item isa Chalk::IR::FieldInfo) {
-                $raw_name = $item->name();
-                $attrs    = $item->attributes();
-            } else {
-                next;
-            }
+        for my $field ($mop_class->fields) {
+            my $raw_name = $field->name;
             my ($sigil) = $raw_name =~ /^([\$\@\%])/;
-            my $field_name = $raw_name;
-            $field_name =~ s/^[\$\@\%]//;  # Strip sigil
+            my $field_name = $raw_name =~ s/^[\$\@\%]//r;
             $field_map{$field_name} = $index++;
             $sigils{$field_name} = $sigil // '$';
-            # Detect :param attribute — these fields vary per instance
-            if (ref($attrs) eq 'ARRAY') {
-                for my $attr ($attrs->@*) {
-                    my $attr_name = $attr->{name};
-                    if (defined $attr_name && $attr_name eq 'param') {
-                        $params{$field_name} = 1;
-                    }
-                }
+            if ($field->is_param) {
+                $params{$field_name} = 1;
             }
         }
 
@@ -194,98 +192,64 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return;
     }
 
-    # Pre-scan all methods and subs in the class body to build $_class_methods.
+    # Pre-scan all methods and subs in a MOP::Class to build $_class_methods.
     # Also populates %_class_subs for class-scope sub declarations.
     # Returns hashref: name => { returns => bool, params => [...], is_sub => bool, ... }
-    method _scan_class_methods($class_decl) {
-        my $body       = $class_decl->body();
-        my $class_name = $class_decl->name();
+    method _scan_class_methods($mop_class) {
+        my $class_name = $mop_class->name;
         my %methods;
 
-        # Collect MethodInfo and SubInfo nodes from the class body.
-        # SubInfo may be mis-parented as VarDecl initializer due to parser
-        # ambiguity (e.g., `my %_cache; sub _intern(...)` parsed as one unit).
-        # Recurse one level into VarDecl initializers to find these.
-        my @items_to_scan;
-        for my $item ($body->@*) {
-            next unless ($item isa Chalk::IR::Node
-                      || $item isa Chalk::IR::MethodInfo
-                      || $item isa Chalk::IR::SubInfo);
-            push @items_to_scan, $item;
-            # Check VarDecl initializer for mis-parented SubInfo
-            if ($item isa Chalk::IR::Node::VarDecl) {
-                my $init = $item->init();
-                if (defined $init && $init isa Chalk::IR::SubInfo) {
-                    push @items_to_scan, $init;
-                }
+        # Methods: MOP::Method entries.
+        # Params shape note: the (my $pname = $p) =~ s/^[\$\@\%]// regex matches
+        # the legacy _scan_class_methods (EmitHelpers.pm:229-231) byte-for-byte.
+        # MOP::Method->params IS MethodInfo->params — Actions.pm:700 passes the
+        # same arrayref reference to declare_method. The canary tests (Tasks
+        # 1.8-1.11) use plain-string params in their MOP declare_method calls
+        # to ensure the sigil-strip works correctly.
+        for my $method ($mop_class->methods) {
+            my $name = $method->name;
+            my @param_names;
+            for my $p ($method->params->@*) {
+                (my $pname = $p) =~ s/^[\$\@\%]//;
+                push @param_names, $pname;
             }
+            $methods{$name} = {
+                returns => true,
+                params  => \@param_names,
+            };
         }
 
-        for my $item (@items_to_scan) {
-            # Handle MethodInfo metadata structs
-            if ($item isa Chalk::IR::MethodInfo) {
-                my $name = $item->name();
-                my @param_names;
-                for my $p ($item->params()->@*) {
-                    (my $pname = $p) =~ s/^[\$\@\%]//;
-                    push @param_names, $pname;
-                }
-                $methods{$name} = {
-                    returns => true,
-                    params  => \@param_names,
-                };
-                next;
+        # Subs: MOP::Sub entries. Also populates %_class_subs.
+        # MOP::Sub does NOT have a scope accessor today (per lib/Chalk/MOP/Sub.pm);
+        # default to 'package' which matches the legacy SubInfo default.
+        for my $sub ($mop_class->subs) {
+            my $name = $sub->name;
+            my @param_names;
+            for my $p ($sub->params->@*) {
+                (my $pname = $p) =~ s/^[\$\@\%]//;
+                push @param_names, $pname;
             }
-
-            # Handle SubInfo metadata structs
-            if ($item isa Chalk::IR::SubInfo) {
-                my $name = $item->name();
-                my @param_names;
-                for my $p ($item->params()->@*) {
-                    (my $pname = $p) =~ s/^[\$\@\%]//;
-                    push @param_names, $pname;
-                }
-                my $entry = {
-                    returns    => true,
-                    params     => \@param_names,
-                    is_sub     => true,
-                    class_name => $class_name,
-                    scope      => $item->scope(),
-                };
-                $_class_subs{$name} = $entry;
-                $methods{$name} = $entry;
-                next;
-            }
+            my $entry = {
+                returns    => true,
+                params     => \@param_names,
+                is_sub     => true,
+                class_name => $class_name,
+                scope      => ($sub->can('scope') ? $sub->scope : 'package'),
+            };
+            $_class_subs{$name} = $entry;
+            $methods{$name} = $entry;
         }
 
-        # Scan FieldInfo nodes for :reader attributes — these auto-generate
+        # Scan fields for :reader attributes — these auto-generate
         # accessor methods that can be called via direct dispatch.
-        for my $item ($body->@*) {
-            my ($raw_name, $attrs);
-            if ($item isa Chalk::IR::FieldInfo) {
-                $raw_name = $item->name();
-                $attrs    = $item->attributes();
-            } else {
-                next;
-            }
-            next unless ref($attrs) eq 'ARRAY';
-            my $has_reader = false;
-            for my $attr ($attrs->@*) {
-                my $attr_name = $attr->{name};
-                if (defined $attr_name && $attr_name eq 'reader') {
-                    $has_reader = true;
-                    last;
-                }
-            }
-            if ($has_reader) {
-                my $fname = $raw_name;
-                $fname =~ s/^[\$\@\%]//;  # Strip sigil
-                $methods{$fname} //= {
-                    returns    => true,
-                    params     => [],
-                    is_reader  => true,
-                };
-            }
+        for my $field ($mop_class->fields) {
+            next unless $field->has_reader;
+            my $fname = $field->name =~ s/^[\$\@\%]//r;
+            $methods{$fname} //= {
+                returns    => true,
+                params     => [],
+                is_reader  => true,
+            };
         }
 
         return \%methods;
@@ -572,60 +536,6 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         }{$1 \{\n        correct_sv = left; rejected_sv = right;\n    \}$2}sx;
 
         return $xs_text;
-    }
-
-    # Scan IR tree for MethodCallExpr nodes where invocant is a field variable.
-    # Returns hashref of "fieldname_methodname" => { field_name, field_idx, method_name }.
-    method _scan_field_method_calls($class_decl) {
-        my %cache;
-        my $body = $class_decl->inputs()->[2];
-
-        my $walk;
-        $walk = sub ($node) {
-            return unless defined $node;
-
-            if ($node isa Chalk::IR::Node::Call && $node->dispatch_kind() eq 'method') {
-                my $invocant_node = $node->inputs()->[0];
-                my $method_const  = $node->inputs()->[1];
-
-                if (defined $invocant_node
-                        && $invocant_node isa Chalk::IR::Node::Constant
-                        && defined $field_map) {
-                    my $val = $invocant_node->value();
-                    my $ct  = $invocant_node->const_type();
-                    if (($ct eq 'variable' || $val =~ /^[\$\@\%]/) && $val =~ /^[\$\@\%](.+)/) {
-                        my $var = $1;
-                        if (exists $field_map->{$var}) {
-                            my $method_name = $method_const->value();
-                            if ($method_name ne 'can') {
-                                my $key = "${var}_${method_name}";
-                                $cache{$key} //= {
-                                    field_name => $var,
-                                    field_idx  => $field_map->{$var},
-                                    method_name => $method_name,
-                                };
-                            }
-                        }
-                    }
-                }
-            }
-
-            if ($node isa Chalk::IR::Node) {
-                for my $input ($node->inputs()->@*) {
-                    if (ref($input) eq 'ARRAY') {
-                        $walk->($_) for $input->@*;
-                    } else {
-                        $walk->($input);
-                    }
-                }
-            }
-        };
-
-        for my $item ($body->@*) {
-            $walk->($item);
-        }
-
-        return \%cache;
     }
 
     # Check if a MethodDecl will be emitted as a complex method (with helper).
