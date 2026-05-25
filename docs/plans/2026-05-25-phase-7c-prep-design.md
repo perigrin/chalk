@@ -322,22 +322,38 @@ period. One commit:
 > feat(mop): Phase 7c-prep — MOP::Class gains class-body shape
 
 containing:
-- `lib/Chalk/MOP/Class.pm` — new fields, accessors, declare_*
-  methods, `use Chalk::Bootstrap::Scope;` and
-  `use Chalk::IR::Graph;` additions.
+- `lib/Chalk/MOP/Class.pm` — new `$scope` field, two typed entity
+  lists, two `declare_*` methods + their accessors, and
+  `use Chalk::Bootstrap::Scope;` at the top. (No `use Chalk::IR::Graph;`
+  — this commit does not construct or merge into a Graph; the existing
+  Method/Sub `use` lines stay as they are.)
 - `lib/Chalk/Bootstrap/Perl/Actions.pm` — ClassBlock action body-
   loop split for VarDecl and `use constant`.
 - `t/bootstrap/mop/class-scope-vars.t` — new MOP unit test.
 - `t/bootstrap/mop/use-constants.t` — new MOP unit test.
 - `t/bootstrap/mop/parse-integration.t` — extension for real-class
-  assertions.
+  assertions. The synthetic `use constant` test (if no class-scope
+  `use constant { ... }` exists in the corpus) lives in this same
+  file rather than a new file, to keep this commit's test surface
+  tight.
 
 ## Acceptance
 
 This design is approved when:
 
-- All four sub-question resolutions (1a; 2a + 2d; 3a; 4b) are reflected
-  above with their reasoning.
+- All four sub-question resolutions are reflected above with their
+  reasoning:
+  - **1a** — `$scope` default-constructs on every MOP::Class instance
+    (the reduced version of sub-question 1's original "graph + scope +
+    factory eager-default" answer).
+  - **2a** — class-scope `my $x = ...;` reuses `Chalk::IR::Node::VarDecl`;
+    no new metaobject.
+  - **2d** — `use constant` routes to `declare_use_constant` (hashref
+    entity), splitting it out from the existing `declare_import` path.
+  - **3a** — method-scope-inherits-class-scope wiring is deferred to
+    a later commit.
+  - **4b** — unit tests + a parse-integration extension against a
+    real corpus file.
 - Risks are identified with mitigations.
 - Out-of-scope items are explicit so 7c-proper has a clear
   contract.
