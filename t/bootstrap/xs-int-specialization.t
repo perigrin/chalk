@@ -12,6 +12,8 @@ use Chalk::IR::Node::Return;
 use Chalk::IR::Program;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::MOP;
+use Chalk::Bootstrap::Context;
 
 # BinaryExpr operator -> typed-node class name (subset of Shim's %BINOP_MAP
 # covering the operators used in this test).
@@ -67,8 +69,17 @@ my $program = Chalk::IR::Program->new(
     classes => [$class_decl],
 );
 
+my $mop = Chalk::MOP->new;
+my $mop_class = $mop->declare_class('Test::IntSpec');
+$mop_class->declare_method('add_one',
+    params      => ['$self', '$n'],
+    body        => $method->body,
+    return_type => undef,
+);
+my $ctx = Chalk::Bootstrap::Context->new(focus => undef, mop => $mop);
+
 my $target = Chalk::Bootstrap::Perl::Target::C->new(module_name => 'Test::IntSpec');
-my $c_result = eval { $target->_generate_c_files($program, undef, undef) };
+my $c_result = eval { $target->_generate_c_files($program, undef, $ctx) };
 ok(defined $c_result, '_generate_c_files succeeds') or do {
     diag "Error: $@";
     done_testing();
@@ -199,8 +210,19 @@ my $program2 = Chalk::IR::Program->new(
     classes => [$class2],
 );
 
+my $mop2 = Chalk::MOP->new;
+my $mop_class2 = $mop2->declare_class('Test::ParseLoop');
+for my $m (@methods2) {
+    $mop_class2->declare_method($m->name,
+        params      => $m->params,
+        body        => $m->body,
+        return_type => undef,
+    );
+}
+my $ctx2 = Chalk::Bootstrap::Context->new(focus => undef, mop => $mop2);
+
 my $target2  = Chalk::Bootstrap::Perl::Target::C->new(module_name => 'Test::ParseLoop');
-my $result2  = eval { $target2->_generate_c_files($program2, undef, undef) };
+my $result2  = eval { $target2->_generate_c_files($program2, undef, $ctx2) };
 ok(defined $result2, 'parse-loop IR: _generate_c_files succeeds') or do {
     diag "Error: $@";
     done_testing();

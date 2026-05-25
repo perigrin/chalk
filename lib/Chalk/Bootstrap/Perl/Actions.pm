@@ -256,9 +256,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Register top-level subs on the MOP's main class.
         # These are SubInfo objects that appear at program scope (not inside a ClassBlock).
         # ClassBlock separately registers in-class subs on the declared class.
-        # current_mop() is used instead of $ctx->mop() because intermediate
-        # multiply contexts do not propagate the mop field.
-        my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
+        my $mop = $ctx->mop;
         if (defined $mop) {
             my $main = $mop->for_class('main');
             if (defined $main) {
@@ -655,9 +653,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         # Populate MOP with the class and its members when a MOP is present.
-        # current_mop() is used instead of $ctx->mop() because intermediate
-        # multiply contexts do not propagate the mop field.
-        my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
+        my $mop = $ctx->mop;
         if (defined $mop) {
             my $superclass_obj = defined $parent_str
                 ? $mop->for_class($parent_str)

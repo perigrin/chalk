@@ -10,6 +10,7 @@ our @EXPORT_OK = qw(
     build_parser parse_ir bnf_text full_pipeline optimized_pipeline grammars_match
     perl_bnf_text perl_pipeline build_perl_recognizer
     build_perl_ir_parser
+    parse_perl_source
 );
 
 use Chalk::Bootstrap::Earley;
@@ -30,6 +31,7 @@ use Chalk::Grammar::Perl::TypeLibrary;
 use Chalk::Bootstrap::Semiring::Structural;
 use Chalk::Bootstrap::Perl::Actions;
 use Chalk::MOP;
+use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Returns the canonical 10-rule BNF meta-grammar as a string
 sub bnf_text {
@@ -181,6 +183,65 @@ sub build_perl_ir_parser {
     return _build_perl_parser_with_actions(
         $grammar, Chalk::Bootstrap::Perl::Actions->new(), %opts,
     );
+}
+
+# Parse a Perl source string through the full pipeline.
+# Returns ($ir, $sa, $ctx) — the IR root, the SemanticAction semiring
+# instance, and the parse-root Context (whose ->mop accessor returns
+# the MOP that SemanticAction::set_mop installed, post-Phase-7c-proper
+# propagation fix).
+#
+# Uses the MOP already installed via SemanticAction::set_mop rather than
+# creating a new one, so the caller's pre-installed MOP is preserved.
+#
+# Caches the generated grammar across calls in the same process.
+my $_cached_perl_grammar;
+sub parse_perl_source ($source) {
+    unless (defined $_cached_perl_grammar) {
+        my $raw_ir = perl_pipeline();
+        die "perl_pipeline returned undef" unless defined $raw_ir;
+        my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+        my $generated = $bnf_target->generate($raw_ir);
+        $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ParsePerlSourceHelper/g;
+        eval $generated;
+        die "generated grammar eval failed: $@" if $@;
+        $_cached_perl_grammar = Chalk::Grammar::Perl::ParsePerlSourceHelper::grammar();
+    }
+
+    # Build the parser components inline, preserving the caller-installed MOP
+    # rather than replacing it (as build_perl_ir_parser does).
+    my $ordered   = _reorder_grammar($_cached_perl_grammar, start => 'Program');
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($ordered);
+
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    );
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        actions => Chalk::Bootstrap::Perl::Actions->new(),
+    );
+
+    my $comp_sr = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],
+    );
+    $comp_sr->reset_cache();
+
+    my $parser = Chalk::Bootstrap::Earley->new(
+        grammar  => $desugared,
+        semiring => $comp_sr,
+    );
+
+    my $ctx = $parser->parse_value($source);
+    return unless defined $ctx;
+    my $ir = $ctx->extract();
+    my $sa = $comp_sr->semirings()->[-1];
+
+    return ($ir, $sa, $ctx);
 }
 
 # Compare two grammars structurally (rule names, alternatives, symbols)

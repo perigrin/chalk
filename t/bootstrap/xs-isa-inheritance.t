@@ -15,6 +15,8 @@ use Chalk::IR::Node::Return;
 use Chalk::IR::Program;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::MOP;
+use Chalk::Bootstrap::Context;
 
 my $factory = Chalk::IR::NodeFactory->new();
 
@@ -47,12 +49,27 @@ my $program = Chalk::IR::Program->new(
     classes => [$class_decl],
 );
 
+# MOP setup: Commit 2 reads class shape from $ctx->mop.
+# Build a MOP that mirrors what Actions.pm would produce for
+# `class Test::ISA::Child :isa(Test::ISA::Parent) { method greet { 'hello' } }`.
+# IMPORTANT: MOP::Method->params is consumed by EmitHelpers::_scan_class_methods
+# via a sigil-strip regex. The convention (matching Actions.pm-driven production
+# parses) is plain strings like '$self', NOT IR Constant nodes.
+my $mop = Chalk::MOP->new;
+my $mop_class = $mop->declare_class($child_name, parent_name => $parent_name);
+$mop_class->declare_method('greet',
+    params      => ['$self'],
+    body        => $child_method->body,
+    return_type => undef,
+);
+my $ctx = Chalk::Bootstrap::Context->new(focus => undef, mop => $mop);
+
 # Generate XS wrapper and check it contains :isa registration
 my $target = Chalk::Bootstrap::Perl::Target::C->new(
     module_name => $child_name,
 );
 
-my $c_result = eval { $target->_generate_c_files($program, undef, undef) };
+my $c_result = eval { $target->_generate_c_files($program, undef, $ctx) };
 ok(defined $c_result, '_generate_c_files succeeds') or do {
     diag "Error: $@";
     done_testing();

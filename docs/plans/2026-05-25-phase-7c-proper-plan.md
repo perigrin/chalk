@@ -183,7 +183,7 @@ Edit `lib/Chalk/MOP/Field.pm`. Find the existing `method attributes()` line (~li
 plenv exec perl -Ilib t/bootstrap/mop/field-helpers.t
 ```
 
-Expected: all 13 assertions PASS.
+Expected: all 14 assertions PASS.
 
 - [ ] **Step 5: Confirm no regressions in adjacent tests.**
 
@@ -194,7 +194,67 @@ plenv exec perl -Ilib t/bootstrap/mop/parse-integration.t 2>&1 | tail -5
 
 Expected: still green.
 
-**No commit yet** — Commit 1 is a single cohesive commit; all sub-tasks land together.
+- [ ] **Step 6: Regenerate `Chalk__MOP__Field.pl.golden`.**
+
+Adding three methods to MOP::Field changes the MOP-emitted Perl for `lib/Chalk/MOP/Field.pm` and breaks `t/bootstrap/mop/codegen-byte-compat.t` at the golden comparison for `Chalk__MOP__Field.pl.golden`. The fix mirrors what 7c-prep did for `Chalk__MOP__Class.pl.golden`: regenerate by parsing the modified source through the MOP-driven pipeline and writing the emitted output to the golden file.
+
+Write the regeneration script (a one-off, deleted after use):
+
+```perl
+# /tmp/regen_field_golden.pl
+use 5.42.0;
+use utf8;
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
+use Chalk::Bootstrap::Semiring::SemanticAction;
+use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::Bootstrap::Perl::Target::Perl;
+
+my $raw_ir = perl_pipeline();
+my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+my $generated = $bnf_target->generate($raw_ir);
+$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::GoldenRegen/g;
+eval $generated;
+die "grammar eval: $@" if $@;
+my $gen_grammar = Chalk::Grammar::Perl::GoldenRegen::grammar();
+
+my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+$parser->semiring->reset_cache;
+# build_perl_ir_parser installs a fresh MOP via SA::set_mop;
+# current_mop returns it.
+my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
+
+open my $fh, '<:utf8', 'lib/Chalk/MOP/Field.pm' or die;
+local $/;
+my $src = <$fh>;
+close $fh;
+$parser->parse_value($src) or die "parse failed";
+
+my $emitted = Chalk::Bootstrap::Perl::Target::Perl->new->generate($mop);
+my @cands = values %$emitted;
+for my $cand (@cands) {
+    next unless $cand =~ /class Chalk::MOP::Field/;
+    open my $out, '>:utf8', 't/fixtures/codegen-goldens/Chalk__MOP__Field.pl.golden' or die;
+    print $out $cand;
+    close $out;
+    print "regenerated golden (", length($cand), " bytes)\n";
+    last;
+}
+```
+
+Run it:
+```bash
+/home/perigrin/.local/share/pvm/versions/5.42.0/bin/perl -Ilib -It/bootstrap/lib /tmp/regen_field_golden.pl
+rm /tmp/regen_field_golden.pl
+```
+
+Verify byte-compat now passes:
+```bash
+/home/perigrin/.local/share/pvm/versions/5.42.0/bin/perl -Ilib t/bootstrap/mop/codegen-byte-compat.t 2>&1 | tail -5
+```
+
+Expected: 19/19 PASS.
+
+**No commit yet** — Commit 1 is a single cohesive commit; all sub-tasks land together. The regenerated golden file ships in Commit 1.
 
 ---
 
@@ -737,7 +797,25 @@ Expected: all green.
 
 ---
 
-### Task 1.6: Fix chained-VarDecl population in Actions.pm ClassBlock (TDD)
+### Task 1.6: Chained-VarDecl regression coverage (TDD)
+
+**Discovery note (added during execution 2026-05-25):** The premise of
+this task — that consecutive `my $a; my $b;` at class scope parses as
+one VarDecl whose `init` is another VarDecl — does NOT match current
+parser behavior. Verification via `parse_perl_source` on
+`lib/Chalk/Bootstrap/Semiring/Boolean.pm` shows two separate VarDecls
+with `init => undef`, both registered correctly by Actions.pm:746-747's
+existing loop. The legacy C.pm:65-77 comment about chained inits
+referenced an older parser shape that no longer applies.
+
+What ships in this task: the **regression test only** (Step 1 below).
+The Actions.pm fix (Steps 3) is NOT applied — the bug doesn't exist.
+The test still has value as a regression guard: if the parser ever
+returns to producing chained-VarDecl-via-init for consecutive `my`,
+the test fails with a specific assertion (`ONE_CTX missing`) that
+points at the right place.
+
+
 
 **Files:**
 - Modify: `lib/Chalk/Bootstrap/Perl/Actions.pm` (lines 746-747).
@@ -806,16 +884,23 @@ Expected: the existing assertions PASS; `'class_scope_vars contains ONE_CTX'` FA
 
 The earlier assertions in the block (`'Boolean.pm parses'`, `'class_scope_vars contains ZERO_CTX'`) must PASS — if those fail, the test scaffold is wrong, not the production code.
 
-- [ ] **Step 3: Apply the fix to Actions.pm ClassBlock.**
+- [ ] **Step 3: SKIP — Actions.pm fix not needed.**
 
-Edit `lib/Chalk/Bootstrap/Perl/Actions.pm`. Find lines 746-747:
+The discovery note above explains why. Step 2 of execution confirmed
+both `ZERO_CTX` and `ONE_CTX` are already registered by the existing
+Actions.pm:746-747 loop. The chained-decl fix the plan originally
+specified would be dead defensive code (the `while` loop would
+execute exactly once because `$current->init()` is always undef in
+this context). Do not apply.
 
-```perl
-                } elsif ($item isa Chalk::IR::Node::VarDecl) {
-                    $mop_class->declare_class_scope_var($item);
-```
+The original Step 3 content is preserved here as documentation of
+what the plan once specified, in case the parser regresses to the
+chained-init shape — in which case adding the descent logic is the
+right fix. But do NOT apply it as part of this task; do NOT touch
+Actions.pm in Task 1.6.
 
-Replace with:
+(Original Step 3 specification — for documentation only, NOT to be
+applied in this task:)
 
 ```perl
                 } elsif ($item isa Chalk::IR::Node::VarDecl) {
@@ -1134,6 +1219,7 @@ git add lib/Chalk/Bootstrap/Semiring/FilterComposite.pm \
         lib/Chalk/Bootstrap/Perl/Actions.pm \
         lib/Chalk/MOP/Field.pm \
         t/bootstrap/lib/TestPipeline.pm \
+        t/fixtures/codegen-goldens/Chalk__MOP__Field.pl.golden \
         t/bootstrap/xs-isa-inheritance.t \
         t/bootstrap/xs-polymorphic-dispatch.t \
         t/bootstrap/xs-int-specialization.t \
@@ -1159,17 +1245,20 @@ Fix two architectural debts blocking Phase 7c-proper migration:
    do not propagate the mop field") documented this bug as a
    class-global workaround. Both now read $ctx->mop directly.
 
-2. Actions.pm ClassBlock chained-VarDecl drop:
-   `my $a; my $b;` at class scope parses as one VarDecl whose init
-   is another VarDecl. The MOP path only registered the outer one,
-   making $mop_class->class_scope_vars lossy for any class with
-   consecutive bare `my` declarations (e.g., Semiring/Boolean.pm's
-   `my $ZERO_CTX; my $ONE_CTX;`). The ClassBlock loop now descends
-   into chained inits via a while-loop.
+2. Chained-VarDecl regression test (Boolean.pm fixture):
+   Documented the contract that consecutive class-scope `my` decls
+   land as separate entries in $mop_class->class_scope_vars. Plan
+   originally expected this would require an Actions.pm fix; during
+   execution, the test passed immediately — current parser produces
+   two distinct VarDecls with init => undef, not the chained shape
+   the legacy C.pm:65-77 comment described. The regression test
+   ships as documentation/guard; no Actions.pm change shipped.
 
 Also:
 - MOP::Field gains has_attribute / is_param / has_reader helpers
-  used by the Commit 2 migration sites.
+  used by the Commit 2 migration sites. Regenerated golden
+  Chalk__MOP__Field.pl.golden (mirrors 7c-prep's regeneration of
+  the Class golden when Class gained new fields).
 - Four hand-built-IR test fixtures (xs-isa-inheritance.t,
   xs-polymorphic-dispatch.t, xs-int-specialization.t,
   xs-athx-no-args.t) now construct a real MOP and pass $ctx with

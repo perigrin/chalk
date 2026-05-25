@@ -56,4 +56,20 @@ use Chalk::Bootstrap::Context;
     ok(!defined $one->mop(), 'one() mop is undef when no MOP set');
 }
 
+# Test 5: After a real parse, $ctx->mop returns the installed MOP.
+# This is the canonical contract that motivated the propagation fix.
+{
+    use lib 't/bootstrap/lib';
+    use TestPipeline qw(parse_perl_source);
+
+    my $mop = Chalk::MOP->new;
+    Chalk::Bootstrap::Semiring::SemanticAction::set_mop($mop);
+
+    my $src = "class A { method f { 1 } }\nclass B { method g { 2 } }\n";
+    my ($ir, $sa, $ctx) = parse_perl_source($src);
+    ok(defined $ctx, 'parse succeeds');
+    is(refaddr($ctx->mop), refaddr($mop),
+       'parse root $ctx->mop is the installed MOP (post-propagation-fix)');
+}
+
 done_testing();

@@ -12,6 +12,8 @@ use Chalk::IR::Node::Return;
 use Chalk::IR::Program;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::MOP;
+use Chalk::Bootstrap::Context;
 
 my $factory = Chalk::IR::NodeFactory->new();
 
@@ -39,6 +41,20 @@ my $program = Chalk::IR::Program->new(
     classes => [$class_decl],
 );
 
+# MOP setup: register the class under its REAL name ('Foo::Bar::Baz'), not
+# the module_name ('Some::Module::TestBaz'). The mismatch is the point of
+# this test: class slug ('baz') differs from module slug ('testbaz'), and
+# the generated C function must use the class slug.
+# params are plain strings (Actions.pm convention) — NOT IR Constant nodes.
+my $mop = Chalk::MOP->new;
+my $mop_class = $mop->declare_class($class_name);
+$mop_class->declare_method('hello',
+    params      => ['$self'],
+    body        => $method->body,
+    return_type => undef,
+);
+my $ctx = Chalk::Bootstrap::Context->new(focus => undef, mop => $mop);
+
 # Use a module name that produces a different slug than the class name.
 # Class slug: baz (from Foo::Bar::Baz)
 # Module slug: testbaz (from Some::Module::TestBaz)
@@ -47,7 +63,7 @@ my $target = Chalk::Bootstrap::Perl::Target::C->new(
 );
 
 # Generate C files (sets up class slug from IR)
-my $c_result = eval { $target->_generate_c_files($program, undef, undef) };
+my $c_result = eval { $target->_generate_c_files($program, undef, $ctx) };
 ok(defined $c_result, '_generate_c_files succeeds') or do {
     diag "Error: $@";
     done_testing();

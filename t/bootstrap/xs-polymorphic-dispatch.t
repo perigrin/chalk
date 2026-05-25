@@ -12,6 +12,8 @@ use Chalk::IR::Node::Return;
 use Chalk::IR::Program;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::MOP;
+use Chalk::Bootstrap::Context;
 
 # Build a minimal IR: a class with a single no-op method so _generate_c_files
 # has something to process without hitting undef errors.
@@ -80,7 +82,16 @@ my $target = Chalk::Bootstrap::Perl::Target::C->new(
     compiled_class_metadata => $compiled_metadata,
 );
 
-my $result = eval { $target->_generate_c_files($program, undef, undef) };
+my $mop = Chalk::MOP->new;
+my $mop_class = $mop->declare_class('Test::Dispatch::Host');
+$mop_class->declare_method('stub',
+    params      => ['$self'],
+    body        => $method->body,
+    return_type => undef,
+);
+my $ctx = Chalk::Bootstrap::Context->new(focus => undef, mop => $mop);
+
+my $result = eval { $target->_generate_c_files($program, undef, $ctx) };
 ok(defined $result, '_generate_c_files succeeds with compiled_class_metadata') or do {
     diag "Error: $@";
     done_testing();
@@ -126,7 +137,7 @@ for my $meth (qw(is_zero add multiply)) {
 
 # --- Verify Component 3: stash statics, init_statics, and cross-class includes ---
 
-my $c_result = eval { $target->_generate_c_files($program, undef, undef) };
+my $c_result = eval { $target->_generate_c_files($program, undef, $ctx) };
 ok(defined $c_result, '_generate_c_files returns a result for Component 3 checks') or do {
     diag "Error: $@";
     done_testing();
@@ -225,7 +236,16 @@ my $target2 = Chalk::Bootstrap::Perl::Target::C->new(
     compiled_class_metadata => $compiled_metadata,
 );
 
-my $result2 = eval { $target2->_generate_c_files($program2, undef, undef) };
+my $mop2 = Chalk::MOP->new;
+my $mop_class2 = $mop2->declare_class('Test::Dispatch::Host2');
+$mop_class2->declare_method('check',
+    params      => ['$self', '$sr', '$v'],
+    body        => $check_method->body,
+    return_type => undef,
+);
+my $ctx2 = Chalk::Bootstrap::Context->new(focus => undef, mop => $mop2);
+
+my $result2 = eval { $target2->_generate_c_files($program2, undef, $ctx2) };
 ok(defined $result2, '_generate_c_files succeeds for Component 2 stash-compare test') or do {
     diag "Error: $@";
     done_testing();
@@ -306,7 +326,16 @@ for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
         },
     );
 
-    my $reader_result = eval { $reader_target->_generate_c_files($program, undef, undef) };
+    my $reader_mop = Chalk::MOP->new;
+    my $reader_mop_class = $reader_mop->declare_class('Test::ReaderEdge');
+    $reader_mop_class->declare_method('stub',
+        params      => ['$self'],
+        body        => $method_node->body,
+        return_type => undef,
+    );
+    my $reader_ctx = Chalk::Bootstrap::Context->new(focus => undef, mop => $reader_mop);
+
+    my $reader_result = eval { $reader_target->_generate_c_files($program, undef, $reader_ctx) };
     ok(defined $reader_result, 'reader edge case: _generate_c_files succeeds');
 
     my $pd = $reader_target->_polymorphic_dispatch();

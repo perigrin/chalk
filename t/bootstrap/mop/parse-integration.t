@@ -230,4 +230,45 @@ class Counters {
     }
 }
 
+# Chained-decl regression: Boolean.pm has consecutive `my $ZERO_CTX; my $ONE_CTX;`
+# at class scope. The parser packs these as one VarDecl whose init is another
+# VarDecl. Both names must end up in class_scope_vars (presence, not order).
+{
+    use TestPipeline qw(parse_perl_source);
+    use Scalar::Util qw(refaddr);
+
+    my $bool_src;
+    {
+        open my $fh, '<:utf8', 'lib/Chalk/Bootstrap/Semiring/Boolean.pm'
+            or die "Cannot read Boolean.pm: $!";
+        local $/;
+        $bool_src = <$fh>;
+        close $fh;
+    }
+
+    # parse_perl_source is the Task-1.5b helper. It uses whatever MOP was
+    # installed via SemanticAction::set_mop. Install a fresh one for this block.
+    my $mop_for_parse = Chalk::MOP->new;
+    Chalk::Bootstrap::Semiring::SemanticAction::set_mop($mop_for_parse);
+
+    my ($ir, $sa, $ctx) = parse_perl_source($bool_src);
+    ok(defined $ctx, 'Boolean.pm parses');
+    my $mop = $ctx->mop;
+    ok(defined $mop, 'Boolean.pm parse produces a MOP');
+    is(refaddr($mop), refaddr($mop_for_parse),
+       'parse ctx->mop is the installed MOP');
+
+    my $mop_cls = $mop->for_class('Chalk::Bootstrap::Semiring::Boolean');
+    ok(defined $mop_cls, 'Boolean class is registered on MOP');
+
+    my @class_scope_var_names = map {
+        my $n = $_->name->value;
+        $n =~ s/^[\$\@\%]//r;
+    } $mop_cls->class_scope_vars;
+
+    my %present = map { $_ => 1 } @class_scope_var_names;
+    ok($present{ZERO_CTX}, 'class_scope_vars contains ZERO_CTX (outer chained decl)');
+    ok($present{ONE_CTX},  'class_scope_vars contains ONE_CTX (inner chained decl)');
+}
+
 done_testing();

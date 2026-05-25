@@ -155,6 +155,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             scope       => ($is_ctx ? $sa_result->scope() : undef),
             graph       => ($is_ctx ? $sa_result->graph() : undef),
             factory     => ($is_ctx ? $sa_result->factory() : undef),
+            mop         => ($is_ctx ? $sa_result->mop() : undef),
             annotations => {
                 ($is_ctx ? $sa_result->annotations()->%* : ()),
                 %slot_results,
@@ -183,6 +184,10 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             is_zero      => false,
             is_ambiguous => true,
             annotations  => {},
+            mop          => $survivors[0]->mop(),
+            scope        => $survivors[0]->scope(),
+            graph        => $survivors[0]->graph(),
+            factory      => $survivors[0]->factory(),
         );
     }
 
@@ -479,6 +484,10 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
                     is_zero      => false,
                     is_ambiguous => true,
                     annotations  => {},
+                    mop          => $left->mop(),
+                    scope        => $left->scope(),
+                    graph        => $left->graph(),
+                    factory      => $left->factory(),
                 );
             }
             # All slots identical: deterministic tie-break picks left.

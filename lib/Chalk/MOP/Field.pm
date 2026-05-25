@@ -16,4 +16,10 @@ class Chalk::MOP::Field {
     field $attributes    :param = [];
 
     method attributes() { return $attributes->@* }
+
+    method has_attribute($name) {
+        return scalar grep { $_ eq ":$name" } $attributes->@*;
+    }
+    method is_param()   { return $self->has_attribute('param') }
+    method has_reader() { return $self->has_attribute('reader') }
 }
