@@ -670,6 +670,38 @@ Run: `$HOME/.local/share/pvm/versions/5.42.0/bin/perl -Ilib t/bootstrap/mop/code
 
 Expected: 19/19. If any fail, inspect the diff between expected and actual — if the only difference is the disappearance of a `use constant` line, the design has a bug (Target::Perl needs to also consume use_constants) and you must stop and surface this back to the design phase before committing.
 
+### Step 4.2.5: Regenerate the Chalk__MOP__Class golden
+
+**Why this step exists:** `t/bootstrap/mop/codegen-byte-compat.t` test 14 regenerates `lib/Chalk/MOP/Class.pm` through Target::Perl and diffs the output against `t/fixtures/codegen-goldens/Chalk__MOP__Class.pl.golden`. Tasks 1 and 2 legitimately add source (`$scope` field, `@class_scope_vars`, `@use_constants`, accessors, `declare_*` methods) to MOP/Class.pm. The regenerated output is correct but no longer matches the pre-Task-1 golden. This step regenerates the golden so the comparison passes at commit time.
+
+The regenerated golden is **part of the single Phase 7c-prep commit**, not a separate change.
+
+Use the existing regeneration script. Find it:
+
+```bash
+ls script/*golden* 2>&1 || ls t/bootstrap/regenerate* 2>&1 || grep -l "Chalk__MOP" script/ -r 2>&1 || grep -rl "golden_to_source\|codegen-goldens" script/ t/bootstrap/ 2>&1 | head -5
+```
+
+If a regeneration script exists (e.g., `script/regenerate-codegen-goldens` or similar), use it for just the Class golden. If none exists, the regeneration is a manual call to the Target::Perl pipeline:
+
+1. Inspect `t/bootstrap/mop/codegen-byte-compat.t` lines 1-65 to see exactly how `regenerate($src)` derives the output for a single source. Reproduce that call for `lib/Chalk/MOP/Class.pm`, capture the output, and write it to `t/fixtures/codegen-goldens/Chalk__MOP__Class.pl.golden`.
+
+2. Re-run `$HOME/.local/share/pvm/versions/5.42.0/bin/perl -Ilib t/bootstrap/mop/codegen-byte-compat.t 2>&1 | tail -3`. Expected: **`1..19` with no `not ok`**.
+
+3. Inspect the diff between the old and new golden:
+
+   ```bash
+   git diff t/fixtures/codegen-goldens/Chalk__MOP__Class.pl.golden | head -80
+   ```
+
+   The diff must show **only** the new `use Chalk::Bootstrap::Scope;`, the new `field $scope`, `field @class_scope_vars`, `field @use_constants`, the new accessors, the new `declare_class_scope_var` and `declare_use_constant` methods — and *nothing else*. If the diff includes unrelated reordering, whitespace changes, or other unexpected churn, STOP — that's symptomatic of a Target::Perl regression and must be diagnosed before continuing.
+
+4. Stage the new golden:
+
+   ```bash
+   git add t/fixtures/codegen-goldens/Chalk__MOP__Class.pl.golden
+   ```
+
 ### Step 4.3: Broader regression check
 
 Run these as a final sanity pass; expected: all pre-existing pass/fail counts unchanged from `docs/plans/2026-05-24-phase-7-baseline.md`.
@@ -693,6 +725,7 @@ Expected files staged:
 - `t/bootstrap/mop/class-scope-vars.t` (new)
 - `t/bootstrap/mop/use-constants.t` (new)
 - `t/bootstrap/mop/parse-integration.t` (+ inline tests for Sentinel + Counters)
+- `t/fixtures/codegen-goldens/Chalk__MOP__Class.pl.golden` (regenerated in Step 4.2.5)
 
 If anything else is staged (e.g., from a tool-induced side-effect), unstage it.
 
