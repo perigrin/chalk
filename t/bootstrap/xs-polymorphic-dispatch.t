@@ -12,8 +12,33 @@ use Chalk::IR::Node::Return;
 use Chalk::IR::Program;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::Graph;
 use Chalk::MOP;
 use Chalk::Bootstrap::Context;
+
+# Build a populated Graph from a body arrayref so that the scheduler can
+# walk graph->returns() and produce a non-empty schedule. Without this,
+# hand-built MOP::Method objects (which default to an empty graph) trigger
+# the empty-body shortcut in _emit_method, suppressing body emission.
+sub _graph_for_body($body) {
+    my $graph = Chalk::IR::Graph->new;
+    my $walk;
+    $walk = sub ($node) {
+        return unless defined $node && ref($node);
+        if (blessed($node) && $node->can('inputs')) {
+            $graph->merge($node);
+            for my $input ($node->inputs->@*) {
+                if (ref($input) eq 'ARRAY') {
+                    $walk->($_) for $input->@*;
+                } else {
+                    $walk->($input);
+                }
+            }
+        }
+    };
+    $walk->($_) for $body->@*;
+    return $graph;
+}
 
 # Build a minimal IR: a class with a single no-op method so _generate_c_files
 # has something to process without hitting undef errors.
@@ -87,6 +112,7 @@ my $mop_class = $mop->declare_class('Test::Dispatch::Host');
 $mop_class->declare_method('stub',
     params      => ['$self'],
     body        => $method->body,
+    graph       => _graph_for_body($method->body),
     return_type => undef,
 );
 my $ctx = Chalk::Bootstrap::Context->new(focus => undef, mop => $mop);
@@ -241,6 +267,7 @@ my $mop_class2 = $mop2->declare_class('Test::Dispatch::Host2');
 $mop_class2->declare_method('check',
     params      => ['$self', '$sr', '$v'],
     body        => $check_method->body,
+    graph       => _graph_for_body($check_method->body),
     return_type => undef,
 );
 my $ctx2 = Chalk::Bootstrap::Context->new(focus => undef, mop => $mop2);
@@ -331,6 +358,7 @@ for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
     $reader_mop_class->declare_method('stub',
         params      => ['$self'],
         body        => $method_node->body,
+        graph       => _graph_for_body($method_node->body),
         return_type => undef,
     );
     my $reader_ctx = Chalk::Bootstrap::Context->new(focus => undef, mop => $reader_mop);

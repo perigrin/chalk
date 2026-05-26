@@ -7,9 +7,11 @@ use experimental 'class';
 use Chalk::Bootstrap::Perl::Target::EmitHelpers;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node;
+use Chalk::IR::Node::If;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
 use Chalk::IR::Node::VarDecl;
+use Chalk::IR::Scheduler::EagerPinning;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Interpolate;
 use Chalk::IR::Node::Subscript;
@@ -95,130 +97,318 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         return;
     }
-    method _emit_method($method_decl) {
-        my $name = $method_decl->name();
-        my $body = $method_decl->body();
-        # Normalize plain string params to Constant nodes so downstream
-        # code can uniformly call ->value() on each param.
+
+    # Build the schedule for a MOP::Method or MOP::Sub and walk
+    # the items into C body lines. Mirrors Target::Perl's
+    # _emit_scheduled_body (Perl.pm:234-244). Returns an arrayref
+    # of body lines (NOT a joined string); the caller assembles
+    # the helper template around it.
+    method _emit_scheduled_c_body($method) {
+        my $scheduler = Chalk::IR::Scheduler::EagerPinning->new;
+        my $schedule  = $scheduler->schedule($method);
+
+        my @lines;
+        my $indent = 0;
+        my %declared_vars;
+        for my $item ($schedule->items->@*) {
+            $self->_emit_c_schedule_item(
+                $item, \@lines, \$indent, $scheduler, \%declared_vars
+            );
+        }
+        return \@lines;
+    }
+
+    # Emit a single Schedule Item into the C lines accumulator.
+    # Mirrors Target::Perl's _emit_schedule_item (Perl.pm:251-326)
+    # but produces C syntax. The 'stmt' case dispatches to
+    # _emit_stmt for ordinary statements; structural-marker
+    # items (block_open, block_close, else, elsif, catch) emit
+    # the C-syntax head or tail.
+    method _emit_c_schedule_item($item, $lines, $indent_ref, $scheduler, $declared_vars) {
+        my $kind = $item->kind;
+        if ($kind eq 'stmt') {
+            my $code = $self->_emit_stmt($item->node, $declared_vars, false);
+            return unless defined $code;
+            for my $l (split /\n/, $code) {
+                push $lines->@*, ('    ' x $$indent_ref) . $l;
+            }
+        } elsif ($kind eq 'block_open') {
+            my $head = $self->_emit_c_block_open_head($item);
+            push $lines->@*, ('    ' x $$indent_ref) . $head;
+            $$indent_ref++;
+        } elsif ($kind eq 'block_close') {
+            $$indent_ref-- if $$indent_ref > 0;
+            my $tail = $self->_emit_c_block_close_tail($item);
+            push $lines->@*, ('    ' x $$indent_ref) . $tail;
+        } elsif ($kind eq 'else') {
+            $$indent_ref-- if $$indent_ref > 0;
+            push $lines->@*, ('    ' x $$indent_ref) . '} else {';
+            $$indent_ref++;
+        } elsif ($kind eq 'elsif') {
+            $$indent_ref-- if $$indent_ref > 0;
+            push $lines->@*, ('    ' x $$indent_ref)
+                . '} else ' . $self->_emit_c_if_head($item->node);
+            $$indent_ref++;
+        } elsif ($kind eq 'catch') {
+            $$indent_ref-- if $$indent_ref > 0;
+            push $lines->@*, ('    ' x $$indent_ref)
+                . '} ' . $self->_emit_c_catch_head($item);
+            $$indent_ref++;
+        } else {
+            die "Unknown Schedule Item kind: $kind";
+        }
+    }
+
+    # Render the opening line for a block_open Item. $item->form selects
+    # the C surface syntax; the IR node carries the condition / iterator
+    # / list / try info that the surface needs.
+    method _emit_c_block_open_head($item) {
+        my $form = $item->form // '';
+        if ($form eq 'if')      { return $self->_emit_c_if_head($item->node); }
+        if ($form eq 'while')   { return $self->_emit_c_while_head($item->node); }
+        if ($form eq 'foreach') { return $self->_emit_c_foreach_head($item->node); }
+        if ($form eq 'for')     { return $self->_emit_c_for_head($item->node); }
+        if ($form eq 'try')     { return 'JMPENV_PUSH(rs); switch (rs) { case 0: {'; }
+        die "Unknown block_open form: $form";
+    }
+
+    # Emit the closing C syntax for a block_close Item.
+    # For foreach: TWO close braces (one for the for-loop, one for the
+    # AV/iterator scope). For try: switch+JMPENV_POP epilogue.
+    method _emit_c_block_close_tail($item) {
+        my $form = $item->form // '';
+        # For foreach: TWO close braces (one for the for-loop, one
+        # for the AV/iterator scope). See design Risk #2 for rationale.
+        return '}}' if $form eq 'foreach';
+        # For try: switch+JMPENV_POP epilogue
+        return '} break; default: { /* exception */ } } JMPENV_POP;' if $form eq 'try';
+        return '}';
+    }
+
+    # `if (SvTRUE(X)) {` from an If node.
+    method _emit_c_if_head($if_node) {
+        my $cond = $if_node->inputs->[1];
+        my $cond_expr = $self->_emit_node($cond);
+        return "if (SvTRUE($cond_expr)) {";
+    }
+
+    # `while (SvTRUE(X)) {` from a Loop node.
+    method _emit_c_while_head($loop) {
+        my $cond = $self->_loop_condition_c($loop);
+        return "while (SvTRUE($cond)) {";
+    }
+
+    # `{ AV *_iter_av = ...; for (...) { SV *x_sv = ...; ` from a foreach Loop node.
+    # The implementer MUST verify the actual shape of $sd->list
+    # before relying on this branch. Grep lib/Chalk/Bootstrap/Perl/Actions.pm
+    # for `schedule_data(EagerPinning::Loop->new(...))` to see what the
+    # parser action passes. If $list is always a single node, drop
+    # the arrayref branch.
+    method _emit_c_foreach_head($loop) {
+        my $sd = $loop->schedule_data;
+        my $iter = $sd->iterator;
+        my $list = $sd->list;
+        my $iter_name = ref($iter) ? $iter->value : "$iter";
+        $iter_name =~ s/^[\$\@\%]//;
+        my $list_expr = ref($list) eq 'ARRAY'
+            ? '(' . join(', ', map { $self->_emit_node($_) } $list->@*) . ')'
+            : $self->_emit_node($list);
+        # Outer scope holds the AV; for-loop iterates.
+        return "{ AV *_iter_av = (AV*)SvRV($list_expr); for (IV _i = 0; _i <= av_len(_iter_av); _i++) { SV *${iter_name}_sv = *av_fetch(_iter_av, _i, 0);";
+    }
+
+    # C-style for: `for (init; SvTRUE(cond); step) {`.
+    method _emit_c_for_head($loop) {
+        my $sd = $loop->schedule_data;
+        my $init = $sd->for_init;
+        my $cond = $self->_loop_condition_c($loop);
+        my $step = $sd->for_step;
+        my $init_str = defined $init ? $self->_emit_node($init) : '';
+        my $step_str = defined $step ? $self->_emit_node($step) : '';
+        return "for ($init_str; SvTRUE($cond); $step_str) {";
+    }
+
+    # `} break; case 1: { SV *e_sv = ERRSV;` head from a catch-marker Item.
+    # IMPLEMENTATION NOTE: this is a sketch. The legacy try/catch in
+    # EmitHelpers.pm (search for `emit_cfg_try_catch`) has substantially
+    # more JMPENV_PUSH/JMPENV_POP boilerplate than this one-line head.
+    # Full machinery: JMPENV setup goes in the `try` block_open head,
+    # case-1 dispatch + ERRSV access goes here, POP goes in the `try`
+    # block_close tail. Task 2.7's smoke test will surface what else is needed.
+    method _emit_c_catch_head($item) {
+        my $try = $item->node;
+        my $sd  = $try->schedule_data;
+        my $var = $sd->catch_var;
+        my $var_name = ref($var) ? $var->value : "$var";
+        $var_name =~ s/^[\$\@\%]//;
+        # Catch entry: error message lives in ERRSV.
+        return "} break; case 1: { SV *${var_name}_sv = ERRSV;";
+    }
+
+    # Walk a Loop's controlled If to extract its condition as a C expression.
+    # MIRRORS Perl.pm:429-437 exactly: the controlled If is a CONSUMER of
+    # the Loop (Loop.inputs[0] = entry control; Loop.inputs[1] = backedge,
+    # set later via set_backedge_ctrl — NEITHER is an If node).
+    method _loop_condition_c($loop) {
+        for my $c ($loop->consumers->@*) {
+            return $self->_emit_node($c->inputs->[1])
+                if blessed($c) && $c isa Chalk::IR::Node::If;
+        }
+        return '';
+    }
+
+    method _emit_method($method) {
+        my $name = $method->name;
         my $factory = Chalk::IR::NodeFactory->new();
         my $params = [
             map { $factory->make('Constant', const_type => 'variable', value => $_) }
-                $method_decl->params()->@*
+                $method->params->@*
         ];
-
         my $func_name = "${\  $self->_get_current_slug()}_${name}";
 
-        if (scalar $body->@* == 1) {
-            my $body_item = $body->[0];
-            my $returns_value = (defined $body_item
-                && $body_item isa Chalk::IR::Node::Return);
-            my $dies = (defined $body_item
-                && $body_item isa Chalk::IR::Node::Unwind);
+        my $scheduler = Chalk::IR::Scheduler::EagerPinning->new;
+        my $schedule  = $scheduler->schedule($method);
 
-            if ($returns_value) {
-                my $value = $body_item->inputs()->[1];  # inputs[0]=control, inputs[1]=value
+        # Simple-body shortcuts (schedule-driven).
+        my @items = $schedule->items->@*;
 
-                if ($value isa Chalk::IR::Node::Interpolate) {
+        # Empty body shortcut.
+        if (@items == 0) {
+            return $self->_emit_simple_empty_method($func_name, $params);
+        }
+
+        # Single-stmt Return-of-Constant or Return-of-Interpolate shortcut.
+        if (@items == 1 && $items[0]->kind eq 'stmt') {
+            my $node = $items[0]->node;
+            if ($node isa Chalk::IR::Node::Return) {
+                my $value = $node->inputs->[1];
+                if (defined $value && $value isa Chalk::IR::Node::Interpolate) {
                     return $self->_emit_interp_return($name, $value);
-                } elsif ($value isa Chalk::IR::Node::Constant
-                         && ($value->const_type() // '') ne 'variable'
-                         && $value->value() !~ /^[\$\@\%]/) {
-                    my $str = $self->_escape_c_string($value->value());
-                    my $c_expr = "newSVpvs(\"$str\")";
-                    my $raw = $value->value();
-                    if ($raw eq '1' || $raw eq 'true') {
-                        $c_expr = '&PL_sv_yes';
-                    } elsif ($raw eq '0' || $raw eq 'false' || $raw eq '') {
-                        $c_expr = '&PL_sv_no';
-                    } elsif ($raw eq 'undef') {
-                        $c_expr = '&PL_sv_undef';
-                    } elsif ($raw =~ /\A-?\d+\z/) {
-                        $c_expr = "newSViv($raw)";
-                    }
-                    my @c_params = ('SV *self');
-                    for my $p ($params->@*) {
-                        my $pname = $p->value();
-                        $pname =~ s/^\$//;
-                        push @c_params, "SV *$pname";
-                    }
-                    my @helper;
-                    push @helper, "SV * ${func_name}(pTHX_ " . join(', ', @c_params) . ") {";
-                    for my $p (@c_params) {
-                        push @helper, "    PERL_UNUSED_ARG(${\($p =~ s/^SV \*//r)});"
-                            unless $p =~ /^SV \*self$/;
-                    }
-                    push @helper, "    return $c_expr;";
-                    push @helper, "}";
-                    push @_exported_functions, {
-                        name        => $func_name,
-                        return_type => 'SV *',
-                        params      => 'pTHX_ ' . join(', ', @c_params),
-                    };
-                    return { helper => \@helper };
+                }
+                if (defined $value && $value isa Chalk::IR::Node::Constant
+                        && ($value->const_type // '') ne 'variable'
+                        && $value->value !~ /^[\$\@\%]/) {
+                    return $self->_emit_simple_return_method(
+                        $func_name, $params, $value
+                    );
                 }
             }
-
-            if ($dies) {
-                my $args = $body_item->inputs()->[0];
-                my $msg = '';
-                if (ref($args) eq 'ARRAY' && $args->@*) {
-                    $msg = $self->_escape_c_string($args->[0]->value());
-                }
-
-                my @c_params = ('SV *self');
-                for my $p ($params->@*) {
-                    my $pname = $p->value();
-                    $pname =~ s/^\$//;
-                    push @c_params, "SV *$pname";
-                }
-
-                my @helper;
-                push @helper, "void ${func_name}(pTHX_ " . join(', ', @c_params) . ") {";
-                push @helper, "    croak(\"%s\", \"$msg\");";
-                push @helper, "}";
-                push @_exported_functions, {
-                    name        => $func_name,
-                    return_type => 'void',
-                    params      => 'pTHX_ ' . join(', ', @c_params),
-                };
-                return { helper => \@helper };
+            if ($node isa Chalk::IR::Node::Unwind) {
+                return $self->_emit_simple_die_method(
+                    $func_name, $params, $node
+                );
             }
         }
 
-        if ($body->@* == 0) {
-            my @helper;
-            push @helper, "void ${func_name}(pTHX_ SV *self) {";
-            push @helper, "    PERL_UNUSED_ARG(self);";
-            push @helper, "    /* empty */";
-            push @helper, "}";
-            push @_exported_functions, {
-                name        => $func_name,
-                return_type => 'void',
-                params      => 'pTHX_ SV *self',
-            };
-            return { helper => \@helper };
-        }
+        my $return_type = $method->return_type;
+        return $self->_emit_complex_method(
+            $name, $params, $schedule, $scheduler, $return_type
+        );
+    }
 
-        my $return_type = $method_decl->return_type();  # already a plain string
-        return $self->_emit_complex_method($name, $params, $body, $return_type);
+    # Empty method body: emit `void NAME(pTHX_ SV *self) { /* empty */ }`.
+    method _emit_simple_empty_method($func_name, $params) {
+        my @helper;
+        push @helper, "void ${func_name}(pTHX_ SV *self) {";
+        push @helper, "    PERL_UNUSED_ARG(self);";
+        push @helper, "    /* empty */";
+        push @helper, "}";
+        push @_exported_functions, {
+            name        => $func_name,
+            return_type => 'void',
+            params      => 'pTHX_ SV *self',
+        };
+        return { helper => \@helper };
+    }
+
+    # Single-stmt Return-of-Constant: emit one-liner `return newSViv(N);`
+    # (or &PL_sv_yes for true, etc.).
+    method _emit_simple_return_method($func_name, $params, $value) {
+        my $str = $self->_escape_c_string($value->value);
+        my $c_expr = "newSVpvs(\"$str\")";
+        my $raw = $value->value;
+        if ($raw eq '1' || $raw eq 'true') {
+            $c_expr = '&PL_sv_yes';
+        } elsif ($raw eq '0' || $raw eq 'false' || $raw eq '') {
+            $c_expr = '&PL_sv_no';
+        } elsif ($raw eq 'undef') {
+            $c_expr = '&PL_sv_undef';
+        } elsif ($raw =~ /\A-?\d+\z/) {
+            $c_expr = "newSViv($raw)";
+        }
+        my @c_params = ('SV *self');
+        for my $p ($params->@*) {
+            my $pname = $p->value;
+            $pname =~ s/^\$//;
+            push @c_params, "SV *$pname";
+        }
+        my @helper;
+        push @helper, "SV * ${func_name}(pTHX_ " . join(', ', @c_params) . ") {";
+        for my $p (@c_params) {
+            push @helper, "    PERL_UNUSED_ARG(${\($p =~ s/^SV \*//r)});"
+                unless $p =~ /^SV \*self$/;
+        }
+        push @helper, "    return $c_expr;";
+        push @helper, "}";
+        push @_exported_functions, {
+            name        => $func_name,
+            return_type => 'SV *',
+            params      => 'pTHX_ ' . join(', ', @c_params),
+        };
+        return { helper => \@helper };
+    }
+
+    # Single-stmt Unwind (die): emit `croak("MSG");`.
+    method _emit_simple_die_method($func_name, $params, $node) {
+        my $args = $node->inputs->[0];
+        my $msg = '';
+        if (ref($args) eq 'ARRAY' && $args->@*) {
+            $msg = $self->_escape_c_string($args->[0]->value);
+        }
+        my @c_params = ('SV *self');
+        for my $p ($params->@*) {
+            my $pname = $p->value;
+            $pname =~ s/^\$//;
+            push @c_params, "SV *$pname";
+        }
+        my @helper;
+        push @helper, "void ${func_name}(pTHX_ " . join(', ', @c_params) . ") {";
+        push @helper, "    croak(\"%s\", \"$msg\");";
+        push @helper, "}";
+        push @_exported_functions, {
+            name        => $func_name,
+            return_type => 'void',
+            params      => 'pTHX_ ' . join(', ', @c_params),
+        };
+        return { helper => \@helper };
     }
 
     # Emit a multi-statement method body as a C helper + XSUB wrapper.
-    method _emit_complex_method($name, $params, $body, $ir_return_type = undef) {
+    # Post-Phase-7d: consumes a Chalk::IR::Schedule produced by
+    # Chalk::IR::Scheduler::EagerPinning. The wrapper logic (param
+    # decls, %declared_vars, retval handling, function template) is
+    # unchanged; only the inner body loop swaps from
+    # `for my $stmt ($body->@*)` to `_emit_scheduled_c_body($method)`-
+    # equivalent (here, the schedule is already built and passed in).
+    method _emit_complex_method($name, $params, $schedule, $scheduler, $ir_return_type = undef) {
         my @code;
 
-        my $last_item = $body->[-1];
-        my $last_is_return = (defined $last_item
-            && $last_item isa Chalk::IR::Node::Return);
-        my $body_has_returns = $self->_body_contains_return($body);
+        # Find the last 'stmt' item to drive last-stmt analyses.
+        my @stmt_items = grep { $_->kind eq 'stmt' } $schedule->items->@*;
+        my $last_stmt = @stmt_items ? $stmt_items[-1] : undef;
+        my $last_node = defined $last_stmt ? $last_stmt->node : undef;
+
+        my $last_is_return = (defined $last_node
+            && $last_node isa Chalk::IR::Node::Return);
+        my $body_has_returns = $self->_body_contains_return($schedule);
         my $single_stmt_return = (!$last_is_return
-            && scalar($body->@*) == 1
-            && defined $last_item
-            && $self->_is_single_stmt_return_expr($last_item));
+            && scalar(@stmt_items) == 1
+            && defined $last_node
+            && $self->_is_single_stmt_return_expr($last_node));
         my $tail_expr_return = (!$last_is_return
-            && defined $last_item
-            && ($self->_is_unambiguous_value_expr($last_item)
-                || ($body_has_returns && $self->_is_bare_return_expr($last_item)))
+            && defined $last_node
+            && ($self->_is_unambiguous_value_expr($last_node)
+                || ($body_has_returns && $self->_is_bare_return_expr($last_node)))
             );
         my $heuristic_has_return = $last_is_return || $tail_expr_return
                || $single_stmt_return || $body_has_returns;
@@ -237,26 +427,30 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         my @xs_params = ('SV *self');
         for my $p ($params->@*) {
-            my $pname = $p->value();
+            my $pname = $p->value;
             $pname =~ s/^[\$\@\%]//;
             push @xs_params, "SV *$pname";
             $declared_vars{"param:$pname"} = true;
         }
 
-        $self->_collect_var_decls($body, \%declared_vars);
-        $self->_collect_all_var_refs($body, \%declared_vars);
+        $self->_collect_var_decls($schedule, \%declared_vars);
+        $self->_collect_all_var_refs($schedule, \%declared_vars);
 
-        my $has_early_return = $self->_has_early_return($body);
+        my $has_early_return = $self->_has_early_return($schedule);
 
         my $prev_return_context = $self->_get_return_context();
         $self->_set_return_context($has_return);
 
-        for my $idx (0 .. $body->@* - 1) {
-            my $is_last = ($idx == $body->@* - 1);
-            my $stmt = $self->_emit_stmt($body->[$idx], \%declared_vars, $is_last);
-            push @code, $stmt if defined $stmt;
+        # Body emission: walk schedule items into @code lines.
+        my $indent = 0;
+        for my $item ($schedule->items->@*) {
+            $self->_emit_c_schedule_item(
+                $item, \@code, \$indent, $scheduler, \%declared_vars
+            );
         }
 
+        # Retval tail rewriting: if the last code line is an expression
+        # (no trailing semicolon stripping), wrap it as `retval = EXPR;`.
         if (!$last_is_return && @code) {
             my $last_code = $code[-1];
             if ($last_code =~ /\n/) {
@@ -288,8 +482,6 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         $self->_set_return_context($prev_return_context);
 
         my @helper;
-        # Exported C function: no "static", no "_impl_" prefix.
-        # Called from Boolean.xs via the function pointer or direct call.
         my $func_name = "${\  $self->_get_current_slug()}_${name}";
         my $c_ret_type = $has_return ? $self->_xs_c_type_for($ir_return_type) : 'void';
         push @helper, "$c_ret_type ${func_name}(pTHX_ " . join(', ', @xs_params) . ") {";
@@ -322,8 +514,6 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
         push @helper, '}';
 
-        # Track exported function for .h generation.
-        # The .h prototype needs pTHX_ as the first parameter for threaded perls.
         push @_exported_functions, {
             name        => $func_name,
             return_type => $c_ret_type,
@@ -334,13 +524,16 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     }
 
     # Emit a class-scope sub declaration as a static C helper function.
-    method _emit_sub($name, $params, $body) {
-        my @code;
+    # Post-Phase-7d: takes a MOP::Sub directly and builds its own
+    # schedule. The try/catch save/restore wrapper for
+    # _current_sub_name and _return_context is preserved — exceptions
+    # during body compilation must not leak state into subsequent
+    # method/sub compilation in the same class.
+    method _emit_sub($sub) {
+        my $name = $sub->name;
+        my $params = $sub->params;
 
-        # Track current sub name for __SUB__ recursion resolution.
-        # Save/restore both _current_sub_name and _return_context so that
-        # an exception during body compilation does not leak state into
-        # subsequent method/sub compilation within the same class.
+        # State save/restore: any exception below must not leak.
         my $prev_sub_name = $self->_get_current_sub_name();
         my $prev_return_context = $self->_get_return_context();
         $self->_set_current_sub_name($name);
@@ -348,54 +541,158 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my $result;
         my $caught_error;
         try {
+            my $scheduler = Chalk::IR::Scheduler::EagerPinning->new;
+            my $schedule  = $scheduler->schedule($sub);
 
-        my $last_item = $body->[-1];
-        my $last_is_return = (defined $last_item
-            && $last_item isa Chalk::IR::Node::Return);
-        $last_is_return ||= (defined $last_item
-            && $last_item isa Chalk::IR::Node::Constant
-            && ($last_item->value() // '') eq 'return');
-        my $body_has_returns = $self->_body_contains_return($body);
+            # Simple-body shortcuts for subs (same shape as _emit_method).
+            my @items = $schedule->items->@*;
+            if (@items == 0) {
+                $result = $self->_emit_simple_empty_sub($name);
+            } elsif (@items == 1 && $items[0]->kind eq 'stmt') {
+                my $node = $items[0]->node;
+                if ($node isa Chalk::IR::Node::Return) {
+                    my $value = $node->inputs->[1];
+                    if (defined $value && $value isa Chalk::IR::Node::Constant
+                            && ($value->const_type // '') ne 'variable'
+                            && $value->value !~ /^[\$\@\%]/) {
+                        $result = $self->_emit_simple_return_sub($name, $params, $value);
+                    }
+                }
+                if (!defined $result && $node isa Chalk::IR::Node::Unwind) {
+                    $result = $self->_emit_simple_die_sub($name, $params, $node);
+                }
+            }
+
+            # Fall through to complex emission.
+            if (!defined $result) {
+                $result = $self->_emit_complex_sub_body(
+                    $name, $params, $schedule, $scheduler
+                );
+            }
+        } catch ($e) {
+            $caught_error = $e;
+        }
+
+        # Always restore state, even if body compilation threw.
+        $self->_set_current_sub_name($prev_sub_name);
+        $self->_set_return_context($prev_return_context);
+
+        die $caught_error if defined $caught_error;
+        return $result;
+    }
+
+    # Empty sub: emit `static SV *NAME(pTHX) { return &PL_sv_undef; }`.
+    method _emit_simple_empty_sub($name) {
+        my @helper;
+        my $helper_name = "${\  $self->_get_current_slug()}_${name}";
+        push @helper, "static SV * $helper_name(pTHX) {";
+        push @helper, '    return &PL_sv_undef;';
+        push @helper, '}';
+        return { helper => \@helper };
+    }
+
+    # Simple Return-of-Constant sub: emit static one-liner helper.
+    method _emit_simple_return_sub($name, $params, $value) {
+        my $str = $self->_escape_c_string($value->value);
+        my $c_expr = "newSVpvs(\"$str\")";
+        my $raw = $value->value;
+        if ($raw eq '1' || $raw eq 'true') { $c_expr = '&PL_sv_yes'; }
+        elsif ($raw eq '0' || $raw eq 'false' || $raw eq '') { $c_expr = '&PL_sv_no'; }
+        elsif ($raw eq 'undef') { $c_expr = '&PL_sv_undef'; }
+        elsif ($raw =~ /\A-?\d+\z/) { $c_expr = "newSViv($raw)"; }
+
+        my @xs_params;
+        for my $p ($params->@*) {
+            my $pname = ref($p) ? $p->value : "$p";
+            $pname =~ s/^[\$\@\%]//;
+            push @xs_params, "SV *$pname";
+        }
+        my $helper_name = "${\  $self->_get_current_slug()}_${name}";
+        my $param_str = @xs_params ? 'pTHX_ ' . join(', ', @xs_params) : 'pTHX';
+        my @helper;
+        push @helper, "static SV * $helper_name($param_str) {";
+        push @helper, "    return $c_expr;";
+        push @helper, '}';
+        return { helper => \@helper };
+    }
+
+    # Simple Unwind sub: emit `croak("MSG");` and return undef.
+    method _emit_simple_die_sub($name, $params, $node) {
+        my $args = $node->inputs->[0];
+        my $msg = '';
+        if (ref($args) eq 'ARRAY' && $args->@*) {
+            $msg = $self->_escape_c_string($args->[0]->value);
+        }
+        my @xs_params;
+        for my $p ($params->@*) {
+            my $pname = ref($p) ? $p->value : "$p";
+            $pname =~ s/^[\$\@\%]//;
+            push @xs_params, "SV *$pname";
+        }
+        my $helper_name = "${\  $self->_get_current_slug()}_${name}";
+        my $param_str = @xs_params ? 'pTHX_ ' . join(', ', @xs_params) : 'pTHX';
+        my @helper;
+        push @helper, "static SV * $helper_name($param_str) {";
+        push @helper, "    croak(\"%s\", \"$msg\");";
+        push @helper, '    return &PL_sv_undef;  /* unreachable */';
+        push @helper, '}';
+        return { helper => \@helper };
+    }
+
+    # Complex sub body emission — schedule-driven, mirrors
+    # _emit_complex_method but emits `static SV *` (not exported)
+    # and handles the Constant.value eq 'return' last-stmt case
+    # specific to subs.
+    method _emit_complex_sub_body($name, $params, $schedule, $scheduler) {
+        my @code;
+
+        my @stmt_items = grep { $_->kind eq 'stmt' } $schedule->items->@*;
+        my $last_stmt = @stmt_items ? $stmt_items[-1] : undef;
+        my $last_node = defined $last_stmt ? $last_stmt->node : undef;
+
+        my $last_is_return = (defined $last_node
+            && $last_node isa Chalk::IR::Node::Return);
+        # Sub-specific: a trailing Constant.value eq 'return' counts.
+        $last_is_return ||= (defined $last_node
+            && $last_node isa Chalk::IR::Node::Constant
+            && ($last_node->value // '') eq 'return');
+        my $body_has_returns = $self->_body_contains_return($schedule);
         my $single_stmt_return = (!$last_is_return
-            && scalar($body->@*) == 1
-            && defined $last_item
-            && $self->_is_single_stmt_return_expr($last_item));
+            && scalar(@stmt_items) == 1
+            && defined $last_node
+            && $self->_is_single_stmt_return_expr($last_node));
         my $tail_expr_return = (!$last_is_return
-            && defined $last_item
-            && ($self->_is_unambiguous_value_expr($last_item)
-                || ($body_has_returns && $self->_is_bare_return_expr($last_item)))
+            && defined $last_node
+            && ($self->_is_unambiguous_value_expr($last_node)
+                || ($body_has_returns && $self->_is_bare_return_expr($last_node)))
             );
         my $has_return = $last_is_return || $tail_expr_return
                || $single_stmt_return || $body_has_returns;
 
         my %declared_vars;
-
         my @xs_params;
         for my $p ($params->@*) {
-            my $pname;
-            if ($p isa Chalk::IR::Node) {
-                $pname = $p->value();
-            } else {
-                $pname = "$p";
-            }
+            my $pname = ref($p) ? $p->value : "$p";
             $pname =~ s/^[\$\@\%]//;
             push @xs_params, "SV *$pname";
             $declared_vars{"param:$pname"} = true;
         }
 
-        $self->_collect_var_decls($body, \%declared_vars);
-        $self->_collect_all_var_refs($body, \%declared_vars);
+        $self->_collect_var_decls($schedule, \%declared_vars);
+        $self->_collect_all_var_refs($schedule, \%declared_vars);
 
-        my $has_early_return = $self->_has_early_return($body);
-
+        my $has_early_return = $self->_has_early_return($schedule);
         $self->_set_return_context($has_return);
 
-        for my $idx (0 .. $body->@* - 1) {
-            my $is_last = ($idx == $body->@* - 1);
-            my $stmt = $self->_emit_stmt($body->[$idx], \%declared_vars, $is_last);
-            push @code, $stmt if defined $stmt;
+        # Body emission via schedule walker.
+        my $indent = 0;
+        for my $item ($schedule->items->@*) {
+            $self->_emit_c_schedule_item(
+                $item, \@code, \$indent, $scheduler, \%declared_vars
+            );
         }
 
+        # Retval tail rewriting (sub-specific: skip sv_setsv-style).
         if (!$last_is_return && @code) {
             my $last_code = $code[-1];
             if ($last_code =~ s/;\s*$//) {
@@ -410,18 +707,15 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
 
         my @helper;
-        # Class-scope subs are static helpers — not exported, not in the .h file.
         my $helper_name = "${\  $self->_get_current_slug()}_${name}";
         my $param_str = @xs_params ? 'pTHX_ ' . join(', ', @xs_params) : 'pTHX';
         push @helper, "static SV * $helper_name($param_str) {";
-
         push @helper, '    SV *retval = NULL;';
         for my $var (sort keys %declared_vars) {
             next if $var eq 'hash';
             next if $var =~ /^param:/;
             push @helper, "    SV *${var}_sv = NULL;";
         }
-
         for my $stmt (@code) {
             my $rewritten = $stmt;
             $rewritten =~ s/\bRETVAL\b/retval/g;
@@ -430,7 +724,6 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 push @helper, "    $line";
             }
         }
-
         if ($has_early_return) {
             push @helper, '    xsreturn:';
         }
@@ -440,18 +733,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             push @helper, '    return &PL_sv_undef;';
         }
         push @helper, '}';
-
-        $result = { helper => \@helper };
-        } catch ($e) {
-            $caught_error = $e;
-        }
-
-        # Always restore state, even if body compilation threw
-        $self->_set_current_sub_name($prev_sub_name);
-        $self->_set_return_context($prev_return_context);
-
-        die $caught_error if defined $caught_error;
-        return $result;
+        return { helper => \@helper };
     }
 
     # Emit a Constant IR node as a C expression
@@ -1582,14 +1864,11 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my @func_lines;     # exported C functions (methods)
 
         # Emit class-scope subs (static helpers) before methods.
-        # _emit_sub still reads $sub->body — that's 7d-transitional.
         for my $sub ($mop_class->subs) {
-            my $sname   = $sub->name;
-            my $sparams = $sub->params;   # arrayref of plain strings
-            my $sbody   = $sub->body;     # 7d-transitional read
+            my $sname = $sub->name;
             my $result;
             try {
-                $result = $self->_emit_sub($sname, $sparams, $sbody);
+                $result = $self->_emit_sub($sub);
             } catch ($e) {
                 # Emission failed — mark sub as not compiled
             }

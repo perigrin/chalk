@@ -559,93 +559,70 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return $xs_text;
     }
 
-    # Check if a MethodDecl will be emitted as a complex method (with helper).
-    method _is_complex_method($method_decl) {
-        my $body = $method_decl->inputs()->[2];
-
-        return false if $body->@* == 0;
-        return true if $body->@* > 1;
-
-        my $body_item = $body->[0];
-        my $returns_value = (defined $body_item
-            && $body_item isa Chalk::IR::Node::Return);
-        my $dies = (defined $body_item
-            && $body_item isa Chalk::IR::Node::Unwind);
-
-        if ($returns_value) {
-            my $value = $body_item->inputs()->[1];  # inputs[0]=control, inputs[1]=value
-            if ($value isa Chalk::IR::Node::Interpolate) {
-                return false;
-            }
-            if ($value isa Chalk::IR::Node::Constant
-                    && ($value->const_type() // '') ne 'variable'
-                    && $value->value() !~ /^[\$\@\%]/) {
-                return false;
-            }
-            return true;
-        }
-
-        return false if $dies;
-        return true;
+    # Check if a Schedule will be emitted as a complex method (with helper).
+    method _is_complex_method($schedule) {
+        my @stmts = grep { $_->kind eq 'stmt' } $schedule->items->@*;
+        return false if @stmts <= 1;
+        # If there are block_open items, it's structured control flow.
+        return true if grep { $_->kind eq 'block_open' } $schedule->items->@*;
+        return true;  # multi-stmt without blocks is still complex
     }
 
-    method _has_early_return($nodes) {
-        for my $item ($nodes->@*) {
-            next unless $item isa Chalk::IR::Node;
-            if (%_cfg_lookup && ref($item)) {
-                my $state = $_cfg_lookup{refaddr($item)};
-                if (defined $state && defined $state->{if_node}) {
-                    my $then = $state->{then_stmts};
-                    return true if $self->_body_contains_return($then);
-                    # Stale-merge can strip Return node leaving bare expressions
-                    return true if $self->_body_contains_bare_return($then);
-                    my $else = $state->{else_stmts};
-                    return true if defined($else) && ref($else) eq 'ARRAY'
-                        && $self->_body_contains_return($else);
-                    return true if defined($else) && ref($else) eq 'ARRAY'
-                        && $self->_body_contains_bare_return($else);
-                }
-                # Recurse into loop body_stmts
-                if (defined $state && defined $state->{loop}) {
-                    my $loop_body = $state->{body_stmts};
-                    return true if defined($loop_body) && ref($loop_body) eq 'ARRAY'
-                        && $self->_has_early_return($loop_body);
-                }
-            }
+    method _has_early_return($schedule) {
+        # Walk all 'stmt' items EXCEPT the terminal synthetic-Return.
+        # Per the design doc's correctness invariant, branch-internal
+        # Returns appear as their own 'stmt' items in the flat sequence;
+        # those ARE early returns that need the xsreturn: label.
+        my @items = $schedule->items->@*;
+        return false unless @items;
+
+        # Identify the terminal synthetic-Return (if any) to exclude.
+        my $last = $items[-1];
+        my $is_terminal_synthetic = $last->kind eq 'stmt'
+            && $last->node isa Chalk::IR::Node::Return
+            && $last->node->can('synthetic')
+            && $last->node->synthetic;
+
+        my $end_idx = $is_terminal_synthetic ? $#items - 1 : $#items;
+        # The LAST non-terminal-synthetic 'stmt' item is also not
+        # counted as an early return — it's the normal trailing return.
+        # We want: any 'stmt' before the last 'stmt' that is a
+        # non-synthetic Return.
+        my @stmt_idx;
+        for my $i (0 .. $end_idx) {
+            push @stmt_idx, $i if $items[$i]->kind eq 'stmt';
+        }
+        return false if @stmt_idx <= 1;
+        pop @stmt_idx;  # exclude the last stmt
+        for my $i (@stmt_idx) {
+            my $node = $items[$i]->node;
+            return true if $node isa Chalk::IR::Node::Return
+                        && !($node->can('synthetic') && $node->synthetic);
         }
         return false;
     }
 
-    # Check if a body array contains any Return CFG node
-    method _body_contains_return($body) {
-        return false unless ref($body) eq 'ARRAY';
-        for my $item ($body->@*) {
-            next unless $item isa Chalk::IR::Node;
-            if (%_cfg_lookup && ref($item)) {
-                my $state = $_cfg_lookup{refaddr($item)};
-                if (defined $state && defined $state->{if_node}) {
-                    my $then = $state->{then_stmts};
-                    return true if $self->_body_contains_return($then);
-                    my $else = $state->{else_stmts};
-                    return true if defined($else) && $self->_body_contains_return($else);
-                }
-                if (defined $state && defined $state->{loop}) {
-                    my $loop_body = $state->{body_stmts};
-                    return true if defined($loop_body) && ref($loop_body) eq 'ARRAY'
-                        && $self->_body_contains_return($loop_body);
-                }
-            }
-            return true if $item isa Chalk::IR::Node::Return;
+    # Check if a schedule contains any Return CFG node in its stmt items.
+    method _body_contains_return($schedule) {
+        for my $item ($schedule->items->@*) {
+            next unless $item->kind eq 'stmt';
+            my $node = $item->node;
+            return true if $node isa Chalk::IR::Node::Return;
         }
         return false;
     }
 
-    # Check if a body array's last item is a bare return expression
-    # (filter-gap merge artifact).
-    method _body_contains_bare_return($body) {
-        return false unless ref($body) eq 'ARRAY' && $body->@*;
-        my $last = $body->[-1];
-        return $self->_is_bare_return_expr($last);
+    # Check if any schedule stmt item is a bare return expression
+    # (filter-gap merge artifact). Checks all stmt nodes in the schedule.
+    method _body_contains_bare_return($schedule) {
+        for my $item ($schedule->items->@*) {
+            next unless $item->kind eq 'stmt';
+            my $node = $item->node;
+            next unless $node isa Chalk::IR::Node::Return;
+            my $val = $node->inputs->[1];
+            return true unless defined $val;
+        }
+        return false;
     }
 
     # Detect if an IR node is a bare expression that was likely a return value
@@ -697,117 +674,68 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return true;
     }
 
-    # Recursively collect VarDecl and iterator names from IR nodes at any nesting depth.
-    method _collect_var_decls($nodes, $declared_vars) {
-        for my $item ($nodes->@*) {
-            next unless $item isa Chalk::IR::Node;
-
-            if (%_cfg_lookup && ref($item)) {
-                my $state = $_cfg_lookup{refaddr($item)};
-                if (defined $state) {
-                    if (defined $state->{if_node}) {
-                        my $then = $state->{then_stmts};
-                        $self->_collect_var_decls($then, $declared_vars) if ref($then) eq 'ARRAY';
-                        my $else = $state->{else_stmts};
-                        $self->_collect_var_decls($else, $declared_vars) if defined($else) && ref($else) eq 'ARRAY';
-                    }
-                    if (defined $state->{loop}) {
-                        my $iter = $state->{iterator};
-                        if (defined $iter && $iter isa Chalk::IR::Node::Constant) {
-                            my $iter_name = $iter->value();
-                            $iter_name =~ s/^[\$\@\%]//;
-                            $declared_vars->{$iter_name} = true;
-                        }
-                        my $body = $state->{body_stmts};
-                        $self->_collect_var_decls($body, $declared_vars) if ref($body) eq 'ARRAY';
-                    }
-                    if (defined $state->{try_node}) {
-                        my $try = $state->{try_stmts};
-                        $self->_collect_var_decls($try, $declared_vars) if ref($try) eq 'ARRAY';
-                        my $catch = $state->{catch_stmts};
-                        $self->_collect_var_decls($catch, $declared_vars) if ref($catch) eq 'ARRAY';
-                        my $catch_var = $state->{catch_var};
-                        if (defined $catch_var) {
-                            my $cv = $catch_var;
-                            $cv =~ s/^[\$\@\%]//;
-                            $declared_vars->{$cv} = true;
-                        }
-                    }
-                    next;
+    # Collect VarDecl, foreach-iterator, and catch-var names from a flat Schedule.
+    # Walks all items: 'stmt' items for VarDecl nodes, 'block_open'(foreach) for
+    # iterator names, and 'catch' items for catch-variable names.
+    method _collect_var_decls($schedule, $declared_vars) {
+        for my $item ($schedule->items->@*) {
+            if ($item->kind eq 'stmt') {
+                my $node = $item->node;
+                if ($node isa Chalk::IR::Node::VarDecl) {
+                    my $name = $node->name;
+                    my $vname = ref($name) ? $name->value : "$name";
+                    $vname =~ s/^[\$\@\%]//;
+                    $declared_vars->{$vname} = true;
                 }
-            }
-
-            my $is_var_decl = $item isa Chalk::IR::Node::VarDecl;
-            next unless $is_var_decl;
-
-            if ($is_var_decl) {
-                my $var = $item->name()->value();
-                $var =~ s/^[\$\@\%]//;
-                next if defined $field_map && exists $field_map->{$var};
-                next if %_class_scope_vars && exists $_class_scope_vars{$var};
-                $declared_vars->{$var} = true;
-                my $init = $item->init();
-                if (defined $init && $init isa Chalk::IR::Node::VarDecl) {
-                    $self->_collect_var_decls([$init], $declared_vars);
-                }
-                if (defined $init
-                        && $init isa Chalk::IR::Node::TryCatch) {
-                    my $state = $_cfg_lookup{refaddr($init)};
-                    if (defined $state) {
-                        my $try = $state->{try_stmts};
-                        $self->_collect_var_decls($try, $declared_vars) if ref($try) eq 'ARRAY';
-                        my $catch = $state->{catch_stmts};
-                        $self->_collect_var_decls($catch, $declared_vars) if ref($catch) eq 'ARRAY';
-                        my $catch_var = $state->{catch_var};
-                        if (defined $catch_var) {
-                            my $cv = $catch_var;
-                            $cv =~ s/^[\$\@\%]//;
-                            $declared_vars->{$cv} = true;
-                        }
-                    }
-                }
+            } elsif ($item->kind eq 'block_open' && ($item->form // '') eq 'foreach') {
+                my $iter = $item->node->schedule_data->iterator;
+                my $iname = ref($iter) ? $iter->value : "$iter";
+                $iname =~ s/^[\$\@\%]//;
+                $declared_vars->{$iname} = true;
+            } elsif ($item->kind eq 'catch') {
+                my $var = $item->node->schedule_data->catch_var;
+                my $cname = ref($var) ? $var->value : "$var";
+                $cname =~ s/^[\$\@\%]//;
+                $declared_vars->{$cname} = true;
             }
         }
+        return;
     }
 
-    # Walk the IR tree to find all variable references and register them in declared_vars.
-    method _collect_all_var_refs($nodes, $declared_vars) {
-        my @queue = grep { defined $_ } $nodes->@*;
-        my %visited;
-        while (my $node = shift @queue) {
-            next unless ref($node);
-            my $addr = refaddr($node);
-            next if $visited{$addr}++;
-
-            if ($node isa Chalk::IR::Node::Constant) {
-                my $val = $node->value() // '';
-                if ($val =~ /^\$([\w]+)$/) {
-                    my $bare = $1;
-                    next if $bare =~ /^\d+$/;
-                    next if $bare =~ /\A(?:ENV|SIG|INC)\z/;
-                    next if defined $field_map && exists $field_map->{$bare};
-                    next if $declared_vars->{"param:$bare"};
-                    next if %_class_scope_vars && exists $_class_scope_vars{$bare};
-                    $declared_vars->{$bare} = true;
-                }
-            } elsif ($node isa Chalk::IR::Node) {
-                push @queue, grep { defined $_ && ref($_) } $node->inputs()->@*;
+    # Walk stmt nodes in the schedule to find all variable references and
+    # register them in declared_vars. Also walks foreach iterator schedule_data.
+    method _collect_all_var_refs($schedule, $declared_vars) {
+        my $walk;
+        $walk = sub ($node) {
+            return unless defined $node && ref($node);
+            if ($node isa Chalk::IR::Node::Constant
+                    && ($node->const_type // '') eq 'variable') {
+                my $name = $node->value;
+                $name =~ s/^[\$\@\%]//;
+                $declared_vars->{$name} //= true;
             }
-
-            if (%_cfg_lookup) {
-                my $state = $_cfg_lookup{$addr};
-                if (defined $state) {
-                    for my $key (qw(body_stmts then_stmts else_stmts try_stmts catch_stmts)) {
-                        my $stmts = $state->{$key};
-                        push @queue, grep { defined $_ } $stmts->@* if ref($stmts) eq 'ARRAY';
+            if ($node isa Chalk::IR::Node) {
+                for my $input ($node->inputs->@*) {
+                    if (ref($input) eq 'ARRAY') {
+                        $walk->($_) for $input->@*;
+                    } else {
+                        $walk->($input);
                     }
                 }
             }
-
-            if (ref($node) eq 'ARRAY') {
-                push @queue, grep { defined $_ && ref($_) } $node->@*;
+        };
+        for my $item ($schedule->items->@*) {
+            next unless $item->kind eq 'stmt';
+            $walk->($item->node);
+        }
+        # Also walk foreach iterator schedule_data:
+        for my $item ($schedule->items->@*) {
+            if ($item->kind eq 'block_open' && ($item->form // '') eq 'foreach') {
+                my $iter = $item->node->schedule_data->iterator;
+                $walk->($iter) if ref($iter);
             }
         }
+        return;
     }
 
     method _wrap_retval($val_expr) {
