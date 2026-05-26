@@ -49,6 +49,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     field %_use_constants;     # constant_name => numeric_value from `use constant { ... }` declarations
     field $_struct_schemas = {}; # schema_name => { fields => [{ name, c_type }] } for struct promotion
     field $_mop_class;  # set by _generate_c_files; read by generate_xs_wrapper
+    field %_repair_counters;  # repair_name => fire_count; populated by _record_repair.
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -101,6 +102,12 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _get_struct_schemas()     { return $_struct_schemas; }
     method _set_mop_class($v) { $_mop_class = $v }
     method _get_mop_class()    { return $_mop_class }
+    method _record_repair($name) {
+        $_repair_counters{$name}++;
+        return;
+    }
+    method repair_counters()   { return { %_repair_counters }; }
+    method reset_repair_counters() { %_repair_counters = (); }
 
     # Derive a short lowercase slug from a class name for identifier namespacing.
     # Takes the last component of a qualified name and lowercases it.
@@ -321,7 +328,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 warn "  LINE: $line\n" if $line =~ /(?:RETVAL|retval) = newSVpvs/;
             }
         }
-        return ($has_dispatch && $has_bare_str);
+        my $is = ($has_dispatch && $has_bare_str);
+        $self->_record_repair('is_stale_merge_detected') if $is;
+        return $is;
     }
 
     # Repair filter-gap merge artifact in method output.
@@ -365,8 +374,10 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $hashref_code = join(' ', @hv_lines);
 
         my @fixed;
+        my $fired = 0;
         for my $line ($xs_lines->@*) {
             if ($line =~ /(?:RETVAL|retval) = newSVpvs\("/) {
+                $self->_record_repair('repair_stale_merge') unless $fired++;
                 $line =~ s/(?:RETVAL|retval) = newSVpvs\("[^"]*"\)/$hashref_code/;
             }
             push @fixed, $line;
@@ -395,32 +406,39 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _fixup_xs_list_destructuring($xs_text) {
         # Fix: ($core_id, $skip_symbols) = $pred_entry->@* in _predict
         if ($xs_text =~ /core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(pred_entry_sv\), 0, 0\)\)/) {
+            $self->_record_repair('list_destr_pred_entry');
             $xs_text =~ s{(core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(pred_entry_sv\), 0, 0\)\);)}
                 {$1\n            SV *skip_symbols_sv = (*av_fetch((AV*)SvRV(pred_entry_sv), 1, 0));}s;
             $xs_text =~ s{get_sv\("[^"]*::skip_symbols", GV_ADD\)}{skip_symbols_sv}g;
         }
 
         $xs_text =~ s{(w_core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(wref_sv\), 0, 0\)\);)}
-            {$1\n            w_origin_sv = (*av_fetch((AV*)SvRV(wref_sv), 1, 0));}sg;
+            {$1\n            w_origin_sv = (*av_fetch((AV*)SvRV(wref_sv), 1, 0));}sg
+            and $self->_record_repair('list_destr_wref');
 
         $xs_text =~ s{(waiting_item_sv = \(\*av_fetch\(\(AV\*\)SvRV\(entry_sv\), 0, 0\)\);)}
-            {$1\n            waiting_alt_idx_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg;
+            {$1\n            waiting_alt_idx_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg
+            and $self->_record_repair('list_destr_waiting_alt');
 
         $xs_text =~ s{(c_core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(cref_sv\), 0, 0\)\);)}
-            {$1\n            c_origin_sv = (*av_fetch((AV*)SvRV(cref_sv), 1, 0));}sg;
+            {$1\n            c_origin_sv = (*av_fetch((AV*)SvRV(cref_sv), 1, 0));}sg
+            and $self->_record_repair('list_destr_cref');
 
         $xs_text =~ s{(citem_sv = \(\*av_fetch\(\(AV\*\)SvRV\(entry_sv\), 0, 0\)\);)}
-            {$1\n            SV *calt_idx_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg;
+            {$1\n            SV *calt_idx_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg
+            and $self->_record_repair('list_destr_calt');
 
         # Fix: ($it, $ai) = $entry->@* in safe-set GC
         # it_sv is extracted from entry_sv[0] but ai_sv is never set, causing NULL dereference.
         $xs_text =~ s{(it_sv = \(\*av_fetch\(\(AV\*\)SvRV\(entry_sv\), 0, 0\)\);)}
-            {$1\n            ai_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg;
+            {$1\n            ai_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg
+            and $self->_record_repair('list_destr_it_ai');
 
         # Fix: ($sweep_origin, $sweep_end) = $sweep->@* in epoch GC
         # sweep_origin_sv is extracted from sweep_sv[0] but sweep_end falls back to a
         # global package variable. Extract it from sweep_sv[1] and replace the global refs.
         if ($xs_text =~ /sweep_origin_sv = \(\*av_fetch\(\(AV\*\)SvRV\(sweep_sv\), 0, 0\)\)/) {
+            $self->_record_repair('list_destr_sweep');
             $xs_text =~ s{(sweep_origin_sv = \(\*av_fetch\(\(AV\*\)SvRV\(sweep_sv\), 0, 0\)\);)}
                 {$1\n            SV *sweep_end_sv = (*av_fetch((AV*)SvRV(sweep_sv), 1, 0));}s;
             $xs_text =~ s{get_sv\("[^"]*::sweep_end", GV_ADD\)}{sweep_end_sv}g;
@@ -456,6 +474,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     # branch results are discarded.
     method _fixup_ternary_assignment($xs_text, $var_name) {
         my $pattern = qr/\(SvTRUE\(\(\{\s*\Q$var_name\E\s*=\s*/;
+        my $fired = 0;
         while ($xs_text =~ /($pattern)/g) {
             my $match_len = length($1);
             my $start = pos($xs_text) - $match_len;
@@ -505,6 +524,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             $true_br  =~ s/^\s+|\s+$//g;
             $false_br =~ s/^\s+|\s+$//g;
             my $replacement = "$var_name = (SvTRUE(({ SV *_tmp = $cond_val; _tmp; })) ? $true_br : $false_br);";
+            $self->_record_repair('ternary_assignment') unless $fired++;
             substr($xs_text, $start, $end - $start + 1, $replacement);
             next;
         }
@@ -520,7 +540,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             (if \s* \(SvTRUE\(\(sv_eq\(verdict_sv, \s* sv_2mortal\(newSVpvs\("right_loses"\)\)\) \s* \? \s* &PL_sv_yes \s* : \s* &PL_sv_no\)\)\)) \s* \{
             \s* sv_2mortal\(newSVpvs\("="\)\);
             \s* \}
-        }{$1 \{\n        correct_sv = left; rejected_sv = right;\n    \}}sx;
+        }{$1 \{\n        correct_sv = left; rejected_sv = right;\n    \}}sx
+            and $self->_record_repair('filtercomposite_add_destr');
 
         $xs_text =~ s{
             (else \s+ if \s* \(SvTRUE\(\(sv_eq\(verdict_sv, \s* sv_2mortal\(newSVpvs\("left_loses"\)\)\) \s* \? \s* &PL_sv_yes \s* : \s* &PL_sv_no\)\)\)) \s* \{
@@ -1210,6 +1231,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 # Detect: processed_sv assignment followed later by _is_complete call,
                 # with chart_sv/pos_sv/core_id_sv/origin_sv available.
                 if ($body_code =~ /processed_sv.*PL_sv_yes/ && $body_code =~ /call_method\("_is_complete"/) {
+                    $self->_record_repair('chart_re_read');
                     my @new_lines;
                     for my $line (@lines) {
                         if ($line =~ /call_method\("_is_complete"/ && $line !~ /_reread/) {
