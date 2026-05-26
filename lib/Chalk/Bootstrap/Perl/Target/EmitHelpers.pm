@@ -329,6 +329,19 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             }
         }
         my $is = ($has_dispatch && $has_bare_str);
+        # MONITORED REPAIR: is_stale_merge_detected
+        # Detection counter for the filter-gap merge artifact: a method body
+        # that has call_method/slug dispatch (real work) but RETVAL is assigned
+        # a bare string literal via newSVpvs. Fires once per detected instance
+        # as a signal that _repair_stale_merge will be invoked.
+        #
+        # Phase 7d (2026-05-25) decision: retain. Zero fires on the Commit 1
+        # corpus (Boolean.pm, Structural.pm, FilterComposite.pm), but those
+        # classes do not produce Earley-shaped bodies with the hashref-constructor
+        # artifact this repairs. Earley.pm is currently impractical to probe:
+        # parsing takes ~400s and _generate_c_files stalls on a pre-existing
+        # "Deep recursion on _collect_var_decls" warning in the legacy code path.
+        # Counter retained as ongoing monitoring.
         $self->_record_repair('is_stale_merge_detected') if $is;
         return $is;
     }
@@ -377,6 +390,19 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $fired = 0;
         for my $line ($xs_lines->@*) {
             if ($line =~ /(?:RETVAL|retval) = newSVpvs\("/) {
+                # MONITORED REPAIR: repair_stale_merge
+                # Textual repair over emitted XSUB output that fixes the filter-gap
+                # merge artifact: a method body's RETVAL/retval was emitted as a bare
+                # string constant (newSVpvs) where a hashref constructor was expected.
+                # Replaces that constant with an HV* built from the method's params
+                # and local VarDecl names. Fires at most once per method body (guarded
+                # by $fired).
+                #
+                # Phase 7d (2026-05-25) decision: retain. Zero fires on the Commit 1
+                # corpus. Earley.pm is the expected fire-site (it produces
+                # Earley-shaped bodies with hashref constructors), but it is currently
+                # impractical to probe due to the pre-existing _collect_var_decls
+                # recursion stall. Counter retained as ongoing monitoring.
                 $self->_record_repair('repair_stale_merge') unless $fired++;
                 $line =~ s/(?:RETVAL|retval) = newSVpvs\("[^"]*"\)/$hashref_code/;
             }
@@ -406,30 +432,84 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _fixup_xs_list_destructuring($xs_text) {
         # Fix: ($core_id, $skip_symbols) = $pred_entry->@* in _predict
         if ($xs_text =~ /core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(pred_entry_sv\), 0, 0\)\)/) {
+            # MONITORED REPAIR: list_destr_pred_entry
+            # The IR codegen for ($core_id, $skip_symbols) = $pred_entry->@*
+            # in Earley::_predict only emits the element-[0] extraction for
+            # core_id; skip_symbols is never assigned. This repair injects the
+            # element-[1] av_fetch and rewires all get_sv("::skip_symbols")
+            # references to the local variable.
+            #
+            # Phase 7d (2026-05-25) decision: retain. Zero fires on the Commit 1
+            # corpus (Boolean.pm, Structural.pm, FilterComposite.pm have no
+            # _predict method). Earley.pm is the canonical fire-site but is
+            # currently impractical to probe. Counter retained as ongoing monitoring.
             $self->_record_repair('list_destr_pred_entry');
             $xs_text =~ s{(core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(pred_entry_sv\), 0, 0\)\);)}
                 {$1\n            SV *skip_symbols_sv = (*av_fetch((AV*)SvRV(pred_entry_sv), 1, 0));}s;
             $xs_text =~ s{get_sv\("[^"]*::skip_symbols", GV_ADD\)}{skip_symbols_sv}g;
         }
 
+        # MONITORED REPAIR: list_destr_wref
+        # The IR codegen for ($w_core_id, $w_origin) = $wref->@* in Earley
+        # only emits the element-[0] extraction; w_origin is never assigned.
+        # This repair injects the element-[1] av_fetch immediately after.
+        #
+        # Phase 7d (2026-05-25) decision: retain. Zero fires on the Commit 1
+        # corpus. Earley.pm is the canonical fire-site (it contains the wref
+        # iteration) but is currently impractical to probe due to the pre-existing
+        # _collect_var_decls recursion stall. Counter retained as ongoing monitoring.
         $xs_text =~ s{(w_core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(wref_sv\), 0, 0\)\);)}
             {$1\n            w_origin_sv = (*av_fetch((AV*)SvRV(wref_sv), 1, 0));}sg
             and $self->_record_repair('list_destr_wref');
 
+        # MONITORED REPAIR: list_destr_waiting_alt
+        # The IR codegen for ($waiting_item, $waiting_alt_idx) = $entry->@* in
+        # Earley's waiting-items loop only emits element-[0]; waiting_alt_idx is
+        # never assigned. This repair injects the element-[1] av_fetch.
+        #
+        # Phase 7d (2026-05-25) decision: retain. Zero fires on the Commit 1
+        # corpus. Earley.pm is the canonical fire-site but is currently
+        # impractical to probe. Counter retained as ongoing monitoring.
         $xs_text =~ s{(waiting_item_sv = \(\*av_fetch\(\(AV\*\)SvRV\(entry_sv\), 0, 0\)\);)}
             {$1\n            waiting_alt_idx_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg
             and $self->_record_repair('list_destr_waiting_alt');
 
+        # MONITORED REPAIR: list_destr_cref
+        # The IR codegen for ($c_core_id, $c_origin) = $cref->@* in Earley's
+        # completor loop only emits element-[0]; c_origin is never assigned.
+        # This repair injects the element-[1] av_fetch after the cref extraction.
+        #
+        # Phase 7d (2026-05-25) decision: retain. Zero fires on the Commit 1
+        # corpus. Earley.pm is the canonical fire-site but is currently
+        # impractical to probe. Counter retained as ongoing monitoring.
         $xs_text =~ s{(c_core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(cref_sv\), 0, 0\)\);)}
             {$1\n            c_origin_sv = (*av_fetch((AV*)SvRV(cref_sv), 1, 0));}sg
             and $self->_record_repair('list_destr_cref');
 
+        # MONITORED REPAIR: list_destr_calt
+        # The IR codegen for ($citem, $calt_idx) = $entry->@* in Earley's
+        # completion-entry loop only emits element-[0]; calt_idx is never
+        # declared or assigned. This repair injects the element-[1] av_fetch
+        # and declares calt_idx_sv inline.
+        #
+        # Phase 7d (2026-05-25) decision: retain. Zero fires on the Commit 1
+        # corpus. Earley.pm is the canonical fire-site but is currently
+        # impractical to probe. Counter retained as ongoing monitoring.
         $xs_text =~ s{(citem_sv = \(\*av_fetch\(\(AV\*\)SvRV\(entry_sv\), 0, 0\)\);)}
             {$1\n            SV *calt_idx_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg
             and $self->_record_repair('list_destr_calt');
 
         # Fix: ($it, $ai) = $entry->@* in safe-set GC
         # it_sv is extracted from entry_sv[0] but ai_sv is never set, causing NULL dereference.
+        # MONITORED REPAIR: list_destr_it_ai
+        # The IR codegen for ($it, $ai) = $entry->@* in Earley's safe-set GC
+        # only emits element-[0] for it_sv; ai_sv is never assigned, causing a
+        # NULL dereference at runtime. This repair injects the element-[1] av_fetch.
+        #
+        # Phase 7d (2026-05-25) decision: retain. Zero fires on the Commit 1
+        # corpus. Earley.pm is the canonical fire-site (safe-set GC is Earley
+        # internals) but is currently impractical to probe. Counter retained
+        # as ongoing monitoring.
         $xs_text =~ s{(it_sv = \(\*av_fetch\(\(AV\*\)SvRV\(entry_sv\), 0, 0\)\);)}
             {$1\n            ai_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg
             and $self->_record_repair('list_destr_it_ai');
@@ -438,6 +518,17 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # sweep_origin_sv is extracted from sweep_sv[0] but sweep_end falls back to a
         # global package variable. Extract it from sweep_sv[1] and replace the global refs.
         if ($xs_text =~ /sweep_origin_sv = \(\*av_fetch\(\(AV\*\)SvRV\(sweep_sv\), 0, 0\)\)/) {
+            # MONITORED REPAIR: list_destr_sweep
+            # The IR codegen for ($sweep_origin, $sweep_end) = $sweep->@* in
+            # Earley's epoch GC only emits element-[0]; sweep_end falls back to
+            # a global package variable. This repair injects element-[1] extraction
+            # and rewires all get_sv("::sweep_end") references to the local variable.
+            # Package name is matched dynamically since module_name varies across tests.
+            #
+            # Phase 7d (2026-05-25) decision: retain. Zero fires on the Commit 1
+            # corpus. Earley.pm is the canonical fire-site (epoch GC is Earley
+            # internals) but is currently impractical to probe. Counter retained
+            # as ongoing monitoring.
             $self->_record_repair('list_destr_sweep');
             $xs_text =~ s{(sweep_origin_sv = \(\*av_fetch\(\(AV\*\)SvRV\(sweep_sv\), 0, 0\)\);)}
                 {$1\n            SV *sweep_end_sv = (*av_fetch((AV*)SvRV(sweep_sv), 1, 0));}s;
@@ -524,6 +615,20 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             $true_br  =~ s/^\s+|\s+$//g;
             $false_br =~ s/^\s+|\s+$//g;
             my $replacement = "$var_name = (SvTRUE(({ SV *_tmp = $cond_val; _tmp; })) ? $true_br : $false_br);";
+            # MONITORED REPAIR: ternary_assignment
+            # The IR codegen for ternary expressions where the variable is
+            # assigned in the condition (e.g., $var = expr ? a : b) emits a
+            # pattern where SvTRUE wraps the assignment but the branch results
+            # are discarded. This repair restructures the output so the variable
+            # receives the selected branch value. Fires at most once per
+            # invocation ($var_name is passed by the caller, which is
+            # _fixup_xs_list_destructuring applying two specific variables:
+            # skip_value and skip_is_zero in Earley).
+            #
+            # Phase 7d (2026-05-25) decision: retain. Zero fires on the Commit 1
+            # corpus. The fire-sites (skip_value_sv / skip_is_zero_sv) are
+            # Earley-specific. Earley.pm is currently impractical to probe.
+            # Counter retained as ongoing monitoring.
             $self->_record_repair('ternary_assignment') unless $fired++;
             substr($xs_text, $start, $end - $start + 1, $replacement);
             next;
@@ -536,6 +641,18 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     # Verdict string protocol ('right_loses'/'left_loses') is kept stable; only
     # the output C variable names follow the Perl source ($correct/$rejected).
     method _fixup_filtercomposite_add_destructuring($xs_text) {
+        # MONITORED REPAIR: filtercomposite_add_destr
+        # The IR codegen for ($correct, $rejected) = ($left, $right) in
+        # FilterComposite::add emits the right_loses branch body as a bare
+        # string "=" constant instead of variable assignments. This repair
+        # replaces the bare-constant branch body with the correct C variable
+        # assignments (correct_sv = left; rejected_sv = right).
+        #
+        # Phase 7d (2026-05-25) decision: retain. Zero fires on the Commit 1
+        # corpus even though FilterComposite.pm was in the test set. This
+        # suggests either the code path is not reached by the test inputs
+        # or the IR pattern has changed. Counter retained as ongoing monitoring;
+        # a future fire would confirm the repair is still active and warranted.
         $xs_text =~ s{
             (if \s* \(SvTRUE\(\(sv_eq\(verdict_sv, \s* sv_2mortal\(newSVpvs\("right_loses"\)\)\) \s* \? \s* &PL_sv_yes \s* : \s* &PL_sv_no\)\)\)) \s* \{
             \s* sv_2mortal\(newSVpvs\("="\)\);
@@ -1159,6 +1276,20 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 # Detect: processed_sv assignment followed later by _is_complete call,
                 # with chart_sv/pos_sv/core_id_sv/origin_sv available.
                 if ($body_code =~ /processed_sv.*PL_sv_yes/ && $body_code =~ /call_method\("_is_complete"/) {
+                    # MONITORED REPAIR: chart_re_read
+                    # In Earley's main recognition loop, the Perl source re-reads
+                    # (item, alt_idx) from the chart after the "already processed"
+                    # check, replacing the stale agenda copy with the merged value.
+                    # The IR loses this list assignment entirely. This repair injects
+                    # a call to _chart_get (the chart re-read) immediately before
+                    # the _is_complete method call, and updates item_sv/alt_idx_sv
+                    # from the returned array.
+                    #
+                    # Phase 7d (2026-05-25) decision: retain. Zero fires on the
+                    # Commit 1 corpus (Boolean.pm, Structural.pm, FilterComposite.pm
+                    # have no _chart_get / _is_complete interaction). Earley.pm is
+                    # the canonical and only expected fire-site but is currently
+                    # impractical to probe. Counter retained as ongoing monitoring.
                     $self->_record_repair('chart_re_read');
                     my @new_lines;
                     for my $line (@lines) {
