@@ -118,15 +118,16 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             }
             my $focus = $is_ctx ? $sa_one->extract() : $sa_one;
             Chalk::Bootstrap::Context->new(
-                focus    => $focus,
-                children => [],
-                position => 0,
-                is_zero  => false,
-                annotations => $annotations,
-                mop      => ($is_ctx ? $sa_one->mop() : undef),
-                scope    => ($is_ctx ? $sa_one->scope() : undef),
-                graph    => ($is_ctx ? $sa_one->graph() : undef),
-                factory  => ($is_ctx ? $sa_one->factory() : undef),
+                focus        => $focus,
+                children     => [],
+                position     => 0,
+                is_zero      => false,
+                annotations  => $annotations,
+                mop          => ($is_ctx ? $sa_one->mop() : undef),
+                scope        => ($is_ctx ? $sa_one->scope() : undef),
+                graph        => ($is_ctx ? $sa_one->graph() : undef),
+                factory      => ($is_ctx ? $sa_one->factory() : undef),
+                control_head => ($is_ctx ? $sa_one->control_head() : undef),
             );
         };
     }
@@ -147,16 +148,17 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     method _wrap_sa_result($sa_result, %slot_results) {
         my $is_ctx = blessed($sa_result) && $sa_result->can('extract');
         return Chalk::Bootstrap::Context->new(
-            focus       => $is_ctx ? $sa_result->extract() : $sa_result,
-            children    => $is_ctx ? [$sa_result->children()->@*] : [],
-            position    => $is_ctx ? $sa_result->position() : 0,
-            rule        => $is_ctx ? $sa_result->rule() : undef,
-            is_zero     => false,
-            scope       => ($is_ctx ? $sa_result->scope() : undef),
-            graph       => ($is_ctx ? $sa_result->graph() : undef),
-            factory     => ($is_ctx ? $sa_result->factory() : undef),
-            mop         => ($is_ctx ? $sa_result->mop() : undef),
-            annotations => {
+            focus        => $is_ctx ? $sa_result->extract() : $sa_result,
+            children     => $is_ctx ? [$sa_result->children()->@*] : [],
+            position     => $is_ctx ? $sa_result->position() : 0,
+            rule         => $is_ctx ? $sa_result->rule() : undef,
+            is_zero      => false,
+            scope        => ($is_ctx ? $sa_result->scope() : undef),
+            graph        => ($is_ctx ? $sa_result->graph() : undef),
+            factory      => ($is_ctx ? $sa_result->factory() : undef),
+            mop          => ($is_ctx ? $sa_result->mop() : undef),
+            control_head => ($is_ctx ? $sa_result->control_head() : undef),
+            annotations  => {
                 ($is_ctx ? $sa_result->annotations()->%* : ()),
                 %slot_results,
             },
@@ -188,6 +190,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
             scope        => $survivors[0]->scope(),
             graph        => $survivors[0]->graph(),
             factory      => $survivors[0]->factory(),
+            control_head => $survivors[0]->control_head(),
         );
     }
 
@@ -488,6 +491,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
                     scope        => $left->scope(),
                     graph        => $left->graph(),
                     factory      => $left->factory(),
+                    control_head => $left->control_head(),
                 );
             }
             # All slots identical: deterministic tie-break picks left.

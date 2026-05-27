@@ -82,13 +82,14 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             my $start   = $parse_factory->make('Start');
             my $scope   = Chalk::Bootstrap::Scope->new()->with_control($start);
             $_one_singleton = Chalk::Bootstrap::Context->new(
-                focus    => undef,
-                children => [],
-                position => 0,
-                rule     => undef,
-                mop      => $_mop,
-                scope    => $scope,
-                factory  => $parse_factory,
+                focus        => undef,
+                children     => [],
+                position     => 0,
+                rule         => undef,
+                mop          => $_mop,
+                scope        => $scope,
+                factory      => $parse_factory,
+                control_head => $start,
             );
         }
         return $_one_singleton;
@@ -141,15 +142,20 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             # the sequence), fall back to left. Per-parse factory seeded by
             # _one_ctx threads through every multiply-merged Context.
             my $factory = $right->factory() // $left->factory();
+            # control_head: right wins unless undef. This is the
+            # "sibling-to-sibling, monotonically advancing" rule
+            # — distinct from _merge_scope's bindings-aware logic.
+            my $control_head = $right->control_head() // $left->control_head();
             Chalk::Bootstrap::Context->new(
-                focus    => undef,
-                children => [$left, $right],
-                position => $right->position(),
-                rule     => undef,
-                mop      => $_mop,
-                scope    => $scope,
-                graph    => $graph,
-                factory  => $factory,
+                focus        => undef,
+                children     => [$left, $right],
+                position     => $right->position(),
+                rule         => undef,
+                mop          => $_mop,
+                scope        => $scope,
+                graph        => $graph,
+                factory      => $factory,
+                control_head => $control_head,
             );
         });
     }

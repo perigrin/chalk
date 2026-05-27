@@ -17,7 +17,8 @@ class Chalk::Bootstrap::Context {
     field $mop         :param :reader = undef;
     field $graph       :param :reader = undef;
     field $scope       :param :reader = undef;
-    field $factory     :param :reader = undef;
+    field $factory      :param :reader = undef;
+    field $control_head :param :reader = undef;
 
     # Extract the current focus value from the context
     method extract() {
@@ -41,7 +42,8 @@ class Chalk::Bootstrap::Context {
             mop         => (exists $opts{mop} ? $opts{mop} : $mop),
             graph       => (exists $opts{graph} ? $opts{graph} : $graph),
             scope       => (exists $opts{scope} ? $opts{scope} : $scope),
-            factory     => (exists $opts{factory} ? $opts{factory} : $factory),
+            factory      => (exists $opts{factory}      ? $opts{factory}      : $factory),
+            control_head => (exists $opts{control_head} ? $opts{control_head} : $control_head),
         );
     }
 
