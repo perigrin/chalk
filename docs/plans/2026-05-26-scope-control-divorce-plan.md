@@ -53,6 +53,21 @@
 - `t/bootstrap/cfg-try-catch.t` — update imports + construct Contexts with `control_head` directly.
 - `t/fixtures/codegen-goldens/Chalk__MOP__Class.pl.golden` — regenerate.
 
+> **Post-execution audit amendment (2026-05-30): the C3 file map above is materially incomplete.** A pre-execution grep of `Chalk::Bootstrap::Scope` across `lib script t` found a far larger surface than the three test files listed. Corrections:
+>
+> **Production (two additions to the list above):**
+> - `_merge_scope` has **TWO** call sites in SemanticAction.pm, not one. Line ~142 (inside `_mul_ctx`, already noted in Task 3.3 Step 0) AND line ~565 (inside the disambiguation/merge path that builds `$correct_scope`/`$rejected_scope` and stashes a `_transferred_scope` annotation). The line-565 caller also relies on the `->control` tiebreak that C3 deletes. Both callers must migrate to `_merge_bindings`; the line-565 path needs the same control-free merge semantics.
+> - `_ctx_control` has **11** call sites in Actions.pm (Task 3.3 Step 5 says 12 — stale). `_ctx_scope` has **23** (decision (a) keeps the helper, so callers are untouched).
+> - Context.pm `cfg_state` was already rewritten in C2; its remaining `$node->scope` reads are inside the C2 body (~lines 215/221), not at the old line 190.
+>
+> **Tests — the real surface is 21 files + 1 golden, classified as:**
+> - **DELETE (1):** `t/bootstrap/scope/control-input.t` — a dedicated `with_control`/`control` unit-test suite (~7 subtests asserting `->control`, `with_control` immutability, chaining, merge-control). It tests the exact methods C3 removes; it cannot be migrated and must be deleted. (The plan never mentioned this file.)
+> - **MIGRATE control assertions (1):** `t/bootstrap/context-cfg-annotation.t` — 5 sites asserting `scope->control` / `->scope()->control()->operation()`. Migrate to `control_head` reads; this file also exercises the cfg_state shim that C2 changed, so re-verify behavior.
+> - **MIGRATE setup to `control_head` (3):** `scope-variable-lookup.t`, `cfg-statements.t`, `assignment-scope.t` — construct Contexts via `scope->with_control($n)` purely as setup; rewrite to `bindings => Bindings->new(...), control_head => $n` (same pattern C2 applied to `cfg-try-catch.t`).
+> - **RENAME-only (16, incl. the 2 the plan already listed):** `scope.t`→`bindings.t`, `scope-threading.t`, `cfg-loop-phi.t`, `context-control-head.t`, `context/graph-scope-fields.t`, `context/scope-containment.t`, `ir-return-cfg-node.t`, `phi-integration.t`, `postfix-loop-phi.t`, `scope-for-loop-merge.t`, `scope-phi-merge.t`, `scope-sentinel.t`, `scope-ssa.t`, `scope-trivial-phi.t` (also calls `Chalk::Bootstrap::Scope::_remove_trivial_phi` → `Bindings::`), `semantic-action-scope.t`. These reference the class only by `use`/construction/`isa`; change the name, nothing else.
+>
+> Executing C3 as originally written (touching only 3 test files) would leave ~18 test files broken — most failing to compile (`Can't locate Chalk::Bootstrap::Scope`), plus `scope/control-input.t` and `context-cfg-annotation.t` failing on deleted-method assertions. The corrected task list below (Tasks 3.4a–3.4c) reflects the full surface.
+
 ### Commit 4 — files touched
 
 **Modify:**
@@ -1083,13 +1098,15 @@ Update the call site inside `_mul_ctx` (line ~134): `my $scope = _merge_scope($l
 
 And the corresponding Context->new `scope => $scope,` field assignment becomes `bindings => $bindings,`.
 
+**SECOND caller (post-execution audit, 2026-05-30):** `_merge_scope` is ALSO called at SemanticAction.pm line ~565, inside the disambiguation/merge path that builds `$correct_scope`/`$rejected_scope` and stashes a `_transferred_scope` annotation. Update that call to `_merge_bindings($correct_bindings, $rejected_bindings)` too, sourcing each from `->bindings` rather than `->scope`. This caller previously relied on `_merge_scope`'s `->control` tiebreak; after the rename, `_merge_bindings` is control-free (control lives on `control_head` now), which is correct — the disambiguation merge only needs binding reconciliation, not control selection. Verify the `_transferred_scope` annotation consumers still behave (the annotation key name can stay; it's an internal handle).
+
 - [ ] **Step 1: Update SemanticAction.pm.**
 
 ```bash
-grep -n 'Chalk::Bootstrap::Scope' /home/perigrin/dev/chalk/.claude/worktrees/pu/lib/Chalk/Bootstrap/Semiring/SemanticAction.pm
+grep -n 'Chalk::Bootstrap::Scope\|_merge_scope' /home/perigrin/dev/chalk/.claude/worktrees/pu/lib/Chalk/Bootstrap/Semiring/SemanticAction.pm
 ```
 
-Expected: line 8 (`use`) and line 83 (`->new()->with_control`).
+Expected: `use` line (~8), the `_one_ctx` `->new()->with_control` (~90), the `_merge_scope` definition (~109), and BOTH call sites (~142 in `_mul_ctx`, ~565 in the disambiguation path).
 
 Change line 8: `use Chalk::Bootstrap::Scope;` → `use Chalk::Bootstrap::Bindings;`
 
@@ -1156,13 +1173,13 @@ Update the `extend` method at line 30-46: change `scope => (exists $opts{scope} 
 
 Update the `cfg_state()` method at line 190+: change `$ns->control()` to `$node->control_head` was done in C2; now the `$node->scope` reads inside it should become `$node->bindings`. Search and replace.
 
-- [ ] **Step 5: Delete the `_ctx_control` helper and inline its 12 callers.**
+- [ ] **Step 5: Delete the `_ctx_control` helper and inline its 11 callers.** (Audit 2026-05-30: 11 call sites, not 12.)
 
 Edit `lib/Chalk/Bootstrap/Perl/Actions.pm`.
 
 Delete the `_ctx_control` helper definition (lines ~194-196).
 
-Then for each of the 12 caller sites, replace `_ctx_control($ctx)` with `$ctx->control_head`. Use grep to find them:
+Then for each of the 11 caller sites, replace `_ctx_control($ctx)` with `$ctx->control_head`. Use grep to find them:
 
 ```bash
 grep -n '_ctx_control(' /home/perigrin/dev/chalk/.claude/worktrees/pu/lib/Chalk/Bootstrap/Perl/Actions.pm
@@ -1290,7 +1307,102 @@ $PERL -Ilib t/bootstrap/cfg-try-catch.t 2>&1 | tail -5
 
 Expected: all pass (counts may have changed if tests were deleted; document any drops).
 
-- [ ] **Step 6: Do NOT commit yet.** Golden file is next.
+- [ ] **Step 6: Do NOT commit yet.** The remaining 18 test files (Tasks 3.4a–3.4c) and the golden are next.
+
+---
+
+### Task 3.4a: DELETE `scope/control-input.t`
+
+**Files:**
+- Delete: `t/bootstrap/scope/control-input.t`.
+
+This file is a dedicated unit-test suite for `with_control` and the `control` reader (its ABOUTME: "Verifies with_control returns a new Scope with control replaced"). Every subtest asserts on a method C3 deletes. There is no migration target — the bundled-control behavior it tests is gone by design.
+
+- [ ] **Step 1: Confirm the file only tests control/with_control (no orphaned binding coverage worth keeping).**
+
+```bash
+grep -nE 'subtest|with_control|->control|define|lookup' /home/perigrin/dev/chalk/.claude/worktrees/pu/t/bootstrap/scope/control-input.t | grep -vE '_encode|_decode'
+```
+
+The binding behavior (`define`/`lookup`/`merge`) is already covered by `scope.t`→`bindings.t`. If any assertion here is the *sole* coverage for a binding behavior, port it to `bindings.t` before deleting; otherwise delete outright.
+
+- [ ] **Step 2: Delete.**
+
+```bash
+cd /home/perigrin/dev/chalk/.claude/worktrees/pu
+git rm t/bootstrap/scope/control-input.t
+rmdir t/bootstrap/scope 2>/dev/null || true   # if now empty
+```
+
+- [ ] **Step 3: Do NOT commit yet.**
+
+---
+
+### Task 3.4b: MIGRATE control-asserting + control-setup test files
+
+**Files:**
+- Modify: `t/bootstrap/context-cfg-annotation.t` — 5 sites assert `scope->control` / `->scope()->control()`; migrate to `control_head`.
+- Modify: `t/bootstrap/scope-variable-lookup.t`, `t/bootstrap/cfg-statements.t`, `t/bootstrap/assignment-scope.t` — construct Contexts via `scope->with_control($n)` as setup; rewrite to `bindings => Chalk::Bootstrap::Bindings->new(...), control_head => $n`.
+
+- [ ] **Step 1: context-cfg-annotation.t — migrate control assertions.**
+
+```bash
+grep -nE 'with_control|->control' /home/perigrin/dev/chalk/.claude/worktrees/pu/t/bootstrap/context-cfg-annotation.t | grep -vE '_encode|_decode'
+```
+
+For each Context construction, replace `scope => Chalk::Bootstrap::Scope->new()->with_control($n)` with `bindings => Chalk::Bootstrap::Bindings->new(), control_head => $n`. For each assertion `is($state->{control}, $n, ...)` keep as-is (cfg_state still returns a `control` key). For `$one->scope()->control()` / `$result->scope()->control()->operation()` style assertions, rewrite to read the Context's `control_head` directly (e.g. `$one->control_head->operation`). This file tests the cfg_state shim that C2 rewrote — re-verify each assertion's expectation against the post-C2 cfg_state behavior, don't assume the old shape.
+
+- [ ] **Step 2: scope-variable-lookup.t / cfg-statements.t / assignment-scope.t — migrate setup.**
+
+For each, replace the import and rewrite each `Chalk::Bootstrap::Scope->new()->with_control($n)` used as a Context `scope =>` value to the `bindings => ..., control_head => $n` pair, mirroring the `cfg-try-catch.t` migration from C2. Where `with_control` is chained after `define`, keep the `define` on the Bindings object and move the control node to `control_head`.
+
+- [ ] **Step 3: Run the migrated files.**
+
+```bash
+PERL=/home/perigrin/.local/share/pvm/versions/5.42.0/bin/perl
+for t in t/bootstrap/context-cfg-annotation.t t/bootstrap/scope-variable-lookup.t t/bootstrap/cfg-statements.t t/bootstrap/assignment-scope.t; do
+    echo "=== $t ==="; $PERL -Ilib "$t" 2>&1 | tail -3
+done
+```
+
+Expected: all green. Document any assertion-count changes.
+
+- [ ] **Step 4: Do NOT commit yet.**
+
+---
+
+### Task 3.4c: RENAME-only test files (15)
+
+**Files (mechanical `Chalk::Bootstrap::Scope` → `Chalk::Bootstrap::Bindings` + `Scope::Sentinel` → `Bindings::Sentinel` + `Scope::_remove_trivial_phi` → `Bindings::_remove_trivial_phi`):**
+- `cfg-loop-phi.t`, `context-control-head.t`, `context/graph-scope-fields.t`, `context/scope-containment.t`, `ir-return-cfg-node.t`, `phi-integration.t`, `postfix-loop-phi.t`, `scope-for-loop-merge.t`, `scope-phi-merge.t`, `scope-sentinel.t`, `scope-ssa.t`, `scope-trivial-phi.t`, `semantic-action-scope.t`
+- (Plus `scope.t`→`bindings.t` and `scope-threading.t` already covered in Task 3.4 Steps 2–3.)
+
+These reference the class only by `use` / construction / `isa` / `ref ... eq '...Sentinel'` / the internal `_remove_trivial_phi` function. No control coupling. A name-only substitution suffices.
+
+- [ ] **Step 1: Verify none of these secretly use control before bulk-renaming.**
+
+```bash
+for f in cfg-loop-phi context-control-head context/graph-scope-fields context/scope-containment ir-return-cfg-node phi-integration postfix-loop-phi scope-for-loop-merge scope-phi-merge scope-sentinel scope-ssa scope-trivial-phi semantic-action-scope; do
+    if grep -qE 'with_control|->control\b' "t/bootstrap/$f.t" 2>/dev/null; then echo "CONTROL FOUND: $f"; fi
+done
+```
+
+Expected: zero output. If any file prints, it was misclassified — move it to Task 3.4b.
+
+- [ ] **Step 2: Apply the rename to each file.** Substitute `Chalk::Bootstrap::Scope::Sentinel` → `Chalk::Bootstrap::Bindings::Sentinel` FIRST (longest match), then `Chalk::Bootstrap::Scope` → `Chalk::Bootstrap::Bindings`. Update ABOUTME comments where they name the class. `context-control-head.t` will be deleted/renamed-around in C5 — for C3 just rename its `use`.
+
+- [ ] **Step 3: Run all 15.**
+
+```bash
+PERL=/home/perigrin/.local/share/pvm/versions/5.42.0/bin/perl
+for t in cfg-loop-phi context-control-head context/graph-scope-fields context/scope-containment ir-return-cfg-node phi-integration postfix-loop-phi scope-for-loop-merge scope-phi-merge scope-sentinel scope-ssa scope-trivial-phi semantic-action-scope; do
+    echo "=== $t ==="; $PERL -Ilib "t/bootstrap/$t.t" 2>&1 | tail -2
+done
+```
+
+Expected: all green.
+
+- [ ] **Step 4: Do NOT commit yet.** Golden file is next.
 
 ---
 
@@ -1403,7 +1515,7 @@ Touched files:
   use line updated. Pre-flight grep confirmed no production
   consumer; the field was Phase 7c-prep forward infrastructure.
 - lib/Chalk/Bootstrap/Perl/Actions.pm — _ctx_control helper
-  deleted; 12 call sites inlined to $ctx->control_head;
+  deleted; 11 call sites inlined to $ctx->control_head;
   line 211 with_control in _resolve_from_scope deleted (was
   propagating control through bindings-rebuilding, dead post-divorce)
 - t/bootstrap/scope.t → t/bootstrap/bindings.t (renamed; class
