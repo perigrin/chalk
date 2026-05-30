@@ -123,9 +123,20 @@ class Chalk::IR::Scheduler::EagerPinning {
                 $cur = $next;
                 last if ref($cur) eq 'ARRAY';
             }
-            if ($len >= $best_len) {
+            if ($len > $best_len) {
                 $best = $r;
                 $best_len = $len;
+            } elsif ($len == $best_len) {
+                # Prefer Return over Unwind on ties: an Unwind (die/throw)
+                # is a terminal abort node; the synthetic Return is the
+                # true method exit. Picking Unwind here causes the method
+                # body to be emitted as `die $e` instead of the structured
+                # try/catch block.
+                if (!($best isa Chalk::IR::Node::Return)
+                        && $r isa Chalk::IR::Node::Return) {
+                    $best = $r;
+                    $best_len = $len;
+                }
             }
         }
         return $best;
