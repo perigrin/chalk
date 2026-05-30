@@ -296,6 +296,8 @@ Add `control_head` propagation (right wins unless undef) immediately before the 
 
 Then add `control_head => $control_head,` to the Context->new arg list (alongside `factory => $factory,`).
 
+**Note (post-execution plan amendment, 2026-05-29):** the simple `right->control_head // left->control_head` rule above is INSUFFICIENT. It clobbers an already-advanced `control_head` on the left with the seed `Start` carried on the right, diverging from `scope.control` and firing the C2 sync-invariant assert. The implemented rule mirrors `_merge_scope`'s control tiebreak exactly: when both sides are defined and left is non-Start while right is Start, prefer left (more advanced); otherwise prefer right; when only one side is defined, use it (right preferred when both undef). This restores the non-Start preference that `scope.control` always had. The zero-divergence result across the full MOP suite confirms the two rules now agree. See the implemented form in `SemanticAction.pm::_mul_ctx`.
+
 - [ ] **Step 3: Confirm tests pass.**
 
 ```bash
@@ -411,10 +413,13 @@ Expected: ctx-mop-propagation.t 10/10; bnf-target-c.t 178/178.
 
 ---
 
-### Task 1.5: Add sync-invariant assert in `_complete_sa` and verify Task 1.0 test passes
+### Task 1.5: Verify Task 1.0 test passes; Commit 1
 
-**Files:**
-- Modify: `lib/Chalk/Bootstrap/Semiring/SemanticAction.pm` (add assert at top of `_complete_sa`, line ~276).
+**Files:** none modified beyond Tasks 1.1-1.4.
+
+**Note (post-execution plan amendment, 2026-05-27):** The sync-invariant assert that v1 of this plan placed here is INCOMPATIBLE with Commit 1 alone. The assert fires whenever `scope.control` advances without `control_head` advancing in lockstep — which happens on every `update_scope($scope->with_control($region))` call in Actions.pm. Those call sites are Commit 2's migration scope; until C2 introduces `update_control_head`, control_head stays at the seed value while scope.control advances. The assert is correct, but it cannot be green at C1.
+
+The assert is therefore **moved to Commit 2** (Task 2.1, after the migration is complete and the sites are paired). Commit 1 ends with no assert; the sync invariant is enforced after C2 in retrospect (a one-time correctness verification across the full test suite).
 
 - [ ] **Step 1: Run the Task 1.0 test (now expected to PASS).**
 
@@ -426,7 +431,7 @@ After Tasks 1.1-1.4 added the field and propagation, the failing test from Task 
 
 Expected: 4/4 PASS.
 
-- [ ] **Step 2: Add the sync-invariant assert in `_complete_sa`.**
+- [ ] **Step 2 (SKIPPED — moved to Commit 2):** The sync-invariant assert is moved to Task 2.1 to avoid firing on every Actions.pm `update_scope` call before the C2 migration pairs them with `update_control_head`.
 
 Edit `lib/Chalk/Bootstrap/Semiring/SemanticAction.pm`. Find `_complete_sa` (line ~276). At the top of the method body (immediately after `return $self->zero() if $value->is_zero();` at line 277), add:
 
@@ -831,7 +836,7 @@ The original code chained `->with_control($start)` to make sure the scope had co
 
 **Decision:** keep the legacy `->with_control($start)` chain in `_one_ctx` for now (it satisfies the sync invariant from Task 1.5's assert). It gets removed in C3 when `Scope.control` deletes entirely. So **Task 2.4 leaves the SemanticAction.pm site alone**; it migrates in C3.
 
-- [ ] **Step 4: Confirm tests pass.**
+- [ ] **Step 4: Confirm tests pass (pre-assert).**
 
 ```bash
 PERL=/home/perigrin/.local/share/pvm/versions/5.42.0/bin/perl
@@ -843,7 +848,42 @@ $PERL -Ilib t/bootstrap/mop/parse-threading.t 2>&1 | tail -3
 
 Expected: bnf-target-c.t 178/178; parse-integration.t 34/34; c-emit-helpers-inheritance.t 55/55; parse-threading.t 11/11.
 
-If anything fails (especially the sync invariant), trace which `update_scope` call had a `with_control` that wasn't paired with a corresponding `update_control_head`.
+- [ ] **Step 4b: Add the sync-invariant assert at top of `_complete_sa` (moved from Task 1.5).**
+
+Now that all `update_scope` writes are paired with `update_control_head` writes, the sync invariant should hold. Edit `lib/Chalk/Bootstrap/Semiring/SemanticAction.pm`. Find `_complete_sa` (line ~276). At the top of the method body (immediately after `return $self->zero() if $value->is_zero();`), add:
+
+```perl
+        # Sync invariant: control_head and scope.control must agree from
+        # C2 onward (until C3 deletes scope.control entirely, removing
+        # this assert).
+        {
+            my $sc = $value->scope && $value->scope->control;
+            my $ch = $value->control_head;
+            my $sync_ok = (!defined $sc && !defined $ch)
+                || (defined $sc && defined $ch
+                    && Scalar::Util::refaddr($sc) == Scalar::Util::refaddr($ch));
+            die "control_head/scope.control divergence at rule=$rule_name: "
+                . "sc=" . (defined $sc ? ref($sc) : 'undef')
+                . " ch=" . (defined $ch ? ref($ch) : 'undef')
+                unless $sync_ok;
+        }
+```
+
+Confirm `use Scalar::Util qw(refaddr);` is at the top of the file; add it if missing.
+
+- [ ] **Step 4c: Run the full suite with the assert in place to catch any C2 migration gaps.**
+
+```bash
+PERL=/home/perigrin/.local/share/pvm/versions/5.42.0/bin/perl
+for t in t/bootstrap/mop/*.t t/bootstrap/bnf-target-c.t t/bootstrap/xs-isa-inheritance.t t/bootstrap/xs-athx-no-args.t t/bootstrap/scope-threading.t t/bootstrap/scope.t t/bootstrap/cfg-try-catch.t t/bootstrap/c-emit-helpers-inheritance.t; do
+    echo "=== $t ==="
+    $PERL -Ilib "$t" 2>&1 | tail -3
+done
+```
+
+Expected: all green. If the assert fires on any test, the C2 migration missed a `with_control` site. Find the offending `update_scope` call (the rule name in the assert message points at it) and pair it with `update_control_head`.
+
+The assert is removed in Commit 3 when `scope.control` deletes entirely.
 
 - [ ] **Step 5: Stage Commit 2.**
 

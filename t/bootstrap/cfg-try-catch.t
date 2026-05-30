@@ -27,11 +27,12 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 
     # Build context with scope (Start as control) and structural annotations directly.
     my $ctx = Chalk::Bootstrap::Context->new(
-        focus       => undef,
-        children    => [],
-        position    => 0,
-        scope       => Chalk::Bootstrap::Scope->new()->with_control($start),
-        annotations => {
+        focus        => undef,
+        children     => [],
+        position     => 0,
+        scope        => Chalk::Bootstrap::Scope->new()->with_control($start),
+        control_head => $start,
+        annotations  => {
             try_node    => $try_marker,
             try_stmts   => [$try_stmt],
             catch_var   => '$e',
@@ -59,11 +60,12 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 
     # Build context with scope (Start as control) and structural annotations directly.
     my $ctx = Chalk::Bootstrap::Context->new(
-        focus       => undef,
-        children    => [],
-        position    => 0,
-        scope       => Chalk::Bootstrap::Scope->new()->with_control($start),
-        annotations => {
+        focus        => undef,
+        children     => [],
+        position     => 0,
+        scope        => Chalk::Bootstrap::Scope->new()->with_control($start),
+        control_head => $start,
+        annotations  => {
             try_node    => $try_marker,
             try_stmts   => [$try_stmt],
             catch_var   => '$e',

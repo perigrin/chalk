@@ -189,25 +189,36 @@ class Chalk::Bootstrap::Context {
         catch_var try_stmts catch_stmts
     );
 
+    # Returns { control, scope, ...structural } summarizing this Context.
+    # Walks all child Contexts to find the most-advanced control_head; the
+    # accompanying scope and structural annotations come from the same node.
+    #
+    # Post-Commit-2 of scope/control divorce: sources `control` from the
+    # new control_head Context field, not from scope.control. The returned
+    # hash's `control` and `scope` keys preserve the public contract.
     method cfg_state() {
         my @stack = ($self);
+        my $found_ch;
         my $found_scope;
         my %structural;
 
         while (@stack) {
             my $node = pop @stack;
 
-            my $ns = $node->scope();
-            if (defined $ns) {
-                if (!defined $found_scope) {
-                    $found_scope = $ns;
+            my $nc = $node->control_head;
+            if (defined $nc) {
+                # Co-existence invariant: every site that sets control_head
+                # also has scope populated. If $found_scope is missing here,
+                # it's a code bug, not a cfg_state defect.
+                if (!defined $found_ch) {
+                    $found_ch = $nc;
+                    $found_scope = $node->scope;
                 } else {
-                    # Prefer the scope whose control is non-Start over Start.
-                    my $nc = $ns->control();
-                    my $sc = $found_scope->control();
-                    if (defined $nc && (!defined $sc || $sc->operation() eq 'Start')
-                            && $nc->operation() ne 'Start') {
-                        $found_scope = $ns;
+                    # Prefer non-Start over Start (structural change wins).
+                    if ($found_ch->operation eq 'Start'
+                            && $nc->operation ne 'Start') {
+                        $found_ch = $nc;
+                        $found_scope = $node->scope;
                     }
                 }
             }
@@ -220,10 +231,10 @@ class Chalk::Bootstrap::Context {
             push @stack, $node->children()->@*;
         }
 
-        return undef unless defined $found_scope;
+        return undef unless defined $found_ch;
 
         return {
-            control => $found_scope->control(),
+            control => $found_ch,
             scope   => $found_scope,
             %structural,
         };

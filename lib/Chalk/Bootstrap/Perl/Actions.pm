@@ -190,10 +190,11 @@ class Chalk::Bootstrap::Perl::Actions {
         return $ctx->scope();
     }
 
-    # Helper: get the control node from a Context's scope, or undef.
+    # Helper: get the control_head from a Context (or undef).
+    # Post-scope/control-divorce C2: reads control_head directly.
+    # Helper kept as a wrapper for one commit; deleted in C3.
     my sub _ctx_control($ctx) {
-        my $scope = $ctx->scope();
-        return defined $scope ? $scope->control() : undef;
+        return $ctx->control_head;
     }
 
     # Helper: resolve a variable name from scope, creating a Phi if needed.
@@ -207,8 +208,6 @@ class Chalk::Bootstrap::Perl::Actions {
         my ($value, $new_scope) = $scope->resolve_sentinel($var_name, $factory);
         return undef unless defined $value;
         if ($new_scope) {
-            # Preserve control when updating scope after sentinel resolution
-            $new_scope = $new_scope->with_control($scope->control()) if defined $scope->control();
             $sa->update_scope($new_scope);
         }
         return $value;
@@ -1787,10 +1786,8 @@ class Chalk::Bootstrap::Perl::Actions {
         if (defined $sa) {
             my $scope = _ctx_scope($ctx);
             if (defined $scope) {
-                my $new_scope = $scope
-                    ->define($var_name->value(), $var_decl)
-                    ->with_control($var_decl);
-                $sa->update_scope($new_scope);
+                $sa->update_scope($scope->define($var_name->value(), $var_decl)->with_control($var_decl));
+                $sa->update_control_head($var_decl);
             }
             $sa->update_graph($graph);
         }
@@ -2323,11 +2320,8 @@ class Chalk::Bootstrap::Perl::Actions {
                         && $name_in->value() =~ /^[\$\@\%]/) {
                     my $scope = _ctx_scope($ctx);
                     if (defined $scope) {
-                        $sa->update_scope(
-                            $scope
-                                ->define($name_in->value(), $result)
-                                ->with_control($result)
-                        );
+                        $sa->update_scope($scope->define($name_in->value(), $result)->with_control($result));
+                        $sa->update_control_head($result);
                     }
                     my $graph = $ctx->graph() // Chalk::IR::Graph->new;
                     $graph->unmerge($target);  # drop the bare VarDecl
@@ -2451,6 +2445,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     );
 
                     $sa->update_scope($scope->with_control($region));
+                    $sa->update_control_head($region);
                     $sa->update_annotations({
                         loop       => $loop,
                         loop_if    => $if_node,
@@ -2514,6 +2509,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     );
 
                     $sa->update_scope($scope->with_control($region));
+                    $sa->update_control_head($region);
                     $sa->update_annotations({
                         then_stmts => [],
                         else_stmts => undef,
@@ -2678,6 +2674,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
 
                 $sa->update_scope($merged_scope->with_control($region));
+                $sa->update_control_head($region);
                 $sa->update_annotations({
                     then_stmts => $then_body,
                     else_stmts => $else_body,
@@ -2764,6 +2761,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
 
                 $sa->update_scope($scope->with_control($region));
+                $sa->update_control_head($region);
                 $sa->update_annotations({
                     then_stmts => $then_body,
                     else_stmts => $else_body,
@@ -2900,6 +2898,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
 
                 $sa->update_scope($post_loop_scope->with_control($region));
+                $sa->update_control_head($region);
                 $sa->update_annotations({
                     body_stmts => $body,
                     loop       => $loop,
@@ -3057,6 +3056,7 @@ class Chalk::Bootstrap::Perl::Actions {
         );
 
         $sa->update_scope($post_loop_scope->with_control($region));
+        $sa->update_control_head($region);
         $sa->update_annotations({
             body_stmts => \@effective_body,
             loop       => $loop,
@@ -3204,6 +3204,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
 
                 $sa->update_scope($post_loop_scope->with_control($region));
+                $sa->update_control_head($region);
                 $sa->update_annotations({
                     body_stmts => $body,
                     loop       => $loop,

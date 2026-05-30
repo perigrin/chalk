@@ -7,6 +7,7 @@ use experimental 'class';
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::Scope;
 use Chalk::IR::NodeFactory;
+use Scalar::Util qw(refaddr);
 
 class Chalk::Bootstrap::Semiring::SemanticAction {
     field $actions :param = undef;
@@ -30,6 +31,12 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # update_annotations() to request annotation additions to the result
     # context; _complete_sa merges them into the result context annotations.
     my $_pending_annotations_update;
+
+    # Pending control_head update from action methods. Action methods call
+    # update_control_head() to publish the IR node that heads the current
+    # control edge; _complete_sa applies it to the result context's
+    # control_head field after the action returns.
+    my $_pending_control_head_update;
 
     # The active SemanticAction instance during a complete event. Action methods
     # access this via current_instance() to call update_scope/update_annotations.
@@ -142,10 +149,26 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             # the sequence), fall back to left. Per-parse factory seeded by
             # _one_ctx threads through every multiply-merged Context.
             my $factory = $right->factory() // $left->factory();
-            # control_head: right wins unless undef. This is the
-            # "sibling-to-sibling, monotonically advancing" rule
-            # — distinct from _merge_scope's bindings-aware logic.
-            my $control_head = $right->control_head() // $left->control_head();
+            # control_head: prefer the more-advanced side (non-Start wins over
+            # Start). Mirrors the "sibling-to-sibling, monotonically advancing"
+            # rule in _merge_scope: when right carries only the seed Start node
+            # but left has already advanced (e.g. to VarDecl), prefer left.
+            my $rch = $right->control_head();
+            my $lch = $left->control_head();
+            my $control_head;
+            if (!defined $rch) {
+                $control_head = $lch;
+            } elsif (!defined $lch) {
+                $control_head = $rch;
+            } elsif (defined $lch && $lch->operation ne 'Start'
+                     && defined $rch && $rch->operation eq 'Start') {
+                # left is non-Start, right is Start — prefer left (more advanced)
+                $control_head = $lch;
+            } else {
+                # right wins (either right is non-Start, or both are Start/undef,
+                # or both are non-Start — take right as the later in the sequence)
+                $control_head = $rch;
+            }
             Chalk::Bootstrap::Context->new(
                 focus        => undef,
                 children     => [$left, $right],
@@ -211,6 +234,14 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # the graph to the MOP metaobject.
     method update_graph($graph) {
         $_pending_graph_update = $graph;
+        return;
+    }
+
+    # Request a control_head update from within an action method.
+    # Called by Actions.pm during extend(); _complete_sa applies the update
+    # to the result context's control_head field after the action returns.
+    method update_control_head($node) {
+        $_pending_control_head_update = $node;
         return;
     }
 
@@ -282,14 +313,30 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     method _complete_sa($value, $rule_name) {
         return $self->zero() if $value->is_zero();
 
+        # Sync invariant: control_head and scope.control must agree from
+        # C2 onward (until C3 deletes scope.control entirely, removing
+        # this assert).
+        {
+            my $sc = $value->scope && $value->scope->control;
+            my $ch = $value->control_head;
+            my $sync_ok = (!defined $sc && !defined $ch)
+                || (defined $sc && defined $ch
+                    && refaddr($sc) == refaddr($ch));
+            die "control_head/scope.control divergence at rule=$rule_name: "
+                . "sc=" . (defined $sc ? ref($sc) : 'undef')
+                . " ch=" . (defined $ch ? ref($ch) : 'undef')
+                unless $sync_ok;
+        }
+
         my $has_method = false;
         if ($actions) {
             $has_method = defined $actions->can($rule_name);
         }
         my $result_ctx;
-        $_pending_scope_update       = undef;  # Clear before action call
-        $_pending_annotations_update = undef;  # Clear before action call
-        $_pending_graph_update       = undef;  # Clear before action call
+        $_pending_scope_update        = undef;  # Clear before action call
+        $_pending_annotations_update  = undef;  # Clear before action call
+        $_pending_graph_update        = undef;  # Clear before action call
+        $_pending_control_head_update = undef;  # Clear before action call
         $_current_instance = $self;             # Make accessible to action methods
         if ($has_method) {
             # Dispatch action and wrap value in one extend call.
@@ -311,18 +358,19 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         # Scope update overrides what extend inherited from $value.
         if (defined $_pending_scope_update) {
             $result_ctx = Chalk::Bootstrap::Context->new(
-                focus       => $result_ctx->focus(),
-                children    => $result_ctx->children(),
-                position    => $result_ctx->position(),
-                rule        => $result_ctx->rule(),
-                annotations => $result_ctx->annotations(),
-                token       => $result_ctx->token(),
-                is_zero     => $result_ctx->is_zero(),
-                error       => $result_ctx->error(),
-                mop         => $result_ctx->mop(),
-                graph       => $result_ctx->graph(),
-                scope       => $_pending_scope_update,
-                factory     => $result_ctx->factory(),
+                focus        => $result_ctx->focus(),
+                children     => $result_ctx->children(),
+                position     => $result_ctx->position(),
+                rule         => $result_ctx->rule(),
+                annotations  => $result_ctx->annotations(),
+                token        => $result_ctx->token(),
+                is_zero      => $result_ctx->is_zero(),
+                error        => $result_ctx->error(),
+                mop          => $result_ctx->mop(),
+                graph        => $result_ctx->graph(),
+                scope        => $_pending_scope_update,
+                factory      => $result_ctx->factory(),
+                control_head => $result_ctx->control_head(),
             );
             $_pending_scope_update = undef;
         }
@@ -341,20 +389,41 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         # Graph update overrides what extend inherited from $value.
         if (defined $_pending_graph_update) {
             $result_ctx = Chalk::Bootstrap::Context->new(
-                focus       => $result_ctx->focus(),
-                children    => $result_ctx->children(),
-                position    => $result_ctx->position(),
-                rule        => $result_ctx->rule(),
-                annotations => $result_ctx->annotations(),
-                token       => $result_ctx->token(),
-                is_zero     => $result_ctx->is_zero(),
-                error       => $result_ctx->error(),
-                mop         => $result_ctx->mop(),
-                scope       => $result_ctx->scope(),
-                graph       => $_pending_graph_update,
-                factory     => $result_ctx->factory(),
+                focus        => $result_ctx->focus(),
+                children     => $result_ctx->children(),
+                position     => $result_ctx->position(),
+                rule         => $result_ctx->rule(),
+                annotations  => $result_ctx->annotations(),
+                token        => $result_ctx->token(),
+                is_zero      => $result_ctx->is_zero(),
+                error        => $result_ctx->error(),
+                mop          => $result_ctx->mop(),
+                scope        => $result_ctx->scope(),
+                graph        => $_pending_graph_update,
+                factory      => $result_ctx->factory(),
+                control_head => $result_ctx->control_head(),
             );
             $_pending_graph_update = undef;
+        }
+
+        # Apply pending control_head update from action method, if any.
+        if (defined $_pending_control_head_update) {
+            $result_ctx = Chalk::Bootstrap::Context->new(
+                focus        => $result_ctx->focus(),
+                children     => $result_ctx->children(),
+                position     => $result_ctx->position(),
+                rule         => $result_ctx->rule(),
+                annotations  => $result_ctx->annotations(),
+                token        => $result_ctx->token(),
+                is_zero      => $result_ctx->is_zero(),
+                error        => $result_ctx->error(),
+                mop          => $result_ctx->mop(),
+                scope        => $result_ctx->scope(),
+                graph        => $result_ctx->graph(),
+                factory      => $result_ctx->factory(),
+                control_head => $_pending_control_head_update,
+            );
+            $_pending_control_head_update = undef;
         }
 
         # Propagate scope: inherit from $value if result has no scope.
@@ -362,18 +431,19 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             my $inherited_scope = $value->scope();
             if (defined $inherited_scope) {
                 $result_ctx = Chalk::Bootstrap::Context->new(
-                    focus       => $result_ctx->focus(),
-                    children    => $result_ctx->children(),
-                    position    => $result_ctx->position(),
-                    rule        => $result_ctx->rule(),
-                    annotations => $result_ctx->annotations(),
-                    token       => $result_ctx->token(),
-                    is_zero     => $result_ctx->is_zero(),
-                    error       => $result_ctx->error(),
-                    mop         => $result_ctx->mop(),
-                    graph       => $result_ctx->graph(),
-                    scope       => $inherited_scope,
-                    factory     => $result_ctx->factory(),
+                    focus        => $result_ctx->focus(),
+                    children     => $result_ctx->children(),
+                    position     => $result_ctx->position(),
+                    rule         => $result_ctx->rule(),
+                    annotations  => $result_ctx->annotations(),
+                    token        => $result_ctx->token(),
+                    is_zero      => $result_ctx->is_zero(),
+                    error        => $result_ctx->error(),
+                    mop          => $result_ctx->mop(),
+                    graph        => $result_ctx->graph(),
+                    scope        => $inherited_scope,
+                    factory      => $result_ctx->factory(),
+                    control_head => $result_ctx->control_head(),
                 );
             }
         }
