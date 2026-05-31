@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib';
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Actions;
 use Chalk::Bootstrap::Context;
@@ -44,13 +44,18 @@ my sub make_leaf_ctx($node) {
     );
 }
 
-# Helper: build a parent Context with children
-my sub make_parent_ctx(@children) {
+# Helper: build a parent Context with children. Optional bindings and
+# control_head carry the lexical scope and SSA control input directly
+# (replacing the removed set_cfg_state side-channel).
+my sub make_parent_ctx($bindings, $control_head, @children) {
     return Chalk::Bootstrap::Context->new(
-        focus    => undef,
-        children => \@children,
-        position => 0,
-        rule     => undef,
+        focus        => undef,
+        children     => \@children,
+        position     => 0,
+        rule         => undef,
+        bindings     => $bindings,
+        control_head => $control_head,
+        factory      => $factory,
     );
 }
 
@@ -93,16 +98,14 @@ subtest 'ReturnStatement action produces Chalk::IR::Node::Return' => sub {
     my $return_kw = $factory->make('Constant', const_type => 'string', value => 'return');
     my $expr_val  = $factory->make('Constant', const_type => 'string', value => 'something');
 
-    # Build context: [return_keyword, expression_value]
-    my $ctx = make_parent_ctx(
+    # Build context: [return_keyword, expression_value] carrying the
+    # lexical bindings and Start control directly on the Context.
+    my $scope   = Chalk::Bootstrap::Bindings->new();
+    my $start   = $factory->make('Start');
+    my $ctx = make_parent_ctx($scope, $start,
         make_leaf_ctx($return_kw),
         make_leaf_ctx($expr_val),
     );
-
-    # Set cfg_state with a control node
-    my $scope   = Chalk::Bootstrap::Scope->new();
-    my $start   = $factory->make('Start');
-    $sa->set_cfg_state($ctx, { control => $start, scope => $scope });
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ReturnStatement', 0, 0, 0));
     ok(defined $result, 'ReturnStatement multiply returns a result');
@@ -123,11 +126,9 @@ subtest 'ReturnStatement bare return produces Return with undef value' => sub {
 
     # Only a return keyword, no following expression
     my $return_kw = $factory->make('Constant', const_type => 'string', value => 'return');
-    my $ctx = make_parent_ctx(make_leaf_ctx($return_kw));
-
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $start = $factory->make('Start');
-    $sa->set_cfg_state($ctx, { control => $start, scope => $scope });
+    my $ctx = make_parent_ctx($scope, $start, make_leaf_ctx($return_kw));
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ReturnStatement', 0, 0, 0));
     ok(defined $result, 'bare ReturnStatement multiply returns a result');
