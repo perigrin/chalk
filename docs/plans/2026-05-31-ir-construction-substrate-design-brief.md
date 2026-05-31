@@ -96,14 +96,28 @@ The spike says the substrate carries real information, destroyed exactly where w
 
 ---
 
-## 6. Recommended next step
+## 6. A-vs-B resolved (spike, 2026-05-31): Option A is viable
 
-**Do not implement yet. Do not delete `completion_map` yet.** One more focused spike resolves A-vs-B: take a multi-state statement-boundary position from the §3 data and determine whether the live DFA states there can be reduced — at that point in the parse, before the full parse completes — to a single, correct "control predecessor" for the next statement. Concretely: is the predecessor extractable from per-position state, or is it only knowable once `add`/disambiguation has resolved the position (which is post-parse-ish, i.e. Option B territory)?
+The deciding spike ran. **Verdict: Option A is viable; the problem is plumbing, not ambiguity.**
 
-- If extractable pre-resolution → write the Option A implementation plan (per-position state tracking + inherited control threading + retire the rebuild).
-- If only post-resolution → write the Option B implementation plan (disambiguated-tree-then-act-pass), and *then* the `completion_map` cleanup is safe.
+Decisive evidence (env-gated instrumentation, reverted; detector proven live via positive control on `filter-composite-packed.t` which fired 3 packs):
 
-Either way, the bug-fixes from Option C (control_head drop, dead `_transferred_scope`/`error`) are safe to do now, independently — they don't touch `completion_map`.
+- **Zero ambiguity packs during real multi-statement parses.** Both a flat 3-statement body and a nested-If body produced `AMBIG_PACK=0, PACK_SURVIVORS=0`; `CHALK_COUNT_FILTER_TIES` silent. The four filter semirings collapse to a single survivor at every statement boundary — `add` never packs alternatives there. The statement-boundary multi-state is **(b) the deterministic LR fan**, NOT (a) genuine unresolved ambiguity.
+- **Statement N is materialized and determinate when N+1's action fires — but not threaded.** At the instant `$y`'s `VariableDeclaration` action runs (Actions.pm:1758), `$x`'s VarDecl node already exists in the factory and is unambiguous, yet `$y`'s action receives `control_head = Start`. The predecessor is *known and present*; the synthesized fold simply does not hand it laterally across siblings. `update_control_head` publishes the control *upward* to the multiply result, but `_mul_ctx` does not propagate it *across StatementList siblings* before N+1's action runs.
+- The final chain is correct (`Start → VarDecl($x) → VarDecl($y) → Return`) — built today by the post-hoc rebuild. The rebuild is repairing a **plumbing gap**, not resolving ambiguity.
+
+**Implication:** this is the cleanest outcome. The during-parse IR-construction thesis holds — the information is available during the parse (exactly as Simple's threaded `ctrl`), it's just not wired laterally. Option B (post-parse act-pass, move SA out of the semiring) is NOT forced. The fix is a **lateral control-threading change in the fold** — thread `control_head` across StatementList siblings (in `_mul_ctx` or at StatementList completion) so each statement action receives its predecessor's materialized node and builds the chain correctly on the first try, retiring the Block rebuild.
+
+Note: the `completion_map` / per-position DFA-state substrate may not be needed for the FLAT case at all — the predecessor is already determinate from the surviving Context's lineage; the gap is purely lateral propagation. Per-position DFA state matters (if at all) only at the harder nested/disambiguation edges.
+
+### Remaining uncertainty before committing A for the full grammar
+
+Definitive for **flat statement sequences**. **Consistent-but-not-proven for nesting** (If/Loop producing Regions, nested blocks): the nested-If case parsed correctly with zero packs, but the Region/Phi control-threading *order* was not instrumented deeply enough to prove the predecessor is determinate at the moment those control nodes are wired. **Next spike before the A implementation plan:** instrument If/Loop/Region/Phi threading order on a nested body and confirm determinacy holds there too (or characterize exactly where it doesn't).
+
+### Disposition of the other options
+
+- **Option B** is not forced and is the heavier change; shelve unless the nesting spike overturns A.
+- **Option C cleanup:** the `control_head`-drop bug (two `_complete_sa` inherit blocks), dead `_transferred_scope`, and dead `error` field are safe to fix now, independent of A. **Do NOT delete `completion_map`** — A's nesting question may still want per-position state; revisit only after the nesting spike.
 
 ---
 
