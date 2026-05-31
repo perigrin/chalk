@@ -67,14 +67,14 @@ is(refaddr($one->mop), refaddr($mop), 'one() carries MOP');
     my $factory_obj  = bless { tag => 'factory' }, 'Test::Sentinel::Factory';
     my $c1 = Chalk::Bootstrap::Context->new(
         focus => 'a', children => [], mop => $mop,
-        scope => $scope_obj, graph => $graph_obj, factory => $factory_obj,
+        bindings => $scope_obj, graph => $graph_obj, factory => $factory_obj,
     );
     my $c2 = Chalk::Bootstrap::Context->new(
         focus => 'b', children => [], mop => $mop,
-        scope => $scope_obj, graph => $graph_obj, factory => $factory_obj,
+        bindings => $scope_obj, graph => $graph_obj, factory => $factory_obj,
     );
     my $packed = $comp->_pack_survivors($c1, $c2);
-    is(refaddr($packed->scope),   refaddr($scope_obj),   '_pack_survivors preserves scope');
+    is(refaddr($packed->bindings), refaddr($scope_obj),   '_pack_survivors preserves bindings');
     is(refaddr($packed->graph),   refaddr($graph_obj),   '_pack_survivors preserves graph');
     is(refaddr($packed->factory), refaddr($factory_obj), '_pack_survivors preserves factory');
 }

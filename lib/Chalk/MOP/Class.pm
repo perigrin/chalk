@@ -9,7 +9,7 @@ use Chalk::MOP::Method;
 use Chalk::MOP::Sub;
 use Chalk::MOP::Import;
 use Chalk::MOP::Phaser::Adjust;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 
 class Chalk::MOP::Class {
     field $name        :param :reader;
@@ -21,7 +21,7 @@ class Chalk::MOP::Class {
     field @subs;
     field @imports;
     field @adjust_blocks;
-    field $scope :reader = Chalk::Bootstrap::Scope->new;
+    field $bindings :reader = Chalk::Bootstrap::Bindings->new;
     field @class_scope_vars;
     field @use_constants;
 
@@ -95,10 +95,10 @@ class Chalk::MOP::Class {
         # into a class-side graph here — no class graph exists in this
         # commit (see Phase 7c-prep design Risk #2). Record in the
         # insertion-ordered list (for codegen iteration) and bind the
-        # name in $scope (for lookup-by-name semantics).
+        # name in $bindings (for lookup-by-name semantics).
         push @class_scope_vars, $vardecl_node;
         my $name = $vardecl_node->name->value;
-        $scope = $scope->define($name, $vardecl_node);
+        $bindings = $bindings->define($name, $vardecl_node);
         return $vardecl_node;
     }
 

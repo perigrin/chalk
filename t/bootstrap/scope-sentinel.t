@@ -5,14 +5,14 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::NodeFactory;
 
 my $factory = Chalk::IR::NodeFactory->new();
 
 # --- fork_for_loop: replaces bindings with sentinels ---
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node_a = $factory->make('Constant', const_type => 'integer', value => '1');
     my $node_b = $factory->make('Constant', const_type => 'integer', value => '2');
     $scope = $scope->define('$a', $node_a);
@@ -27,7 +27,7 @@ my $factory = Chalk::IR::NodeFactory->new();
 
     # raw_lookup returns sentinel hashref, not original node
     my $sentinel_a = $forked->raw_lookup('$a');
-    ok(ref $sentinel_a eq 'Chalk::Bootstrap::Scope::Sentinel', '$a binding is a blessed sentinel');
+    ok(ref $sentinel_a eq 'Chalk::Bootstrap::Bindings::Sentinel', '$a binding is a blessed sentinel');
     is($sentinel_a->pre_value(), $node_a, 'sentinel pre_value is original node');
     is($sentinel_a->loop(), $loop, 'sentinel loop is the Loop node');
 }
@@ -35,7 +35,7 @@ my $factory = Chalk::IR::NodeFactory->new();
 # --- resolve_sentinel: creates Phi on first read ---
 {
     my $node_x = $factory->make('Constant', const_type => 'integer', value => '42');
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     $scope = $scope->define('$x', $node_x);
 
     my $loop = $factory->make('Loop', entry_ctrl => $factory->make('Start'), backedge_ctrl => undef);
@@ -61,7 +61,7 @@ my $factory = Chalk::IR::NodeFactory->new();
 
 # --- resolve_sentinel: unbound variable returns undef ---
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my ($value, $new_scope) = $scope->resolve_sentinel('$unknown', $factory);
     ok(!defined $value, 'unbound variable returns undef');
     ok(!defined $new_scope, 'no new scope for unbound variable');
@@ -70,7 +70,7 @@ my $factory = Chalk::IR::NodeFactory->new();
 # --- resolve_sentinel: non-sentinel binding returns value, no new scope ---
 {
     my $node = $factory->make('Constant', const_type => 'string', value => 'hello');
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     $scope = $scope->define('$x', $node);
 
     my ($value, $new_scope) = $scope->resolve_sentinel('$x', $factory);
@@ -81,7 +81,7 @@ my $factory = Chalk::IR::NodeFactory->new();
 # --- raw_lookup: returns binding without resolving ---
 {
     my $node = $factory->make('Constant', const_type => 'integer', value => '1');
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     $scope = $scope->define('$x', $node);
 
     my $loop = $factory->make('Loop', entry_ctrl => $factory->make('Start'), backedge_ctrl => undef);
@@ -89,24 +89,24 @@ my $factory = Chalk::IR::NodeFactory->new();
 
     # raw_lookup returns the sentinel, not a Phi
     my $raw = $forked->raw_lookup('$x');
-    ok(ref $raw eq 'Chalk::Bootstrap::Scope::Sentinel', 'raw_lookup returns sentinel');
+    ok(ref $raw eq 'Chalk::Bootstrap::Bindings::Sentinel', 'raw_lookup returns sentinel');
 
     # regular lookup also returns sentinel (no auto-resolve)
     my $regular = $forked->lookup('$x');
-    ok(ref $regular eq 'Chalk::Bootstrap::Scope::Sentinel', 'lookup returns sentinel too');
+    ok(ref $regular eq 'Chalk::Bootstrap::Bindings::Sentinel', 'lookup returns sentinel too');
 }
 
 # --- Sentinel is a proper class with accessor methods ---
 {
     my $node = $factory->make('Constant', const_type => 'integer', value => '99');
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     $scope = $scope->define('$v', $node);
 
     my $loop = $factory->make('Loop', entry_ctrl => $factory->make('Start'), backedge_ctrl => undef);
     my $forked = $scope->fork_for_loop($loop);
 
     my $sentinel = $forked->raw_lookup('$v');
-    ok($sentinel isa Chalk::Bootstrap::Scope::Sentinel, 'sentinel isa Chalk::Bootstrap::Scope::Sentinel');
+    ok($sentinel isa Chalk::Bootstrap::Bindings::Sentinel, 'sentinel isa Chalk::Bootstrap::Bindings::Sentinel');
     is($sentinel->loop(), $loop, 'sentinel->loop() returns the Loop node');
     is($sentinel->pre_value(), $node, 'sentinel->pre_value() returns the pre-loop binding');
 }

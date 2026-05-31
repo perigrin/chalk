@@ -6,7 +6,7 @@ use Chalk::MOP::Method;
 use Chalk::MOP::Sub;
 use Chalk::MOP::Import;
 use Chalk::MOP::Phaser::Adjust;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 class Chalk::MOP::Class {
     field $name :param :reader;
     field $superclass :param :reader = undef;
@@ -17,7 +17,7 @@ class Chalk::MOP::Class {
     field @subs;
     field @imports;
     field @adjust_blocks;
-    field $scope :reader = 'Chalk::Bootstrap::Scope'->new();
+    field $bindings :reader = 'Chalk::Bootstrap::Bindings'->new();
     field @class_scope_vars;
     field @use_constants;
     method fields() {
@@ -74,7 +74,7 @@ class Chalk::MOP::Class {
     method declare_class_scope_var($vardecl_node) {
         push @class_scope_vars, $vardecl_node;
         my $name = $vardecl_node->name()->value();
-        $scope = $scope->define($name, $vardecl_node);
+        $bindings = $bindings->define($name, $vardecl_node);
         return $vardecl_node;
     }
     method declare_use_constant($name, $value_node) {

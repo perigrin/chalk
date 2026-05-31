@@ -9,7 +9,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use Chalk::Bootstrap::Context;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::NodeFactory;
 
 # Default value is undef.

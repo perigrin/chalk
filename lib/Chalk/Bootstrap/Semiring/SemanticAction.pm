@@ -5,7 +5,7 @@ use utf8;
 use experimental 'class';
 
 use Chalk::Bootstrap::Context;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::NodeFactory;
 use Scalar::Util qw(refaddr);
 
@@ -87,14 +87,14 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             # docs/plans/2026-05-21-earley-identity-audit.md and
             # docs/plans/2026-05-21-phase-7d-factory-unification.md.
             my $start   = $parse_factory->make('Start');
-            my $scope   = Chalk::Bootstrap::Scope->new()->with_control($start);
+            my $bindings = Chalk::Bootstrap::Bindings->new();
             $_one_singleton = Chalk::Bootstrap::Context->new(
                 focus        => undef,
                 children     => [],
                 position     => 0,
                 rule         => undef,
                 mop          => $_mop,
-                scope        => $scope,
+                bindings     => $bindings,
                 factory      => $parse_factory,
                 control_head => $start,
             );
@@ -102,32 +102,18 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return $_one_singleton;
     }
 
-    # Merge two scope values from multiply children, using the same
-    # control-preference logic that cfg_state propagation used:
-    # prefer non-Start over Start (structural change wins).
-    # Merges variable bindings from both sides (right takes precedence for dups).
-    my sub _merge_scope($left_scope, $right_scope) {
-        return $right_scope // $left_scope unless defined $left_scope && defined $right_scope;
-
-        my $l_ctrl = $left_scope->control;
-        my $r_ctrl = $right_scope->control;
-
-        # Both have a control input — pick the more advanced one
-        if (defined $l_ctrl && defined $r_ctrl) {
-            my $l_op = $l_ctrl->operation();
-            my $r_op = $r_ctrl->operation();
-            my $base;
-            if ($l_op ne 'Start' && $r_op eq 'Start') {
-                $base = $left_scope;
-            } else {
-                $base = $right_scope;
-            }
-            # Merge bindings: left accumulated, right may add new vars
-            return $base->merge($left_scope);
-        }
-
-        # Fallback: use whichever has a control, or right if neither does
-        return (defined $r_ctrl ? $right_scope : $left_scope);
+    # Merge two bindings values from multiply children. Control selection
+    # is no longer part of this merge — control_head propagates separately
+    # on the Context (see _mul_ctx). This is pure binding reconciliation.
+    #
+    # Preserves the legacy _merge_scope behavior exactly: right is the
+    # receiver (base), left is folded in. Bindings::merge makes the
+    # ARGUMENT win for duplicate names, so left's bindings overwrite
+    # right's — i.e. $right->merge($left) gives left precedence for dups.
+    my sub _merge_bindings($left_bindings, $right_bindings) {
+        return $right_bindings // $left_bindings
+            unless defined $left_bindings && defined $right_bindings;
+        return $right_bindings->merge($left_bindings);
     }
 
     # Return a hash-consed multiply Context for the given left+right children.
@@ -136,10 +122,10 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     my sub _mul_ctx($left, $right) {
         my $key = "mul:" . refaddr($left) . ":" . refaddr($right);
         return ($_ctx_cache{$key} //= do {
-            # Propagate scope: prefer scope with more-advanced control.
-            # Right is later in the sequence; if right has a non-Start control
-            # and left has a Start (or no scope), prefer right. Otherwise prefer left.
-            my $scope = _merge_scope($left->scope, $right->scope);
+            # Propagate bindings: reconcile both children's variable
+            # bindings (left wins for duplicate names). Control selection
+            # is handled separately via control_head below.
+            my $bindings = _merge_bindings($left->bindings, $right->bindings);
             # Propagate graph: prefer right (later in the sequence). If right
             # has no graph, fall back to left's graph - side-effect actions
             # publish a graph via update_graph; the same instance should
@@ -175,7 +161,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 position     => $right->position(),
                 rule         => undef,
                 mop          => $_mop,
-                scope        => $scope,
+                bindings     => $bindings,
                 graph        => $graph,
                 factory      => $factory,
                 control_head => $control_head,
@@ -313,21 +299,6 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     method _complete_sa($value, $rule_name) {
         return $self->zero() if $value->is_zero();
 
-        # Sync invariant: control_head and scope.control must agree from
-        # C2 onward (until C3 deletes scope.control entirely, removing
-        # this assert).
-        {
-            my $sc = $value->scope && $value->scope->control;
-            my $ch = $value->control_head;
-            my $sync_ok = (!defined $sc && !defined $ch)
-                || (defined $sc && defined $ch
-                    && refaddr($sc) == refaddr($ch));
-            die "control_head/scope.control divergence at rule=$rule_name: "
-                . "sc=" . (defined $sc ? ref($sc) : 'undef')
-                . " ch=" . (defined $ch ? ref($ch) : 'undef')
-                unless $sync_ok;
-        }
-
         my $has_method = false;
         if ($actions) {
             $has_method = defined $actions->can($rule_name);
@@ -368,7 +339,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 error        => $result_ctx->error(),
                 mop          => $result_ctx->mop(),
                 graph        => $result_ctx->graph(),
-                scope        => $_pending_scope_update,
+                bindings     => $_pending_scope_update,
                 factory      => $result_ctx->factory(),
                 control_head => $result_ctx->control_head(),
             );
@@ -398,7 +369,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 is_zero      => $result_ctx->is_zero(),
                 error        => $result_ctx->error(),
                 mop          => $result_ctx->mop(),
-                scope        => $result_ctx->scope(),
+                bindings     => $result_ctx->bindings(),
                 graph        => $_pending_graph_update,
                 factory      => $result_ctx->factory(),
                 control_head => $result_ctx->control_head(),
@@ -418,7 +389,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 is_zero      => $result_ctx->is_zero(),
                 error        => $result_ctx->error(),
                 mop          => $result_ctx->mop(),
-                scope        => $result_ctx->scope(),
+                bindings     => $result_ctx->bindings(),
                 graph        => $result_ctx->graph(),
                 factory      => $result_ctx->factory(),
                 control_head => $_pending_control_head_update,
@@ -426,10 +397,10 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             $_pending_control_head_update = undef;
         }
 
-        # Propagate scope: inherit from $value if result has no scope.
-        if (!defined $result_ctx->scope()) {
-            my $inherited_scope = $value->scope();
-            if (defined $inherited_scope) {
+        # Propagate bindings: inherit from $value if result has none.
+        if (!defined $result_ctx->bindings()) {
+            my $inherited_bindings = $value->bindings();
+            if (defined $inherited_bindings) {
                 $result_ctx = Chalk::Bootstrap::Context->new(
                     focus        => $result_ctx->focus(),
                     children     => $result_ctx->children(),
@@ -441,7 +412,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                     error        => $result_ctx->error(),
                     mop          => $result_ctx->mop(),
                     graph        => $result_ctx->graph(),
-                    scope        => $inherited_scope,
+                    bindings     => $inherited_bindings,
                     factory      => $result_ctx->factory(),
                     control_head => $result_ctx->control_head(),
                 );
@@ -462,7 +433,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                     is_zero     => $result_ctx->is_zero(),
                     error       => $result_ctx->error(),
                     mop         => $result_ctx->mop(),
-                    scope       => $result_ctx->scope(),
+                    bindings    => $result_ctx->bindings(),
                     graph       => $inherited_graph,
                     factory     => $result_ctx->factory(),
                 );
@@ -483,7 +454,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                     is_zero     => $result_ctx->is_zero(),
                     error       => $result_ctx->error(),
                     mop         => $result_ctx->mop(),
-                    scope       => $result_ctx->scope(),
+                    bindings    => $result_ctx->bindings(),
                     graph       => $result_ctx->graph(),
                     factory     => $inherited_factory,
                 );
@@ -532,14 +503,14 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # docs/plans/2026-05-09-fixup-audit-baseline.md.
     method on_merge($correct, $rejected) {
         return if $correct->is_zero() || $rejected->is_zero();
-        my $correct_scope  = $correct->scope();
-        my $rejected_scope = $rejected->scope();
+        my $correct_bindings  = $correct->bindings();
+        my $rejected_bindings = $rejected->bindings();
 
-        return unless defined $rejected_scope;
+        return unless defined $rejected_bindings;
 
-        # If the rejected side has scope but the correct side doesn't, transfer it
-        if (!defined $correct_scope) {
-            # Rebuild the correct context with the rejected scope
+        # If the rejected side has bindings but the correct side doesn't, transfer it
+        if (!defined $correct_bindings) {
+            # Rebuild the correct context with the rejected bindings
             my $updated = Chalk::Bootstrap::Context->new(
                 focus       => $correct->focus(),
                 children    => $correct->children(),
@@ -551,19 +522,19 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 error       => $correct->error(),
                 mop         => $correct->mop(),
                 graph       => $correct->graph(),
-                scope       => $rejected_scope,
+                bindings    => $rejected_bindings,
                 factory     => $correct->factory(),
             );
-            # Transfer the rebuilt context's scope to the original via annotations hack:
+            # Transfer the rebuilt context's bindings to the original via annotations hack:
             # We can't replace $correct's identity (caller holds a reference), so
-            # transfer scope data via annotations for on_merge compatibility.
-            $correct->annotations()->{_transferred_scope} = $rejected_scope;
+            # transfer bindings data via annotations for on_merge compatibility.
+            $correct->annotations()->{_transferred_scope} = $rejected_bindings;
             return;
         }
 
-        # Both have scope: merge them using the same logic as _merge_scope.
-        my $merged = _merge_scope($correct_scope, $rejected_scope);
-        if (defined $merged && refaddr($merged) != refaddr($correct_scope)) {
+        # Both have bindings: reconcile them with the same merge logic.
+        my $merged = _merge_bindings($correct_bindings, $rejected_bindings);
+        if (defined $merged && refaddr($merged) != refaddr($correct_bindings)) {
             $correct->annotations()->{_transferred_scope} = $merged;
         }
         return;

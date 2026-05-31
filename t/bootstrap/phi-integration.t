@@ -10,7 +10,7 @@ use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Phi;
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 
 # Build the Perl grammar recognizer pipeline once for all tests.

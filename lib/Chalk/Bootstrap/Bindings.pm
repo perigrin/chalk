@@ -1,4 +1,4 @@
-# ABOUTME: Immutable lexical scope mapping variable names to IR node bindings
+# ABOUTME: Immutable lexical bindings mapping variable names to IR node values
 # ABOUTME: Provides lookup, define (copy-on-write), snapshot, diff, and lazy Phi sentinel operations
 use 5.42.0;
 use utf8;
@@ -6,15 +6,11 @@ use experimental 'class';
 
 use Scalar::Util 'refaddr';
 use Chalk::IR::Node::Phi;
-use Chalk::Bootstrap::Scope::Sentinel;
+use Chalk::Bootstrap::Bindings::Sentinel;
 
-class Chalk::Bootstrap::Scope {
+class Chalk::Bootstrap::Bindings {
     # Hash mapping variable names (strings like '$x', '@arr', '%hash') to IR nodes
     field $bindings :param = undef;
-
-    # Current control input: the most recent side-effect node in this scope's
-    # linear control chain, or undef for the scope before any side effects.
-    field $control :param :reader = undef;
 
     # Initialize bindings to empty hash if not provided
     ADJUST {
@@ -27,26 +23,15 @@ class Chalk::Bootstrap::Scope {
         return $bindings->{$name};
     }
 
-    # Return a new Scope with the control input replaced.
-    # Preserves all existing bindings. This is an immutable operation.
-    method with_control($new_control) {
-        return Chalk::Bootstrap::Scope->new(
-            bindings => { $bindings->%* },
-            control  => $new_control,
-        );
-    }
-
     # Define a new binding (or overwrite existing)
-    # Returns a NEW Scope with the binding added (immutable operation)
+    # Returns a NEW Bindings with the binding added (immutable operation)
     method define($name, $node) {
         # Create a new bindings hash with the added/updated binding
         my %new_bindings = $bindings->%*;
         $new_bindings{$name} = $node;
 
-        # Return new Scope with updated bindings, preserving control
-        return Chalk::Bootstrap::Scope->new(
+        return Chalk::Bootstrap::Bindings->new(
             bindings => \%new_bindings,
-            control  => $control,
         );
     }
 
@@ -83,17 +68,15 @@ class Chalk::Bootstrap::Scope {
         return scalar keys $bindings->%*;
     }
 
-    # Merge another scope's bindings into this one, returning a new Scope.
-    # The other scope's bindings take precedence for duplicate names.
-    # Control comes from self (the left/base scope).
+    # Merge another bindings set into this one, returning a new Bindings.
+    # The other set's bindings take precedence for duplicate names.
     method merge($other) {
         my %new_bindings = $bindings->%*;
         for my $name ($other->variable_names()) {
             $new_bindings{$name} = $other->lookup($name);
         }
-        return Chalk::Bootstrap::Scope->new(
+        return Chalk::Bootstrap::Bindings->new(
             bindings => \%new_bindings,
-            control  => $control,
         );
     }
 
@@ -105,17 +88,17 @@ class Chalk::Bootstrap::Scope {
     # Create a new Scope with all bindings replaced by sentinels.
     # Each sentinel records the Loop node and the pre-loop binding value.
     # Called at loop entry to enable lazy Phi creation.
-    # Sentinels are blessed into Chalk::Bootstrap::Scope::Sentinel for
+    # Sentinels are blessed into Chalk::Bootstrap::Bindings::Sentinel for
     # unambiguous type detection (plain hashrefs could be confused with IR nodes).
     method fork_for_loop($loop_node) {
         my %sentinel_bindings;
         for my $name (keys $bindings->%*) {
-            $sentinel_bindings{$name} = Chalk::Bootstrap::Scope::Sentinel->new(
+            $sentinel_bindings{$name} = Chalk::Bootstrap::Bindings::Sentinel->new(
                 loop      => $loop_node,
                 pre_value => $bindings->{$name},
             );
         }
-        return Chalk::Bootstrap::Scope->new(bindings => \%sentinel_bindings, control => $control);
+        return Chalk::Bootstrap::Bindings->new(bindings => \%sentinel_bindings);
     }
 
     # Resolve a sentinel for a variable, creating a Phi on demand.
@@ -128,7 +111,7 @@ class Chalk::Bootstrap::Scope {
         return (undef, undef) unless defined $binding;
 
         # Non-sentinel: return the binding directly
-        unless (ref $binding eq 'Chalk::Bootstrap::Scope::Sentinel') {
+        unless (ref $binding eq 'Chalk::Bootstrap::Bindings::Sentinel') {
             return ($binding, undef);
         }
 
@@ -138,7 +121,7 @@ class Chalk::Bootstrap::Scope {
             values => [$binding->pre_value(), undef],
         );
 
-        # Replace sentinel with Phi in a new scope (define preserves control)
+        # Replace sentinel with Phi in a new bindings set
         my $new_scope = $self->define($name, $phi);
         return ($phi, $new_scope);
     }
@@ -189,7 +172,7 @@ class Chalk::Bootstrap::Scope {
         my %merged;
 
         # Union of pre-loop and body-final names. Pre-loop scope alone is
-        # insufficient because Chalk's Scope.bindings does not propagate
+        # insufficient because Chalk's bindings do not propagate
         # sibling-to-sibling at leaf entry: the loop action sees an empty
         # pre-loop bindings hash, while the body leaf has captured the
         # post-body Assigns. Mirrors merge_with_phis' union over both
@@ -225,7 +208,7 @@ class Chalk::Bootstrap::Scope {
             $merged{$name} = $phi;
         }
 
-        return Chalk::Bootstrap::Scope->new(bindings => \%merged, control => $control);
+        return Chalk::Bootstrap::Bindings->new(bindings => \%merged);
     }
 
     # Merge two branch scopes at a Region node, creating Phi nodes for variables
@@ -268,7 +251,7 @@ class Chalk::Bootstrap::Scope {
             $merged{$name} = _remove_trivial_phi($phi);
         }
 
-        return Chalk::Bootstrap::Scope->new(bindings => \%merged, control => $control);
+        return Chalk::Bootstrap::Bindings->new(bindings => \%merged);
     }
 }
 

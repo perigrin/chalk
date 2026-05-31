@@ -9,7 +9,7 @@ use lib 't/bootstrap/lib';
 use Chalk::Bootstrap::Context;
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::SemanticAction;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::Bootstrap::Perl::Target::Perl;
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::BNF::Target::Perl;
@@ -30,7 +30,7 @@ use Chalk::Bootstrap::BNF::Target::Perl;
         focus        => undef,
         children     => [],
         position     => 0,
-        scope        => Chalk::Bootstrap::Scope->new()->with_control($start),
+        bindings        => Chalk::Bootstrap::Bindings->new(),
         control_head => $start,
         annotations  => {
             try_node    => $try_marker,
@@ -63,7 +63,7 @@ use Chalk::Bootstrap::BNF::Target::Perl;
         focus        => undef,
         children     => [],
         position     => 0,
-        scope        => Chalk::Bootstrap::Scope->new()->with_control($start),
+        bindings        => Chalk::Bootstrap::Bindings->new(),
         control_head => $start,
         annotations  => {
             try_node    => $try_marker,

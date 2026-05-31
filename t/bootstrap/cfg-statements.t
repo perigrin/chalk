@@ -9,7 +9,7 @@ use lib 't/bootstrap/lib';
 use Chalk::Bootstrap::Context;
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::SemanticAction;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::Program;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
@@ -46,7 +46,7 @@ sub _gen_from_snippet ($parser, $snippet) {
         focus       => undef,
         children    => [],
         position    => 0,
-        scope       => Chalk::Bootstrap::Scope->new()->with_control($start),
+        bindings       => Chalk::Bootstrap::Bindings->new(), control_head => $start,
         annotations => { statements => [$stmt1] },
     );
 
@@ -77,7 +77,7 @@ sub _gen_from_snippet ($parser, $snippet) {
         focus       => undef,
         children    => [],
         position    => 0,
-        scope       => Chalk::Bootstrap::Scope->new()->with_control($region),
+        bindings       => Chalk::Bootstrap::Bindings->new(), control_head => $region,
         annotations => {
             then_stmts => [$then_stmt],
             else_stmts => [$else_stmt],
@@ -121,7 +121,7 @@ sub _gen_from_snippet ($parser, $snippet) {
         focus       => undef,
         children    => [],
         position    => 0,
-        scope       => Chalk::Bootstrap::Scope->new()->with_control($region),
+        bindings       => Chalk::Bootstrap::Bindings->new(), control_head => $region,
         annotations => {
             body_stmts => [$body_stmt],
             loop       => $loop,
@@ -171,7 +171,7 @@ sub _gen_from_snippet ($parser, $snippet) {
         children    => [],
         position    => 0,
         rule        => 'PostfixModifier',
-        scope       => Chalk::Bootstrap::Scope->new()->with_control($region),
+        bindings       => Chalk::Bootstrap::Bindings->new(), control_head => $region,
         annotations => {
             then_stmts => [],
             else_stmts => undef,
@@ -186,7 +186,7 @@ sub _gen_from_snippet ($parser, $snippet) {
         children    => [$child_ctx],
         position    => 0,
         rule        => 'ExpressionStatement',
-        scope       => Chalk::Bootstrap::Scope->new()->with_control($region),
+        bindings       => Chalk::Bootstrap::Bindings->new(), control_head => $region,
         annotations => {
             then_stmts => [$body_stmt],
             else_stmts => undef,

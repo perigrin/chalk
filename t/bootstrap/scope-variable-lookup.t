@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Phi;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Actions;
 use Chalk::Bootstrap::Context;
@@ -84,14 +84,14 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $x_node = $factory->make('Constant', const_type => 'integer', value => '42');
 
     # Create scope with $x bound
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     $scope = $scope->define('$x', $x_node);
 
     # Build a Context with the scope (control-bearing) field set directly.
     # Phase 3a-infra deleted set_cfg_state — Context's scope field is now
     # the channel for control + scope state.
     my $ctx = make_scan_ctx('$x',
-        scope => $scope->with_control($factory->make('Start')),
+        bindings => $scope, control_head => $factory->make('Start'),
     );
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ScalarVariable', 0, 0, 0));
@@ -122,17 +122,17 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     );
 
     # Fork scope to create sentinels
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     $scope = $scope->define('$x', $pre_value);
     my $loop_scope = $scope->fork_for_loop($loop);
 
     # Verify sentinel is in place before calling action
     my $raw = $loop_scope->raw_lookup('$x');
-    ok(ref $raw eq 'Chalk::Bootstrap::Scope::Sentinel', 'scope has sentinel before action runs');
+    ok(ref $raw eq 'Chalk::Bootstrap::Bindings::Sentinel', 'scope has sentinel before action runs');
 
     # Build a Context with the sentinel scope (control-bearing) field set.
     my $ctx = make_scan_ctx('$x',
-        scope => $loop_scope->with_control($factory->make('Start')),
+        bindings => $loop_scope, control_head => $factory->make('Start'),
     );
 
 
@@ -170,11 +170,11 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
     my $arr_node = $factory->make('Constant', const_type => 'variable', value => '@arr');
 
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     $scope = $scope->define('@arr', $arr_node);
 
     my $ctx = make_scan_ctx('@arr',
-        scope => $scope->with_control($factory->make('Start')),
+        bindings => $scope, control_head => $factory->make('Start'),
     );
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'ArrayVariable', 0, 0, 0));
@@ -193,11 +193,11 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
     my $hash_node = $factory->make('Constant', const_type => 'variable', value => '%h');
 
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     $scope = $scope->define('%h', $hash_node);
 
     my $ctx = make_scan_ctx('%h',
-        scope => $scope->with_control($factory->make('Start')),
+        bindings => $scope, control_head => $factory->make('Start'),
     );
 
     my $result = $sa->multiply($ctx, $make_complete->($ctx, 'HashVariable', 0, 0, 0));

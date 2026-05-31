@@ -16,7 +16,7 @@ class Chalk::Bootstrap::Context {
     field $error        :param :reader = undef;
     field $mop         :param :reader = undef;
     field $graph       :param :reader = undef;
-    field $scope       :param :reader = undef;
+    field $bindings    :param :reader = undef;
     field $factory      :param :reader = undef;
     field $control_head :param :reader = undef;
 
@@ -25,9 +25,15 @@ class Chalk::Bootstrap::Context {
         return $focus;
     }
 
+    # Deprecation shim for scope/control divorce C3. The field was renamed
+    # to $bindings to reflect its bindings-only semantic. The scope() alias
+    # is for one-commit backward compatibility — deleted in C5.
+    method scope() { return $bindings; }
+
     # Apply a function to this context, creating a new context with the result as focus
     # This is the comonad 'extend' operation: (Context -> a) -> Context -> Context
-    # Optional %opts may include rule, annotations, graph, scope, and other field overrides.
+    # Optional %opts may include rule, annotations, graph, bindings, and other field overrides.
+    # The deprecated `scope` opt key is accepted as an alias for `bindings` (removed in C5).
     method extend($f, %opts) {
         my $new_focus = $f->($self);
         return Chalk::Bootstrap::Context->new(
@@ -41,7 +47,7 @@ class Chalk::Bootstrap::Context {
             error       => (exists $opts{error} ? $opts{error} : $error),
             mop         => (exists $opts{mop} ? $opts{mop} : $mop),
             graph       => (exists $opts{graph} ? $opts{graph} : $graph),
-            scope       => (exists $opts{scope} ? $opts{scope} : $scope),
+            bindings    => (exists $opts{bindings} ? $opts{bindings} : (exists $opts{scope} ? $opts{scope} : $bindings)),
             factory      => (exists $opts{factory}      ? $opts{factory}      : $factory),
             control_head => (exists $opts{control_head} ? $opts{control_head} : $control_head),
         );
@@ -199,7 +205,7 @@ class Chalk::Bootstrap::Context {
     method cfg_state() {
         my @stack = ($self);
         my $found_ch;
-        my $found_scope;
+        my $found_bindings;
         my %structural;
 
         while (@stack) {
@@ -208,17 +214,17 @@ class Chalk::Bootstrap::Context {
             my $nc = $node->control_head;
             if (defined $nc) {
                 # Co-existence invariant: every site that sets control_head
-                # also has scope populated. If $found_scope is missing here,
-                # it's a code bug, not a cfg_state defect.
+                # also has bindings populated. If $found_bindings is missing
+                # here, it's a code bug, not a cfg_state defect.
                 if (!defined $found_ch) {
                     $found_ch = $nc;
-                    $found_scope = $node->scope;
+                    $found_bindings = $node->bindings;
                 } else {
                     # Prefer non-Start over Start (structural change wins).
                     if ($found_ch->operation eq 'Start'
                             && $nc->operation ne 'Start') {
                         $found_ch = $nc;
-                        $found_scope = $node->scope;
+                        $found_bindings = $node->bindings;
                     }
                 }
             }
@@ -233,9 +239,11 @@ class Chalk::Bootstrap::Context {
 
         return undef unless defined $found_ch;
 
+        # The returned hash's `scope` key is the public cfg_state contract
+        # (consumers read $state->{scope}); it carries the Bindings object.
         return {
             control => $found_ch,
-            scope   => $found_scope,
+            scope   => $found_bindings,
             %structural,
         };
     }

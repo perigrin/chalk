@@ -7,31 +7,31 @@ use experimental 'class';
 
 use lib 'lib';
 use Chalk::Bootstrap::Context;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::Graph;
 
 subtest 'structural action can drop scope by not propagating it' => sub {
-    my $scope = Chalk::Bootstrap::Scope->new()->define('$x', 'some_node');
+    my $scope = Chalk::Bootstrap::Bindings->new()->define('$x', 'some_node');
     my $inner_ctx = Chalk::Bootstrap::Context->new(
         focus => 'inner',
-        scope => $scope,
+        bindings => $scope,
     );
 
     # A structural action (like MethodDefinition) doesn't forward its children's scope.
     # It explicitly passes scope => undef (or omits scope from opts).
     my $outer = $inner_ctx->extend(
         sub ($c) { 'method_result' },
-        scope => undef,
+        bindings => undef,
     );
 
     is($outer->scope, undef, 'structural action produces result with no scope');
 };
 
 subtest 'scope survives extend when not overridden' => sub {
-    my $scope = Chalk::Bootstrap::Scope->new()->define('$y', 'some_other_node');
+    my $scope = Chalk::Bootstrap::Bindings->new()->define('$y', 'some_other_node');
     my $ctx = Chalk::Bootstrap::Context->new(
         focus => 'value',
-        scope => $scope,
+        bindings => $scope,
     );
 
     my $extended = $ctx->extend(sub ($c) { 'new_value' });
@@ -39,16 +39,16 @@ subtest 'scope survives extend when not overridden' => sub {
 };
 
 subtest 'scope from outer extend not visible in separate sibling context' => sub {
-    my $scope = Chalk::Bootstrap::Scope->new()->define('$z', 'a_node');
+    my $scope = Chalk::Bootstrap::Bindings->new()->define('$z', 'a_node');
     my $ctx_with_scope = Chalk::Bootstrap::Context->new(
         focus => 'body',
-        scope => $scope,
+        bindings => $scope,
     );
 
     # Simulate a separate "after" context with no scope
     my $ctx_without_scope = Chalk::Bootstrap::Context->new(
         focus => 'after',
-        scope => undef,
+        bindings => undef,
     );
 
     is($ctx_without_scope->scope, undef,

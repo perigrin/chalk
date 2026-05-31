@@ -6,7 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::IR::NodeFactory;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::Node::Phi;
 use Scalar::Util 'refaddr';
 
@@ -26,7 +26,7 @@ my $region = $factory->make('Region', controls => []);
         region => $region,
         values => [$const1, $const1],
     );
-    my $result = Chalk::Bootstrap::Scope::_remove_trivial_phi($phi);
+    my $result = Chalk::Bootstrap::Bindings::_remove_trivial_phi($phi);
     ok(!($result isa Chalk::IR::Node::Phi),
         'direct: Phi with two identical operands is trivial');
     is(refaddr($result), refaddr($const1),
@@ -43,7 +43,7 @@ my $region = $factory->make('Region', controls => []);
     $phi->inputs()->[0] = $const1;
     $phi->inputs()->[1] = $phi;
 
-    my $result = Chalk::Bootstrap::Scope::_remove_trivial_phi($phi);
+    my $result = Chalk::Bootstrap::Bindings::_remove_trivial_phi($phi);
     ok(!($result isa Chalk::IR::Node::Phi),
         'direct: Phi with self-ref + one value is trivial (self-ref ignored)');
     is(refaddr($result), refaddr($const1),
@@ -56,7 +56,7 @@ my $region = $factory->make('Region', controls => []);
         region => $region,
         values => [$const1, $const2],
     );
-    my $result = Chalk::Bootstrap::Scope::_remove_trivial_phi($phi);
+    my $result = Chalk::Bootstrap::Bindings::_remove_trivial_phi($phi);
     ok($result isa Chalk::IR::Node::Phi,
         'direct: Phi with different operands is non-trivial');
     is(refaddr($result), refaddr($phi),
@@ -69,7 +69,7 @@ my $region = $factory->make('Region', controls => []);
         region => $region,
         values => [$const1, undef],
     );
-    my $result = Chalk::Bootstrap::Scope::_remove_trivial_phi($phi);
+    my $result = Chalk::Bootstrap::Bindings::_remove_trivial_phi($phi);
     ok($result isa Chalk::IR::Node::Phi,
         'direct: Phi with undef operand is non-trivial');
     is(refaddr($result), refaddr($phi),
@@ -80,7 +80,7 @@ my $region = $factory->make('Region', controls => []);
 
 # Case 5: both branches unchanged — merge returns original value, not a Phi
 {
-    my $pre_scope = Chalk::Bootstrap::Scope->new();
+    my $pre_scope = Chalk::Bootstrap::Bindings->new();
     $pre_scope = $pre_scope->define('$x', $const1);
 
     my $merged = $pre_scope->merge_with_phis(
@@ -96,7 +96,7 @@ my $region = $factory->make('Region', controls => []);
 
 # Case 6: both branches assign different values — non-trivial Phi remains
 {
-    my $pre_scope = Chalk::Bootstrap::Scope->new();
+    my $pre_scope = Chalk::Bootstrap::Bindings->new();
     $pre_scope = $pre_scope->define('$x', $const1);
 
     my $then_scope = $pre_scope->define('$x', $const2);
@@ -113,7 +113,7 @@ my $region = $factory->make('Region', controls => []);
 
 # Case 7: variable only in one branch (other undef) — Phi remains
 {
-    my $base_scope = Chalk::Bootstrap::Scope->new();
+    my $base_scope = Chalk::Bootstrap::Bindings->new();
     my $then_scope = $base_scope->define('$z', $const1);
     my $else_scope = $base_scope;
 
@@ -128,7 +128,7 @@ my $region = $factory->make('Region', controls => []);
 
 # Case 8: both branches assign same value (same node) — trivial, returns value
 {
-    my $pre_scope = Chalk::Bootstrap::Scope->new();
+    my $pre_scope = Chalk::Bootstrap::Bindings->new();
     $pre_scope = $pre_scope->define('$x', $const1);
 
     my $then_scope = $pre_scope->define('$x', $const2);

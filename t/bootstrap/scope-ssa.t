@@ -7,14 +7,14 @@ use Test2::V0;
 use Scalar::Util 'refaddr';
 
 use lib 'lib';
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::NodeFactory;
 
 my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 1: define() overwrites an existing binding
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node_a = $factory->make('Constant', const_type => 'int', value => 1);
     my $node_b = $factory->make('Constant', const_type => 'int', value => 2);
 
@@ -26,7 +26,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 2: original scope is unchanged after overwrite (immutability)
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node_a = $factory->make('Constant', const_type => 'int', value => 10);
     my $node_b = $factory->make('Constant', const_type => 'int', value => 20);
 
@@ -39,7 +39,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 3: define() with sigil-prefixed name works for all sigils
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $scalar_node = $factory->make('Constant', const_type => 'int', value => 1);
     my $array_node  = $factory->make('Constant', const_type => 'int', value => 2);
     my $hash_node   = $factory->make('Constant', const_type => 'int', value => 3);
@@ -55,7 +55,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 4: Overwriting a binding does not affect other bindings in the same scope
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node_x = $factory->make('Constant', const_type => 'int', value => 1);
     my $node_y = $factory->make('Constant', const_type => 'int', value => 2);
     my $node_x2 = $factory->make('Constant', const_type => 'int', value => 99);

@@ -7,7 +7,7 @@ use Test2::V0;
 use Scalar::Util 'refaddr';
 
 use lib 'lib';
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::NodeFactory;
 
 # Reset factory to ensure clean test state
@@ -16,13 +16,13 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 1: Empty scope - lookup returns undef
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     is($scope->lookup('$x'), undef, 'empty scope lookup returns undef');
 }
 
 # Test 2: Define and lookup - define $x → Constant(0), lookup returns it
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node = $factory->make('Constant', const_type => 'int', value => 0);
 
     my $scope2 = $scope->define('$x', $node);
@@ -32,7 +32,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 3: Immutability - defining on scope2 doesn't change scope1
 {
-    my $scope1 = Chalk::Bootstrap::Scope->new();
+    my $scope1 = Chalk::Bootstrap::Bindings->new();
     my $node = $factory->make('Constant', const_type => 'int', value => 1);
 
     my $scope2 = $scope1->define('$x', $node);
@@ -43,7 +43,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 4: Overwrite - defining $x again returns new value, previous scope unchanged
 {
-    my $scope1 = Chalk::Bootstrap::Scope->new();
+    my $scope1 = Chalk::Bootstrap::Bindings->new();
     my $node_a = $factory->make('Constant', const_type => 'int', value => 10);
     my $node_b = $factory->make('Constant', const_type => 'int', value => 20);
 
@@ -57,7 +57,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 5: Multiple variables - define $x and $y, both look up correctly
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node_x = $factory->make('Constant', const_type => 'int', value => 100);
     my $node_y = $factory->make('Constant', const_type => 'int', value => 200);
 
@@ -70,7 +70,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 6: Snapshot - returns hashref of current bindings
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node_x = $factory->make('Constant', const_type => 'int', value => 5);
     my $node_y = $factory->make('Constant', const_type => 'int', value => 10);
 
@@ -85,7 +85,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 7: Diff - modified variable shows in diff
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node_a = $factory->make('Constant', const_type => 'int', value => 1);
     my $node_b = $factory->make('Constant', const_type => 'int', value => 2);
 
@@ -101,7 +101,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 8: Diff - new variable shows in diff
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node_x = $factory->make('Constant', const_type => 'int', value => 1);
     my $node_y = $factory->make('Constant', const_type => 'int', value => 2);
 
@@ -117,7 +117,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 9: Diff - unchanged variable not in diff
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node = $factory->make('Constant', const_type => 'int', value => 42);
 
     my $scope2 = $scope->define('$x', $node);
@@ -130,7 +130,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 10: Diff - multiple changes (both modified and new variables)
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node_x1 = $factory->make('Constant', const_type => 'int', value => 1);
     my $node_x2 = $factory->make('Constant', const_type => 'int', value => 2);
     my $node_y = $factory->make('Constant', const_type => 'int', value => 3);
@@ -150,7 +150,7 @@ my $factory = Chalk::IR::NodeFactory->new;
 
 # Test 11: variable_names - returns all bound names
 {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $node_x = $factory->make('Constant', const_type => 'int', value => 1);
     my $node_y = $factory->make('Constant', const_type => 'int', value => 2);
     my $node_z = $factory->make('Constant', const_type => 'int', value => 3);

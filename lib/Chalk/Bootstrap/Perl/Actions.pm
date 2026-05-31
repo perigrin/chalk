@@ -184,17 +184,10 @@ class Chalk::Bootstrap::Perl::Actions {
         return 'Any';
     }
 
-    # Helper: get the effective scope from a Context.
-    # Reads the $scope field directly; returns undef if no scope is set.
+    # Helper: get the lexical bindings from a Context.
+    # Reads the $bindings field directly; returns undef if none is set.
     my sub _ctx_scope($ctx) {
-        return $ctx->scope();
-    }
-
-    # Helper: get the control_head from a Context (or undef).
-    # Post-scope/control-divorce C2: reads control_head directly.
-    # Helper kept as a wrapper for one commit; deleted in C3.
-    my sub _ctx_control($ctx) {
-        return $ctx->control_head;
+        return $ctx->bindings;
     }
 
     # Helper: resolve a variable name from scope, creating a Phi if needed.
@@ -369,7 +362,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Retrieve the current control token from scope for CFG edge.
         # Fall back to a fresh Start node when no scope is available
         # (e.g., in tests or early-parse contexts without scope tracking).
-        my $control = _ctx_control($ctx) // $factory->make('Start');
+        my $control = $ctx->control_head // $factory->make('Start');
         return $factory->make_cfg('Return',
             inputs => [$control, $value // _make_const($factory, 'undef')],
         );
@@ -1348,7 +1341,7 @@ class Chalk::Bootstrap::Perl::Actions {
         if (defined $func_name && $func_name eq 'return') {
             # return EXPR → Return CFG node
             my $value   = $args[0]; # single value for Tier A
-            my $control = _ctx_control($ctx) // $factory->make('Start');
+            my $control = $ctx->control_head // $factory->make('Start');
             return $factory->make_cfg('Return',
                 inputs => [$control, $value],
             );
@@ -1356,7 +1349,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         if (defined $func_name && $func_name eq 'die') {
             # die EXPR → Unwind CFG node (exceptional exit)
-            my $control = _ctx_control($ctx) // $factory->make('Start');
+            my $control = $ctx->control_head // $factory->make('Start');
             return $factory->make_cfg('Unwind',
                 inputs => [$control, \@args],
             );
@@ -1762,7 +1755,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Side-effect-shaped: inputs[0]=control, [1]=name, [2]=init.
         # Control comes from the in-scope control input - the previous
         # side-effect node, or a fresh Start if this is the first.
-        my $control = _ctx_control($ctx) // $factory->make('Start');
+        my $control = $ctx->control_head // $factory->make('Start');
         my $var_decl = $ctx->factory->make('VarDecl',
             inputs       => [$control, $var_name, undef],
         );
@@ -1786,7 +1779,7 @@ class Chalk::Bootstrap::Perl::Actions {
         if (defined $sa) {
             my $scope = _ctx_scope($ctx);
             if (defined $scope) {
-                $sa->update_scope($scope->define($var_name->value(), $var_decl)->with_control($var_decl));
+                $sa->update_scope($scope->define($var_name->value(), $var_decl));
                 $sa->update_control_head($var_decl);
             }
             $sa->update_graph($graph);
@@ -2320,7 +2313,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         && $name_in->value() =~ /^[\$\@\%]/) {
                     my $scope = _ctx_scope($ctx);
                     if (defined $scope) {
-                        $sa->update_scope($scope->define($name_in->value(), $result)->with_control($result));
+                        $sa->update_scope($scope->define($name_in->value(), $result));
                         $sa->update_control_head($result);
                     }
                     my $graph = $ctx->graph() // Chalk::IR::Graph->new;
@@ -2393,7 +2386,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
             if (defined $sa) {
                 my $scope   = _ctx_scope($ctx);
-                my $control = _ctx_control($ctx) // $factory->make('Start');
+                my $control = $ctx->control_head // $factory->make('Start');
                 if (defined $scope) {
                     my $loop_cond = $condition // $factory->make('Constant',
                         const_type => 'string', value => '__loop_bound__');
@@ -2444,7 +2437,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         )
                     );
 
-                    $sa->update_scope($scope->with_control($region));
+                    $sa->update_scope($scope);
                     $sa->update_control_head($region);
                     $sa->update_annotations({
                         loop       => $loop,
@@ -2461,7 +2454,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
             if (defined $sa) {
                 my $scope   = _ctx_scope($ctx);
-                my $control = _ctx_control($ctx) // $factory->make('Start');
+                my $control = $ctx->control_head // $factory->make('Start');
                 if (defined $scope) {
                     # For 'unless', negate the condition (unless X = if !X)
                     my $cond = $condition;
@@ -2508,7 +2501,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         )
                     );
 
-                    $sa->update_scope($scope->with_control($region));
+                    $sa->update_scope($scope);
                     $sa->update_control_head($region);
                     $sa->update_annotations({
                         then_stmts => [],
@@ -2598,7 +2591,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         if (defined $sa) {
             my $scope   = _ctx_scope($ctx);
-            my $control = _ctx_control($ctx) // $factory->make('Start');
+            my $control = $ctx->control_head // $factory->make('Start');
             if (defined $scope) {
                 my $if_node = $factory->make('If',
                     control   => $control,
@@ -2673,7 +2666,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     )
                 );
 
-                $sa->update_scope($merged_scope->with_control($region));
+                $sa->update_scope($merged_scope);
                 $sa->update_control_head($region);
                 $sa->update_annotations({
                     then_stmts => $then_body,
@@ -2737,7 +2730,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         if (defined $sa) {
             my $scope   = _ctx_scope($ctx);
-            my $control = _ctx_control($ctx) // $factory->make('Start');
+            my $control = $ctx->control_head // $factory->make('Start');
             if (defined $scope) {
                 my $if_node = $factory->make('If',
                     control   => $control,
@@ -2760,7 +2753,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     )
                 );
 
-                $sa->update_scope($scope->with_control($region));
+                $sa->update_scope($scope);
                 $sa->update_control_head($region);
                 $sa->update_annotations({
                     then_stmts => $then_body,
@@ -2821,7 +2814,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         if (defined $sa) {
             my $scope   = _ctx_scope($ctx);
-            my $control = _ctx_control($ctx) // $factory->make('Start');
+            my $control = $ctx->control_head // $factory->make('Start');
             if (defined $scope) {
                 # Pre-loop scope: read from the condition leaf, not from
                 # $ctx directly. By the time WhileStatement's complete event
@@ -2897,7 +2890,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     )
                 );
 
-                $sa->update_scope($post_loop_scope->with_control($region));
+                $sa->update_scope($post_loop_scope);
                 $sa->update_control_head($region);
                 $sa->update_annotations({
                     body_stmts => $body,
@@ -2975,7 +2968,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         my $scope   = _ctx_scope($ctx);
         return undef unless defined $scope;
-        my $control = _ctx_control($ctx) // $factory->make('Start');
+        my $control = $ctx->control_head // $factory->make('Start');
 
         # Pre-loop scope from the condition leaf (matches WhileStatement
         # pattern: by the time ForStatement's complete event fires,
@@ -3055,7 +3048,7 @@ class Chalk::Bootstrap::Perl::Actions {
             )
         );
 
-        $sa->update_scope($post_loop_scope->with_control($region));
+        $sa->update_scope($post_loop_scope);
         $sa->update_control_head($region);
         $sa->update_annotations({
             body_stmts => \@effective_body,
@@ -3118,7 +3111,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         if (defined $sa) {
             my $scope   = _ctx_scope($ctx);
-            my $control = _ctx_control($ctx) // $factory->make('Start');
+            my $control = $ctx->control_head // $factory->make('Start');
             if (defined $scope) {
                 # Pre-loop scope: read from the list-leaf, not from $ctx
                 # directly. By the time ForeachStatement's complete event
@@ -3203,7 +3196,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     )
                 );
 
-                $sa->update_scope($post_loop_scope->with_control($region));
+                $sa->update_scope($post_loop_scope);
                 $sa->update_control_head($region);
                 $sa->update_annotations({
                     body_stmts => $body,

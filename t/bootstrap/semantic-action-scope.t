@@ -5,7 +5,7 @@ use utf8;
 use Test::More;
 
 use Chalk::Bootstrap::Semiring::SemanticAction;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Context;
 
@@ -44,7 +44,7 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     ok(exists $state->{control}, 'state has control key');
     ok(exists $state->{scope}, 'state has scope key');
     is($state->{control}->operation(), 'Start', 'initial control is Start');
-    ok($state->{scope} isa Chalk::Bootstrap::Scope, 'initial scope is a Scope');
+    ok($state->{scope} isa Chalk::Bootstrap::Bindings, 'initial scope is a Scope');
 }
 
 # --- Test 2: cfg_state propagates through multiply with complete Context ---
@@ -79,7 +79,7 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $state = $result->cfg_state();
     ok(defined $state, 'cfg_state available on completed context');
     is($state->{control}->operation(), 'Start', 'control propagated from parent');
-    ok($state->{scope} isa Chalk::Bootstrap::Scope, 'scope propagated from parent');
+    ok($state->{scope} isa Chalk::Bootstrap::Bindings, 'scope propagated from parent');
 }
 
 # --- Test 3 (REMOVED): set_cfg_state was deleted in Phase 3a-infra ---

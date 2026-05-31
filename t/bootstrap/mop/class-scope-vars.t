@@ -33,8 +33,8 @@ sub make_vardecl ($var_name) {
     my @empty = $cls->class_scope_vars;
     is(scalar @empty, 0,
         'fresh class has zero class_scope_vars');
-    ok(defined $cls->scope, 'fresh class has defined scope');
-    is($cls->scope->lookup('$missing'), undef,
+    ok(defined $cls->bindings, 'fresh class has defined scope');
+    is($cls->bindings->lookup('$missing'), undef,
         'fresh scope returns undef for unknown name');
 }
 
@@ -52,7 +52,7 @@ sub make_vardecl ($var_name) {
     is(scalar @list, 1, 'class_scope_vars has 1 entry after one declare');
     is($list[0], $vd, 'class_scope_vars entry is the same VarDecl object');
 
-    is($cls->scope->lookup('$ZERO'), $vd,
+    is($cls->bindings->lookup('$ZERO'), $vd,
         'scope->lookup($ZERO) returns the VarDecl');
 }
 
@@ -75,9 +75,9 @@ sub make_vardecl ($var_name) {
     is($list[1], $b, 'insertion order [1] is $B');
     is($list[2], $c, 'insertion order [2] is $C');
 
-    is($cls->scope->lookup('$A'), $a, 'scope->lookup($A) returns $a');
-    is($cls->scope->lookup('$B'), $b, 'scope->lookup($B) returns $b');
-    is($cls->scope->lookup('$C'), $c, 'scope->lookup($C) returns $c');
+    is($cls->bindings->lookup('$A'), $a, 'scope->lookup($A) returns $a');
+    is($cls->bindings->lookup('$B'), $b, 'scope->lookup($B) returns $b');
+    is($cls->bindings->lookup('$C'), $c, 'scope->lookup($C) returns $c');
 }
 
 # Test 4: scope is immutable copy-on-write — each declare returns a new Scope.
@@ -92,9 +92,9 @@ sub make_vardecl ($var_name) {
     $cls->declare_class_scope_var(make_vardecl('$A'));
     $cls->declare_class_scope_var(make_vardecl('$B'));
 
-    ok(defined $cls->scope->lookup('$A'),
+    ok(defined $cls->bindings->lookup('$A'),
         '$A still visible after later declare ($scope reassignment works)');
-    ok(defined $cls->scope->lookup('$B'),
+    ok(defined $cls->bindings->lookup('$B'),
         '$B visible after its own declare');
 }
 

@@ -6,7 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::IR::NodeFactory;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::Node::Phi;
 
 my $factory = Chalk::IR::NodeFactory->new();
@@ -20,7 +20,7 @@ my $loop = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
 
 # Case 1: body assigns $x (body_val differs from pre_val) — creates Phi with backedge
 {
-    my $pre_scope = Chalk::Bootstrap::Scope->new();
+    my $pre_scope = Chalk::Bootstrap::Bindings->new();
     $pre_scope = $pre_scope->define('$x', $const1);
 
     my %body_final = ('$x' => $const2);
@@ -37,7 +37,7 @@ my $loop = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
 
 # Case 2: body does not assign $y — no Phi, keeps pre_loop value
 {
-    my $pre_scope = Chalk::Bootstrap::Scope->new();
+    my $pre_scope = Chalk::Bootstrap::Bindings->new();
     $pre_scope = $pre_scope->define('$y', $const3);
 
     my %body_final = ();  # $y not modified in body
@@ -50,7 +50,7 @@ my $loop = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
 
 # Case 3: body assigns same value as pre-loop — no Phi (identity check)
 {
-    my $pre_scope = Chalk::Bootstrap::Scope->new();
+    my $pre_scope = Chalk::Bootstrap::Bindings->new();
     $pre_scope = $pre_scope->define('$z', $const1);
 
     my %body_final = ('$z' => $const1);  # same node
@@ -63,7 +63,7 @@ my $loop = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
 
 # Case 4: iterator variable excluded from Phi creation
 {
-    my $pre_scope = Chalk::Bootstrap::Scope->new();
+    my $pre_scope = Chalk::Bootstrap::Bindings->new();
     $pre_scope = $pre_scope->define('$i', $const1);
     $pre_scope = $pre_scope->define('$sum', $const2);
 
@@ -82,7 +82,7 @@ my $loop = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
 
 # Case 5: multiple variables — some get Phi, some do not
 {
-    my $pre_scope = Chalk::Bootstrap::Scope->new();
+    my $pre_scope = Chalk::Bootstrap::Bindings->new();
     $pre_scope = $pre_scope->define('$a', $const1);
     $pre_scope = $pre_scope->define('$b', $const2);
     $pre_scope = $pre_scope->define('$c', $const3);

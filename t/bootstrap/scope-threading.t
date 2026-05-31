@@ -9,7 +9,7 @@ use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 
 # Build the Perl grammar recognizer pipeline
@@ -47,7 +47,7 @@ SKIP: {
         # cfg_state scope should contain $x from parse-time propagation
         my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available on parse result');
-        ok($state->{scope} isa Chalk::Bootstrap::Scope, 'state has a Scope');
+        ok($state->{scope} isa Chalk::Bootstrap::Bindings, 'state has a Scope');
         my $x_node = $state->{scope}->lookup('$x');
         ok(defined $x_node, '$x is in scope after declaration');
     }
@@ -62,7 +62,7 @@ SKIP: {
         my $sem_ctx = $result;
         my $state = $sem_ctx->cfg_state();
         ok(defined $state, 'cfg_state available');
-        ok($state->{scope} isa Chalk::Bootstrap::Scope, 'state has a Scope');
+        ok($state->{scope} isa Chalk::Bootstrap::Bindings, 'state has a Scope');
         ok(defined $state->{scope}->lookup('$a'), '$a is in scope');
         ok(defined $state->{scope}->lookup('$b'), '$b is in scope');
     }

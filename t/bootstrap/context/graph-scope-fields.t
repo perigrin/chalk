@@ -7,7 +7,7 @@ use experimental 'class';
 
 use lib 'lib';
 use Chalk::Bootstrap::Context;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::Graph;
 
 # --- graph field tests ---
@@ -36,10 +36,10 @@ subtest 'Context has a scope field' => sub {
 };
 
 subtest 'Context accepts a scope at construction' => sub {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $ctx = Chalk::Bootstrap::Context->new(
         focus => undef,
-        scope => $scope,
+        bindings => $scope,
     );
     is($ctx->scope, $scope, 'scope returns the provided scope');
 };
@@ -57,10 +57,10 @@ subtest 'extend preserves graph field' => sub {
 };
 
 subtest 'extend preserves scope field' => sub {
-    my $scope = Chalk::Bootstrap::Scope->new();
+    my $scope = Chalk::Bootstrap::Bindings->new();
     my $ctx = Chalk::Bootstrap::Context->new(
         focus => 'original',
-        scope => $scope,
+        bindings => $scope,
     );
     my $extended = $ctx->extend(sub ($c) { 'new_focus' });
     is($extended->scope, $scope, 'extend propagates scope to result');
@@ -78,13 +78,13 @@ subtest 'extend opts can override graph' => sub {
 };
 
 subtest 'extend opts can override scope' => sub {
-    my $scope1 = Chalk::Bootstrap::Scope->new();
-    my $scope2 = Chalk::Bootstrap::Scope->new();
+    my $scope1 = Chalk::Bootstrap::Bindings->new();
+    my $scope2 = Chalk::Bootstrap::Bindings->new();
     my $ctx = Chalk::Bootstrap::Context->new(
         focus => 'original',
-        scope => $scope1,
+        bindings => $scope1,
     );
-    my $extended = $ctx->extend(sub ($c) { 'new_focus' }, scope => $scope2);
+    my $extended = $ctx->extend(sub ($c) { 'new_focus' }, bindings => $scope2);
     is($extended->scope, $scope2, 'extend scope opt overrides inherited scope');
 };
 

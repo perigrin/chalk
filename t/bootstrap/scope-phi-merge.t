@@ -6,7 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::IR::NodeFactory;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::IR::Node::Phi;
 
 my $factory = Chalk::IR::NodeFactory->new();
@@ -15,7 +15,7 @@ my $const1 = $factory->make('Constant', const_type => 'integer', value => '1');
 my $const2 = $factory->make('Constant', const_type => 'integer', value => '2');
 my $const3 = $factory->make('Constant', const_type => 'integer', value => '3');
 
-my $pre_scope = Chalk::Bootstrap::Scope->new();
+my $pre_scope = Chalk::Bootstrap::Bindings->new();
 $pre_scope = $pre_scope->define('$x', $const1);
 $pre_scope = $pre_scope->define('$y', $const3);
 

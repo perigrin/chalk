@@ -8,7 +8,7 @@ use lib 'lib';
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::VarDecl;
-use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Bindings;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Actions;
 use Chalk::Bootstrap::Context;
@@ -27,13 +27,15 @@ my sub make_leaf_ctx($node) {
 
 # Helper: build a parent Context with specified leaf children (focus=undef) and scope.
 # Scope carries the control input node as per the new scope-based API.
-my sub make_parent_ctx($scope, @children) {
+my sub make_parent_ctx($bindings, $control_head, @children) {
     return Chalk::Bootstrap::Context->new(
-        focus    => undef,
-        children => \@children,
-        position => 0,
-        rule     => undef,
-        scope    => $scope,
+        focus        => undef,
+        children     => \@children,
+        position     => 0,
+        rule         => undef,
+        bindings     => $bindings,
+        control_head => $control_head,
+        factory      => $factory,
     );
 }
 
@@ -76,9 +78,9 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $op_node   = $factory->make('Constant', const_type => 'string', value => '=');
     my $rhs_node  = $factory->make('Constant', const_type => 'integer', value => '42');
 
-    # Build a parent context with leaves: [VarDecl, '=', 42], scope carries Start control.
-    my $scope = Chalk::Bootstrap::Scope->new()->with_control($factory->make('Start'));
-    my $ctx = make_parent_ctx($scope,
+    # Build a parent context with leaves: [VarDecl, '=', 42], control_head carries Start.
+    my $scope = Chalk::Bootstrap::Bindings->new();
+    my $ctx = make_parent_ctx($scope, $factory->make('Start'),
         make_leaf_ctx($vardecl),
         make_leaf_ctx($op_node),
         make_leaf_ctx($rhs_node),
@@ -119,10 +121,9 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
     # Pre-populate scope with existing $x binding (value 1)
     my $old_x = $factory->make('Constant', const_type => 'integer', value => '1');
-    my $scope = Chalk::Bootstrap::Scope->new()->define('$x', $old_x)
-                                               ->with_control($factory->make('Start'));
+    my $scope = Chalk::Bootstrap::Bindings->new()->define('$x', $old_x);
 
-    my $ctx = make_parent_ctx($scope,
+    my $ctx = make_parent_ctx($scope, $factory->make('Start'),
         make_leaf_ctx($var_node),
         make_leaf_ctx($op_node),
         make_leaf_ctx($rhs_node),
@@ -134,7 +135,10 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $node = $result->extract();
     ok(defined $node, 'plain assignment: result has an IR node');
     ok($node isa Chalk::IR::Node, 'plain assignment: result is an IR node');
-    is($node->class(), 'BinaryExpr', 'plain assignment: result is a BinaryExpr (Assign)');
+    # class() returns the typed operation 'Assign'. The action makes the node
+    # via make('Assign') with no compat_class, so class() falls through to
+    # operation() — the legacy 'BinaryExpr' compat_class is no longer set.
+    is($node->class(), 'Assign', 'plain assignment: result is an Assign node');
 
     # Verify scope was updated with the Assign node
     my $result_scope = $result->scope();
@@ -163,10 +167,9 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
     # Pre-populate scope
     my $old_x = $factory->make('Constant', const_type => 'integer', value => '0');
-    my $scope = Chalk::Bootstrap::Scope->new()->define('$x', $old_x)
-                                               ->with_control($factory->make('Start'));
+    my $scope = Chalk::Bootstrap::Bindings->new()->define('$x', $old_x);
 
-    my $ctx = make_parent_ctx($scope,
+    my $ctx = make_parent_ctx($scope, $factory->make('Start'),
         make_leaf_ctx($var_node),
         make_leaf_ctx($op_node),
         make_leaf_ctx($rhs_node),
@@ -206,7 +209,7 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     my $rhs_node = $factory->make('Constant', const_type => 'integer', value => '99');
 
     # No scope on this context
-    my $ctx = make_parent_ctx(undef,
+    my $ctx = make_parent_ctx(undef, undef,
         make_leaf_ctx($var_node),
         make_leaf_ctx($op_node),
         make_leaf_ctx($rhs_node),
@@ -217,7 +220,7 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
 
     my $node = $result->extract();
     ok(defined $node, 'no-scope assignment: result has an IR node');
-    is($node->class(), 'BinaryExpr', 'no-scope assignment: returns BinaryExpr (Assign)');
+    is($node->class(), 'Assign', 'no-scope assignment: returns an Assign node');
 }
 
 done_testing();
