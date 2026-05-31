@@ -1539,6 +1539,55 @@ git log --oneline -1
 
 ## COMMIT 4 — Retire Block's control-chain rebuild
 
+> **BLOCKED — premise invalidated by the Task 4.1 audit (2026-05-31).**
+>
+> The Task 4.1 instrumentation was run across the Block-exercising suite
+> (bnf-target-c, mop/parse-integration, mop/codegen-byte-compat,
+> c-emit-helpers-inheritance, build-graph-control-chain/loop-phi/ifelse-phi,
+> cfg-statements, cfg-try-catch). It counted three kinds of work, not just
+> the plan's single "rewrite branch":
+>   - `rewrite_fires` — a control-input rewrite actually changed a VarDecl/
+>     Return/Unwind node (the C2 sibling-propagation claim is false if >0)
+>   - `merge_adds`    — `$graph->merge($s)` added a Call-family node not
+>     already in the graph
+>   - `ctrl_in_sets`  — `set_control_in` changed a Call-family/If/Loop node
+>
+> Of 46 blocks that ran the rebuild: **22 had rewrite_fires>0, 29 had
+> merge_adds>0, 43 had ctrl_in_sets>0.** The rebuild is heavily
+> load-bearing. Per Task 4.1 Step 4, this means STOP — do not delete.
+>
+> **Why the plan's premise was wrong.** C2 made `control_head` propagate
+> sibling-to-sibling through the *semiring multiply* (`_mul_ctx`), carrying
+> the *parse-time* control. But the Block rebuild wires the *materialized
+> IR-node* effect chain — a different problem. Earley synthesizes actions
+> bottom-up: each statement in a StatementList is an independent subtree
+> built from `one()` (Start control); siblings merge only at the parent
+> rule, *after* both have completed. So when statement N+1's action runs,
+> statement N's materialized IR node does not yet exist — the action falls
+> back to `$ctx->control_head // make('Start')`, and the rebuild is the
+> pass that retroactively wires each node's inputs[0] to its true
+> predecessor. `control_head` propagation and the IR-node rebuild solve
+> different problems; C2 did not make the rebuild redundant. This is the
+> same structural gap documented in the `phase_3a_migration_cross_stmt_scope.md`
+> memory note (which recommended the rebuild — "approach 1" — in the first
+> place).
+>
+> **The rebuild cannot be deleted; it can at best be relocated.** The
+> control-threading must happen after all sibling nodes materialize, which
+> only occurs at the StatementList action (a pure collector today) or the
+> Block action (current location). Relocating it is not deletion. True
+> redundancy requires the note's approach 2 (SA-instance mutable
+> thread-local state — breaks the immutability/determinism design
+> principle) or approach 3 (mutable control attribute — diverges from the
+> Return/Unwind positional-input convention). Both are invasive
+> architectural changes, out of scope for this plan.
+>
+> **Disposition:** C4 is shelved. C5 does not depend on the rebuild's
+> deletion and can proceed independently. If retiring the rebuild becomes
+> a goal, it needs its own design brief evaluating approaches 2/3 against
+> the immutability principle — not this plan's "it's already redundant"
+> framing.
+
 ### Task 4.1: Pre-commit instrumentation audit
 
 **Files:**
