@@ -180,6 +180,30 @@ SKIP: {
             '$x is a Phi even with trailing statement')
             or diag('$x binding is: ' . ref($x_binding));
     }
+
+    # --- Test 7: Trailing rebind after a loop REPLACES the loop Phi ---
+    # The symmetric, SSA-critical counterpart to Test 6. A bare read leaves the
+    # Phi intact, but a trailing assignment ($x = 99;) rebinds $x to a new value.
+    # Because _mul_ctx gives the RIGHT (later) sibling precedence for duplicate
+    # names, the program-scope binding for $x must be the trailing assignment,
+    # NOT the loop-carried Phi. This distinguishes correct right-wins from a
+    # naive Phi-preserving heuristic.
+    {
+        $semiring->reset_cache();
+
+        my $src = 'my $x = 0; for my $i (1, 2, 3) { $x = $x + $i; } $x = 99;';
+        my $result = $parser->parse_value($src);
+        ok(defined $result, 'loop with trailing rebind parses');
+
+        my $sem_ctx = $result;
+        skip 'no semantic context for Test 7', 1 unless defined $sem_ctx;
+
+        my $state = $sem_ctx->cfg_state();
+        my $x_binding = $state->{scope}->lookup('$x');
+        ok(!($x_binding isa Chalk::IR::Node::Phi),
+            '$x is NOT a Phi after a trailing rebind (later sibling wins)')
+            or diag('$x binding is: ' . ref($x_binding));
+    }
 }
 
 done_testing();
