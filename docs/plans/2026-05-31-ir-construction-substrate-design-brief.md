@@ -110,14 +110,33 @@ Decisive evidence (env-gated instrumentation, reverted; detector proven live via
 
 Note: the `completion_map` / per-position DFA-state substrate may not be needed for the FLAT case at all — the predecessor is already determinate from the surviving Context's lineage; the gap is purely lateral propagation. Per-position DFA state matters (if at all) only at the harder nested/disambiguation edges.
 
-### Remaining uncertainty before committing A for the full grammar
+### Nesting spike (2026-06-01): Option A extends to nesting — PASSED
 
-Definitive for **flat statement sequences**. **Consistent-but-not-proven for nesting** (If/Loop producing Regions, nested blocks): the nested-If case parsed correctly with zero packs, but the Region/Phi control-threading *order* was not instrumented deeply enough to prove the predecessor is determinate at the moment those control nodes are wired. **Next spike before the A implementation plan:** instrument If/Loop/Region/Phi threading order on a nested body and confirm determinacy holds there too (or characterize exactly where it doesn't).
+The gating spike ran on three nested shapes: statement-after-if (with inner block), loop, and nested-if. Result: **determinacy holds through nesting and control flow.** Verdict (a): determinate-and-materialized, Option A extends.
+
+Decisive evidence:
+- **Zero ambiguity packs** in any nested parse (flat-case baseline preserved); detector proven live (7 packs on `filter-composite-packed.t`). Control-flow-boundary multi-state is the deterministic LR fan, not ambiguity — nothing to resolve, only to route.
+- **The correct predecessor is always already materialized when needed.** Factory creation log proves temporal ordering: e.g. for `my $x=1; if($x){my $y=2;} my $z=3;`, `Region#4` is created (during the If action) strictly *before* `$z`'s VarDecl action fires — yet `$z` receives `control_head=Start, graph=no-graph`. The Region exists and is a single unambiguous node; it's just not threaded. Same for loop (`Loop#1`/`Region#6` exist before rebuild) and nested-if (`Region#4` exists before outer-if fires).
+- The rebuild's `agree=NO` at every control-flow junction confirms `control_head` is stale/leaked, not absent-because-undecided.
+
+**Scope this adds to the Option A fix (more than the flat linear rewire — three routing rules):**
+1. **Region-advance:** for If/Loop the parent chain advances past `$s->region` (the merge point), not past the If/Loop node (`Actions.pm:1671`).
+2. **Inner-tail-leak suppression (new direction):** an inner block's tail `control_head` currently leaks *upward* and pollutes the enclosing control statement's predecessor (e.g. inner-if saw `$a`, outer-if saw the inner Region). Threading must prevent this.
+3. **Graph propagation to trailing siblings:** the in-flight `graph` isn't carried to trailing siblings (`$z` fired with `no-graph`).
+
+None require ambiguity resolution or post-parse materialization waits — all are routing. So the Block rebuild is **retireable** under Option A for control-flow cases too, provided the threading reproduces these three rules (not just the flat linear chain).
+
+**Phi caveat (separate, currently-incomplete feature — do NOT conflate with "done"):** eager-Phi construction at merge points (`Bindings::merge_with_phis`, called in the If action) is incomplete in the current parser — Phis largely aren't built for divergent branches (`scope-if-merge.t` 7/12, `cfg-loop-phi.t` 4/8/16/19 are `# TODO`, "pre-existing parser bug"). This is orthogonal to the threading decision (Phis, when built, ride the same during-parse timeline inside the If action), but the Option A plan must treat Phi-at-merge as its own workstream, not assume it's handled.
 
 ### Disposition of the other options
 
-- **Option B** is not forced and is the heavier change; shelve unless the nesting spike overturns A.
-- **Option C cleanup:** the `control_head`-drop bug (two `_complete_sa` inherit blocks), dead `_transferred_scope`, and dead `error` field are safe to fix now, independent of A. **Do NOT delete `completion_map`** — A's nesting question may still want per-position state; revisit only after the nesting spike.
+- **Option B** is not forced (both spikes confirm determinacy); shelve.
+- **Option C cleanup:** the `control_head`-drop bug (two `_complete_sa` inherit blocks), dead `_transferred_scope`, and dead `error` field are safe to fix now, independent of A.
+- **`completion_map` / per-position DFA state:** NOT needed for Option A — both spikes show the predecessor is determinate from the surviving Context's lineage; the gap is purely lateral routing, not per-position state lookup. The dead `completion_map` can now be cleaned up (deleted or scoped to its C-serializer consumer) without losing anything Option A needs. (Resolves the earlier "do not delete until nesting settles" hold.)
+
+### Bottom line
+
+Option A is confirmed viable for the full statement/control-flow grammar. The fix is during-parse lateral control threading implementing three routing rules (linear-chain, region-advance, inner-tail-leak-suppression) plus graph propagation, retiring the ~90-line Block rebuild. Phi-at-merge is a separate incomplete feature to plan independently. Next artifact: the Option A implementation plan (TDD, flat case green first, then control-flow, then nesting).
 
 ---
 
