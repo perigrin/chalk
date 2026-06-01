@@ -83,6 +83,16 @@ class Chalk::Bootstrap::Perl::Actions {
     field $factory;
     field $typed;
 
+    # Block control-chain rebuild toggle (Phase 2 Step A). The rebuild
+    # (in Block) re-threads each side-effect node's control input in source
+    # order. It is retained as a safety net while during-parse control_head
+    # threading is validated. Tests disable it to prove the threading builds
+    # the chain on its own; production leaves it enabled.
+    my $_control_rebuild_enabled = true;
+    sub disable_control_rebuild { $_control_rebuild_enabled = false }
+    sub enable_control_rebuild  { $_control_rebuild_enabled = true }
+    sub control_rebuild_enabled { $_control_rebuild_enabled }
+
     ADJUST {
         # Phase 7d Step 3: $factory and $typed both point at the same
         # per-Actions typed factory. The Bootstrap singleton is no
@@ -1575,13 +1585,19 @@ class Chalk::Bootstrap::Perl::Actions {
         my $start = $graph->start() // $factory->make('Start');
         $graph->merge($start);
         my $current_control = $start;
+        # When the rebuild is disabled (Phase 2 Step A test instrumentation),
+        # skip every control rewrite/rewire so the test observes the chain
+        # the during-parse threading built on its own. Node-into-graph merges
+        # still run unconditionally so reachability walks see the statements.
+        my $do_rewrite = $_control_rebuild_enabled;
         for my $i (0..$#stmts) {
             my $s = $stmts[$i];
             next unless blessed($s);
             if ($s isa Chalk::IR::Node::VarDecl) {
                 my $existing_ctrl = $s->control();
-                if (!defined $existing_ctrl
-                        || refaddr($existing_ctrl) != refaddr($current_control)) {
+                if ($do_rewrite
+                        && (!defined $existing_ctrl
+                        || refaddr($existing_ctrl) != refaddr($current_control))) {
                     my $rebuilt = $ctx->factory->make('VarDecl',
                         inputs       => [$current_control, $s->name(), $s->init()],
                     );
@@ -1597,8 +1613,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 # the current chain tail. The ReturnStatement action sees
                 # only its own multiply context and falls back to Start.
                 my $existing_ctrl = $s->inputs->[0];
-                if (!defined $existing_ctrl
-                        || refaddr($existing_ctrl) != refaddr($current_control)) {
+                if ($do_rewrite
+                        && (!defined $existing_ctrl
+                        || refaddr($existing_ctrl) != refaddr($current_control))) {
                     my $op = $s isa Chalk::IR::Node::Return
                         ? 'Return' : 'Unwind';
                     my $synthetic = $s isa Chalk::IR::Node::Return
@@ -1628,8 +1645,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 # merge into the graph so $graph->nodes and reachability
                 # walks see it.
                 $graph->merge($s);
-                if (!defined $s->control_in
-                        || refaddr($s->control_in) != refaddr($current_control)) {
+                if ($do_rewrite
+                        && (!defined $s->control_in
+                        || refaddr($s->control_in) != refaddr($current_control))) {
                     $s->set_control_in($current_control);
                 }
                 $current_control = $s;
@@ -1642,8 +1660,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 # past the post-construct Region which the action
                 # stashed on the node via set_region().
                 my $existing_ctrl = $s->inputs->[0];
-                if (!defined $existing_ctrl
-                        || refaddr($existing_ctrl) != refaddr($current_control)) {
+                if ($do_rewrite
+                        && (!defined $existing_ctrl
+                        || refaddr($existing_ctrl) != refaddr($current_control))) {
                     $s->set_control_in($current_control);
                 }
                 $current_control = $s->region // $s;
