@@ -80,18 +80,20 @@ Plus: **emission + dead-code cleanup** — Phase 4.
 
 ## PHASE 2 — Control-chain threading (Option A); retire the Block rebuild
 
-**Goal:** thread `control_head` laterally so each statement action receives its predecessor's materialized node, building the control chain correctly on the first try. Retire the ~90-line Block rebuild (`Actions.pm:1567-1651`). Validated viable (flat + nested) by the Option A spikes.
+> **SCOPE/RISK REVISED 2026-06-01 (Task 2.1 + ordering spike).** Phase 2 is NOT the contained semiring change the earlier Option A framing implied. The ordering spike proved the gap is in the **Earley prediction/completion fold**, not the SemanticAction fold: statement N+1 is *predicted and seeded from `$semiring->one()`* (a fresh Start context, `Earley.pm:1219`) and completes bottom-up **before** the StatementList-level merge where N's materialized tail would reach it (347 trace events too early). So "thread control_head laterally" is **not a reordering** of `multiply`/`_complete_sa`/`_mul_ctx` — it requires **NEW machinery: an inherited (downward) control_head channel at `_predict`**, seeding predicted StatementList/Block children with the parent's `control_head` instead of bare `one()`. This is a parser-engine change to `Earley.pm` (the most load-bearing file), and it is precisely the "invasive approach" the Block rebuild was originally chosen *instead of* (`phase_3a_migration_cross_stmt_scope.md`). It does NOT need a new Context field (control_head exists) — it needs a new propagation path. **Determinism hazard:** the `_mul_ctx` hash-cons key is `refaddr(left):refaddr(right)`; per-frontier prediction seeds must be distinct, content-deterministic objects or the cache returns stale merges. This revision is WHY a from-first-principles re-evaluation + clean-room validation was commissioned before implementing.
 
-**Depends on Phase 1?** Partially independent (control_head ≠ bindings), but sequence after Phase 1 so the bindings field is stable and the two field-propagation rules aren't being changed simultaneously.
+**Goal (unchanged):** make each statement action receive its predecessor's materialized node so the control chain is built correctly on the first try, retiring the ~90-line Block rebuild (`Actions.pm:1567-1655`). **Mechanism (revised):** inherited control_head seeding at Earley prediction, NOT lateral threading in the semiring fold. **Risk (revised):** HIGH — touches `Earley.pm` prediction + hash-cons identity; pending re-evaluation.
+
+**Depends on Phase 1?** Partially independent (control_head ≠ bindings). Phase 1 confirmed NOT to have changed the control gap (fire counts unchanged: ~21 rewrites, ~31 merge-adds, ~48 ctrl-in-sets pre and post).
 
 **The three routing rules the threading must reproduce (from the nesting spike):**
-1. Linear chain (flat case).
-2. Region-advance: advance the parent chain past `$s->region` for If/Loop, not the If/Loop node (`Actions.pm:1671`).
-3. Inner-block-tail-leak suppression: an inner block's tail control_head must not leak up into the enclosing control statement's predecessor.
-Plus: propagate the in-flight `graph` to trailing siblings.
+1. Linear chain (flat case) — the part needing the inherited predict-seed channel.
+2. Region-advance: nearly free — If/Loop actions already `update_control_head($region)`, so carrying the published control_head forward yields the merge point automatically.
+3. Inner-block-tail-leak suppression: an inner block's tail control_head must not leak up into the enclosing control statement's predecessor (needs a Block-boundary reset; `_mul_ctx` cannot infer it from refaddrs alone).
+Plus: propagate the in-flight `graph` to trailing siblings (same lateral-ordering origin).
 
-### Task 2.1: Instrument + characterize (temporary, reverted)
-- [ ] Re-confirm against current code (post-Phase-1) the three routing rules and the graph-propagation gap, via env-gated instrumentation. Revert before implementing.
+### Task 2.1: Instrument + characterize (temporary, reverted) — DONE 2026-06-01
+- [x] Re-characterized post-Phase-1 (counts unchanged; every rewrite fires off the SEED, confirming pure lateral gap). Ordering spike then proved the gap is in Earley prediction (`one()` seed at `Earley.pm:1219`), requiring an inherited-attribute channel — see the scope/risk box above. **Re-evaluation from first principles + clean-room validation of all findings commissioned before Task 2.2+.**
 
 ### Task 2.2: RED — a control-chain unit test that fails without threading
 - [ ] Write a focused test (the gap the Option A brief noted: no behavioral unit spec exists for the rebuild — `c-schedule-tail-control.t` only covers an if-tail). Construct flat + nested bodies; assert each side-effect node's `inputs[0]` points at its true predecessor. With the rebuild still present this passes; **temporarily disable the rebuild** to confirm the test then fails — proving it tests the threading, not the rebuild.
