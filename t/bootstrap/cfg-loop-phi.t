@@ -51,7 +51,7 @@ SKIP: {
 
         # $x should be a Phi node (created because $x was read inside loop)
         TODO: {
-            local $TODO = 'parser does not construct degenerate Phi for read-only loop variable (pre-existing parser bug)';
+            local $TODO = 'degenerate Phi for read-only loop var needs lazy header-Phi-on-read (Phase 3)';
             ok($x_binding isa Chalk::IR::Node::Phi,
                 '$x is a Phi (read-only, degenerate)')
                 or diag("Got: " . ref($x_binding) . " / "
@@ -131,12 +131,9 @@ SKIP: {
 
         my $x_binding = $state->{scope}->lookup('$x');
         ok(defined $x_binding, '$x in scope after nested loops');
-        TODO: {
-            local $TODO = 'nested loop Phi requires propagating inner body refs to outer loop';
-            ok($x_binding isa Chalk::IR::Node::Phi,
-                '$x is a Phi after nested loops')
-                or diag('$x binding is: ' . ref($x_binding));
-        }
+        ok($x_binding isa Chalk::IR::Node::Phi,
+            '$x is a Phi after nested loops')
+            or diag('$x binding is: ' . ref($x_binding));
     }
 
     # --- Test 5: Multiple variables, only referenced ones get Phi ---
@@ -154,12 +151,9 @@ SKIP: {
         ok(defined $state, 'cfg_state available for multi-var loop');
 
         my $a_binding = $state->{scope}->lookup('$a');
-        TODO: {
-            local $TODO = 'parser does not construct Phi for in-loop-referenced multi-var (pre-existing parser bug)';
-            ok($a_binding isa Chalk::IR::Node::Phi,
-                '$a is a Phi (referenced in loop)')
-                or diag('$a binding is: ' . ref($a_binding));
-        }
+        ok($a_binding isa Chalk::IR::Node::Phi,
+            '$a is a Phi (referenced in loop)')
+            or diag('$a binding is: ' . ref($a_binding));
 
         my $b_binding = $state->{scope}->lookup('$b');
         ok(defined $b_binding, '$b is still in scope');

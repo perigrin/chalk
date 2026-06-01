@@ -38,8 +38,7 @@ SKIP: {
     # --- Test 1: Synthetic accumulator loop produces Phi for outer variable ---
     # my $x = 0; for my $i (1, 2, 3) { $x = $x + $i; }
     # $x is read and written inside the loop, so it should get a loop-carried Phi.
-    # Note: no trailing statement after the loop — the trailing-statement case
-    # exposes a known scope-propagation limitation with multiply() right-wins merge.
+    # The trailing-statement variant is covered by Test 6.
     {
         $semiring->reset_cache();
 
@@ -56,13 +55,10 @@ SKIP: {
         my $x_binding = $state->{scope}->lookup('$x');
         ok(defined $x_binding, '$x in scope after accumulator loop');
 
-        TODO: {
-            local $TODO = 'parser does not construct Phi for loop-carried accumulator (pre-existing parser bug, same family as cfg-loop-phi.t #19)';
-            ok($x_binding isa Chalk::IR::Node::Phi,
-                '$x is a Phi node (loop-carried accumulator)')
-                or diag('$x binding: ' . ref($x_binding)
-                    . ' / ' . ($x_binding->operation() // 'undef'));
-        }
+        ok($x_binding isa Chalk::IR::Node::Phi,
+            '$x is a Phi node (loop-carried accumulator)')
+            or diag('$x binding: ' . ref($x_binding)
+                . ' / ' . ($x_binding->operation() // 'undef'));
     }
 
     # --- Test 2: Synthetic string concatenation loop produces Phi ---
@@ -84,13 +80,10 @@ SKIP: {
         my $s_binding = $state->{scope}->lookup('$s');
         ok(defined $s_binding, '$s in scope after string concatenation loop');
 
-        TODO: {
-            local $TODO = 'parser does not construct Phi for loop-carried string accumulator (pre-existing parser bug)';
-            ok($s_binding isa Chalk::IR::Node::Phi,
-                '$s is a Phi node (loop-carried string accumulator)')
-                or diag('$s binding: ' . ref($s_binding)
-                    . ' / ' . ($s_binding->operation() // 'undef'));
-        }
+        ok($s_binding isa Chalk::IR::Node::Phi,
+            '$s is a Phi node (loop-carried string accumulator)')
+            or diag('$s binding: ' . ref($s_binding)
+                . ' / ' . ($s_binding->operation() // 'undef'));
     }
 
     # --- Test 3: Phi backedges are wired in a read-write loop ---
@@ -110,44 +103,39 @@ SKIP: {
         ok(defined $state, 'cfg_state available for backedge check');
 
         my $sum_binding = $state->{scope}->lookup('$sum');
-        TODO: {
-            local $TODO = 'parser does not construct Phi for backedge-wired loop accumulator (pre-existing parser bug)';
-            ok($sum_binding isa Chalk::IR::Node::Phi,
-                '$sum is a Phi in backedge test')
-                or diag('$sum binding: ' . ref($sum_binding));
-        }
+        ok($sum_binding isa Chalk::IR::Node::Phi,
+            '$sum is a Phi in backedge test')
+            or diag('$sum binding: ' . ref($sum_binding));
 
         if ($sum_binding isa Chalk::IR::Node::Phi) {
-            my $values = $sum_binding->inputs()->[1];
-            ok(defined $values->[1],
+            # inputs() is [entry, backedge]; set_backedge wires inputs->[1].
+            my $backedge = $sum_binding->inputs()->[1];
+            ok(defined $backedge,
                 'Phi backedge is wired (not undef) for $sum')
-                or diag('backedge: ' . ($values->[1] // 'undef'));
+                or diag('backedge: ' . ($backedge // 'undef'));
         }
         else {
-            TODO: {
-                local $TODO = 'sum is not a Phi — skipping backedge check';
-                ok(false, 'Phi backedge wired');
-            }
+            fail('Phi backedge wired ($sum is not a Phi)');
         }
     }
 
-    # --- Test 4: Real file integration — Scope.pm has a for my $name loop ---
-    # Scope.pm contains: for my $name (keys $bindings->%*) { ... }
+    # --- Test 4: Real file integration — Bindings.pm has a for my $name loop ---
+    # Bindings.pm contains: for my $name (keys $bindings->%*) { ... }
     # This is a smoke test to verify lazy Phi doesn't crash on real code.
     {
         $semiring->reset_cache();
 
-        open my $fh, '<:utf8', 'lib/Chalk/Bootstrap/Scope.pm'
-            or skip 'Cannot read Scope.pm', 2;
+        open my $fh, '<:utf8', 'lib/Chalk/Bootstrap/Bindings.pm'
+            or skip 'Cannot read Bindings.pm', 2;
         local $/;
         my $source = <$fh>;
         close $fh;
 
         my $result = $parser->parse_value($source);
-        ok(defined $result, 'Scope.pm parses with lazy Phi enabled');
+        ok(defined $result, 'Bindings.pm parses with lazy Phi enabled');
 
         my $sem_ctx = $result;
-        ok(defined $sem_ctx, 'Scope.pm produces a semantic context');
+        ok(defined $sem_ctx, 'Bindings.pm produces a semantic context');
     }
 
     # --- Test 5: Real file integration — smoke test with for loops ---
@@ -171,12 +159,11 @@ SKIP: {
         ok(defined $sem_ctx, 'Context.pm produces a semantic context');
     }
 
-    # --- Test 6: Trailing-statement scope limitation (documented known issue) ---
-    # When a statement follows a loop (e.g., $x; after for...{}), the multiply()
-    # right-wins scope merge overwrites the Program-level Phi with the stale
-    # pre-loop value that ScalarVariable resolved before ForeachStatement fired.
-    # This is a known limitation of bottom-up Earley parsing with mutable scope.
-    # The loop-only form (Test 1/2 above) works correctly.
+    # --- Test 6: Trailing statement after a loop preserves the loop Phi ---
+    # When a statement follows a loop (e.g., $x; after for...{}), the sequential
+    # sibling merge in _mul_ctx now gives the RIGHT (later) sibling precedence
+    # for duplicate names. A bare read ($x;) does not rebind $x, so the loop's
+    # Phi survives the trailing statement.
     {
         $semiring->reset_cache();
 
@@ -188,12 +175,10 @@ SKIP: {
         skip 'no semantic context for Test 6', 1 unless defined $sem_ctx;
 
         my $state = $sem_ctx->cfg_state();
-        TODO: {
-            local $TODO = 'trailing statement overwrites loop Phi via multiply() right-wins merge';
-            my $x_binding = $state->{scope}->lookup('$x');
-            ok($x_binding isa Chalk::IR::Node::Phi,
-                '$x is a Phi even with trailing statement');
-        }
+        my $x_binding = $state->{scope}->lookup('$x');
+        ok($x_binding isa Chalk::IR::Node::Phi,
+            '$x is a Phi even with trailing statement')
+            or diag('$x binding is: ' . ref($x_binding));
     }
 }
 

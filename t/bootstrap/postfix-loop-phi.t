@@ -51,7 +51,7 @@ SKIP: {
 
         my $x_binding = $state->{scope}->lookup('$x');
         TODO: {
-            local $TODO = 'parser does not construct Phi for postfix-for loop-carried variables (pre-existing parser bug)';
+            local $TODO = 'postfix-for loop Phi needs PostfixModifier to build a loop merge (Phase 3)';
             ok($x_binding isa Chalk::IR::Node::Phi,
                 '$x is a Phi after postfix for loop (loop-carried dep)')
                 or diag('$x binding is: ' . ref($x_binding)
@@ -78,7 +78,7 @@ SKIP: {
         my $n_binding = $state->{scope}->lookup('$n');
         ok(defined $n_binding, '$n in scope after postfix while loop');
         TODO: {
-            local $TODO = 'parser does not construct Phi for postfix-while loop-carried variables (pre-existing parser bug)';
+            local $TODO = 'postfix-while loop Phi needs PostfixModifier to build a loop merge (Phase 3)';
             ok($n_binding isa Chalk::IR::Node::Phi,
                 '$n is a Phi after postfix while loop')
                 or diag('$n binding is: ' . ref($n_binding));

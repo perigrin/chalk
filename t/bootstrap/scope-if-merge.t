@@ -56,11 +56,8 @@ SKIP: {
                 skip 'no scope to check', 2 unless defined $scope;
                 my $x_val = $scope->lookup('$x');
                 ok(defined $x_val, '$x is bound in scope after if/else');
-                TODO: {
-                    local $TODO = 'parser does not construct Phi for if/else divergent branches (pre-existing parser bug, same family as cfg-loop-phi.t #19)';
-                    ok($x_val isa Chalk::IR::Node::Phi,
-                        '$x is a Phi node after if/else with different branch values');
-                }
+                ok($x_val isa Chalk::IR::Node::Phi,
+                    '$x is a Phi node after if/else with different branch values');
             }
         }
     }
@@ -87,11 +84,8 @@ SKIP: {
                 skip 'no scope to check', 2 unless defined $scope;
                 my $x_val = $scope->lookup('$x');
                 ok(defined $x_val, '$x is bound in scope after if-without-else');
-                TODO: {
-                    local $TODO = 'parser does not construct Phi for if-without-else then-branch assign (pre-existing parser bug)';
-                    ok($x_val isa Chalk::IR::Node::Phi,
-                        '$x is a Phi after if-without-else (then assigns, else uses pre-value)');
-                }
+                ok($x_val isa Chalk::IR::Node::Phi,
+                    '$x is a Phi after if-without-else (then assigns, else uses pre-value)');
             }
         }
     }
