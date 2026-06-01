@@ -118,7 +118,8 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
     # Return a hash-consed multiply Context for the given left+right children.
     # Two calls with the same children (same refaddrs) return the same object.
-    # Scope propagates left-to-right; if left has no scope, inherit from right.
+    # Bindings reconcile with the LATER (right) sibling winning for duplicate
+    # names; graph/factory/control_head prefer the right side with left fallback.
     my sub _mul_ctx($left, $right) {
         my $key = "mul:" . refaddr($left) . ":" . refaddr($right);
         return ($_ctx_cache{$key} //= do {
