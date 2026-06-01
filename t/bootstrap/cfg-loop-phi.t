@@ -77,17 +77,15 @@ SKIP: {
         ok(defined $sum_binding, '$sum in scope after loop');
 
         # $sum should be a Phi with a wired backedge
-        TODO: {
-            local $TODO = 'parser does not construct Phi for read-write loop variable (pre-existing parser bug)';
-            ok($sum_binding isa Chalk::IR::Node::Phi,
-                '$sum is a Phi after read-write loop')
-                or diag('$sum binding is: ' . ref($sum_binding));
-        }
+        ok($sum_binding isa Chalk::IR::Node::Phi,
+            '$sum is a Phi after read-write loop')
+            or diag('$sum binding is: ' . ref($sum_binding));
         if ($sum_binding isa Chalk::IR::Node::Phi) {
-            my $values = $sum_binding->inputs()->[1];
-            ok(defined $values->[1],
+            # inputs() is [entry, backedge]; set_backedge wires inputs->[1].
+            my $backedge = $sum_binding->inputs()->[1];
+            ok(defined $backedge,
                 'Phi backedge is wired (not undef)')
-                or diag("backedge value: " . ($values->[1] // 'undef'));
+                or diag("backedge value: " . ($backedge // 'undef'));
         }
     }
 

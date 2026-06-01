@@ -118,14 +118,21 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
     # Return a hash-consed multiply Context for the given left+right children.
     # Two calls with the same children (same refaddrs) return the same object.
-    # Scope propagates right-to-left; if right has no scope, inherit from left.
+    # Scope propagates left-to-right; if left has no scope, inherit from right.
     my sub _mul_ctx($left, $right) {
         my $key = "mul:" . refaddr($left) . ":" . refaddr($right);
         return ($_ctx_cache{$key} //= do {
             # Propagate bindings: reconcile both children's variable
-            # bindings (left wins for duplicate names). Control selection
-            # is handled separately via control_head below.
-            my $bindings = _merge_bindings($left->bindings, $right->bindings);
+            # bindings. For sequential statement merges the RIGHT (later)
+            # sibling holds the more-recent value, so right wins for
+            # duplicate names — this keeps SSA correct (e.g. a loop's Phi
+            # survives a preceding VarDecl of the same name). _merge_bindings
+            # gives precedence to its left argument, so the children are
+            # passed right-then-left to make right win. The shared
+            # _merge_bindings helper keeps its left-wins semantics for its
+            # other (on_merge) caller. Control selection is handled
+            # separately via control_head below.
+            my $bindings = _merge_bindings($right->bindings, $left->bindings);
             # Propagate graph: prefer right (later in the sequence). If right
             # has no graph, fall back to left's graph - side-effect actions
             # publish a graph via update_graph; the same instance should
