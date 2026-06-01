@@ -50,9 +50,17 @@ Plus: **emission + dead-code cleanup** — Phase 4.
 
 **Why this is the root:** `Bindings.pm:171-179` documents the symptom directly ("the loop action sees an empty pre-loop bindings hash, while the body leaf has captured the post-body Assigns"). The merge methods pass their unit tests (`scope-phi-merge.t`, `scope-for-loop-merge.t`) — they only fail end-to-end because the scope they're handed is empty.
 
-### Task 1.1: Characterize the propagation gap precisely (no code yet)
-- [ ] Trace how `bindings` flows from a branch/body Block's completion up to the enclosing If/While/For action. Identify the exact point where the body-final bindings are present in a leaf Context but not delivered to the merge call. Cite the leaf-collection code in the If action (`Actions.pm` ~2606-2634) and While/For (~2843-2859, ~3011, ~3159).
-- [ ] Determine whether the fix belongs in: (a) the `_mul_ctx` bindings-merge rule, (b) how the If/Loop action collects leaf scopes, or (c) the `update_scope`/`_complete_sa` publish path. The brief's expectation: it's the bindings propagation rule / leaf-scope collection, NOT control_head.
+### Task 1.1: Characterize the propagation gap precisely (no code yet) — DONE 2026-06-01
+
+**FINDING (corrects the plan's and `Bindings.pm:171-179`'s premise):** the merge methods are NOT starved of input. `merge_with_phis`/`merge_for_loop` receive correct, populated branch/body-final scopes and **build the correct Phi** on the loop/if statement's own result Context (verified by instrumentation). The Phi is then **CLOBBERED** when `_mul_ctx` merges that statement with its preceding sibling: `_merge_bindings` (`SemanticAction.pm:113-117`) does `$right->merge($left)`, and `Bindings::merge` makes the **argument win** → **left (earlier) sibling wins for duplicate names**. So `my $x=0; loop{ $x=... }` resolves `$x` to the pre-loop VarDecl, not the loop's Phi. This is backwards for SSA: the **later** sibling holds the more-recent value and must win.
+
+**Fix site: the sequential bindings reconciliation in `_mul_ctx`** (`SemanticAction.pm:128`), NOT leaf collection (works), NOT the publish path (works), NOT control_head.
+
+**REFINEMENT (post-investigation, verified by orchestrator):** do NOT flip the shared `_merge_bindings` helper globally. Its other caller is `on_merge` (`SemanticAction.pm:536`), whose result (`_transferred_scope`) is **write-only dead code** (0 readers, confirmed in the earlier architecture audit) — so flipping wouldn't break `on_merge`, but the legacy left-wins behavior was *deliberately preserved* in C3 and something else may rely on it. **Localize the change:** make `_mul_ctx` reconcile bindings with **right-precedence at its call site** (e.g. `$left->merge($right)` or a right-wins variant), leaving `_merge_bindings`'s shared semantics untouched. Smallest, safest change.
+
+**Stale residue to revisit (not necessarily this task):** the `Bindings.pm:171-179` comment and the `merge_for_loop` `all_names` union it justifies are likely redundant once precedence is fixed — but verify before removing; the union may still be load-bearing for the nested case.
+
+**Per-test RED guide (simplest first):** `phi-integration.t` test 5 or `cfg-loop-phi.t` test 8 (single var, single loop, no nesting) — Foreach builds `$x`/`$sum` Phi, clobbered by the leading `my` VarDecl. `scope-if-merge.t` test 7 (if/else both assign `$x`) — same clobber. **`cfg-loop-phi.t` test 16 (nested loops) is a DISTINCT sub-gap** (inner-body ref → outer loop) — the precedence fix alone will NOT fix it; per Task 1.4 it likely belongs to Phase 3.
 
 ### Task 1.2: RED — un-TODO one representative test per shape
 - [ ] Pick the simplest currently-TODO case from each shape: one if/else merge (`scope-if-merge.t`), one loop-carried var (`cfg-loop-phi.t`), one accumulator (`phi-integration.t`). Remove the `# TODO` marker so it's a hard failure. Run; confirm each fails for the *expected* reason (merge received empty/incomplete scope → no Phi built), not some other reason.
