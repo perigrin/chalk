@@ -54,5 +54,54 @@ Side-effect statement actions (Call/Assign/CompoundAssign/RegexSubst/TryCatch) n
 
 **LATENT-DEBT acceptance criterion for the eventual rebuild deletion (from the step-(b) review):** `CallExpression` fires for nested sub-expression calls too, so step (b) now stamps `control_in` onto nested, non-statement-position Call nodes (e.g. the inner `foo()` in `bar(foo())`) that were previously `undef`. This is HARMLESS today only because (1) the EagerPinning scheduler is chain-walk-based (visits only Return-chain nodes, never these), and (2) the Block rebuild is the last writer for on-chain nodes. **Before deleting the rebuild (step d), VERIFY no pass reads `control_in` outside the Return-chain walk** — a future scheduler/pass iterating `$graph->nodes` reading `control_in` directly would observe these stray nested values. (Classic residue-coupling per `feedback_technical_debt_cleanup`.)
 
-### Step Proposal-2 — IN PROGRESS
-Node-representation uniformity (control off the hash key → uniform `control_in` decoration; VarDecl counter-identity landmine). Then STOP and re-visit the whole plan.
+### Step Proposal-2 — DONE, committed 8c6cfe0f (Return/Unwind) + d01bfea3 (VarDecl)
+Node-representation uniformity landed in the two-step order Proposal 2
+recommended (smallest/safest first, commit between).
+
+**Step 1 (8c6cfe0f) — Return/Unwind:** control moved off `inputs[0]` onto
+the hash-excluded `control_in` decoration; inputs hold only the value
+(a `value()` accessor reads `inputs[0]`). No identity change (already
+counter-id'd via `make_cfg`). The Block rebuild's Return/Unwind branch
+collapsed from unmerge/make_cfg/merge churn to a plain `set_control_in`
+mutation. Note: the rebuild must NOT `merge()` a Return/Unwind (that keys
+it by content_hash and collides with the id-keyed transitive seed,
+double-counting it in `returns()`); the transitive-seed walk now follows
+`control_in` so the effect chain stays reachable. The Return golden was
+re-baselined — the only diff is the new `value()` method rendered from the
+edited source; codegen logic unchanged (verified by diff).
+
+**Step 2 (d01bfea3) — VarDecl (the landmine):** control moved off
+`inputs[0]` (inputs become `[name, init]`) AND out of content-hash
+identity. **Landmine resolution:** VarDecl gets per-position (counter)
+identity like Return/Unwind, and `content_hash()` returns the unique id,
+so two textually-identical declarations in different control positions are
+distinct nodes — never deduplicated by the factory cache or graph
+merge/unmerge. The init-fold's refined VarDecl gets a *fresh* id (NOT the
+bare node's id — id-reuse left two same-id objects that `nodes()`'s
+id-dedup nondeterministically confused); the bare node is unmerged so it
+leaves the cache and `nodes()` filters it out. The Block rebuild's VarDecl
+branch collapsed to the same `set_control_in` mutation.
+
+**Rebuild simplification achieved:** the rebuild's four branch-shapes (two
+churning) collapsed to two: a uniform `set_control_in` mutation path for
+VarDecl/Return/Unwind/Call/Assign/CompoundAssign/RegexSubst/TryCatch, plus
+the unchanged If/Loop region-advance. The rebuild STAYS as the
+differential oracle (not deleted), and the lateral-seed gap is NOT touched.
+
+**Step 3 — If/Loop left on inputs[0]:** per Proposal 2, If/Loop keep their
+`control_in()`/`set_control_in()` overrides reading/writing `inputs[0]`
+(a true dataflow control edge the Region/merge machinery reads). The
+scheduler's unified reader (`$cur->control_in`) works uniformly across all
+types: override for If/Loop, base field for everyone else. The
+`// inputs[0]` fallback in EagerPinning is now vestigial for the migrated
+types but left in place (out of scope; harmless).
+
+**Gates (both commits):** bnf-target-c byte-identical x2; mop/codegen-
+byte-compat 19/19; codegen-byte-compat-schedule 19/19; all mop/* pass
+(documented TODOs excepted); phi suite at baseline; control-threading 1-7
+green (test 5 TODO). No IR-snapshot re-baseline needed for step 2 (no test
+asserts on the old VarDecl content-hash id string).
+
+Next: STOP and re-visit the whole plan with the substrate clean, per the
+2026-06-02 decision (the step-3 fork — during-parse capstone vs
+complete-the-scheduler — is decided against the cleaned-up substrate).
