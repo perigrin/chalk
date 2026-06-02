@@ -78,36 +78,37 @@ Plus: **emission + dead-code cleanup** — Phase 4.
 
 ---
 
-## PHASE 2 — Control-chain threading (Option A); retire the Block rebuild
+## PHASE 2 — Control-chain wiring (status: OPEN — tasks below SUPERSEDED; pending solution design)
 
-> **SCOPE/RISK REVISED 2026-06-01 (Task 2.1 + ordering spike).** Phase 2 is NOT the contained semiring change the earlier Option A framing implied. The ordering spike proved the gap is in the **Earley prediction/completion fold**, not the SemanticAction fold: statement N+1 is *predicted and seeded from `$semiring->one()`* (a fresh Start context, `Earley.pm:1219`) and completes bottom-up **before** the StatementList-level merge where N's materialized tail would reach it (347 trace events too early). So "thread control_head laterally" is **not a reordering** of `multiply`/`_complete_sa`/`_mul_ctx` — it requires **NEW machinery: an inherited (downward) control_head channel at `_predict`**, seeding predicted StatementList/Block children with the parent's `control_head` instead of bare `one()`. This is a parser-engine change to `Earley.pm` (the most load-bearing file), and it is precisely the "invasive approach" the Block rebuild was originally chosen *instead of* (`phase_3a_migration_cross_stmt_scope.md`). It does NOT need a new Context field (control_head exists) — it needs a new propagation path. **Determinism hazard:** the `_mul_ctx` hash-cons key is `refaddr(left):refaddr(right)`; per-frontier prediction seeds must be distinct, content-deterministic objects or the cache returns stale merges. This revision is WHY a from-first-principles re-evaluation + clean-room validation was commissioned before implementing.
+> **TASKS 2.2–2.5 BELOW ARE SUPERSEDED AND MUST NOT BE EXECUTED AS WRITTEN.** They assumed retiring the Block rebuild via "lateral control_head threading" was a contained change. An audit PAIR (one confirming, one adversarial) on 2026-06-02 **refuted** that reduction with reproducible `/tmp` probes. The honest audited picture is below. The during-parse alternative is being re-designed from scratch (a trio of independent architecture proposals); pick the approach from that comparison before writing any Phase 2 code.
 
-**Goal (unchanged):** make each statement action receive its predecessor's materialized node so the control chain is built correctly on the first try, retiring the ~90-line Block rebuild (`Actions.pm:1567-1655`). **Mechanism (revised):** inherited control_head seeding at Earley prediction, NOT lateral threading in the semiring fold. **Risk (revised):** HIGH — touches `Earley.pm` prediction + hash-cons identity; pending re-evaluation.
+### Audited reality (2026-06-02): the control-wiring defect is MULTI-CAUSAL, not one missing edge
 
-**Depends on Phase 1?** Partially independent (control_head ≠ bindings). Phase 1 confirmed NOT to have changed the control gap (fire counts unchanged: ~21 rewrites, ~31 merge-adds, ~48 ctrl-in-sets pre and post).
+A reasoning chain reached a tidy reduction ("one missing left-sibling→right-sibling edge at StatementList; everything else fine; VarDecl fold cleanly separable"). The adversarial audit broke it. What actually holds (probed, not reasoned):
 
-**The three routing rules the threading must reproduce (from the nesting spike):**
-1. Linear chain (flat case) — the part needing the inherited predict-seed channel.
-2. Region-advance: nearly free — If/Loop actions already `update_control_head($region)`, so carrying the published control_head forward yields the merge point automatically.
-3. Inner-block-tail-leak suppression: an inner block's tail control_head must not leak up into the enclosing control statement's predecessor (needs a Block-boundary reset; `_mul_ctx` cannot infer it from refaddrs alone).
-Plus: propagate the in-flight `graph` to trailing siblings (same lateral-ordering origin).
+**Solid / confirmed:**
+- The Block rebuild (`Actions.pm:1585-1670`) is **load-bearing, not dead** — disabled, bodies collapse (the chain walk dies at the first `control_in=undef`; `bar(foo()); return 1;` schedules as `Return` alone).
+- The flat single-Block sibling gap is real: `my $x=1; my $y=2;` (rebuild off) → stmt 2 reads `control_head=Start`, never stmt 1's node.
+- VarDecl/Return/Unwind carry control in the **hash-cons KEY** (`inputs[0]`); Call/Assign/CompoundAssign/RegexSubst/TryCatch carry it in the hash-EXCLUDED `control_in` field (`Node.pm:25-31`), mutated via `set_control_in` (no identity change). This asymmetry is why the rebuild's VarDecl/Return/Unwind branches do `unmerge`+`merge` while the others just mutate.
+- The VarDecl init-fold (`AssignmentExpression` rebuilding bare→refined VarDecl, `Actions.pm:2319-2343`) is a **mistimed optimization** — deferrable to a later pass; doing it during parse creates the during-parse identity churn. (This narrow point survived; what was REFUTED was that removing it cleanly isolates the sibling gap.)
 
-### Task 2.1: Instrument + characterize (temporary, reverted) — DONE 2026-06-01
-- [x] Re-characterized post-Phase-1 (counts unchanged; every rewrite fires off the SEED, confirming pure lateral gap). Ordering spike then proved the gap is in Earley prediction (`one()` seed at `Earley.pm:1219`), requiring an inherited-attribute channel — see the scope/risk box above. **Re-evaluation from first principles + clean-room validation of all findings commissioned before Task 2.2+.**
+**REFUTED (the reduction's errors — do not repeat):**
+1. **"Within-statement child→parent threading works."** FALSE in general. Nested side-effecting calls get NO control edge even WITH the rebuild: `bar(foo())` → inner `foo()` has `control_in=undef` (verified directly). The rebuild iterates only statement-level `@stmts`; it never recurses into inits/args.
+2. **"The gap is ONLY at StatementList siblings."** FALSE. It recurs at EVERY Block boundary (masked only by each Block's own rebuild) and is **fully unmasked at `Program`** (`Actions.pm:223-284`), which runs NO rebuild.
+3. **"The fold is cleanly separable from the sibling gap."** FALSE coupling, per commit `fb571989`: the bare/refined split + the `add()` tie-break makes the next sibling inherit the *bare* (pre-init) head.
 
-### Task 2.2: RED — a control-chain unit test that fails without threading
-- [ ] Write a focused test (the gap the Option A brief noted: no behavioral unit spec exists for the rebuild — `c-schedule-tail-control.t` only covers an if-tail). Construct flat + nested bodies; assert each side-effect node's `inputs[0]` points at its true predecessor. With the rebuild still present this passes; **temporarily disable the rebuild** to confirm the test then fails — proving it tests the threading, not the rebuild.
+**The defect is at least THREE independent problems:**
+- (a) **Structural lateral seed gap** — N+1 is predicted+seeded from `one()` (Start) at `Earley.pm:1219` and completes before the StatementList merge; the synthesized fold gives a node its children, never its left siblings. Fixing needs an inherited (downward) channel at `_predict`, with a determinism hazard (`_mul_ctx` hash-cons key is `refaddr(left):refaddr(right)`; per-frontier seeds must be distinct, content-deterministic).
+- (b) **Action-layer non-consumption** — Call/Assign/etc. actions don't read `control_head` into their control input at construction at all; entirely rebuild-dependent. Orthogonal to (a).
+- (c) **Fold/tie-break coupling** — VarDecl bare/refined churn interacts with sibling inheritance via the `add()` tie-break.
+- Plus: region-advance (If/Loop) and `Program` having no rebuild.
 
-### Task 2.3: GREEN — implement lateral control threading
-- [ ] Thread `control_head` across StatementList siblings (in `_mul_ctx` or at StatementList completion — Task 2.1 decides which) implementing rules 1-3 + graph propagation. Statement actions stop guessing `// make('Start')` and receive the real predecessor.
-- [ ] Keep the rebuild in place initially; assert threading produces the SAME chain the rebuild does (differential check).
+**Why this strengthens "keep the rebuild" — honestly.** Not "structurally necessary" (overclaimed) and not "one clean edge replaces it" (refuted), but: **a post-materialization pass solves (a)(b)(c) + region-advance by construction (runs once every node exists, at statement granularity), whereas the during-parse alternative must independently solve ≥3 problems plus a determinism hazard.** That is the real trade the solution-design trio must weigh.
 
-### Task 2.4: Retire the rebuild
-- [ ] Delete the rebuild loop (`Actions.pm:1567-1651`). Run full suite (`bnf-target-c.t`, `mop/codegen-byte-compat.t`, all `mop/*`, the Phase-1-converted Phi tests). All green at baseline counts.
-- [ ] If any regression: the threading missed a routing rule the rebuild covered — restore, find the gap, fix, retry. (The nesting spike says all cases are determinate, so a regression means a missed *rule*, not an impossible case.)
+### Task 2.1: characterize — DONE (audited reality above)
 
-### Task 2.5: Commit Phase 2
-- [ ] Commit: control chain built during-parse via lateral threading; Block rebuild retired; suite green. Update `block_action_workaround_accretion.md` memory note (workaround #1 resolved).
+### Tasks 2.2–2.5 — SUPERSEDED
+Replaced by: design the during-parse alternative from scratch (trio of independent proposals, 2026-06-02), compare, then decide between (i) implementing a chosen during-parse design, (ii) keeping + relocating the rebuild to the scheduler layer where `EagerPinning` lives, or (iii) a hybrid. Do NOT execute the old 2.2–2.5.
 
 ---
 
