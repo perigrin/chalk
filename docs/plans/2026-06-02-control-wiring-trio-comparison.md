@@ -96,11 +96,32 @@ types: override for If/Loop, base field for everyone else. The
 `// inputs[0]` fallback in EagerPinning is now vestigial for the migrated
 types but left in place (out of scope; harmless).
 
-**Gates (both commits):** bnf-target-c byte-identical x2; mop/codegen-
-byte-compat 19/19; codegen-byte-compat-schedule 19/19; all mop/* pass
-(documented TODOs excepted); phi suite at baseline; control-threading 1-7
-green (test 5 TODO). No IR-snapshot re-baseline needed for step 2 (no test
-asserts on the old VarDecl content-hash id string).
+**Gates (production cutover):** bnf-target-c byte-identical x2; mop/codegen-
+byte-compat 19/19; codegen-byte-compat-schedule 19/19; phi suite at baseline;
+control-threading 1-7 green; control-uniform-representation 14/14. Codegen
+byte-identical (id-determinism + init-fold-leak both confirmed correct by
+review, not luck — VarDecl id is a per-parse counter, never reaches codegen
+output).
+
+**Incomplete-gate gap caught by review (B1, fixed in 208e4a78):** the
+implementation initially declared DONE against the gate set above, which did
+NOT include the IR-unit and struct-promotion suites that HAND-CONSTRUCT
+Return/Unwind/VarDecl with the old input shape. Those 12 files (~41 hard
+assertions) regressed (0 at base → N at HEAD) and were missed. Per CLAUDE.md
+pristine-tests, this was a blocker, not done. Fixed by migrating every test
+that builds/asserts these nodes to the new contract (inputs `[value]` for
+Return/Unwind, `[name,init]` for VarDecl; control via set_control_in;
+identical-VarDecl-is-distinct-node assertions for the new per-position
+identity). No test weakened — ported assertions check the same real behavior
+under the new accessors; the two ir-hash-consing dedup/determinism cases that
+used VarDecl as a content-hashed stand-in were repointed at `Add` (still
+content-hashed). Plus the M1 stale EagerPinning comment. **Widened gate set
+(all green at 208e4a78):** the 12 migrated files + the production gates above.
+
+**Lesson:** "tests green" must mean the FULL suite, not a curated gate list —
+a representation change ripples into every test that hand-builds the node.
+Add IR-unit + struct-promotion suites to the gate set for any future node-
+representation work.
 
 Next: STOP and re-visit the whole plan with the substrate clean, per the
 2026-06-02 decision (the step-3 fork — during-parse capstone vs
