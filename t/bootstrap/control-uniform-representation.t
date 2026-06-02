@@ -78,4 +78,55 @@ PERL
     }
 }
 
+# Step 2: VarDecl carries control in control_in, NOT inputs[0]. inputs hold
+# [name, init]. Control is the hash-excluded decoration.
+{
+    my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $x = 1;
+        my $y = 2;
+    }
+}
+PERL
+    my @stmts = method_body_stmts($src);
+    is(scalar(@stmts), 2, 'VarDecl body has two statements');
+
+  SKIP: {
+        skip 'parse did not yield two statements', 4 unless @stmts == 2;
+        my ($s1, $s2) = @stmts;
+        is(scalar($s1->inputs->@*), 2,
+            'VarDecl inputs hold [name, init] (control is not in inputs)');
+        ok(defined $s2->control_in,
+            'VarDecl control predecessor lives in control_in');
+        is(refaddr($s2->control_in), refaddr($s1),
+            'second VarDecl control_in is the first VarDecl (rebuilt chain)');
+        is(refaddr($s1->name), refaddr($s1->inputs->[0]),
+            'VarDecl->name() reads inputs[0]');
+    }
+}
+
+# Step 2 landmine: two textually-identical declarations in DIFFERENT control
+# positions must be DISTINCT nodes (per-position identity), not hash-consed
+# into one node fighting over a single control_in field.
+{
+    my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $x = 1;
+        my $x = 1;
+    }
+}
+PERL
+    my @stmts = method_body_stmts($src);
+    is(scalar(@stmts), 2, 'two identical decls yield two statements');
+
+  SKIP: {
+        skip 'parse did not yield two statements', 1 unless @stmts == 2;
+        my ($s1, $s2) = @stmts;
+        isnt(refaddr($s1), refaddr($s2),
+            'identical decls in different positions are distinct nodes (per-position identity)');
+    }
+}
+
 done_testing;

@@ -220,6 +220,21 @@ class Chalk::IR::NodeFactory {
             return $node;
         }
 
+        # VarDecl is a statement-position side-effect node with per-position
+        # (counter) identity, like Return/Unwind: two textually-identical
+        # declarations in different control positions are distinct nodes,
+        # each carrying its own control_in decoration. Allocate a fresh id
+        # per call; never hash-cons by content.
+        if ($op_name eq 'VarDecl') {
+            my $class = $DATA_CLASSES{VarDecl};
+            $cfg_counter++;
+            my $id = "VarDecl#${cfg_counter}";
+            my $node = $class->new( id => $id, %args );
+            $self->_register_consumers($node, %args);
+            $cache{$id} = $node;
+            return $node;
+        }
+
         my $class = $DATA_CLASSES{$op_name}
             or die "Unknown data node operation: $op_name";
 

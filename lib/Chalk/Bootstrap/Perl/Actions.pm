@@ -1630,17 +1630,14 @@ class Chalk::Bootstrap::Perl::Actions {
             my $s = $stmts[$i];
             next unless blessed($s);
             if ($s isa Chalk::IR::Node::VarDecl) {
-                my $existing_ctrl = $s->control();
+                # Control is a hash-excluded control_in decoration, so this
+                # is a plain mutation — no make/unmerge/merge identity churn.
+                $graph->merge($s);
+                my $existing_ctrl = $s->control_in;
                 if ($do_rewrite
                         && (!defined $existing_ctrl
                         || refaddr($existing_ctrl) != refaddr($current_control))) {
-                    my $rebuilt = $ctx->factory->make('VarDecl',
-                        inputs       => [$current_control, $s->name(), $s->init()],
-                    );
-                    $graph->unmerge($s);
-                    $graph->merge($rebuilt);
-                    $stmts[$i] = $rebuilt;
-                    $s = $rebuilt;
+                    $s->set_control_in($current_control);
                 }
                 $current_control = $s;
             } elsif ($s isa Chalk::IR::Node::Return
@@ -1800,13 +1797,14 @@ class Chalk::Bootstrap::Perl::Actions {
             );
         }
 
-        # Side-effect-shaped: inputs[0]=control, [1]=name, [2]=init.
-        # Control comes from the in-scope control input - the previous
-        # side-effect node, or a fresh Start if this is the first.
+        # Side-effect-shaped: inputs[0]=name, [1]=init. Control flows
+        # through the control_in decoration — the previous side-effect
+        # node, or a fresh Start if this is the first.
         my $control = $ctx->control_head // $factory->make('Start');
         my $var_decl = $ctx->factory->make('VarDecl',
-            inputs       => [$control, $var_name, undef],
+            inputs       => [$var_name, undef],
         );
+        $var_decl->set_control_in($control);
 
         # Get or create the in-flight graph. If no inner action has yet
         # published one (e.g., this is the first side-effect in a body),
@@ -2344,11 +2342,17 @@ class Chalk::Bootstrap::Perl::Actions {
                         inputs       => [$value],
                     );
                 }
-                my $ctrl_in = $target->inputs()->[0];
-                my $name_in = $target->inputs()->[1];
+                my $ctrl_in = $target->control_in;
+                my $name_in = $target->name();
+                # The refined node (with init) supersedes the bare one. It
+                # gets a fresh per-position id; the bare node is unmerged
+                # below so it falls out of the graph (its id is no longer
+                # in the cache, so nodes() filters it out). Control is a
+                # hash-excluded decoration copied via set_control_in.
                 my $result = $ctx->factory->make('VarDecl',
-                    inputs       => [$ctrl_in, $name_in, $init_value],
+                    inputs       => [$name_in, $init_value],
                 );
+                $result->set_control_in($ctrl_in) if defined $ctrl_in;
 
                 # Update scope: rebind the variable to the refined VarDecl
                 # and advance control so the next side-effect chains after it.

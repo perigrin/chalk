@@ -48,9 +48,10 @@ sub start_of($graph) {
 }
 
 # Walk a side-effect node's control chain. The chain is "the chain of CFG
-# predecessors reachable through inputs()[0] (control) at each step". The
-# walk stops at Start. Returns the list of nodes traversed (excluding the
-# starting node and Start itself), or undef if Start was never reached.
+# predecessors reachable through control_in at each step". Control is a
+# hash-excluded use-def decoration, not an inputs() slot. The walk stops
+# at Start. Returns the list of nodes traversed (excluding the starting
+# node and Start itself), or undef if Start was never reached.
 sub control_chain($node) {
     return undef unless defined $node && blessed($node);
     my @chain;
@@ -60,8 +61,7 @@ sub control_chain($node) {
         last if $cur->operation() eq 'Start';
         return undef if $seen{refaddr($cur)}++;
         push @chain, $cur;
-        my $ins = $cur->inputs() // [];
-        my $next = $ins->[0];
+        my $next = $cur->control_in;
         return undef unless defined $next && blessed($next);
         $cur = $next;
     }
@@ -99,7 +99,7 @@ class C {
         skip 'no VarDecl to chain-check', 1 unless @vardecls;
         my $chain = control_chain($vardecls[0]);
         ok(defined $chain,
-            'VarDecl control chain reaches Start via inputs[0]');
+            'VarDecl control chain reaches Start via control_in');
     }
 }
 

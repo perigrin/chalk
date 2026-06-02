@@ -1,5 +1,5 @@
 # ABOUTME: Variable declaration node in the Chalk IR.
-# ABOUTME: Side-effect-shaped: inputs[0]=control, inputs[1]=name Constant, inputs[2]=init (or undef).
+# ABOUTME: Side-effect-shaped: inputs[0]=name Constant, inputs[1]=init (or undef); control flows via control_in.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -11,12 +11,20 @@ class Chalk::IR::Node::VarDecl :isa(Chalk::IR::Node) {
 
     method operation() { 'VarDecl' }
 
+    # VarDecl has per-position (counter) identity, not content-hash
+    # identity: two textually-identical declarations in different control
+    # positions are distinct nodes (each carries its own control_in
+    # decoration). The content_hash is therefore the node's unique id so
+    # nothing — factory cache or graph merge/unmerge — ever deduplicates
+    # two declarations by their textual content.
     method content_hash() {
-        return join('|', 'VarDecl', "scope=$scope", $self->_serialize_inputs());
+        return $self->id();
     }
 
-    # Convenience accessors for the standard input slots.
-    method control() { return $self->inputs->[0] }
-    method name()    { return $self->inputs->[1] }
-    method init()    { return $self->inputs->[2] }
+    # Convenience accessors for the standard input slots. Control flows
+    # through the control_in decoration (set via set_control_in), not an
+    # inputs slot.
+    method control() { return $self->control_in }
+    method name()    { return $self->inputs->[0] }
+    method init()    { return $self->inputs->[1] }
 }

@@ -48,7 +48,7 @@ PERL
         skip 'parse did not yield two statements', 1 unless @stmts == 2;
         my ($s1, $s2) = @stmts;
         is(
-            refaddr($s2->inputs->[0]), refaddr($s1),
+            refaddr($s2->control_in), refaddr($s1),
             'rebuild active: second statement control input is the first statement node'
         );
     }
@@ -68,7 +68,7 @@ PERL
   SKIP: {
         skip 'parse did not yield two statements', 1 unless @stmts == 2;
         my ($s1, $s2) = @stmts;
-        my $ctrl2 = $s2->inputs->[0];
+        my $ctrl2 = $s2->control_in;
         is(
             ( blessed($ctrl2) && $ctrl2->can('operation') ? $ctrl2->operation : 'undef' ),
             'Start',
@@ -79,11 +79,11 @@ PERL
 
 # Step A goal (BLOCKED — see docs/plans/2026-06-01 plan and the Phase 2 Step A
 # report): during-parse control_head threading at Earley prediction should make
-# the rebuild-disabled chain identical to the rebuild-active chain. A seed-at-
-# prediction prototype proved insufficient: the bare/refined VarDecl identity
-# split plus the add() tie-break delivers the pre-init head, and non-VarDecl
-# statements never read control_head into inputs[0] at all (they are entirely
-# rebuild-dependent). Marked TODO until the merge/action gaps are closed.
+# the rebuild-disabled chain identical to the rebuild-active chain. The blocker
+# is the lateral-seed gap: statement N+1 is predicted+seeded from Start before
+# the StatementList merge, so its control_in is the bare Start seed rather than
+# statement N. The rebuild repairs this after the fact. Marked TODO until the
+# lateral-seed gap is closed.
 TODO: {
     local $TODO = 'Step A during-parse control threading not yet viable; rebuild remains the source of truth';
 
@@ -95,7 +95,7 @@ TODO: {
         skip 'parse did not yield two statements', 1 unless @stmts == 2;
         my ($s1, $s2) = @stmts;
         is(
-            refaddr($s2->inputs->[0]), refaddr($s1),
+            refaddr($s2->control_in), refaddr($s1),
             'threading (rebuild disabled) reproduces the rebuild-active chain'
         );
     }
