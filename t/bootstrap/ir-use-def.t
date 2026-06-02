@@ -27,16 +27,16 @@ use Chalk::IR::Node::VarDecl;
 
     my $typed = Chalk::IR::NodeFactory->new;
     my $decl  = $typed->make('VarDecl',
-        inputs       => [undef, $var, $init],
+        inputs       => [$var, $init],
         compat_class => 'VarDecl',
     );
 
     # Check producers (inputs) of decl - side-effect-shaped:
-    # inputs[0]=control (undef when constructed via Shim without it),
-    # inputs[1]=variable, inputs[2]=initializer.
-    is(scalar($decl->inputs->@*), 3, 'decl has 3 inputs (control, variable, initializer)');
-    is($decl->inputs->[1], $var,  'second input is variable');
-    is($decl->inputs->[2], $init, 'third input is initializer');
+    # inputs[0]=variable, inputs[1]=initializer. Control flows via the
+    # control_in decoration, not an inputs slot.
+    is(scalar($decl->inputs->@*), 2, 'decl has 2 inputs (variable, initializer)');
+    is($decl->inputs->[0], $var,  'first input is variable');
+    is($decl->inputs->[1], $init, 'second input is initializer');
 
     # Check consumers of var
     is(scalar($var->consumers->@*), 1, 'var has 1 consumer');
@@ -47,7 +47,10 @@ use Chalk::IR::Node::VarDecl;
     is($init->consumers->[0], $decl, 'init consumed by decl');
 }
 
-# Test 2: Multiple consumers - same inputs deduplicated
+# Test 2: Multiple consumers - identical VarDecls stay distinct
+# VarDecl carries per-position (counter) identity, so two textually-identical
+# declarations are distinct nodes (see Chalk::IR::Node::VarDecl). Each registers
+# itself as a consumer of the shared inputs, so the shared input has 2 consumers.
 {
     my $factory = Chalk::IR::NodeFactory->new;
 
@@ -56,20 +59,20 @@ use Chalk::IR::Node::VarDecl;
 
     my $typed = Chalk::IR::NodeFactory->new;
     my $decl1 = $typed->make('VarDecl',
-        inputs       => [undef, $shared_var, $shared_init],
+        inputs       => [$shared_var, $shared_init],
         compat_class => 'VarDecl',
     );
 
     my $decl2 = $typed->make('VarDecl',
-        inputs       => [undef, $shared_var, $shared_init],
+        inputs       => [$shared_var, $shared_init],
         compat_class => 'VarDecl',
     );
 
-    # Because of hash consing, decl1 and decl2 are the same
-    is($decl1, $decl2, 'VarDecl nodes are deduplicated');
+    # VarDecl has per-position identity: decl1 and decl2 are distinct
+    isnt($decl1, $decl2, 'identical VarDecl nodes are distinct (per-position identity)');
 
-    # So shared_var still has only 1 consumer
-    is(scalar($shared_var->consumers->@*), 1, 'shared_var has 1 consumer (deduplicated)');
+    # Both distinct decls consume shared_var
+    is(scalar($shared_var->consumers->@*), 2, 'shared_var has 2 consumers (one per distinct decl)');
 }
 
 # Test 3: Multiple consumers (non-deduplicated due to different initializers)
@@ -93,12 +96,12 @@ use Chalk::IR::Node::VarDecl;
 
     my $typed = Chalk::IR::NodeFactory->new;
     my $decl1 = $typed->make('VarDecl',
-        inputs       => [undef, $shared_var, $init1],
+        inputs       => [$shared_var, $init1],
         compat_class => 'VarDecl',
     );
 
     my $decl2 = $typed->make('VarDecl',
-        inputs       => [undef, $shared_var, $init2],
+        inputs       => [$shared_var, $init2],
         compat_class => 'VarDecl',
     );
 
@@ -124,7 +127,7 @@ use Chalk::IR::Node::VarDecl;
 
     my $typed = Chalk::IR::NodeFactory->new;
     my $decl  = $typed->make('VarDecl',
-        inputs       => [undef, $var, $init],
+        inputs       => [$var, $init],
         compat_class => 'VarDecl',
     );
 
@@ -169,12 +172,12 @@ use Chalk::IR::Node::VarDecl;
 
     my $typed = Chalk::IR::NodeFactory->new;
     my $decl1 = $typed->make('VarDecl',
-        inputs       => [undef, $shared, $init1],
+        inputs       => [$shared, $init1],
         compat_class => 'VarDecl',
     );
 
     my $decl2 = $typed->make('VarDecl',
-        inputs       => [undef, $shared, $init2],
+        inputs       => [$shared, $init2],
         compat_class => 'VarDecl',
     );
 

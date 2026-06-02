@@ -114,8 +114,9 @@ subtest 'ReturnStatement action produces Chalk::IR::Node::Return' => sub {
     ok(defined $node, 'result has an IR node');
     isa_ok($node, 'Chalk::IR::Node::Return', 'ReturnStatement produces Chalk::IR::Node::Return');
     is($node->operation(), 'Return', 'operation is Return');
-    is(scalar $node->inputs()->@*, 2, 'Return node has 2 inputs (control + value)');
-    is($node->inputs()->[1], $expr_val, 'Return value is the expression');
+    is(scalar $node->inputs()->@*, 1, 'Return node has 1 input (value); control is in control_in');
+    is($node->value(), $expr_val, 'Return value is the expression');
+    is($node->control_in(), $start, 'Return control_in is the Start control node');
 };
 
 # ---- Test 4: ReturnStatement with bare return (no expression) ----
@@ -136,7 +137,8 @@ subtest 'ReturnStatement bare return produces Return with undef value' => sub {
     my $node = $result->extract();
     ok(defined $node, 'result has an IR node');
     isa_ok($node, 'Chalk::IR::Node::Return', 'bare ReturnStatement produces Chalk::IR::Node::Return');
-    is(scalar $node->inputs()->@*, 2, 'Return node has 2 inputs');
+    is(scalar $node->inputs()->@*, 1, 'Return node has 1 input (value); control is in control_in');
+    is($node->control_in(), $start, 'Return control_in is the Start control node');
 };
 
 done_testing();

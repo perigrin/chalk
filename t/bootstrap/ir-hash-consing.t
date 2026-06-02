@@ -44,75 +44,95 @@ use Chalk::IR::NodeFactory;
     isnt(refaddr($const1), refaddr($const2), 'reference addresses differ');
 }
 
-# Test 3: Complex node deduplication
+# Test 3: Complex (data) node deduplication
+# Uses a content-hashed data node (BinaryExpr/Add). VarDecl is NOT used here
+# because VarDecl carries per-position (counter) identity by design and is
+# therefore never deduplicated — see Test 5.
 {
     my $factory = Chalk::IR::NodeFactory->new;
     my $typed   = Chalk::IR::NodeFactory->new;
 
     # Create shared input nodes
-    my $var = $factory->make('Constant',
+    my $lhs = $factory->make('Constant',
         const_type => 'string',
         value => '$x',
     );
 
-    my $init = $factory->make('Constant',
+    my $rhs = $factory->make('Constant',
         const_type => 'string',
         value => '42',
     );
 
-    # Create two VarDecl nodes with same inputs (typed factory, post-Shim shape)
-    my $decl1 = $typed->make('VarDecl',
-        inputs       => [undef, $var, $init],
-        compat_class => 'VarDecl',
+    my $op = $factory->make('Constant', const_type => 'string', value => '+');
+
+    # Create two Add nodes with same inputs (typed factory, post-Shim shape)
+    my $expr1 = $typed->make('Add',
+        inputs       => [$op, $lhs, $rhs],
+        left         => $lhs,
+        right        => $rhs,
+        compat_class => 'BinaryExpr',
     );
 
-    my $decl2 = $typed->make('VarDecl',
-        inputs       => [undef, $var, $init],
-        compat_class => 'VarDecl',
+    my $expr2 = $typed->make('Add',
+        inputs       => [$op, $lhs, $rhs],
+        left         => $lhs,
+        right        => $rhs,
+        compat_class => 'BinaryExpr',
     );
 
-    is($decl1, $decl2, 'complex nodes with same inputs deduplicated');
+    is($expr1, $expr2, 'complex nodes with same inputs deduplicated');
 }
 
 # Test 4: Hash key determinism - same data different code path
+# Uses a content-hashed data node (Add). VarDecl is excluded because it carries
+# per-position identity and is never content-deduplicated (see Test 5).
 {
     my $factory = Chalk::IR::NodeFactory->new;
     my $typed   = Chalk::IR::NodeFactory->new;
 
     # Create inputs in one code path
-    my $var1 = $factory->make('Constant',
+    my $op1 = $factory->make('Constant', const_type => 'string', value => '+');
+    my $lhs1 = $factory->make('Constant',
         const_type => 'string',
         value => '$bar',
     );
-    my $init1 = $factory->make('Constant',
+    my $rhs1 = $factory->make('Constant',
         const_type => 'string',
         value => 'value1',
     );
 
-    my $decl1 = $typed->make('VarDecl',
-        inputs       => [undef, $var1, $init1],
-        compat_class => 'VarDecl',
+    my $expr1 = $typed->make('Add',
+        inputs       => [$op1, $lhs1, $rhs1],
+        left         => $lhs1,
+        right        => $rhs1,
+        compat_class => 'BinaryExpr',
     );
 
     # Create inputs in a different code path but same logical data
-    my $var2 = $factory->make('Constant',
+    my $op2 = $factory->make('Constant', const_type => 'string', value => '+');
+    my $lhs2 = $factory->make('Constant',
         const_type => 'string',
         value => '$bar',
     );
-    my $init2 = $factory->make('Constant',
+    my $rhs2 = $factory->make('Constant',
         const_type => 'string',
         value => 'value1',
     );
 
-    my $decl2 = $typed->make('VarDecl',
-        inputs       => [undef, $var2, $init2],
-        compat_class => 'VarDecl',
+    my $expr2 = $typed->make('Add',
+        inputs       => [$op2, $lhs2, $rhs2],
+        left         => $lhs2,
+        right        => $rhs2,
+        compat_class => 'BinaryExpr',
     );
 
-    is($decl1, $decl2, 'hash key generation is deterministic');
+    is($expr1, $expr2, 'hash key generation is deterministic');
 }
 
-# Test 5: Nested deduplication
+# Test 5: Nested deduplication of leaves; VarDecl roots stay distinct
+# Leaf Constants are content-hashed and deduplicated. VarDecl carries
+# per-position (counter) identity, so two textually-identical declarations are
+# distinct nodes by design — see Chalk::IR::Node::VarDecl.
 {
     my $factory = Chalk::IR::NodeFactory->new;
     my $typed   = Chalk::IR::NodeFactory->new;
@@ -121,7 +141,7 @@ use Chalk::IR::NodeFactory;
     my $var1  = $factory->make('Constant', const_type => 'string', value => '$z');
     my $init1 = $factory->make('Constant', const_type => 'string', value => 'nested');
     my $decl1 = $typed->make('VarDecl',
-        inputs       => [undef, $var1, $init1],
+        inputs       => [$var1, $init1],
         compat_class => 'VarDecl',
     );
 
@@ -129,13 +149,13 @@ use Chalk::IR::NodeFactory;
     my $var2  = $factory->make('Constant', const_type => 'string', value => '$z');
     my $init2 = $factory->make('Constant', const_type => 'string', value => 'nested');
     my $decl2 = $typed->make('VarDecl',
-        inputs       => [undef, $var2, $init2],
+        inputs       => [$var2, $init2],
         compat_class => 'VarDecl',
     );
 
     is($var1,  $var2,  'leaf variable nodes deduplicated');
     is($init1, $init2, 'leaf init nodes deduplicated');
-    is($decl1, $decl2, 'root VarDecl nodes deduplicated');
+    isnt($decl1, $decl2, 'root VarDecl nodes are distinct (per-position identity)');
 }
 
 # Test 6: Factory instances are independent (typed factory uses ->new, not singleton)
@@ -228,7 +248,7 @@ use Chalk::IR::NodeFactory;
     my $var  = $factory->make('Constant', const_type => 'string', value => '$consumer_test');
     my $init = $factory->make('Constant', const_type => 'string', value => 'init_val');
     my $decl = $factory->make('VarDecl',
-        inputs       => [undef, $var, $init],
+        inputs       => [$var, $init],
         compat_class => 'VarDecl',
     );
 

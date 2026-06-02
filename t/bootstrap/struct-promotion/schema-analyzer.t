@@ -75,10 +75,12 @@ sub ctor($class, %inputs) {
         );
     }
     if ($class eq 'VarDecl') {
-        return $typed->make('VarDecl',
-            inputs       => [$inputs{control}, $inputs{variable}, $inputs{initializer}],
+        my $vd = $typed->make('VarDecl',
+            inputs       => [$inputs{variable}, $inputs{initializer}],
             compat_class => 'VarDecl',
         );
+        $vd->set_control_in($inputs{control}) if defined $inputs{control};
+        return $vd;
     }
     if ($class eq 'MethodCallExpr') {
         return $typed->make('Call',
@@ -91,12 +93,15 @@ sub ctor($class, %inputs) {
     die "ctor: unsupported class '$class'";
 }
 
-# Helper: create a Return CFG node
+# Helper: create a Return CFG node. Value is inputs[0]; control flows via the
+# control_in decoration, not an inputs slot.
 sub ret_node($val) {
     my $factory = Chalk::IR::NodeFactory->new;
-    return $factory->make_cfg('Return',
-        inputs => [ $factory->make('Start'), $val ],
+    my $ret = $factory->make_cfg('Return',
+        inputs => [ $val ],
     );
+    $ret->set_control_in($factory->make('Start'));
+    return $ret;
 }
 
 # Helper: create a MethodInfo metadata struct

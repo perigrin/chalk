@@ -72,7 +72,7 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     # Simulate a VarDecl node with no initializer yet (from 'my $x')
     my $var_node = $factory->make('Constant', const_type => 'variable', value => '$x');
     my $vardecl = $typed->make('VarDecl',
-        inputs       => [undef, $var_node, undef],
+        inputs       => [$var_node, undef],
         compat_class => 'VarDecl',
     );
     my $op_node   = $factory->make('Constant', const_type => 'string', value => '=');

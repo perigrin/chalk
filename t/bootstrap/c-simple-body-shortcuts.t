@@ -25,7 +25,8 @@ my $start = $factory->make('Start');
 $graph->merge($start);
 my $val = $factory->make('Constant', const_type => 'string', value => '42');
 $graph->merge($val);
-my $ret = $factory->make_cfg('Return', inputs => [$start, $val]);
+my $ret = $factory->make_cfg('Return', inputs => [$val]);
+$ret->set_control_in($start);
 $graph->merge($ret);
 
 my $method = $cls->declare_method('answer',
@@ -58,7 +59,8 @@ unlike($helper, qr/SV \*retval = NULL/, 'simple body does NOT use RETVAL pattern
     $graph2->merge($start2);
     my $val_one = $factory2->make('Constant', const_type => 'string', value => '1');
     $graph2->merge($val_one);
-    my $ret_one = $factory2->make_cfg('Return', inputs => [$start2, $val_one]);
+    my $ret_one = $factory2->make_cfg('Return', inputs => [$val_one]);
+    $ret_one->set_control_in($start2);
     $graph2->merge($ret_one);
     my $method_one = $cls->declare_method('one',
         params => ['$self'],

@@ -23,21 +23,21 @@ my sub c($val) {
     my $var = c('$x');
     my $init = c('hello');
     my $node = $typed->make('VarDecl',
-        inputs       => [undef, $var, $init],
+        inputs       => [$var, $init],
         compat_class => 'VarDecl',
     );
     ok(defined $node, 'VarDecl: created');
     is($node->class(), 'VarDecl', 'VarDecl: class');
-    is($node->inputs()->[1]->value(), '$x', 'VarDecl: variable');
-    is($node->inputs()->[2]->value(), 'hello', 'VarDecl: initializer');
+    is($node->inputs()->[0]->value(), '$x', 'VarDecl: variable');
+    is($node->inputs()->[1]->value(), 'hello', 'VarDecl: initializer');
 
     # VarDecl without initializer
     my $bare = $typed->make('VarDecl',
-        inputs       => [undef, c('$y'), undef],
+        inputs       => [c('$y'), undef],
         compat_class => 'VarDecl',
     );
     ok(defined $bare, 'VarDecl: bare created');
-    is($bare->inputs()->[2], undef, 'VarDecl: no initializer');
+    is($bare->inputs()->[1], undef, 'VarDecl: no initializer');
 }
 
 # ============================================================
@@ -298,15 +298,18 @@ SKIP: {
     my $c2 = $t->make('Constant', const_type => 'string', value => 'test');
     is($c1, $c2, 'Hash consing: same Constant returns same object');
 
+    # VarDecl carries per-position (counter) identity, not content-hash
+    # identity: two textually-identical declarations are distinct nodes by
+    # design (see Chalk::IR::Node::VarDecl).
     my $n1 = $t->make('VarDecl',
-        inputs       => [undef, $c1, undef],
+        inputs       => [$c1, undef],
         compat_class => 'VarDecl',
     );
     my $n2 = $t->make('VarDecl',
-        inputs       => [undef, $c2, undef],
+        inputs       => [$c2, undef],
         compat_class => 'VarDecl',
     );
-    is($n1, $n2, 'Hash consing: same VarDecl returns same object');
+    isnt($n1, $n2, 'Per-position identity: same VarDecl returns distinct objects');
 }
 
 done_testing();

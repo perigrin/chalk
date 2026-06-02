@@ -26,7 +26,7 @@ my $typed   = Chalk::IR::NodeFactory->new;
     );
 
     my $decl = $typed->make('VarDecl',
-        inputs       => [undef, $var_name, $init],
+        inputs       => [$var_name, $init],
         compat_class => 'VarDecl',
     );
 
@@ -35,9 +35,11 @@ my $typed   = Chalk::IR::NodeFactory->new;
     is($decl->operation(), 'VarDecl', 'operation is VarDecl');
 
     my $inputs = $decl->inputs();
-    is($inputs->[0], undef,     'first input is control (undef when not in a chain)');
-    is($inputs->[1], $var_name, 'second input is variable name');
-    is($inputs->[2], $init,     'third input is initializer');
+    is($inputs->[0], $var_name, 'first input is variable name');
+    is($inputs->[1], $init,     'second input is initializer');
+    is($decl->name(), $var_name, 'name() accessor reads variable name');
+    is($decl->init(), $init,     'init() accessor reads initializer');
+    is($decl->control_in(), undef, 'control is undef when not in a chain');
 }
 
 # Test 2: BinaryExpr creation (+ becomes Add)
@@ -118,7 +120,10 @@ my $typed   = Chalk::IR::NodeFactory->new;
     isnt(refaddr($decl), refaddr($arr), 'reference addresses differ');
 }
 
-# Test 5: Hash consing - same class and inputs deduplicated
+# Test 5: VarDecl per-position identity - textually-identical decls are distinct
+# VarDecl carries per-position (counter) identity, not content-hash identity:
+# two declarations with identical name/init are distinct nodes by design (each
+# carries its own control_in decoration). See Chalk::IR::Node::VarDecl.
 {
     my $var = $factory->make('Constant',
         const_type => 'string',
@@ -131,17 +136,17 @@ my $typed   = Chalk::IR::NodeFactory->new;
     );
 
     my $decl1 = $typed->make('VarDecl',
-        inputs       => [undef, $var, $init],
+        inputs       => [$var, $init],
         compat_class => 'VarDecl',
     );
 
     my $decl2 = $typed->make('VarDecl',
-        inputs       => [undef, $var, $init],
+        inputs       => [$var, $init],
         compat_class => 'VarDecl',
     );
 
-    is($decl1, $decl2, 'identical VarDecl nodes deduplicated');
-    is(refaddr($decl1), refaddr($decl2), 'reference addresses match');
+    isnt($decl1, $decl2, 'identical VarDecl nodes are distinct (per-position identity)');
+    isnt(refaddr($decl1), refaddr($decl2), 'reference addresses differ');
 }
 
 # Test 6: Hash consing - operation distinguishes nodes

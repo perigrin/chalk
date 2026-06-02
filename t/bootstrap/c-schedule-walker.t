@@ -27,7 +27,8 @@ my $start = $factory->make('Start');
 $graph->merge($start);
 my $value = $factory->make('Constant', const_type => 'string', value => 'hello');
 $graph->merge($value);
-my $ret = $factory->make_cfg('Return', inputs => [$start, $value]);
+my $ret = $factory->make_cfg('Return', inputs => [$value]);
+$ret->set_control_in($start);
 $graph->merge($ret);
 
 my $method = $mop_class->declare_method('greet',

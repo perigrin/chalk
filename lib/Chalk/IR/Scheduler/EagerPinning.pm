@@ -45,8 +45,8 @@ class Chalk::IR::Scheduler::EagerPinning {
         #     controlling If/Loop and continue from head.control_in.
         #   If, Loop: override control_in to read inputs[0] (rewired
         #     by Block fixup).
-        #   VarDecl: base control_in field unused; control predecessor
-        #     is inputs[0].
+        #   VarDecl: control predecessor lives in control_in (set by
+        #     Block fixup); inputs hold only the name and init.
         #   Return, Unwind: control predecessor lives in control_in;
         #     inputs hold only the value.
         #   Call, Assign, CompoundAssign, RegexSubst, TryCatch: base
