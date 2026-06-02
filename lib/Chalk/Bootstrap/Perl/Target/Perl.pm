@@ -262,7 +262,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                     && $node->can('synthetic')
                     && $node->synthetic)
             {
-                my $val = $node->inputs->[1];
+                my $val = $node->value;
                 if (defined $val
                         && blessed($val)
                         && ($val isa Chalk::IR::Node::If
@@ -874,12 +874,12 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_return_stmt($node) {
-        my $value = $node->inputs()->[1];  # inputs[0]=control, inputs[1]=value
+        my $value = $node->value;  # inputs[0]=value; control is in control_in
         return "return " . $self->_emit_expr($value) . ";";
     }
 
     method _emit_die_call($node) {
-        my $args = $node->inputs()->[1];
+        my $args = $node->value;
         my @arg_strs = map { $self->_emit_expr($_) } $args->@*;
         return "die " . join(', ', @arg_strs) . ";";
     }

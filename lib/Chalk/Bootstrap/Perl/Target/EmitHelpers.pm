@@ -736,7 +736,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             next unless $item->kind eq 'stmt';
             my $node = $item->node;
             next unless $node isa Chalk::IR::Node::Return;
-            my $val = $node->inputs->[1];
+            my $val = $node->value;
             return true unless defined $val;
         }
         return false;
@@ -920,11 +920,11 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             }
             # Unwrap Return/Unwind wrappers (filter-gap merge artifacts)
             if ($cur isa Chalk::IR::Node::Return) {
-                $cur = $cur->inputs()->[1];  # inputs[1] is the value
+                $cur = $cur->value;  # inputs[0] is the value
                 next;
             }
             if ($cur isa Chalk::IR::Node::Unwind) {
-                $cur = $cur->inputs()->[1];  # inputs[1] is exception args (arrayref)
+                $cur = $cur->value;  # inputs[0] is exception args (arrayref)
                 next;
             }
             return;
@@ -956,11 +956,11 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             }
             # Unwrap Return/Unwind wrappers (filter-gap merge artifacts)
             if ($cur isa Chalk::IR::Node::Return) {
-                $cur = $cur->inputs()->[1];  # inputs[1] is the value
+                $cur = $cur->value;  # inputs[0] is the value
                 next;
             }
             if ($cur isa Chalk::IR::Node::Unwind) {
-                $cur = $cur->inputs()->[1];  # inputs[1] is exception args (arrayref)
+                $cur = $cur->value;  # inputs[0] is exception args (arrayref)
                 next;
             }
             last;
@@ -2263,7 +2263,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     method _emit_return_stmt($node, $declared_vars, $is_last = true) {
-        my $value = $node->inputs()->[1];  # inputs[0]=control, inputs[1]=value
+        my $value = $node->value;  # inputs[0]=value; control is in control_in
         my $val_expr = $self->_emit_expr($value, $declared_vars);
         $val_expr =~ s/^sv_2mortal\((.+)\)$/$1/;
         my $retval = $self->_wrap_retval($val_expr);
@@ -2276,7 +2276,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     }
 
     method _emit_die_call($node, $declared_vars = undef) {
-        my $args = $node->inputs()->[1];
+        my $args = $node->value;
         my $msg = '';
         if (ref($args) eq 'ARRAY' && $args->@*) {
             my $first = $args->[0];

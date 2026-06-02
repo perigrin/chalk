@@ -52,6 +52,11 @@ sub reachable_from_inputs(@seeds) {
                 push @worklist, $in;
             }
         }
+        # Control is a use-def edge carried in control_in (not an inputs()
+        # slot) for Return/Unwind/Call/VarDecl. Follow it so the effect
+        # chain is reachable.
+        my $ctrl = $n->control_in;
+        push @worklist, $ctrl if defined $ctrl && blessed($ctrl);
     }
     return \%seen;
 }
@@ -71,7 +76,7 @@ sub check_reachability($method, $label) {
         my $reached = reachable_from_inputs(@returns);
         my @missing = grep { !$reached->{refaddr($_)} } @vardecls;
         is(scalar @missing, 0,
-            "$label: every VarDecl reachable from Return via inputs() alone")
+            "$label: every VarDecl reachable from Return via use-def edges (inputs + control_in)")
             or diag("missing $label VarDecls: " . scalar @missing);
     }
 

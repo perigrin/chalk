@@ -392,7 +392,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
 
         # Return CFG node in a public method — returned value may escape.
         if ($node isa Chalk::IR::Node::Return && $is_public) {
-            my $value = $node->inputs()->[1];  # inputs[0]=control, inputs[1]=value
+            my $value = $node->value;  # inputs[0]=value; control is in control_in
             if (defined $value
                 && $value isa Chalk::IR::Node::Constant
                 && $value->const_type() eq 'variable') {

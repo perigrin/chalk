@@ -281,7 +281,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         if (@items == 1 && $items[0]->kind eq 'stmt') {
             my $node = $items[0]->node;
             if ($node isa Chalk::IR::Node::Return) {
-                my $value = $node->inputs->[1];
+                my $value = $node->value;
                 if (defined $value && $value isa Chalk::IR::Node::Interpolate) {
                     return $self->_emit_interp_return($name, $value);
                 }
@@ -360,7 +360,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
     # Single-stmt Unwind (die): emit `croak("MSG");`.
     method _emit_simple_die_method($func_name, $params, $node) {
-        my $args = $node->inputs->[0];
+        my $args = $node->value;
         my $msg = '';
         if (ref($args) eq 'ARRAY' && $args->@*) {
             $msg = $self->_escape_c_string($args->[0]->value);
@@ -551,7 +551,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             } elsif (@items == 1 && $items[0]->kind eq 'stmt') {
                 my $node = $items[0]->node;
                 if ($node isa Chalk::IR::Node::Return) {
-                    my $value = $node->inputs->[1];
+                    my $value = $node->value;
                     if (defined $value && $value isa Chalk::IR::Node::Constant
                             && ($value->const_type // '') ne 'variable'
                             && $value->value !~ /^[\$\@\%]/) {
@@ -618,7 +618,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
     # Simple Unwind sub: emit `croak("MSG");` and return undef.
     method _emit_simple_die_sub($name, $params, $node) {
-        my $args = $node->inputs->[0];
+        my $args = $node->value;
         my $msg = '';
         if (ref($args) eq 'ARRAY' && $args->@*) {
             $msg = $self->_escape_c_string($args->[0]->value);

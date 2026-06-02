@@ -7,4 +7,7 @@ class Chalk::IR::Node::Return :isa(Chalk::IR::Node) {
     method operation() {
         'Return'
     }
+    method value() {
+        return $self->inputs()->[0];
+    }
 }

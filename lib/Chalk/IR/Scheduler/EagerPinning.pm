@@ -45,15 +45,17 @@ class Chalk::IR::Scheduler::EagerPinning {
         #     controlling If/Loop and continue from head.control_in.
         #   If, Loop: override control_in to read inputs[0] (rewired
         #     by Block fixup).
-        #   VarDecl, Return, Unwind: base control_in field unused;
-        #     control predecessor is inputs[0].
+        #   VarDecl: base control_in field unused; control predecessor
+        #     is inputs[0].
+        #   Return, Unwind: control predecessor lives in control_in;
+        #     inputs hold only the value.
         #   Call, Assign, CompoundAssign, RegexSubst, TryCatch: base
         #     control_in field set by Block fixup; that's the
         #     predecessor.
         #
         # Unified reader: $cur->control_in if defined, else inputs[0].
         my @reverse;
-        my $cur = $exit->inputs->[0];
+        my $cur = $exit->control_in;
         while (defined $cur && blessed($cur)) {
             last if $cur->operation eq 'Start';
 
@@ -100,7 +102,7 @@ class Chalk::IR::Scheduler::EagerPinning {
         my $best_len = 0;
         for my $r ($returns->@*) {
             my $len = 0;
-            my $cur = $r->inputs->[0];
+            my $cur = $r->control_in;
             my %seen;
             while (defined $cur && blessed($cur)) {
                 last if $cur->operation eq 'Start';

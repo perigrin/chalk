@@ -391,9 +391,11 @@ class Chalk::Bootstrap::Perl::Actions {
         # Fall back to a fresh Start node when no scope is available
         # (e.g., in tests or early-parse contexts without scope tracking).
         my $control = $ctx->control_head // $factory->make('Start');
-        return $factory->make_cfg('Return',
-            inputs => [$control, $value // _make_const($factory, 'undef')],
+        my $ret = $factory->make_cfg('Return',
+            inputs => [$value // _make_const($factory, 'undef')],
         );
+        $ret->set_control_in($control);
+        return $ret;
     }
 
     method SimpleStatement($ctx) {
@@ -1008,9 +1010,10 @@ class Chalk::Bootstrap::Perl::Actions {
                     }
                 }
                 my $implicit_return = $factory->make_cfg('Return',
-                    inputs    => [$return_ctrl, $last],
+                    inputs    => [$last],
                     synthetic => true,
                 );
+                $implicit_return->set_control_in($return_ctrl);
                 push @returns, $implicit_return;
             }
         }
@@ -1063,6 +1066,15 @@ class Chalk::Bootstrap::Perl::Actions {
                 next unless defined $input && blessed($input)
                     && $input->isa('Chalk::IR::Node');
                 push @worklist, $input;
+            }
+            # Control is a hash-excluded use-def edge (control_in), not an
+            # inputs() slot for Return/Unwind/Call/etc. Follow it so the
+            # effect chain (each statement's control predecessor) is part
+            # of the seeded graph, preserving full reachability.
+            my $ctrl = $n->control_in;
+            if (defined $ctrl && blessed($ctrl)
+                    && $ctrl->isa('Chalk::IR::Node')) {
+                push @worklist, $ctrl;
             }
         }
 
@@ -1371,17 +1383,21 @@ class Chalk::Bootstrap::Perl::Actions {
             # return EXPR → Return CFG node
             my $value   = $args[0]; # single value for Tier A
             my $control = $ctx->control_head // $factory->make('Start');
-            return $factory->make_cfg('Return',
-                inputs => [$control, $value],
+            my $ret = $factory->make_cfg('Return',
+                inputs => [$value],
             );
+            $ret->set_control_in($control);
+            return $ret;
         }
 
         if (defined $func_name && $func_name eq 'die') {
             # die EXPR → Unwind CFG node (exceptional exit)
             my $control = $ctx->control_head // $factory->make('Start');
-            return $factory->make_cfg('Unwind',
-                inputs => [$control, \@args],
+            my $unwind = $factory->make_cfg('Unwind',
+                inputs => [\@args],
             );
+            $unwind->set_control_in($control);
+            return $unwind;
         }
 
         # Generic builtin or function call → BuiltinCall
@@ -1560,7 +1576,7 @@ class Chalk::Bootstrap::Perl::Actions {
             if (defined $f && blessed($f)
                     && ($f isa Chalk::IR::Node::Return
                         || $f isa Chalk::IR::Node::Unwind)) {
-                my $val_in = $f->inputs->[1];
+                my $val_in = $f->value;
                 my $t = _classify_value_type($val_in);
                 $exit_types{$t}++ if defined $t;
                 next;
@@ -1629,26 +1645,19 @@ class Chalk::Bootstrap::Perl::Actions {
                 $current_control = $s;
             } elsif ($s isa Chalk::IR::Node::Return
                         || $s isa Chalk::IR::Node::Unwind) {
-                # Return/Unwind also need their control input updated to
-                # the current chain tail. The ReturnStatement action sees
+                # Return/Unwind also need their control predecessor updated
+                # to the current chain tail. The ReturnStatement action sees
                 # only its own multiply context and falls back to Start.
-                my $existing_ctrl = $s->inputs->[0];
+                # Control is a hash-excluded control_in decoration, so this
+                # is a plain mutation — no identity churn. The node is
+                # seeded into the graph by _finalize_body_graph's @returns
+                # walk, so no merge() here (which would key it by
+                # content_hash and collide with the id-keyed seed).
+                my $existing_ctrl = $s->control_in;
                 if ($do_rewrite
                         && (!defined $existing_ctrl
                         || refaddr($existing_ctrl) != refaddr($current_control))) {
-                    my $op = $s isa Chalk::IR::Node::Return
-                        ? 'Return' : 'Unwind';
-                    my $synthetic = $s isa Chalk::IR::Node::Return
-                        && $s->can('synthetic') ? $s->synthetic : false;
-                    my $rebuilt = $factory->make_cfg($op,
-                        inputs => [$current_control, $s->inputs->[1]],
-                        ($op eq 'Return' && $synthetic
-                            ? (synthetic => $synthetic) : ()),
-                    );
-                    $graph->unmerge($s);
-                    $graph->merge($rebuilt);
-                    $stmts[$i] = $rebuilt;
-                    $s = $rebuilt;
+                    $s->set_control_in($current_control);
                 }
                 # Return/Unwind terminate the chain - don't advance control.
             } elsif ($s isa Chalk::IR::Node::Call
