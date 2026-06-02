@@ -106,6 +106,23 @@ class Chalk::Bootstrap::Perl::Actions {
         Chalk::Bootstrap::Semiring::SemanticAction::set_factory($typed);
     }
 
+    # Helper: thread a statement-position side-effect node's control input from
+    # the during-parse control_head at construction, mirroring how VarDecl/
+    # Return/Unwind consume `$ctx->control_head // make('Start')`. These nodes
+    # carry control in the hash-excluded control_in field (set via the late-
+    # binding set_control_in), not inputs[0]. The Block control-chain rebuild
+    # still re-threads each node in source order as the source of truth; this
+    # only makes the action consume whatever control_head IS present at fire
+    # time, so the node is correct without the rebuild where control_head is
+    # already correct (and a no-op rewrite where the rebuild agrees). Skip when
+    # the node already carries control_in.
+    my sub _thread_control_head($ctx, $node, $factory) {
+        return $node unless blessed($node) && $node->can('set_control_in');
+        return $node if defined $node->control_in;
+        $node->set_control_in($ctx->control_head // $factory->make('Start'));
+        return $node;
+    }
+
     # Helper: collect all leaves with defined IR focuses (Constructor or Constant nodes)
     my sub _collect_ir_leaves($ctx) {
         my @results;
@@ -326,12 +343,13 @@ class Chalk::Bootstrap::Perl::Actions {
                     # Merge remaining items into the list-builtin's args
                     my @merged_args = ($first->inputs()->[1]->@*, $items->@[1..$items->$#*]);
                     my $name_node = $first->inputs()->[0];
-                    push @ir_nodes, $ctx->factory->make('Call',
+                    my $merged_call = $ctx->factory->make('Call',
                         dispatch_kind => 'builtin',
                         name          => $name_node->value(),
                         paren_form    => false,
                         inputs        => [$name_node, \@merged_args],
                     );
+                    push @ir_nodes, _thread_control_head($ctx, $merged_call, $factory);
                 } else {
                     # No list-builtin merge — push each item as its own statement
                     push @ir_nodes, $items->@*;
@@ -1138,6 +1156,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 my $try_node = $ctx->factory->make('TryCatch',
                     inputs       => [$try_body, $catch_var_const, $catch_body],
                 );
+                _thread_control_head($ctx, $try_node, $factory);
 
                 # Phase 1 migration 4: mirror try/catch metadata onto the
                 # TryCatch node's schedule_data so the scheduler can read
@@ -1377,12 +1396,13 @@ class Chalk::Bootstrap::Perl::Actions {
             # calls that may participate in postfix-chain stitching.
             my $text = $ctx->scanned_text() // '';
             my $is_paren_form = $text =~ /^\s*[\w:]+\s*\(/ ? true : false;
-            return $ctx->factory->make('Call',
+            my $call = $ctx->factory->make('Call',
                 dispatch_kind => 'builtin',
                 name          => $name_node->value(),
                 paren_form    => $is_paren_form,
                 inputs        => [$name_node, \@args],
             );
+            return _thread_control_head($ctx, $call, $factory);
         }
 
         return undef;
@@ -1960,10 +1980,11 @@ class Chalk::Bootstrap::Perl::Actions {
                 if ($pat =~ m{^s/((?:[^/\\]|\\.)*)/((?:[^/\\]|\\.)*)/([\w]*)$}) {
                     my $flags_node = _make_const($factory, $3);
                     my $flags_str  = (defined $flags_node ? $flags_node->value() : '') // '';
-                    return $ctx->factory->make('RegexSubst',
+                    my $regex_subst = $ctx->factory->make('RegexSubst',
                         flags        => $flags_str,
                         inputs       => [$left, _make_const($factory, $1), _make_const($factory, $2), $flags_node],
                     );
+                    return _thread_control_head($ctx, $regex_subst, $factory);
                 }
             } else {
                 # /pattern/flags or m/pattern/flags
@@ -2357,7 +2378,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     && $target->value() =~ /^[\$\@\%]/) {
                 $update_scope->($target->value(), $assign_result);
             }
-            return $assign_result;
+            return _thread_control_head($ctx, $assign_result, $factory);
         }
 
         # Compound assignment (.=, //=, +=, etc.)
@@ -2370,7 +2391,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 && $target->value() =~ /^[\$\@\%]/) {
             $update_scope->($target->value(), $compound_result);
         }
-        return $compound_result;
+        return _thread_control_head($ctx, $compound_result, $factory);
     }
 
     # §17 AssignOp — returns operator as Constant

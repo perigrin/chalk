@@ -101,4 +101,41 @@ TODO: {
     }
 }
 
+# Step (b): the side-effect statement actions must consume $ctx->control_head
+# into their control input AT CONSTRUCTION, like VarDecl/Return/Unwind already
+# do. This step does NOT fix cross-statement chaining (the lateral-seed gap) —
+# it only makes the action READ whatever control_head is present at fire time.
+#
+# For a single statement-position Call whose predecessor IS Start (the seed),
+# control_head is correct at construction, so the action — with the rebuild
+# DISABLED — must set the Call's control_in to that Start. Today it is undef:
+# the action layer is structurally incapable of consuming control. This test
+# pins that the action now sets it on its own.
+{
+    my $single = <<'PERL';
+class T {
+    method m($self) {
+        foo();
+    }
+}
+PERL
+
+    Chalk::Bootstrap::Perl::Actions->disable_control_rebuild;
+    my @stmts = method_body_stmts($single);
+    Chalk::Bootstrap::Perl::Actions->enable_control_rebuild;
+
+    is(scalar(@stmts), 1, 'single side-effect statement (rebuild disabled)');
+
+  SKIP: {
+        skip 'parse did not yield one statement', 1 unless @stmts == 1;
+        my ($call) = @stmts;
+        my $ctrl = $call->can('control_in') ? $call->control_in : undef;
+        is(
+            ( blessed($ctrl) && $ctrl->can('operation') ? $ctrl->operation : 'undef' ),
+            'Start',
+            'rebuild disabled: statement-position Call consumes control_head (Start) at construction'
+        );
+    }
+}
+
 done_testing;
