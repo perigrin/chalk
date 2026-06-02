@@ -46,3 +46,13 @@ The rebuild stays as the **differential-check oracle** throughout (the `disable_
 **Execute (b) then Proposal 2, then STOP and re-visit the entire plan** with those landed and the substrate clean. The step-3 fork (capstone vs scheduler) is explicitly deferred to that re-visit — decided against the real, cleaned-up substrate rather than from reasoning.
 
 Full proposals preserved in the session subagent transcripts (workflow/agent records 2026-06-02).
+
+## Execution log
+
+### Step (b) — DONE, committed 68218db2 (reviewed, APPROVED)
+Side-effect statement actions (Call/Assign/CompoundAssign/RegexSubst/TryCatch) now consume `$ctx->control_head` at construction via a shared `_thread_control_head` helper (Actions.pm:119-124), applied at 6 sites. Byte-identical under rebuild-ON (goldens 19/19, bnf-target-c 178/178 twice, all mop/*); ~42% of the rebuild's set_control_in calls for these types are now no-ops. The rebuild stays as differential oracle.
+
+**LATENT-DEBT acceptance criterion for the eventual rebuild deletion (from the step-(b) review):** `CallExpression` fires for nested sub-expression calls too, so step (b) now stamps `control_in` onto nested, non-statement-position Call nodes (e.g. the inner `foo()` in `bar(foo())`) that were previously `undef`. This is HARMLESS today only because (1) the EagerPinning scheduler is chain-walk-based (visits only Return-chain nodes, never these), and (2) the Block rebuild is the last writer for on-chain nodes. **Before deleting the rebuild (step d), VERIFY no pass reads `control_in` outside the Return-chain walk** — a future scheduler/pass iterating `$graph->nodes` reading `control_in` directly would observe these stray nested values. (Classic residue-coupling per `feedback_technical_debt_cleanup`.)
+
+### Step Proposal-2 — IN PROGRESS
+Node-representation uniformity (control off the hash key → uniform `control_in` decoration; VarDecl counter-identity landmine). Then STOP and re-visit the whole plan.
