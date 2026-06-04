@@ -152,3 +152,51 @@ representation work.
 Next: STOP and re-visit the whole plan with the substrate clean, per the
 2026-06-02 decision (the step-3 fork — during-parse capstone vs
 complete-the-scheduler — is decided against the cleaned-up substrate).
+
+### Step Capstone (Proposal 1 during-parse channel) — DONE, pending review
+
+The during-parse lateral-seed channel landed on `phase1-lateral-bindings`.
+
+**Mechanism:** Two interlocking changes:
+
+1. **Earley.pm `_predict` + agenda loop** — Added an optional `$control_head`
+   parameter to `_predict`. In the agenda loop, when a `StatementList` item
+   predicts `StatementItem`, extracts the item's `control_head` (non-Start)
+   and passes it as a lateral seed via `one_with_control`. Discovery: the seed
+   point is the AGENDA LOOP at line 700 (`_predict` called while processing
+   `StatementList _ . StatementItem`), not the pre-prediction loop — Leo
+   optimization means `StatementList _ . StatementItem` never appears in
+   `@active_cids` (Leo short-circuits the intermediate chain items; the item
+   is created during the agenda loop at the whitespace-completion step).
+
+2. **Actions.pm `StatementItem`** — After `_thread_control_head`, publishes
+   `update_control_head(node)` for side-effect nodes (Call/Assign/etc.) that
+   advance the chain, so the completing StatementList carries the Call as its
+   `control_head` for the NEXT prediction. Excluded: Return/Unwind (chain
+   terminals), If/Loop (Region published by their own actions), VarDecl
+   (published by its own action).
+
+3. **SemanticAction + filter semirings** — `one_with_control($node)` method
+   on all 5 semirings (Boolean/Precedence/TypeInference/Structural are
+   pass-throughs; FilterComposite delegates to SA; SA caches by `node->id()`
+   for content-determinism).
+
+**Gates verified (all green):**
+- control-threading.t 21/21 (3 targets: flat VarDecl, if/else-join, falsification guard)
+- leo-graph-equivalence.t 4/4 (Leo-on ≡ Leo-off byte-identical)
+- bnf-target-c.t 178/178 ×2 (byte-identical across runs)
+- mop/codegen-byte-compat.t 19/19, mop/codegen-byte-compat-schedule.t 19/19
+- control-uniform-representation.t 14/14
+- mop/build-graph-*.t, scope-if-merge.t, cfg-loop-phi.t, phi-integration.t, etc.
+- Full suite: 227 pass, 57 fail — all 57 are pre-existing (XS/C/slow-timeout)
+
+**Rebuild stays.** The Block control-chain rebuild is NOT deleted in this
+step — it remains as a differential oracle. With rebuild ENABLED, the chain
+is identical to before (the during-parse channel is additive and the rebuild
+is idempotent over an already-correct chain). With rebuild DISABLED, the
+during-parse channel alone produces the correct chain for: flat VarDecl
+chains, if/else joins (Region), call chains, return predecessors.
+
+**Remaining acceptance criterion for rebuild deletion (from step-(b) review):**
+verify no pass reads `control_in` outside the Return-chain walk before
+removing the rebuild. That audit is a separate step.
