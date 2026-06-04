@@ -138,4 +138,49 @@ PERL
     }
 }
 
+# Test 8: data-position (nested arg) Call must NOT carry control_in.
+# With rebuild disabled, parse `bar(foo())`. The outer bar() Call is at
+# statement position — its control_in must be Start. The inner foo() Call
+# is in data position (an argument) — it must NOT receive control_in.
+# Before the fix, _thread_control_head is called inside CallExpression,
+# which fires for BOTH the outer and inner calls, so foo() incorrectly
+# gets control_in=Start. This test pins that data-position calls stay undef.
+{
+    my $nested = <<'PERL';
+class T {
+    method m($self) {
+        bar(foo());
+    }
+}
+PERL
+
+    Chalk::Bootstrap::Perl::Actions->disable_control_rebuild;
+    my @stmts = method_body_stmts($nested);
+    Chalk::Bootstrap::Perl::Actions->enable_control_rebuild;
+
+    is(scalar(@stmts), 1, 'test 8: nested call: one statement (rebuild disabled)');
+
+  SKIP: {
+        skip 'parse did not yield one statement', 2 unless @stmts == 1;
+        my ($outer) = @stmts;
+
+        # Outer call (bar) is statement-position: must have control_in=Start
+        my $outer_ctrl = $outer->can('control_in') ? $outer->control_in : undef;
+        is(
+            ( blessed($outer_ctrl) && $outer_ctrl->can('operation') ? $outer_ctrl->operation : 'undef' ),
+            'Start',
+            'test 8: outer statement-position Call (bar) has control_in=Start'
+        );
+
+        # Inner call (foo) is data-position (argument): must NOT have control_in
+        # inputs->[1] is the args arrayref for a Call node
+        my $args = $outer->inputs->[1];
+        my $inner = ref($args) eq 'ARRAY' ? $args->[0] : undef;
+        ok(
+            defined($inner) && $inner->can('control_in') && !defined($inner->control_in),
+            'test 8: inner data-position Call (foo) control_in is undef'
+        );
+    }
+}
+
 done_testing;

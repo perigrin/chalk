@@ -361,7 +361,14 @@ class Chalk::Bootstrap::Perl::Actions {
                     || $val isa Chalk::IR::MethodInfo
                     || $val isa Chalk::IR::SubInfo
                     || (ref($val) eq 'HASH' && (exists $val->{__adjust_body} || exists $val->{__phaser_block}))) {
-                push @ir_nodes, $val;
+                # Thread control_in onto IR nodes arriving at statement boundary.
+                # VarDecl/Return/Unwind set control_in at construction; the guard
+                # inside _thread_control_head skips them. Non-Node values (UseInfo,
+                # ClassInfo, etc.) are not IR control carriers and are pushed as-is.
+                my $node_to_push = ($val isa Chalk::IR::Node)
+                    ? _thread_control_head($ctx, $val, $factory)
+                    : $val;
+                push @ir_nodes, $node_to_push;
             }
         }
         # Single value — return directly
@@ -1418,7 +1425,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 paren_form    => $is_paren_form,
                 inputs        => [$name_node, \@args],
             );
-            return _thread_control_head($ctx, $call, $factory);
+            return $call;
         }
 
         return undef;
@@ -1991,7 +1998,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         flags        => $flags_str,
                         inputs       => [$left, _make_const($factory, $1), _make_const($factory, $2), $flags_node],
                     );
-                    return _thread_control_head($ctx, $regex_subst, $factory);
+                    return $regex_subst;
                 }
             } else {
                 # /pattern/flags or m/pattern/flags
@@ -2391,7 +2398,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     && $target->value() =~ /^[\$\@\%]/) {
                 $update_scope->($target->value(), $assign_result);
             }
-            return _thread_control_head($ctx, $assign_result, $factory);
+            return $assign_result;
         }
 
         # Compound assignment (.=, //=, +=, etc.)
@@ -2404,7 +2411,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 && $target->value() =~ /^[\$\@\%]/) {
             $update_scope->($target->value(), $compound_result);
         }
-        return _thread_control_head($ctx, $compound_result, $factory);
+        return $compound_result;
     }
 
     # §17 AssignOp — returns operator as Constant
