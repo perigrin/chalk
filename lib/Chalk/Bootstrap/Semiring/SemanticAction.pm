@@ -196,11 +196,34 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return $self->_one_ctx();
     }
 
+    # one_with_control returns a Context like one() but with control_head set
+    # to the given node. Used by the Earley lateral-seed channel to deliver a
+    # preceding statement's control_head to the next StatementItem prediction.
+    # Cached by node->id() (a per-position counter string, not refaddr) so
+    # identical-shape statements in different positions get distinct seeds and
+    # the result is content-deterministic across runs.
+    my %_one_with_control_cache;
+    method one_with_control($node) {
+        my $base = $self->_one_ctx();
+        my $key  = 'owc:' . ($node->can('id') ? $node->id : refaddr($node));
+        return ($_one_with_control_cache{$key} //= Chalk::Bootstrap::Context->new(
+            focus        => undef,
+            children     => [],
+            position     => 0,
+            rule         => undef,
+            mop          => $base->mop(),
+            bindings     => $base->bindings(),
+            factory      => $base->factory(),
+            control_head => $node,
+        ));
+    }
+
     # Clear hash-cons cache between parses to prevent unbounded growth.
     # Cache entries from one file are not useful for subsequent files
     # because they reference different Context refaddrs.
     method reset_cache() {
         %_ctx_cache = ();
+        %_one_with_control_cache = ();
         $_one_singleton = undef;
         $_zero_singleton = undef;
     }

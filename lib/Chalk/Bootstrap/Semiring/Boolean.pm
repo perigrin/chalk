@@ -34,6 +34,10 @@ class Chalk::Bootstrap::Semiring::Boolean {
         return $ONE_CTX;
     }
 
+    # Pass-through: Boolean semiring does not carry control state.
+    # The lateral-seed channel is handled at the SemanticAction layer.
+    method one_with_control($node) { return $self->one() }
+
     # is_zero reads the Context's is_zero flag directly.
     method is_zero($value) {
         return $value->is_zero();

@@ -179,6 +179,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return ($_one_singleton //= $self->_ctx({ valid => true }));
     }
 
+    # Pass-through: TypeInference semiring does not carry control state.
+    # The lateral-seed channel is handled at the SemanticAction layer.
+    method one_with_control($node) { return $self->one() }
+
     method is_zero($value) {
         return !defined $value;
     }

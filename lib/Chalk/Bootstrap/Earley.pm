@@ -697,7 +697,21 @@ class Chalk::Bootstrap::Earley {
                         }
 
                         # Predict
-                        $self->_predict($w_rule, $pos, \@chart, \@agenda, \%predicted_at);
+                        # Lateral-seed channel: when a StatementList item
+                        # predicts StatementItem, seed the prediction with the
+                        # preceding statement's control_head so the next
+                        # statement's action sees the correct predecessor.
+                        my $lateral_seed = undef;
+                        if ($w_rule eq 'StatementItem'
+                                && $rule_name eq 'StatementList'
+                                && blessed($value) && $value->can('control_head')) {
+                            my $ch = $value->control_head();
+                            if (defined $ch && $ch->can('operation')
+                                    && $ch->operation ne 'Start') {
+                                $lateral_seed = $ch;
+                            }
+                        }
+                        $self->_predict($w_rule, $pos, \@chart, \@agenda, \%predicted_at, $lateral_seed);
                         # Advance from already-completed items at this position.
                         # When a nullable nonterminal (e.g. _) appears multiple
                         # times in a rule, the second prediction is suppressed
@@ -1195,7 +1209,7 @@ class Chalk::Bootstrap::Earley {
     # an unfocused Context node for each skipped symbol.
     # Tracks which rules have been predicted at each position to avoid
     # re-iterating the prediction set on redundant calls.
-    method _predict($rule_name, $pos, $chart, $agenda, $predicted_at = undef) {
+    method _predict($rule_name, $pos, $chart, $agenda, $predicted_at = undef, $control_head = undef) {
 
         # Skip if this rule was already predicted at this position
         if (defined $predicted_at) {
@@ -1205,6 +1219,14 @@ class Chalk::Bootstrap::Earley {
 
         my $prediction_items = $lr0_dfa->prediction_items_for($rule_name);
         return unless defined $prediction_items;
+
+        # When a control_head is provided (lateral-seed channel), use
+        # one_with_control to seed the initial value so the next
+        # statement's action sees the preceding statement's node as its
+        # control predecessor rather than the bare Start seed.
+        my $seed_value = defined($control_head)
+            ? $semiring->one_with_control($control_head)
+            : $semiring->one();
 
         for my $pred_entry ($prediction_items->@*) {
             my ($core_id, $skip_symbols) = $pred_entry->@*;
@@ -1216,7 +1238,7 @@ class Chalk::Bootstrap::Earley {
                 # Build initial value. For dot>0 items with skipped nullable symbols,
                 # absent optionals produce multiply(value, one()) which creates
                 # an unfocused Context node.
-                my $value = $semiring->one();
+                my $value = $seed_value;
                 if ($skip_symbols && $skip_symbols->@*) {
                     for my $sym_name ($skip_symbols->@*) {
                         $value = $semiring->multiply($value, $semiring->one());

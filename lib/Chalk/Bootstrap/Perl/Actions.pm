@@ -327,9 +327,17 @@ class Chalk::Bootstrap::Perl::Actions {
     # arguments — merge them into that call rather than emitting N siblings.
     # This is the statement-level "reification" that prevents fragmentation
     # of `push @arr, EXPR` into separate IR nodes.
+    #
+    # Lateral-seed channel: for side-effect nodes that advance the control
+    # chain (Call/Assign/CompoundAssign/RegexSubst/TryCatch), publish
+    # update_control_head after threading so the next StatementItem
+    # prediction is seeded with this node as the predecessor. VarDecl and
+    # IfStatement/LoopStatement already call update_control_head in their
+    # own actions; Return/Unwind terminate the chain and must not advance it.
     method StatementItem($ctx) {
         my @values = _collect_ir_values($ctx);
         my @ir_nodes;
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         for my $val (@values) {
             if ($val isa Chalk::IR::Node::ExpressionList) {
                 # Reify: check if items[0] is a bare list-builtin call
@@ -349,7 +357,10 @@ class Chalk::Bootstrap::Perl::Actions {
                         paren_form    => false,
                         inputs        => [$name_node, \@merged_args],
                     );
-                    push @ir_nodes, _thread_control_head($ctx, $merged_call, $factory);
+                    my $threaded = _thread_control_head($ctx, $merged_call, $factory);
+                    push @ir_nodes, $threaded;
+                    # Advance control_head so the next statement sees this call.
+                    $sa->update_control_head($threaded) if defined $sa;
                 } else {
                     # No list-builtin merge — push each item as its own statement
                     push @ir_nodes, $items->@*;
@@ -369,6 +380,19 @@ class Chalk::Bootstrap::Perl::Actions {
                     ? _thread_control_head($ctx, $val, $factory)
                     : $val;
                 push @ir_nodes, $node_to_push;
+                # For side-effect nodes that advance the control chain, publish
+                # update_control_head so the next statement's lateral seed carries
+                # this node as the predecessor. Skip Return/Unwind (chain terminals),
+                # If/Loop (they publish the Region in their own actions), and
+                # VarDecl (already published in its own action).
+                if (defined $sa && $node_to_push isa Chalk::IR::Node
+                        && !($node_to_push isa Chalk::IR::Node::Return)
+                        && !($node_to_push isa Chalk::IR::Node::Unwind)
+                        && !($node_to_push isa Chalk::IR::Node::If)
+                        && !($node_to_push isa Chalk::IR::Node::Loop)
+                        && !($node_to_push isa Chalk::IR::Node::VarDecl)) {
+                    $sa->update_control_head($node_to_push);
+                }
             }
         }
         # Single value — return directly
@@ -1700,6 +1724,21 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 $current_control = $s->region // $s;
             }
+        }
+
+        # Suppress the body's control_head from propagating outward. The Block
+        # action fires as a sub-rule of IfStatement/WhileStatement/ForStatement/
+        # ForeachStatement/TryCatch. Each of those actions must read the
+        # control_head that was current BEFORE the block body ran (i.e. the
+        # statement immediately preceding the control-flow node), not the body
+        # tail. Publishing Start here makes _mul_ctx in the enclosing rule's
+        # item prefer the enclosing item's accumulated control_head over the
+        # Block's result (right=Start loses to left=non-Start in _mul_ctx).
+        # For top-level method/sub bodies, the enclosing action (MethodDefinition,
+        # SubroutineDefinition, etc.) does not read control_head, so this is safe.
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            $sa->update_control_head($start);
         }
 
         return {

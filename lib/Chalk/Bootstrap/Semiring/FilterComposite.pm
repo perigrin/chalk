@@ -132,6 +132,42 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         };
     }
 
+    # one_with_control($node) returns a Context like one() but with
+    # control_head set to the given node. Used by the Earley lateral-seed
+    # channel to deliver a preceding statement's control_head to the next
+    # StatementItem prediction. Delegates to SA's one_with_control for the
+    # control_head; annotation slots come from each component's one().
+    # Not cached as a singleton because different nodes yield different seeds.
+    method one_with_control($node) {
+        my $sa_one = $self->_sa()->one_with_control($node);
+        my $is_ctx = blessed($sa_one) && $sa_one->can('annotations');
+        my $annotations = $is_ctx ? { $sa_one->annotations()->%* } : {};
+        for my $sr ($self->_annotation_semirings()) {
+            my $slot = $sr->slot_name();
+            if ($slot eq 'type') {
+                my $ti_one = $sr->one();
+                $annotations->{$slot} = (blessed($ti_one) && $ti_one->can('extract'))
+                    ? $ti_one->extract()
+                    : $ti_one;
+            } else {
+                $annotations->{$slot} = $sr->one();
+            }
+        }
+        my $focus = $is_ctx ? $sa_one->extract() : $sa_one;
+        return Chalk::Bootstrap::Context->new(
+            focus        => $focus,
+            children     => [],
+            position     => 0,
+            is_zero      => false,
+            annotations  => $annotations,
+            mop          => ($is_ctx ? $sa_one->mop() : undef),
+            bindings     => ($is_ctx ? $sa_one->bindings() : undef),
+            graph        => ($is_ctx ? $sa_one->graph() : undef),
+            factory      => ($is_ctx ? $sa_one->factory() : undef),
+            control_head => ($is_ctx ? $sa_one->control_head() : undef),
+        );
+    }
+
     # is_zero() checks the Context's is_zero flag directly.
     # Handles non-Context values from legacy semiring configurations.
     method is_zero($ctx) {

@@ -78,6 +78,10 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return _intern(true, undef, undef, false);
     }
 
+    # Pass-through: Precedence semiring does not carry control state.
+    # The lateral-seed channel is handled at the SemanticAction layer.
+    method one_with_control($node) { return $self->one() }
+
     method is_zero($value) {
         my $valid = $value->{valid};
         return !$valid;
