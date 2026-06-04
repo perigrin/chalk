@@ -54,6 +54,32 @@ Side-effect statement actions (Call/Assign/CompoundAssign/RegexSubst/TryCatch) n
 
 **LATENT-DEBT acceptance criterion for the eventual rebuild deletion (from the step-(b) review):** `CallExpression` fires for nested sub-expression calls too, so step (b) now stamps `control_in` onto nested, non-statement-position Call nodes (e.g. the inner `foo()` in `bar(foo())`) that were previously `undef`. This is HARMLESS today only because (1) the EagerPinning scheduler is chain-walk-based (visits only Return-chain nodes, never these), and (2) the Block rebuild is the last writer for on-chain nodes. **Before deleting the rebuild (step d), VERIFY no pass reads `control_in` outside the Return-chain walk** — a future scheduler/pass iterating `$graph->nodes` reading `control_in` directly would observe these stray nested values. (Classic residue-coupling per `feedback_technical_debt_cleanup`.)
 
+### Step (b) latent debt — RESOLVED, committed a109dcfd
+The residue above is now eliminated at its source. The four sub-expression
+sites that could fire in data position (`CallExpression` ~1421, `RegexSubst`
+~1994, plain `Assign` ~2394, `CompoundAssign` ~2407) no longer call
+`_thread_control_head`; they return the bare node with `control_in=undef`.
+Threading moved to the single statement-layer chokepoint — `StatementItem`'s
+generic push branch (~357-364) routes every arriving `Chalk::IR::Node` through
+`_thread_control_head`, whose existing guard (no-op when `control_in` is
+already set) leaves VarDecl/Return/Unwind untouched. The reify branch (~352)
+and TryCatch (~1171) were already statement-layer and are unchanged. Result:
+statement-position side-effect nodes still get `control_in=Start`;
+data-position nodes (nested args, BinaryExpr operands) stay `undef` — the
+honest pre-step-(b) invariant restored.
+
+Verified: control-threading.t test 8 (new) pins both directions
+(outer `bar()` = Start kept; inner `foo()` = undef fixed); RED-then-GREEN
+confirmed independently (test 10 fails without the Actions.pm change, passes
+with it). Byte-identical gates green (control-uniform-representation 14/14,
+codegen-byte-compat 19/19, bnf-target-c 178/178 ×2). **Full bootstrap suite
+failure set IDENTICAL to baseline** — both 54 files under a matching 90s/test
+cap, zero regressions and zero spurious changes (WITH-changes set diffed
+against the stashed-baseline set by filename; `comm` empty both directions).
+The rebuild-deletion acceptance criterion is now satisfied for these node
+types: data-position nodes carry no `control_in`, so a future pass iterating
+`$graph->nodes` would not observe stray values from them.
+
 ### Step Proposal-2 — DONE, committed 8c6cfe0f (Return/Unwind) + d01bfea3 (VarDecl)
 Node-representation uniformity landed in the two-step order Proposal 2
 recommended (smallest/safest first, commit between).
