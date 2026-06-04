@@ -200,3 +200,59 @@ chains, if/else joins (Region), call chains, return predecessors.
 **Remaining acceptance criterion for rebuild deletion (from step-(b) review):**
 verify no pass reads `control_in` outside the Return-chain walk before
 removing the rebuild. That audit is a separate step.
+
+**Post-leak-fix final state (after review correction):** the leak-suppression
+fix (Block publishes `update_control_head(Start)` before returning) plus the
+coherent re-commit landed the capstone as `f50b4195` (+ doc `00a3df7f`) on
+`phase1-lateral-bindings`. control-threading.t is 39 tests (targets 1-5 +
+6-shape ON==OFF equivalence). With rebuild DISABLED the during-parse chain is
+byte-identical to rebuild-ENABLED across 12 shapes (flat/loop/nested-block/
+if-else-join + back-to-back blocks, double-nested, if-else-both-bodies,
+loop-then-if, block-first, single-statement). Full bootstrap failure set
+identical to baseline (54 files, 90s/test cap, zero regressions — verified by
+diffing WITH-capstone vs pre-capstone `0fbcffd0`). NOTE: the interim broken
+commit `24cf61e9` (Actions.pm+test only, depending on uncommitted Earley/
+semiring code) was orphaned by a soft-reset + coherent re-commit; it is NOT in
+branch history.
+
+### Rebuild-deletion readiness audit — VERDICT: RED (2026-06-04)
+
+Full report: `docs/plans/2026-06-04-rebuild-deletion-readiness-audit.md`.
+
+The rebuild CANNOT be deleted yet — one contained blocker remains.
+
+**Blocker: postfix modifiers.** The during-parse channel does NOT thread
+control through postfix-modifier statements (`STMT if/unless/while/until/for
+COND;`). With rebuild OFF, the postfix If/Loop gets `control_in=Start` instead
+of its true predecessor, so the scheduler's backward Return-chain walk
+terminates early and DROPS the preceding statement from codegen.
+Independently reproduced: `my $a=1; foo() if $c; return $a;` → rebuild-OFF
+gives `If<=Start` (should be `If<=VarDecl`), and codegen drops `my $a=1`.
+Real-file impact: `lib/Chalk/Grammar/Symbol.pm` `to_string()` — 1 of 16
+goldens diverges rebuild-OFF. Root: `Actions.pm::PostfixModifier` (~2488/2556)
+reads `control_head` (still Start) at fire-time; the rebuild's If/Loop branch
+(~1719-1723) is the ONLY writer that later corrects it. The fix is the
+postfix analog of what StatementItem already does for normal statements
+(publish/consume control_head for the postfix construct) — contained, not a
+fundamental flaw.
+
+**What is NOT a blocker (verified clean ON==OFF, scheduled output + codegen):**
+loop-carried variables, nested loops, loop-then-if, try/catch, and 15/16 real
+goldens. The suspected loop/Phi and nested-body `*_stmts` ScheduleMeta
+frontiers are clean (those arrays are populated by If/Loop/Try actions, never
+by the rebuild). The latent-debt criterion is MET: the full control_in reader
+inventory (11 sites) has ZERO category-(c) blocking readers — all are
+chain-walk, value-position (`->value()`), or `defined`-guarded. Data-position
+nodes carry `control_in=undef`.
+
+**Pre-existing bug found in passing (out of scope, NOT rebuild-related):**
+`StructPromotion.pm:766-768` builds VarDecl with the old 3-input
+`[control,name,init]` shape; post-Proposal-2 it should be `[name,init]` +
+`set_control_in`. Only in the XS/C build path. Tracked here; not fixed.
+
+**Test gap:** `control-threading.t` (the only rebuild-toggle test) never
+covered a postfix modifier — that is why the gap shipped undetected. Add a
+postfix-modifier ON==OFF case when fixing.
+
+**Next:** fix the postfix-modifier control threading (the contained blocker),
+add the postfix test, re-run the readiness audit; THEN delete the rebuild.
