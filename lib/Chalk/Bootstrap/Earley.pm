@@ -697,13 +697,36 @@ class Chalk::Bootstrap::Earley {
                         }
 
                         # Predict
-                        # Lateral-seed channel: when a StatementList item
-                        # predicts StatementItem, seed the prediction with the
-                        # preceding statement's control_head so the next
-                        # statement's action sees the correct predecessor.
+                        # Lateral-seed channel: deliver the preceding
+                        # statement's control_head to the next item so
+                        # actions see the correct control predecessor.
+                        #
+                        # Case 1: StatementList → StatementItem. The
+                        # completing StatementList item carries the last
+                        # statement's control_head; seed the next
+                        # StatementItem prediction with it.
+                        #
+                        # Case 2: ExpressionStatement or SimpleStatement
+                        # → PostfixModifier. The ExpressionStatement item
+                        # waiting for PostfixModifier (at the position
+                        # after "Expression WS") carries the statement's
+                        # predecessor control_head from the StatementItem
+                        # epsilon-closure seed. Seeding PostfixModifier
+                        # here lets the postfix If/Loop action read the
+                        # correct predecessor at construction time, matching
+                        # what block-form IfStatement/WhileStatement do.
                         my $lateral_seed = undef;
                         if ($w_rule eq 'StatementItem'
                                 && $rule_name eq 'StatementList'
+                                && blessed($value) && $value->can('control_head')) {
+                            my $ch = $value->control_head();
+                            if (defined $ch && $ch->can('operation')
+                                    && $ch->operation ne 'Start') {
+                                $lateral_seed = $ch;
+                            }
+                        } elsif ($w_rule eq 'PostfixModifier'
+                                && ($rule_name eq 'ExpressionStatement'
+                                    || $rule_name eq 'SimpleStatement')
                                 && blessed($value) && $value->can('control_head')) {
                             my $ch = $value->control_head();
                             if (defined $ch && $ch->can('operation')

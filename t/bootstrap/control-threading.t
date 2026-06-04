@@ -580,6 +580,134 @@ PERL
         my $off = chain_for($src, 0);
         is($off, $on, 'ON==OFF shape 6: if/else-join (if/else then call and return)');
     }
+
+    # shape 7: postfix-if (STMT if COND) preceded by a statement
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $a = 1;
+        foo() if $c;
+        return $a;
+    }
+}
+PERL
+        my $on  = chain_for($src, 1);
+        my $off = chain_for($src, 0);
+        is($off, $on, 'ON==OFF shape 7: postfix-if (STMT if COND)');
+    }
+
+    # shape 8: postfix-unless
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $a = 1;
+        foo() unless $c;
+        return $a;
+    }
+}
+PERL
+        my $on  = chain_for($src, 1);
+        my $off = chain_for($src, 0);
+        is($off, $on, 'ON==OFF shape 8: postfix-unless (STMT unless COND)');
+    }
+
+    # shape 9: postfix-while
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $a = 1;
+        foo() while $c;
+        return $a;
+    }
+}
+PERL
+        my $on  = chain_for($src, 1);
+        my $off = chain_for($src, 0);
+        is($off, $on, 'ON==OFF shape 9: postfix-while (STMT while COND)');
+    }
+
+    # shape 10: postfix-until
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $a = 1;
+        foo() until $c;
+        return $a;
+    }
+}
+PERL
+        my $on  = chain_for($src, 1);
+        my $off = chain_for($src, 0);
+        is($off, $on, 'ON==OFF shape 10: postfix-until (STMT until COND)');
+    }
+}
+
+# Target 6 (postfix-modifier predecessor): with the rebuild DISABLED, a
+# postfix-modifier statement's control-flow node (If for if/unless, Loop for
+# while/until) must take the PRECEDING statement as its control_in — exactly
+# as the rebuild does. Before this fix the postfix If/Loop was constructed
+# with control_in=Start at PostfixModifier-fire-time (deep in the expression
+# sub-tree, where the lateral seed has not reached), and _thread_control_head
+# at the statement boundary skipped it because Start is "defined". This
+# orphaned the preceding statement from the scheduler's Return-chain walk and
+# dropped it from codegen.
+{
+    my sub postfix_pred ($src) {
+        Chalk::Bootstrap::Perl::Actions->disable_control_rebuild;
+        my @stmts = method_body_stmts($src);
+        Chalk::Bootstrap::Perl::Actions->enable_control_rebuild;
+        return @stmts;
+    }
+
+    # postfix-if: my $a = 1; foo() if $c; -> If.control_in == VarDecl
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $a = 1;
+        foo() if $c;
+        return $a;
+    }
+}
+PERL
+        my @stmts = postfix_pred($src);
+        is(scalar(@stmts), 3, 'target 6 (postfix-if): three statements (rebuild off)');
+      SKIP: {
+            skip 'parse did not yield three statements', 1 unless @stmts == 3;
+            my ($vardecl, $if_stmt, $ret) = @stmts;
+            is(
+                refaddr($if_stmt->control_in // 0), refaddr($vardecl),
+                'target 6 (postfix-if, rebuild off): If control_in is the preceding VarDecl, not Start'
+            );
+        }
+    }
+
+    # postfix-while: my $a = 1; foo() while $c; -> Loop.control_in == VarDecl
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $a = 1;
+        foo() while $c;
+        return $a;
+    }
+}
+PERL
+        my @stmts = postfix_pred($src);
+        is(scalar(@stmts), 3, 'target 6 (postfix-while): three statements (rebuild off)');
+      SKIP: {
+            skip 'parse did not yield three statements', 1 unless @stmts == 3;
+            my ($vardecl, $loop_stmt, $ret) = @stmts;
+            is(
+                refaddr($loop_stmt->control_in // 0), refaddr($vardecl),
+                'target 6 (postfix-while, rebuild off): Loop control_in is the preceding VarDecl, not Start'
+            );
+        }
+    }
 }
 
 done_testing;
