@@ -10,6 +10,8 @@ The session that produced this established (with evidence) a dependency-ordered 
 - **IR-generation** (SemanticAction) is KNOWN broken.
 - The **IR** and **CodeGen** are UNVERIFIED — they sit downstream of the broken IR-gen, so "it produces output" is not "it produces correct output." (perigrin: "standing on sand.")
 
+**Framing (assume CodeGen is DIRECTIONAL, not complete):** the current CodeGen (both Perl and C backends) is a *sketch of the right shape*, not a finished implementation — the C backend's `generate` is literally a stub (PAAD finding F1). Therefore the harness is a **completeness instrument FIRST, a regression gate SECOND.** Early red results are not "subtle bugs" — the default reading is "CodeGen does not implement this idiom yet, or implements it provisionally." The harness's first deliverable is a **gap map** (which idioms CodeGen can't yet handle, ranked by the corpus = by real idiom frequency); only once CodeGen is substantially complete does "all corpus green" become a meaningful regression gate. The effort is therefore not "verify an existing CodeGen" but "**use the harness + corpus as specification-by-example to COMPLETE CodeGen idiom-by-idiom, with perl as the spec.**" Never treat current CodeGen output as a reference — it is an incomplete sketch; perl is the only thing we compare to.
+
 The fix is to verify bottom-up against an EXTERNAL oracle, not against Chalk's own (suspect) output. The external oracle is **perl**: "does the code Chalk generates behave the same as the source program run under perl?" The root-of-trust corpus already exists in seed form: `t/fixtures/ir-audit-corpus.pl` (~40 categorized `feature class` idioms with human-obvious intended results, verified to run natively under perl 5.42).
 
 **Verification order (each layer grounded on something already trusted):**
@@ -83,13 +85,20 @@ The discipline that keeps the corpus trustworthy as it grows: **expected behavio
 ### Phase 3 — Capstone: self-hosting via the harness
 - The hardest tier-2 target: the Earley parser + semirings. CodeGen output must produce a parser that parses like the original. This is the definitive CodeGen certification (and, later, the gate for the whole optree→IR→codegen path once a front-end is trusted).
 
-## Acceptance criteria
-- A repeatable harness: `program → perl behavior (S)` vs `program → Perl-codegen → run (P)` vs `program → C/XS-codegen → run (C)`, diffing all three, with perl (S) as the ground-truth oracle and P-vs-C as the IR-vs-codegen localizer.
-- Tier-1 corpus: all ~40 idioms green — S = P = C.
-- Tier-2 (lib/) + tier-3 (pedagogical) corpora: growing sets with classified results; every divergence attributed to a specific layer (IR vs Perl-backend vs C-backend) via the dual-backend cross-check.
+## Acceptance criteria (staged — CodeGen is directional, so these are MILESTONES, not day-one expectations)
+
+**Stage 1 — harness + gap map (the instrument exists):**
+- A repeatable harness: `program → perl behavior (S)` vs `program → Perl-codegen → run (P)`, diffing on the widened behavior record (see architecture doc C2: return + context/wantarray + stdout + STDERR/warnings + exception + object-state + hash-order-normalized + FP-tolerant + dualvar + aliasing/tie/overload). perl (S) is the sole oracle. (C corner deferred per PAAD: Perl-first.)
+- A **gap map**: for the tier-1 corpus, which idioms CodeGen handles vs. doesn't-yet, ranked. This is the FIRST deliverable — red is expected and is the work-list, not a failure.
+
+**Stage 2 — complete CodeGen to green, idiom by idiom:**
+- Drive tier-1 to all-green (S = P) by COMPLETING CodeGen against the gap map, perl as spec. Then tier-2 (lib/) + tier-3 (pedagogical), growing the green set.
 - Negative set: out-of-subset programs cleanly rejected.
-- Determinism preserved (byte-identical codegen, both backends).
-- Capstone (self-host the Earley parser) tracked as the eventual gate, not a near-term requirement.
+- Determinism preserved (byte-identical Perl codegen).
+
+**Stage 3 — add the C corner (gated):** once Perl-codegen is substantially green AND a free-standing-graph → C path exists (today the real C backend needs Program+SA+Context; the named `generate($mop)` is a stub), add C as the third corner for automatic IR-vs-codegen localization. Enforce same-IR-two-lowerings (F7).
+
+**Stage 4 — capstone:** self-host the Earley parser via the harness (CodeGen output produces a parser that parses like the original). The eventual definitive certification, not a near-term requirement.
 
 ## Relationship to the kept evidence docs
 - `2026-06-05-context-to-son-postpass-vision-validation.md` — established the 3-pieces decomposition + that disambiguation is IR-independent (why CodeGen/IR can be developed against an external oracle). Still valid context.
