@@ -9,10 +9,12 @@ Build a repeatable harness that, for each corpus program, compares three behavio
 
 ## Existing interfaces the harness builds on (verified at HEAD)
 
-- **Perl backend:** `Chalk::Bootstrap::Perl::Target::Perl->generate($input)` — `$input` is either a `Chalk::MOP` (→ `_generate_from_schedule`, runs each body through `Chalk::IR::Scheduler::EagerPinning`) or a `Chalk::IR::Program` (→ `_emit_program`). Returns Perl source string. (`Target/Perl.pm:77-85`)
-- **C/XS backend:** `Chalk::Bootstrap::Perl::Target::C->generate($mop)` — takes a MOP, returns C source (+ headers). (`Target/C.pm:1722`)
-- **IR JSON interchange:** `Chalk::IR::Serialize::JSON::{to_json($named_graphs), from_json($json_string)}` (`JSON.pm:194,299`). `from_json` deserializes a SoN graph (Chalk's own, or B::SoN's compatible subset).
-- **MOP:** `Chalk::MOP` is the graph-of-graphs root (per-class/method/sub IR graphs). It is the codegen input contract.
+> **CORRECTIONS from the PAAD architecture review (2026-06-05, `paad/architecture-reviews/2026-06-05-codegen-harness-architecture-review.md`) — verified against code. The original interface descriptions below were materially wrong; the corrected facts are load-bearing and change the harness design (see §"Review corrections" at the end).**
+
+- **Perl backend:** `Chalk::Bootstrap::Perl::Target::Perl->generate($input)` — `$input` is a `Chalk::MOP` (→ `_generate_from_schedule`, runs each body through `Chalk::IR::Scheduler::EagerPinning`) or a `Chalk::IR::Program` (→ `_emit_program`). Returns Perl source string. (`Target/Perl.pm:77-85`) **[VERIFIED correct.]**
+- **C/XS backend:** `Chalk::Bootstrap::Perl::Target::C->generate($mop)` (`Target/C.pm:1722`) is a **STUB** — it emits only `/* method: name */` comments and an empty XS `MODULE` line, NO method bodies (`C.pm:1733-1746`). The REAL C codegen is `_generate_c_files($ir, $sa, $ctx)` (`C.pm:1764`), which takes a `Program` **plus the chalk-parser's SemanticAction instance and Context** and asserts `$ctx->mop()` is set (`C.pm:1853`). **It is structurally welded to the untrusted chalk-parser path** — a `hand` or `bson` graph CANNOT drive the real C backend through any existing interface. This breaks the "C corner" of the triangle as originally drawn.
+- **IR JSON interchange:** `Chalk::IR::Serialize::JSON::{to_json($named_graphs), from_json($json_string)}` (`JSON.pm:194,299`). **`from_json` returns a hash of name → `Chalk::IR::Graph` — NOT a MOP or Program** (`JSON.pm:299-306`), and `_deserialize_graph` **silently drops unsupported fields** (`JSON.pm:210-214`) — i.e. it is LOSSY. So the loader adapter (C6) must *assemble a MOP/Program from loose per-method graphs* (bigger than "JSON→MOP") and sits as lossy plumbing in the trust root.
+- **MOP:** `Chalk::MOP` is the graph-of-graphs root (per-class/method/sub IR graphs). It is the Perl-backend codegen input contract (the C backend's real path wants Program+SA+Context, not a free MOP — see above).
 - **Pattern to learn from:** `t/bootstrap/mop/codegen-byte-compat*.t` — existing golden/byte-compat rigs (determinism + emission), but they compare to STORED goldens, not to perl behavior. The harness differs: oracle is perl, not stored output.
 
 ## The KNOWN GAP this architecture must close
@@ -95,9 +97,20 @@ Each backend's emission run twice; assert byte-identical (reuses the byte-compat
 - No parser-to-IR bridge.
 - The harness does not "fix" codegen; it MEASURES it. Fixes are downstream work the harness then re-verifies.
 
-## Open questions for the PAAD review (where I most want challenge)
-1. **Is the graph-source plug (C4) the right seam, or does pluggability hide the circular-oracle risk?** The whole strategy rests on `hand` graphs grounding codegen before `chalk-parser`/`bson` are trusted. Is that bootstrap sound, or is there a hidden assumption that an untrusted graph-source contaminates the codegen verdict?
-2. **Is the behavior record (C2) a sufficient observable?** Does "return + stdout + exception + object-state" actually capture Perl behavioral equivalence, or are there divergence classes (tie magic, ordering, numeric stringification, aliasing) it misses?
-3. **Loader adapter (C6) risk:** building JSON→MOP introduces a new translation that itself could have bugs and confound the triangle. Should the hand graph-source produce MOP *directly* (skip JSON) to keep the trust root adapter-free?
-4. **C-backend-unverified caveat:** is treating C as a triangle corner sound when C is known-buggy, or does an unverified C corner produce more noise than localization signal early on? Should C be gated behind P-green first?
-5. **Exercise specs (C1) for tier-2 lib/ units:** is auto-deriving "how to invoke a library class" tractable, or does it need per-unit manual specs (and does that undermine "no manual expected output")?
+## Open questions — ANSWERED by the PAAD review (2026-06-05)
+
+Full report: `paad/architecture-reviews/2026-06-05-codegen-harness-architecture-review.md`. Verdict: **the core oracle is sound (perl-as-S is genuine external ground truth; verify-CodeGen-first correctly breaks the circular trap), but the backend interfaces were misdescribed in load-bearing ways (see corrections above).** The five answers:
+
+1. **Graph-source circular-oracle risk?** No risk in principle — per-entry source tagging avoids contamination — BUT currently un-realizable for the C corner (the real C backend needs the untrusted SA+Context, finding F1). The Perl corner is fine.
+2. **Behavior record sufficient? — NO.** It misses wantarray/context, STDERR/warnings, hash-ordering, floating-point tolerance, numeric-vs-string equality, aliasing, tie/overload. Risk of **FALSE GREENS** — the worst outcome for a verifier. The behavior record (C2) must be widened to capture these, or each becomes a silent escape.
+3. **Loader adapter / skip JSON for hand? — YES, the `hand` graph-source should produce MOP/Program DIRECTLY**, not via JSON. `from_json` is lossy (drops fields) and returns loose Graphs, not MOP/Program — JSON in the trust root is un-grounded. Reserve JSON for the (later) `bson` path.
+4. **C as a triangle corner while unverified? — NO, not early. GATE C BEHIND P-GREEN.** Agreed with the doc's own hedge — and it's STRUCTURAL, not just "C is buggy": the C backend is a stub at the named interface and the real path is welded to the chalk-parser. Phase the harness as **Perl-only triangle first (S vs P)**; add the C corner only once a free-standing-graph C path exists and P is green.
+5. **Auto-derive exercise specs for tier-2? — NO, tier-2 needs per-unit MANUAL specs** (driver + representative arguments). The "no manual expected output" claim SURVIVES (expected behavior stays perl-derived), but driver/arg selection is a third manual axis the plan must name — it is not "no manual work," it is "no manual *expected output*."
+
+## Review corrections — what this changes about the architecture
+
+- **The triangle is Perl-first, not dual-backend-from-day-one.** Start S vs P (oracle vs Perl-codegen). The C corner (and its IR-vs-codegen localization benefit) is a LATER addition gated on (a) P green and (b) a real free-standing-graph → C path existing (today the C backend's real entry needs Program+SA+Context). Until then, IR-vs-codegen localization relies on the corpus's tier-1 smallness (human blame), not the C corner.
+- **C6 splits:** the `hand` trust root builds MOP/Program DIRECTLY (no JSON, no loader); a JSON/Graph→MOP assembler is needed only for the deferred `bson` path and is explicitly untrusted plumbing then.
+- **C2 (behavior record) must widen** to context/wantarray, STDERR+warnings, hash-order normalization, FP tolerance, dualvar (num vs str), aliasing, tie/overload — else false greens.
+- **C1 exercise specs are partly manual for tier-2** (driver + args); only expected *output* is oracle-derived. The plan's "no manual expected output" wording is correct but must not be mistaken for "no manual work."
+- **F7 (Med):** "same IR, two lowerings" is asserted but not ENFORCED — the harness must guarantee both backends consume the identical graph object, or the triangle's localization logic is invalid. (Moot until the C corner is added, but record it.)
