@@ -644,6 +644,24 @@ PERL
         my $off = chain_for($src, 0);
         is($off, $on, 'ON==OFF shape 10: postfix-until (STMT until COND)');
     }
+
+    # shape 11: C-style for(init; cond; step) preceded by a statement.
+    # The init VarDecl is hoisted to statement position; its control_in must
+    # chain off the preceding statement, not be a bare Start.
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $r = 0;
+        for (my $i = 0; $i < 3; $i = $i + 1) { foo(); }
+        return $r;
+    }
+}
+PERL
+        my $on  = chain_for($src, 1);
+        my $off = chain_for($src, 0);
+        is($off, $on, 'ON==OFF shape 11: C-style for(init;cond;step)');
+    }
 }
 
 # Target 6 (postfix-modifier predecessor): with the rebuild DISABLED, a
@@ -707,6 +725,37 @@ PERL
                 'target 6 (postfix-while, rebuild off): Loop control_in is the preceding VarDecl, not Start'
             );
         }
+    }
+}
+
+# Target 7 (C-style for-init predecessor): with the rebuild DISABLED, a
+# C-style for(init; cond; step) loop hoists its init VarDecl to statement
+# position (ForStatement returns [init, loop]). That hoisted init's control_in
+# must be the PRECEDING statement, not a bare Start. Before this fix only the
+# Block rebuild threaded it, so deleting the rebuild would orphan the statement
+# before the loop (e.g. drop `my $r = 0;` from codegen).
+{
+    my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $r = 0;
+        for (my $i = 0; $i < 3; $i = $i + 1) { foo(); }
+        return $r;
+    }
+}
+PERL
+    Chalk::Bootstrap::Perl::Actions->disable_control_rebuild;
+    my @off = method_body_stmts($src);
+    Chalk::Bootstrap::Perl::Actions->enable_control_rebuild;
+
+    is(scalar(@off), 4, 'target 7 (C-for): four statements (rebuild off)');
+  SKIP: {
+        skip 'parse did not yield four statements', 1 unless @off == 4;
+        my ($r_decl, $i_init, $loop, $ret) = @off;
+        is(
+            refaddr($i_init->control_in // 0), refaddr($r_decl),
+            'target 7 (C-for, rebuild off): hoisted init control_in is the preceding VarDecl, not Start'
+        );
     }
 }
 

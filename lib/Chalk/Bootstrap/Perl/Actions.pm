@@ -123,6 +123,31 @@ class Chalk::Bootstrap::Perl::Actions {
         return $node;
     }
 
+    # Find the control_head that was active BEFORE a hoisted init VarDecl in a
+    # C-style for-loop clobbered it via update_control_head. Walks the full
+    # Context multiply tree (including unfocused intermediate multiply nodes,
+    # which walk_all/leaves skip) looking for the binary multiply node where
+    # the right child's control_head == $init_node (by refaddr). When found,
+    # the left child carries the pre-init predecessor control_head. Returns
+    # undef when not found (init.control_in is already correct as Start, or
+    # there was no hoisted VarDecl).
+    my sub _find_pre_init_control_head($ctx, $init_node) {
+        return undef unless defined $init_node;
+        my @stack = ($ctx);
+        while (@stack) {
+            my $node = pop @stack;
+            my $children = $node->children();
+            next unless defined $children && $children->@* == 2;
+            my ($left, $right) = $children->@*;
+            my $rch = $right->control_head();
+            if (defined $rch && refaddr($rch) == refaddr($init_node)) {
+                return $left->control_head();
+            }
+            push @stack, $left, $right;
+        }
+        return undef;
+    }
+
     # Helper: collect all leaves with defined IR focuses (Constructor or Constant nodes)
     my sub _collect_ir_leaves($ctx) {
         my @results;
@@ -3156,6 +3181,23 @@ class Chalk::Bootstrap::Perl::Actions {
             body_proj  => $body_proj,
             exit_proj  => $exit_proj,
         });
+
+        # During-parse control threading for hoisted init VarDecl:
+        # When the init is a VarDecl (e.g. `my $i = 0`), its action fires
+        # inside the for-paren and calls update_control_head($i_decl),
+        # clobbering the predecessor that arrived via the StatementItem
+        # lateral-seed channel. Walk the Context multiply tree to find the
+        # predecessor that was active BEFORE the init's update_control_head
+        # fired, then re-thread init.control_in to that predecessor. This
+        # mirrors the Block control-chain rebuild's effect on hoisted init
+        # nodes, making the during-parse chain identical to the rebuild's
+        # so the rebuild can eventually be deleted.
+        if (defined $init && $init isa Chalk::IR::Node::VarDecl) {
+            my $pre_init_ch = _find_pre_init_control_head($ctx, $init);
+            if (defined $pre_init_ch) {
+                $init->set_control_in($pre_init_ch);
+            }
+        }
 
         # Return value: for the Block fixup pass to thread the init
         # onto the control chain BEFORE the Loop, we return an arrayref
