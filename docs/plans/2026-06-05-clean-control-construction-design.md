@@ -1,274 +1,114 @@
-# Clean Control-Construction Design: System of Record for Threading and Graph Completion
+# Clean Control-Construction Design (RE-DERIVED)
 
 **Date:** 2026-06-05
-**Branch:** phase1-lateral-bindings @ f2f8d836
-**Status:** Design document. No `lib/` or `t/` modifications. Drives an alignment audit before implementation.
+**Branch:** phase1-lateral-bindings @ ccee2d05
+**Status:** Design document. No lib/ or t/ modifications. Drives the alignment audit before implementation.
+**Supersedes:** the prior version of this file, whose Part 1 premise (graph-completion merges are load-bearing, therefore a post-pass is required regardless) has been EXPERIMENTALLY FALSIFIED.
 
-**Predecessor plans:**
-- `docs/plans/2026-06-02-control-wiring-trio-comparison.md` — execution log, lateral-seed capstone
-- `docs/plans/2026-06-04-rebuild-deletion-readiness-audit.md` — pass 1 (postfix)
-- `docs/plans/2026-06-04-rebuild-deletion-readiness-audit-rerun.md` — pass 2 (C-for my-init)
-- `docs/plans/2026-06-05-rebuild-deletion-readiness-audit-pass3.md` — pass 3 (if/elsif + C-for bare-init)
-- `docs/plans/2026-06-05-rebuild-deletion-readiness-audit-pass4.md` — pass 4 (my-decl postfix; merge load-bearing confirmed)
+**Predecessors:** `docs/plans/2026-06-02-control-wiring-trio-comparison.md`; the four audits `2026-06-04-rebuild-deletion-readiness-audit{,-rerun}.md`, `2026-06-05-rebuild-deletion-readiness-audit-pass3.md`, `-pass4.md`.
 
-## Executive Summary
+---
 
-Four audits, five blockers, one family: a node self-publishing or a sub-rule
-leaking its `control_head`, so an enclosing or following construct reads the
-wrong control predecessor. Four incremental Earley/action fixes (6cdcb15b,
-e5b71467, f71b4b49, d7070e25) each addressed one instance. Blocker #5
-(my-decl-with-postfix `my $x = E if C`) is open; a probable #6 sits in
-`StructPromotion.pm`.
+## Verified Fact Base (all confirmed by in-code experiment)
 
-**Recommendation:** The post-parse pass (the Block control-chain "rebuild") is
-the **system of record** for control threading. The during-parse lateral-seed
-channel is **retired in full**. Blockers #5/#6 are **not worth fixing** as
-during-parse channel fixes.
+**FACT 1 — the graph-completion merges are REDUNDANT, not load-bearing.** The prior design claimed the Block rebuild's `$graph->merge($s)` calls (Actions.pm:1691, 1729) are required because `_finalize_body_graph` (1016-1138) only reaches nodes transitively from Returns via `inputs()`. FALSE: its closure follows BOTH `inputs()` AND `control_in` (line 1130). Experiment (this session): guarded the two merge calls behind `$ENV{CHALK_NO_MERGE}`, ran the gates with merges DISABLED (control threading still on). byte-compat 19/19, byte-compat-schedule 19/19, bnf-target-c 178/178, c-schedule-walker / ir-use-def / ir-hash-consing / struct-promotion-end-to-end all 0 failures. cfg-statements (10) + cfg-loop (1) fail identically WITH merges = pre-existing, not caused. The orphan case `my $orphan=99; bar(); 7;` keeps VarDecl($orphan) in `$graph->nodes` with merges DISABLED, reached via the synthesized implicit Return's `control_in` chain. CONCLUSION: graph completion is fully handled by the closure provided the control_in chain is intact. The prior design's foundational "a post-pass loop is required regardless" is GONE.
 
-**Why (scheduler-independent):** the post-pass is the one mechanism that
-produces correct `control_in` edges *by construction* — it walks the
-materialized statement list in source order, with no timing or sub-rule-
-visibility dependencies, so no construct can escape it. The during-parse
-channel is elegant but has sprung five leaks and is accreting bespoke per-
-construct mechanisms; it is not cheaply leak-free. A future scheduler (GCM or
-otherwise) will read `control_in` as ground truth, so the durable requirement
-is "the IR's control edges are correct," and the post-pass guarantees that
-where the channel does not.
+**FACT 2 — graph completeness DEPENDS on the control_in chain being intact.** The closure reaches a statement node only by walking `control_in` (and `inputs`) back from the Return. So correct control threading is not just the CFG requirement — it is ALSO what makes the graph complete. The two requirements are unified: correct `control_in` is sufficient for both.
 
-## Scheduler caveat (governs this whole document)
+**FACT 3 — a leak does not DROP nodes; it produces SPURIOUS/wrong nodes + double-emit.** Blocker #5 (`my $a=1; my $b=foo() if $c; return $a;`): rebuild ON graph = {VarDecl($a), If, Return, Proj×2, Region, Start, Constant×3} with `$b`/`foo()` correctly NESTED inside the If (postfix body), NOT top-level. Rebuild OFF graph = ALSO contains top-level VarDecl($b)+Call (spurious) → the double-emit. A control leak corrupts the graph, it does not merely mis-thread one edge. (Verified this session by dumping `$graph->nodes` ON vs OFF.)
 
-The current scheduler (`Chalk::IR::Scheduler::EagerPinning`) is explicitly a
-"good enough to work" placeholder, NOT the final architecture. It will be
-re-evaluated for GCM or other scheduler options. Therefore this design does
-NOT justify any decision by appeal to current scheduler behavior. In
-particular, the earlier (trio-comparison) argument "the during-parse leaks
-don't matter because the byte-compat-era scheduler is forced to reproduce
-source order" is REJECTED here as scheduler-dependent reasoning. The durable
-invariant is: **`control_in` edges in the IR must be correct by construction**,
-because whatever scheduler replaces EagerPinning will consume them as the
-authoritative control-flow predecessor relation. The choice between during-
-parse and post-parse is decided by *which mechanism reliably produces correct
-edges*, not by what today's scheduler tolerates.
+**FACT 4 — the during-parse channel threads flat/simple cases correctly even rebuild-OFF.** `my $orphan=99; bar(); 7;` rebuild-OFF chain = `VarDecl<=Start | Call<=VarDecl | Constant<=Call` (correct). The five blockers are all the leak family: a node self-publishes (or a sub-rule leaks) its control_head via `update_control_head` in a context an enclosing/following construct later reads. postfix (fixed 6cdcb15b), C-for my-init (e5b71467), elsif (f71b4b49), C-for bare-assign init (d7070e25), my-decl-postfix (#5 OPEN), probable StructPromotion (#6).
 
-## Part 1: The Two Jobs of the Rebuild, Separated
+**CONSTRAINT (governs everything):** the current scheduler (EagerPinning) is a "good enough to work" PLACEHOLDER, slated for re-evaluation (GCM or other). No architectural decision is justified by appeal to its behavior. The durable invariant is "the IR's `control_in` edges are correct," because whatever scheduler replaces EagerPinning reads them as ground truth.
 
-The Block control-chain rebuild (`Actions.pm:1669–1752`) does two distinct
-things, currently interleaved.
+---
 
-### Job A — Control Threading
-Each statement-position IR node's `control_in` is set to its source-order
-predecessor. The rebuild iterates `@stmts` in order, advancing
-`$current_control`: VarDecl (1688–1698), Return/Unwind (1699–1715, no
-advance), Call/Assign/CompoundAssign/RegexSubst/TryCatch (1716–1735), If/Loop
-(1736–1751, rewire `inputs[0]`, advance to `region // $s`). Gated by
-`$do_rewrite = $_control_rebuild_enabled` (1684).
+## Part 1: The Minimal Post-Parse Pass — revised from the falsified premise
 
-**Correct by construction:** operates on `@stmts`, a flat source-order list.
-No timing dependencies, no sub-parse visibility, no `update_control_head`
-side-channel. Same source → same `@stmts` → same edges.
+The prior design's argument ("Job B graph-completion needs a post-pass loop regardless; adding Job A control-threading is free") is VOID — Fact 1 falsifies it. Graph completion is delegated to `_finalize_body_graph`'s `control_in`-following closure provided the chain is intact (Fact 2). So whether a post-pass is needed reduces ENTIRELY to the control-threading question.
 
-### Job B — Graph Completion
-Three UNCONDITIONAL merges put every statement-position node into
-`$graph->nodes`: `merge($start)` (1678), `merge($s)` for VarDecl (1691),
-`merge($s)` for Call/Assign/etc. (1729).
+Two minimal end states:
+- **End State A (post-pass SoR):** the Block rebuild iterates `@stmts` in source order and sets `control_in` on every statement node; it is the sole producer of correct `control_in`. The during-parse channel becomes dead (overwritten) and is removed. Graph completion follows from the correct chain.
+- **End State B (during-parse SoR):** the rebuild is deleted; the during-parse channel is made leak-free so every node has correct `control_in` at action-fire time. Graph completion follows automatically (Fact 2). No post-pass of any kind.
 
-**Load-bearing (verified, pass 4 Dim 4):** `_finalize_body_graph`
-(`Actions.pm:1016`) transitively seeds the graph only from Return roots via
-`inputs()`. The during-parse chain uses the hash-EXCLUDED `control_in` field
-(not `inputs()`), so a top-level side-effect node not otherwise referenced is
-in `$graph->nodes` ONLY because of the rebuild's explicit merge. Probe:
-`my $x=1; foo(); $x=2; return $x;` → the first VarDecl is in the 10-node graph
-but unreachable from the Return via `inputs()+control_in`; it is present solely
-via line 1691. Wholesale deletion would drop it.
+Both produce the durable invariant. The difference is WHERE/WHEN correctness is established.
 
-**Conclusion:** a post-parse loop calling `$graph->merge($s)` per statement-
-position node is UNCONDITIONALLY REQUIRED and cannot be subsumed by
-`_finalize_body_graph`. Once that loop must exist, adding source-order control
-threading (Job A) to it costs nothing.
+---
 
-## Part 2: The Leak Family Root
+## Part 2: The Real Fork
 
-`update_control_head` is a process-wide mutable slot
-(`SemanticAction.pm:39`) shared across a rule completion's during-parse extent.
-`_complete_sa` stamps it onto the result Context's `control_head`; `_mul_ctx`
-(150–165) propagates it upward (right wins unless left non-Start and right
-Start). It is called with three indistinguishable intentions:
+**Option X — post-parse pass is system of record.** The rebuild iterates the materialized flat `@stmts` list AFTER all actions fire, calling `set_control_in($current_control)` and advancing. It sees every statement once, in source order, no sub-rule ambiguity, no timing dependency, no `update_control_head` side-channel. It is the last writer and always wins. The during-parse channel's values are overwritten — it can be deleted. Correctness condition: the Block action extracts the right `@stmts` (already required for codegen/scheduling regardless; no known failure mode).
 
-1. **(correct)** "I am a top-level statement; here is my node for the next
-   sibling." — IfStatement Region (2794), WhileStatement Region (3028),
-   Call/Assign via StatementItem (419).
-2. **(leaked)** "I am a sub-rule; here is my Region." — ElsifChain (was 2881),
-   read by the enclosing IfStatement as the outer If's predecessor.
-3. **(leaked)** "I am a same-statement body node; here I am." —
-   VariableDeclaration self-publishing (1900) when `my $b = foo()` fires before
-   the same-statement PostfixModifier reads it.
+**Option Y — during-parse channel is system of record.** The channel (Earley lateral-seed Cases 1/2; StatementItem publisher; `one_with_control`) delivers the predecessor as the seed; actions consume `$ctx->control_head` to set `control_in` at construction. Correctness condition: every publisher fires where no enclosing/same-statement node has clobbered the visible control_head. This has sprung FIVE leaks across FOUR audits. Under Y, leak-freedom is a CORRECTNESS requirement (Fact 3: leaks corrupt the graph), not a nicety.
 
-| Blocker | Root | Fix | Approach |
-|---|---|---|---|
-| postfix modifier | seed not delivered into sub-rule | 6cdcb15b | Earley prediction-point seed (bespoke) |
-| C-for my-init | Intention 3 | e5b71467 | `_find_pre_init_control_head` tree-walk (bespoke) |
-| if/elsif outer-If | Intention 2 | f71b4b49 | publish Start (symptom suppressor) |
-| C-for bare-assign init | Intention 3 | d7070e25 | extend e5b71467 |
-| my-decl postfix (OPEN) | Intention 3 | — | would need generalized tree-walk in PostfixModifier |
+**Evaluation (scheduler-independent):**
+- X's condition (`@stmts` correct) is an existing, never-failing invariant; the re-threading is an exhaustive O(n) iteration no construct escapes.
+- Y's condition has failed in 5 distinct constructs. Root cause: `update_control_head` is a shared mutable slot (`SemanticAction.pm:39`) conflating "advance the sibling chain" (correct) with "I am a sub-expression whose value is a control-interesting node" (leaks). The action cannot tell at fire-time whether it is at a statement boundary; the grammar nesting context is not visible inside the action method.
 
-f71b4b49 closed the last *sub-rule* (Intention 2) leaker. Intention 3
-(self-publishing nodes in sub-positions) is a SEPARATE vector and is not
-closed: any node type that self-publishes and can appear as a postfix body /
-for-init / nested position is a new blocker. The publisher fires BEFORE the
-enclosing rule, so no sub-rule-boundary suppressor can prevent it; each
-enclosing construct needs its own "recover the pre-publication predecessor"
-mechanism — i.e. the `_find_pre_init_control_head` pattern, applied per
-construct. That is the accretion.
+---
 
-## Part 3: Recommendation — Post-Parse Pass as System of Record
+## Part 3: Does Fact 3 decisively favor X? — Yes
 
-**The post-parse pass is the system of record for control threading; the
-during-parse lateral-seed channel is retired in full.**
+Fact 3 makes the stakes asymmetric: under Y a leak is graph corruption (duplicate nodes, broken codegen); under X a during-parse leak is harmless (overwritten). 
 
-Arguments (all scheduler-independent):
-1. Job B requires an unconditional post-pass merge loop regardless (Part 1).
-   Adding Job A to it is free.
-2. The post-pass is correct by construction over source order; no construct
-   escapes it.
-3. The during-parse channel is not cheaply leak-free (Part 2); fixing each
-   blocker reproduces, one construct at a time, what the post-pass already does
-   uniformly.
-4. Four fixes across four audits, one blocker still open, a sixth likely.
-5. This is NOT trio-comparison "Proposal 3" (move threading into the
-   scheduler — "heavier"). It KEEPS the rebuild loop where it lives, deletes
-   the toggle (always-on), and retires the channel that was meant to replace
-   it. Net simpler than the current dual-mechanism state.
-6. `Node.pm:26–28` already documents this as the architecture
-   ("set by the Block control-chain fixup pass via `set_control_in()`"); the
-   channel was an addition.
+Can Y be made leak-free by construction? The publishers split into: (1) correct statement-boundary publishers (not the problem); (2) structural suppressors that publish Start — Block (1766), ElsifChain (2891 after f71b4b49) — safe; (3) self-publishing mid-statement nodes — VariableDeclaration (1900), AssignmentExpression init-fold (2441) — the live leak vectors. Fixing (3) structurally needs the action to know it is NOT at a top statement boundary, which is not cheaply available at fire-time. The only mechanism available given the current action API is the `_find_pre_init_control_head` tree-walk (134-149) — a per-construct bespoke fix, already applied at C-for (e5b71467) and bare-init (d7070e25); blocker #5 would need a second call site in PostfixModifier; #6 likely a third. That is the whack-a-mole. X sidesteps it entirely: the post-pass ignores whatever the channel published.
 
-**Durable-invariant framing (replacing the rejected scheduler-tolerance
-argument):** a future GCM/other scheduler reads `control_in` as the
-authoritative control predecessor relation. The requirement is therefore
-"`control_in` is correct by construction." The post-pass guarantees this; the
-leaky channel does not. This is exactly why the post-pass should be the system
-of record — and exactly why the channel's residual leaks are not a reason to
-keep extending it.
+**Verdict: a leak-proof during-parse channel is not achievable without either redesigning the `update_control_head` API to carry statement-boundary metadata (deeper than either option) or continuing whack-a-mole. Fact 3 decisively favors X.**
 
-### Trade-off acknowledged (and explicitly deferred to the scheduler re-eval)
-A leak-free during-parse channel would set correct `control_in` at construction
-time, which a GCM scheduler *might* exploit for earlier scheduling freedom.
-Whether that matters is a question for the scheduler re-evaluation, with
-concrete GCM requirements in hand — NOT something to pre-build a leak-prone
-channel for now. If that re-eval shows during-parse control accuracy is needed,
-the mechanism can be designed then against real requirements (and may not be
-the current lateral-seed channel at all — e.g. SSA construction from the
-materialized graph). Until then, the post-pass is the system of record and the
-IR it produces is correct, which is all any future scheduler needs as a
-starting point.
+---
 
-## Part 4: Consequence for Blockers #5 and #6
+## Part 4: Recommendation — Option X, retire the channel
 
-**Not worth fixing as during-parse channel fixes.** Under this design, blocker
-#5 manifests as: PostfixModifier reads `control_head` (a wrong, self-published
-VarDecl), builds the If/Loop with the wrong predecessor, and the post-pass
-overwrites the If/Loop's `inputs[0]` with the correct chain tail. Final IR is
-correct. Same for #6 (StructPromotion.pm). The channel's residual incorrectness
-at construction is overwritten by the authoritative post-pass, so the IR the
-future scheduler sees is correct regardless. Fixing #5/#6 in the channel builds
-infrastructure for a mechanism being deleted.
+**The post-parse rebuild is the system of record for control threading. The during-parse lateral-seed channel is retired in full.** Reasons (all scheduler-independent): (1) the post-pass re-threads `control_in` unconditionally from the materialized `@stmts` — no construct escapes; (2) Y's leak-freedom is not achievable without per-construct bespoke fixes, 5 leaks and counting; (3) Fact 3 makes X degrade gracefully and Y degrade into graph corruption; (4) the post-pass is correct by construction over source order, O(n), no timing deps; (5) `Node.pm:26-28` already documents the post-pass as the architecture — the channel was an addition.
 
-(If the team ever chose during-parse as SoR — rejected here — #5 would need a
-generalized `_find_pre_init_control_head` call in PostfixModifier. This design
-recommends against that road.)
+**Blocker #5 (`my $x=E if C`): NOT worth fixing as a channel fix.** Under X, PostfixModifier reads the self-published VarDecl as predecessor (wrong), but the post-pass's If/Loop branch (1744-1748) rewrites `inputs[0]` to the correct chain tail. Final IR correct; channel incorrectness overwritten. Fixing #5 builds infrastructure for a mechanism being deleted.
+
+**Blocker #6 (StructPromotion.pm): NOT worth fixing as a channel fix** — same overwrite argument. It is additionally entangled with a pre-existing VarDecl write-shape bug (Actions.pm:767 uses the old 3-input `[control,name,init]` shape post-Proposal-2); that bug is a Proposal-2 follow-up to fix regardless, orthogonal to control threading, tracked separately.
+
+---
 
 ## Part 5: Concrete End-State Spec
 
-### Delete — `Actions.pm`
-- Toggle API (91–94): `$_control_rebuild_enabled`, `disable_control_rebuild`,
-  `enable_control_rebuild`, `control_rebuild_enabled`.
-- `_thread_control_head` helper (119–124) + call sites (StatementItem 405,
-  TryCatch 1227).
-- `_find_pre_init_control_head` helper (134–149).
-- ForStatement during-parse fix block (3195–3230).
-- `$do_rewrite` gate (1684) and the four `if ($do_rewrite ...)` wrappers
-  (1693, 1710, 1730, 1745) — keep the bodies (now unconditional).
-- All chain-advancing `update_control_head` calls in actions: StatementItem
-  (388, 419), VariableDeclaration (1900), AssignmentExpression init-fold
-  (2441), PostfixModifier (2565, 2629), IfStatement (2794), ElsifChain (2891),
-  WhileStatement (3028), ForStatement (3186), ForeachStatement (3371).
-- Block's outward suppressor `update_control_head($start)` (1766) — no-op once
-  no action body publishes; delete in Phase 3.
+**Delete — Actions.pm:** toggle API (91-94); `$do_rewrite` gate (1684) + the four `if ($do_rewrite ...)` wrappers (keep bodies); `_thread_control_head` (119-124) + call sites (385, 405, 1227); `_find_pre_init_control_head` (134-149) + call site (3214); ForStatement during-parse fix block (3195-3230); all chain-advancing `update_control_head` calls in actions (StatementItem 388/419, PostfixModifier 2565/2629, IfStatement 2794, ElsifChain 2891, WhileStatement 3028, ForStatement 3186, ForeachStatement 3371); VariableDeclaration self-publish (1900); AssignmentExpression init-fold publish (2441); Block outward suppressor (1766, after confirming no action reads control_head for threading).
 
-### Keep — `Actions.pm`
-- `merge($start)` (1678), `merge($s)` (1691, 1729) — load-bearing.
-- All `set_control_in` / region-advance logic in the rebuild loop body.
-- `update_scope` / `update_graph` / `update_annotations` in actions.
-- `_finalize_body_graph` (1016–1138).
-- `$ctx->control_head` reads in actions (read Start after retirement;
-  harmless; a later cleanup can simplify to `$factory->make('Start')`).
+**Delete — Earley.pm:** lateral-seed Cases 1/2 + `$lateral_seed` (718-737); `_predict` `$control_head` param + `$seed_value` conditional (1235, 1250-1252) → always `one()`.
 
-### Delete — `Earley.pm`
-- Lateral-seed Cases 1 & 2 + `$lateral_seed` (718–737).
-- `_predict` `$control_head` parameter and `$seed_value` conditional (1235,
-  1246–1252) — always `$semiring->one()`.
+**Delete — SemanticAction.pm:** `one_with_control` + `%_one_with_control_cache` (205-219, 226); `$_pending_control_head_update` (39); `update_control_head` (257-263); `_complete_sa` application block (411-429).
 
-### Delete — `SemanticAction.pm`
-- `one_with_control` + `%_one_with_control_cache` (205–219) and its
-  `reset_cache` line (226).
-- `$_pending_control_head_update` (35–39), `update_control_head` (257–263),
-  and its `_complete_sa` application block (411–430) — Phase 4.
+**Keep — Actions.pm:** the rebuild loop body 1685-1752 (becomes unconditional); `set_control_in`/region-advance logic (this IS Job A); `update_scope`/`update_graph`/`update_annotations`; `_finalize_body_graph`.
 
-### Rewrite — `t/bootstrap/control-threading.t`
-Remove all `disable/enable_control_rebuild` calls. Rewrite every
-`chain_for($src,0)` vs `chain_for($src,1)` differential-oracle assertion as a
-fixed golden assertion (expected = post-pass output = current rebuild-ON =
-current goldens). Add codegen/schedule-level assertions for my-decl postfix
-(blocker #5 — must emit correctly under the unconditional post-pass),
-TryCatch, nested-loop, loop-then-if.
+**Merges (1678/1691/1729) — DECISION NEEDED, flagged honestly:** Fact 1 proved them redundant. The architect recommended KEEPING them as cheap belt-and-suspenders hygiene. This is a mild inconsistency (proven-redundant yet kept). RESOLUTION for the alignment audit: either (a) keep them (conservative, cheap, insulates future graph-walk code that might not follow control_in) OR (b) delete them too and rely solely on the closure (cleaner, matches Fact 1, and the experiment proved the gates pass without them). Recommend (b) for cleanliness UNLESS the alignment audit finds a consumer that walks `$graph->nodes` expecting membership the closure would not provide. Do not leave this as unexamined residue.
+
+**Rewrite — t/bootstrap/control-threading.t:** remove all `disable/enable_control_rebuild` pairs; rewrite every `chain_for($src,0)` vs `chain_for($src,1)` differential-oracle assertion as a fixed golden (expected = current rebuild-ON output). Add codegen/SCHEDULE-level assertions (not chain-only — Fact 3 shows chain-only oracles miss the double-emit) for: my-decl-postfix all flavors (#5 — confirm the post-pass corrects it), TryCatch, nested-loop, loop-then-if, postfix-after-control-flow, postfix-chain.
+
+---
 
 ## Part 6: Migration Order
-- **Phase 1 — retire the Earley channel** (Earley `_predict` + Cases 1/2;
-  delete `one_with_control`). Rebuild still ON, corrects everything. Gates:
-  leo 4/4, bnf-target-c 178/178 x2, byte-compat 19/19 + schedule 19/19.
-- **Phase 2 — delete the toggle, rebuild unconditional** (remove
-  `$do_rewrite`). Rewrite control-threading.t to fixed goldens. Gates: + full
-  suite failure set == baseline (54).
-- **Phase 3 — remove action `update_control_head` publishers** + delete
-  `_thread_control_head`, `_find_pre_init_control_head`, ForStatement fix
-  block, Block suppressor. Gates: + new codegen/schedule assertions.
-- **Phase 4 — clean up SemanticAction** (`$_pending_control_head_update`,
-  `update_control_head`, `_complete_sa` block).
-- **Phase 5 — real-file sweep** (parseable lib/*.pm, 0 regressions) +
-  StructPromotion.pm:767 old-VarDecl-shape bug (orthogonal, tracked).
+
+- **Phase 1 — delete toggle, rebuild unconditional.** Remove toggle API + `$do_rewrite` gate (keep bodies). Rewrite control-threading.t differential blocks to fixed goldens. Gates: bnf-target-c 178/178 x2, byte-compat 19/19, byte-compat-schedule 19/19, leo 4/4.
+- **Phase 2 — delete the Earley channel.** Remove Cases 1/2, `_predict` param, `one_with_control`. Add control-threading.t codegen/schedule assertions for #5-shape + gap shapes. Gates: same + full suite failure set == baseline (54).
+- **Phase 3 — remove action `update_control_head` publishers** + `_thread_control_head` + `_find_pre_init_control_head` + ForStatement fix block + Block suppressor. Gates: same.
+- **Phase 4 — clean up SemanticAction** (`$_pending_control_head_update`, `update_control_head`, `_complete_sa` block).
+- **Phase 5 — real-file sweep** (31 self-hosting files, 0 regressions); resolve the merge decision (Part 5); fix StructPromotion.pm:767 write-shape bug (orthogonal); optionally simplify residual `$ctx->control_head` reads (now always Start).
+
+---
 
 ## Part 7: Determinism
-Post-pass operates on source-ordered `@stmts`; `$current_control` advances
-left-to-right → deterministic `control_in`. Merges keyed by `content_hash()`
-(VarDecl = per-position counter id, advancing in grammar/source order).
-After retirement, `control_head` in multiply-Contexts is always Start; not part
-of `content_hash`, so no hash-cons instability. Goldens are already byte-
-identical ON==OFF (pass 4: 16/16); making the rebuild unconditional reproduces
-ON output exactly — no re-baselining. Leo equivalence is parse-time,
-independent of threading.
 
-## Part 8: Open question the alignment audit must answer
-Is this recommendation sound GIVEN the scheduler is a placeholder slated for
-re-evaluation? Specifically: does making the post-pass the authoritative
-producer of `control_in` (correct-by-construction IR) leave a future GCM
-scheduler everything it needs, OR is there a concrete GCM requirement that
-demands correct `control_in` *at parse time* (which only a leak-free during-
-parse channel could give)? If the latter, the recommendation flips and #5/#6
-matter. The audit should pressure-test the durable-invariant claim against
-plausible GCM designs rather than against the current EagerPinning behavior.
+Post-pass iterates source-ordered `@stmts`; `$current_control` advances left-to-right → deterministic. `set_control_in` mutates existing nodes (no factory `make`), so no content-hash/identity effect. VarDecl per-position counter ids (Proposal-2 d01bfea3) keep identical decls distinct. After channel retirement, `control_head` is always Start; not in any content hash → no hash-cons instability. Goldens already byte-identical ON==OFF (pass-4 16/16, 44/45 synthetic); making the rebuild unconditional reproduces ON output exactly → no re-baselining.
 
-## Cross-References
-- Trio comparison "step-3 fork": resolved as neither "during-parse capstone"
-  nor "complete the scheduler" — keep the post-pass, retire the channel.
-- `block_action_workaround_accretion.md`: the four lateral-seed fixes ARE the
-  accretion that note warned about; this design retires them.
-- `ir_construction_during_parse_option_a.md`: revises "during-parse achievable"
-  — achievable for constructs tested then, NOT structurally leak-free for the
-  self-publishing-node family (Intention 3).
+---
 
-**Source paths:** `lib/Chalk/Bootstrap/Perl/Actions.pm` (91–94, 119–149, 388,
-405, 419, 1227, 1669–1752, 1766, 1900, 2441, 2565, 2629, 2794, 2891, 3028,
-3186, 3195–3230, 3371); `lib/Chalk/Bootstrap/Earley.pm` (699–737, 1235–1252);
-`lib/Chalk/Bootstrap/Semiring/SemanticAction.pm` (35–39, 205–219, 257–263,
-411–430); `t/bootstrap/control-threading.t`; `lib/Chalk/IR/Node.pm` (26–28);
-`lib/Chalk/Bootstrap/Optimizer/StructPromotion.pm` (767).
+## Part 8: The GCM-Forward Question (for the alignment audit, not to decide now)
+
+Option X hands a future GCM scheduler correct `control_in` by construction — a correct CFG with correct predecessor edges, which is GCM's starting requirement (Click/Paleczny 1995 builds the dominator tree from the COMPLETED graph, not incrementally — suggesting "correct at schedule time" suffices, which X provides). The open question: would a future GCM design specifically need correct `control_in` AT PARSE/construction time (favoring Y)? If so, the response is NOT to resurrect the leaky channel but to design a structurally leak-free two-pass construction then, against concrete requirements. The alignment audit should pressure-test "correct-by-construction-at-schedule-time is sufficient" against plausible GCM designs — NOT against EagerPinning.
+
+---
+
+## Source paths
+- `lib/Chalk/Bootstrap/Perl/Actions.pm` (91-94, 119-149, 385, 405, 419, 1227, 1678, 1684, 1691, 1693-1696, 1710-1712, 1729, 1730-1732, 1744-1748, 1766, 1900, 2441, 2565, 2629, 2794, 2891, 3028, 3186, 3195-3230, 3371)
+- `lib/Chalk/Bootstrap/Earley.pm` (718-737, 1235, 1250-1252)
+- `lib/Chalk/Bootstrap/Semiring/SemanticAction.pm` (39, 205-219, 226, 257-263, 411-429)
+- `t/bootstrap/control-threading.t` (all toggle pairs + differential assertions)
+- `lib/Chalk/Bootstrap/Optimizer/StructPromotion.pm` (767 — Proposal-2 write-shape follow-up, orthogonal)
+- `lib/Chalk/IR/Node.pm` (26-28, doc already matches; no change)
