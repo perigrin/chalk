@@ -16,9 +16,11 @@
 
 **Consequence for v3:** it must NOT present its two commitments as discoveries. It must cite April's diagnosis + decision, explain why **rewrite succeeds where three in-place fixes drifted**, and — critically — replace Feb's WRONG diagnosis with the durable one. Feb said hash-consing was the blocker that justified going flat. The real, orthogonal-to-hash-consing blocker is: **the synthesized-attribute fold (Loup Vaillant Earley model) structurally cannot carry the inherited left-sibling-predecessor channel that control needs.** That is the load-bearing reason two-tier is correct, and it is what breaks the two-tier→flat→during-parse→post-parse loop. Without this paragraph, v3 is just the next swing of the pendulum.
 
-## Finding A — the "4 filters produce a clean disambiguated tree" premise is FALSE as stated (CRITICAL)
+## Finding A — CORRECTED: the "4 filters produce a clean unambiguous tree" premise is TRUE at HEAD (the May evidence below is STALE)
 
-Evidence (May era):
+**This finding was initially recorded as "premise FALSE" based on the May-era docs cited below. Direct instrumentation at HEAD (d87b7ccf) REFUTED that — the four pure filters produce a single unambiguous survivor (0 ambiguous Contexts ever constructed; 0 multi-survivor packs; the named fixups were deleted as dead code in commit `38e6af60`, having fired 0 transformations across the 105-file corpus). The "251k fires" was a node-visit counter, not transformations. v3 Part 2 now records the TRUE state. The May evidence below is preserved as the historical record of what was true BEFORE the post-May robustness work — it is no longer the state of the code.**
+
+Stale May-era evidence (what motivated the original-but-wrong "false premise" reading):
 - `2026-05-09-fixup-audit-baseline.md`: "filter stack is complete iff zero fixups fire" — it never reaches zero. **All 105 corpus files trigger fixups**; ~130 real transforms remain (IR/MOP/Grammar), 1,250+ on Bootstrap-partial.
 - `2026-05-17-survivor-list-architecture.md`: under honest product semantics, **9.4% of merges are real Precedence-vs-Structural conflicts; 4,459+ ties** surface that Boolean's `$left`-by-convention had masked. The output is packed-ambiguous / multi-survivor, not a single clean tree. The `peel_builtin` walker STAYS load-bearing (~30 residual cases); "Derivation C" is genuine IR-shape rewriting, not disambiguation.
 - `2026-05-12-list-operators-as-predeclared.md` + `peel-builtin-investigation.md`: at least two disambiguation classes (bare list-op comma-slurping; method-over-builtin/deref) are documented as NOT precedence and NOT cleanly filterable; their homes are a chart-merge preference rule or a fixup walker.
