@@ -23,7 +23,17 @@ CodeGen-first is deliberate: two unverified things cannot validate each other. T
 
 BUILDS:
 - A **behavioral-equivalence harness**: source program → run under perl (capture behavior) vs. Chalk CodeGen output → run → diff. perl is the oracle; never "match Chalk's prior output."
-- An **expanded idiom corpus** (tier 1 seed → mined from lib/ → sampled from CPAN), each entry carrying a perl-derived expected behavior.
+- A **dual-backend differential cross-check** (see below): lower the SAME IR through BOTH the Perl backend and the C/XS backend, run both, and compare all three of {source-under-perl, Perl-codegen-output, C/XS-codegen-output}.
+- An **expanded idiom corpus** (tier 1 hand idioms → mined from lib/ → pedagogical/canonical sources), each entry carrying a perl-derived expected behavior.
+
+### Dual-backend differential cross-check — localizes IR-vs-CodeGen failures automatically
+
+The same IR (MOP + SoN graph) is lowered two independent ways. Let P = behavior of the Perl-codegen output, C = behavior of the C/XS-codegen output, S = behavior of the source under perl (the ground truth). The three must agree (S = P = C); the *disagreements* are the diagnostic:
+- **P ≠ C** (backends disagree with each other, same IR input) → bug is in ONE of the codegens; the IR is exonerated. Failure localized to a backend without human inspection.
+- **P = C ≠ S** (backends agree with each other but not with perl) → both faithfully lowered a WRONG graph → bug is UPSTREAM in the IR; codegens exonerated.
+- **C/XS chokes where Perl-codegen passes** → the C backend must commit to types/memory/struct-layout (the StructPromotion path), so it acts as a stricter type/shape checker than perl ever would; a graph it rejects but Perl-codegen accepts signals an UNDERSPECIFIED IR the Perl backend was papering over.
+
+This mechanizes the "blame the layer" property the corpus gives by inspection: agreement-between-backends isolates IR-vs-codegen automatically. Honest caveat: the C/XS backend is itself unverified at the start (known XS-codegen bugs: CV cache, edge-case segfaults), so early `C ≠ P` will sometimes just be "C-codegen is broken here" rather than an IR signal — that's fine, the triangle ALSO verifies the C backend (against P + perl); we simply trust no single corner at the outset and lean on tier-1 smallness to keep it debuggable.
 
 DOES NOT (out of scope here):
 - No rewrite of SemanticAction / IR-generation (paused).
@@ -40,8 +50,16 @@ The discipline that keeps the corpus trustworthy as it grows: **expected behavio
 
 - **Tier 1 — hand-written idioms (`ir-audit-corpus.pl`, ~40):** tiny, categorized (decls, side-effects, assignments, control flow, returns, fields, methods), human-obvious result. Trusted by INSPECTION. This is the root that grounds CodeGen first. Also the primary source for the `feature class` MOP corpus.
 - **Tier 2 — mined from `lib/`:** real, complex 5.42 `feature class` — and the eventual self-hosting workload (capstone: regenerate the Earley parser). Trusted by PERL behavior (libraries need exercise harnesses — instantiate, call methods, observe; not "run and print"). Second source for MOP-shaped programs.
-- **Tier 3 — pedagogical idioms (e.g. chromatic's *Modern Perl*, onyxneon.com free CC edition; and "Learning Perl"-style examples):** canonical, idiomatic, small-and-complete, behaviorally documented examples of how Perl is *meant* to be written. High-yield IN-SUBSET source that covers body-level idioms (refs, closures, data structures, regex, string/list ops, control flow) we wouldn't think to hand-write — the fix for tier-2's blind spot (lib/ only exercises idioms Chalk's own authors used). Caveats: (a) needs CLASSIFICATION per example (in-subset / reject / scope-decision) like tier 4, since the books cover the whole language; (b) extraction is semi-manual — pull COMPLETE, runnable, intended-to-work snippets (skip fragments and "don't do this" anti-examples); (c) provenance — confirm the CC license permits including derived examples in the test corpus; (d) WEAK on `feature class` MOP (most editions predate it, teach Moo/Moose/bless-OO) — complements but does not solve the MOP-corpus need (that stays tiers 1+2). Trusted by PERL behavior once extracted.
-- **Tier 4 — sampled from CPAN:** maximal real-world breadth / adversarial diversity. Role is coverage-discovery + NEGATIVE testing (most CPAN is outside Chalk's subset). Classification per program: (a) in-subset → must compile + behave like perl; (b) out-of-subset → must be cleanly rejected; (c) undecided feature → flag for a scope decision.
+- **Tier 3 — pedagogical & canonical-idiom sources (in-subset, high-yield):** small, complete, idiomatic, behaviorally-clear examples of how Perl is *meant* to be written — covering body-level idioms (refs, closures, data structures, regex, string/list ops, control flow) we wouldn't think to hand-write (fixes tier-2's blind spot: lib/ only exercises idioms Chalk's own authors used). Sources:
+  - chromatic's *Modern Perl* (onyxneon.com free CC edition) — canonical modern-Perl idioms.
+  - "Learning Perl"-style teaching examples.
+  - perlfaq / perldoc "how do I do X" snippets — very idiomatic, small, in-subset-heavy.
+  - perl's own distribution test suite (`t/` in the perl source) — the most authoritative "this is what Perl must do" corpus; behaviorally precise (much is out-of-subset / tests the interpreter, so classify hard, but the in-subset slice is gold).
+  - rosettacode Perl entries — same task across many idioms (diversity).
+  - Perl Weekly Challenge solutions — small self-contained programs with known expected output (excellent behavioral-oracle fit).
+  Caveats (apply to all tier-3 sources): (a) CLASSIFY per example (in-subset / reject / scope-decision) — these cover the whole language; (b) extraction is semi-manual — pull COMPLETE, runnable, intended-to-work snippets (skip fragments and "don't do this" anti-examples); (c) provenance — confirm each source's license permits including derived examples; (d) WEAK on `feature class` MOP (predate it / teach Moo/Moose/bless-OO) — complement but do not solve the MOP-corpus need (that stays tiers 1+2). Trusted by PERL behavior once extracted.
+
+  **CPAN is DROPPED for now** — highest classification effort, lowest in-subset yield; revisit later for breadth + negative testing once tiers 1-3 are solid.
 
 ## Phases
 
@@ -57,20 +75,21 @@ The discipline that keeps the corpus trustworthy as it grows: **expected behavio
 - Run each through the (now mechanically-trusted) CodeGen path; classify divergences (CodeGen bug vs. graph-producer bug vs. unsupported construct).
 - This is where the perl-as-oracle discipline pays off: no human specifies expected output for 22k lines; perl does.
 
-### Phase 2 — Corpus expansion: sample CPAN
-- Sample real CPAN modules; classify each (in-subset / reject / scope-decision). Build the negative-test set (must-reject) alongside the must-compile set.
-- Use as a coverage-discovery instrument: what real-world idioms exist that tier 1+2 missed.
+### Phase 2 — Corpus expansion: pedagogical & canonical sources (tier 3)
+- Harvest complete, runnable, intended-to-work snippets from the tier-3 sources (Modern Perl, Learning-Perl-style, perlfaq/perldoc, perl's own `t/`, rosettacode, Perl Weekly Challenge). Classify each (in-subset / reject / scope-decision); confirm per-source license/provenance.
+- Capture perl behavior for each; run through CodeGen + dual-backend cross-check. These broaden body-idiom coverage beyond what lib/ exercises.
+- (CPAN deferred — see corpus tiers note.)
 
 ### Phase 3 — Capstone: self-hosting via the harness
 - The hardest tier-2 target: the Earley parser + semirings. CodeGen output must produce a parser that parses like the original. This is the definitive CodeGen certification (and, later, the gate for the whole optree→IR→codegen path once a front-end is trusted).
 
 ## Acceptance criteria
-- A repeatable harness: `program → perl behavior` vs `program → CodeGen → run`, diffing behavior, with perl as the sole oracle.
-- Tier-1 corpus: all ~40 idioms green (CodeGen output behaves like perl).
-- Tier-2 corpus: a growing set of lib/ units with classified results; divergences attributed to a specific layer.
+- A repeatable harness: `program → perl behavior (S)` vs `program → Perl-codegen → run (P)` vs `program → C/XS-codegen → run (C)`, diffing all three, with perl (S) as the ground-truth oracle and P-vs-C as the IR-vs-codegen localizer.
+- Tier-1 corpus: all ~40 idioms green — S = P = C.
+- Tier-2 (lib/) + tier-3 (pedagogical) corpora: growing sets with classified results; every divergence attributed to a specific layer (IR vs Perl-backend vs C-backend) via the dual-backend cross-check.
 - Negative set: out-of-subset programs cleanly rejected.
-- Determinism preserved (byte-identical codegen).
-- Capstone tracked as the eventual gate, not a near-term requirement.
+- Determinism preserved (byte-identical codegen, both backends).
+- Capstone (self-host the Earley parser) tracked as the eventual gate, not a near-term requirement.
 
 ## Relationship to the kept evidence docs
 - `2026-06-05-context-to-son-postpass-vision-validation.md` — established the 3-pieces decomposition + that disambiguation is IR-independent (why CodeGen/IR can be developed against an external oracle). Still valid context.
