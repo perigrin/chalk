@@ -111,29 +111,56 @@ The current tree is the **differential oracle**: every new component is gated on
 
 ## Part 8: Toolchain decisions (researched 2026-06-05)
 
-The reset is the cheapest moment to adopt tooling (no retrofit friction). Four tools were evaluated from source. **The headline finding: this stack is the productized form of the agentic workflow we ran by hand all this session.** The ad-hoc loop we used — dispatch parallel specialist agents, verify findings against code + git history to filter false positives, track "what's next / what's ready in parallel," gate work against acceptance criteria, audit plan-vs-code drift — is exactly what these four tools formalize. Adopting them replaces improvisation with a repeatable harness.
+The reset is the cheapest moment to adopt tooling (no retrofit friction). SIX tools were evaluated from source (git-zhi, crochet, PAAD, perl-development-plugin, superpowers, claude-session-driver). **The headline finding: this stack is the productized, integrated form of the agentic workflow we ran by hand all this session** — and two of the six (superpowers, PAAD) are ALREADY active in this environment and were used throughout. The ad-hoc loop we used — brainstorm/plan, TDD RED-GREEN, dispatch parallel specialist agents, verify findings against code + git history to filter false positives, track "what's next / what's ready in parallel," gate work against acceptance criteria, audit plan-vs-code drift — is exactly what these tools formalize, as a single composed pipeline (next subsection). Adopting them replaces improvisation with a repeatable harness, much of which is already running.
 
 ### The stack (layered, and three of four are perigrin's own — low dependency risk, full roadmap control)
 - **git-zhi** (`github.com/perigrin/git-zhi`, Go, `git zhi`): a git-native task graph — "what to do next, for developers and agents." Task state lives in `refs/zhi/`; no external DB. Agent-first: `git zhi issue show --format json` (structured context: paths, commands, acceptance_criteria), `git zhi next --actor 'agent:claude-code'` (per-worker scheduling), `git zhi list --ready` (parallel-runnable set), `git zhi verify <milestone>` (run all AC commands). Critical-Chain (Goldratt) forecasting from observed velocity, not estimates. **This is the foundation** — it gives the v3 migration a machine-readable task graph that agents query directly.
 - **crochet** (`github.com/perigrin/crochet`, Claude Code plugin): the "intelligence layer for git-zhi." Decomposes specs into executable task chains, validates implementations against requirements, enforces retrospectives at milestones. Skills: `crochet:assess`, `crochet:refinement`, `crochet:execute`, `crochet:verify`. Interacts with chain state *exclusively* via `git zhi` CLI (porcelain-over-plumbing). Coordinates specialist agents (architect, decomposer, SQE, tech writer). **This is the orchestration layer** — it turns a v3 design doc into a decomposed, dependency-ordered, verifiable task chain.
 - **PAAD** (`github.com/ovid/paad`, Curtis Poe's; Claude Code plugin): **P**ushback, **A**lignment, **A**rchitecture, **D**iscipline — defense-in-depth review skills. `paad:pushback` (challenge specs before build), `paad:alignment` (requirements/design/plan match before coding), `paad:agentic-architecture` (5 specialists, 14 strength + 34 flaw categories), `paad:agentic-review` (branch review w/ severity ranking + dedup), with a **verification phase that filters false positives by reading code and checking git history.** **This is the review/discipline layer.** We used it by hand all session; its verification discipline is exactly what caught the stale Part-2 claim.
 - **perl-development-plugin** (`github.com/perigrin/perl-development-plugin`, Claude Code plugin): version-aware Perl skills — `perl:write-5.42` (the `feature class` skill CLAUDE.md already mandates), `perl:test` (Test2::V0, prove, real-data), perlcritic/perltidy, matrix regression. **This is the implementation/test layer**, version-pinned to 5.42 which v3 requires.
+- **superpowers** (`github.com/obra/superpowers`, Claude Code plugin; ALREADY ACTIVE this session): "a complete software development methodology built on composable skills" — brainstorming (Socratic design), implementation planning, subagent-driven-development with two-stage review, TDD RED-GREEN-REFACTOR, verification-before-completion, git-worktree management. **This is the methodology spine.** Its principles ("Evidence over claims — verify before declaring success"; "Systematic over ad-hoc") are the discipline we operated under all session; crochet's `execute` uses its TDD inner loop.
+- **claude-session-driver / csd** (`github.com/obra/claude-session-driver`, shell; superpowers marketplace): orchestrates MULTIPLE Claude Code sessions — launches tmux workers, assigns tasks, monitors via JSONL event logs, collects results. Patterns: delegate-and-wait, fan-out, pipeline, supervise, hand-off. **Cross-session/autonomous parallelism** — a different mechanism from in-process subagents (the Agent tool); use when work needs genuine parallel SESSIONS (e.g. the strangler migration's family-by-family construction moves).
 
 ### How they compose with v3's architecture and migration
 - **No conflict with the Perl 5.42 / `./prove` substrate** — perl-development-plugin IS the 5.42 + prove workflow, formalized. git-zhi is orthogonal (git-native, language-agnostic).
 - **They operationalize the strangler-against-oracle migration:** git-zhi holds the phase/family task graph with acceptance criteria = "byte-identical-or-justified vs the oracle"; `git zhi verify` runs those AC gates; crochet decomposes v3's Part 7 phases into the chain; PAAD reviews each landing. This is precisely the manual loop of this session (dispatch → verify against HEAD → gate against goldens), made repeatable.
 - **PAAD's plan-vs-code verification is a structural defense against the exact failure that produced this very session's stale claims** (history-doc drift from code). Baking `paad:alignment` in before each phase, and PAAD's "check git history" verification after, is the discipline that would have caught Part 2 earlier.
 
-### Recommendation
-**ADOPT all four for the v3 reset, in this order, with one caution.**
-1. **git-zhi first** — the task-graph substrate everything else rides on; encode v3's Part 7 migration phases + acceptance criteria as the initial issue/milestone graph.
-2. **perl-development-plugin** — formalizes the 5.42 + prove + critic/tidy loop v3 already requires; lowest-risk, immediate.
-3. **PAAD** — formalize the review discipline we proved valuable this session; gate each phase with `paad:alignment` (pre) and `paad:agentic-review` (post).
-4. **crochet** — the orchestration layer; adopt once git-zhi + the v3 task graph exist (it depends on git-zhi on `$PATH`).
+### The stack is INTEGRATED, not competing (corrected framing)
 
-**Caution (honest):** these are early-stage tools (git-zhi/crochet are perigrin's own, evolving). Adopting them couples the v3 reset's *process* to their maturity. Mitigation: the tools are porcelain over git (git-zhi state is just refs; crochet/PAAD are skills) — if any tool stalls, the underlying work (git refs, prove, manual review) survives. This is low lock-in. The dependency-control upside (three of four are perigrin's) outweighs the maturity risk for a project that IS an AI-driven-development testbed.
+An initial read treated the overlaps (superpowers vs crochet on orchestration; superpowers vs PAAD on review; csd vs in-process subagents) as conflicts requiring a winner-per-concern. That is WRONG: these tools were **designed to integrate**, with deliberate overlap where they reinforce each other. Verified evidence: `crochet:execute` is documented as "TDD with **Ralph Loop inner cycle and PAAD outer gate**" — crochet does not compete with PAAD, it INVOKES PAAD as its review gate. csd is distributed through the superpowers marketplace. PAAD "complements rather than replaces." So the model is **layered per-concern with intentional reinforcing overlap**, a single composed pipeline:
 
-**Determinism/repo note:** git-zhi stores task state in `refs/zhi/` — orthogonal to source and to Chalk's byte-identical-codegen determinism requirement (it touches no build output). No conflict.
+```
+git-zhi          = durable task-state substrate (refs/zhi/; agent-queryable)
+  ↑ driven via CLI by
+crochet          = spec → decomposed verifiable task chain; orchestration
+  │  crochet:execute = TDD inner loop + PAAD outer gate
+  ├─ PAAD        = review/discipline gate (pushback/alignment/architecture/
+  │                review, w/ code+git-history verification)
+  ├─ TDD inner   = (superpowers' RED-GREEN-REFACTOR; the methodology spine,
+  │                already the active substrate this session)
+  └─ over
+perl-development-plugin = Perl 5.42 + prove + critic/tidy (lang/test layer)
+
+csd (claude-session-driver) = orthogonal: cross-session/autonomous tmux
+   fan-out for parallel WORKERS — a different mechanism from in-session
+   subagents; used when work needs genuine parallel sessions, not when an
+   in-process Agent fan-out suffices.
+```
+
+Two already active in THIS environment (installed + used all session): **superpowers** (the brainstorm/TDD/subagent/verify discipline we've operated under) and **PAAD** (every audit this session is a PAAD-pattern review, archived in `paad/*-reviews/`). So adopting the stack is largely *formalizing what is already in use* + adding git-zhi/crochet/perl-plugin/csd.
+
+### Recommendation: ADOPT the integrated stack, sequenced by dependency
+
+1. **git-zhi first** — the substrate everything rides on. Encode v3's Part 7 migration phases + acceptance criteria (AC = "byte-identical-or-justified vs the oracle") as the initial issue/milestone graph.
+2. **perl-development-plugin** + **superpowers** — already-mandated/already-active; formalize the 5.42+prove+TDD spine.
+3. **PAAD** — formalize the review gate (already in use by hand); `paad:alignment` pre-phase, `paad:agentic-review`/`agentic-architecture` post.
+4. **crochet** — the orchestrator that ties git-zhi + TDD + PAAD into `assess→refinement→execute→verify` chains. Adopt once git-zhi + the v3 task graph exist (depends on git-zhi on `$PATH`).
+5. **csd** — adopt opportunistically, for genuinely-parallel multi-session work (the v3 strangler migration's family-by-family construction moves are a natural fan-out candidate). Not required for the linear phases.
+
+**Caution (honest, unchanged):** git-zhi/crochet are early-stage (perigrin's own, evolving), so the reset's *process* couples to their maturity. Mitigation: low lock-in — everything is porcelain over git (zhi state is just refs; crochet/PAAD/superpowers/csd are skills/scripts); if any stalls, the underlying work (git refs, prove, manual review, in-process subagents) survives. For a project that IS an AI-driven-development testbed, dogfooding this stack is itself aligned with Chalk's purpose, and the dependency-control upside (4 of 6 are perigrin/obra collaborators' own) outweighs the maturity risk.
+
+**Determinism/repo note:** git-zhi stores task state in `refs/zhi/` — orthogonal to source and to Chalk's byte-identical-codegen determinism (touches no build output). No conflict.
 
 ## Part 9: Explicitly out of scope / deferred
 - GCM or alternative scheduler (EagerPinning is the placeholder; `control_in`-correct-at-hand-off is the contract; design against concrete GCM requirements when GCM is active).
