@@ -2878,7 +2878,17 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
 
                 $sa->update_scope($scope);
-                $sa->update_control_head($region);
+                # Suppress the elsif's internal Region from leaking outward.
+                # ElsifChain is parsed as a sub-rule of IfStatement; publishing
+                # the Region here would make the enclosing IfStatement read it
+                # as the OUTER If's control predecessor (via _mul_ctx) instead
+                # of the statement before the if. Publishing Start makes
+                # _mul_ctx prefer the enclosing item's accumulated predecessor
+                # (left non-Start wins over right Start), the same suppression
+                # Block's action uses. The outer If's successor still chains
+                # off IfStatement's own published Region; the elsif's branch
+                # bodies are carried on the If node's schedule_data, not here.
+                $sa->update_control_head($factory->make('Start'));
                 $sa->update_annotations({
                     then_stmts => $then_body,
                     else_stmts => $else_body,

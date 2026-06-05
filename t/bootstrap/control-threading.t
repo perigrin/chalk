@@ -759,4 +759,125 @@ PERL
     }
 }
 
+# Target 8 (if/elsif chain predecessor): with the rebuild DISABLED, an
+# if/elsif[/else] chain's OUTER If node must take the PRECEDING statement as
+# its control_in, NOT the elsif's internal merge Region. The elsif desugars to
+# a nested If (ElsifChain action) that publishes its own Region via
+# update_control_head; without suppression that Region leaks up and the
+# enclosing IfStatement reads it as the outer If's predecessor. This orphans
+# the statement before the if from the scheduler's Return-chain walk.
+{
+    my sub off_stmts ($src) {
+        Chalk::Bootstrap::Perl::Actions->disable_control_rebuild;
+        my @s = method_body_stmts($src);
+        Chalk::Bootstrap::Perl::Actions->enable_control_rebuild;
+        return @s;
+    }
+
+    # 2-arm: my $a=1; if($b){foo()} elsif($c){bar()} -> outer If.control_in == VarDecl
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $a = 1;
+        if ($b) { foo(); } elsif ($c) { bar(); }
+        return $a;
+    }
+}
+PERL
+        my @off = off_stmts($src);
+        is(scalar(@off), 3, 'target 8 (elsif-2arm): three statements (rebuild off)');
+      SKIP: {
+            skip 'parse did not yield three statements', 1 unless @off == 3;
+            my ($vardecl, $if_stmt, $ret) = @off;
+            is(
+                refaddr($if_stmt->control_in // 0), refaddr($vardecl),
+                'target 8 (elsif-2arm, rebuild off): outer If control_in is the preceding VarDecl, not the elsif Region'
+            );
+        }
+    }
+
+    # 3-arm with else
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $a = 1;
+        if ($b) { foo(); } elsif ($c) { bar(); } else { baz(); }
+        return $a;
+    }
+}
+PERL
+        my @off = off_stmts($src);
+        is(scalar(@off), 3, 'target 8 (elsif-3arm): three statements (rebuild off)');
+      SKIP: {
+            skip 'parse did not yield three statements', 1 unless @off == 3;
+            my ($vardecl, $if_stmt, $ret) = @off;
+            is(
+                refaddr($if_stmt->control_in // 0), refaddr($vardecl),
+                'target 8 (elsif-3arm, rebuild off): outer If control_in is the preceding VarDecl'
+            );
+        }
+    }
+}
+
+# ON==OFF equivalence for if/elsif shapes (the decisive rebuild-deletion check).
+{
+    my sub chain_for ($src, $rebuild_enabled) {
+        Chalk::Bootstrap::Perl::Actions->disable_control_rebuild unless $rebuild_enabled;
+        my @stmts = method_body_stmts($src);
+        Chalk::Bootstrap::Perl::Actions->enable_control_rebuild unless $rebuild_enabled;
+        my @chain;
+        for my $s (@stmts) {
+            my $op   = blessed($s) && $s->can('operation') ? $s->operation : ref($s) || '?';
+            my $ctrl = $s->can('control_in') ? $s->control_in : undef;
+            my $ctrl_op = defined($ctrl) ? (blessed($ctrl) && $ctrl->can('operation')
+                ? $ctrl->operation : 'scalar') : 'undef';
+            push @chain, "$op<=$ctrl_op";
+        }
+        return join(',', @chain);
+    }
+
+    # shape 12: elsif-2arm
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $a = 1;
+        if ($b) { foo(); } elsif ($c) { bar(); }
+        return $a;
+    }
+}
+PERL
+        is(chain_for($src, 0), chain_for($src, 1), 'ON==OFF shape 12: if/elsif 2-arm');
+    }
+
+    # shape 13: elsif-3arm-else
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $a = 1;
+        if ($b) { foo(); } elsif ($c) { bar(); } else { baz(); }
+        return $a;
+    }
+}
+PERL
+        is(chain_for($src, 0), chain_for($src, 1), 'ON==OFF shape 13: if/elsif/else 3-arm');
+    }
+
+    # shape 14: elsif as first statement (predecessor genuinely Start)
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        if ($b) { foo(); } elsif ($c) { bar(); }
+        return 1;
+    }
+}
+PERL
+        is(chain_for($src, 0), chain_for($src, 1), 'ON==OFF shape 14: elsif as first statement');
+    }
+}
+
 done_testing;
