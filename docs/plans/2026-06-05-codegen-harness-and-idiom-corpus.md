@@ -10,7 +10,7 @@ The session that produced this established (with evidence) a dependency-ordered 
 - **IR-generation** (SemanticAction) is KNOWN broken.
 - The **IR** and **CodeGen** are UNVERIFIED — they sit downstream of the broken IR-gen, so "it produces output" is not "it produces correct output." (perigrin: "standing on sand.")
 
-**Framing (assume CodeGen is DIRECTIONAL, not complete):** the current CodeGen (both Perl and C backends) is a *sketch of the right shape*, not a finished implementation — the C backend's `generate` is literally a stub (PAAD finding F1). Therefore the harness is a **completeness instrument FIRST, a regression gate SECOND.** The harness's first deliverable is a **gap map** (which idioms CodeGen can't yet handle, ranked by the corpus = by real idiom frequency); only once CodeGen is substantially complete does "all corpus green" become a meaningful regression gate. The effort is therefore not "verify an existing CodeGen" but "**use the harness + corpus as specification-by-example to COMPLETE CodeGen idiom-by-idiom, with perl as the spec.**" Never treat current CodeGen output as a reference — it is an incomplete sketch; perl is the only thing we compare to.
+**Framing (assume CodeGen is DIRECTIONAL, not complete):** the current CodeGen (both Perl and C backends) is a *sketch of the right shape*, not a finished implementation — the C backend's `generate` is literally a stub (PAAD finding F1). Therefore the harness is a **completeness instrument FIRST, a regression gate SECOND.** The harness's first deliverable is a **gap map** (which idioms CodeGen can't yet handle, organized by corpus category/coverage — NOT by frequency: the corpus is one-snippet-per-idiom with no count weighting, so "ranked by frequency" would require adding frequency data the corpus does not have; treat the gap map as coverage-organized work-list); only once CodeGen is substantially complete does "all corpus green" become a meaningful regression gate. The effort is therefore not "verify an existing CodeGen" but "**use the harness + corpus as specification-by-example to COMPLETE CodeGen idiom-by-idiom, with perl as the spec.**" Never treat current CodeGen output as a reference — it is an incomplete sketch; perl is the only thing we compare to.
 
 **CRITICAL guard (PAAD re-review): a red is NOT automatically "just a gap."** The directional framing introduces a false-green risk — two different causes both look like `S≠P`: a **GAP** (CodeGen couldn't emit / emitted obviously-incomplete code — fails loud, IS backlog) vs a **MISCOMPILE** (CodeGen emitted plausible-but-WRONG code that ran and diverged, or is wrong on an axis the behavior record doesn't observe = a FALSE GREEN). A miscompile is a **correctness alarm, never backlog.** The harness comparator MUST classify gap-vs-miscompile explicitly (did it emit code at all / for every construct / mark-unsupported, vs. emitted complete-looking code that diverged) — see architecture doc C7. Do not let "red is expected" launder a miscompile.
 
@@ -77,7 +77,6 @@ The throughline: CodeGen is **directional**. Each phase first MAPS gaps (run cor
 
 ### Phase 1 — Complete CodeGen to tier-1 green (Stage 2 begins)
 - Work the gap map: complete/fix Perl-codegen idiom-by-idiom until tier-1 is all S=P green. perl is the spec; never the current sketch output.
-- Establish the negative set: out-of-subset programs cleanly rejected.
 
 ### Phase 2 — Corpus expansion → drive further completion (Stage 2 continues)
 - **Mine lib/** (tier 2): extract compilable units; capture perl behavior via per-unit exercise specs (driver + representative args are partly MANUAL — PAAD finding Q5; only the expected *output* is oracle-derived). Run through the harness; the new reds extend the gap map; complete CodeGen against them. This is the self-hosting workload building toward the capstone.
@@ -97,8 +96,8 @@ The throughline: CodeGen is **directional**. Each phase first MAPS gaps (run cor
 
 **Stage 2 — complete CodeGen to green, idiom by idiom:**
 - Drive tier-1 to all-green (S = P) by COMPLETING CodeGen against the gap map, perl as spec. Then tier-2 (lib/) + tier-3 (pedagogical), growing the green set.
-- Negative set: out-of-subset programs cleanly rejected.
 - Determinism preserved (byte-identical Perl codegen).
+- (NOTE — out of scope for THIS harness, PAAD F-N1: "out-of-subset programs cleanly rejected" is a PARSER/front-end concern, not a CodeGen-harness one — S=perl has no subset notion and P=codegen-over-hand-graphs never authors a graph for out-of-subset input, so nothing here owns subset-rejection. The actor is the parser+SemanticAction, which this plan defers. Corpus-entry CLASSIFICATION (in-subset / reject / scope-decision) stays here as a labeling step; ENFORCING rejection belongs to a future parser-scope plan.)
 
 **Stage 3 — add the C corner (gated):** once Perl-codegen is substantially green AND a free-standing-graph → C path exists (today the real C backend needs Program+SA+Context; the named `generate($mop)` is a stub), add C as the third corner for automatic IR-vs-codegen localization. Enforce same-IR-two-lowerings (F7).
 
