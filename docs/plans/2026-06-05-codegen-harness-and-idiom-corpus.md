@@ -92,7 +92,7 @@ The throughline: CodeGen is **directional**. Each phase first MAPS gaps (run cor
 
 **Stage 1 — harness + gap map (the instrument exists):**
 - A repeatable harness: `program → perl behavior (S)` vs `program → Perl-codegen → run (P)`, diffing on the widened behavior record (see architecture doc C2: return + context/wantarray + stdout + STDERR/warnings + exception + object-state + hash-order-normalized + FP-tolerant + dualvar + aliasing/tie/overload). perl (S) is the sole oracle. (C corner deferred per PAAD: Perl-first.)
-- A **gap map**: for the tier-1 corpus, which idioms CodeGen handles vs. doesn't-yet, ranked. This is the FIRST deliverable — red is expected and is the work-list, not a failure.
+- A **gap map**: for the tier-1 corpus, which idioms CodeGen handles vs. doesn't-yet, organized by category/coverage. This is the FIRST deliverable — red is expected and is the work-list, not a failure.
 
 **Stage 2 — complete CodeGen to green, idiom by idiom:**
 - Drive tier-1 to all-green (S = P) by COMPLETING CodeGen against the gap map, perl as spec. Then tier-2 (lib/) + tier-3 (pedagogical), growing the green set.
