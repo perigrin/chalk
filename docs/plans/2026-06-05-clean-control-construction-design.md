@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-05
 **Branch:** phase1-lateral-bindings @ ccee2d05
-**Status:** Design document. No lib/ or t/ modifications. Drives the alignment audit before implementation.
+**Status:** Design document. No lib/ or t/ modifications. Alignment audit (2026-06-05, `2026-06-05-control-construction-alignment-audit.md`) returned GREEN: construction-time `control_in` has zero consumer (no mid-parse reader; all scheduler/optimizer/codegen consumers read the completed graph; GCM builds from the completed CFG). Option X confirmed; this returns to the 2026-06-02 adversarial conclusion, now backed by 5-leaks-in-4-passes. One correction folded in: KEEP the merge-only hygiene loop (graph-membership consumers rely on it). Ready to implement pending perigrin's go.
 **Supersedes:** the prior version of this file, whose Part 1 premise (graph-completion merges are load-bearing, therefore a post-pass is required regardless) has been EXPERIMENTALLY FALSIFIED.
 
 **Predecessors:** `docs/plans/2026-06-02-control-wiring-trio-comparison.md`; the four audits `2026-06-04-rebuild-deletion-readiness-audit{,-rerun}.md`, `2026-06-05-rebuild-deletion-readiness-audit-pass3.md`, `-pass4.md`.
@@ -11,7 +11,9 @@
 
 ## Verified Fact Base (all confirmed by in-code experiment)
 
-**FACT 1 — the graph-completion merges are REDUNDANT, not load-bearing.** The prior design claimed the Block rebuild's `$graph->merge($s)` calls (Actions.pm:1691, 1729) are required because `_finalize_body_graph` (1016-1138) only reaches nodes transitively from Returns via `inputs()`. FALSE: its closure follows BOTH `inputs()` AND `control_in` (line 1130). Experiment (this session): guarded the two merge calls behind `$ENV{CHALK_NO_MERGE}`, ran the gates with merges DISABLED (control threading still on). byte-compat 19/19, byte-compat-schedule 19/19, bnf-target-c 178/178, c-schedule-walker / ir-use-def / ir-hash-consing / struct-promotion-end-to-end all 0 failures. cfg-statements (10) + cfg-loop (1) fail identically WITH merges = pre-existing, not caused. The orphan case `my $orphan=99; bar(); 7;` keeps VarDecl($orphan) in `$graph->nodes` with merges DISABLED, reached via the synthesized implicit Return's `control_in` chain. CONCLUSION: graph completion is fully handled by the closure provided the control_in chain is intact. The prior design's foundational "a post-pass loop is required regardless" is GONE.
+**FACT 1 — the graph-completion merges are NOT THE REASON a post-pass is needed; but they are NOT safe to delete either (corrected by the alignment audit).** The prior design claimed the Block rebuild's `$graph->merge($s)` calls (Actions.pm:1691, 1729) are required because `_finalize_body_graph` (1016-1138) only reaches nodes transitively from Returns via `inputs()`. The closure ACTUALLY follows BOTH `inputs()` AND `control_in` (line 1130). Experiment (this session): guarded the two merge calls behind `$ENV{CHALK_NO_MERGE}` (guard since reverted — not in tree), ran a gate subset with merges DISABLED (control threading still on): byte-compat 19/19, byte-compat-schedule 19/19, bnf-target-c 178/178, c-schedule-walker / ir-use-def / ir-hash-consing / struct-promotion-end-to-end all 0 failures; the orphan case kept VarDecl($orphan) in `$graph->nodes` via the implicit Return's `control_in` chain.
+
+**BUT the alignment audit (2026-06-05) found this experiment's gate set was too narrow.** Four `$graph->nodes` consumers take membership as given — `Optimizer/DCE.pm:39`, `Perl/Target/Perl.pm:467`, `Perl/Actions.pm:839`, `MOP/Class.pm:142` (+ `IR/Serialize/JSON.pm:97`). Graph completeness via the closure is correct ONLY if the `control_in` chain is perfectly intact for every body; a cheap explicit merge guarantees membership unconditionally. **RESOLUTION: KEEP a merge-only hygiene loop** (correctness over cleanliness). The earlier "lean delete" was wrong. What FACT 1 actually establishes is narrower but still decisive for the X-vs-Y question: graph completion is NOT an INDEPENDENT reason to keep a post-pass *that does control threading* — the merges are a separate, cheap, retainable concern. The prior design's foundational "a control-threading post-pass loop is required regardless because of graph completion" is GONE; the post-pass is justified on control-threading correctness alone (Parts 2-4), and a tiny merge loop rides along.
 
 **FACT 2 — graph completeness DEPENDS on the control_in chain being intact.** The closure reaches a statement node only by walking `control_in` (and `inputs`) back from the Return. So correct control threading is not just the CFG requirement — it is ALSO what makes the graph complete. The two requirements are unified: correct `control_in` is sufficient for both.
 
@@ -32,6 +34,36 @@ Two minimal end states:
 - **End State B (during-parse SoR):** the rebuild is deleted; the during-parse channel is made leak-free so every node has correct `control_in` at action-fire time. Graph completion follows automatically (Fact 2). No post-pass of any kind.
 
 Both produce the durable invariant. The difference is WHERE/WHEN correctness is established.
+
+---
+
+## Part 1.5: Why Chalk differs from other SoN front-ends (the architecture-specific crux)
+
+Classic Sea-of-Nodes front-ends (HotSpot C2, Click's original) DO build the
+graph during parsing — but they parse an already-structured AST/bytecode
+TOP-DOWN, with full parent/sibling context available at each node as they
+descend. Control's defining relationship — a side-effect node's predecessor is
+its LEFT SIBLING statement — is trivially available in a top-down walk.
+
+Chalk is architecturally different (see memory `ir_construction_during_parse_option_a`).
+Its semantic-action layer is a PURE SYNTHESIZED-ATTRIBUTE FOLD (Loup Vaillant
+Earley model): a rule's action sees ONLY its children's results — there is no
+inherited-attribute / left-sibling→right-sibling channel. The one relationship
+a synthesized fold structurally cannot hand across is exactly the
+left-sibling-predecessor that control needs. The during-parse lateral-seed
+channel is an attempt to bolt an inherited channel onto a synthesized fold; the
+five-leak family is the symptom of fighting the attribute model. A post-parse
+pass operates AFTER the fold completes, when the flat source-ordered `@stmts`
+is materialized — so the left-sibling relationship is directly available, with
+no fold to fight. This is why "other SoN implementations do during-parse" does
+NOT transfer: they aren't building over a synthesized-attribute Earley fold.
+
+So the user's framing — "is it easier / more correct to build control_in during
+construction or in a post-parse-pre-schedule pass?" — answers: the post-pass is
+BOTH easier (it already exists, ~60 lines, correct-by-construction; adopting it
+is net deletion) AND more correct (5 incorrectness bugs in the during-parse
+channel vs 0 in the post-pass), *because of* Chalk's synthesized-fold
+architecture, not in spite of it.
 
 ---
 
@@ -77,7 +109,7 @@ Can Y be made leak-free by construction? The publishers split into: (1) correct 
 
 **Keep — Actions.pm:** the rebuild loop body 1685-1752 (becomes unconditional); `set_control_in`/region-advance logic (this IS Job A); `update_scope`/`update_graph`/`update_annotations`; `_finalize_body_graph`.
 
-**Merges (1678/1691/1729) — DECISION NEEDED, flagged honestly:** Fact 1 proved them redundant. The architect recommended KEEPING them as cheap belt-and-suspenders hygiene. This is a mild inconsistency (proven-redundant yet kept). RESOLUTION for the alignment audit: either (a) keep them (conservative, cheap, insulates future graph-walk code that might not follow control_in) OR (b) delete them too and rely solely on the closure (cleaner, matches Fact 1, and the experiment proved the gates pass without them). Recommend (b) for cleanliness UNLESS the alignment audit finds a consumer that walks `$graph->nodes` expecting membership the closure would not provide. Do not leave this as unexamined residue.
+**Merges (1678/1691/1729) — DECIDED: KEEP a merge-only hygiene loop.** The alignment audit (2026-06-05) resolved this: four `$graph->nodes` consumers (DCE.pm:39, Target/Perl.pm:467, Actions.pm:839, MOP/Class.pm:142) take membership as given, and the merge experiment's gate set was too narrow to license deletion. Keep the merges as a cheap unconditional guarantee of graph membership; do NOT make completeness depend on the `control_in` closure being perfect for every body. So the post-pass becomes: an unconditional source-order loop that (Job A) threads `control_in` and (Job B-residual) merges each statement node — Job B kept not because it's load-bearing for the X-vs-Y decision but because it's cheap insurance the `$graph->nodes` consumers rely on.
 
 **Rewrite — t/bootstrap/control-threading.t:** remove all `disable/enable_control_rebuild` pairs; rewrite every `chain_for($src,0)` vs `chain_for($src,1)` differential-oracle assertion as a fixed golden (expected = current rebuild-ON output). Add codegen/SCHEDULE-level assertions (not chain-only — Fact 3 shows chain-only oracles miss the double-emit) for: my-decl-postfix all flavors (#5 — confirm the post-pass corrects it), TryCatch, nested-loop, loop-then-if, postfix-after-control-flow, postfix-chain.
 
