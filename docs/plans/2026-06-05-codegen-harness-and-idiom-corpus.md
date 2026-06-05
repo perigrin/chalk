@@ -23,19 +23,19 @@ CodeGen-first is deliberate: two unverified things cannot validate each other. T
 
 ## What this plan builds (and explicitly does NOT)
 
-BUILDS:
-- A **behavioral-equivalence harness**: source program → run under perl (capture behavior) vs. Chalk CodeGen output → run → diff. perl is the oracle; never "match Chalk's prior output."
-- A **dual-backend differential cross-check** (see below): lower the SAME IR through BOTH the Perl backend and the C/XS backend, run both, and compare all three of {source-under-perl, Perl-codegen-output, C/XS-codegen-output}.
-- An **expanded idiom corpus** (tier 1 hand idioms → mined from lib/ → pedagogical/canonical sources), each entry carrying a perl-derived expected behavior.
+BUILDS (in stages — the harness GROWS, it is not built all at once; CodeGen is directional, so we build the instrument and use it to COMPLETE CodeGen):
+- **First: a Perl-first behavioral-equivalence harness** — source program → run under perl (capture behavior S) vs. Chalk Perl-codegen output → run → diff (behavior P). perl (S) is the oracle; never "match Chalk's prior output" (which is an incomplete sketch anyway). This alone produces the **gap map** that drives CodeGen completion.
+- **An expanded idiom corpus** (tier 1 hand idioms → mined from lib/ → pedagogical/canonical sources), each entry carrying a perl-derived expected behavior.
+- **Later (gated): the C corner**, turning the S-vs-P comparison into the full S/P/C triangle below — added only once Perl-codegen is substantially green AND a free-standing-graph → C path exists (PAAD finding F1: today `Target::C->generate($mop)` is a STUB; the real C codegen is welded to the chalk-parser SA+Context, so a hand/bson graph cannot drive it yet).
 
-### Dual-backend differential cross-check — localizes IR-vs-CodeGen failures automatically
+### The S/P/C triangle — the DESTINATION (Stage 3), not the day-one build
 
-The same IR (MOP + SoN graph) is lowered two independent ways. Let P = behavior of the Perl-codegen output, C = behavior of the C/XS-codegen output, S = behavior of the source under perl (the ground truth). The three must agree (S = P = C); the *disagreements* are the diagnostic:
-- **P ≠ C** (backends disagree with each other, same IR input) → bug is in ONE of the codegens; the IR is exonerated. Failure localized to a backend without human inspection.
-- **P = C ≠ S** (backends agree with each other but not with perl) → both faithfully lowered a WRONG graph → bug is UPSTREAM in the IR; codegens exonerated.
-- **C/XS chokes where Perl-codegen passes** → the C backend must commit to types/memory/struct-layout (the StructPromotion path), so it acts as a stricter type/shape checker than perl ever would; a graph it rejects but Perl-codegen accepts signals an UNDERSPECIFIED IR the Perl backend was papering over.
+Once both backends can lower the SAME IR, let P = Perl-codegen behavior, C = C/XS-codegen behavior, S = source-under-perl (ground truth). The three must agree; disagreements localize the fault automatically:
+- **P ≠ C** → bug in ONE codegen; IR exonerated.
+- **P = C ≠ S** → both lowered a WRONG graph; bug is UPSTREAM in the IR; codegens exonerated.
+- **C/XS chokes where Perl passes** → C commits to types/memory/struct-layout (StructPromotion), acting as a stricter type/shape checker; a graph it rejects but Perl accepts signals an UNDERSPECIFIED IR.
 
-This mechanizes the "blame the layer" property the corpus gives by inspection: agreement-between-backends isolates IR-vs-codegen automatically. Honest caveat: the C/XS backend is itself unverified at the start (known XS-codegen bugs: CV cache, edge-case segfaults), so early `C ≠ P` will sometimes just be "C-codegen is broken here" rather than an IR signal — that's fine, the triangle ALSO verifies the C backend (against P + perl); we simply trust no single corner at the outset and lean on tier-1 smallness to keep it debuggable.
+This mechanizes the "blame the layer" property the corpus gives by inspection. **Until the C corner exists, layer-blame relies on the corpus's tier-1 smallness (human reads the one-line idiom), not on backend agreement.** Caveat for when C is added: the C backend is itself directional/unverified, so early `C ≠ P` may just be "C-codegen incomplete here" rather than an IR signal — the triangle verifies all three corners; trust no single corner at the outset.
 
 DOES NOT (out of scope here):
 - No rewrite of SemanticAction / IR-generation (paused).
@@ -44,7 +44,7 @@ DOES NOT (out of scope here):
 
 ## Open seam (named honestly): where does the graph come from to drive CodeGen?
 
-To run CodeGen we need an IR/MOP graph per corpus program. Today the only producers are (a) Chalk's parser+SemanticAction (the broken/unverified path) and (b) B::SoN (itself unverified). The corpus does NOT eliminate this — it makes it **auditable**: for the smallest tier-1 idioms the correct graph is hand-confirmable, so CodeGen's mechanics can be certified on hand-trusted graphs first; as CodeGen earns trust, it becomes the probe that finds a graph-producer's bugs (a corpus idiom diverging from perl, isolatable to the producer because CodeGen is trusted). Tier-1 smallness is what keeps each bootstrap rung small enough to trust. This seam is the reason CodeGen is verified FIRST.
+To run CodeGen we need an IR/MOP graph per corpus program. Today the only producers are (a) Chalk's parser+SemanticAction (the broken/unverified path) and (b) B::SoN (itself unverified). The corpus does NOT eliminate this — it makes it **auditable**: for the smallest tier-1 idioms the correct graph is hand-authored DIRECTLY as MOP/Program (PAAD: not via lossy JSON), so CodeGen can be COMPLETED and certified on hand-trusted graphs first; as CodeGen becomes trusted, it becomes the probe that finds a graph-producer's bugs (a corpus idiom diverging from perl, isolatable to the producer because CodeGen is trusted). Tier-1 smallness is what keeps each bootstrap rung small enough to trust. This seam is the reason CodeGen is completed-and-verified FIRST — and the reason early reds are read as CodeGen gaps (directional, not done), not graph-producer bugs, while we are still on hand-authored graphs.
 
 ## The corpus — three tiers, escalating coverage, each with a perl-grounded oracle
 
@@ -63,27 +63,29 @@ The discipline that keeps the corpus trustworthy as it grows: **expected behavio
 
   **CPAN is DROPPED for now** — highest classification effort, lowest in-subset yield; revisit later for breadth + negative testing once tiers 1-3 are solid.
 
-## Phases
+## Phases (map to the staged acceptance criteria above)
 
-### Phase 0 — Behavioral harness skeleton (tier 1)
-- A test rig: for each tier-1 idiom, run under perl 5.42, capture behavior (return value / stdout / exception). This is the ground-truth half — needs no Chalk at all and is trivially correct.
-- Hand-confirm IR/MOP graphs for the smallest idioms (the bootstrap root of trust for CodeGen mechanics).
-- Wire: trusted graph → CodeGen → emit Perl → run → diff vs perl behavior.
-- Gate: CodeGen mechanics certified on hand-trusted graphs across the tier-1 categories. Determinism (byte-identical codegen) checked as part of the rig.
+The throughline: CodeGen is **directional**. Each phase first MAPS gaps (run corpus → perl-oracle diff → gap list), then COMPLETES CodeGen against those gaps (perl as spec), re-verifying to green. We are building CodeGen *with* the harness, not auditing a finished CodeGen.
 
-### Phase 1 — Corpus expansion: mine lib/
-- Programmatically extract compilable units from `lib/Chalk/**` (per-class / per-method) as tier-2 corpus entries.
-- For each: capture perl behavior via an exercise harness (instantiate, call with representative inputs). Where a unit can't be exercised meaningfully in isolation, note it.
-- Run each through the (now mechanically-trusted) CodeGen path; classify divergences (CodeGen bug vs. graph-producer bug vs. unsupported construct).
-- This is where the perl-as-oracle discipline pays off: no human specifies expected output for 22k lines; perl does.
+### Phase 0 — Perl-first harness skeleton + tier-1 gap map (Stage 1)
+- Behavior-capture half: for each tier-1 idiom, run under perl 5.42, capture the **widened behavior record** (return + context/wantarray + stdout + STDERR/warnings + exception + object-state + hash-order-normalized + FP-tolerant + dualvar + aliasing/tie/overload — per architecture C2). Ground truth; no Chalk dependency.
+- Graph half: hand-author MOP/Program **directly** (NOT via JSON — PAAD finding: `from_json` is lossy and returns loose Graphs, not MOP/Program) for the tier-1 idioms. This is the bootstrap root of trust.
+- Wire: hand graph → Perl-codegen → run → diff vs perl. Determinism (byte-identical Perl codegen) checked in the rig.
+- **Deliverable = the GAP MAP:** which tier-1 idioms CodeGen handles vs. doesn't-yet. Red is EXPECTED and is the work-list — not a failure.
 
-### Phase 2 — Corpus expansion: pedagogical & canonical sources (tier 3)
-- Harvest complete, runnable, intended-to-work snippets from the tier-3 sources (Modern Perl, Learning-Perl-style, perlfaq/perldoc, perl's own `t/`, rosettacode, Perl Weekly Challenge). Classify each (in-subset / reject / scope-decision); confirm per-source license/provenance.
-- Capture perl behavior for each; run through CodeGen + dual-backend cross-check. These broaden body-idiom coverage beyond what lib/ exercises.
-- (CPAN deferred — see corpus tiers note.)
+### Phase 1 — Complete CodeGen to tier-1 green (Stage 2 begins)
+- Work the gap map: complete/fix Perl-codegen idiom-by-idiom until tier-1 is all S=P green. perl is the spec; never the current sketch output.
+- Establish the negative set: out-of-subset programs cleanly rejected.
 
-### Phase 3 — Capstone: self-hosting via the harness
-- The hardest tier-2 target: the Earley parser + semirings. CodeGen output must produce a parser that parses like the original. This is the definitive CodeGen certification (and, later, the gate for the whole optree→IR→codegen path once a front-end is trusted).
+### Phase 2 — Corpus expansion → drive further completion (Stage 2 continues)
+- **Mine lib/** (tier 2): extract compilable units; capture perl behavior via per-unit exercise specs (driver + representative args are partly MANUAL — PAAD finding Q5; only the expected *output* is oracle-derived). Run through the harness; the new reds extend the gap map; complete CodeGen against them. This is the self-hosting workload building toward the capstone.
+- **Pedagogical/canonical sources** (tier 3): harvest complete runnable snippets (Modern Perl, Learning-Perl-style, perlfaq/perldoc, perl's own `t/`, rosettacode, Perl Weekly Challenge); classify (in-subset/reject/scope-decision); confirm license/provenance; capture perl behavior; broaden coverage beyond what lib/ exercises. (CPAN deferred.)
+
+### Phase 3 — Add the C corner (Stage 3, GATED)
+- Prerequisite: Perl-codegen substantially green AND a free-standing-graph → C path exists (today the real C backend needs Program+SA+Context; `generate($mop)` is a stub). Build that path, then add C as the third triangle corner for automatic IR-vs-codegen localization. Enforce same-IR-two-lowerings (architecture F7).
+
+### Phase 4 — Capstone: self-host the Earley parser (Stage 4)
+- The hardest tier-2 target: the Earley parser + semirings. CodeGen output must produce a parser that parses like the original. The definitive CodeGen certification (and, later, the gate for the whole optree→IR→codegen path once a front-end is trusted).
 
 ## Acceptance criteria (staged — CodeGen is directional, so these are MILESTONES, not day-one expectations)
 
