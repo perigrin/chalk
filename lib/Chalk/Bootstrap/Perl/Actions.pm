@@ -3192,20 +3192,40 @@ class Chalk::Bootstrap::Perl::Actions {
             exit_proj  => $exit_proj,
         });
 
-        # During-parse control threading for hoisted init VarDecl:
-        # When the init is a VarDecl (e.g. `my $i = 0`), its action fires
-        # inside the for-paren and calls update_control_head($i_decl),
-        # clobbering the predecessor that arrived via the StatementItem
-        # lateral-seed channel. Walk the Context multiply tree to find the
-        # predecessor that was active BEFORE the init's update_control_head
-        # fired, then re-thread init.control_in to that predecessor. This
-        # mirrors the Block control-chain rebuild's effect on hoisted init
-        # nodes, making the during-parse chain identical to the rebuild's
-        # so the rebuild can eventually be deleted.
-        if (defined $init && $init isa Chalk::IR::Node::VarDecl) {
-            my $pre_init_ch = _find_pre_init_control_head($ctx, $init);
+        # During-parse control threading for the hoisted init node:
+        # When the init carries control (a VarDecl `my $i = 0` or a bare-assign
+        # Assign `$i = 0`), its action fires inside the for-paren and calls
+        # update_control_head($init), clobbering the predecessor that arrived
+        # via the StatementItem lateral-seed channel. Walk the Context multiply
+        # tree to find the predecessor that was active BEFORE the init's
+        # update_control_head fired, then re-thread init.control_in to that
+        # predecessor. This mirrors the Block control-chain rebuild's effect on
+        # hoisted init nodes, making the during-parse chain identical to the
+        # rebuild's so the rebuild can eventually be deleted. Covers any
+        # control-carrying init node, not just VarDecl.
+        if (defined $init && blessed($init) && $init->can('set_control_in')) {
+            # A VarDecl init publishes ITSELF as control_head while parsing the
+            # for-paren, clobbering the predecessor — recover it by walking the
+            # multiply tree for the node that sat before the init. A bare-assign
+            # init (`$i = 0`, an Assign) does NOT publish, so the predecessor is
+            # still intact in $ctx->control_head; the tree-walk returns undef
+            # and we fall back to it. Either way the init's control_in becomes
+            # the statement preceding the loop, matching the Block rebuild.
+            my $pre_init_ch = _find_pre_init_control_head($ctx, $init)
+                // $ctx->control_head;
             if (defined $pre_init_ch) {
                 $init->set_control_in($pre_init_ch);
+                # The Loop is hoisted right after the init ([init, loop]) and
+                # must chain off the init. A VarDecl init publishes itself as
+                # control_head during the for-paren parse, so the Loop already
+                # sees it; a non-publishing init (bare-assign Assign) does not,
+                # leaving the Loop chained to the pre-init predecessor. Rewire
+                # the Loop's control input to the init so the hoisted pair forms
+                # a contiguous chain (pre_init -> init -> loop), matching the
+                # Block rebuild. Only when they currently disagree.
+                if (refaddr($loop->control_in // 0) != refaddr($init)) {
+                    $loop->set_control_in($init);
+                }
             }
         }
 

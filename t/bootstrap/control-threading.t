@@ -878,6 +878,23 @@ class T {
 PERL
         is(chain_for($src, 0), chain_for($src, 1), 'ON==OFF shape 14: elsif as first statement');
     }
+
+    # shape 15: C-style for with a BARE-ASSIGN init (for ($i=0; ...), no `my`).
+    # The hoisted init is an Assign node, not a VarDecl; the ForStatement init
+    # re-threading must cover it too, not just VarDecl.
+    {
+        my $src = <<'PERL';
+class T {
+    method m($self) {
+        my $r = 0;
+        my $i = 0;
+        for ($i = 0; $i < 3; $i = $i + 1) { foo(); }
+        return $r;
+    }
+}
+PERL
+        is(chain_for($src, 0), chain_for($src, 1), 'ON==OFF shape 15: C-style for with bare-assign init');
+    }
 }
 
 done_testing;
