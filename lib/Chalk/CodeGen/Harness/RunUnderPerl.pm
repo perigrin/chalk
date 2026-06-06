@@ -434,10 +434,25 @@ sub _encode_perl_list {
     return join(', ', map { _encode_perl_scalar($_) } @$args);
 }
 
-# _encode_perl_scalar($val) -> perl literal string (string or number)
+# _encode_perl_scalar($val) -> perl literal string (scalar, number, arrayref, or hashref)
+# Recursively encodes refs so a real arrayref/hashref can be passed as a method argument.
+# Array refs encode as [ elem, elem, ... ] and hash refs as { 'key' => val, ... } with
+# keys sorted for determinism. Mirrors the structure of _serialize_value (which handles
+# the reverse direction: return values back from the generated program).
 sub _encode_perl_scalar {
     my ($v) = @_;
     return 'undef' unless defined $v;
+    if (ref $v eq 'ARRAY') {
+        my @encoded = map { _encode_perl_scalar($_) } $v->@*;
+        return '[' . join(', ', @encoded) . ']';
+    }
+    if (ref $v eq 'HASH') {
+        my @pairs;
+        for my $k (sort keys $v->%*) {
+            push @pairs, "'" . ($k =~ s/'/\\'/gr) . "' => " . _encode_perl_scalar($v->{$k});
+        }
+        return '{ ' . join(', ', @pairs) . ' }';
+    }
     if (looks_like_number($v) && $v !~ /^0\d/) {
         return $v + 0;  # emit as numeric literal
     }

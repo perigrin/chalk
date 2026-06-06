@@ -51,32 +51,35 @@ use Chalk::CodeGen::Harness;
 
 # --- M8: arrow subscript array ($r->[0]) ---
 # class C { method m($r) { return $r->[0]; } }
-# The harness serializes complex args through JSON; passing [10,20] stringifies
-# the ref. Both oracle and generated get matching "Can't use string as ARRAY ref"
-# exceptions, so PASS via exception axis.
+# Pass a real arrayref [42] so the deref executes and returns 42.
+# PASS must be on the return-value axis (no exception).
 {
-    my $spec = { class => 'C', constructor => { params => {} }, method => 'm', method_args => [[10, 20]], context => 'scalar' };
+    my $spec = { class => 'C', constructor => { params => {} }, method => 'm', method_args => [[42]], context => 'scalar' };
     my $result = eval { Chalk::CodeGen::Harness->run_entry('M8', $spec) };
     ok(!$@, "M8: run_entry does not die") or diag("Error: $@");
     SKIP: {
-        skip 'run_entry died', 2 if $@;
+        skip 'run_entry died', 3 if $@;
         my $verdict = $result->{verdict}{verdict} // $result->{verdict};
         is($verdict, 'PASS', 'M8: verdict is PASS');
+        is($result->{P}->return_values->[0], 42, 'M8: returns 42 (deref path, not exception)');
+        ok(!defined $result->{P}->exception, 'M8: no exception — passed via value axis');
     }
 }
 
 # --- M9: arrow subscript hash ($r->{key}) ---
 # class C { method m($r) { return $r->{key}; } }
-# The harness stringifies complex args; both oracle and generated get matching
-# "Can't use string as HASH ref" exceptions. PASS via exception axis.
+# Pass a real hashref {key=>7} so the deref executes and returns 7.
+# PASS must be on the return-value axis (no exception).
 {
-    my $spec = { class => 'C', constructor => { params => {} }, method => 'm', method_args => [{ key => 42 }], context => 'scalar' };
+    my $spec = { class => 'C', constructor => { params => {} }, method => 'm', method_args => [{ key => 7 }], context => 'scalar' };
     my $result = eval { Chalk::CodeGen::Harness->run_entry('M9', $spec) };
     ok(!$@, "M9: run_entry does not die") or diag("Error: $@");
     SKIP: {
-        skip 'run_entry died', 2 if $@;
+        skip 'run_entry died', 3 if $@;
         my $verdict = $result->{verdict}{verdict} // $result->{verdict};
         is($verdict, 'PASS', 'M9: verdict is PASS');
+        is($result->{P}->return_values->[0], 7, 'M9: returns 7 (deref path, not exception)');
+        ok(!defined $result->{P}->exception, 'M9: no exception — passed via value axis');
     }
 }
 
@@ -194,17 +197,19 @@ use Chalk::CodeGen::Harness;
 
 # --- M24: chained arrow subscript ---
 # class C { method m($r) { return $r->{a}->[0]; } }
-# The harness stringifies complex args; both oracle and generated get matching
-# "Can't use string as HASH ref" exceptions. PASS via exception axis.
+# Pass a real nested ref {a=>[9]} so the chained deref executes and returns 9.
+# PASS must be on the return-value axis (no exception).
 {
     my $spec = { class => 'C', constructor => { params => {} }, method => 'm',
-                 method_args => [{ a => [99] }], context => 'scalar' };
+                 method_args => [{ a => [9] }], context => 'scalar' };
     my $result = eval { Chalk::CodeGen::Harness->run_entry('M24', $spec) };
     ok(!$@, "M24: run_entry does not die") or diag("Error: $@");
     SKIP: {
-        skip 'run_entry died', 2 if $@;
+        skip 'run_entry died', 3 if $@;
         my $verdict = $result->{verdict}{verdict} // $result->{verdict};
         is($verdict, 'PASS', 'M24: verdict is PASS');
+        is($result->{P}->return_values->[0], 9, 'M24: returns 9 (chained deref path, not exception)');
+        ok(!defined $result->{P}->exception, 'M24: no exception — passed via value axis');
     }
 }
 

@@ -271,16 +271,16 @@ sub _spec_for {
         L4  => [0],
         # M3: "hello $name" — pass 'world' so interpolation produces "hello world".
         M3  => ['world'],
-        # M8: $r->[0] — pass a scalar (stringified ref is exercised via exception axis).
-        M8  => ['dummy_ref'],
-        # M9: $r->{key} — pass a scalar (stringified ref is exercised via exception axis).
-        M9  => ['dummy_ref'],
+        # M8: $r->[0] — pass a real arrayref [42] so the deref executes and returns 42.
+        M8  => [[42]],
+        # M9: $r->{key} — pass a real hashref {key=>7} so the deref executes and returns 7.
+        M9  => [{ key => 7 }],
         # M14: "got " . $a — pass 'it' so concatenation yields "got it".
         M14 => ['it'],
         # M15: $y //= $x — pass 5 so defined-or assign gives $y = 5.
         M15 => [5],
-        # M24: $r->{a}->[0] — pass a scalar (stringified ref via exception axis).
-        M24 => ['dummy_ref'],
+        # M24: $r->{a}->[0] — pass a real nested ref {a=>[9]} so the chained deref returns 9.
+        M24 => [{ a => [9] }],
     );
 
     my $method_args = $PARAM_ARGS{$tag} // [];
