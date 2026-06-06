@@ -330,6 +330,8 @@ sub _spec_for {
     # Chosen so the interesting behavior is exercised (not just the undef path).
     # Bilateral cases (both true/false outcome branches) are covered by batch tests.
     my %PARAM_ARGS = (
+        # D1: if/else $n > 0 — pass n=1 so the true branch ($x=1) is taken.
+        D1  => [1],
         # D6: ternary $n > 0 ? 1 : 2 — pass n=1 so the true branch (1) is taken.
         D6  => [1],
         # J1: regex match $s =~ /foo/ — pass 'foobar' so the match succeeds.

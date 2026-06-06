@@ -27,6 +27,10 @@ use Chalk::IR::Node::RegexMatch;
 use Chalk::IR::Node::RegexSubst;
 use Chalk::IR::Node::TernaryExpr;
 use Chalk::IR::Node::Ref;
+use Chalk::IR::Node::If;
+use Chalk::IR::Node::Region;
+use Chalk::IR::Node::NumGt;
+use Chalk::Scheduler::EagerPinning::If;
 
 # Dispatch table from corpus tag to builder sub.
 # Each builder returns a Chalk::MOP built directly node-by-node.
@@ -2590,6 +2594,100 @@ sub _build_K2 {
     return $mop;
 }
 
+# ---------------------------------------------------------------------------
+# D1: class C { method m($n) { my $x = 0; if ($n > 0) { $x = 1; } else { $x = 2; } return $x; } }
+#
+# CFG graph with an If node (condition: $n > 0), a Region join, and two
+# Assign nodes in the then/else branch bodies. The scheduler reads the If
+# node's schedule_data (EagerPinning::If) to find then_stmts and else_stmts
+# and emits a structured if/else block.
+#
+# Node layout:
+#   start         : Start
+#   var_x         : VarDecl(name='$x', init=0)     [control_in=start]
+#   cond_gt       : BinOp(op='>', left=$n, right=0) [condition for If]
+#   if_node       : If(inputs=[var_x, cond_gt])      [control_in = inputs[0] = var_x]
+#   assign_x_1    : Assign($x = 1)                  [then-branch body]
+#   assign_x_2    : Assign($x = 2)                  [else-branch body]
+#   region        : Region                           [join point; head=if_node]
+#   x_read        : Constant($x, variable)           [return value]
+#   ret           : Return(x_read)                   [control_in=region]
+#
+# Control chain (scheduler backward walk from ret):
+#   ret.control_in = region  -> region.head = if_node  -> if_node.inputs[0] = var_x -> var_x.control_in = start
+# Forward body order: [var_x, if_node, ret]
+# If expansion adds: block_open(if) + then_stmts + else + else_stmts + block_close(if)
+# ---------------------------------------------------------------------------
+sub _build_D1 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $x = 0
+    my $name_x  = $factory->make('Constant', value => '$x', const_type => 'string');
+    my $const_0 = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $var_x   = $factory->make('VarDecl', inputs => [$name_x, $const_0], scope => 'my');
+    $var_x->set_control_in($start);
+
+    # Condition: $n > 0
+    # BinOp layout: inputs[0]=op-constant, inputs[1]=left, inputs[2]=right
+    my $op_gt  = $factory->make('Constant', value => '>',  const_type => 'string');
+    my $n_read = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $zero   = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $cond_gt = $factory->make('NumGt', inputs => [$op_gt, $n_read, $zero]);
+
+    # If node: inputs[0]=control (var_x), inputs[1]=condition ($n > 0)
+    # make() for If accepts named args; use inputs => [...] directly.
+    my $if_node = $factory->make('If', inputs => [$var_x, $cond_gt]);
+
+    # Then-branch: $x = 1
+    my $op_eq_t  = $factory->make('Constant', value => '=',  const_type => 'string');
+    my $x_lhs_t  = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $const_1  = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $assign_1 = $factory->make('Assign', inputs => [$op_eq_t, $x_lhs_t, $const_1]);
+
+    # Else-branch: $x = 2
+    my $op_eq_e  = $factory->make('Constant', value => '=',  const_type => 'string');
+    my $x_lhs_e  = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $const_2  = $factory->make('Constant', value => '2',  const_type => 'integer');
+    my $assign_2 = $factory->make('Assign', inputs => [$op_eq_e, $x_lhs_e, $const_2]);
+
+    # Attach EagerPinning::If schedule_data: then=[assign_1], else=[assign_2]
+    my $sd = Chalk::Scheduler::EagerPinning::If->new(
+        node       => $if_node,
+        then_stmts => [$assign_1],
+        else_stmts => [$assign_2],
+    );
+    $if_node->set_schedule_data($sd);
+
+    # Region: merge point after if/else. head = if_node (so scheduler can
+    # find the If when walking backward through Region).
+    my $region = $factory->make('Region', inputs => []);
+    $if_node->set_region($region);    # also sets $region->head($if_node)
+
+    # Return: return $x. control_in = region (the scheduler reads region.head).
+    my $x_read = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$x_read]);
+    $ret->set_control_in($region);
+
+    # Populate graph.
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_x, $const_0, $var_x,
+               $op_gt, $n_read, $zero, $cond_gt,
+               $if_node,
+               $op_eq_t, $x_lhs_t, $const_1, $assign_1,
+               $op_eq_e, $x_lhs_e, $const_2, $assign_2,
+               $region, $x_read, $ret) {
+        $graph->merge($n);
+    }
+
+    # Wire MOP: method m($n) with graph.
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$n'], graph => $graph);
+    return $mop;
+}
+
 # Populate the dispatch table after all builders are defined.
 %BUILDERS = (
     A1 => \&_build_A1,
@@ -2610,6 +2708,7 @@ sub _build_K2 {
     C3 => \&_build_C3,
     C4 => \&_build_C4,
     C5 => \&_build_C5,
+    D1 => \&_build_D1,
     D6 => \&_build_D6,
     E1 => \&_build_E1,
     H1 => \&_build_H1,

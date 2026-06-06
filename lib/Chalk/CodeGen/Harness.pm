@@ -34,6 +34,7 @@ my %CORPUS = (
     C3  => 'class C { method m() { my $s = "a"; $s .= "b"; return $s; } }',
     C4  => 'class C { method m() { my @a = (1); $a[0] = 2; return $a[0]; } }',
     C5  => 'class C { method m() { my %h = (); $h{k} = 1; return $h{k}; } }',
+    D1  => 'class C { method m($n) { my $x = 0; if ($n > 0) { $x = 1; } else { $x = 2; } return $x; } }',
     D6  => 'class C { method m($n) { my $x = $n > 0 ? 1 : 2; return $x; } }',
     E1  => 'class C { method m() { my $x = 1; $x } }',
     F1  => 'class C { method m() { return $self->foo->bar; } }',
