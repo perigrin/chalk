@@ -154,3 +154,7 @@ class C { method m() { my %h = (a => 1); delete $h{a}; return scalar keys %h; } 
 class C { method m($r) { return $r->{a}->[0]; } }
 === M25: C-style for loop
 class C { method m() { my $sum = 0; for (my $i = 0; $i < 3; $i++) { $sum = $sum + $i; } return $sum; } }
+=== M26: observable next in loop (sum skipping element 3, expect 12)
+class C { method m() { my $sum = 0; foreach my $n (1, 2, 3, 4, 5) { next if $n == 3; $sum = $sum + $n; } return $sum; } }
+=== M27: observable last in loop (sum until element 3, expect 3)
+class C { method m() { my $sum = 0; foreach my $n (1, 2, 3, 4, 5) { last if $n == 3; $sum = $sum + $n; } return $sum; } }

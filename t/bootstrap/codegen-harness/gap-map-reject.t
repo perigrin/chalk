@@ -53,8 +53,8 @@ use_ok('Chalk::CodeGen::Harness::GapMap');
         skip "generate() failed: $err", 1 if $err || !defined $gap_map;
 
         my $entries = $gap_map->{entries} // [];
-        is(scalar(@$entries), 78,
-            'R3: denominator is still 78 after REJECT classification');
+        is(scalar(@$entries), 80,
+            'R3: denominator is still 80 after REJECT classification');
     }
 }
 
@@ -231,7 +231,7 @@ use_ok('Chalk::CodeGen::Harness::GapMap');
         my %full_groups = (
             A => 5, B => 8, C => 5, D => 8, E => 4, F => 3,
             G => 4, H => 4, I => 3, J => 3, K => 2, L => 4,
-            M => 25,
+            M => 27,
         );
 
         my $valid = eval {

@@ -251,6 +251,10 @@ class Chalk::IR::Scheduler::EagerPinning {
     #   [else]                       — only if else_stmts is defined
     #   ...else-branch items...
     #   block_close(if)
+    #
+    # Special case: when is_loop_jump is set, emits a single loop_jump
+    # item instead of a block — the emitter renders it as `next if COND;`
+    # or `last if COND;` rather than `if (COND) {}`.
     method _expand_if($if) {
         my $sd = $if->schedule_data;
 
@@ -258,6 +262,17 @@ class Chalk::IR::Scheduler::EagerPinning {
         # site populates it), but degrade gracefully to a one-item stmt.
         unless (defined $sd && $sd isa Chalk::Scheduler::EagerPinning::If) {
             return Chalk::IR::Schedule::Item->new(kind => 'stmt', node => $if);
+        }
+
+        # Loop-jump shortcut: emit `next if COND;` / `last if COND;` rather
+        # than a block. The then_stmts are empty and the jump keyword is the
+        # entire effect — there is no block to open.
+        if (defined $sd->is_loop_jump) {
+            return Chalk::IR::Schedule::Item->new(
+                kind         => 'loop_jump',
+                node         => $if,
+                jump_keyword => $sd->is_loop_jump,
+            );
         }
 
         my @items;

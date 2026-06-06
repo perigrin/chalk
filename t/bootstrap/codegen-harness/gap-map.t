@@ -1,5 +1,5 @@
-# ABOUTME: Positive tests for the gap-map generator — verifies full corpus coverage (78 idioms, A-M).
-# ABOUTME: Asserts denominator==78, all 13 groups present, per-group counts match, MISCOMPILE distinct from GAP.
+# ABOUTME: Positive tests for the gap-map generator — verifies full corpus coverage (80 idioms, A-M).
+# ABOUTME: Asserts denominator==80, all 13 groups present, per-group counts match, MISCOMPILE distinct from GAP.
 use 5.42.0;
 use utf8;
 
@@ -22,7 +22,7 @@ my %EXPECTED_GROUP_COUNTS = (
     J => 3,
     K => 2,
     L => 4,
-    M => 25,
+    M => 27,
 );
 my $TOTAL = 0;
 $TOTAL += $_ for values %EXPECTED_GROUP_COUNTS;

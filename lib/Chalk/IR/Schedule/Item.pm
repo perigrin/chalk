@@ -6,10 +6,10 @@ use experimental 'class';
 no warnings 'experimental::class';
 
 class Chalk::IR::Schedule::Item {
-    # 'stmt' | 'block_open' | 'block_close' | 'else' | 'elsif' | 'catch'
+    # 'stmt' | 'block_open' | 'block_close' | 'else' | 'elsif' | 'catch' | 'loop_jump'
     field $kind :param :reader;
 
-    # The IR node this item references. Required for stmt, block_open;
+    # The IR node this item references. Required for stmt, block_open, loop_jump;
     # optional for block_close / else / elsif / catch.
     field $node :param :reader = undef;
 
@@ -17,4 +17,8 @@ class Chalk::IR::Schedule::Item {
     # For elsif: the new If's surface form (mirrors block_open).
     # Undef for plain statements.
     field $form :param :reader = undef;
+
+    # For loop_jump: the jump keyword ('next' or 'last').
+    # The node field carries the If node whose condition is the guard.
+    field $jump_keyword :param :reader = undef;
 }

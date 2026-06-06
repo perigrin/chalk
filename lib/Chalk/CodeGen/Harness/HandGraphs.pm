@@ -3969,6 +3969,192 @@ sub _build_I1 {
     return $mop;
 }
 
+# ---------------------------------------------------------------------------
+# M26: class C { method m() { my $sum = 0; foreach my $n (1, 2, 3, 4, 5) { next if $n == 3; $sum = $sum + $n; } return $sum; } }
+#
+# Observable-next: the loop body has two stmts — the jump-if and the accumulate.
+# When next fires on $n==3, the accumulate is skipped for that iteration.
+# Expected result: 1+2+4+5 = 12. If next is dropped, returns 1+2+3+4+5 = 15 (MISCOMPILE).
+#
+# Loop body_stmts order: [if_next, assign_sum]
+# The jump comes BEFORE the accumulate so that when next fires, $sum += $n is skipped.
+#
+# Control chain: start <- var_sum <- loop <- region <- ret($sum)
+# ---------------------------------------------------------------------------
+sub _build_M26 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $sum = 0
+    my $name_sum = $factory->make('Constant', value => '$sum', const_type => 'string');
+    my $zero     = $factory->make('Constant', value => '0',    const_type => 'integer');
+    my $var_sum  = $factory->make('VarDecl', inputs => [$name_sum, $zero], scope => 'my');
+    $var_sum->set_control_in($start);
+
+    # Loop node: inputs[0]=var_sum (entry), inputs[1]=undef (backedge)
+    my $loop = $factory->make_cfg('Loop', inputs => [$var_sum, undef]);
+
+    # Condition for next: $n == 3
+    my $op_eq_c = $factory->make('Constant', value => '==', const_type => 'string');
+    my $n_read  = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $three_v = $factory->make('Constant', value => '3',  const_type => 'integer');
+    my $cond    = $factory->make('NumEq', inputs => [$op_eq_c, $n_read, $three_v]);
+
+    # next if $n == 3 — If with is_loop_jump='next', no then/else body
+    my $if_next = $factory->make('If', inputs => [$loop, $cond]);
+    my $sd_next = Chalk::Scheduler::EagerPinning::If->new(
+        node         => $if_next,
+        is_loop_jump => 'next',
+        then_stmts   => [],
+        else_stmts   => undef,
+    );
+    $if_next->set_schedule_data($sd_next);
+
+    # Body accumulate: $sum = $sum + $n
+    my $op_plus  = $factory->make('Constant', value => '+',    const_type => 'string');
+    my $sum_rd   = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $n_body   = $factory->make('Constant', value => '$n',   const_type => 'variable');
+    my $add_op   = $factory->make('Add', inputs => [$op_plus, $sum_rd, $n_body]);
+    my $op_eq    = $factory->make('Constant', value => '=',    const_type => 'string');
+    my $sum_lhs  = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $assign   = $factory->make('Assign', inputs => [$op_eq, $sum_lhs, $add_op]);
+
+    # Iterator ($n) and list [1,2,3,4,5]
+    my $iter_node = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $e1 = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $e2 = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $e3 = $factory->make('Constant', value => '3', const_type => 'integer');
+    my $e4 = $factory->make('Constant', value => '4', const_type => 'integer');
+    my $e5 = $factory->make('Constant', value => '5', const_type => 'integer');
+
+    # Loop schedule_data: body = [if_next, assign] (jump BEFORE accumulate)
+    my $sd_loop = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $loop,
+        iterator   => $iter_node,
+        list       => [$e1, $e2, $e3, $e4, $e5],
+        body_stmts => [$if_next, $assign],
+    );
+    $loop->set_schedule_data($sd_loop);
+
+    my $region = $factory->make('Region', inputs => []);
+    $loop->set_region($region);
+
+    # Return: $sum
+    my $sum_ret = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $ret     = $factory->make_cfg('Return', inputs => [$sum_ret]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_sum, $zero, $var_sum,
+               $loop,
+               $op_eq_c, $n_read, $three_v, $cond, $if_next,
+               $op_plus, $sum_rd, $n_body, $add_op,
+               $op_eq, $sum_lhs, $assign,
+               $iter_node, $e1, $e2, $e3, $e4, $e5,
+               $region, $sum_ret, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M27: class C { method m() { my $sum = 0; foreach my $n (1, 2, 3, 4, 5) { last if $n == 3; $sum = $sum + $n; } return $sum; } }
+#
+# Observable-last: the loop body has two stmts — the jump-if and the accumulate.
+# When last fires on $n==3, the loop exits; $n==3 and all later values are skipped.
+# Expected result: 1+2 = 3. If last is dropped, returns 1+2+3+4+5 = 15 (MISCOMPILE).
+#
+# Loop body_stmts order: [if_last, assign_sum]
+# The jump comes BEFORE the accumulate so that when last fires, $sum += $n is skipped.
+#
+# Control chain: start <- var_sum <- loop <- region <- ret($sum)
+# ---------------------------------------------------------------------------
+sub _build_M27 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $sum = 0
+    my $name_sum = $factory->make('Constant', value => '$sum', const_type => 'string');
+    my $zero     = $factory->make('Constant', value => '0',    const_type => 'integer');
+    my $var_sum  = $factory->make('VarDecl', inputs => [$name_sum, $zero], scope => 'my');
+    $var_sum->set_control_in($start);
+
+    # Loop node: inputs[0]=var_sum (entry), inputs[1]=undef (backedge)
+    my $loop = $factory->make_cfg('Loop', inputs => [$var_sum, undef]);
+
+    # Condition for last: $n == 3
+    my $op_eq_c = $factory->make('Constant', value => '==', const_type => 'string');
+    my $n_read  = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $three_v = $factory->make('Constant', value => '3',  const_type => 'integer');
+    my $cond    = $factory->make('NumEq', inputs => [$op_eq_c, $n_read, $three_v]);
+
+    # last if $n == 3 — If with is_loop_jump='last', no then/else body
+    my $if_last = $factory->make('If', inputs => [$loop, $cond]);
+    my $sd_last = Chalk::Scheduler::EagerPinning::If->new(
+        node         => $if_last,
+        is_loop_jump => 'last',
+        then_stmts   => [],
+        else_stmts   => undef,
+    );
+    $if_last->set_schedule_data($sd_last);
+
+    # Body accumulate: $sum = $sum + $n
+    my $op_plus  = $factory->make('Constant', value => '+',    const_type => 'string');
+    my $sum_rd   = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $n_body   = $factory->make('Constant', value => '$n',   const_type => 'variable');
+    my $add_op   = $factory->make('Add', inputs => [$op_plus, $sum_rd, $n_body]);
+    my $op_eq    = $factory->make('Constant', value => '=',    const_type => 'string');
+    my $sum_lhs  = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $assign   = $factory->make('Assign', inputs => [$op_eq, $sum_lhs, $add_op]);
+
+    # Iterator ($n) and list [1,2,3,4,5]
+    my $iter_node = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $e1 = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $e2 = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $e3 = $factory->make('Constant', value => '3', const_type => 'integer');
+    my $e4 = $factory->make('Constant', value => '4', const_type => 'integer');
+    my $e5 = $factory->make('Constant', value => '5', const_type => 'integer');
+
+    # Loop schedule_data: body = [if_last, assign] (jump BEFORE accumulate)
+    my $sd_loop = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $loop,
+        iterator   => $iter_node,
+        list       => [$e1, $e2, $e3, $e4, $e5],
+        body_stmts => [$if_last, $assign],
+    );
+    $loop->set_schedule_data($sd_loop);
+
+    my $region = $factory->make('Region', inputs => []);
+    $loop->set_region($region);
+
+    # Return: $sum
+    my $sum_ret = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $ret     = $factory->make_cfg('Return', inputs => [$sum_ret]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_sum, $zero, $var_sum,
+               $loop,
+               $op_eq_c, $n_read, $three_v, $cond, $if_last,
+               $op_plus, $sum_rd, $n_body, $add_op,
+               $op_eq, $sum_lhs, $assign,
+               $iter_node, $e1, $e2, $e3, $e4, $e5,
+               $region, $sum_ret, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
 # Populate the dispatch table after all builders are defined.
 %BUILDERS = (
     A1 => \&_build_A1,
@@ -4042,6 +4228,8 @@ sub _build_I1 {
     M16 => \&_build_M16,
     M17 => \&_build_M17,
     M18 => \&_build_M18,
+    M26 => \&_build_M26,
+    M27 => \&_build_M27,
     M19 => \&_build_M19,
     M22 => \&_build_M22,
     M25 => \&_build_M25,

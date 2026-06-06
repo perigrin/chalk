@@ -51,8 +51,8 @@ use_ok('Chalk::CodeGen::Harness::GapMap');
     SKIP: {
         skip "generate() failed", 1 unless defined $gap_map;
         my $entries = $gap_map->{entries} // [];
-        is(scalar(@$entries), 78,
-            'D3: denominator is still 78 (DEFERRED entries not dropped)');
+        is(scalar(@$entries), 80,
+            'D3: denominator is still 80 (DEFERRED entries not dropped)');
     }
 }
 

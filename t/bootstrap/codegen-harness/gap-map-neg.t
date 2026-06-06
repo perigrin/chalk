@@ -8,11 +8,11 @@ use lib 'lib';
 
 use_ok('Chalk::CodeGen::Harness::GapMap');
 
-my $FULL_DENOMINATOR = 78;
+my $FULL_DENOMINATOR = 80;
 my %FULL_GROUP_COUNTS = (
     A => 5, B => 8, C => 5, D => 8, E => 4, F => 3,
     G => 4, H => 4, I => 3, J => 3, K => 2, L => 4,
-    M => 25,
+    M => 27,
 );
 
 # ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ sub synthetic_gap_map {
 # ---------------------------------------------------------------------------
 # N1: Shrunk-denominator false green
 # A gap map covering only groups A-F+I (a subset) must FAIL the coverage assertion.
-# The validator must detect denominator < 78.
+# The validator must detect denominator < 80.
 # ---------------------------------------------------------------------------
 {
     # Build a fake gap_map with only A(5)+B(8)+C(5)+D(8)+E(4)+F(3)+I(3) = 36 entries
@@ -56,13 +56,13 @@ sub synthetic_gap_map {
     # Either validate_coverage returns false/error, or it dies — either way not "all good"
     my $detected = (!$valid) || (defined $err && length $err);
     ok($detected,
-        'N1: shrunk denominator (36 of 78) is DETECTED by validate_coverage');
+        'N1: shrunk denominator (36 of 80) is DETECTED by validate_coverage');
 }
 
 # ---------------------------------------------------------------------------
 # N2: Dropped-group escape — removing a group's idioms must be detected
 # via per-group count check, not silently produce a smaller-but-greener map.
-# Remove group M (25 idioms) and check detection.
+# Remove group M (27 idioms) and check detection.
 # ---------------------------------------------------------------------------
 {
     my @no_M_entries;
@@ -202,7 +202,7 @@ sub synthetic_gap_map {
         my $validate_err = $@;
 
         ok($valid && !$validate_err,
-            'N7: validate_coverage returns true for the full correct 78-idiom map');
+            'N7: validate_coverage returns true for the full correct 80-idiom map');
     }
 }
 

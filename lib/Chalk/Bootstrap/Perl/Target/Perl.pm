@@ -341,6 +341,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             push $lines->@*, ('    ' x $$indent_ref)
                 . '} ' . $self->_emit_catch_head($item);
             $$indent_ref++;
+        } elsif ($kind eq 'loop_jump') {
+            my $code = $self->_emit_loop_jump($item->jump_keyword, $item->node);
+            for my $l (split /\n/, $code) {
+                push $lines->@*, ('    ' x $$indent_ref) . $l;
+            }
         } else {
             die "Unknown Schedule Item kind: $kind";
         }
