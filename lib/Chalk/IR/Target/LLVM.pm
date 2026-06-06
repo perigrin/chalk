@@ -37,6 +37,23 @@ sub lower {
 
     my $ctx = Chalk::IR::Target::LLVM::Context->new;
 
+    # Process the control chain in forward order before lowering the value.
+    # The control chain (via control_in) models side-effect sequencing:
+    # VarDecl declarations and Assign/CompoundAssign stores must be processed
+    # before the value is read via PadAccess. Collect the chain backwards
+    # (Return -> last-assign -> ... -> first-vardecl), then reverse.
+    {
+        my @chain;
+        my $ctrl = $return_node->control_in;
+        while (defined $ctrl) {
+            push @chain, $ctrl;
+            $ctrl = $ctrl->can('control_in') ? $ctrl->control_in : undef;
+        }
+        for my $node (reverse @chain) {
+            $ctx->process_control_node($node);
+        }
+    }
+
     # Lower the value sub-graph rooted at the Return's input.
     my $value_node = $return_node->inputs->[0];
     my $result_ref  = $ctx->lower_value($value_node);
@@ -97,7 +114,12 @@ sub new {
     return bless {
         instructions => [],
         counter      => 0,
-        cache        => {},   # node id -> llvm_ref (%tmp_N)
+        cache        => {},     # node id -> llvm_ref (%tmp_N)
+        var_table    => {},     # VarDecl node id -> current SSA value ref
+                                # Used for SSA-value threading of lexical scalars:
+                                # VarDecl stores its init SSA ref here; Assign updates
+                                # it; PadAccess reads it. Models straight-line SSA
+                                # without needing alloca/store/load for simple cases.
     }, $class;
 }
 
@@ -142,6 +164,15 @@ sub lower_value {
     }
     elsif ($op eq 'Coerce') {
         return $self->_lower_coerce($node);
+    }
+    elsif ($op eq 'VarDecl') {
+        return $self->_lower_vardecl($node);
+    }
+    elsif ($op eq 'PadAccess') {
+        return $self->_lower_padaccess($node);
+    }
+    elsif ($op eq 'Assign' || $op eq 'CompoundAssign') {
+        return $self->_lower_assign($node);
     }
     else {
         if (defined $node->representation && $node->representation eq 'Scalar') {
@@ -328,6 +359,135 @@ sub _lower_coerce {
 
     $self->{cache}{$node->id} = $ref;
     return $ref;
+}
+
+# ---------------------------------------------------------------------------
+# SSA-value threading for lexical scalar variables (Phase 3c)
+#
+# Model: straight-line code only (no branches, no loops). VarDecl stores its
+# initialized SSA value in var_table[vd_id]. PadAccess reads it. Assign and
+# CompoundAssign update it. This covers A1, A4, C1, C2, K1, K2 from the
+# gap-map without needing alloca+store+load (LLVM mem2reg would do the same
+# optimization anyway; we do it directly at the IR level).
+#
+# The var_table is keyed by VarDecl node id. PadAccess locates its VarDecl
+# via inputs->[0]. Assign locates the VarDecl via inputs->[0] (the lhs
+# PadAccess), then inputs->[0] of that (the VarDecl).
+# ---------------------------------------------------------------------------
+
+# _lower_vardecl: store the initializer's SSA value in var_table; return it.
+sub _lower_vardecl {
+    my ($self, $node) = @_;
+
+    my $repr = $node->representation // 'Int';
+    if ($repr eq 'Scalar') {
+        die "GAP: VarDecl with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+    }
+
+    my $init_node = $node->inputs->[1];    # inputs[1] = init value (or undef)
+    my $init_ref;
+    if (defined $init_node) {
+        $init_ref = $self->lower_value($init_node);
+    }
+    else {
+        # No initializer: use a zero value for the type
+        my $zero = $self->_fresh;
+        if ($repr eq 'Num') {
+            push $self->instructions->@*,
+                "  $zero = fadd double 0.0, 0.0  ; VarDecl uninit Num -> 0.0";
+        }
+        else {
+            push $self->instructions->@*,
+                "  $zero = add i64 0, 0  ; VarDecl uninit Int -> 0";
+        }
+        $init_ref = $zero;
+    }
+
+    # Store the SSA value in the var_table under this VarDecl's id.
+    $self->{var_table}{ $node->id } = $init_ref;
+    $self->{cache}{ $node->id }     = $init_ref;
+    return $init_ref;
+}
+
+# _lower_padaccess: read the current SSA value from the var_table.
+sub _lower_padaccess {
+    my ($self, $node) = @_;
+
+    my $repr = $node->representation // 'Int';
+    if ($repr eq 'Scalar') {
+        die "GAP: PadAccess with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+    }
+
+    # Locate the VarDecl via inputs->[0].
+    my $vd = $node->inputs->[0];
+    unless (defined $vd) {
+        die "LLVM backend: PadAccess has no VarDecl input (inputs->[0] is undef); "
+          . "hand-authored graphs must wire PadAccess.inputs[0] = VarDecl";
+    }
+
+    # Ensure the VarDecl has been lowered (it may be in the data-chain, in
+    # which case lower_value(VarDecl) processes it here; or it was already
+    # processed by process_control_node).
+    my $vd_id = $vd->id;
+    unless (exists $self->{var_table}{$vd_id}) {
+        $self->lower_value($vd);
+    }
+
+    my $val_ref = $self->{var_table}{$vd_id};
+    unless (defined $val_ref) {
+        die "LLVM backend: PadAccess var_table has no entry for VarDecl id=$vd_id";
+    }
+
+    # PadAccess itself doesn't emit any instructions; it just references the
+    # current SSA value for the variable. Cache it under the PadAccess id
+    # so repeated reads of the same PadAccess node share the same SSA ref.
+    $self->{cache}{ $node->id } = $val_ref;
+    return $val_ref;
+}
+
+# _lower_assign: lower the RHS value and update the var_table for the target VarDecl.
+# Returns the new SSA value.
+sub _lower_assign {
+    my ($self, $node) = @_;
+
+    my $repr = $node->representation // 'Int';
+    if ($repr eq 'Scalar') {
+        die "GAP: Assign with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+    }
+
+    # inputs[0] = lhs (PadAccess or direct VarDecl reference)
+    # inputs[1] = rhs (new value)
+    my $lhs     = $node->inputs->[0];
+    my $rhs     = $node->inputs->[1];
+
+    my $rhs_ref = $self->lower_value($rhs);
+
+    # Find the VarDecl the lhs PadAccess points to.
+    my $vd = $lhs;
+    if (defined $vd && $vd->operation eq 'PadAccess') {
+        $vd = $lhs->inputs->[0];
+    }
+    unless (defined $vd && $vd->operation eq 'VarDecl') {
+        die "LLVM backend: Assign lhs must be a PadAccess(VarDecl) or VarDecl; "
+          . "got " . (defined $vd ? $vd->operation : 'undef');
+    }
+
+    # Update var_table: the variable now holds the new SSA value.
+    $self->{var_table}{ $vd->id } = $rhs_ref;
+    $self->{cache}{ $node->id }   = $rhs_ref;
+    return $rhs_ref;
+}
+
+# process_control_node: called during the control-chain pre-pass for each
+# side-effect node in forward order. Processes VarDecl, Assign, CompoundAssign.
+sub process_control_node {
+    my ($self, $node) = @_;
+    my $op = $node->operation;
+    if ($op eq 'VarDecl' || $op eq 'Assign' || $op eq 'CompoundAssign') {
+        $self->lower_value($node);
+    }
+    # Other ops in the control chain (Return, Unwind, bare Call, etc.) are
+    # either handled separately or ignored here.
 }
 
 1;

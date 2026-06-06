@@ -16,6 +16,9 @@ use Chalk::IR::Node::Subtract;
 use Chalk::IR::Node::Multiply;
 use Chalk::IR::Node::Divide;
 use Chalk::IR::Node::Modulo;
+use Chalk::IR::Node::Assign;
+use Chalk::IR::Node::CompoundAssign;
+use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Target::LLVM;
@@ -57,6 +60,25 @@ sub _int_const {
     my $c = $factory->make('Constant', value => "$val", const_type => 'integer');
     $c->set_representation('Int');
     return $c;
+}
+
+# Helper: make an Int VarDecl node with an optional initializer.
+# Returns ($vd, $name_const) where $vd is the VarDecl and $name_const is
+# the Constant node for the variable name.
+sub _int_vardecl {
+    my ($factory, $varname, $init_node) = @_;
+    my $name = $factory->make('Constant', value => $varname, const_type => 'string');
+    my $vd   = $factory->make('VarDecl', inputs => [$name, $init_node]);
+    $vd->set_representation('Int');
+    return ($vd, $name);
+}
+
+# Helper: make a PadAccess node reading from a VarDecl slot.
+sub _pad_read {
+    my ($factory, $vd, $varname) = @_;
+    my $pad = $factory->make('PadAccess', targ => 0, varname => $varname, inputs => [$vd]);
+    $pad->set_representation('Int');
+    return $pad;
 }
 
 # ---------------------------------------------------------------------------
@@ -173,15 +195,14 @@ sub _idiom_table {
             group       => 'A',
             description => 'VarDecl scalar: my $x = 1; return $x',
             perl_oracle => '1',
-            # GAP: VarDecl has no representation; the variable's value
-            # (a PadAccess/VarDecl result) cannot be lowered runtime-free
-            # because the IR carries no type/repr for lexical variables.
-            gap_category => 'representation-missing',
-            gap_reason   => 'VarDecl node has no representation field; lexical '
-                          . 'variables require alloca + store/load in LLVM IR, '
-                          . 'but the IR does not yet carry representation on '
-                          . 'VarDecl or PadAccess nodes (Phase 3c task).',
-            build_graph  => undef,
+            # Phase 3c: VarDecl + PadAccess with Int representation via SSA threading.
+            build_graph => sub {
+                my $f   = Chalk::IR::NodeFactory->new;
+                my $c1  = _int_const($f, 1);
+                my ($vd) = _int_vardecl($f, 'x', $c1);
+                my $pad = _pad_read($f, $vd, '$x');
+                return _make_return($f, $pad);
+            },
         },
         {
             tag         => 'A2',
@@ -209,10 +230,23 @@ sub _idiom_table {
             group       => 'A',
             description => 'VarDecl no initializer: my $x; $x = 1; return $x',
             perl_oracle => '1',
-            gap_category => 'representation-missing',
-            gap_reason   => 'VarDecl with undef initializer + Assign: variable '
-                          . 'representation not on graph; cannot lower without alloca.',
-            build_graph  => undef,
+            # Phase 3c: VarDecl(undef init) + Assign in control chain.
+            build_graph => sub {
+                my $f    = Chalk::IR::NodeFactory->new;
+                my ($vd) = _int_vardecl($f, 'x', undef);  # no initializer
+                my $c1   = _int_const($f, 1);
+
+                # Assign: lhs=PadAccess, rhs=Constant(1), control_in=VarDecl
+                my $lhs  = _pad_read($f, $vd, '$x_lhs');
+                my $asgn = $f->make('Assign', inputs => [$lhs, $c1]);
+                $asgn->set_representation('Int');
+                $asgn->set_control_in($vd);
+
+                my $pad = _pad_read($f, $vd, '$x');
+                my $ret = _make_return($f, $pad);
+                $ret->set_control_in($asgn);
+                return $ret;
+            },
         },
         {
             tag         => 'A5',
@@ -233,21 +267,47 @@ sub _idiom_table {
             group       => 'C',
             description => 'reassignment: my $x = 1; $x = 2; return $x',
             perl_oracle => '2',
-            gap_category => 'representation-missing',
-            gap_reason   => 'Assign/VarDecl nodes have no representation; '
-                          . 'mutable variable requires alloca + store/load, '
-                          . 'neither of which the IR currently models.',
-            build_graph  => undef,
+            # Phase 3c: reassignment via Assign in control chain.
+            build_graph => sub {
+                my $f    = Chalk::IR::NodeFactory->new;
+                my $c1   = _int_const($f, 1);
+                my $c2   = _int_const($f, 2);
+                my ($vd) = _int_vardecl($f, 'x', $c1);
+                my $lhs  = _pad_read($f, $vd, '$x_lhs');
+                my $asgn = $f->make('Assign', inputs => [$lhs, $c2]);
+                $asgn->set_representation('Int');
+                $asgn->set_control_in($vd);
+                my $pad = _pad_read($f, $vd, '$x');
+                my $ret = _make_return($f, $pad);
+                $ret->set_control_in($asgn);
+                return $ret;
+            },
         },
         {
             tag         => 'C2',
             group       => 'C',
             description => 'compound assignment: my $x = 1; $x += 2; return $x',
             perl_oracle => '3',
-            gap_category => 'representation-missing',
-            gap_reason   => 'CompoundAssign (+= ) has no representation; same gap '
-                          . 'as C1 (mutable variable, no alloca model).',
-            build_graph  => undef,
+            # Phase 3c: CompoundAssign (+=) via SSA threading.
+            build_graph => sub {
+                my $f    = Chalk::IR::NodeFactory->new;
+                my $c1   = _int_const($f, 1);
+                my $c2   = _int_const($f, 2);
+                my ($vd) = _int_vardecl($f, 'x', $c1);
+                # The read side of +=: current $x value
+                my $read = _pad_read($f, $vd, '$x_r');
+                my $sum  = $f->make('Add', inputs => [$read, $c2]);
+                $sum->set_representation('Int');
+                # CompoundAssign: lhs=PadAccess, rhs=computed sum
+                my $lhs  = _pad_read($f, $vd, '$x_l');
+                my $ca   = $f->make('CompoundAssign', op => '+=', inputs => [$lhs, $sum]);
+                $ca->set_representation('Int');
+                $ca->set_control_in($vd);
+                my $pad = _pad_read($f, $vd, '$x');
+                my $ret = _make_return($f, $pad);
+                $ret->set_control_in($ca);
+                return $ret;
+            },
         },
         {
             tag         => 'C3',
@@ -380,22 +440,53 @@ sub _idiom_table {
             group       => 'K',
             description => 'pre-increment: my $i = 0; ++$i; return $i',
             perl_oracle => '1',
-            gap_category => 'representation-missing',
-            gap_reason   => 'Pre-increment (++$i) is a CompoundAssign on a mutable '
-                          . 'variable. The VarDecl/Assign nodes have no representation; '
-                          . 'cannot lower without alloca model (same gap class as C1).',
-            build_graph  => undef,
+            # Phase 3c: pre-increment is a CompoundAssign(+=1) in the control chain.
+            build_graph => sub {
+                my $f    = Chalk::IR::NodeFactory->new;
+                my $c0   = _int_const($f, 0);
+                my $c1   = _int_const($f, 1);
+                my ($vd) = _int_vardecl($f, 'i', $c0);
+                # ++$i: read current, add 1, assign back
+                my $read = _pad_read($f, $vd, '$i_r');
+                my $sum  = $f->make('Add', inputs => [$read, $c1]);
+                $sum->set_representation('Int');
+                my $lhs  = _pad_read($f, $vd, '$i_l');
+                my $ca   = $f->make('CompoundAssign', op => '+=', inputs => [$lhs, $sum]);
+                $ca->set_representation('Int');
+                $ca->set_control_in($vd);
+                my $pad  = _pad_read($f, $vd, '$i');
+                my $ret  = _make_return($f, $pad);
+                $ret->set_control_in($ca);
+                return $ret;
+            },
         },
         {
             tag         => 'K2',
             group       => 'K',
             description => 'post-increment: my $i = 0; $i++; return $i',
             perl_oracle => '1',
-            gap_category => 'representation-missing',
-            gap_reason   => 'Post-increment ($i++) differs from pre-increment only in '
-                          . 'the returned value (before vs after). Same representation '
-                          . 'gap as K1 — VarDecl/Assign without alloca model.',
-            build_graph  => undef,
+            # Phase 3c: post-increment side-effect is a CompoundAssign(+=1);
+            # the return is $i AFTER the increment (both return 1 from 0).
+            # The distinction from K1 (what expression $i++ vs ++$i produces)
+            # is immaterial here since return is always of $i, not the expr.
+            build_graph => sub {
+                my $f    = Chalk::IR::NodeFactory->new;
+                my $c0   = _int_const($f, 0);
+                my $c1   = _int_const($f, 1);
+                my ($vd) = _int_vardecl($f, 'i', $c0);
+                # $i++: same side-effect graph as K1 for the purpose of `return $i`
+                my $read = _pad_read($f, $vd, '$i_r');
+                my $sum  = $f->make('Add', inputs => [$read, $c1]);
+                $sum->set_representation('Int');
+                my $lhs  = _pad_read($f, $vd, '$i_l');
+                my $ca   = $f->make('CompoundAssign', op => '+=', inputs => [$lhs, $sum]);
+                $ca->set_representation('Int');
+                $ca->set_control_in($vd);
+                my $pad  = _pad_read($f, $vd, '$i');
+                my $ret  = _make_return($f, $pad);
+                $ret->set_control_in($ca);
+                return $ret;
+            },
         },
 
         # ---------------------------------------------------------------
