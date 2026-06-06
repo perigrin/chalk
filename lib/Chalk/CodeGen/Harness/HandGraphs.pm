@@ -411,6 +411,247 @@ sub _build_A3 {
 }
 
 # ---------------------------------------------------------------------------
+# H1: class C { method m() { my @r = map { $_ * 2 } (1, 2, 3); return scalar @r; } }
+#
+# VarDecl(@r, Call(map, [AnonSub({$_*2}), 1, 2, 3])), Return(scalar(@r)).
+# The AnonSub is the block form: inputs[0]=[] params, inputs[1]=[BinOp(*,_,2)].
+# Control chain: Start <- var_r <- ret
+# ---------------------------------------------------------------------------
+sub _build_H1 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Block body: $_ * 2
+    my $op_mul    = $factory->make('Constant', value => '*',  const_type => 'string');
+    my $topic_var = $factory->make('Constant', value => '$_', const_type => 'variable');
+    my $two       = $factory->make('Constant', value => '2',  const_type => 'integer');
+    my $mul_op    = $factory->make('Multiply', inputs => [$op_mul, $topic_var, $two]);
+
+    # AnonSub (block form): no params, body = [$mul_op]
+    my @no_params  = ();
+    my @block_body = ($mul_op);
+    my $block      = $factory->make('AnonSub', inputs => [\@no_params, \@block_body]);
+
+    # map args: AnonSub + list elements
+    my $name_map = $factory->make('Constant', value => 'map', const_type => 'string');
+    my $e1       = $factory->make('Constant', value => '1',   const_type => 'integer');
+    my $e2       = $factory->make('Constant', value => '2',   const_type => 'integer');
+    my $e3       = $factory->make('Constant', value => '3',   const_type => 'integer');
+    my @map_args = ($block, $e1, $e2, $e3);
+    my $call_map = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'map',
+        inputs        => [$name_map, \@map_args],
+    );
+
+    # VarDecl: my @r = map { ... } (1,2,3)
+    my $name_r  = $factory->make('Constant', value => '@r', const_type => 'string');
+    my $var_r   = $factory->make('VarDecl', inputs => [$name_r, $call_map], scope => 'my');
+    $var_r->set_control_in($start);
+
+    # scalar(@r)
+    my $name_scalar = $factory->make('Constant', value => 'scalar', const_type => 'string');
+    my $r_read      = $factory->make('Constant', value => '@r',     const_type => 'variable');
+    my @scalar_args = ($r_read);
+    my $call_scalar = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'scalar',
+        inputs        => [$name_scalar, \@scalar_args],
+    );
+
+    # Return: scalar @r
+    my $ret = $factory->make_cfg('Return', inputs => [$call_scalar]);
+    $ret->set_control_in($var_r);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_mul, $topic_var, $two, $mul_op, $block, $name_map,
+               $e1, $e2, $e3, $call_map, $name_r, $var_r,
+               $name_scalar, $r_read, $call_scalar, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# H2: class C { method m() { my @r = grep { $_ > 1 } (1, 2, 3); return scalar @r; } }
+#
+# VarDecl(@r, Call(grep, [AnonSub({$_>1}), 1, 2, 3])), Return(scalar(@r)).
+# The AnonSub block body is BinOp(>, $_, 1).
+# Control chain: Start <- var_r <- ret
+# ---------------------------------------------------------------------------
+sub _build_H2 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Block body: $_ > 1
+    my $op_gt     = $factory->make('Constant', value => '>',  const_type => 'string');
+    my $topic_var = $factory->make('Constant', value => '$_', const_type => 'variable');
+    my $one_val   = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $gt_op     = $factory->make('NumGt', inputs => [$op_gt, $topic_var, $one_val]);
+
+    # AnonSub (block form): no params, body = [$gt_op]
+    my @no_params  = ();
+    my @block_body = ($gt_op);
+    my $block      = $factory->make('AnonSub', inputs => [\@no_params, \@block_body]);
+
+    # grep args
+    my $name_grep = $factory->make('Constant', value => 'grep', const_type => 'string');
+    my $e1        = $factory->make('Constant', value => '1',    const_type => 'integer');
+    my $e2        = $factory->make('Constant', value => '2',    const_type => 'integer');
+    my $e3        = $factory->make('Constant', value => '3',    const_type => 'integer');
+    my @grep_args = ($block, $e1, $e2, $e3);
+    my $call_grep = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'grep',
+        inputs        => [$name_grep, \@grep_args],
+    );
+
+    # VarDecl: my @r = grep { ... } (1,2,3)
+    my $name_r  = $factory->make('Constant', value => '@r', const_type => 'string');
+    my $var_r   = $factory->make('VarDecl', inputs => [$name_r, $call_grep], scope => 'my');
+    $var_r->set_control_in($start);
+
+    # scalar(@r)
+    my $name_scalar = $factory->make('Constant', value => 'scalar', const_type => 'string');
+    my $r_read      = $factory->make('Constant', value => '@r',     const_type => 'variable');
+    my @scalar_args = ($r_read);
+    my $call_scalar = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'scalar',
+        inputs        => [$name_scalar, \@scalar_args],
+    );
+
+    # Return: scalar @r
+    my $ret = $factory->make_cfg('Return', inputs => [$call_scalar]);
+    $ret->set_control_in($var_r);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_gt, $topic_var, $one_val, $gt_op, $block, $name_grep,
+               $e1, $e2, $e3, $call_grep, $name_r, $var_r,
+               $name_scalar, $r_read, $call_scalar, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# H3: class C { method m() { my @r = sort (3, 1, 2); return $r[0]; } }
+#
+# sort without block: Call(sort, [3, 1, 2]).
+# VarDecl(@r), Return(Subscript($r, 0, array)).
+# Control chain: Start <- var_r <- ret
+# ---------------------------------------------------------------------------
+sub _build_H3 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # sort(3, 1, 2)
+    my $name_sort = $factory->make('Constant', value => 'sort', const_type => 'string');
+    my $e3        = $factory->make('Constant', value => '3',    const_type => 'integer');
+    my $e1        = $factory->make('Constant', value => '1',    const_type => 'integer');
+    my $e2        = $factory->make('Constant', value => '2',    const_type => 'integer');
+    my @sort_args = ($e3, $e1, $e2);
+    my $call_sort = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'sort',
+        inputs        => [$name_sort, \@sort_args],
+    );
+
+    # VarDecl: my @r = sort(3, 1, 2)
+    my $name_r  = $factory->make('Constant', value => '@r', const_type => 'string');
+    my $var_r   = $factory->make('VarDecl', inputs => [$name_r, $call_sort], scope => 'my');
+    $var_r->set_control_in($start);
+
+    # $r[0] — aggregate subscript
+    my $r_read  = $factory->make('Constant', value => '$r',   const_type => 'variable');
+    my $idx_0   = $factory->make('Constant', value => '0',    const_type => 'integer');
+    my $style_a = $factory->make('Constant', value => 'array', const_type => 'string');
+    my $sub_r0  = $factory->make('Subscript', inputs => [$r_read, $idx_0, $style_a]);
+
+    # Return: $r[0]
+    my $ret = $factory->make_cfg('Return', inputs => [$sub_r0]);
+    $ret->set_control_in($var_r);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_sort, $e3, $e1, $e2, $call_sort, $name_r, $var_r,
+               $r_read, $idx_0, $style_a, $sub_r0, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# H4: class C { method m() { my $f = sub ($x) { return $x + 1; }; return $f->(1); } }
+#
+# AnonSub with param $x and body [Return(BinOp(+,$x,1))].
+# VarDecl($f, AnonSub), Return(Subscript($f, [1], call)).
+# Control chain: Start <- var_f <- ret
+# ---------------------------------------------------------------------------
+sub _build_H4 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # AnonSub body: return $x + 1
+    my $op_plus = $factory->make('Constant', value => '+',  const_type => 'string');
+    my $x_var   = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $one_val = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $add_op  = $factory->make('Add', inputs => [$op_plus, $x_var, $one_val]);
+
+    # Return node inside the anon sub body
+    my $ret_inner = $factory->make_cfg('Return', inputs => [$add_op]);
+
+    # AnonSub: params=['$x'], body=[ret_inner]
+    my $x_param   = $factory->make('Constant', value => '$x', const_type => 'string');
+    my @params    = ($x_param);
+    my @body      = ($ret_inner);
+    my $anon_sub  = $factory->make('AnonSub', inputs => [\@params, \@body]);
+
+    # VarDecl: my $f = sub ($x) { ... }
+    my $name_f  = $factory->make('Constant', value => '$f', const_type => 'string');
+    my $var_f   = $factory->make('VarDecl', inputs => [$name_f, $anon_sub], scope => 'my');
+    $var_f->set_control_in($start);
+
+    # $f->(1) — coderef call: Subscript($f, [1], call)
+    my $f_read    = $factory->make('Constant', value => '$f', const_type => 'variable');
+    my $arg_1     = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $call_style = $factory->make('Constant', value => 'call', const_type => 'string');
+    my @call_args = ($arg_1);
+    my $call_f    = $factory->make('Subscript', inputs => [$f_read, \@call_args, $call_style]);
+
+    # Return: $f->(1)
+    my $ret = $factory->make_cfg('Return', inputs => [$call_f]);
+    $ret->set_control_in($var_f);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_plus, $x_var, $one_val, $add_op, $ret_inner,
+               $x_param, $anon_sub, $name_f, $var_f,
+               $f_read, $arg_1, $call_style, $call_f, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
 # D6: class C { method m($n) { my $x = $n > 0 ? 1 : 2; return $x; } }
 #
 # Method param $n. VarDecl($x) = TernaryExpr(BinOp(>, $n, 0), 1, 2). Return $x.
@@ -1638,6 +1879,10 @@ sub _build_K2 {
     C5 => \&_build_C5,
     D6 => \&_build_D6,
     E1 => \&_build_E1,
+    H1 => \&_build_H1,
+    H2 => \&_build_H2,
+    H3 => \&_build_H3,
+    H4 => \&_build_H4,
     F1 => \&_build_F1,
     F2 => \&_build_F2,
     F3 => \&_build_F3,
