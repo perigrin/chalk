@@ -13,6 +13,20 @@ use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::Call;
+use Chalk::IR::Node::ArrayRef;
+use Chalk::IR::Node::HashRef;
+use Chalk::IR::Node::Assign;
+use Chalk::IR::Node::BinOp;
+use Chalk::IR::Node::UnaryOp;
+use Chalk::IR::Node::CompoundAssign;
+use Chalk::IR::Node::Subscript;
+use Chalk::IR::Node::PostfixDeref;
+use Chalk::IR::Node::Interpolate;
+use Chalk::IR::Node::AnonSub;
+use Chalk::IR::Node::RegexMatch;
+use Chalk::IR::Node::RegexSubst;
+use Chalk::IR::Node::TernaryExpr;
+use Chalk::IR::Node::Ref;
 
 # Dispatch table from corpus tag to builder sub.
 # Each builder returns a Chalk::MOP built directly node-by-node.
@@ -286,9 +300,121 @@ sub _build_F3 {
     return $mop;
 }
 
+# ---------------------------------------------------------------------------
+# A2: class C { method m() { my @list = (1, 2, 3); return scalar @list; } }
+#
+# VarDecl(@list) initialized from ArrayRef([1,2,3]).
+# Return: scalar(@list) — emitted as builtin call scalar([@list]).
+# Control chain: Start <- var_list.control_in <- ret.control_in
+# ---------------------------------------------------------------------------
+sub _build_A2 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Array elements: 1, 2, 3
+    my $e1 = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $e2 = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $e3 = $factory->make('Constant', value => '3', const_type => 'integer');
+
+    # ArrayRef node: inputs[0] = perl arrayref of element nodes
+    my @elems = ($e1, $e2, $e3);
+    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+
+    # VarDecl: my @list = (1, 2, 3)
+    my $name_list = $factory->make('Constant', value => '@list', const_type => 'string');
+    my $var_list  = $factory->make('VarDecl',
+        inputs => [$name_list, $arr_ref],
+        scope  => 'my',
+    );
+    $var_list->set_control_in($start);
+
+    # scalar(@list) — builtin call
+    my $name_scalar = $factory->make('Constant', value => 'scalar', const_type => 'string');
+    my $list_read   = $factory->make('Constant', value => '@list',  const_type => 'variable');
+    my @scalar_args = ($list_read);
+    my $call_scalar = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'scalar',
+        inputs        => [$name_scalar, \@scalar_args],
+    );
+
+    # Return: scalar @list
+    my $ret = $factory->make_cfg('Return', inputs => [$call_scalar]);
+    $ret->set_control_in($var_list);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $e1, $e2, $e3, $arr_ref, $name_list, $var_list,
+               $name_scalar, $list_read, $call_scalar, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# A3: class C { method m() { my %h = (a => 1, b => 2); return $h{a}; } }
+#
+# VarDecl(%h) initialized from HashRef(a,1,b,2).
+# Return: Subscript($h, 'a', 'hash') — emits $h{'a'} (aggregate var, so no arrow).
+# Control chain: Start <- var_h.control_in <- ret.control_in
+# ---------------------------------------------------------------------------
+sub _build_A3 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Hash pairs: a => 1, b => 2
+    my $key_a = $factory->make('Constant', value => 'a', const_type => 'string');
+    my $val_1 = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $key_b = $factory->make('Constant', value => 'b', const_type => 'string');
+    my $val_2 = $factory->make('Constant', value => '2', const_type => 'integer');
+
+    # HashRef node: inputs[0] = perl arrayref of interleaved key/value nodes
+    my @pairs = ($key_a, $val_1, $key_b, $val_2);
+    my $hash_ref = $factory->make('HashRef', inputs => [\@pairs]);
+
+    # VarDecl: my %h = (a => 1, b => 2)
+    my $name_h = $factory->make('Constant', value => '%h', const_type => 'string');
+    my $var_h  = $factory->make('VarDecl',
+        inputs => [$name_h, $hash_ref],
+        scope  => 'my',
+    );
+    $var_h->set_control_in($start);
+
+    # Subscript: $h{a}
+    # inputs[0]=target, inputs[1]=key, inputs[2]=Constant(style)
+    my $h_read  = $factory->make('Constant', value => '$h', const_type => 'variable');
+    my $key_a2  = $factory->make('Constant', value => 'a',  const_type => 'string');
+    my $style   = $factory->make('Constant', value => 'hash', const_type => 'string');
+    my $sub_ha  = $factory->make('Subscript',
+        inputs => [$h_read, $key_a2, $style],
+    );
+
+    # Return: $h{a}
+    my $ret = $factory->make_cfg('Return', inputs => [$sub_ha]);
+    $ret->set_control_in($var_h);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $key_a, $val_1, $key_b, $val_2, $hash_ref, $name_h, $var_h,
+               $h_read, $key_a2, $style, $sub_ha, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
 # Populate the dispatch table after all builders are defined.
 %BUILDERS = (
     A1 => \&_build_A1,
+    A2 => \&_build_A2,
+    A3 => \&_build_A3,
     A4 => \&_build_A4,
     A5 => \&_build_A5,
     E1 => \&_build_E1,
