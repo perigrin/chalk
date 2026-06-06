@@ -6,6 +6,34 @@
 
 ---
 
+> ## ⚠ CORRECTION — see the pushback review before acting on this doc
+>
+> An adversarial pushback review (`docs/plans/2026-06-06-phase1-audit-pushback-review.md`,
+> verified against code) found this audit's bucket COUNTS roughly right and BUCKET-1
+> genuinely mechanical (confirmed end-to-end against real perl), but identified three
+> material errors that change the decomposition. Do NOT create child issues from the
+> original recommendation below; use the corrected decomposition in the pushback review.
+>
+> 1. **BUCKET-2 is described against the WRONG code path.** The harness drives
+>    `generate(MOP)` → `_generate_from_schedule` → `Chalk::IR::Scheduler::EagerPinning`.
+>    The audit's bucket-2 (`cfg_state`, `emit_cfg_if`/`emit_cfg_loop`, `true_proj`/`false_proj`)
+>    describes `_generate_with_cfg`, which `die`s unless given a parser `Program`
+>    (`Target/Perl.pm:494-495`) and is UNREACHABLE from a hand graph. The real 1b work is
+>    scheduler `schedule_data` construction (`EagerPinning::If/Loop/TryCatch`,
+>    `control_in`/region wiring); recipe = `t/bootstrap/scheduler/schedule-data-*.t`.
+>    "Solving patterns 1,3,4 unlocks 13 of 25" is asserted, not verified.
+> 2. **M19 (`my ($a,$b)=(1,2)`) is a buried deep unknown**, not a low-priority bucket-3 item:
+>    no tuple/list-assignment IR node exists (only `ExpressionList`/`Multiply`); the naive
+>    emission miscompiles. Give it its own spike, do not bury it in 1c.
+> 3. **BUCKET-4 ≠ 0.** M20 (`do`) has no IR node and M21 (`eval`) is excluded by project
+>    policy — both are scope decisions, not codegen work.
+>
+> Also recommended: re-bucket M10, M11, K2, D6 from bucket-3 into 1a (not real gaps).
+> The week-level estimates (1 week / 2-3 weeks) are decorative for an AI-driven process —
+> the real unit of uncertainty is distinct CFG patterns + genuine unknowns, not idiom count.
+
+---
+
 ## Executive Summary
 
 **Phase 1 = "Complete CodeGen to tier-1 green (S=P) for all 78 idioms."**
