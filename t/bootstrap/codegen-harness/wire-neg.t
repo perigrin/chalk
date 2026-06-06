@@ -1,5 +1,5 @@
 # ABOUTME: Adversarial tests for the wire harness — ensures the rig catches false-green scenarios.
-# ABOUTME: Tests: verdict-on-crash, empty-P GAP, miscompile not laundered, E1 MISCOMPILE.
+# ABOUTME: Tests: verdict-on-crash, empty-P GAP, miscompile not laundered, E1 regression guard.
 use 5.42.0;
 use utf8;
 
@@ -159,9 +159,10 @@ use Chalk::CodeGen::Harness::BehaviorRecord;
 # must verdict MISCOMPILE, not GAP.
 #
 # E1: class C { method m() { my $x = 1; $x } }
-# Known quirk: E1 emits '$x' (single-quoted string) instead of $x (variable).
-# If E1's emitted Perl runs and returns '$x' (string) instead of 1 (value),
-# that is a MISCOMPILE — a correctness alarm, not backlog.
+# Regression guard: the emitter previously single-quoted the variable ($x became '$x'),
+# causing the generated code to return the string '$x' instead of the value 1 (MISCOMPILE).
+# After the fix, _emit_expr is used for bare-value implicit-return position, so $x is
+# emitted correctly and E1 must produce PASS.
 {
     my $spec = {
         class       => 'C',
@@ -175,27 +176,14 @@ use Chalk::CodeGen::Harness::BehaviorRecord;
     is($@, '', 'N5: run_entry("E1") does not die');
 
     SKIP: {
-        skip 'E1 run_entry failed', 3 unless defined $result;
+        skip 'E1 run_entry failed', 2 unless defined $result;
 
         ok(defined $result->{verdict}, 'N5: E1 produces a verdict');
 
-        # The E1 emitter emits '$x' (single-quoted) — the generated code
-        # runs and returns the string '$x' instead of numeric 1.
-        # This is either MISCOMPILE (if run succeeds with wrong value)
-        # or GAP (if emit is incomplete). Either way, it is NOT PASS.
-        isnt($result->{verdict}{verdict}, 'PASS',
-            'N5: E1 known-quirk does not produce PASS (is MISCOMPILE or GAP)');
-
-        # If the verdict is MISCOMPILE, assert it has a proper implicated_layer.
-        if ($result->{verdict}{verdict} eq 'MISCOMPILE') {
-            ok(defined $result->{verdict}{implicated_layer},
-                'N5: MISCOMPILE carries implicated_layer (not laundered as GAP)');
-        }
-        else {
-            # It's GAP — also acceptable, just note why.
-            is($result->{verdict}{verdict}, 'GAP',
-                'N5: E1 verdict is GAP (incomplete emission)');
-        }
+        # E1 must be PASS — the generated code emits the bare variable $x
+        # (not the single-quoted string '$x'), so running it returns 1.
+        is($result->{verdict}{verdict}, 'PASS',
+            'N5: E1 regression guard — implicit-return emits $x (not single-quoted), returns 1');
     }
 }
 

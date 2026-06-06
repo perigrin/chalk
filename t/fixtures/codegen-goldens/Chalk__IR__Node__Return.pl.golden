@@ -5,7 +5,7 @@ use Chalk::IR::Node;
 class Chalk::IR::Node::Return :isa(Chalk::IR::Node) {
     field $synthetic :param :reader = false;
     method operation() {
-        'Return'
+        'Return';
     }
     method value() {
         return $self->inputs()->[0];

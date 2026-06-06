@@ -4,6 +4,6 @@ use experimental 'class';
 use Chalk::IR::Node;
 class Chalk::IR::Node::Start :isa(Chalk::IR::Node) {
     method operation() {
-        'Start'
+        'Start';
     }
 }

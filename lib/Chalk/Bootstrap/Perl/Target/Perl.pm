@@ -286,9 +286,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                     return;
                 }
                 if (defined $val) {
-                    # _emit_node would add `return ` and `;`; the
-                    # bare-value form still needs the trailing `;`.
-                    $code = $self->_emit_node($val);
+                    # The value is in implicit-return (bare-value) position:
+                    # emit it as an expression via _emit_expr, which returns
+                    # variables and other expressions without quoting them.
+                    # Append `;` because the bare-value form is a statement.
+                    $code = $self->_emit_expr($val) . ";";
                 } else {
                     $code = undef;
                 }

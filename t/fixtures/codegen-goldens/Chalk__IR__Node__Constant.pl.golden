@@ -6,7 +6,7 @@ class Chalk::IR::Node::Constant :isa(Chalk::IR::Node) {
     field $value :param :reader;
     field $const_type :param :reader = 'string';
     method operation() {
-        'Constant'
+        'Constant';
     }
     method content_hash() {
         return join('|', 'Constant', "const_type=$const_type", 'value=' . defined($value) ? $value : undef);
