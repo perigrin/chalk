@@ -235,9 +235,32 @@ work in the project: it unlocks standalone + optimization + fast-XS at once).
   deferred not because it is hard but because there is nothing for it to
   specialize on until 3c.
 
-### (Later) Phase 4 — capstone: self-host the Earley parser (unchanged in spirit)
-- Still the definitive cert. Now also: the parser must produce graphs meeting the
-  typed-IR contract 3c established.
+### Phase 4 — B::SoN as the trusted IR/MOP producer (the IR-generation layer)
+- The capstone needs an IR-PRODUCER for real lib/ input. It is NOT the chalk
+  parser/SemanticAction (untrusted, paused). It is **B::SoN** (`perl -MO=SoN`,
+  repo `~/dev/perl5-son`): walk the REAL perl optree → our robust IR/MOP. Reading
+  what perl actually compiled (not a re-parse) is the right shape for a trusted
+  front end. This is the long-deferred "how does the front end hook to the IR"
+  answer — by REPLACING SemanticAction with the optree, not repairing it.
+- **Current B::SoN is DIRECTIONAL, not complete/correct** — treated exactly as
+  CodeGen was at the start: a sketch of the right shape, output SUSPECT until
+  proven, not trusted. It is known-partial (drops field writes, no MOP emission,
+  FromOptree bugs). It EARNS trust by being verified THROUGH the now-trusted
+  (Phase-3) harness: B::SoN IR → verified CodeGen → run → compare to perl; a
+  divergence is a B::SoN bug, never trusted around.
+- **Scope DEFERRED until Phase 3 lands** (the typed-IR contract must be concrete
+  first); the B::SoN phase shape is decided then. Verification logic only works
+  AFTER Phase 3 makes CodeGen trusted.
+
+### Phase 5 — CAPSTONE: run lib/ through B::SoN → CodeGen, confirm == perl
+- The OLD framing ("self-host the Earley parser via the harness") was MIS-WIRED:
+  it silently assumed an IR-producer that did not trustworthily exist. Corrected
+  chain: source → B::SoN (Phase 4) → CodeGen (Phase 3) → run → compare to perl.
+  Well-posed only once BOTH layers exist — hence Phase 5, blocked by Phase 4.
+- The composition of two independently-verified layers applied to the hardest,
+  largest real workload (lib/, ultimately the Earley parser). A green capstone
+  certifies the whole optree→IR→CodeGen path is sound on real complex code — not
+  merely that a transpiler round-trips.
 
 ## Acceptance criteria (staged)
 - **3a:** typed-IR contract drafted; ONE computation idiom lowers SoN→LLVM IR,
@@ -251,6 +274,13 @@ work in the project: it unlocks standalone + optimization + fast-XS at once).
   full-corpus oracle; C is NOT a corner yet.)
 - **3e (later):** C/XS rejoins as 4th corner, rebuilt to specialize on IR types
   (post-3c only).
+- **Phase 4 (B::SoN, scope deferred till Phase 3 lands):** B::SoN produces IR/MOP
+  from the optree that passes the well-typed-graph invariant and lowers via the
+  verified CodeGen to behavior matching perl (the directional producer verified
+  through the trusted instrument; MOP-emission gap closed).
+- **Phase 5 (capstone):** representative lib/ units lower B::SoN → CodeGen to
+  behavior matching perl; ultimately the Earley parser parses like the original.
+  perl is the sole oracle throughout.
 
 ## Invariants preserved from the harness plan
 - perl remains the SOLE behavioral oracle (S). LLVM/C outputs are compared to
