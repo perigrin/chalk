@@ -179,17 +179,25 @@ sub _group_of {
 
 # Build a default spec for running a corpus entry through RunUnderPerl.
 # Most corpus entries are class C { method m() { ... } }; a few are not.
-# For non-class entries we return undef (cannot run through the class rig).
+# For non-class entries (I2, M1, M2) we return a 'sub_name' spec for capture_sub.
 sub _spec_for {
     my ($tag, $snippet) = @_;
 
-    # Detect non-class entries: I2 (top-level sub), M1 (use pragma), M2 (use module)
-    # These have no class C wrapping and cannot be exercised via the class rig.
+    # Non-class top-level-sub entries: I2, M1, M2.
+    # These define a top-level sub named 'greet' which is called directly.
+    # Args per idiom: I2 passes 'world', M1 and M2 pass no args.
+    my %SUB_SPECS = (
+        I2 => { sub_name => 'greet', sub_args => ['world'], context => 'scalar' },
+        M1 => { sub_name => 'greet', sub_args => [],        context => 'scalar' },
+        M2 => { sub_name => 'greet', sub_args => [],        context => 'scalar' },
+    );
+    if (exists $SUB_SPECS{$tag}) {
+        return $SUB_SPECS{$tag};
+    }
+
     return undef unless $snippet =~ /class\s+C\s*\{/;
 
-    # Detect if the method m() takes parameters
-    # For parameterized methods we can't provide a useful default spec.
-    # Use a conservative spec: no constructor params, no method args.
+    # Class-based entries: instantiate C and call method m().
     my $spec = {
         class       => 'C',
         constructor => { params => {} },
@@ -253,9 +261,14 @@ sub _run_one {
         };
     }
 
+    # Determine exercise mode: sub-name spec uses capture_sub; class spec uses capture.
+    my $is_sub_spec = exists $spec->{sub_name};
+
     # Run the S side (oracle via RunUnderPerl).
     my $S = eval {
-        Chalk::CodeGen::Harness::RunUnderPerl->capture($snippet, $spec);
+        $is_sub_spec
+            ? Chalk::CodeGen::Harness::RunUnderPerl->capture_sub($snippet, $spec)
+            : Chalk::CodeGen::Harness::RunUnderPerl->capture($snippet, $spec);
     };
     if ($@) {
         my $err = $@;

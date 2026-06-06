@@ -85,10 +85,12 @@ sub run {
     my $full_snippet = _add_pragmas($snippet);
 
     # ---- Run under perl 5.42 via RunUnderPerl ----
-    # RunUnderPerl->capture wraps the snippet, runs it under perl, and returns
-    # a BehaviorRecord. It captures exceptions rather than propagating them.
+    # For sub-name specs (non-class top-level subs), use capture_sub; otherwise
+    # use the standard class/method capture.
     my $P = eval {
-        Chalk::CodeGen::Harness::RunUnderPerl->capture($full_snippet, $spec);
+        exists $spec->{sub_name}
+            ? Chalk::CodeGen::Harness::RunUnderPerl->capture_sub($full_snippet, $spec)
+            : Chalk::CodeGen::Harness::RunUnderPerl->capture($full_snippet, $spec);
     };
     if ($@) {
         # The harness itself failed (e.g. driver produced no JSON output).

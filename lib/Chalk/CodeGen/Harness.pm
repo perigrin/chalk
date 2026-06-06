@@ -96,7 +96,10 @@ sub run_entry {
     my $snippet = $CORPUS{$tag};
 
     # ---- S side: oracle via real perl ----
-    my $S = Chalk::CodeGen::Harness::RunUnderPerl->capture($snippet, $spec);
+    my $is_sub_spec = exists $spec->{sub_name};
+    my $S = $is_sub_spec
+        ? Chalk::CodeGen::Harness::RunUnderPerl->capture_sub($snippet, $spec)
+        : Chalk::CodeGen::Harness::RunUnderPerl->capture($snippet, $spec);
 
     # ---- P side: generated via Chalk Target::Perl ----
     my $graph = Chalk::CodeGen::Harness::HandGraphs->graph_for($tag);

@@ -411,6 +411,123 @@ sub _build_A3 {
 }
 
 # ---------------------------------------------------------------------------
+# I2: sub greet ($name) { return "hi $name"; }
+#
+# Top-level sub in main class. Emits a 'sub greet($name) { ... }' declaration
+# at the top level. The greet sub returns an interpolated string.
+# Exercised via capture_sub with sub_name='greet', sub_args=['world'].
+# ---------------------------------------------------------------------------
+sub _build_I2 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # "hi $name" — Interpolate
+    my $lit_hi   = $factory->make('Constant', value => 'hi ',   const_type => 'string');
+    my $var_name = $factory->make('Constant', value => '$name', const_type => 'variable');
+    my @parts    = ($lit_hi, $var_name);
+    my $interp   = $factory->make('Interpolate', inputs => [\@parts]);
+
+    # Return: "hi $name"
+    my $ret = $factory->make_cfg('Return', inputs => [$interp]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $lit_hi, $var_name, $interp, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $main = $mop->for_class('main');
+    $main->declare_sub('greet', params => ['$name'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M1: use strict; use warnings; sub greet { return "hi"; }
+#
+# Top-level with use pragmas. The main class gets imports for strict/warnings
+# and a sub greet. Exercised via capture_sub with sub_name='greet', sub_args=[].
+# ---------------------------------------------------------------------------
+sub _build_M1 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Return: 'hi'
+    my $str_hi = $factory->make('Constant', value => 'hi', const_type => 'string');
+    my $ret    = $factory->make_cfg('Return', inputs => [$str_hi]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    $graph->merge($start);
+    $graph->merge($str_hi);
+    $graph->merge($ret);
+
+    my $mop  = Chalk::MOP->new;
+    my $main = $mop->for_class('main');
+    $main->declare_import('strict');
+    $main->declare_import('warnings');
+    $main->declare_sub('greet', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M2: use List::Util qw(first sum); sub greet { return first { $_ > 1 } (0, 2, 3); }
+#
+# Top-level with List::Util import. The sub greet calls first with a block.
+# Exercised via capture_sub with sub_name='greet', sub_args=[].
+# ---------------------------------------------------------------------------
+sub _build_M2 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Block body: $_ > 1
+    my $op_gt     = $factory->make('Constant', value => '>',  const_type => 'string');
+    my $topic_var = $factory->make('Constant', value => '$_', const_type => 'variable');
+    my $one_val   = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $gt_op     = $factory->make('NumGt', inputs => [$op_gt, $topic_var, $one_val]);
+
+    # AnonSub (block form): no params, body = [$gt_op]
+    my @no_params  = ();
+    my @block_body = ($gt_op);
+    my $block      = $factory->make('AnonSub', inputs => [\@no_params, \@block_body]);
+
+    # first { $_ > 1 } (0, 2, 3)
+    my $name_first = $factory->make('Constant', value => 'first', const_type => 'string');
+    my $e0         = $factory->make('Constant', value => '0',     const_type => 'integer');
+    my $e2         = $factory->make('Constant', value => '2',     const_type => 'integer');
+    my $e3         = $factory->make('Constant', value => '3',     const_type => 'integer');
+    my @first_args = ($block, $e0, $e2, $e3);
+    my $call_first = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'first',
+        inputs        => [$name_first, \@first_args],
+    );
+
+    # Return: first { $_ > 1 } (0, 2, 3)
+    my $ret = $factory->make_cfg('Return', inputs => [$call_first]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_gt, $topic_var, $one_val, $gt_op, $block,
+               $name_first, $e0, $e2, $e3, $call_first, $ret) {
+        $graph->merge($n);
+    }
+
+    # use List::Util qw(first sum)
+    # The qw() arg is a Constant bareword so it emits without quoting
+    my $qw_arg = $factory->make('Constant', value => 'qw(first sum)', const_type => 'bareword');
+
+    my $mop  = Chalk::MOP->new;
+    my $main = $mop->for_class('main');
+    $main->declare_import('List::Util', args => [$qw_arg]);
+    $main->declare_sub('greet', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
 # I3: class C { method m() { my sub helper ($n) { return $n * 2; } return helper(3); } }
 #
 # Represented as VarDecl($helper, AnonSub) + Return(Subscript($helper,[3],call)).
@@ -2499,6 +2616,7 @@ sub _build_K2 {
     H2 => \&_build_H2,
     H3 => \&_build_H3,
     H4 => \&_build_H4,
+    I2 => \&_build_I2,
     I3 => \&_build_I3,
     F1 => \&_build_F1,
     F2 => \&_build_F2,
@@ -2516,6 +2634,8 @@ sub _build_K2 {
     L2 => \&_build_L2,
     L3 => \&_build_L3,
     L4 => \&_build_L4,
+    M1  => \&_build_M1,
+    M2  => \&_build_M2,
     M3  => \&_build_M3,
     M4  => \&_build_M4,
     M8  => \&_build_M8,

@@ -307,6 +307,112 @@ sub capture {
     );
 }
 
+# capture_sub($snippet, $spec) -> BehaviorRecord
+# Variant of capture() for top-level sub snippets (no class instantiation).
+# spec must have: sub_name (required), sub_args (optional arrayref).
+# Wraps the snippet so the named sub is called directly and the return value
+# is captured. Used by the GapMap for non-class idioms (I2, M1, M2).
+sub capture_sub {
+    my (undef, $snippet, $spec) = @_;
+    croak "capture_sub: snippet must be a non-empty string"
+        unless defined $snippet && length $snippet;
+    croak "capture_sub: spec must be a hashref"
+        unless ref $spec eq 'HASH';
+    croak "capture_sub: spec must have a 'sub_name' field"
+        unless defined $spec->{sub_name} && length $spec->{sub_name};
+
+    my $sub_name  = $spec->{sub_name};
+    my $sub_args  = $spec->{sub_args} // [];
+    my $context   = $spec->{context}  // 'scalar';
+    my $args_code = _encode_perl_list($sub_args);
+
+    my $call_expr;
+    if ($context eq 'list') {
+        $call_expr = "\@_ret = $sub_name($args_code);";
+    } elsif ($context eq 'void') {
+        $call_expr = "$sub_name($args_code);";
+    } else {
+        $call_expr = "\@_ret = (scalar($sub_name($args_code)));";
+    }
+
+    my $program = <<"END_PROGRAM";
+use 5.42.0;
+use utf8;
+use feature 'class';
+no warnings 'experimental::class';
+use Scalar::Util qw(blessed looks_like_number);
+use JSON::PP;
+
+# --- Snippet under test ---
+$snippet
+
+# --- Harness driver ---
+{
+    my \$_stdout_buf = '';
+    my \$_stderr_buf = '';
+    my \$_exception  = undef;
+    my \@_ret        = ();
+
+    open(my \$_cap_stdout, '>', \\\$_stdout_buf) or die "open cap_stdout: \$!";
+    open(my \$_cap_stderr, '>', \\\$_stderr_buf) or die "open cap_stderr: \$!";
+
+    {
+        local *STDOUT = \$_cap_stdout;
+        local *STDERR = \$_cap_stderr;
+        eval { $call_expr };
+    }
+    my \$_eval_err = \$\@;
+    close \$_cap_stdout;
+    close \$_cap_stderr;
+
+    if (\$_eval_err) {
+        if (ref \$_eval_err && blessed(\$_eval_err)) {
+            my \$_msg = '';
+            eval { \$_msg = \$_eval_err->message() if \$_eval_err->can('message'); };
+            \$_msg ||= "\$_eval_err";
+            \$_exception = { kind => 'object', class => ref(\$_eval_err), message => \$_msg };
+        } else {
+            (my \$_clean = "\$_eval_err") =~ s{ at \\S+ line \\d+\\.?\\n?}{};
+            \$_clean =~ s/\\s+\$//;
+            \$_exception = { kind => 'string', class => undef, message => \$_clean };
+        }
+    }
+
+    my \$_record = {
+        return_values      => \\\@_ret,
+        wantarray_context  => '$context',
+        stdout             => \$_stdout_buf,
+        stderr             => \$_stderr_buf,
+        exception          => \$_exception,
+        object_state       => {},
+        hash_order_policy  => 'sorted-keys',
+        fp_tolerance       => 1e-9,
+        dualvar_policy     => 'numeric-first',
+        aliasing_topology  => {},
+    };
+
+    my \$_json = JSON::PP->new->utf8->canonical->encode(\$_record);
+    print \$_json, "\\n";
+}
+END_PROGRAM
+
+    my ($stdout, $stderr, $exit) = Chalk::CodeGen::Harness::RunUnderPerl->run_program($program);
+    my $data = Chalk::CodeGen::Harness::RunUnderPerl->parse_output($stdout);
+
+    return Chalk::CodeGen::Harness::BehaviorRecord->new(
+        return_values      => $data->{return_values}     // [],
+        wantarray_context  => $data->{wantarray_context} // 'scalar',
+        stdout             => $data->{stdout}            // '',
+        stderr             => $data->{stderr}            // '',
+        exception          => $data->{exception},
+        object_state       => $data->{object_state}      // {},
+        hash_order_policy  => $data->{hash_order_policy} // 'sorted-keys',
+        fp_tolerance       => $data->{fp_tolerance}      // 1e-9,
+        dualvar_policy     => $data->{dualvar_policy}    // 'numeric-first',
+        aliasing_topology  => $data->{aliasing_topology} // {},
+    );
+}
+
 # --- Internal helpers ---
 
 # _encode_perl_args(\%params) -> "(key => val, ...)" string for constructor call
