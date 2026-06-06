@@ -82,7 +82,9 @@ sub run {
 
     # ---- Prepend required pragmas ----
     # The generated code is a class body — it needs pragmas to be runnable.
-    my $full_snippet = _add_pragmas($snippet);
+    # When the spec has use_also modules (e.g. for complex constructor args
+    # that reference types from other modules), load them from lib/ first.
+    my $full_snippet = _add_pragmas($snippet, $spec->{use_also});
 
     # ---- Run under perl 5.42 via RunUnderPerl ----
     # For sub-name specs (non-class top-level subs), use capture_sub; otherwise
@@ -147,18 +149,24 @@ sub _flatten_generated {
     return join("\n", map { $generated->{$_} } sort keys %$generated);
 }
 
-# _add_pragmas($snippet) -> $full_snippet
+# _add_pragmas($snippet, \@use_also) -> $full_snippet
 # Prepends the Perl 5.42 pragmas required to make a bare class declaration
-# runnable. The generated snippet from Target::Perl does not include these.
+# runnable. When use_also is given, those modules are loaded from lib/ before
+# the snippet (needed when complex ctor_raw args reference external types).
 sub _add_pragmas {
-    my ($snippet) = @_;
-    return join("\n",
+    my ($snippet, $use_also) = @_;
+    my @lines = (
         'use 5.42.0;',
         'use utf8;',
         "use feature 'class';",
         "no warnings 'experimental::class';",
-        $snippet,
     );
+    if (defined $use_also && ref $use_also eq 'ARRAY' && @$use_also) {
+        push @lines, "use lib 'lib';";
+        push @lines, "use $_;" for @$use_also;
+    }
+    push @lines, $snippet;
+    return join("\n", @lines);
 }
 
 1;

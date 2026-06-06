@@ -934,6 +934,12 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
     method _emit_return_stmt($node) {
         my $value = $node->value;  # inputs[0]=value; control is in control_in
+        # Synthetic returns (implicit last-expression) omit the `return` keyword.
+        # This applies to AnonSub bodies where the last expression is the value
+        # of the block (e.g., map { EXPR } uses the last expr without `return`).
+        if ($node->can('synthetic') && $node->synthetic) {
+            return defined $value ? $self->_emit_expr($value) . ";" : undef;
+        }
         return "return " . $self->_emit_expr($value) . ";";
     }
 
@@ -1140,7 +1146,15 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $left  = $node->inputs()->[1];
         my $right = $node->inputs()->[2];
 
-        return $self->_emit_expr($left) . " $op " . $self->_emit_expr($right);
+        # Parenthesize ternary sub-expressions to preserve precedence.
+        # Without parens, `ternary . $x` parses as `cond ? a : (b . $x)`
+        # because `.` binds tighter than `?:`.
+        my $left_expr  = $self->_emit_expr($left);
+        my $right_expr = $self->_emit_expr($right);
+        $left_expr  = "($left_expr)"  if $left  isa Chalk::IR::Node::TernaryExpr;
+        $right_expr = "($right_expr)" if $right isa Chalk::IR::Node::TernaryExpr;
+
+        return "$left_expr $op $right_expr";
     }
 
     method _emit_unary_expr($node) {

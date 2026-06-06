@@ -84,10 +84,13 @@ sub wrap_program {
     my $method      = $spec->{method};
     my $context     = $spec->{context} // 'scalar';
     my $params      = $spec->{constructor}{params} // {};
+    my $ctor_raw    = $spec->{constructor}{raw};
     my $method_args = $spec->{method_args} // [];
 
     # Serialize constructor params as Perl code: (key => val, ...)
-    my $ctor_args = _encode_perl_args($params);
+    # When ctor_raw is provided it is used verbatim (supports complex object
+    # construction that cannot be expressed via plain key/value pairs).
+    my $ctor_args = defined $ctor_raw ? $ctor_raw : _encode_perl_args($params);
 
     # Serialize method args as Perl code: (val, ...)
     my $meth_args = _encode_perl_list($method_args);

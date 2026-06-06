@@ -20,6 +20,13 @@ use Chalk::CodeGen::Harness::GapMap;
 # Each entry describes one real lib/ unit: the module path (for the S side),
 # the class name (for instantiation), and the constructor params that both the
 # real module and the hand-authored stub accept.
+#
+# Optional fields:
+#   use_also      — arrayref of extra module names to load in the oracle snippet
+#   ctor_raw      — raw Perl argument string for the constructor call, used in
+#                   place of encoding ctor_params when complex object construction
+#                   is required (e.g., passing nested blessed objects). Must be
+#                   valid Perl that evaluates to a list of key => value pairs.
 # ---------------------------------------------------------------------------
 my %UNIT_REGISTRY = (
     Add => {
@@ -29,6 +36,58 @@ my %UNIT_REGISTRY = (
         ctor_params => { id => 'tier2_test', inputs => [] },
         graph_tag   => 'T2_Add',
         graph_source => 'hand:T2_Add',
+    },
+    BinOp => {
+        lib_path    => 'lib/Chalk/IR/Node/BinOp.pm',
+        class       => 'Chalk::IR::Node::BinOp',
+        use_module  => 'Chalk::IR::Node::BinOp',
+        ctor_params => { id => 'tier2_test', inputs => [], left => 'left_val', right => 'right_val' },
+        graph_tag   => 'T2_BinOp',
+        graph_source => 'hand:T2_BinOp',
+    },
+    Symbol => {
+        lib_path    => 'lib/Chalk/Grammar/Symbol.pm',
+        class       => 'Chalk::Grammar::Symbol',
+        use_module  => 'Chalk::Grammar::Symbol',
+        ctor_params => { type => 'terminal', value => 'foo' },
+        graph_tag   => 'T2_Symbol',
+        graph_source => 'hand:T2_Symbol',
+    },
+    Symbol_ref => {
+        lib_path    => 'lib/Chalk/Grammar/Symbol.pm',
+        class       => 'Chalk::Grammar::Symbol',
+        use_module  => 'Chalk::Grammar::Symbol',
+        ctor_params => { type => 'reference', value => 'Bar', quantifier => '*' },
+        graph_tag   => 'T2_Symbol',
+        graph_source => 'hand:T2_Symbol',
+    },
+    Rule => {
+        lib_path    => 'lib/Chalk/Grammar/Rule.pm',
+        class       => 'Chalk::Grammar::Rule',
+        use_module  => 'Chalk::Grammar::Rule',
+        # One alternative with one terminal symbol — is_terminal_rule() = true.
+        use_also  => ['Chalk::Grammar::Symbol'],
+        ctor_raw  => q(name => 'TermRule',
+            expressions => [[
+                Chalk::Grammar::Symbol->new(type => 'terminal', value => 'foo'),
+                Chalk::Grammar::Symbol->new(type => 'terminal', value => 'bar'),
+            ]]),
+        graph_tag   => 'T2_Rule',
+        graph_source => 'hand:T2_Rule',
+    },
+    Rule_mixed => {
+        lib_path    => 'lib/Chalk/Grammar/Rule.pm',
+        class       => 'Chalk::Grammar::Rule',
+        use_module  => 'Chalk::Grammar::Rule',
+        # One alternative with a nonterminal symbol — is_terminal_rule() = false.
+        use_also  => ['Chalk::Grammar::Symbol'],
+        ctor_raw  => q(name => 'MixedRule',
+            expressions => [[
+                Chalk::Grammar::Symbol->new(type => 'terminal',  value => 'foo'),
+                Chalk::Grammar::Symbol->new(type => 'reference', value => 'Bar'),
+            ]]),
+        graph_tag   => 'T2_Rule_mixed',
+        graph_source => 'hand:T2_Rule_mixed',
     },
 );
 
@@ -80,17 +139,19 @@ sub run_unit_method {
             if exists $spec_overrides->{expected_output};
     }
 
-    my $class       = $entry->{class};
-    my $ctor_params = $entry->{ctor_params};
-    my $graph_tag   = $entry->{graph_tag};
+    my $class        = $entry->{class};
+    my $ctor_params  = $entry->{ctor_params};
+    my $ctor_raw     = $entry->{ctor_raw};
+    my $graph_tag    = $entry->{graph_tag};
     my $graph_source = $entry->{graph_source};
 
     my $spec = {
         class       => $class,
-        constructor => { params => $ctor_params },
+        constructor => { params => $ctor_params, raw => $ctor_raw },
         method      => $method_name,
         method_args => [],
         context     => 'scalar',
+        use_also    => $entry->{use_also},
     };
 
     # ---- S side: oracle via real lib/ module ----
@@ -135,12 +196,18 @@ sub check_spec_completeness {
 # _build_oracle_snippet($entry) -> $snippet_text
 #
 # Builds the Perl snippet for the S side: loads the real lib/ module via
-# 'use lib 'lib'' then loads the module with use. The RunUnderPerl harness
-# driver then instantiates the class and calls the method.
+# 'use lib 'lib'' then loads the module with use. When the entry has a
+# use_also list, those modules are loaded as well (needed when ctor_raw
+# constructs objects whose types come from other modules).
 sub _build_oracle_snippet {
     my ($entry) = @_;
-    my $module = $entry->{use_module};
-    return "use lib 'lib';\nuse $module;";
+    my $module   = $entry->{use_module};
+    my @also     = $entry->{use_also} ? $entry->{use_also}->@* : ();
+    my $snippet  = "use lib 'lib';\nuse $module;";
+    for my $also (@also) {
+        $snippet .= "\nuse $also;";
+    }
+    return $snippet;
 }
 
 # _methods_for($unit_name) -> \@method_names

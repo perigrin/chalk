@@ -4252,6 +4252,808 @@ sub _build_T2_Add {
     return $mop;
 }
 
+# ---------------------------------------------------------------------------
+# T2_BinOp: lib/Chalk/IR/Node/BinOp.pm
+#
+# class Chalk::IR::Node::BinOp :isa(Chalk::IR::Node) {
+#     field $left  :param :reader = undef;
+#     field $right :param :reader = undef;
+#     ADJUST { $left //= $self->inputs()->[0]; $right //= $self->inputs()->[1]; }
+#     method op_str() { die "Subclass must implement op_str()"; }
+# }
+#
+# The MOP declares the full inheritance chain:
+#   Chalk::IR::Node — stub with $id and $inputs :param fields
+#   Chalk::IR::Node::BinOp — the unit under test
+#
+# Exercised with explicit left => 'left_val', right => 'right_val' params, so
+# the ADJUST //= is a no-op (values are defined) — tests the reader path.
+# op_str() method dies; both S and P raise matching exceptions (PASS via exception axis).
+#
+# method left() and right() — emitted automatically from :reader field declarations.
+# method op_str() graph:
+#   Start <- unwind.control_in   unwind(inputs=[["Subclass must implement op_str()"]])
+# ADJUST graph:
+#   start_adj <- ca_left.control_in <- ca_right.control_in <- ret_adj.control_in
+#   ca_left  = CompoundAssign(//=, $left,  Subscript(Call($self, 'inputs', []), 0, array))
+#   ca_right = CompoundAssign(//=, $right, Subscript(Call($self, 'inputs', []), 1, array))
+# ---------------------------------------------------------------------------
+sub _build_T2_BinOp {
+    my $adj_factory = Chalk::IR::NodeFactory->new;
+
+    # ---- ADJUST block graph ----
+    # $left //= $self->inputs()->[0]
+    # $right //= $self->inputs()->[1]
+    my $start_adj = $adj_factory->make_cfg('Start', inputs => []);
+
+    # $self->inputs() — method call on $self
+    my $self_var_l  = $adj_factory->make('Constant', value => '$self',   const_type => 'variable');
+    my $name_inputs_l = $adj_factory->make('Constant', value => 'inputs', const_type => 'string');
+    my @inputs_args_l = ();
+    my $call_inputs_l = $adj_factory->make('Call',
+        dispatch_kind => 'method',
+        name          => 'inputs',
+        inputs        => [$self_var_l, $name_inputs_l, \@inputs_args_l],
+    );
+
+    # ->->[0] — array subscript on the result
+    my $idx_0_l  = $adj_factory->make('Constant', value => '0',    const_type => 'integer');
+    my $style_a_l = $adj_factory->make('Constant', value => 'array', const_type => 'string');
+    my $sub_l   = $adj_factory->make('Subscript',
+        inputs => [$call_inputs_l, $idx_0_l, $style_a_l],
+    );
+
+    # $left //= $self->inputs()->[0]
+    my $op_dfor_l = $adj_factory->make('Constant', value => '//=', const_type => 'string');
+    my $left_lhs  = $adj_factory->make('Constant', value => '$left', const_type => 'variable');
+    my $ca_left   = $adj_factory->make('CompoundAssign',
+        op     => '//=',
+        inputs => [$op_dfor_l, $left_lhs, $sub_l],
+    );
+    $ca_left->set_control_in($start_adj);
+
+    # $self->inputs() — second call for right
+    my $self_var_r    = $adj_factory->make('Constant', value => '$self',   const_type => 'variable');
+    my $name_inputs_r = $adj_factory->make('Constant', value => 'inputs',  const_type => 'string');
+    my @inputs_args_r = ();
+    my $call_inputs_r = $adj_factory->make('Call',
+        dispatch_kind => 'method',
+        name          => 'inputs',
+        inputs        => [$self_var_r, $name_inputs_r, \@inputs_args_r],
+    );
+
+    # ->->[1] — array subscript on the result
+    my $idx_1_r   = $adj_factory->make('Constant', value => '1',     const_type => 'integer');
+    my $style_a_r = $adj_factory->make('Constant', value => 'array',  const_type => 'string');
+    my $sub_r     = $adj_factory->make('Subscript',
+        inputs => [$call_inputs_r, $idx_1_r, $style_a_r],
+    );
+
+    # $right //= $self->inputs()->[1]
+    my $op_dfor_r = $adj_factory->make('Constant', value => '//=',   const_type => 'string');
+    my $right_lhs = $adj_factory->make('Constant', value => '$right', const_type => 'variable');
+    my $ca_right  = $adj_factory->make('CompoundAssign',
+        op     => '//=',
+        inputs => [$op_dfor_r, $right_lhs, $sub_r],
+    );
+    $ca_right->set_control_in($ca_left);
+
+    # Synthetic Return with no value (ADJUST has no explicit return).
+    my $ret_adj = Chalk::IR::Node::Return->new(
+        id        => 'Return#hand_T2BinOp_adj',
+        inputs    => [],
+        synthetic => true,
+    );
+    $ret_adj->set_control_in($ca_right);
+
+    my $adj_graph = Chalk::IR::Graph->new;
+    for my $n ($start_adj,
+               $self_var_l, $name_inputs_l, $call_inputs_l, $idx_0_l, $style_a_l, $sub_l,
+               $op_dfor_l, $left_lhs, $ca_left,
+               $self_var_r, $name_inputs_r, $call_inputs_r, $idx_1_r, $style_a_r, $sub_r,
+               $op_dfor_r, $right_lhs, $ca_right,
+               $ret_adj) {
+        $adj_graph->merge($n);
+    }
+
+    # ---- Graph for op_str() -> die "Subclass must implement op_str()" ----
+    my $op_factory = Chalk::IR::NodeFactory->new;
+    my $op_start   = $op_factory->make_cfg('Start', inputs => []);
+    my $die_msg    = $op_factory->make('Constant',
+        value      => 'Subclass must implement op_str()',
+        const_type => 'string',
+    );
+    my @die_args = ($die_msg);
+    my $unwind   = $op_factory->make_cfg('Unwind', inputs => [\@die_args]);
+    $unwind->set_control_in($op_start);
+
+    my $op_graph = Chalk::IR::Graph->new;
+    $op_graph->merge($op_start);
+    $op_graph->merge($die_msg);
+    $op_graph->merge($unwind);
+
+    # ---- Wire MOP: full class chain ----
+    my $mop = Chalk::MOP->new;
+
+    # Chalk::IR::Node — stub with $id :param :reader and $inputs :param :reader = [].
+    my $node_cls = $mop->declare_class('Chalk::IR::Node');
+    $node_cls->declare_field('$id',
+        sigil      => '$',
+        param_name => 'id',
+        attributes => [':param', ':reader'],
+    );
+    $node_cls->declare_field('$inputs',
+        sigil         => '$',
+        param_name    => 'inputs',
+        attributes    => [':param', ':reader'],
+        has_default   => true,
+        default_value => do {
+            my $df = Chalk::IR::NodeFactory->new;
+            my @empty;
+            $df->make('ArrayRef', inputs => [\@empty]);
+        },
+    );
+
+    # Chalk::IR::Node::BinOp — the unit under test.
+    my $binop_cls = $mop->declare_class('Chalk::IR::Node::BinOp',
+        parent_name => 'Chalk::IR::Node',
+    );
+
+    # field $left :param :reader = undef
+    my $undef_left = do {
+        my $df = Chalk::IR::NodeFactory->new;
+        $df->make('Constant', value => 'undef', const_type => 'string');
+    };
+    $binop_cls->declare_field('$left',
+        sigil         => '$',
+        param_name    => 'left',
+        attributes    => [':param', ':reader'],
+        has_default   => true,
+        default_value => $undef_left,
+    );
+
+    # field $right :param :reader = undef
+    my $undef_right = do {
+        my $df = Chalk::IR::NodeFactory->new;
+        $df->make('Constant', value => 'undef', const_type => 'string');
+    };
+    $binop_cls->declare_field('$right',
+        sigil         => '$',
+        param_name    => 'right',
+        attributes    => [':param', ':reader'],
+        has_default   => true,
+        default_value => $undef_right,
+    );
+
+    # ADJUST block
+    $binop_cls->declare_adjust(graph => $adj_graph);
+
+    # method op_str()
+    $binop_cls->declare_method('op_str', params => [], graph => $op_graph);
+
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# T2_Symbol: lib/Chalk/Grammar/Symbol.pm
+#
+# class Chalk::Grammar::Symbol {
+#     field $type       :param :reader;
+#     field $value      :param :reader;
+#     field $quantifier :param :reader = undef;
+#     method is_terminal()   { $type eq 'terminal' }
+#     method is_reference()  { $type eq 'reference' }
+#     method is_quantified() { defined $quantifier }
+#     method goto_key()      { ($type eq 'reference' ? 'n:' : 't:') . $value }
+#     method to_string() { my $str = $self->is_terminal() ? "/$value/" : $value; $str .= $quantifier if defined $quantifier; return $str; }
+# }
+#
+# The MOP is self-contained. No parent class (Symbol has no :isa).
+# Exercised with two registry entries:
+#   Symbol     — type='terminal', value='foo'  → is_terminal=true, is_reference=false
+#   Symbol_ref — type='reference', value='Bar', quantifier='*' → reverse bilaterals
+#
+# Method graph layouts:
+#   is_terminal()   → TernaryExpr($type eq 'terminal', true, false) or BinOp(eq, $type, 'terminal')
+#   is_reference()  → BinOp(eq, $type, 'reference')
+#   is_quantified() → Call(defined, [$quantifier])
+#   goto_key()      → Interpolate([TernaryExpr(eq, 'n:', 't:'), $value])
+#   to_string()     → complex: my $str = is_terminal ? "/$value/" : $value;
+#                             $str .= $quantifier if defined($quantifier); return $str;
+#
+# Because goto_key uses string concat via Interpolate and a ternary:
+#   ($type eq 'reference' ? 'n:' : 't:') . $value
+# We emit this as a BinOp(., TernaryExpr(NumEq-like strEq, 'n:', 't:'), $value).
+# The actual emitter node for string eq is a BinOp with op 'eq'.
+# ---------------------------------------------------------------------------
+sub _build_T2_Symbol {
+
+    # ---- Graph for is_terminal() { $type eq 'terminal' } ----
+    # StrEq node: inputs[0]=Constant('eq'), inputs[1]=$type, inputs[2]='terminal'
+    my $it_factory = Chalk::IR::NodeFactory->new;
+    my $it_start   = $it_factory->make_cfg('Start', inputs => []);
+    my $it_op      = $it_factory->make('Constant', value => 'eq',       const_type => 'string');
+    my $it_type    = $it_factory->make('Constant', value => '$type',    const_type => 'variable');
+    my $it_term    = $it_factory->make('Constant', value => 'terminal', const_type => 'string');
+    my $it_eq      = $it_factory->make('StrEq', inputs => [$it_op, $it_type, $it_term]);
+    my $it_ret     = $it_factory->make_cfg('Return', inputs => [$it_eq]);
+    $it_ret->set_control_in($it_start);
+
+    my $it_graph = Chalk::IR::Graph->new;
+    for my $n ($it_start, $it_op, $it_type, $it_term, $it_eq, $it_ret) {
+        $it_graph->merge($n);
+    }
+
+    # ---- Graph for is_reference() { $type eq 'reference' } ----
+    my $ir_factory = Chalk::IR::NodeFactory->new;
+    my $ir_start   = $ir_factory->make_cfg('Start', inputs => []);
+    my $ir_op      = $ir_factory->make('Constant', value => 'eq',        const_type => 'string');
+    my $ir_type    = $ir_factory->make('Constant', value => '$type',     const_type => 'variable');
+    my $ir_ref     = $ir_factory->make('Constant', value => 'reference', const_type => 'string');
+    my $ir_eq      = $ir_factory->make('StrEq', inputs => [$ir_op, $ir_type, $ir_ref]);
+    my $ir_ret     = $ir_factory->make_cfg('Return', inputs => [$ir_eq]);
+    $ir_ret->set_control_in($ir_start);
+
+    my $ir_graph = Chalk::IR::Graph->new;
+    for my $n ($ir_start, $ir_op, $ir_type, $ir_ref, $ir_eq, $ir_ret) {
+        $ir_graph->merge($n);
+    }
+
+    # ---- Graph for is_quantified() { defined $quantifier } ----
+    my $iq_factory = Chalk::IR::NodeFactory->new;
+    my $iq_start   = $iq_factory->make_cfg('Start', inputs => []);
+    my $iq_name    = $iq_factory->make('Constant', value => 'defined',     const_type => 'string');
+    my $iq_qvar    = $iq_factory->make('Constant', value => '$quantifier', const_type => 'variable');
+    my @iq_args    = ($iq_qvar);
+    my $iq_call    = $iq_factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'defined',
+        inputs        => [$iq_name, \@iq_args],
+    );
+    my $iq_ret     = $iq_factory->make_cfg('Return', inputs => [$iq_call]);
+    $iq_ret->set_control_in($iq_start);
+
+    my $iq_graph = Chalk::IR::Graph->new;
+    for my $n ($iq_start, $iq_name, $iq_qvar, $iq_call, $iq_ret) {
+        $iq_graph->merge($n);
+    }
+
+    # ---- Graph for goto_key() { ($type eq 'reference' ? 'n:' : 't:') . $value } ----
+    # TernaryExpr($type eq 'reference', 'n:', 't:')  — then concat with $value
+    # BinOp('.', TernaryExpr(...), $value)
+    my $gk_factory = Chalk::IR::NodeFactory->new;
+    my $gk_start   = $gk_factory->make_cfg('Start', inputs => []);
+
+    # $type eq 'reference'
+    my $gk_eq_op   = $gk_factory->make('Constant', value => 'eq',        const_type => 'string');
+    my $gk_type    = $gk_factory->make('Constant', value => '$type',     const_type => 'variable');
+    my $gk_ref_str = $gk_factory->make('Constant', value => 'reference', const_type => 'string');
+    my $gk_eq      = $gk_factory->make('StrEq', inputs => [$gk_eq_op, $gk_type, $gk_ref_str]);
+
+    # Ternary: $type eq 'reference' ? 'n:' : 't:'
+    my $gk_n_colon = $gk_factory->make('Constant', value => 'n:', const_type => 'string');
+    my $gk_t_colon = $gk_factory->make('Constant', value => 't:', const_type => 'string');
+    my $gk_tern    = $gk_factory->make('TernaryExpr',
+        inputs => [$gk_eq, $gk_n_colon, $gk_t_colon],
+    );
+
+    # ternary_result . $value
+    my $gk_dot_op  = $gk_factory->make('Constant', value => '.',     const_type => 'string');
+    my $gk_value   = $gk_factory->make('Constant', value => '$value', const_type => 'variable');
+    my $gk_concat  = $gk_factory->make('Concat', inputs => [$gk_dot_op, $gk_tern, $gk_value]);
+
+    my $gk_ret = $gk_factory->make_cfg('Return', inputs => [$gk_concat]);
+    $gk_ret->set_control_in($gk_start);
+
+    my $gk_graph = Chalk::IR::Graph->new;
+    for my $n ($gk_start, $gk_eq_op, $gk_type, $gk_ref_str, $gk_eq,
+               $gk_n_colon, $gk_t_colon, $gk_tern,
+               $gk_dot_op, $gk_value, $gk_concat, $gk_ret) {
+        $gk_graph->merge($n);
+    }
+
+    # ---- Graph for to_string() ----
+    # my $str = $self->is_terminal() ? "/$value/" : $value;
+    # $str .= $quantifier if defined $quantifier;
+    # return $str;
+    #
+    # Node layout:
+    #   start
+    #   -- call is_terminal: Call(method, $self, 'is_terminal', [])
+    #   -- ternary: TernaryExpr(call_it, Interpolate(['/', $value, '/']), $value_var)
+    #   -- VarDecl($str, ternary)
+    #   -- defined $quantifier: Call(defined, [$quantifier])
+    #   -- If(defined_q, then=[CompoundAssign(.=, $str, $quantifier_var)])
+    #   -- Return($str_read)
+    my $ts_factory = Chalk::IR::NodeFactory->new;
+    my $ts_start   = $ts_factory->make_cfg('Start', inputs => []);
+
+    # $self->is_terminal()
+    my $ts_self    = $ts_factory->make('Constant', value => '$self',       const_type => 'variable');
+    my $ts_it_name = $ts_factory->make('Constant', value => 'is_terminal', const_type => 'string');
+    my @ts_it_args = ();
+    my $ts_it_call = $ts_factory->make('Call',
+        dispatch_kind => 'method',
+        name          => 'is_terminal',
+        inputs        => [$ts_self, $ts_it_name, \@ts_it_args],
+    );
+
+    # "/$value/" — Interpolate([Constant('/'), $value, Constant('/')])
+    my $ts_slash1  = $ts_factory->make('Constant', value => '/',     const_type => 'string');
+    my $ts_val_v   = $ts_factory->make('Constant', value => '$value', const_type => 'variable');
+    my $ts_slash2  = $ts_factory->make('Constant', value => '/',     const_type => 'string');
+    my @ts_interp_parts = ($ts_slash1, $ts_val_v, $ts_slash2);
+    my $ts_interp  = $ts_factory->make('Interpolate', inputs => [\@ts_interp_parts]);
+
+    # $value (bare) for reference case
+    my $ts_val_bare = $ts_factory->make('Constant', value => '$value', const_type => 'variable');
+
+    # TernaryExpr: is_terminal ? "/$value/" : $value
+    my $ts_tern    = $ts_factory->make('TernaryExpr',
+        inputs => [$ts_it_call, $ts_interp, $ts_val_bare],
+    );
+
+    # VarDecl: my $str = ternary
+    my $ts_str_name = $ts_factory->make('Constant', value => '$str', const_type => 'string');
+    my $ts_var_str  = $ts_factory->make('VarDecl',
+        inputs => [$ts_str_name, $ts_tern],
+        scope  => 'my',
+    );
+    $ts_var_str->set_control_in($ts_start);
+
+    # defined $quantifier
+    my $ts_def_name = $ts_factory->make('Constant', value => 'defined',     const_type => 'string');
+    my $ts_q_var    = $ts_factory->make('Constant', value => '$quantifier', const_type => 'variable');
+    my @ts_def_args = ($ts_q_var);
+    my $ts_def_call = $ts_factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'defined',
+        inputs        => [$ts_def_name, \@ts_def_args],
+    );
+
+    # $str .= $quantifier — CompoundAssign(.=, $str, $quantifier_var)
+    my $ts_dotass_op  = $ts_factory->make('Constant', value => '.=',          const_type => 'string');
+    my $ts_str_lhs    = $ts_factory->make('Constant', value => '$str',        const_type => 'variable');
+    my $ts_q_rhs      = $ts_factory->make('Constant', value => '$quantifier', const_type => 'variable');
+    my $ts_dotass     = $ts_factory->make('CompoundAssign',
+        op     => '.=',
+        inputs => [$ts_dotass_op, $ts_str_lhs, $ts_q_rhs],
+    );
+
+    # If node: inputs[0]=control(var_str), inputs[1]=condition(defined_q)
+    # Schedule data carries then_stmts=[ts_dotass], else_stmts=[]
+    my $ts_if = $ts_factory->make('If', inputs => [$ts_var_str, $ts_def_call]);
+    my $ts_if_sd = Chalk::Scheduler::EagerPinning::If->new(
+        node       => $ts_if,
+        then_stmts => [$ts_dotass],
+        else_stmts => [],
+    );
+    $ts_if->set_schedule_data($ts_if_sd);
+    my $ts_if_region = $ts_factory->make('Region', inputs => []);
+    $ts_if->set_region($ts_if_region);
+
+    # Return $str; control_in = if_region (joins if/else paths)
+    my $ts_str_read = $ts_factory->make('Constant', value => '$str', const_type => 'variable');
+    my $ts_ret      = $ts_factory->make_cfg('Return', inputs => [$ts_str_read]);
+    $ts_ret->set_control_in($ts_if_region);
+
+    my $ts_graph = Chalk::IR::Graph->new;
+    for my $n ($ts_start,
+               $ts_self, $ts_it_name, $ts_it_call,
+               $ts_slash1, $ts_val_v, $ts_slash2, $ts_interp,
+               $ts_val_bare, $ts_tern,
+               $ts_str_name, $ts_var_str,
+               $ts_def_name, $ts_q_var, $ts_def_call,
+               $ts_dotass_op, $ts_str_lhs, $ts_q_rhs, $ts_dotass,
+               $ts_if, $ts_if_region, $ts_str_read, $ts_ret) {
+        $ts_graph->merge($n);
+    }
+
+    # ---- Wire MOP: Chalk::Grammar::Symbol (no parent class) ----
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Chalk::Grammar::Symbol');
+
+    # field $type :param :reader
+    $cls->declare_field('$type',
+        sigil      => '$',
+        param_name => 'type',
+        attributes => [':param', ':reader'],
+    );
+
+    # field $value :param :reader
+    $cls->declare_field('$value',
+        sigil      => '$',
+        param_name => 'value',
+        attributes => [':param', ':reader'],
+    );
+
+    # field $quantifier :param :reader = undef
+    my $undef_q = do {
+        my $df = Chalk::IR::NodeFactory->new;
+        $df->make('Constant', value => 'undef', const_type => 'string');
+    };
+    $cls->declare_field('$quantifier',
+        sigil         => '$',
+        param_name    => 'quantifier',
+        attributes    => [':param', ':reader'],
+        has_default   => true,
+        default_value => $undef_q,
+    );
+
+    $cls->declare_method('is_terminal',   params => [], graph => $it_graph);
+    $cls->declare_method('is_reference',  params => [], graph => $ir_graph);
+    $cls->declare_method('is_quantified', params => [], graph => $iq_graph);
+    $cls->declare_method('goto_key',      params => [], graph => $gk_graph);
+    $cls->declare_method('to_string',     params => [], graph => $ts_graph);
+
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# T2_Rule: lib/Chalk/Grammar/Rule.pm — terminal-only alternative
+#
+# class Chalk::Grammar::Rule {
+#     field $name        :param :reader;
+#     field $expressions :param :reader;
+#     method alternative_count() { return scalar $expressions->@*; }
+#     method is_terminal_rule() { for my $alt ($expressions->@*) { for my $symbol ($alt->@*) { return false unless $symbol->is_terminal(); } } return true; }
+#     method to_string() { my @alts = map { join(' ', map { $_->to_string() } $_->@*) } $expressions->@*; return "$name ::= " . join(' | ', @alts) . " ;"; }
+# }
+#
+# Exercised with real Symbol objects passed via ctor_raw:
+#   Rule (terminal): expressions=[[Symbol(terminal,'foo'), Symbol(terminal,'bar')]]
+#     alternative_count=1, is_terminal_rule=true, to_string='TermRule ::= /foo/ /bar/ ;'
+#   Rule_mixed: expressions=[[Symbol(terminal,'foo'), Symbol(reference,'Bar')]]
+#     alternative_count=1, is_terminal_rule=false, to_string='MixedRule ::= /foo/ Bar ;'
+#
+# Because Rule depends on Symbol objects via $symbol->is_terminal() and
+# $_->to_string(), the generated Rule class must call methods on the
+# Symbol objects stored in $expressions. These method calls use Call(method, ...)
+# nodes in the IR.
+#
+# alternative_count() graph:
+#   Start <- ret.control_in
+#   ret(inputs=[Call(builtin, 'scalar', [PostfixDeref($expressions, '@')])])
+#
+# is_terminal_rule() graph:
+#   Start <- var_result <- for_alt (Loop) <- return_false_if_or_true
+#   Complex nested-loop + early return: emit via two nested foreach Loops
+#   with Return(false) inside and Return(true) after.
+#
+# to_string() graph:
+#   Start <- var_alts <- ret
+#   map expression over $expressions->@* producing @alts
+#   return "$name ::= " . join(' | ', @alts) . " ;"
+#
+# NOTE: The nested-loop + early-return pattern in is_terminal_rule() is complex
+# to represent in the IR (requires TryCatch or loop-exit semantics). The
+# to_string() map-of-map is similarly complex. These are potential emitter gaps.
+# ---------------------------------------------------------------------------
+sub _build_T2_Rule {
+    # ---- Graph for alternative_count() { return scalar $expressions->@*; } ----
+    # Emits: return scalar($expressions->@*);
+    my $ac_factory = Chalk::IR::NodeFactory->new;
+    my $ac_start   = $ac_factory->make_cfg('Start', inputs => []);
+
+    # $expressions->@* — PostfixDeref: inputs[0]=target, inputs[1]=sigil_constant
+    my $ac_expr_var   = $ac_factory->make('Constant', value => '$expressions', const_type => 'variable');
+    my $ac_sigil_at   = $ac_factory->make('Constant', value => '@',            const_type => 'string');
+    my $ac_deref      = $ac_factory->make('PostfixDeref',
+        sigil  => '@',
+        inputs => [$ac_expr_var, $ac_sigil_at],
+    );
+
+    # scalar($expressions->@*)
+    my $ac_scalar_name = $ac_factory->make('Constant', value => 'scalar', const_type => 'string');
+    my @ac_scalar_args = ($ac_deref);
+    my $ac_scalar      = $ac_factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'scalar',
+        inputs        => [$ac_scalar_name, \@ac_scalar_args],
+    );
+
+    my $ac_ret = $ac_factory->make_cfg('Return', inputs => [$ac_scalar]);
+    $ac_ret->set_control_in($ac_start);
+
+    my $ac_graph = Chalk::IR::Graph->new;
+    for my $n ($ac_start, $ac_expr_var, $ac_sigil_at, $ac_deref,
+               $ac_scalar_name, $ac_scalar, $ac_ret) {
+        $ac_graph->merge($n);
+    }
+
+    # ---- Graph for is_terminal_rule() ----
+    #   for my $alt ($expressions->@*) {
+    #       for my $sym ($alt->@*) {
+    #           return false unless $sym->is_terminal();  (= if !is_terminal -> return false)
+    #       }
+    #   }
+    #   return true;
+    #
+    # Structure:
+    #   start
+    #   outer_loop (foreach $alt, list=$expressions->@*)
+    #       outer_region (outer loop exit)
+    #   inner_loop (foreach $sym, list=$alt->@*) [in outer body_stmts]
+    #       inner_region (inner loop exit)
+    #   if_node (condition=!$sym->is_terminal()) [in inner body_stmts]
+    #       if_region (if join)
+    #   ret_false (Return false) [in if then_stmts]
+    #   ret_true (Return true) [main chain after outer_region]
+    #
+    # Control chain: ret_true.control_in = outer_region
+    #   outer_region.head = outer_loop
+    #   outer_loop.control_in = start
+    # Inner/if structure lives in schedule_data (body_stmts/then_stmts).
+    my $itr_factory = Chalk::IR::NodeFactory->new;
+    my $itr_start   = $itr_factory->make_cfg('Start', inputs => []);
+
+    # $expressions->@*
+    my $outer_expr_var = $itr_factory->make('Constant', value => '$expressions', const_type => 'variable');
+    my $outer_sigil    = $itr_factory->make('Constant', value => '@',            const_type => 'string');
+    my $outer_deref    = $itr_factory->make('PostfixDeref',
+        sigil  => '@',
+        inputs => [$outer_expr_var, $outer_sigil],
+    );
+
+    # $alt->@*
+    my $inner_alt_var = $itr_factory->make('Constant', value => '$alt', const_type => 'variable');
+    my $inner_sigil   = $itr_factory->make('Constant', value => '@',    const_type => 'string');
+    my $inner_deref   = $itr_factory->make('PostfixDeref',
+        sigil  => '@',
+        inputs => [$inner_alt_var, $inner_sigil],
+    );
+
+    # $sym->is_terminal()
+    my $sym_var      = $itr_factory->make('Constant', value => '$sym',        const_type => 'variable');
+    my $it_meth_name = $itr_factory->make('Constant', value => 'is_terminal', const_type => 'string');
+    my @it_meth_args = ();
+    my $sym_is_term  = $itr_factory->make('Call',
+        dispatch_kind => 'method',
+        name          => 'is_terminal',
+        inputs        => [$sym_var, $it_meth_name, \@it_meth_args],
+    );
+
+    # !$sym->is_terminal()
+    my $not_op       = $itr_factory->make('Constant', value => '!', const_type => 'string');
+    my $sym_not_term = $itr_factory->make('Not', inputs => [$not_op, $sym_is_term]);
+
+    # Return(false) — inside If.then_stmts
+    my $ret_false_const = $itr_factory->make('Constant', value => 'false', const_type => 'string');
+    my $ret_false = $itr_factory->make_cfg('Return', inputs => [$ret_false_const]);
+
+    # If node: inputs[0]=placeholder (will be inner_loop), inputs[1]=condition
+    my $if_node = $itr_factory->make('If', inputs => [undef, $sym_not_term]);
+    my $if_sd   = Chalk::Scheduler::EagerPinning::If->new(
+        node       => $if_node,
+        then_stmts => [$ret_false],
+        else_stmts => [],
+    );
+    $if_node->set_schedule_data($if_sd);
+    my $if_region = $itr_factory->make('Region', inputs => []);
+    $if_node->set_region($if_region);
+
+    # Inner Loop: foreach my $sym ($alt->@*) { if(!is_terminal) { return false } }
+    my $inner_iter = $itr_factory->make('Constant', value => '$sym', const_type => 'variable');
+    my $inner_loop = $itr_factory->make_cfg('Loop', inputs => [undef, undef]);
+    my $inner_sd   = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $inner_loop,
+        iterator   => $inner_iter,
+        list       => $inner_deref,
+        body_stmts => [$if_node],
+    );
+    $inner_loop->set_schedule_data($inner_sd);
+    my $inner_region = $itr_factory->make('Region', inputs => []);
+    $inner_loop->set_region($inner_region);
+
+    # Outer Loop: foreach my $alt ($expressions->@*) { inner_loop }
+    my $outer_iter = $itr_factory->make('Constant', value => '$alt', const_type => 'variable');
+    my $outer_loop = $itr_factory->make_cfg('Loop', inputs => [$itr_start, undef]);
+    $outer_loop->set_control_in($itr_start);
+    my $outer_sd   = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $outer_loop,
+        iterator   => $outer_iter,
+        list       => $outer_deref,
+        body_stmts => [$inner_loop],
+    );
+    $outer_loop->set_schedule_data($outer_sd);
+    my $outer_region = $itr_factory->make('Region', inputs => []);
+    $outer_loop->set_region($outer_region);
+
+    # Return(true) — main chain exit after outer loop
+    my $ret_true_const = $itr_factory->make('Constant', value => 'true', const_type => 'string');
+    my $ret_true = $itr_factory->make_cfg('Return', inputs => [$ret_true_const]);
+    $ret_true->set_control_in($outer_region);
+
+    my $itr_graph = Chalk::IR::Graph->new;
+    for my $n ($itr_start,
+               $outer_expr_var, $outer_sigil, $outer_deref,
+               $inner_alt_var, $inner_sigil, $inner_deref,
+               $sym_var, $it_meth_name, $sym_is_term,
+               $not_op, $sym_not_term,
+               $ret_false_const, $ret_false,
+               $if_node, $if_region,
+               $inner_iter, $inner_loop, $inner_region,
+               $outer_iter, $outer_loop, $outer_region,
+               $ret_true_const, $ret_true) {
+        $itr_graph->merge($n);
+    }
+
+    # ---- Graph for to_string() ----
+    # my @alts = map { join(' ', map { $_->to_string() } $_->@*) } $expressions->@*;
+    # return "$name ::= " . join(' | ', @alts) . " ;";
+    #
+    # Node layout:
+    #   start
+    #   innermost AnonSub: sub { $_->to_string() }
+    #     body: [Return(Call(method,$_,'to_string',[]), synthetic=true)]
+    #   inner map+join AnonSub: sub { join(' ', map { inner_anon } $_->@*) }
+    #     body: [Return(Call(join,[' ', Call(map,[inner_anon, PostfixDeref($_,'@')])]), synthetic=true)]
+    #   outer map: map { outer_anon } $expressions->@*  -> @alts
+    #   VarDecl: my @alts = outer_map
+    #   join: join(' | ', @alts)
+    #   Interpolate: [$name, ' ::= ']  -> "$name ::= "
+    #   Concat: "$name ::= " . join_outer  -> mid
+    #   Concat: mid . " ;"  -> result
+    #   Return: result
+    my $ts_factory = Chalk::IR::NodeFactory->new;
+    my $ts_start   = $ts_factory->make_cfg('Start', inputs => []);
+
+    # Innermost anon sub body: $_->to_string()
+    my $ts_topic1    = $ts_factory->make('Constant', value => '$_',        const_type => 'variable');
+    my $ts_ts_name   = $ts_factory->make('Constant', value => 'to_string', const_type => 'string');
+    my @ts_ts_args   = ();
+    my $ts_ts_call   = $ts_factory->make('Call',
+        dispatch_kind => 'method',
+        name          => 'to_string',
+        inputs        => [$ts_topic1, $ts_ts_name, \@ts_ts_args],
+    );
+    my $ts_inner_ret = Chalk::IR::Node::Return->new(
+        id        => 'Return#hand_T2Rule_ts_inner',
+        inputs    => [$ts_ts_call],
+        synthetic => true,
+    );
+    my @ts_inner_p = ();
+    my @ts_inner_b = ($ts_inner_ret);
+    my $ts_inner_anon = $ts_factory->make('AnonSub', inputs => [\@ts_inner_p, \@ts_inner_b]);
+
+    # $_->@* (inner list)
+    my $ts_topic2    = $ts_factory->make('Constant', value => '$_', const_type => 'variable');
+    my $ts_sigil_at2 = $ts_factory->make('Constant', value => '@',  const_type => 'string');
+    my $ts_inner_deref = $ts_factory->make('PostfixDeref',
+        sigil  => '@',
+        inputs => [$ts_topic2, $ts_sigil_at2],
+    );
+
+    # map { inner_anon } $_->@*
+    my $ts_map1_name = $ts_factory->make('Constant', value => 'map', const_type => 'string');
+    my @ts_map1_args = ($ts_inner_anon, $ts_inner_deref);
+    my $ts_map1      = $ts_factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'map',
+        inputs        => [$ts_map1_name, \@ts_map1_args],
+    );
+
+    # join(' ', map1)
+    my $ts_join1_name = $ts_factory->make('Constant', value => 'join', const_type => 'string');
+    my $ts_sp         = $ts_factory->make('Constant', value => ' ',    const_type => 'string');
+    my @ts_join1_args = ($ts_sp, $ts_map1);
+    my $ts_join1      = $ts_factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'join',
+        inputs        => [$ts_join1_name, \@ts_join1_args],
+    );
+
+    # Outer anon sub body: join(' ', map { ts_call } $_->@*)
+    my $ts_outer_ret = Chalk::IR::Node::Return->new(
+        id        => 'Return#hand_T2Rule_ts_outer',
+        inputs    => [$ts_join1],
+        synthetic => true,
+    );
+    my @ts_outer_p = ();
+    my @ts_outer_b = ($ts_outer_ret);
+    my $ts_outer_anon = $ts_factory->make('AnonSub', inputs => [\@ts_outer_p, \@ts_outer_b]);
+
+    # $expressions->@*
+    my $ts_expr_var  = $ts_factory->make('Constant', value => '$expressions', const_type => 'variable');
+    my $ts_sigil_at3 = $ts_factory->make('Constant', value => '@',            const_type => 'string');
+    my $ts_expr_deref = $ts_factory->make('PostfixDeref',
+        sigil  => '@',
+        inputs => [$ts_expr_var, $ts_sigil_at3],
+    );
+
+    # map { outer_anon } $expressions->@*
+    my $ts_map2_name = $ts_factory->make('Constant', value => 'map', const_type => 'string');
+    my @ts_map2_args = ($ts_outer_anon, $ts_expr_deref);
+    my $ts_map2      = $ts_factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'map',
+        inputs        => [$ts_map2_name, \@ts_map2_args],
+    );
+
+    # VarDecl: my @alts = map2
+    my $ts_alts_name = $ts_factory->make('Constant', value => '@alts', const_type => 'string');
+    my $ts_var_alts  = $ts_factory->make('VarDecl',
+        inputs => [$ts_alts_name, $ts_map2],
+        scope  => 'my',
+    );
+    $ts_var_alts->set_control_in($ts_start);
+
+    # join(' | ', @alts)
+    my $ts_join2_name = $ts_factory->make('Constant', value => 'join',  const_type => 'string');
+    my $ts_pipe       = $ts_factory->make('Constant', value => ' | ',   const_type => 'string');
+    my $ts_alts_var   = $ts_factory->make('Constant', value => '@alts', const_type => 'variable');
+    my @ts_join2_args = ($ts_pipe, $ts_alts_var);
+    my $ts_join2      = $ts_factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'join',
+        inputs        => [$ts_join2_name, \@ts_join2_args],
+    );
+
+    # "$name ::= " via Interpolate([$name, ' ::= '])
+    my $ts_name_var = $ts_factory->make('Constant', value => '$name',  const_type => 'variable');
+    my $ts_sep      = $ts_factory->make('Constant', value => ' ::= ', const_type => 'string');
+    my @ts_interp_parts = ($ts_name_var, $ts_sep);
+    my $ts_prefix   = $ts_factory->make('Interpolate', inputs => [\@ts_interp_parts]);
+
+    # "$name ::= " . join2  (Concat)
+    my $ts_dot1 = $ts_factory->make('Constant', value => '.', const_type => 'string');
+    my $ts_mid  = $ts_factory->make('Concat', inputs => [$ts_dot1, $ts_prefix, $ts_join2]);
+
+    # mid . " ;"  (Concat)
+    my $ts_dot2   = $ts_factory->make('Constant', value => '.',  const_type => 'string');
+    my $ts_suffix = $ts_factory->make('Constant', value => ' ;', const_type => 'string');
+    my $ts_result = $ts_factory->make('Concat', inputs => [$ts_dot2, $ts_mid, $ts_suffix]);
+
+    my $ts_ret = $ts_factory->make_cfg('Return', inputs => [$ts_result]);
+    $ts_ret->set_control_in($ts_var_alts);
+
+    my $ts_graph = Chalk::IR::Graph->new;
+    for my $n ($ts_start,
+               $ts_topic1, $ts_ts_name, $ts_ts_call, $ts_inner_ret, $ts_inner_anon,
+               $ts_topic2, $ts_sigil_at2, $ts_inner_deref,
+               $ts_map1_name, $ts_map1,
+               $ts_join1_name, $ts_sp, $ts_join1,
+               $ts_outer_ret, $ts_outer_anon,
+               $ts_expr_var, $ts_sigil_at3, $ts_expr_deref,
+               $ts_map2_name, $ts_map2,
+               $ts_alts_name, $ts_var_alts,
+               $ts_join2_name, $ts_pipe, $ts_alts_var, $ts_join2,
+               $ts_name_var, $ts_sep, $ts_prefix,
+               $ts_dot1, $ts_mid,
+               $ts_dot2, $ts_suffix, $ts_result,
+               $ts_ret) {
+        $ts_graph->merge($n);
+    }
+
+    # ---- Wire MOP: Chalk::Grammar::Rule (no parent class) ----
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Chalk::Grammar::Rule');
+
+    $cls->declare_field('$name',
+        sigil      => '$',
+        param_name => 'name',
+        attributes => [':param', ':reader'],
+    );
+    $cls->declare_field('$expressions',
+        sigil      => '$',
+        param_name => 'expressions',
+        attributes => [':param', ':reader'],
+    );
+
+    $cls->declare_method('alternative_count', params => [], graph => $ac_graph);
+    $cls->declare_method('is_terminal_rule',  params => [], graph => $itr_graph);
+    $cls->declare_method('to_string',         params => [], graph => $ts_graph);
+
+    return $mop;
+}
+
+# T2_Rule_mixed: same class as T2_Rule (Chalk::Grammar::Rule) but exercised
+# with a mixed expression (has a nonterminal symbol).
+# The MOP is identical to T2_Rule — only the ctor_params differ (handled in Tier2.pm).
+sub _build_T2_Rule_mixed {
+    return _build_T2_Rule();
+}
+
 # Populate the dispatch table after all builders are defined.
 %BUILDERS = (
     A1 => \&_build_A1,
@@ -4334,7 +5136,11 @@ sub _build_T2_Add {
     M24 => \&_build_M24,
 
     # Tier-2 units: real lib/ modules exercised via hand-authored graphs
-    T2_Add => \&_build_T2_Add,
+    T2_Add       => \&_build_T2_Add,
+    T2_BinOp     => \&_build_T2_BinOp,
+    T2_Symbol    => \&_build_T2_Symbol,
+    T2_Rule      => \&_build_T2_Rule,
+    T2_Rule_mixed => \&_build_T2_Rule_mixed,
 );
 
 1;

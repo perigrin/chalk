@@ -15,7 +15,7 @@ class Chalk::Grammar::Symbol {
         defined($quantifier);
     }
     method goto_key() {
-        $type eq 'reference' ? 'n:' : 't:' . $value;
+        ($type eq 'reference' ? 'n:' : 't:') . $value;
     }
     method to_string() {
         my $str = $self->is_terminal() ? "/$value/" : $value;
