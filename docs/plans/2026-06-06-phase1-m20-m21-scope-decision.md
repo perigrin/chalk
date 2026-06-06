@@ -2,7 +2,7 @@
 
 **Issue**: 019e9af9-8a3a  
 **Date**: 2026-06-06  
-**Status**: M21 = REJECT (decided). M20 = pending perigrin's call (recommendation: IN-SUBSET-DEFERRED).
+**Status**: M21 = REJECT (decided). M20 = IN-SUBSET-DEFERRED (decided by perigrin 2026-06-06; Option A). M20 stays NOT-YET-COVERED with the recorded reason "needs Do IR node + DoBlock grammar rule + emitter"; a follow-up codegen issue tracks it. M20 is in-subset (used in lib/ via `//= do {}`, needed for the self-host capstone) but not Phase-1 work.
 
 ---
 

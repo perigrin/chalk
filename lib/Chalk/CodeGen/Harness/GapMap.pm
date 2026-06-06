@@ -39,6 +39,23 @@ my %REJECT_IDIOMS = (
          . 'Chalk uses try/catch for exception handling (see CLAUDE.md)',
 );
 
+# Idioms that are IN-SUBSET but deliberately deferred past Phase 1, with a
+# specific reason recorded so the gap map does not flatten them into a generic
+# "no hand graph defined".  Key = tag, value = reason string.  These remain
+# NOT-YET-COVERED (in the denominator, blocking tier-1-green until addressed),
+# but the reason documents the known follow-up work.
+my %DEFERRED_REASONS = (
+    # do { } as an expression is valid Perl, NOT policy-excluded, and is used
+    # in Chalk's own source (SemanticAction.pm, FilterComposite.pm use //= do {})
+    # so it is needed for the self-host capstone.  Classified IN-SUBSET-DEFERRED
+    # per the M20/M21 scope decision (docs/plans/2026-06-06-phase1-m20-m21-scope-decision.md):
+    # it needs a Chalk::IR::Node::Do + a DoBlock grammar rule + emitter; tracked
+    # as a follow-up codegen issue, not Phase-1 work.
+    M20 => 'IN-SUBSET-DEFERRED: needs Chalk::IR::Node::Do + DoBlock grammar rule '
+         . '+ emitter; tracked as a follow-up codegen issue (see the M20/M21 '
+         . 'scope-decision doc)',
+);
+
 # ---------------------------------------------------------------------------
 # generate() -> \%gap_map
 #
@@ -400,12 +417,16 @@ sub _run_one {
     }
 
     # No hand graph yet — record NOT-YET-COVERED (still in denominator).
+    # If the tag has a recorded deferral reason, surface it instead of the
+    # generic "no hand graph defined" so the artifact documents the decision.
     unless (defined $mop) {
         return {
             tag     => $tag,
             group   => $group,
             verdict => 'NOT-YET-COVERED',
-            extra   => { reason => 'no hand graph defined' },
+            extra   => {
+                reason => $DEFERRED_REASONS{$tag} // 'no hand graph defined',
+            },
         };
     }
 
