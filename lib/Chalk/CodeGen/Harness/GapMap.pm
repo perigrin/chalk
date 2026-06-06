@@ -177,9 +177,63 @@ sub _group_of {
     return $1 // croak "GapMap: cannot extract group from tag '$tag'";
 }
 
-# Build a default spec for running a corpus entry through RunUnderPerl.
+# ---------------------------------------------------------------------------
+# check_spec_completeness($tag, $snippet, $spec) -> bool/undef
+#
+# Structural guard against vacuous passes from under-specified exercise specs.
+# Returns a true value (the reason string) when the spec is under-specified:
+# the snippet declares method/sub parameters but the spec supplies no args.
+# Returns false/undef when the spec is adequate.
+#
+# A parameterized method or sub run with no args exercises only the undef-arg
+# path. Both oracle and generated code produce the same degenerate result,
+# so the verdict is meaninglessly PASS. This guard catches that before the
+# rig runs.
+# ---------------------------------------------------------------------------
+sub check_spec_completeness {
+    my (undef, $tag, $snippet, $spec) = @_;    # class method
+
+    croak "check_spec_completeness: tag must be a non-empty string"
+        unless defined $tag && length $tag;
+    croak "check_spec_completeness: snippet must be a non-empty string"
+        unless defined $snippet && length $snippet;
+    croak "check_spec_completeness: spec must be a hashref"
+        unless ref $spec eq 'HASH';
+
+    # For sub-based specs, check sub_args vs the sub's parameter list.
+    if (exists $spec->{sub_name}) {
+        my $param_count = _extract_sub_param_count($snippet, $spec->{sub_name});
+        if ($param_count > 0) {
+            my $args = $spec->{sub_args} // [];
+            if (scalar(@$args) == 0) {
+                return "sub '$spec->{sub_name}' has $param_count parameter(s) but spec supplies no sub_args";
+            }
+        }
+        return undef;    # adequately specified
+    }
+
+    # For class-based specs, check method_args vs the method's parameter list.
+    return undef unless exists $spec->{method};
+
+    my $method = $spec->{method};
+    my $param_count = _extract_method_param_count($snippet, $method);
+    if ($param_count > 0) {
+        my $args = $spec->{method_args} // [];
+        if (scalar(@$args) == 0) {
+            return "method '$method' has $param_count parameter(s) but spec supplies no method_args";
+        }
+    }
+    return undef;    # adequately specified
+}
+
+# Build a spec for running a corpus entry through RunUnderPerl.
 # Most corpus entries are class C { method m() { ... } }; a few are not.
 # For non-class entries (I2, M1, M2) we return a 'sub_name' spec for capture_sub.
+#
+# Parameterized idioms have representative method_args that exercise the
+# interesting behavior (not just the degenerate undef-arg path).
+# Multi-outcome idioms (logical ops, ternary, regex match) use the first
+# representative arg here; bilateral coverage is provided by the batch tests.
 sub _spec_for {
     my ($tag, $snippet) = @_;
 
@@ -197,12 +251,46 @@ sub _spec_for {
 
     return undef unless $snippet =~ /class\s+C\s*\{/;
 
+    # Per-tag representative args for parameterized idioms.
+    # Chosen so the interesting behavior is exercised (not just the undef path).
+    # Bilateral cases (both true/false outcome branches) are covered by batch tests.
+    my %PARAM_ARGS = (
+        # D6: ternary $n > 0 ? 1 : 2 — pass n=1 so the true branch (1) is taken.
+        D6  => [1],
+        # J1: regex match $s =~ /foo/ — pass 'foobar' so the match succeeds.
+        J1  => ['foobar'],
+        # J2: s/foo/bar/ — pass 'foobar' so the substitution actually fires.
+        J2  => ['foobar'],
+        # L1: $a && $b — pass (1, 2): both truthy, returns 2 (last truthy value).
+        L1  => [1, 2],
+        # L2: $a || $b — pass (0, 3): left false so right (3) is returned.
+        L2  => [0, 3],
+        # L3: $a // $b — pass (undef, 4): left undefined so right (4) is returned.
+        L3  => [undef, 4],
+        # L4: !$a — pass (0): false input, so !0 = true (1).
+        L4  => [0],
+        # M3: "hello $name" — pass 'world' so interpolation produces "hello world".
+        M3  => ['world'],
+        # M8: $r->[0] — pass a scalar (stringified ref is exercised via exception axis).
+        M8  => ['dummy_ref'],
+        # M9: $r->{key} — pass a scalar (stringified ref is exercised via exception axis).
+        M9  => ['dummy_ref'],
+        # M14: "got " . $a — pass 'it' so concatenation yields "got it".
+        M14 => ['it'],
+        # M15: $y //= $x — pass 5 so defined-or assign gives $y = 5.
+        M15 => [5],
+        # M24: $r->{a}->[0] — pass a scalar (stringified ref via exception axis).
+        M24 => ['dummy_ref'],
+    );
+
+    my $method_args = $PARAM_ARGS{$tag} // [];
+
     # Class-based entries: instantiate C and call method m().
     my $spec = {
         class       => 'C',
         constructor => { params => {} },
         method      => 'm',
-        method_args => [],
+        method_args => $method_args,
         context     => 'scalar',
     };
     return $spec;
@@ -258,6 +346,24 @@ sub _run_one {
             group   => $group,
             verdict => 'NOT-YET-COVERED',
             extra   => { reason => 'non-class snippet; cannot exercise via class rig' },
+        };
+    }
+
+    # Structural guard: a spec that supplies no args for a parameterized method
+    # would produce a vacuous PASS via the degenerate undef-arg path.
+    # UNDER_SPECIFIED is a correctness alarm, not backlog.
+    my $under_spec_reason = eval {
+        Chalk::CodeGen::Harness::GapMap->check_spec_completeness($tag, $snippet, $spec)
+    };
+    if ($under_spec_reason) {
+        return {
+            tag     => $tag,
+            group   => $group,
+            verdict => 'UNDER_SPECIFIED',
+            extra   => {
+                reason           => "spec is under-specified: $under_spec_reason",
+                implicated_layer => 'spec',
+            },
         };
     }
 
@@ -370,6 +476,56 @@ sub _write_artifact {
     my $json = JSON::PP->new->utf8->canonical->encode($gap_map);
     print $fh $json;
     close $fh;
+}
+
+# ---------------------------------------------------------------------------
+# _extract_method_param_count($snippet, $method_name) -> $count
+#
+# Parses the Perl snippet for a method declaration matching:
+#   method $method_name($param, ...) { ... }
+# Returns the number of declared parameters (excluding $self, which is
+# implicit in Perl 5.42 class methods and not listed in the signature).
+# Returns 0 if the method has no parameters or is not found.
+# ---------------------------------------------------------------------------
+sub _extract_method_param_count {
+    my ($snippet, $method) = @_;
+    return 0 unless defined $snippet && defined $method && length $method;
+
+    # Match:  method m($a, $b) { ... }  or  method m() { ... }
+    # The signature is the content between the outer parentheses after the method name.
+    if ($snippet =~ /\bmethod\s+\Q$method\E\s*\(([^)]*)\)/) {
+        my $sig = $1 // '';
+        $sig =~ s/^\s+|\s+$//g;
+        return 0 unless length $sig;
+
+        # Count comma-separated parameters (each starts with $, @, or %).
+        my @params = split /\s*,\s*/, $sig;
+        my $count  = scalar grep { /^\s*[\$\@\%]/ } @params;
+        return $count;
+    }
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# _extract_sub_param_count($snippet, $sub_name) -> $count
+#
+# Same as _extract_method_param_count but for top-level subs:
+#   sub $sub_name($param, ...) { ... }
+# ---------------------------------------------------------------------------
+sub _extract_sub_param_count {
+    my ($snippet, $sub_name) = @_;
+    return 0 unless defined $snippet && defined $sub_name && length $sub_name;
+
+    if ($snippet =~ /\bsub\s+\Q$sub_name\E\s*\(([^)]*)\)/) {
+        my $sig = $1 // '';
+        $sig =~ s/^\s+|\s+$//g;
+        return 0 unless length $sig;
+
+        my @params = split /\s*,\s*/, $sig;
+        my $count  = scalar grep { /^\s*[\$\@\%]/ } @params;
+        return $count;
+    }
+    return 0;
 }
 
 1;

@@ -207,4 +207,89 @@ sub synthetic_gap_map {
     }
 }
 
+# ---------------------------------------------------------------------------
+# N8: Parameterized idiom exercised with empty args must NOT silently PASS.
+#
+# The structural guard: if a snippet's method/sub signature declares parameters
+# and the spec supplies no args (method_args => []), the run must be FLAGGED
+# (verdict UNDER_SPECIFIED) rather than producing a vacuous PASS via the
+# degenerate undef-arg path.
+#
+# We drive this through GapMap->check_spec_completeness($tag, $snippet, $spec)
+# which must return a true/defined value when the spec is under-specified.
+# When a fully specified spec is supplied, it must return false/undef.
+# ---------------------------------------------------------------------------
+{
+    # A parameterized snippet: method m($n) { ... }
+    my $parameterized_snippet = 'class C { method m($n) { return $n > 0 ? 1 : 2; } }';
+
+    # Empty args spec — this is what the old _spec_for default supplied.
+    my $empty_spec = {
+        class       => 'C',
+        constructor => { params => {} },
+        method      => 'm',
+        method_args => [],
+        context     => 'scalar',
+    };
+
+    # check_spec_completeness must DETECT the under-specification.
+    my $flagged = eval {
+        Chalk::CodeGen::Harness::GapMap->check_spec_completeness(
+            'D6_synthetic', $parameterized_snippet, $empty_spec
+        )
+    };
+    my $err = $@;
+
+    # Either it dies (croaks) OR it returns a truthy "flagged" indicator.
+    # Either outcome prevents a silent vacuous PASS.
+    my $detected = (defined $flagged && $flagged) || (defined $err && length $err);
+    ok($detected,
+        'N8: parameterized snippet with empty method_args is detected as under-specified');
+}
+
+# N8b: A correctly-specified parameterized spec must NOT be flagged.
+{
+    my $parameterized_snippet = 'class C { method m($n) { return $n > 0 ? 1 : 2; } }';
+
+    my $good_spec = {
+        class       => 'C',
+        constructor => { params => {} },
+        method      => 'm',
+        method_args => [1],
+        context     => 'scalar',
+    };
+
+    my $flagged = eval {
+        Chalk::CodeGen::Harness::GapMap->check_spec_completeness(
+            'D6_synthetic', $parameterized_snippet, $good_spec
+        )
+    };
+
+    # A spec that supplies args must NOT be flagged (must return false/undef, not die).
+    ok(!$@ && !$flagged,
+        'N8b: correctly-specified parameterized spec is NOT flagged as under-specified');
+}
+
+# N8c: A non-parameterized snippet with empty args must NOT be flagged.
+{
+    my $no_params_snippet = 'class C { method m() { return 42; } }';
+
+    my $empty_spec = {
+        class       => 'C',
+        constructor => { params => {} },
+        method      => 'm',
+        method_args => [],
+        context     => 'scalar',
+    };
+
+    my $flagged = eval {
+        Chalk::CodeGen::Harness::GapMap->check_spec_completeness(
+            'A1_synthetic', $no_params_snippet, $empty_spec
+        )
+    };
+
+    ok(!$@ && !$flagged,
+        'N8c: non-parameterized snippet with empty args is NOT flagged');
+}
+
 done_testing();
