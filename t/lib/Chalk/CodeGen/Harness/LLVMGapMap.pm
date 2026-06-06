@@ -121,6 +121,40 @@ sub _idiom_table {
                 return _make_return($f, $mul);
             },
         },
+        # Division and modulo: build the typed graph and ATTEMPT to lower —
+        # the LLVM backend now refuses (loud GAP-die) because neither is
+        # correct as a bare i64 op vs perl semantics. These verdict GAP with
+        # the perl-semantics reason, surfacing the finding in the artifact
+        # rather than silently emitting wrong code. (Phase 3c: Num repr for
+        # `/`, sign-correction for `%`.) Found by the 3b gate code review.
+        {
+            tag         => 'arith-div',
+            group       => 'A',
+            description => 'literal arithmetic: return 3 / 4 (perl float division = 0.75)',
+            perl_oracle => '0.75',
+            build_graph => sub {
+                my $f = Chalk::IR::NodeFactory->new;
+                my $c3  = _int_const($f, 3);
+                my $c4  = _int_const($f, 4);
+                my $div = $f->make('Divide', inputs => [$c3, $c4]);
+                $div->set_representation('Int');
+                return _make_return($f, $div);
+            },
+        },
+        {
+            tag         => 'arith-mod',
+            group       => 'A',
+            description => 'literal arithmetic: return -7 % 3 (perl right-operand sign = 2)',
+            perl_oracle => '2',
+            build_graph => sub {
+                my $f = Chalk::IR::NodeFactory->new;
+                my $c7  = _int_const($f, -7);
+                my $c3  = _int_const($f, 3);
+                my $mod = $f->make('Modulo', inputs => [$c7, $c3]);
+                $mod->set_representation('Int');
+                return _make_return($f, $mod);
+            },
+        },
 
         # ---------------------------------------------------------------
         # Group A: variable declarations

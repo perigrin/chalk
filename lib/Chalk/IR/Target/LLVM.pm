@@ -106,10 +106,24 @@ sub lower_value {
         return $self->_lower_binop_int($node, 'mul');
     }
     elsif ($op eq 'Divide') {
-        return $self->_lower_binop_int($node, 'sdiv');
+        # GAP — NOT lowerable runtime-free as integer division. Perl `/` is
+        # ALWAYS floating-point division (3/4 == 0.75), so `sdiv i64` (which
+        # truncates to 0) MISCOMPILES vs perl. A correct lowering needs a Num
+        # (double) result: Coerce(Int->Num) operands + `fdiv double`. Deferred
+        # to 3c (Num representation + the Int->Num coercion on `/`).
+        die "GAP: op=Divide cannot lower runtime-free as i64 — Perl `/` is "
+          . "float division (3/4=0.75); needs Num repr + fdiv, not sdiv. "
+          . "Deferred to 3c.";
     }
     elsif ($op eq 'Modulo') {
-        return $self->_lower_binop_int($node, 'srem');
+        # GAP — NOT lowerable as bare `srem i64`. Perl `%` follows the SIGN OF
+        # THE RIGHT operand (-7 % 3 == 2), whereas LLVM `srem` follows the left
+        # operand (-7 srem 3 == -1) — different functions for mixed-sign
+        # operands. A correct lowering needs perl-`%` sign-correction. Deferred
+        # to 3c.
+        die "GAP: op=Modulo cannot lower runtime-free as bare srem — Perl `%` "
+          . "follows the right operand's sign (-7%3=2 not -1); needs "
+          . "sign-correction. Deferred to 3c.";
     }
     elsif ($op eq 'Coerce') {
         return $self->_lower_coerce($node);

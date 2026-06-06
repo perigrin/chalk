@@ -210,7 +210,13 @@ entry:
    - Integer literal constants → `Int`
    - Float literal constants → `Num`
    - String literal constants → `Str`
-   - Arithmetic result nodes (Add/Sub/Mul/Div on Int inputs) → `Int` propagation
+   - Arithmetic result nodes Add/Sub/Mul on Int inputs → `Int` propagation.
+     NOTE (3b gate finding): Div is NOT Int — Perl `/` is float division
+     (`3/4 == 0.75`), so `Int / Int` yields `Num` and requires Coerce(Int→Num)
+     operands + `fdiv`. Modulo `%` follows the right operand's sign
+     (`-7 % 3 == 2`, unlike LLVM `srem`) and needs sign-correction. Both are
+     recorded as GAP in the gap-map (arith-div, arith-mod); do NOT lower them
+     as bare `sdiv`/`srem` i64 (that miscompiles vs perl).
    - Method parameter types (when TypeInference has inferred them) → their type
 
 3. **Wire Coerce insertion into Actions.pm** for:
