@@ -339,4 +339,107 @@ sub num_const {
     }
 }
 
+# ===========================================================================
+# GROUP 4: Comparison operators + TernaryExpr (D6 — select-based ternary)
+#
+# Numeric comparisons (>, <, ==, !=, >=, <=) lower to LLVM icmp instructions
+# which produce i1. These are used as conditions for select (ternary) and
+# later for branch instructions.
+#
+# TernaryExpr ($cond ? $true : $false) with Int branches and i1 condition:
+# lowers to `select i1 %cond, i64 %true, i64 %false`.
+#
+# This does NOT require Phi nodes — `select` is a pure value instruction.
+# It covers D6 from the gap-map.
+# ===========================================================================
+
+# CMP-1: NumGt(5, 3) should lower to icmp sgt i64 5, 3 → i1
+{
+    my $f    = Chalk::IR::NodeFactory->new;
+    my $c5   = int_const($f, 5);
+    my $c3   = int_const($f, 3);
+    my $cmp  = $f->make('NumGt', inputs => [$c5, $c3]);
+    $cmp->set_representation('Bool');   # comparison result = i1
+
+    # Wrap in a TernaryExpr to make it returnable as an Int
+    my $c1   = int_const($f, 1);
+    my $c0   = int_const($f, 0);
+    my $tern = $f->make('TernaryExpr', inputs => [$cmp, $c1, $c0]);
+    $tern->set_representation('Int');
+
+    my $ret  = $f->make_cfg('Return', inputs => [$tern]);
+
+    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    ok(!$@, 'CMP-1: TernaryExpr(NumGt(5,3), 1, 0) lowers without dying')
+        or diag("lower() died: $@");
+
+    SKIP: {
+        skip 'lower() failed', 3 unless defined $ll;
+        like($ll, qr/icmp sgt i64/, 'CMP-1: .ll contains icmp sgt i64');
+        like($ll, qr/select i1/, 'CMP-1: .ll contains select i1');
+        unlike($ll, qr/\bSV\b|Perl_|libperl/, 'CMP-1: .ll is libperl-free');
+
+        my ($out, $exit) = run_lli($ll);
+        is($exit, 0, 'CMP-1: lli exits 0');
+        is($out, '1', "CMP-1: lli output '1' (5 > 3 ? 1 : 0 == 1)");
+    }
+}
+
+# CMP-2: NumGt(1, 3) — false branch
+{
+    my $f    = Chalk::IR::NodeFactory->new;
+    my $c1c  = int_const($f, 1);
+    my $c3   = int_const($f, 3);
+    my $cmp  = $f->make('NumGt', inputs => [$c1c, $c3]);
+    $cmp->set_representation('Bool');
+
+    my $c1   = int_const($f, 1);
+    my $c0   = int_const($f, 0);
+    my $tern = $f->make('TernaryExpr', inputs => [$cmp, $c1, $c0]);
+    $tern->set_representation('Int');
+
+    my $ret  = $f->make_cfg('Return', inputs => [$tern]);
+
+    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    ok(!$@, 'CMP-2: TernaryExpr(NumGt(1,3), 1, 0) lowers without dying')
+        or diag("lower() died: $@");
+
+    SKIP: {
+        skip 'lower() failed', 2 unless defined $ll;
+        my ($out, $exit) = run_lli($ll);
+        is($exit, 0, 'CMP-2: lli exits 0');
+        is($out, '0', "CMP-2: lli output '0' (1 > 3 ? 1 : 0 == 0)");
+    }
+}
+
+# CMP-3 (D6 ternary idiom): return $n > 0 ? 1 : 2
+# With $n as an Int constant (5), oracle = 1 (since 5 > 0 is true)
+{
+    my $f    = Chalk::IR::NodeFactory->new;
+    my $n    = int_const($f, 5);    # $n = 5 (an Int constant representing the parameter)
+    my $zero = int_const($f, 0);
+    my $cmp  = $f->make('NumGt', inputs => [$n, $zero]);
+    $cmp->set_representation('Bool');
+
+    my $c1   = int_const($f, 1);
+    my $c2   = int_const($f, 2);
+    my $tern = $f->make('TernaryExpr', inputs => [$cmp, $c1, $c2]);
+    $tern->set_representation('Int');
+
+    my $ret  = $f->make_cfg('Return', inputs => [$tern]);
+
+    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    ok(!$@, 'CMP-3 (D6): return 5 > 0 ? 1 : 2 lowers without dying')
+        or diag("lower() died: $@");
+
+    SKIP: {
+        skip 'lower() failed', 3 unless defined $ll;
+        unlike($ll, qr/\bSV\b|Perl_|libperl/, 'CMP-3 (D6): .ll is libperl-free');
+
+        my ($out, $exit) = run_lli($ll);
+        is($exit, 0, 'CMP-3 (D6): lli exits 0');
+        is($out, '1', "CMP-3 (D6): lli output '1' (5>0 ? 1 : 2 == 1)");
+    }
+}
+
 done_testing;

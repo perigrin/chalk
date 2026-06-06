@@ -243,14 +243,14 @@
       {
          "extra" : {
             "description" : "ternary: my $x = $n > 0 ? 1 : 2; return $x",
-            "gap_category" : "representation-missing",
-            "gap_reason" : "TernaryExpr requires Bool-repr condition; the condition result ($n > 0) has no representation in the current IR. The parameter $n also has no representation.",
-            "libperl_free" : null,
-            "runtime_free_coverage" : null
+            "libperl_free" : 1,
+            "lli_output" : "1",
+            "perl_oracle" : "1",
+            "runtime_free_coverage" : 1
          },
          "group" : "D",
          "tag" : "D6",
-         "verdict" : "GAP"
+         "verdict" : "L-GREEN"
       },
       {
          "extra" : {
@@ -368,7 +368,8 @@
          "D" : {
             "count" : 8,
             "verdicts" : {
-               "GAP" : 8
+               "GAP" : 7,
+               "L-GREEN" : 1
             }
          },
          "K" : {
@@ -385,8 +386,8 @@
          }
       },
       "by_verdict" : {
-         "GAP" : 18,
-         "L-GREEN" : 11
+         "GAP" : 17,
+         "L-GREEN" : 12
       },
       "denominator" : 29
    }

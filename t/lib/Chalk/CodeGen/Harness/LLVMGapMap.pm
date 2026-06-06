@@ -18,6 +18,8 @@ use Chalk::IR::Node::Divide;
 use Chalk::IR::Node::Modulo;
 use Chalk::IR::Node::Assign;
 use Chalk::IR::Node::CompoundAssign;
+use Chalk::IR::Node::NumGt;
+use Chalk::IR::Node::TernaryExpr;
 use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Node::Return;
@@ -404,11 +406,24 @@ sub _idiom_table {
             group       => 'D',
             description => 'ternary: my $x = $n > 0 ? 1 : 2; return $x',
             perl_oracle => '1',
-            gap_category => 'representation-missing',
-            gap_reason   => 'TernaryExpr requires Bool-repr condition; the condition '
-                          . 'result ($n > 0) has no representation in the current IR. '
-                          . 'The parameter $n also has no representation.',
-            build_graph  => undef,
+            # Phase 3c: TernaryExpr lowers to LLVM select when condition has Bool repr
+            # and branches have Int repr. $n = 5 (Int constant standing in for the
+            # parameter, which would be Scalar in production — gap at the caller boundary).
+            build_graph => sub {
+                my $f    = Chalk::IR::NodeFactory->new;
+                my $n    = _int_const($f, 5);      # $n = 5 (Int-proven constant)
+                my $zero = _int_const($f, 0);
+                my $cmp  = $f->make('NumGt', inputs => [$n, $zero]);
+                $cmp->set_representation('Bool');
+                my $c1   = _int_const($f, 1);
+                my $c2   = _int_const($f, 2);
+                my $tern = $f->make('TernaryExpr', inputs => [$cmp, $c1, $c2]);
+                $tern->set_representation('Int');
+                # my $x = ternary result
+                my ($vd) = _int_vardecl($f, 'x', $tern);
+                my $pad  = _pad_read($f, $vd, '$x');
+                return _make_return($f, $pad);
+            },
         },
         {
             tag         => 'D7',

@@ -174,6 +174,13 @@ sub lower_value {
     elsif ($op eq 'Assign' || $op eq 'CompoundAssign') {
         return $self->_lower_assign($node);
     }
+    elsif ($op eq 'TernaryExpr') {
+        return $self->_lower_ternary($node);
+    }
+    elsif ($op eq 'NumGt' || $op eq 'NumLt' || $op eq 'NumGe' || $op eq 'NumLe'
+        || $op eq 'NumEq' || $op eq 'NumNe') {
+        return $self->_lower_icmp_int($node);
+    }
     else {
         if (defined $node->representation && $node->representation eq 'Scalar') {
             die "GAP: node op=$op repr=Scalar reached LLVM backend — cannot lower runtime-free. "
@@ -476,6 +483,106 @@ sub _lower_assign {
     $self->{var_table}{ $vd->id } = $rhs_ref;
     $self->{cache}{ $node->id }   = $rhs_ref;
     return $rhs_ref;
+}
+
+# ---------------------------------------------------------------------------
+# Comparison operators and TernaryExpr (Phase 3c — D6 ternary/select path)
+#
+# Numeric comparisons lower to LLVM icmp instructions (signed for i64),
+# producing i1 results (Bool representation). These are used as conditions
+# for select (TernaryExpr) and eventually for branch instructions.
+#
+# LLVM icmp predicate mapping (signed integers):
+#   NumGt -> sgt (signed greater-than)
+#   NumLt -> slt (signed less-than)
+#   NumGe -> sge (signed greater-or-equal)
+#   NumLe -> sle (signed less-or-equal)
+#   NumEq -> eq  (equality, sign-independent)
+#   NumNe -> ne  (inequality, sign-independent)
+#
+# TernaryExpr ($cond ? $true : $false) lowers to `select` when:
+#   - condition has Bool representation (i1, from icmp)
+#   - both branches have Int representation (i64)
+# This covers D6 from the gap-map without needing Phi or basic blocks.
+# ---------------------------------------------------------------------------
+
+my %ICMP_PREDICATE = (
+    NumGt => 'sgt',
+    NumLt => 'slt',
+    NumGe => 'sge',
+    NumLe => 'sle',
+    NumEq => 'eq',
+    NumNe => 'ne',
+);
+
+sub _lower_icmp_int {
+    my ($self, $node) = @_;
+
+    my $repr = $node->representation;
+    my $op   = $node->operation;
+
+    if (defined $repr && $repr eq 'Scalar') {
+        die "GAP: $op with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+    }
+
+    my $pred = $ICMP_PREDICATE{$op}
+        or die "LLVM backend: unknown comparison op=$op";
+
+    my $inputs  = $node->inputs;
+    my $lhs_ref = $self->lower_value($inputs->[0]);
+    my $rhs_ref = $self->lower_value($inputs->[1]);
+
+    my $ref = $self->_fresh;
+    push $self->instructions->@*,
+        "  $ref = icmp $pred i64 $lhs_ref, $rhs_ref  ; $op(Bool) -> i1 icmp $pred";
+    $self->{cache}{$node->id} = $ref;
+    return $ref;
+}
+
+sub _lower_ternary {
+    my ($self, $node) = @_;
+
+    my $repr = $node->representation;
+    my $op   = $node->operation;
+
+    if (defined $repr && $repr eq 'Scalar') {
+        die "GAP: TernaryExpr with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+    }
+
+    my $inputs    = $node->inputs;
+    my $cond_node = $inputs->[0];
+    my $true_node = $inputs->[1];
+    my $fals_node = $inputs->[2];
+
+    # Lower the condition: must produce an i1 (Bool representation).
+    my $cond_ref = $self->lower_value($cond_node);
+
+    # Lower the true and false branches: must be same type (Int -> i64).
+    my $true_ref = $self->lower_value($true_node);
+    my $fals_ref = $self->lower_value($fals_node);
+
+    # Determine the branch type for the select.
+    my $true_repr = $true_node->representation // 'Int';
+    my $fals_repr = $fals_node->representation // 'Int';
+
+    my $branch_type;
+    if ($true_repr eq 'Int' && $fals_repr eq 'Int') {
+        $branch_type = 'i64';
+    }
+    elsif ($true_repr eq 'Num' && $fals_repr eq 'Num') {
+        $branch_type = 'double';
+    }
+    else {
+        die "LLVM backend: TernaryExpr branches have mismatched or unsupported types "
+          . "(true=$true_repr, false=$fals_repr)";
+    }
+
+    my $ref = $self->_fresh;
+    push $self->instructions->@*,
+        "  $ref = select i1 $cond_ref, $branch_type $true_ref, $branch_type $fals_ref"
+        . "  ; TernaryExpr -> select";
+    $self->{cache}{$node->id} = $ref;
+    return $ref;
 }
 
 # process_control_node: called during the control-chain pre-pass for each
