@@ -75,8 +75,11 @@ class Chalk::CodeGen::Harness::Comparator {
             push @diverged, 'stdout';
         }
 
-        # Axis: stderr (exact string match; warnings are observable divergences)
-        if ( ( $S->stderr // '' ) ne ( $P->stderr // '' ) ) {
+        # Axis: stderr (normalized string match; source-location footers from
+        # warn/die are stripped because oracle and generated code run from
+        # different temp files, making the " at FILE line N." suffix always
+        # differ even when the message content is identical).
+        if ( _normalize_stderr( $S->stderr // '' ) ne _normalize_stderr( $P->stderr // '' ) ) {
             push @diverged, 'stderr';
         }
 
@@ -190,6 +193,17 @@ class Chalk::CodeGen::Harness::Comparator {
             }
         }
         return true;
+    }
+
+    # _normalize_stderr($stderr_text) — strip Perl source-location footers from
+    # warn/die output so oracle and generated stderr can be compared by message
+    # content only.  Lines ending in " at FILE line N." or " at FILE line N.\n"
+    # (where FILE is an absolute path to a temp file) are normalized by removing
+    # the " at ..." suffix.  This preserves message content while ignoring the
+    # ephemeral filename/line that differs between oracle and generated runs.
+    sub _normalize_stderr ($text) {
+        $text =~ s{ at \S+ line \d+\.?\n?}{\n}g;
+        return $text;
     }
 
     # _object_states_equal($a, $b, $policy) — compare two object_state hashrefs.

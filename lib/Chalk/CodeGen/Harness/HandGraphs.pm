@@ -411,6 +411,344 @@ sub _build_A3 {
 }
 
 # ---------------------------------------------------------------------------
+# B1: class C { method m() { my @list = (); push @list, 1; return scalar @list; } }
+#
+# VarDecl empty @list, bare Call(push, @list, 1), Return(scalar(@list)).
+# push is no-parens builtin. Control chain: Start <- var_list <- push_call <- ret
+# ---------------------------------------------------------------------------
+sub _build_B1 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my @list = ()
+    my $name_list = $factory->make('Constant', value => '@list', const_type => 'string');
+    my @no_elems  = ();
+    my $arr_ref   = $factory->make('ArrayRef', inputs => [\@no_elems]);
+    my $var_list  = $factory->make('VarDecl', inputs => [$name_list, $arr_ref], scope => 'my');
+    $var_list->set_control_in($start);
+
+    # push @list, 1
+    my $name_push  = $factory->make('Constant', value => 'push', const_type => 'string');
+    my $list_var   = $factory->make('Constant', value => '@list', const_type => 'variable');
+    my $one        = $factory->make('Constant', value => '1',     const_type => 'integer');
+    my @push_args  = ($list_var, $one);
+    my $call_push  = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'push',
+        inputs        => [$name_push, \@push_args],
+    );
+    $call_push->set_control_in($var_list);
+
+    # scalar(@list)
+    my $name_scalar  = $factory->make('Constant', value => 'scalar', const_type => 'string');
+    my $list_read    = $factory->make('Constant', value => '@list',  const_type => 'variable');
+    my @scalar_args  = ($list_read);
+    my $call_scalar  = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'scalar',
+        inputs        => [$name_scalar, \@scalar_args],
+    );
+
+    # Return: scalar @list
+    my $ret = $factory->make_cfg('Return', inputs => [$call_scalar]);
+    $ret->set_control_in($call_push);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_list, $arr_ref, $var_list, $name_push, $list_var, $one, $call_push,
+               $name_scalar, $list_read, $call_scalar, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# B2: class C { method m() { print "hi"; return 1; } }
+#
+# Bare Call(print, "hi"), Return(1).
+# print is no-parens builtin. Control chain: Start <- print_call <- ret
+# ---------------------------------------------------------------------------
+sub _build_B2 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # print "hi"
+    my $name_print = $factory->make('Constant', value => 'print', const_type => 'string');
+    my $str_hi     = $factory->make('Constant', value => 'hi',    const_type => 'string');
+    my @print_args = ($str_hi);
+    my $call_print = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'print',
+        inputs        => [$name_print, \@print_args],
+    );
+    $call_print->set_control_in($start);
+
+    # Return: 1
+    my $one = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $ret = $factory->make_cfg('Return', inputs => [$one]);
+    $ret->set_control_in($call_print);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_print, $str_hi, $call_print, $one, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# B3: class C { method m() { say "hi"; return 1; } }
+#
+# Bare Call(say, "hi"), Return(1).
+# say is no-parens builtin. Control chain: Start <- say_call <- ret
+# ---------------------------------------------------------------------------
+sub _build_B3 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # say "hi"
+    my $name_say  = $factory->make('Constant', value => 'say', const_type => 'string');
+    my $str_hi    = $factory->make('Constant', value => 'hi',  const_type => 'string');
+    my @say_args  = ($str_hi);
+    my $call_say  = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'say',
+        inputs        => [$name_say, \@say_args],
+    );
+    $call_say->set_control_in($start);
+
+    # Return: 1
+    my $one = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $ret = $factory->make_cfg('Return', inputs => [$one]);
+    $ret->set_control_in($call_say);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_say, $str_hi, $call_say, $one, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# B4: class C { method m() { die "boom"; } }
+#
+# Bare Unwind node carrying the die argument. Unwind is a CFG exit node;
+# inputs[0] is an arrayref of die arguments. Control chain: Start <- unwind
+# ---------------------------------------------------------------------------
+sub _build_B4 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # die "boom" — Unwind node, inputs[0] = arrayref of args
+    my $str_boom   = $factory->make('Constant', value => 'boom', const_type => 'string');
+    my @die_args   = ($str_boom);
+    my $unwind     = $factory->make_cfg('Unwind', inputs => [\@die_args]);
+    $unwind->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $str_boom, $unwind) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# B5: class C { method m() { foo(1, 2); return 1; } }
+#
+# Bare Call(foo, 1, 2) as a side-effect statement, Return(1).
+# foo is not defined: both oracle and generated code raise an undefined-sub
+# exception; the Comparator sees matching exceptions and returns PASS.
+# Control chain: Start <- call_foo <- ret
+# ---------------------------------------------------------------------------
+sub _build_B5 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # foo(1, 2)
+    my $name_foo = $factory->make('Constant', value => 'foo', const_type => 'string');
+    my $arg1     = $factory->make('Constant', value => '1',   const_type => 'integer');
+    my $arg2     = $factory->make('Constant', value => '2',   const_type => 'integer');
+    my @foo_args = ($arg1, $arg2);
+    my $call_foo = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'foo',
+        inputs        => [$name_foo, \@foo_args],
+    );
+    $call_foo->set_control_in($start);
+
+    # Return: 1
+    my $one = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $ret = $factory->make_cfg('Return', inputs => [$one]);
+    $ret->set_control_in($call_foo);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_foo, $arg1, $arg2, $call_foo, $one, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# B6: class C { method m() { $self->bar(); return 1; } }
+#
+# Bare method Call($self, bar, []) as side-effect, Return(1).
+# bar is not defined on class C: both oracle and generated code raise a
+# "Can't locate object method" exception; Comparator sees matching exceptions.
+# Control chain: Start <- call_bar <- ret
+# ---------------------------------------------------------------------------
+sub _build_B6 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # $self->bar()
+    # Method Call layout: inputs[0]=invocant, inputs[1]=Constant(method_name), inputs[2]=\@args
+    my $self_var  = $factory->make('Constant', value => '$self', const_type => 'variable');
+    my $name_bar  = $factory->make('Constant', value => 'bar',   const_type => 'string');
+    my @bar_args  = ();
+    my $call_bar  = $factory->make('Call',
+        dispatch_kind => 'method',
+        name          => 'bar',
+        inputs        => [$self_var, $name_bar, \@bar_args],
+    );
+    $call_bar->set_control_in($start);
+
+    # Return: 1
+    my $one = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $ret = $factory->make_cfg('Return', inputs => [$one]);
+    $ret->set_control_in($call_bar);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $self_var, $name_bar, $call_bar, $one, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# B7: class C { method m() { my @list = (); unshift @list, 1; return scalar @list; } }
+#
+# VarDecl empty @list, bare Call(unshift, @list, 1), Return(scalar(@list)).
+# unshift is no-parens builtin. Control chain: Start <- var_list <- unshift <- ret
+# ---------------------------------------------------------------------------
+sub _build_B7 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my @list = ()
+    my $name_list = $factory->make('Constant', value => '@list', const_type => 'string');
+    my @no_elems  = ();
+    my $arr_ref   = $factory->make('ArrayRef', inputs => [\@no_elems]);
+    my $var_list  = $factory->make('VarDecl', inputs => [$name_list, $arr_ref], scope => 'my');
+    $var_list->set_control_in($start);
+
+    # unshift @list, 1
+    my $name_unsh  = $factory->make('Constant', value => 'unshift', const_type => 'string');
+    my $list_var   = $factory->make('Constant', value => '@list',   const_type => 'variable');
+    my $one        = $factory->make('Constant', value => '1',       const_type => 'integer');
+    my @unsh_args  = ($list_var, $one);
+    my $call_unsh  = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'unshift',
+        inputs        => [$name_unsh, \@unsh_args],
+    );
+    $call_unsh->set_control_in($var_list);
+
+    # scalar(@list)
+    my $name_scalar = $factory->make('Constant', value => 'scalar', const_type => 'string');
+    my $list_read   = $factory->make('Constant', value => '@list',  const_type => 'variable');
+    my @scalar_args = ($list_read);
+    my $call_scalar = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'scalar',
+        inputs        => [$name_scalar, \@scalar_args],
+    );
+
+    # Return: scalar @list
+    my $ret = $factory->make_cfg('Return', inputs => [$call_scalar]);
+    $ret->set_control_in($call_unsh);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_list, $arr_ref, $var_list, $name_unsh, $list_var, $one, $call_unsh,
+               $name_scalar, $list_read, $call_scalar, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# B8: class C { method m() { warn "hi"; return 1; } }
+#
+# Bare Call(warn, "hi"), Return(1).
+# warn uses no-parens list syntax (added to the emitter's no-parens list).
+# warn output goes to STDERR; the harness captures it and both S=P match.
+# Control chain: Start <- warn_call <- ret
+# ---------------------------------------------------------------------------
+sub _build_B8 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # warn "hi"
+    my $name_warn  = $factory->make('Constant', value => 'warn', const_type => 'string');
+    my $str_hi     = $factory->make('Constant', value => 'hi',   const_type => 'string');
+    my @warn_args  = ($str_hi);
+    my $call_warn  = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'warn',
+        inputs        => [$name_warn, \@warn_args],
+    );
+    $call_warn->set_control_in($start);
+
+    # Return: 1
+    my $one = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $ret = $factory->make_cfg('Return', inputs => [$one]);
+    $ret->set_control_in($call_warn);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_warn, $str_hi, $call_warn, $one, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
 # C1: class C { method m() { my $x = 1; $x = 2; return $x; } }
 #
 # VarDecl, bare Assign ($x = 2), Return.
@@ -737,6 +1075,14 @@ sub _build_K2 {
     A3 => \&_build_A3,
     A4 => \&_build_A4,
     A5 => \&_build_A5,
+    B1 => \&_build_B1,
+    B2 => \&_build_B2,
+    B3 => \&_build_B3,
+    B4 => \&_build_B4,
+    B5 => \&_build_B5,
+    B6 => \&_build_B6,
+    B7 => \&_build_B7,
+    B8 => \&_build_B8,
     C1 => \&_build_C1,
     C2 => \&_build_C2,
     C3 => \&_build_C3,

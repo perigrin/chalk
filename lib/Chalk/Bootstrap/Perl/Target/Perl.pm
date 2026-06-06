@@ -1295,7 +1295,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
         # Some builtins use list syntax (no parens)
         if ($name eq 'push' || $name eq 'unshift' || $name eq 'die'
-                || $name eq 'return' || $name eq 'print' || $name eq 'say') {
+                || $name eq 'return' || $name eq 'print' || $name eq 'say'
+                || $name eq 'warn') {
             return "$name " . join(', ', @arg_strs);
         }
 
