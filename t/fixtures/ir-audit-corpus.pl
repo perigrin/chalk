@@ -63,7 +63,7 @@ class C { method m() { return $self->foo->bar; } }
 === F2: method call with args
 class C { method m() { return $self->foo(1, 2, 3); } }
 === F3: function call with capture
-class C { method m() { my $r = foo(1, 2); return $r; } }
+class C { sub foo($a, $b) { return $a + $b; } method m() { my $r = foo(1, 2); return $r; } }
 === G1: postfix deref array
 class C { method m() { my $r = [1, 2]; return $r->@*; } }
 === G2: postfix deref hash

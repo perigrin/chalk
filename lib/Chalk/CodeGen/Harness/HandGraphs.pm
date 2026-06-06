@@ -263,21 +263,57 @@ sub _build_E1 {
 }
 
 # ---------------------------------------------------------------------------
-# F3: class C { method m() { my $r = foo(1, 2); return $r; } }
+# F3: class C { sub foo($a, $b) { return $a + $b; } method m() { my $r = foo(1, 2); return $r; } }
 #
-# VarDecl whose init value is a Call to function 'foo' with args (1, 2).
-# Uses dispatch_kind='builtin' because the emitter only handles 'builtin'
-# and 'method' dispatch kinds. The builtin Call node layout matches
-# _emit_builtin_call: inputs[0]=Constant(name), inputs[1]=\@args.
-# Control chain: Start <- var_r.control_in <- ret.control_in
+# A class-level plain sub 'foo' is defined alongside method 'm'.  Method m
+# calls foo(1, 2) and captures the return value in $r.
+#
+# The 'foo' graph: takes named params $a and $b, returns their sum.
+# Node layout for the foo graph:
+#   start_foo     : Start
+#   a_var         : Constant('$a', variable)
+#   b_var         : Constant('$b', variable)
+#   op_plus       : Constant('+', string)
+#   sum           : Add(inputs=[op_plus, a_var, b_var])
+#   ret_foo       : Return(inputs=[sum])
+#
+# The 'm' graph: calls foo(1,2), stores result in $r, returns $r.
+# Node layout for the m graph:
+#   start         : Start
+#   name_foo      : Constant('foo', string)
+#   const_1       : Constant('1', integer)
+#   const_2       : Constant('2', integer)
+#   call_foo      : Call(dispatch_kind='builtin', name='foo', inputs=[name_foo, [const_1, const_2]])
+#   const_r_name  : Constant('$r', string)
+#   var_r         : VarDecl(inputs=[const_r_name, call_foo])
+#   const_r_read  : Constant('$r', variable)
+#   ret           : Return(inputs=[const_r_read])
+#
+# Control chain (m): start <- var_r.control_in <- ret.control_in
 # ---------------------------------------------------------------------------
 sub _build_F3 {
     my $factory = Chalk::IR::NodeFactory->new;
 
+    # --- Graph for sub foo($a, $b) { return $a + $b; } ---
+    my $foo_factory = Chalk::IR::NodeFactory->new;
+    my $start_foo = $foo_factory->make_cfg('Start', inputs => []);
+
+    my $a_var   = $foo_factory->make('Constant', value => '$a', const_type => 'variable');
+    my $b_var   = $foo_factory->make('Constant', value => '$b', const_type => 'variable');
+    my $op_plus = $foo_factory->make('Constant', value => '+',  const_type => 'string');
+    my $sum     = $foo_factory->make('Add', inputs => [$op_plus, $a_var, $b_var]);
+
+    my $ret_foo = $foo_factory->make_cfg('Return', inputs => [$sum]);
+    $ret_foo->set_control_in($start_foo);
+
+    my $foo_graph = Chalk::IR::Graph->new;
+    for my $n ($start_foo, $a_var, $b_var, $op_plus, $sum, $ret_foo) {
+        $foo_graph->merge($n);
+    }
+
+    # --- Graph for method m() { my $r = foo(1, 2); return $r; } ---
     my $start = $factory->make_cfg('Start', inputs => []);
 
-    # Call node: foo(1, 2).
-    # Layout for dispatch_kind='builtin': inputs[0]=Constant(fn-name), inputs[1]=\@args.
     my $name_foo = $factory->make('Constant', value => 'foo', const_type => 'string');
     my $const_1  = $factory->make('Constant', value => '1',   const_type => 'integer');
     my $const_2  = $factory->make('Constant', value => '2',   const_type => 'integer');
@@ -288,7 +324,6 @@ sub _build_F3 {
         inputs        => [$name_foo, \@call_args],
     );
 
-    # VarDecl: $r = foo(1, 2).
     my $const_r_name = $factory->make('Constant', value => '$r', const_type => 'string');
     my $var_r = $factory->make('VarDecl',
         inputs => [$const_r_name, $call_foo],
@@ -296,7 +331,6 @@ sub _build_F3 {
     );
     $var_r->set_control_in($start);
 
-    # Return: $r.
     my $const_r_read = $factory->make('Constant', value => '$r', const_type => 'variable');
     my $ret = $factory->make_cfg('Return', inputs => [$const_r_read]);
     $ret->set_control_in($var_r);
@@ -308,6 +342,8 @@ sub _build_F3 {
 
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('C');
+    # Declare the helper sub first so it appears before method m in the emitted class body.
+    $cls->declare_sub('foo', params => ['$a', '$b'], graph => $foo_graph);
     $cls->declare_method('m',
         params => [],
         graph  => $graph,
