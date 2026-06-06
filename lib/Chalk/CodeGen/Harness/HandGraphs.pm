@@ -411,6 +411,622 @@ sub _build_A3 {
 }
 
 # ---------------------------------------------------------------------------
+# I3: class C { method m() { my sub helper ($n) { return $n * 2; } return helper(3); } }
+#
+# Represented as VarDecl($helper, AnonSub) + Return(Subscript($helper,[3],call)).
+# The oracle runs 'my sub' by name; the generated code calls via coderef $helper->(3).
+# Both return 6, so behavioral equivalence gives PASS.
+# Control chain: Start <- var_helper <- ret
+# ---------------------------------------------------------------------------
+sub _build_I3 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # AnonSub body: return $n * 2
+    my $op_mul   = $factory->make('Constant', value => '*',  const_type => 'string');
+    my $n_var    = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $two      = $factory->make('Constant', value => '2',  const_type => 'integer');
+    my $mul_op   = $factory->make('Multiply', inputs => [$op_mul, $n_var, $two]);
+    my $ret_inner = $factory->make_cfg('Return', inputs => [$mul_op]);
+
+    # AnonSub: param=$n, body=[return $n*2]
+    my $n_param  = $factory->make('Constant', value => '$n', const_type => 'string');
+    my @params   = ($n_param);
+    my @body     = ($ret_inner);
+    my $anon_sub = $factory->make('AnonSub', inputs => [\@params, \@body]);
+
+    # VarDecl: my $helper = sub ($n) { ... }
+    my $name_h  = $factory->make('Constant', value => '$helper', const_type => 'string');
+    my $var_h   = $factory->make('VarDecl', inputs => [$name_h, $anon_sub], scope => 'my');
+    $var_h->set_control_in($start);
+
+    # $helper->(3) — coderef call
+    my $h_read    = $factory->make('Constant', value => '$helper', const_type => 'variable');
+    my $arg_3     = $factory->make('Constant', value => '3',       const_type => 'integer');
+    my $call_style = $factory->make('Constant', value => 'call',   const_type => 'string');
+    my @call_args = ($arg_3);
+    my $call_h    = $factory->make('Subscript', inputs => [$h_read, \@call_args, $call_style]);
+
+    # Return: $helper->(3)
+    my $ret = $factory->make_cfg('Return', inputs => [$call_h]);
+    $ret->set_control_in($var_h);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_mul, $n_var, $two, $mul_op, $ret_inner,
+               $n_param, $anon_sub, $name_h, $var_h,
+               $h_read, $arg_3, $call_style, $call_h, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M3: class C { method m($name) { return "hello $name"; } }
+#
+# Method param $name. Return Interpolate([Constant('hello '), Constant('$name',variable)]).
+# Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_M3 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # "hello $name" — Interpolate with literal and variable parts
+    my $lit_hello = $factory->make('Constant', value => 'hello ', const_type => 'string');
+    my $var_name  = $factory->make('Constant', value => '$name',  const_type => 'variable');
+    my @parts     = ($lit_hello, $var_name);
+    my $interp    = $factory->make('Interpolate', inputs => [\@parts]);
+
+    # Return: "hello $name"
+    my $ret = $factory->make_cfg('Return', inputs => [$interp]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $lit_hello, $var_name, $interp, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$name'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M4: class C { method m() { my @list = (1, 2); return "got @list"; } }
+#
+# VarDecl(@list), Return(Interpolate([Constant('got '), Constant('@list',variable)])).
+# Control chain: Start <- var_list <- ret
+# ---------------------------------------------------------------------------
+sub _build_M4 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # my @list = (1, 2)
+    my $e1      = $factory->make('Constant', value => '1',     const_type => 'integer');
+    my $e2      = $factory->make('Constant', value => '2',     const_type => 'integer');
+    my @elems   = ($e1, $e2);
+    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+    my $name_l  = $factory->make('Constant', value => '@list', const_type => 'string');
+    my $var_l   = $factory->make('VarDecl', inputs => [$name_l, $arr_ref], scope => 'my');
+    $var_l->set_control_in($start);
+
+    # "got @list" — Interpolate
+    my $lit_got  = $factory->make('Constant', value => 'got ',  const_type => 'string');
+    my $var_list = $factory->make('Constant', value => '@list', const_type => 'variable');
+    my @parts    = ($lit_got, $var_list);
+    my $interp   = $factory->make('Interpolate', inputs => [\@parts]);
+
+    # Return: "got @list"
+    my $ret = $factory->make_cfg('Return', inputs => [$interp]);
+    $ret->set_control_in($var_l);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $e1, $e2, $arr_ref, $name_l, $var_l, $lit_got, $var_list, $interp, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M8: class C { method m($r) { return $r->[0]; } }
+#
+# Method param $r (scalar ref). Return Subscript($r, 0, array) — arrow style.
+# $r is not an aggregate var so emits $r->[0].
+# Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_M8 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # $r->[0] — arrow subscript (not aggregate)
+    my $r_read  = $factory->make('Constant', value => '$r',   const_type => 'variable');
+    my $idx_0   = $factory->make('Constant', value => '0',    const_type => 'integer');
+    my $style_a = $factory->make('Constant', value => 'array', const_type => 'string');
+    my $sub_r0  = $factory->make('Subscript', inputs => [$r_read, $idx_0, $style_a]);
+
+    # Return: $r->[0]
+    my $ret = $factory->make_cfg('Return', inputs => [$sub_r0]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $r_read, $idx_0, $style_a, $sub_r0, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$r'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M9: class C { method m($r) { return $r->{key}; } }
+#
+# Method param $r. Return Subscript($r, 'key', hash) — arrow style.
+# $r is not an aggregate var so emits $r->{'key'}.
+# Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_M9 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # $r->{'key'}
+    my $r_read  = $factory->make('Constant', value => '$r',  const_type => 'variable');
+    my $key     = $factory->make('Constant', value => 'key', const_type => 'string');
+    my $style_h = $factory->make('Constant', value => 'hash', const_type => 'string');
+    my $sub_rk  = $factory->make('Subscript', inputs => [$r_read, $key, $style_h]);
+
+    # Return: $r->{'key'}
+    my $ret = $factory->make_cfg('Return', inputs => [$sub_rk]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $r_read, $key, $style_h, $sub_rk, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$r'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M10: class C { method m() { my @list = (1, 2); my $r = \@list; return $r->[0]; } }
+#
+# VarDecl(@list), VarDecl($r, Ref(@list)), Return(Subscript($r, 0, array)).
+# Ref is a UnaryOp with op='\'. The emitter emits \@list for Ref(@list).
+# Control chain: Start <- var_list <- var_r <- ret
+# ---------------------------------------------------------------------------
+sub _build_M10 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # my @list = (1, 2)
+    my $e1      = $factory->make('Constant', value => '1',     const_type => 'integer');
+    my $e2      = $factory->make('Constant', value => '2',     const_type => 'integer');
+    my @elems   = ($e1, $e2);
+    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+    my $name_l  = $factory->make('Constant', value => '@list', const_type => 'string');
+    my $var_l   = $factory->make('VarDecl', inputs => [$name_l, $arr_ref], scope => 'my');
+    $var_l->set_control_in($start);
+
+    # my $r = \@list — Ref node (UnaryOp with op='\')
+    my $op_ref   = $factory->make('Constant', value => '\\',   const_type => 'string');
+    my $list_var = $factory->make('Constant', value => '@list', const_type => 'variable');
+    my $ref_node = $factory->make('Ref', inputs => [$op_ref, $list_var]);
+    my $name_r   = $factory->make('Constant', value => '$r',   const_type => 'string');
+    my $var_r    = $factory->make('VarDecl', inputs => [$name_r, $ref_node], scope => 'my');
+    $var_r->set_control_in($var_l);
+
+    # $r->[0]
+    my $r_read  = $factory->make('Constant', value => '$r',   const_type => 'variable');
+    my $idx_0   = $factory->make('Constant', value => '0',    const_type => 'integer');
+    my $style_a = $factory->make('Constant', value => 'array', const_type => 'string');
+    my $sub_r0  = $factory->make('Subscript', inputs => [$r_read, $idx_0, $style_a]);
+
+    # Return: $r->[0]
+    my $ret = $factory->make_cfg('Return', inputs => [$sub_r0]);
+    $ret->set_control_in($var_r);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $e1, $e2, $arr_ref, $name_l, $var_l,
+               $op_ref, $list_var, $ref_node, $name_r, $var_r,
+               $r_read, $idx_0, $style_a, $sub_r0, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M11: class C { method m() { my %h = (k => 1); my $r = \%h; return $r->{k}; } }
+#
+# VarDecl(%h), VarDecl($r, Ref(%h)), Return(Subscript($r, k, hash)).
+# Control chain: Start <- var_h <- var_r <- ret
+# ---------------------------------------------------------------------------
+sub _build_M11 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # my %h = (k => 1)
+    my $key_k    = $factory->make('Constant', value => 'k', const_type => 'string');
+    my $val_1    = $factory->make('Constant', value => '1', const_type => 'integer');
+    my @pairs    = ($key_k, $val_1);
+    my $hash_ref = $factory->make('HashRef', inputs => [\@pairs]);
+    my $name_h   = $factory->make('Constant', value => '%h', const_type => 'string');
+    my $var_h    = $factory->make('VarDecl', inputs => [$name_h, $hash_ref], scope => 'my');
+    $var_h->set_control_in($start);
+
+    # my $r = \%h
+    my $op_ref  = $factory->make('Constant', value => '\\', const_type => 'string');
+    my $h_var   = $factory->make('Constant', value => '%h', const_type => 'variable');
+    my $ref_node = $factory->make('Ref', inputs => [$op_ref, $h_var]);
+    my $name_r  = $factory->make('Constant', value => '$r', const_type => 'string');
+    my $var_r   = $factory->make('VarDecl', inputs => [$name_r, $ref_node], scope => 'my');
+    $var_r->set_control_in($var_h);
+
+    # $r->{k}
+    my $r_read  = $factory->make('Constant', value => '$r',  const_type => 'variable');
+    my $key_k2  = $factory->make('Constant', value => 'k',   const_type => 'string');
+    my $style_h = $factory->make('Constant', value => 'hash', const_type => 'string');
+    my $sub_rk  = $factory->make('Subscript', inputs => [$r_read, $key_k2, $style_h]);
+
+    # Return: $r->{k}
+    my $ret = $factory->make_cfg('Return', inputs => [$sub_rk]);
+    $ret->set_control_in($var_r);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $key_k, $val_1, $hash_ref, $name_h, $var_h,
+               $op_ref, $h_var, $ref_node, $name_r, $var_r,
+               $r_read, $key_k2, $style_h, $sub_rk, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M12: class C { method m() { return Foo::Bar->new(); } }
+#
+# Static method call: Call(method, Constant('Foo::Bar', bareword), 'new', []).
+# Foo::Bar doesn't exist; both oracle and generated raise matching exceptions.
+# Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_M12 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Foo::Bar->new()
+    my $class_fb = $factory->make('Constant', value => 'Foo::Bar', const_type => 'bareword');
+    my $name_new = $factory->make('Constant', value => 'new',      const_type => 'string');
+    my @new_args = ();
+    my $call_new = $factory->make('Call',
+        dispatch_kind => 'method',
+        name          => 'new',
+        inputs        => [$class_fb, $name_new, \@new_args],
+    );
+
+    # Return: Foo::Bar->new()
+    my $ret = $factory->make_cfg('Return', inputs => [$call_new]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $class_fb, $name_new, $call_new, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M13: class C { method m() { return Foo::Bar::baz(1); } }
+#
+# Qualified function call: Call(builtin, 'Foo::Bar::baz', [1]).
+# Foo::Bar::baz doesn't exist; both oracle and generated raise matching exceptions.
+# Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_M13 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Foo::Bar::baz(1)
+    my $name_baz = $factory->make('Constant', value => 'Foo::Bar::baz', const_type => 'string');
+    my $arg_1    = $factory->make('Constant', value => '1',             const_type => 'integer');
+    my @baz_args = ($arg_1);
+    my $call_baz = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'Foo::Bar::baz',
+        inputs        => [$name_baz, \@baz_args],
+    );
+
+    # Return: Foo::Bar::baz(1)
+    my $ret = $factory->make_cfg('Return', inputs => [$call_baz]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_baz, $arg_1, $call_baz, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M14: class C { method m($a) { return "got " . $a; } }
+#
+# Method param $a. Return BinOp(., Constant('got '), $a).
+# Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_M14 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # "got " . $a
+    my $op_dot = $factory->make('Constant', value => '.',     const_type => 'string');
+    my $lit    = $factory->make('Constant', value => 'got ',  const_type => 'string');
+    my $a_var  = $factory->make('Constant', value => '$a',    const_type => 'variable');
+    my $concat = $factory->make('Concat', inputs => [$op_dot, $lit, $a_var]);
+
+    # Return: "got " . $a
+    my $ret = $factory->make_cfg('Return', inputs => [$concat]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_dot, $lit, $a_var, $concat, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$a'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M15: class C { method m($x) { my $y; $y //= $x; return $y; } }
+#
+# VarDecl($y, undef), CompoundAssign(//=, $y, $x), Return($y).
+# Control chain: Start <- var_y <- compound_assign <- ret
+# ---------------------------------------------------------------------------
+sub _build_M15 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $y (uninitialised)
+    my $name_y = $factory->make('Constant', value => '$y', const_type => 'string');
+    my $var_y  = $factory->make('VarDecl', inputs => [$name_y, undef], scope => 'my');
+    $var_y->set_control_in($start);
+
+    # $y //= $x
+    my $op_dfeq = $factory->make('Constant', value => '//=', const_type => 'string');
+    my $y_lhs   = $factory->make('Constant', value => '$y',  const_type => 'variable');
+    my $x_var   = $factory->make('Constant', value => '$x',  const_type => 'variable');
+    my $compound = $factory->make('CompoundAssign',
+        op     => '//=',
+        inputs => [$op_dfeq, $y_lhs, $x_var],
+    );
+    $compound->set_control_in($var_y);
+
+    # Return: $y
+    my $y_read = $factory->make('Constant', value => '$y', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$y_read]);
+    $ret->set_control_in($compound);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_y, $var_y, $op_dfeq, $y_lhs, $x_var, $compound, $y_read, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$x'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M22: class C { method m() { my @r = sort { $a <=> $b } (3, 1, 2); return $r[0]; } }
+#
+# sort with comparison block: AnonSub({$a <=> $b}), then list args.
+# VarDecl(@r), Return(Subscript($r, 0, array)).
+# Control chain: Start <- var_r <- ret
+# ---------------------------------------------------------------------------
+sub _build_M22 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Block body: $a <=> $b
+    my $op_cmp = $factory->make('Constant', value => '<=>',  const_type => 'string');
+    my $a_var  = $factory->make('Constant', value => '$a',   const_type => 'variable');
+    my $b_var  = $factory->make('Constant', value => '$b',   const_type => 'variable');
+    my $cmp_op = $factory->make('NumCmp', inputs => [$op_cmp, $a_var, $b_var]);
+
+    # AnonSub (block form): no params, body = [$cmp_op]
+    my @no_params  = ();
+    my @block_body = ($cmp_op);
+    my $block      = $factory->make('AnonSub', inputs => [\@no_params, \@block_body]);
+
+    # sort args: block + list elements
+    my $name_sort = $factory->make('Constant', value => 'sort', const_type => 'string');
+    my $e3        = $factory->make('Constant', value => '3',    const_type => 'integer');
+    my $e1        = $factory->make('Constant', value => '1',    const_type => 'integer');
+    my $e2        = $factory->make('Constant', value => '2',    const_type => 'integer');
+    my @sort_args = ($block, $e3, $e1, $e2);
+    my $call_sort = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'sort',
+        inputs        => [$name_sort, \@sort_args],
+    );
+
+    # VarDecl: my @r = sort { ... } (3, 1, 2)
+    my $name_r  = $factory->make('Constant', value => '@r', const_type => 'string');
+    my $var_r   = $factory->make('VarDecl', inputs => [$name_r, $call_sort], scope => 'my');
+    $var_r->set_control_in($start);
+
+    # $r[0] — aggregate subscript
+    my $r_read  = $factory->make('Constant', value => '$r',   const_type => 'variable');
+    my $idx_0   = $factory->make('Constant', value => '0',    const_type => 'integer');
+    my $style_a = $factory->make('Constant', value => 'array', const_type => 'string');
+    my $sub_r0  = $factory->make('Subscript', inputs => [$r_read, $idx_0, $style_a]);
+
+    # Return: $r[0]
+    my $ret = $factory->make_cfg('Return', inputs => [$sub_r0]);
+    $ret->set_control_in($var_r);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_cmp, $a_var, $b_var, $cmp_op, $block, $name_sort,
+               $e3, $e1, $e2, $call_sort, $name_r, $var_r,
+               $r_read, $idx_0, $style_a, $sub_r0, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M23: class C { method m() { my %h = (a => 1); delete $h{a}; return scalar keys %h; } }
+#
+# VarDecl(%h), bare Call(delete, [Subscript($h,a,hash)]), Return(scalar(keys(%h))).
+# Control chain: Start <- var_h <- delete_call <- ret
+# ---------------------------------------------------------------------------
+sub _build_M23 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # my %h = (a => 1)
+    my $key_a    = $factory->make('Constant', value => 'a', const_type => 'string');
+    my $val_1    = $factory->make('Constant', value => '1', const_type => 'integer');
+    my @pairs    = ($key_a, $val_1);
+    my $hash_ref = $factory->make('HashRef', inputs => [\@pairs]);
+    my $name_h   = $factory->make('Constant', value => '%h', const_type => 'string');
+    my $var_h    = $factory->make('VarDecl', inputs => [$name_h, $hash_ref], scope => 'my');
+    $var_h->set_control_in($start);
+
+    # delete $h{a} — Call(delete, [Subscript($h, a, hash)])
+    my $h_lhs   = $factory->make('Constant', value => '$h',   const_type => 'variable');
+    my $key_a2  = $factory->make('Constant', value => 'a',    const_type => 'string');
+    my $style_h = $factory->make('Constant', value => 'hash', const_type => 'string');
+    my $sub_ha  = $factory->make('Subscript', inputs => [$h_lhs, $key_a2, $style_h]);
+    my $name_del = $factory->make('Constant', value => 'delete', const_type => 'string');
+    my @del_args = ($sub_ha);
+    my $call_del = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'delete',
+        inputs        => [$name_del, \@del_args],
+    );
+    $call_del->set_control_in($var_h);
+
+    # keys %h — Call(keys, [%h])
+    my $name_keys = $factory->make('Constant', value => 'keys', const_type => 'string');
+    my $h_read    = $factory->make('Constant', value => '%h',   const_type => 'variable');
+    my @keys_args = ($h_read);
+    my $call_keys = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'keys',
+        inputs        => [$name_keys, \@keys_args],
+    );
+
+    # scalar(keys(%h)) — Call(scalar, [Call(keys)])
+    my $name_scalar  = $factory->make('Constant', value => 'scalar', const_type => 'string');
+    my @scalar_args  = ($call_keys);
+    my $call_scalar  = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'scalar',
+        inputs        => [$name_scalar, \@scalar_args],
+    );
+
+    # Return: scalar keys %h
+    my $ret = $factory->make_cfg('Return', inputs => [$call_scalar]);
+    $ret->set_control_in($call_del);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $key_a, $val_1, $hash_ref, $name_h, $var_h,
+               $h_lhs, $key_a2, $style_h, $sub_ha, $name_del, $call_del,
+               $name_keys, $h_read, $call_keys,
+               $name_scalar, $call_scalar, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M24: class C { method m($r) { return $r->{a}->[0]; } }
+#
+# Method param $r. Chained subscript: Subscript(Subscript($r, a, hash), 0, array).
+# Emits $r->{'a'}->[0]. Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_M24 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # $r->{'a'} — outer hash subscript (arrow style, not aggregate)
+    my $r_read   = $factory->make('Constant', value => '$r',   const_type => 'variable');
+    my $key_a    = $factory->make('Constant', value => 'a',    const_type => 'string');
+    my $style_h  = $factory->make('Constant', value => 'hash', const_type => 'string');
+    my $sub_rha  = $factory->make('Subscript', inputs => [$r_read, $key_a, $style_h]);
+
+    # ->->[0] — inner array subscript
+    my $idx_0    = $factory->make('Constant', value => '0',    const_type => 'integer');
+    my $style_a  = $factory->make('Constant', value => 'array', const_type => 'string');
+    my $sub_arr  = $factory->make('Subscript', inputs => [$sub_rha, $idx_0, $style_a]);
+
+    # Return: $r->{a}->[0]
+    my $ret = $factory->make_cfg('Return', inputs => [$sub_arr]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $r_read, $key_a, $style_h, $sub_rha, $idx_0, $style_a, $sub_arr, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$r'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
 # H1: class C { method m() { my @r = map { $_ * 2 } (1, 2, 3); return scalar @r; } }
 #
 # VarDecl(@r, Call(map, [AnonSub({$_*2}), 1, 2, 3])), Return(scalar(@r)).
@@ -1883,6 +2499,7 @@ sub _build_K2 {
     H2 => \&_build_H2,
     H3 => \&_build_H3,
     H4 => \&_build_H4,
+    I3 => \&_build_I3,
     F1 => \&_build_F1,
     F2 => \&_build_F2,
     F3 => \&_build_F3,
@@ -1899,6 +2516,19 @@ sub _build_K2 {
     L2 => \&_build_L2,
     L3 => \&_build_L3,
     L4 => \&_build_L4,
+    M3  => \&_build_M3,
+    M4  => \&_build_M4,
+    M8  => \&_build_M8,
+    M9  => \&_build_M9,
+    M10 => \&_build_M10,
+    M11 => \&_build_M11,
+    M12 => \&_build_M12,
+    M13 => \&_build_M13,
+    M14 => \&_build_M14,
+    M15 => \&_build_M15,
+    M22 => \&_build_M22,
+    M23 => \&_build_M23,
+    M24 => \&_build_M24,
 );
 
 1;

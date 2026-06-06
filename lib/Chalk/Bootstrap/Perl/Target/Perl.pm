@@ -945,6 +945,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if ($ct eq 'variable' || $val =~ /^[\$\@\%]/) {
                 return $val;
             }
+            # Bare identifiers (class names, qualified names) emit without quoting
+            if ($ct eq 'bareword') {
+                return $val;
+            }
             # Numeric values
             if ($val =~ /^-?[0-9]+(?:\.[0-9]+)?$/) {
                 return $val;
