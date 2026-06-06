@@ -136,6 +136,43 @@ package main;
 }
 
 # =========================================================================
+# N4c: FP outside tolerance — oracle token 'numeric-first' (production path)
+#      The oracle (RunUnderPerl) always emits dualvar_policy='numeric-first'.
+#      Confirms that 'numeric-first' also applies FP tolerance (not string-eq).
+# =========================================================================
+{
+    my $tol  = 0.001;
+    my $diff = 0.002;   # outside tolerance
+    my $s = t::BehaviorRecord->new( return_values  => [1.0],
+                                    fp_tolerance   => $tol,
+                                    dualvar_policy => 'numeric-first' );
+    my $p = t::BehaviorRecord->new( return_values  => [1.0 + $diff],
+                                    fp_tolerance   => $tol,
+                                    dualvar_policy => 'numeric-first' );
+    my $meta = { emitted_for_every_construct => 1, marked_unsupported => 0 };
+    my $r = Comparator->verdict($s, $p, $meta);
+    isnt( $r->{verdict}, 'PASS',     'N4c: FP outside tolerance (numeric-first) must NOT verdict PASS' );
+    is(   $r->{verdict}, 'MISCOMPILE','N4c: FP outside tolerance (numeric-first) => MISCOMPILE' );
+}
+
+# =========================================================================
+# N4d: FP boundary — just inside tolerance => PASS (oracle token 'numeric-first')
+# =========================================================================
+{
+    my $tol  = 0.001;
+    my $diff = 0.0009;  # inside tolerance
+    my $s = t::BehaviorRecord->new( return_values  => [1.0],
+                                    fp_tolerance   => $tol,
+                                    dualvar_policy => 'numeric-first' );
+    my $p = t::BehaviorRecord->new( return_values  => [1.0 + $diff],
+                                    fp_tolerance   => $tol,
+                                    dualvar_policy => 'numeric-first' );
+    my $meta = { emitted_for_every_construct => 1, marked_unsupported => 0 };
+    my $r = Comparator->verdict($s, $p, $meta);
+    is( $r->{verdict}, 'PASS', 'N4d: FP just inside tolerance (numeric-first) => PASS' );
+}
+
+# =========================================================================
 # N5: Unobserved-axis false green — hash-identity (object_state) differs
 #     return_values and stdout agree, but object_state differs.
 # =========================================================================

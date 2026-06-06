@@ -156,14 +156,19 @@ class Chalk::CodeGen::Harness::Comparator {
     # two arrayrefs element-by-element applying FP tolerance and dualvar policy.
     #
     # dualvar_policy:
+    #   'numeric-first' — if both values look numeric (looks_like_number), compare
+    #               the numeric face with abs(a-b) <= fp_tolerance.  If either
+    #               value is non-numeric, fall back to exact string comparison.
+    #               This is the token the oracle (RunUnderPerl) always emits.
+    #   'numeric' — coerce both to numbers and compare with abs(a-b) <= fp_tolerance,
+    #               regardless of whether the values look numeric.  Retained for
+    #               direct test-fixture use.
     #   'string'  — compare the string face (Perl's "stringification") exactly.
     #               No FP tolerance is applied: "3.0" ne "3" => not equal.
-    #               This is the right policy for string-typed outputs where
-    #               string identity matters.
-    #   'numeric' — coerce both to numbers and compare with abs(a-b) <= fp_tolerance.
-    #               This is the right policy for computed floating-point outputs.
     #   (other)   — exact string (eq) comparison, no FP tolerance.
     sub _return_values_equal ($a, $b, $fp_tolerance, $dualvar_policy) {
+        use Scalar::Util qw(looks_like_number);
+
         $a //= [];
         $b //= [];
         return false if scalar(@$a) != scalar(@$b);
@@ -177,13 +182,26 @@ class Chalk::CodeGen::Harness::Comparator {
             # One undef => not equal.
             if ( !defined($va) || !defined($vb) ) { return false }
 
-            if ( ( $dualvar_policy // 'string' ) eq 'numeric' ) {
+            my $policy = $dualvar_policy // 'string';
+
+            if ( $policy eq 'numeric-first' ) {
+                # Numeric face when both look numeric; string fallback otherwise.
+                if ( looks_like_number($va) && looks_like_number($vb) ) {
+                    my $na = $va + 0;
+                    my $nb = $vb + 0;
+                    return false if abs($na - $nb) > ( $fp_tolerance // 1e-9 );
+                }
+                else {
+                    return false if "$va" ne "$vb";
+                }
+            }
+            elsif ( $policy eq 'numeric' ) {
                 # Numeric comparison with FP tolerance.
                 my $na = $va + 0;
                 my $nb = $vb + 0;
                 return false if abs($na - $nb) > ( $fp_tolerance // 1e-9 );
             }
-            elsif ( ( $dualvar_policy // 'string' ) eq 'string' ) {
+            elsif ( $policy eq 'string' ) {
                 # Exact string-face comparison; no FP blurring.
                 return false if "$va" ne "$vb";
             }

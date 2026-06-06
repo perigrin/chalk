@@ -82,6 +82,65 @@ my $COMPLETE_META = { emitted_for_every_construct => 1, marked_unsupported => 0 
 }
 
 # =========================================================================
+# Axis: FP tolerance with oracle-emitted token 'numeric-first'
+# (RunUnderPerl always emits 'numeric-first'; these tests exercise the
+# production path so a vocabulary gap cannot silently regress)
+# =========================================================================
+{
+    # Within tolerance, both numeric => PASS
+    my $s = t::BehaviorRecord->new( return_values => [1.0000000001], fp_tolerance => 1e-6,
+                                    dualvar_policy => 'numeric-first' );
+    my $p = t::BehaviorRecord->new( return_values => [1.0000000002], fp_tolerance => 1e-6,
+                                    dualvar_policy => 'numeric-first' );
+    my $r = Comparator->verdict($s, $p, $COMPLETE_META);
+    is( $r->{verdict}, 'PASS', 'FP within tolerance (numeric-first) => PASS' );
+}
+{
+    # Outside tolerance => MISCOMPILE
+    my $s = t::BehaviorRecord->new( return_values => [1.0], fp_tolerance => 1e-9,
+                                    dualvar_policy => 'numeric-first' );
+    my $p = t::BehaviorRecord->new( return_values => [2.0], fp_tolerance => 1e-9,
+                                    dualvar_policy => 'numeric-first' );
+    my $r = Comparator->verdict($s, $p, $COMPLETE_META);
+    is( $r->{verdict}, 'MISCOMPILE', 'FP outside tolerance (numeric-first) => MISCOMPILE' );
+}
+{
+    my $tol = 0.001;
+    # Just inside (bilateral inner side)
+    my $s_in = t::BehaviorRecord->new( return_values => [1.0000], fp_tolerance => $tol,
+                                       dualvar_policy => 'numeric-first' );
+    my $p_in = t::BehaviorRecord->new( return_values => [1.0009], fp_tolerance => $tol,
+                                       dualvar_policy => 'numeric-first' );
+    my $r_in = Comparator->verdict($s_in, $p_in, $COMPLETE_META);
+    is( $r_in->{verdict}, 'PASS', 'FP just inside tolerance (numeric-first) => PASS' );
+
+    # Just outside (bilateral outer side)
+    my $s_out = t::BehaviorRecord->new( return_values => [1.0000], fp_tolerance => $tol,
+                                        dualvar_policy => 'numeric-first' );
+    my $p_out = t::BehaviorRecord->new( return_values => [1.0011], fp_tolerance => $tol,
+                                        dualvar_policy => 'numeric-first' );
+    my $r_out = Comparator->verdict($s_out, $p_out, $COMPLETE_META);
+    is( $r_out->{verdict}, 'MISCOMPILE', 'FP just outside tolerance (numeric-first) => MISCOMPILE' );
+}
+{
+    # Non-numeric values fall back to string comparison under 'numeric-first'
+    my $s = t::BehaviorRecord->new( return_values => ["hello"], fp_tolerance => 1e-9,
+                                    dualvar_policy => 'numeric-first' );
+    my $p = t::BehaviorRecord->new( return_values => ["hello"], fp_tolerance => 1e-9,
+                                    dualvar_policy => 'numeric-first' );
+    my $r = Comparator->verdict($s, $p, $COMPLETE_META);
+    is( $r->{verdict}, 'PASS', 'dualvar numeric-first: non-numeric strings equal => PASS (string fallback)' );
+}
+{
+    my $s = t::BehaviorRecord->new( return_values => ["hello"], fp_tolerance => 1e-9,
+                                    dualvar_policy => 'numeric-first' );
+    my $p = t::BehaviorRecord->new( return_values => ["world"], fp_tolerance => 1e-9,
+                                    dualvar_policy => 'numeric-first' );
+    my $r = Comparator->verdict($s, $p, $COMPLETE_META);
+    is( $r->{verdict}, 'MISCOMPILE', 'dualvar numeric-first: non-numeric strings differ => MISCOMPILE (string fallback)' );
+}
+
+# =========================================================================
 # Axis: hash-order normalization
 # =========================================================================
 {
