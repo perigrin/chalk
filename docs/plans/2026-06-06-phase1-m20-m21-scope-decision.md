@@ -2,7 +2,9 @@
 
 **Issue**: 019e9af9-8a3a  
 **Date**: 2026-06-06  
-**Status**: M21 = REJECT (decided). M20 = IN-SUBSET-DEFERRED (decided by perigrin 2026-06-06; Option A). M20 stays NOT-YET-COVERED with the recorded reason "needs Do IR node + DoBlock grammar rule + emitter"; a follow-up codegen issue tracks it. M20 is in-subset (used in lib/ via `//= do {}`, needed for the self-host capstone) but not Phase-1 work.
+**Status**: M21 = REJECT (decided). M20 = IN-SUBSET-DEFERRED (decided by perigrin 2026-06-06; Option A). M20 carries the gap-map verdict **DEFERRED** (a distinct verdict, not NOT-YET-COVERED) with the recorded reason "needs Do IR node + DoBlock grammar rule + emitter"; a follow-up codegen issue (019e9b4a) tracks it. M20 is in-subset (used in lib/ via `//= do {}`, needed for the self-host capstone) but not Phase-1 work.
+
+**tier-1-green definition (decided by perigrin 2026-06-06)**: `tier1_green()` excludes both REJECT (out-of-subset) and DEFERRED (in-subset-deferred) entries from the green requirement. Green = every *required* idiom (verdict neither REJECT nor DEFERRED) is PASS. DEFERRED is NOT a loophole: only idioms in the explicit `%DEFERRED_REASONS` registry receive it; an ordinary NOT-YET-COVERED still blocks green. With this definition, the sole remaining tier-1-green blocker is I1 (ADJUST, tracked as 019e9b75).
 
 ---
 

@@ -157,19 +157,25 @@ sub validate_coverage {
 # assert that new verdicts are documented rather than appearing silently.
 # ---------------------------------------------------------------------------
 sub valid_verdicts {
-    return qw(PASS GAP MISCOMPILE NOT-YET-COVERED UNDER_SPECIFIED REJECT);
+    return qw(PASS GAP MISCOMPILE NOT-YET-COVERED UNDER_SPECIFIED REJECT DEFERRED);
 }
 
 # ---------------------------------------------------------------------------
 # tier1_green(\%gap_map) -> bool
 #
 # Returns true iff the gap map satisfies the tier-1 green requirement:
-#   - Every IN-SUBSET idiom has verdict PASS.
-#   - REJECT idioms are excluded from the requirement.
-#   - Any non-PASS, non-REJECT verdict (GAP, MISCOMPILE, NOT-YET-COVERED,
-#     UNDER_SPECIFIED) on an in-subset idiom counts as NOT green.
+#   - Every required idiom has verdict PASS.
+#   - REJECT idioms (out-of-subset) are excluded from the requirement.
+#   - DEFERRED idioms (in-subset but deliberately deferred past Phase 1, e.g.
+#     M20 do-block per the M20/M21 scope decision) are excluded from the
+#     requirement — they remain in the denominator as tracked debt but do not
+#     block green.
+#   - Any non-PASS verdict that is neither REJECT nor DEFERRED (GAP, MISCOMPILE,
+#     NOT-YET-COVERED, UNDER_SPECIFIED) on a required idiom counts as NOT green.
 #
-# "In-subset" means: any entry whose verdict is not REJECT.
+# DEFERRED is NOT a loophole for undone work: only idioms in the explicit
+# %DEFERRED_REASONS registry receive it.  An ordinary NOT-YET-COVERED still
+# blocks green.
 # ---------------------------------------------------------------------------
 sub tier1_green {
     my (undef, $gap_map) = @_;    # class method
@@ -181,7 +187,8 @@ sub tier1_green {
 
     for my $entry (@$entries) {
         my $v = $entry->{verdict} // 'UNKNOWN';
-        next if $v eq 'REJECT';    # out-of-subset, excluded from green requirement
+        next if $v eq 'REJECT';      # out-of-subset, excluded from green requirement
+        next if $v eq 'DEFERRED';    # in-subset but deferred debt, excluded from green
         return false unless $v eq 'PASS';
     }
 
@@ -388,7 +395,23 @@ sub _spec_for {
 sub _run_one {
     my ($tag, $group, $corpus_text) = @_;
 
-    # Check the out-of-subset registry first.  REJECT idioms are classified
+    # Check the deferred registry: IN-SUBSET-DEFERRED idioms are classified
+    # immediately as DEFERRED.  They stay in the denominator as tracked debt
+    # and never reach the codegen rig, but (unlike NOT-YET-COVERED) they do not
+    # block tier-1-green — see the M20/M21 scope decision.
+    if (exists $DEFERRED_REASONS{$tag}) {
+        return {
+            tag     => $tag,
+            group   => $group,
+            verdict => 'DEFERRED',
+            extra   => {
+                reason         => $DEFERRED_REASONS{$tag},
+                classification => 'in-subset-deferred',
+            },
+        };
+    }
+
+    # Check the out-of-subset registry next.  REJECT idioms are classified
     # immediately: they stay in the denominator but never reach the codegen rig.
     if (exists $REJECT_IDIOMS{$tag}) {
         return {
