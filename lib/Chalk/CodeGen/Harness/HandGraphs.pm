@@ -410,6 +410,326 @@ sub _build_A3 {
     return $mop;
 }
 
+# ---------------------------------------------------------------------------
+# C1: class C { method m() { my $x = 1; $x = 2; return $x; } }
+#
+# VarDecl, bare Assign ($x = 2), Return.
+# Same pattern as A4 but the reassigned value is 2, not the initial 1.
+# Control chain: Start <- var_x <- assign <- ret
+# ---------------------------------------------------------------------------
+sub _build_C1 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $x = 1
+    my $name_x  = $factory->make('Constant', value => '$x', const_type => 'string');
+    my $const_1 = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $var_x   = $factory->make('VarDecl', inputs => [$name_x, $const_1], scope => 'my');
+    $var_x->set_control_in($start);
+
+    # Assign: $x = 2
+    my $op_eq    = $factory->make('Constant', value => '=',  const_type => 'string');
+    my $x_lhs    = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $const_2  = $factory->make('Constant', value => '2',  const_type => 'integer');
+    my $assign   = $factory->make('Assign', inputs => [$op_eq, $x_lhs, $const_2]);
+    $assign->set_control_in($var_x);
+
+    # Return: $x
+    my $x_read = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$x_read]);
+    $ret->set_control_in($assign);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_x, $const_1, $var_x, $op_eq, $x_lhs, $const_2, $assign, $x_read, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# C2: class C { method m() { my $x = 1; $x += 2; return $x; } }
+#
+# VarDecl, CompoundAssign ($x += 2), Return.
+# CompoundAssign layout: inputs[0]=Constant(op), inputs[1]=target, inputs[2]=value.
+# The CompoundAssign node also carries op as a named :param.
+# Control chain: Start <- var_x <- compound_assign <- ret
+# ---------------------------------------------------------------------------
+sub _build_C2 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $x = 1
+    my $name_x  = $factory->make('Constant', value => '$x', const_type => 'string');
+    my $const_1 = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $var_x   = $factory->make('VarDecl', inputs => [$name_x, $const_1], scope => 'my');
+    $var_x->set_control_in($start);
+
+    # CompoundAssign: $x += 2
+    my $op_plus = $factory->make('Constant', value => '+=', const_type => 'string');
+    my $x_lhs   = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $const_2 = $factory->make('Constant', value => '2',  const_type => 'integer');
+    my $compound = $factory->make('CompoundAssign',
+        op     => '+=',
+        inputs => [$op_plus, $x_lhs, $const_2],
+    );
+    $compound->set_control_in($var_x);
+
+    # Return: $x
+    my $x_read = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$x_read]);
+    $ret->set_control_in($compound);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_x, $const_1, $var_x, $op_plus, $x_lhs, $const_2, $compound, $x_read, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# C3: class C { method m() { my $s = "a"; $s .= "b"; return $s; } }
+#
+# VarDecl, CompoundAssign ($s .= "b"), Return.
+# Control chain: Start <- var_s <- compound_assign <- ret
+# ---------------------------------------------------------------------------
+sub _build_C3 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $s = "a"
+    my $name_s  = $factory->make('Constant', value => '$s', const_type => 'string');
+    my $str_a   = $factory->make('Constant', value => 'a',  const_type => 'string');
+    my $var_s   = $factory->make('VarDecl', inputs => [$name_s, $str_a], scope => 'my');
+    $var_s->set_control_in($start);
+
+    # CompoundAssign: $s .= "b"
+    my $op_dot  = $factory->make('Constant', value => '.=', const_type => 'string');
+    my $s_lhs   = $factory->make('Constant', value => '$s', const_type => 'variable');
+    my $str_b   = $factory->make('Constant', value => 'b',  const_type => 'string');
+    my $compound = $factory->make('CompoundAssign',
+        op     => '.=',
+        inputs => [$op_dot, $s_lhs, $str_b],
+    );
+    $compound->set_control_in($var_s);
+
+    # Return: $s
+    my $s_read = $factory->make('Constant', value => '$s', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$s_read]);
+    $ret->set_control_in($compound);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_s, $str_a, $var_s, $op_dot, $s_lhs, $str_b, $compound, $s_read, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# C4: class C { method m() { my @a = (1); $a[0] = 2; return $a[0]; } }
+#
+# VarDecl(@a), Assign(Subscript($a,0,array), 2), Return(Subscript($a,0,array)).
+# The Subscript on the LHS is an aggregate var, so emits $a[0] (no arrow).
+# Control chain: Start <- var_a <- assign <- ret
+# ---------------------------------------------------------------------------
+sub _build_C4 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my @a = (1)
+    my $name_a  = $factory->make('Constant', value => '@a', const_type => 'string');
+    my $one     = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my @elems   = ($one);
+    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+    my $var_a   = $factory->make('VarDecl', inputs => [$name_a, $arr_ref], scope => 'my');
+    $var_a->set_control_in($start);
+
+    # Subscript: $a[0] (LHS)
+    my $a_lhs   = $factory->make('Constant', value => '$a', const_type => 'variable');
+    my $idx_0   = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $style_a = $factory->make('Constant', value => 'array', const_type => 'string');
+    my $sub_lhs = $factory->make('Subscript', inputs => [$a_lhs, $idx_0, $style_a]);
+
+    # Assign: $a[0] = 2
+    my $op_eq  = $factory->make('Constant', value => '=', const_type => 'string');
+    my $two    = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $assign = $factory->make('Assign', inputs => [$op_eq, $sub_lhs, $two]);
+    $assign->set_control_in($var_a);
+
+    # Return: $a[0]
+    my $a_read  = $factory->make('Constant', value => '$a', const_type => 'variable');
+    my $idx_0b  = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $style_b = $factory->make('Constant', value => 'array', const_type => 'string');
+    my $sub_ret = $factory->make('Subscript', inputs => [$a_read, $idx_0b, $style_b]);
+    my $ret     = $factory->make_cfg('Return', inputs => [$sub_ret]);
+    $ret->set_control_in($assign);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_a, $one, $arr_ref, $var_a, $a_lhs, $idx_0, $style_a, $sub_lhs,
+               $op_eq, $two, $assign, $a_read, $idx_0b, $style_b, $sub_ret, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# C5: class C { method m() { my %h = (); $h{k} = 1; return $h{k}; } }
+#
+# VarDecl(%h) with empty HashRef, Assign(Subscript($h,k,hash), 1), Return(Subscript).
+# Control chain: Start <- var_h <- assign <- ret
+# ---------------------------------------------------------------------------
+sub _build_C5 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my %h = ()
+    my $name_h   = $factory->make('Constant', value => '%h', const_type => 'string');
+    my @no_pairs = ();
+    my $hash_ref = $factory->make('HashRef', inputs => [\@no_pairs]);
+    my $var_h    = $factory->make('VarDecl', inputs => [$name_h, $hash_ref], scope => 'my');
+    $var_h->set_control_in($start);
+
+    # Subscript: $h{k} (LHS)
+    my $h_lhs    = $factory->make('Constant', value => '$h',   const_type => 'variable');
+    my $key_k    = $factory->make('Constant', value => 'k',    const_type => 'string');
+    my $style_h  = $factory->make('Constant', value => 'hash', const_type => 'string');
+    my $sub_lhs  = $factory->make('Subscript', inputs => [$h_lhs, $key_k, $style_h]);
+
+    # Assign: $h{k} = 1
+    my $op_eq   = $factory->make('Constant', value => '=', const_type => 'string');
+    my $one     = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $assign  = $factory->make('Assign', inputs => [$op_eq, $sub_lhs, $one]);
+    $assign->set_control_in($var_h);
+
+    # Return: $h{k}
+    my $h_read   = $factory->make('Constant', value => '$h',   const_type => 'variable');
+    my $key_k2   = $factory->make('Constant', value => 'k',    const_type => 'string');
+    my $style_h2 = $factory->make('Constant', value => 'hash', const_type => 'string');
+    my $sub_ret  = $factory->make('Subscript', inputs => [$h_read, $key_k2, $style_h2]);
+    my $ret      = $factory->make_cfg('Return', inputs => [$sub_ret]);
+    $ret->set_control_in($assign);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_h, $hash_ref, $var_h, $h_lhs, $key_k, $style_h, $sub_lhs,
+               $op_eq, $one, $assign, $h_read, $key_k2, $style_h2, $sub_ret, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# K1: class C { method m() { my $i = 0; ++$i; return $i; } }
+#
+# Pre-increment: ++$i. The IR represents this as CompoundAssign($i += 1)
+# since there is no dedicated PreIncrement node and the behavior as a bare
+# statement is identical. The return value is always $i after increment.
+# Control chain: Start <- var_i <- compound_assign <- ret
+# ---------------------------------------------------------------------------
+sub _build_K1 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $i = 0
+    my $name_i  = $factory->make('Constant', value => '$i', const_type => 'string');
+    my $zero    = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $var_i   = $factory->make('VarDecl', inputs => [$name_i, $zero], scope => 'my');
+    $var_i->set_control_in($start);
+
+    # ++$i as CompoundAssign: $i += 1
+    my $op_plus = $factory->make('Constant', value => '+=', const_type => 'string');
+    my $i_lhs   = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $one     = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $incr    = $factory->make('CompoundAssign',
+        op     => '+=',
+        inputs => [$op_plus, $i_lhs, $one],
+    );
+    $incr->set_control_in($var_i);
+
+    # Return: $i
+    my $i_read = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$i_read]);
+    $ret->set_control_in($incr);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_i, $zero, $var_i, $op_plus, $i_lhs, $one, $incr, $i_read, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# K2: class C { method m() { my $i = 0; $i++; return $i; } }
+#
+# Post-increment: $i++. As a bare statement the effect is identical to
+# ++$i (both increment $i by 1). Represented as CompoundAssign($i += 1).
+# Control chain: Start <- var_i <- compound_assign <- ret
+# ---------------------------------------------------------------------------
+sub _build_K2 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $i = 0
+    my $name_i  = $factory->make('Constant', value => '$i', const_type => 'string');
+    my $zero    = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $var_i   = $factory->make('VarDecl', inputs => [$name_i, $zero], scope => 'my');
+    $var_i->set_control_in($start);
+
+    # $i++ as CompoundAssign: $i += 1
+    my $op_plus = $factory->make('Constant', value => '+=', const_type => 'string');
+    my $i_lhs   = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $one     = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $incr    = $factory->make('CompoundAssign',
+        op     => '+=',
+        inputs => [$op_plus, $i_lhs, $one],
+    );
+    $incr->set_control_in($var_i);
+
+    # Return: $i
+    my $i_read = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$i_read]);
+    $ret->set_control_in($incr);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_i, $zero, $var_i, $op_plus, $i_lhs, $one, $incr, $i_read, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
 # Populate the dispatch table after all builders are defined.
 %BUILDERS = (
     A1 => \&_build_A1,
@@ -417,8 +737,15 @@ sub _build_A3 {
     A3 => \&_build_A3,
     A4 => \&_build_A4,
     A5 => \&_build_A5,
+    C1 => \&_build_C1,
+    C2 => \&_build_C2,
+    C3 => \&_build_C3,
+    C4 => \&_build_C4,
+    C5 => \&_build_C5,
     E1 => \&_build_E1,
     F3 => \&_build_F3,
+    K1 => \&_build_K1,
+    K2 => \&_build_K2,
 );
 
 1;
