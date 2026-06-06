@@ -158,6 +158,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         for my $field ($cls->fields) {
             push @body_lines, $self->_emit_mop_field($field);
         }
+        for my $adjust ($cls->adjust_blocks) {
+            push @body_lines, $self->_emit_mop_adjust($adjust);
+        }
         for my $method ($cls->methods) {
             push @body_lines, $self->_emit_mop_method($method);
         }
@@ -190,6 +193,20 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             $decl .= " = " . $self->_emit_expr($field->default_value);
         }
         return "$decl;";
+    }
+
+    # Emit an ADJUST block from a Chalk::MOP::Phaser::Adjust. ADJUST blocks
+    # run at construction time after field initialization. They have no
+    # parameters and no return value; the body is emitted verbatim inside
+    # `ADJUST { ... }`. The body graph is scheduled via EagerPinning the
+    # same way a method body is, with an empty params list.
+    method _emit_mop_adjust($adjust) {
+        my %saved = %_aggregate_vars;
+        $self->_scope_body_vars_mop([], $adjust);
+        my $body_code = $self->_emit_scheduled_body($adjust);
+        %_aggregate_vars = %saved;
+
+        return "ADJUST {\n" . _indent_block($body_code) . "}";
     }
 
     # Emit a method declaration from a Chalk::MOP::Method, with body

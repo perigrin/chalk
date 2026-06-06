@@ -57,6 +57,7 @@ my %CORPUS = (
     H2  => 'class C { method m() { my @r = grep { $_ > 1 } (1, 2, 3); return scalar @r; } }',
     H3  => 'class C { method m() { my @r = sort (3, 1, 2); return $r[0]; } }',
     H4  => 'class C { method m() { my $f = sub ($x) { return $x + 1; }; return $f->(1); } }',
+    I1  => 'class C { field $x :param; ADJUST { $x = $x + 1; } method m() { return $x; } }',
     I2  => 'sub greet ($name) { return "hi $name"; }',
     I3  => 'class C { method m() { my sub helper ($n) { return $n * 2; } return helper(3); } }',
     J1  => 'class C { method m($s) { return $s =~ /foo/; } }',

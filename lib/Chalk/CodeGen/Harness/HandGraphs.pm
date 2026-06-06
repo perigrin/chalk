@@ -41,6 +41,7 @@ use Chalk::IR::Node::ExpressionList;
 use Chalk::Scheduler::EagerPinning::If;
 use Chalk::Scheduler::EagerPinning::Loop;
 use Chalk::Scheduler::EagerPinning::TryCatch;
+use Chalk::MOP::Phaser::Adjust;
 
 # Dispatch table from corpus tag to builder sub.
 # Each builder returns a Chalk::MOP built directly node-by-node.
@@ -3849,6 +3850,89 @@ sub _build_M25 {
     return $mop;
 }
 
+# ---------------------------------------------------------------------------
+# I1: class C { field $x :param; ADJUST { $x = $x + 1; } method m() { return $x; } }
+#
+# The class has a :param field $x and an ADJUST block that increments $x.
+# Constructing C->new(x => 5) sets $x = 5, then ADJUST fires and sets $x = $x + 1 = 6.
+# method m() returns $x, which is 6 (proving ADJUST ran and mutated the field).
+#
+# ADJUST graph layout:
+#   start_adj     : Start
+#   op_eq         : Constant('=')
+#   x_lhs         : Constant('$x', variable) [left-hand side of assignment]
+#   op_plus       : Constant('+')
+#   x_rhs         : Constant('$x', variable) [right-hand side: read $x]
+#   one           : Constant(1, integer)
+#   add           : Add(op_plus, x_rhs, one)  [$x + 1]
+#   assign        : Assign(op_eq, x_lhs, add) [$x = $x + 1]
+#   ret_adj       : Return(inputs=[]) synthetic=true  [no return value; ADJUST returns nothing]
+# Control chain: start_adj <- assign.control_in <- ret_adj.control_in
+#
+# Method m() graph layout (same as A5):
+#   start   : Start
+#   x_read  : Constant('$x', variable)
+#   ret     : Return(inputs=[x_read])
+# Control chain: start <- ret.control_in
+# ---------------------------------------------------------------------------
+sub _build_I1 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    # --- ADJUST block graph: $x = $x + 1 ---
+    my $start_adj = $factory->make_cfg('Start', inputs => []);
+
+    # $x + 1
+    my $op_plus = $factory->make('Constant', value => '+',  const_type => 'string');
+    my $x_rhs   = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $one     = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $add     = $factory->make('Add', inputs => [$op_plus, $x_rhs, $one]);
+
+    # $x = $x + 1
+    my $op_eq = $factory->make('Constant', value => '=',  const_type => 'string');
+    my $x_lhs = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $assign = $factory->make('Assign', inputs => [$op_eq, $x_lhs, $add]);
+    $assign->set_control_in($start_adj);
+
+    # Synthetic Return with no value (ADJUST body has no explicit return).
+    my $ret_adj = Chalk::IR::Node::Return->new(
+        id        => 'Return#hand_I1_adj',
+        inputs    => [],
+        synthetic => true,
+    );
+    $ret_adj->set_control_in($assign);
+
+    my $adj_graph = Chalk::IR::Graph->new;
+    for my $n ($start_adj, $op_plus, $x_rhs, $one, $add, $op_eq, $x_lhs, $assign, $ret_adj) {
+        $adj_graph->merge($n);
+    }
+
+    # --- Method m() graph: return $x ---
+    my $start       = $factory->make_cfg('Start', inputs => []);
+    my $x_read      = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $ret         = $factory->make_cfg('Return', inputs => [$x_read]);
+    $ret->set_control_in($start);
+
+    my $m_graph = Chalk::IR::Graph->new;
+    $m_graph->merge($start);
+    $m_graph->merge($x_read);
+    $m_graph->merge($ret);
+
+    # --- Wire MOP ---
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_field('$x',
+        sigil      => '$',
+        param_name => 'x',
+        attributes => [':param'],
+    );
+    $cls->declare_adjust(graph => $adj_graph);
+    $cls->declare_method('m',
+        params => [],
+        graph  => $m_graph,
+    );
+    return $mop;
+}
+
 # Populate the dispatch table after all builders are defined.
 %BUILDERS = (
     A1 => \&_build_A1,
@@ -3885,6 +3969,7 @@ sub _build_M25 {
     H2 => \&_build_H2,
     H3 => \&_build_H3,
     H4 => \&_build_H4,
+    I1 => \&_build_I1,
     I2 => \&_build_I2,
     I3 => \&_build_I3,
     F1 => \&_build_F1,

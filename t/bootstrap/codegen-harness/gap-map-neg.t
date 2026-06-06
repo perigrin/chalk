@@ -152,13 +152,12 @@ sub synthetic_gap_map {
         ok(exists $tag_in_map{M25},
             'N5b: M25 (no hand graph) appears in the gap map denominator');
 
-        # Count NOT-YET-COVERED or GAP entries — there should be many (most of 78)
-        my $nyc_count = scalar grep {
-            ($_->{verdict} // '') =~ /^(?:NOT-YET-COVERED|GAP)$/
-        } @$entries;
-
-        ok($nyc_count > 0,
-            "N5c: at least one NOT-YET-COVERED/GAP entry present (got $nyc_count)");
+        # N5c: tier1_green() must be TRUE now that all required idioms PASS.
+        # M20 is DEFERRED (in-subset but deferred debt, excluded from green requirement).
+        # M21 is REJECT (out-of-subset by policy, excluded from green requirement).
+        # All 76 other idioms must be PASS.
+        my $green = Chalk::CodeGen::Harness::GapMap->tier1_green($gap_map);
+        ok($green, "N5c: tier1_green() is TRUE — all required idioms PASS (tier-1 corpus green)");
     }
 }
 

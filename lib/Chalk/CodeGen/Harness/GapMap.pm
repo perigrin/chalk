@@ -331,6 +331,29 @@ sub _spec_for {
         return $SUB_SPECS{$tag};
     }
 
+    # Class-based entries with non-default constructor params. I1 passes
+    # x => 5 to the constructor so the ADJUST block's side-effect ($x++)
+    # is observable: m() must return 6, not 5.
+    my %CTOR_SPECS = (
+        I1 => {
+            class       => 'C',
+            constructor => { params => { x => 5 } },
+            method      => 'm',
+            method_args => [],
+            context     => 'scalar',
+        },
+        A5 => {
+            class       => 'C',
+            constructor => { params => { x => 42 } },
+            method      => 'm',
+            method_args => [],
+            context     => 'scalar',
+        },
+    );
+    if (exists $CTOR_SPECS{$tag}) {
+        return $CTOR_SPECS{$tag};
+    }
+
     return undef unless $snippet =~ /class\s+C\s*\{/;
 
     # Per-tag representative args for parameterized idioms.
