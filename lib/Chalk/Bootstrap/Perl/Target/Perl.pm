@@ -391,7 +391,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     # `for my $x (LIST) {` from a Loop node with iterator/list on
-    # schedule_data.
+    # schedule_data. When the iterator is $_ (the implicit topic variable),
+    # emits `for (LIST) {` without the `my $_` declaration, which Perl
+    # does not permit as a lexical alias for the global $_.
     method _emit_foreach_head($loop) {
         my $sd = $loop->schedule_data;
         my $iter = $sd->iterator;
@@ -403,7 +405,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         } else {
             $list_expr = $self->_emit_expr($list);
         }
-        return "for my $iter_expr ($list_expr) {";
+        # $_ is the implicit topic variable; `for my $_ (...)` is invalid Perl.
+        # Emit `for (LIST)` which uses $_ implicitly as the iterator.
+        return $iter_expr eq '$_'
+            ? "for ($list_expr) {"
+            : "for my $iter_expr ($list_expr) {";
     }
 
     # C-style for: `for (init; cond; step) {`. for_init and for_step

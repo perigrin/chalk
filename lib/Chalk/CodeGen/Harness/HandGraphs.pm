@@ -28,9 +28,17 @@ use Chalk::IR::Node::RegexSubst;
 use Chalk::IR::Node::TernaryExpr;
 use Chalk::IR::Node::Ref;
 use Chalk::IR::Node::If;
+use Chalk::IR::Node::Loop;
+use Chalk::IR::Node::TryCatch;
 use Chalk::IR::Node::Region;
 use Chalk::IR::Node::NumGt;
+use Chalk::IR::Node::NumLt;
+use Chalk::IR::Node::NumEq;
+use Chalk::IR::Node::Not;
+use Chalk::IR::Node::Unwind;
 use Chalk::Scheduler::EagerPinning::If;
+use Chalk::Scheduler::EagerPinning::Loop;
+use Chalk::Scheduler::EagerPinning::TryCatch;
 
 # Dispatch table from corpus tag to builder sub.
 # Each builder returns a Chalk::MOP built directly node-by-node.
@@ -2688,6 +2696,1091 @@ sub _build_D1 {
     return $mop;
 }
 
+# ---------------------------------------------------------------------------
+# D7: class C { method m($n) { my $x = 0; if ($n > 0) { if ($n > 5) { $x = 1; } else { $x = 2; } } else { $x = 3; } return $x; } }
+#
+# Nested if/else: outer If ($n > 0), inner If ($n > 5) in the outer then-branch.
+# Outer then_stmts=[inner_if], outer else_stmts=[assign_x_3].
+# Inner then_stmts=[assign_x_1], inner else_stmts=[assign_x_2].
+# Control chain: start <- var_x <- outer_if <- outer_region <- return($x)
+# The inner If/Region live inside the outer then-branch stmts list.
+# ---------------------------------------------------------------------------
+sub _build_D7 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $x = 0
+    my $name_x  = $factory->make('Constant', value => '$x', const_type => 'string');
+    my $const_0 = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $var_x   = $factory->make('VarDecl', inputs => [$name_x, $const_0], scope => 'my');
+    $var_x->set_control_in($start);
+
+    # Outer condition: $n > 0
+    my $op_gt_out  = $factory->make('Constant', value => '>',  const_type => 'string');
+    my $n_read_out = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $zero_out   = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $cond_outer = $factory->make('NumGt', inputs => [$op_gt_out, $n_read_out, $zero_out]);
+
+    # Outer If node: inputs[0]=var_x (control), inputs[1]=cond
+    my $if_outer = $factory->make('If', inputs => [$var_x, $cond_outer]);
+
+    # Inner condition: $n > 5
+    my $op_gt_in  = $factory->make('Constant', value => '>',  const_type => 'string');
+    my $n_read_in = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $five      = $factory->make('Constant', value => '5',  const_type => 'integer');
+    my $cond_inner = $factory->make('NumGt', inputs => [$op_gt_in, $n_read_in, $five]);
+
+    # Inner If node: inputs[0]=outer_if (control), inputs[1]=inner cond
+    my $if_inner = $factory->make('If', inputs => [$if_outer, $cond_inner]);
+
+    # Inner then-branch: $x = 1
+    my $op_eq_t1  = $factory->make('Constant', value => '=',  const_type => 'string');
+    my $x_lhs_t1  = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $const_1   = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $assign_1  = $factory->make('Assign', inputs => [$op_eq_t1, $x_lhs_t1, $const_1]);
+
+    # Inner else-branch: $x = 2
+    my $op_eq_t2  = $factory->make('Constant', value => '=',  const_type => 'string');
+    my $x_lhs_t2  = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $const_2   = $factory->make('Constant', value => '2',  const_type => 'integer');
+    my $assign_2  = $factory->make('Assign', inputs => [$op_eq_t2, $x_lhs_t2, $const_2]);
+
+    # Inner schedule_data and Region
+    my $sd_inner = Chalk::Scheduler::EagerPinning::If->new(
+        node       => $if_inner,
+        then_stmts => [$assign_1],
+        else_stmts => [$assign_2],
+    );
+    $if_inner->set_schedule_data($sd_inner);
+    my $region_inner = $factory->make('Region', inputs => []);
+    $if_inner->set_region($region_inner);
+
+    # Outer else-branch: $x = 3
+    my $op_eq_e  = $factory->make('Constant', value => '=',  const_type => 'string');
+    my $x_lhs_e  = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $const_3  = $factory->make('Constant', value => '3',  const_type => 'integer');
+    my $assign_3 = $factory->make('Assign', inputs => [$op_eq_e, $x_lhs_e, $const_3]);
+
+    # Outer schedule_data: then=[if_inner], else=[assign_3]
+    my $sd_outer = Chalk::Scheduler::EagerPinning::If->new(
+        node       => $if_outer,
+        then_stmts => [$if_inner],
+        else_stmts => [$assign_3],
+    );
+    $if_outer->set_schedule_data($sd_outer);
+    my $region_outer = $factory->make('Region', inputs => []);
+    $if_outer->set_region($region_outer);
+
+    # Return: $x; control_in = outer_region
+    my $x_read = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$x_read]);
+    $ret->set_control_in($region_outer);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_x, $const_0, $var_x,
+               $op_gt_out, $n_read_out, $zero_out, $cond_outer, $if_outer,
+               $op_gt_in, $n_read_in, $five, $cond_inner, $if_inner,
+               $op_eq_t1, $x_lhs_t1, $const_1, $assign_1,
+               $op_eq_t2, $x_lhs_t2, $const_2, $assign_2,
+               $region_inner,
+               $op_eq_e, $x_lhs_e, $const_3, $assign_3,
+               $region_outer, $x_read, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$n'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M16: class C { method m($n) { unless ($n) { return 0; } return 1; } }
+#
+# `unless ($n)` desugars to `if (!$n)` for the IR. The If's condition is
+# Not($n). then_stmts=[Return(0)], else_stmts=undef (no else clause).
+# Return(1) is the outer control chain exit, control_in=Region.
+#
+# Control chain: Start <- if_node <- region <- ret(1)
+# ---------------------------------------------------------------------------
+sub _build_M16 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Condition: !$n (represents `unless ($n)`)
+    my $op_not = $factory->make('Constant', value => '!',  const_type => 'string');
+    my $n_read = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $not_n  = $factory->make('Not', inputs => [$op_not, $n_read]);
+
+    # If node: inputs[0]=start (control), inputs[1]=!$n
+    my $if_node = $factory->make('If', inputs => [$start, $not_n]);
+
+    # Then-branch (the unless body): return 0
+    my $zero   = $factory->make('Constant', value => '0', const_type => 'integer');
+    my $ret_0  = $factory->make_cfg('Return', inputs => [$zero]);
+
+    # Schedule: no else clause
+    my $sd = Chalk::Scheduler::EagerPinning::If->new(
+        node       => $if_node,
+        then_stmts => [$ret_0],
+        else_stmts => undef,
+    );
+    $if_node->set_schedule_data($sd);
+
+    my $region = $factory->make('Region', inputs => []);
+    $if_node->set_region($region);
+
+    # Outer return: return 1; control_in = region
+    my $one = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $ret = $factory->make_cfg('Return', inputs => [$one]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_not, $n_read, $not_n, $if_node,
+               $zero, $ret_0, $region, $one, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$n'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# D2: class C { method m() { my $i = 0; while ($i < 3) { $i = $i + 1; } return $i; } }
+#
+# While loop: Loop node with condition If($i < 3), body=[Assign($i = $i + 1)].
+# Loop.control_in = var_i (via inputs[0]).
+# The inner condition If is a consumer of the Loop.
+# Control chain: start <- var_i <- loop <- region <- ret($i)
+# ---------------------------------------------------------------------------
+sub _build_D2 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $i = 0
+    my $name_i  = $factory->make('Constant', value => '$i', const_type => 'string');
+    my $zero_d  = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $var_i   = $factory->make('VarDecl', inputs => [$name_i, $zero_d], scope => 'my');
+    $var_i->set_control_in($start);
+
+    # Loop node: inputs[0]=var_i (entry control), inputs[1]=undef (backedge, wired later)
+    my $loop = $factory->make_cfg('Loop', inputs => [$var_i, undef]);
+
+    # Loop condition: $i < 3
+    my $op_lt  = $factory->make('Constant', value => '<',  const_type => 'string');
+    my $i_cond = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $three  = $factory->make('Constant', value => '3',  const_type => 'integer');
+    my $cond   = $factory->make('NumLt', inputs => [$op_lt, $i_cond, $three]);
+
+    # Inner If node (consumed by loop to determine condition): inputs[0]=loop, inputs[1]=cond
+    my $loop_if = $factory->make('If', inputs => [$loop, $cond]);
+
+    # Loop body: $i = $i + 1
+    my $op_plus  = $factory->make('Constant', value => '+',  const_type => 'string');
+    my $i_read   = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $one_val  = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $add_op   = $factory->make('Add', inputs => [$op_plus, $i_read, $one_val]);
+    my $op_eq    = $factory->make('Constant', value => '=',  const_type => 'string');
+    my $i_lhs    = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $assign_i = $factory->make('Assign', inputs => [$op_eq, $i_lhs, $add_op]);
+
+    # EagerPinning::Loop schedule_data: while-form (no iterator, not for-style)
+    my $sd = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $loop,
+        body_stmts => [$assign_i],
+    );
+    $loop->set_schedule_data($sd);
+
+    # Region: join after loop exit
+    my $region = $factory->make('Region', inputs => []);
+    $loop->set_region($region);
+
+    # Return: $i; control_in = region
+    my $i_ret = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $ret   = $factory->make_cfg('Return', inputs => [$i_ret]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_i, $zero_d, $var_i, $loop,
+               $op_lt, $i_cond, $three, $cond, $loop_if,
+               $op_plus, $i_read, $one_val, $add_op,
+               $op_eq, $i_lhs, $assign_i,
+               $region, $i_ret, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# D3: class C { method m() { my $sum = 0; foreach my $n (1, 2, 3) { $sum = $sum + $n; } return $sum; } }
+#
+# Foreach loop: Loop with iterator='$n', list=[1,2,3], body=[Assign($sum = $sum + $n)].
+# EagerPinning::Loop.iterator = Constant('$n', variable), .list = [1,2,3].
+# Control chain: start <- var_sum <- loop <- region <- ret($sum)
+# ---------------------------------------------------------------------------
+sub _build_D3 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $sum = 0
+    my $name_sum = $factory->make('Constant', value => '$sum', const_type => 'string');
+    my $zero_s   = $factory->make('Constant', value => '0',    const_type => 'integer');
+    my $var_sum  = $factory->make('VarDecl', inputs => [$name_sum, $zero_s], scope => 'my');
+    $var_sum->set_control_in($start);
+
+    # Loop node: inputs[0]=var_sum (entry), inputs[1]=undef (backedge)
+    my $loop = $factory->make_cfg('Loop', inputs => [$var_sum, undef]);
+
+    # Loop body: $sum = $sum + $n
+    my $op_plus = $factory->make('Constant', value => '+',    const_type => 'string');
+    my $sum_rd  = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $n_rd    = $factory->make('Constant', value => '$n',   const_type => 'variable');
+    my $add_op  = $factory->make('Add', inputs => [$op_plus, $sum_rd, $n_rd]);
+    my $op_eq   = $factory->make('Constant', value => '=',    const_type => 'string');
+    my $sum_lhs = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $assign  = $factory->make('Assign', inputs => [$op_eq, $sum_lhs, $add_op]);
+
+    # Iterator and list for foreach
+    my $iter_node = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $e1 = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $e2 = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $e3 = $factory->make('Constant', value => '3', const_type => 'integer');
+
+    # EagerPinning::Loop schedule_data: foreach-form
+    my $sd = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $loop,
+        iterator   => $iter_node,
+        list       => [$e1, $e2, $e3],
+        body_stmts => [$assign],
+    );
+    $loop->set_schedule_data($sd);
+
+    # Region: join after loop exit
+    my $region = $factory->make('Region', inputs => []);
+    $loop->set_region($region);
+
+    # Return: $sum; control_in = region
+    my $sum_ret = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $ret     = $factory->make_cfg('Return', inputs => [$sum_ret]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_sum, $zero_s, $var_sum, $loop,
+               $op_plus, $sum_rd, $n_rd, $add_op,
+               $op_eq, $sum_lhs, $assign,
+               $iter_node, $e1, $e2, $e3,
+               $region, $sum_ret, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# D4: class C { method m($n) { my $x = 0; $x = 1 if $n > 0; return $x; } }
+#
+# Postfix if: `$x = 1 if $n > 0` becomes If($n>0, then=[Assign($x=1)], else=undef).
+# Control chain: start <- var_x <- if_node <- region <- ret($x)
+# ---------------------------------------------------------------------------
+sub _build_D4 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $x = 0
+    my $name_x  = $factory->make('Constant', value => '$x', const_type => 'string');
+    my $const_0 = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $var_x   = $factory->make('VarDecl', inputs => [$name_x, $const_0], scope => 'my');
+    $var_x->set_control_in($start);
+
+    # Condition: $n > 0
+    my $op_gt  = $factory->make('Constant', value => '>',  const_type => 'string');
+    my $n_read = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $zero   = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $cond   = $factory->make('NumGt', inputs => [$op_gt, $n_read, $zero]);
+
+    # If node: inputs[0]=var_x (control), inputs[1]=cond
+    my $if_node = $factory->make('If', inputs => [$var_x, $cond]);
+
+    # Then-branch: $x = 1
+    my $op_eq_t = $factory->make('Constant', value => '=',  const_type => 'string');
+    my $x_lhs   = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $const_1 = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $assign  = $factory->make('Assign', inputs => [$op_eq_t, $x_lhs, $const_1]);
+
+    # No else clause (postfix if has no else)
+    my $sd = Chalk::Scheduler::EagerPinning::If->new(
+        node       => $if_node,
+        then_stmts => [$assign],
+        else_stmts => undef,
+    );
+    $if_node->set_schedule_data($sd);
+
+    my $region = $factory->make('Region', inputs => []);
+    $if_node->set_region($region);
+
+    # Return: $x; control_in = region
+    my $x_read = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$x_read]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_x, $const_0, $var_x,
+               $op_gt, $n_read, $zero, $cond, $if_node,
+               $op_eq_t, $x_lhs, $const_1, $assign,
+               $region, $x_read, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$n'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# D5: class C { method m() { my $i = 0; $i = $i + 1 while $i < 3; return $i; } }
+#
+# Postfix while: `$i = $i + 1 while $i < 3` — emitted as while loop.
+# Uses the same while-loop recipe as D2.
+# Control chain: start <- var_i <- loop <- region <- ret($i)
+# ---------------------------------------------------------------------------
+sub _build_D5 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $i = 0
+    my $name_i  = $factory->make('Constant', value => '$i', const_type => 'string');
+    my $zero_d  = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $var_i   = $factory->make('VarDecl', inputs => [$name_i, $zero_d], scope => 'my');
+    $var_i->set_control_in($start);
+
+    # Loop node: inputs[0]=var_i (entry), inputs[1]=undef (backedge)
+    my $loop = $factory->make_cfg('Loop', inputs => [$var_i, undef]);
+
+    # Loop condition: $i < 3
+    my $op_lt  = $factory->make('Constant', value => '<',  const_type => 'string');
+    my $i_cond = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $three  = $factory->make('Constant', value => '3',  const_type => 'integer');
+    my $cond   = $factory->make('NumLt', inputs => [$op_lt, $i_cond, $three]);
+
+    # Inner If node (loop condition check): inputs[0]=loop, inputs[1]=cond
+    my $loop_if = $factory->make('If', inputs => [$loop, $cond]);
+
+    # Body: $i = $i + 1
+    my $op_plus  = $factory->make('Constant', value => '+',  const_type => 'string');
+    my $i_read   = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $one_val  = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $add_op   = $factory->make('Add', inputs => [$op_plus, $i_read, $one_val]);
+    my $op_eq    = $factory->make('Constant', value => '=',  const_type => 'string');
+    my $i_lhs    = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $assign_i = $factory->make('Assign', inputs => [$op_eq, $i_lhs, $add_op]);
+
+    # EagerPinning::Loop: while-form
+    my $sd = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $loop,
+        body_stmts => [$assign_i],
+    );
+    $loop->set_schedule_data($sd);
+
+    # Region
+    my $region = $factory->make('Region', inputs => []);
+    $loop->set_region($region);
+
+    # Return: $i
+    my $i_ret = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $ret   = $factory->make_cfg('Return', inputs => [$i_ret]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_i, $zero_d, $var_i, $loop,
+               $op_lt, $i_cond, $three, $cond, $loop_if,
+               $op_plus, $i_read, $one_val, $add_op,
+               $op_eq, $i_lhs, $assign_i,
+               $region, $i_ret, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M5: class C { method m($n) { my $x = 0; $x = 1 unless $n; return $x; } }
+#
+# Postfix unless: `$x = 1 unless $n` becomes If(!$n, then=[Assign($x=1)], else=undef).
+# Condition: Not($n). Control chain: start <- var_x <- if_node <- region <- ret($x)
+# ---------------------------------------------------------------------------
+sub _build_M5 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $x = 0
+    my $name_x  = $factory->make('Constant', value => '$x', const_type => 'string');
+    my $const_0 = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $var_x   = $factory->make('VarDecl', inputs => [$name_x, $const_0], scope => 'my');
+    $var_x->set_control_in($start);
+
+    # Condition: !$n (represents `unless $n`)
+    my $op_not = $factory->make('Constant', value => '!',  const_type => 'string');
+    my $n_read = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $not_n  = $factory->make('Not', inputs => [$op_not, $n_read]);
+
+    # If node: inputs[0]=var_x (control), inputs[1]=!$n
+    my $if_node = $factory->make('If', inputs => [$var_x, $not_n]);
+
+    # Then-branch: $x = 1
+    my $op_eq  = $factory->make('Constant', value => '=',  const_type => 'string');
+    my $x_lhs  = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $one    = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $assign = $factory->make('Assign', inputs => [$op_eq, $x_lhs, $one]);
+
+    my $sd = Chalk::Scheduler::EagerPinning::If->new(
+        node       => $if_node,
+        then_stmts => [$assign],
+        else_stmts => undef,
+    );
+    $if_node->set_schedule_data($sd);
+
+    my $region = $factory->make('Region', inputs => []);
+    $if_node->set_region($region);
+
+    # Return: $x
+    my $x_read = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$x_read]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_x, $const_0, $var_x,
+               $op_not, $n_read, $not_n, $if_node,
+               $op_eq, $x_lhs, $one, $assign,
+               $region, $x_read, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$n'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M6: class C { method m() { my $sum = 0; $sum = $sum + $_ for (1, 2, 3); return $sum; } }
+#
+# Postfix for: `expr for LIST` — foreach with implicit $_ iterator.
+# iterator=Constant('$_', variable), list=[1,2,3], body=[Assign($sum = $sum + $_)].
+# Control chain: start <- var_sum <- loop <- region <- ret($sum)
+# ---------------------------------------------------------------------------
+sub _build_M6 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $sum = 0
+    my $name_sum = $factory->make('Constant', value => '$sum', const_type => 'string');
+    my $zero_s   = $factory->make('Constant', value => '0',    const_type => 'integer');
+    my $var_sum  = $factory->make('VarDecl', inputs => [$name_sum, $zero_s], scope => 'my');
+    $var_sum->set_control_in($start);
+
+    # Loop node
+    my $loop = $factory->make_cfg('Loop', inputs => [$var_sum, undef]);
+
+    # Body: $sum = $sum + $_
+    my $op_plus = $factory->make('Constant', value => '+',    const_type => 'string');
+    my $sum_rd  = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $topic   = $factory->make('Constant', value => '$_',   const_type => 'variable');
+    my $add_op  = $factory->make('Add', inputs => [$op_plus, $sum_rd, $topic]);
+    my $op_eq   = $factory->make('Constant', value => '=',    const_type => 'string');
+    my $sum_lhs = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $assign  = $factory->make('Assign', inputs => [$op_eq, $sum_lhs, $add_op]);
+
+    # Iterator ($_ is the default for postfix for) and list
+    my $iter_node = $factory->make('Constant', value => '$_', const_type => 'variable');
+    my $e1 = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $e2 = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $e3 = $factory->make('Constant', value => '3', const_type => 'integer');
+
+    my $sd = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $loop,
+        iterator   => $iter_node,
+        list       => [$e1, $e2, $e3],
+        body_stmts => [$assign],
+    );
+    $loop->set_schedule_data($sd);
+
+    my $region = $factory->make('Region', inputs => []);
+    $loop->set_region($region);
+
+    # Return: $sum
+    my $sum_ret = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $ret     = $factory->make_cfg('Return', inputs => [$sum_ret]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_sum, $zero_s, $var_sum, $loop,
+               $op_plus, $sum_rd, $topic, $add_op,
+               $op_eq, $sum_lhs, $assign,
+               $iter_node, $e1, $e2, $e3,
+               $region, $sum_ret, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M7: class C { method m() { my $sum = 0; foreach (1, 2, 3) { $sum = $sum + $_; } return $sum; } }
+#
+# foreach with no explicit iterator — uses implicit $_ topic.
+# Same as D3 but with $_ as iterator.
+# Control chain: start <- var_sum <- loop <- region <- ret($sum)
+# ---------------------------------------------------------------------------
+sub _build_M7 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $sum = 0
+    my $name_sum = $factory->make('Constant', value => '$sum', const_type => 'string');
+    my $zero_s   = $factory->make('Constant', value => '0',    const_type => 'integer');
+    my $var_sum  = $factory->make('VarDecl', inputs => [$name_sum, $zero_s], scope => 'my');
+    $var_sum->set_control_in($start);
+
+    # Loop node
+    my $loop = $factory->make_cfg('Loop', inputs => [$var_sum, undef]);
+
+    # Body: $sum = $sum + $_
+    my $op_plus = $factory->make('Constant', value => '+',    const_type => 'string');
+    my $sum_rd  = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $topic   = $factory->make('Constant', value => '$_',   const_type => 'variable');
+    my $add_op  = $factory->make('Add', inputs => [$op_plus, $sum_rd, $topic]);
+    my $op_eq   = $factory->make('Constant', value => '=',    const_type => 'string');
+    my $sum_lhs = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $assign  = $factory->make('Assign', inputs => [$op_eq, $sum_lhs, $add_op]);
+
+    # Iterator ($_ implicit) and list [1,2,3]
+    my $iter_node = $factory->make('Constant', value => '$_', const_type => 'variable');
+    my $e1 = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $e2 = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $e3 = $factory->make('Constant', value => '3', const_type => 'integer');
+
+    my $sd = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $loop,
+        iterator   => $iter_node,
+        list       => [$e1, $e2, $e3],
+        body_stmts => [$assign],
+    );
+    $loop->set_schedule_data($sd);
+
+    my $region = $factory->make('Region', inputs => []);
+    $loop->set_region($region);
+
+    # Return: $sum
+    my $sum_ret = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $ret     = $factory->make_cfg('Return', inputs => [$sum_ret]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_sum, $zero_s, $var_sum, $loop,
+               $op_plus, $sum_rd, $topic, $add_op,
+               $op_eq, $sum_lhs, $assign,
+               $iter_node, $e1, $e2, $e3,
+               $region, $sum_ret, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M17: class C { method m() { foreach my $n (1, 2, 3) { next if $n == 2; } return 1; } }
+#
+# Loop with a `next if $n == 2` inside. The `next if` is an If with
+# is_loop_jump='next', no else. Body: [next_if].
+# Control chain: start <- loop <- region <- ret(1)
+# ---------------------------------------------------------------------------
+sub _build_M17 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Loop node
+    my $loop = $factory->make_cfg('Loop', inputs => [$start, undef]);
+
+    # Condition for next: $n == 2
+    my $op_eq_c = $factory->make('Constant', value => '==', const_type => 'string');
+    my $n_read  = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $two_val = $factory->make('Constant', value => '2',  const_type => 'integer');
+    my $cond    = $factory->make('NumEq', inputs => [$op_eq_c, $n_read, $two_val]);
+
+    # next if $n == 2 — If with loop_jump='next', no body stmts (the jump is the stmt)
+    my $if_next = $factory->make('If', inputs => [$loop, $cond]);
+    my $sd_next = Chalk::Scheduler::EagerPinning::If->new(
+        node         => $if_next,
+        is_loop_jump => 'next',
+        then_stmts   => [],
+        else_stmts   => undef,
+    );
+    $if_next->set_schedule_data($sd_next);
+
+    # Iterator ($n) and list [1,2,3]
+    my $iter_node = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $e1 = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $e2 = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $e3 = $factory->make('Constant', value => '3', const_type => 'integer');
+
+    # Loop schedule_data: body = [if_next]
+    my $sd_loop = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $loop,
+        iterator   => $iter_node,
+        list       => [$e1, $e2, $e3],
+        body_stmts => [$if_next],
+    );
+    $loop->set_schedule_data($sd_loop);
+
+    my $region = $factory->make('Region', inputs => []);
+    $loop->set_region($region);
+
+    # Return: 1
+    my $one = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $ret = $factory->make_cfg('Return', inputs => [$one]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $loop,
+               $op_eq_c, $n_read, $two_val, $cond, $if_next,
+               $iter_node, $e1, $e2, $e3,
+               $region, $one, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M18: class C { method m() { foreach my $n (1, 2, 3) { last if $n > 1; } return 1; } }
+#
+# Loop with `last if $n > 1` inside. The `last if` is an If with
+# is_loop_jump='last', no else. Body: [last_if].
+# Control chain: start <- loop <- region <- ret(1)
+# ---------------------------------------------------------------------------
+sub _build_M18 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Loop node
+    my $loop = $factory->make_cfg('Loop', inputs => [$start, undef]);
+
+    # Condition for last: $n > 1
+    my $op_gt  = $factory->make('Constant', value => '>',  const_type => 'string');
+    my $n_read = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $one_v  = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $cond   = $factory->make('NumGt', inputs => [$op_gt, $n_read, $one_v]);
+
+    # last if $n > 1 — If with loop_jump='last'
+    my $if_last = $factory->make('If', inputs => [$loop, $cond]);
+    my $sd_last = Chalk::Scheduler::EagerPinning::If->new(
+        node         => $if_last,
+        is_loop_jump => 'last',
+        then_stmts   => [],
+        else_stmts   => undef,
+    );
+    $if_last->set_schedule_data($sd_last);
+
+    # Iterator ($n) and list [1,2,3]
+    my $iter_node = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $e1 = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $e2 = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $e3 = $factory->make('Constant', value => '3', const_type => 'integer');
+
+    # Loop schedule_data: body = [if_last]
+    my $sd_loop = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $loop,
+        iterator   => $iter_node,
+        list       => [$e1, $e2, $e3],
+        body_stmts => [$if_last],
+    );
+    $loop->set_schedule_data($sd_loop);
+
+    my $region = $factory->make('Region', inputs => []);
+    $loop->set_region($region);
+
+    # Return: 1
+    my $one = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $ret = $factory->make_cfg('Return', inputs => [$one]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $loop,
+               $op_gt, $n_read, $one_v, $cond, $if_last,
+               $iter_node, $e1, $e2, $e3,
+               $region, $one, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# E2: class C { method m($n) { if ($n > 0) { return 1; } return 0; } }
+#
+# Early return from if-branch: If($n>0, then=[Return(1)], else=undef).
+# The outer Return(0) is on the control chain past the Region.
+# Control chain: Start <- if_node <- region <- ret(0)
+# ---------------------------------------------------------------------------
+sub _build_E2 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Condition: $n > 0
+    my $op_gt  = $factory->make('Constant', value => '>',  const_type => 'string');
+    my $n_read = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $zero   = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $cond   = $factory->make('NumGt', inputs => [$op_gt, $n_read, $zero]);
+
+    # If node: inputs[0]=start (control), inputs[1]=cond
+    my $if_node = $factory->make('If', inputs => [$start, $cond]);
+
+    # Then-branch: return 1 (early return)
+    my $one    = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $ret_1  = $factory->make_cfg('Return', inputs => [$one]);
+
+    # No else clause
+    my $sd = Chalk::Scheduler::EagerPinning::If->new(
+        node       => $if_node,
+        then_stmts => [$ret_1],
+        else_stmts => undef,
+    );
+    $if_node->set_schedule_data($sd);
+
+    my $region = $factory->make('Region', inputs => []);
+    $if_node->set_region($region);
+
+    # Outer return: return 0; control_in = region
+    my $zero2 = $factory->make('Constant', value => '0', const_type => 'integer');
+    my $ret   = $factory->make_cfg('Return', inputs => [$zero2]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_gt, $n_read, $zero, $cond, $if_node,
+               $one, $ret_1, $region, $zero2, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$n'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# E3: class C { method m() { foreach my $n (1, 2, 3) { return $n if $n == 2; } return 0; } }
+#
+# Return from inside loop: the loop body contains `return $n if $n == 2`.
+# The postfix-if body is Return($n). The loop returns $n when $n==2, else 0.
+# Control chain: start <- loop <- region <- ret(0)
+# Loop body: [if_ret_n]
+# The If's then_stmts=[Return($n)] — early return from within loop body.
+# ---------------------------------------------------------------------------
+sub _build_E3 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Loop node
+    my $loop = $factory->make_cfg('Loop', inputs => [$start, undef]);
+
+    # Condition for inner if: $n == 2
+    my $op_eq_c = $factory->make('Constant', value => '==', const_type => 'string');
+    my $n_rd    = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $two_v   = $factory->make('Constant', value => '2',  const_type => 'integer');
+    my $cond    = $factory->make('NumEq', inputs => [$op_eq_c, $n_rd, $two_v]);
+
+    # return $n (inner Return inside the if body)
+    my $n_ret_v = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $ret_n   = $factory->make_cfg('Return', inputs => [$n_ret_v]);
+
+    # `return $n if $n == 2` — If with then=[Return($n)]
+    my $if_ret = $factory->make('If', inputs => [$loop, $cond]);
+    my $sd_if  = Chalk::Scheduler::EagerPinning::If->new(
+        node       => $if_ret,
+        then_stmts => [$ret_n],
+        else_stmts => undef,
+    );
+    $if_ret->set_schedule_data($sd_if);
+
+    # We don't need a Region for the inner if here — no continuation after
+    # the if in the loop body (either return fires or we fall through to loop exit).
+    # But the emitter may need a region to know the if is inside a loop body.
+    # Actually in the scheduler path we just list the inner If in body_stmts
+    # and the Region is for the loop itself.
+
+    # Iterator ($n) and list [1,2,3]
+    my $iter_node = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $e1 = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $e2 = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $e3 = $factory->make('Constant', value => '3', const_type => 'integer');
+
+    # Loop schedule: body = [if_ret]
+    my $sd_loop = Chalk::Scheduler::EagerPinning::Loop->new(
+        node       => $loop,
+        iterator   => $iter_node,
+        list       => [$e1, $e2, $e3],
+        body_stmts => [$if_ret],
+    );
+    $loop->set_schedule_data($sd_loop);
+
+    # Region (loop exit join)
+    my $region = $factory->make('Region', inputs => []);
+    $loop->set_region($region);
+
+    # Outer return: return 0; control_in = region
+    my $zero   = $factory->make('Constant', value => '0', const_type => 'integer');
+    my $ret    = $factory->make_cfg('Return', inputs => [$zero]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $loop,
+               $op_eq_c, $n_rd, $two_v, $cond,
+               $n_ret_v, $ret_n,
+               $if_ret,
+               $iter_node, $e1, $e2, $e3,
+               $region, $zero, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# E4: class C { method m() { die "no" if 1; return 1; } }
+#
+# `die "no" if 1` — postfix if, always fires. Then-branch is an Unwind.
+# If(1==true, then=[Unwind("no")], else=undef).
+# Outer return 1 follows (but is never reached in practice; both oracle
+# and generated code die and the comparator matches the exception).
+# Control chain: Start <- if_node <- region <- ret(1)
+# ---------------------------------------------------------------------------
+sub _build_E4 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # Condition: 1 (always true)
+    my $cond_one = $factory->make('Constant', value => '1', const_type => 'integer');
+
+    # If node: inputs[0]=start, inputs[1]=1
+    my $if_node = $factory->make('If', inputs => [$start, $cond_one]);
+
+    # Then-branch: die "no" — Unwind node
+    my $str_no   = $factory->make('Constant', value => 'no', const_type => 'string');
+    my @die_args = ($str_no);
+    my $unwind   = $factory->make_cfg('Unwind', inputs => [\@die_args]);
+
+    my $sd = Chalk::Scheduler::EagerPinning::If->new(
+        node       => $if_node,
+        then_stmts => [$unwind],
+        else_stmts => undef,
+    );
+    $if_node->set_schedule_data($sd);
+
+    my $region = $factory->make('Region', inputs => []);
+    $if_node->set_region($region);
+
+    # Outer return 1 (unreachable but present in IR)
+    my $one = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $ret = $factory->make_cfg('Return', inputs => [$one]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $cond_one, $if_node, $str_no, $unwind, $region, $one, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# D8: class C { method m() { try { die "boom"; } catch ($e) { return 0; } return 1; } }
+#
+# Try/catch: TryCatch node with try_stmts=[Unwind("boom")], catch_var='$e',
+# catch_stmts=[Return(0)]. Outer Return(1) follows on the control chain.
+# Control chain: Start <- try_node <- region <- ret(1)
+# ---------------------------------------------------------------------------
+sub _build_D8 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # TryCatch node: inputs[0]=start (control)
+    my $try_node = $factory->make('TryCatch', inputs => [$start]);
+    $try_node->set_control_in($start);
+
+    # Try body: die "boom" — Unwind
+    my $str_boom = $factory->make('Constant', value => 'boom', const_type => 'string');
+    my @die_args = ($str_boom);
+    my $unwind   = $factory->make_cfg('Unwind', inputs => [\@die_args]);
+
+    # Catch body: return 0
+    my $zero    = $factory->make('Constant', value => '0', const_type => 'integer');
+    my $ret_0   = $factory->make_cfg('Return', inputs => [$zero]);
+
+    # EagerPinning::TryCatch schedule_data
+    my $sd = Chalk::Scheduler::EagerPinning::TryCatch->new(
+        node         => $try_node,
+        try_stmts    => [$unwind],
+        catch_var    => '$e',
+        catch_stmts  => [$ret_0],
+    );
+    $try_node->set_schedule_data($sd);
+
+    # Region (join after try/catch)
+    my $region = $factory->make('Region', inputs => []);
+    # For TryCatch the region head is the TryCatch itself
+    $region->set_head($try_node) if $region->can('set_head');
+
+    # Outer return: return 1; control_in = region
+    my $one = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $ret = $factory->make_cfg('Return', inputs => [$one]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $try_node, $str_boom, $unwind, $zero, $ret_0, $region, $one, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# M25: class C { method m() { my $sum = 0; for (my $i = 0; $i < 3; $i++) { $sum = $sum + $i; } return $sum; } }
+#
+# C-style for loop: is_for_style=true, for_init=VarDecl($i,0), for_step=CompoundAssign($i+=1).
+# Condition: $i < 3. Body: [Assign($sum = $sum + $i)].
+# Control chain: start <- var_sum <- loop <- region <- ret($sum)
+# ---------------------------------------------------------------------------
+sub _build_M25 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # VarDecl: my $sum = 0 (outer, before the for loop)
+    my $name_sum = $factory->make('Constant', value => '$sum', const_type => 'string');
+    my $zero_s   = $factory->make('Constant', value => '0',    const_type => 'integer');
+    my $var_sum  = $factory->make('VarDecl', inputs => [$name_sum, $zero_s], scope => 'my');
+    $var_sum->set_control_in($start);
+
+    # For-init: my $i = 0
+    my $name_i  = $factory->make('Constant', value => '$i', const_type => 'string');
+    my $zero_i  = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $for_init = $factory->make('VarDecl', inputs => [$name_i, $zero_i], scope => 'my');
+
+    # Loop node: inputs[0]=var_sum (entry), inputs[1]=undef (backedge)
+    my $loop = $factory->make_cfg('Loop', inputs => [$var_sum, undef]);
+
+    # Loop condition: $i < 3
+    my $op_lt  = $factory->make('Constant', value => '<',  const_type => 'string');
+    my $i_cond = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $three  = $factory->make('Constant', value => '3',  const_type => 'integer');
+    my $cond   = $factory->make('NumLt', inputs => [$op_lt, $i_cond, $three]);
+
+    # Inner If node (loop condition check): inputs[0]=loop, inputs[1]=cond
+    my $loop_if = $factory->make('If', inputs => [$loop, $cond]);
+
+    # For-step: $i++ (represented as $i += 1)
+    my $op_plus_eq = $factory->make('Constant', value => '+=', const_type => 'string');
+    my $i_step_lhs = $factory->make('Constant', value => '$i', const_type => 'variable');
+    my $one_step   = $factory->make('Constant', value => '1',  const_type => 'integer');
+    my $for_step   = $factory->make('CompoundAssign',
+        op     => '+=',
+        inputs => [$op_plus_eq, $i_step_lhs, $one_step],
+    );
+
+    # Body: $sum = $sum + $i
+    my $op_plus = $factory->make('Constant', value => '+',    const_type => 'string');
+    my $sum_rd  = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $i_body  = $factory->make('Constant', value => '$i',   const_type => 'variable');
+    my $add_op  = $factory->make('Add', inputs => [$op_plus, $sum_rd, $i_body]);
+    my $op_eq   = $factory->make('Constant', value => '=',    const_type => 'string');
+    my $sum_lhs = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $assign  = $factory->make('Assign', inputs => [$op_eq, $sum_lhs, $add_op]);
+
+    # EagerPinning::Loop: for-style
+    my $sd = Chalk::Scheduler::EagerPinning::Loop->new(
+        node         => $loop,
+        is_for_style => true,
+        for_init     => $for_init,
+        for_step     => $for_step,
+        body_stmts   => [$assign],
+    );
+    $loop->set_schedule_data($sd);
+
+    my $region = $factory->make('Region', inputs => []);
+    $loop->set_region($region);
+
+    # Return: $sum
+    my $sum_ret = $factory->make('Constant', value => '$sum', const_type => 'variable');
+    my $ret     = $factory->make_cfg('Return', inputs => [$sum_ret]);
+    $ret->set_control_in($region);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_sum, $zero_s, $var_sum,
+               $name_i, $zero_i, $for_init,
+               $loop,
+               $op_lt, $i_cond, $three, $cond, $loop_if,
+               $op_plus_eq, $i_step_lhs, $one_step, $for_step,
+               $op_plus, $sum_rd, $i_body, $add_op,
+               $op_eq, $sum_lhs, $assign,
+               $region, $sum_ret, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
 # Populate the dispatch table after all builders are defined.
 %BUILDERS = (
     A1 => \&_build_A1,
@@ -2708,9 +3801,18 @@ sub _build_D1 {
     C3 => \&_build_C3,
     C4 => \&_build_C4,
     C5 => \&_build_C5,
-    D1 => \&_build_D1,
-    D6 => \&_build_D6,
-    E1 => \&_build_E1,
+    D1  => \&_build_D1,
+    D2  => \&_build_D2,
+    D3  => \&_build_D3,
+    D4  => \&_build_D4,
+    D5  => \&_build_D5,
+    D6  => \&_build_D6,
+    D7  => \&_build_D7,
+    D8  => \&_build_D8,
+    E1  => \&_build_E1,
+    E2  => \&_build_E2,
+    E3  => \&_build_E3,
+    E4  => \&_build_E4,
     H1 => \&_build_H1,
     H2 => \&_build_H2,
     H3 => \&_build_H3,
@@ -2734,6 +3836,9 @@ sub _build_D1 {
     L3 => \&_build_L3,
     L4 => \&_build_L4,
     M1  => \&_build_M1,
+    M5  => \&_build_M5,
+    M6  => \&_build_M6,
+    M7  => \&_build_M7,
     M2  => \&_build_M2,
     M3  => \&_build_M3,
     M4  => \&_build_M4,
@@ -2745,7 +3850,11 @@ sub _build_D1 {
     M13 => \&_build_M13,
     M14 => \&_build_M14,
     M15 => \&_build_M15,
+    M16 => \&_build_M16,
+    M17 => \&_build_M17,
+    M18 => \&_build_M18,
     M22 => \&_build_M22,
+    M25 => \&_build_M25,
     M23 => \&_build_M23,
     M24 => \&_build_M24,
 );

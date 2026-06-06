@@ -332,8 +332,14 @@ sub _spec_for {
     my %PARAM_ARGS = (
         # D1: if/else $n > 0 — pass n=1 so the true branch ($x=1) is taken.
         D1  => [1],
+        # D4: postfix if $n > 0 — pass n=1 so the assignment fires.
+        D4  => [1],
         # D6: ternary $n > 0 ? 1 : 2 — pass n=1 so the true branch (1) is taken.
         D6  => [1],
+        # D7: nested if $n > 0 / $n > 5 — pass n=10 so outer-true/inner-true ($x=1).
+        D7  => [10],
+        # E2: if ($n > 0) early-return — pass n=1 so the early return fires.
+        E2  => [1],
         # J1: regex match $s =~ /foo/ — pass 'foobar' so the match succeeds.
         J1  => ['foobar'],
         # J2: s/foo/bar/ — pass 'foobar' so the substitution actually fires.
@@ -348,6 +354,10 @@ sub _spec_for {
         L4  => [0],
         # M3: "hello $name" — pass 'world' so interpolation produces "hello world".
         M3  => ['world'],
+        # M5: postfix unless $n — pass 0 so the assignment fires.
+        M5  => [0],
+        # M16: unless ($n) { return 0; } — pass 0 so the unless branch fires.
+        M16 => [0],
         # M8: $r->[0] — pass a real arrayref [42] so the deref executes and returns 42.
         M8  => [[42]],
         # M9: $r->{key} — pass a real hashref {key=>7} so the deref executes and returns 7.
