@@ -36,6 +36,8 @@ use Chalk::IR::Node::NumLt;
 use Chalk::IR::Node::NumEq;
 use Chalk::IR::Node::Not;
 use Chalk::IR::Node::Unwind;
+use Chalk::IR::Node::ListAssign;
+use Chalk::IR::Node::ExpressionList;
 use Chalk::Scheduler::EagerPinning::If;
 use Chalk::Scheduler::EagerPinning::Loop;
 use Chalk::Scheduler::EagerPinning::TryCatch;
@@ -3452,6 +3454,72 @@ sub _build_M18 {
 }
 
 # ---------------------------------------------------------------------------
+# M19: class C { method m() { my ($a, $b) = (1, 2); return $a + $b; } }
+#
+# List-context multi-assignment using ListAssign node.
+# LHS: arrayref of name Constants [$name_a, $name_b]
+# RHS: ExpressionList([const_1, const_2])
+# Returns $a + $b = 3.
+#
+# Node layout:
+#   start      : Start
+#   name_a     : Constant(value='$a', const_type='string')   [LHS name slot]
+#   name_b     : Constant(value='$b', const_type='string')   [LHS name slot]
+#   const_1    : Constant(value='1',  const_type='integer')  [RHS element]
+#   const_2    : Constant(value='2',  const_type='integer')  [RHS element]
+#   rhs_list   : ExpressionList(inputs=[[$const_1, $const_2]])
+#   list_decl  : ListAssign(inputs=[[$name_a, $name_b], $rhs_list])
+#   op_plus    : Constant(value='+', const_type='string')
+#   a_read     : Constant(value='$a', const_type='variable')
+#   b_read     : Constant(value='$b', const_type='variable')
+#   sum        : Add(inputs=[$op_plus, $a_read, $b_read])
+#   ret        : Return(inputs=[$sum])
+#
+# Control chain: start <- list_decl.control_in, list_decl <- ret.control_in
+# ---------------------------------------------------------------------------
+sub _build_M19 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # LHS: name constants for $a and $b
+    my $name_a = $factory->make('Constant', value => '$a', const_type => 'string');
+    my $name_b = $factory->make('Constant', value => '$b', const_type => 'string');
+
+    # RHS: ExpressionList containing 1 and 2
+    my $const_1  = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $const_2  = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $rhs_list = $factory->make('ExpressionList', inputs => [[$const_1, $const_2]]);
+
+    # my ($a, $b) = (1, 2)
+    my $list_decl = $factory->make('ListAssign',
+        inputs => [[$name_a, $name_b], $rhs_list],
+        scope  => 'my',
+    );
+    $list_decl->set_control_in($start);
+
+    # return $a + $b
+    my $op_plus = $factory->make('Constant', value => '+', const_type => 'string');
+    my $a_read  = $factory->make('Constant', value => '$a', const_type => 'variable');
+    my $b_read  = $factory->make('Constant', value => '$b', const_type => 'variable');
+    my $sum     = $factory->make('Add', inputs => [$op_plus, $a_read, $b_read]);
+
+    my $ret = $factory->make_cfg('Return', inputs => [$sum]);
+    $ret->set_control_in($list_decl);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $name_a, $name_b, $const_1, $const_2, $rhs_list,
+               $list_decl, $op_plus, $a_read, $b_read, $sum, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
 # E2: class C { method m($n) { if ($n > 0) { return 1; } return 0; } }
 #
 # Early return from if-branch: If($n>0, then=[Return(1)], else=undef).
@@ -3853,6 +3921,7 @@ sub _build_M25 {
     M16 => \&_build_M16,
     M17 => \&_build_M17,
     M18 => \&_build_M18,
+    M19 => \&_build_M19,
     M22 => \&_build_M22,
     M25 => \&_build_M25,
     M23 => \&_build_M23,

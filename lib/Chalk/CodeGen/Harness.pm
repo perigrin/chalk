@@ -86,6 +86,7 @@ my %CORPUS = (
     M16 => 'class C { method m($n) { unless ($n) { return 0; } return 1; } }',
     M17 => 'class C { method m() { foreach my $n (1, 2, 3) { next if $n == 2; } return 1; } }',
     M18 => 'class C { method m() { foreach my $n (1, 2, 3) { last if $n > 1; } return 1; } }',
+    M19 => 'class C { method m() { my ($a, $b) = (1, 2); return $a + $b; } }',
     M22 => 'class C { method m() { my @r = sort { $a <=> $b } (3, 1, 2); return $r[0]; } }',
     M25 => 'class C { method m() { my $sum = 0; for (my $i = 0; $i < 3; $i++) { $sum = $sum + $i; } return $sum; } }',
     M23 => 'class C { method m() { my %h = (a => 1); delete $h{a}; return scalar keys %h; } }',

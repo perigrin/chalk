@@ -69,6 +69,7 @@ use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::BacktickExpr;
 use Chalk::IR::Node::Stringify;
 use Chalk::IR::Node::VarDecl;
+use Chalk::IR::Node::ListAssign;
 use Chalk::IR::Node::TernaryExpr;
 use Chalk::IR::Node::StructRef;
 use Chalk::IR::Node::StructFieldAccess;
@@ -92,7 +93,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     PadAccess FieldAccess StashAccess Subscript Slice
     Call HashRef ArrayRef Interpolate AnonSub
     RegexMatch RegexSubst TryCatch
-    PostfixDeref CompoundAssign BacktickExpr Stringify VarDecl
+    PostfixDeref CompoundAssign BacktickExpr Stringify VarDecl ListAssign
     TernaryExpr StructRef StructFieldAccess
     ExpressionList
     Start Return Unwind
@@ -229,6 +230,18 @@ class Chalk::IR::NodeFactory {
             my $class = $DATA_CLASSES{VarDecl};
             $cfg_counter++;
             my $id = "VarDecl#${cfg_counter}";
+            my $node = $class->new( id => $id, %args );
+            $self->_register_consumers($node, %args);
+            $cache{$id} = $node;
+            return $node;
+        }
+
+        # ListAssign has the same per-position identity semantics as VarDecl:
+        # each list declaration occupies a distinct control position.
+        if ($op_name eq 'ListAssign') {
+            my $class = $DATA_CLASSES{ListAssign};
+            $cfg_counter++;
+            my $id = "ListAssign#${cfg_counter}";
             my $node = $class->new( id => $id, %args );
             $self->_register_consumers($node, %args);
             $cache{$id} = $node;

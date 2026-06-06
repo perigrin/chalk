@@ -12,6 +12,8 @@ use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::UnaryOp;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::VarDecl;
+use Chalk::IR::Node::ListAssign;
+use Chalk::IR::Node::ExpressionList;
 use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::Interpolate;
 use Chalk::IR::Node::Subscript;
@@ -473,12 +475,24 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $graph = $method->graph;
         return unless defined $graph;
         for my $n ($graph->nodes->@*) {
-            next unless $n isa Chalk::IR::Node::VarDecl;
-            my $var = $n->name;
-            next unless defined $var && $var isa Chalk::IR::Node::Constant;
-            my $vname = $var->value;
-            if (defined $vname && $vname =~ /^([\@\%])(.+)/) {
-                $_aggregate_vars{$2} = $1;
+            if ($n isa Chalk::IR::Node::VarDecl) {
+                my $var = $n->name;
+                next unless defined $var && $var isa Chalk::IR::Node::Constant;
+                my $vname = $var->value;
+                if (defined $vname && $vname =~ /^([\@\%])(.+)/) {
+                    $_aggregate_vars{$2} = $1;
+                }
+            }
+            elsif ($n isa Chalk::IR::Node::ListAssign) {
+                my $names = $n->names;
+                next unless ref($names) eq 'ARRAY';
+                for my $var ($names->@*) {
+                    next unless defined $var && $var isa Chalk::IR::Node::Constant;
+                    my $vname = $var->value;
+                    if (defined $vname && $vname =~ /^([\@\%])(.+)/) {
+                        $_aggregate_vars{$2} = $1;
+                    }
+                }
             }
         }
     }
@@ -698,6 +712,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::IR::Node::VarDecl) {
             return $self->_emit_var_decl($node);
         }
+        if ($node isa Chalk::IR::Node::ListAssign) {
+            return $self->_emit_list_assign($node);
+        }
         if ($node isa Chalk::IR::Node::CompoundAssign) {
             return $self->_emit_compound_assign($node) . ";";
         }
@@ -855,14 +872,26 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 delete $_aggregate_vars{$1};
             }
         }
-        # Add body-local aggregate VarDecls
+        # Add body-local aggregate VarDecls and ListAssigns
         for my $item ($body->@*) {
-            next unless $item isa Chalk::IR::Node::VarDecl;
-            my $var = $item->name();
-            next unless defined $var && $var isa Chalk::IR::Node::Constant;
-            my $vname = $var->value();
-            if (defined $vname && $vname =~ /^([\@\%])(.+)/) {
-                $_aggregate_vars{$2} = $1;
+            if ($item isa Chalk::IR::Node::VarDecl) {
+                my $var = $item->name();
+                next unless defined $var && $var isa Chalk::IR::Node::Constant;
+                my $vname = $var->value();
+                if (defined $vname && $vname =~ /^([\@\%])(.+)/) {
+                    $_aggregate_vars{$2} = $1;
+                }
+            }
+            elsif ($item isa Chalk::IR::Node::ListAssign) {
+                my $names = $item->names();
+                next unless ref($names) eq 'ARRAY';
+                for my $var ($names->@*) {
+                    next unless defined $var && $var isa Chalk::IR::Node::Constant;
+                    my $vname = $var->value();
+                    if (defined $vname && $vname =~ /^([\@\%])(.+)/) {
+                        $_aggregate_vars{$2} = $1;
+                    }
+                }
             }
         }
     }
@@ -990,6 +1019,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::IR::Node::BacktickExpr) { return $self->_emit_backtick_expr($node); }
         if ($node isa Chalk::IR::Node::CompoundAssign) { return $self->_emit_compound_assign($node); }
         if ($node isa Chalk::IR::Node::VarDecl)     { return $self->_emit_var_decl_expr($node); }
+        if ($node isa Chalk::IR::Node::ListAssign)  { return $self->_emit_list_assign_expr($node); }
         if ($node isa Chalk::IR::Node::TernaryExpr)       { return $self->_emit_ternary_expr($node); }
         if ($node isa Chalk::IR::Node::StructRef)         { return $self->_emit_struct_ref_expr($node); }
         if ($node isa Chalk::IR::Node::StructFieldAccess) { return $self->_emit_field_access_expr($node); }
@@ -1016,6 +1046,46 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return "my $var = " . $self->_emit_init_expr($var, $init);
         }
         return "my $var";
+    }
+
+    # Emit a ListAssign as `my ($a, $b) = (1, 2);` (with semicolon).
+    # The LHS names are emitted as a parenthesized comma-list;
+    # the RHS init is emitted as a parenthesized list via _emit_list_rhs.
+    method _emit_list_assign($node) {
+        return $self->_emit_list_assign_expr($node) . ";";
+    }
+
+    # Emit a ListAssign as expression (no semicolon).
+    # Produces: my ($a, $b) = (rhs_items)
+    method _emit_list_assign_expr($node) {
+        my $names = $node->names();   # arrayref of name Constant nodes
+        my $init  = $node->init();    # init node (ExpressionList or other)
+        my $scope = $node->scope();   # 'my', 'our', etc.
+
+        my @name_strs = map { $_->value() } $names->@*;
+        my $lhs = $scope . ' (' . join(', ', @name_strs) . ')';
+
+        if (defined $init) {
+            my $rhs = $self->_emit_list_rhs($init);
+            return "$lhs = $rhs";
+        }
+        return $lhs;
+    }
+
+    # Emit the RHS of a list assignment as a parenthesized list.
+    # ExpressionList nodes are flattened into (item1, item2, ...).
+    # Other init nodes are emitted as a single-element list.
+    method _emit_list_rhs($init) {
+        if ($init isa Chalk::IR::Node::ExpressionList) {
+            my $items = $init->items();
+            if ($items->@*) {
+                my @strs = map { $self->_emit_expr($_) } $items->@*;
+                return '(' . join(', ', @strs) . ')';
+            }
+            return '()';
+        }
+        # Scalar or other expression: wrap in parens for list context
+        return '(' . $self->_emit_expr($init) . ')';
     }
 
     # Emit a VarDecl initializer expression.
