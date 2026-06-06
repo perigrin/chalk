@@ -22,7 +22,7 @@ ok(defined &Chalk::CodeGen::Harness::PerlDriver::run,
 # This is a structural AC from the issue: grep for generate|graph_for in PerlDriver.pm
 {
     my $driver_src = do {
-        open my $fh, '<', 'lib/Chalk/CodeGen/Harness/PerlDriver.pm'
+        open my $fh, '<', 't/lib/Chalk/CodeGen/Harness/PerlDriver.pm'
             or die "Cannot open PerlDriver.pm: $!";
         local $/;
         <$fh>;

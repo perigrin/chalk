@@ -68,7 +68,7 @@ for my $tag (@file_tags) {
 
 # Read the raw Harness.pm source to extract the %CORPUS hash keys/values
 # (before the refactor replaces it).
-my $harness_pm = 'lib/Chalk/CodeGen/Harness.pm';
+my $harness_pm = 't/lib/Chalk/CodeGen/Harness.pm';
 open my $hfh, '<', $harness_pm
     or die "Cannot open '$harness_pm': $!";
 my $harness_source = do { local $/; <$hfh> };
