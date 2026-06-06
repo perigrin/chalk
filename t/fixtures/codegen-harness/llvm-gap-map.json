@@ -39,26 +39,26 @@
       {
          "extra" : {
             "description" : "literal arithmetic: return 3 / 4 (perl float division = 0.75)",
-            "gap_category" : "representation-missing",
-            "gap_reason" : "lower() died: GAP: op=Divide cannot lower runtime-free as i64 — Perl `/` is float division (3/4=0.75); needs Num repr + fdiv, not sdiv. Deferred to 3c. at lib/Chalk/IR/Target/LLVM.pm line 114.\n",
-            "libperl_free" : null,
+            "libperl_free" : 1,
+            "lli_output" : "0.75",
+            "perl_oracle" : "0.75",
             "runtime_free_coverage" : 1
          },
          "group" : "A",
          "tag" : "arith-div",
-         "verdict" : "GAP"
+         "verdict" : "L-GREEN"
       },
       {
          "extra" : {
             "description" : "literal arithmetic: return -7 % 3 (perl right-operand sign = 2)",
-            "gap_category" : "representation-missing",
-            "gap_reason" : "lower() died: GAP: op=Modulo cannot lower runtime-free as bare srem — Perl `%` follows the right operand's sign (-7%3=2 not -1); needs sign-correction. Deferred to 3c. at lib/Chalk/IR/Target/LLVM.pm line 124.\n",
-            "libperl_free" : null,
+            "libperl_free" : 1,
+            "lli_output" : "2",
+            "perl_oracle" : "2",
             "runtime_free_coverage" : 1
          },
          "group" : "A",
          "tag" : "arith-mod",
-         "verdict" : "GAP"
+         "verdict" : "L-GREEN"
       },
       {
          "extra" : {
@@ -354,8 +354,8 @@
          "A" : {
             "count" : 10,
             "verdicts" : {
-               "GAP" : 7,
-               "L-GREEN" : 3
+               "GAP" : 5,
+               "L-GREEN" : 5
             }
          },
          "C" : {
@@ -384,8 +384,8 @@
          }
       },
       "by_verdict" : {
-         "GAP" : 26,
-         "L-GREEN" : 3
+         "GAP" : 24,
+         "L-GREEN" : 5
       },
       "denominator" : 29
    }

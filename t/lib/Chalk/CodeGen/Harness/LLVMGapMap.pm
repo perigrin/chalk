@@ -14,6 +14,9 @@ use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Add;
 use Chalk::IR::Node::Subtract;
 use Chalk::IR::Node::Multiply;
+use Chalk::IR::Node::Divide;
+use Chalk::IR::Node::Modulo;
+use Chalk::IR::Node::Coerce;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Target::LLVM;
 
@@ -121,33 +124,36 @@ sub _idiom_table {
                 return _make_return($f, $mul);
             },
         },
-        # Division and modulo: build the typed graph and ATTEMPT to lower —
-        # the LLVM backend now refuses (loud GAP-die) because neither is
-        # correct as a bare i64 op vs perl semantics. These verdict GAP with
-        # the perl-semantics reason, surfacing the finding in the artifact
-        # rather than silently emitting wrong code. (Phase 3c: Num repr for
-        # `/`, sign-correction for `%`.) Found by the 3b gate code review.
+        # Division: Perl `/` is always float division (3/4 = 0.75).
+        # The correct typed graph: Coerce(Int->Num) both operands, fdiv double,
+        # Divide node has Num representation. Phase 3c unlocked this idiom.
         {
             tag         => 'arith-div',
             group       => 'A',
             description => 'literal arithmetic: return 3 / 4 (perl float division = 0.75)',
             perl_oracle => '0.75',
             build_graph => sub {
-                my $f = Chalk::IR::NodeFactory->new;
-                my $c3  = _int_const($f, 3);
-                my $c4  = _int_const($f, 4);
-                my $div = $f->make('Divide', inputs => [$c3, $c4]);
-                $div->set_representation('Int');
+                my $f    = Chalk::IR::NodeFactory->new;
+                my $c3   = _int_const($f, 3);
+                my $c4   = _int_const($f, 4);
+                my $coe3 = $f->make('Coerce', inputs => [$c3], from_repr => 'Int', to_repr => 'Num');
+                $coe3->set_representation('Num');
+                my $coe4 = $f->make('Coerce', inputs => [$c4], from_repr => 'Int', to_repr => 'Num');
+                $coe4->set_representation('Num');
+                my $div  = $f->make('Divide', inputs => [$coe3, $coe4]);
+                $div->set_representation('Num');
                 return _make_return($f, $div);
             },
         },
+        # Modulo: Perl `%` follows the right-operand sign (-7 % 3 = 2, not -1).
+        # Phase 3c unlocked this via perl-semantics sign-correction in the backend.
         {
             tag         => 'arith-mod',
             group       => 'A',
             description => 'literal arithmetic: return -7 % 3 (perl right-operand sign = 2)',
             perl_oracle => '2',
             build_graph => sub {
-                my $f = Chalk::IR::NodeFactory->new;
+                my $f   = Chalk::IR::NodeFactory->new;
                 my $c7  = _int_const($f, -7);
                 my $c3  = _int_const($f, 3);
                 my $mod = $f->make('Modulo', inputs => [$c7, $c3]);
