@@ -4155,6 +4155,103 @@ sub _build_M27 {
     return $mop;
 }
 
+# ===========================================================================
+# TIER-2 BUILDERS
+#
+# Tier-2 units are REAL lib/ modules exercised via hand-authored MOP graphs.
+# The MOP is built directly node-by-node (trusted input), never via the Chalk
+# parser or SemanticAction pipeline. Graph source is tagged 'hand' to isolate
+# any S≠P divergence cleanly to the CodeGen layer.
+#
+# Naming convention: T2_<UnitName>[:MethodName] where UnitName is the
+# short name of the lib/ module under test.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# T2_Add: lib/Chalk/IR/Node/Add.pm
+#
+# class Chalk::IR::Node::Add :isa(Chalk::IR::Node::BinOp) {
+#     method operation() { 'Add' }
+#     method op_str()    { '+' }
+# }
+#
+# The MOP is self-contained: it declares the full inheritance chain
+# (Chalk::IR::Node and Chalk::IR::Node::BinOp as minimal stubs, then
+# Chalk::IR::Node::Add with the two const-returning methods). This lets the
+# emitter produce a runnable standalone snippet without external deps.
+#
+# method operation() graph:
+#   Start <- ret.control_in   ret(inputs=[Constant('Add', string)])
+#
+# method op_str() graph:
+#   Start <- ret.control_in   ret(inputs=[Constant('+', string)])
+# ---------------------------------------------------------------------------
+sub _build_T2_Add {
+    # ---- Graph for operation() -> 'Add' ----
+    my $op_factory = Chalk::IR::NodeFactory->new;
+    my $op_start   = $op_factory->make_cfg('Start', inputs => []);
+    my $op_const   = $op_factory->make('Constant', value => 'Add', const_type => 'string');
+    my $op_ret     = $op_factory->make_cfg('Return', inputs => [$op_const]);
+    $op_ret->set_control_in($op_start);
+
+    my $op_graph = Chalk::IR::Graph->new;
+    $op_graph->merge($op_start);
+    $op_graph->merge($op_const);
+    $op_graph->merge($op_ret);
+
+    # ---- Graph for op_str() -> '+' ----
+    my $str_factory = Chalk::IR::NodeFactory->new;
+    my $str_start   = $str_factory->make_cfg('Start', inputs => []);
+    my $str_const   = $str_factory->make('Constant', value => '+', const_type => 'string');
+    my $str_ret     = $str_factory->make_cfg('Return', inputs => [$str_const]);
+    $str_ret->set_control_in($str_start);
+
+    my $str_graph = Chalk::IR::Graph->new;
+    $str_graph->merge($str_start);
+    $str_graph->merge($str_const);
+    $str_graph->merge($str_ret);
+
+    # ---- Wire MOP: full class chain (Node stub, BinOp stub, Add) ----
+    my $mop = Chalk::MOP->new;
+
+    # Chalk::IR::Node — stub with the :param fields required by the constructor.
+    # The real Node has field $id :param :reader and field $inputs :param :reader = [].
+    # The stub must accept the same constructor params so the same spec works for
+    # both the S side (real module) and the P side (generated stub).
+    my $node_cls = $mop->declare_class('Chalk::IR::Node');
+    $node_cls->declare_field('$id',
+        sigil       => '$',
+        param_name  => 'id',
+        attributes  => [':param', ':reader'],
+    );
+    $node_cls->declare_field('$inputs',
+        sigil         => '$',
+        param_name    => 'inputs',
+        attributes    => [':param', ':reader'],
+        has_default   => true,
+        default_value => do {
+            # Default value node: [] — an ArrayRef with no elements.
+            my $df = Chalk::IR::NodeFactory->new;
+            my @empty;
+            $df->make('ArrayRef', inputs => [\@empty]);
+        },
+    );
+
+    # Chalk::IR::Node::BinOp — minimal stub inheriting from Node
+    $mop->declare_class('Chalk::IR::Node::BinOp',
+        parent_name => 'Chalk::IR::Node',
+    );
+
+    # Chalk::IR::Node::Add — the unit under test
+    my $add_cls = $mop->declare_class('Chalk::IR::Node::Add',
+        parent_name => 'Chalk::IR::Node::BinOp',
+    );
+    $add_cls->declare_method('operation', params => [], graph => $op_graph);
+    $add_cls->declare_method('op_str',    params => [], graph => $str_graph);
+
+    return $mop;
+}
+
 # Populate the dispatch table after all builders are defined.
 %BUILDERS = (
     A1 => \&_build_A1,
@@ -4235,6 +4332,9 @@ sub _build_M27 {
     M25 => \&_build_M25,
     M23 => \&_build_M23,
     M24 => \&_build_M24,
+
+    # Tier-2 units: real lib/ modules exercised via hand-authored graphs
+    T2_Add => \&_build_T2_Add,
 );
 
 1;

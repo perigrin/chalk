@@ -100,7 +100,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        for my $cls ($mop->classes()) {
+        for my $cls ($self->_toposort_classes($mop->classes())) {
             my $name = $cls->name;
             next if $name eq 'main';
             push @lines, $self->_emit_mop_class($cls);
@@ -1614,5 +1614,74 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         }
         push @lines, "}";
         return join("\n", @lines);
+    }
+
+    # -----------------------------------------------------------------------
+    # _toposort_classes(@classes) -> @classes_in_dependency_order
+    #
+    # Returns the classes list sorted so that a parent class always appears
+    # before its children. Classes without a declared parent sort before those
+    # that have one. Within the same dependency level, alphabetical order by
+    # class name ensures deterministic emission.
+    #
+    # Uses Kahn's algorithm on the parent-child DAG. Only intra-MOP parent
+    # relationships (where the parent class is also declared in the same MOP)
+    # count as edges. External parents (loaded via 'use') are ignored; the
+    # child class has in-degree 0 with respect to the MOP graph and is emitted
+    # whenever its MOP-internal ancestors are satisfied.
+    # -----------------------------------------------------------------------
+    method _toposort_classes(@classes) {
+        my %by_name;
+        my %parent_of;
+
+        for my $cls (@classes) {
+            my $name = $cls->name;
+            $by_name{$name} = $cls;
+
+            my $parent;
+            if ($cls->can('superclass') && defined $cls->superclass) {
+                $parent = $cls->superclass->name;
+            }
+            elsif ($cls->can('parent_name') && defined $cls->parent_name) {
+                $parent = $cls->parent_name;
+            }
+            $parent_of{$name} = $parent;
+        }
+
+        my %in_degree;
+        my %children_of;
+
+        for my $name (sort keys %by_name) {
+            $in_degree{$name} //= 0;
+            my $parent = $parent_of{$name};
+            if (defined $parent && exists $by_name{$parent}) {
+                $in_degree{$name}++;
+                push $children_of{$parent}->@*, $name;
+            }
+        }
+
+        my @queue = sort grep { $in_degree{$_} == 0 } keys %by_name;
+        my @result;
+
+        while (@queue) {
+            my $name = shift @queue;
+            push @result, $by_name{$name};
+            my @kids = defined $children_of{$name} ? sort $children_of{$name}->@* : ();
+            for my $child (@kids) {
+                $in_degree{$child}--;
+                if ($in_degree{$child} == 0) {
+                    push @queue, $child;
+                    @queue = sort @queue;
+                }
+            }
+        }
+
+        # Cycle fallback: emit any remaining classes in alphabetical order.
+        my %emitted = map { $_->name => 1 } @result;
+        for my $name (sort keys %by_name) {
+            push @result, $by_name{$name} unless $emitted{$name};
+        }
+
+        return @result;
     }
 }
