@@ -20,6 +20,26 @@ my $CORPUS_FILE = 't/fixtures/ir-audit-corpus.pl';
 my $ARTIFACT_FILE = 't/fixtures/codegen-harness/gap-map.json';
 
 # ---------------------------------------------------------------------------
+# Out-of-subset idiom registry.
+#
+# Idioms listed here are classified REJECT: they are excluded from the Chalk
+# subset by explicit policy decision, are NOT codegen targets, and must NOT
+# count as codegen failures.  They still appear in the 78-entry denominator
+# (classified, not dropped) and carry a documented reason.
+#
+# Key   = tier-1 corpus tag (e.g. 'M21').
+# Value = human-readable reason string explaining the policy decision.
+# ---------------------------------------------------------------------------
+my %REJECT_IDIOMS = (
+    # eval { } is excluded by the try/catch policy: Chalk's exception-handling
+    # mechanism is try/catch; eval is excluded in all forms (see CLAUDE.md and
+    # the memory note feedback_try_catch_not_eval).  The grammar (chalk-bootstrap.bnf)
+    # has no eval rule and no eval keyword anywhere in its 336 lines.
+    M21 => 'out-of-subset by policy: eval is excluded in all forms; '
+         . 'Chalk uses try/catch for exception handling (see CLAUDE.md)',
+);
+
+# ---------------------------------------------------------------------------
 # generate() -> \%gap_map
 #
 # Iterates every tier-1 corpus entry (A1 .. M25, 78 idioms total), runs each
@@ -108,6 +128,44 @@ sub validate_coverage {
         unless ($actual == $expected) {
             return false;
         }
+    }
+
+    return true;
+}
+
+# ---------------------------------------------------------------------------
+# valid_verdicts() -> @list
+#
+# Returns the complete list of valid verdict strings.  Tests use this to
+# assert that new verdicts are documented rather than appearing silently.
+# ---------------------------------------------------------------------------
+sub valid_verdicts {
+    return qw(PASS GAP MISCOMPILE NOT-YET-COVERED UNDER_SPECIFIED REJECT);
+}
+
+# ---------------------------------------------------------------------------
+# tier1_green(\%gap_map) -> bool
+#
+# Returns true iff the gap map satisfies the tier-1 green requirement:
+#   - Every IN-SUBSET idiom has verdict PASS.
+#   - REJECT idioms are excluded from the requirement.
+#   - Any non-PASS, non-REJECT verdict (GAP, MISCOMPILE, NOT-YET-COVERED,
+#     UNDER_SPECIFIED) on an in-subset idiom counts as NOT green.
+#
+# "In-subset" means: any entry whose verdict is not REJECT.
+# ---------------------------------------------------------------------------
+sub tier1_green {
+    my (undef, $gap_map) = @_;    # class method
+
+    croak "tier1_green: gap_map must be a hashref"
+        unless ref $gap_map eq 'HASH';
+
+    my $entries = $gap_map->{entries} // [];
+
+    for my $entry (@$entries) {
+        my $v = $entry->{verdict} // 'UNKNOWN';
+        next if $v eq 'REJECT';    # out-of-subset, excluded from green requirement
+        return false unless $v eq 'PASS';
     }
 
     return true;
@@ -300,6 +358,20 @@ sub _spec_for {
 # The entry always carries: { tag, group, verdict, extra }.
 sub _run_one {
     my ($tag, $group, $corpus_text) = @_;
+
+    # Check the out-of-subset registry first.  REJECT idioms are classified
+    # immediately: they stay in the denominator but never reach the codegen rig.
+    if (exists $REJECT_IDIOMS{$tag}) {
+        return {
+            tag     => $tag,
+            group   => $group,
+            verdict => 'REJECT',
+            extra   => {
+                reason           => $REJECT_IDIOMS{$tag},
+                classification   => 'out-of-subset',
+            },
+        };
+    }
 
     # Extract the snippet from the corpus.
     my $snippet = eval {

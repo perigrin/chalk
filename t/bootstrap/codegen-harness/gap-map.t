@@ -65,7 +65,8 @@ SKIP: {
     # UNDER_SPECIFIED is also valid — it indicates a parameterized idiom whose
     # exercise spec supplies no args (vacuous-pass guard).  It should be treated
     # as a correctness alarm and fixed before the idiom can reach PASS.
-    my @valid_verdicts = qw(PASS GAP MISCOMPILE NOT-YET-COVERED UNDER_SPECIFIED);
+    # REJECT is valid — it marks out-of-subset idioms excluded by policy.
+    my @valid_verdicts = Chalk::CodeGen::Harness::GapMap->valid_verdicts();
     my %valid = map { $_ => 1 } @valid_verdicts;
     my $all_valid = 1;
     my @bad;
@@ -75,7 +76,7 @@ SKIP: {
             push @bad, "$entry->{tag}: $entry->{verdict}";
         }
     }
-    ok($all_valid, 'every verdict is PASS | GAP | MISCOMPILE | NOT-YET-COVERED | UNDER_SPECIFIED')
+    ok($all_valid, 'every verdict is PASS | GAP | MISCOMPILE | NOT-YET-COVERED | UNDER_SPECIFIED | REJECT')
         or diag("bad verdicts: @bad");
 
     # --- T8: all 13 groups A-M are present ---
