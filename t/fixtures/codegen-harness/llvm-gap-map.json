@@ -1,0 +1,368 @@
+{
+   "entries" : [
+      {
+         "extra" : {
+            "description" : "literal arithmetic: return 1 + 2",
+            "libperl_free" : 1,
+            "lli_output" : "3",
+            "perl_oracle" : "3",
+            "runtime_free_coverage" : 1
+         },
+         "group" : "A",
+         "tag" : "arith-add",
+         "verdict" : "L-GREEN"
+      },
+      {
+         "extra" : {
+            "description" : "literal arithmetic: return 5 - 3",
+            "libperl_free" : 1,
+            "lli_output" : "2",
+            "perl_oracle" : "2",
+            "runtime_free_coverage" : 1
+         },
+         "group" : "A",
+         "tag" : "arith-sub",
+         "verdict" : "L-GREEN"
+      },
+      {
+         "extra" : {
+            "description" : "literal arithmetic: return 3 * 4",
+            "libperl_free" : 1,
+            "lli_output" : "12",
+            "perl_oracle" : "12",
+            "runtime_free_coverage" : 1
+         },
+         "group" : "A",
+         "tag" : "arith-mul",
+         "verdict" : "L-GREEN"
+      },
+      {
+         "extra" : {
+            "description" : "VarDecl scalar: my $x = 1; return $x",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "VarDecl node has no representation field; lexical variables require alloca + store/load in LLVM IR, but the IR does not yet carry representation on VarDecl or PadAccess nodes (Phase 3c task).",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "A",
+         "tag" : "A1",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "VarDecl array literal: my @list = (1,2,3); return scalar @list",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "ArrayRef/ListAssign nodes have no representation; Perl arrays require Scalar (SV*) representation — no runtime-free lowering exists for array allocation.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "A",
+         "tag" : "A2",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "VarDecl hash literal: my %h = (a=>1,b=>2); return $h{a}",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "HashRef/Subscript nodes have no representation; Perl hashes require Scalar (SV*) — no runtime-free lowering.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "A",
+         "tag" : "A3",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "VarDecl no initializer: my $x; $x = 1; return $x",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "VarDecl with undef initializer + Assign: variable representation not on graph; cannot lower without alloca.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "A",
+         "tag" : "A4",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "VarDecl field: field $x :param; return $x",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "FieldAccess node has no representation; object fields require layout knowledge (struct offset) not yet in IR.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "A",
+         "tag" : "A5",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "reassignment: my $x = 1; $x = 2; return $x",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Assign/VarDecl nodes have no representation; mutable variable requires alloca + store/load, neither of which the IR currently models.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "C",
+         "tag" : "C1",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "compound assignment: my $x = 1; $x += 2; return $x",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "CompoundAssign (+= ) has no representation; same gap as C1 (mutable variable, no alloca model).",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "C",
+         "tag" : "C2",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "string concat assign: my $s = \"a\"; $s .= \"b\"; return $s",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Concat/.= operates on Str representation which is not yet lowerable runtime-free (Str = char*/SV* — no runtime-free string layout in the IR).",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "C",
+         "tag" : "C3",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "array element assignment: my @a = (1); $a[0] = 2; return $a[0]",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Array Subscript + Assign has no representation; array element access requires Scalar (SV*).",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "C",
+         "tag" : "C4",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "hash element assignment: my %h = (); $h{k} = 1; return $h{k}",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Hash Subscript + Assign has no representation; hash element access requires Scalar (SV*).",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "C",
+         "tag" : "C5",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "if/else: my $x = 0; if ($n > 0) { $x=1 } else { $x=2 }; return $x",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "If/Phi control flow requires: (1) condition operand with representation (Bool or Int), (2) Phi node carrying representation for the join value. Neither Phi nor the If condition carries representation in the current IR. Additionally, the method parameter $n has no representation.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "D",
+         "tag" : "D1",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "while loop: my $i = 0; while ($i < 3) { $i = $i + 1; } return $i",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Loop/Phi backedge requires Phi nodes with representation and back-edge-safe coercion ordering (per typed-ir-repr §1a M2 note). Neither Loop nor Phi carries representation in the current IR.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "D",
+         "tag" : "D2",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "foreach loop: my $sum = 0; foreach my $n (1,2,3) { $sum=$sum+$n; }; return $sum",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "ForEach loop requires: iterator Phi with representation, loop variable $n with representation (PadAccess not on graph). Same gap class as D2.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "D",
+         "tag" : "D3",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "postfix if: my $x = 0; $x = 1 if $n > 0; return $x",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Postfix-if control flow requires If node with Bool-repr condition and Phi for the join; same gap class as D1.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "D",
+         "tag" : "D4",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "postfix while: my $i = 0; $i = $i+1 while $i < 3; return $i",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Postfix-while is a Loop/Phi pattern; same gap class as D2.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "D",
+         "tag" : "D5",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "ternary: my $x = $n > 0 ? 1 : 2; return $x",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "TernaryExpr requires Bool-repr condition; the condition result ($n > 0) has no representation in the current IR. The parameter $n also has no representation.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "D",
+         "tag" : "D6",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "nested if: if ($n>0) { if ($n>5) {$x=1} else {$x=2} } else {$x=3}; return $x",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Nested If/Phi: same gap class as D1, compounded by two levels of Phi merge.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "D",
+         "tag" : "D7",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "try/catch: try { die \"boom\"; } catch ($e) { return 0; } return 1",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "TryCatch node has no representation; exception handling requires a landing-pad mechanism (LLVM personality + invoke) not yet modelled in the IR.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "D",
+         "tag" : "D8",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "pre-increment: my $i = 0; ++$i; return $i",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Pre-increment (++$i) is a CompoundAssign on a mutable variable. The VarDecl/Assign nodes have no representation; cannot lower without alloca model (same gap class as C1).",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "K",
+         "tag" : "K1",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "post-increment: my $i = 0; $i++; return $i",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Post-increment ($i++) differs from pre-increment only in the returned value (before vs after). Same representation gap as K1 — VarDecl/Assign without alloca model.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "K",
+         "tag" : "K2",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "logical and: return $a && $b",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "The And node operates on Scalar-typed arguments ($a, $b are method parameters with no on-graph representation). Logical && in Perl returns a value (not just a bool), so it requires Scalar representation or a proven-bool narrowing coercion. Neither is in the current IR.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "L",
+         "tag" : "L1",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "logical or: return $a || $b",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Same gap as L1: Or node on Scalar-repr parameters.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "L",
+         "tag" : "L2",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "defined-or: return $a // $b",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "DefinedOr requires a defined-check on an SV* — inherently Scalar. No runtime-free defined-check exists in the current IR.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "L",
+         "tag" : "L3",
+         "verdict" : "GAP"
+      },
+      {
+         "extra" : {
+            "description" : "not: return !$a",
+            "gap_category" : "representation-missing",
+            "gap_reason" : "Not (!) on a Scalar parameter: the negation result type (Bool/Int) and the operand representation are both absent from the IR. Without a proven-bool input, ! requires Scalar coercion.",
+            "libperl_free" : null,
+            "runtime_free_coverage" : null
+         },
+         "group" : "L",
+         "tag" : "L4",
+         "verdict" : "GAP"
+      }
+   ],
+   "summary" : {
+      "by_group" : {
+         "A" : {
+            "count" : 8,
+            "verdicts" : {
+               "GAP" : 5,
+               "L-GREEN" : 3
+            }
+         },
+         "C" : {
+            "count" : 5,
+            "verdicts" : {
+               "GAP" : 5
+            }
+         },
+         "D" : {
+            "count" : 8,
+            "verdicts" : {
+               "GAP" : 8
+            }
+         },
+         "K" : {
+            "count" : 2,
+            "verdicts" : {
+               "GAP" : 2
+            }
+         },
+         "L" : {
+            "count" : 4,
+            "verdicts" : {
+               "GAP" : 4
+            }
+         }
+      },
+      "by_verdict" : {
+         "GAP" : 24,
+         "L-GREEN" : 3
+      },
+      "denominator" : 27
+   }
+}

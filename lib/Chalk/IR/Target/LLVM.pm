@@ -1,5 +1,5 @@
-# ABOUTME: SoN->LLVM IR lowering pass for the typed-representation model (Phase 3a).
-# ABOUTME: Lowers typed SoN graphs (Int literals + Add + Return) to LLVM IR text for lli.
+# ABOUTME: SoN->LLVM IR lowering pass for the typed-representation model (Phase 3a/3b).
+# ABOUTME: Lowers typed SoN graphs (Int/Num literals, Add/Sub/Mul/Div + Return) to LLVM IR text for lli.
 package Chalk::IR::Target::LLVM;
 use 5.42.0;
 use utf8;
@@ -97,13 +97,24 @@ sub lower_value {
         return $self->_lower_constant($node);
     }
     elsif ($op eq 'Add') {
-        return $self->_lower_add($node);
+        return $self->_lower_binop_int($node, 'add');
+    }
+    elsif ($op eq 'Subtract') {
+        return $self->_lower_binop_int($node, 'sub');
+    }
+    elsif ($op eq 'Multiply') {
+        return $self->_lower_binop_int($node, 'mul');
+    }
+    elsif ($op eq 'Divide') {
+        return $self->_lower_binop_int($node, 'sdiv');
+    }
+    elsif ($op eq 'Modulo') {
+        return $self->_lower_binop_int($node, 'srem');
     }
     elsif ($op eq 'Coerce') {
         return $self->_lower_coerce($node);
     }
     else {
-        my $repr = $node->representation // 'undef';
         if (defined $node->representation && $node->representation eq 'Scalar') {
             die "GAP: node op=$op repr=Scalar reached LLVM backend — cannot lower runtime-free. "
               . "This value requires libperl; it is a GAP on the L corner.";
@@ -153,19 +164,20 @@ sub _lower_constant {
     }
 }
 
-sub _lower_add {
-    my ($self, $node) = @_;
+sub _lower_binop_int {
+    my ($self, $node, $llvm_op) = @_;
 
     my $repr = $node->representation;
-    die "GAP: Add with repr=Scalar reached LLVM backend" if defined $repr && $repr eq 'Scalar';
+    my $op   = $node->operation;
+    die "GAP: $op with repr=Scalar reached LLVM backend" if defined $repr && $repr eq 'Scalar';
 
-    my $inputs = $node->inputs;
+    my $inputs  = $node->inputs;
     my $lhs_ref = $self->lower_value($inputs->[0]);
     my $rhs_ref = $self->lower_value($inputs->[1]);
 
     my $ref = $self->_fresh;
     push $self->instructions->@*,
-        "  $ref = add i64 $lhs_ref, $rhs_ref  ; Add(repr=Int) -> i64 add";
+        "  $ref = $llvm_op i64 $lhs_ref, $rhs_ref  ; $op(repr=Int) -> i64 $llvm_op";
     $self->{cache}{$node->id} = $ref;
     return $ref;
 }
