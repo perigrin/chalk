@@ -81,6 +81,7 @@ use Chalk::IR::Node::Proj;
 use Chalk::IR::Node::Region;
 use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::ExpressionList;
+use Chalk::IR::Node::Coerce;
 
 my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Constant Phi
@@ -97,6 +98,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     TernaryExpr StructRef StructFieldAccess
     ExpressionList
     Start Return Unwind
+    Coerce
 );
 
 # CFG ops that are NEVER hash-consed via make_cfg (each call allocates fresh).
