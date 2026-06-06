@@ -411,6 +411,292 @@ sub _build_A3 {
 }
 
 # ---------------------------------------------------------------------------
+# D6: class C { method m($n) { my $x = $n > 0 ? 1 : 2; return $x; } }
+#
+# Method param $n. VarDecl($x) = TernaryExpr(BinOp(>, $n, 0), 1, 2). Return $x.
+# Control chain: Start <- var_x <- ret
+# ---------------------------------------------------------------------------
+sub _build_D6 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # $n > 0 — BinOp with operator '>'
+    my $op_gt  = $factory->make('Constant', value => '>',  const_type => 'string');
+    my $n_var  = $factory->make('Constant', value => '$n', const_type => 'variable');
+    my $zero   = $factory->make('Constant', value => '0',  const_type => 'integer');
+    my $cond   = $factory->make('NumGt', inputs => [$op_gt, $n_var, $zero]);
+
+    # $n > 0 ? 1 : 2 — TernaryExpr
+    my $one    = $factory->make('Constant', value => '1', const_type => 'integer');
+    my $two    = $factory->make('Constant', value => '2', const_type => 'integer');
+    my $ternary = $factory->make('TernaryExpr', inputs => [$cond, $one, $two]);
+
+    # VarDecl: my $x = $n > 0 ? 1 : 2
+    my $name_x = $factory->make('Constant', value => '$x', const_type => 'string');
+    my $var_x  = $factory->make('VarDecl', inputs => [$name_x, $ternary], scope => 'my');
+    $var_x->set_control_in($start);
+
+    # Return: $x
+    my $x_read = $factory->make('Constant', value => '$x', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$x_read]);
+    $ret->set_control_in($var_x);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_gt, $n_var, $zero, $cond, $one, $two, $ternary, $name_x, $var_x, $x_read, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$n'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# J1: class C { method m($s) { return $s =~ /foo/; } }
+#
+# Method param $s. Return RegexMatch($s, /foo/).
+# Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_J1 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # $s =~ /foo/
+    my $s_var  = $factory->make('Constant', value => '$s',   const_type => 'variable');
+    my $pat    = $factory->make('Constant', value => '/foo/', const_type => 'regex');
+    my $match  = $factory->make('RegexMatch', inputs => [$s_var, $pat]);
+
+    # Return: $s =~ /foo/
+    my $ret = $factory->make_cfg('Return', inputs => [$match]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $s_var, $pat, $match, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$s'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# J2: class C { method m($s) { $s =~ s/foo/bar/; return $s; } }
+#
+# Method param $s. Bare RegexSubst($s, foo, bar, ''), then Return($s).
+# RegexSubst is a statement-position side-effect: set_control_in on it.
+# Control chain: Start <- subst <- ret
+# ---------------------------------------------------------------------------
+sub _build_J2 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # $s =~ s/foo/bar/
+    my $s_var  = $factory->make('Constant', value => '$s',  const_type => 'variable');
+    my $pat    = $factory->make('Constant', value => 'foo', const_type => 'string');
+    my $repl   = $factory->make('Constant', value => 'bar', const_type => 'string');
+    my $flags  = $factory->make('Constant', value => '',    const_type => 'string');
+    my $subst  = $factory->make('RegexSubst', inputs => [$s_var, $pat, $repl, $flags]);
+    $subst->set_control_in($start);
+
+    # Return: $s (after substitution)
+    my $s_read = $factory->make('Constant', value => '$s', const_type => 'variable');
+    my $ret    = $factory->make_cfg('Return', inputs => [$s_read]);
+    $ret->set_control_in($subst);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $s_var, $pat, $repl, $flags, $subst, $s_read, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$s'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# J3: class C { method m() { my @keys = qw(a b c); return scalar @keys; } }
+#
+# qw(a b c) desugars to ArrayRef(['a','b','c']). VarDecl, Return(scalar(@keys)).
+# Control chain: Start <- var_keys <- ret
+# ---------------------------------------------------------------------------
+sub _build_J3 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # qw(a b c) — ArrayRef of string constants
+    my $str_a  = $factory->make('Constant', value => 'a', const_type => 'string');
+    my $str_b  = $factory->make('Constant', value => 'b', const_type => 'string');
+    my $str_c  = $factory->make('Constant', value => 'c', const_type => 'string');
+    my @elems  = ($str_a, $str_b, $str_c);
+    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+
+    # VarDecl: my @keys = qw(a b c)
+    my $name_keys = $factory->make('Constant', value => '@keys', const_type => 'string');
+    my $var_keys  = $factory->make('VarDecl', inputs => [$name_keys, $arr_ref], scope => 'my');
+    $var_keys->set_control_in($start);
+
+    # scalar(@keys)
+    my $name_scalar  = $factory->make('Constant', value => 'scalar',  const_type => 'string');
+    my $keys_read    = $factory->make('Constant', value => '@keys',   const_type => 'variable');
+    my @scalar_args  = ($keys_read);
+    my $call_scalar  = $factory->make('Call',
+        dispatch_kind => 'builtin',
+        name          => 'scalar',
+        inputs        => [$name_scalar, \@scalar_args],
+    );
+
+    # Return: scalar @keys
+    my $ret = $factory->make_cfg('Return', inputs => [$call_scalar]);
+    $ret->set_control_in($var_keys);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $str_a, $str_b, $str_c, $arr_ref, $name_keys, $var_keys,
+               $name_scalar, $keys_read, $call_scalar, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => [], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# L1: class C { method m($a, $b) { return $a && $b; } }
+#
+# Method params $a, $b. Return BinOp(&&, $a, $b).
+# Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_L1 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # $a && $b
+    my $op_and = $factory->make('Constant', value => '&&', const_type => 'string');
+    my $a_var  = $factory->make('Constant', value => '$a', const_type => 'variable');
+    my $b_var  = $factory->make('Constant', value => '$b', const_type => 'variable');
+    my $and_op = $factory->make('And', inputs => [$op_and, $a_var, $b_var]);
+
+    # Return: $a && $b
+    my $ret = $factory->make_cfg('Return', inputs => [$and_op]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_and, $a_var, $b_var, $and_op, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$a', '$b'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# L2: class C { method m($a, $b) { return $a || $b; } }
+#
+# Method params $a, $b. Return BinOp(||, $a, $b).
+# Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_L2 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # $a || $b
+    my $op_or  = $factory->make('Constant', value => '||', const_type => 'string');
+    my $a_var  = $factory->make('Constant', value => '$a', const_type => 'variable');
+    my $b_var  = $factory->make('Constant', value => '$b', const_type => 'variable');
+    my $or_op  = $factory->make('Or', inputs => [$op_or, $a_var, $b_var]);
+
+    # Return: $a || $b
+    my $ret = $factory->make_cfg('Return', inputs => [$or_op]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_or, $a_var, $b_var, $or_op, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$a', '$b'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# L3: class C { method m($a, $b) { return $a // $b; } }
+#
+# Method params $a, $b. Return BinOp(//, $a, $b).
+# Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_L3 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # $a // $b
+    my $op_defedor = $factory->make('Constant', value => '//', const_type => 'string');
+    my $a_var      = $factory->make('Constant', value => '$a', const_type => 'variable');
+    my $b_var      = $factory->make('Constant', value => '$b', const_type => 'variable');
+    my $defor_op   = $factory->make('DefinedOr', inputs => [$op_defedor, $a_var, $b_var]);
+
+    # Return: $a // $b
+    my $ret = $factory->make_cfg('Return', inputs => [$defor_op]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_defedor, $a_var, $b_var, $defor_op, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$a', '$b'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
+# L4: class C { method m($a) { return !$a; } }
+#
+# Method param $a. Return UnaryOp(!, $a).
+# Control chain: Start <- ret
+# ---------------------------------------------------------------------------
+sub _build_L4 {
+    my $factory = Chalk::IR::NodeFactory->new;
+
+    my $start = $factory->make_cfg('Start', inputs => []);
+
+    # !$a
+    my $op_not = $factory->make('Constant', value => '!',  const_type => 'string');
+    my $a_var  = $factory->make('Constant', value => '$a', const_type => 'variable');
+    my $not_op = $factory->make('Not', inputs => [$op_not, $a_var]);
+
+    # Return: !$a
+    my $ret = $factory->make_cfg('Return', inputs => [$not_op]);
+    $ret->set_control_in($start);
+
+    my $graph = Chalk::IR::Graph->new;
+    for my $n ($start, $op_not, $a_var, $not_op, $ret) {
+        $graph->merge($n);
+    }
+
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('C');
+    $cls->declare_method('m', params => ['$a'], graph => $graph);
+    return $mop;
+}
+
+# ---------------------------------------------------------------------------
 # F1: class C { method m() { return $self->foo->bar; } }
 #
 # Chained method calls: $self->foo returns something, then ->bar is called on it.
@@ -1350,6 +1636,7 @@ sub _build_K2 {
     C3 => \&_build_C3,
     C4 => \&_build_C4,
     C5 => \&_build_C5,
+    D6 => \&_build_D6,
     E1 => \&_build_E1,
     F1 => \&_build_F1,
     F2 => \&_build_F2,
@@ -1358,8 +1645,15 @@ sub _build_K2 {
     G2 => \&_build_G2,
     G3 => \&_build_G3,
     G4 => \&_build_G4,
+    J1 => \&_build_J1,
+    J2 => \&_build_J2,
+    J3 => \&_build_J3,
     K1 => \&_build_K1,
     K2 => \&_build_K2,
+    L1 => \&_build_L1,
+    L2 => \&_build_L2,
+    L3 => \&_build_L3,
+    L4 => \&_build_L4,
 );
 
 1;
