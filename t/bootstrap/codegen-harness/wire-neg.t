@@ -4,7 +4,7 @@ use 5.42.0;
 use utf8;
 
 use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
 
 use Chalk::CodeGen::Harness;
 use Chalk::CodeGen::Harness::PerlDriver;

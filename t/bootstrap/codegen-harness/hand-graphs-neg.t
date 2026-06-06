@@ -4,7 +4,7 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use Scalar::Util qw(blessed refaddr);
-use lib 'lib';
+use lib 'lib', 't/lib';
 
 use Chalk::MOP;
 use Chalk::IR::Graph;

@@ -4,7 +4,7 @@ use 5.42.0;
 use utf8;
 
 use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
 
 # ---------------------------------------------------------------------------
 # Expected per-group counts (verified from ir-audit-corpus.pl P-3 correction).

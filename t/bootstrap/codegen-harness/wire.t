@@ -5,7 +5,7 @@ use utf8;
 
 use Test::More;
 use Scalar::Util qw(blessed);
-use lib 'lib';
+use lib 'lib', 't/lib';
 
 use Chalk::CodeGen::Harness;
 use Chalk::CodeGen::Harness::HandGraphs;
