@@ -38,6 +38,19 @@ class Chalk::IR::Node {
     # decoration, not a structural property of the node's content.
     field $schedule_data :reader = undef;
 
+    # Machine-level representation of the value produced by this node.
+    # Values: 'Int' (i64), 'Num' (double/f64), 'Ptr' (raw pointer),
+    # 'Struct' (struct-by-value), 'Scalar' (boxed Perl SV* — conservative
+    # fallback). Set post-construction by the IR builder or a lowering pass
+    # via set_representation(); undef = not yet assigned.
+    # Excluded from content_hash: representation is a per-use lowering
+    # decision, not a structural property of what value the node IS. Two
+    # nodes with identical content (same literal, same operation, same
+    # inputs) must still hash-cons to one node regardless of what
+    # representation the builder later assigns. Coerce nodes (§2 of
+    # typed-ir-representation.md) bridge between representations on edges.
+    field $representation :reader = undef;
+
     # Add a consumer to this node's consumer list
     method add_consumer($node) {
         push $consumers->@*, $node;
@@ -101,6 +114,14 @@ class Chalk::IR::Node {
         if (defined $ctrl) {
             $ctrl->add_consumer($self);
         }
+        return;
+    }
+
+    # Late-binding setter for the machine-level representation.
+    # Called by the IR builder or a lowering pass after the node is
+    # constructed. Does not affect content_hash or hash-consing identity.
+    method set_representation($repr) {
+        $representation = $repr;
         return;
     }
 }
