@@ -47,7 +47,7 @@ SKIP: {
     # --- T4: result has 'entries' key ---
     ok(exists $gap_map->{entries}, 'gap_map has entries key');
 
-    # --- T5: denominator equals 78 ---
+    # --- T5: denominator equals the full corpus size ($TOTAL) ---
     my $entries = $gap_map->{entries} // [];
     is(scalar(@$entries), $TOTAL, "denominator == $TOTAL (all idioms present)");
 

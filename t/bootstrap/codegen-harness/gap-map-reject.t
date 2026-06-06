@@ -43,7 +43,7 @@ use_ok('Chalk::CodeGen::Harness::GapMap');
 
 # ---------------------------------------------------------------------------
 # R3: REJECT idiom still counts in the denominator (no silent shrinkage)
-# After classifying M21 as REJECT, the denominator must still be 78.
+# After classifying M21 as REJECT, the denominator must still be the full corpus size (80).
 # ---------------------------------------------------------------------------
 {
     my $gap_map = eval { Chalk::CodeGen::Harness::GapMap->generate() };
