@@ -65,18 +65,23 @@ L: GREEN
 
 ## Comparison as a condition (1 < 2 ? 1 : 0)
 
-Bool is a CONDITION type, not a returned-value type. A *bare* `1 < 2` is not a
-faithful runtime-free idiom: Perl's true is `1` but its FALSE is `""` (the empty
-string, not `0`), so returning a raw i1 as an integer would MISCOMPILE the false
-case (`0` ≠ `""`). A perl-faithful bool-as-a-VALUE therefore needs Str
-representation (gap group C) — bool-return is blocked on strings, not a freebie.
+This case lowers the comparison through a ternary into an Int — the GREEN D6
+`select i1` pattern: the NumLt is the i1 condition, the returned value is a plain
+Int. It is the simplest faithful runtime-free comparison idiom and lowers today.
 
-The faithful runtime-free idiom feeds the comparison (Bool/i1) into a ternary,
-which yields an Int — exactly the GREEN D6 `select i1` pattern. So we express
-the real idiom `1 < 2 ? 1 : 0`: the NumLt is an internal condition, never a
-returned value, and the returned value is a plain Int. Finding (2026-06-07):
-the "H Bool-return freebie" is not independent — bool-as-value requires Str
-(group C); bool-as-condition is already lowerable.
+CORRECTED FINDING (2026-06-07): Bool is its OWN representation, not "the empty
+string." Perl 5.36+ has primitive `true`/`false` distinguishable by
+`builtin::is_bool()`: `(2 < 1)` is a genuine boolean (`is_bool`=1) that
+*coerces* to `""` in string context and `0` in numeric context — but a literal
+`""` is NOT a boolean (`is_bool("")`=0). So bool is an `i1`-representable
+runtime-free value with explicit `Coerce(Bool->Num)` (-> 0/1) and
+`Coerce(Bool->Str)` (-> ""/"1") edges, exactly like `Coerce(Int->Num)`.
+Therefore bool-return is NOT blocked on Str/group-C: a bare `1 < 2` is closeable
+by modelling the Bool representation + its coercion edges (a small runtime-free
+capability). The earlier "needs Str" claim was wrong. We use the ternary form
+here as the simplest GREEN case; a bare-bool-return case can be added once the
+Bool representation + Coerce(Bool->*) edges are modelled (a separate, clean,
+runtime-free gap — not a string dependency).
 
 ```perl
 # source

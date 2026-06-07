@@ -90,11 +90,18 @@ L: GAP(// needs SvOK defined-check; inherently a Scalar runtime operation)
 
 ## L4 not
 
-Perl `!` returns `""` (empty string) for truthy input and `"1"` for falsy
-input.  This is NOT integer 0 and 1: `!5` is `""` (defined, length 0), and
-`!0` is `"1"`.  The result is a Str-typed dual-representation value — not a
-runtime-free boolean integer lowering.  Verified: `perl -e 'print !5, "|", !0'`
-prints `|1` (empty string before the pipe, then 1).
+Perl `!` returns a genuine BOOLEAN: `!5` is `false`, `!0` is `true`. These are
+primitive booleans (`is_bool(!5)`=1, `is_bool(!0)`=1 — verified), NOT strings.
+A boolean *coerces* to `""`/`"1"` in string context and `0`/`1` in numeric
+context, but its identity is Bool, not Str (a literal `""` has `is_bool`=0).
+
+CORRECTED CLASSIFICATION (2026-06-07): `!` is a Bool-REPRESENTATION gap, not a
+"Str dual-representation" gap (the earlier prose was wrong — `!5` is not an empty
+string, it is `false`). It is closeable runtime-free by modelling the Bool
+representation (i1) + a UnaryNot(Bool)->Bool op + the `Coerce(Bool->*)` edges —
+NOT blocked on Str/group-C. (Contrast L1/L2 `&&`/`||`, which genuinely return an
+OPERAND and need control flow / cfg-blocks-phi; and L3 `//`, which needs SvOK.)
+Output of a bare bool still needs the context-correct `Coerce(Bool->Str|Num)`.
 
 ```perl
 # source
@@ -108,5 +115,5 @@ context: scalar
 ```
 
 ```ir
-L: GAP(! returns "" not 0 for truthy input; dual-representation Str result not runtime-free)
+L: GAP(bool-repr: ! yields a genuine Bool (is_bool), not a Str; closeable runtime-free via a Bool representation + UnaryNot + Coerce(Bool->*) edges. NOT a Str/group-C dependency.)
 ```
