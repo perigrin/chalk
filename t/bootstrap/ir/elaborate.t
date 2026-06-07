@@ -689,4 +689,111 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     }
 }
 
+# ---------------------------------------------------------------------------
+# E9: If-nested-in-loop — lli==perl (H2 interaction proof, other direction).
+#
+# Perl: my $n=3; my $s=0; while($n>0){ if($n>1){$s+=10}else{$s+=1}; $n-- }; $s
+# perl oracle: iter1(n=3,n>1): s=10; iter2(n=2,n>1): s=20; iter3(n=1,n>1 false): s=21; = 21
+#
+# The if-inside-loop uses an inner Phi node at the inner Region to represent
+# "the value of $s after the inner if": then-arm = s+10, else-arm = s+1.
+# The loop phi s_phi's backedge is wired to this inner Phi.
+# ---------------------------------------------------------------------------
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    # Constants
+    my $c3    = $f->make('Constant', value => '3',  const_type => 'integer'); $c3->set_representation('Int');
+    my $c0a   = $f->make('Constant', value => '0',  const_type => 'integer'); $c0a->set_representation('Int');
+    my $c0b   = $f->make('Constant', value => '0',  const_type => 'integer'); $c0b->set_representation('Int');
+    my $c0c   = $f->make('Constant', value => '0',  const_type => 'integer'); $c0c->set_representation('Int');
+    my $c1    = $f->make('Constant', value => '1',  const_type => 'integer'); $c1->set_representation('Int');
+    my $c1b   = $f->make('Constant', value => '1',  const_type => 'integer'); $c1b->set_representation('Int');
+    my $c10   = $f->make('Constant', value => '10', const_type => 'integer'); $c10->set_representation('Int');
+
+    my $nn   = $f->make('Constant', value => '$n', const_type => 'string');
+    my $sn   = $f->make('Constant', value => '$s', const_type => 'string');
+    my $vn   = $f->make('VarDecl', inputs => [$nn, $c3]);  $vn->set_representation('Int');
+    my $vs   = $f->make('VarDecl', inputs => [$sn, $c0a]); $vs->set_representation('Int');
+
+    my $rn0  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]); $rn0->set_representation('Int');
+    my $rs0  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]); $rs0->set_representation('Int');
+
+    # Loop
+    my $loop  = $f->make('Loop', inputs => [$vs, undef]);
+    my $n_phi = $f->make('Phi', region => $loop, values => [$rn0]); $n_phi->set_representation('Int');
+    my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]); $s_phi->set_representation('Int');
+
+    # Loop condition: n_phi > 0
+    my $loop_cmp = $f->make('NumGt', inputs => [$n_phi, $c0c]); $loop_cmp->set_representation('Bool');
+    $loop_cmp->set_control_in($loop);
+
+    # Inner condition: n_phi > 1
+    my $inner_cmp = $f->make('NumGt', inputs => [$n_phi, $c1]); $inner_cmp->set_representation('Bool');
+
+    # Inner if branches
+    my $body_proj = $f->make('Proj', inputs => [$loop], index => 0);
+    my $exit_proj = $f->make('Proj', inputs => [$loop], index => 1);
+    my $exit_reg  = $f->make('Region', inputs => [$exit_proj]);
+    $loop->set_region($exit_reg);
+
+    my $inner_if  = $f->make('If', inputs => [$body_proj, $inner_cmp]);
+    my $inner_p0  = $f->make('Proj', inputs => [$inner_if], index => 0);
+    my $inner_p1  = $f->make('Proj', inputs => [$inner_if], index => 1);
+    my $inner_reg = $f->make('Region', inputs => [$inner_p0, $inner_p1]);
+    $inner_if->set_region($inner_reg);
+    $inner_if->set_control_in($body_proj);
+
+    # Then: s_phi + 10; Else: s_phi + 1
+    my $s_then = $f->make('Add', inputs => [$s_phi, $c10]); $s_then->set_representation('Int');
+    my $s_else = $f->make('Add', inputs => [$s_phi, $c1b]); $s_else->set_representation('Int');
+
+    # Inner Phi at Region merge: represents "s after the if"
+    my $s_new = $f->make('Phi', region => $inner_reg, values => [$s_then, $s_else]);
+    $s_new->set_representation('Int');
+
+    # n_new = n_phi - 1
+    my $n_new = $f->make('Subtract', inputs => [$n_phi, $c1]); $n_new->set_representation('Int');
+    $n_new->set_control_in($body_proj);
+
+    # Loop backedges
+    $n_phi->set_backedge($n_new);
+    $s_phi->set_backedge($s_new);
+
+    # Control chain: vn -> vs -> loop
+    $vs->set_control_in($vn);
+    $loop->set_control_in($vs);
+
+    # Return $s
+    my $rx  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]); $rx->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+    $ret->set_control_in($loop);
+
+    SKIP: {
+        skip 'E9: lli not found', 6 unless -x $LLI;
+
+        my $ll;
+        eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+        ok(!$@, "E9: if-nested-in-loop lowers without dying (got: $@)");
+
+        SKIP: {
+            skip 'E9: lowering failed', 5 unless defined $ll;
+
+            unlike($ll, qr/Perl_/, 'E9 .ll: no Perl_ C-API');
+
+            my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+            binmode $fh, ':utf8';
+            print $fh $ll;
+            close $fh;
+
+            my $lli_out = qx($LLI $tmp 2>&1);
+            my $exit    = $? >> 8;
+            is($exit, 0, 'E9 .ll: lli exits cleanly');
+            chomp $lli_out;
+            # perl oracle: n=3 -> s=10; n=2 -> s=20; n=1 (not >1) -> s=21
+            is($lli_out, '21', 'E9: lli==perl=21 (if-nested-in-loop, n=3)');
+        }
+    }
+}
+
 done_testing;

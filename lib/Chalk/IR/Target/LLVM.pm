@@ -1236,7 +1236,17 @@ sub _process_loop_body {
 
     my @body_nodes = _collect_branch_body($body_proj);
     for my $body_node (@body_nodes) {
-        $self->lower_value($body_node);
+        my $op = $body_node->can('operation') ? $body_node->operation : '';
+        if ($op eq 'If' || $op eq 'Loop') {
+            # Dispatch control-flow nodes through process_control_node so that
+            # nested If/Loop structures are handled by _process_if_node /
+            # _process_loop_node, which emit basic blocks and phi instructions.
+            # lower_value(If) only returns undef without processing branches.
+            $self->process_control_node($body_node);
+        }
+        else {
+            $self->lower_value($body_node);
+        }
     }
 }
 
@@ -1512,7 +1522,62 @@ sub _process_if_node {
             $self->{var_table}{$vd_id} = $phi_ref;
         }
 
-        # Wire explicit Phi nodes on the Region (legacy path for hand-authored loops).
-        $self->_wire_region_phis($region, $then_end_label, $else_end_label);
+        # Wire explicit Phi nodes on the Region.
+        # Explicit Phi nodes (consumers of the Region) have their incoming values
+        # lowered in the PREDECESSOR blocks, not in the merge block, so that
+        # instructions appear before the phi in the correct block. We temporarily
+        # re-enter the then/else tail blocks to emit the incoming-value instructions
+        # (if not already cached), then return to the merge block.
+        $self->_wire_region_phis_with_preblock(
+            $region, $then_end_label, $else_end_label);
+    }
+}
+
+# _wire_region_phis_with_preblock: emit explicit Phi nodes on a Region,
+# ensuring each incoming value is lowered in its PREDECESSOR block (not the
+# current/merge block). For each Phi consumer of the Region, we temporarily
+# switch to the then/else tail block to emit the incoming-value instructions
+# (if they are not already in cache), then switch back to the merge block to
+# emit the phi instruction itself.
+#
+# This is required when a Phi's incoming value has not been pre-lowered during
+# branch processing (e.g. a pure data node like Add that has no control_in
+# and is not in the body chain). Emitting it from the merge block would place
+# the instruction after the phi that references it — invalid in LLVM IR.
+sub _wire_region_phis_with_preblock {
+    my ($self, $region, $then_label, $else_label) = @_;
+
+    my $consumers = $region->consumers // [];
+    for my $phi_node (@$consumers) {
+        next unless defined $phi_node && ref($phi_node);
+        next unless $phi_node->can('operation') && $phi_node->operation eq 'Phi';
+        next if exists $self->{cache}{ $phi_node->id };
+
+        my $inputs = $phi_node->inputs;
+        unless (defined $inputs && scalar @$inputs >= 2) {
+            die "LLVM backend: Phi node (id=" . $phi_node->id . ") attached to Region "
+              . "has fewer than 2 incoming values — missing predecessor edge";
+        }
+
+        # Lower incoming[0] in the then-tail block so the instruction precedes
+        # the phi in the correct predecessor.
+        my $merge_idx = $self->_find_block_idx($self->_current_block_label);
+        my $then_idx  = $self->_find_block_idx($then_label);
+        $self->{current_idx} = $then_idx;
+        my $then_val = $self->lower_value($inputs->[0]);
+
+        # Lower incoming[1] in the else-tail block.
+        my $else_idx = $self->_find_block_idx($else_label);
+        $self->{current_idx} = $else_idx;
+        my $else_val = $self->lower_value($inputs->[1]);
+
+        # Return to merge block to emit the phi instruction.
+        $self->{current_idx} = $merge_idx;
+
+        my $repr      = $phi_node->representation // 'Int';
+        my $llvm_type = Chalk::IR::Target::LLVM::Context::_repr_to_llvm_type($repr);
+        my $result    = $self->_fresh;
+        $self->_emit("  $result = phi $llvm_type [ $then_val, %$then_label ], [ $else_val, %$else_label ]  ; Region phi");
+        $self->{cache}{ $phi_node->id } = $result;
     }
 }
