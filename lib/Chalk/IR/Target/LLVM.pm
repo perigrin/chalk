@@ -120,6 +120,13 @@ sub new {
                                 # VarDecl stores its init SSA ref here; Assign updates
                                 # it; PadAccess reads it. Models straight-line SSA
                                 # without needing alloca/store/load for simple cases.
+        reads_of_var => {},     # VarDecl id -> [PadAccess node ids read so far].
+                                # When the variable is reassigned, these cached
+                                # reads are poisoned (B1 soundness guard).
+        poisoned_reads => {},   # PadAccess node id -> 1 if its cached SSA value
+                                # went stale due to an intervening reassignment of
+                                # its variable. A re-read of a poisoned node GAPs
+                                # rather than returning the stale value (MISCOMPILE).
     }, $class;
 }
 
@@ -138,9 +145,20 @@ sub _fresh {
 sub lower_value {
     my ($self, $node) = @_;
 
-    # Cache: if we already lowered this node (hash-cons sharing), reuse.
+    # Cache: if we already lowered this node (hash-cons sharing), reuse —
+    # UNLESS it was poisoned by an intervening reassignment (B1 soundness guard):
+    # a cached read whose variable was reassigned holds a stale value, so a
+    # re-read here would MISCOMPILE. Refuse loudly instead.
     my $id = $node->id();
-    return $self->{cache}{$id} if exists $self->{cache}{$id};
+    if (exists $self->{cache}{$id}) {
+        if ($self->{poisoned_reads}{$id}) {
+            die "GAP: cached read (node id=$id) is stale — its variable was "
+              . "reassigned between this read and a prior read of the same "
+              . "hash-consed node; the SSA model cannot serve both. Cannot lower "
+              . "runtime-free; deferred to a follow-up (program-point-aware reads).";
+        }
+        return $self->{cache}{$id};
+    }
 
     my $op = $node->operation();
 
@@ -445,10 +463,20 @@ sub _lower_padaccess {
         die "LLVM backend: PadAccess var_table has no entry for VarDecl id=$vd_id";
     }
 
-    # PadAccess itself doesn't emit any instructions; it just references the
-    # current SSA value for the variable. Cache it under the PadAccess id
-    # so repeated reads of the same PadAccess node share the same SSA ref.
+    # SOUNDNESS GUARD (3c gate finding B1) — record this read against its VarDecl
+    # so a later reassignment can POISON it. A pre-assign and post-assign read of
+    # the same variable sharing a varname hash-cons to ONE PadAccess node; if that
+    # node is reassigned-around and re-read, the cache would serve the STALE
+    # pre-assign value (MISCOMPILE). _lower_assign poisons these prior reads; the
+    # cache-hit path in lower_value() refuses a poisoned re-read as a GAP. Read-
+    # modify-write idioms (++$i, $x+=1) are SAFE: their internal read uses a
+    # distinct read node from the final read, so neither aliases the other.
+    #
+    # PadAccess itself emits no instructions; it just references the current SSA
+    # value for the variable. Cache it under the PadAccess id so repeated reads
+    # of the same node share the SSA ref.
     $self->{cache}{ $node->id } = $val_ref;
+    push $self->{reads_of_var}{$vd_id}->@*, $node->id;
     return $val_ref;
 }
 
@@ -477,6 +505,18 @@ sub _lower_assign {
     unless (defined $vd && $vd->operation eq 'VarDecl') {
         die "LLVM backend: Assign lhs must be a PadAccess(VarDecl) or VarDecl; "
           . "got " . (defined $vd ? $vd->operation : 'undef');
+    }
+
+    # SOUNDNESS GUARD (B1): poison every read of this variable that was cached
+    # BEFORE this reassignment. Those cached SSA refs hold the pre-assign value;
+    # if any of those exact hash-consed PadAccess nodes is read again after this
+    # assign, the cache would serve the stale value — a MISCOMPILE. Poisoning
+    # makes such a re-read GAP loudly instead. The RHS read just lowered for a
+    # read-modify-write ($x = $x + 1) is part of THIS assign's input and is not
+    # re-read afterward via the same node, so it is not poisoned in practice;
+    # only a separate later read of a poisoned node triggers the guard.
+    if (my $prior = $self->{reads_of_var}{ $vd->id }) {
+        $self->{poisoned_reads}{$_} = 1 for $prior->@*;
     }
 
     # Update var_table: the variable now holds the new SSA value.

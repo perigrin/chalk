@@ -442,4 +442,45 @@ sub num_const {
     }
 }
 
+# ===========================================================================
+# B1 SOUNDNESS GUARD (3c gate code-review finding): a variable read both
+# BEFORE and AFTER a reassignment must GAP (die loudly), NOT silently
+# miscompile. The two same-varname reads hash-cons to one PadAccess node;
+# without the guard the cached pre-assign SSA value would be served to the
+# post-assign read too. Source: my $x=1; my $y=$x; $x=2; return $x + $y
+# (perl = 3; the un-guarded lowering would compute 1+1 = 2).
+# ===========================================================================
+{
+    my $f  = Chalk::IR::NodeFactory->new;
+    my $nx = $f->make('Constant', value => '$x', const_type => 'string');
+    my $c1 = int_const($f, 1);
+    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_representation('Int');
+
+    # my $y = $x;  (a read of $x, BEFORE the reassignment)
+    my $rx1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $rx1->set_representation('Int');
+    my $ny  = $f->make('Constant', value => '$y', const_type => 'string');
+    my $vy  = $f->make('VarDecl', inputs => [$ny, $rx1]); $vy->set_representation('Int');
+
+    # $x = 2;  (reassignment — poisons the prior read of $x)
+    my $c2  = int_const($f, 2);
+    my $rxL = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $rxL->set_representation('Int');
+    my $asg = $f->make('Assign', inputs => [$rxL, $c2]); $asg->set_representation('Int');
+
+    # return $x + $y;  ($x read AFTER reassign hash-cons-aliases the BEFORE read)
+    my $rx2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $rx2->set_representation('Int');
+    my $ryF = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
+    $ryF->set_representation('Int');
+    my $add = $f->make('Add', inputs => [$rx2, $ryF]); $add->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$add]);
+    $ret->set_control_in($asg); $asg->set_control_in($vy); $vy->set_control_in($vx);
+
+    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    ok($@, 'B1: read-before-and-after-reassign GAPs (dies), not miscompiles')
+        or diag("expected a GAP die but lower() succeeded — possible miscompile");
+    like($@ // '', qr/GAP|stale/i, 'B1: the die is a GAP/stale soundness refusal');
+}
+
 done_testing;
