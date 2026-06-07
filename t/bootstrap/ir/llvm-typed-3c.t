@@ -443,12 +443,18 @@ sub num_const {
 }
 
 # ===========================================================================
-# B1 SOUNDNESS GUARD (3c gate code-review finding): a variable read both
-# BEFORE and AFTER a reassignment must GAP (die loudly), NOT silently
-# miscompile. The two same-varname reads hash-cons to one PadAccess node;
-# without the guard the cached pre-assign SSA value would be served to the
-# post-assign read too. Source: my $x=1; my $y=$x; $x=2; return $x + $y
-# (perl = 3; the un-guarded lowering would compute 1+1 = 2).
+# B1 SOUNDNESS: my $x=1; my $y=$x; $x=2; return $x + $y  (perl = 3)
+#
+# The pre-assign read ($y=$x) and post-assign read (return $x+$y) hash-cons
+# to the SAME PadAccess node. The scoped-elaboration var_table+phi model
+# reads var_table[vd_id] at each PadAccess lowering point, so the Return
+# read sees x=2 (the post-assign value) rather than the stale x=1. This
+# supersedes the original "B1 poison guard" (introduced in the 3c gate
+# review), which died with a GAP when it saw a cached pre-assign read being
+# re-read. The new model is program-point-correct: no stale cache exists
+# for PadAccess nodes because they always read the current var_table entry.
+# See t/bootstrap/ir/llvm-reassign-soundness.t for the full adversarial
+# proof covering straight-line, branch, and loop shapes.
 # ===========================================================================
 {
     my $f  = Chalk::IR::NodeFactory->new;
@@ -456,19 +462,20 @@ sub num_const {
     my $c1 = int_const($f, 1);
     my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_representation('Int');
 
-    # my $y = $x;  (a read of $x, BEFORE the reassignment)
+    # my $y = $x;  (pre-assign read of $x — x=1)
     my $rx1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
     $rx1->set_representation('Int');
     my $ny  = $f->make('Constant', value => '$y', const_type => 'string');
     my $vy  = $f->make('VarDecl', inputs => [$ny, $rx1]); $vy->set_representation('Int');
 
-    # $x = 2;  (reassignment — poisons the prior read of $x)
+    # $x = 2;  (reassignment — updates var_table[vx] to new SSA value)
     my $c2  = int_const($f, 2);
     my $rxL = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
     $rxL->set_representation('Int');
     my $asg = $f->make('Assign', inputs => [$rxL, $c2]); $asg->set_representation('Int');
 
-    # return $x + $y;  ($x read AFTER reassign hash-cons-aliases the BEFORE read)
+    # return $x + $y;  ($x and $rxL and $rx1 are all the same hash-consed node;
+    # the scoped model reads var_table[vx] which now holds x=2)
     my $rx2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
     $rx2->set_representation('Int');
     my $ryF = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
@@ -478,9 +485,18 @@ sub num_const {
     $ret->set_control_in($asg); $asg->set_control_in($vy); $vy->set_control_in($vx);
 
     my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
-    ok($@, 'B1: read-before-and-after-reassign GAPs (dies), not miscompiles')
-        or diag("expected a GAP die but lower() succeeded — possible miscompile");
-    like($@ // '', qr/GAP|stale/i, 'B1: the die is a GAP/stale soundness refusal');
+    ok(!$@, 'B1: read-before-and-after-reassign lowers correctly (scoped var_table is program-point-aware)')
+        or diag("lower() died: $@");
+
+    SKIP: {
+        skip 'lower() failed', 3 unless defined $ll;
+        unlike($ll, qr/\bSV\b|Perl_|libperl/, 'B1: .ll is libperl-free');
+
+        my ($out, $exit) = run_lli($ll);
+        is($exit, 0, 'B1: lli exits 0');
+        is($out, '3',
+            'B1: lli=3 == perl=3 (x=2 post-assign, y=1 pre-assign, 2+1=3) — scoped model correct');
+    }
 }
 
 done_testing;
