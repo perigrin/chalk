@@ -1,5 +1,5 @@
-# ABOUTME: Behavioral comparator for the CodeGen harness — classifies S-vs-P divergence.
-# ABOUTME: Emits PASS | GAP | MISCOMPILE per the gap-vs-miscompile discrimination rule (C7).
+# ABOUTME: Behavioral comparator for the CodeGen harness — classifies S-vs-P and S/P/L divergence.
+# ABOUTME: Emits PASS | GAP | MISCOMPILE verdicts; three-corner S/P/L matrix with F7 identity guard.
 use 5.42.0;
 use utf8;
 no warnings 'experimental::class';
@@ -119,6 +119,171 @@ class Chalk::CodeGen::Harness::Comparator {
             verdict      => 'PASS',
             graph_source => $graph_source,
         };
+    }
+
+    # ------------------------------------------------------------------
+    # verdict_spl($S, $P, $L, \%p_emission_meta, \%l_emission_meta)
+    #   -> { verdict => ..., implicated_layer => ..., ... }
+    #
+    # Three-corner verdict for the S/P/L triangle.
+    #
+    # S  — BehaviorRecord: perl oracle (source-of-truth)
+    # P  — BehaviorRecord: Perl-codegen output
+    # L  — BehaviorRecord: LLVM-via-lli output
+    # p_emission_meta — from the P driver (emitted_for_every_construct, marked_unsupported)
+    # l_emission_meta — from the L driver (emitted_for_every_construct, marked_unsupported,
+    #                   gap_reason, runtime_free_fraction)
+    #
+    # Matrix (from the plan):
+    #   S=P=L (all agree) AND L fully runtime-free -> PASS
+    #   L cannot lower (GAP) -> GAP / underspecified-ir
+    #   L runtime_free_fraction < 1.0 -> GAP / coverage (not a valid PASS)
+    #   P=L!=S -> MISCOMPILE / upstream-ir (both lowerings agree vs oracle)
+    #   P!=L (both complete) -> MISCOMPILE / codegen-divergence (not auto-blame-IR)
+    #   P miscompiles vs S alone -> MISCOMPILE / codegen
+    # ------------------------------------------------------------------
+    sub verdict_spl ($class_or_self, $S, $P, $L, $p_emission_meta, $l_emission_meta) {
+        my $graph_source = $p_emission_meta->{graph_source} // 'unknown';
+
+        # ---- Check 1: L-cannot-lower GAP ----
+        # When L could not lower, the IR is underspecified for standalone.
+        # This is a distinct outcome from MISCOMPILE — it is backlog, not an alarm.
+        if (   $l_emission_meta->{marked_unsupported}
+            || !$l_emission_meta->{emitted_for_every_construct} )
+        {
+            return {
+                verdict          => 'GAP',
+                graph_source     => $graph_source,
+                implicated_layer => 'underspecified-ir',
+                reason           => $l_emission_meta->{gap_reason} // 'L cannot lower runtime-free',
+            };
+        }
+
+        # ---- Check 2: P-GAP (P couldn't emit) ----
+        if (   $p_emission_meta->{marked_unsupported}
+            || !$p_emission_meta->{emitted_for_every_construct} )
+        {
+            return {
+                verdict          => 'GAP',
+                graph_source     => $graph_source,
+                implicated_layer => 'codegen',
+                reason           => 'P corner could not emit',
+            };
+        }
+
+        # ---- Check 3: Coverage guard (false-green prevention) ----
+        # A triangle PASS requires L to be fully runtime-free.
+        # P=L on a mostly-Scalar L is not a valid agreement — the L value was
+        # obtained via a libperl path (Scalar fallback), not via runtime-free lowering.
+        my $frac = $l_emission_meta->{runtime_free_fraction} // 1.0;
+        if ( $frac < 1.0 ) {
+            return {
+                verdict          => 'GAP',
+                graph_source     => $graph_source,
+                implicated_layer => 'coverage',
+                reason           => "L corner not fully runtime-free (coverage=$frac); "
+                                  . "P=L on a mostly-Scalar L is not a valid agreement",
+            };
+        }
+
+        # ---- Check 4: Compare all three corners ----
+        # Use the existing two-corner comparison logic to classify each pair.
+        my $p_agrees_with_s = _records_equal( $S, $P );
+        my $l_agrees_with_s = _records_equal( $S, $L );
+        my $p_agrees_with_l = _records_equal( $P, $L );
+
+        if ( $p_agrees_with_s && $l_agrees_with_s ) {
+            # All three agree — PASS.
+            return {
+                verdict      => 'PASS',
+                graph_source => $graph_source,
+            };
+        }
+
+        if ( $p_agrees_with_l && !$p_agrees_with_s ) {
+            # P = L != S: both lowerings agree but diverge from the oracle.
+            # This localizes the bug to the IR/graph (upstream of both backends).
+            return {
+                verdict          => 'MISCOMPILE',
+                graph_source     => $graph_source,
+                implicated_layer => 'upstream-ir',
+                reason           => 'P=L but both diverge from S (oracle): the graph is wrong',
+            };
+        }
+
+        if ( !$p_agrees_with_l ) {
+            # P != L: the two backends disagree.
+            # Early on this usually means L is incomplete for this idiom.
+            # We do NOT auto-blame the IR — that requires all three corners.
+            return {
+                verdict          => 'MISCOMPILE',
+                graph_source     => $graph_source,
+                implicated_layer => 'codegen-divergence',
+                reason           => 'P and L disagree; cannot localize to IR without further analysis',
+            };
+        }
+
+        # Remaining case: P agrees with L but S differs for some other reason —
+        # treat as codegen MISCOMPILE (both backends agree on something the oracle does not).
+        return {
+            verdict          => 'MISCOMPILE',
+            graph_source     => $graph_source,
+            implicated_layer => 'upstream-ir',
+            reason           => 'unexpected three-corner disagreement',
+        };
+    }
+
+    # ------------------------------------------------------------------
+    # check_f7($graph_for_p, $graph_for_l)
+    #
+    # F7 guard: asserts that the P corner and L corner received the IDENTICAL
+    # graph object (same refaddr). Dies with a descriptive error if they differ.
+    # Called by the triangle rig before running the three-corner verdict.
+    # ------------------------------------------------------------------
+    sub check_f7 ($class_or_self, $graph_for_p, $graph_for_l) {
+        use Scalar::Util qw(refaddr);
+
+        my $addr_p = refaddr($graph_for_p);
+        my $addr_l = refaddr($graph_for_l);
+
+        if ( !defined $addr_p || !defined $addr_l ) {
+            die "F7 violation: one or both graph arguments are not references "
+              . "(addr_p=" . ( $addr_p // 'undef' ) . " addr_l=" . ( $addr_l // 'undef' ) . ")";
+        }
+
+        if ( $addr_p != $addr_l ) {
+            die "F7 violation: P corner and L corner received DIFFERENT graph objects "
+              . "(addr_p=$addr_p addr_l=$addr_l). "
+              . "All corners must consume the IDENTICAL graph object for localization "
+              . "to be valid. Build ONE graph and pass it to every driver.";
+        }
+
+        return 1;    # guard passed
+    }
+
+    # ------------------------------------------------------------------
+    # Private helper: _records_equal($a, $b)
+    # Compare two BehaviorRecords for behavioral equality on the axes the
+    # triangle verdict cares about (return_values, stdout, exception).
+    # ------------------------------------------------------------------
+    sub _records_equal ($a, $b) {
+        return false unless defined $a && defined $b;
+
+        # return_values comparison (string equality, element-by-element)
+        my $rv_a = $a->return_values // [];
+        my $rv_b = $b->return_values // [];
+        return false if scalar(@$rv_a) != scalar(@$rv_b);
+        for my $i ( 0 .. $#$rv_a ) {
+            return false if ( $rv_a->[$i] // '' ) ne ( $rv_b->[$i] // '' );
+        }
+
+        # stdout comparison (exact string)
+        return false if ( $a->stdout // '' ) ne ( $b->stdout // '' );
+
+        # exception comparison (structural)
+        return false if !_exceptions_equal( $a->exception, $b->exception );
+
+        return true;
     }
 
     # ------------------------------------------------------------------
