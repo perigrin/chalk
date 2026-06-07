@@ -148,7 +148,27 @@ class Chalk::IR::Schedule::Elaborate {
             elsif ($op eq 'Loop') {
                 _elaborate_loop($node, $val_map, $elab_blocks, $phis, $dom);
             }
-            # Return, Region, Start, Phi — just record; no val_map update.
+            elsif ($op eq 'Region') {
+                # A Region appearing in the chain indicates that Return.control_in
+                # was wired to the Region directly (instead of to the If/Loop that
+                # precedes it). The Region's head back-pointer gives us the owning
+                # If/Loop, which we elaborate now. This is the M2 path.
+                my $head = $node->can('head') ? $node->head : undef;
+                if (defined $head) {
+                    my $head_op = $head->can('operation') ? $head->operation : '';
+                    if ($head_op eq 'If') {
+                        _elaborate_if($head, $val_map, $elab_blocks, $phis, $dom);
+                    }
+                    elsif ($head_op eq 'Loop') {
+                        _elaborate_loop($head, $val_map, $elab_blocks, $phis, $dom);
+                    }
+                }
+                # Also record the Region as an elaborated block.
+                my $blk = $dom->block_for($node->id);
+                my $bid = defined $blk ? $blk->{id} : 'entry';
+                push @$elab_blocks, { id => $bid, ctrl_nodes => [$node], phi_nodes => [] };
+            }
+            # Return, Start, Phi — just record; no val_map update.
             else {
                 my $blk = $dom->block_for($node->id);
                 my $bid = defined $blk ? $blk->{id} : 'entry';
@@ -183,14 +203,12 @@ class Chalk::IR::Schedule::Elaborate {
         # the two branch maps (or differs from the pre-branch value on the
         # not-taken edge), emit a phi at the merge block.
         my $region = $if_node->region;
-        my $merge_bid = do {
-            if (defined $region) {
-                my $mb = $dom->block_for($region->id);
-                defined $mb ? $mb->{id} : 'if.merge.' . $region->id;
-            } else {
-                undef;
-            }
-        };
+        # Use 'if.merge.<region_id>' as the canonical merge block key. This must
+        # agree with the LLVM backend's phi lookup key (ElaboratedContext uses
+        # 'if.merge.' . $region->id). Using the Dominators block_for() can return
+        # the wrong block id when the Region is not reachable via the backward
+        # control_in chain (e.g. the M2 case: Return.control_in = Region directly).
+        my $merge_bid = defined $region ? 'if.merge.' . $region->id : undef;
 
         # Collect all VarDecl ids visible in either branch.
         my %all_vd_ids;
@@ -235,46 +253,102 @@ class Chalk::IR::Schedule::Elaborate {
 
     # _elaborate_loop($loop_node, $val_map, ...): handle loop header phi +
     # body elaboration + exit merge.
+    #
+    # Loop bodies in the SoN IR represent variable modifications through Phi
+    # nodes (backedge pattern), not Assign nodes — so walking the body chain for
+    # Assign nodes misses all loop-carried variable updates. Instead, we look at
+    # the explicit Phi nodes whose region is this Loop node: each such Phi tracks
+    # one variable that changes across loop iterations. The variables tracked by
+    # loop Phis are the ones we must mark as modified by the loop.
+    #
+    # After a loop, any variable tracked by a loop Phi holds the loop-exit value
+    # (the header phi ref when the condition was last false). We signal this by
+    # storing the loop_node itself as a sentinel in val_map for that variable.
+    # The LLVM backend uses var_table snapshots (not lower_value on the sentinel)
+    # so the sentinel is never lowered directly; it only serves to make the
+    # post-loop value DISTINCT from the pre-loop value so that any outer phi
+    # (e.g. the merge of an if whose then-branch contained this loop) detects
+    # the divergence and emits the outer merge phi.
     sub _elaborate_loop($loop_node, $val_map, $elab_blocks, $phis, $dom) {
-        my $body_proj = _find_proj($loop_node, 0);
-        my $exit_proj = _find_proj($loop_node, 1);
-
-        # Body chain.
-        my @body_chain = defined $body_proj ? _collect_branch_chain($body_proj) : ();
-
-        # Snapshot pre-loop values.
-        my %pre = %$val_map;
-
-        # Process body with pre-loop values to find what changes.
-        my %body_map = %pre;
-        _elaborate_chain(\@body_chain, \%body_map, $elab_blocks, $phis, $dom);
-
-        # For variables that changed in the body, emit a loop phi at the header.
         my $header_blk = $dom->block_for($loop_node->id);
         my $header_bid = defined $header_blk ? $header_blk->{id} : 'loop.header.' . $loop_node->id;
 
-        for my $vd_id (sort keys %pre) {
-            my $init_val = $pre{$vd_id};
-            my $body_val = $body_map{$vd_id} // $init_val;
+        # Find the VarDecl ids tracked by the loop Phis.
+        my %loop_modified_vd_ids;
 
-            my $init_id = defined $init_val ? $init_val->id : '__undef__';
-            my $body_id = defined $body_val ? $body_val->id : '__undef__';
+        # Strategy 1: loop Phi nodes (primary path for D2/D3/D5-style loops).
+        my $consumers = $loop_node->consumers // [];
+        for my $c (@$consumers) {
+            next unless defined $c && $c->can('operation');
+            next unless $c->operation eq 'Phi';
+            my $r = $c->can('region') ? $c->region : undef;
+            next unless defined $r && $r->id eq $loop_node->id;
 
-            if ($init_id ne $body_id) {
+            my $init_node = $c->inputs->[0];
+            next unless defined $init_node;
+            my $vd = _resolve_vd_from_node($init_node);
+            if (defined $vd) {
+                next if $loop_modified_vd_ids{ $vd->id }++;
                 push @$phis, {
                     block_id => $header_bid,
-                    vd_id    => $vd_id,
+                    vd_id    => $vd->id,
                     incoming => [
-                        { value => $init_val, from_branch => 'preheader' },
-                        { value => $body_val, from_branch => 'backedge'  },
+                        { value => $init_node, from_branch => 'preheader' },
+                        { value => $loop_node, from_branch => 'backedge'  },
                     ],
                     is_loop_phi => 1,
                 };
-                $val_map->{$vd_id} = $init_val;  # header phi result
             }
         }
 
-        # After the loop, val_map holds the loop-exit values (header phi values).
+        # Strategy 2: body Assign nodes (for assign-within-loop authored graphs).
+        my $body_proj = _find_proj($loop_node, 0);
+        if (defined $body_proj) {
+            my @body_chain = _collect_branch_chain($body_proj);
+            my %pre = %$val_map;
+            my %body_map = %pre;
+            _elaborate_chain(\@body_chain, \%body_map, $elab_blocks, $phis, $dom);
+
+            for my $vd_id (sort keys %pre) {
+                next if $loop_modified_vd_ids{$vd_id};
+                my $init_val = $pre{$vd_id};
+                my $body_val = $body_map{$vd_id} // $init_val;
+                my $init_id  = defined $init_val ? $init_val->id : '__undef__';
+                my $body_id  = defined $body_val ? $body_val->id : '__undef__';
+                if ($init_id ne $body_id) {
+                    $loop_modified_vd_ids{$vd_id} = 1;
+                    push @$phis, {
+                        block_id => $header_bid,
+                        vd_id    => $vd_id,
+                        incoming => [
+                            { value => $init_val, from_branch => 'preheader' },
+                            { value => $body_val, from_branch => 'backedge'  },
+                        ],
+                        is_loop_phi => 1,
+                    };
+                }
+            }
+        }
+
+        # For every loop-modified variable, update val_map to the loop_node sentinel.
+        # Its id differs from any init_val->id, so an outer phi comparison detects
+        # divergence and emits the outer merge phi.
+        for my $vd_id (sort keys %loop_modified_vd_ids) {
+            $val_map->{$vd_id} = $loop_node;
+        }
+
+        # After the loop, val_map entries for loop-modified variables hold the
+        # loop_node sentinel; unchanged variables retain their pre-loop values.
+    }
+
+    # _resolve_vd_from_node: trace a loop Phi's init-value node back to its VarDecl.
+    sub _resolve_vd_from_node($node) {
+        return undef unless defined $node;
+        return $node if $node->can('operation') && $node->operation eq 'VarDecl';
+        if ($node->can('operation') && $node->operation eq 'PadAccess') {
+            return $node->inputs->[0];
+        }
+        return undef;
     }
 
     # _collect_branch_chain($proj_node) -> ordered list of body nodes for a branch.

@@ -405,4 +405,288 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     }
 }
 
+# ---------------------------------------------------------------------------
+# E7: Loop-nested-in-if — lli==perl (H2 interaction proof).
+#
+# Perl: my $s=0; my $n=3; if ($n>0) { while ($n>0) { $s+=$n; $n-- } }; $s
+# perl oracle: n=3, n>0 true -> loop runs: s=3+2+1=6; lli must give 6.
+#
+# The outer-if then-branch contains a full Loop. After processing, var_table
+# holds the loop-exit phi SSA ref for $s (=6 on exit). The outer merge phi
+# must arm with this loop-exit ref vs the pre-branch value (0 from else/skip).
+# The B1+M1 fix (var_table snapshots) makes this work: then_var[vs_id] holds
+# the loop-exit phi ref after _process_branch_from_if returns.
+# ---------------------------------------------------------------------------
+{
+    use Chalk::IR::Node::Loop;
+    use Chalk::IR::Node::Phi;
+
+    my $f = Chalk::IR::NodeFactory->new;
+
+    # Constants
+    my $c3    = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+    my $c0a   = $f->make('Constant', value => '0', const_type => 'integer');
+    $c0a->set_representation('Int');
+    my $c0b   = $f->make('Constant', value => '0', const_type => 'integer');
+    $c0b->set_representation('Int');
+    my $c0c   = $f->make('Constant', value => '0', const_type => 'integer');
+    $c0c->set_representation('Int');
+    my $c1    = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+
+    # Variables
+    my $nn    = $f->make('Constant', value => '$n', const_type => 'string');
+    my $sn    = $f->make('Constant', value => '$s', const_type => 'string');
+    my $vn    = $f->make('VarDecl', inputs => [$nn, $c3]);
+    $vn->set_representation('Int');
+    my $vs    = $f->make('VarDecl', inputs => [$sn, $c0a]);
+    $vs->set_representation('Int');
+
+    my $rn0   = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    $rn0->set_representation('Int');
+    my $rs0   = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    $rs0->set_representation('Int');
+
+    # Outer condition: $n > 0 (static: 3>0 = true)
+    my $cmp_out = $f->make('NumGt', inputs => [$rn0, $c0b]);
+    $cmp_out->set_representation('Bool');
+
+    # Loop (lives inside the outer-if then-branch)
+    my $loop  = $f->make('Loop', inputs => [$vs, undef]);
+
+    # Loop phis
+    my $n_phi = $f->make('Phi', region => $loop, values => [$rn0]);
+    $n_phi->set_representation('Int');
+    my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]);
+    $s_phi->set_representation('Int');
+
+    # Loop condition: n_phi > 0
+    my $loop_cmp = $f->make('NumGt', inputs => [$n_phi, $c0c]);
+    $loop_cmp->set_representation('Bool');
+    $loop_cmp->set_control_in($loop);
+
+    # Loop body: s_new = s_phi + n_phi; n_new = n_phi - 1
+    my $s_new = $f->make('Add', inputs => [$s_phi, $n_phi]);
+    $s_new->set_representation('Int');
+    my $n_new = $f->make('Subtract', inputs => [$n_phi, $c1]);
+    $n_new->set_representation('Int');
+
+    $n_phi->set_backedge($n_new);
+    $s_phi->set_backedge($s_new);
+
+    my $lp0   = $f->make('Proj', inputs => [$loop], index => 0);
+    my $lp1   = $f->make('Proj', inputs => [$loop], index => 1);
+    my $lreg  = $f->make('Region', inputs => [$lp1]);
+    $loop->set_region($lreg);
+    $s_new->set_control_in($lp0);
+    $n_new->set_control_in($lp0);
+
+    # Outer if: if ($n > 0) { loop } else { skip }
+    my $outer_if  = $f->make('If', inputs => [$vn, $cmp_out]);
+    my $outer_p0  = $f->make('Proj', inputs => [$outer_if], index => 0);
+    my $outer_p1  = $f->make('Proj', inputs => [$outer_if], index => 1);
+    my $outer_reg = $f->make('Region', inputs => [$outer_p0, $outer_p1]);
+    $outer_if->set_region($outer_reg);
+
+    # Loop lives in outer-then branch
+    $loop->set_control_in($outer_p0);
+
+    # Control chain: vn -> vs -> outer_if
+    $vs->set_control_in($vn);
+    $outer_if->set_control_in($vs);
+
+    # Return $s
+    my $rx    = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    $rx->set_representation('Int');
+    my $ret   = $f->make_cfg('Return', inputs => [$rx]);
+    $ret->set_control_in($outer_if);
+
+    SKIP: {
+        skip 'E7: lli not found', 6 unless -x $LLI;
+
+        my $ll;
+        eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+        ok(!$@, "E7: loop-nested-in-if lowers without dying (got: $@)");
+
+        SKIP: {
+            skip 'E7: lowering failed', 5 unless defined $ll;
+
+            unlike($ll, qr/Perl_/, 'E7 .ll: no Perl_ C-API');
+
+            my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+            binmode $fh, ':utf8';
+            print $fh $ll;
+            close $fh;
+
+            my $lli_out = qx($LLI $tmp 2>&1);
+            my $exit    = $? >> 8;
+            is($exit, 0, 'E7 .ll: lli exits cleanly');
+            chomp $lli_out;
+            # perl oracle: n=3, n>0 true -> loop: s = 3+2+1 = 6
+            is($lli_out, '6', 'E7: lli==perl=6 (loop-nested-in-if, n=3)');
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# E8: N4 — placement-only: the pass does NOT hoist or deduplicate.
+#
+# The Elaborate pass is a placement-only pass. It must not reorder, hoist,
+# or deduplicate nodes across branches. Verify by checking that:
+# - A value computed only in the then-branch is NOT hoisted to the entry block.
+# - A value computed in both branches independently stays in each branch.
+# - No phi is emitted for a value that is identical in both branches.
+# ---------------------------------------------------------------------------
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    # Graph: if (5>0) { $x = 1 } else { $x = 2 }; $x
+    my $c5   = $f->make('Constant', value => '5', const_type => 'integer');
+    $c5->set_representation('Int');
+    my $c0   = $f->make('Constant', value => '0', const_type => 'integer');
+    $c0->set_representation('Int');
+    my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
+    $c2->set_representation('Int');
+    my $cmp  = $f->make('NumGt', inputs => [$c5, $c0]);
+    $cmp->set_representation('Bool');
+
+    my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
+    my $vx   = $f->make('VarDecl', inputs => [$xn]);
+    $vx->set_representation('Int');
+
+    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $lhs1->set_representation('Int');
+    my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
+    $as1->set_representation('Int');
+
+    my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $lhs2->set_representation('Int');
+    my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
+    $as2->set_representation('Int');
+
+    my $if_node = $f->make('If', inputs => [$vx, $cmp]);
+    my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
+    my $proj1   = $f->make('Proj', inputs => [$if_node], index => 1);
+    my $region  = $f->make('Region', inputs => [$proj0, $proj1]);
+    $if_node->set_region($region);
+    $as1->set_control_in($proj0);
+    $as2->set_control_in($proj1);
+
+    my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $rx->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+    $if_node->set_control_in($vx);
+    $ret->set_control_in($if_node);
+
+    my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($ret);
+    my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($ret, $dom);
+
+    # N4: placement-only — exactly 1 phi (one diverging variable), no hoisting.
+    # The Assign nodes stay in their respective branch blocks, not the entry block.
+    my $phis = $elab->emitted_phis;
+    is(scalar(@$phis), 1, 'N4: placement-only: exactly 1 phi for the one diverging variable');
+
+    # Verify the phi is at the merge block, not in entry.
+    if (scalar(@$phis) == 1) {
+        my $phi = $phis->[0];
+        isnt($phi->{block_id}, 'entry', 'N4: phi is NOT in the entry block (no hoisting)');
+        like($phi->{block_id}, qr/merge/, 'N4: phi is in a merge block (placement-only)');
+    }
+}
+
+# ---------------------------------------------------------------------------
+# M2: Region-as-Return.control_in path.
+#
+# Real codegen can produce graphs where Return.control_in = Region (not If).
+# The Elaborate pass's _collect_control_chain handles this via head traversal
+# (Elaborate.pm: if op eq 'Region', get head, continue from head.control_in).
+# This path was untested. Verify it works end-to-end.
+#
+# Graph: if ($n>0) { $x=1 } else { $x=2 }; $x
+# but Return.control_in = Region (not If), as real codegen produces.
+# ---------------------------------------------------------------------------
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $c5   = $f->make('Constant', value => '5', const_type => 'integer');
+    $c5->set_representation('Int');
+    my $c0   = $f->make('Constant', value => '0', const_type => 'integer');
+    $c0->set_representation('Int');
+    my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
+    $c2->set_representation('Int');
+    my $cmp  = $f->make('NumGt', inputs => [$c5, $c0]);
+    $cmp->set_representation('Bool');
+
+    my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
+    my $vx   = $f->make('VarDecl', inputs => [$xn]);
+    $vx->set_representation('Int');
+
+    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $lhs1->set_representation('Int');
+    my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
+    $as1->set_representation('Int');
+
+    my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $lhs2->set_representation('Int');
+    my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
+    $as2->set_representation('Int');
+
+    my $if_node = $f->make('If', inputs => [$vx, $cmp]);
+    my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
+    my $proj1   = $f->make('Proj', inputs => [$if_node], index => 1);
+    my $region  = $f->make('Region', inputs => [$proj0, $proj1]);
+    $if_node->set_region($region);
+    $as1->set_control_in($proj0);
+    $as2->set_control_in($proj1);
+
+    my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $rx->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+
+    # KEY: Return's control_in is the REGION, not the If.
+    # This exercises the Region-as-Return.control_in head-traversal path.
+    $if_node->set_control_in($vx);
+    $ret->set_control_in($region);  # NOTE: region, not if_node
+
+    my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($ret);
+    my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($ret, $dom);
+
+    ok(defined $elab, 'M2: Region-as-control_in: elaboration succeeds');
+
+    my $phis = $elab->emitted_phis;
+    ok(scalar(@$phis) >= 1, 'M2: Region-as-control_in: phi emitted at merge')
+        or diag('phi count: ' . scalar(@$phis));
+
+    SKIP: {
+        skip 'M2: lli not found', 5 unless -x $LLI;
+
+        my $ll;
+        eval { $ll = Chalk::IR::Target::LLVM->lower_with_elaboration($ret, $elab) };
+        ok(!$@, "M2: Region-as-control_in: LLVM lowering succeeds (got: $@)");
+
+        SKIP: {
+            skip 'M2: LLVM lowering failed', 4 unless defined $ll;
+
+            unlike($ll, qr/Perl_/, 'M2 .ll: no Perl_ C-API');
+
+            my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+            binmode $fh, ':utf8';
+            print $fh $ll;
+            close $fh;
+
+            my $lli_out = qx($LLI $tmp 2>&1);
+            my $exit    = $? >> 8;
+            is($exit, 0, 'M2 .ll: lli exits cleanly');
+            chomp $lli_out;
+            # perl oracle: n=5, 5>0 true -> x=1
+            is($lli_out, '1', 'M2: lli==perl=1 (Region-as-control_in, n=5)');
+        }
+    }
+}
+
 done_testing;

@@ -64,14 +64,35 @@ sub lower_with_elaboration {
     # Build a context that knows the elaboration phi plan.
     my $ctx = Chalk::IR::Target::LLVM::ElaboratedContext->new(elab => $elab);
 
-    # Process the control chain as usual — VarDecl/Assign/If/Loop.
+    # Process the control chain — VarDecl/Assign/If/Loop.
     # ElaboratedContext._process_if_node uses the elab phis for phi placement.
+    #
+    # When Return.control_in is a Region (not an If/Loop directly), we walk via
+    # the Region's head back-pointer to find the If/Loop that owns it, then
+    # continue from head.control_in. This matches the Elaborate pass's M2 path.
     {
         my @chain;
         my $ctrl = $return_node->control_in;
         while (defined $ctrl) {
-            push @chain, $ctrl;
-            $ctrl = $ctrl->can('control_in') ? $ctrl->control_in : undef;
+            my $op = $ctrl->can('operation') ? $ctrl->operation : '';
+            if ($op eq 'Region') {
+                # Region-as-control_in: push the owning If/Loop (the head) so
+                # process_control_node handles it correctly, then continue from
+                # the head's control_in predecessor.
+                my $head = $ctrl->can('head') ? $ctrl->head : undef;
+                if (defined $head) {
+                    push @chain, $head;
+                    $ctrl = $head->can('control_in') ? $head->control_in : undef;
+                }
+                else {
+                    push @chain, $ctrl;
+                    last;
+                }
+            }
+            else {
+                push @chain, $ctrl;
+                $ctrl = $ctrl->can('control_in') ? $ctrl->control_in : undef;
+            }
         }
         for my $node (reverse @chain) {
             $ctx->process_control_node($node);
@@ -222,8 +243,16 @@ sub lower_value {
     # UNLESS it was poisoned by an intervening reassignment (B1 soundness guard):
     # a cached read whose variable was reassigned holds a stale value, so a
     # re-read here would MISCOMPILE. Refuse loudly instead.
+    #
+    # PadAccess nodes are EXCLUDED from the cache-hit path: they read the current
+    # var_table, which can change across phi emissions (e.g. after an outer-merge
+    # phi updates var_table, a PadAccess for the same variable must see the new phi
+    # SSA ref, not the pre-phi cached value). PadAccess cache entries are still
+    # WRITTEN by _lower_padaccess for poisoned_reads tracking, but they are never
+    # used as a read shortcut here.
     my $id = $node->id();
-    if (exists $self->{cache}{$id}) {
+    my $op = $node->operation();
+    if ($op ne 'PadAccess' && exists $self->{cache}{$id}) {
         if ($self->{poisoned_reads}{$id}) {
             die "GAP: cached read (node id=$id) is stale — its variable was "
               . "reassigned between this read and a prior read of the same "
@@ -232,8 +261,6 @@ sub lower_value {
         }
         return $self->{cache}{$id};
     }
-
-    my $op = $node->operation();
 
     if ($op eq 'Constant') {
         return $self->_lower_constant($node);
