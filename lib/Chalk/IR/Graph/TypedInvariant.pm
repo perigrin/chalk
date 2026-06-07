@@ -16,7 +16,7 @@ my %OP_REQUIRED_REPR = (
     Add      => 'Int',
     Subtract => 'Int',
     Multiply => 'Int',
-    Divide   => 'Int',
+    Divide   => 'Num',  # Perl `/` is always float division; inputs must be Num
     Modulo   => 'Int',
 );
 

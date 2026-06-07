@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the mdtest-style typed-IR corpus: parses .md topic files into cases,
-# ABOUTME: asserts behavior (perl oracle), ir-shape (structural subset match), and L verdict.
+# ABOUTME: asserts behavior (perl oracle), constructs SoN graphs from ir blocks, and checks L verdict.
 package Chalk::CodeGen::Harness::MdtestCorpus;
 
 use 5.42.0;
@@ -9,6 +9,19 @@ use Carp      qw(croak);
 use File::Temp qw(tempfile);
 use Scalar::Util qw(blessed looks_like_number);
 use JSON::PP;
+
+use Chalk::IR::NodeFactory;
+use Chalk::IR::Node::Constant;
+use Chalk::IR::Node::Add;
+use Chalk::IR::Node::Subtract;
+use Chalk::IR::Node::Multiply;
+use Chalk::IR::Node::Divide;
+use Chalk::IR::Node::Modulo;
+use Chalk::IR::Node::Coerce;
+use Chalk::IR::Node::VarDecl;
+use Chalk::IR::Node::PadAccess;
+use Chalk::IR::Node::Return;
+use Chalk::IR::Graph::TypedInvariant;
 
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::BehaviorRecord;
@@ -145,6 +158,207 @@ sub rewrite_behavior {
     close $out;
 }
 
+# build_graph_from_ir($ir_block) -> $return_node_or_undef
+#
+# Parses a named-SSA ir block and CONSTRUCTS a real SoN graph from it.
+# Each node line maps to a NodeFactory->make() call.  The constructed graph
+# is then available for TypedInvariant checking and LLVMDriver lowering.
+#
+# Grammar handled:
+#   %name = Constant(value) :Repr
+#   %name = Op(%a, %b) :Repr          -- binary/unary data ops
+#   %name = Coerce(%x : From -> To) :Repr
+#   %name = VarDecl(%nameconst, %init) :Repr
+#   %name = PadAccess(%vd, "$varname") :Repr
+#   return %name
+#   control: %a -> %b                  -- control_in chain
+#   L: GREEN | L: GAP(reason)         -- verdict (not a node; parsed separately)
+#
+# A pure-GAP block (only an L: GAP(...) line, no node lines) returns undef.
+sub build_graph_from_ir {
+    my ($class, $ir_block) = @_;
+    croak "build_graph_from_ir: ir_block must be defined" unless defined $ir_block;
+
+    my $factory    = Chalk::IR::NodeFactory->new;
+    my %sym;            # %name -> node object
+    my $return_name;    # the %name handed to 'return'
+    my @control_seq;    # ordered list of %names from 'control:' line
+    my $has_nodes   = false;
+
+    for my $raw_line (split /\n/, $ir_block) {
+        # Strip trailing inline comments and whitespace
+        (my $line = $raw_line) =~ s/\s*#.*$//;
+        $line =~ s/^\s+|\s+$//g;
+        next unless length $line;
+
+        # Skip L: verdict lines (handled by parse_l_verdict_from_ir)
+        next if $line =~ /^L:/;
+
+        # 'return %name'
+        if ($line =~ /^return\s+(%\w+)\s*$/) {
+            $return_name = $1;
+            next;
+        }
+
+        # 'control: %a -> %b -> ...'
+        if ($line =~ /^control:\s+(.+)$/) {
+            my @parts = split /\s*->\s*/, $1;
+            @control_seq = map { s/^\s+|\s+$//gr } @parts;
+            next;
+        }
+
+        # '%name = ...' binding lines
+        if ($line =~ /^(%\w+)\s*=\s*(.+)$/) {
+            my ($name, $rhs) = ($1, $2);
+            $has_nodes = true;
+
+            # Parse optional :Repr at end of rhs
+            my $repr;
+            if ($rhs =~ s/\s*:(\w+)\s*$//) {
+                $repr = $1;
+            }
+
+            my $node = _build_node_from_rhs($factory, \%sym, $name, $rhs);
+            unless (defined $node) {
+                croak "build_graph_from_ir: could not build node for line: $raw_line";
+            }
+
+            $node->set_representation($repr) if defined $repr;
+            $sym{$name} = $node;
+            next;
+        }
+
+        # Unrecognized line (not a comment, not empty, not a known form)
+        croak "build_graph_from_ir: unrecognized ir line: $raw_line";
+    }
+
+    # Pure-GAP: no node lines were found
+    return undef unless $has_nodes;
+
+    # Build the Return node
+    croak "build_graph_from_ir: no 'return %name' line found"
+        unless defined $return_name;
+    croak "build_graph_from_ir: 'return $return_name' but '$return_name' not defined"
+        unless exists $sym{$return_name};
+
+    my $ret = $factory->make_cfg('Return', inputs => [ $sym{$return_name} ]);
+
+    # Wire control_in chain: the control: line lists nodes in dependency order.
+    # The last node in the chain is the control predecessor of Return.
+    # Each node's control_in is set to the previous node in the sequence.
+    if (@control_seq) {
+        # Set Return's control_in to the last listed control node
+        my $prev_ctrl = undef;
+        for my $ctrl_name (@control_seq) {
+            croak "build_graph_from_ir: control: references undefined '$ctrl_name'"
+                unless exists $sym{$ctrl_name};
+            my $ctrl_node = $sym{$ctrl_name};
+            $ctrl_node->set_control_in($prev_ctrl) if defined $prev_ctrl;
+            $prev_ctrl = $ctrl_node;
+        }
+        $ret->set_control_in($sym{ $control_seq[-1] });
+    }
+
+    return $ret;
+}
+
+# parse_l_verdict_from_ir($ir_block) -> 'GREEN' | 'GAP'
+#
+# Extracts the L: verdict line from a named-SSA ir block.
+# Returns 'GREEN' if the L: GREEN line is present, 'GAP' for L: GAP(...),
+# or 'GREEN' as the default when no L: line is present.
+sub parse_l_verdict_from_ir {
+    my ($class, $ir_block) = @_;
+    return 'GREEN' unless defined $ir_block;
+
+    for my $line (split /\n/, $ir_block) {
+        $line =~ s/\s*#.*$//;
+        $line =~ s/^\s+|\s+$//g;
+        if ($line =~ /^L:\s*(GREEN|GAP)/i) {
+            return uc($1);
+        }
+    }
+    return 'GREEN';
+}
+
+# ---------------------------------------------------------------------------
+# PRIVATE: constructive node builder helpers
+# ---------------------------------------------------------------------------
+
+# _build_node_from_rhs($factory, \%sym, $name, $rhs) -> $node
+#
+# Parses the RHS of a %name = RHS line and builds the corresponding IR node.
+# $rhs has already had :Repr stripped.
+sub _build_node_from_rhs {
+    my ($factory, $sym, $name, $rhs) = @_;
+
+    # Coerce(%x : From -> To)
+    if ($rhs =~ /^Coerce\(\s*(%\w+)\s*:\s*(\w+)\s*->\s*(\w+)\s*\)/) {
+        my ($input_name, $from, $to) = ($1, $2, $3);
+        croak "build_graph_from_ir: Coerce references undefined '$input_name' at $name"
+            unless exists $sym->{$input_name};
+        return $factory->make('Coerce',
+            inputs    => [ $sym->{$input_name} ],
+            from_repr => $from,
+            to_repr   => $to,
+        );
+    }
+
+    # Constant(value)  — value may be a number, negative number, or quoted string
+    if ($rhs =~ /^Constant\(\s*(.*?)\s*\)$/) {
+        my $val_raw = $1;
+        # Quoted string: Constant("$x") or Constant('x')
+        if ($val_raw =~ /^"(.*)"$/ || $val_raw =~ /^'(.*)'$/) {
+            my $str_val = $1;
+            return $factory->make('Constant', value => $str_val, const_type => 'string');
+        }
+        # Bare value (integer or negative integer)
+        return $factory->make('Constant', value => $val_raw, const_type => 'integer');
+    }
+
+    # VarDecl(%nameconst, %init)
+    if ($rhs =~ /^VarDecl\(\s*(%\w+)\s*,\s*(%\w+)\s*\)$/) {
+        my ($nc_name, $init_name) = ($1, $2);
+        croak "build_graph_from_ir: VarDecl name ref '$nc_name' undefined at $name"
+            unless exists $sym->{$nc_name};
+        croak "build_graph_from_ir: VarDecl init ref '$init_name' undefined at $name"
+            unless exists $sym->{$init_name};
+        return $factory->make('VarDecl',
+            inputs => [ $sym->{$nc_name}, $sym->{$init_name} ]);
+    }
+
+    # PadAccess(%vd, "$varname")
+    if ($rhs =~ /^PadAccess\(\s*(%\w+)\s*,\s*"([^"]*)"\s*\)$/) {
+        my ($vd_name, $varname) = ($1, $2);
+        croak "build_graph_from_ir: PadAccess VarDecl '$vd_name' undefined at $name"
+            unless exists $sym->{$vd_name};
+        return $factory->make('PadAccess',
+            targ    => 0,
+            varname => $varname,
+            inputs  => [ $sym->{$vd_name} ]);
+    }
+
+    # Binary ops: Op(%a, %b)
+    if ($rhs =~ /^(\w+)\(\s*(%\w+)\s*,\s*(%\w+)\s*\)$/) {
+        my ($op, $a_name, $b_name) = ($1, $2, $3);
+        croak "build_graph_from_ir: $op first operand '$a_name' undefined at $name"
+            unless exists $sym->{$a_name};
+        croak "build_graph_from_ir: $op second operand '$b_name' undefined at $name"
+            unless exists $sym->{$b_name};
+        return $factory->make($op, inputs => [ $sym->{$a_name}, $sym->{$b_name} ]);
+    }
+
+    # Unary ops: Op(%a)
+    if ($rhs =~ /^(\w+)\(\s*(%\w+)\s*\)$/) {
+        my ($op, $a_name) = ($1, $2);
+        croak "build_graph_from_ir: $op operand '$a_name' undefined at $name"
+            unless exists $sym->{$a_name};
+        return $factory->make($op, inputs => [ $sym->{$a_name} ]);
+    }
+
+    croak "build_graph_from_ir: could not parse RHS '$rhs' for $name";
+}
+
 # ---------------------------------------------------------------------------
 # PRIVATE: markdown parsing
 # ---------------------------------------------------------------------------
@@ -231,13 +445,16 @@ sub _run_behavior_check {
         return { verdict => 'FAIL', actual => undef, declared => undef };
     }
 
-    # Run source under perl to capture actual behavior
+    # Run source under perl to capture actual behavior; stash value for L-verdict check
     my ($actual_val, $run_error) = _run_expr_under_perl($source);
     if (defined $run_error) {
         push @$fail_reasons, "case '$case->{title}': perl oracle failed: $run_error";
         return { verdict => 'FAIL', actual => undef, declared => undef,
                  error => $run_error };
     }
+    # Stash so _run_l_verdict_check can compare lli output against perl without
+    # re-running perl or requiring a separate perl_oracle_for callback.
+    $case->{_perl_actual} = $actual_val;
 
     my $behavior_text = $case->{behavior} // '';
     my $is_empty = ($behavior_text !~ /\S/ || $behavior_text =~ /^\s*#\s*capture\s*$/m);
@@ -383,7 +600,7 @@ sub _serialize_behavior {
 }
 
 # ---------------------------------------------------------------------------
-# PRIVATE: IR-shape check
+# PRIVATE: IR-shape check (constructive: builds graph from ir block)
 # ---------------------------------------------------------------------------
 
 sub _run_ir_shape_check {
@@ -394,65 +611,83 @@ sub _run_ir_shape_check {
         return { verdict => 'SKIP', missing => [], reason => 'no ir block' };
     }
 
-    my $graph_for = $opts->{graph_for};
-    unless (defined $graph_for) {
-        return { verdict => 'SKIP', missing => [], reason => 'no graph_for supplied' };
+    # Determine if this is a pure-GAP block (no buildable graph)
+    my $declared_verdict = __PACKAGE__->parse_l_verdict_from_ir($ir_text);
+    my $is_pure_gap      = _is_pure_gap_block($ir_text);
+
+    if ($is_pure_gap) {
+        # Pure-GAP: no nodes to build or validate — structural check passes trivially.
+        return { verdict => 'PASS', missing => [], reason => 'pure-GAP block; no graph to check' };
     }
 
-    # Look up the graph by the case title (used as corpus tag lookup).
-    # The graph_for coderef may look up by case title or by a tag extracted
-    # from the ir block (an "# ir-tag: arith-add" comment line).
-    my $ir_tag = _extract_ir_tag($case);
-    unless (defined $ir_tag) {
-        return { verdict => 'SKIP', missing => [],
-                 reason => "no ir-tag comment in ir block for '$case->{title}'" };
-    }
-
+    # Build the graph from the ir block
     my $return_node;
-    eval { $return_node = $graph_for->($ir_tag) };
+    eval { $return_node = __PACKAGE__->build_graph_from_ir($ir_text) };
     if ($@) {
-        push @$fail_reasons, "case '$case->{title}': graph_for('$ir_tag') died: $@";
-        return { verdict => 'FAIL', missing => [], error => $@, tag => $ir_tag };
+        my $err = $@;
+        push @$fail_reasons,
+            "case '$case->{title}': ir block failed to build graph: $err";
+        return { verdict => 'FAIL', missing => [], error => $err };
     }
     unless (defined $return_node) {
-        return { verdict => 'SKIP', missing => [],
-                 reason => "graph_for('$ir_tag') returned undef (no graph for this idiom)" };
+        return { verdict => 'SKIP', missing => [], reason => 'build_graph_from_ir returned undef' };
     }
 
-    # Parse the ir block into shape requirements
-    my $shape = _parse_ir_block($ir_text);
-
-    # Walk the real graph and collect node signatures
-    my @real_nodes = _collect_node_signatures($return_node);
-
-    # Structural subset match: every declared node must appear in the real graph
-    my @missing;
-    for my $req (@{ $shape->{nodes} }) {
-        unless (_find_node($req, \@real_nodes)) {
-            push @missing, $req->{raw};
-        }
-    }
-
-    if (@missing) {
+    # Run the TypedInvariant on the built graph to catch ill-typed blocks
+    my @all_nodes = _collect_all_nodes($return_node);
+    my $inv = Chalk::IR::Graph::TypedInvariant->check(\@all_nodes);
+    unless ($inv->{ok}) {
+        my $violations_str = join('; ', map { $_->{message} } @{ $inv->{violations} });
         push @$fail_reasons,
-            "case '$case->{title}': ir-shape mismatch — declared nodes not found in graph: "
-            . join(', ', map { "'$_'" } @missing);
-        return { verdict => 'FAIL', missing => \@missing, tag => $ir_tag };
+            "case '$case->{title}': built graph fails TypedInvariant: $violations_str";
+        return { verdict => 'FAIL', missing => [], violations => $inv->{violations} };
     }
 
-    return { verdict => 'PASS', missing => [], tag => $ir_tag,
-             real_nodes => \@real_nodes };
+    return { verdict => 'PASS', missing => [], built => true };
 }
 
-# _extract_ir_tag($case) -> $tag_or_undef
-# Looks for "# ir-tag: arith-add" comment line in the ir block.
-sub _extract_ir_tag {
-    my ($case) = @_;
-    my $ir = $case->{ir} // '';
-    if ($ir =~ /^\s*#\s*ir-tag:\s*(\S+)/m) {
-        return $1;
+# _is_pure_gap_block($ir_text) -> bool
+# A pure-GAP block has an L: GAP(...) line and NO %name = ... node lines.
+sub _is_pure_gap_block {
+    my ($ir_text) = @_;
+    my $has_node_lines = false;
+    for my $line (split /\n/, $ir_text) {
+        $line =~ s/\s*#.*$//;
+        $line =~ s/^\s+|\s+$//g;
+        next unless length $line;
+        next if $line =~ /^L:/;
+        next if $line =~ /^return\s/;
+        next if $line =~ /^control:/;
+        if ($line =~ /^%\w+\s*=/) {
+            $has_node_lines = true;
+            last;
+        }
     }
-    return undef;
+    return !$has_node_lines;
+}
+
+# _collect_all_nodes($return_node) -> @nodes
+# Collects all reachable nodes from a Return node (data + control), deduped.
+sub _collect_all_nodes {
+    my ($return_node) = @_;
+    my %visited;
+    my @nodes;
+    _collect_nodes_recursive($return_node, \%visited, \@nodes);
+    return @nodes;
+}
+
+sub _collect_nodes_recursive {
+    my ($node, $visited, $nodes) = @_;
+    return unless defined $node;
+    my $id = $node->id;
+    return if $visited->{$id}++;
+    push @$nodes, $node;
+    if ($node->can('inputs') && defined $node->inputs) {
+        _collect_nodes_recursive($_, $visited, $nodes) for $node->inputs->@*;
+    }
+    if ($node->can('control_in') && defined $node->control_in) {
+        _collect_nodes_recursive($node->control_in, $visited, $nodes);
+    }
 }
 
 # _parse_ir_block($text) -> { nodes => [...], l_verdict => str }
@@ -647,7 +882,7 @@ sub _find_node {
 }
 
 # ---------------------------------------------------------------------------
-# PRIVATE: L-verdict check
+# PRIVATE: L-verdict check (constructive: builds graph from ir block)
 # ---------------------------------------------------------------------------
 
 sub _run_l_verdict_check {
@@ -658,40 +893,43 @@ sub _run_l_verdict_check {
         return { verdict => 'SKIP', reason => 'no ir block' };
     }
 
-    my $graph_for = $opts->{graph_for};
-    unless (defined $graph_for) {
-        return { verdict => 'SKIP', reason => 'no graph_for supplied' };
-    }
+    # Parse the declared L: verdict from the block
+    my $decl        = __PACKAGE__->parse_l_verdict_from_ir($ir_text);
+    my $is_pure_gap = _is_pure_gap_block($ir_text);
 
-    my $ir_tag = _extract_ir_tag($case);
-    unless (defined $ir_tag) {
-        return { verdict => 'SKIP', reason => "no ir-tag in ir block" };
-    }
-
-    my $return_node;
-    eval { $return_node = $graph_for->($ir_tag) };
-    if ($@) {
-        push @$fail_reasons, "case '$case->{title}': L check: graph_for('$ir_tag') died: $@";
-        return { verdict => 'FAIL', error => $@ };
-    }
-    unless (defined $return_node) {
-        # GAP idiom (no graph) — check declared L: verdict is also GAP
-        my $shape = _parse_ir_block($ir_text);
-        my $decl  = $shape->{l_verdict};
+    # Pure-GAP block: no graph to lower; verify declared verdict is also GAP
+    if ($is_pure_gap) {
         if ($decl eq 'GAP') {
             return { verdict => 'PASS', actual => 'GAP', declared => 'GAP',
-                     note => 'no-graph idiom, declared GAP matches' };
+                     note => 'pure-GAP block with declared GAP — consistent' };
         } else {
             push @$fail_reasons,
                 "case '$case->{title}': L verdict mismatch — "
-                . "graph is a GAP idiom (no Return node) but declared '$decl'";
+                . "pure-GAP block (no nodes) but declared '$decl'";
             return { verdict => 'FAIL', actual => 'GAP', declared => $decl };
         }
     }
 
-    # Parse declared L verdict
-    my $shape      = _parse_ir_block($ir_text);
-    my $decl       = $shape->{l_verdict};
+    # Build the graph from the ir block
+    my $return_node;
+    eval { $return_node = __PACKAGE__->build_graph_from_ir($ir_text) };
+    if ($@) {
+        my $err = $@;
+        push @$fail_reasons,
+            "case '$case->{title}': L check: ir block failed to build graph: $err";
+        return { verdict => 'FAIL', error => $err };
+    }
+    unless (defined $return_node) {
+        # build_graph_from_ir returned undef (pure-GAP) — check declared is GAP
+        if ($decl eq 'GAP') {
+            return { verdict => 'PASS', actual => 'GAP', declared => 'GAP',
+                     note => 'build_graph_from_ir returned undef, declared GAP matches' };
+        }
+        push @$fail_reasons,
+            "case '$case->{title}': L verdict mismatch — "
+            . "graph builds to undef (GAP) but declared '$decl'";
+        return { verdict => 'FAIL', actual => 'GAP', declared => $decl };
+    }
 
     # Run through LLVMDriver
     my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
@@ -712,12 +950,12 @@ sub _run_l_verdict_check {
                  meta => $meta };
     }
 
-    # For GREEN: additionally verify lli output matches declared behavior
-    if ($actual_verdict eq 'GREEN' && defined $opts->{perl_oracle_for}) {
-        my $expected = $opts->{perl_oracle_for}->($ir_tag);
-        if (defined $expected) {
-            my $lli_out = $L->return_values->[0] // '';
-            # Numeric comparison with tolerance
+    # For GREEN: verify lli output agrees with perl behavior oracle (from behavior check)
+    if ($actual_verdict eq 'GREEN') {
+        my $lli_out  = $L->return_values->[0] // '';
+        my $expected = $opts->{perl_oracle_value} // $case->{_perl_actual};
+
+        if (defined $expected && length $expected) {
             if (looks_like_number($lli_out) && looks_like_number($expected)) {
                 my $diff = abs($lli_out - $expected);
                 if ($diff >= 1e-9) {
@@ -725,14 +963,14 @@ sub _run_l_verdict_check {
                         "case '$case->{title}': L corner output '$lli_out' "
                         . "does not match perl oracle '$expected'";
                     return { verdict => 'FAIL', actual => $actual_verdict, declared => $decl,
-                             lli_out => $lli_out, expected => $expected };
+                             lli_out => $lli_out, expected => $expected, meta => $meta };
                 }
             } elsif ($lli_out ne $expected) {
                 push @$fail_reasons,
                     "case '$case->{title}': L corner output '$lli_out' "
                     . "does not match perl oracle '$expected'";
                 return { verdict => 'FAIL', actual => $actual_verdict, declared => $decl,
-                         lli_out => $lli_out, expected => $expected };
+                         lli_out => $lli_out, expected => $expected, meta => $meta };
             }
         }
     }

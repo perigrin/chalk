@@ -18,11 +18,10 @@ context: scalar
 ```
 
 ```ir
-# ir-tag: arith-add
-Constant(1) :Int
-Constant(2) :Int
-Add(Int, Int) :Int
-Return(Add)
+%c1  = Constant(1) :Int
+%c2  = Constant(2) :Int
+%add = Add(%c1, %c2) :Int
+return %add
 L: GREEN
 ```
 
@@ -41,11 +40,10 @@ context: scalar
 ```
 
 ```ir
-# ir-tag: arith-sub
-Constant(5) :Int
-Constant(3) :Int
-Subtract(Int, Int) :Int
-Return(Subtract)
+%c5  = Constant(5) :Int
+%c3  = Constant(3) :Int
+%sub = Subtract(%c5, %c3) :Int
+return %sub
 L: GREEN
 ```
 
@@ -64,11 +62,10 @@ context: scalar
 ```
 
 ```ir
-# ir-tag: arith-mul
-Constant(3) :Int
-Constant(4) :Int
-Multiply(Int, Int) :Int
-Return(Multiply)
+%c3  = Constant(3) :Int
+%c4  = Constant(4) :Int
+%mul = Multiply(%c3, %c4) :Int
+return %mul
 L: GREEN
 ```
 
@@ -88,13 +85,12 @@ context: scalar
 ```
 
 ```ir
-# ir-tag: arith-div
-Constant(3) :Int
-Constant(4) :Int
-Coerce(Int -> Num)
-Coerce(Int -> Num)
-Divide(Num, Num) :Num
-Return(Divide)
+%c3  = Constant(3) :Int
+%c4  = Constant(4) :Int
+%d3  = Coerce(%c3 : Int -> Num) :Num
+%d4  = Coerce(%c4 : Int -> Num) :Num
+%div = Divide(%d3, %d4) :Num
+return %div
 L: GREEN
 ```
 
@@ -114,10 +110,9 @@ context: scalar
 ```
 
 ```ir
-# ir-tag: arith-mod
-Constant(-7) :Int
-Constant(3) :Int
-Modulo(Int, Int) :Int
-Return(Modulo)
+%cn7 = Constant(-7) :Int
+%c3  = Constant(3) :Int
+%mod = Modulo(%cn7, %c3) :Int
+return %mod
 L: GREEN
 ```

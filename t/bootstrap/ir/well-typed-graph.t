@@ -103,4 +103,45 @@ use Chalk::IR::Graph::TypedInvariant;
     ok($result->{ok}, 'undef representation on operands is not a violation (not yet assigned)');
 }
 
+# H2-6: Divide requires Num inputs (Perl `/` is always float division).
+# A Coerce(Int->Num) bridging each operand satisfies the invariant.
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $lhs_i = $f->make('Constant', value => '3', const_type => 'integer');
+    $lhs_i->set_representation('Int');
+    my $rhs_i = $f->make('Constant', value => '4', const_type => 'integer');
+    $rhs_i->set_representation('Int');
+    my $coe_lhs = $f->make('Coerce', from_repr => 'Int', to_repr => 'Num',
+        inputs => [$lhs_i]);
+    $coe_lhs->set_representation('Num');
+    my $coe_rhs = $f->make('Coerce', from_repr => 'Int', to_repr => 'Num',
+        inputs => [$rhs_i]);
+    $coe_rhs->set_representation('Num');
+    my $div = $f->make('Divide', inputs => [$coe_lhs, $coe_rhs]);
+    $div->set_representation('Num');
+
+    my $result = Chalk::IR::Graph::TypedInvariant->check(
+        [$lhs_i, $rhs_i, $coe_lhs, $coe_rhs, $div]);
+    ok($result->{ok}, 'Divide(Coerce(Int->Num), Coerce(Int->Num)) passes the invariant');
+    is(scalar @{ $result->{violations} }, 0,
+        'no violations for well-typed float division graph');
+}
+
+# H2-7: Divide with bare Int inputs (no Coerce) fails the invariant.
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $lhs = $f->make('Constant', value => '3', const_type => 'integer');
+    $lhs->set_representation('Int');
+    my $rhs = $f->make('Constant', value => '4', const_type => 'integer');
+    $rhs->set_representation('Int');
+    my $div = $f->make('Divide', inputs => [$lhs, $rhs]);
+    $div->set_representation('Num');
+
+    my $result = Chalk::IR::Graph::TypedInvariant->check([$lhs, $rhs, $div]);
+    ok(!$result->{ok}, 'Divide(Int, Int) without Coerce fails the invariant');
+    ok(scalar @{ $result->{violations} } > 0, 'violations reported for bare-Int Divide');
+}
+
 done_testing;

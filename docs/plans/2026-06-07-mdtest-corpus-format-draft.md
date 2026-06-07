@@ -196,6 +196,89 @@ format makes ONE `.md` per topic the source of truth for source + behavior +
 IR-shape + verdict — the architecture-review-flagged "stringly-typed config that
 needs editing in N places per idiom" goes away.
 
+## CONSTRUCTIVE ir-block (perigrin, 2026-06-07): the markdown IS the graph
+
+Superseding the original "subset assertion against an external graph" model: the
+`ir` block is now a COMPLETE, CONSTRUCTIVE, self-contained textual SoN-graph spec.
+The runner BUILDS the graph by parsing the block — no external `graph_for`
+builders, no `# ir-tag` punt. This makes each `.md` the single source of truth
+(source + behavior + the actual typed IR) and gives us a readable, debuggable
+SoN-dump format as a bonus. The `LLVMGapMap`/`HandGraphs` builders are RETIRED
+into the corpus as topics migrate.
+
+### Syntax: named SSA bindings (decided)
+
+Each node gets a `%name`; inputs reference names. The runner walks lines in order,
+mapping each to `factory->make(Op, inputs => [...], ...)` + `set_representation`.
+
+```
+%c1  = Constant(1) :Int
+%c2  = Constant(2) :Int
+%add = Add(%c1, %c2) :Int
+return %add
+L: GREEN
+```
+
+Grammar:
+- `%name = Op(args...) :Repr` — bind a node. `args` are `%name` references OR
+  literals for leaf attributes (e.g. `Constant(1)`, `PadAccess($x)`). `:Repr` is
+  the representation (Int/Num/Str/Scalar/Bool/...), omittable when undef.
+- `Coerce(%x : From -> To)` — an explicit coercion node wrapping `%x`
+  (e.g. `%cd3 = Coerce(%c3 : Int -> Num) :Num`).
+- `return %name` — the (synthetic) Return over a value; the runner builds the
+  Return node + wires control.
+- `control: %a -> %b -> %c` (optional) — declares the control_in chain for
+  effectful idioms (VarDecl/Assign sequencing), when control order matters and
+  isn't implied by data edges.
+- `L: GREEN` | `L: GAP(reason)` — the L-corner verdict (asserted against the REAL
+  L corner, never the author's claim).
+- A case may have NO buildable graph (pure GAP / not-yet-representable): write
+  only `L: GAP(reason)` (no node lines) — the runner records the GAP without
+  building/lowering. This is the honest form for idioms the IR can't represent
+  runtime-free yet.
+
+### Worked harder cases (proving the format on real idioms)
+
+A1 `my $x = 1; return $x` (variable, control_in matters):
+```
+%one  = Constant(1) :Int
+%xn   = Constant("$x") :Str        # the var name
+%vx   = VarDecl(%xn, %one) :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx                       # the decl is the control predecessor
+L: GREEN
+```
+
+arith-div (Coerce edges):
+```
+%c3  = Constant(3) :Int
+%c4  = Constant(4) :Int
+%d3  = Coerce(%c3 : Int -> Num) :Num
+%d4  = Coerce(%c4 : Int -> Num) :Num
+%div = Divide(%d3, %d4) :Num
+return %div
+L: GREEN
+```
+
+L1 `return $a && $b` (pure GAP, no buildable runtime-free graph):
+```
+L: GAP(&& returns an operand not a bool; needs If+Phi short-circuit)
+```
+
+### Runner change (constructive build)
+
+The runner gains a graph-BUILDER: parse the `ir` block -> a symbol table of
+`%name -> node`, construct each node via NodeFactory in line order
+(set_representation per `:Repr`, wire Coerce from/to, build the Return + control
+chain), return the Return node. Then: structural self-consistency is automatic
+(the block built it), so the IR check becomes "the block parses and builds a
+graph that passes the well-typed-graph invariant (TypedInvariant)" + the L corner
+runs that built graph for the `L:` verdict + behavior. The honesty guards still
+hold: behavior is perl-captured (never authored), L verdict is checked against
+the real corner (a block claiming GREEN that really GAPs FAILS), and a block whose
+nodes don't satisfy the typed-graph invariant FAILS loudly.
+
 ## Resolved decisions (perigrin, 2026-06-07)
 
 1. **`ir` block syntax = node-by-role LINES** (`Constant(1) :Int`,
