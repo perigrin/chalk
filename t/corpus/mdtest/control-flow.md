@@ -110,7 +110,32 @@ context: scalar
 ```
 
 ```ir
-L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for while back-edge. SAME gap as if/for/&&/||.)
+%c3    = Constant(3) :Int
+%c0a   = Constant(0) :Int
+%c0b   = Constant(0) :Int
+%one   = Constant(1) :Int
+%nn    = Constant("$n") :Str
+%sn    = Constant("$s") :Str
+%vn    = VarDecl(%nn, %c3) :Int
+%vs    = VarDecl(%sn, %c0a) :Int
+%rn0   = PadAccess(%vn, "$n") :Int
+%rs0   = PadAccess(%vs, "$s") :Int
+%loop  = Loop(%vs)
+%n_phi = Phi(%rn0, region: %loop) :Int
+%s_phi = Phi(%rs0, region: %loop) :Int
+%cmp   = NumGt(%n_phi, %c0b) :Bool
+%s_new = Add(%s_phi, %n_phi) :Int
+%n_new = Subtract(%n_phi, %one) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+control: %vn -> %vs -> %loop
+loop_backedge: %n_phi -> %n_new
+loop_backedge: %s_phi -> %s_new
+branch_control: %lp0 -> %n_new
+branch_control: %lp0 -> %s_new
+L: GREEN
 ```
 
 ## D3 foreach loop
@@ -132,7 +157,28 @@ context: scalar
 ```
 
 ```ir
-L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for foreach back-edge. SAME gap as if/while/&&/||.)
+%c0    = Constant(0) :Int
+%c1    = Constant(1) :Int
+%c4    = Constant(4) :Int
+%sn    = Constant("$s") :Str
+%vs    = VarDecl(%sn, %c0) :Int
+%rs0   = PadAccess(%vs, "$s") :Int
+%loop  = Loop(%vs)
+%i_phi = Phi(%c1, region: %loop) :Int
+%s_phi = Phi(%rs0, region: %loop) :Int
+%cmp   = NumGt(%c4, %i_phi) :Bool
+%s_new = Add(%s_phi, %i_phi) :Int
+%i_new = Add(%i_phi, %c1) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+control: %vs -> %loop
+loop_backedge: %i_phi -> %i_new
+loop_backedge: %s_phi -> %s_new
+branch_control: %lp0 -> %s_new
+branch_control: %lp0 -> %i_new
+L: GREEN
 ```
 
 ## D4 postfix if
@@ -155,7 +201,24 @@ context: scalar
 ```
 
 ```ir
-L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for postfix-if branch. SAME gap as if/while/&&/||.)
+%n     = Constant(5) :Int
+%zero  = Constant(0) :Int
+%c0    = Constant(0) :Int
+%c1    = Constant(1) :Int
+%xn    = Constant("$x") :Str
+%vx    = VarDecl(%xn, %c0) :Int
+%cmp   = NumGt(%n, %zero) :Bool
+%lhs   = PadAccess(%vx, "$x") :Int
+%as    = Assign(%lhs, %c1) :Int
+%if    = If(%vx, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%region = Region(%proj0, %proj1)
+%rx    = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx -> %if
+branch_control: %proj0 -> %as
+L: GREEN
 ```
 
 ## D5 postfix while
@@ -178,7 +241,32 @@ context: scalar
 ```
 
 ```ir
-L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for postfix-while back-edge. SAME gap as if/while/&&/||.)
+%c3    = Constant(3) :Int
+%c0a   = Constant(0) :Int
+%c0b   = Constant(0) :Int
+%one   = Constant(1) :Int
+%nn    = Constant("$n") :Str
+%sn    = Constant("$s") :Str
+%vn    = VarDecl(%nn, %c3) :Int
+%vs    = VarDecl(%sn, %c0a) :Int
+%rn0   = PadAccess(%vn, "$n") :Int
+%rs0   = PadAccess(%vs, "$s") :Int
+%loop  = Loop(%vs)
+%n_phi = Phi(%rn0, region: %loop) :Int
+%s_phi = Phi(%rs0, region: %loop) :Int
+%cmp   = NumGt(%n_phi, %c0b) :Bool
+%s_new = Add(%s_phi, %n_phi) :Int
+%n_new = Subtract(%n_phi, %one) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+control: %vn -> %vs -> %loop
+loop_backedge: %n_phi -> %n_new
+loop_backedge: %s_phi -> %s_new
+branch_control: %lp0 -> %n_new
+branch_control: %lp0 -> %s_new
+L: GREEN
 ```
 
 ## D7 nested if
@@ -201,7 +289,38 @@ context: scalar
 ```
 
 ```ir
-L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for nested if/else join. SAME gap as if/while/&&/||.)
+%n        = Constant(5) :Int
+%zero     = Constant(0) :Int
+%three    = Constant(3) :Int
+%c3val    = Constant(3) :Int
+%c1val    = Constant(1) :Int
+%c0val    = Constant(0) :Int
+%xn       = Constant("$x") :Str
+%vx       = VarDecl(%xn) :Int
+%cmp_out  = NumGt(%n, %zero) :Bool
+%cmp_in   = NumGt(%n, %three) :Bool
+%lhs3     = PadAccess(%vx, "$x") :Int
+%as3      = Assign(%lhs3, %c3val) :Int
+%lhs1     = PadAccess(%vx, "$x") :Int
+%as1      = Assign(%lhs1, %c1val) :Int
+%lhs0     = PadAccess(%vx, "$x") :Int
+%as0      = Assign(%lhs0, %c0val) :Int
+%inner_if    = If(%vx, %cmp_in)
+%inner_p0    = Proj(%inner_if, index: 0)
+%inner_p1    = Proj(%inner_if, index: 1)
+%inner_reg   = Region(%inner_p0, %inner_p1)
+%outer_if    = If(%vx, %cmp_out)
+%outer_p0    = Proj(%outer_if, index: 0)
+%outer_p1    = Proj(%outer_if, index: 1)
+%outer_reg   = Region(%outer_p0, %outer_p1)
+%rx          = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx -> %outer_if
+branch_control: %outer_p0 -> %inner_if
+branch_control: %inner_p0 -> %as3
+branch_control: %inner_p1 -> %as1
+branch_control: %outer_p1 -> %as0
+L: GREEN
 ```
 
 ## D8 try/catch

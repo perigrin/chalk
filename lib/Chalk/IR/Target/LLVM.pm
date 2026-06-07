@@ -1092,50 +1092,41 @@ sub _process_loop_node {
     # Jump from preheader to the loop header.
     $self->_set_terminator("  br label %$header_label  ; Loop: enter header");
 
-    # ---- Loop header ----
-    # The header emits phi nodes for loop-carried values, then the condition test.
-    # Loop-carried Phi nodes are consumers of the Loop node (and also of the
-    # exit Proj via the backedge). We emit placeholder phi nodes here and
-    # patch them after the body is lowered.
-    $self->_new_block($header_label);
-
-    # Find Phi nodes whose region is this Loop.
+    # ---- Lower init values in the preheader block ----
+    # Each loop phi's inputs[0] is the initial value. Lower it NOW (while still
+    # in the preheader block) so the SSA definition of the init value precedes
+    # the phi instruction in the header block. If lowered after opening the
+    # header, the init value's definition would appear after the phi that
+    # references it — invalid LLVM IR (forward reference not allowed in phi).
     my @loop_phis = _collect_loop_phis($loop_node);
 
-    # Emit a phi placeholder for each loop-carried variable. We need to know
-    # the initial value (from the preheader) and the backedge value (from the
-    # body). The backedge value is known only after the body is lowered, so
-    # we do a two-pass approach: emit the phi with a placeholder, then
-    # use the actual result. Since LLVM IR is text, we emit the phi with
-    # real values but reference the body-end block (which we allocate now).
-    # We use a forward-reference trick: the phi emitted in the header
-    # references the body_end label and the init value reference.
-
-    my @phi_records;    # [ { node, header_ref, init_ref, vd_id } ]
+    my @phi_records;    # [ { node, phi_ref, init_ref } ]
 
     for my $phi_node (@loop_phis) {
         my $inputs = $phi_node->inputs;
         unless (defined $inputs && scalar @$inputs >= 1) {
             die "LLVM backend: Loop Phi (id=" . $phi_node->id . ") has no incoming values";
         }
-        # inputs[0] = initial value (from preheader / before loop)
-        # inputs[1] = backedge value (from body — known only after body lowering)
+        # Lower init value in the preheader block (current block before _new_block).
         my $init_ref = $self->lower_value($inputs->[0]);
-
-        # We will patch this phi's text after knowing the body-end SSA value.
-        # For now: emit a placeholder comment; the actual phi line is appended
-        # as the FIRST instruction in the header block after the body is done.
-        # We defer by NOT emitting the phi yet — instead record what we need.
-        my $phi_ref = $self->_fresh;
+        my $phi_ref  = $self->_fresh;
         push @phi_records, {
             node     => $phi_node,
             phi_ref  => $phi_ref,
             init_ref => $init_ref,
         };
-        # Tentatively assign the phi_ref as the header value for this variable.
-        $self->{cache}{ $phi_node->id } = $phi_ref;
-        # Also update var_table if the Phi corresponds to a VarDecl.
-        _update_var_table_for_phi($self, $phi_node, $phi_ref);
+    }
+
+    # ---- Loop header ----
+    # Open the header block. Phi instructions for loop-carried values are
+    # prepended to this block after the body is lowered (two-pass approach:
+    # we need the backedge SSA refs from the body to complete each phi).
+    $self->_new_block($header_label);
+
+    # Cache the phi refs so body lowering can reference them via lower_value.
+    for my $rec (@phi_records) {
+        $self->{cache}{ $rec->{node}->id } = $rec->{phi_ref};
+        _update_var_table_for_phi($self, $rec->{node}, $rec->{phi_ref});
     }
 
     # Emit the loop condition. The condition is drawn from consumers of the
