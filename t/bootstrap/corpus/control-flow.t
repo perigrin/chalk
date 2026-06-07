@@ -31,7 +31,7 @@ unless (-f $CONTROL_FLOW_MD) {
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($CONTROL_FLOW_MD);
-is(scalar(@$cases), 8, 'control-flow.md has 8 cases (D1-D8)');
+is(scalar(@$cases), 9, 'control-flow.md has 9 cases (D1-D9)');
 
 my @titles = map { $_->{title} } @$cases;
 ok((grep { /D6.*ternary/i } @titles),    'case: D6 ternary present');
@@ -42,6 +42,7 @@ ok((grep { /D4.*postfix.*if/i } @titles),'case: D4 postfix if present');
 ok((grep { /D5.*postfix.*while/i } @titles), 'case: D5 postfix while present');
 ok((grep { /D7.*nested/i }  @titles),    'case: D7 nested if present');
 ok((grep { /D8.*try/i }     @titles),    'case: D8 try/catch present');
+ok((grep { /D9.*nested.*runtime/i } @titles), 'case: D9 nested if runtime-false present');
 
 # ---------------------------------------------------------------------------
 # SECTION 2: Run all 8 cases end-to-end
@@ -85,8 +86,8 @@ for my $case (@$cases) {
 # D6 (ternary) + D1-D5 + D7 are GREEN via their respective lowering paths.
 # ---------------------------------------------------------------------------
 
-subtest 'D1-D7 declare L: GREEN; D8 declares L: GAP' => sub {
-    plan tests => 8;
+subtest 'D1-D7 and D9 declare L: GREEN; D8 declares L: GAP' => sub {
+    plan tests => 9;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);

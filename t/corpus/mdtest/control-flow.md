@@ -325,6 +325,68 @@ branch_control: %outer_p1 -> %as0
 L: GREEN
 ```
 
+## D9 nested if runtime-false inner condition
+
+Nested conditionals with a runtime-FALSE inner condition expose the phi-arm
+miscompile (B1): the outer merge phi must arm with the INNER MERGE PHI result
+(the value live at the exit of the outer-then branch), not the raw inner-then
+assignment value. With n=2, the outer condition (2>0) is true, but the inner
+condition (2>3) is false, so x=1 via the inner-else path. lli must agree with perl.
+
+This case differs from D7 (which uses n=5, making the inner condition statically
+true and letting lli constant-fold the wrong phi arm away).
+
+```perl
+# source
+my $n = 2;
+my $x = 0;
+if ($n > 0) { if ($n > 3) { $x = 3 } else { $x = 1 } } else { $x = 0 }
+$x
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%cn   = Constant(2) :Int
+%zero = Constant(0) :Int
+%c0   = Constant(0) :Int
+%c1   = Constant(1) :Int
+%c3   = Constant(3) :Int
+%c3v  = Constant(3) :Int
+%nn   = Constant("$n") :Str
+%vn   = VarDecl(%nn, %cn) :Int
+%rn   = PadAccess(%vn, "$n") :Int
+%xn   = Constant("$x") :Str
+%vx   = VarDecl(%xn, %c0) :Int
+%cmp_out = NumGt(%rn, %zero) :Bool
+%cmp_in  = NumGt(%rn, %c3) :Bool
+%lhs3 = PadAccess(%vx, "$x") :Int
+%as3  = Assign(%lhs3, %c3v) :Int
+%lhs1 = PadAccess(%vx, "$x") :Int
+%as1  = Assign(%lhs1, %c1) :Int
+%lhs0 = PadAccess(%vx, "$x") :Int
+%as0  = Assign(%lhs0, %c0) :Int
+%inner_if  = If(%vx, %cmp_in)
+%inner_p0  = Proj(%inner_if, index: 0)
+%inner_p1  = Proj(%inner_if, index: 1)
+%inner_reg = Region(%inner_p0, %inner_p1)
+%outer_if  = If(%vx, %cmp_out)
+%outer_p0  = Proj(%outer_if, index: 0)
+%outer_p1  = Proj(%outer_if, index: 1)
+%outer_reg = Region(%outer_p0, %outer_p1)
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vn -> %vx -> %outer_if
+branch_control: %outer_p0 -> %inner_if
+branch_control: %inner_p0 -> %as3
+branch_control: %inner_p1 -> %as1
+branch_control: %outer_p1 -> %as0
+L: GREEN
+```
+
 ## D8 try/catch
 
 Exception handling requires an LLVM `landingpad` instruction, a personality
