@@ -246,4 +246,97 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
         'Phi with no incoming values dies loudly (adversarial guard)');
 }
 
+# ---------------------------------------------------------------------------
+# L10: If/Proj/Region/Phi lowering — if ($n > 0) { $x = 1 } else { $x = 2 }; $x
+#
+# D1 pattern: condition -> br i1 to then/else blocks, Assign in each branch,
+# phi in merge block, final PadAccess returns phi result.
+# $n=5, expected output: 1.
+# ---------------------------------------------------------------------------
+{
+    use Chalk::IR::Node::NumGt;
+    use Chalk::IR::Node::VarDecl;
+    use Chalk::IR::Node::PadAccess;
+    use Chalk::IR::Node::Assign;
+    use Chalk::IR::Node::If;
+    use Chalk::IR::Node::Proj;
+    use Chalk::IR::Node::Region;
+
+    my $f = Chalk::IR::NodeFactory->new;
+
+    # $n = 5; condition: $n > 0
+    my $cn   = $f->make('Constant', value => '5',  const_type => 'integer');
+    $cn->set_representation('Int');
+    my $zero = $f->make('Constant', value => '0',  const_type => 'integer');
+    $zero->set_representation('Int');
+    my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
+    $cmp->set_representation('Bool');
+
+    # my $x; (no init)
+    my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
+    my $vx   = $f->make('VarDecl', inputs => [$xn]);
+    $vx->set_representation('Int');
+
+    # $x = 1 (then branch)
+    my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $lhs1->set_representation('Int');
+    my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
+    $as1->set_representation('Int');
+
+    # $x = 2 (else branch)
+    my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
+    $c2->set_representation('Int');
+    # Note: lhs2 hash-cons == lhs1 (same targ/varname/vd) — that's correct.
+    my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $lhs2->set_representation('Int');
+    my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
+    $as2->set_representation('Int');
+
+    # If / Proj / Region structure
+    my $if_node = $f->make('If',   inputs => [$vx, $cmp]);
+    my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
+    my $proj1   = $f->make('Proj', inputs => [$if_node], index => 1);
+    my $region  = $f->make('Region', inputs => [$proj0, $proj1]);
+    $if_node->set_region($region);
+
+    # Wire then/else assigns as consumers of their Proj nodes
+    $as1->set_control_in($proj0);
+    $as2->set_control_in($proj1);
+
+    # $x (read after if/else)
+    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $rx->set_representation('Int');
+
+    # Return $x; control chain: vx -> if
+    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+    $if_node->set_control_in($vx);
+    $ret->set_control_in($if_node);
+
+    my $ll;
+    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    ok(!$@, "If/else node lowers without dying (got: $@)");
+
+    SKIP: {
+        skip 'If/else lowering failed', 5 unless defined $ll;
+
+        unlike($ll, qr/Perl_/, 'If/else .ll: no Perl_ C-API');
+        unlike($ll, qr/\bSV\b/, 'If/else .ll: no SV type');
+        like($ll, qr/br i1/, 'If/else .ll: contains conditional branch');
+        like($ll, qr/phi i64/, 'If/else .ll: contains phi');
+
+        my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+        binmode $fh, ':utf8';
+        print $fh $ll;
+        close $fh;
+
+        my $lli_out = qx($LLI $tmp 2>&1);
+        my $exit    = $? >> 8;
+        is($exit, 0, 'If/else .ll: lli exits cleanly');
+        chomp $lli_out;
+        is($lli_out, '1', "If/else .ll: lli output is 1 (n=5, n>0 true -> x=1)");
+    }
+}
+
 done_testing;

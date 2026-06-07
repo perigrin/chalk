@@ -67,7 +67,27 @@ context: scalar
 ```
 
 ```ir
-L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for if/else join. SAME gap as while/for/&&/|| -- one capability unlocks all 8.)
+%n     = Constant(5) :Int
+%zero  = Constant(0) :Int
+%cmp   = NumGt(%n, %zero) :Bool
+%xn    = Constant("$x") :Str
+%vx    = VarDecl(%xn) :Int
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%lhs1  = PadAccess(%vx, "$x") :Int
+%as1   = Assign(%lhs1, %c1) :Int
+%lhs2  = PadAccess(%vx, "$x") :Int
+%as2   = Assign(%lhs2, %c2) :Int
+%if    = If(%vx, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%region = Region(%proj0, %proj1)
+%rx    = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx -> %if
+branch_control: %proj0 -> %as1
+branch_control: %proj1 -> %as2
+L: GREEN
 ```
 
 ## D2 while loop

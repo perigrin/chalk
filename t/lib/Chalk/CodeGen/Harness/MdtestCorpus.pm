@@ -183,6 +183,7 @@ sub build_graph_from_ir {
     my %sym;            # %name -> node object
     my $return_name;    # the %name handed to 'return'
     my @control_seq;    # ordered list of %names from 'control:' line
+    my @branch_edges;   # [ [$from_name, $to_name], ... ] from branch_control: lines
     my $has_nodes   = false;
 
     for my $raw_line (split /\n/, $ir_block) {
@@ -204,6 +205,15 @@ sub build_graph_from_ir {
         if ($line =~ /^control:\s+(.+)$/) {
             my @parts = split /\s*->\s*/, $1;
             @control_seq = map { s/^\s+|\s+$//gr } @parts;
+            next;
+        }
+
+        # 'branch_control: %from -> %to'
+        # Sets $to->set_control_in($from), wiring $to as a consumer of $from.
+        # Use for branching control edges (if-branch bodies, loop bodies) that
+        # cannot be expressed as a flat sequential chain.
+        if ($line =~ /^branch_control:\s+(%\w+)\s*->\s*(%\w+)\s*$/) {
+            push @branch_edges, [$1, $2];
             next;
         }
 
@@ -257,6 +267,36 @@ sub build_graph_from_ir {
             $prev_ctrl = $ctrl_node;
         }
         $ret->set_control_in($sym{ $control_seq[-1] });
+    }
+
+    # Wire branch_control edges: set_control_in for branching control paths.
+    for my $edge (@branch_edges) {
+        my ($from_name, $to_name) = @$edge;
+        croak "build_graph_from_ir: branch_control: from '$from_name' undefined"
+            unless exists $sym{$from_name};
+        croak "build_graph_from_ir: branch_control: to '$to_name' undefined"
+            unless exists $sym{$to_name};
+        $sym{$to_name}->set_control_in($sym{$from_name});
+    }
+
+    # Post-build pass: wire Region->head back-pointers.
+    # For each Region node in the symbol table, look at its Proj inputs to
+    # find the If or Loop node that produced those Projs. Call set_region on
+    # that If/Loop so the LLVM backend can traverse the structure.
+    for my $sym_name (keys %sym) {
+        my $node = $sym{$sym_name};
+        next unless $node->can('operation') && $node->operation eq 'Region';
+        my $inputs = $node->inputs // [];
+        for my $inp (@$inputs) {
+            next unless defined $inp && $inp->can('operation');
+            next unless $inp->operation eq 'Proj';
+            # The Proj's inputs[0] is the If or Loop node.
+            my $proj_inputs = $inp->inputs // [];
+            my $parent = $proj_inputs->[0];
+            next unless defined $parent && $parent->can('set_region');
+            $parent->set_region($node);
+            last;    # One set_region call per Region is enough.
+        }
     }
 
     return $ret;
@@ -369,12 +409,26 @@ sub _build_node_from_rhs {
             } elsif ($arg =~ /^(\w+)\s*:\s*"(.*)"$/) {
                 # Keyword attr: key: "quoted string"
                 $attrs{$1} = $2;
+            } elsif ($arg =~ /^(\w+)\s*:\s*(%\w+)$/) {
+                # Keyword attr: key: %node_ref — resolve to node object
+                my ($key, $ref) = ($1, $2);
+                croak "build_graph_from_ir: $op kwarg '$key: $ref' references undefined '$ref' at $name"
+                    unless exists $sym->{$ref};
+                $attrs{$key} = $sym->{$ref};
             } elsif ($arg =~ /^(\w+)\s*:\s*(\S+)$/) {
                 # Keyword attr: key: bare_token
                 $attrs{$1} = $2;
             } else {
                 croak "build_graph_from_ir: $op cannot parse arg '$arg' at $name";
             }
+        }
+
+        # Phi node: NodeFactory::make('Phi', ...) expects region => $node, values => [...].
+        # When built via general N-ary form, we have inputs => [...] and region => $node
+        # (already resolved above). Remap to the Phi-specific call shape.
+        if ($op eq 'Phi') {
+            my $region = delete $attrs{region};
+            return $factory->make('Phi', region => $region, values => \@inputs, %attrs);
         }
 
         return $factory->make($op, inputs => \@inputs, %attrs);

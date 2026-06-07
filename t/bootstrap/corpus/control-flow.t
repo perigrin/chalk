@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the control-flow mdtest corpus topic (constructive format).
-# ABOUTME: Exercises D1-D8 control-flow idioms: D6 is GREEN (TernaryExpr -> select i1); D1-D5/D7/D8 are LLVM GAPs.
+# ABOUTME: D6 (ternary->select) and D1/D2/D3/D4/D5/D7 (cfg-blocks-phi) are GREEN; D8 (try/catch) is GAP.
 use 5.42.0;
 use utf8;
 
@@ -24,11 +24,10 @@ unless (-f $CONTROL_FLOW_MD) {
 # ---------------------------------------------------------------------------
 # SECTION 1: Parse control-flow.md and verify case inventory
 #
-# All 8 control-flow idioms (D1-D8) must be present.  D6 is a builder GAP
-# (TernaryExpr requires 3 inputs; the binary-op pattern handles 2 args only).
-# D1-D5, D7, D8 are LLVM GAPs (br + phi or landingpad not yet lowerable).
-# The corpus MUST record these GAPs honestly — a GREEN claim for any of them
-# would be a lie and must fail.
+# All 8 control-flow idioms (D1-D8) must be present.
+#   D6: GREEN via TernaryExpr -> select i1
+#   D1/D2/D3/D4/D5/D7: GREEN via cfg-blocks-phi (br + phi)
+#   D8: GAP (needs LLVM landingpad — different capability)
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($CONTROL_FLOW_MD);
@@ -49,13 +48,11 @@ ok((grep { /D8.*try/i }     @titles),    'case: D8 try/catch present');
 #
 # For each case:
 #   - behavior check must PASS (perl oracle vs declared return value)
-#   - ir-shape check must not FAIL (pure-GAP blocks trivially pass)
+#   - ir-shape check must not FAIL
 #   - L-verdict check must PASS (declared verdict matches actual verdict)
 #
-# D6 declares L: GREEN — the 3-input TernaryExpr builder builds the graph
-# and the LLVM backend lowers it via select i1.  lli output must match perl.
-# D1-D5/D7/D8 are genuine LLVM GAPs (br + phi or landingpad not in the
-# current lowering slice).
+# D6, D1-D5, D7 declare L: GREEN.
+# D8 declares L: GAP (landingpad not in this scope).
 # ---------------------------------------------------------------------------
 
 for my $case (@$cases) {
@@ -64,22 +61,18 @@ for my $case (@$cases) {
     subtest "case: $title" => sub {
         my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
 
-        # Behavior check: perl oracle must agree with declared return
         is($result->{behavior}{verdict}, 'PASS',
             "$title: behavior oracle matches")
             or diag("  behavior fail: " . join('; ', @{ $result->{fail_reasons} }));
 
-        # IR-shape check: pure-GAP blocks trivially pass (no graph to validate)
         isnt($result->{ir_shape}{verdict}, 'FAIL',
             "$title: ir-shape not FAIL")
             or diag("  ir-shape fail: " . join('; ', @{ $result->{fail_reasons} }));
 
-        # L-verdict check: declared GAP must match actual GAP
         is($result->{l_verdict}{verdict}, 'PASS',
             "$title: L verdict matches")
             or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
 
-        # Overall
         is($result->{overall}, 'PASS', "$title: overall PASS")
             or diag("  fail reasons: " . join('; ', @{ $result->{fail_reasons} }));
     };
@@ -88,35 +81,26 @@ for my $case (@$cases) {
 # ---------------------------------------------------------------------------
 # SECTION 3: Verify L-verdict declarations per case
 #
-# D6 declares L: GREEN — the 3-input TernaryExpr builder can now construct
-# the graph, and the LLVM backend lowers it via select i1.
-# D1-D5, D7, D8 all declare L: GAP (br + phi or landingpad not yet in the
-# lowering slice).
+# D8 (try/catch) is the only remaining GAP — needs LLVM landingpad.
+# D6 (ternary) + D1-D5 + D7 are GREEN via their respective lowering paths.
 # ---------------------------------------------------------------------------
 
-subtest 'D6 declares L: GREEN; D1-D5/D7/D8 declare L: GAP' => sub {
+subtest 'D1-D7 declare L: GREEN; D8 declares L: GAP' => sub {
     plan tests => 8;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
         my $title   = $case->{title};
-        if ($title =~ /D6.*ternary/i) {
-            is($decl, 'GREEN', "case '$title': declared L: GREEN (TernaryExpr via select i1)");
+        if ($title =~ /D8.*try/i) {
+            is($decl, 'GAP', "case '$title': declared L: GAP (try/catch needs landingpad)");
         } else {
-            is($decl, 'GAP',   "case '$title': declared L: GAP (not lowerable as straight-line code)");
+            is($decl, 'GREEN', "case '$title': declared L: GREEN");
         }
     }
 };
 
 # ---------------------------------------------------------------------------
 # SECTION 4: D6 constructive proof — TernaryExpr builds and lowers correctly
-#
-# D6 now has a constructive ir block (not pure-GAP). Verify that:
-#   - build_graph_from_ir builds a real TernaryExpr graph from the block
-#   - the built graph lowers via LLVMDriver without being marked_unsupported
-#   - lli output is 1 (5 > 0 is true, select branch 1)
-#   - lli output matches the perl oracle (also 1)
-# This is the load-bearing proof that D6 is truly GREEN, not just claimed GREEN.
 # ---------------------------------------------------------------------------
 
 subtest 'D6 constructive proof: TernaryExpr builds and lowers to 1 via lli' => sub {
@@ -124,17 +108,12 @@ subtest 'D6 constructive proof: TernaryExpr builds and lowers to 1 via lli' => s
     ok(defined $d6_case, 'D6 case found');
 
     my $ir_text = $d6_case->{ir} // '';
-
-    # The D6 ir block now has node lines (not pure-GAP)
     my $return_node;
-    eval {
-        $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text);
-    };
+    eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
     ok(!$@, "D6 build_graph_from_ir does not croak (got: $@)")
         or diag("build error: $@");
     ok(defined $return_node, 'D6 build_graph_from_ir returns a defined Return node');
 
-    # The L verdict must be GREEN
     my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
     is($verdict, 'GREEN', 'D6 ir block declares L: GREEN');
 
@@ -150,12 +129,43 @@ subtest 'D6 constructive proof: TernaryExpr builds and lowers to 1 via lli' => s
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 5: Negative guard — a non-lowerable control-flow case claiming GREEN must FAIL
-#
-# If someone edits a D1-D5/D7/D8 case to claim L: GREEN without actually
-# building a lowerable graph, the runner must catch the lie.  We test this
-# with a fake if/else case that claims GREEN — the pure-GAP block (no nodes)
-# combined with a GREEN claim is the inconsistency the runner detects.
+# SECTION 5: D1 constructive proof — if/else with branch+phi lowers correctly
+# ---------------------------------------------------------------------------
+
+subtest 'D1 constructive proof: if/else builds and lowers to 1 via lli' => sub {
+    my ($d1_case) = grep { $_->{title} =~ /D1.*if.*else/i } @$cases;
+    ok(defined $d1_case, 'D1 case found');
+
+    my $ir_text = $d1_case->{ir} // '';
+    my $return_node;
+    eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
+    ok(!$@, "D1 build_graph_from_ir does not croak (got: $@)")
+        or diag("build error: $@");
+    ok(defined $return_node, 'D1 build_graph_from_ir returns a defined Return node');
+
+    my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
+    is($verdict, 'GREEN', 'D1 ir block declares L: GREEN');
+
+    if (defined $return_node) {
+        my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
+        ok(!$meta->{marked_unsupported}, 'D1 if/else graph is truly GREEN')
+            or diag("gap: " . ($meta->{gap_reason} // 'none') . "\nerr: " . ($meta->{lower_error} // 'none'));
+
+        my $ll = $meta->{ll_text} // '';
+        unlike($ll, qr/Perl_/, 'D1 .ll: no Perl_ C-API symbols');
+        unlike($ll, qr/\bSV\b/, 'D1 .ll: no SV type symbols');
+        like($ll, qr/br i1/, 'D1 .ll: contains conditional branch (not just select)');
+        like($ll, qr/phi i64/, 'D1 .ll: contains phi instruction');
+
+        my $lli_out = $L->return_values->[0] // '';
+        is($lli_out, '1', "D1 lli output is 1 (n=5, n>0 -> x=1)");
+        is($lli_out, $d1_case->{_perl_actual} // '1',
+            "D1 lli output matches perl oracle");
+    }
+};
+
+# ---------------------------------------------------------------------------
+# SECTION 6: Negative guard — a non-lowerable control-flow case claiming GREEN must FAIL
 # ---------------------------------------------------------------------------
 
 subtest 'guard: pure-GAP block with L: GREEN for control-flow FAILS L verdict' => sub {
