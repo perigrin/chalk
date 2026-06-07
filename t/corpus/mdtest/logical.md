@@ -40,7 +40,7 @@ context: scalar
 ```
 
 ```ir
-L: GAP(&& returns an operand not a bool; needs If+Phi short-circuit)
+L: GAP(cfg-blocks-phi: && is short-circuit control flow (returns an operand, skips RHS when LHS false); needs LLVM basic blocks + br + phi. THE SAME GAP as if/while/for -- && is an if-expression in disguise.)
 ```
 
 ## L2 logical or
@@ -62,7 +62,7 @@ context: scalar
 ```
 
 ```ir
-L: GAP(|| returns an operand not a bool; needs If+Phi short-circuit)
+L: GAP(cfg-blocks-phi: || is short-circuit control flow (returns an operand, skips RHS when LHS true); needs LLVM basic blocks + br + phi. THE SAME GAP as if/while/for.)
 ```
 
 ## L3 defined-or

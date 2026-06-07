@@ -67,7 +67,7 @@ context: scalar
 ```
 
 ```ir
-L: GAP(needs LLVM basic blocks + br + phi for if/else join)
+L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for if/else join. SAME gap as while/for/&&/|| -- one capability unlocks all 8.)
 ```
 
 ## D2 while loop
@@ -90,7 +90,7 @@ context: scalar
 ```
 
 ```ir
-L: GAP(needs LLVM basic blocks + br + phi for loop back-edge)
+L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for while back-edge. SAME gap as if/for/&&/||.)
 ```
 
 ## D3 foreach loop
@@ -112,7 +112,7 @@ context: scalar
 ```
 
 ```ir
-L: GAP(needs LLVM basic blocks + br + phi for foreach loop back-edge)
+L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for foreach back-edge. SAME gap as if/while/&&/||.)
 ```
 
 ## D4 postfix if
@@ -135,7 +135,7 @@ context: scalar
 ```
 
 ```ir
-L: GAP(needs LLVM basic blocks + br + phi for single-branch conditional)
+L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for postfix-if branch. SAME gap as if/while/&&/||.)
 ```
 
 ## D5 postfix while
@@ -158,7 +158,7 @@ context: scalar
 ```
 
 ```ir
-L: GAP(needs LLVM basic blocks + br + phi for postfix-while back-edge)
+L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for postfix-while back-edge. SAME gap as if/while/&&/||.)
 ```
 
 ## D7 nested if
@@ -181,7 +181,7 @@ context: scalar
 ```
 
 ```ir
-L: GAP(needs LLVM basic blocks + br + phi for nested if/else join)
+L: GAP(cfg-blocks-phi: LLVM basic blocks + br + phi for nested if/else join. SAME gap as if/while/&&/||.)
 ```
 
 ## D8 try/catch
