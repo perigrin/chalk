@@ -63,17 +63,24 @@ control: %vx -> %vy
 L: GREEN
 ```
 
-## Comparison chain (1 < 2): Bool return GAP
+## Comparison as a condition (1 < 2 ? 1 : 0)
 
-A numeric comparison `1 < 2` lowers to a NumLt node with Bool/i1
-representation. Perl returns `1` for true comparisons, but the LLVM backend
-cannot emit a return for repr=Bool — it only supports Int (i64 -> i32 printf)
-and Num (double printf). Returning a raw Bool to the L corner is a GAP until
-the backend gains Bool->Int promotion or a `%b\n` printf path.
+Bool is a CONDITION type, not a returned-value type. A *bare* `1 < 2` is not a
+faithful runtime-free idiom: Perl's true is `1` but its FALSE is `""` (the empty
+string, not `0`), so returning a raw i1 as an integer would MISCOMPILE the false
+case (`0` ≠ `""`). A perl-faithful bool-as-a-VALUE therefore needs Str
+representation (gap group C) — bool-return is blocked on strings, not a freebie.
+
+The faithful runtime-free idiom feeds the comparison (Bool/i1) into a ternary,
+which yields an Int — exactly the GREEN D6 `select i1` pattern. So we express
+the real idiom `1 < 2 ? 1 : 0`: the NumLt is an internal condition, never a
+returned value, and the returned value is a plain Int. Finding (2026-06-07):
+the "H Bool-return freebie" is not independent — bool-as-value requires Str
+(group C); bool-as-condition is already lowerable.
 
 ```perl
 # source
-1 < 2
+1 < 2 ? 1 : 0
 ```
 
 ```behavior
@@ -82,7 +89,14 @@ context: scalar
 ```
 
 ```ir
-L: GAP(Bool-return: NumLt produces repr=Bool/i1; LLVM backend cannot emit printf for i1 — needs Bool->Int Coerce or i1 zext path)
+%one  = Constant(1) :Int
+%two  = Constant(2) :Int
+%cmp  = NumLt(%one, %two) :Bool
+%t    = Constant(1) :Int
+%f    = Constant(0) :Int
+%tern = TernaryExpr(%cmp, %t, %f) :Int
+return %tern
+L: GREEN
 ```
 
 ## Pragma declaration (use strict): compile-time GAP

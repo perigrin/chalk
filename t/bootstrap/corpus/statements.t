@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the statements mdtest corpus topic (constructive format).
-# ABOUTME: Covers return-integer, multi-statement, comparison-Bool-return GAP, and pragma GAP idioms.
+# ABOUTME: Covers return-integer, multi-statement, comparison-as-condition GREEN, and pragma GAP idioms.
 use 5.42.0;
 use utf8;
 
@@ -27,7 +27,7 @@ unless (-f $STATEMENTS_MD) {
 # All 5 statement idioms must be present.
 # - Return integer literal: GREEN (Constant -> Return, simplest runtime-free)
 # - Multiple statements: GREEN (two VarDecls + Add, straight-line SSA)
-# - Comparison chain: GAP (NumLt returns Bool; LLVM backend cannot emit Bool return)
+# - Comparison as condition (1<2?1:0): GREEN (TernaryExpr/select -> Int; bool is a condition not a value)
 # - Pragma (use strict): GAP (compile-time directive, no SoN IR node)
 # - Pragma with import (use Module qw(...)): GAP (compile-time import)
 #
@@ -106,7 +106,12 @@ subtest 'L-verdict declarations: GREEN for return/multi, GAP for comparison/prag
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
         my $title   = $case->{title};
 
-        if ($title =~ /return.*integer.*literal/i || $title =~ /multiple.*statement/i) {
+        # GREEN: return-integer, multiple-statements, and comparison-as-condition
+        # (1 < 2 ? 1 : 0 -> Int via TernaryExpr/select; the bool is an internal
+        # condition, never a returned value — bool-as-VALUE would need Str/group-C).
+        if (   $title =~ /return.*integer.*literal/i
+            || $title =~ /multiple.*statement/i
+            || $title =~ /comparison.*condition/i) {
             is($decl, 'GREEN', "case '$title': declared L: GREEN");
         } else {
             is($decl, 'GAP', "case '$title': declared L: GAP");
