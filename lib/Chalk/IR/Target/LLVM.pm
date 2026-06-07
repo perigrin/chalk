@@ -1415,74 +1415,77 @@ sub _process_if_node {
 
     $self->_set_terminator("  br i1 $cond_ref, label %$then_label, label %$else_label  ; If (elab): branch");
 
-    # Process then-branch; the elaboration pass determines phi placement.
-    $self->_new_block($then_label);
     my $region = $if_node->region;
+
+    # Snapshot var_table before any branch so each branch starts from the same
+    # pre-branch state. This is required for correctness with nested control:
+    # the then-branch may contain a nested If that updates var_table with an
+    # inner-merge phi ref; the else-branch must see the pre-branch state, not the
+    # post-then state. After both branches run, phi arms are taken from branch
+    # snapshots (not from raw assignment nodes in the elab record), so a nested
+    # If's merge phi ref is correctly propagated as the outer phi arm value.
+    my %pre_var = %{ $self->{var_table} };
+
+    # Process then-branch. var_table is mutated in place; snapshot after.
+    $self->_new_block($then_label);
     $self->_process_branch_from_if($if_node, 0, $merge_label);
     my $then_end_label = $self->_current_block_label;
+    my %then_var = %{ $self->{var_table} };
 
-    # Process else-branch.
+    # Restore to pre-branch state before processing else-branch.
+    %{ $self->{var_table} } = %pre_var;
+
+    # Process else-branch. var_table starts from pre-branch state.
     $self->_new_block($else_label);
     $self->_process_branch_from_if($if_node, 1, $merge_label);
     my $else_end_label = $self->_current_block_label;
+    my %else_var = %{ $self->{var_table} };
+
+    # Restore to pre-branch state before emitting merge phis. The merge block
+    # will update var_table with phi results.
+    %{ $self->{var_table} } = %pre_var;
 
     # Merge block.
     $self->_new_block($merge_label);
 
     # Emit phis from the elaboration plan for this merge block.
-    # The Elaborate pass computed block_ids using the Dominators; the merge block
-    # label we just created may differ. We look up by Region's role: the phis
-    # whose block_id matches the region's block_id in the dom tree are the ones
-    # to emit here.
+    # The Elaborate pass determines which variables diverge between branches and
+    # records the merge block id (keyed as 'if.merge.<region_id>'). We look up
+    # the exact key by region id (M1 fix: exact match, not substring regex, to
+    # prevent Region#5 matching Region#59).
     if (defined $region) {
-        # Find phis that belong to this Region's merge block.
-        # The elab block_id is keyed to the Dominators block id, which is
-        # 'if.merge.<region_id>'. We match by searching the elab_phi_by_block.
-        my @phi_keys = grep { /if\.merge\./ } sort keys %{ $self->{elab_phi_by_block} };
-        # Find the key that corresponds to this region.
-        my $phi_key;
-        for my $key (@phi_keys) {
-            # Each key is 'if.merge.<region->id>'. Check if this region's id appears.
-            if ($key =~ /\Q${\$region->id}\E/) {
-                $phi_key = $key;
-                last;
-            }
+        my $phi_key = 'if.merge.' . $region->id;
+        my $phi_recs = $self->{elab_phi_by_block}{$phi_key} // [];
+
+        for my $phi_rec (@$phi_recs) {
+            my $vd_id = $phi_rec->{vd_id};
+
+            # Use var_table snapshots from each branch — NOT lower_value(arm->{value}).
+            # lower_value on a raw assignment node emits a fresh instruction that does
+            # not reflect nested merge phis. The snapshot holds the SSA ref LIVE AT
+            # THE END of each branch: for a nested-if branch, that is the inner merge
+            # phi ref; for a simple-assign branch, it is the assign's SSA ref.
+            my $then_ref = $then_var{$vd_id};
+            my $else_ref = $else_var{$vd_id};
+
+            # Fall back to '0' only for truly uninit variables.
+            $then_ref //= '0';
+            $else_ref //= '0';
+
+            # Look up the VarDecl repr for this phi.
+            my $var_repr  = $self->{_vd_repr}{$vd_id} // 'Int';
+            my $llvm_type = Chalk::IR::Target::LLVM::Context::_repr_to_llvm_type($var_repr);
+
+            my $phi_ref  = $self->_fresh;
+            my $phi_line = "  $phi_ref = phi $llvm_type "
+                         . "[ $then_ref, %$then_end_label ], "
+                         . "[ $else_ref, %$else_end_label ]"
+                         . "  ; elab phi (vd=$vd_id)";
+            $self->_emit($phi_line);
+            $self->{var_table}{$vd_id} = $phi_ref;
         }
 
-        if (defined $phi_key) {
-            my $phi_recs = $self->{elab_phi_by_block}{$phi_key} // [];
-            for my $phi_rec (@$phi_recs) {
-                my $incoming = $phi_rec->{incoming};
-                # incoming is [{ value => IR_node, from_branch => 'then'|'else' }, ...]
-                # Lower each incoming value; it was computed in then_block or else_block.
-                my @phi_arms;
-                my @branch_labels = ($then_end_label, $else_end_label);
-                for my $i (0 .. $#$incoming) {
-                    my $arm = $incoming->[$i];
-                    my $val_ref;
-                    if (defined $arm->{value}) {
-                        $val_ref = $self->lower_value($arm->{value});
-                    }
-                    else {
-                        # Uninit — use 0 as default for Int.
-                        $val_ref = '0';
-                    }
-                    push @phi_arms, "[ $val_ref, %$branch_labels[$i] ]";
-                }
-
-                # Look up the VarDecl repr for this phi.
-                my $vd_id   = $phi_rec->{vd_id};
-                my $var_repr = $self->{_vd_repr}{$vd_id} // 'Int';
-                my $llvm_type = Chalk::IR::Target::LLVM::Context::_repr_to_llvm_type($var_repr);
-
-                my $phi_ref = $self->_fresh;
-                my $phi_line = "  $phi_ref = phi $llvm_type " . join(', ', @phi_arms) . "  ; elab phi";
-                $self->_emit($phi_line);
-                $self->{var_table}{$vd_id} = $phi_ref;
-            }
-        }
-
-        # Wire explicit Phi nodes on the Region.
+        # Wire explicit Phi nodes on the Region (legacy path for hand-authored loops).
         $self->_wire_region_phis($region, $then_end_label, $else_end_label);
     }
 }

@@ -275,4 +275,134 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
         'E5: dominates(then, else) = false, cross-branch reference is invalid by construction');
 }
 
+# ---------------------------------------------------------------------------
+# E6: Nested-if with runtime-FALSE inner condition (MISCOMPILE repro).
+#
+# Perl:  my $x=0; if ($n>0) { if ($n>3){$x=3} else {$x=1} } else { $x=0 }; $x
+# With n=2: outer cond true, inner cond false -> x=1 (perl oracle).
+#
+# The bug (B1): _elaborate_if sets val_map{vd} = the RAW inner-then value (=3),
+# not the inner-merge phi (=1). The outer phi then arms are [3, 0], so on the
+# n=2 path (outer-then taken, inner-else taken) lli reads 3 instead of 1.
+#
+# Fix requirement: the outer phi for $x must arm with the inner-merge phi result
+# (whatever x holds at the END of the outer-then block), not the inner-then raw
+# assignment node. lli must agree with perl (=1).
+#
+# This test is written BEFORE the fix. It starts RED (lli=3, perl=1).
+# ---------------------------------------------------------------------------
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    # Constants
+    my $c0    = $f->make('Constant', value => '0', const_type => 'integer');
+    $c0->set_representation('Int');
+    my $c1    = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c3    = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+
+    # Variable $n = 2 (runtime value — chosen to make outer-cond TRUE, inner-cond FALSE)
+    my $nn   = $f->make('Constant', value => '$n', const_type => 'string');
+    my $vn   = $f->make('VarDecl', inputs => [$nn, $f->make('Constant', value => '2', const_type => 'integer')]);
+    $vn->set_representation('Int');
+    $vn->inputs->[1]->set_representation('Int');
+
+    my $rn   = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    $rn->set_representation('Int');
+
+    # Variable $x = 0
+    my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
+    my $vx   = $f->make('VarDecl', inputs => [$xn, $c0]);
+    $vx->set_representation('Int');
+
+    # Outer condition: $n > 0  (true for n=2)
+    my $cmp_out = $f->make('NumGt', inputs => [$rn, $c0]);
+    $cmp_out->set_representation('Bool');
+
+    # Inner condition: $n > 3  (false for n=2)
+    my $cmp_in = $f->make('NumGt', inputs => [$rn, $c3]);
+    $cmp_in->set_representation('Bool');
+
+    # Assignments
+    my $lhs3 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $lhs3->set_representation('Int');
+    my $as3  = $f->make('Assign', inputs => [$lhs3, $c3]);
+    $as3->set_representation('Int');
+
+    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $lhs1->set_representation('Int');
+    my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
+    $as1->set_representation('Int');
+
+    my $lhs0 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $lhs0->set_representation('Int');
+    my $as0  = $f->make('Assign', inputs => [$lhs0, $c0]);
+    $as0->set_representation('Int');
+
+    # Inner if: if ($n>3) { $x=3 } else { $x=1 }
+    my $inner_if  = $f->make('If', inputs => [$vx, $cmp_in]);
+    my $inner_p0  = $f->make('Proj', inputs => [$inner_if], index => 0);
+    my $inner_p1  = $f->make('Proj', inputs => [$inner_if], index => 1);
+    my $inner_reg = $f->make('Region', inputs => [$inner_p0, $inner_p1]);
+    $inner_if->set_region($inner_reg);
+    $as3->set_control_in($inner_p0);
+    $as1->set_control_in($inner_p1);
+
+    # Outer if: if ($n>0) { <inner_if> } else { $x=0 }
+    my $outer_if  = $f->make('If', inputs => [$vx, $cmp_out]);
+    my $outer_p0  = $f->make('Proj', inputs => [$outer_if], index => 0);
+    my $outer_p1  = $f->make('Proj', inputs => [$outer_if], index => 1);
+    my $outer_reg = $f->make('Region', inputs => [$outer_p0, $outer_p1]);
+    $outer_if->set_region($outer_reg);
+    $inner_if->set_control_in($outer_p0);
+    $as0->set_control_in($outer_p1);
+
+    # Control chain: $vn -> $vx -> $outer_if
+    $vx->set_control_in($vn);
+    $outer_if->set_control_in($vx);
+
+    # Return $x
+    my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $rx->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+    $ret->set_control_in($outer_if);
+
+    my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($ret);
+    my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($ret, $dom);
+
+    ok(defined $elab, 'E6: nested-if runtime-false elaboration succeeds');
+
+    # The elaboration must emit 2 phis: one at inner merge, one at outer merge.
+    my $phis = $elab->emitted_phis;
+    ok(scalar(@$phis) >= 2, 'E6: nested-if emits at least 2 phis (inner + outer merge)')
+        or diag('emitted_phis count: ' . scalar(@$phis));
+
+    SKIP: {
+        skip 'E6: lli not found', 5 unless -x $LLI;
+
+        my $ll;
+        eval { $ll = Chalk::IR::Target::LLVM->lower_with_elaboration($ret, $elab) };
+        ok(!$@, "E6: LLVM lowering succeeds (got: $@)");
+
+        SKIP: {
+            skip 'E6: LLVM lowering failed', 4 unless defined $ll;
+
+            unlike($ll, qr/Perl_/, 'E6 .ll: no Perl_ C-API');
+
+            my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+            binmode $fh, ':utf8';
+            print $fh $ll;
+            close $fh;
+
+            my $lli_out = qx($LLI $tmp 2>&1);
+            my $exit    = $? >> 8;
+            is($exit, 0, 'E6 .ll: lli exits cleanly');
+            chomp $lli_out;
+            # perl oracle: n=2, outer cond (2>0) true, inner cond (2>3) false -> x=1
+            is($lli_out, '1', 'E6: lli output is 1 (n=2, outer-true inner-false -> x=1) [B1+H1 repro]');
+        }
+    }
+}
+
 done_testing;
