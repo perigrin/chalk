@@ -1022,11 +1022,13 @@ sub _process_branch_from_if {
         return;
     }
 
-    # Walk consumers of the Proj node that are VarDecl/Assign/CompoundAssign
-    # side-effect nodes. These form the body of the branch.
+    # Walk consumers of the Proj node that are side-effect nodes (VarDecl,
+    # Assign, CompoundAssign) or nested If/Loop nodes. These form the body
+    # of the branch. Dispatch each through process_control_node so nested
+    # If nodes are handled recursively via _process_if_node.
     my @body_nodes = _collect_branch_body($proj);
     for my $body_node (@body_nodes) {
-        $self->lower_value($body_node);
+        $self->process_control_node($body_node);
     }
 
     $self->_set_terminator("  br label %$merge_label  ; if branch $branch_idx: jump to merge");
@@ -1383,9 +1385,16 @@ sub _collect_body_recursive {
 
     my $op = $node->can('operation') ? $node->operation : '';
 
-    # Side-effect nodes go into the body.
-    if ($op eq 'VarDecl' || $op eq 'Assign' || $op eq 'CompoundAssign') {
+    # Side-effect and control-flow nodes go into the body.
+    # If/Loop nodes in a branch are processed via process_control_node,
+    # which dispatches to _process_if_node/_process_loop_node for nested
+    # control flow.
+    if ($op eq 'VarDecl' || $op eq 'Assign' || $op eq 'CompoundAssign'
+        || $op eq 'If' || $op eq 'Loop') {
         push @$body, $node;
+        # Do NOT recurse further for If/Loop — their branch bodies are
+        # discovered from their own Proj consumers by _process_if_node.
+        return if $op eq 'If' || $op eq 'Loop';
     }
 
     # Recurse into consumers that have this node as a control predecessor.

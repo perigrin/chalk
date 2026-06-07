@@ -339,4 +339,112 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     }
 }
 
+# ---------------------------------------------------------------------------
+# L11: Loop node lowering — while ($n > 0) { $s += $n; $n-- }; $s
+#
+# $n=3, $s=0 initial. Loop sums 3+2+1=6.
+# Demonstrates: loop header phi, condition test, body updates, back-edge.
+# ---------------------------------------------------------------------------
+{
+    use Chalk::IR::Node::NumGt;
+    use Chalk::IR::Node::Subtract;
+    use Chalk::IR::Node::Add;
+    use Chalk::IR::Node::VarDecl;
+    use Chalk::IR::Node::PadAccess;
+    use Chalk::IR::Node::Loop;
+    use Chalk::IR::Node::Phi;
+    use Chalk::IR::Node::Proj;
+    use Chalk::IR::Node::Region;
+
+    my $f = Chalk::IR::NodeFactory->new;
+
+    # Preheader: n=3, s=0
+    my $c3   = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+    my $c0s  = $f->make('Constant', value => '0', const_type => 'integer');
+    $c0s->set_representation('Int');
+    my $c0   = $f->make('Constant', value => '0', const_type => 'integer');
+    $c0->set_representation('Int');
+    my $one  = $f->make('Constant', value => '1', const_type => 'integer');
+    $one->set_representation('Int');
+
+    my $nn   = $f->make('Constant', value => '$n', const_type => 'string');
+    my $sn   = $f->make('Constant', value => '$s', const_type => 'string');
+    my $vn   = $f->make('VarDecl', inputs => [$nn, $c3]);
+    $vn->set_representation('Int');
+    my $vs   = $f->make('VarDecl', inputs => [$sn, $c0s]);
+    $vs->set_representation('Int');
+
+    my $rn0  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    $rn0->set_representation('Int');
+    my $rs0  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    $rs0->set_representation('Int');
+
+    # Loop node (entry_ctrl = %vs)
+    my $loop = $f->make('Loop', inputs => [$vs, undef]);
+
+    # Phi nodes for loop-carried values
+    my $n_phi = $f->make('Phi', region => $loop, values => [$rn0]);
+    $n_phi->set_representation('Int');
+    my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]);
+    $s_phi->set_representation('Int');
+
+    # Condition: n_phi > 0
+    my $zero = $c0;  # re-use c0
+    my $cmp  = $f->make('NumGt', inputs => [$n_phi, $zero]);
+    $cmp->set_representation('Bool');
+
+    # Body: s_new = s_phi + n_phi; n_new = n_phi - 1
+    my $s_new = $f->make('Add', inputs => [$s_phi, $n_phi]);
+    $s_new->set_representation('Int');
+    my $n_new = $f->make('Subtract', inputs => [$n_phi, $one]);
+    $n_new->set_representation('Int');
+
+    # Wire backedges
+    $n_phi->set_backedge($n_new);
+    $s_phi->set_backedge($s_new);
+
+    # Proj/Region
+    my $body_proj = $f->make('Proj', inputs => [$loop], index => 0);
+    my $exit_proj = $f->make('Proj', inputs => [$loop], index => 1);
+    my $exit_region = $f->make('Region', inputs => [$exit_proj]);
+    $loop->set_region($exit_region);
+
+    # Wire body nodes as consumers of body_proj
+    $n_new->set_control_in($body_proj);
+    $s_new->set_control_in($body_proj);
+
+    # Return $s (the s_phi value at exit)
+    my $rs = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    $rs->set_representation('Int');
+
+    my $ret = $f->make_cfg('Return', inputs => [$s_phi]);
+    $vs->set_control_in($vn);
+    $loop->set_control_in($vs);
+    $ret->set_control_in($loop);
+
+    my $ll;
+    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    ok(!$@, "Loop node lowers without dying (got: $@)");
+
+    SKIP: {
+        skip 'Loop lowering failed', 5 unless defined $ll;
+
+        unlike($ll, qr/Perl_/, 'Loop .ll: no Perl_ C-API');
+        unlike($ll, qr/\bSV\b/, 'Loop .ll: no SV type');
+        like($ll, qr/phi i64/, 'Loop .ll: contains phi instruction');
+
+        my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+        binmode $fh, ':utf8';
+        print $fh $ll;
+        close $fh;
+
+        my $lli_out = qx($LLI $tmp 2>&1);
+        my $exit    = $? >> 8;
+        is($exit, 0, 'Loop .ll: lli exits cleanly');
+        chomp $lli_out;
+        is($lli_out, '6', "Loop .ll: lli output is 6 (sum 3+2+1=6)");
+    }
+}
+
 done_testing;

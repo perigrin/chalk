@@ -180,10 +180,11 @@ sub build_graph_from_ir {
     croak "build_graph_from_ir: ir_block must be defined" unless defined $ir_block;
 
     my $factory    = Chalk::IR::NodeFactory->new;
-    my %sym;            # %name -> node object
-    my $return_name;    # the %name handed to 'return'
-    my @control_seq;    # ordered list of %names from 'control:' line
-    my @branch_edges;   # [ [$from_name, $to_name], ... ] from branch_control: lines
+    my %sym;              # %name -> node object
+    my $return_name;      # the %name handed to 'return'
+    my @control_seq;      # ordered list of %names from 'control:' line
+    my @branch_edges;     # [ [$from_name, $to_name], ... ] from branch_control: lines
+    my @loop_backedges;   # [ [$phi_name, $val_name], ... ] from loop_backedge: lines
     my $has_nodes   = false;
 
     for my $raw_line (split /\n/, $ir_block) {
@@ -214,6 +215,15 @@ sub build_graph_from_ir {
         # cannot be expressed as a flat sequential chain.
         if ($line =~ /^branch_control:\s+(%\w+)\s*->\s*(%\w+)\s*$/) {
             push @branch_edges, [$1, $2];
+            next;
+        }
+
+        # 'loop_backedge: %phi -> %body_val'
+        # Sets the backedge (inputs[1]) of a loop Phi node after the body
+        # computation is defined, resolving the circular reference inherent
+        # in SSA loop phis. Calls phi->set_backedge($body_val).
+        if ($line =~ /^loop_backedge:\s+(%\w+)\s*->\s*(%\w+)\s*$/) {
+            push @loop_backedges, [$1, $2];
             next;
         }
 
@@ -277,6 +287,20 @@ sub build_graph_from_ir {
         croak "build_graph_from_ir: branch_control: to '$to_name' undefined"
             unless exists $sym{$to_name};
         $sym{$to_name}->set_control_in($sym{$from_name});
+    }
+
+    # Wire loop_backedge edges: set inputs[1] on Phi nodes for loop-carried values.
+    for my $edge (@loop_backedges) {
+        my ($phi_name, $val_name) = @$edge;
+        croak "build_graph_from_ir: loop_backedge: phi '$phi_name' undefined"
+            unless exists $sym{$phi_name};
+        croak "build_graph_from_ir: loop_backedge: value '$val_name' undefined"
+            unless exists $sym{$val_name};
+        my $phi_node = $sym{$phi_name};
+        my $val_node = $sym{$val_name};
+        croak "build_graph_from_ir: loop_backedge: '$phi_name' is not a Phi node"
+            unless $phi_node->can('operation') && $phi_node->operation eq 'Phi';
+        $phi_node->set_backedge($val_node);
     }
 
     # Post-build pass: wire Region->head back-pointers.
