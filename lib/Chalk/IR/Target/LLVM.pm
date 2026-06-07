@@ -501,8 +501,11 @@ sub _lower_vardecl {
     }
 
     # Store the SSA value in the var_table under this VarDecl's id.
-    $self->{var_table}{ $node->id } = $init_ref;
-    $self->{cache}{ $node->id }     = $init_ref;
+    # Also record the representation for this VarDecl so the if/else merge
+    # phi can derive the correct LLVM type (B2 fix).
+    $self->{var_table}{ $node->id }  = $init_ref;
+    $self->{cache}{ $node->id }      = $init_ref;
+    $self->{_vd_repr}{ $node->id }   = $repr;
     return $init_ref;
 }
 
@@ -857,8 +860,9 @@ sub _lower_proj {
 # labels to emit:
 #   %result = phi i64 [ %val_from_pred0, %pred0_label ], [ %val_from_pred1, %pred1_label ]
 #
-# ADVERSARIAL GUARD: a Phi with no incoming values (empty inputs) must die
-# loudly — an empty phi is undef-poisoned IR that would silently miscompile.
+# ADVERSARIAL GUARD: a Phi with missing or undef incoming values must die
+# loudly — empty or partially-undef inputs produce undef-poisoned phi IR
+# that lli would silently miscompile.
 sub _lower_phi {
     my ($self, $node) = @_;
 
@@ -867,6 +871,18 @@ sub _lower_phi {
         die "LLVM backend: Phi node has no incoming values (empty inputs) — "
           . "a missing predecessor edge would produce undef-poisoned phi IR; "
           . "every Phi must have at least one incoming value per predecessor block";
+    }
+
+    # Extended guard: reject any undef slot in the inputs array (H4/H5).
+    # An undef incoming value means a predecessor edge was not wired — the
+    # resulting phi instruction would reference an undefined SSA name, causing
+    # a verifier error or silent miscompile in lli.
+    for my $i (0 .. $#$inputs) {
+        unless (defined $inputs->[$i]) {
+            die "LLVM backend: Phi node (id=" . $node->id . ") has undef incoming "
+              . "value at slot $i — every phi incoming slot must be a valid node "
+              . "(missing predecessor wire); this would produce invalid phi IR";
+        }
     }
 
     # The phi instruction has already been emitted by the if/loop lowering
@@ -982,22 +998,30 @@ sub _process_if_node {
     # Merge block: emit phi for each variable that was assigned in either branch.
     $self->_new_block($merge_label);
 
-    # Find variables that differ between then/else branches and need phi nodes.
+    # Union-SSA merge: the phi set is every variable whose ref CHANGED in EITHER
+    # branch vs the pre-branch snapshot. For the branch that did NOT modify a
+    # variable, use the pre-branch ref as that edge's incoming value.
+    # This handles both the both-branch and one-branch-assign cases correctly.
     my %all_vd_ids = (%then_vars, %else_vars);
-    for my $vd_id (keys %all_vd_ids) {
-        my $then_ref = $then_vars{$vd_id};
-        my $else_ref = $else_vars{$vd_id};
-        next unless defined $then_ref && defined $else_ref;
-        next if $then_ref eq $else_ref;    # same SSA ref — no phi needed
+    for my $vd_id (sort keys %all_vd_ids) {
+        my $then_ref = $then_vars{$vd_id} // $pre_branch_vars{$vd_id};
+        my $else_ref = $else_vars{$vd_id} // $pre_branch_vars{$vd_id};
 
-        # Find the repr from the pre-branch snapshot (or use Int as fallback).
+        # Skip vars that have no SSA value in either branch (e.g. vars only
+        # declared inside a branch body that aren't accessible after the merge).
+        next unless defined $then_ref && defined $else_ref;
+
+        # Skip if both branches carry the same SSA ref (no assignment in either).
+        next if $then_ref eq $else_ref;
+
+        # Determine the LLVM type for this phi from the VarDecl's representation.
+        # Look up the VarDecl node via _vd_repr_table (populated by _lower_vardecl).
+        my $var_repr = $self->{_vd_repr}{$vd_id} // 'Int';
+        my $llvm_type = _repr_to_llvm_type($var_repr);
+
         my $phi_ref   = $self->_fresh;
-        # For now, assume Int for all phi merges; the typed harness ensures
-        # both branches produce the same representation.
-        $self->_emit("  $phi_ref = phi i64 [ $then_ref, %$then_end_label ], [ $else_ref, %$else_end_label ]  ; if/else phi");
+        $self->_emit("  $phi_ref = phi $llvm_type [ $then_ref, %$then_end_label ], [ $else_ref, %$else_end_label ]  ; if/else phi");
         $self->{var_table}{$vd_id} = $phi_ref;
-        # Store in cache under the Phi node id if the Region has one.
-        # Also update any Phi node in the graph that corresponds to this VarDecl.
     }
 
     # Wire any explicit Phi nodes attached to this Region into the cache.
@@ -1198,45 +1222,59 @@ sub _process_loop_node {
 }
 
 # _lower_loop_condition: find and lower the condition value for a loop header.
-# The condition is a Bool value consumed by the If node that drives the loop,
-# OR it is determined by looking at consumers of the Loop node.
+#
+# Selection strategy (structural, not heuristic):
+#
+#   1. Find a comparison node whose control_in is the Loop node itself. This
+#      is the canonical structural link authored by ir-block builders to mark
+#      the condition as belonging to the header branch (not the body). Return
+#      the first such node found (only one should be wired this way).
+#
+#   2. Fallback: walk consumers of each loop-header Phi and return the first
+#      icmp-predicate node found. This covers older ir-block graphs that do
+#      not wire control_in on the condition. Iterate in sorted-id order for
+#      determinism (CLAUDE.md: sort all hash iteration).
+#
+# The structural strategy is preferred because the fallback is ambiguous when
+# the loop body contains its own comparisons that also consume the induction
+# phi — a first-icmp heuristic would pick the body comparison instead of the
+# header condition (H3 bug).
 sub _lower_loop_condition {
     my ($self, $loop_node) = @_;
 
-    # The loop condition is encoded as a consumer of the Loop node.
-    # The convention used by the ir-block builder: a NumGt/NumLt/etc. node
-    # whose inputs include the loop-header phi (for the induction variable)
-    # and a limit constant. This is attached as a consumer via the Proj 0 chain.
-    # We find it by looking at the body Proj's consumers for an If-like node,
-    # or by looking at what nodes consume the loop phis.
+    # Strategy 1: structural — look for a comparison whose control_in is
+    # the loop node. This link is set by the ir-block author via
+    # $cond->set_control_in($loop) to mark the header condition explicitly.
+    my $loop_consumers = $loop_node->consumers // [];
+    for my $c (@$loop_consumers) {
+        next unless defined $c && $c->can('operation');
+        next unless exists $ICMP_PREDICATE{ $c->operation };
+        # This comparison has the loop as its control predecessor — it is the
+        # header branch condition, not a body comparison.
+        return $self->lower_value($c);
+    }
 
-    # Strategy: walk consumers of Loop to find condition. The condition must
-    # have already been partially defined via the loop phi SSA values.
-    # For the ir-block authored form, the condition node is a direct consumer
-    # of one of the loop phi nodes.
+    # Strategy 2: fallback — first icmp consumer of any loop phi.
+    # Collect all phi-consumer icmps, sort by node id for determinism.
+    my @candidates;
     for my $phi_node (_collect_loop_phis($loop_node)) {
         my $consumers = $phi_node->consumers // [];
         for my $consumer (@$consumers) {
             next unless defined $consumer && $consumer->can('operation');
-            my $cop = $consumer->operation;
-            if (exists $ICMP_PREDICATE{$cop}) {
-                return $self->lower_value($consumer);
-            }
+            next unless exists $ICMP_PREDICATE{ $consumer->operation };
+            push @candidates, $consumer;
         }
     }
-
-    # Fallback: look at consumers of the loop node itself for an If node.
-    my $loop_consumers = $loop_node->consumers // [];
-    for my $c (@$loop_consumers) {
-        next unless defined $c && $c->can('operation');
-        if ($c->operation eq 'Proj') {
-            # Body proj (index 0): its consumers may include condition-testing nodes.
-            # Already handled above via phi consumers.
-        }
+    if (@candidates) {
+        # Sort by id for deterministic selection (earliest-constructed condition
+        # is the induction-variable test in well-structured loops).
+        my ($first) = sort { $a->id cmp $b->id } @candidates;
+        return $self->lower_value($first);
     }
 
     die "LLVM backend: could not find loop condition — the loop ir-block must "
       . "express the condition as a comparison (NumGt/NumLt/etc.) that "
+      . "either has control_in wired to the Loop node (structural) or "
       . "consumes a loop-header Phi (the induction variable)";
 }
 
@@ -1275,37 +1313,33 @@ sub _collect_loop_phis {
 # _find_phi_backedge_value: find the backedge value for a Loop phi node.
 # The backedge value is the SSA ref of the updated variable at the end of
 # the loop body — i.e. the value in var_table after the body ran.
+#
+# Primary strategy: read inputs[1] of the Phi, which is the explicitly wired
+# backedge value (set via set_backedge after the body is constructed). Lower
+# it to get the SSA ref produced by the body update.
+#
+# Fallback strategy: if inputs[1] is absent, look in body_vars for the VarDecl
+# that this phi tracks (via _phi_to_vd). Iterate in sorted key order so the
+# result is deterministic across Perl hash-iteration orders.
 sub _find_phi_backedge_value {
     my ($self, $phi_node, $body_vars, $fallback_ref) = @_;
 
-    # Look for VarDecl nodes that are consumers of this Phi, then check
-    # if body_vars has an updated value for that VarDecl.
-    my $consumers = $phi_node->consumers // [];
-    for my $c (@$consumers) {
-        next unless defined $c && $c->can('operation');
-        # The backedge input is inputs[1] of the Phi itself (if already wired).
-        # For the ir-block form, the backedge value is the Assign/CompoundAssign
-        # result in the body. Look at what drives inputs[1].
-    }
-
-    # Try inputs[1] of the phi (the backedge wire, if set).
+    # Primary: use inputs[1] of the phi (the explicitly wired backedge).
     my $inputs = $phi_node->inputs;
     if (defined $inputs && scalar @$inputs >= 2 && defined $inputs->[1]) {
-        # Lower the backedge value.
         my $backedge_ref = $self->lower_value($inputs->[1]);
         return $backedge_ref if defined $backedge_ref;
     }
 
-    # Fallback: look in body_vars for a VarDecl that corresponds to this phi.
-    # The phi's region is the Loop; the phi's inputs[0] is the init value.
-    # Find the VarDecl whose var_table entry was updated during the body.
-    for my $vd_id (keys %$body_vars) {
+    # Fallback: look in body_vars for the VarDecl this phi tracks.
+    # Sort keys for deterministic iteration (CLAUDE.md: sort all hash iteration).
+    for my $vd_id (sort keys %$body_vars) {
         my $body_ref = $body_vars->{$vd_id};
-        # Skip if the body value is the same as the phi_ref (no update).
+        # Skip if the body value is unchanged from the phi_ref (no update).
         next if $body_ref eq $fallback_ref;
-        # If the phi was tracking this vd_id, return the body value.
-        if (defined $self->{_phi_to_vd}{$phi_node->id}
-            && $self->{_phi_to_vd}{$phi_node->id} eq $vd_id) {
+        # Check if this phi is known to track this vd_id (set by _update_var_table_for_phi).
+        if (defined $self->{_phi_to_vd}{ $phi_node->id }
+            && $self->{_phi_to_vd}{ $phi_node->id } eq $vd_id) {
             return $body_ref;
         }
     }
