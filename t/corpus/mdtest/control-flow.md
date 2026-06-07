@@ -9,23 +9,16 @@ All other idioms require LLVM basic blocks, `br`, and either `phi` (D1-D5, D7) o
 `landingpad` (D8) — none of which are in the current literal-arithmetic lowering
 slice.
 
-One builder gap is reported below: the constructive ir-block builder parses binary
-(2-input) and unary (1-input) op forms but has no 3-input form. TernaryExpr takes
-three inputs (condition, true-branch, false-branch) and cannot be expressed in the
-current named-SSA syntax. The LLVM backend does support TernaryExpr via `select`;
-the gap is in the markdown builder, not the lowering pass.
-
 ## D6 ternary (n>0 ? 1 : 2)
 
-The ternary `$n > 0 ? 1 : 2` compiles to a NumGt comparison (producing an i1
-Bool) fed into a TernaryExpr (LLVM `select i1`). No branches, no phi — the only
+The ternary `$n > 0 ? 1 : 2` compiles to a NumGt comparison (producing a Bool/i1)
+fed into a TernaryExpr (LLVM `select i1`). No branches, no phi — the only
 runtime-free control-flow idiom in this topic.
 
-Builder gap: the named-SSA syntax handles `Op(%a, %b)` for binary ops and `Op(%a)`
-for unary ops, but has no 3-input form. `TernaryExpr(%cond, %true, %false)` needs
-three named inputs. The LLVM backend (`_lower_ternary` in Target::LLVM) supports
-this op; the gap is in the constructive markdown builder. Once a 3-input form is
-added to the builder, this case becomes GREEN.
+The named-SSA builder uses the 3-input form `TernaryExpr(%cond, %then, %else)`
+to build the graph: `%cmp` is the NumGt (Bool repr), `%c1`/`%c2` are the Int
+branch constants, and `%tern` is the TernaryExpr (Int repr). The LLVM backend
+lowers this to `select i1 %cmp, i64 1, i64 2`.
 
 ```perl
 # source
@@ -40,7 +33,18 @@ context: scalar
 ```
 
 ```ir
-L: GAP(builder: TernaryExpr needs 3 inputs but binary-op pattern handles 2 args only; LLVM backend supports this op via select i1)
+%n    = Constant(5) :Int
+%zero = Constant(0) :Int
+%cmp  = NumGt(%n, %zero) :Bool
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%tern = TernaryExpr(%cmp, %c1, %c2) :Int
+%xn   = Constant("$x") :Str
+%vx   = VarDecl(%xn, %tern) :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx
+L: GREEN
 ```
 
 ## D1 if/else

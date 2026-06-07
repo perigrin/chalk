@@ -338,22 +338,46 @@ sub _build_node_from_rhs {
             inputs  => [ $sym->{$vd_name} ]);
     }
 
-    # Binary ops: Op(%a, %b)
-    if ($rhs =~ /^(\w+)\(\s*(%\w+)\s*,\s*(%\w+)\s*\)$/) {
-        my ($op, $a_name, $b_name) = ($1, $2, $3);
-        croak "build_graph_from_ir: $op first operand '$a_name' undefined at $name"
-            unless exists $sym->{$a_name};
-        croak "build_graph_from_ir: $op second operand '$b_name' undefined at $name"
-            unless exists $sym->{$b_name};
-        return $factory->make($op, inputs => [ $sym->{$a_name}, $sym->{$b_name} ]);
-    }
+    # General N-ary ops with optional keyword args:
+    #   Op(%a, %b, %c)                    — N input references, no attrs
+    #   Op(%a, %b, key: value)            — inputs + keyword attrs
+    #   Op(%a, key: "quoted", key2: bare) — mixed inputs and attrs
+    #
+    # Grammar: Op(arg, arg, ...) where each arg is either:
+    #   %name        — an input reference (resolved from symbol table)
+    #   key: value   — a keyword attr (passed to make() as a named pair)
+    # Values may be a quoted string "..." or a bare token.
+    if ($rhs =~ /^(\w+)\(\s*(.*)\s*\)$/s) {
+        my ($op, $args_raw) = ($1, $2);
 
-    # Unary ops: Op(%a)
-    if ($rhs =~ /^(\w+)\(\s*(%\w+)\s*\)$/) {
-        my ($op, $a_name) = ($1, $2);
-        croak "build_graph_from_ir: $op operand '$a_name' undefined at $name"
-            unless exists $sym->{$a_name};
-        return $factory->make($op, inputs => [ $sym->{$a_name} ]);
+        # Split on commas, but only top-level commas (no nesting in our grammar).
+        my @raw_args = split /\s*,\s*/, $args_raw;
+
+        my @inputs;
+        my %attrs;
+
+        for my $arg (@raw_args) {
+            $arg =~ s/^\s+|\s+$//g;
+            next unless length $arg;
+
+            if ($arg =~ /^(%\w+)$/) {
+                # Input reference
+                my $ref = $1;
+                croak "build_graph_from_ir: $op input '$ref' undefined at $name"
+                    unless exists $sym->{$ref};
+                push @inputs, $sym->{$ref};
+            } elsif ($arg =~ /^(\w+)\s*:\s*"(.*)"$/) {
+                # Keyword attr: key: "quoted string"
+                $attrs{$1} = $2;
+            } elsif ($arg =~ /^(\w+)\s*:\s*(\S+)$/) {
+                # Keyword attr: key: bare_token
+                $attrs{$1} = $2;
+            } else {
+                croak "build_graph_from_ir: $op cannot parse arg '$arg' at $name";
+            }
+        }
+
+        return $factory->make($op, inputs => \@inputs, %attrs);
     }
 
     croak "build_graph_from_ir: could not parse RHS '$rhs' for $name";

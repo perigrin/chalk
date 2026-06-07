@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the control-flow mdtest corpus topic (constructive format).
-# ABOUTME: Exercises D1-D8 control-flow idioms: D6 is a builder GAP (TernaryExpr 3-input); D1-D5/D7/D8 are LLVM GAPs.
+# ABOUTME: Exercises D1-D8 control-flow idioms: D6 is GREEN (TernaryExpr -> select i1); D1-D5/D7/D8 are LLVM GAPs.
 use 5.42.0;
 use utf8;
 
@@ -50,13 +50,12 @@ ok((grep { /D8.*try/i }     @titles),    'case: D8 try/catch present');
 # For each case:
 #   - behavior check must PASS (perl oracle vs declared return value)
 #   - ir-shape check must not FAIL (pure-GAP blocks trivially pass)
-#   - L-verdict check must PASS (declared GAP matches actual GAP)
+#   - L-verdict check must PASS (declared verdict matches actual verdict)
 #
-# The CRITICAL assertion: ALL 8 cases declare L: GAP.
-# D6 is a builder GAP (not an LLVM-lowering GAP — the LLVM backend supports
-# TernaryExpr — but the markdown builder cannot construct a 3-input node from
-# the current named-SSA syntax, so the ir block is correctly written as pure-GAP).
-# D1-D5/D7/D8 are genuine LLVM GAPs (no basic-block lowering).
+# D6 declares L: GREEN — the 3-input TernaryExpr builder builds the graph
+# and the LLVM backend lowers it via select i1.  lli output must match perl.
+# D1-D5/D7/D8 are genuine LLVM GAPs (br + phi or landingpad not in the
+# current lowering slice).
 # ---------------------------------------------------------------------------
 
 for my $case (@$cases) {
@@ -87,58 +86,73 @@ for my $case (@$cases) {
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 3: Verify ALL cases declare L: GAP (none claim GREEN)
+# SECTION 3: Verify L-verdict declarations per case
 #
-# A control-flow case claiming GREEN when the LLVM backend cannot lower it
-# would be dishonest.  D6 specifically: the LLVM _lower_ternary exists but
-# the builder has no 3-input form — the correct answer is to GAP the ir
-# block, not to hand-wave a GREEN.  If the builder gains a 3-input form in
-# the future, this guard must be removed for D6 only at that time.
+# D6 declares L: GREEN — the 3-input TernaryExpr builder can now construct
+# the graph, and the LLVM backend lowers it via select i1.
+# D1-D5, D7, D8 all declare L: GAP (br + phi or landingpad not yet in the
+# lowering slice).
 # ---------------------------------------------------------------------------
 
-subtest 'all 8 control-flow cases declare L: GAP (none claim GREEN)' => sub {
+subtest 'D6 declares L: GREEN; D1-D5/D7/D8 declare L: GAP' => sub {
     plan tests => 8;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
-        my $decl = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
-        is($decl, 'GAP',
-            "case '$case->{title}': declared L: GAP (not GREEN)");
+        my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
+        my $title   = $case->{title};
+        if ($title =~ /D6.*ternary/i) {
+            is($decl, 'GREEN', "case '$title': declared L: GREEN (TernaryExpr via select i1)");
+        } else {
+            is($decl, 'GAP',   "case '$title': declared L: GAP (not lowerable as straight-line code)");
+        }
     }
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 4: Builder gap audit for D6
+# SECTION 4: D6 constructive proof — TernaryExpr builds and lowers correctly
 #
-# Verify that build_graph_from_ir correctly handles the pure-GAP block for D6
-# (returns undef, does not croak) — the block has no node lines, only L: GAP.
-# This confirms the corpus format is correct even for the builder-gap case.
+# D6 now has a constructive ir block (not pure-GAP). Verify that:
+#   - build_graph_from_ir builds a real TernaryExpr graph from the block
+#   - the built graph lowers via LLVMDriver without being marked_unsupported
+#   - lli output is 1 (5 > 0 is true, select branch 1)
+#   - lli output matches the perl oracle (also 1)
+# This is the load-bearing proof that D6 is truly GREEN, not just claimed GREEN.
 # ---------------------------------------------------------------------------
 
-subtest 'D6 pure-GAP block: build_graph_from_ir returns undef (no nodes to build)' => sub {
+subtest 'D6 constructive proof: TernaryExpr builds and lowers to 1 via lli' => sub {
     my ($d6_case) = grep { $_->{title} =~ /D6.*ternary/i } @$cases;
     ok(defined $d6_case, 'D6 case found');
 
     my $ir_text = $d6_case->{ir} // '';
 
-    # The D6 ir block is pure-GAP (only an L: GAP line, no %name = ... lines)
+    # The D6 ir block now has node lines (not pure-GAP)
     my $return_node;
     eval {
         $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text);
     };
     ok(!$@, "D6 build_graph_from_ir does not croak (got: $@)")
         or diag("build error: $@");
-    ok(!defined $return_node,
-        'D6 build_graph_from_ir returns undef for pure-GAP block');
+    ok(defined $return_node, 'D6 build_graph_from_ir returns a defined Return node');
 
-    # The L verdict must be GAP
+    # The L verdict must be GREEN
     my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
-    is($verdict, 'GAP', 'D6 ir block declares L: GAP');
+    is($verdict, 'GREEN', 'D6 ir block declares L: GREEN');
+
+    if (defined $return_node) {
+        my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
+        ok(!$meta->{marked_unsupported},
+            'D6 TernaryExpr graph is truly GREEN (not marked_unsupported)');
+        my $lli_out = $L->return_values->[0] // '';
+        is($lli_out, '1', "D6 lli output is 1 (5>0 true -> select then-branch)");
+        is($lli_out, $d6_case->{_perl_actual} // '1',
+            "D6 lli output matches perl oracle");
+    }
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 5: Negative guard — a control-flow case claiming GREEN must FAIL
+# SECTION 5: Negative guard — a non-lowerable control-flow case claiming GREEN must FAIL
 #
-# If someone edits a control-flow case to claim L: GREEN without actually
+# If someone edits a D1-D5/D7/D8 case to claim L: GREEN without actually
 # building a lowerable graph, the runner must catch the lie.  We test this
 # with a fake if/else case that claims GREEN — the pure-GAP block (no nodes)
 # combined with a GREEN claim is the inconsistency the runner detects.

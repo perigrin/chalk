@@ -5,20 +5,9 @@ read-modify-write (RMW): read the current value, add 1, write the result
 back to the variable slot, then return the post-write value. Both produce
 the same return value when `return $i` follows the increment.
 
-The RMW write-back is represented here with `Assign` — the natural Chalk IR
-node for a plain `=` write-back. The more precise node for `++$i` in the
-full compiler is `CompoundAssign(op => '+=')`, but the constructive
-`build_graph_from_ir` builder in `MdtestCorpus.pm` does not support
-`CompoundAssign` because it requires an extra `op` parameter that the
-current named-SSA binary-op pattern (`Op(%a, %b)`) cannot convey. `Assign`
-is semantically equivalent for the purpose of `return $i` (the return
-reads the post-write value regardless of how the write was encoded). The
-LLVM target handles both `Assign` and `CompoundAssign` through the same
-`_lower_assign` code path.
-
-Builder gap noted: once the named-SSA syntax gains a keyword-arg form
-(e.g. `CompoundAssign(%lhs, %rhs, op: "+=")`) the `Assign` here should be
-replaced with `CompoundAssign` for full IR fidelity.
+The RMW write-back uses `CompoundAssign(op: "+=")` — the accurate Chalk IR
+node for pre/post-increment. The LLVM target handles `CompoundAssign` through
+the same `_lower_assign` code path as plain `Assign`.
 
 The B1 stale-read guard does NOT fire on these cases because the RMW
 internal read (`$i_r`), the lhs slot (`$i_l`), and the final return read
@@ -49,7 +38,7 @@ context: scalar
 %read  = PadAccess(%vd, "$i_r") :Int    # RMW internal read — distinct node from final read
 %add   = Add(%read, %c1) :Int
 %lhs   = PadAccess(%vd, "$i_l") :Int    # lhs slot for write-back — distinct from read nodes
-%ca    = Assign(%lhs, %add) :Int        # write-back (Assign stands in for CompoundAssign += 1)
+%ca    = CompoundAssign(%lhs, %add, op: "+=") :Int   # write-back: ++$i is a += 1
 %ret_r = PadAccess(%vd, "$i") :Int      # final return read — distinct from RMW read
 return %ret_r
 control: %vd -> %ca
@@ -81,7 +70,7 @@ context: scalar
 %read  = PadAccess(%vd, "$i_r") :Int    # RMW internal read — distinct node from final read
 %add   = Add(%read, %c1) :Int
 %lhs   = PadAccess(%vd, "$i_l") :Int    # lhs slot for write-back
-%ca    = Assign(%lhs, %add) :Int        # write-back (same side-effect shape as K1)
+%ca    = CompoundAssign(%lhs, %add, op: "+=") :Int   # write-back: $i++ side-effect is += 1
 %ret_r = PadAccess(%vd, "$i") :Int      # final return read — distinct from RMW read
 return %ret_r
 control: %vd -> %ca

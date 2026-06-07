@@ -15,13 +15,8 @@ slot, and the final return read must use DISTINCT `PadAccess` nodes. This is
 done by giving each a unique `varname` string (`$x_r` for the internal read,
 `$x_l` for the write-back lhs, `$x` for the result read). The LLVM target
 handles both `Assign` and `CompoundAssign` through the same `_lower_assign`
-code path; the corpus uses `Assign` here because the named-SSA binary-op
-builder pattern (`Op(%a, %b)`) cannot convey the extra `op` parameter that
-`CompoundAssign` requires.
-
-Builder gap noted: once the named-SSA syntax gains a keyword-arg form
-(e.g. `CompoundAssign(%lhs, %rhs, op: "+=")`) the `Assign` here should be
-replaced with `CompoundAssign` for full IR fidelity.
+code path. The named-SSA builder supports the keyword-arg form
+`CompoundAssign(%lhs, %rhs, op: "+=")` for the `op` parameter.
 
 ## A1 my-decl with init and read
 
@@ -151,12 +146,13 @@ of `$x`, add `2`, write the result back to `$x`.
 
 RMW requires three distinct `PadAccess` nodes to avoid the B1 stale-read
 guard: the internal read (`$x_r`, for the Add input), the lhs write-back slot
-(`$x_l`, for the Assign lhs), and the result read (`$x`, for the Return).
+(`$x_l`, for the CompoundAssign lhs), and the result read (`$x`, for the Return).
 Using distinct varnames gives each a unique content hash, so they are
 separate nodes in the graph and no poisoning occurs.
 
-The compound assignment is modelled with `Assign` (write-back after explicit
-`Add`). See the file header for the builder-gap note on `CompoundAssign`.
+The compound assignment is modelled with `CompoundAssign(op: "+=")` — the
+accurate node for `$x += 2`. The `op` keyword arg distinguishes it from plain
+`Assign` and distinguishes different compound operators from each other.
 
 ```perl
 # source
@@ -176,9 +172,9 @@ context: scalar
 %read  = PadAccess(%vx, "$x_r") :Int
 %sum   = Add(%read, %two) :Int
 %lhs   = PadAccess(%vx, "$x_l") :Int
-%as    = Assign(%lhs, %sum) :Int
+%ca    = CompoundAssign(%lhs, %sum, op: "+=") :Int
 %rx    = PadAccess(%vx, "$x") :Int
 return %rx
-control: %vx -> %as
+control: %vx -> %ca
 L: GREEN
 ```

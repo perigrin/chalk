@@ -220,11 +220,19 @@ L: GREEN
 ```
 
 Grammar:
-- `%name = Op(args...) :Repr` — bind a node. `args` are `%name` references OR
-  literals for leaf attributes (e.g. `Constant(1)`, `PadAccess($x)`). `:Repr` is
-  the representation (Int/Num/Str/Scalar/Bool/...), omittable when undef.
+- `%name = Op(args...) :Repr` — bind a node. `args` is a comma-separated list
+  where each element is either a `%name` reference (an input) or a `key: value`
+  keyword attr. `:Repr` is the representation (Int/Num/Str/Scalar/Bool/...),
+  omittable when undef.
+  - **N-ary inputs**: any number of `%name` references map to `inputs => [...]`
+    in order. Example: `%t = TernaryExpr(%cond, %then, %else) :Int` builds a
+    3-input TernaryExpr.
+  - **Keyword attrs**: trailing `key: value` pairs (after all `%name` inputs)
+    become named parameters on `make()`. Values may be a quoted string `"..."` or
+    a bare token. Example: `%ca = CompoundAssign(%lhs, %rhs, op: "+=") :Int`.
 - `Coerce(%x : From -> To)` — an explicit coercion node wrapping `%x`
-  (e.g. `%cd3 = Coerce(%c3 : Int -> Num) :Num`).
+  (e.g. `%cd3 = Coerce(%c3 : Int -> Num) :Num`). This is a special form for the
+  Coerce node (not the general kwarg syntax).
 - `return %name` — the (synthetic) Return over a value; the runner builds the
   Return node + wires control.
 - `control: %a -> %b -> %c` (optional) — declares the control_in chain for
@@ -258,6 +266,38 @@ arith-div (Coerce edges):
 %d4  = Coerce(%c4 : Int -> Num) :Num
 %div = Divide(%d3, %d4) :Num
 return %div
+L: GREEN
+```
+
+D6 ternary (N-ary 3-input form + NumGt Bool comparison):
+```
+%n    = Constant(5) :Int
+%zero = Constant(0) :Int
+%cmp  = NumGt(%n, %zero) :Bool            # binary op -> Bool/i1
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%tern = TernaryExpr(%cmp, %c1, %c2) :Int  # 3-input N-ary form -> LLVM select i1
+%xn   = Constant("$x") :Str
+%vx   = VarDecl(%xn, %tern) :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx
+L: GREEN
+```
+
+C2 compound assign (keyword-arg form for op parameter):
+```
+%one   = Constant(1) :Int
+%xname = Constant("$x") :Str
+%vx    = VarDecl(%xname, %one) :Int
+%two   = Constant(2) :Int
+%read  = PadAccess(%vx, "$x_r") :Int
+%sum   = Add(%read, %two) :Int
+%lhs   = PadAccess(%vx, "$x_l") :Int
+%ca    = CompoundAssign(%lhs, %sum, op: "+=") :Int  # kwarg: op distinguishes += from -=
+%rx    = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx -> %ca
 L: GREEN
 ```
 

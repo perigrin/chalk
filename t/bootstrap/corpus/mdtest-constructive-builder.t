@@ -177,4 +177,136 @@ END_IR
     is($gap_verdict,   'GAP',   'GAP verdict parsed from ir block');
 }
 
+# Test 9: N-ary (3-input) op form — TernaryExpr(%cond, %then, %else)
+# This tests the generalized N-input form of the builder.
+{
+    my $ir_block = <<'END_IR';
+%n    = Constant(5) :Int
+%zero = Constant(0) :Int
+%cmp  = NumGt(%n, %zero) :Bool
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%tern = TernaryExpr(%cmp, %c1, %c2) :Int
+return %tern
+L: GREEN
+END_IR
+
+    my $return_node;
+    eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_block) };
+    ok(!$@, "3-input TernaryExpr block builds without error (got: $@)");
+    ok(defined $return_node, '3-input TernaryExpr block returns a defined Return node');
+
+    if (defined $return_node) {
+        my $tern = $return_node->inputs->[0];
+        isa_ok($tern, 'Chalk::IR::Node::TernaryExpr',
+            'Return input is a TernaryExpr node');
+        is($tern->representation, 'Int', 'TernaryExpr has Int representation');
+
+        my $tern_inputs = $tern->inputs;
+        is(scalar(@$tern_inputs), 3, 'TernaryExpr has exactly 3 inputs');
+        isa_ok($tern_inputs->[0], 'Chalk::IR::Node::NumGt',
+            'TernaryExpr cond input is NumGt');
+        is($tern_inputs->[0]->representation, 'Bool', 'cond (NumGt) has Bool repr');
+        is($tern_inputs->[1]->value, '1', 'then-branch constant is 1');
+        is($tern_inputs->[2]->value, '2', 'else-branch constant is 2');
+    }
+}
+
+# Test 10: kwarg form — CompoundAssign(%lhs, %rhs, op: "+=")
+# This tests that trailing key: value pairs become :param attrs on make().
+{
+    my $ir_block = <<'END_IR';
+%c1   = Constant(1) :Int
+%xn   = Constant("$x") :Str
+%vx   = VarDecl(%xn, %c1) :Int
+%c2   = Constant(2) :Int
+%read = PadAccess(%vx, "$x_r") :Int
+%sum  = Add(%read, %c2) :Int
+%lhs  = PadAccess(%vx, "$x_l") :Int
+%ca   = CompoundAssign(%lhs, %sum, op: "+=") :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx -> %ca
+L: GREEN
+END_IR
+
+    my $return_node;
+    eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_block) };
+    ok(!$@, "kwarg CompoundAssign block builds without error (got: $@)");
+    ok(defined $return_node, 'kwarg CompoundAssign block returns a defined Return node');
+
+    if (defined $return_node) {
+        # Walk up to find the CompoundAssign in the control chain
+        my $ctrl = $return_node->control_in;
+        ok(defined $ctrl, 'Return has a control_in');
+        isa_ok($ctrl, 'Chalk::IR::Node::CompoundAssign',
+            'Return control_in is CompoundAssign');
+        is($ctrl->op, '+=', 'CompoundAssign op is +=');
+        is($ctrl->representation, 'Int', 'CompoundAssign has Int representation');
+
+        my $ca_inputs = $ctrl->inputs;
+        is(scalar(@$ca_inputs), 2, 'CompoundAssign has 2 inputs (lhs, rhs)');
+        isa_ok($ca_inputs->[0], 'Chalk::IR::Node::PadAccess', 'lhs is PadAccess');
+        isa_ok($ca_inputs->[1], 'Chalk::IR::Node::Add', 'rhs is Add');
+    }
+}
+
+# Test 11: N-ary TernaryExpr block lowers via LLVMDriver and produces 1
+# (cond 5>0 is true, select branch 1)
+{
+    my $ir_block = <<'END_IR';
+%n    = Constant(5) :Int
+%zero = Constant(0) :Int
+%cmp  = NumGt(%n, %zero) :Bool
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%tern = TernaryExpr(%cmp, %c1, %c2) :Int
+return %tern
+L: GREEN
+END_IR
+
+    my $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_block);
+    ok(defined $return_node, 'TernaryExpr block builds for lli test');
+
+    if (defined $return_node) {
+        my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
+        ok(!$meta->{marked_unsupported},
+            'TernaryExpr (built from block) is not marked_unsupported');
+        my $lli_out = $L->return_values->[0] // '';
+        is($lli_out, '1',
+            'TernaryExpr(5>0, 1, 2) -> lli -> 1 (cond true, select then-branch)');
+    }
+}
+
+# Test 12: kwarg CompoundAssign block lowers via lli and produces 3
+# ($x=1, $x+=2 -> $x==3)
+{
+    my $ir_block = <<'END_IR';
+%c1   = Constant(1) :Int
+%xn   = Constant("$x") :Str
+%vx   = VarDecl(%xn, %c1) :Int
+%c2   = Constant(2) :Int
+%read = PadAccess(%vx, "$x_r") :Int
+%sum  = Add(%read, %c2) :Int
+%lhs  = PadAccess(%vx, "$x_l") :Int
+%ca   = CompoundAssign(%lhs, %sum, op: "+=") :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx -> %ca
+L: GREEN
+END_IR
+
+    my $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_block);
+    ok(defined $return_node, 'CompoundAssign kwarg block builds for lli test');
+
+    if (defined $return_node) {
+        my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
+        ok(!$meta->{marked_unsupported},
+            'CompoundAssign kwarg (built from block) is not marked_unsupported');
+        my $lli_out = $L->return_values->[0] // '';
+        is($lli_out, '3',
+            'CompoundAssign kwarg ($x=1; $x+=2) -> lli -> 3');
+    }
+}
+
 done_testing;
