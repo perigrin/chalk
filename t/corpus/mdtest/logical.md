@@ -49,7 +49,11 @@ context: scalar
 ```
 
 ```ir
-L: GAP(cfg-blocks-phi: && is short-circuit control flow (returns an operand, skips RHS when LHS false); needs LLVM basic blocks + br + phi. THE SAME GAP as if/while/for -- && is an if-expression in disguise.)
+%ca = Constant(3) :Int
+%cb = Constant(7) :Int
+%r  = And(%ca, %cb) :Int
+return %r
+L: GREEN
 ```
 
 ## L2 logical or
@@ -71,7 +75,11 @@ context: scalar
 ```
 
 ```ir
-L: GAP(cfg-blocks-phi: || is short-circuit control flow (returns an operand, skips RHS when LHS true); needs LLVM basic blocks + br + phi. THE SAME GAP as if/while/for.)
+%ca = Constant(3) :Int
+%cb = Constant(7) :Int
+%r  = Or(%ca, %cb) :Int
+return %r
+L: GREEN
 ```
 
 ## L3 defined-or

@@ -143,4 +143,107 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
         'generated .ll is not the hand-written spike file');
 }
 
+# ---------------------------------------------------------------------------
+# L7: And node (&&) lowering — short-circuit branch+phi
+#
+# And(Constant 3 :Int, Constant 7 :Int) wrapped in Return.
+# Perl &&: 3 is truthy -> returns 7.  lli must print 7.
+# RED phase: currently dies "cannot lower op=And".
+# ---------------------------------------------------------------------------
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+    my $c7 = $f->make('Constant', value => '7', const_type => 'integer');
+    $c7->set_representation('Int');
+    my $and = $f->make('And', inputs => [$c3, $c7]);
+    $and->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$and]);
+
+    my $ll;
+    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    ok(!$@, "And node lowers without dying (got: $@)");
+
+    SKIP: {
+        skip 'And lowering failed', 4 unless defined $ll;
+
+        unlike($ll, qr/Perl_/, 'And .ll: no Perl_ C-API');
+        unlike($ll, qr/\bSV\b/, 'And .ll: no SV type');
+
+        my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+        binmode $fh, ':utf8';
+        print $fh $ll;
+        close $fh;
+
+        my $lli_out = qx($LLI $tmp 2>&1);
+        my $exit    = $? >> 8;
+        is($exit, 0, 'And .ll: lli exits cleanly');
+        chomp $lli_out;
+        is($lli_out, '7', "And .ll: lli output is 7 (3&&7 == 7)");
+    }
+}
+
+# ---------------------------------------------------------------------------
+# L8: Or node (||) lowering — short-circuit branch+phi
+#
+# Or(Constant 3 :Int, Constant 7 :Int) wrapped in Return.
+# Perl ||: 3 is truthy -> returns 3.  lli must print 3.
+# ---------------------------------------------------------------------------
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+    my $c7 = $f->make('Constant', value => '7', const_type => 'integer');
+    $c7->set_representation('Int');
+    my $or = $f->make('Or', inputs => [$c3, $c7]);
+    $or->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$or]);
+
+    my $ll;
+    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    ok(!$@, "Or node lowers without dying (got: $@)");
+
+    SKIP: {
+        skip 'Or lowering failed', 4 unless defined $ll;
+
+        unlike($ll, qr/Perl_/, 'Or .ll: no Perl_ C-API');
+        unlike($ll, qr/\bSV\b/, 'Or .ll: no SV type');
+
+        my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+        binmode $fh, ':utf8';
+        print $fh $ll;
+        close $fh;
+
+        my $lli_out = qx($LLI $tmp 2>&1);
+        my $exit    = $? >> 8;
+        is($exit, 0, 'Or .ll: lli exits cleanly');
+        chomp $lli_out;
+        is($lli_out, '3', "Or .ll: lli output is 3 (3||7 == 3)");
+    }
+}
+
+# ---------------------------------------------------------------------------
+# L9: Phi missing-predecessor guard
+#
+# A Phi node referenced in lower_value without all predecessor blocks
+# having been materialized must die loudly (not silently emit
+# undef-poisoned phi). This is the adversarial well-typed check.
+# ---------------------------------------------------------------------------
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    # Build a Region and Phi manually, but do NOT wire up the predecessor
+    # blocks so the Phi has only 0 incoming values (empty inputs).
+    my $region = $f->make('Region', inputs => []);
+    my $phi    = $f->make('Phi', region => $region, values => []);
+    $phi->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$phi]);
+
+    eval { Chalk::IR::Target::LLVM->lower($ret) };
+    like($@, qr/Phi|missing|edge|predecessor|incoming/i,
+        'Phi with no incoming values dies loudly (adversarial guard)');
+}
+
 done_testing;

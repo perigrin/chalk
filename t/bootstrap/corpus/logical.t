@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the logical-operators mdtest corpus topic (constructive format).
-# ABOUTME: Exercises L1-L4 logical idioms: &&, ||, //, ! — all are honest GAPs (no runtime-free lowering).
+# ABOUTME: L1 (&&) and L2 (||) are GREEN via cfg-blocks-phi; L3 (//) and L4 (!) remain GAP.
 use 5.42.0;
 use utf8;
 
@@ -24,13 +24,11 @@ unless (-f $LOGICAL_MD) {
 # ---------------------------------------------------------------------------
 # SECTION 1: Parse logical.md and verify case inventory
 #
-# All 4 logical idioms (L1-L4) must be present.  All four declare L: GAP
-# because:
-#   L1 (&&): operand-returning; needs If+Phi short-circuit
-#   L2 (||): operand-returning; needs If+Phi short-circuit
-#   L3 (//): SvOK defined-check; inherently a Scalar runtime operation
-#   L4 (!):  returns "" not 0 for truthy input; dual-representation Str result
-# A GREEN claim for any of them would be a lie and must fail.
+# All 4 logical idioms (L1-L4) must be present.
+#   L1 (&&): GREEN — cfg-blocks-phi lands And lowering (branch+phi)
+#   L2 (||): GREEN — cfg-blocks-phi lands Or lowering (branch+phi)
+#   L3 (//): GAP  — needs Undef representation + definedness predicate
+#   L4 (!):  GAP  — needs Bool representation + UnaryNot + Coerce(Bool->*)
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($LOGICAL_MD);
@@ -48,10 +46,10 @@ ok((grep { /L4.*not/i          } @titles),  'case: L4 not present');
 # For each case:
 #   - behavior check must PASS (perl oracle vs declared return value)
 #   - ir-shape check must not FAIL (pure-GAP blocks trivially pass)
-#   - L-verdict check must PASS (declared GAP matches actual GAP)
+#   - L-verdict check must PASS (declared verdict matches actual verdict)
 #
-# All four cases declare L: GAP — none can be lowered runtime-free by the
-# current literal-arithmetic lowering slice.
+# L1 and L2 declare L: GREEN — they lower via And/Or branch+phi.
+# L3 and L4 declare L: GAP — not lowerable in the current slice.
 # ---------------------------------------------------------------------------
 
 for my $case (@$cases) {
@@ -70,7 +68,7 @@ for my $case (@$cases) {
             "$title: ir-shape not FAIL")
             or diag("  ir-shape fail: " . join('; ', @{ $result->{fail_reasons} }));
 
-        # L-verdict check: declared GAP must match actual GAP
+        # L-verdict check: declared verdict must match actual verdict
         is($result->{l_verdict}{verdict}, 'PASS',
             "$title: L verdict matches")
             or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
@@ -82,35 +80,102 @@ for my $case (@$cases) {
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 3: Verify all four cases declare L: GAP
+# SECTION 3: Verify L-verdict declarations per case
 #
-# None of these idioms are runtime-free lowerable:
-#   L1 (&&): operand-returning short-circuit — needs If+Phi
-#   L2 (||): operand-returning short-circuit — needs If+Phi
-#   L3 (//): SvOK defined-check — Scalar runtime operation
-#   L4 (!):  "" vs "1" dual-representation — not integer 0/1
+# L1 (&&): GREEN — And lowering via branch+phi
+# L2 (||): GREEN — Or lowering via branch+phi
+# L3 (//): GAP  — Undef representation not yet modelled
+# L4 (!):  GAP  — Bool representation + UnaryNot not yet modelled
 # ---------------------------------------------------------------------------
 
-subtest 'all four logical cases declare L: GAP' => sub {
+subtest 'L1/L2 declare L: GREEN; L3/L4 declare L: GAP' => sub {
     plan tests => 4;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
         my $title   = $case->{title};
-        is($decl, 'GAP', "case '$title': declared L: GAP");
+        if ($title =~ /L1.*logical.*and/i || $title =~ /L2.*logical.*or/i) {
+            is($decl, 'GREEN', "case '$title': declared L: GREEN (cfg-blocks-phi And/Or lowering)");
+        } else {
+            is($decl, 'GAP',   "case '$title': declared L: GAP (not lowerable in current slice)");
+        }
     }
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 4: All four cases are pure-GAP blocks (no buildable nodes)
+# SECTION 4: L1/L2 constructive proof — And/Or builds and lowers correctly
 #
-# A pure-GAP block has an L: GAP(...) line and no %name = ... node lines.
-# Verify build_graph_from_ir returns undef for each case (no graph to build).
+# L1 (&&): And(Constant 3, Constant 7) lowers via branch+phi; lli prints 7.
+# L2 (||): Or(Constant 3, Constant 7) lowers via branch+phi; lli prints 3.
+# L3/L4 return undef (pure-GAP blocks, no graph to build).
 # ---------------------------------------------------------------------------
 
-subtest 'all four logical cases are pure-GAP blocks (build_graph_from_ir returns undef)' => sub {
-    plan tests => 4;
+subtest 'L1 constructive proof: And builds and lowers to 7 via lli' => sub {
+    my ($l1_case) = grep { $_->{title} =~ /L1.*logical.*and/i } @$cases;
+    ok(defined $l1_case, 'L1 case found');
+
+    my $ir_text = $l1_case->{ir} // '';
+    my $return_node;
+    eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
+    ok(!$@, "L1 build_graph_from_ir does not croak (got: $@)")
+        or diag("build error: $@");
+    ok(defined $return_node, 'L1 build_graph_from_ir returns a defined Return node');
+
+    my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
+    is($verdict, 'GREEN', 'L1 ir block declares L: GREEN');
+
+    if (defined $return_node) {
+        my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
+        ok(!$meta->{marked_unsupported}, 'L1 And graph is truly GREEN (not marked_unsupported)')
+            or diag("gap reason: " . ($meta->{gap_reason} // 'none') . "\nerror: " . ($meta->{lower_error} // 'none'));
+
+        # Libperl-free assertion: the emitted .ll must not call any Perl C-API.
+        my $ll = $meta->{ll_text} // '';
+        unlike($ll, qr/Perl_/, 'L1 .ll: no Perl_ C-API symbols');
+        unlike($ll, qr/\bSV\b/, 'L1 .ll: no SV type symbols');
+
+        my $lli_out = $L->return_values->[0] // '';
+        is($lli_out, '7', "L1 lli output is 7 (3&&7 == 7)");
+        is($lli_out, $l1_case->{_perl_actual} // '7',
+            "L1 lli output matches perl oracle");
+    }
+};
+
+subtest 'L2 constructive proof: Or builds and lowers to 3 via lli' => sub {
+    my ($l2_case) = grep { $_->{title} =~ /L2.*logical.*or/i } @$cases;
+    ok(defined $l2_case, 'L2 case found');
+
+    my $ir_text = $l2_case->{ir} // '';
+    my $return_node;
+    eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
+    ok(!$@, "L2 build_graph_from_ir does not croak (got: $@)")
+        or diag("build error: $@");
+    ok(defined $return_node, 'L2 build_graph_from_ir returns a defined Return node');
+
+    my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
+    is($verdict, 'GREEN', 'L2 ir block declares L: GREEN');
+
+    if (defined $return_node) {
+        my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
+        ok(!$meta->{marked_unsupported}, 'L2 Or graph is truly GREEN (not marked_unsupported)')
+            or diag("gap reason: " . ($meta->{gap_reason} // 'none') . "\nerror: " . ($meta->{lower_error} // 'none'));
+
+        # Libperl-free assertion.
+        my $ll = $meta->{ll_text} // '';
+        unlike($ll, qr/Perl_/, 'L2 .ll: no Perl_ C-API symbols');
+        unlike($ll, qr/\bSV\b/, 'L2 .ll: no SV type symbols');
+
+        my $lli_out = $L->return_values->[0] // '';
+        is($lli_out, '3', "L2 lli output is 3 (3||7 == 3)");
+        is($lli_out, $l2_case->{_perl_actual} // '3',
+            "L2 lli output matches perl oracle");
+    }
+};
+
+subtest 'L3/L4 are pure-GAP blocks (build_graph_from_ir returns undef)' => sub {
+    plan tests => 2;
     for my $case (@$cases) {
+        next unless $case->{title} =~ /L3.*defined.*or/i || $case->{title} =~ /L4.*not/i;
         my $ir_text = $case->{ir} // '';
         my $return_node;
         eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
@@ -122,11 +187,7 @@ subtest 'all four logical cases are pure-GAP blocks (build_graph_from_ir returns
 
 # ---------------------------------------------------------------------------
 # SECTION 5: Negative guard — a logical case claiming L: GREEN must FAIL
-#
-# If someone edits a logical case to claim L: GREEN without building a
-# lowerable graph, the runner must catch the lie.  A pure-GAP block
-# (no node lines) combined with a GREEN claim is the inconsistency the
-# runner detects.
+# if the ir block has no buildable nodes (pure-GAP with GREEN claim).
 # ---------------------------------------------------------------------------
 
 subtest 'guard: pure-GAP block with L: GREEN for logical op FAILS L verdict' => sub {
