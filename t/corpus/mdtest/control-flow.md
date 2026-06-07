@@ -223,9 +223,11 @@ L: GREEN
 
 ## D5 postfix while
 
-A postfix `EXPR while COND` is a do-while loop: the body executes, then the
-condition is checked for the back-edge. Requires a loop header block, a
-conditional branch, and phi nodes for induction variables.
+A postfix `EXPR while COND` is a pre-test statement-modifier while loop: the
+condition is checked first, and the body executes only when it is true. Requires
+a loop header block, a conditional branch, and phi nodes for induction variables.
+Note: `$s += $n-- while $n > 0` with `$n=0` gives `$s=0` (body runs zero times),
+confirming the pre-test semantics. A true do-while is only `do{...}while(COND)`.
 
 ```perl
 # source

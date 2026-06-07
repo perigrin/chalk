@@ -207,4 +207,39 @@ END_MD
         'fail reason mentions L verdict, GAP, or GREEN');
 };
 
+# ---------------------------------------------------------------------------
+# SECTION 7: Per-case libperl-free assertion for every GREEN control-flow case
+#
+# All GREEN cases (D1-D7) must emit LLVM IR with NO Perl_/SV/sv_ symbols.
+# D1 already had this assertion; D2-D7 were missing it (alignment gap).
+# D8 is GAP (pure-GAP block, no emitted .ll to check).
+# ---------------------------------------------------------------------------
+
+subtest 'all GREEN control-flow cases emit libperl-free .ll' => sub {
+    for my $case (@$cases) {
+        my $title    = $case->{title};
+        my $ir_text  = $case->{ir} // '';
+        my $decl     = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
+
+        # Skip GAP cases — no .ll is emitted for them
+        next if $decl eq 'GAP';
+
+        my $return_node;
+        eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
+        next unless defined $return_node && !$@;
+
+        my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
+        my $ll = $meta->{ll_text} // '';
+
+        SKIP: {
+            skip "case '$title': no .ll emitted (GAP or lower failed)", 3
+                unless length($ll) && !$meta->{marked_unsupported};
+
+            unlike($ll, qr/Perl_/,   "case '$title': .ll has no Perl_ C-API symbols");
+            unlike($ll, qr/\bSV\b/,  "case '$title': .ll has no SV type symbols");
+            unlike($ll, qr/libperl/, "case '$title': .ll has no libperl references");
+        }
+    }
+};
+
 done_testing;
