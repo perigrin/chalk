@@ -41,8 +41,8 @@ use Chalk::IR::Schedule::Elaborate;
 #
 # Main entry point. Builds the dominator tree + scoped-elaboration pass
 # automatically from the return node, then delegates to lower_with_elaboration.
-# All placement is driven by the Elaborate pass (defs-dominate-uses by
-# construction); no ad-hoc var_table snapshot/union-SSA is used.
+# Placement is driven by the Elaborate pass; defs-dominate-uses holds by
+# construction via the scoped value map.
 sub lower {
     my ($class, $return_node) = @_;
 
@@ -53,15 +53,11 @@ sub lower {
 
 # lower_with_elaboration($class, $ret_node, $elab) -> $llvm_ir_text
 #
-# Variant of lower() that uses a pre-computed Elaborate pass result for
-# phi placement at Region merge points. This replaces the ad-hoc var_table
-# snapshot/restore + union-SSA loop with placement driven by the dominator
-# tree and scoped value map.
-#
-# The $elab object carries emitted_phis() — the list of { block_id, vd_id,
-# incoming => [...] } records that the elaboration pass determined should be
-# phi nodes at merge blocks. The LLVM backend uses these records to emit phi
-# instructions in the correct block instead of inferring them via snapshot diffs.
+# Variant of lower() that accepts a pre-computed Elaborate pass result for
+# phi placement at Region merge points. The $elab object carries emitted_phis()
+# — the list of { block_id, vd_id, incoming => [...] } records that the
+# elaboration pass determined should be phi nodes at merge blocks. The LLVM
+# backend places phis using the dominator-tree scoped value map.
 sub lower_with_elaboration {
     my ($class, $return_node, $elab) = @_;
 
@@ -69,8 +65,7 @@ sub lower_with_elaboration {
     my $ctx = Chalk::IR::Target::LLVM::ElaboratedContext->new(elab => $elab);
 
     # Process the control chain as usual — VarDecl/Assign/If/Loop.
-    # The ElaboratedContext overrides _process_if_node to use the elab phis
-    # rather than snapshot/union-SSA.
+    # ElaboratedContext._process_if_node uses the elab phis for phi placement.
     {
         my @chain;
         my $ctrl = $return_node->control_in;
@@ -947,104 +942,13 @@ sub process_control_node {
     # are either handled by their driving structure or ignored here.
 }
 
-# _process_if_node: lower an If node and its associated Region pair.
-#
-# Control flow:
-#   current block: ... compute condition ... br i1 %cond, label %then, label %else
-#   then block: ... (body of then-branch) ... br label %merge
-#   else block: ... (body of else-branch) ... br label %merge
-#   merge block: phi for any values that differ between branches
-#
-# The If node must have:
-#   inputs[0] = control predecessor (already processed)
-#   inputs[1] = condition (Bool/i1 value)
-#   $if->region = the Region merge node
-#
-# The Region merge node carries as inputs the Proj nodes from the if's two
-# outputs. Each Proj node carries the control of the branch body.
-#
-# The var_table is updated for each VarDecl that is assigned in a branch.
-# After the merge block, var_table entries that differ between branches need
-# Phi nodes; this is handled by looking at the Phi nodes attached to the Region.
+# _process_if_node: forward to the concrete subclass.
+# The base Context class does not implement if/else lowering directly;
+# all if/else placement is performed by ElaboratedContext (see below),
+# which uses the dominator-tree scoped value map to place phis at merge blocks.
 sub _process_if_node {
     my ($self, $if_node) = @_;
-
-    # Lower the condition value in the current block.
-    my $cond_input = $if_node->inputs->[1];
-    die "LLVM backend: If node has no condition (inputs[1] is undef)"
-        unless defined $cond_input;
-
-    my $cond_ref = $self->lower_value($cond_input);
-
-    # Ensure condition is i1. If it's an i64 comparison result, it's already
-    # i1. If it's an i64 integer, convert to i1 via icmp ne 0.
-    my $cond_repr = $cond_input->representation // 'Bool';
-    if ($cond_repr eq 'Int') {
-        my $bool_ref = $self->_fresh;
-        $self->_emit("  $bool_ref = icmp ne i64 $cond_ref, 0  ; If: coerce Int to i1");
-        $cond_ref = $bool_ref;
-    }
-
-    my $then_label  = $self->_fresh_label('if.then.');
-    my $else_label  = $self->_fresh_label('if.else.');
-    my $merge_label = $self->_fresh_label('if.merge.');
-    my $entry_label = $self->_current_block_label;
-
-    # Emit the conditional branch terminator.
-    $self->_set_terminator("  br i1 $cond_ref, label %$then_label, label %$else_label  ; If: conditional branch");
-
-    # Save var_table snapshot before branches.
-    my %pre_branch_vars = %{ $self->{var_table} };
-
-    # Process the then-branch: collect VarDecl/Assign nodes from Proj 0.
-    $self->_new_block($then_label);
-    my $region = $if_node->region;
-    $self->_process_branch_from_if($if_node, 0, $merge_label);
-    my $then_end_label = $self->_current_block_label;
-    my %then_vars = %{ $self->{var_table} };
-
-    # Restore var_table for the else-branch.
-    $self->{var_table} = { %pre_branch_vars };
-
-    # Process the else-branch: collect VarDecl/Assign nodes from Proj 1.
-    $self->_new_block($else_label);
-    $self->_process_branch_from_if($if_node, 1, $merge_label);
-    my $else_end_label = $self->_current_block_label;
-    my %else_vars = %{ $self->{var_table} };
-
-    # Merge block: emit phi for each variable that was assigned in either branch.
-    $self->_new_block($merge_label);
-
-    # Union-SSA merge: the phi set is every variable whose ref CHANGED in EITHER
-    # branch vs the pre-branch snapshot. For the branch that did NOT modify a
-    # variable, use the pre-branch ref as that edge's incoming value.
-    # This handles both the both-branch and one-branch-assign cases correctly.
-    my %all_vd_ids = (%then_vars, %else_vars);
-    for my $vd_id (sort keys %all_vd_ids) {
-        my $then_ref = $then_vars{$vd_id} // $pre_branch_vars{$vd_id};
-        my $else_ref = $else_vars{$vd_id} // $pre_branch_vars{$vd_id};
-
-        # Skip vars that have no SSA value in either branch (e.g. vars only
-        # declared inside a branch body that aren't accessible after the merge).
-        next unless defined $then_ref && defined $else_ref;
-
-        # Skip if both branches carry the same SSA ref (no assignment in either).
-        next if $then_ref eq $else_ref;
-
-        # Determine the LLVM type for this phi from the VarDecl's representation.
-        # Look up the VarDecl node via _vd_repr_table (populated by _lower_vardecl).
-        my $var_repr = $self->{_vd_repr}{$vd_id} // 'Int';
-        my $llvm_type = _repr_to_llvm_type($var_repr);
-
-        my $phi_ref   = $self->_fresh;
-        $self->_emit("  $phi_ref = phi $llvm_type [ $then_ref, %$then_end_label ], [ $else_ref, %$else_end_label ]  ; if/else phi");
-        $self->{var_table}{$vd_id} = $phi_ref;
-    }
-
-    # Wire any explicit Phi nodes attached to this Region into the cache.
-    if (defined $region) {
-        $self->_wire_region_phis($region, $then_end_label, $else_end_label);
-    }
+    die ref($self) . ': _process_if_node called on base Context — use ElaboratedContext';
 }
 
 # _process_branch_from_if: lower the body of one If branch (then=0, else=1).
@@ -1461,7 +1365,8 @@ sub _find_block_idx {
 
 # ---------------------------------------------------------------------------
 # ElaboratedContext: a Context subclass that uses the Elaborate pass output
-# for phi placement at Region merges, replacing the ad-hoc snapshot/union-SSA.
+# for phi placement at Region merges. Placement is driven by the dominator tree
+# and scoped value map computed by Chalk::IR::Schedule::Elaborate.
 # ---------------------------------------------------------------------------
 package Chalk::IR::Target::LLVM::ElaboratedContext;
 use 5.42.0;
@@ -1487,7 +1392,7 @@ sub new {
 }
 
 # _process_if_node: elaboration-driven version.
-# Uses the elab phi plan rather than snapshot/union-SSA.
+# Reads phi records from the Elaborate pass for this Region's merge block.
 sub _process_if_node {
     my ($self, $if_node) = @_;
 
@@ -1510,7 +1415,7 @@ sub _process_if_node {
 
     $self->_set_terminator("  br i1 $cond_ref, label %$then_label, label %$else_label  ; If (elab): branch");
 
-    # Process then-branch (no var_table snapshot — elaboration handles phi).
+    # Process then-branch; the elaboration pass determines phi placement.
     $self->_new_block($then_label);
     my $region = $if_node->region;
     $self->_process_branch_from_if($if_node, 0, $merge_label);
