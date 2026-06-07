@@ -83,11 +83,12 @@ L: GREEN
 
 ## A5 field param read
 
-`field $x :param; return $x` — a class field declared with `:param`. Field
-access has no runtime-free representation in the current typed IR: the value
-lives in an SV-boxed slot whose address is determined at object-construction
-time. No static-dispatch `PadAccess` can model it without libperl. This
-idiom is a pure GAP.
+`field $x :param; return $x` — a class field declared with `:param`. Per
+docs/architecture/runtime-free-boundary.md field access is RF: a `feature class`
+is lexically declared, so the object is a static struct `{class*, fields}` and a
+field read is a known offset load — no libperl, no runtime SV slot. It is a GAP
+only until the MOP object-struct + field-offset lowering is modelled (campaign
+group G5), not because it needs the interpreter.
 
 ```perl
 # source
@@ -103,7 +104,7 @@ context: scalar
 ```
 
 ```ir
-L: GAP(field has no Scalar-free representation; needs libperl SV slot access)
+L: GAP(field access is RF: static struct {class*, fields} + known field-offset load; GAP only until MOP object-struct lowering (G5) is modelled, NOT a libperl dependency)
 ```
 
 ## C1 reassign then read

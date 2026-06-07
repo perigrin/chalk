@@ -2,10 +2,16 @@
 
 Regex match, compiled-regex (qr//), and substitution idioms.
 
-All cases in this topic are L: GAP — regex operations require a Str/Scalar (SV*)
-representation for the subject string and the regex engine for matching. Neither
-is part of the runtime-free Int/Num lowering slice. The behavior is still
-specified by the perl oracle; the GAP records the honest reason a
+All cases in this topic are L: GAP — but the GAP means "not modelled YET," not
+"needs the interpreter." Core regex is runtime-free (RF): a literal pattern is a
+compile-time-known mini-language, and the RF answer is a regex sub-compiler
+(pattern -> DFA/NFA/bytecode matcher) emitted runtime-free, producing
+`(matched?, $1, $2, ...)`. `qr//` compiles a matcher value; `s///` is match + Str
+rewrite (the Str part riding on G3's Str representation). These are GAPs only
+until the regex sub-compiler (campaign group G6) and Str (G3) are modelled, NOT a
+libperl/perl-regex-engine dependency. (The genuinely-OOS regex feature is only
+`(?{ perl code })` — embedded runtime code; core patterns are RF.) The behavior
+is still specified by the perl oracle; the GAP records the honest reason a
 compile-time-only LLVM path cannot yet lower these idioms.
 
 Archive sources: `archive/pu-2026-03-24:t/corpus/ir/regex-match.chalk` (R1
@@ -14,11 +20,11 @@ adapted to a runnable form), `archive/pu-2026-03-24:t/corpus/ir/regex-qr.chalk`
 
 ## R1 regex match (=~)
 
-The `=~` operator applies a literal regex to a string subject. At the IR level
-this requires a Str-typed node for the subject and a RegexMatch node whose
-operands carry Scalar/SV* representations. Neither the Str/Scalar allocation
-nor the regex engine call is runtime-free lowerable in the current Int/Num
-arithmetic slice.
+The `=~` operator applies a literal regex to a string subject. The literal
+pattern is a compile-time-known mini-language: a regex sub-compiler lowers it to a
+DFA/NFA matcher that produces `(matched?, $1, $2, ...)` runtime-free. The IR is a
+GAP only until the regex sub-compiler (G6) is modelled, NOT a libperl/regex-engine
+dependency.
 
 Source: `archive/pu-2026-03-24:t/corpus/ir/regex-match.chalk`
 (`if ($x =~ m/pattern/) { 1 }` — adapted to a runnable form with concrete values).
@@ -35,16 +41,15 @@ context: scalar
 ```
 
 ```ir
-L: GAP(regex match needs Str/Scalar + regex engine; not runtime-free lowerable)
+L: GAP(regex match is RF: a regex sub-compiler lowers the pattern to a DFA/NFA matcher producing (matched?, $1..); GAP only until the regex sub-compiler (G6) is modelled, NOT a libperl/perl-regex-engine dependency)
 ```
 
 ## R2 qr// compiled regex
 
-The `qr//` operator compiles a regex into a first-class regex object. The IR
-would need a Scalar/regex-object representation for the compiled pattern, and
-a subsequent `=~` still invokes the regex engine at runtime. Neither the
-regex-object allocation nor the match call is in the runtime-free lowering
-slice.
+The `qr//` operator compiles a regex into a first-class matcher value. The regex
+sub-compiler lowers the literal pattern to that matcher value runtime-free, and a
+subsequent `=~` is an indirect application of the same matcher. The IR is a GAP
+only until the regex sub-compiler (G6) is modelled, NOT a libperl dependency.
 
 Source: `archive/pu-2026-03-24:t/corpus/ir/regex-qr.chalk`
 (`my $re = qr/\d+/;` — adapted to a runnable form that also exercises the match).
@@ -62,15 +67,15 @@ context: scalar
 ```
 
 ```ir
-L: GAP(qr compiles a regex object; needs Scalar/regex representation; not runtime-free lowerable)
+L: GAP(qr// is RF: compiles a matcher value via the regex sub-compiler (G6); GAP only until G6 is modelled, NOT a libperl dependency)
 ```
 
 ## R3 regex substitution (s///)
 
-The `s///` operator mutates the subject string in place. This requires both a
-Str-typed mutable binding (VarDecl + PadAccess) and a RegexSubst node that
-invokes the regex engine and performs string replacement. The mutating Str
-binding and the regex engine call are outside the runtime-free lowering slice.
+The `s///` operator is a match followed by a Str rewrite. The match rides on the
+regex sub-compiler (G6) and the rewrite rides on G3's Str representation — both
+runtime-free. The IR is a GAP only until the regex sub-compiler (G6) and Str (G3)
+are modelled, NOT a libperl/regex-engine dependency.
 
 ```perl
 # source
@@ -85,5 +90,5 @@ context: scalar
 ```
 
 ```ir
-L: GAP(s/// needs mutable Str/Scalar binding + regex engine; not runtime-free lowerable)
+L: GAP(s/// is RF: match (regex sub-compiler, G6) + Str rewrite (G3); GAP only until G6+G3 are modelled, NOT a libperl dependency)
 ```

@@ -3,12 +3,16 @@
 Array and hash construction, element access, element assignment, anonymous
 references, and deref idioms.
 
-All cases in this topic are `L: GAP`. Arrays and hashes require a Perl `Scalar`
-(SV\*) representation — they hold reference-counted heap values. None of the
-array/hash/ref operations are runtime-free lowerable in the current Int/Num/Str
-arithmetic slice. The behavior oracle (perl) is specified for every case;
-the IR block records the honest GAP reason rather than fabricating a constructive
-graph that does not exist yet.
+All cases in this topic are `L: GAP`. Arrays, hashes, and refs are all
+runtime-free (RF): an array is a `{len, cap, elem*}` vector, a hash is a hash
+table `{Str->value}`, and a ref is a pointer to one of those structs plus a ref
+tag. Their operations (push/pop/index/scalar/slice, keys/values/exists/delete/
+lookup, deref/element) are pure ops — load-through-pointer for refs. None of
+these need the Perl interpreter. The GAP here means the Array/Hash
+representations are simply not modelled YET; clearing them is a work-list item
+for campaign group G4 (Array/Hash), NOT a libperl dependency. The behavior
+oracle (perl) is specified for every case; the IR block records the honest GAP
+reason rather than fabricating a constructive graph that does not exist yet.
 
 Archive sources used: `anonymous-array.chalk`, `anonymous-hash.chalk`,
 `array-literal.chalk`, `hash-literal.chalk`, `array-access.chalk`,
@@ -18,11 +22,11 @@ Archive sources used: `anonymous-array.chalk`, `anonymous-hash.chalk`,
 
 ## R1 array literal and scalar count
 
-An array literal `(1, 2, 3)` creates a Perl array (AV\*). `scalar @a` returns
-the element count as an integer. The array itself has no runtime-free IR
-representation: it requires an AV\* backed by a Scalar/SV layout. The count
-could be an Int in principle, but the construction path (array allocation,
-element insertion) is not lowerable without SV\* support.
+An array literal `(1, 2, 3)` creates an array — a `{len, cap, elem*}` vector,
+not an AV\*. `scalar @a` returns the element count as an Int, a pure op on the
+vector. The construction path (allocate the vector, write the elements) is all
+pure machine-level work; it is runtime-free. It is a GAP only because the Array
+representation is not modelled yet (campaign group G4).
 
 ```perl
 # source
@@ -36,14 +40,14 @@ context: scalar
 ```
 
 ```ir
-L: GAP(arrays require AV*/Scalar representation; array allocation not runtime-free)
+L: GAP(array is RF: a {len,cap,elem*} vector, allocation + scalar-count are pure ops; GAP only until the Array representation (G4) is modelled, NOT a libperl/AV dependency)
 ```
 
 ## R2 array element read
 
-Reading an element `$a[1]` from a declared array requires subscript access on
-an AV\*. Even though the result is an integer, the lookup path goes through the
-Perl runtime — the subscript operation has no Int-level IR node.
+Reading an element `$a[1]` from a declared array is an index into a
+`{len, cap, elem*}` vector — a pure op, not an AV\* access. The result is an Int.
+There is nothing runtime-bound here; the index node is just not modelled yet.
 
 ```perl
 # source
@@ -57,14 +61,15 @@ context: scalar
 ```
 
 ```ir
-L: GAP(array subscript requires AV*/Scalar representation; no runtime-free ArrayIndex node)
+L: GAP(array index is RF: index into a {len,cap,elem*} vector is a pure op; GAP only until the Array representation (G4) is modelled, NOT a libperl/AV dependency)
 ```
 
 ## R3 hash literal and element read
 
-A hash literal `(a => 1, b => 2)` creates a Perl hash (HV\*). Reading `$h{a}`
-requires key-based lookup on the HV\*, which is not runtime-free. Key interning,
-bucket dispatch, and SV\* dereferencing all require the Perl runtime.
+A hash literal `(a => 1, b => 2)` creates a hash table `{Str->value}`, not an
+HV\*. Reading `$h{a}` is a key lookup — a pure op on that table. Key hashing and
+bucket dispatch are ordinary machine-level work; none of it needs the Perl
+runtime.
 
 ```perl
 # source
@@ -78,15 +83,15 @@ context: scalar
 ```
 
 ```ir
-L: GAP(hashes require HV*/Scalar representation; hash key lookup not runtime-free)
+L: GAP(hash is RF: a hash table {Str->value}, key lookup is a pure op; GAP only until the Hash representation (G4) is modelled, NOT a libperl/HV dependency)
 ```
 
 ## R4 anonymous array ref and deref
 
-An anonymous array constructor `[1, 2, 3]` allocates an AV\* and wraps it in
-a reference SV\*. The dereference `$r->[0]` follows the reference and subscripts
-the AV\*. Both the allocation and the deref are Scalar-level operations — no
-runtime-free lowering exists.
+An anonymous array constructor `[1, 2, 3]` allocates a `{len, cap, elem*}`
+vector and yields a pointer to it plus a ref tag — not an AV\* wrapped in an
+SV\*. The dereference `$r->[0]` is load-through-pointer then index: both pure
+ops. The whole thing is runtime-free.
 
 ```perl
 # source
@@ -100,14 +105,15 @@ context: scalar
 ```
 
 ```ir
-L: GAP(anonymous arrayref allocates AV* + SV* ref; deref and subscript require Scalar representation)
+L: GAP(arrayref is RF: a {len,cap,elem*} vector + a pointer/tag ref, deref = load-through-pointer then index; GAP only until Array/Hash representations (G4) are modelled, NOT a libperl/SV/AV dependency)
 ```
 
 ## R5 anonymous hash ref and deref
 
-An anonymous hash constructor `{a => 1, b => 2}` allocates an HV\* and wraps it
-in a reference SV\*. The dereference `$r->{a}` follows the reference and looks up
-the key in the HV\*. Both construction and lookup are Scalar-level.
+An anonymous hash constructor `{a => 1, b => 2}` allocates a hash table
+`{Str->value}` and yields a pointer to it plus a ref tag — not an HV\* wrapped
+in an SV\*. The dereference `$r->{a}` is load-through-pointer then key lookup:
+both pure ops. Construction and lookup are runtime-free.
 
 ```perl
 # source
@@ -121,14 +127,14 @@ context: scalar
 ```
 
 ```ir
-L: GAP(anonymous hashref allocates HV* + SV* ref; deref and key lookup require Scalar representation)
+L: GAP(hashref is RF: a hash table {Str->value} + a pointer/tag ref, deref = load-through-pointer then key lookup, both pure ops; GAP only until Array/Hash representations (G4) are modelled, NOT a libperl/SV/HV dependency)
 ```
 
 ## R6 array element assignment
 
-Writing to an array element `$a[0] = 42` requires AV\* mutation: bounds-check,
-slot access, and SV\* store. The array must already be backed by a Scalar layout.
-The read back `$a[0]` similarly goes through the AV\*.
+Writing to an array element `$a[0] = 42` is a store into a slot of the
+`{len, cap, elem*}` vector: bounds-check then slot write — pure ops, no AV\*
+mutation. The read back `$a[0]` is an index into the same vector.
 
 ```perl
 # source
@@ -143,14 +149,14 @@ context: scalar
 ```
 
 ```ir
-L: GAP(array element assign mutates AV*/Scalar slot; no runtime-free ArrayStore node)
+L: GAP(array element store is RF: store into a slot of a {len,cap,elem*} vector is a pure op; GAP only until the Array representation (G4) is modelled, NOT a libperl/AV dependency)
 ```
 
 ## R7 hash element assignment
 
-Writing to a hash element `$h{k} = 99` requires HV\* mutation: key hashing,
-bucket insertion, and SV\* store. The read back `$h{k}` is a key lookup.
-Both are Scalar-level operations.
+Writing to a hash element `$h{k} = 99` is a store into the hash table
+`{Str->value}`: key hashing then bucket insertion — pure ops, no HV\* mutation.
+The read back `$h{k}` is a key lookup on the same table.
 
 ```perl
 # source
@@ -165,14 +171,16 @@ context: scalar
 ```
 
 ```ir
-L: GAP(hash element assign mutates HV*/Scalar slot; no runtime-free HashStore node)
+L: GAP(hash element store is RF: store into a hash table {Str->value} is a pure op; GAP only until the Hash representation (G4) is modelled, NOT a libperl/HV dependency)
 ```
 
 ## R8 nested array ref deref
 
-A two-level dereference `$r->[1][0]` chains two AV\* subscript operations through
-SV\* references. This requires the same Scalar/SV layout as the single-level case,
-plus an additional reference-follow step.
+A two-level dereference `$r->[1][0]` chains two load-through-pointer levels: the
+outer ref loads a vector, an index yields an inner ref, a second
+load-through-pointer and index produce the value. Just repeated pure ops on
+`{len, cap, elem*}` vectors plus pointer/tag refs — runtime-free, like the
+single-level case with one more follow step.
 
 ```perl
 # source
@@ -186,5 +194,5 @@ context: scalar
 ```
 
 ```ir
-L: GAP(nested arrayref requires two AV*/SV* deref levels; no runtime-free lowering for chained subscript)
+L: GAP(nested arrayref is RF: two load-through-pointer levels, each index a pure op; GAP only until Array/Hash representations (G4) are modelled, NOT a libperl dependency)
 ```
