@@ -18,6 +18,7 @@ my %OP_REQUIRED_REPR = (
     Multiply => 'Int',
     Divide   => 'Num',  # Perl `/` is always float division; inputs must be Num
     Modulo   => 'Int',
+    Concat   => 'Str',  # String concatenation requires Str operands (G3)
 );
 
 # check(\@nodes) -> { ok => bool, violations => [ { node_id, message } ] }

@@ -2,15 +2,11 @@
 
 String literals, concatenation, and interpolation idioms.
 
-All cases in this topic are L: GAP — but Str is runtime-free (RF). Per the
-runtime-free boundary, every in-subset value is a machine representation plus
-coercions; there is no libperl/SV* dependency. Str's representation is a
-`{ptr, len}` machine string buffer (NOT an SV*): constants are static data,
-concat is alloc+copy, Coerce(Str→Num) is perl's leading-numeric rule, and
-Coerce(Str→Bool) maps `""`/`"0"` to false. These cases are GAPs only until the
-Str representation is modelled (campaign group G3) — not because they need the
-interpreter. The behavior is specified by the perl oracle; each GAP records the
-work-list item that closes it.
+Str representation is `{ ptr, len, encoding }` where `encoding` is a tagged
+enum (0=ASCII/default, 1=UTF-8, 2=UTF-16, ...). The ASCII/default slice (enc=0)
+is fully lowered: S1-S4 are GREEN. A non-ASCII (non-default-encoding) case is
+explicitly asserted GAP (honest boundary — no silent cap). The campaign forbids
+silently dropping coverage; S5 is the required explicit boundary marker.
 
 Archive source: `archive/pu-2026-03-24:t/corpus/ir/string-sq.chalk` (S1),
 `archive/pu-2026-03-24:t/corpus/ir/string-dq.chalk` (S2),
@@ -19,10 +15,9 @@ gap-map entry C3 (S4).
 
 ## S1 single-quoted literal
 
-A single-quoted string literal produces a Str-typed constant node. Str is
-RF: its representation is a `{ptr, len}` machine string buffer, and a string
-constant lowers to static data — no SV* allocation, no interpreter. The GAP
-is only that the Str representation is not modelled yet.
+A single-quoted string literal produces a Str-typed constant node. Str is RF:
+its representation is `{ptr, len, encoding}` (enc=0 = ASCII/default). A string
+constant lowers to a private global, len = byte count, enc = 0.
 
 ```perl
 # source
@@ -36,15 +31,19 @@ context: scalar
 ```
 
 ```ir
-L: GAP(Str is RF: a {ptr,len} machine buffer + coercions; GAP only until the Str representation (G3) is modelled, NOT a libperl/SV dependency)
+%nc  = Constant("s") :Str
+%val = Constant("hello") :Str
+%vd  = VarDecl(%nc, %val) :Str
+%pa  = PadAccess(%vd, "s") :Str
+control: %vd
+return %pa
+L: GREEN
 ```
 
 ## S2 double-quoted literal
 
-A double-quoted string literal with no interpolation behaves identically to
-a single-quoted literal at the IR level — the value is a Str constant. The
-same RF `{ptr, len}` buffer representation applies; the GAP is equally just
-that the Str representation is not modelled yet.
+A double-quoted string literal with no interpolation produces a Str constant,
+identical to a single-quoted literal at the IR level.
 
 ```perl
 # source
@@ -58,19 +57,20 @@ context: scalar
 ```
 
 ```ir
-L: GAP(Str is RF: a {ptr,len} machine buffer + coercions; GAP only until the Str representation (G3) is modelled, NOT a libperl/SV dependency)
+%nc  = Constant("s") :Str
+%val = Constant("hello world") :Str
+%vd  = VarDecl(%nc, %val) :Str
+%pa  = PadAccess(%vd, "s") :Str
+control: %vd
+return %pa
+L: GREEN
 ```
 
 ## S3 string concatenation (dot operator)
 
-The dot operator concatenates two string values into a new string. The IR
-models this as a StrConcat node whose operands and result carry Str
-representation. Concat is RF: it lowers to alloc+copy over `{ptr, len}`
-buffers — no SV*, no interpreter. The GAP is only that the Str representation
-and its concat operation are not modelled yet (campaign group G3).
-
-Source: `archive/pu-2026-03-24:t/corpus/ir/string-concat.chalk`:
-`return "hello" . " world";`
+The dot operator concatenates two string values. The IR models this as a Concat
+node. Both operands and the result carry Str representation. Concat is RF: it
+lowers to malloc+memcpy over `{ptr,len,enc}` buffers.
 
 ```perl
 # source
@@ -83,18 +83,18 @@ context: scalar
 ```
 
 ```ir
-L: GAP(StrConcat is RF: alloc+copy over {ptr,len} buffers; GAP only until the Str representation (G3) is modelled, NOT a libperl/SV dependency)
+%lhs = Constant("hello") :Str
+%rhs = Constant(" world") :Str
+%cat = Concat(%lhs, %rhs) :Str
+return %cat
+L: GREEN
 ```
 
 ## S4 string concat-assign (.=)
 
-The compound-assign `.=` appends to an existing string variable. This
-involves both a Str-typed VarDecl and a StrConcat node that replaces the
-binding. Both are RF: the binding holds a `{ptr, len}` buffer and the
-append is alloc+copy — no SV*, no interpreter. The GAP is only that the Str
-representation and its concat are not modelled yet (campaign group G3).
-
-Source: gap-map entry C3: `my $s = "a"; $s .= "b"; return $s`.
+The compound-assign `.=` appends to an existing string variable. A Concat node
+replaces the binding in the SSA var_table. Both the VarDecl and the Concat carry
+Str representation. The PadAccess after `.=` sees the post-concat SSA value.
 
 ```perl
 # source
@@ -109,5 +109,39 @@ context: scalar
 ```
 
 ```ir
-L: GAP(Concat/.= is RF: a {ptr,len} buffer + alloc+copy append; GAP only until the Str representation (G3) is modelled, NOT a libperl/SV dependency)
+%nc   = Constant("s") :Str
+%va   = Constant("a") :Str
+%vd   = VarDecl(%nc, %va) :Str
+%pa1  = PadAccess(%vd, "s") :Str
+%vb   = Constant("b") :Str
+%cat  = Concat(%pa1, %vb) :Str
+%asgn = Assign(%pa1, %cat) :Str
+%pa2  = PadAccess(%vd, "s") :Str
+control: %vd -> %asgn
+return %pa2
+L: GREEN
+```
+
+## S5 non-ASCII string (non-default encoding, explicit GAP boundary)
+
+A string containing non-ASCII characters such as cafe-with-accent (cafe\x{e9})
+has byte-len 5 but char-len 4 (the accented e is 2 bytes in UTF-8). The encoding
+tag would be non-zero (UTF-8). The ASCII/default-encoding slice (enc=0) does not
+cover this case: length must return 4 (char count), not 5 (byte count). This
+encoding path is not yet lowered. This GAP is the REQUIRED explicit boundary marker
+-- the campaign forbids silently dropping non-ASCII coverage.
+
+```perl
+# source
+my $s = "caf\x{e9}";
+length($s)
+```
+
+```behavior
+return: 4
+context: scalar
+```
+
+```ir
+L: GAP(non-ASCII Str with enc!=0 not yet lowered: char-len 4 != byte-len 5; a future UTF-8 encoding issue closes this path)
 ```

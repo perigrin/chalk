@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the strings mdtest corpus topic (constructive format).
-# ABOUTME: Exercises S1-S4 string idioms: all are Scalar/SV* GAPs (no runtime-free string lowering yet).
+# ABOUTME: S1-S4 are GREEN (Str ASCII/default-encoding lowered); S5 is the explicit non-ASCII GAP boundary.
 use 5.42.0;
 use utf8;
 
@@ -24,85 +24,96 @@ unless (-f $STRINGS_MD) {
 # ---------------------------------------------------------------------------
 # SECTION 1: Parse strings.md and verify case inventory
 #
-# All 4 string idioms (S1-S4) must be present.  Every case is a pure-GAP
-# (Str/Scalar representation; no runtime-free string lowering in the current
-# Int/Num slice).  The corpus MUST record these GAPs honestly — a GREEN claim
-# for any of them would be a lie and must fail.
+# 5 string cases (S1-S4 GREEN, S5 GAP non-ASCII boundary).
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($STRINGS_MD);
-is(scalar(@$cases), 4, 'strings.md has 4 cases (S1-S4)');
+is(scalar(@$cases), 5, 'strings.md has 5 cases (S1-S4 + S5 non-ASCII GAP)');
 
 my @titles = map { $_->{title} } @$cases;
-ok((grep { /S1.*single/i      } @titles), 'case: S1 single-quoted literal present');
-ok((grep { /S2.*double/i      } @titles), 'case: S2 double-quoted literal present');
-ok((grep { /S3.*concat.*dot/i } @titles), 'case: S3 dot concat present');
+ok((grep { /S1.*single/i         } @titles), 'case: S1 single-quoted literal present');
+ok((grep { /S2.*double/i         } @titles), 'case: S2 double-quoted literal present');
+ok((grep { /S3.*concat.*dot/i    } @titles), 'case: S3 dot concat present');
 ok((grep { /S4.*concat.*assign/i } @titles), 'case: S4 concat-assign present');
+ok((grep { /S5.*non.ASCII/i      } @titles), 'case: S5 non-ASCII GAP boundary present');
 
 # ---------------------------------------------------------------------------
-# SECTION 2: Run all 4 cases end-to-end
+# SECTION 2: Run S1-S4 end-to-end (GREEN cases)
 #
 # For each case:
 #   - behavior check must PASS (perl oracle vs declared return value)
-#   - ir-shape check must not FAIL (pure-GAP blocks trivially pass)
-#   - L-verdict check must PASS (all declare L: GAP, actual is also GAP)
-#
-# All string cases are pure-GAP: the ir block contains only an L: GAP(...)
-# line with no node bindings.  The runner records the GAP without attempting
-# to build or lower a graph.
+#   - ir-shape check must not FAIL (builds real graph, TypedInvariant passes)
+#   - L-verdict check must PASS (builds graph, lowers to LLVM IR, lli==perl)
 # ---------------------------------------------------------------------------
 
-for my $case (@$cases) {
+my @green_cases = grep { $_->{title} !~ /S5/i } @$cases;
+
+for my $case (@green_cases) {
     my $title = $case->{title};
 
     subtest "case: $title" => sub {
         my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
 
-        # Behavior check: perl oracle must agree with declared return
         is($result->{behavior}{verdict}, 'PASS',
             "$title: behavior oracle matches")
             or diag("  behavior fail: " . join('; ', @{ $result->{fail_reasons} }));
 
-        # IR-shape check: pure-GAP blocks trivially pass (no graph to validate)
         isnt($result->{ir_shape}{verdict}, 'FAIL',
             "$title: ir-shape not FAIL")
             or diag("  ir-shape fail: " . join('; ', @{ $result->{fail_reasons} }));
 
-        # L-verdict check: declared GAP must match actual GAP
         is($result->{l_verdict}{verdict}, 'PASS',
-            "$title: L verdict matches")
+            "$title: L verdict matches (GREEN)")
             or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
 
-        # Overall
         is($result->{overall}, 'PASS', "$title: overall PASS")
             or diag("  fail reasons: " . join('; ', @{ $result->{fail_reasons} }));
     };
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 3: Verify all cases declare L: GAP
+# SECTION 3: Verify L: verdict for each case
 #
-# Every string idiom in this topic is a GAP — strings require Scalar/SV*
-# representation not yet in the runtime-free lowering slice.
+# S1-S4: must declare and achieve L: GREEN
+# S5: must declare L: GAP (explicit non-ASCII boundary)
 # ---------------------------------------------------------------------------
 
-subtest 'S1-S4 all declare L: GAP (Str/Scalar not runtime-free lowerable)' => sub {
+subtest 'S1-S4 declare and achieve L: GREEN' => sub {
     plan tests => 4;
-    for my $case (@$cases) {
+    for my $case (@green_cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
         my $title   = $case->{title};
-        is($decl, 'GAP', "case '$title': declared L: GAP");
+        is($decl, 'GREEN', "case '$title': declared L: GREEN");
     }
 };
 
+subtest 'S5 declares L: GAP (non-ASCII boundary)' => sub {
+    my ($s5) = grep { $_->{title} =~ /S5/i } @$cases;
+    ok(defined $s5, 'S5 case found');
+    my $ir_text = $s5->{ir} // '';
+    my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
+    is($decl, 'GAP', 'S5 declared L: GAP');
+};
+
 # ---------------------------------------------------------------------------
-# SECTION 4: Negative guard — a string case claiming GREEN must FAIL
-#
-# String idioms are not runtime-free lowerable.  If someone edits a string
-# case to claim L: GREEN without an actual lowerable graph, the runner must
-# catch the lie.  A pure-GAP block (no node lines) combined with a GREEN
-# claim is the inconsistency the runner detects.
+# SECTION 4: Run S5 (GAP) and verify it does NOT lower
+# ---------------------------------------------------------------------------
+
+subtest 'S5 non-ASCII GAP: pure-GAP block stays GAP, not lowered' => sub {
+    my ($s5) = grep { $_->{title} =~ /S5/i } @$cases;
+    ok(defined $s5, 'S5 found');
+    my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($s5, {});
+    is($result->{l_verdict}{verdict}, 'PASS',
+        'S5: L verdict PASS (declared GAP, actual GAP — consistent)')
+        or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
+    is($result->{overall}, 'PASS', 'S5: overall PASS')
+        or diag("  fail reasons: " . join('; ', @{ $result->{fail_reasons} }));
+};
+
+# ---------------------------------------------------------------------------
+# SECTION 5: Negative guard — a string case claiming GREEN with a pure-GAP
+#            block must FAIL (harness integrity check)
 # ---------------------------------------------------------------------------
 
 subtest 'guard: pure-GAP block with L: GREEN for string literal FAILS L verdict' => sub {
@@ -142,6 +153,33 @@ END_MD
     ok(scalar(@{ $result->{fail_reasons} }) > 0, 'at least one fail reason recorded');
     like($result->{fail_reasons}[0] // '', qr/L verdict|GAP|GREEN/i,
         'fail reason mentions L verdict, GAP, or GREEN');
+};
+
+# ---------------------------------------------------------------------------
+# SECTION 6: Libperl-free guard — emitted .ll for S1-S4 must not reference
+#            Perl_/SV*/sv_ symbols (the LLVM backend must be runtime-free)
+# ---------------------------------------------------------------------------
+
+subtest 'S1-S4 emitted .ll is libperl-free' => sub {
+    plan tests => scalar(@green_cases);
+    for my $case (@green_cases) {
+        my $title = $case->{title};
+        my $ir_text = $case->{ir} // '';
+
+        my $return_node;
+        eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
+        if ($@ || !defined $return_node) {
+            fail("$title: could not build graph: $@");
+            next;
+        }
+
+        my (undef, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
+        my $ll = $meta->{ll_text} // '';
+
+        ok($ll !~ /Perl_|\bSV\b|sv_|libperl/,
+            "$title: emitted .ll has no libperl symbols")
+            or diag("  libperl symbols found in emitted .ll:\n$ll");
+    }
 };
 
 done_testing;

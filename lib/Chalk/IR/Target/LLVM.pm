@@ -1,5 +1,5 @@
-# ABOUTME: SoN->LLVM IR lowering pass for the typed-representation model (Phase 3a/3b/3c/cfg-phi).
-# ABOUTME: Lowers typed SoN graphs to LLVM IR text: arithmetic, VarDecl/PadAccess, and control-flow (br+phi).
+# ABOUTME: SoN->LLVM IR lowering pass for the typed-representation model (Phase 3a/3b/3c/cfg-phi/G3-Str).
+# ABOUTME: Lowers typed SoN graphs to LLVM IR text: arithmetic, VarDecl/PadAccess, control-flow, and Str.
 package Chalk::IR::Target::LLVM;
 use 5.42.0;
 use utf8;
@@ -49,6 +49,125 @@ sub lower {
     my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($return_node);
     my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($return_node, $dom);
     return $class->lower_with_elaboration($return_node, $elab);
+}
+
+# _encode_c_string($str) -> LLVM c"..." compatible escaped string (module-level helper)
+#
+# Converts a Perl string to the LLVM c"..." literal encoding.
+# In LLVM IR, c"..." accepts \XX hex escapes for non-printable bytes and
+# backslash characters. The NUL terminator is added by the caller.
+#
+# For ASCII printable chars (0x20-0x7E except \ and "), emit as-is.
+# For all others and for \ and ", emit as \XX (2 hex digits).
+sub _encode_c_string {
+    my ($str) = @_;
+    my $out = '';
+    for my $i (0 .. length($str) - 1) {
+        my $byte = ord(substr($str, $i, 1));
+        if ($byte >= 0x20 && $byte <= 0x7e && $byte != ord('\\') && $byte != ord('"')) {
+            $out .= chr($byte);
+        } else {
+            $out .= sprintf('\\%02X', $byte);
+        }
+    }
+    return $out;
+}
+
+# _emit_str_to_num_helper() -> LLVM IR text for the @chalk_str_to_num helper function
+#
+# Emits a module-level helper that implements perl's leading-numeric rule:
+#   - Skip leading ASCII whitespace (0x09,0x0A,0x0B,0x0C,0x0D,0x20)
+#   - If the non-whitespace start is "0x" or "0X", return 0.0 immediately
+#     (perl does NOT parse hex: "0x10" -> 0, not 16)
+#   - Otherwise call libc strtod on the remaining bytes
+#   - strtod handles sign, digits, decimal point, exponent — matching perl exactly
+#     for all other leading-numeric forms
+#
+# This is a runtime-free implementation (strtod is host-C, not libperl).
+# The helper is defined as internal linkage (not exported).
+#
+# Algorithm in LLVM IR pseudo-code:
+#   ptr2 = ptr + skip_whitespace(ptr, len)
+#   rem_len = len - (ptr2 - ptr)
+#   if rem_len >= 2 && ptr2[0]=='0' && (ptr2[1]=='x'||ptr2[1]=='X'): return 0.0
+#   endptr = null
+#   result = strtod(ptr2, &endptr)
+#   return result
+#
+# We use a simple loop for whitespace-skipping.
+sub _emit_str_to_num_helper {
+    # The helper is emitted as LLVM IR text. We use a direct implementation
+    # with a loop for whitespace skipping and a branch for the 0x check.
+    return <<'END_HELPER';
+define internal double @chalk_str_to_num(i8* %ptr, i64 %len) {
+entry:
+  ; Whitespace skip: advance ptr while current byte is whitespace and within len.
+  ; Whitespace chars: tab(9) LF(10) VT(11) FF(12) CR(13) space(32).
+  ; We use a loop: %cur_ptr iterates forward, %remaining counts bytes left.
+  br label %ws_check
+
+ws_check:
+  %cur_ptr = phi i8* [ %ptr, %entry ], [ %next_ptr, %ws_body ]
+  %remaining = phi i64 [ %len, %entry ], [ %rem_next, %ws_body ]
+  %have_bytes = icmp sgt i64 %remaining, 0
+  br i1 %have_bytes, label %ws_load, label %after_ws
+
+ws_load:
+  %byte = load i8, i8* %cur_ptr
+  %b_as_i32 = sext i8 %byte to i32
+  ; Check: is byte a whitespace char? (9,10,11,12,13,32)
+  %is_tab   = icmp eq i32 %b_as_i32, 9
+  %is_lf    = icmp eq i32 %b_as_i32, 10
+  %is_vt    = icmp eq i32 %b_as_i32, 11
+  %is_ff    = icmp eq i32 %b_as_i32, 12
+  %is_cr    = icmp eq i32 %b_as_i32, 13
+  %is_sp    = icmp eq i32 %b_as_i32, 32
+  %is_ws1   = or i1 %is_tab, %is_lf
+  %is_ws2   = or i1 %is_vt, %is_ff
+  %is_ws3   = or i1 %is_cr, %is_sp
+  %is_ws12  = or i1 %is_ws1, %is_ws2
+  %is_ws    = or i1 %is_ws12, %is_ws3
+  br i1 %is_ws, label %ws_body, label %after_ws
+
+ws_body:
+  %next_ptr = getelementptr inbounds i8, i8* %cur_ptr, i64 1
+  %rem_next = sub i64 %remaining, 1
+  br label %ws_check
+
+after_ws:
+  ; cur_ptr now points to first non-whitespace byte (or end of string).
+  ; remaining = bytes left from cur_ptr.
+  %rem_after = phi i64 [ %remaining, %ws_check ], [ %remaining, %ws_load ]
+  %ptr_after = phi i8* [ %cur_ptr, %ws_check ], [ %cur_ptr, %ws_load ]
+
+  ; Check for "0x" or "0X" prefix -> return 0.0 immediately.
+  ; Only if remaining >= 2 and ptr_after[0]=='0' and ptr_after[1]=='x'|'X'.
+  %have_two = icmp sge i64 %rem_after, 2
+  br i1 %have_two, label %check_0x, label %call_strtod
+
+check_0x:
+  %b0 = load i8, i8* %ptr_after
+  %is_zero = icmp eq i8 %b0, 48    ; '0' = 48
+  br i1 %is_zero, label %check_x, label %call_strtod
+
+check_x:
+  %ptr1 = getelementptr inbounds i8, i8* %ptr_after, i64 1
+  %b1 = load i8, i8* %ptr1
+  %is_lc_x = icmp eq i8 %b1, 120  ; 'x' = 120
+  %is_uc_x = icmp eq i8 %b1, 88   ; 'X' = 88
+  %is_hex = or i1 %is_lc_x, %is_uc_x
+  br i1 %is_hex, label %return_zero, label %call_strtod
+
+return_zero:
+  ret double 0.0
+
+call_strtod:
+  ; Use ptr_after (whitespace-skipped) for strtod. strtod handles the rest.
+  ; endptr can be null (we don't need it).
+  %result = call double @strtod(i8* %ptr_after, i8** null)
+  ret double %result
+}
+END_HELPER
 }
 
 # lower_with_elaboration($class, $ret_node, $elab) -> $llvm_ir_text
@@ -130,16 +249,30 @@ sub lower_with_elaboration {
         push @lines, '@fmt_s = private unnamed_addr constant [3 x i8] c"%s\00", align 1';
     }
     elsif ($result_repr eq 'Str') {
-        # Str result: the value is an i8* pointer to a NUL-terminated string.
-        # The Bool string-face Coerce(Bool->Str) is the primary producer.
-        # Emit the two Bool-string-face globals here (always; they are small
-        # constants and may be needed even if _need_bool_str_globals was set
-        # during body lowering — emitting them in the prologue is the canonical path).
+        # Str result: two possible print paths depending on whether we have a
+        # compile-time-tracked length or only a NUL-terminated pointer.
+        #
+        # Path A (length-tracked, from Constant/Concat/VarDecl Str values):
+        #   printf("Str:%.*s\n", (i32)len, ptr)
+        #   Format: "Str:%.*s\n\0" = S,t,r,:,%,.,*,s,\n,\0 = 10 bytes = [10 x i8]
+        #   This is correct for any byte content (including embedded NULs in theory).
+        #
+        # Path B (NUL-terminated only, from Coerce(Bool->Str) or unknown-length):
+        #   printf("Str:%s\n", ptr)
+        #   Format: "Str:%s\n\0" = 8 bytes = [8 x i8]
+        #   Both Bool-face strings are NUL-terminated globals — correct for ASCII.
+        #
+        # We emit both format globals; the epilogue selects at lower_with_elaboration
+        # time based on whether the context has a tracked length for the result.
+        #
+        # Bool string-face globals for Coerce(Bool->Str):
         # "1\0" = [2 x i8]; "\0" = [1 x i8] (NUL only = empty string)
         push @lines, '@coerce_bool_str_true  = private unnamed_addr constant [2 x i8] c"1\00", align 1';
         push @lines, '@coerce_bool_str_false = private unnamed_addr constant [1 x i8] c"\00",   align 1';
-        # Tagged format: "Str:%s\n\0" = S,t,r,:,%,s,\n,\0 = 8 bytes = [8 x i8]
+        # Path B format (NUL-terminated fallback):
         push @lines, '@fmt_str = private unnamed_addr constant [8 x i8] c"Str:%s\0A\00", align 1';
+        # Path A format (length-precision):
+        push @lines, '@fmt_str_len = private unnamed_addr constant [10 x i8] c"Str:%.*s\0A\00", align 1';
     }
     else {
         die "LLVM backend (elaboration): cannot emit return of repr=$result_repr";
@@ -156,6 +289,46 @@ sub lower_with_elaboration {
 
     push @lines, '';
     push @lines, 'declare i32 @printf(i8* nocapture readonly, ...)';
+
+    # Emit string-constant globals collected during body lowering.
+    # Each Constant(:Str) node emits a private global; the names are stashed in
+    # _str_globals as [ $global_name, $content, $byte_len ] triples. We emit
+    # them here (before the function body) so they appear in the module before @main.
+    if (defined $ctx->{_str_globals}) {
+        push @lines, '';
+        for my $g ($ctx->{_str_globals}->@*) {
+            my ($gname, $content, $blen) = @$g;
+            my $total = $blen + 1;  # +1 for NUL terminator
+            # Encode the bytes as a c"..." literal (NUL is \00).
+            my $enc = _encode_c_string($content);
+            push @lines, "$gname = private unnamed_addr constant [$total x i8] c\"$enc\\00\", align 1";
+        }
+    }
+
+    # Declare malloc/memcpy when Str concat operations were emitted.
+    # These are plain C host-interface functions — NOT libperl.
+    if ($ctx->{_need_malloc_memcpy}) {
+        push @lines, 'declare i8* @malloc(i64)';
+        push @lines, 'declare i8* @memcpy(i8*, i8*, i64)';
+    }
+
+    # Emit @chalk_str_to_num helper + strtod declaration when Coerce(Str->Num) is used.
+    #
+    # The helper implements perl's leading-numeric rule: skip whitespace, then parse
+    # a decimal number (no hex). The one divergence from libc strtod: strtod parses
+    # "0x10" as 16.0, but perl returns 0. We pre-check for "0x"/"0X" and return 0.0.
+    #
+    # strtod is a plain C library function (host interface, NOT libperl). The
+    # chalk_str_to_num function is a module-local helper; no external linkage needed.
+    if ($ctx->{_need_str_to_num_helper}) {
+        push @lines, '';
+        push @lines, 'declare double @strtod(i8* nocapture readonly, i8** nocapture)';
+        push @lines, '';
+        # @chalk_str_to_num(i8* %ptr, i64 %len) -> double
+        # Implements perl's leading-numeric rule (decimal only; "0x..." -> 0.0).
+        push @lines, _emit_str_to_num_helper();
+    }
+
     push @lines, '';
     push @lines, 'define i32 @main() {';
 
@@ -187,11 +360,24 @@ sub lower_with_elaboration {
         push @lines, '  call i32 (i8*, ...) @printf(i8* %fmt_s_ptr, i8* %bool_str_ptr)';
     }
     elsif ($result_repr eq 'Str') {
-        # The result is an i8* from Coerce(Bool->Str). Print it as "Str:<value>\n".
-        # The value string itself is already NUL-terminated; use the "Str:%s\n" format.
-        # @fmt_str is [8 x i8] c"Str:%s\0A\00" (S,t,r,:,%,s,\n,\0 = 8 bytes).
-        push @lines, '  %fmt_str_ptr = getelementptr inbounds [8 x i8], [8 x i8]* @fmt_str, i64 0, i64 0';
-        push @lines, "  call i32 (i8*, ...) \@printf(i8* %fmt_str_ptr, i8* $result_ref)";
+        # Print as "Str:<value>\n" using the type-tag format.
+        # Path A: length-tracked (from Constant/Concat/VarDecl Str nodes).
+        #   Use printf("Str:%.*s\n", (i32)len, ptr) — correct for exactly len bytes.
+        # Path B: NUL-terminated only (from Coerce(Bool->Str) or unknown-length).
+        #   Use printf("Str:%s\n", ptr) — correct for NUL-terminated ASCII.
+        my $len_ref = $ctx->_str_len_for($result_ref);
+        if (defined $len_ref) {
+            # Path A: length-tracked
+            my $len32 = '%result_str_len32';
+            push @lines, "  $len32 = trunc i64 $len_ref to i32  ; Str output: len i64->i32 for printf precision";
+            push @lines, '  %fmt_str_len_ptr = getelementptr inbounds [10 x i8], [10 x i8]* @fmt_str_len, i64 0, i64 0';
+            push @lines, "  call i32 (i8*, ...) \@printf(i8* %fmt_str_len_ptr, i32 $len32, i8* $result_ref)";
+        }
+        else {
+            # Path B: NUL-terminated fallback (Coerce(Bool->Str) etc.)
+            push @lines, '  %fmt_str_ptr = getelementptr inbounds [8 x i8], [8 x i8]* @fmt_str, i64 0, i64 0';
+            push @lines, "  call i32 (i8*, ...) \@printf(i8* %fmt_str_ptr, i8* $result_ref)";
+        }
     }
 
     push @lines, '  ret i32 0';
@@ -224,7 +410,27 @@ sub new {
                              # VarDecl stores its init SSA ref here; Assign updates
                              # it; PadAccess reads it. Models straight-line SSA
                              # without needing alloca/store/load for simple cases.
+        # Str representation tracking (G3):
+        #   _str_globals    => [ [$global_name, $content, $byte_len], ... ]
+        #     String constant globals to emit in the module prologue.
+        #   _str_len_table  => { $ssa_ptr_ref => $len_ssa_ref_or_literal }
+        #     Maps each Str SSA ptr ref to its length (i64). Used by the output
+        #     epilogue to emit printf("Str:%.*s\n", len, ptr) for exactly len bytes.
+        #   _need_malloc_memcpy => bool
+        #     Set when a Concat node is lowered; triggers malloc/memcpy declarations.
+        _str_globals          => [],
+        _str_len_table        => {},
+        _need_malloc_memcpy   => 0,
+        _need_str_to_num_helper => 0,
     }, $class;
+}
+
+# _str_len_for($ptr_ref) -> $len_ref_or_undef
+# Returns the tracked length SSA ref/literal for a Str SSA ptr reference,
+# or undef if the length is not tracked (e.g. for Coerce(Bool->Str) values).
+sub _str_len_for {
+    my ($self, $ptr_ref) = @_;
+    return $self->{_str_len_table}{$ptr_ref};
 }
 
 # blocks() -> arrayref of { label, insts, terminator }
@@ -348,6 +554,9 @@ sub lower_value {
     elsif ($op eq 'Or') {
         return $self->_lower_or($node);
     }
+    elsif ($op eq 'Concat') {
+        return $self->_lower_concat($node);
+    }
     elsif ($op eq 'Phi') {
         return $self->_lower_phi($node);
     }
@@ -402,6 +611,35 @@ sub _lower_constant {
         # Num constant -> double immediate
         my $ref = $self->_fresh;
         $self->_emit("  $ref = fadd double 0.0, $val    ; Constant($val, repr=Num -> double)");
+        $self->{cache}{$node->id} = $ref;
+        return $ref;
+    }
+    elsif ($repr eq 'Str') {
+        # Str constant -> private global + GEP to get i8* ptr.
+        # The Str representation is {ptr, len, encoding}; here encoding=0 (ASCII/default).
+        # We track the ptr as the SSA value and record the byte-length in _str_len_table.
+        # The private global is emitted in the module prologue.
+        #
+        # For a Constant node whose value is the string content (e.g., "hello"),
+        # the byte length = length($val) (UTF-8 byte count; all corpus cases are ASCII).
+        # The name-constant Constant("s") :Str for VarDecl names is also Str repr but
+        # should not be printed — it is used only as a VarDecl name marker. We lower
+        # it to the same ptr-to-global pattern; the len is tracked but unused for names.
+        my $byte_len = do { use bytes; length($val) };
+        my $total    = $byte_len + 1;  # +1 for NUL terminator
+
+        # Allocate a unique global name for this string constant.
+        my $gidx    = scalar @{ $self->{_str_globals} };
+        my $gname   = "\@str_const_$gidx";
+        push $self->{_str_globals}->@*, [$gname, $val, $byte_len];
+
+        # GEP to get i8* from the global array.
+        my $ref = $self->_fresh;
+        $self->_emit("  $ref = getelementptr inbounds [$total x i8], [$total x i8]* $gname, i64 0, i64 0  ; Constant(\"$val\", Str) -> i8* ptr");
+
+        # Record the byte-length as a compile-time literal for the output epilogue.
+        $self->{_str_len_table}{$ref} = $byte_len;
+
         $self->{cache}{$node->id} = $ref;
         return $ref;
     }
@@ -517,6 +755,93 @@ sub _lower_modulo {
     return $res;
 }
 
+# _lower_concat: emit Str concatenation as malloc+memcpy.
+#
+# Str = { ptr: i8*, len: i64, enc: i32 } where enc=0 (ASCII/default).
+# Concat(a, b) allocates a new buffer of len(a)+len(b)+1 bytes (NUL term),
+# copies a's bytes then b's bytes, returns the new ptr.
+#
+# The length of the result is tracked in _str_len_table for the output epilogue.
+# The allocation is malloc (not alloca) — SOUND for G4 aggregates where Str values
+# escape function frames. alloca would be unsound once a Str escapes its defining frame.
+# The malloc leak is acceptable for main()-returns-then-process-exits patterns.
+#
+# Both operands must have Str representation; lengths must be tracked in
+# _str_len_table. If a length is not tracked, the operation cannot be lowered safely.
+sub _lower_concat {
+    my ($self, $node) = @_;
+
+    my $repr = $node->representation;
+    if (defined $repr && $repr ne 'Str') {
+        die "GAP: Concat with repr=$repr reached LLVM backend — Concat requires Str operands";
+    }
+
+    my $inputs  = $node->inputs;
+    my $lhs_ref = $self->lower_value($inputs->[0]);
+    my $rhs_ref = $self->lower_value($inputs->[1]);
+
+    # Look up the lengths of both operands.
+    my $len_a = $self->_str_len_for($lhs_ref);
+    my $len_b = $self->_str_len_for($rhs_ref);
+    unless (defined $len_a && defined $len_b) {
+        die "GAP: Concat cannot lower — one or both operand lengths not tracked in _str_len_table. "
+          . "Only Str values produced by Constant(:Str) or Concat(:Str) have tracked lengths.";
+    }
+
+    # Compute result length = len_a + len_b. Emit as LLVM add i64 if either is
+    # an SSA ref (not a literal); use the literal sum if both are literals.
+    my $len_sum;
+    if ($len_a =~ /^\d+$/ && $len_b =~ /^\d+$/) {
+        # Both compile-time literals: compute the sum at codegen time.
+        $len_sum = $len_a + $len_b;
+    }
+    else {
+        # At least one is an SSA ref: emit add i64.
+        my $la_ref = $len_a =~ /^\d+$/ ? $len_a : $len_a;
+        my $lb_ref = $len_b =~ /^\d+$/ ? $len_b : $len_b;
+        $len_sum = $self->_fresh;
+        $self->_emit("  $len_sum = add i64 $la_ref, $lb_ref  ; Concat: total byte-len");
+    }
+
+    # Allocate: malloc(len_a + len_b + 1) — +1 for NUL terminator.
+    my $total;
+    if ($len_sum =~ /^\d+$/) {
+        $total = $len_sum + 1;
+    }
+    else {
+        $total = $self->_fresh;
+        $self->_emit("  $total = add i64 $len_sum, 1  ; Concat: +1 for NUL terminator");
+    }
+    my $buf = $self->_fresh;
+    $self->_emit("  $buf = call i8* \@malloc(i64 $total)  ; Concat: allocate result buffer");
+
+    # Copy a's bytes (len_a bytes from lhs_ref into buf).
+    $self->_emit("  call i8* \@memcpy(i8* $buf, i8* $lhs_ref, i64 $len_a)  ; Concat: copy lhs");
+
+    # Advance write ptr by len_a.
+    my $buf_b = $self->_fresh;
+    $self->_emit("  $buf_b = getelementptr inbounds i8, i8* $buf, i64 $len_a  ; Concat: ptr after lhs");
+
+    # Copy b's bytes (len_b+1 bytes including NUL from rhs_ref — or len_b+1 bytes).
+    # We copy len_b+1 to include the source NUL, completing the NUL terminator of result.
+    my $copy_b_len;
+    if ($len_b =~ /^\d+$/) {
+        $copy_b_len = $len_b + 1;
+    }
+    else {
+        $copy_b_len = $self->_fresh;
+        $self->_emit("  $copy_b_len = add i64 $len_b, 1  ; Concat: rhs copy len +1 for NUL");
+    }
+    $self->_emit("  call i8* \@memcpy(i8* $buf_b, i8* $rhs_ref, i64 $copy_b_len)  ; Concat: copy rhs+NUL");
+
+    # Track the result length and mark that malloc/memcpy declarations are needed.
+    $self->{_str_len_table}{$buf} = $len_sum;
+    $self->{_need_malloc_memcpy}  = 1;
+
+    $self->{cache}{$node->id} = $buf;
+    return $buf;
+}
+
 sub _lower_coerce {
     my ($self, $node) = @_;
 
@@ -570,6 +895,63 @@ sub _lower_coerce {
         $self->_emit("  $tp = getelementptr inbounds [2 x i8], [2 x i8]* $true_g,  i64 0, i64 0  ; Coerce[Bool->Str] true ptr");
         $self->_emit("  $fp = getelementptr inbounds [1 x i8], [1 x i8]* $false_g, i64 0, i64 0  ; Coerce[Bool->Str] false ptr");
         $self->_emit("  $ref = select i1 $input_ref, i8* $tp, i8* $fp  ; Coerce[Bool->Str] select");
+    }
+    # Coerce(Str->Num): perl leading-numeric rule.
+    # "3abc"->3, "abc"->0, " 42"->42, "3.14x"->3.14, ""->0, ".5"->0.5,
+    # "0x10"->0 (perl does NOT parse hex).
+    #
+    # Implementation: call a module-level helper @chalk_str_to_num(i8* ptr, i64 len)
+    # -> double. The helper uses libc strtod (host-C, NOT libperl) with a pre-check
+    # that returns 0.0 for any string starting with "0x" or "0X" (the one known
+    # divergence between strtod and perl's rule). strtod matches perl for all other
+    # leading-numeric forms. See G3 implementation notes.
+    elsif ($from eq 'Str' && $to eq 'Num') {
+        my $ptr_ref = $input_ref;
+        my $len_ref = $self->_str_len_for($ptr_ref) // 0;
+        # Flag that the str-to-num helper + strtod declaration are needed.
+        $self->{_need_str_to_num_helper} = 1;
+        $self->_emit("  $ref = call double \@chalk_str_to_num(i8* $ptr_ref, i64 $len_ref)  ; Coerce[Str->Num] leading-numeric");
+    }
+    # Coerce(Str->Bool): perl's string truthiness rule.
+    # false iff the string is "" (empty) or exactly "0".
+    # "0.0","00","0 " etc. are all TRUE (only exact "0" and "" are false).
+    #
+    # Implementation: branchless LLVM IR:
+    #   is_empty = (len == 0)
+    #   first_byte = load i8 from ptr (safe since we gep+load conditionally)
+    #   is_zero_char = (first_byte == '0')
+    #   is_single_char = (len == 1)
+    #   is_single_zero = (is_single_char AND is_zero_char)
+    #   is_false = (is_empty OR is_single_zero)
+    #   result = NOT is_false  (true iff not false)
+    elsif ($from eq 'Str' && $to eq 'Bool') {
+        my $ptr_ref = $input_ref;
+        my $len_ref = $self->_str_len_for($ptr_ref) // 0;
+        # is_empty = (len == 0)
+        my $is_empty = $self->_fresh;
+        $self->_emit("  $is_empty = icmp eq i64 $len_ref, 0  ; Coerce[Str->Bool]: len==0 check");
+        # Load the first byte conditionally: use select to get '0' when empty
+        # (the byte doesn't matter when empty; we AND with is_single_zero anyway).
+        # Safe approach: GEP ptr (valid even at length 0 for constant globals),
+        # load the byte, then mask out the result with is_single_zero.
+        my $first_byte_ptr = $self->_fresh;
+        $self->_emit("  $first_byte_ptr = getelementptr inbounds i8, i8* $ptr_ref, i64 0  ; Coerce[Str->Bool]: ptr to first byte");
+        my $first_byte = $self->_fresh;
+        $self->_emit("  $first_byte = load i8, i8* $first_byte_ptr  ; Coerce[Str->Bool]: load first byte");
+        # is_zero_char = (first_byte == '0' = 48)
+        my $is_zero_char = $self->_fresh;
+        $self->_emit("  $is_zero_char = icmp eq i8 $first_byte, 48  ; Coerce[Str->Bool]: first byte == '0'");
+        # is_single_char = (len == 1)
+        my $is_single = $self->_fresh;
+        $self->_emit("  $is_single = icmp eq i64 $len_ref, 1  ; Coerce[Str->Bool]: len==1 check");
+        # is_single_zero = is_single AND is_zero_char
+        my $is_single_zero = $self->_fresh;
+        $self->_emit("  $is_single_zero = and i1 $is_single, $is_zero_char  ; Coerce[Str->Bool]: single-zero check");
+        # is_false = is_empty OR is_single_zero
+        my $is_false = $self->_fresh;
+        $self->_emit("  $is_false = or i1 $is_empty, $is_single_zero  ; Coerce[Str->Bool]: is false?");
+        # result = NOT is_false -> true iff non-empty and not "0"
+        $self->_emit("  $ref = xor i1 $is_false, true  ; Coerce[Str->Bool]: invert -> Bool");
     }
     elsif ($from eq 'Scalar' || $to eq 'Scalar') {
         die "GAP: Coerce involving Scalar reached LLVM backend — cannot lower runtime-free.";
@@ -670,7 +1052,11 @@ sub _lower_vardecl {
         $init_ref = $self->lower_value($init_node);
     }
     else {
-        # No initializer: use a zero value for the type
+        # No initializer: use a zero/empty value for the type.
+        if ($repr eq 'Str') {
+            die "GAP: VarDecl with repr=Str and no initializer reached LLVM backend — "
+              . "uninit Str is not yet lowered (would require an empty-string global).";
+        }
         my $zero = $self->_fresh;
         if ($repr eq 'Num') {
             $self->_emit("  $zero = fadd double 0.0, 0.0  ; VarDecl uninit Num -> 0.0");
@@ -1069,6 +1455,7 @@ sub _repr_to_llvm_type {
     return 'i64'    if $repr eq 'Int';
     return 'double' if $repr eq 'Num';
     return 'i1'     if $repr eq 'Bool';
+    return 'i8*'    if $repr eq 'Str';
     die "LLVM backend: no LLVM type for representation '$repr'";
 }
 
