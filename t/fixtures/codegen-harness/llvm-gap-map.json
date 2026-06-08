@@ -4,8 +4,8 @@
          "extra" : {
             "description" : "literal arithmetic: return 1 + 2",
             "libperl_free" : 1,
-            "lli_output" : "3",
-            "perl_oracle" : "3",
+            "lli_output" : "Int:3",
+            "perl_oracle" : "Int:3",
             "runtime_free_coverage" : 1
          },
          "group" : "A",
@@ -16,8 +16,8 @@
          "extra" : {
             "description" : "literal arithmetic: return 5 - 3",
             "libperl_free" : 1,
-            "lli_output" : "2",
-            "perl_oracle" : "2",
+            "lli_output" : "Int:2",
+            "perl_oracle" : "Int:2",
             "runtime_free_coverage" : 1
          },
          "group" : "A",
@@ -28,8 +28,8 @@
          "extra" : {
             "description" : "literal arithmetic: return 3 * 4",
             "libperl_free" : 1,
-            "lli_output" : "12",
-            "perl_oracle" : "12",
+            "lli_output" : "Int:12",
+            "perl_oracle" : "Int:12",
             "runtime_free_coverage" : 1
          },
          "group" : "A",
@@ -40,8 +40,8 @@
          "extra" : {
             "description" : "literal arithmetic: return 3 / 4 (perl float division = 0.75)",
             "libperl_free" : 1,
-            "lli_output" : "0.75",
-            "perl_oracle" : "0.75",
+            "lli_output" : "Num:0.75",
+            "perl_oracle" : "Num:0.75",
             "runtime_free_coverage" : 1
          },
          "group" : "A",
@@ -52,8 +52,8 @@
          "extra" : {
             "description" : "literal arithmetic: return -7 % 3 (perl right-operand sign = 2)",
             "libperl_free" : 1,
-            "lli_output" : "2",
-            "perl_oracle" : "2",
+            "lli_output" : "Int:2",
+            "perl_oracle" : "Int:2",
             "runtime_free_coverage" : 1
          },
          "group" : "A",
@@ -64,8 +64,8 @@
          "extra" : {
             "description" : "VarDecl scalar: my $x = 1; return $x",
             "libperl_free" : 1,
-            "lli_output" : "1",
-            "perl_oracle" : "1",
+            "lli_output" : "Int:1",
+            "perl_oracle" : "Int:1",
             "runtime_free_coverage" : 1
          },
          "group" : "A",
@@ -100,8 +100,8 @@
          "extra" : {
             "description" : "VarDecl no initializer: my $x; $x = 1; return $x",
             "libperl_free" : 1,
-            "lli_output" : "1",
-            "perl_oracle" : "1",
+            "lli_output" : "Int:1",
+            "perl_oracle" : "Int:1",
             "runtime_free_coverage" : 1
          },
          "group" : "A",
@@ -124,8 +124,8 @@
          "extra" : {
             "description" : "reassignment: my $x = 1; $x = 2; return $x",
             "libperl_free" : 1,
-            "lli_output" : "2",
-            "perl_oracle" : "2",
+            "lli_output" : "Int:2",
+            "perl_oracle" : "Int:2",
             "runtime_free_coverage" : 1
          },
          "group" : "C",
@@ -136,8 +136,8 @@
          "extra" : {
             "description" : "compound assignment: my $x = 1; $x += 2; return $x",
             "libperl_free" : 1,
-            "lli_output" : "3",
-            "perl_oracle" : "3",
+            "lli_output" : "Int:3",
+            "perl_oracle" : "Int:3",
             "runtime_free_coverage" : 1
          },
          "group" : "C",
@@ -244,8 +244,8 @@
          "extra" : {
             "description" : "ternary: my $x = $n > 0 ? 1 : 2; return $x",
             "libperl_free" : 1,
-            "lli_output" : "1",
-            "perl_oracle" : "1",
+            "lli_output" : "Int:1",
+            "perl_oracle" : "Int:1",
             "runtime_free_coverage" : 1
          },
          "group" : "D",
@@ -280,8 +280,8 @@
          "extra" : {
             "description" : "pre-increment: my $i = 0; ++$i; return $i",
             "libperl_free" : 1,
-            "lli_output" : "1",
-            "perl_oracle" : "1",
+            "lli_output" : "Int:1",
+            "perl_oracle" : "Int:1",
             "runtime_free_coverage" : 1
          },
          "group" : "K",
@@ -292,8 +292,8 @@
          "extra" : {
             "description" : "post-increment: my $i = 0; $i++; return $i",
             "libperl_free" : 1,
-            "lli_output" : "1",
-            "perl_oracle" : "1",
+            "lli_output" : "Int:1",
+            "perl_oracle" : "Int:1",
             "runtime_free_coverage" : 1
          },
          "group" : "K",

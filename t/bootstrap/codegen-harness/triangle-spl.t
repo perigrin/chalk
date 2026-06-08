@@ -71,7 +71,7 @@ subtest 'LLVMDriver BehaviorRecord has correct return value for arith-add' => su
 
     my $rv = $L->return_values;
     is( scalar(@$rv), 1,   'return_values has one element' );
-    is( $rv->[0], '3',     'return_values[0] is "3" (1+2)' );
+    is( $rv->[0], 'Int:3', 'return_values[0] is "Int:3" (1+2, type-tagged)' );
 };
 
 subtest 'LLVMDriver L record is libperl-free (no Perl_/SV_ in .ll)' => sub {
@@ -272,9 +272,9 @@ subtest 'real S/P/L triangle PASS for arith-add' => sub {
 
     # S: perl oracle — run "return 1 + 2" under perl and capture the result.
     # For the triangle test, we build S directly as a BehaviorRecord with
-    # the known perl oracle output "3". (The full PerlDriver/RunUnderPerl path
-    # is tested elsewhere; here we focus on the triangle verdict.)
-    my $S = Chalk::CodeGen::Harness::BehaviorRecord->new( return_values => ['3'] );
+    # the known perl oracle output "Int:3" (type-tagged, matching the new oracle format).
+    # (The full PerlDriver/RunUnderPerl path is tested elsewhere; here we focus on the triangle verdict.)
+    my $S = Chalk::CodeGen::Harness::BehaviorRecord->new( return_values => ['Int:3'] );
 
     # P: Perl codegen corner — lower the SAME typed graph to Perl, run under perl.
     my ( $P, $p_meta ) = Chalk::CodeGen::Harness::ReturnNodePerlDriver->run(

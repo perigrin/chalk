@@ -86,13 +86,10 @@ for my $case (@$cases) {
                 my $lli_out  = $L->return_values->[0] // '';
                 my $perl_out = $case->{_perl_actual} // '';
                 if (length $perl_out) {
-                    if ($lli_out =~ /\./ || $perl_out =~ /\./) {
-                        ok(abs($lli_out - $perl_out) < 1e-9,
-                            "$title: lli output '$lli_out' == perl oracle '$perl_out' (built from block)");
-                    } else {
-                        is($lli_out, $perl_out,
-                            "$title: lli output == perl oracle (built from block)");
-                    }
+                    # Both sides are type-tagged (Int:N, Num:G, Bool:, etc.).
+                    # Exact tag comparison — no numeric tolerance needed; the tag encodes the type.
+                    is($lli_out, $perl_out,
+                        "$title: lli output '$lli_out' == perl oracle '$perl_out' (built from block)");
                 }
             }
         }
@@ -146,7 +143,8 @@ END_MD
     });
 
     is($result->{behavior}{verdict}, 'CAPTURED', 'behavior verdict is CAPTURED');
-    is($result->{behavior}{actual}, '3', 'captured value is 3 from perl oracle');
+    # The oracle now emits a type-tagged value: Int:3 for the integer 1+2.
+    is($result->{behavior}{actual}, 'Int:3', 'captured value is Int:3 from perl oracle (type-tagged)');
     is($result->{overall}, 'CAPTURED', 'overall verdict is CAPTURED');
 
     # Re-read the file: the behavior block should now be filled
@@ -154,7 +152,7 @@ END_MD
     my $new_content = do { local $/; <$rfh> };
     close $rfh;
 
-    like($new_content, qr/return: 3/, 'rewritten file contains "return: 3"');
+    like($new_content, qr/return: Int:3/, 'rewritten file contains "return: Int:3" (type-tagged)');
     unlike($new_content, qr/^```behavior\s*```/m, 'behavior block is no longer empty');
 
     # Run again on the rewritten file — now it should PASS (not CAPTURED)

@@ -8,6 +8,7 @@ use utf8;
 use Carp      qw(croak);
 use File::Temp qw(tempfile);
 use JSON::PP;
+use Scalar::Util qw(looks_like_number);
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
@@ -49,6 +50,26 @@ my $ARTIFACT_FILE = 't/fixtures/codegen-harness/llvm-gap-map.json';
 # coercion node is missing, or a guard is absent — is a GAP, and the specific
 # reason is recorded.
 # ---------------------------------------------------------------------------
+
+# _infer_oracle_tag($oracle_str) -> type-tagged string
+# Converts a plain oracle string (e.g. "3", "0.75") to the type-tagged form
+# (e.g. "Int:3", "Num:0.75") that lli now emits. Already-tagged strings
+# (with Bool:/Int:/Num:/Str:/Undef: prefix) are returned unchanged.
+# This keeps existing plain perl_oracle => 'N' entries working without
+# requiring all entries to be rewritten.
+sub _infer_oracle_tag {
+    my ($val) = @_;
+    return 'Undef:' unless defined $val;
+    return $val if $val =~ /^(?:Bool:|Int:|Num:|Str:|Undef:)/;
+    return 'Str:' if $val eq '';
+    if (looks_like_number($val) && $val =~ /\./) {
+        return sprintf("Num:%g", $val);
+    }
+    if (looks_like_number($val)) {
+        return "Int:$val";
+    }
+    return "Str:$val";
+}
 
 # Helper: make a Return node over a value-def chain.
 sub _make_return {
@@ -730,7 +751,11 @@ sub _assess_one {
     # Run through lli to compare against the perl oracle.
     my ($lli_out, $lli_exit) = _run_lli($ll);
 
-    my $oracle = $idiom->{perl_oracle} // '';
+    my $oracle_raw = $idiom->{perl_oracle} // '';
+    # The lli output is type-tagged (e.g. "Int:3", "Num:0.75"). The oracle
+    # strings in _idiom_table may be plain ("3") or already tagged ("Int:3").
+    # Infer a tag for the oracle so both sides are comparable.
+    my $oracle = _infer_oracle_tag($oracle_raw);
 
     # MISCOMPILE: lowered correctly but behavior diverges.
     if ($lli_exit != 0 || $lli_out ne $oracle) {

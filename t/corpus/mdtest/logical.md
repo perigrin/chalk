@@ -115,14 +115,16 @@ primitive booleans (`is_bool(!5)`=1, `is_bool(!0)`=1 — verified), NOT strings.
 A boolean *coerces* to `""`/`"1"` in string context and `0`/`1` in numeric
 context, but its identity is Bool, not Str (a literal `""` has `is_bool`=0).
 
-CORRECTED CLASSIFICATION (2026-06-07): `!` is a Bool-REPRESENTATION gap, not a
-"Str dual-representation" gap (the earlier prose was wrong — `!5` is not an empty
-string, it is `false`). It is closeable runtime-free by modelling the Bool
-representation (i1) + a UnaryNot(Bool)->Bool op + the `Coerce(Bool->*)` edges —
-NOT blocked on Str/group-C. (Contrast L1/L2 `&&`/`||`, which genuinely return an
-OPERAND and need control flow / cfg-blocks-phi; and L3 `//`, an RF
-Undef-definedness check + the same operand-selecting control flow.)
-Output of a bare bool still needs the context-correct `Coerce(Bool->Str|Num)`.
+G2 GREEN: `!` lowers runtime-free via the Bool representation (i1) + UnaryNot
+(xor i1 %cond, true) + Coerce(Int->Bool) truthiness (icmp ne) + Coerce(Bool->Str)
+string-face for the return path. The type-tagged oracle (`Bool:` for false,
+`Bool:1` for true) distinguishes a Bool result from its Str coercion (which would
+be `Str:`) — so Int-as-0 or Str-as-empty miscompiles are caught at the oracle
+layer, not just at the lli output layer.
+
+Source: `my $a = 5; !$a` — $a is 5 (truthy), so !$a is false. The ir-block
+models the Not over a PadAccess(:Int), coercing Int to Bool via truthiness, then
+negating. The final return is :Bool, and the type-tagged output is `Bool:`.
 
 ```perl
 # source
@@ -131,10 +133,18 @@ my $a = 5;
 ```
 
 ```behavior
-return: 
+return: Bool:
 context: scalar
 ```
 
 ```ir
-L: GAP(bool-repr: ! yields a genuine Bool (is_bool), not a Str; closeable runtime-free via a Bool representation + UnaryNot + Coerce(Bool->*) edges. NOT a Str/group-C dependency.)
+%cn   = Constant("$a") :Str
+%c5   = Constant(5) :Int
+%vd   = VarDecl(%cn, %c5) :Int
+%pa   = PadAccess(%vd, "$a") :Int
+%b    = Coerce(%pa : Int -> Bool) :Bool
+%nb   = Not(%b) :Bool
+return %nb
+control: %vd
+L: GREEN
 ```

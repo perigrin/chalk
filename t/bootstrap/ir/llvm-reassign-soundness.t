@@ -122,8 +122,8 @@ sub int_const {
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (a): .ll is libperl-free');
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'Case (a): lli exits 0');
-        is($out, '3',
-            'Case (a): lli=3 == perl=3 (x=2 post-assign, y=1 pre-assign, 2+1=3)');
+        is($out, 'Int:3',
+            'Case (a): lli=Int:3 == perl=Int:3 (x=2 post-assign, y=1 pre-assign, 2+1=3, type-tagged)');
     }
 }
 
@@ -195,8 +195,8 @@ sub int_const {
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (b): .ll is libperl-free');
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'Case (b): lli exits 0');
-        is($out, '6',
-            'Case (b): lli=6 == perl=6 (x=3, y=1, z=2: 3+1+2=6)');
+        is($out, 'Int:6',
+            'Case (b): lli=Int:6 == perl=Int:6 (x=3, y=1, z=2: 3+1+2=6, type-tagged)');
     }
 }
 
@@ -275,8 +275,8 @@ for my $pair ([5, 6], [-1, 2]) {
         unlike($ll, qr/\bSV\b|Perl_|libperl/, "Case (c) n=$n_val: .ll is libperl-free");
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, "Case (c) n=$n_val: lli exits 0");
-        is($out, "$expected",
-            "Case (c) n=$n_val: lli=$expected == perl=$expected");
+        is($out, "Int:$expected",
+            "Case (c) n=$n_val: lli=Int:$expected == perl=Int:$expected (type-tagged)");
     }
 }
 
@@ -356,8 +356,8 @@ for my $pair ([5, 6], [-1, 2]) {
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (d): .ll is libperl-free');
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'Case (d): lli exits 0');
-        is($out, '6',
-            'Case (d): lli=6 == perl=6 (sum 1+2+3=6 via loop-carried x reassign)');
+        is($out, 'Int:6',
+            'Case (d): lli=Int:6 == perl=Int:6 (sum 1+2+3=6 via loop-carried x reassign, type-tagged)');
     }
 }
 
@@ -436,8 +436,8 @@ for my $pair ([5, 6], [-1, 2]) {
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (e): .ll is libperl-free');
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'Case (e): lli exits 0');
-        is($out, '6',
-            'Case (e): lli=6 == perl=6 (1+2+3=6: x reads each program-point value)');
+        is($out, 'Int:6',
+            'Case (e): lli=Int:6 == perl=Int:6 (1+2+3=6: x reads each program-point value, type-tagged)');
     }
 }
 

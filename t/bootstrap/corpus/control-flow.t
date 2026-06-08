@@ -123,8 +123,8 @@ subtest 'D6 constructive proof: TernaryExpr builds and lowers to 1 via lli' => s
         ok(!$meta->{marked_unsupported},
             'D6 TernaryExpr graph is truly GREEN (not marked_unsupported)');
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '1', "D6 lli output is 1 (5>0 true -> select then-branch)");
-        is($lli_out, $d6_case->{_perl_actual} // '1',
+        is($lli_out, 'Int:1', "D6 lli output is Int:1 (5>0 true -> select then-branch, type-tagged)");
+        is($lli_out, $d6_case->{_perl_actual} // 'Int:1',
             "D6 lli output matches perl oracle");
     }
 };
@@ -159,8 +159,8 @@ subtest 'D1 constructive proof: if/else builds and lowers to 1 via lli' => sub {
         like($ll, qr/phi i64/, 'D1 .ll: contains phi instruction');
 
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '1', "D1 lli output is 1 (n=5, n>0 -> x=1)");
-        is($lli_out, $d1_case->{_perl_actual} // '1',
+        is($lli_out, 'Int:1', "D1 lli output is Int:1 (n=5, n>0 -> x=1, type-tagged)");
+        is($lli_out, $d1_case->{_perl_actual} // 'Int:1',
             "D1 lli output matches perl oracle");
     }
 };

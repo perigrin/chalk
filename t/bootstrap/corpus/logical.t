@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the logical-operators mdtest corpus topic (constructive format).
-# ABOUTME: L1 (&&) and L2 (||) are GREEN via cfg-blocks-phi; L3 (//) and L4 (!) remain GAP.
+# ABOUTME: L1 (&&), L2 (||), L4 (!) are GREEN; L3 (//) remains GAP (needs Undef repr).
 use 5.42.0;
 use utf8;
 
@@ -28,7 +28,7 @@ unless (-f $LOGICAL_MD) {
 #   L1 (&&): GREEN — cfg-blocks-phi lands And lowering (branch+phi)
 #   L2 (||): GREEN — cfg-blocks-phi lands Or lowering (branch+phi)
 #   L3 (//): GAP  — needs Undef representation + definedness predicate
-#   L4 (!):  GAP  — needs Bool representation + UnaryNot + Coerce(Bool->*)
+#   L4 (!):  GREEN — Bool repr (i1) + Not (xor i1) + Coerce(Int->Bool) + type-tagged return
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($LOGICAL_MD);
@@ -48,8 +48,8 @@ ok((grep { /L4.*not/i          } @titles),  'case: L4 not present');
 #   - ir-shape check must not FAIL (pure-GAP blocks trivially pass)
 #   - L-verdict check must PASS (declared verdict matches actual verdict)
 #
-# L1 and L2 declare L: GREEN — they lower via And/Or branch+phi.
-# L3 and L4 declare L: GAP — not lowerable in the current slice.
+# L1, L2, L4 declare L: GREEN — they lower via And/Or branch+phi (L1/L2) or
+# Not+Coerce+Bool-tagged return (L4). L3 declares L: GAP.
 # ---------------------------------------------------------------------------
 
 for my $case (@$cases) {
@@ -85,17 +85,18 @@ for my $case (@$cases) {
 # L1 (&&): GREEN — And lowering via branch+phi
 # L2 (||): GREEN — Or lowering via branch+phi
 # L3 (//): GAP  — Undef representation not yet modelled
-# L4 (!):  GAP  — Bool representation + UnaryNot not yet modelled
+# L4 (!):  GREEN — Bool repr + Not + Coerce(Int->Bool) + type-tagged Bool return
 # ---------------------------------------------------------------------------
 
-subtest 'L1/L2 declare L: GREEN; L3/L4 declare L: GAP' => sub {
+subtest 'L1/L2/L4 declare L: GREEN; L3 declares L: GAP' => sub {
     plan tests => 4;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
         my $title   = $case->{title};
-        if ($title =~ /L1.*logical.*and/i || $title =~ /L2.*logical.*or/i) {
-            is($decl, 'GREEN', "case '$title': declared L: GREEN (cfg-blocks-phi And/Or lowering)");
+        if ($title =~ /L1.*logical.*and/i || $title =~ /L2.*logical.*or/i
+                || $title =~ /L4.*not/i) {
+            is($decl, 'GREEN', "case '$title': declared L: GREEN");
         } else {
             is($decl, 'GAP',   "case '$title': declared L: GAP (not lowerable in current slice)");
         }
@@ -135,8 +136,8 @@ subtest 'L1 constructive proof: And builds and lowers to 7 via lli' => sub {
         unlike($ll, qr/\bSV\b/, 'L1 .ll: no SV type symbols');
 
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '7', "L1 lli output is 7 (3&&7 == 7)");
-        is($lli_out, $l1_case->{_perl_actual} // '7',
+        is($lli_out, 'Int:7', "L1 lli output is Int:7 (3&&7 == 7, type-tagged)");
+        is($lli_out, $l1_case->{_perl_actual} // 'Int:7',
             "L1 lli output matches perl oracle");
     }
 };
@@ -166,31 +167,86 @@ subtest 'L2 constructive proof: Or builds and lowers to 3 via lli' => sub {
         unlike($ll, qr/\bSV\b/, 'L2 .ll: no SV type symbols');
 
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '3', "L2 lli output is 3 (3||7 == 3)");
-        is($lli_out, $l2_case->{_perl_actual} // '3',
+        is($lli_out, 'Int:3', "L2 lli output is Int:3 (3||7 == 3, type-tagged)");
+        is($lli_out, $l2_case->{_perl_actual} // 'Int:3',
             "L2 lli output matches perl oracle");
     }
 };
 
-subtest 'L3/L4 are pure-GAP blocks (build_graph_from_ir returns undef)' => sub {
+subtest 'L3 is a pure-GAP block (build_graph_from_ir returns undef); L4 builds' => sub {
     plan tests => 2;
-    for my $case (@$cases) {
-        next unless $case->{title} =~ /L3.*defined.*or/i || $case->{title} =~ /L4.*not/i;
-        my $ir_text = $case->{ir} // '';
+    # L3 (//) is still a pure-GAP block (no nodes, no buildable graph).
+    my ($l3_case) = grep { $_->{title} =~ /L3.*defined.*or/i } @$cases;
+    if (defined $l3_case) {
+        my $ir_text = $l3_case->{ir} // '';
         my $return_node;
         eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
-        my $title = $case->{title};
         ok(!defined $return_node && !$@,
-            "case '$title': build_graph_from_ir returns undef (pure-GAP, no error)");
+            "case '$l3_case->{title}': build_graph_from_ir returns undef (pure-GAP, no error)");
+    }
+    # L4 (!) now has a buildable graph (Not + Coerce Bool).
+    my ($l4_case) = grep { $_->{title} =~ /L4.*not/i } @$cases;
+    if (defined $l4_case) {
+        my $ir_text = $l4_case->{ir} // '';
+        my $return_node;
+        eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
+        ok(defined $return_node && !$@,
+            "case '$l4_case->{title}': build_graph_from_ir returns a node (GREEN, Not lowers)");
     }
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 5: Negative guard — a logical case claiming L: GREEN must FAIL
+# SECTION 5: L4 constructive proof — Not(Bool) builds and lowers correctly
+#
+# !5 => false (Bool:). The ir-block uses Coerce(Int->Bool) for truthiness then
+# Not (xor i1 %cond, true). lli output must match the type-tagged perl oracle.
+# ---------------------------------------------------------------------------
+
+subtest 'L4 constructive proof: Not builds and lowers to Bool: (false) via lli' => sub {
+    my ($l4_case) = grep { $_->{title} =~ /L4.*not/i } @$cases;
+    ok(defined $l4_case, 'L4 case found');
+
+    my $ir_text = $l4_case->{ir} // '';
+    my $return_node;
+    eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
+    ok(!$@, "L4 build_graph_from_ir does not croak (got: $@)")
+        or diag("build error: $@");
+    ok(defined $return_node, 'L4 build_graph_from_ir returns a defined Return node');
+
+    my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
+    is($verdict, 'GREEN', 'L4 ir block declares L: GREEN');
+
+    if (defined $return_node) {
+        my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
+        ok(!$meta->{marked_unsupported}, 'L4 Not graph is truly GREEN (not marked_unsupported)')
+            or diag("gap reason: " . ($meta->{gap_reason} // 'none') . "\nerror: " . ($meta->{lower_error} // 'none'));
+
+        # Libperl-free assertion: the emitted .ll must not call any Perl C-API.
+        my $ll = $meta->{ll_text} // '';
+        unlike($ll, qr/Perl_/, 'L4 .ll: no Perl_ C-API symbols');
+        unlike($ll, qr/\bSV\b/, 'L4 .ll: no SV type symbols');
+        unlike($ll, qr/sv_/,    'L4 .ll: no sv_ C-API symbols');
+        unlike($ll, qr/libperl/,'L4 .ll: no libperl reference');
+
+        # Bool: (false) — type-tagged. NOT "Int:0" (wrong type) or "Str:" (wrong identity).
+        my $lli_out = $L->return_values->[0] // '';
+        is($lli_out, 'Bool:', "L4 lli output is Bool: (false, type-tagged)");
+        is($lli_out, $l4_case->{_perl_actual} // 'Bool:',
+            "L4 lli output matches perl oracle");
+
+        # Structural sanity: .ll contains xor i1 (Not instruction).
+        like($ll, qr/xor i1/, 'L4 .ll: contains xor i1 (Not lowering)');
+        # .ll contains icmp ne (truthiness coercion from Int).
+        like($ll, qr/icmp ne/, 'L4 .ll: contains icmp ne (Int->Bool truthiness)');
+    }
+};
+
+# ---------------------------------------------------------------------------
+# SECTION 6: Negative guard — a logical case claiming L: GREEN must FAIL
 # if the ir block has no buildable nodes (pure-GAP with GREEN claim).
 # ---------------------------------------------------------------------------
 
-subtest 'guard: pure-GAP block with L: GREEN for logical op FAILS L verdict' => sub {
+subtest 'guard: pure-GAP block with L: GREEN for logical op FAILS L-verdict' => sub {
     my $fake_green_md = <<'END_MD';
 # Fake
 

@@ -93,7 +93,7 @@ sub num_const {
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'arith-div DIV-1: lli exits 0');
-        is($out, '0.75', "arith-div DIV-1: lli output '0.75' matches perl oracle");
+        is($out, 'Num:0.75', "arith-div DIV-1: lli output 'Num:0.75' matches perl oracle (type-tagged)");
     }
 }
 
@@ -145,7 +145,7 @@ sub num_const {
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'arith-mod MOD-1: lli exits 0');
-        is($out, '2', "arith-mod MOD-1: lli output '2' matches perl oracle (-7 % 3 == 2)");
+        is($out, 'Int:2', "arith-mod MOD-1: lli output 'Int:2' matches perl oracle (-7 % 3 == 2, type-tagged)");
     }
 }
 
@@ -166,7 +166,7 @@ sub num_const {
         skip 'lower() failed', 2 unless defined $ll;
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'arith-mod MOD-2: lli exits 0');
-        is($out, '1', "arith-mod MOD-2: lli output '1' matches perl oracle (7 % 3 == 1)");
+        is($out, 'Int:1', "arith-mod MOD-2: lli output 'Int:1' matches perl oracle (7 % 3 == 1, type-tagged)");
     }
 }
 
@@ -187,7 +187,7 @@ sub num_const {
         skip 'lower() failed', 2 unless defined $ll;
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'arith-mod MOD-3: lli exits 0');
-        is($out, '-2', "arith-mod MOD-3: lli output '-2' matches perl oracle (7 % -3 == -2)");
+        is($out, 'Int:-2', "arith-mod MOD-3: lli output 'Int:-2' matches perl oracle (7 % -3 == -2, type-tagged)");
     }
 }
 
@@ -239,7 +239,7 @@ sub num_const {
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'VAR-1 (A1): lli exits 0');
-        is($out, '1', "VAR-1 (A1): lli output '1' matches perl oracle");
+        is($out, 'Int:1', "VAR-1 (A1): lli output 'Int:1' matches perl oracle (type-tagged)");
     }
 }
 
@@ -284,7 +284,7 @@ sub num_const {
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'VAR-2 (C1): lli exits 0');
-        is($out, '2', "VAR-2 (C1): lli output '2' matches perl oracle");
+        is($out, 'Int:2', "VAR-2 (C1): lli output 'Int:2' matches perl oracle (type-tagged)");
     }
 }
 
@@ -335,7 +335,7 @@ sub num_const {
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'VAR-3 (C2): lli exits 0');
-        is($out, '3', "VAR-3 (C2): lli output '3' matches perl oracle");
+        is($out, 'Int:3', "VAR-3 (C2): lli output 'Int:3' matches perl oracle (type-tagged)");
     }
 }
 
@@ -381,7 +381,7 @@ sub num_const {
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'CMP-1: lli exits 0');
-        is($out, '1', "CMP-1: lli output '1' (5 > 3 ? 1 : 0 == 1)");
+        is($out, 'Int:1', "CMP-1: lli output 'Int:1' (5 > 3 ? 1 : 0 == 1, type-tagged)");
     }
 }
 
@@ -408,7 +408,7 @@ sub num_const {
         skip 'lower() failed', 2 unless defined $ll;
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'CMP-2: lli exits 0');
-        is($out, '0', "CMP-2: lli output '0' (1 > 3 ? 1 : 0 == 0)");
+        is($out, 'Int:0', "CMP-2: lli output 'Int:0' (1 > 3 ? 1 : 0 == 0, type-tagged)");
     }
 }
 
@@ -438,7 +438,7 @@ sub num_const {
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'CMP-3 (D6): lli exits 0');
-        is($out, '1', "CMP-3 (D6): lli output '1' (5>0 ? 1 : 2 == 1)");
+        is($out, 'Int:1', "CMP-3 (D6): lli output 'Int:1' (5>0 ? 1 : 2 == 1, type-tagged)");
     }
 }
 
@@ -494,8 +494,8 @@ sub num_const {
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'B1: lli exits 0');
-        is($out, '3',
-            'B1: lli=3 == perl=3 (x=2 post-assign, y=1 pre-assign, 2+1=3) — scoped model correct');
+        is($out, 'Int:3',
+            'B1: lli=Int:3 == perl=Int:3 (x=2 post-assign, y=1 pre-assign, 2+1=3, type-tagged)');
     }
 }
 

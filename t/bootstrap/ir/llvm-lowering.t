@@ -92,9 +92,8 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
 
     is($exit, 0, 'lli exits cleanly on generated .ll');
 
-    # perl oracle
-    my $perl_out = $1 if (1+2) =~ /(\d+)/;
-    $perl_out = '3';   # constant: 1+2 under perl is 3
+    # perl oracle (type-tagged: Int:3)
+    my $perl_out = 'Int:3';   # 1+2 under perl = Int:3 (type-tagged oracle)
 
     chomp $lli_out;
     is($lli_out, $perl_out,
@@ -180,7 +179,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'And .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, '7', "And .ll: lli output is 7 (3&&7 == 7)");
+        is($lli_out, 'Int:7', "And .ll: lli output is Int:7 (3&&7 == 7, type-tagged)");
     }
 }
 
@@ -220,7 +219,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'Or .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, '3', "Or .ll: lli output is 3 (3||7 == 3)");
+        is($lli_out, 'Int:3', "Or .ll: lli output is Int:3 (3||7 == 3, type-tagged)");
     }
 }
 
@@ -335,7 +334,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'If/else .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, '1', "If/else .ll: lli output is 1 (n=5, n>0 true -> x=1)");
+        is($lli_out, 'Int:1', "If/else .ll: lli output is Int:1 (n=5, n>0 true -> x=1, type-tagged)");
     }
 }
 
@@ -443,7 +442,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'Loop .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, '6', "Loop .ll: lli output is 6 (sum 3+2+1=6)");
+        is($lli_out, 'Int:6', "Loop .ll: lli output is Int:6 (sum 3+2+1=6, type-tagged)");
     }
 }
 
@@ -530,7 +529,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'B3 .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, '1', "B3 lli output is 1 (n=5, n>0, then-branch runs: x=1)");
+        is($lli_out, 'Int:1', "B3 lli output is Int:1 (n=5, n>0, then-branch runs: x=1, type-tagged)");
     }
 }
 
@@ -619,7 +618,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'B2 .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, '2.5', "B2 lli output is 2.5 (n=5, n>0 -> x=2.5)");
+        is($lli_out, 'Num:2.5', "B2 lli output is Num:2.5 (n=5, n>0 -> x=2.5, type-tagged)");
     }
 }
 
@@ -720,7 +719,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'B1 .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, '12', "B1 lli output is 12 (n=5, t=n+1=6, x=t*2=12)");
+        is($lli_out, 'Int:12', "B1 lli output is Int:12 (n=5, t=n+1=6, x=t*2=12, type-tagged)");
     }
 }
 
@@ -840,7 +839,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'H3 .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, '21', "H3 lli output is 21 (n=3: 10+10+1=21)");
+        is($lli_out, 'Int:21', "H3 lli output is Int:21 (n=3: 10+10+1=21, type-tagged)");
     }
 }
 

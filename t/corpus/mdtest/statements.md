@@ -104,6 +104,58 @@ return %tern
 L: GREEN
 ```
 
+## Bare bool return true (1 < 2)
+
+A bare numeric comparison used as the final expression returns a genuine Bool
+(`is_bool`=1). `1 < 2` is true: `Bool:1` in the type-tagged oracle. The ir-block
+returns the NumLt node directly with repr :Bool, and the emitter prints the
+`Bool:` + string-face tag via a `select i1` between two string-constant globals.
+Bilateral coverage for the false case is the next case (2 < 1 => `Bool:`).
+
+```perl
+# source
+1 < 2
+```
+
+```behavior
+return: Bool:1
+context: scalar
+```
+
+```ir
+%one  = Constant(1) :Int
+%two  = Constant(2) :Int
+%cmp  = NumLt(%one, %two) :Bool
+return %cmp
+L: GREEN
+```
+
+## Bare bool return false (2 < 1)
+
+The bilateral counterpart to the true case above: `2 < 1` is false, so the result
+is `Bool:` (empty string-face) in the type-tagged oracle. A lowering that modelled
+Bool as an integer 0 would emit `Int:0`, which differs from `Bool:` — the
+type-discriminating oracle catches this miscompile. This case is the adversarial
+guard made concrete: the false Bool must be `Bool:`, not `Str:` or `Int:0`.
+
+```perl
+# source
+2 < 1
+```
+
+```behavior
+return: Bool:
+context: scalar
+```
+
+```ir
+%two  = Constant(2) :Int
+%one  = Constant(1) :Int
+%cmp  = NumLt(%two, %one) :Bool
+return %cmp
+L: GREEN
+```
+
 ## Pragma declaration (use strict): compile-time GAP
 
 A `use strict` pragma is a compile-time directive. It has no runtime value

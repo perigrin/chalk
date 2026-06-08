@@ -220,7 +220,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
             my $exit    = $? >> 8;
             is($exit, 0, 'E4/B3 .ll: lli exits cleanly');
             chomp $lli_out;
-            is($lli_out, '1', 'E4/B3: lli output is 1 (n=5, n>0 true -> x=1, phi emits 1)');
+            is($lli_out, 'Int:1', 'E4/B3: lli output is Int:1 (n=5, n>0 true -> x=1, phi emits 1, type-tagged)');
         }
     }
 }
@@ -400,7 +400,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
             is($exit, 0, 'E6 .ll: lli exits cleanly');
             chomp $lli_out;
             # perl oracle: n=2, outer cond (2>0) true, inner cond (2>3) false -> x=1
-            is($lli_out, '1', 'E6: lli output is 1 (n=2, outer-true inner-false -> x=1) [B1+H1 repro]');
+            is($lli_out, 'Int:1', 'E6: lli output is Int:1 (n=2, outer-true inner-false -> x=1) [B1+H1 repro, type-tagged]');
         }
     }
 }
@@ -524,7 +524,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
             is($exit, 0, 'E7 .ll: lli exits cleanly');
             chomp $lli_out;
             # perl oracle: n=3, n>0 true -> loop: s = 3+2+1 = 6
-            is($lli_out, '6', 'E7: lli==perl=6 (loop-nested-in-if, n=3)');
+            is($lli_out, 'Int:6', 'E7: lli==perl=Int:6 (loop-nested-in-if, n=3, type-tagged)');
         }
     }
 }
@@ -684,7 +684,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
             is($exit, 0, 'M2 .ll: lli exits cleanly');
             chomp $lli_out;
             # perl oracle: n=5, 5>0 true -> x=1
-            is($lli_out, '1', 'M2: lli==perl=1 (Region-as-control_in, n=5)');
+            is($lli_out, 'Int:1', 'M2: lli==perl=Int:1 (Region-as-control_in, n=5, type-tagged)');
         }
     }
 }
@@ -791,7 +791,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
             is($exit, 0, 'E9 .ll: lli exits cleanly');
             chomp $lli_out;
             # perl oracle: n=3 -> s=10; n=2 -> s=20; n=1 (not >1) -> s=21
-            is($lli_out, '21', 'E9: lli==perl=21 (if-nested-in-loop, n=3)');
+            is($lli_out, 'Int:21', 'E9: lli==perl=Int:21 (if-nested-in-loop, n=3, type-tagged)');
         }
     }
 }

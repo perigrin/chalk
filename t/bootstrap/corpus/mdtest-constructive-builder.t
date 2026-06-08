@@ -120,7 +120,7 @@ END_IR
 
     ok(!$meta->{marked_unsupported}, 'arith-add (built from block) is not marked_unsupported');
     my $lli_out = $L->return_values->[0] // '';
-    is($lli_out, '3', 'arith-add built-from-block -> lli -> 3 (matches perl)');
+    is($lli_out, 'Int:3', 'arith-add built-from-block -> lli -> Int:3 (type-tagged, matches perl)');
 }
 
 # Test 6: arith-div graph (built from block) lowers via lli and produces 0.75
@@ -140,7 +140,8 @@ END_IR
 
     ok(!$meta->{marked_unsupported}, 'arith-div (built from block) is not marked_unsupported');
     my $lli_out = $L->return_values->[0] // '';
-    ok(abs($lli_out - 0.75) < 1e-9, "arith-div built-from-block -> lli -> 0.75 (got '$lli_out')");
+    # Type-tagged: Num:0.75 — exact string compare (the %g format is consistent).
+    is($lli_out, 'Num:0.75', "arith-div built-from-block -> lli -> Num:0.75 (type-tagged, got '$lli_out')");
 }
 
 # Test 7: ill-typed block (Int Add fed with Num without Coerce) fails TypedInvariant
@@ -273,8 +274,8 @@ END_IR
         ok(!$meta->{marked_unsupported},
             'TernaryExpr (built from block) is not marked_unsupported');
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '1',
-            'TernaryExpr(5>0, 1, 2) -> lli -> 1 (cond true, select then-branch)');
+        is($lli_out, 'Int:1',
+            'TernaryExpr(5>0, 1, 2) -> lli -> Int:1 (cond true, select then-branch, type-tagged)');
     }
 }
 
@@ -304,8 +305,8 @@ END_IR
         ok(!$meta->{marked_unsupported},
             'CompoundAssign kwarg (built from block) is not marked_unsupported');
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '3',
-            'CompoundAssign kwarg ($x=1; $x+=2) -> lli -> 3');
+        is($lli_out, 'Int:3',
+            'CompoundAssign kwarg ($x=1; $x+=2) -> lli -> Int:3 (type-tagged)');
     }
 }
 

@@ -86,9 +86,9 @@ for my $case (@$cases) {
                 "$title: built-from-block graph is truly GREEN (not marked_unsupported)");
             my $lli_out  = $L->return_values->[0] // '';
             my $perl_out = $case->{_perl_actual}  // '';
-            is($lli_out, '1', "$title: lli output is 1");
-            is($perl_out, '1', "$title: perl oracle is 1");
-            is($lli_out, $perl_out, "$title: lli output == perl oracle (both 1)");
+            is($lli_out, 'Int:1', "$title: lli output is Int:1 (type-tagged)");
+            is($perl_out, 'Int:1', "$title: perl oracle is Int:1 (type-tagged)");
+            is($lli_out, $perl_out, "$title: lli output == perl oracle (both Int:1)");
         }
     };
 }
@@ -136,8 +136,8 @@ subtest 'distinct PadAccess varnames prevent B1 stale-read GAP' => sub {
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
         ok(!$meta->{marked_unsupported},
             'K1 graph lowers without triggering B1 stale-read GAP');
-        is($L->return_values->[0], '1',
-            'K1 lli output is 1 (B1 guard did not fire; no stale-read GAP)');
+        is($L->return_values->[0], 'Int:1',
+            'K1 lli output is Int:1 (B1 guard did not fire; no stale-read GAP, type-tagged)');
     }
 };
 

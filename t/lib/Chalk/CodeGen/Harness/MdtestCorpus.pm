@@ -9,6 +9,8 @@ use Carp      qw(croak);
 use File::Temp qw(tempfile);
 use Scalar::Util qw(blessed looks_like_number);
 use JSON::PP;
+use builtin qw(is_bool);
+no warnings 'experimental::builtin';
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
@@ -601,20 +603,28 @@ sub _run_expr_under_perl {
     (my $clean_source = $source) =~ s/^\s*#[^\n]*\n//gm;
     $clean_source =~ s/^\s+|\s+$//g;
 
+    # The oracle emits a TYPE-TAGGED canonical string so Bool is distinguishable
+    # from its Str coercion (is_bool discriminates). Tags: Bool:1/Bool: Int:N
+    # Num:%g Str:<val> Undef:  — lli must print the same tag from its known repr.
     my $program = <<"END_PROGRAM";
 use 5.42.0;
 use utf8;
 use Scalar::Util qw(looks_like_number);
+use builtin qw(is_bool);
+no warnings 'experimental::builtin';
 
 my \$_result = do { $clean_source };
 
-if (!defined \$_result) {
-    print "undef\\n";
+if (is_bool(\$_result)) {
+    print "Bool:" . (\$_result ? "1" : "") . "\\n";
+} elsif (!defined \$_result) {
+    print "Undef:\\n";
 } elsif (looks_like_number(\$_result) && \$_result =~ /\\./) {
-    # Float: use %g format (matches lli output)
-    printf "%g\\n", \$_result;
+    printf "Num:%g\\n", \$_result;
+} elsif (looks_like_number(\$_result)) {
+    print "Int:\$_result\\n";
 } else {
-    print \$_result, "\\n";
+    print "Str:\$_result\\n";
 }
 END_PROGRAM
 
@@ -652,7 +662,15 @@ sub _parse_behavior_block {
     return \%d;
 }
 
-# _behavior_matches($actual_string, \%declared) -> ($bool, $reason)
+# _behavior_matches($actual_tagged, \%declared) -> ($bool, $reason)
+#
+# Both sides are type-tagged (e.g. "Int:5", "Bool:", "Str:hello").
+# The perl oracle ($actual_tagged) always emits a tag via _run_expr_under_perl.
+# The declared return value may be:
+#   - Already tagged (e.g. "Bool:", "Int:5") — compare as-is.
+#   - A plain untagged value (e.g. "5", "hello") — infer a tag using the same
+#     heuristic as the oracle (without is_bool, so plain numbers become Int:/Num:,
+#     and plain strings become Str:). This keeps existing behavior blocks green.
 sub _behavior_matches {
     my ($actual, $declared) = @_;
 
@@ -661,20 +679,46 @@ sub _behavior_matches {
         return (true, '');  # no return assertion
     }
 
-    # Numeric comparison with tolerance for floats
-    if (looks_like_number($actual) && looks_like_number($declared_return)) {
-        my $diff = abs($actual - $declared_return);
-        if ($diff < 1e-9) {
-            return (true, '');
-        }
-        return (false, "numeric mismatch: got '$actual', expected '$declared_return'");
-    }
+    # Compute a tag for the declared return value if it is not already tagged.
+    my $decl_tagged = _infer_tag($declared_return);
 
-    # String comparison
-    if ($actual eq $declared_return) {
+    # Compare tags exactly.
+    if ($actual eq $decl_tagged) {
         return (true, '');
     }
-    return (false, "string mismatch: got '$actual', expected '$declared_return'");
+    return (false, "tag mismatch: got '$actual', expected '$decl_tagged' (declared: '$declared_return')");
+}
+
+# _infer_tag($declared_str) -> tagged string
+#
+# If the string already carries a type prefix (Bool:/Int:/Num:/Str:/Undef:),
+# return it unchanged. Otherwise infer a tag from the value's form:
+#   empty/undef   -> Str:  (could be empty string; not is_bool-detectable here)
+#   looks numeric with decimal -> Num:%g formatted
+#   looks numeric -> Int:<val>
+#   else          -> Str:<val>
+#
+# This function is ONLY for declared values in behavior blocks (which were
+# historically untagged plain strings). The perl oracle always emits real tags.
+sub _infer_tag {
+    my ($val) = @_;
+    return 'Undef:' unless defined $val;
+
+    # Already tagged: pass through unchanged.
+    return $val if $val =~ /^(?:Bool:|Int:|Num:|Str:|Undef:)/;
+
+    # Empty string declared as "" — could be Str or Bool:false. We cannot
+    # distinguish here; treat as Str: so that only properly-tagged Bool: behavior
+    # blocks match a Bool:false perl result.
+    return 'Str:' if $val eq '';
+
+    if (looks_like_number($val) && $val =~ /\./) {
+        return sprintf("Num:%g", $val);
+    }
+    if (looks_like_number($val)) {
+        return "Int:$val";
+    }
+    return "Str:$val";
 }
 
 sub _make_behavior_record {
@@ -1052,25 +1096,19 @@ sub _run_l_verdict_check {
                  meta => $meta };
     }
 
-    # For GREEN: verify lli output agrees with perl behavior oracle (from behavior check)
+    # For GREEN: verify lli output agrees with perl behavior oracle (from behavior check).
+    # Both sides are type-tagged (e.g. "Int:5", "Bool:", "Num:3.14").
+    # The perl oracle always emits a tag. The lli output must print the same tag.
+    # Exact string comparison — no numeric tolerance needed (the tag encodes the type).
     if ($actual_verdict eq 'GREEN') {
         my $lli_out  = $L->return_values->[0] // '';
         my $expected = $opts->{perl_oracle_value} // $case->{_perl_actual};
 
         if (defined $expected && length $expected) {
-            if (looks_like_number($lli_out) && looks_like_number($expected)) {
-                my $diff = abs($lli_out - $expected);
-                if ($diff >= 1e-9) {
-                    push @$fail_reasons,
-                        "case '$case->{title}': L corner output '$lli_out' "
-                        . "does not match perl oracle '$expected'";
-                    return { verdict => 'FAIL', actual => $actual_verdict, declared => $decl,
-                             lli_out => $lli_out, expected => $expected, meta => $meta };
-                }
-            } elsif ($lli_out ne $expected) {
+            if ($lli_out ne $expected) {
                 push @$fail_reasons,
                     "case '$case->{title}': L corner output '$lli_out' "
-                    . "does not match perl oracle '$expected'";
+                    . "does not match perl oracle '$expected' (type-tagged compare)";
                 return { verdict => 'FAIL', actual => $actual_verdict, declared => $decl,
                          lli_out => $lli_out, expected => $expected, meta => $meta };
             }

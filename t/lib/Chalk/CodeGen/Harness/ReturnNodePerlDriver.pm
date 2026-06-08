@@ -129,16 +129,23 @@ sub _emit_return_as_perl {
     my $value_node = $return_node->inputs->[0];
     my $expr       = _emit_expr( $value_node, \%var_table );
 
-    # Choose print format.
+    # Emit type-tagged output: both P and L corners now emit tags so Bool is
+    # distinguishable from its Str coercion in the three-corner Comparator.
+    # Tags: Bool:1/Bool: Int:<n> Num:<g> Str:<s> Undef: — matching MdtestCorpus oracle.
     my $repr = $value_node->can('representation') ? ( $value_node->representation // 'Int' ) : 'Int';
 
     my $print_stmt;
-    if ( $repr eq 'Num' ) {
-        # Match perl's %g-like default stringification for floats.
-        $print_stmt = "printf('%s', $expr);\n";
+    if ( $repr eq 'Bool' ) {
+        # Bool: tagged output using is_bool (always true for Bool-repr values from this emitter).
+        $print_stmt = "use builtin qw(is_bool); no warnings 'experimental::builtin'; my \$_r = $expr; print is_bool(\$_r) ? 'Bool:' . (\$_r ? '1' : '') : 'Int:' . \$_r; print \"\\n\";\n";
+    }
+    elsif ( $repr eq 'Num' ) {
+        # Num: tagged output with %g format (matches lli output).
+        $print_stmt = "{ my \$_r = $expr; printf \"Num:%g\\n\", \$_r; }\n";
     }
     else {
-        $print_stmt = "print($expr);\n";
+        # Int (default): tagged output as Int:<decimal>.
+        $print_stmt = "{ my \$_r = $expr; print \"Int:\$_r\\n\"; }\n";
     }
 
     return join( "\n", @ctrl_stmts ) . ( @ctrl_stmts ? "\n" : '' ) . $print_stmt;
