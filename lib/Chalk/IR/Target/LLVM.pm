@@ -170,6 +170,356 @@ call_strtod:
 END_HELPER
 }
 
+# _method_fn_type($result_repr) -> LLVM fn type string (no asterisk; add * for ptr)
+# Returns the LLVM function TYPE string for a method with the given result repr.
+# Used in both vtable bitcast expressions and call-site casts.
+sub _method_fn_type {
+    my ($result_repr) = @_;
+    return 'i64 (i8*)' if !defined $result_repr || $result_repr eq 'Int';
+    return '%StrPair (i8*)' if $result_repr eq 'Str';
+    return 'i1 (i8*)'   if $result_repr eq 'Bool';
+    return 'double (i8*)' if $result_repr eq 'Num';
+    die "LLVM MOP: unsupported method return repr '$result_repr'";
+}
+
+# _method_fn_llvm_ret_type($repr) -> LLVM return type for method function header
+sub _method_fn_llvm_ret_type {
+    my ($repr) = @_;
+    return 'i64'      if !defined $repr || $repr eq 'Int';
+    return '%StrPair' if $repr eq 'Str';
+    return 'i1'       if $repr eq 'Bool';
+    return 'double'   if $repr eq 'Num';
+    die "LLVM MOP: unsupported method return repr '$repr' for fn return type";
+}
+
+# ---------------------------------------------------------------------------
+# Class registry: scan graph for ClassDecl/MethodDef/FieldDef nodes.
+# ---------------------------------------------------------------------------
+
+# _scan_class_registry($return_node) -> \%registry
+#
+# Walks all reachable nodes from $return_node and collects:
+#   ClassDecl nodes -> class name, parent name
+#   MethodDef nodes -> method name, body_node, return_repr, owning class
+#   FieldDef nodes  -> field metadata, owning class
+#
+# Returns a hashref: { class_name => { methods => [...], fields => [...], parent => str } }
+# where each method entry is { name, vtable_slot, body_node, return_repr }
+# and each field entry is { name, field_index, is_param, has_reader, has_default, default_node }.
+sub _scan_class_registry {
+    my ($return_node) = @_;
+
+    my %registry;  # class_name -> { methods, fields, parent, adjusts }
+    my %visited;
+
+    # Walk the entire reachable graph
+    my @queue = ($return_node);
+    while (@queue) {
+        my $node = shift @queue;
+        next unless defined $node;
+        my $id = $node->id;
+        next if $visited{$id}++;
+
+        my $op = $node->can('operation') ? $node->operation : '';
+
+        if ($op eq 'ClassDecl') {
+            my $cname  = $node->class_name;
+            my $parent = $node->can('parent_name') ? $node->parent_name : undef;
+            $registry{$cname} //= { methods => [], fields => [], adjusts => [], parent => undef };
+            $registry{$cname}{parent} //= $parent;
+            # ClassDecl.inputs = [MethodDef1, MethodDef2, ..., FieldDef1, FieldDef2...]
+            # Process each input to build the class's method/field lists.
+            # The walk will visit these inputs via the queue, but we process them HERE
+            # in ClassDecl context so we know which class they belong to.
+            my $inputs = $node->inputs // [];
+            my $mslot = scalar @{ $registry{$cname}{methods} };
+            for my $inp (@$inputs) {
+                next unless defined $inp;
+                my $inp_op = $inp->can('operation') ? $inp->operation : '';
+                if ($inp_op eq 'MethodDef') {
+                    my $mname     = $inp->method_name;
+                    my $body_node = $inp->body_node;
+                    my $ret_repr  = defined $body_node ? ($body_node->representation // 'Int') : 'Int';
+                    # Avoid duplicate method entries
+                    unless (grep { ($_->{name} // '') eq $mname } @{ $registry{$cname}{methods} }) {
+                        push @{ $registry{$cname}{methods} }, {
+                            name        => $mname,
+                            body_node   => $body_node,
+                            return_repr => $ret_repr,
+                            vtable_slot => $mslot++,
+                        };
+                    }
+                }
+                elsif ($inp_op eq 'FieldDef') {
+                    my $fname       = $inp->field_name;
+                    my $fidx        = $inp->field_index;
+                    my $is_param    = $inp->is_param    // false;
+                    my $has_reader  = $inp->has_reader  // false;
+                    my $has_default = $inp->has_default // false;
+                    my $def_node    = $inp->can('default_node') ? $inp->default_node : undef;
+                    unless (grep { ($_->{field_index} // -1) == $fidx } @{ $registry{$cname}{fields} }) {
+                        push @{ $registry{$cname}{fields} }, {
+                            name         => $fname,
+                            field_index  => $fidx,
+                            is_param     => $is_param,
+                            has_reader   => $has_reader,
+                            has_default  => $has_default,
+                            default_node => $def_node,
+                        };
+                    }
+                    # :reader synthesis
+                    if ($has_reader) {
+                        unless (grep { ($_->{name} // '') eq $fname } @{ $registry{$cname}{methods} }) {
+                            push @{ $registry{$cname}{methods} }, {
+                                name               => $fname,
+                                body_node          => undef,
+                                return_repr        => 'Str',
+                                vtable_slot        => $mslot++,
+                                is_reader_synth    => 1,
+                                reader_field_index => $fidx,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+
+        # Enqueue all inputs
+        if ($node->can('inputs') && defined $node->inputs) {
+            push @queue, grep { defined $_ } $node->inputs->@*;
+        }
+        if ($node->can('control_in') && defined $node->control_in) {
+            push @queue, $node->control_in;
+        }
+    }
+
+    # Resolve :isa inheritance: for each class with a parent, copy inherited
+    # method slots from the parent into the child's vtable (compile-time MRO flatten).
+    # This is done AFTER the full scan so all parent classes are in the registry.
+    for my $cname (keys %registry) {
+        my $parent = $registry{$cname}{parent};
+        next unless defined $parent;
+        my $parent_reg = $registry{$parent};
+        unless (defined $parent_reg) {
+            die "LLVM MOP: class '$cname' has :isa($parent) but '$parent' is not declared in this graph";
+        }
+        # Copy parent methods into child that don't already exist in child
+        for my $pmeth (@{ $parent_reg->{methods} }) {
+            unless (grep { ($_->{name} // '') eq $pmeth->{name} } @{ $registry{$cname}{methods} }) {
+                push @{ $registry{$cname}{methods} }, {
+                    %$pmeth,
+                    vtable_slot => scalar(@{ $registry{$cname}{methods} }),
+                    inherited_from => $parent,
+                };
+            }
+        }
+    }
+
+    return \%registry;
+}
+
+# _emit_class_registry_ir(\%registry, $ctx) -> @llvm_lines
+#
+# Emits all class-related LLVM IR declarations: type defs, vtable globals,
+# class-name constants, and method body define functions.
+# Returns a list of LLVM IR text lines to prepend to the module.
+sub _emit_class_registry_ir {
+    my ($registry, $ctx) = @_;
+    my @lines;
+
+    # Determine if any method returns Str -> need %StrPair type
+    my $need_strpair = 0;
+    for my $cname (sort keys %$registry) {
+        my $reg = $registry->{$cname};
+        for my $m (@{ $reg->{methods} }) {
+            $need_strpair = 1 if ($m->{return_repr} // '') eq 'Str';
+        }
+    }
+
+    if ($need_strpair) {
+        push @lines, '; StrPair: {i8* ptr, i64 len} for Str method return values';
+        push @lines, '%StrPair = type { i8*, i64 }';
+        $ctx->{_need_strpair} = 1;
+    }
+
+    for my $cname (sort keys %$registry) {
+        my $reg     = $registry->{$cname};
+        my $methods = $reg->{methods} // [];
+        my $fields  = $reg->{fields}  // [];
+
+        # Sort fields by field_index to ensure consistent struct layout
+        my @sorted_fields = sort { ($a->{field_index} // 0) <=> ($b->{field_index} // 0) } @$fields;
+
+        # 1. Vtable type: { i8* class-name, i8* slot0, i8* slot1, ... }
+        my $vt_type = '%' . $cname . '.vt';
+        my $n_slots = scalar @$methods;
+        my @vt_elems = ('i8*');  # slot 0 = class-name ptr
+        push @vt_elems, ('i8*') x $n_slots;
+        push @lines, "$vt_type = type { " . join(', ', @vt_elems) . " }  ; vtable for $cname";
+
+        # 2. Object struct type: { %Cls.vt*, %Slot, %Slot, ... }
+        my $obj_type = '%' . $cname . '.obj';
+        my @obj_elems = ($vt_type . '*');  # slot 0 = vtable ptr
+        push @obj_elems, ('%Slot') x scalar(@sorted_fields);  # one %Slot per field
+        push @lines, "$obj_type = type { " . join(', ', @obj_elems) . " }  ; object struct for $cname";
+
+        # 3. Class-name string constant
+        my $cn_name_global = '@' . $cname . '__class_name';
+        my $cn_bytes = length($cname) + 1;  # +1 for NUL
+        my $cn_enc   = _encode_c_string($cname);
+        push @lines, "$cn_name_global = private unnamed_addr constant [$cn_bytes x i8] c\"$cn_enc\\00\", align 1";
+
+        # 4. Method body functions (one define per method)
+        for my $minfo (@$methods) {
+            my $mname     = $minfo->{name};
+            my $fn_name   = '@' . $cname . '__' . $mname;
+            my $ret_repr  = $minfo->{return_repr} // 'Int';
+            my $fn_ret    = _method_fn_llvm_ret_type($ret_repr);
+
+            if ($minfo->{inherited_from}) {
+                # Inherited method: emit a wrapper that forwards to the parent's impl
+                my $parent = $minfo->{inherited_from};
+                my $parent_fn = '@' . $parent . '__' . $mname;
+                push @lines, "define internal $fn_ret $fn_name(i8* %self) {";
+                push @lines, 'entry:';
+                if ($ret_repr eq 'Str') {
+                    push @lines, "  %r = call %StrPair $parent_fn(i8* %self)";
+                    push @lines, '  ret %StrPair %r';
+                }
+                elsif ($ret_repr eq 'Num') {
+                    push @lines, "  %r = call double $parent_fn(i8* %self)";
+                    push @lines, '  ret double %r';
+                }
+                elsif ($ret_repr eq 'Bool') {
+                    push @lines, "  %r = call i1 $parent_fn(i8* %self)";
+                    push @lines, '  ret i1 %r';
+                }
+                else {
+                    push @lines, "  %r = call i64 $parent_fn(i8* %self)";
+                    push @lines, '  ret i64 %r';
+                }
+                push @lines, '}';
+                push @lines, '';
+                next;
+            }
+
+            if ($minfo->{is_reader_synth}) {
+                # :reader synthesized method: load field at field_index and return
+                my $fidx     = $minfo->{reader_field_index};
+                my $slot_idx = $fidx + 1;
+                push @lines, "define internal $fn_ret $fn_name(i8* %self) {  ; :reader for field $fidx";
+                push @lines, 'entry:';
+                push @lines, "  %obj = bitcast i8* %self to %${cname}.obj*";
+                # Load defined bit
+                push @lines, "  %def_gep = getelementptr inbounds %${cname}.obj, %${cname}.obj* %obj, i64 0, i32 $slot_idx, i32 0";
+                push @lines, '  %def = load i1, i1* %def_gep';
+                # Load payload
+                push @lines, "  %pay_gep = getelementptr inbounds %${cname}.obj, %${cname}.obj* %obj, i64 0, i32 $slot_idx, i32 1";
+                push @lines, '  %pay = load i64, i64* %pay_gep';
+                if ($ret_repr eq 'Str') {
+                    # payload = StrPair* (as i64) -> cast back and return {ptr, len}
+                    push @lines, '  %pair_ptr = inttoptr i64 %pay to %StrPair*';
+                    push @lines, '  %pp_gep = getelementptr inbounds %StrPair, %StrPair* %pair_ptr, i64 0, i32 0';
+                    push @lines, '  %sp = load i8*, i8** %pp_gep';
+                    push @lines, '  %lp_gep = getelementptr inbounds %StrPair, %StrPair* %pair_ptr, i64 0, i32 1';
+                    push @lines, '  %sl = load i64, i64* %lp_gep';
+                    push @lines, '  %r0 = insertvalue %StrPair undef, i8* %sp, 0';
+                    push @lines, '  %r1 = insertvalue %StrPair %r0, i64 %sl, 1';
+                    push @lines, '  ret %StrPair %r1';
+                }
+                else {
+                    push @lines, '  ret i64 %pay';
+                }
+                push @lines, '}';
+                push @lines, '';
+                next;
+            }
+
+            my $body_node = $minfo->{body_node};
+            unless (defined $body_node) {
+                push @lines, "define internal $fn_ret $fn_name(i8* %self) { entry: ret ${fn_ret} 0 }  ; stub (no body)";
+                push @lines, '';
+                next;
+            }
+
+            # Lower the method body into a fresh context
+            my $body_ctx = Chalk::IR::Target::LLVM::Context->new;
+            $body_ctx->{_in_method_body} = 1;
+            $body_ctx->{_method_self_name} = '%self';
+            $body_ctx->{_method_class_name} = $cname;
+            $body_ctx->{class_registry} = $registry;
+            $body_ctx->{_need_strpair}  = $ctx->{_need_strpair} // 0;
+
+            # Lower the body value node into the method body context
+            my $body_val = $body_ctx->lower_value($body_node);
+
+            push @lines, "define internal $fn_ret $fn_name(i8* %self) {  ; method body for ${cname}::${mname}";
+            push @lines, 'entry:';
+
+            # Emit all instructions from the body context
+            my $body_blocks = $body_ctx->blocks;
+            for my $i (0 .. $#$body_blocks) {
+                my $blk = $body_blocks->[$i];
+                if ($i > 0) {
+                    push @lines, $blk->{label} . ':';
+                }
+                push @lines, $blk->{insts}->@*;
+                if (defined $blk->{terminator}) {
+                    push @lines, $blk->{terminator};
+                }
+            }
+
+            # Emit return instruction
+            if ($ret_repr eq 'Str') {
+                my $len_ref = $body_ctx->{_str_len_table}{$body_val};
+                if (defined $len_ref) {
+                    push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* $body_val, 0";
+                    push @lines, "  %ret_r1 = insertvalue %StrPair %ret_r0, i64 $len_ref, 1";
+                    push @lines, '  ret %StrPair %ret_r1';
+                }
+                else {
+                    # Compute strlen at runtime
+                    push @lines, "  %ret_len = call i64 \@strlen(i8* $body_val)";
+                    push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* $body_val, 0";
+                    push @lines, "  %ret_r1 = insertvalue %StrPair %ret_r0, i64 %ret_len, 1";
+                    push @lines, '  ret %StrPair %ret_r1';
+                }
+            }
+            elsif ($ret_repr eq 'Num') {
+                push @lines, "  ret double $body_val";
+            }
+            elsif ($ret_repr eq 'Bool') {
+                push @lines, "  ret i1 $body_val";
+            }
+            else {
+                push @lines, "  ret i64 $body_val";
+            }
+            push @lines, '}';
+            push @lines, '';
+
+            # Propagate malloc/strpair needs up to the main ctx
+            $ctx->{_need_malloc_memcpy} = 1 if $body_ctx->{_need_malloc_memcpy};
+            $ctx->{_need_strpair}       = 1 if $body_ctx->{_need_strpair};
+        }
+
+        # 5. Vtable global: @Cls__vtable = { class-name-ptr, fn-ptr0, fn-ptr1, ... }
+        my $vt_global = '@' . $cname . '__vtable';
+        my @vt_init;
+        push @vt_init, "i8* getelementptr inbounds ([$cn_bytes x i8], [$cn_bytes x i8]* $cn_name_global, i64 0, i64 0)";
+        for my $minfo (@$methods) {
+            my $mname   = $minfo->{name};
+            my $fn_name = '@' . $cname . '__' . $mname;
+            my $ret_repr = $minfo->{return_repr} // 'Int';
+            my $fn_type_str = _method_fn_type($ret_repr);
+            push @vt_init, "i8* bitcast ($fn_type_str* $fn_name to i8*)";
+        }
+        push @lines, "$vt_global = private unnamed_addr constant $vt_type { " . join(', ', @vt_init) . " }  ; vtable for $cname";
+        push @lines, '';
+    }
+
+    return @lines;
+}
+
 # lower_with_elaboration($class, $ret_node, $elab) -> $llvm_ir_text
 #
 # Variant of lower() that accepts a pre-computed Elaborate pass result for
@@ -180,8 +530,21 @@ END_HELPER
 sub lower_with_elaboration {
     my ($class, $return_node, $elab) = @_;
 
+    # Pre-scan for ClassDecl/MethodDef/FieldDef nodes and build a class registry.
+    # The registry drives class-type declarations, vtable globals, and method body
+    # emission — all of which must appear BEFORE @main in the LLVM module.
+    my $class_registry = _scan_class_registry($return_node);
+
     # Build a context that knows the elaboration phi plan.
-    my $ctx = Chalk::IR::Target::LLVM::ElaboratedContext->new(elab => $elab);
+    my $ctx = Chalk::IR::Target::LLVM::ElaboratedContext->new(elab => $elab,
+        class_registry => $class_registry);
+
+    # Classes require %Slot (for fields) and malloc (for New).
+    # Set these flags early so the prologue emits them even before body lowering.
+    if (defined $class_registry && %$class_registry) {
+        $ctx->{_need_aggregate_types} = 1;
+        $ctx->{_need_malloc_memcpy}   = 1;
+    }
 
     # Process the control chain — VarDecl/Assign/If/Loop.
     # ElaboratedContext._process_if_node uses the elab phis for phi placement.
@@ -371,6 +734,16 @@ sub lower_with_elaboration {
         push @lines, _emit_str_to_num_helper();
     }
 
+    # Emit class-related IR: type declarations, vtable globals, class-name constants,
+    # strlen declaration (for Str field reads), and method body functions.
+    # Classes always require %Slot (aggregate types) and malloc.
+    if (defined $class_registry && %$class_registry) {
+        push @lines, '';
+        push @lines, 'declare i64 @strlen(i8* nocapture readonly)';
+        my @class_lines = _emit_class_registry_ir($class_registry, $ctx);
+        push @lines, @class_lines;
+    }
+
     push @lines, '';
     push @lines, 'define i32 @main() {';
 
@@ -498,6 +871,17 @@ package Chalk::IR::Target::LLVM::Context;
 use 5.42.0;
 use utf8;
 
+# _method_fn_type($result_repr) -> LLVM fn type string for method signatures.
+# Duplicate of the module-level sub; both packages need it to avoid cross-package calls.
+sub _method_fn_type {
+    my ($result_repr) = @_;
+    return 'i64 (i8*)' if !defined $result_repr || $result_repr eq 'Int';
+    return '%StrPair (i8*)' if $result_repr eq 'Str';
+    return 'i1 (i8*)'   if $result_repr eq 'Bool';
+    return 'double (i8*)' if $result_repr eq 'Num';
+    die "LLVM MOP: unsupported method return repr '$result_repr'";
+}
+
 sub new {
     my ($class) = @_;
     # Each block is: { label => 'name', insts => [...], terminator => str|undef }
@@ -544,6 +928,16 @@ sub new {
         # Maps the SSA def-bit ref -> SSA payload ref (i64).
         # Used by the Slot return epilogue to retrieve both fields.
         _slot_payload => {},
+        # G5 MOP: class registry (class_name -> { methods, fields, ... }).
+        # Set by ElaboratedContext::new via the pre-scan in lower_with_elaboration.
+        # Also set on method-body sub-contexts via direct hash assignment.
+        class_registry => {},
+        # G5 MOP: StrPair type needed (Str-returning methods)
+        _need_strpair => 0,
+        # G5 MOP: method body context flags
+        _in_method_body      => 0,
+        _method_self_name    => undef,
+        _method_class_name   => undef,
     }, $class;
 }
 
@@ -732,6 +1126,40 @@ sub lower_value {
     }
     elsif ($op eq 'HashDeref') {
         return $self->_lower_hash_deref($node);
+    }
+    # FieldAccess in a method body context: load from $self's struct
+    elsif ($op eq 'FieldAccess' && $self->{_in_method_body}) {
+        return $self->_lower_field_access_in_method($node);
+    }
+    # MOP / class object operations (G5)
+    elsif ($op eq 'ClassDecl') {
+        # ClassDecl is a type-level declaration node — its LLVM "value" is a
+        # no-op sentinel. The class structure was emitted before @main by the
+        # pre-scan pass. Return a zero placeholder (never used as a value).
+        return 'zeroinitializer';
+    }
+    elsif ($op eq 'MethodDef') {
+        # MethodDef declares a method — the LLVM function was emitted before @main.
+        # Return a sentinel (never used directly as a runtime value).
+        return 'zeroinitializer';
+    }
+    elsif ($op eq 'FieldDef') {
+        # FieldDef declares a field — structural metadata only, no runtime value.
+        return 'zeroinitializer';
+    }
+    elsif ($op eq 'New') {
+        return $self->_lower_new($node);
+    }
+    elsif ($op eq 'MethodCall') {
+        return $self->_lower_method_call($node);
+    }
+    elsif ($op eq 'FieldWrite') {
+        return $self->_lower_field_write($node);
+    }
+    elsif ($op eq 'Ref' && defined $node->inputs->[0]
+        && defined $node->inputs->[0]->representation
+        && $node->inputs->[0]->representation eq 'Object') {
+        return $self->_lower_ref_of_object($node);
     }
     else {
         if (defined $node->representation && $node->representation eq 'Scalar') {
@@ -2816,6 +3244,395 @@ sub _lower_hash_deref {
     return $hash;
 }
 
+# ---------------------------------------------------------------------------
+# MOP / class object lowering (G5: feature-class static vtables + object structs)
+# ---------------------------------------------------------------------------
+
+# _lower_new($node) -> $llvm_ref
+#
+# Lowers a New node: malloc the object struct, store the vtable pointer, and
+# bind each :param field from the node's inputs[1..N].
+#
+# Object layout: %Cls.obj = { %Cls.vt*, %Slot, %Slot, ... }
+# Vtable ptr is stored at GEP index 0. Field i is at GEP index i+1 (one %Slot
+# = two sub-elements: i1 at index 0, i64 at index 1; we use the Slot type).
+#
+# Returns: an i8* (raw opaque pointer to the object). The Object repr signals
+# to MethodCall/FieldWrite that this is an object pointer.
+sub _lower_new {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+
+    my $cls_node    = $node->class_decl_node;
+    my $class_name  = $cls_node->class_name;
+    my $param_names = $node->param_names // [];
+    my $param_vals  = $node->param_values // [];
+
+    # Verify the class is registered
+    my $reg = $self->{class_registry}{$class_name}
+        or die "LLVM MOP: New references undeclared class '$class_name'";
+
+    # malloc the object
+    my $raw     = $self->_fresh;
+    my $obj_ref = $self->_fresh;
+    $self->_emit("  $raw     = call i8* \@malloc(i64 ptrtoint (%${class_name}.obj* getelementptr (%${class_name}.obj, %${class_name}.obj* null, i64 1) to i64))  ; New $class_name: sizeof");
+    $self->_emit("  $obj_ref = bitcast i8* $raw to %${class_name}.obj*  ; New $class_name: typed ptr");
+
+    # Store vtable pointer
+    my $vt_gep = $self->_fresh;
+    $self->_emit("  $vt_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 0  ; vtable ptr slot");
+    $self->_emit("  store %${class_name}.vt* \@${class_name}__vtable, %${class_name}.vt** $vt_gep  ; store vtable");
+
+    # Bind :param fields
+    my $fields = $reg->{fields} // [];
+    for my $i (0 .. $#$param_names) {
+        my $pname   = $param_names->[$i];
+        my $pval    = $param_vals->[$i];
+        # Find the field with this param name
+        my ($finfo) = grep { ($_->{name} // '') eq $pname } @$fields;
+        unless (defined $finfo) {
+            die "LLVM MOP: New $class_name: no :param field named '$pname' in class registry";
+        }
+        my $fidx = $finfo->{field_index};
+        my $slot_idx = $fidx + 1;  # +1 for vtable pointer at index 0
+        my $repr = defined $pval ? ($pval->representation // 'Int') : 'Int';
+
+        my $val_ref = $self->lower_value($pval);
+
+        # Store the defined=1 bit
+        my $def_gep = $self->_fresh;
+        $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; field[$fidx] defined bit");
+        $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' defined=true");
+
+        # Store the payload
+        my $pay_gep = $self->_fresh;
+        $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; field[$fidx] payload");
+        if ($repr eq 'Str') {
+            # Str payload: store ptr as i64. The length is tracked separately in _str_len_table.
+            # Allocate a heap StrPair to store {ptr, len} and store its address as i64.
+            my $len_ref = $self->{_str_len_table}{$val_ref};
+            my $pair_raw = $self->_fresh;
+            my $pair_ptr = $self->_fresh;
+            $self->_emit("  $pair_raw = call i8* \@malloc(i64 16)  ; alloc StrPair for field '$pname'");
+            $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
+            my $pp_gep = $self->_fresh;
+            $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
+            $self->_emit("  store i8* $val_ref, i8** $pp_gep  ; store str ptr");
+            my $pl_gep = $self->_fresh;
+            $self->_emit("  $pl_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
+            my $len_val = defined $len_ref ? $len_ref : 'zeroinitializer';
+            if ($len_val eq 'zeroinitializer') {
+                # Compute length via strlen at runtime
+                $len_val = $self->_fresh;
+                $self->_emit("  $len_val = call i64 \@strlen(i8* $val_ref)  ; strlen for Str field '$pname'");
+            }
+            $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
+            my $pair_as_i64 = $self->_fresh;
+            $self->_emit("  $pair_as_i64 = ptrtoint %StrPair* $pair_ptr to i64  ; StrPair* -> i64 payload");
+            $self->_emit("  store i64 $pair_as_i64, i64* $pay_gep  ; field '$pname' Str payload = StrPair*");
+            # For Str-typed field, the StrPair pointer (as i64) is the payload.
+            $self->{_need_strpair} = 1;
+        }
+        else {
+            # Int/Bool: store directly as i64
+            my $pay_i64 = $self->_fresh;
+            if ($repr eq 'Bool') {
+                $self->_emit("  $pay_i64 = zext i1 $val_ref to i64  ; Bool->i64 for field '$pname'");
+            }
+            else {
+                $self->_emit("  $pay_i64 = add i64 0, $val_ref  ; identity: $repr->i64 for field '$pname'");
+            }
+            $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; field '$pname' payload");
+        }
+    }
+
+    # Store default fields (has_default=true, not provided as :param at this New call)
+    for my $finfo (@$fields) {
+        my $pname = $finfo->{name} // '';
+        next if grep { $_ eq $pname } @$param_names;  # already bound above
+        my $fidx     = $finfo->{field_index};
+        my $slot_idx = $fidx + 1;
+
+        if ($finfo->{has_default}) {
+            # Has a default value node — bind it
+            my $def_node = $finfo->{default_node};
+            my $def_repr = defined $def_node ? ($def_node->representation // 'Int') : 'Int';
+            my $def_ref  = defined $def_node ? $self->lower_value($def_node) : '0';
+
+            my $def_gep = $self->_fresh;
+            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; default field[$fidx] defined");
+            $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' default defined=true");
+            my $pay_gep = $self->_fresh;
+            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; default field[$fidx] payload");
+            my $pay_i64 = $self->_fresh;
+            $self->_emit("  $pay_i64 = add i64 0, $def_ref  ; default value for field '$pname'");
+            $self->_emit("  store i64 $pay_i64, i64* $pay_gep");
+        }
+        else {
+            # No default: defined=false, payload=0
+            my $def_gep = $self->_fresh;
+            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; uninit field[$fidx] defined");
+            $self->_emit("  store i1 false, i1* $def_gep  ; field '$pname' not initialized");
+            my $pay_gep = $self->_fresh;
+            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; uninit field[$fidx] payload");
+            $self->_emit("  store i64 0, i64* $pay_gep  ; field '$pname' payload=0");
+        }
+    }
+
+    # ADJUST blocks: lower each ADJUST body in base-first order
+    my $adjusts = $reg->{adjusts} // [];
+    for my $adj (@$adjusts) {
+        # adj = { body_nodes => [...] } where body_nodes are FieldWrite nodes
+        for my $fw_node (@{ $adj->{body_nodes} // [] }) {
+            # Lower FieldWrite with $obj_ref as the object
+            $self->_lower_field_write_with_obj($fw_node, $obj_ref, $class_name);
+        }
+    }
+
+    # Return the raw i8* pointer (Object repr)
+    my $result = $self->_fresh;
+    $self->_emit("  $result = bitcast %${class_name}.obj* $obj_ref to i8*  ; New $class_name: -> Object (i8*)");
+    $self->{cache}{ $node->id } = $result;
+    return $result;
+}
+
+# _lower_method_call($node) -> $llvm_ref
+#
+# Lowers a MethodCall node: load vtable from obj, GEP to the method slot,
+# load the opaque fn ptr, cast to the actual fn-ptr type, and call.
+#
+# Adversarial contract: if the method name is not in the class's vtable,
+# die loudly at lowering time — NEVER emit a null/garbage fn-ptr.
+sub _lower_method_call {
+    my ($self, $node) = @_;
+
+    my $method_name = $node->method_name;
+    my $obj_node    = $node->obj_node;
+    my $cls_node    = $node->class_decl_node;
+    my $class_name  = $cls_node->class_name;
+    my $result_repr = $node->representation // 'Int';
+
+    # Verify class and method are in the registry
+    my $reg = $self->{class_registry}{$class_name}
+        or die "LLVM MOP: MethodCall '$method_name' on undeclared class '$class_name' — "
+             . "no ClassDecl registered for this class. Cannot emit vtable slot.";
+
+    my $methods = $reg->{methods} // [];
+    my ($minfo) = grep { ($_->{name} // '') eq $method_name } @$methods;
+    unless (defined $minfo) {
+        die "LLVM MOP: MethodCall '$method_name' is absent from class '$class_name' vtable — "
+          . "available methods: [" . join(', ', map { $_->{name} // '?' } @$methods) . "]. "
+          . "Cannot emit vtable dispatch to a non-existent slot.";
+    }
+
+    my $slot_idx  = $minfo->{vtable_slot};  # index in vtable (after class-name ptr)
+
+    # Lower the object to get the raw pointer
+    my $obj_raw = $self->lower_value($obj_node);
+
+    # Load vtable pointer: GEP %Cls.obj[0].field[0] = vtable ptr slot
+    my $obj_typed = $self->_fresh;
+    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; MethodCall $method_name: typed obj");
+    my $vt_gep = $self->_fresh;
+    $self->_emit("  $vt_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 0  ; vtable ptr slot");
+    my $vt_ptr = $self->_fresh;
+    $self->_emit("  $vt_ptr = load %${class_name}.vt*, %${class_name}.vt** $vt_gep  ; load vtable ptr");
+
+    # Load opaque fn ptr from vtable slot (slot index = 1 + vtable_slot for methods,
+    # since slot 0 is the class-name pointer)
+    my $fn_slot_llvm = 1 + $slot_idx;
+    my $fn_gep = $self->_fresh;
+    $self->_emit("  $fn_gep = getelementptr inbounds %${class_name}.vt, %${class_name}.vt* $vt_ptr, i64 0, i32 $fn_slot_llvm  ; method '$method_name' fn ptr slot");
+    my $opaque_fn = $self->_fresh;
+    $self->_emit("  $opaque_fn = load i8*, i8** $fn_gep  ; load opaque fn ptr for '$method_name'");
+
+    # Cast to actual fn-ptr type and call
+    my $fn_type  = _method_fn_type($result_repr);
+    my $typed_fn = $self->_fresh;
+    $self->_emit("  $typed_fn = bitcast i8* $opaque_fn to $fn_type*  ; cast to typed fn ptr");
+
+    # Call the method: always passes self as first arg
+    my $result = $self->_fresh;
+    if ($result_repr eq 'Str') {
+        # Str returns: method returns %StrPair (as struct value)
+        $self->{_need_strpair} = 1;
+        $self->_emit("  $result = call %StrPair $typed_fn(i8* $obj_raw)  ; call $method_name -> StrPair");
+        # Extract ptr and len
+        my $str_ptr = $self->_fresh;
+        my $str_len = $self->_fresh;
+        $self->_emit("  $str_ptr = extractvalue %StrPair $result, 0  ; MethodCall $method_name result ptr");
+        $self->_emit("  $str_len = extractvalue %StrPair $result, 1  ; MethodCall $method_name result len");
+        $self->{_str_len_table}{$str_ptr} = $str_len;
+        $self->{cache}{ $node->id } = $str_ptr;
+        return $str_ptr;
+    }
+    else {
+        # Int return: i64
+        $self->_emit("  $result = call i64 $typed_fn(i8* $obj_raw)  ; call $method_name -> i64");
+        $self->{cache}{ $node->id } = $result;
+        return $result;
+    }
+}
+
+# _lower_field_write($node) -> $llvm_ref
+#
+# Lowers a FieldWrite node: GEP to the field's %Slot within the object struct,
+# store {defined=1, payload} into the Slot.
+sub _lower_field_write {
+    my ($self, $node) = @_;
+
+    my $obj_node    = $node->obj_node;
+    my $val_node    = $node->new_val_node;
+    my $field_index = $node->field_index;
+
+    # Infer class_name from the obj_node's ClassDecl chain
+    my $class_name = _infer_class_name_from_obj($obj_node);
+
+    my $obj_raw = $self->lower_value($obj_node);
+    return $self->_lower_field_write_with_obj($node, $obj_raw, $class_name);
+}
+
+# _lower_field_write_with_obj($node, $obj_raw, $class_name) -> $llvm_ref
+#
+# Implementation of FieldWrite given an already-lowered object raw pointer.
+sub _lower_field_write_with_obj {
+    my ($self, $node, $obj_raw, $class_name) = @_;
+
+    my $val_node    = $node->new_val_node;
+    my $field_index = $node->field_index;
+    my $val_repr    = defined $val_node ? ($val_node->representation // 'Int') : 'Int';
+
+    my $slot_idx = $field_index + 1;
+
+    my $obj_typed = $self->_fresh;
+    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; FieldWrite: typed obj");
+
+    my $val_ref = $self->lower_value($val_node);
+
+    # Store defined=true
+    my $def_gep = $self->_fresh;
+    $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 0  ; FieldWrite[$field_index] defined");
+    $self->_emit("  store i1 true, i1* $def_gep  ; FieldWrite[$field_index] defined=true");
+
+    # Store payload as i64
+    my $pay_gep = $self->_fresh;
+    $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 1  ; FieldWrite[$field_index] payload");
+    my $pay_i64 = $self->_fresh;
+    if ($val_repr eq 'Bool') {
+        $self->_emit("  $pay_i64 = zext i1 $val_ref to i64  ; Bool->i64 FieldWrite");
+    }
+    else {
+        $self->_emit("  $pay_i64 = add i64 0, $val_ref  ; identity: $val_repr->i64 FieldWrite");
+    }
+    $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; FieldWrite[$field_index] payload");
+
+    $self->{cache}{ $node->id } = $pay_i64;
+    return $pay_i64;
+}
+
+# _lower_ref_of_object($node) -> $llvm_ref (Str: ptr to class-name string)
+#
+# Lowers ref($obj) where obj has repr=Object. Returns the class-name string
+# pointer (i8*) and tracks the compile-time-known length in _str_len_table.
+sub _lower_ref_of_object {
+    my ($self, $node) = @_;
+
+    my $obj_node = $node->inputs->[0];
+
+    # Walk obj_node back to the New node to find the ClassDecl
+    my $class_name = _infer_class_name_from_obj($obj_node);
+    my $name_len   = length($class_name);  # compile-time known ASCII length
+
+    # Load vtable from obj, load class-name ptr from vtable slot 0.
+    # This is the runtime-verifiable path (load from actual vtable).
+    my $obj_raw = $self->lower_value($obj_node);
+    my $obj_typed = $self->_fresh;
+    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; ref(obj): typed obj");
+    my $vt_gep = $self->_fresh;
+    $self->_emit("  $vt_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 0  ; vtable ptr slot");
+    my $vt_ptr = $self->_fresh;
+    $self->_emit("  $vt_ptr = load %${class_name}.vt*, %${class_name}.vt** $vt_gep  ; load vtable");
+    my $cn_gep = $self->_fresh;
+    $self->_emit("  $cn_gep = getelementptr inbounds %${class_name}.vt, %${class_name}.vt* $vt_ptr, i64 0, i32 0  ; class-name ptr slot");
+    my $cn_ptr = $self->_fresh;
+    $self->_emit("  $cn_ptr = load i8*, i8** $cn_gep  ; load class-name ptr");
+
+    # Track the compile-time-known length for the Str output epilogue
+    $self->{_str_len_table}{$cn_ptr} = $name_len;
+    $self->{cache}{ $node->id } = $cn_ptr;
+    return $cn_ptr;
+}
+
+# _lower_field_access_in_method($node) -> $llvm_ref
+#
+# Lowers a FieldAccess node when inside a method body context.
+# Reads from %self at the field's struct offset.
+# For Str fields: payload is a StrPair* (as i64); returns the string ptr.
+sub _lower_field_access_in_method {
+    my ($self, $node) = @_;
+
+    my $field_index = $node->field_index;
+    my $class_name  = $self->{_method_class_name}
+        or die "LLVM MOP: FieldAccess in method body but _method_class_name not set";
+    my $repr        = $node->representation // 'Int';
+
+    my $slot_idx  = $field_index + 1;
+    my $obj_raw   = $self->{_method_self_name} // '%self';
+    my $obj_typed = $self->_fresh;
+    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; FieldAccess: typed self");
+    my $pay_gep   = $self->_fresh;
+    $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 1  ; field[$field_index] payload");
+    my $pay       = $self->_fresh;
+    $self->_emit("  $pay = load i64, i64* $pay_gep  ; load field[$field_index] payload");
+
+    if ($repr eq 'Str') {
+        # Payload is a StrPair* (as i64) — cast and extract {ptr, len}
+        $self->{_need_strpair} = 1;
+        my $pair_ptr = $self->_fresh;
+        $self->_emit("  $pair_ptr = inttoptr i64 $pay to %StrPair*  ; payload -> StrPair*");
+        my $pp_gep = $self->_fresh;
+        $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
+        my $sp = $self->_fresh;
+        $self->_emit("  $sp = load i8*, i8** $pp_gep  ; load str ptr");
+        my $lp_gep = $self->_fresh;
+        $self->_emit("  $lp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
+        my $sl = $self->_fresh;
+        $self->_emit("  $sl = load i64, i64* $lp_gep  ; load str len");
+        $self->{_str_len_table}{$sp} = $sl;
+        $self->{cache}{ $node->id } = $sp;
+        return $sp;
+    }
+    else {
+        # Int: payload is i64 directly
+        $self->{cache}{ $node->id } = $pay;
+        return $pay;
+    }
+}
+
+# _infer_class_name_from_obj($obj_node) -> $class_name
+#
+# Walks the obj_node back to find the ClassDecl. Currently supports:
+# - New node (inputs[0] = ClassDecl)
+# - Other cases: die loudly (cannot infer class name)
+sub _infer_class_name_from_obj {
+    my ($obj_node) = @_;
+    return undef unless defined $obj_node;
+    my $op = $obj_node->can('operation') ? $obj_node->operation : '';
+    if ($op eq 'New') {
+        my $cls_node = $obj_node->class_decl_node;
+        return defined $cls_node ? $cls_node->class_name : undef;
+    }
+    # PadAccess to a variable holding a New — walk inputs
+    if ($op eq 'PadAccess') {
+        # Not yet supported in MOP: die to trigger diagnostic
+        die "LLVM MOP: cannot infer class name from PadAccess — "
+          . "method body self-reference via var not yet supported";
+    }
+    die "LLVM MOP: cannot infer class name from op=$op — expected New or PadAccess";
+}
+
 1;
 
 # ---------------------------------------------------------------------------
@@ -2831,9 +3648,13 @@ use parent -norequire, 'Chalk::IR::Target::LLVM::Context';
 
 sub new {
     my ($class, %args) = @_;
-    my $elab = delete $args{elab};
+    my $elab           = delete $args{elab};
+    my $class_registry = delete $args{class_registry};
     my $self  = $class->SUPER::new(%args);
     $self->{elab} = $elab;
+    # Class registry: maps class_name -> { methods => [...], fields => [...], parent => str }
+    # Built by _scan_class_registry() in lower_with_elaboration.
+    $self->{class_registry} = $class_registry // {};
     # Index emitted_phis by Region id -> list of phi records.
     # The Elaborate pass emits phis with block_id = the merge block id.
     # We need to look them up by the Region node's block id at emit time.

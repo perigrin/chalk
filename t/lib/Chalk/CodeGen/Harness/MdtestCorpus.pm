@@ -461,6 +461,32 @@ sub _build_node_from_rhs {
             return $factory->make('Phi', region => $region, values => \@inputs, %attrs);
         }
 
+        # New node: param_names attr is a comma-separated string -> arrayref.
+        # e.g. param_names: "name" -> ['name']; param_names: "" -> []
+        if ($op eq 'New') {
+            if (exists $attrs{param_names}) {
+                my $pn = $attrs{param_names};
+                if (!defined $pn || $pn eq '') {
+                    $attrs{param_names} = [];
+                }
+                else {
+                    $attrs{param_names} = [ split /\s*,\s*/, $pn ];
+                }
+            }
+            else {
+                $attrs{param_names} = [];
+            }
+        }
+
+        # FieldDef: is_param, has_reader, has_default are bare tokens "true"/"false" -> bool.
+        if ($op eq 'FieldDef') {
+            for my $bool_key (qw(is_param has_reader has_default)) {
+                if (exists $attrs{$bool_key}) {
+                    $attrs{$bool_key} = ($attrs{$bool_key} eq 'true') ? 1 : 0;
+                }
+            }
+        }
+
         return $factory->make($op, inputs => \@inputs, %attrs);
     }
 

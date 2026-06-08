@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the classes mdtest corpus topic (constructive format).
-# ABOUTME: Exercises 7 feature-class MOP idioms; all are L: GAP (MOP/object model not runtime-free lowerable).
+# ABOUTME: Exercises 7 feature-class MOP idioms; flipped to GREEN as G5 lowering is implemented.
 use 5.42.0;
 use utf8;
 
@@ -17,9 +17,7 @@ unless (-f $CLASSES_MD) {
 # ---------------------------------------------------------------------------
 # SECTION 1: Parse classes.md and verify case inventory
 #
-# All 7 class idioms must be present.  All declare L: GAP — class/object
-# representation requires the full MOP and Scalar object model, which are
-# not in the current runtime-free lowering slice.
+# All 7 class idioms must be present.
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($CLASSES_MD);
@@ -37,13 +35,8 @@ ok((grep { /adjust/i         } @titles), 'case: adjust present');
 # ---------------------------------------------------------------------------
 # SECTION 2: Run all 7 cases end-to-end
 #
-# For each case:
-#   - behavior check must PASS (perl oracle vs declared return value)
-#   - ir-shape check must not FAIL (pure-GAP blocks trivially pass)
-#   - L-verdict check must PASS (all cases declare L: GAP)
-#
-# None of these cases declare L: GREEN — class/object idioms are not
-# runtime-free lowerable in the current slice (no MOP, no Scalar repr).
+# GREEN cases: behavior, ir-shape, and L-verdict must all PASS.
+# GAP cases: behavior must PASS, ir-shape must not FAIL, L-verdict is GAP.
 # ---------------------------------------------------------------------------
 
 for my $case (@$cases) {
@@ -62,7 +55,7 @@ for my $case (@$cases) {
             "$title: ir-shape not FAIL")
             or diag("  ir-shape fail: " . join('; ', @{ $result->{fail_reasons} }));
 
-        # L-verdict check: declared GAP must match actual GAP
+        # L-verdict check: declared verdict must match actual
         is($result->{l_verdict}{verdict}, 'PASS',
             "$title: L verdict matches")
             or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
@@ -74,49 +67,79 @@ for my $case (@$cases) {
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 3: Verify all 7 cases declare L: GAP
+# SECTION 3: Verify L-verdict distribution
 #
-# Class/object idioms are entirely in the MOP/Scalar-representation tier.
-# No class idiom in this topic is runtime-free lowerable to LLVM IR without
-# the full object model.  All 7 must declare L: GAP with a MOP-related reason.
+# Currently: class-simple, method-simple, field-basic = GREEN.
+# Remaining 4 (field-attrs, method-call, class-isa, adjust) = still GAP.
 # ---------------------------------------------------------------------------
 
-subtest 'all 7 class idioms declare L: GAP' => sub {
-    plan tests => 7;
+my @green_cases = qw(class-simple method-simple field-basic);
+my @gap_cases   = qw(field-attrs method-call class-isa adjust);
+
+subtest 'GREEN cases declare L: GREEN' => sub {
+    plan tests => scalar @green_cases;
     for my $case (@$cases) {
+        my $title = lc($case->{title});
+        $title =~ s/^\s+|\s+$//g;
+        next unless grep { $_ eq $title } @green_cases;
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
-        my $title   = $case->{title};
-        is($decl, 'GAP', "case '$title': declared L: GAP (MOP/object not runtime-free)");
+        is($decl, 'GREEN', "case '$title': declared L: GREEN (G5 lowering implemented)");
+    }
+};
+
+subtest 'GAP cases still declare L: GAP' => sub {
+    plan tests => scalar @gap_cases;
+    for my $case (@$cases) {
+        my $title = lc($case->{title});
+        $title =~ s/^\s+|\s+$//g;
+        next unless grep { $_ eq $title } @gap_cases;
+        my $ir_text = $case->{ir} // '';
+        my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
+        is($decl, 'GAP', "case '$title': declared L: GAP (not yet implemented)");
     }
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 4: Verify each case's ir block is pure-GAP form
+# SECTION 4: Verify GREEN ir blocks have node lines
 #
-# A pure-GAP block has an L: GAP(...) line and NO %name = ... node lines.
-# This is the correct form for idioms the IR cannot represent runtime-free.
-# A block with node lines claiming GAP would be internally inconsistent.
+# A GREEN ir block must have %name = ... node lines (constructive graph).
 # ---------------------------------------------------------------------------
 
-subtest 'all ir blocks are pure-GAP form (no node lines)' => sub {
-    plan tests => 7;
+subtest 'GREEN ir blocks have node lines' => sub {
+    plan tests => scalar @green_cases;
     for my $case (@$cases) {
+        my $title = lc($case->{title});
+        $title =~ s/^\s+|\s+$//g;
+        next unless grep { $_ eq $title } @green_cases;
         my $ir_text = $case->{ir} // '';
         my $has_node_lines = ($ir_text =~ /^%\w+\s*=/m) ? 1 : 0;
-        my $title = $case->{title};
-        ok(!$has_node_lines,
-            "case '$title': ir block is pure-GAP form (no %name = ... lines)");
+        ok($has_node_lines, "case '$title': GREEN ir block has node lines (constructive graph)");
     }
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 5: Negative guard — a class idiom claiming L: GREEN must FAIL
+# SECTION 5: Verify GAP ir blocks remain pure-GAP form
 #
-# If someone edits a class idiom to claim L: GREEN without providing a
-# buildable runtime-free graph, the runner must catch the lie.  We test this
-# with a fake class-simple case that claims GREEN — a pure-GAP block with a
-# GREEN claim is the inconsistency the runner detects.
+# Pure-GAP blocks have L: GAP line and NO %name = ... node lines.
+# ---------------------------------------------------------------------------
+
+subtest 'GAP ir blocks are pure-GAP form (no node lines)' => sub {
+    plan tests => scalar @gap_cases;
+    for my $case (@$cases) {
+        my $title = lc($case->{title});
+        $title =~ s/^\s+|\s+$//g;
+        next unless grep { $_ eq $title } @gap_cases;
+        my $ir_text = $case->{ir} // '';
+        my $has_node_lines = ($ir_text =~ /^%\w+\s*=/m) ? 1 : 0;
+        ok(!$has_node_lines,
+            "case '$title': GAP ir block is pure-GAP form (no %name = ... lines)");
+    }
+};
+
+# ---------------------------------------------------------------------------
+# SECTION 6: Negative guard — a class idiom claiming L: GREEN must FAIL
+# if the block is pure-GAP (no constructive graph).
 # ---------------------------------------------------------------------------
 
 subtest 'guard: pure-GAP block with L: GREEN for class idiom FAILS L verdict' => sub {

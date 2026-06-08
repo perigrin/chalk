@@ -17,8 +17,8 @@ constructing a partial graph.
 
 A minimal `class C {}` with no fields or methods. Instantiating it produces an
 object whose `ref()` is the class name. Because the class is statically declared,
-the object is a static `{class*, fields}` struct — runtime-free; the IR is a GAP
-only until the MOP object-struct lowering (G5) is modelled.
+the object is a static `{class*, fields}` struct — runtime-free; lowered via G5
+MOP static vtable + object struct.
 
 ```perl
 # source
@@ -30,12 +30,16 @@ ref($e)
 ```
 
 ```behavior
-return: Empty
+return: Str:Empty
 context: scalar
 ```
 
 ```ir
-L: GAP(class/object is RF: a static {class*, fields} struct; GAP only until MOP object-struct lowering (G5) is modelled, NOT a libperl/Scalar-SV dependency)
+%cls    = ClassDecl(class_name: "Empty")
+%new_e  = New(%cls) :Object
+%result = Ref(%new_e) :Str
+return %result
+L: GREEN
 ```
 
 ## field-basic
@@ -43,8 +47,7 @@ L: GAP(class/object is RF: a static {class*, fields} struct; GAP only until MOP 
 A field declared with `:param` requires the constructor to accept a named
 argument. A method that returns the field value reads from the object struct at a
 known offset — a typed struct field, not a Scalar SV* slot. The read is
-runtime-free; the IR is a GAP only until the MOP object-struct lowering (G5) is
-modelled.
+runtime-free; lowered via G5 MOP static vtable + object struct.
 
 ```perl
 # source
@@ -59,12 +62,20 @@ $a->name
 ```
 
 ```behavior
-return: cat
+return: Str:cat
 context: scalar
 ```
 
 ```ir
-L: GAP(field read is RF: a known struct offset load (typed field, not a Scalar SV* slot); GAP only until MOP object-struct lowering (G5) is modelled, NOT a libperl dependency)
+%fa     = FieldAccess(field_index: 0, field_stash: "Animal") :Str
+%meth   = MethodDef(%fa, method_name: "name")
+%fdef   = FieldDef(field_name: "name", field_index: 0, is_param: true, has_reader: false, has_default: false)
+%cls    = ClassDecl(%meth, %fdef, class_name: "Animal")
+%nval   = Constant("cat") :Str
+%new_a  = New(%cls, %nval, param_names: "name") :Object
+%result = MethodCall(%new_a, %cls, method_name: "name") :Str
+return %result
+L: GREEN
 ```
 
 ## field-attrs
@@ -100,8 +111,8 @@ L: GAP(:reader synthesis is RF: a static vtable slot returning a known struct of
 
 A method that ignores `$self` and returns a literal value is the simplest
 non-trivial method. The dispatch path is a known per-class vtable slot + indirect
-call (static, no runtime `@ISA` mutation), so it is runtime-free; the IR is a GAP
-only until the MOP static-vtable lowering (G5) is modelled.
+call (static, no runtime `@ISA` mutation), so it is runtime-free; lowered via G5
+MOP static vtable emission.
 
 ```perl
 # source
@@ -115,12 +126,18 @@ $g->greet
 ```
 
 ```behavior
-return: 42
+return: Int:42
 context: scalar
 ```
 
 ```ir
-L: GAP(method dispatch is RF: a known per-class vtable slot + indirect call (static, no runtime @ISA mutation); GAP only until MOP vtable lowering (G5) is modelled, NOT a libperl dependency)
+%body   = Constant(42) :Int
+%meth   = MethodDef(%body, method_name: "greet")
+%cls    = ClassDecl(%meth, class_name: "Greeter")
+%new_g  = New(%cls) :Object
+%result = MethodCall(%new_g, %cls, method_name: "greet") :Int
+return %result
+L: GREEN
 ```
 
 ## method-call

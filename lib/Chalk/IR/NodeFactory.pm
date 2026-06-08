@@ -93,6 +93,12 @@ use Chalk::IR::Node::Region;
 use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::ExpressionList;
 use Chalk::IR::Node::Coerce;
+use Chalk::IR::Node::ClassDecl;
+use Chalk::IR::Node::MethodDef;
+use Chalk::IR::Node::FieldDef;
+use Chalk::IR::Node::New;
+use Chalk::IR::Node::MethodCall;
+use Chalk::IR::Node::FieldWrite;
 
 my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Constant Phi
@@ -114,6 +120,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     ExpressionList
     Start Return Unwind
     Coerce
+    ClassDecl MethodDef FieldDef New MethodCall FieldWrite
 );
 
 # CFG ops that are NEVER hash-consed via make_cfg (each call allocates fresh).
@@ -259,6 +266,20 @@ class Chalk::IR::NodeFactory {
             my $class = $DATA_CLASSES{ListAssign};
             $cfg_counter++;
             my $id = "ListAssign#${cfg_counter}";
+            my $node = $class->new( id => $id, %args );
+            $self->_register_consumers($node, %args);
+            $cache{$id} = $node;
+            return $node;
+        }
+
+        # New, MethodCall, and FieldWrite have per-call identity (side effects:
+        # malloc / vtable dispatch / field mutation). Each call site is a distinct
+        # operation even when the arguments are the same content.
+        if ($op_name eq 'New' || $op_name eq 'FieldWrite') {
+            my $class = $DATA_CLASSES{$op_name}
+                or die "Unknown node operation: $op_name";
+            $cfg_counter++;
+            my $id = "${op_name}#${cfg_counter}";
             my $node = $class->new( id => $id, %args );
             $self->_register_consumers($node, %args);
             $cache{$id} = $node;
