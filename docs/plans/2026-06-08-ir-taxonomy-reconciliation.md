@@ -1,9 +1,23 @@
-# IR Taxonomy Reconciliation: converge the G4/G5 lowering nodes onto a single IR
+# Target-Layer Reconciliation: single IR vocabulary + a common `Chalk::Target` home
 
 **Date:** 2026-06-08
 **Status:** PLAN — awaiting perigrin's approval before execution
 **Author:** drafted from two alignment audits (aggregate-nodes audit + MOP-nodes audit)
 run against commits `3435b75a..5f6a9f63` (the G2–G5 runtime-free GAP-clearing campaign).
+
+**Scope:** this plan covers two of the three target-layer architecture-review
+findings:
+- **Finding 1 (node taxonomy)** — converge the ~18 parallel G4/G5 nodes onto the
+  single canonical IR (Parts below: Problem → Phases 0–6).
+- **Finding 2 (target namespace)** — move the codegen targets into a common
+  top-level `Chalk::Target::*` (see the "Target namespace consolidation" section at
+  the end).
+- Finding 3 (LLVM-first sequencing) is RESOLVED — it was a documented decision
+  (`docs/plans/2026-06-06-three-axis-codegen-and-typed-ir-contract.md`), not drift;
+  `docs/llvm-target.md` has been updated to cite it. Not covered here.
+- Note: `Chalk::IR::Node::Coerce` is NOT drift — it resolves
+  `typed-ir-representation.md`'s own open questions (a node, parameterized by
+  from/to) exactly as that doc planned. Out of scope; it is the model done right.
 
 ## Problem
 
@@ -192,10 +206,57 @@ parser↔backend contract is explicit.
   genuinely-new node KEPT is documented with rationale.
 - No regression to G2/G3/L3 cases.
 
+## Target namespace consolidation (Finding 2)
+
+**Decision (perigrin, 2026-06-08): codegen targets belong in a common top-level
+`Chalk::Target::*`** — NOT under `Chalk::IR::` (targets are *consumers* of the IR,
+not part of it) and NOT under the legacy `Chalk::Bootstrap::*::Target` (the
+`Bootstrap` prefix is being retired). Target home = `Chalk::Target::{LLVM,Perl,C,XS}`,
+with the existing abstract base `Chalk::Bootstrap::Target` ("Base class for code
+generation targets") becoming `Chalk::Target` (the base interface that subclasses'
+`generate()`/`lower()` implement).
+
+Current surface (the move):
+
+| Module | Current namespace | Consumers | Target namespace |
+|---|---|---|---|
+| `lib/Chalk/IR/Target/LLVM.pm` | `Chalk::IR::Target::LLVM` | **14** (all test-side, this session) | `Chalk::Target::LLVM` |
+| `lib/Chalk/Bootstrap/Target.pm` | `Chalk::Bootstrap::Target` (base) | — | `Chalk::Target` (base) |
+| `lib/Chalk/Bootstrap/Perl/Target/{Perl,C,EmitHelpers,ClassRegistry}.pm` | `Chalk::Bootstrap::Perl::Target::*` | part of ~153 | `Chalk::Target::{Perl,C,...}` |
+| `lib/Chalk/Bootstrap/BNF/Target/{Perl,C,XS,XS/AST/*}.pm` | `Chalk::Bootstrap::BNF::Target::*` | part of ~153 | `Chalk::Target::BNF::*` (or fold) |
+
+`Chalk::Target` does not exist yet (0 refs today).
+
+### Two scopes (decide narrow-vs-full at execution time)
+- **Narrow (cheap, do alongside Phase 0):** move ONLY `Chalk::IR::Target::LLVM` →
+  `Chalk::Target::LLVM` (git mv + package rename + update the 14 `use` lines, all in
+  t/), and create `Chalk::Target` as the base (promote `Bootstrap::Target`, leaving a
+  compat alias if the 153 Bootstrap consumers still reference the old base). Fixes the
+  immediate "LLVM shouldn't live under IR" problem; the Perl/C/XS family stays put for
+  now under a tracked follow-up.
+- **Full (large, tied to the Bootstrap rename):** also migrate the ~153-file
+  `Chalk::Bootstrap::{Perl,BNF}::Target::*` family (Perl/C/XS + the BNF/XS AST tree +
+  EmitHelpers/ClassRegistry) into `Chalk::Target::*`. ~167 files touched; entangled
+  with the broader `Bootstrap`→`Chalk` rename, so it should be sequenced WITH that
+  rename, not ahead of it.
+
+### Recommendation
+Do the **narrow** move (LLVM → `Chalk::Target::LLVM` + create `Chalk::Target` base)
+as part of this reconciliation — it is cheap (14 test-side refs), removes the
+"target under IR" wart immediately, and establishes `Chalk::Target` as the canonical
+home so future targets land there. File the **full** Bootstrap-target migration as a
+separate issue tied to the Bootstrap→Chalk rename (it is mechanical but large and
+should not be smuggled into this node-reconciliation work). Update
+`docs/architecture/ir-lowering.md` (which still describes the Bootstrap-namespaced
+targets and never mentions the LLVM target) to reflect `Chalk::Target::*` as the
+target layer.
+
 ## Execution disposition (to decide with perigrin after approval)
-- A single tracked git-zhi issue ("IR taxonomy reconciliation") with the 6 phases as
-  its task list, OR one issue per phase (Phase 0–6) in a small chain.
+- A single tracked git-zhi issue ("target-layer reconciliation") with the node phases
+  0–6 + the narrow `Chalk::Target` move as its task list, OR one issue per phase in a
+  small chain; the full Bootstrap-target migration is its OWN issue (rename-tied).
 - Sequence relative to G6/G7: STRONGLY prefer doing this reconciliation BEFORE G6/G7
   build more LLVM lowering on top of the parallel vocabulary (G6's RegexMatch is
   already taxonomy-conformant; G7's $1 consumes G6's capture struct — neither should
-  accrete more drift).
+  accrete more drift). The narrow `Chalk::Target::LLVM` move should land FIRST (or
+  alongside Phase 0) so G6/G7's new lowering code is written at the correct namespace.
