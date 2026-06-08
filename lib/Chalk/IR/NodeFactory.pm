@@ -59,6 +59,17 @@ use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::HashRef;
 use Chalk::IR::Node::ArrayRef;
+use Chalk::IR::Node::ArrayLiteral;
+use Chalk::IR::Node::ScalarLen;
+use Chalk::IR::Node::ArrayRead;
+use Chalk::IR::Node::ArrayWrite;
+use Chalk::IR::Node::HashLiteral;
+use Chalk::IR::Node::HashRead;
+use Chalk::IR::Node::HashWrite;
+use Chalk::IR::Node::MakeArrayRef;
+use Chalk::IR::Node::MakeHashRef;
+use Chalk::IR::Node::ArrayDeref;
+use Chalk::IR::Node::HashDeref;
 use Chalk::IR::Node::Interpolate;
 use Chalk::IR::Node::AnonSub;
 use Chalk::IR::Node::RegexMatch;
@@ -92,7 +103,11 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Assign Repeat Match NotMatch DefinedOr Xor Range Yada IsaOp
     Not Negate Complement Defined UnaryPlus Ref Length
     PadAccess FieldAccess StashAccess Subscript Slice
-    Call HashRef ArrayRef Interpolate AnonSub
+    Call HashRef ArrayRef
+    ArrayLiteral ScalarLen ArrayRead ArrayWrite
+    HashLiteral HashRead HashWrite
+    MakeArrayRef MakeHashRef ArrayDeref HashDeref
+    Interpolate AnonSub
     RegexMatch RegexSubst TryCatch
     PostfixDeref CompoundAssign BacktickExpr Stringify VarDecl ListAssign
     TernaryExpr StructRef StructFieldAccess

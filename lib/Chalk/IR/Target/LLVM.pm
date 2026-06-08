@@ -1,5 +1,5 @@
-# ABOUTME: SoN->LLVM IR lowering pass for the typed-representation model (Phase 3a/3b/3c/cfg-phi/G3-Str).
-# ABOUTME: Lowers typed SoN graphs to LLVM IR text: arithmetic, VarDecl/PadAccess, control-flow, and Str.
+# ABOUTME: SoN->LLVM IR lowering pass for the typed-representation model (G4 Array/Hash added).
+# ABOUTME: Lowers typed SoN graphs to LLVM IR text: arithmetic, control-flow, Str, and Array/Hash aggregates.
 package Chalk::IR::Target::LLVM;
 use 5.42.0;
 use utf8;
@@ -291,6 +291,14 @@ sub lower_with_elaboration {
         push @lines, '@undef_str  = private unnamed_addr constant [8 x i8] c"Undef:\0A\00", align 1';
         push @lines, '@fmt_s_u    = private unnamed_addr constant [3 x i8] c"%s\00", align 1';
     }
+    elsif ($result_repr eq 'Slot') {
+        # Slot result: a tagged-scalar {i1 defined, i64 payload} from array/hash reads.
+        # If defined=true: print "Int:<payload>\n". If defined=false: print "Undef:\n".
+        # "Int:%d\n\0" = 8 bytes; "Undef:\n\0" = 8 bytes.
+        push @lines, '@fmt_slot_int   = private unnamed_addr constant [8 x i8] c"Int:%d\0A\00",  align 1';
+        push @lines, '@fmt_slot_undef = private unnamed_addr constant [8 x i8] c"Undef:\0A\00",  align 1';
+        push @lines, '@fmt_slot_s     = private unnamed_addr constant [3 x i8] c"%s\00",          align 1';
+    }
     else {
         die "LLVM backend (elaboration): cannot emit return of repr=$result_repr";
     }
@@ -322,11 +330,28 @@ sub lower_with_elaboration {
         }
     }
 
-    # Declare malloc/memcpy when Str concat operations were emitted.
+    # Declare malloc/memcpy when Str concat or aggregate operations were emitted.
     # These are plain C host-interface functions — NOT libperl.
     if ($ctx->{_need_malloc_memcpy}) {
         push @lines, 'declare i8* @malloc(i64)';
         push @lines, 'declare i8* @memcpy(i8*, i8*, i64)';
+    }
+
+    # Declare memcmp when hash key comparison operations were emitted.
+    if ($ctx->{_need_memcmp}) {
+        push @lines, 'declare i32 @memcmp(i8* nocapture readonly, i8* nocapture readonly, i64)';
+    }
+
+    # Emit LLVM type declarations for Array/Hash aggregate structures when needed.
+    # %Slot = { i1 defined, i64 payload } (16 bytes with padding)
+    # %Array = { i64 len, i64 cap, %Slot* elems }
+    # %HashEntry = { i8* key_ptr, i64 key_len, i32 key_enc, i1 val_def, i64 val_pay }
+    # %Hash = { i64 count, i64 cap, %HashEntry* entries }
+    if ($ctx->{_need_aggregate_types}) {
+        push @lines, '%Slot       = type { i1, i64 }';
+        push @lines, '%Array      = type { i64, i64, %Slot* }';
+        push @lines, '%HashEntry  = type { i8*, i64, i32, i1, i64 }';
+        push @lines, '%Hash       = type { i64, i64, %HashEntry* }';
     }
 
     # Emit @chalk_str_to_num helper + strtod declaration when Coerce(Str->Num) is used.
@@ -428,6 +453,37 @@ sub lower_with_elaboration {
         push @lines, '  %fmt_s_u_ptr   = getelementptr inbounds [3 x i8], [3 x i8]* @fmt_s_u, i64 0, i64 0';
         push @lines, '  call i32 (i8*, ...) @printf(i8* %fmt_s_u_ptr, i8* %undef_str_ptr)';
     }
+    elsif ($result_repr eq 'Slot') {
+        # Slot result: tagged-scalar from array/hash read.
+        # result_ref is the i1 defined-bit SSA ref.
+        # The payload (i64) is retrieved from _slot_payload{result_ref}.
+        #
+        # Branch on defined-bit:
+        #   defined=true  -> print "Int:<payload>\n"
+        #   defined=false -> print "Undef:\n"
+        my $def_bit  = $result_ref;
+        my $pay_val  = $ctx->{_slot_payload}{$def_bit}
+            // die "LLVM backend: Slot result missing payload in _slot_payload table";
+        my $def_lbl  = $ctx->_fresh_label('slot_def');
+        my $und_lbl  = $ctx->_fresh_label('slot_und');
+        my $end_lbl  = $ctx->_fresh_label('slot_end');
+
+        push @lines, "  br i1 $def_bit, label \%$def_lbl, label \%$und_lbl";
+        push @lines, '';
+        push @lines, "$def_lbl:";
+        my $pay32 = $ctx->_fresh;
+        push @lines, "  $pay32 = trunc i64 $pay_val to i32  ; Slot defined: truncate payload for printf %d";
+        push @lines, '  %slot_fmt_int_ptr = getelementptr inbounds [8 x i8], [8 x i8]* @fmt_slot_int, i64 0, i64 0';
+        push @lines, "  call i32 (i8*, ...) \@printf(i8* %slot_fmt_int_ptr, i32 $pay32)";
+        push @lines, "  br label \%$end_lbl";
+        push @lines, '';
+        push @lines, "$und_lbl:";
+        push @lines, '  %slot_fmt_undef_ptr = getelementptr inbounds [8 x i8], [8 x i8]* @fmt_slot_undef, i64 0, i64 0';
+        push @lines, '  call i32 (i8*, ...) @printf(i8* %slot_fmt_undef_ptr)';
+        push @lines, "  br label \%$end_lbl";
+        push @lines, '';
+        push @lines, "$end_lbl:";
+    }
 
     push @lines, '  ret i32 0';
     push @lines, '}';
@@ -471,6 +527,23 @@ sub new {
         _str_len_table        => {},
         _need_malloc_memcpy   => 0,
         _need_str_to_num_helper => 0,
+        # G4 Array/Hash aggregate tracking:
+        #   _need_aggregate_types => bool
+        #     Set when any Array/Hash node is lowered; triggers type struct declarations.
+        #   _need_memcmp => bool
+        #     Set when HashRead/HashWrite is lowered; triggers memcmp declaration.
+        #   _arr_table => { node_id => '%arr_ptr_ref' }
+        #     Maps ArrayLiteral/ArrayWrite node id -> LLVM %Array* pointer ref.
+        #   _hash_table => { node_id => '%hash_ptr_ref' }
+        #     Maps HashLiteral/HashWrite node id -> LLVM %Hash* pointer ref.
+        _need_aggregate_types => 0,
+        _need_memcmp          => 0,
+        _arr_table            => {},
+        _hash_table           => {},
+        # Slot repr tracking: parallel to _undef_defined_bit/_undef_payload for Undef.
+        # Maps the SSA def-bit ref -> SSA payload ref (i64).
+        # Used by the Slot return epilogue to retrieve both fields.
+        _slot_payload => {},
     }, $class;
 }
 
@@ -626,6 +699,39 @@ sub lower_value {
     }
     elsif ($op eq 'Loop') {
         return $self->_lower_loop($node);
+    }
+    elsif ($op eq 'ArrayLiteral') {
+        return $self->_lower_array_literal($node);
+    }
+    elsif ($op eq 'ScalarLen') {
+        return $self->_lower_scalar_len($node);
+    }
+    elsif ($op eq 'ArrayRead') {
+        return $self->_lower_array_read($node);
+    }
+    elsif ($op eq 'ArrayWrite') {
+        return $self->_lower_array_write($node);
+    }
+    elsif ($op eq 'HashLiteral') {
+        return $self->_lower_hash_literal($node);
+    }
+    elsif ($op eq 'HashRead') {
+        return $self->_lower_hash_read($node);
+    }
+    elsif ($op eq 'HashWrite') {
+        return $self->_lower_hash_write($node);
+    }
+    elsif ($op eq 'MakeArrayRef') {
+        return $self->_lower_make_array_ref($node);
+    }
+    elsif ($op eq 'MakeHashRef') {
+        return $self->_lower_make_hash_ref($node);
+    }
+    elsif ($op eq 'ArrayDeref') {
+        return $self->_lower_array_deref($node);
+    }
+    elsif ($op eq 'HashDeref') {
+        return $self->_lower_hash_deref($node);
     }
     else {
         if (defined $node->representation && $node->representation eq 'Scalar') {
@@ -2167,6 +2273,547 @@ sub _find_block_idx {
         return $i if $blocks->[$i]{label} eq $label;
     }
     die "LLVM backend: internal error — block '$label' not found";
+}
+
+# ===========================================================================
+# G4 Array/Hash aggregate lowering
+# ===========================================================================
+#
+# Array representation: %Array = { i64 len, i64 cap, %Slot* elems }
+# Hash representation:  %Hash  = { i64 count, i64 cap, %HashEntry* entries }
+# Slot type:            %Slot  = { i1 defined, i64 payload }
+# HashEntry type:       %HashEntry = { i8* key_ptr, i64 key_len, i32 key_enc,
+#                                      i1 val_defined, i64 val_payload }
+# Ref types:  ArrayRef = bitcast %Array* to i8* (pointer, no additional tag needed)
+#             HashRef  = bitcast %Hash* to i8*
+#
+# All allocation uses libc malloc — NOT libperl AV*/HV*. The slot model is
+# the tagged-scalar {i1,i64} from L3 (SPIKE confirmed: OOB -> defined=false
+# = undef by construction; plain-i64 rejected because INT_MIN is a valid
+# payload with no safe sentinel, as L3's analysis showed).
+#
+# Hash lookup: linear scan with memcmp on Str keys. Sufficient for the small
+# literal hashes in the R-corpus. Order-normalized for determinism (keys are
+# stored in literal order; the R3/R5/R7 corpus cases only read, not iterate).
+# ===========================================================================
+
+# _lower_array_literal: allocate Array + Slot buffer, store each element.
+# inputs = [elem0, elem1, ...] all :Int (corpus cases).
+# Returns the %Array* pointer as the SSA ref.
+sub _lower_array_literal {
+    my ($self, $node) = @_;
+
+    my $inputs = $node->inputs;
+    my $n      = scalar @$inputs;
+
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+
+    # Allocate slot buffer: n * sizeof(%Slot). sizeof(%Slot) = 16 (i1 + pad + i64).
+    my $slot_bytes = $n * 16;
+    my $slot_buf = $self->_fresh;
+    $self->_emit("  $slot_buf = call i8* \@malloc(i64 $slot_bytes)  ; ArrayLiteral: alloc $n slots");
+    my $slots = $self->_fresh;
+    $self->_emit("  $slots = bitcast i8* $slot_buf to %Slot*  ; ArrayLiteral: slot array ptr");
+
+    # Store each element as a defined slot {i1=true, i64=value}.
+    for my $i (0 .. $n - 1) {
+        my $elem_ref = $self->lower_value($inputs->[$i]);
+        my $slot_def = $self->_fresh;
+        my $slot_pay = $self->_fresh;
+        $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 0  ; ArrayLiteral: slot[$i] defined ptr");
+        $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 1  ; ArrayLiteral: slot[$i] payload ptr");
+        $self->_emit("  store i1 true, i1* $slot_def  ; ArrayLiteral: slot[$i] defined=true");
+        my $elem_i64;
+        my $elem_repr = $inputs->[$i]->representation // '';
+        if ($elem_repr eq 'ArrayRef' || $elem_repr eq 'HashRef') {
+            # Pointer element: ptrtoint to i64 for storage in the slot payload.
+            $elem_i64 = $self->_fresh;
+            $self->_emit("  $elem_i64 = ptrtoint i8* $elem_ref to i64  ; ArrayLiteral: ptr elem[$i] -> i64");
+        }
+        else {
+            $elem_i64 = $elem_ref;
+        }
+        $self->_emit("  store i64 $elem_i64, i64* $slot_pay  ; ArrayLiteral: slot[$i] payload=$elem_i64");
+    }
+
+    # Allocate Array: { i64 len, i64 cap, %Slot* elems } = 24 bytes.
+    my $arr_buf = $self->_fresh;
+    $self->_emit("  $arr_buf = call i8* \@malloc(i64 24)  ; ArrayLiteral: alloc Array header");
+    my $arr = $self->_fresh;
+    $self->_emit("  $arr = bitcast i8* $arr_buf to %Array*  ; ArrayLiteral: Array ptr");
+    my $len_ptr = $self->_fresh;
+    my $cap_ptr = $self->_fresh;
+    my $elm_ptr = $self->_fresh;
+    $self->_emit("  $len_ptr = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0  ; ArrayLiteral: len ptr");
+    $self->_emit("  $cap_ptr = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 1  ; ArrayLiteral: cap ptr");
+    $self->_emit("  $elm_ptr = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2  ; ArrayLiteral: elems ptr");
+    $self->_emit("  store i64 $n, i64* $len_ptr  ; ArrayLiteral: len=$n");
+    $self->_emit("  store i64 $n, i64* $cap_ptr  ; ArrayLiteral: cap=$n");
+    $self->_emit("  store %Slot* $slots, %Slot** $elm_ptr  ; ArrayLiteral: store slots ptr");
+
+    $self->{cache}{ $node->id } = $arr;
+    # Track in _arr_table so ScalarLen/ArrayRead can locate the Array* ptr.
+    $self->{_arr_table}{ $node->id } = $arr;
+    return $arr;
+}
+
+# _lower_scalar_len: read the len field from an Array pointer.
+# input = [Array node]. Returns i64 (repr=Int).
+sub _lower_scalar_len {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+
+    my $arr_ref = $self->lower_value($node->inputs->[0]);
+    my $len_ptr = $self->_fresh;
+    my $len     = $self->_fresh;
+    $self->_emit("  $len_ptr = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 0  ; ScalarLen: len ptr");
+    $self->_emit("  $len = load i64, i64* $len_ptr  ; ScalarLen: load len");
+
+    $self->{cache}{ $node->id } = $len;
+    return $len;
+}
+
+# _lower_array_read: bounds-checked element read.
+# inputs = [Array, index :Int]. repr=Int: extract payload (in-bounds known).
+# repr=Slot: return an alloca {i1,i64} — defined=true if in-bounds, false if OOB.
+# The bounds-check is ALWAYS emitted (soundness). For repr=Int, the OOB path
+# stores undefined into the payload (unreachable for valid in-bounds indices).
+sub _lower_array_read {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+
+    my $arr_ref = $self->lower_value($node->inputs->[0]);
+    my $idx_ref = $self->lower_value($node->inputs->[1]);
+    my $repr    = $node->representation // 'Int';
+
+    # Load len and elems pointer from the Array struct.
+    my $len_ptr  = $self->_fresh;
+    my $elem_ptr = $self->_fresh;
+    my $len      = $self->_fresh;
+    my $elems    = $self->_fresh;
+    $self->_emit("  $len_ptr  = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 0  ; ArrayRead: len ptr");
+    $self->_emit("  $elem_ptr = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 2  ; ArrayRead: elems ptr");
+    $self->_emit("  $len   = load i64, i64* $len_ptr   ; ArrayRead: load len");
+    $self->_emit("  $elems = load %Slot*, %Slot** $elem_ptr  ; ArrayRead: load elems");
+
+    # Emit bounds-check: in_bounds = (idx < len).
+    my $ok    = $self->_fresh;
+    my $lbl_inb = $self->_fresh_label('arr_inb');
+    my $lbl_oob = $self->_fresh_label('arr_oob');
+    my $lbl_end = $self->_fresh_label('arr_end');
+    $self->_emit("  $ok = icmp ult i64 $idx_ref, $len  ; ArrayRead: bounds check (idx < len)");
+    $self->_set_terminator("  br i1 $ok, label \%$lbl_inb, label \%$lbl_oob");
+    $self->_new_block($lbl_inb);
+
+    # In-bounds: load the slot at elems[idx].
+    my $slot_p   = $self->_fresh;
+    my $slot_def = $self->_fresh;
+    my $slot_pay = $self->_fresh;
+    my $def_val  = $self->_fresh;
+    my $pay_val  = $self->_fresh;
+    $self->_emit("  $slot_p   = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref  ; ArrayRead: slot ptr");
+    $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 0  ; ArrayRead: slot defined ptr");
+    $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 1  ; ArrayRead: slot payload ptr");
+    $self->_emit("  $def_val  = load i1,  i1*  $slot_def  ; ArrayRead: load defined bit");
+    $self->_emit("  $pay_val  = load i64, i64* $slot_pay  ; ArrayRead: load payload");
+    $self->_set_terminator("  br label \%$lbl_end");
+
+    $self->_new_block($lbl_oob);
+    # OOB: produce an undef-like slot (defined=false, payload=0).
+    $self->_set_terminator("  br label \%$lbl_end");
+
+    $self->_new_block($lbl_end);
+
+    if ($repr eq 'Int') {
+        # In-bounds known: phi-select the payload (OOB path unreachable for valid idx).
+        my $result = $self->_fresh;
+        $self->_emit("  $result = phi i64 [ $pay_val, \%$lbl_inb ], [ 0, \%$lbl_oob ]  ; ArrayRead :Int payload");
+        $self->{cache}{ $node->id } = $result;
+        return $result;
+    }
+    elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
+        # Pointer element: phi-select payload then inttoptr.
+        my $raw_pay = $self->_fresh;
+        $self->_emit("  $raw_pay = phi i64 [ $pay_val, \%$lbl_inb ], [ 0, \%$lbl_oob ]  ; ArrayRead :$repr raw ptr payload");
+        my $ptr = $self->_fresh;
+        $self->_emit("  $ptr = inttoptr i64 $raw_pay to i8*  ; ArrayRead :$repr ptr");
+        $self->{cache}{ $node->id } = $ptr;
+        return $ptr;
+    }
+    else {
+        # Slot repr: phi-select defined-bit and payload at the merge point.
+        # The epilogue retrieves the payload from _slot_payload keyed by the def ref.
+        my $def_phi = $self->_fresh;
+        my $pay_phi = $self->_fresh;
+        $self->_emit("  $def_phi = phi i1  [ $def_val, \%$lbl_inb ], [ false, \%$lbl_oob ]  ; ArrayRead :Slot defined phi");
+        $self->_emit("  $pay_phi = phi i64 [ $pay_val, \%$lbl_inb ], [ 0,          \%$lbl_oob ]  ; ArrayRead :Slot payload phi");
+        # Track payload for the Slot epilogue.
+        $self->{_slot_payload}{$def_phi} = $pay_phi;
+        $self->{cache}{ $node->id } = $def_phi;
+        return $def_phi;
+    }
+}
+
+# _lower_array_write: store a value into an array element (in-bounds assumed for corpus).
+# inputs = [Array, index :Int, value :Int]. Returns the Array* (for chaining).
+sub _lower_array_write {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+
+    my $arr_ref = $self->lower_value($node->inputs->[0]);
+    my $idx_ref = $self->lower_value($node->inputs->[1]);
+    my $val_ref = $self->lower_value($node->inputs->[2]);
+
+    # Load elems pointer.
+    my $elem_ptr = $self->_fresh;
+    my $elems    = $self->_fresh;
+    $self->_emit("  $elem_ptr = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 2  ; ArrayWrite: elems ptr");
+    $self->_emit("  $elems = load %Slot*, %Slot** $elem_ptr  ; ArrayWrite: load elems");
+
+    # Write slot at index: defined=true, payload=val.
+    my $slot_def = $self->_fresh;
+    my $slot_pay = $self->_fresh;
+    $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 0  ; ArrayWrite: slot def ptr");
+    $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 1  ; ArrayWrite: slot pay ptr");
+    $self->_emit("  store i1 true, i1* $slot_def  ; ArrayWrite: defined=true");
+    $self->_emit("  store i64 $val_ref, i64* $slot_pay  ; ArrayWrite: store value");
+
+    # Return the same Array* (mutated in place — idiomatic for value-return chaining).
+    $self->{cache}{ $node->id } = $arr_ref;
+    return $arr_ref;
+}
+
+# _lower_hash_literal: allocate Hash + HashEntry buffer, store each key/value pair.
+# inputs = [key0, val0, key1, val1, ...]. Keys are :Str, values are :Int.
+# Returns the %Hash* pointer as the SSA ref.
+sub _lower_hash_literal {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+    $self->{_need_memcmp}          = 1;
+
+    my $inputs = $node->inputs;
+    my $npairs = scalar(@$inputs) / 2;
+
+    # sizeof(%HashEntry) = ptr(8) + i64(8) + i32(4) + pad(4) + i1(1) + pad(7) + i64(8) = 40 bytes
+    # Use 48 bytes (generous padding) to avoid alignment issues.
+    my $entry_bytes = $npairs * 48;
+    my $ent_buf = $self->_fresh;
+    $self->_emit("  $ent_buf = call i8* \@malloc(i64 $entry_bytes)  ; HashLiteral: alloc $npairs entries");
+    my $ents = $self->_fresh;
+    $self->_emit("  $ents = bitcast i8* $ent_buf to %HashEntry*  ; HashLiteral: entry array ptr");
+
+    # Store each key/value pair.
+    for my $i (0 .. $npairs - 1) {
+        my $key_ref = $self->lower_value($inputs->[ $i * 2     ]);
+        my $val_ref = $self->lower_value($inputs->[ $i * 2 + 1 ]);
+        my $key_len = $self->_str_len_for($key_ref) // 0;
+
+        my $e_kp = $self->_fresh;  # key_ptr field
+        my $e_kl = $self->_fresh;  # key_len field
+        my $e_ke = $self->_fresh;  # key_enc field
+        my $e_vd = $self->_fresh;  # val_defined field
+        my $e_vp = $self->_fresh;  # val_payload field
+        $self->_emit("  $e_kp = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 0  ; HashLiteral: entry[$i] key_ptr ptr");
+        $self->_emit("  $e_kl = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 1  ; HashLiteral: entry[$i] key_len ptr");
+        $self->_emit("  $e_ke = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 2  ; HashLiteral: entry[$i] key_enc ptr");
+        $self->_emit("  $e_vd = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 3  ; HashLiteral: entry[$i] val_def ptr");
+        $self->_emit("  $e_vp = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 4  ; HashLiteral: entry[$i] val_pay ptr");
+        $self->_emit("  store i8* $key_ref, i8** $e_kp  ; HashLiteral: key ptr");
+        $self->_emit("  store i64 $key_len, i64* $e_kl  ; HashLiteral: key len=$key_len");
+        $self->_emit("  store i32 0, i32* $e_ke          ; HashLiteral: enc=0 (ASCII)");
+        $self->_emit("  store i1 true, i1* $e_vd         ; HashLiteral: defined=true");
+        $self->_emit("  store i64 $val_ref, i64* $e_vp   ; HashLiteral: value");
+    }
+
+    # Allocate Hash: { i64 count, i64 cap, %HashEntry* entries } = 24 bytes.
+    my $hash_buf = $self->_fresh;
+    $self->_emit("  $hash_buf = call i8* \@malloc(i64 24)  ; HashLiteral: alloc Hash header");
+    my $hash = $self->_fresh;
+    $self->_emit("  $hash = bitcast i8* $hash_buf to %Hash*  ; HashLiteral: Hash ptr");
+    my $cnt_ptr = $self->_fresh;
+    my $cap_ptr = $self->_fresh;
+    my $ent_ptr = $self->_fresh;
+    $self->_emit("  $cnt_ptr = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 0  ; HashLiteral: count ptr");
+    $self->_emit("  $cap_ptr = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 1  ; HashLiteral: cap ptr");
+    $self->_emit("  $ent_ptr = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 2  ; HashLiteral: entries ptr");
+    $self->_emit("  store i64 $npairs, i64* $cnt_ptr  ; HashLiteral: count=$npairs");
+    $self->_emit("  store i64 $npairs, i64* $cap_ptr  ; HashLiteral: cap=$npairs");
+    $self->_emit("  store %HashEntry* $ents, %HashEntry** $ent_ptr  ; HashLiteral: store entries ptr");
+
+    $self->{cache}{ $node->id } = $hash;
+    $self->{_hash_table}{ $node->id } = $hash;
+    return $hash;
+}
+
+# _lower_hash_read: linear-scan key lookup using phi-based loop counter.
+# inputs = [Hash, key :Str]. repr=Int: extract payload (key found).
+# repr=Slot: phi-select {defined=false, payload=0} for missing keys.
+#
+# Block structure:
+#   pre_loop_block: load count+entries, br %hloop
+#   hloop: %i = phi [0, pre_loop], [i_next, hnxt]; cond = i<count; br hchk/hmiss
+#   hchk: load entry[i], len_eq check; br hcmp/hnxt
+#   hcmp: memcmp; br hhit/hnxt
+#   hhit: load val_def/val_pay; br hend
+#   hnxt: i_next = i+1; br hloop  (back-edge)
+#   hmiss: br hend
+#   hend: phi result
+sub _lower_hash_read {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_memcmp}          = 1;
+
+    my $hash_ref = $self->lower_value($node->inputs->[0]);
+    my $lkey_ref = $self->lower_value($node->inputs->[1]);
+    my $lkey_len = $self->_str_len_for($lkey_ref) // 0;
+    my $repr     = $node->representation // 'Int';
+
+    # Load count and entries pointer from Hash struct (in current/pre_loop block).
+    my $cnt_ptr  = $self->_fresh;
+    my $ent_ptr  = $self->_fresh;
+    my $count    = $self->_fresh;
+    my $ents     = $self->_fresh;
+    $self->_emit("  $cnt_ptr = getelementptr inbounds %Hash, %Hash* $hash_ref, i32 0, i32 0  ; HashRead: count ptr");
+    $self->_emit("  $ent_ptr = getelementptr inbounds %Hash, %Hash* $hash_ref, i32 0, i32 2  ; HashRead: entries ptr");
+    $self->_emit("  $count = load i64, i64* $cnt_ptr  ; HashRead: load count");
+    $self->_emit("  $ents  = load %HashEntry*, %HashEntry** $ent_ptr  ; HashRead: load entries");
+
+    # Allocate fresh block labels — all known before any block is emitted.
+    my $lbl_loop = $self->_fresh_label('hloop');
+    my $lbl_chk  = $self->_fresh_label('hchk');
+    my $lbl_cmp  = $self->_fresh_label('hcmp');
+    my $lbl_hit  = $self->_fresh_label('hhit');
+    my $lbl_nxt  = $self->_fresh_label('hnxt');
+    my $lbl_miss = $self->_fresh_label('hmiss');
+    my $lbl_end  = $self->_fresh_label('hend');
+
+    # Capture pre_loop label before terminating the current block.
+    my $lbl_pre  = $self->_current_block_label;
+
+    # Pre-loop -> loop header
+    $self->_set_terminator("  br label \%$lbl_loop");
+    $self->_new_block($lbl_loop);
+
+    # Loop header: phi for i using pre_loop (=0) and hnxt (=i+1) predecessors.
+    my $i_phi = $self->_fresh;
+    my $i_next = $self->_fresh;  # defined later in hnxt; its name is known now
+    $self->_emit("  $i_phi = phi i64 [ 0, \%$lbl_pre ], [ $i_next, \%$lbl_nxt ]  ; HashRead: loop counter");
+    my $loop_cond = $self->_fresh;
+    $self->_emit("  $loop_cond = icmp ult i64 $i_phi, $count  ; HashRead: i < count?");
+    $self->_set_terminator("  br i1 $loop_cond, label \%$lbl_chk, label \%$lbl_miss");
+
+    # hchk: load entry[i], compare key length.
+    $self->_new_block($lbl_chk);
+    my $ent_p   = $self->_fresh;
+    my $ent_kpp = $self->_fresh;
+    my $ent_klp = $self->_fresh;
+    my $ent_vdp = $self->_fresh;
+    my $ent_vpp = $self->_fresh;
+    my $ent_kp  = $self->_fresh;
+    my $ent_kl  = $self->_fresh;
+    $self->_emit("  $ent_p   = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i_phi  ; HashRead: entry[$i_phi] ptr");
+    $self->_emit("  $ent_kpp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 0  ; HashRead: key_ptr field ptr");
+    $self->_emit("  $ent_klp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 1  ; HashRead: key_len field ptr");
+    $self->_emit("  $ent_vdp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 3  ; HashRead: val_def field ptr");
+    $self->_emit("  $ent_vpp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 4  ; HashRead: val_pay field ptr");
+    $self->_emit("  $ent_kp  = load i8*,  i8**  $ent_kpp  ; HashRead: load entry key ptr");
+    $self->_emit("  $ent_kl  = load i64,  i64*  $ent_klp  ; HashRead: load entry key len");
+    my $len_eq = $self->_fresh;
+    $self->_emit("  $len_eq = icmp eq i64 $ent_kl, $lkey_len  ; HashRead: key-len eq?");
+    $self->_set_terminator("  br i1 $len_eq, label \%$lbl_cmp, label \%$lbl_nxt");
+
+    # hcmp: memcmp key bytes.
+    $self->_new_block($lbl_cmp);
+    my $cmp_res  = $self->_fresh;
+    my $is_match = $self->_fresh;
+    $self->_emit("  $cmp_res  = call i32 \@memcmp(i8* nocapture readonly $ent_kp, i8* nocapture readonly $lkey_ref, i64 $lkey_len)  ; HashRead: key memcmp");
+    $self->_emit("  $is_match = icmp eq i32 $cmp_res, 0  ; HashRead: key match?");
+    $self->_set_terminator("  br i1 $is_match, label \%$lbl_hit, label \%$lbl_nxt");
+
+    # hhit: load value slot.
+    $self->_new_block($lbl_hit);
+    my $vd_val = $self->_fresh;
+    my $vp_val = $self->_fresh;
+    $self->_emit("  $vd_val = load i1,  i1*  $ent_vdp  ; HashRead: val defined bit");
+    $self->_emit("  $vp_val = load i64, i64* $ent_vpp  ; HashRead: val payload");
+    $self->_set_terminator("  br label \%$lbl_end");
+
+    # hnxt: i++ and back-edge to loop header.
+    $self->_new_block($lbl_nxt);
+    # $i_next was fresh()ed earlier so its name is deterministic.
+    $self->_emit("  $i_next = add i64 $i_phi, 1  ; HashRead: i++");
+    $self->_set_terminator("  br label \%$lbl_loop");
+
+    # hmiss: key not found.
+    $self->_new_block($lbl_miss);
+    $self->_set_terminator("  br label \%$lbl_end");
+
+    # hend: result phi.
+    $self->_new_block($lbl_end);
+
+    if ($repr eq 'Int') {
+        my $result = $self->_fresh;
+        $self->_emit("  $result = phi i64 [ $vp_val, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; HashRead :Int payload");
+        $self->{cache}{ $node->id } = $result;
+        return $result;
+    }
+    else {
+        # Slot repr: phi-select defined-bit and payload. Track payload for epilogue.
+        my $def_phi = $self->_fresh;
+        my $pay_phi = $self->_fresh;
+        $self->_emit("  $def_phi = phi i1  [ $vd_val, \%$lbl_hit ], [ false, \%$lbl_miss ]  ; HashRead :Slot defined phi");
+        $self->_emit("  $pay_phi = phi i64 [ $vp_val, \%$lbl_hit ], [ 0,     \%$lbl_miss ]  ; HashRead :Slot payload phi");
+        $self->{_slot_payload}{$def_phi} = $pay_phi;
+        $self->{cache}{ $node->id } = $def_phi;
+        return $def_phi;
+    }
+}
+
+# _lower_hash_write: update an existing key's value in a hash (phi-based loop counter).
+# inputs = [Hash, key :Str, value :Int]. Returns the Hash* (for chaining).
+# Scans the hash for the key and updates val_payload if found. The corpus cases
+# (R6/R7) only write to keys that exist in the initial hash literal.
+sub _lower_hash_write {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+    $self->{_need_memcmp}          = 1;
+
+    my $hash_ref = $self->lower_value($node->inputs->[0]);
+    my $wkey_ref = $self->lower_value($node->inputs->[1]);
+    my $wkey_len = $self->_str_len_for($wkey_ref) // 0;
+    my $wval_ref = $self->lower_value($node->inputs->[2]);
+
+    # Load count and entries (in pre_loop block).
+    my $cnt_ptr = $self->_fresh;
+    my $ent_ptr = $self->_fresh;
+    my $count   = $self->_fresh;
+    my $ents    = $self->_fresh;
+    $self->_emit("  $cnt_ptr = getelementptr inbounds %Hash, %Hash* $hash_ref, i32 0, i32 0  ; HashWrite: count ptr");
+    $self->_emit("  $ent_ptr = getelementptr inbounds %Hash, %Hash* $hash_ref, i32 0, i32 2  ; HashWrite: entries ptr");
+    $self->_emit("  $count = load i64, i64* $cnt_ptr  ; HashWrite: load count");
+    $self->_emit("  $ents  = load %HashEntry*, %HashEntry** $ent_ptr  ; HashWrite: load entries");
+
+    my $lbl_wloop = $self->_fresh_label('hwloop');
+    my $lbl_wchk  = $self->_fresh_label('hwchk');
+    my $lbl_wcmp  = $self->_fresh_label('hwcmp');
+    my $lbl_wupd  = $self->_fresh_label('hwupd');
+    my $lbl_wnxt  = $self->_fresh_label('hwnxt');
+    my $lbl_wend  = $self->_fresh_label('hwend');
+
+    my $lbl_wpre  = $self->_current_block_label;
+    my $wi_next   = $self->_fresh;  # allocated now; defined in hwloop nxt block
+
+    $self->_set_terminator("  br label \%$lbl_wloop");
+    $self->_new_block($lbl_wloop);
+
+    # Loop header phi.
+    my $wi_phi = $self->_fresh;
+    $self->_emit("  $wi_phi = phi i64 [ 0, \%$lbl_wpre ], [ $wi_next, \%$lbl_wnxt ]  ; HashWrite: loop counter");
+    my $wcond = $self->_fresh;
+    $self->_emit("  $wcond = icmp ult i64 $wi_phi, $count  ; HashWrite: i < count?");
+    $self->_set_terminator("  br i1 $wcond, label \%$lbl_wchk, label \%$lbl_wend");
+
+    $self->_new_block($lbl_wchk);
+    my $went_p   = $self->_fresh;
+    my $went_kpp = $self->_fresh;
+    my $went_klp = $self->_fresh;
+    my $went_vpp = $self->_fresh;
+    my $went_kp  = $self->_fresh;
+    my $went_kl  = $self->_fresh;
+    $self->_emit("  $went_p   = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $wi_phi  ; HashWrite: entry ptr");
+    $self->_emit("  $went_kpp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 0  ; HashWrite: key_ptr field");
+    $self->_emit("  $went_klp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 1  ; HashWrite: key_len field");
+    $self->_emit("  $went_vpp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 4  ; HashWrite: val_pay field");
+    $self->_emit("  $went_kp  = load i8*,  i8**  $went_kpp  ; HashWrite: entry key ptr");
+    $self->_emit("  $went_kl  = load i64,  i64*  $went_klp  ; HashWrite: entry key len");
+    my $wlen_eq = $self->_fresh;
+    $self->_emit("  $wlen_eq = icmp eq i64 $went_kl, $wkey_len  ; HashWrite: len eq");
+    $self->_set_terminator("  br i1 $wlen_eq, label \%$lbl_wcmp, label \%$lbl_wnxt");
+
+    $self->_new_block($lbl_wcmp);
+    my $wcmp_res  = $self->_fresh;
+    my $wis_match = $self->_fresh;
+    $self->_emit("  $wcmp_res  = call i32 \@memcmp(i8* nocapture readonly $went_kp, i8* nocapture readonly $wkey_ref, i64 $wkey_len)  ; HashWrite: key memcmp");
+    $self->_emit("  $wis_match = icmp eq i32 $wcmp_res, 0  ; HashWrite: key match?");
+    $self->_set_terminator("  br i1 $wis_match, label \%$lbl_wupd, label \%$lbl_wnxt");
+
+    $self->_new_block($lbl_wupd);
+    $self->_emit("  store i64 $wval_ref, i64* $went_vpp  ; HashWrite: update val_payload");
+    $self->_set_terminator("  br label \%$lbl_wend");
+
+    $self->_new_block($lbl_wnxt);
+    $self->_emit("  $wi_next = add i64 $wi_phi, 1  ; HashWrite: i++");
+    $self->_set_terminator("  br label \%$lbl_wloop");
+
+    $self->_new_block($lbl_wend);
+    # Return the same Hash* (mutated in place).
+    $self->{cache}{ $node->id } = $hash_ref;
+    return $hash_ref;
+}
+
+# _lower_make_array_ref: return the Array* as an i8* (pointer value for ref-storage).
+# For the purposes of the corpus, an ArrayRef IS the Array* pointer (bitcast to i8*).
+# A full ref-tag would require an extra word per the runtime-free-boundary spec; for
+# G4 corpus cases (deref always follows immediately) the pointer-identity is sufficient.
+sub _lower_make_array_ref {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+
+    my $arr_ref = $self->lower_value($node->inputs->[0]);
+    my $ref = $self->_fresh;
+    $self->_emit("  $ref = bitcast %Array* $arr_ref to i8*  ; MakeArrayRef: Array* -> i8* ref");
+    $self->{cache}{ $node->id } = $ref;
+    return $ref;
+}
+
+# _lower_make_hash_ref: return the Hash* as an i8*.
+sub _lower_make_hash_ref {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+
+    my $hash_ref = $self->lower_value($node->inputs->[0]);
+    my $ref = $self->_fresh;
+    $self->_emit("  $ref = bitcast %Hash* $hash_ref to i8*  ; MakeHashRef: Hash* -> i8* ref");
+    $self->{cache}{ $node->id } = $ref;
+    return $ref;
+}
+
+# _lower_array_deref: cast i8* ref back to %Array*.
+# The input is an ArrayRef (i8*); the output is an Array* for use by ScalarLen/ArrayRead.
+sub _lower_array_deref {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+
+    my $ref_val = $self->lower_value($node->inputs->[0]);
+    my $arr = $self->_fresh;
+    $self->_emit("  $arr = bitcast i8* $ref_val to %Array*  ; ArrayDeref: i8* ref -> Array*");
+    $self->{cache}{ $node->id } = $arr;
+    return $arr;
+}
+
+# _lower_hash_deref: cast i8* ref back to %Hash*.
+sub _lower_hash_deref {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+
+    my $ref_val = $self->lower_value($node->inputs->[0]);
+    my $hash = $self->_fresh;
+    $self->_emit("  $hash = bitcast i8* $ref_val to %Hash*  ; HashDeref: i8* ref -> Hash*");
+    $self->{cache}{ $node->id } = $hash;
+    return $hash;
 }
 
 1;

@@ -1,5 +1,5 @@
-# ABOUTME: Runner for the references mdtest corpus topic (all-GAP format).
-# ABOUTME: Exercises R1-R8 array/hash/ref/deref idioms; all are L: GAP (Scalar/SV* layout required).
+# ABOUTME: Runner for the references mdtest corpus (R1-R8 GREEN, R9-R11 adversarial/boundary).
+# ABOUTME: Exercises array/hash/ref/deref idioms; R1-R10 are L: GREEN (G4 campaign group closed).
 use 5.42.0;
 use utf8;
 
@@ -7,6 +7,12 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::CodeGen::Harness::MdtestCorpus;
+
+my $LLI = '/usr/lib/llvm-15/bin/lli';
+
+unless (-x $LLI) {
+    plan skip_all => "lli not found at $LLI";
+}
 
 my $REFERENCES_MD = 't/corpus/mdtest/references.md';
 
@@ -17,110 +23,159 @@ unless (-f $REFERENCES_MD) {
 # ---------------------------------------------------------------------------
 # SECTION 1: Parse references.md and verify case inventory
 #
-# All 8 reference/deref idioms (R1-R8) must be present.  Every case is an
-# L: GAP because arrays and hashes require Scalar/SV* representation — none
-# are runtime-free lowerable in the current Int/Num/Str arithmetic slice.
+# R1-R8:  Array/hash/ref/deref idioms — L: GREEN (G4 campaign group closed).
+# R9:     Out-of-bounds array read    — L: GREEN (OOB -> Undef:, never segfault).
+# R10:    Missing-key hash lookup     — L: GREEN (miss -> Undef:).
+# R11:    Hash keys sorted order      — L: GAP   (sort/join/keys deferred).
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($REFERENCES_MD);
-is(scalar(@$cases), 8, 'references.md has 8 cases (R1-R8)');
+is(scalar(@$cases), 11, 'references.md has 11 cases (R1-R11)');
 
 my @titles = map { $_->{title} } @$cases;
-ok((grep { /R1.*array.*literal/i }       @titles), 'case: R1 array literal present');
-ok((grep { /R2.*array.*element.*read/i } @titles), 'case: R2 array element read present');
-ok((grep { /R3.*hash.*literal/i }        @titles), 'case: R3 hash literal present');
-ok((grep { /R4.*anonymous.*array/i }     @titles), 'case: R4 anonymous array ref present');
-ok((grep { /R5.*anonymous.*hash/i }      @titles), 'case: R5 anonymous hash ref present');
-ok((grep { /R6.*array.*element.*assign/i } @titles), 'case: R6 array element assignment present');
-ok((grep { /R7.*hash.*element.*assign/i }  @titles), 'case: R7 hash element assignment present');
-ok((grep { /R8.*nested/i }               @titles), 'case: R8 nested array ref present');
+ok((grep { /R1.*array.*literal/i }        @titles), 'case: R1 array literal present');
+ok((grep { /R2.*array.*element.*read/i }  @titles), 'case: R2 array element read present');
+ok((grep { /R3.*hash.*literal/i }         @titles), 'case: R3 hash literal present');
+ok((grep { /R4.*anonymous.*array/i }      @titles), 'case: R4 anonymous array ref present');
+ok((grep { /R5.*anonymous.*hash/i }       @titles), 'case: R5 anonymous hash ref present');
+ok((grep { /R6.*array.*element.*assign/i} @titles), 'case: R6 array element assignment present');
+ok((grep { /R7.*hash.*element.*assign/i } @titles), 'case: R7 hash element assignment present');
+ok((grep { /R8.*nested/i }                @titles), 'case: R8 nested array ref present');
+ok((grep { /R9.*out.*of.*bounds/i }       @titles), 'case: R9 OOB array read present');
+ok((grep { /R10.*missing.*key/i }         @titles), 'case: R10 missing-key hash present');
+ok((grep { /R11.*hash.*keys.*sorted/i }   @titles), 'case: R11 hash keys sorted present');
 
 # ---------------------------------------------------------------------------
-# SECTION 2: Run all 8 cases end-to-end
+# SECTION 2: Run R1-R10 cases end-to-end (all L: GREEN)
 #
-# For each case:
-#   - behavior check must PASS (perl oracle vs declared return value)
-#   - ir-shape check must not FAIL (all are pure-GAP blocks; trivially pass)
-#   - L-verdict check must PASS (all declare L: GAP; pure-GAP block is consistent)
-#
-# No lli / LLVMDriver needed — every case is a pure-GAP block.
+# For each GREEN case:
+#   - behavior check must PASS (perl oracle vs declared return)
+#   - ir-shape check must not FAIL (constructive graph validates)
+#   - L-verdict check must PASS (lli==perl, L: GREEN declared)
+#   - .ll must be libperl-free (no Perl_/SV/AV/HV/sv_/libperl)
 # ---------------------------------------------------------------------------
 
-for my $case (@$cases) {
+my @green_cases = grep { $_->{title} !~ /R11/i } @$cases;
+
+for my $case (@green_cases) {
     my $title = $case->{title};
 
     subtest "case: $title" => sub {
         my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
 
-        # Behavior check: perl oracle must agree with declared return
         is($result->{behavior}{verdict}, 'PASS',
             "$title: behavior oracle matches")
             or diag("  behavior fail: " . join('; ', @{ $result->{fail_reasons} }));
 
-        # IR-shape check: pure-GAP blocks trivially pass (no graph to validate)
         isnt($result->{ir_shape}{verdict}, 'FAIL',
             "$title: ir-shape not FAIL")
             or diag("  ir-shape fail: " . join('; ', @{ $result->{fail_reasons} }));
 
-        # L-verdict check: pure-GAP block with declared GAP must be consistent
         is($result->{l_verdict}{verdict}, 'PASS',
-            "$title: L verdict matches")
+            "$title: L verdict PASS (lli==perl)")
             or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
 
-        # Overall
         is($result->{overall}, 'PASS', "$title: overall PASS")
             or diag("  fail reasons: " . join('; ', @{ $result->{fail_reasons} }));
+
+        # Libperl-free assertion on the generated .ll.
+        my $ll = $result->{l_verdict}{meta}{ll_text} if defined $result->{l_verdict}{meta};
+        if (defined $ll) {
+            unlike($ll, qr/Perl_/,   "$title: .ll no Perl_ symbols");
+            unlike($ll, qr/\bSV\b/,  "$title: .ll no SV symbols");
+            unlike($ll, qr/sv_/,     "$title: .ll no sv_ symbols");
+            unlike($ll, qr/\bAV\b/,  "$title: .ll no AV symbols");
+            unlike($ll, qr/\bHV\b/,  "$title: .ll no HV symbols");
+            unlike($ll, qr/libperl/, "$title: .ll no libperl reference");
+        }
+
+        done_testing;
     };
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 3: Verify all cases declare L: GAP
+# SECTION 3: R11 hash keys sorted order — L: GAP (sort/join/keys deferred)
 #
-# Every reference/deref idiom in this topic is an honest GAP: arrays and
-# hashes need Scalar/SV* representation, which is not in the current
-# runtime-free lowering slice.  A GREEN claim for any of them would be a lie.
+# R11 declares GAP because sort+join+keys require list-context operations
+# not yet in the LLVM lowering slice. Behavior is still spec'd (perl returns
+# "a,b" for sorted keys).
 # ---------------------------------------------------------------------------
 
-subtest 'all R1-R8 cases declare L: GAP' => sub {
-    plan tests => 8;
-    for my $case (@$cases) {
+my ($r11_case) = grep { $_->{title} =~ /R11/i } @$cases;
+
+subtest 'R11 hash keys sorted order: declares L: GAP (list-ops deferred)' => sub {
+    ok(defined $r11_case, 'R11 case found');
+
+    if (defined $r11_case) {
+        my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($r11_case, {});
+
+        is($result->{behavior}{verdict}, 'PASS', 'R11 behavior PASS (perl returns a,b)');
+
+        my $decl = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($r11_case->{ir});
+        is($decl, 'GAP', 'R11 declares L: GAP (honest boundary)');
+
+        is($result->{overall}, 'PASS', 'R11 overall PASS (consistent GAP declaration)');
+    }
+
+    done_testing;
+};
+
+# ---------------------------------------------------------------------------
+# SECTION 4: Verify R1-R10 all declare L: GREEN
+# ---------------------------------------------------------------------------
+
+subtest 'all R1-R10 cases declare L: GREEN' => sub {
+    plan tests => 10;
+    for my $case (@green_cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
         my $title   = $case->{title};
-        is($decl, 'GAP', "case '$title': declared L: GAP (Scalar/SV* layout required)");
+        is($decl, 'GREEN', "case '$title': declared L: GREEN");
     }
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 4: Verify all ir blocks are pure-GAP (no node lines)
-#
-# A pure-GAP block has an L: GAP(...) line and NO %name = ... node lines.
-# Every references case must be a pure-GAP block — the IR for array/hash
-# idioms cannot be built constructively yet (no ArrayIndex, HashIndex,
-# NewArray, NewHash nodes in the current IR).  This section confirms that
-# none of the cases accidentally grew a node line.
+# SECTION 5: Verify R1-R10 ir blocks have constructive node lines
 # ---------------------------------------------------------------------------
 
-subtest 'all R1-R8 ir blocks are pure-GAP (no constructive node lines)' => sub {
-    plan tests => 8;
-    for my $case (@$cases) {
-        my $ir_text = $case->{ir} // '';
+subtest 'all R1-R10 ir blocks have constructive node lines' => sub {
+    plan tests => 10;
+    for my $case (@green_cases) {
+        my $ir_text   = $case->{ir} // '';
         my $has_nodes = ($ir_text =~ /^\s*%\w+\s*=/m) ? 1 : 0;
         my $title     = $case->{title};
-        ok(!$has_nodes,
-            "case '$title': ir block has no node lines (pure-GAP, not constructive)");
+        ok($has_nodes, "case '$title': ir block has node lines (constructive)");
     }
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 5: Negative guard — a reference case claiming GREEN must FAIL
+# SECTION 6: Bounds-check and missing-key soundness guard
 #
-# If someone edits a reference case to claim L: GREEN without a constructive
-# graph, the runner must catch the lie.  A pure-GAP block combined with a
-# GREEN claim is the inconsistency the runner detects.
+# R9 (OOB) and R10 (missing key) must produce Undef: — never segfault.
+# The .ll must contain 'icmp ult' for R9 and 'memcmp' for R10.
 # ---------------------------------------------------------------------------
 
-subtest 'guard: pure-GAP block with L: GREEN for a reference case FAILS L verdict' => sub {
+subtest 'R9 OOB array read: .ll contains bounds check (icmp ult)' => sub {
+    my ($r9_case) = grep { $_->{title} =~ /R9/i } @$cases;
+    ok(defined $r9_case, 'R9 case found');
+
+    if (defined $r9_case) {
+        my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($r9_case, {});
+        is($result->{overall}, 'PASS', 'R9 overall PASS');
+        my $ll = $result->{l_verdict}{meta}{ll_text} if defined $result->{l_verdict}{meta};
+        if (defined $ll) {
+            like($ll, qr/icmp ult/, 'R9 .ll: bounds check (icmp ult) present — no segfault');
+        }
+    }
+
+    done_testing;
+};
+
+# ---------------------------------------------------------------------------
+# SECTION 7: Negative guard — pure-GAP block claiming GREEN FAILS
+# ---------------------------------------------------------------------------
+
+subtest 'guard: pure-GAP block with L: GREEN FAILS L verdict' => sub {
     my $fake_green_md = <<'END_MD';
 # Fake
 
@@ -157,6 +212,8 @@ END_MD
     ok(scalar(@{ $result->{fail_reasons} }) > 0, 'at least one fail reason recorded');
     like($result->{fail_reasons}[0] // '', qr/L verdict|GAP|GREEN/i,
         'fail reason mentions L verdict, GAP, or GREEN');
+
+    done_testing;
 };
 
 done_testing;

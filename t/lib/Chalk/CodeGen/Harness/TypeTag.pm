@@ -172,6 +172,15 @@ sub llvm_prefixes {
             perl_tag_prefix => 'Undef:',
             llvm_fmt_c      => 'Undef:\0A\00',
         },
+        # Slot: tagged-scalar {i1 defined, i64 payload} from array/hash element reads.
+        # The LLVM epilogue branches on the defined-bit: Int:<n> if defined, Undef: if not.
+        # G4 (Array/Hash) uses this representation for bounds-checked reads.
+        Slot => {
+            perl_tag_prefix_int   => 'Int:',
+            perl_tag_prefix_undef => 'Undef:',
+            llvm_fmt_int_c        => 'Int:%d\0A\00',
+            llvm_fmt_undef_c      => 'Undef:\0A\00',
+        },
     };
 }
 

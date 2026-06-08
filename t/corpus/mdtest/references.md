@@ -3,16 +3,17 @@
 Array and hash construction, element access, element assignment, anonymous
 references, and deref idioms.
 
-All cases in this topic are `L: GAP`. Arrays, hashes, and refs are all
-runtime-free (RF): an array is a `{len, cap, elem*}` vector, a hash is a hash
-table `{Str->value}`, and a ref is a pointer to one of those structs plus a ref
-tag. Their operations (push/pop/index/scalar/slice, keys/values/exists/delete/
-lookup, deref/element) are pure ops — load-through-pointer for refs. None of
-these need the Perl interpreter. The GAP here means the Array/Hash
-representations are simply not modelled YET; clearing them is a work-list item
-for campaign group G4 (Array/Hash), NOT a libperl dependency. The behavior
-oracle (perl) is specified for every case; the IR block records the honest GAP
-reason rather than fabricating a constructive graph that does not exist yet.
+All 8 original cases (R1-R8) are now `L: GREEN` — array, hash, and ref
+operations are runtime-free (RF): an array is a `{len, cap, Slot*}` vector, a
+hash is a `{count, cap, HashEntry*}` table, and a ref is a pointer (bitcast to
+i8*). Their operations are pure host-C ops — no libperl AV*/HV*/SV*. The G4
+campaign group (Array/Hash representation) closed these cases. Adversarial
+cases R9-R11 cover OOB reads, missing-key hash lookups, and hash iteration order
+normalization.
+
+Slot representation: `{i1 defined, i64 payload}` — a tagged-scalar. Element
+reads return either a defined Int payload or `Undef:` when OOB or key-missing,
+matching perl faithfully without sentinel values.
 
 Archive sources used: `anonymous-array.chalk`, `anonymous-hash.chalk`,
 `array-literal.chalk`, `hash-literal.chalk`, `array-access.chalk`,
@@ -22,11 +23,10 @@ Archive sources used: `anonymous-array.chalk`, `anonymous-hash.chalk`,
 
 ## R1 array literal and scalar count
 
-An array literal `(1, 2, 3)` creates an array — a `{len, cap, elem*}` vector,
-not an AV\*. `scalar @a` returns the element count as an Int, a pure op on the
-vector. The construction path (allocate the vector, write the elements) is all
-pure machine-level work; it is runtime-free. It is a GAP only because the Array
-representation is not modelled yet (campaign group G4).
+An array literal `(1, 2, 3)` creates an array — a `{len, cap, Slot*}` vector.
+`scalar @a` returns the element count as an Int, a pure load on the vector.
+The construction path (allocate the vector, write the elements) is pure
+machine-level work; it is runtime-free.
 
 ```perl
 # source
@@ -40,14 +40,20 @@ context: scalar
 ```
 
 ```ir
-L: GAP(array is RF: a {len,cap,elem*} vector, allocation + scalar-count are pure ops; GAP only until the Array representation (G4) is modelled, NOT a libperl/AV dependency)
+%c1  = Constant(1) :Int
+%c2  = Constant(2) :Int
+%c3  = Constant(3) :Int
+%arr = ArrayLiteral(%c1, %c2, %c3) :Array
+%r   = ScalarLen(%arr) :Int
+return %r
+L: GREEN
 ```
 
 ## R2 array element read
 
-Reading an element `$a[1]` from a declared array is an index into a
-`{len, cap, elem*}` vector — a pure op, not an AV\* access. The result is an Int.
-There is nothing runtime-bound here; the index node is just not modelled yet.
+Reading an element `$a[1]` from a declared array is a bounds-checked index
+into the `{len, cap, Slot*}` vector — a pure op. The bounds check is always
+emitted; for a known-valid index the OOB branch is dead. The result is an Int.
 
 ```perl
 # source
@@ -61,15 +67,21 @@ context: scalar
 ```
 
 ```ir
-L: GAP(array index is RF: index into a {len,cap,elem*} vector is a pure op; GAP only until the Array representation (G4) is modelled, NOT a libperl/AV dependency)
+%c1  = Constant(1) :Int
+%c2  = Constant(2) :Int
+%c3  = Constant(3) :Int
+%arr = ArrayLiteral(%c1, %c2, %c3) :Array
+%idx = Constant(1) :Int
+%r   = ArrayRead(%arr, %idx) :Int
+return %r
+L: GREEN
 ```
 
 ## R3 hash literal and element read
 
-A hash literal `(a => 1, b => 2)` creates a hash table `{Str->value}`, not an
-HV\*. Reading `$h{a}` is a key lookup — a pure op on that table. Key hashing and
-bucket dispatch are ordinary machine-level work; none of it needs the Perl
-runtime.
+A hash literal `(a => 1, b => 2)` creates a hash table `{count, cap, HashEntry*}`.
+Reading `$h{a}` is a key lookup — a linear scan with memcmp on Str keys.
+Key hashing and bucket dispatch are ordinary machine-level work; no libperl.
 
 ```perl
 # source
@@ -83,15 +95,23 @@ context: scalar
 ```
 
 ```ir
-L: GAP(hash is RF: a hash table {Str->value}, key lookup is a pure op; GAP only until the Hash representation (G4) is modelled, NOT a libperl/HV dependency)
+%ka   = Constant("a") :Str
+%v1   = Constant(1) :Int
+%kb   = Constant("b") :Str
+%v2   = Constant(2) :Int
+%hash = HashLiteral(%ka, %v1, %kb, %v2) :Hash
+%lk   = Constant("a") :Str
+%r    = HashRead(%hash, %lk) :Int
+return %r
+L: GREEN
 ```
 
 ## R4 anonymous array ref and deref
 
-An anonymous array constructor `[1, 2, 3]` allocates a `{len, cap, elem*}`
-vector and yields a pointer to it plus a ref tag — not an AV\* wrapped in an
-SV\*. The dereference `$r->[0]` is load-through-pointer then index: both pure
-ops. The whole thing is runtime-free.
+An anonymous array constructor `[1, 2, 3]` allocates a `{len, cap, Slot*}`
+vector and yields a pointer to it (bitcast to i8*) — not an AV\* wrapped in
+an SV\*. The dereference `$r->[0]` is a load-through-pointer (bitcast back to
+%Array*) then a bounds-checked index: both pure ops.
 
 ```perl
 # source
@@ -105,15 +125,23 @@ context: scalar
 ```
 
 ```ir
-L: GAP(arrayref is RF: a {len,cap,elem*} vector + a pointer/tag ref, deref = load-through-pointer then index; GAP only until Array/Hash representations (G4) are modelled, NOT a libperl/SV/AV dependency)
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%c3    = Constant(3) :Int
+%inner = ArrayLiteral(%c1, %c2, %c3) :Array
+%ref   = MakeArrayRef(%inner) :ArrayRef
+%deref = ArrayDeref(%ref) :Array
+%idx   = Constant(0) :Int
+%r     = ArrayRead(%deref, %idx) :Int
+return %r
+L: GREEN
 ```
 
 ## R5 anonymous hash ref and deref
 
-An anonymous hash constructor `{a => 1, b => 2}` allocates a hash table
-`{Str->value}` and yields a pointer to it plus a ref tag — not an HV\* wrapped
-in an SV\*. The dereference `$r->{a}` is load-through-pointer then key lookup:
-both pure ops. Construction and lookup are runtime-free.
+An anonymous hash constructor `{a => 1, b => 2}` allocates a hash table and
+yields a pointer to it — not an HV\* wrapped in an SV\*. The dereference
+`$r->{a}` is a load-through-pointer then a key lookup: both pure ops.
 
 ```perl
 # source
@@ -127,14 +155,24 @@ context: scalar
 ```
 
 ```ir
-L: GAP(hashref is RF: a hash table {Str->value} + a pointer/tag ref, deref = load-through-pointer then key lookup, both pure ops; GAP only until Array/Hash representations (G4) are modelled, NOT a libperl/SV/HV dependency)
+%ka    = Constant("a") :Str
+%v1    = Constant(1) :Int
+%kb    = Constant("b") :Str
+%v2    = Constant(2) :Int
+%inner = HashLiteral(%ka, %v1, %kb, %v2) :Hash
+%ref   = MakeHashRef(%inner) :HashRef
+%deref = HashDeref(%ref) :Hash
+%lk    = Constant("a") :Str
+%r     = HashRead(%deref, %lk) :Int
+return %r
+L: GREEN
 ```
 
 ## R6 array element assignment
 
-Writing to an array element `$a[0] = 42` is a store into a slot of the
-`{len, cap, elem*}` vector: bounds-check then slot write — pure ops, no AV\*
-mutation. The read back `$a[0]` is an index into the same vector.
+Writing to an array element `$a[0] = 42` is a bounds-checked store into a slot
+of the `{len, cap, Slot*}` vector: pure ops, no AV\* mutation. The read back
+`$a[0]` is an index into the same vector (which returns the stored value).
 
 ```perl
 # source
@@ -149,13 +187,23 @@ context: scalar
 ```
 
 ```ir
-L: GAP(array element store is RF: store into a slot of a {len,cap,elem*} vector is a pure op; GAP only until the Array representation (G4) is modelled, NOT a libperl/AV dependency)
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%c3   = Constant(3) :Int
+%arr  = ArrayLiteral(%c1, %c2, %c3) :Array
+%idx  = Constant(0) :Int
+%nv   = Constant(42) :Int
+%arr2 = ArrayWrite(%arr, %idx, %nv) :Array
+%idx2 = Constant(0) :Int
+%r    = ArrayRead(%arr2, %idx2) :Int
+return %r
+L: GREEN
 ```
 
 ## R7 hash element assignment
 
 Writing to a hash element `$h{k} = 99` is a store into the hash table
-`{Str->value}`: key hashing then bucket insertion — pure ops, no HV\* mutation.
+`{count, cap, HashEntry*}`: key scan then slot update — pure ops, no HV\* mutation.
 The read back `$h{k}` is a key lookup on the same table.
 
 ```perl
@@ -171,16 +219,24 @@ context: scalar
 ```
 
 ```ir
-L: GAP(hash element store is RF: store into a hash table {Str->value} is a pure op; GAP only until the Hash representation (G4) is modelled, NOT a libperl/HV dependency)
+%kk   = Constant("k") :Str
+%v0   = Constant(0) :Int
+%hash = HashLiteral(%kk, %v0) :Hash
+%wk   = Constant("k") :Str
+%wv   = Constant(99) :Int
+%h2   = HashWrite(%hash, %wk, %wv) :Hash
+%rk   = Constant("k") :Str
+%r    = HashRead(%h2, %rk) :Int
+return %r
+L: GREEN
 ```
 
 ## R8 nested array ref deref
 
-A two-level dereference `$r->[1][0]` chains two load-through-pointer levels: the
-outer ref loads a vector, an index yields an inner ref, a second
-load-through-pointer and index produce the value. Just repeated pure ops on
-`{len, cap, elem*}` vectors plus pointer/tag refs — runtime-free, like the
-single-level case with one more follow step.
+A two-level dereference `$r->[1][0]` chains two load-through-pointer levels:
+the outer ref loads a vector, an index yields an inner ref (an ArrayRef pointer
+stored as a slot payload), a second load-through-pointer and index produce the
+value. Just repeated pure ops on `{len, cap, Slot*}` vectors plus pointer refs.
 
 ```perl
 # source
@@ -194,5 +250,109 @@ context: scalar
 ```
 
 ```ir
-L: GAP(nested arrayref is RF: two load-through-pointer levels, each index a pure op; GAP only until Array/Hash representations (G4) are modelled, NOT a libperl dependency)
+%ca1       = Constant(1) :Int
+%ca2       = Constant(2) :Int
+%ca3       = Constant(3) :Int
+%ca4       = Constant(4) :Int
+%arr0      = ArrayLiteral(%ca1, %ca2) :Array
+%arr1      = ArrayLiteral(%ca3, %ca4) :Array
+%ref0      = MakeArrayRef(%arr0) :ArrayRef
+%ref1      = MakeArrayRef(%arr1) :ArrayRef
+%outer     = ArrayLiteral(%ref0, %ref1) :Array
+%outer_ref = MakeArrayRef(%outer) :ArrayRef
+%outer_arr = ArrayDeref(%outer_ref) :Array
+%idx1      = Constant(1) :Int
+%inner_ref = ArrayRead(%outer_arr, %idx1) :ArrayRef
+%inner_arr = ArrayDeref(%inner_ref) :Array
+%idx0      = Constant(0) :Int
+%r         = ArrayRead(%inner_arr, %idx0) :Int
+return %r
+L: GREEN
+```
+
+## R9 out-of-bounds array read
+
+An out-of-bounds array read `$a[9]` on a 3-element array returns perl's `undef`
+— exactly as perl does. The bounds-check `icmp ult idx, len` is always emitted
+in the LLVM IR; when the index exceeds the length, the OOB path yields a
+`Slot{defined=false, payload=0}` which the epilogue prints as `Undef:`.
+This is NEVER a segfault: bounds-checking is unconditional.
+
+```perl
+# source
+my @a = (1, 2, 3);
+$a[9]
+```
+
+```behavior
+return: Undef:
+context: scalar
+```
+
+```ir
+%c1  = Constant(1) :Int
+%c2  = Constant(2) :Int
+%c3  = Constant(3) :Int
+%arr = ArrayLiteral(%c1, %c2, %c3) :Array
+%idx = Constant(9) :Int
+%r   = ArrayRead(%arr, %idx) :Slot
+return %r
+L: GREEN
+```
+
+## R10 missing-key hash lookup
+
+A missing-key hash lookup `$h{z}` where `z` is not a key returns perl's `undef`.
+The linear scan exhausts all entries without a match; the miss path yields a
+`Slot{defined=false, payload=0}` which the epilogue prints as `Undef:`.
+
+```perl
+# source
+my %h = (a => 1, b => 2);
+$h{z}
+```
+
+```behavior
+return: Undef:
+context: scalar
+```
+
+```ir
+%ka   = Constant("a") :Str
+%v1   = Constant(1) :Int
+%kb   = Constant("b") :Str
+%v2   = Constant(2) :Int
+%hash = HashLiteral(%ka, %v1, %kb, %v2) :Hash
+%lk   = Constant("z") :Str
+%r    = HashRead(%hash, %lk) :Slot
+return %r
+L: GREEN
+```
+
+## R11 hash keys sorted order
+
+`join(",", sort keys %h)` returns the keys in sorted (normalized) order.
+Hash iteration order is randomized in perl; the corpus normalizes by sorting.
+This case is `L: GAP` because `sort` and `join` are not yet in the LLVM
+lowering slice — they require list-context operations that are deferred to a
+future campaign group (list operators / control-flow-in-list). The behavior is
+specified for deterministic sorted output; unsorted reliance would be non-stable.
+
+The guard: raw `keys %h` order without sorting is NOT asserted as a stable GREEN
+result (perl's hash randomization makes it non-deterministic). Only the sorted
+form is corpus-stable.
+
+```perl
+# source
+my %h = (b => 2, a => 1);
+join(",", sort keys %h)
+```
+
+```behavior
+return: a,b
+context: scalar
+```
+
+```ir
+L: GAP(sort+join+keys requires list-context ops not yet in LLVM slice; deferred to list-operators campaign group)
 ```
