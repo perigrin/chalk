@@ -369,6 +369,11 @@ sub _build_node_from_rhs {
         );
     }
 
+    # Constant(undef) — the undef literal (must be checked before the general Constant case)
+    if ($rhs =~ /^Constant\(\s*undef\s*\)$/) {
+        return $factory->make('Constant', value => undef, const_type => 'undef');
+    }
+
     # Constant(value)  — value may be a number, negative number, or quoted string
     if ($rhs =~ /^Constant\(\s*(.*?)\s*\)$/) {
         my $val_raw = $1;

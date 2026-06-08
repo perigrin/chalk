@@ -22,6 +22,7 @@ use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::NumGt;
 use Chalk::IR::Node::TernaryExpr;
 use Chalk::IR::Node::PadAccess;
+use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Target::LLVM;
@@ -543,12 +544,39 @@ sub _idiom_table {
         {
             tag         => 'L3',
             group       => 'L',
-            description => 'defined-or: return $a // $b',
-            perl_oracle => '4',  # (undef // 4) = 4
-            gap_category => 'representation-missing',
-            gap_reason   => 'DefinedOr requires a defined-check on an SV* — inherently '
-                          . 'Scalar. No runtime-free defined-check exists in the current IR.',
-            build_graph  => undef,
+            description => 'defined-or: return $a // $b (undef // 4 = 4)',
+            perl_oracle => 'Int:4',  # (undef // 4) = Int:4 (type-tagged)
+            build_graph => sub {
+                # Graph: my $a = undef; my $b = 4; $a // $b  => 4
+                # Undef-left DefinedOr: lhs is Undef-typed (alloca+store+load defined bit),
+                # rhs is Int 4. Result is Int:4.
+                my $f = Chalk::IR::NodeFactory->new;
+                # $a = undef
+                my $cn_a   = $f->make('Constant', value => '$a', const_type => 'string');
+                $cn_a->set_representation('Str');
+                my $cundef = $f->make('Constant', value => undef, const_type => 'undef');
+                $cundef->set_representation('Undef');
+                my $vda    = $f->make('VarDecl', inputs => [$cn_a, $cundef]);
+                $vda->set_representation('Undef');
+                my $pa     = $f->make('PadAccess', targ => 0, varname => '$a', inputs => [$vda]);
+                $pa->set_representation('Undef');
+                # $b = 4
+                my $cn_b  = $f->make('Constant', value => '$b', const_type => 'string');
+                $cn_b->set_representation('Str');
+                my $cb    = $f->make('Constant', value => '4', const_type => 'integer');
+                $cb->set_representation('Int');
+                my $vdb   = $f->make('VarDecl', inputs => [$cn_b, $cb]);
+                $vdb->set_representation('Int');
+                my $pb    = $f->make('PadAccess', targ => 0, varname => '$b', inputs => [$vdb]);
+                $pb->set_representation('Int');
+                # $a // $b :Int
+                my $dor   = $f->make('DefinedOr', inputs => [$pa, $pb]);
+                $dor->set_representation('Int');
+                my $ret   = $f->make_cfg('Return', inputs => [$dor]);
+                $ret->set_control_in($vdb);
+                $vdb->set_control_in($vda);
+                return $ret;
+            },
         },
         {
             tag         => 'L4',

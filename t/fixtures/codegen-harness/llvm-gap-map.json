@@ -326,15 +326,15 @@
       },
       {
          "extra" : {
-            "description" : "defined-or: return $a // $b",
-            "gap_category" : "representation-missing",
-            "gap_reason" : "DefinedOr requires a defined-check on an SV* — inherently Scalar. No runtime-free defined-check exists in the current IR.",
-            "libperl_free" : null,
-            "runtime_free_coverage" : null
+            "description" : "defined-or: return $a // $b (undef // 4 = 4)",
+            "libperl_free" : 1,
+            "lli_output" : "Int:4",
+            "perl_oracle" : "Int:4",
+            "runtime_free_coverage" : 1
          },
          "group" : "L",
          "tag" : "L3",
-         "verdict" : "GAP"
+         "verdict" : "L-GREEN"
       },
       {
          "extra" : {
@@ -381,13 +381,14 @@
          "L" : {
             "count" : 4,
             "verdicts" : {
-               "GAP" : 4
+               "GAP" : 3,
+               "L-GREEN" : 1
             }
          }
       },
       "by_verdict" : {
-         "GAP" : 17,
-         "L-GREEN" : 12
+         "GAP" : 16,
+         "L-GREEN" : 13
       },
       "denominator" : 29
    }

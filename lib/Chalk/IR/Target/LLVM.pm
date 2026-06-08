@@ -274,6 +274,13 @@ sub lower_with_elaboration {
         # Path A format (length-precision):
         push @lines, '@fmt_str_len = private unnamed_addr constant [10 x i8] c"Str:%.*s\0A\00", align 1';
     }
+    elsif ($result_repr eq 'Undef') {
+        # Undef result: print "Undef:\n" (8 bytes including NUL terminator).
+        # "Undef:\n\0" = U,n,d,e,f,:,\n,\0 = 8 bytes = [8 x i8]
+        # A fixed string constant — no format arguments needed; use printf("%s", ptr).
+        push @lines, '@undef_str  = private unnamed_addr constant [8 x i8] c"Undef:\0A\00", align 1';
+        push @lines, '@fmt_s_u    = private unnamed_addr constant [3 x i8] c"%s\00", align 1';
+    }
     else {
         die "LLVM backend (elaboration): cannot emit return of repr=$result_repr";
     }
@@ -378,6 +385,14 @@ sub lower_with_elaboration {
             push @lines, '  %fmt_str_ptr = getelementptr inbounds [8 x i8], [8 x i8]* @fmt_str, i64 0, i64 0';
             push @lines, "  call i32 (i8*, ...) \@printf(i8* %fmt_str_ptr, i8* $result_ref)";
         }
+    }
+    elsif ($result_repr eq 'Undef') {
+        # Undef result: always prints "Undef:\n". The result_ref is the i1 defined-bit
+        # (always false for Constant(undef)), which is not used for printing — the
+        # output is the fixed "Undef:\n" string constant regardless of the bit value.
+        push @lines, '  %undef_str_ptr = getelementptr inbounds [8 x i8], [8 x i8]* @undef_str, i64 0, i64 0';
+        push @lines, '  %fmt_s_u_ptr   = getelementptr inbounds [3 x i8], [3 x i8]* @fmt_s_u, i64 0, i64 0';
+        push @lines, '  call i32 (i8*, ...) @printf(i8* %fmt_s_u_ptr, i8* %undef_str_ptr)';
     }
 
     push @lines, '  ret i32 0';
@@ -554,6 +569,12 @@ sub lower_value {
     elsif ($op eq 'Or') {
         return $self->_lower_or($node);
     }
+    elsif ($op eq 'DefinedOr') {
+        return $self->_lower_defined_or($node);
+    }
+    elsif ($op eq 'Defined') {
+        return $self->_lower_defined($node);
+    }
     elsif ($op eq 'Concat') {
         return $self->_lower_concat($node);
     }
@@ -642,6 +663,40 @@ sub _lower_constant {
 
         $self->{cache}{$node->id} = $ref;
         return $ref;
+    }
+    elsif ($repr eq 'Undef') {
+        # Undef constant -> an i1 defined-bit of false (0).
+        #
+        # The Undef representation carries a single i1 "defined" bit. For a
+        # Constant(undef), that bit is always false (= not defined). We emit
+        # it via alloca+store+load so the value is RUNTIME-opaque: an LLVM
+        # optimizer cannot constant-fold or dead-code-eliminate the branch in
+        # DefinedOr even with -O3, because the alloca/store/load sequence is
+        # a memory-barrier that defeats scalar replacement without mem2reg.
+        #
+        # The "payload" (what the variable holds when it is defined) is not
+        # needed for a Constant(undef): the defined bit is always false, so
+        # the payload is never read. We still record a payload of i64 0 in
+        # _undef_payload so that DefinedOr can phi-merge the LHS payload
+        # when the defined path is taken (the optimizer will eliminate the
+        # dead path but the IR must be well-formed).
+        my $slot = $self->_fresh;
+        $self->_emit("  $slot = alloca i1                            ; Constant(undef): defined-bit slot");
+        $self->_emit("  store i1 false, i1* $slot                   ; Constant(undef): store false = not defined");
+        my $defined_bit = $self->_fresh;
+        $self->_emit("  $defined_bit = load i1, i1* $slot           ; Constant(undef): load defined bit (runtime-opaque)");
+
+        # Record the defined bit so DefinedOr can retrieve it.
+        $self->{_undef_defined_bit}{ $node->id } = $defined_bit;
+        # Payload for undef LHS: i64 0 (never read on the undef path).
+        my $payload = $self->_fresh;
+        $self->_emit("  $payload = add i64 0, 0                     ; Constant(undef): payload i64 0 (never used)");
+        $self->{_undef_payload}{ $node->id } = $payload;
+
+        # The canonical SSA ref for an Undef-typed node is its defined bit (i1).
+        # DefinedOr retrieves the payload via _undef_payload when needed.
+        $self->{cache}{ $node->id } = $defined_bit;
+        return $defined_bit;
     }
     else {
         die "LLVM backend: cannot lower Constant with repr=$repr";
@@ -1073,6 +1128,20 @@ sub _lower_vardecl {
     $self->{var_table}{ $node->id }  = $init_ref;
     $self->{cache}{ $node->id }      = $init_ref;
     $self->{_vd_repr}{ $node->id }   = $repr;
+
+    # Undef representation: propagate the defined-bit and payload from the init
+    # node to this VarDecl, indexed by VarDecl id. DefinedOr looks up the payload
+    # by the PadAccess node's VarDecl id to complete the phi merge.
+    if ($repr eq 'Undef' && defined $init_node) {
+        my $init_id = $init_node->id;
+        if (exists $self->{_undef_defined_bit}{$init_id}) {
+            $self->{_undef_defined_bit}{ $node->id } = $self->{_undef_defined_bit}{$init_id};
+        }
+        if (exists $self->{_undef_payload}{$init_id}) {
+            $self->{_undef_payload}{ $node->id } = $self->{_undef_payload}{$init_id};
+        }
+    }
+
     return $init_ref;
 }
 
@@ -1112,6 +1181,19 @@ sub _lower_padaccess {
     # path checks $op ne 'PadAccess') so this write is only used by non-PadAccess
     # consumers of the same node id — a safe sharing pattern.
     $self->{cache}{ $node->id } = $val_ref;
+
+    # Undef representation: propagate _undef_defined_bit and _undef_payload
+    # from the VarDecl to this PadAccess node id. DefinedOr looks up the
+    # payload by the LHS node's id (the PadAccess), not the VarDecl's id.
+    if ($repr eq 'Undef') {
+        if (exists $self->{_undef_defined_bit}{$vd_id}) {
+            $self->{_undef_defined_bit}{ $node->id } = $self->{_undef_defined_bit}{$vd_id};
+        }
+        if (exists $self->{_undef_payload}{$vd_id}) {
+            $self->{_undef_payload}{ $node->id } = $self->{_undef_payload}{$vd_id};
+        }
+    }
+
     return $val_ref;
 }
 
@@ -1353,6 +1435,149 @@ sub _lower_or {
 }
 
 # ---------------------------------------------------------------------------
+# DefinedOr (//) and Defined lowering
+#
+# DefinedOr(lhs, rhs) :T — returns lhs when lhs is DEFINED, rhs otherwise.
+# This is a definedness check, NOT a truthiness check (unlike || which uses
+# icmp-ne-0). The definedness predicate is: is the value NOT Undef?
+#
+# Lowering strategy (static-dispatch on LHS representation):
+#
+#   LHS repr = Undef (always undef, static):
+#     The LHS is an Undef-typed value. Its defined bit was set to false via
+#     the alloca+store+load idiom in _lower_constant. We read it and branch:
+#       br i1 %defined_bit, %dor.defined, %dor.undef
+#     The phi in the end block merges LHS payload (defined path) or RHS value
+#     (undef path). Since the defined bit is always false for Undef-typed LHS,
+#     the optimizer is FREE to eliminate the dead defined path — but the IR
+#     must be well-formed (both phi arms present) for lli to accept it.
+#
+#   LHS repr = Int / Num / Str / Bool (always defined, static):
+#     A non-Undef typed value is always defined. The definedness check is a
+#     static i1 true. We still emit the branch+phi structure for structural
+#     uniformity, but the branch on i1 true always takes the defined path.
+#     The optimizer eliminates the dead undef path.
+#
+# The result representation is that of the DefinedOr node itself (typically
+# the RHS repr, e.g. Int when both operands are Int).
+#
+# RUNTIME-undef guarantee: the defined bit for Undef-typed LHS is emitted via
+# alloca+store+load in _lower_constant, making it a runtime-opaque i1 that
+# LLVM cannot constant-fold without mem2reg. See U3 test for verification.
+# ---------------------------------------------------------------------------
+
+sub _lower_defined_or {
+    my ($self, $node) = @_;
+
+    my $repr = $node->representation;
+    if (defined $repr && $repr eq 'Scalar') {
+        die "GAP: DefinedOr with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+    }
+
+    my $inputs   = $node->inputs;
+    my $lhs_node = $inputs->[0];
+    my $rhs_node = $inputs->[1];
+
+    my $lhs_repr = $lhs_node->representation // 'Int';
+
+    # Lower the LHS. For Undef-typed LHS, this produces the defined bit (i1).
+    # For Int/Num/Str/Bool-typed LHS, this produces the payload value.
+    my $lhs_ref    = $self->lower_value($lhs_node);
+    my $entry_label = $self->_current_block_label;
+
+    # Get the definedness condition (i1).
+    my $defined_cond;
+    if ($lhs_repr eq 'Undef') {
+        # The defined bit was set by _lower_constant to the alloca/load result.
+        # lhs_ref IS the defined bit (i1 false for Constant(undef)).
+        $defined_cond = $lhs_ref;
+    }
+    else {
+        # Non-Undef LHS: always defined. Emit i1 true as a compile-time constant.
+        # The optimizer will take the defined branch always, but the IR is
+        # well-formed (both phi arms present).
+        my $always_true = $self->_fresh;
+        $self->_emit("  $always_true = add i1 0, 1              ; DefinedOr: non-Undef LHS always defined (i1 true)");
+        $defined_cond = $always_true;
+    }
+
+    # Allocate block labels.
+    my $undef_label = $self->_fresh_label('dor.undef.');
+    my $end_label   = $self->_fresh_label('dor.end.');
+
+    # Conditional branch: defined -> end with lhs; undef -> rhs block.
+    $self->_set_terminator("  br i1 $defined_cond, label %$end_label, label %$undef_label  ; DefinedOr: definedness branch");
+
+    # RHS block: evaluate the RHS, then jump to end.
+    $self->_new_block($undef_label);
+    my $rhs_ref       = $self->lower_value($rhs_node);
+    my $undef_end_label = $self->_current_block_label;
+    $self->_set_terminator("  br label %$end_label  ; DefinedOr: undef path falls through");
+
+    # End block: phi merges lhs value (defined path) and rhs value (undef path).
+    $self->_new_block($end_label);
+    my $result = $self->_fresh;
+    my $llvm_type = _repr_to_llvm_type($repr // 'Int');
+
+    # LHS payload for the phi: when LHS is Undef-typed, use the recorded payload
+    # (i64 0 for Constant(undef)) or a zero for the type. When LHS is a typed value,
+    # lhs_ref IS the payload.
+    my $lhs_phi_val;
+    if ($lhs_repr eq 'Undef') {
+        # The payload was recorded by _lower_constant in _undef_payload.
+        $lhs_phi_val = $self->{_undef_payload}{ $lhs_node->id };
+        unless (defined $lhs_phi_val) {
+            # Fallback: emit a zero of the result type if no payload was recorded.
+            $lhs_phi_val = $self->_fresh;
+            if ($llvm_type eq 'double') {
+                $self->_emit("  $lhs_phi_val = fadd double 0.0, 0.0  ; DefinedOr: undef LHS payload fallback (Num)");
+            }
+            else {
+                $self->_emit("  $lhs_phi_val = add $llvm_type 0, 0  ; DefinedOr: undef LHS payload fallback");
+            }
+        }
+    }
+    else {
+        $lhs_phi_val = $lhs_ref;
+    }
+
+    $self->_emit("  $result = phi $llvm_type [ $lhs_phi_val, %$entry_label ], [ $rhs_ref, %$undef_end_label ]  ; DefinedOr: phi");
+
+    $self->{cache}{$node->id} = $result;
+    return $result;
+}
+
+# _lower_defined: lower a Defined(operand) -> i1 definedness predicate.
+#
+# defined($x) is true iff $x is NOT Undef.
+# Static dispatch on the operand's representation:
+#   Undef repr: always false (the operand IS undef). Returns the stored defined bit.
+#   Other repr: always true (Int/Num/Str/Bool are always defined). Returns i1 1.
+sub _lower_defined {
+    my ($self, $node) = @_;
+
+    my $inputs  = $node->inputs;
+    my $operand = $inputs->[0];
+    my $op_repr = $operand->representation // 'Int';
+
+    # Lower the operand to get its value ref (or defined bit for Undef-typed).
+    my $op_ref = $self->lower_value($operand);
+
+    if ($op_repr eq 'Undef') {
+        # op_ref IS the defined bit (i1) from _lower_constant's alloca/load.
+        $self->{cache}{$node->id} = $op_ref;
+        return $op_ref;
+    }
+    else {
+        # Non-Undef operand: always defined. Return i1 true.
+        my $true_ref = $self->_fresh;
+        $self->_emit("  $true_ref = add i1 0, 1  ; Defined($op_repr): always defined, returns i1 true");
+        $self->{cache}{$node->id} = $true_ref;
+        return $true_ref;
+    }
+}
+
+# ---------------------------------------------------------------------------
 # CFG node lowering: If, Proj, Region, Phi, Loop
 #
 # These implement control flow for if/else, while, foreach, and postfix forms.
@@ -1456,6 +1681,7 @@ sub _repr_to_llvm_type {
     return 'double' if $repr eq 'Num';
     return 'i1'     if $repr eq 'Bool';
     return 'i8*'    if $repr eq 'Str';
+    return 'i1'     if $repr eq 'Undef';   # Undef is represented as its defined-bit (i1 false)
     die "LLVM backend: no LLVM type for representation '$repr'";
 }
 

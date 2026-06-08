@@ -153,6 +153,10 @@ sub llvm_prefixes {
             perl_tag_prefix => 'Str:',
             llvm_fmt_c      => 'Str:%s\0A\00',
         },
+        Undef => {
+            perl_tag_prefix => 'Undef:',
+            llvm_fmt_c      => 'Undef:\0A\00',
+        },
     };
 }
 

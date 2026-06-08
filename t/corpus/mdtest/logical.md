@@ -89,8 +89,13 @@ operand.  Definedness (is the value Undef?) is a different test from truthiness
 (`||`).  For `$a = 3`, `$b = 7`, the result is `3`.  Per the runtime-free
 boundary this is RF: a definedness check is a known predicate on the Undef
 representation, paired with the same operand-selecting control flow as `||`
-(cfg-blocks-phi).  It is a GAP only until the Undef representation + its
-definedness predicate are modelled — not a libperl dependency.
+(cfg-blocks-phi).
+
+G2 GREEN: DefinedOr lowers runtime-free via the Undef representation
+(alloca+store+load defined bit) + a definedness branch (br on i1 defined bit) +
+Phi to select the defined operand. The LHS is `Int`-typed (always defined), so
+the definedness branch always takes the defined path. The return is :Int, and the
+type-tagged output is `Int:3`.
 
 ```perl
 # source
@@ -105,7 +110,54 @@ context: scalar
 ```
 
 ```ir
-L: GAP(// is RF: an Undef-definedness check + operand-selecting control flow (cfg-blocks-phi); GAP only until the Undef representation + definedness predicate are modelled, NOT a libperl dependency)
+%cn  = Constant("$a") :Str
+%ca  = Constant(3) :Int
+%vda = VarDecl(%cn, %ca) :Int
+%pa  = PadAccess(%vda, "$a") :Int
+%cnb = Constant("$b") :Str
+%cb  = Constant(7) :Int
+%vdb = VarDecl(%cnb, %cb) :Int
+%pb  = PadAccess(%vdb, "$b") :Int
+%r   = DefinedOr(%pa, %pb) :Int
+return %r
+control: %vda -> %vdb
+L: GREEN
+```
+
+## L3b defined-or undef-left
+
+Perl `//` with an undef left operand: the left operand is Undef, so `//`
+returns the right operand.  For `$a = undef`, `$b = 7`, the result is `7`.
+This is the RUNTIME-UNDEF path: the Undef representation uses alloca+store+load
+to make the definedness bit runtime-opaque (not constant-foldable by the LLVM
+optimizer).  The DefinedOr branches on the loaded i1 bit and the phi selects
+the RHS value on the undef path.
+
+```perl
+# source
+my $a = undef;
+my $b = 7;
+$a // $b
+```
+
+```behavior
+return: 7
+context: scalar
+```
+
+```ir
+%cn    = Constant("$a") :Str
+%cundef = Constant(undef) :Undef
+%vda   = VarDecl(%cn, %cundef) :Undef
+%pa    = PadAccess(%vda, "$a") :Undef
+%cnb   = Constant("$b") :Str
+%cb    = Constant(7) :Int
+%vdb   = VarDecl(%cnb, %cb) :Int
+%pb    = PadAccess(%vdb, "$b") :Int
+%r     = DefinedOr(%pa, %pb) :Int
+return %r
+control: %vda -> %vdb
+L: GREEN
 ```
 
 ## L4 not
