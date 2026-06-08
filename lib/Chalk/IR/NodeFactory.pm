@@ -96,6 +96,7 @@ use Chalk::IR::Node::Coerce;
 use Chalk::IR::Node::ClassDecl;
 use Chalk::IR::Node::MethodDef;
 use Chalk::IR::Node::FieldDef;
+use Chalk::IR::Node::AdjustBlock;
 use Chalk::IR::Node::New;
 use Chalk::IR::Node::MethodCall;
 use Chalk::IR::Node::FieldWrite;
@@ -120,7 +121,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     ExpressionList
     Start Return Unwind
     Coerce
-    ClassDecl MethodDef FieldDef New MethodCall FieldWrite
+    ClassDecl MethodDef FieldDef AdjustBlock New MethodCall FieldWrite
 );
 
 # CFG ops that are NEVER hash-consed via make_cfg (each call allocates fresh).

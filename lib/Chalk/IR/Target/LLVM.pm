@@ -270,16 +270,29 @@ sub _scan_class_registry {
                     # :reader synthesis
                     if ($has_reader) {
                         unless (grep { ($_->{name} // '') eq $fname } @{ $registry{$cname}{methods} }) {
+                            # Use field_repr from FieldDef (defaults to 'Int')
+                            my $f_repr = $inp->can('field_repr') ? ($inp->field_repr // 'Int') : 'Int';
                             push @{ $registry{$cname}{methods} }, {
                                 name               => $fname,
                                 body_node          => undef,
-                                return_repr        => 'Str',
+                                return_repr        => $f_repr,
                                 vtable_slot        => $mslot++,
                                 is_reader_synth    => 1,
                                 reader_field_index => $fidx,
                             };
                         }
                     }
+                }
+                elsif ($inp_op eq 'AdjustBlock') {
+                    # AdjustBlock: collect the body nodes for later ADJUST emission
+                    push @{ $registry{$cname}{adjusts} }, {
+                        body_nodes => [ $inp->body_nodes->@* ],
+                    };
+                }
+                elsif ($inp_op eq 'ClassDecl') {
+                    # Parent ClassDecl as direct input — record parent_name from its class_name.
+                    # The :isa resolution pass copies parent methods after full scan.
+                    $registry{$cname}{parent} //= $inp->class_name;
                 }
             }
         }
@@ -497,9 +510,21 @@ sub _emit_class_registry_ir {
             push @lines, '}';
             push @lines, '';
 
-            # Propagate malloc/strpair needs up to the main ctx
+            # Propagate malloc/strpair needs up to the main ctx.
             $ctx->{_need_malloc_memcpy} = 1 if $body_ctx->{_need_malloc_memcpy};
             $ctx->{_need_strpair}       = 1 if $body_ctx->{_need_strpair};
+
+            # Emit string constant globals from the method body INLINE (before the define).
+            # They cannot go in the main prologue (already emitted); place them here in
+            # the class section, before the function that references them.
+            if (defined $body_ctx->{_str_globals} && @{ $body_ctx->{_str_globals} }) {
+                for my $g (@{ $body_ctx->{_str_globals} }) {
+                    my ($gname, $content, $blen) = @$g;
+                    my $total = $blen + 1;
+                    my $enc = Chalk::IR::Target::LLVM::_encode_c_string($content);
+                    push @lines, "$gname = private unnamed_addr constant [$total x i8] c\"$enc\\00\", align 1";
+                }
+            }
         }
 
         # 5. Vtable global: @Cls__vtable = { class-name-ptr, fn-ptr0, fn-ptr1, ... }
@@ -1145,6 +1170,11 @@ sub lower_value {
     }
     elsif ($op eq 'FieldDef') {
         # FieldDef declares a field — structural metadata only, no runtime value.
+        return 'zeroinitializer';
+    }
+    elsif ($op eq 'AdjustBlock') {
+        # AdjustBlock declares an ADJUST body — processed during New lowering.
+        # No runtime value produced; return sentinel.
         return 'zeroinitializer';
     }
     elsif ($op eq 'New') {
@@ -2270,6 +2300,12 @@ sub process_control_node {
     elsif ($op eq 'Loop') {
         $self->_process_loop_node($node);
     }
+    elsif ($op eq 'MethodCall') {
+        # Side-effecting method call in the control chain (e.g. $obj->inc).
+        # Lower it to ensure the call's side effects (field mutations) are emitted
+        # before subsequent operations that depend on them.
+        $self->lower_value($node);
+    }
     # Other ops in the control chain (Return, Unwind, Region, Proj, Phi, etc.)
     # are either handled by their driving structure or ignored here.
 }
@@ -3381,13 +3417,19 @@ sub _lower_new {
         }
     }
 
-    # ADJUST blocks: lower each ADJUST body in base-first order
+    # ADJUST blocks: lower each ADJUST body in base-first order.
+    # ADJUST bodies run with implicit $self = the newly constructed object (raw i8* pointer).
+    # Set _in_method_body + method context so FieldAccess/FieldWrite use the raw pointer.
     my $adjusts = $reg->{adjusts} // [];
     for my $adj (@$adjusts) {
         # adj = { body_nodes => [...] } where body_nodes are FieldWrite nodes
         for my $fw_node (@{ $adj->{body_nodes} // [] }) {
-            # Lower FieldWrite with $obj_ref as the object
-            $self->_lower_field_write_with_obj($fw_node, $obj_ref, $class_name);
+            # Temporarily set method body context for FieldAccess/FieldWrite.
+            # Use $raw (i8*) not $obj_ref (%Cls.obj*) so field-body bitcasts are correct.
+            local $self->{_in_method_body}    = 1;
+            local $self->{_method_self_name}  = $raw;
+            local $self->{_method_class_name} = $class_name;
+            $self->lower_value($fw_node);
         }
     }
 
@@ -3480,18 +3522,60 @@ sub _lower_method_call {
 #
 # Lowers a FieldWrite node: GEP to the field's %Slot within the object struct,
 # store {defined=1, payload} into the Slot.
+#
+# Two calling conventions:
+#   Non-method-body context: inputs[0]=obj_node, inputs[1]=new_val_node
+#   Method-body context:     inputs[0]=new_val_node (obj is implicit $self)
 sub _lower_field_write {
     my ($self, $node) = @_;
 
-    my $obj_node    = $node->obj_node;
-    my $val_node    = $node->new_val_node;
-    my $field_index = $node->field_index;
+    if ($self->{_in_method_body}) {
+        # Method body context: object is implicit $self
+        my $obj_raw    = $self->{_method_self_name} // '%self';
+        my $class_name = $self->{_method_class_name}
+            or die "LLVM MOP: FieldWrite in method body but _method_class_name not set";
+        return $self->_lower_field_write_method_body($node, $obj_raw, $class_name);
+    }
 
-    # Infer class_name from the obj_node's ClassDecl chain
+    # Non-method-body context: inputs[0]=obj_node, inputs[1]=new_val_node
+    my $obj_node   = $node->obj_node;
     my $class_name = _infer_class_name_from_obj($obj_node);
-
-    my $obj_raw = $self->lower_value($obj_node);
+    my $obj_raw    = $self->lower_value($obj_node);
     return $self->_lower_field_write_with_obj($node, $obj_raw, $class_name);
+}
+
+# _lower_field_write_method_body($node, $obj_raw, $class_name) -> $llvm_ref
+# Method-body FieldWrite: inputs[0] = new value node (no explicit obj).
+sub _lower_field_write_method_body {
+    my ($self, $node, $obj_raw, $class_name) = @_;
+
+    my $val_node    = $node->inputs->[0]  # inputs[0] is the new value in method context
+        or die "LLVM MOP: FieldWrite in method body has no value node (inputs[0] undef)";
+    my $field_index = $node->field_index;
+    my $val_repr    = $val_node->representation // 'Int';
+    my $slot_idx    = $field_index + 1;
+
+    my $obj_typed = $self->_fresh;
+    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; FieldWrite(method): typed self");
+
+    my $val_ref = $self->lower_value($val_node);
+
+    my $def_gep = $self->_fresh;
+    $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 0  ; FieldWrite(method)[$field_index] defined");
+    $self->_emit("  store i1 true, i1* $def_gep");
+    my $pay_gep = $self->_fresh;
+    $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 1  ; FieldWrite(method)[$field_index] payload");
+    my $pay_i64 = $self->_fresh;
+    if ($val_repr eq 'Bool') {
+        $self->_emit("  $pay_i64 = zext i1 $val_ref to i64");
+    }
+    else {
+        $self->_emit("  $pay_i64 = add i64 0, $val_ref  ; identity: $val_repr->i64");
+    }
+    $self->_emit("  store i64 $pay_i64, i64* $pay_gep");
+
+    $self->{cache}{ $node->id } = $pay_i64;
+    return $pay_i64;
 }
 
 # _lower_field_write_with_obj($node, $obj_raw, $class_name) -> $llvm_ref

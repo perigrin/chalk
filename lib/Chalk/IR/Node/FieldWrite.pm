@@ -13,6 +13,8 @@ class Chalk::IR::Node::FieldWrite :isa(Chalk::IR::Node) {
 
     method operation() { 'FieldWrite' }
 
+    # In non-method-body context: inputs[0]=obj_node, inputs[1]=new_val_node.
+    # In method-body context: inputs[0]=new_val_node (obj is implicit $self).
     method obj_node()     { return $self->inputs->[0] }
     method new_val_node() { return $self->inputs->[1] }
 

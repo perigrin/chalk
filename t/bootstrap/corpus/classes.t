@@ -67,51 +67,35 @@ for my $case (@$cases) {
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 3: Verify L-verdict distribution
+# SECTION 3: Verify all 7 cases declare L: GREEN
 #
-# Currently: class-simple, method-simple, field-basic = GREEN.
-# Remaining 4 (field-attrs, method-call, class-isa, adjust) = still GAP.
+# G5 complete: all 7 class idioms are lowerable without libperl.
 # ---------------------------------------------------------------------------
 
-my @green_cases = qw(class-simple method-simple field-basic);
-my @gap_cases   = qw(field-attrs method-call class-isa adjust);
+my @all_case_names = qw(class-simple method-simple field-basic field-attrs method-call class-isa adjust);
 
-subtest 'GREEN cases declare L: GREEN' => sub {
-    plan tests => scalar @green_cases;
+subtest 'all 7 cases declare L: GREEN' => sub {
+    plan tests => 7;
     for my $case (@$cases) {
         my $title = lc($case->{title});
         $title =~ s/^\s+|\s+$//g;
-        next unless grep { $_ eq $title } @green_cases;
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
-        is($decl, 'GREEN', "case '$title': declared L: GREEN (G5 lowering implemented)");
-    }
-};
-
-subtest 'GAP cases still declare L: GAP' => sub {
-    plan tests => scalar @gap_cases;
-    for my $case (@$cases) {
-        my $title = lc($case->{title});
-        $title =~ s/^\s+|\s+$//g;
-        next unless grep { $_ eq $title } @gap_cases;
-        my $ir_text = $case->{ir} // '';
-        my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
-        is($decl, 'GAP', "case '$title': declared L: GAP (not yet implemented)");
+        is($decl, 'GREEN', "case '$title': declared L: GREEN");
     }
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 4: Verify GREEN ir blocks have node lines
+# SECTION 4: Verify all GREEN ir blocks have node lines
 #
 # A GREEN ir block must have %name = ... node lines (constructive graph).
 # ---------------------------------------------------------------------------
 
-subtest 'GREEN ir blocks have node lines' => sub {
-    plan tests => scalar @green_cases;
+subtest 'all GREEN ir blocks have node lines' => sub {
+    plan tests => 7;
     for my $case (@$cases) {
         my $title = lc($case->{title});
         $title =~ s/^\s+|\s+$//g;
-        next unless grep { $_ eq $title } @green_cases;
         my $ir_text = $case->{ir} // '';
         my $has_node_lines = ($ir_text =~ /^%\w+\s*=/m) ? 1 : 0;
         ok($has_node_lines, "case '$title': GREEN ir block has node lines (constructive graph)");
@@ -119,26 +103,7 @@ subtest 'GREEN ir blocks have node lines' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 5: Verify GAP ir blocks remain pure-GAP form
-#
-# Pure-GAP blocks have L: GAP line and NO %name = ... node lines.
-# ---------------------------------------------------------------------------
-
-subtest 'GAP ir blocks are pure-GAP form (no node lines)' => sub {
-    plan tests => scalar @gap_cases;
-    for my $case (@$cases) {
-        my $title = lc($case->{title});
-        $title =~ s/^\s+|\s+$//g;
-        next unless grep { $_ eq $title } @gap_cases;
-        my $ir_text = $case->{ir} // '';
-        my $has_node_lines = ($ir_text =~ /^%\w+\s*=/m) ? 1 : 0;
-        ok(!$has_node_lines,
-            "case '$title': GAP ir block is pure-GAP form (no %name = ... lines)");
-    }
-};
-
-# ---------------------------------------------------------------------------
-# SECTION 6: Negative guard — a class idiom claiming L: GREEN must FAIL
+# SECTION 5: Negative guard — a class idiom claiming L: GREEN must FAIL
 # if the block is pure-GAP (no constructive graph).
 # ---------------------------------------------------------------------------
 

@@ -23,18 +23,25 @@ class Chalk::IR::Node::FieldDef :isa(Chalk::IR::Node) {
     # Whether this field has a compile-time default value
     field $has_default :param :reader = false;
 
+    # Machine representation of the field's value ('Int', 'Str', 'Bool', 'Num', etc.)
+    # Used by :reader synthesis to pick the correct vtable fn signature.
+    # Defaults to 'Int' if not specified.
+    field $field_repr  :param :reader = 'Int';
+
     method operation() { 'FieldDef' }
 
     # Optional default value node is inputs[0] (undef / empty inputs if no default)
     method default_node() { return $self->inputs->[0] }
 
     method content_hash() {
+        my $fr = $field_repr // 'Int';
         return join('|', 'FieldDef',
             "field_name=$field_name",
             "field_index=$field_index",
             "is_param=" . ($is_param ? '1' : '0'),
             "has_reader=" . ($has_reader ? '1' : '0'),
             "has_default=" . ($has_default ? '1' : '0'),
+            "field_repr=$fr",
             $self->_serialize_inputs());
     }
 }

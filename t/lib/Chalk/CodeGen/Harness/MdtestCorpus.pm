@@ -420,8 +420,9 @@ sub _build_node_from_rhs {
     if ($rhs =~ /^(\w+)\(\s*(.*)\s*\)$/s) {
         my ($op, $args_raw) = ($1, $2);
 
-        # Split on commas, but only top-level commas (no nesting in our grammar).
-        my @raw_args = split /\s*,\s*/, $args_raw;
+        # Split on commas, respecting double-quoted strings (don't split inside "...").
+        # e.g. param_names: "left,right" must not be split at the comma inside quotes.
+        my @raw_args = _split_args_respecting_quotes($args_raw);
 
         my @inputs;
         my %attrs;
@@ -479,6 +480,7 @@ sub _build_node_from_rhs {
         }
 
         # FieldDef: is_param, has_reader, has_default are bare tokens "true"/"false" -> bool.
+        # field_repr is a string attr (e.g. "Int", "Str") — passed through as-is.
         if ($op eq 'FieldDef') {
             for my $bool_key (qw(is_param has_reader has_default)) {
                 if (exists $attrs{$bool_key}) {
@@ -491,6 +493,38 @@ sub _build_node_from_rhs {
     }
 
     croak "build_graph_from_ir: could not parse RHS '$rhs' for $name";
+}
+
+# _split_args_respecting_quotes($args_raw) -> @args
+#
+# Splits a comma-separated argument list but does NOT split inside double-quoted
+# strings. This handles cases like param_names: "left,right" where the comma
+# inside the quotes is part of the value, not an argument separator.
+sub _split_args_respecting_quotes {
+    my ($str) = @_;
+    my @parts;
+    my $current = '';
+    my $in_quote = 0;
+    for my $i (0 .. length($str) - 1) {
+        my $ch = substr($str, $i, 1);
+        if ($ch eq '"' && !$in_quote) {
+            $in_quote = 1;
+            $current .= $ch;
+        }
+        elsif ($ch eq '"' && $in_quote) {
+            $in_quote = 0;
+            $current .= $ch;
+        }
+        elsif ($ch eq ',' && !$in_quote) {
+            push @parts, $current;
+            $current = '';
+        }
+        else {
+            $current .= $ch;
+        }
+    }
+    push @parts, $current if length($current) || @parts;
+    return @parts;
 }
 
 # ---------------------------------------------------------------------------

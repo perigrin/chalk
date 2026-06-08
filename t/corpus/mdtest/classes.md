@@ -83,8 +83,8 @@ L: GREEN
 Fields may combine `:param` (constructor binding) and `:reader` (auto-generated
 accessor method). The `:reader` attribute tells the MOP to synthesize a method
 that returns the field value — a known vtable slot returning a known struct
-offset load, statically resolved. Runtime-free; the IR is a GAP only until the
-MOP object-struct + static-vtable lowering (G5) is modelled.
+offset load, statically resolved. Runtime-free; lowered via G5 MOP static vtable
+with synthesized reader methods.
 
 ```perl
 # source
@@ -99,12 +99,22 @@ $p->left + $p->right
 ```
 
 ```behavior
-return: 30
+return: Int:30
 context: scalar
 ```
 
 ```ir
-L: GAP(:reader synthesis is RF: a static vtable slot returning a known struct offset load; GAP only until MOP object-struct + vtable lowering (G5) is modelled, NOT a libperl/Scalar-SV dependency)
+%fd_l   = FieldDef(field_name: "left",  field_index: 0, is_param: true, has_reader: true, has_default: false, field_repr: "Int")
+%fd_r   = FieldDef(field_name: "right", field_index: 1, is_param: true, has_reader: true, has_default: false, field_repr: "Int")
+%cls    = ClassDecl(%fd_l, %fd_r, class_name: "Pair")
+%lval   = Constant(10) :Int
+%rval   = Constant(20) :Int
+%new_p  = New(%cls, %lval, %rval, param_names: "left,right") :Object
+%lr     = MethodCall(%new_p, %cls, method_name: "left")  :Int
+%rr     = MethodCall(%new_p, %cls, method_name: "right") :Int
+%result = Add(%lr, %rr) :Int
+return %result
+L: GREEN
 ```
 
 ## method-simple
@@ -145,8 +155,8 @@ L: GREEN
 A method that mutates a field (`$n += 1`) followed by a method that reads the
 same field exercises the full object-mutation + read sequence. The field write is
 a store to a known struct offset and the read is a load from the same offset —
-typed struct fields, not Scalar SV* slots. Both are runtime-free; the IR is a GAP
-only until the MOP object-struct lowering (G5) is modelled.
+typed struct fields, not Scalar SV* slots. Both are runtime-free; lowered via G5
+MOP with FieldAccess + FieldWrite in method body context.
 
 ```perl
 # source
@@ -163,12 +173,27 @@ $c->val
 ```
 
 ```behavior
-return: 11
+return: Int:11
 context: scalar
 ```
 
 ```ir
-L: GAP(field mutation/read is RF: store/load at a known struct offset (typed fields, not Scalar SV* slots); GAP only until MOP object-struct lowering (G5) is modelled, NOT a libperl dependency)
+%fa_n      = FieldAccess(field_index: 0, field_stash: "Counter") :Int
+%one       = Constant(1) :Int
+%n_plus1   = Add(%fa_n, %one) :Int
+%fw_n      = FieldWrite(%n_plus1, field_index: 0) :Int
+%meth_inc  = MethodDef(%fw_n, method_name: "inc")
+%fa_n2     = FieldAccess(field_index: 0, field_stash: "Counter") :Int
+%meth_val  = MethodDef(%fa_n2, method_name: "val")
+%fdef_n    = FieldDef(field_name: "n", field_index: 0, is_param: true, has_reader: false, has_default: false, field_repr: "Int")
+%cls       = ClassDecl(%meth_inc, %meth_val, %fdef_n, class_name: "Counter")
+%ten       = Constant(10) :Int
+%new_c     = New(%cls, %ten, param_names: "n") :Object
+%inc_call  = MethodCall(%new_c, %cls, method_name: "inc") :Int
+%result    = MethodCall(%new_c, %cls, method_name: "val") :Int
+control: %inc_call -> %result
+return %result
+L: GREEN
 ```
 
 ## class-isa
@@ -176,8 +201,8 @@ L: GAP(field mutation/read is RF: store/load at a known struct offset (typed fie
 A child class that inherits a method from a parent class via `:isa(Parent)`.
 The inherited-method lookup is a static vtable/MRO resolution at compile time
 (classes are lexically declared, no runtime `@ISA` mutation in the subset), so it
-is runtime-free; the IR is a GAP only until the MOP static-vtable lowering (G5)
-is modelled.
+is runtime-free; lowered via G5 MOP compile-time MRO flatten (parent vtable
+slots copied into child at lowering time).
 
 ```perl
 # source
@@ -190,12 +215,19 @@ $c->kind
 ```
 
 ```behavior
-return: base
+return: Str:base
 context: scalar
 ```
 
 ```ir
-L: GAP(inherited-method lookup is RF: static vtable/MRO resolution at compile time; GAP only until MOP vtable lowering (G5), NOT a libperl dependency)
+%kind_body = Constant("base") :Str
+%meth_kind = MethodDef(%kind_body, method_name: "kind")
+%base_cls  = ClassDecl(%meth_kind, class_name: "Base")
+%child_cls = ClassDecl(%base_cls, class_name: "Child", parent_name: "Base")
+%new_c     = New(%child_cls) :Object
+%result    = MethodCall(%new_c, %child_cls, method_name: "kind") :Str
+return %result
+L: GREEN
 ```
 
 ## adjust
@@ -203,8 +235,7 @@ L: GAP(inherited-method lookup is RF: static vtable/MRO resolution at compile ti
 An `ADJUST` block runs after the constructor has bound all `:param` fields. It
 can compute derived fields from the constructor arguments. ADJUST is constructor
 code writing known struct field offsets — typed struct fields, not Scalar SV*
-slots — so it is runtime-free; the IR is a GAP only until the MOP object-struct
-lowering (G5) is modelled.
+slots — so it is runtime-free; lowered via G5 MOP ADJUST-as-constructor-code.
 
 ```perl
 # source
@@ -221,10 +252,24 @@ $b->double
 ```
 
 ```behavior
-return: 14
+return: Int:14
 context: scalar
 ```
 
 ```ir
-L: GAP(ADJUST is RF: constructor code writing known struct field offsets; GAP only until MOP lowering (G5), NOT a Scalar-SV dependency)
+%fa_val    = FieldAccess(field_index: 0, field_stash: "Box") :Int
+%two       = Constant(2) :Int
+%dbl_val   = Multiply(%fa_val, %two) :Int
+%fw_dbl    = FieldWrite(%dbl_val, field_index: 1) :Int
+%adj       = AdjustBlock(%fw_dbl)
+%fa_dbl    = FieldAccess(field_index: 1, field_stash: "Box") :Int
+%meth_dbl  = MethodDef(%fa_dbl, method_name: "double")
+%fdef_val  = FieldDef(field_name: "val",    field_index: 0, is_param: true,  has_reader: false, has_default: false, field_repr: "Int")
+%fdef_dbl  = FieldDef(field_name: "double", field_index: 1, is_param: false, has_reader: false, has_default: false, field_repr: "Int")
+%cls       = ClassDecl(%meth_dbl, %fdef_val, %fdef_dbl, %adj, class_name: "Box")
+%seven     = Constant(7) :Int
+%new_b     = New(%cls, %seven, param_names: "val") :Object
+%result    = MethodCall(%new_b, %cls, method_name: "double") :Int
+return %result
+L: GREEN
 ```
