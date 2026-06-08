@@ -125,13 +125,33 @@ sub lower_with_elaboration {
         # "Bool:\n\0"  = 7 bytes = [7 x i8]
         push @lines, '@bool_true_str  = private unnamed_addr constant [8 x i8] c"Bool:1\0A\00", align 1';
         push @lines, '@bool_false_str = private unnamed_addr constant [7 x i8] c"Bool:\0A\00",  align 1';
-        # printf format for %s: "Bool:" is already baked into the string constants,
-        # but we use puts-style: just print the selected string with printf("%s",...).
-        # Actually simpler: two constants already contain the full line; use printf with %s.
+        # printf format for %s: "Bool:" is already baked into the string constants;
+        # use printf("%s", selected_ptr) to emit the full tagged line.
         push @lines, '@fmt_s = private unnamed_addr constant [3 x i8] c"%s\00", align 1';
+    }
+    elsif ($result_repr eq 'Str') {
+        # Str result: the value is an i8* pointer to a NUL-terminated string.
+        # The Bool string-face Coerce(Bool->Str) is the primary producer.
+        # Emit the two Bool-string-face globals here (always; they are small
+        # constants and may be needed even if _need_bool_str_globals was set
+        # during body lowering — emitting them in the prologue is the canonical path).
+        # "1\0" = [2 x i8]; "\0" = [1 x i8] (NUL only = empty string)
+        push @lines, '@coerce_bool_str_true  = private unnamed_addr constant [2 x i8] c"1\00", align 1';
+        push @lines, '@coerce_bool_str_false = private unnamed_addr constant [1 x i8] c"\00",   align 1';
+        # Tagged format: "Str:%s\n\0" = S,t,r,:,%,s,\n,\0 = 8 bytes = [8 x i8]
+        push @lines, '@fmt_str = private unnamed_addr constant [8 x i8] c"Str:%s\0A\00", align 1';
     }
     else {
         die "LLVM backend (elaboration): cannot emit return of repr=$result_repr";
+    }
+
+    # When body lowering set _need_bool_str_globals (Coerce(Bool->Str) used
+    # internally in a non-Str-return graph), emit those globals now. They are
+    # always emitted for a Str result repr (above); this branch handles the
+    # case where the return is not Str but the body contains a Coerce(Bool->Str).
+    if ($ctx->{_need_bool_str_globals} && $result_repr ne 'Str') {
+        push @lines, '@coerce_bool_str_true  = private unnamed_addr constant [2 x i8] c"1\00", align 1';
+        push @lines, '@coerce_bool_str_false = private unnamed_addr constant [1 x i8] c"\00",   align 1';
     }
 
     push @lines, '';
@@ -165,6 +185,13 @@ sub lower_with_elaboration {
         push @lines, "  %bool_str_ptr   = select i1 $result_ref, i8* %bool_true_ptr, i8* %bool_false_ptr";
         push @lines, '  %fmt_s_ptr      = getelementptr inbounds [3 x i8], [3 x i8]* @fmt_s, i64 0, i64 0';
         push @lines, '  call i32 (i8*, ...) @printf(i8* %fmt_s_ptr, i8* %bool_str_ptr)';
+    }
+    elsif ($result_repr eq 'Str') {
+        # The result is an i8* from Coerce(Bool->Str). Print it as "Str:<value>\n".
+        # The value string itself is already NUL-terminated; use the "Str:%s\n" format.
+        # @fmt_str is [8 x i8] c"Str:%s\0A\00" (S,t,r,:,%,s,\n,\0 = 8 bytes).
+        push @lines, '  %fmt_str_ptr = getelementptr inbounds [8 x i8], [8 x i8]* @fmt_str, i64 0, i64 0';
+        push @lines, "  call i32 (i8*, ...) \@printf(i8* %fmt_str_ptr, i8* $result_ref)";
     }
 
     push @lines, '  ret i32 0';
@@ -575,7 +602,9 @@ sub _lower_not {
     my $inputs   = $node->inputs;
     my $operand  = $inputs->[0];
     my $op_ref   = $self->lower_value($operand);
-    my $op_repr  = $operand->representation // 'Int';
+    my $op_repr  = $operand->representation;
+    die "LLVM backend: Not operand has no representation set — cannot determine i1 vs i64"
+        unless defined $op_repr;
 
     # Convert operand to i1 (truthiness) if it is not already Bool.
     my $cond_ref = $self->_ensure_i1($op_ref, $op_repr);
@@ -594,7 +623,8 @@ sub _lower_not {
 # This is Coerce(*->Bool) = truthiness, used inline by _lower_not.
 sub _ensure_i1 {
     my ($self, $ref, $repr) = @_;
-    $repr //= 'Int';
+    die "LLVM backend: _ensure_i1 called with undef repr — operand must have a representation set"
+        unless defined $repr;
 
     return $ref if $repr eq 'Bool';
 

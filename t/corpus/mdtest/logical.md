@@ -116,11 +116,15 @@ A boolean *coerces* to `""`/`"1"` in string context and `0`/`1` in numeric
 context, but its identity is Bool, not Str (a literal `""` has `is_bool`=0).
 
 G2 GREEN: `!` lowers runtime-free via the Bool representation (i1) + UnaryNot
-(xor i1 %cond, true) + Coerce(Int->Bool) truthiness (icmp ne) + Coerce(Bool->Str)
-string-face for the return path. The type-tagged oracle (`Bool:` for false,
-`Bool:1` for true) distinguishes a Bool result from its Str coercion (which would
-be `Str:`) — so Int-as-0 or Str-as-empty miscompiles are caught at the oracle
-layer, not just at the lli output layer.
+(xor i1 %cond, true) + Coerce(Int->Bool) truthiness (icmp ne). The return value
+is :Bool (i1), and the type-tagged epilogue selects between `@bool_true_str`
+("Bool:1\n") and `@bool_false_str` ("Bool:\n") directly — no Coerce(Bool->Str)
+node is in the return path. Coerce(Bool->Str) is the edge for internal string-context
+use (e.g., a Bool in string interpolation), exercised separately; its string-face
+globals ("1\0" and "\0") are distinct from the tagged epilogue constants ("Bool:1\n"
+and "Bool:\n"). The type-tagged oracle (`Bool:` for false, `Bool:1` for true)
+distinguishes a Bool result from its Str coercion (which would be `Str:`) — so
+Int-as-0 or Str-as-empty miscompiles are caught at the oracle layer.
 
 Source: `my $a = 5; !$a` — $a is 5 (truthy), so !$a is false. The ir-block
 models the Not over a PadAccess(:Int), coercing Int to Bool via truthiness, then
