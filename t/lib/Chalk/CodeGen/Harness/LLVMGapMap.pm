@@ -5,10 +5,10 @@ package Chalk::CodeGen::Harness::LLVMGapMap;
 use 5.42.0;
 use utf8;
 
-use Carp      qw(croak);
-use File::Temp qw(tempfile);
+use Carp         qw(croak);
+use File::Temp   qw(tempfile);
 use JSON::PP;
-use Scalar::Util qw(looks_like_number);
+use Chalk::CodeGen::Harness::TypeTag;
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
@@ -52,23 +52,13 @@ my $ARTIFACT_FILE = 't/fixtures/codegen-harness/llvm-gap-map.json';
 # ---------------------------------------------------------------------------
 
 # _infer_oracle_tag($oracle_str) -> type-tagged string
-# Converts a plain oracle string (e.g. "3", "0.75") to the type-tagged form
-# (e.g. "Int:3", "Num:0.75") that lli now emits. Already-tagged strings
-# (with Bool:/Int:/Num:/Str:/Undef: prefix) are returned unchanged.
-# This keeps existing plain perl_oracle => 'N' entries working without
-# requiring all entries to be rewritten.
+# Delegates to Chalk::CodeGen::Harness::TypeTag::infer_tag -- the single
+# source of truth for the declared-value tag rule. Converts a plain oracle
+# string (e.g. "3", "0.75") to the type-tagged form (e.g. "Int:3", "Num:0.75")
+# that lli emits. Already-tagged strings are returned unchanged.
 sub _infer_oracle_tag {
     my ($val) = @_;
-    return 'Undef:' unless defined $val;
-    return $val if $val =~ /^(?:Bool:|Int:|Num:|Str:|Undef:)/;
-    return 'Str:' if $val eq '';
-    if (looks_like_number($val) && $val =~ /\./) {
-        return sprintf("Num:%g", $val);
-    }
-    if (looks_like_number($val)) {
-        return "Int:$val";
-    }
-    return "Str:$val";
+    return Chalk::CodeGen::Harness::TypeTag::infer_tag($val);
 }
 
 # Helper: make a Return node over a value-def chain.

@@ -5,12 +5,10 @@ package Chalk::CodeGen::Harness::MdtestCorpus;
 use 5.42.0;
 use utf8;
 
-use Carp      qw(croak);
-use File::Temp qw(tempfile);
-use Scalar::Util qw(blessed looks_like_number);
+use Carp         qw(croak);
+use File::Temp   qw(tempfile);
+use Scalar::Util qw(blessed);
 use JSON::PP;
-use builtin qw(is_bool);
-no warnings 'experimental::builtin';
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
@@ -27,6 +25,7 @@ use Chalk::IR::Graph::TypedInvariant;
 
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::BehaviorRecord;
+use Chalk::CodeGen::Harness::TypeTag;
 
 # The Perl 5.42.0 binary used as the oracle.
 my $PERL_BIN = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
@@ -605,27 +604,16 @@ sub _run_expr_under_perl {
 
     # The oracle emits a TYPE-TAGGED canonical string so Bool is distinguishable
     # from its Str coercion (is_bool discriminates). Tags: Bool:1/Bool: Int:N
-    # Num:%g Str:<val> Undef:  — lli must print the same tag from its known repr.
+    # Num:%g Str:<val> Undef: -- lli must print the same tag from its known repr.
+    # The tagging logic is the canonical rule from Chalk::CodeGen::Harness::TypeTag.
+    my $tag_fragment = Chalk::CodeGen::Harness::TypeTag::oracle_perl_fragment();
     my $program = <<"END_PROGRAM";
 use 5.42.0;
 use utf8;
-use Scalar::Util qw(looks_like_number);
-use builtin qw(is_bool);
-no warnings 'experimental::builtin';
 
 my \$_result = do { $clean_source };
 
-if (is_bool(\$_result)) {
-    print "Bool:" . (\$_result ? "1" : "") . "\\n";
-} elsif (!defined \$_result) {
-    print "Undef:\\n";
-} elsif (looks_like_number(\$_result) && \$_result =~ /\\./) {
-    printf "Num:%g\\n", \$_result;
-} elsif (looks_like_number(\$_result)) {
-    print "Int:\$_result\\n";
-} else {
-    print "Str:\$_result\\n";
-}
+$tag_fragment
 END_PROGRAM
 
     my ($fh, $tmpfile) = tempfile(SUFFIX => '.pl', UNLINK => 1);
@@ -691,34 +679,12 @@ sub _behavior_matches {
 
 # _infer_tag($declared_str) -> tagged string
 #
-# If the string already carries a type prefix (Bool:/Int:/Num:/Str:/Undef:),
-# return it unchanged. Otherwise infer a tag from the value's form:
-#   empty/undef   -> Str:  (could be empty string; not is_bool-detectable here)
-#   looks numeric with decimal -> Num:%g formatted
-#   looks numeric -> Int:<val>
-#   else          -> Str:<val>
-#
-# This function is ONLY for declared values in behavior blocks (which were
-# historically untagged plain strings). The perl oracle always emits real tags.
+# Delegates to Chalk::CodeGen::Harness::TypeTag::infer_tag — the single
+# source of truth for the declared-value tag rule. See TypeTag for the full
+# rule specification.
 sub _infer_tag {
     my ($val) = @_;
-    return 'Undef:' unless defined $val;
-
-    # Already tagged: pass through unchanged.
-    return $val if $val =~ /^(?:Bool:|Int:|Num:|Str:|Undef:)/;
-
-    # Empty string declared as "" — could be Str or Bool:false. We cannot
-    # distinguish here; treat as Str: so that only properly-tagged Bool: behavior
-    # blocks match a Bool:false perl result.
-    return 'Str:' if $val eq '';
-
-    if (looks_like_number($val) && $val =~ /\./) {
-        return sprintf("Num:%g", $val);
-    }
-    if (looks_like_number($val)) {
-        return "Int:$val";
-    }
-    return "Str:$val";
+    return Chalk::CodeGen::Harness::TypeTag::infer_tag($val);
 }
 
 sub _make_behavior_record {
