@@ -241,4 +241,28 @@ subtest 'Coerce(Str->Num) lli numeric values match perl oracle' => sub {
     }
 };
 
+# ---------------------------------------------------------------------------
+# KNOWN-UNCOVERED domain: libc strtod accepts inputs whose lowered string-face
+# diverges from perl's. These are NOT covered by G3 and are tracked for a
+# follow-up issue (Coerce(Str->Num) strtod-domain divergence vs perl). They are
+# recorded here as TODO so the gap is LABELED, not a silent cap (campaign rule).
+#
+# Divergence shape: strtod parses "inf"/"infinity"/"nan" (and hex-float like
+# "0x1p4"); perl ALSO treats "inf"/"nan" as numeric (0+"inf" == Inf), but the
+# lowered string-face is lowercase "inf"/"nan" (Num:%g) while perl's face is
+# "Inf"/"NaN" and the harness oracle quirkily tags non-fractional Inf as Int:Inf.
+# Resolution (match-exactly vs explicit-reject) is deferred to the follow-up.
+TODO: {
+    local $TODO = 'strtod inf/nan/hex-float domain diverges from perl string-face; tracked for follow-up issue';
+
+    for my $str (qw(inf infinity nan)) {
+        my $ret_node = make_str_to_num_graph($str);
+        my $ll = eval { Chalk::IR::Target::LLVM->lower($ret_node) };
+        my ($lli_out, undef) = $ll ? run_lli($ll) : ('(lower-failed)', 1);
+        my $perl_tag = perl_oracle_str_to_num($str);
+        is($lli_out, $perl_tag,
+            qq{str="$str": lli string-face ($lli_out) matches perl ($perl_tag)});
+    }
+}
+
 done_testing;
