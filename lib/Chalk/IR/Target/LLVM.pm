@@ -234,8 +234,18 @@ sub lower_with_elaboration {
         push @lines, '@fmt = private unnamed_addr constant [8 x i8] c"Int:%d\0A\00", align 1';
     }
     elsif ($result_repr eq 'Num') {
-        # "Num:%g\n" = 7 bytes + NUL = [8 x i8]
+        # Finite path: "Num:%g\n\0" = 8 bytes = [8 x i8]
         push @lines, '@fmt = private unnamed_addr constant [8 x i8] c"Num:%g\0A\00", align 1';
+        # Non-finite path: perl-style capitalized faces for Inf/-Inf/NaN.
+        # The LLVM epilogue detects non-finite via fcmp and uses these constants.
+        # "Num:Inf\n\0"  = 9 bytes = [9 x i8]
+        # "Num:-Inf\n\0" = 10 bytes = [10 x i8]
+        # "Num:NaN\n\0"  = 9 bytes = [9 x i8]
+        # "%s\0"         = 3 bytes = [3 x i8]
+        push @lines, '@num_inf_str  = private unnamed_addr constant [9 x i8]  c"Num:Inf\0A\00",  align 1';
+        push @lines, '@num_ninf_str = private unnamed_addr constant [10 x i8] c"Num:-Inf\0A\00", align 1';
+        push @lines, '@num_nan_str  = private unnamed_addr constant [9 x i8]  c"Num:NaN\0A\00",  align 1';
+        push @lines, '@fmt_num_s    = private unnamed_addr constant [3 x i8]  c"%s\00",           align 1';
     }
     elsif ($result_repr eq 'Bool') {
         # Bool prints either "Bool:1\n" (true) or "Bool:\n" (false).
@@ -355,8 +365,32 @@ sub lower_with_elaboration {
         push @lines, '  call i32 (i8*, ...) @printf(i8* %fmt_ptr, i32 %result_i32)';
     }
     elsif ($result_repr eq 'Num') {
+        # Non-finite detection: fcmp uno for NaN; fcmp oeq against +Inf/-Inf constants.
+        # Perl formats non-finite as Inf/-Inf/NaN (capitalized); C %g gives lowercase.
+        # We branch on non-finite and print the perl-style string constants instead.
+        push @lines, "  %is_nan   = fcmp uno double $result_ref, $result_ref      ; NaN iff unordered with itself";
+        push @lines, "  %is_pinf  = fcmp oeq double $result_ref, 0x7FF0000000000000  ; +Inf";
+        push @lines, "  %is_ninf  = fcmp oeq double $result_ref, 0xFFF0000000000000  ; -Inf";
+        push @lines, '  %is_nf_in = or i1 %is_pinf, %is_ninf';
+        push @lines, '  %is_nf    = or i1 %is_nan,  %is_nf_in';
+        push @lines, '  br i1 %is_nf, label %print_nf, label %print_fin';
+        push @lines, '';
+        push @lines, 'print_nf:';
+        push @lines, '  %nf_pinf_ptr = getelementptr inbounds [9 x i8],  [9 x i8]*  @num_inf_str,  i64 0, i64 0';
+        push @lines, '  %nf_ninf_ptr = getelementptr inbounds [10 x i8], [10 x i8]* @num_ninf_str, i64 0, i64 0';
+        push @lines, '  %nf_nan_ptr  = getelementptr inbounds [9 x i8],  [9 x i8]*  @num_nan_str,  i64 0, i64 0';
+        push @lines, '  %nf_inf_sel  = select i1 %is_pinf, i8* %nf_pinf_ptr, i8* %nf_ninf_ptr   ; +Inf or -Inf';
+        push @lines, '  %nf_str      = select i1 %is_nan,  i8* %nf_nan_ptr,  i8* %nf_inf_sel    ; NaN overrides';
+        push @lines, '  %fmt_num_s_ptr = getelementptr inbounds [3 x i8], [3 x i8]* @fmt_num_s, i64 0, i64 0';
+        push @lines, '  call i32 (i8*, ...) @printf(i8* %fmt_num_s_ptr, i8* %nf_str)';
+        push @lines, '  br label %print_done';
+        push @lines, '';
+        push @lines, 'print_fin:';
         push @lines, '  %fmt_ptr = getelementptr inbounds [8 x i8], [8 x i8]* @fmt, i64 0, i64 0';
         push @lines, "  call i32 (i8*, ...) \@printf(i8* %fmt_ptr, double $result_ref)";
+        push @lines, '  br label %print_done';
+        push @lines, '';
+        push @lines, 'print_done:';
     }
     elsif ($result_repr eq 'Bool') {
         # Select between "Bool:1\n" and "Bool:\n" based on the i1 result.

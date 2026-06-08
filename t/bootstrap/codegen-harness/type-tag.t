@@ -118,6 +118,35 @@ subtest 'tag_live_value: string -> Str:' => sub {
 };
 
 # ---------------------------------------------------------------------------
+# Non-finite numerics: Inf/-Inf/NaN must tag as Num: with perl-style face
+#
+# perl prints Inf/NaN/-Inf (capitalized), not C's inf/nan. A non-finite
+# numeric is NOT Int: (no decimal point but looks_like_number is true) and
+# NOT Num:inf (wrong case). The canonical tag is Num:Inf / Num:-Inf / Num:NaN.
+# ---------------------------------------------------------------------------
+
+subtest 'tag_live_value: +Inf -> Num:Inf' => sub {
+    my $inf = 0 + 'inf';
+    is( Chalk::CodeGen::Harness::TypeTag::tag_live_value($inf), 'Num:Inf', '+Inf tags as Num:Inf' );
+};
+
+subtest 'tag_live_value: -Inf -> Num:-Inf' => sub {
+    my $ninf = 0 + '-inf';
+    is( Chalk::CodeGen::Harness::TypeTag::tag_live_value($ninf), 'Num:-Inf', '-Inf tags as Num:-Inf' );
+};
+
+subtest 'tag_live_value: NaN -> Num:NaN' => sub {
+    my $nan = 0 + 'nan';
+    is( Chalk::CodeGen::Harness::TypeTag::tag_live_value($nan), 'Num:NaN', 'NaN tags as Num:NaN' );
+};
+
+subtest 'tag_live_value: finite values unchanged after non-finite fix' => sub {
+    is( Chalk::CodeGen::Harness::TypeTag::tag_live_value(3),    'Int:3',    'finite int 3 still Int:3' );
+    is( Chalk::CodeGen::Harness::TypeTag::tag_live_value(0),    'Int:0',    'finite int 0 still Int:0' );
+    is( Chalk::CodeGen::Harness::TypeTag::tag_live_value(3.14), 'Num:3.14', 'finite float still Num:3.14' );
+};
+
+# ---------------------------------------------------------------------------
 # SECTION 3 -- LLVM canonical prefix pinning
 # ---------------------------------------------------------------------------
 #

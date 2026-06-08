@@ -41,10 +41,12 @@ sub run_lli {
 # ---------------------------------------------------------------------------
 sub perl_oracle_str_to_num {
     my ($str) = @_;
-    # Escape backslash and single-quote for passing to perl
+    # Use the TypeTag oracle fragment to get the canonical tag for perl's result.
+    # This uses the same non-finite detection (Inf/-Inf/NaN -> Num:) as TypeTag.
+    my $frag = Chalk::CodeGen::Harness::TypeTag::oracle_perl_fragment();
     (my $escaped = $str) =~ s/\\/\\\\/g;
-    $escaped =~ s/'/\\'/g;
-    my $cmd = qq{$P -e 'my \$s = "$str"; my \$n = \$s + 0; if (\$n =~ /\\./) { printf "Num:%g\\n", \$n } else { print "Int:\$n\\n" }'};
+    $escaped =~ s/"/\\"/g;
+    my $cmd = qq{$P -e 'my \$_result = "$escaped" + 0; $frag'};
     my $out = qx($cmd 2>/dev/null);
     chomp $out;
     return $out;
@@ -121,13 +123,26 @@ sub make_str_to_bool_graph {
 # ---------------------------------------------------------------------------
 
 my @str_to_num_cases = (
-    ["abc",   "Num:0",    "no leading digits -> 0"],
-    ["3abc",  "Num:3",    "leading integer, trailing ignored -> 3"],
-    [" 42 ",  "Num:42",   "leading whitespace stripped -> 42"],
-    ["3.14x", "Num:3.14", "leading float, trailing char ignored -> 3.14"],
-    ["",      "Num:0",    "empty string -> 0"],
-    [".5",    "Num:0.5",  "leading dot -> 0.5"],
-    ["0x10",  "Num:0",    "hex not parsed by perl -> 0"],
+    ["abc",    "Num:0",    "no leading digits -> 0"],
+    ["3abc",   "Num:3",    "leading integer, trailing ignored -> 3"],
+    [" 42 ",   "Num:42",   "leading whitespace stripped -> 42"],
+    ["3.14x",  "Num:3.14", "leading float, trailing char ignored -> 3.14"],
+    ["",       "Num:0",    "empty string -> 0"],
+    [".5",     "Num:0.5",  "leading dot -> 0.5"],
+    ["0x10",   "Num:0",    "hex not parsed by perl -> 0"],
+    # Non-finite forms: strtod accepts inf/nan; perl yields Inf/NaN/-Inf (capitalized).
+    # The LLVM epilogue detects non-finite via fcmp and prints the perl-style face.
+    ["inf",      "Num:Inf",  "inf -> Inf (perl-style)"],
+    ["Inf",      "Num:Inf",  "Inf -> Inf (already capitalized)"],
+    ["infinity", "Num:Inf",  "infinity -> Inf (strtod accepts full word)"],
+    ["1e400",    "Num:Inf",  "1e400 -> Inf (overflow -> +Inf)"],
+    ["-inf",     "Num:-Inf", "-inf -> -Inf"],
+    ["nan",      "Num:NaN",  "nan -> NaN (perl-style)"],
+    ["NaN",      "Num:NaN",  "NaN -> NaN (already capitalized)"],
+    # Hex-float forms: perl stops at "0" (does NOT parse hex-float); all -> 0.
+    ["0x1p4",    "Num:0",    "hex-float 0x1p4 not parsed by perl -> 0"],
+    ["0X1P4",    "Num:0",    "hex-float 0X1P4 (uppercase) not parsed by perl -> 0"],
+    ["0x.8p0",   "Num:0",    "hex-float 0x.8p0 not parsed by perl -> 0"],
 );
 
 subtest 'Coerce(Str->Num) adversarial cases: lli == perl oracle' => sub {
@@ -241,28 +256,9 @@ subtest 'Coerce(Str->Num) lli numeric values match perl oracle' => sub {
     }
 };
 
-# ---------------------------------------------------------------------------
-# KNOWN-UNCOVERED domain: libc strtod accepts inputs whose lowered string-face
-# diverges from perl's. These are NOT covered by G3 and are tracked for a
-# follow-up issue (Coerce(Str->Num) strtod-domain divergence vs perl). They are
-# recorded here as TODO so the gap is LABELED, not a silent cap (campaign rule).
-#
-# Divergence shape: strtod parses "inf"/"infinity"/"nan" (and hex-float like
-# "0x1p4"); perl ALSO treats "inf"/"nan" as numeric (0+"inf" == Inf), but the
-# lowered string-face is lowercase "inf"/"nan" (Num:%g) while perl's face is
-# "Inf"/"NaN" and the harness oracle quirkily tags non-fractional Inf as Int:Inf.
-# Resolution (match-exactly vs explicit-reject) is deferred to the follow-up.
-TODO: {
-    local $TODO = 'strtod inf/nan/hex-float domain diverges from perl string-face; tracked for follow-up issue';
-
-    for my $str (qw(inf infinity nan)) {
-        my $ret_node = make_str_to_num_graph($str);
-        my $ll = eval { Chalk::IR::Target::LLVM->lower($ret_node) };
-        my ($lli_out, undef) = $ll ? run_lli($ll) : ('(lower-failed)', 1);
-        my $perl_tag = perl_oracle_str_to_num($str);
-        is($lli_out, $perl_tag,
-            qq{str="$str": lli string-face ($lli_out) matches perl ($perl_tag)});
-    }
-}
+# Note: the former TODO block for inf/nan/hex-float (issue 019ea740) has been
+# resolved and the cases are now included in the main @str_to_num_cases above.
+# The LLVM epilogue detects non-finite doubles via fcmp and prints the perl-style
+# Inf/NaN/-Inf face; TypeTag tags non-finite as Num: (single source of truth).
 
 done_testing;

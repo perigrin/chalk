@@ -36,10 +36,15 @@ sub infer_tag {
     # blocks match a Bool:false perl result.
     return 'Str:' if $val eq '';
 
-    if (looks_like_number($val) && $val =~ /\./) {
-        return sprintf('Num:%g', $val);
-    }
     if (looks_like_number($val)) {
+        # Non-finite: perl stringifies Inf/-Inf/NaN (capitalized). Detect by the
+        # canonical face so that declared "Inf" or "NaN" tags correctly as Num:.
+        if ($val =~ /^Inf$/i)  { return 'Num:Inf'  }
+        if ($val =~ /^-Inf$/i) { return 'Num:-Inf' }
+        if ($val =~ /^NaN$/i)  { return 'Num:NaN'  }
+        if ($val =~ /\./) {
+            return sprintf('Num:%g', $val);
+        }
         return "Int:$val";
     }
     return "Str:$val";
@@ -70,10 +75,17 @@ sub tag_live_value {
     unless (defined $val) {
         return 'Undef:';
     }
-    if (looks_like_number($val) && $val =~ /\./) {
-        return sprintf('Num:%g', $val);
-    }
+    # Non-finite numerics: perl stringifies these as Inf/-Inf/NaN (capitalized).
+    # looks_like_number returns true for Inf/NaN (no decimal point), which would
+    # mis-tag them as Int:. Detect and tag as Num: with the perl canonical face.
     if (looks_like_number($val)) {
+        my $str = "$val";  # stringify via perl to get the canonical face
+        if ($str =~ /^Inf$/i)  { return 'Num:Inf'  }
+        if ($str =~ /^-Inf$/i) { return 'Num:-Inf' }
+        if ($str =~ /^NaN$/i)  { return 'Num:NaN'  }
+        if ($val =~ /\./) {
+            return sprintf('Num:%g', $val);
+        }
         return "Int:$val";
     }
     return "Str:$val";
@@ -100,10 +112,13 @@ if (is_bool($_result)) {
     print "Bool:" . ($_result ? "1" : "") . "\n";
 } elsif (!defined $_result) {
     print "Undef:\n";
-} elsif (looks_like_number($_result) && $_result =~ /\./) {
-    printf "Num:%g\n", $_result;
 } elsif (looks_like_number($_result)) {
-    print "Int:$_result\n";
+    my $_str = "$_result";
+    if    ($_str =~ /^Inf$/i)  { print "Num:Inf\n"  }
+    elsif ($_str =~ /^-Inf$/i) { print "Num:-Inf\n" }
+    elsif ($_str =~ /^NaN$/i)  { print "Num:NaN\n"  }
+    elsif ($_result =~ /\./)   { printf "Num:%g\n", $_result }
+    else                       { print "Int:$_result\n" }
 } else {
     print "Str:$_result\n";
 }
