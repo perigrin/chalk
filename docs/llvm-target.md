@@ -14,17 +14,21 @@ source-level backends do not: it surfaces missing annotations, under-specified
 control flow, and SSA-construction gaps that a Perl-to-Perl round-trip will never
 reveal.
 
-**Sequencing decision (perigrin, 2026-06): LLVM first, not C/XS first.** An
-earlier draft of this doc (preserved in the History section below) made the C and
-XS targets the prerequisite "stepping stone" and deferred LLVM until C/XS proved
-the IR across the full corpus. That sequencing was superseded. **LLVM-first solves
-everything the C/XS stepping-stone solved *for this problem* — exercising the IR
-through a real native lowering path, proving runtime-free lowerability without
-libperl — without bringing the entire C/XS toolchain build into scope** (no XS
-compilation, no `Build.PL`, no `.so` linking, no CPAN/cc toolchain). The LLVM
-target emits `.ll` text and runs it through `lli`; the only external dependency is
-the LLVM interpreter. This makes the native-backend IR-stressing available now, at
-a fraction of the build-infrastructure cost.
+**Sequencing decision (2026-06-06): LLVM first, not C/XS first.** This is recorded
+in [`plans/2026-06-06-three-axis-codegen-and-typed-ir-contract.md`](plans/2026-06-06-three-axis-codegen-and-typed-ir-contract.md)
+(the THREE-AXIS model: IR→Perl = expressiveness, IR→LLVM = **self-sufficiency, the
+forcing function**, IR→C/XS = practicality, deferred). An earlier draft of THIS doc
+(preserved in History below) made C/XS the prerequisite "stepping stone" and
+deferred LLVM until C/XS proved the IR; that sequencing was superseded by the
+three-axis plan. Per that plan's "Why LLVM IR specifically (not C/XS, not native
+asm)" section: **`lli` interprets the emitted IR directly — no compile, no link, no
+XS — while C/XS "drags in Perl-embedding complexity (XS, SV marshalling) orthogonal
+to 'is the IR correct / self-sufficient.'"** LLVM-first gets the IR-stressing native
+backend (the doc's stated reason for wanting one) without the C/XS toolchain build
+(no `Build.PL`, `.so` linking, CPAN/cc). The C/XS axis is kept as the practicality
+artifact, rebuilt later on the types the LLVM axis forces into the IR — "we do not
+invest in un-welding the existing C path." The LLVM target's only external
+dependency is `lli` (`/usr/lib/llvm-15/bin/lli`).
 
 This is the path the **runtime-free-boundary campaign** takes (see
 [`architecture/runtime-free-boundary.md`](architecture/runtime-free-boundary.md)):
