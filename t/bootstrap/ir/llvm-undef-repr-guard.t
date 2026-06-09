@@ -179,12 +179,16 @@ subtest 'undef-repr Assign dies loudly instead of silently lowering as Int' => s
 };
 
 # Test 7: undef-repr TernaryExpr branch dies loudly (sites: lines ~1963/1964)
+# CG3 fix: prior version used Constant(:Bool) as cond, which dies at constant-lowering
+# ("cannot lower Constant with repr=Bool"), BEFORE the TernaryExpr guard fires.
+# Fixed: use Constant(:Int) as cond so the TernaryExpr guard is the actual die site.
 subtest 'undef-repr TernaryExpr true-branch dies loudly' => sub {
     my $f = Chalk::IR::NodeFactory->new;
+    # Condition: Int is valid (truthiness check via icmp ne i64 %v, 0)
     my $cond = $f->make('Constant', value => 1, const_type => 'integer');
-    $cond->set_representation('Bool');
+    $cond->set_representation('Int');
     my $true_c = $f->make('Constant', value => 10, const_type => 'integer');
-    # Intentionally do NOT set representation on true branch.
+    # Intentionally do NOT set representation on true branch — this is the guard site.
     my $fals_c = $f->make('Constant', value => 20, const_type => 'integer');
     $fals_c->set_representation('Int');
     my $tern = $f->make('TernaryExpr', inputs => [$cond, $true_c, $fals_c]);
@@ -196,11 +200,93 @@ subtest 'undef-repr TernaryExpr true-branch dies loudly' => sub {
     $err = $@;
 
     ok(defined $err && length $err,
-        'undef-repr TernaryExpr true-branch: lower() dies loudly')
+        'undef-repr TernaryExpr true-branch: lower() dies loudly (at TernaryExpr guard, not Constant lowering)')
         or diag("Got no error; .ll:\n" . substr($ll // '', 0, 300));
     if (defined $err && length $err) {
         like($err, qr/representation|repr|GAP/i,
             'TernaryExpr error message mentions representation or GAP')
+            or diag("error: $err");
+        # The error must come from the TernaryExpr guard, not the Constant :Bool path.
+        unlike($err, qr/cannot lower Constant with repr=Bool/i,
+            'TernaryExpr error is NOT the old Constant-repr=Bool die (CG3: guard fires correctly)')
+            or diag("Error came from wrong guard: Constant repr=Bool die, not TernaryExpr guard\nerror: $err");
+    }
+};
+
+# Test 7b: CG3 — undef-repr Phi at Region merge point dies loudly.
+# Tests the _require_repr guard at _wire_region_phis_with_preblock (~line 4098):
+#   `my $repr = _require_repr($phi_node, 'ElaboratedContext.Region.Phi')`
+# Trigger: manually add an explicit Phi node (undef-repr) as a consumer of Region.
+subtest 'undef-repr Phi at Region merge (lower_with_elaboration path) dies loudly (CG3)' => sub {
+    use Chalk::IR::Schedule::Dominators;
+    use Chalk::IR::Schedule::Elaborate;
+    use Chalk::IR::Node::Phi;
+
+    my $f = Chalk::IR::NodeFactory->new;
+
+    # Build minimal if/else: if ($cond) { ... } else { ... }; return Int constant
+    my $c_cond = $f->make('Constant', value => 1, const_type => 'integer');
+    $c_cond->set_representation('Int');
+    my $cmp = $f->make('Coerce', inputs => [$c_cond], from_repr => 'Int', to_repr => 'Bool');
+    $cmp->set_representation('Bool');
+
+    my $c1 = $f->make('Constant', value => 1, const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2 = $f->make('Constant', value => 2, const_type => 'integer');
+    $c2->set_representation('Int');
+
+    my $xn = $f->make('Constant', value => '$x', const_type => 'string');
+    $xn->set_representation('Str');
+    my $vx = $f->make('VarDecl', inputs => [$xn, $c1]);
+    $vx->set_representation('Int');
+
+    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $lhs1->set_representation('Int');
+    my $as1 = $f->make('Assign', inputs => [$lhs1, $c1]);
+    $as1->set_representation('Int');
+
+    my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $lhs2->set_representation('Int');
+    my $as2 = $f->make('Assign', inputs => [$lhs2, $c2]);
+    $as2->set_representation('Int');
+
+    my $if_node = $f->make('If',   inputs => [$vx, $cmp]);
+    my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
+    my $proj1   = $f->make('Proj', inputs => [$if_node], index => 1);
+    my $region  = $f->make('Region', inputs => [$proj0, $proj1]);
+    $if_node->set_region($region);
+    $as1->set_control_in($proj0);
+    $as2->set_control_in($proj1);
+
+    # Return a simple Int (not the $x variable) so the basic lowering works
+    my $c_ret = $f->make('Constant', value => 99, const_type => 'integer');
+    $c_ret->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$c_ret]);
+    $if_node->set_control_in($vx);
+    $ret->set_control_in($region);  # Region-as-control_in path
+
+    # Inject an explicit Phi node as a consumer of the Region.
+    # The Phi has two incoming values but NO representation set.
+    # This simulates a TypeInference gap where the Phi's output type is unknown.
+    my $phi = $f->make('Phi', region => $region, inputs => [$c1, $c2]);
+    # Intentionally do NOT call $phi->set_representation(...) — this is the gap.
+    # Add phi as a consumer of region to trigger _wire_region_phis_with_preblock.
+    $region->add_consumer($phi);
+
+    my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($ret);
+    my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($ret, $dom);
+
+    my ($ll, $err);
+    eval { $ll = Chalk::Target::LLVM->lower_with_elaboration($ret, $elab) };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'undef-repr Phi at Region merge: lower_with_elaboration dies loudly (CG3)')
+        or diag("Got no error — _require_repr guard may be missing at Region.Phi site;\n"
+                . ".ll:\n" . substr($ll // '', 0, 300));
+    if (defined $err && length $err) {
+        like($err, qr/representation|repr|GAP|Region.*Phi|Phi/i,
+            'Phi error message mentions representation or GAP (CG3)')
             or diag("error: $err");
     }
 };

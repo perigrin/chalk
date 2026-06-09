@@ -162,4 +162,78 @@ subtest 'GREEN .ll with SV/HV only inside string-constant payload must PASS guar
         or diag("false-positive fail_reasons: " . join('; ', @{$result->{fail_reasons}}));
 };
 
+# Test 4: CG2 (R1 reopened) — the strip must only blank the c"..." PAYLOAD substring,
+# NOT the whole line. A libperl symbol on a constant-definition line OUTSIDE the payload
+# (e.g. in the type annotation or global name) must still be caught after the strip.
+#
+# Before CG2 fix: `s/^[^\n]*\bconstant\b[^\n]*\bc"[^\n]*$//mg` blanks the ENTIRE line.
+# A libperl symbol that appears ONLY in the global name of a constant line (not in the
+# payload, and not in any other instruction) is silently swallowed.
+# After CG2 fix: only the c"..." payload is removed (`s/\bc"[^"]*"//mg`), so the global
+# name is preserved and the Perl_ prefix remains visible to the guard.
+subtest 'CG2: libperl global name on constant-only line caught after payload-only strip' => sub {
+    no warnings 'redefine';
+    local *Chalk::CodeGen::Harness::LLVMDriver::run = sub {
+        my ($class, $return_node, $opts) = @_;
+        my $L = Chalk::CodeGen::Harness::BehaviorRecord->new(
+            return_values     => ['Int:42'],
+            wantarray_context => 'scalar',
+            stdout            => '',
+            stderr            => '',
+            exception         => undef,
+            object_state      => {},
+        );
+        my $meta = {
+            emitted_for_every_construct => 1,
+            marked_unsupported          => 0,
+            # Construct a .ll where:
+            # - The constant definition line has "Perl_" in the GLOBAL NAME (not the payload)
+            # - NO GEP or other instruction references that global name
+            # Before CG2: whole line stripped -> Perl_ swallowed -> guard misses it.
+            # After CG2: only c"..." stripped -> Perl_ prefix in name preserved -> caught.
+            ll_text => join("\n",
+                # @Perl_named = ... constant ... c"harmless payload\00"
+                # The global name is a libperl reference. NOT referenced from @main or GEPs.
+                'define i32 @main() {',
+                'entry:',
+                '  ret i32 42',
+                '}',
+                # This line: Perl_ is in the GLOBAL NAME, not in the c"..." payload.
+                # Old strip: whole line removed -> Perl_ invisible.
+                # New strip: only c"harmless\00" removed -> @Perl_named still visible.
+                '@Perl_named = private unnamed_addr constant [8 x i8] c"harmless\00", align 1',
+                'declare i32 @printf(i8*, ...)',
+            ),
+            runtime_free_fraction => 1.0,
+            lli_exit              => 0,
+        };
+        return ($L, $meta);
+    };
+
+    my $case = {
+        title        => 'cg2-libperl-in-global-name-of-constant',
+        source       => 'do { 42 }',
+        behavior     => "return: Int:42\ncontext: scalar\n",
+        ir           => "%c = Constant(42) :Int\nreturn %c\nL: GREEN\n",
+        source_pos   => undef,
+        behavior_pos => undef,
+        ir_pos       => undef,
+        _perl_actual => 'Int:42',
+    };
+
+    my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
+
+    # After CG2: the case MUST FAIL (Perl_ in global name, only on constant line).
+    # Before CG2: the whole constant line is stripped -> Perl_ swallowed -> PASS (wrong).
+    isnt($result->{overall}, 'PASS',
+        'CG2: libperl global name on constant-only line must FAIL (payload-only strip preserves name)')
+        or diag("Guard swallowed Perl_ via whole-line strip; fail_reasons: "
+                . join('; ', @{$result->{fail_reasons} // []}));
+
+    my $has_libperl_reason = grep { /libperl/i } @{$result->{fail_reasons} // []};
+    ok($has_libperl_reason,
+        'CG2: fail_reasons mention libperl (name preserved after payload-only strip)')
+        or diag("fail_reasons: " . join('; ', @{$result->{fail_reasons} // []}));
+};
+
 done_testing();

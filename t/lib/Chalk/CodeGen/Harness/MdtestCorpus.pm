@@ -1179,9 +1179,12 @@ sub _run_l_verdict_check {
         # not a libperl reference.  Strip lines that match the LLVM string-constant
         # global pattern before grepping so those payloads cannot false-match.
         my $ll_text = $meta->{ll_text} // '';
-        # Remove string-constant global definition lines (the payload c"..." part).
-        # Pattern: optional-whitespace @<name> = ... constant [...] c"..."
-        (my $ll_stripped = $ll_text) =~ s/^[^\n]*\bconstant\b[^\n]*\bc"[^\n]*$//mg;
+        # Remove the c"..." payload substring from string-constant global definitions.
+        # CG2: strip ONLY the c"..." content (not the whole line) so a libperl symbol
+        # in the global name or type annotation outside the payload is still visible.
+        # Before: s/^[^\n]*\bconstant\b[^\n]*\bc"[^\n]*$//mg  (whole-line strip)
+        # After:  s/\bc"[^"]*"//mg  (payload-only strip — preserves name, type, annotations)
+        (my $ll_stripped = $ll_text) =~ s/\bc"[^"]*"//mg;
         if ($ll_stripped =~ /Perl_|\bSV\b|sv_|\bAV\b|\bHV\b|\bPL_|newSV|libperl/) {
             push @$fail_reasons,
                 "case '$case->{title}': GREEN .ll contains a libperl symbol "
