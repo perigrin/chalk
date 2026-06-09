@@ -1,19 +1,23 @@
 ---
 title: Move test-only Chalk::CodeGen::Harness::* from lib/ to t/lib/
-state: in-progress
+state: done
 urgency: normal
 milestone: codegen-harness
 created: 2026-06-09T02:59:02.410996641Z
-updated: 2026-06-09T02:59:44.25084379Z
+updated: 2026-06-09T02:59:44.285320396Z
 sessions:
 - start_sha: f4149ea4cdf412c343610792324cddc1e34ba8d7
-  end_sha: ""
+  end_sha: f4149ea4cdf412c343610792324cddc1e34ba8d7
   commits: 0
   started_at: 2026-06-09T02:59:44.25084379Z
+  ended_at: 2026-06-09T02:59:44.285320396Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
   timestamp: 2026-06-09T02:59:44.25084379Z
+- state: done
+  actor: human:git-zhi
+  timestamp: 2026-06-09T02:59:44.285320396Z
 ---
 
 -
