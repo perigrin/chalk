@@ -250,21 +250,21 @@ subtest 'method body _need_memcmp propagated to prologue' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# Test 3: method body using HashLiteral + HashRead (sets _need_memcmp)
+# Test 3: method body using HashRef + Subscript (sets _need_memcmp)
 # must emit `declare i32 @memcmp` in the .ll and lli must accept it.
 #
 # H1 (BLOCKER re-open): The post-class re-emission block (G.5) propagates
 # _need_bool_str_globals and _need_str_to_num_helper but NOT _need_memcmp.
 # The prologue reads _need_memcmp BEFORE method bodies lower (inside
-# _emit_class_registry_ir), so a method body doing HashRead (which calls
+# _emit_class_registry_ir), so a method body doing Subscript(Hash) (which calls
 # _lower_hash_read -> sets $self->{_need_memcmp} = 1) emits a @memcmp
 # call instruction with no `declare i32 @memcmp` -> lli rejects.
 # ---------------------------------------------------------------------------
 subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # Build: HashLiteral(a=>1) -> HashRead("a") :Int inside a method body.
-    # The HashRead lowering calls _lower_hash_read which sets _need_memcmp=1.
+    # Build: HashRef(a=>1) -> Subscript("a") :Int inside a method body.
+    # The Subscript(Hash) lowering calls _lower_hash_read which sets _need_memcmp=1.
     # When lowered inside a method body (fresh $body_ctx), _need_memcmp must
     # propagate to the outer $ctx so the post-class emission block can emit
     # the declare.
@@ -273,13 +273,13 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
     my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
     $v1->set_representation('Int');
 
-    my $hash = $f->make('HashLiteral', inputs => [$ka, $v1]);
-    $hash->set_representation('Hash');
+    my $hash = $f->make('HashRef', inputs => [$ka, $v1]);
+    $hash->set_representation('HashRef');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
     $lk->set_representation('Str');
 
-    my $val = $f->make('HashRead', inputs => [$hash, $lk]);
+    my $val = $f->make('Subscript', inputs => [$hash, $lk]);
     $val->set_representation('Int');
 
     # Wrap in a class method body — the outer Return is Int.

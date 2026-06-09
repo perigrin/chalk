@@ -152,13 +152,13 @@ use Chalk::IR::Graph::TypedInvariant;
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
     $c1->set_representation('Int');
-    my $arr = $f->make('ArrayLiteral', inputs => [$c1]);
-    $arr->set_representation('Array');
+    my $arr = $f->make('ArrayRef', inputs => [$c1]);
+    $arr->set_representation('ArrayRef');
     my $len = $f->make('Length', inputs => [$arr]);
     $len->set_representation('Int');
 
     my $result = Chalk::IR::Graph::TypedInvariant->check([$c1, $arr, $len]);
-    ok($result->{ok}, 'H2-8 bilateral: Length(Array)->Int passes the invariant');
+    ok($result->{ok}, 'H2-8 bilateral: Length(ArrayRef)->Int passes the invariant');
     is(scalar @{ $result->{violations} }, 0, 'H2-8: no violations for well-typed Length');
 }
 
@@ -183,16 +183,16 @@ use Chalk::IR::Graph::TypedInvariant;
 {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $arr = $f->make('ArrayLiteral', inputs => []);
-    $arr->set_representation('Array');
+    my $arr = $f->make('ArrayRef', inputs => []);
+    $arr->set_representation('ArrayRef');
     my $idx = $f->make('Constant', value => '0', const_type => 'integer');
     $idx->set_representation('Int');
     my $sub = $f->make('Subscript', inputs => [$arr, $idx]);
     $sub->set_representation('Int');
 
     my $result = Chalk::IR::Graph::TypedInvariant->check([$arr, $idx, $sub]);
-    ok($result->{ok}, 'H2-10 bilateral: Subscript(Array, Int) passes the invariant');
-    is(scalar @{ $result->{violations} }, 0, 'H2-10: no violations for Subscript(Array,Int)');
+    ok($result->{ok}, 'H2-10 bilateral: Subscript(ArrayRef, Int) passes the invariant');
+    is(scalar @{ $result->{violations} }, 0, 'H2-10: no violations for Subscript(ArrayRef,Int)');
 }
 
 # H2-11 (Phase 1.1, bilateral): Subscript(Int, Int) FAILS — container must be Array or Hash.
@@ -216,7 +216,7 @@ use Chalk::IR::Graph::TypedInvariant;
 {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $ref = $f->make('MakeArrayRef', inputs => []);
+    my $ref = $f->make('ArrayRef', inputs => []);
     $ref->set_representation('ArrayRef');
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '@');
     $deref->set_representation('Array');
