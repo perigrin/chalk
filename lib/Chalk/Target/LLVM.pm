@@ -510,9 +510,21 @@ sub _emit_class_registry_ir {
             push @lines, '}';
             push @lines, '';
 
-            # Propagate malloc/strpair needs up to the main ctx.
-            $ctx->{_need_malloc_memcpy} = 1 if $body_ctx->{_need_malloc_memcpy};
-            $ctx->{_need_strpair}       = 1 if $body_ctx->{_need_strpair};
+            # Propagate ALL _need_* flags from the method body context up to the main ctx.
+            # The prologue is assembled before method bodies are lowered; it reads these
+            # flags from $ctx to decide which helpers/declarations to emit.  Any flag set
+            # only on $body_ctx would be invisible to the prologue, producing .ll that
+            # references undeclared globals/helpers (F6 bug).
+            for my $flag (qw(
+                _need_malloc_memcpy
+                _need_strpair
+                _need_bool_str_globals
+                _need_str_to_num_helper
+                _need_memcmp
+                _need_aggregate_types
+            )) {
+                $ctx->{$flag} = 1 if $body_ctx->{$flag};
+            }
 
             # Emit string constant globals from the method body INLINE (before the define).
             # They cannot go in the main prologue (already emitted); place them here in
@@ -694,10 +706,12 @@ sub lower_with_elaboration {
     # When body lowering set _need_bool_str_globals (Coerce(Bool->Str) used
     # internally in a non-Str-return graph), emit those globals now. They are
     # always emitted for a Str result repr (above); this branch handles the
-    # case where the return is not Str but the body contains a Coerce(Bool->Str).
+    # case where the return is not Str but the body contains a Coerce(Bool->Str)
+    # in the MAIN graph (not a method body — method bodies are handled post-class).
     if ($ctx->{_need_bool_str_globals} && $result_repr ne 'Str') {
         push @lines, '@coerce_bool_str_true  = private unnamed_addr constant [2 x i8] c"1\00", align 1';
         push @lines, '@coerce_bool_str_false = private unnamed_addr constant [1 x i8] c"\00",   align 1';
+        $ctx->{_bool_str_globals_emitted} = 1;
     }
 
     push @lines, '';
@@ -757,16 +771,54 @@ sub lower_with_elaboration {
         # @chalk_str_to_num(i8* %ptr, i64 %len) -> double
         # Implements perl's leading-numeric rule (decimal only; "0x..." -> 0.0).
         push @lines, _emit_str_to_num_helper();
+        $ctx->{_str_to_num_helper_emitted} = 1;
     }
 
     # Emit class-related IR: type declarations, vtable globals, class-name constants,
     # strlen declaration (for Str field reads), and method body functions.
     # Classes always require %Slot (aggregate types) and malloc.
+    #
+    # IMPORTANT: method body lowering (inside _emit_class_registry_ir) may set
+    # additional _need_* flags on $ctx via the propagation in that function.
+    # Those flags are checked AGAIN below (post-class emission) to emit any
+    # helpers/declarations that method bodies needed but the prologue did not emit
+    # (because the prologue runs before method bodies are lowered — F6 fix).
     if (defined $class_registry && %$class_registry) {
         push @lines, '';
         push @lines, 'declare i64 @strlen(i8* nocapture readonly)';
         my @class_lines = _emit_class_registry_ir($class_registry, $ctx);
         push @lines, @class_lines;
+    }
+
+    # Post-class emission: emit any helpers/declarations that method bodies
+    # flagged via _need_* propagation but that the pre-class prologue did not emit.
+    # Each check is guarded by "was it already emitted?" (only applicable for
+    # _need_bool_str_globals when result_repr ne Str, and _need_str_to_num_helper).
+    if ($ctx->{_need_bool_str_globals} && $result_repr ne 'Str') {
+        # Only emit if the Str-prologue path (which always includes these globals)
+        # did NOT already emit them. The Str-prologue emits them unconditionally
+        # when result_repr eq 'Str'; for all other reprs, we must emit here if needed.
+        # To avoid duplicate definitions, we track whether they were already emitted.
+        # The prologue emits them only when result_repr eq 'Str' (lines ~668-669) or
+        # when _need_bool_str_globals was already set on $ctx before class-lowering.
+        # Since we only reach here when result_repr ne 'Str', the prologue cannot have
+        # emitted them (it checks `$result_repr ne 'Str'` too), so we need to emit now
+        # IF the flag was newly set by method-body propagation (not by the main graph).
+        # Guard: if the prologue already emitted them (result_repr ne Str path at line 710),
+        # they'll be duplicated. We use $ctx->{_bool_str_globals_emitted} to track this.
+        unless ($ctx->{_bool_str_globals_emitted}) {
+            push @lines, '';
+            push @lines, '@coerce_bool_str_true  = private unnamed_addr constant [2 x i8] c"1\00", align 1';
+            push @lines, '@coerce_bool_str_false = private unnamed_addr constant [1 x i8] c"\00",   align 1';
+            $ctx->{_bool_str_globals_emitted} = 1;
+        }
+    }
+    if ($ctx->{_need_str_to_num_helper} && !$ctx->{_str_to_num_helper_emitted}) {
+        push @lines, '';
+        push @lines, 'declare double @strtod(i8* nocapture readonly, i8** nocapture)';
+        push @lines, '';
+        push @lines, _emit_str_to_num_helper();
+        $ctx->{_str_to_num_helper_emitted} = 1;
     }
 
     push @lines, '';
