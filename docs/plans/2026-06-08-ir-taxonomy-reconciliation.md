@@ -1,7 +1,7 @@
 # Target-Layer Reconciliation: single IR vocabulary + a common `Chalk::Target` home
 
 **Date:** 2026-06-08 (revised 2026-06-09 to fold in the full architecture review)
-**Status:** PLAN — NEEDS REVISION before execution (plan-review 2026-06-09 found 5 Critical + 8 Important holes; see paad/architecture-reviews/2026-06-09-reconciliation-plan-review.md). Direction sound; sequencing/decomposition/specs need fixing.
+**Status:** PLAN — REVISED 2026-06-09 to address the plan-review's 5 Critical + 8 Important holes (`paad/architecture-reviews/2026-06-09-reconciliation-plan-review.md`); awaiting perigrin's re-review. Fixes: C1 GREEN-invariant corrected for Phase G; C2 F8 = loud-die (verified it does NOT dissolve); C3 MOP-before-dispatch (Phases 4↔5 entangled, stated); C4 MOP phase decomposed 4.0–4.5; C5 TypedInvariant moved per-phase; I1/I2 ir-block syntaxes specified; I3 G.4 resolved; I4 nested-ref resolved; I6 G.0 baseline; I7 optimizer shape-oracle risk; I5 F10 filed in G.0.
 **Author:** drafted from two alignment audits (aggregate-nodes + MOP-nodes), then
 revised against the 5-specialist + verifier architecture review
 (`paad/architecture-reviews/2026-06-08-target-ir-layer-review.md`), run against
@@ -41,10 +41,10 @@ no current corpus case is actively miscompiled, but all real). They split into
 | **F11** | No parser→graph→LLVM equivalence test; the corpus is the SOLE producer of the parallel tier — convergence finally wires canonical nodes to LLVM, the moment the divergence could ship silently. | Med (gate) | **Phase G** (acceptance gate) |
 | **F6** | Method-body `_need_*` flags (`_need_bool_str_globals`/`_need_str_to_num_helper`/`_need_memcmp`) set on the distinct `$body_ctx` are not propagated → undeclared-global IR. Same silent-stub class as the already-fixed Coerce(Bool→Str), one scope deeper. | High (codegen) | **Phase G** (fix now; it is a live emitter bug regardless of convergence) |
 | **F7** | `representation // 'Int'` (~19 sites) silently lowers an undef-repr node as i64 before the Scalar-GAP `die` runs; `_lower_constant` emits `add i64 0,$val`. Defense-in-depth weakness. | Med (codegen) | **Phase G** (replace `// 'Int'` with an explicit "missing-repr → loud GAP") |
-| **F8** | `_lower_and`/`_lower_or` hardcode `icmp ne i64`; `_lower_not`/`_ensure_i1` do `*→Bool` truthiness INLINE — a §2 "coercion is a visible node" violation AND a latent miscompile for a Bool/Num operand. Two impls of `*→Bool` (inline vs the `_lower_coerce` node). | Med (codegen) | **Dissolves in Phase 1+** if truthiness routes through an explicit `Coerce(*→Bool)` node; otherwise fix in Phase G. Decide during execution. |
-| **F9** | `FieldWrite`/`FieldAccess` meaning depends on ambient `_in_method_body` state; FieldWrite dropped `field_stash`; 3 `_lower_field_write*` variants. | Med (codegen) | **Dissolves in Phase 3.2** (field store → `Assign(FieldAccess-lvalue)` carrying field_stash; ambient mode-flags removed). |
+| **F8** | `_lower_and`/`_lower_or` hardcode `icmp ne i64`; `_lower_not`/`_ensure_i1` do `*→Bool` truthiness INLINE — a §2 "coercion is a visible node" violation AND a latent miscompile for a Bool/Num operand. | Med (codegen) | **Phase G.7 — DOES NOT dissolve (C2, verified: And/Or/Not are canonical nodes the convergence never touches).** Fix = loud-die on non-Int operand (keeps L1/L2 green, no corpus change). The §2-purity route-through-Coerce is a tracked follow-up. |
+| **F9** | `FieldWrite`/`FieldAccess` meaning depends on ambient `_in_method_body` state; FieldWrite dropped `field_stash`; 3 `_lower_field_write*` variants. | Med (codegen) | **Dissolves in Phase 4.4** (field store → `Assign(FieldAccess-lvalue)` carrying field_stash; ambient mode-flags removed). |
 | **F2-iface** | The two target families have DIVERGENT interfaces — `Bootstrap::Target` defines `generate($ir)`; `IR::Target::LLVM` exposes `lower($return_node)` and does NOT inherit the base. | Med (namespace) | **Namespace section** — reconcile when `Chalk::Target` becomes the base. |
-| **F10** | `LLVM.pm`'s 2831-line `Context` package bundles 4 separable responsibilities; `_process_if_node`/`_wire_region_phis` are duplicated (copy-paste-with-divergence) between `Context` and `ElaboratedContext`. | Med (cohesion) | **Tracked SEPARATELY** — pre-existing control-processor duplication, orthogonal to G4/G5; a follow-up cleanup, not part of this convergence. |
+| **F10** | `LLVM.pm`'s 2831-line `Context` package bundles 4 separable responsibilities; `_process_if_node`/`_wire_region_phis` are duplicated (copy-paste-with-divergence) between `Context` and `ElaboratedContext`. | Med (cohesion) | **FILED as a separate issue in G.0 (I5)** — pre-existing control-processor duplication, orthogonal to G4/G5; the issue number/ref is recorded in G.0's note so the deferral is labeled, not drift (CLAUDE.md). Not done in this convergence. |
 
 **Strengths to protect (do not regress):** repr-out-of-content_hash discipline;
 Coerce as a hash-distinct explicit-on-edge node; acyclic Target→IR→MOP with no
@@ -143,128 +143,196 @@ Any node we choose to KEEP as genuinely-new MUST be added to
 
 ## Execution plan (TDD, bite-sized, dependency-ordered)
 
-**Invariant for the whole refactor:** the G4/G5 corpus cases (references.md R1–R11,
-classes.md 7 cases) MUST stay GREEN (lli==perl, libperl-free) at every step — they
-are the behavioral contract. The refactor changes the IR the corpus ir-blocks
-construct + how LLVM lowers them; the *observable* behavior must not change. Because
-the corpus ir-blocks ARE the parser's spec, rewriting them onto canonical nodes is
-part of the deliverable (it makes the spec honest).
+> **REVISED 2026-06-09** to fix the plan-review's 5 Critical + 8 Important holes
+> (`paad/architecture-reviews/2026-06-09-reconciliation-plan-review.md`). Key changes:
+> the GREEN invariant is corrected for Phase G (C1); F8 is an explicit loud-die fix
+> (C2); old Phase 4 (Call dispatch) now FOLLOWS old Phase 5 (MOP structure) and they
+> form one entangled set (C3); the MOP phase is decomposed (C4); TypedInvariant
+> moves per-phase (C5); the missing ir-block syntaxes are specified (I1, I2); the
+> nested-ref fold (I4) and G.4 ambiguity (I3) are resolved.
 
-Order: **Phase G (gate hardening) FIRST** — the gate must be trustworthy before
-the node-convergence relies on it (the convergence is precisely what wires the
-canonical tier to LLVM, the moment F11's divergence and F3's laundering could ship
-silently). Then the node phases (each: rewrite corpus ir-blocks → teach LLVM to
-lower the canonical node → delete the parallel node → full corpus+ir sweep GREEN →
-commit).
+**Invariant — corrected (C1):**
+- **Node-convergence phases (0–6):** the corpus cases MUST stay GREEN (lli==perl,
+  libperl-free) at every step — the *observable* behavior must not change; only the
+  IR shape + lowering does.
+- **Phase G (gate hardening):** the GREEN set may legitimately SHRINK. Phase G EXISTS
+  to make the gate fail things the lax gate wrongly passed. **Any case Phase G
+  newly-fails is a real latent bug Phase G EXPOSED — NOT a regression.** Each such
+  case is triaged: fix the underlying emitter bug, or correct an actually-wrong corpus
+  ir-block. A smaller-but-honest GREEN set after Phase G is the intended outcome.
 
-### Phase G — Gate hardening (do FIRST; the review's strongest recommendation)
-The campaign's gate is the thing that certifies "lli==perl, libperl-free, GAP-not-
-MISCOMPILE." The review found it has silent-escape hatches. Harden it BEFORE the
-convergence depends on it. Each sub-step is TDD (write a test that the CURRENT gate
-wrongly passes / fails to catch, then fix the gate so it catches it).
+Order: **Phase G first** (trustworthy gate before the convergence relies on it), then
+Phase 0, then the node phases. Within the node phases, **MOP structure precedes method
+dispatch** (C3): the old "Phase 4 (Call dispatch)" now comes AFTER the MOP phase,
+because `Call(dispatch_kind='method').target` is a `MOP::Method` that the MOP phase
+introduces.
 
-G.1 (F3) Unify the GAP-vs-MISCOMPILE classification across harnesses. `LLVMDriver`
-+ `MdtestCorpus` must distinguish lower-error (legitimate GAP) from lli-rejected-IR
-(MISCOMPILE) from output-mismatch (MISCOMPILE) — a successfully-lowered `.ll` that
-lli rejects is a MISCOMPILE, NEVER a GAP. Align `MdtestCorpus`'s classification with
-`LLVMGapMap`'s (`lli_exit!=0 → MISCOMPILE`), and make the corpus gate EMIT the
-MISCOMPILE label. RED: a fixture that lowers but emits malformed IR must be
-classified MISCOMPILE (today the corpus gate would call it GAP/PASS). Commit.
+### Phase G — Gate hardening (FIRST)
+The gate certifies "lli==perl, libperl-free, GAP-not-MISCOMPILE." The review found
+silent-escape hatches. Harden it BEFORE the convergence depends on it. Each sub-step
+is TDD. **Note (C5):** the TypedInvariant *extension* is NOT here — it is per-phase
+(each node phase adds the invariant for its canonical op). Phase G keeps only the
+gate-MECHANISM fixes that are independent of the final op set.
 
-G.2 (F4) Central mechanical libperl-free guard. Add ONE guard in the harness
-(LLVMDriver/MdtestCorpus) that greps every GREEN `.ll` for `Perl_|\bSV\b|sv_|\bAV\b|
-\bHV\b|\bPL_|newSV|libperl` and FAILS the GREEN on any hit — replacing the absent /
-inconsistent per-`.t` `unlike()` calls. RED: a fixture whose `.ll` contains a libperl
-symbol must FAIL its GREEN verdict (today increment/regex/variables/classes/subs
-GREENs would pass it uncaught). Commit.
+G.0 BASELINE (I6): before any change, run the FULL suite
+(`$P -Ilib -It/lib t/bootstrap/**/*.t` + the corpus) and RECORD the failing set
+(the known pre-existing failures: codegen-byte-compat{,-schedule}.t,
+class-scope-vars.t — and anything else). This baseline is what "no NEW regression"
+is measured against; without it, a Phase-G-exposed failure can't be told from a
+pre-existing one. Commit the baseline as a note in the plan/PR.
 
-G.3 (F5) Extend `TypedInvariant` `%OP_REQUIRED_REPR` to the G3–G5 ops: Concat→Str (has
-it), the array/hash ops (container operand must be Array/Hash repr; index Int; key
-Str), method dispatch (invocant must be Object repr), comparisons/logical (operand
-reps), so a mistyped operand is caught at the typed-graph layer, not at a backend
-bitcast. Add bilateral `well-typed-graph.t` cases per the bilateral-coverage rule.
-RED: a hand-authored graph passing an Int where %Array is required must FAIL
-TypedInvariant (today it passes). Commit.
+G.1 (F3) Unify GAP-vs-MISCOMPILE across harnesses (HARNESS-side only, S3/M1): a
+successfully-lowered `.ll` that lli REJECTS is a MISCOMPILE, NEVER a GAP. Align
+`MdtestCorpus`'s classification with `LLVMGapMap`'s (`lli_exit!=0 → MISCOMPILE`) and
+make the corpus gate EMIT the MISCOMPILE label. RED: a fixture that lowers but emits
+malformed IR is classified MISCOMPILE (today: GAP/PASS). All fixes land in `t/lib`,
+NOT in `LLVM.pm`. Commit.
 
-G.4 (F11) Parser→graph→LLVM equivalence GATE. This is the ACCEPTANCE CRITERION for
-the whole convergence, not a one-off: once LLVM lowers the canonical nodes, add a
-test that a graph in canonical-node shape (as the parser would emit) lowers and
-matches perl — so the corpus spec and a future parser cannot diverge silently. (If
-the parser can't yet emit a given idiom, the canonical-shape hand-authored graph is
-the stand-in, but it MUST be canonical-node-shaped, not parallel-tier.) This gate is
-satisfied incrementally as each node phase converts its corpus to canonical nodes.
+G.2 (F4) ONE central mechanical libperl-free guard in the harness: grep every GREEN
+`.ll` for `Perl_|\bSV\b|sv_|\bAV\b|\bHV\b|\bPL_|newSV|libperl`, FAIL the GREEN on any
+hit. Replaces the absent/inconsistent per-`.t` `unlike()` calls. RED: a fixture whose
+`.ll` contains a libperl symbol FAILS its GREEN. **Expect (C1): this may newly-fail
+currently-GREEN cases** (classes.t etc. have no guard today) — triage each as a real
+leak to fix or a clean case. Commit.
 
-G.5 (F6) Fix the method-body `_need_*` flag propagation NOW (a live emitter bug): the
-prologue must see the flags set during method-body lowering (propagate ALL `_need_*`
-from `$body_ctx` to `$ctx`, or lower bodies before assembling the prologue). RED: a
-method body doing `Coerce(Bool->Str)` or a hash-key compare must NOT emit
-undeclared-global IR (today it does → lli rejects → F3 would mis-file it as GAP).
-Commit. (This is independent of the convergence; it is wrong today.)
+G.5 (F6) Fix the method-body `_need_*` flag propagation (a LIVE emitter bug,
+independent of convergence): propagate ALL `_need_*` from `$body_ctx` to `$ctx` (or
+lower bodies before assembling the prologue). RED: a method body doing
+`Coerce(Bool->Str)` / hash-key compare must NOT emit undeclared-global IR. Commit.
 
-G.6 (F7) Replace `representation // 'Int'` defaulting with an explicit missing-repr
+G.6 (F7) Replace `representation // 'Int'` (~19 sites) with an explicit missing-repr
 policy: an undef-repr node reaching lowering is a loud GAP/die ("node X has no
-representation"), NOT a silent i64. RED: an undef-repr Constant must GAP, not emit
-`add i64 0,$val`. (Coordinate with `_ensure_i1`'s existing undef-repr die, which is
-already correct — make the rest consistent.) Commit.
+representation"), NOT a silent i64. RED: an undef-repr Constant GAPs, not
+`add i64 0,$val`. (Make the rest consistent with `_ensure_i1`'s already-correct
+undef-repr die.) Commit.
 
-G.7 (F8) Decide the `*→Bool` truthiness duplication: route `_lower_and`/`_lower_or`/
-`_lower_not` through the explicit `Coerce(*→Bool)` node path (the on-graph impl in
-`_lower_coerce`) instead of the inline hardcoded `icmp ne i64`. This removes the §2
-violation AND the latent Bool/Num-operand miscompile. (May naturally fold into Phase
-1 if logical ops get repr-dispatched lowering then; decide during execution. If
-deferred, leave the inline path with a loud die on non-Int operands rather than a
-silent i64 reinterpret.) Commit.
+G.7 (F8) Fix the `*→Bool` truthiness inline-hardcoding. **DECIDED (C2): loud-die, NOT
+route-through-Coerce.** `_lower_and`/`_lower_or`/`_lower_not`/`_ensure_i1` keep the
+`icmp ne i64` path for Int operands but DIE LOUDLY on a non-Int operand
+("`&&`/`||`/`!` operand has repr X; only Int truthiness is lowered runtime-free —
+GAP") instead of silently reinterpreting it as i64. This removes the latent Bool/Num
+miscompile and keeps L1/L2 (Int operands) GREEN with NO corpus change. RED: an
+`And(Bool, Bool)` graph GAPs loudly, not a silent i64 misread. (The §2-purity fix —
+routing truthiness through an explicit `Coerce(*→Bool)` node, which would require
+adding Coerce edges to the logical.md ir-blocks — is a TRACKED FOLLOW-UP, filed in
+G.0's note, NOT done here.) Commit.
 
-After Phase G the gate reliably distinguishes GAP/MISCOMPILE, enforces libperl-free
-+ operand-rep + equivalence, and the two live emitter bugs (F6, F7) are gone. NOW the
-node convergence can proceed on a trustworthy gate.
+> Removed from Phase G: the old G.3 (TypedInvariant extension) → now per-phase (C5).
+> The old G.4 (parser-equivalence) is resolved as I3 below, not a Phase-G step.
 
-### Phase 0 — the trivial win (de-risks the convergence; do right after Phase G)
-0.1 Fold `ScalarLen` → `Length`: rewrite R1's ir-block to use `Length` (repr Array);
-add a repr-aware arm to LLVM for `Length`; delete `ScalarLen.pm` + its NodeFactory
-entry + its LLVM arm. Sweep. Commit.
+After Phase G the gate distinguishes GAP/MISCOMPILE, mechanically enforces
+libperl-free, the two live emitter bugs (F6/F7) are gone, and `*→Bool` fails loud
+instead of silent. The GREEN set is now smaller-but-honest. NOW the convergence
+proceeds on a trustworthy gate.
+
+### ir-block syntax specifications (resolve BEFORE the phases that need them)
+
+**I1 — lvalue store ir-block syntax (needed by Phase 3).** `build_graph_from_ir`
+(`MdtestCorpus.pm` `_build_node_from_rhs`) has no lvalue-store form today. Specify:
+an element/field store is `%r = Assign(%lvalue, %val)` where `%lvalue` is a
+`Subscript`/`FieldAccess` node used in lvalue position. The builder's general N-ary
+path already constructs `Assign(inputs => [%lvalue, %val])`; the LLVM `_lower_assign`
+must detect when `inputs[0]->operation` is `Subscript`/`FieldAccess` and emit a STORE
+(vs the scalar-rebind it does today). Add the builder support + this lowering branch
+as the FIRST commit of Phase 3, with a RED test, before rewriting any corpus block.
+
+**I2 — ClassInfo-as-input ir-block syntax (needed by the MOP phase).** Specify how a
+class rides into a graph: `%ci = ClassInfo(name: "Pair", parent: "", fields: [...],
+methods: [...])` is NOT expressible in the flat `key:value` grammar. RESOLUTION: the
+builder gains a `ClassInfo(...)`/`MethodInfo(...)` constructor recognizer (like the
+existing `Coerce`/`Constant`/`New` special-cases in `_build_node_from_rhs`) that
+builds the immutable `Chalk::IR::ClassInfo`/`MethodInfo` object from named attrs +
+`%ref` sub-lists, and consumers reference it via `%ci`. This reuses the existing
+immutable classes (which have `id()`/`add_consumer`) WITHOUT wiring the stalled MOP
+migration internals. Build + test this builder support as the FIRST commit of the
+MOP phase, before rewriting any classes.md block.
+
+**I3 (G.4 resolved) — the parser-equivalence "gate" is the corpus-rewrite itself.**
+There is no separate parser→LLVM test in this work (the parser does not emit these
+idioms yet — out of scope). The acceptance is: after the convergence, the corpus
+ir-blocks use ONLY canonical nodes, so "the spec the parser must emit" and "what LLVM
+lowers" are the SAME canonical vocabulary by construction. A TRUE
+`Actions.pm → NodeFactory → LLVM → lli` equivalence test is a FUTURE gate, filed as a
+follow-up (in G.0's note), to land when the parser is wired to LLVM (G6/G7-era).
+
+**I4 (nested-ref fold) — RESOLVED before Phase 2.** R8 nests refs (`ArrayRef`-typed
+slots holding inner arrayrefs). Decision: keep ONE canonical `ArrayRef` that ALWAYS
+produces a ref-to-array; its element inputs may themselves be `ArrayRef`s (a ref of
+refs — exactly R8). The unboxed `%Array` value is purely an emitter temp the
+`_lower_array_ref` arm materializes then references; it is NEVER a separate IR node.
+So `ArrayRef(%inner_ref0, %inner_ref1)` = "build an array whose two elements are the
+two inner refs, return a ref to it." No ambiguity: construct-then-ref composes
+because elements are just values (refs are values). Confirmed; Phase 2 proceeds on
+this.
+
+### Phase 0 — the trivial win (right after Phase G)
+0.1 Fold `ScalarLen` → `Length`: rewrite R1's ir-block to `Length` (repr Array); add a
+repr-aware arm to LLVM for `Length` (array-count vs str-length by repr); EXTEND
+`TypedInvariant` for `Length` (operand must be Array or Str) + a bilateral
+well-typed-graph.t case (C5); delete `ScalarLen.pm` + its NodeFactory entry + LLVM
+arm. Sweep. Commit. (The narrow `Chalk::Target::LLVM` namespace move already landed
+BEFORE Phase G per I8 — see the namespace section — so Phase 0's and Phase G's tests
+are written against the final name.)
 
 ### Phase 1 — aggregate reads/derefs onto canonical nodes
 1.1 `Subscript` lowering: teach LLVM to lower `Subscript` (inputs[0]=container,
-inputs[1]=index/key), branching on the container's repr (Array → bounds-checked slot
-load; Hash → memcmp key scan), reusing the existing `_lower_array_read`/
-`_lower_hash_read` bodies. Rewrite R2/R3/R5 ir-blocks to `Subscript`. Delete
+inputs[1]=index/key), repr-dispatched on the container (Array → bounds-checked slot
+load; Hash → memcmp key scan), reusing the `_lower_array_read`/`_lower_hash_read`
+bodies. EXTEND `TypedInvariant`: `Subscript` container ∈ {Array,Hash}, index Int /
+key Str (C5) + bilateral cases. Rewrite R2/R3/R5 ir-blocks to `Subscript`. Delete
 `ArrayRead`/`HashRead`. Sweep. Commit.
-1.2 `PostfixDeref` lowering: teach LLVM to lower `PostfixDeref` by `sigil`
-(`@`→array, `%`→hash) reusing the deref bitcast bodies. Rewrite R4/R5/R8. Delete
-`ArrayDeref`/`HashDeref`. Sweep. Commit.
+1.2 `PostfixDeref` lowering: teach LLVM to lower `PostfixDeref` by `sigil` (`@`→array,
+`%`→hash) reusing the deref bitcast bodies. EXTEND TypedInvariant for PostfixDeref.
+Rewrite R4/R5/R8. Delete `ArrayDeref`/`HashDeref`. Sweep. Commit.
 
 ### Phase 2 — aggregate construction onto ArrayRef/HashRef
 2.1 Fold `ArrayLiteral`/`MakeArrayRef` → `ArrayRef`; `HashLiteral`/`MakeHashRef` →
-`HashRef`. Decide the value-vs-ref representation (recommend: `ArrayRef`/`HashRef`
-produce the ref; the unboxed `%Array`/`%Hash` is an emitter temp). Teach LLVM to
-lower `ArrayRef`/`HashRef`. Rewrite R1/R4/R5 ir-blocks. Delete the 4 parallel
-construct nodes. Sweep. Commit.
+`HashRef` per the I4 resolution (one canonical ref-producing constructor; unboxed
+`%Array`/`%Hash` is an emitter temp). Teach LLVM to lower `ArrayRef`/`HashRef`; EXTEND
+TypedInvariant (elements + the resulting ArrayRef/HashRef repr). Rewrite R1/R4/R5
+ir-blocks. Delete the 4 parallel construct nodes. Sweep. Commit.
 
-### Phase 3 — element/field stores onto Assign-over-lvalue
-3.1 Element store: rewrite R6/R7 ir-blocks to `Assign(Subscript-lvalue, value)`;
-teach LLVM to lower an `Assign` whose lhs is a `Subscript` (element store). Delete
+### Phase 3 — element stores onto Assign-over-lvalue (uses the I1 syntax)
+3.0 Add the lvalue-store builder support + `_lower_assign` Subscript-lvalue branch
+(I1), with a RED test, BEFORE rewriting any block. Commit.
+3.1 Element store: rewrite R6/R7 ir-blocks to `Assign(Subscript-lvalue, value)`; the
+LLVM `_lower_assign` element-store path (from 3.0). EXTEND TypedInvariant. Delete
 `ArrayWrite`/`HashWrite`. Sweep. Commit.
-3.2 Field store: rewrite classes.md method-call/adjust ir-blocks to
-`Assign(FieldAccess-lvalue, value)` (FieldAccess carries field_index + field_stash);
-teach LLVM to lower it. Delete `FieldWrite`. Sweep. Commit.
+(Field store moves to the MOP phase, since it shares the classes.md blocks — see C3.)
 
-### Phase 4 — method dispatch & construction onto Call
-4.1 Method dispatch: teach LLVM to lower `Call(dispatch_kind='method')` via the
-vtable slot, resolving the callee from `Call.target` (MOP::Method) or a class
-registry. Rewrite classes.md method-simple/field-basic/field-attrs/class-isa
-ir-blocks to use `Call(dispatch_kind='method')`. Delete `MethodCall`. Sweep. Commit.
-4.2 Construction: rewrite `Empty->new` etc. to `Call(dispatch_kind='method',
-name='new')`; move the malloc/vtable/:param/ADJUST lowering under the new-Call arm.
-Delete `New`. Sweep. Commit.
+### Phase 4 — MOP structure (was Phase 5; now BEFORE dispatch, per C3) — DECOMPOSED (C4)
+This phase replaces the `ClassDecl`/`MethodDef`/`FieldDef`/`AdjustBlock` node subtree
+with the MOP/`ClassInfo` layer the LLVM backend consumes — decomposed so each step
+keeps the 7 classes.md cases GREEN independently.
+4.0 (I2) Add the `ClassInfo`/`MethodInfo`-as-input builder support; teach LLVM to
+CONSUME a `ClassInfo` to build the per-class vtable + object struct + ADJUST order —
+WITHOUT yet deleting any parallel node (both paths coexist). RED/GREEN: a graph
+carrying class via `ClassInfo` lowers identically to the `ClassDecl`-subtree version.
+Commit.
+4.1 Replace `ClassDecl` → `ClassInfo` in all 7 ir-blocks (the class anchor); delete
+`ClassDecl`. Sweep. Commit.
+4.2 Replace `MethodDef` → `MethodInfo` (method bodies via the MOP); delete `MethodDef`.
+Sweep. Commit.
+4.3 Replace `FieldDef` → `MOP::Field`; field READ stays `FieldAccess`
+(field_index+field_stash); delete `FieldDef`. Sweep. Commit.
+4.4 Field STORE → `Assign(FieldAccess-lvalue, value)` (carries field_index +
+field_stash; F9 dissolves — the `_in_method_body` ambient operand-reinterpret is
+removed); EXTEND TypedInvariant; delete `FieldWrite`. Sweep. Commit.
+4.5 Replace `AdjustBlock` → `MOP::Phaser::Adjust`; delete `AdjustBlock`. Sweep. Commit.
 
-### Phase 5 — class structure onto the MOP/ClassInfo layer
-5.1 Replace the `ClassDecl`/`MethodDef`/`FieldDef`/`AdjustBlock` node subtree with
-`MOP::Class`/`ClassInfo` (+ `MethodInfo`, `MOP::Field`, `MOP::Phaser::Adjust`) that
-the LLVM backend consumes to build the per-class vtable + object struct + ADJUST
-order. Rewrite all 7 classes.md ir-blocks to carry the class via the MOP/ClassInfo
-metadata (the `%ref`-input mechanism), not the node subtree. Delete the 4 structural
-nodes. Sweep. Commit. (Largest phase; aligns with the codegen-reads-MOP migration.)
+### Phase 5 — method dispatch & construction onto Call (was Phase 4; now AFTER the MOP, per C3)
+Now that the MOP structure exists (Phase 4), method dispatch can resolve from it.
+5.1 Method dispatch: teach LLVM to lower `Call(dispatch_kind='method')` via the vtable
+slot, resolving the callee from `Call.target` (a `MOP::Method`, now available from the
+ClassInfo) or the class registry; EXTEND TypedInvariant (invocant repr = Object) +
+bilateral cases. Rewrite the method-call ir-blocks to `Call(dispatch_kind='method')`.
+Delete `MethodCall`. Sweep. Commit.
+5.2 Construction: rewrite `Empty->new` to `Call(dispatch_kind='method', name='new')`;
+move the malloc/vtable/:param/ADJUST lowering under the new-Call arm. Delete `New`.
+Sweep. Commit.
+(Phases 4+5 land as one entangled SET — a failure in 5 may require reverting parts of
+4; they are NOT independently revertible from each other, though each is from the
+earlier phases. Stated explicitly per C3.)
 
 ### Phase 6 — documentation (mandatory, same change-set)
 6.1 Update `docs/architecture/sea-of-nodes-ir.md`: confirm the canonical aggregate/
@@ -287,18 +355,35 @@ never mentions the LLVM target — update it to the `Chalk::Target::*` layer inc
 
 ## Risks & mitigations
 - **Risk:** rewriting corpus ir-blocks could mask a real behavior change.
-  **Mitigation:** the perl oracle is unchanged; lli==perl must hold at every phase;
-  the `behavior` blocks (perl results) are NOT edited — only the `ir` blocks.
-- **Risk:** `Subscript`/`PostfixDeref` are parser-level polymorphic; the repr needed
-  to pick array-vs-hash lowering must be present on the node. **Mitigation:** verify
-  the repr/type is set on the container input; if the parser doesn't yet set it,
-  that's a TypeInference gap to note (the corpus ir-blocks set it explicitly).
-- **Risk:** Phase 5 (MOP consumption) is large and touches the stalled MOP-migration
-  surface. **Mitigation:** consume `ClassInfo` (immutable, has id()) as a node input
-  WITHOUT wiring the stalled migration internals; keep self-contained against the
-  corpus.
-- **Risk:** large refactor of gate-verified work. **Mitigation:** phase-by-phase,
-  full sweep + lli==perl gate after each phase; each phase independently revertible.
+  **Mitigation:** the perl oracle is unchanged; lli==perl must hold at every
+  node-convergence phase; the `behavior` blocks (perl results) are NOT edited — only
+  the `ir` blocks.
+- **Risk (I7 — optimizer dual-contract):** the corpus ir-blocks are BOTH a lowering
+  spec AND the optimizer's output-SHAPE contract (corpus_dual_contract). The
+  "behavior blocks unchanged" mitigation only covers BEHAVIOR; the SHAPE contract
+  lives in the ir-blocks the convergence rewrites. **Mitigation:** as a FIRST step,
+  audit whether any optimizer/codegen test consumes the corpus ir-blocks as a
+  SHAPE oracle (not just behavior). Any such test is updated as part of the
+  phase-by-phase ir-block rewrite, with the shape-change called out in the commit.
+- **Risk:** `Subscript`/`PostfixDeref` are parser-level polymorphic; the repr to pick
+  array-vs-hash lowering must be on the container input. **Mitigation:** the corpus
+  ir-blocks set it explicitly; an undef-repr container hits G.6's loud-GAP policy (not
+  a silent misread). A parser that doesn't set it is a TypeInference gap — filed, not
+  silently defaulted.
+- **Risk (C4):** the MOP phase (now Phase 4) is large. **Mitigation:** decomposed into
+  4.0–4.5, each keeping the 7 cases GREEN; 4.0 establishes ClassInfo consumption
+  WITHOUT deleting parallel arms (both coexist) so the cutover is incremental, NOT a
+  big-bang. Consumes `ClassInfo` (immutable, id()) WITHOUT wiring the stalled
+  MOP-migration internals.
+- **Risk (C3):** Phases 4+5 are ENTANGLED (Call dispatch resolves from the MOP that
+  Phase 4 builds). **Mitigation:** ordered MOP-before-dispatch; they land as one set
+  and are NOT independently revertible from each other (each IS revertible from the
+  earlier phases). Stated honestly rather than claimed otherwise.
+- **Risk:** large refactor of gate-verified work. **Mitigation:** Phase G hardens the
+  gate FIRST (against a G.0 baseline of pre-existing failures); then phase-by-phase
+  full sweep + lli==perl after each. Each node phase (0–3) is independently revertible
+  to GREEN; the MOP set (4–5) reverts as a unit. **The "independently revertible"
+  claim applies PER-PHASE for 0–3 and PER-SET for 4–5 — not uniformly per-commit.**
 
 ## Acceptance criteria
 
@@ -316,7 +401,7 @@ never mentions the LLVM target — update it to the `Chalk::Target::*` layer inc
 - `*→Bool` truthiness goes through the explicit Coerce path OR loudly dies on a
   non-Int operand — no silent i64 reinterpret (F8).
 
-### Node convergence (Findings 1 + F8/F9 dissolution)
+### Node convergence (Finding 1; F9 dissolves in Phase 4.4; F8 fixed in Phase G.7)
 - `lib/Chalk/IR/NodeFactory.pm` no longer registers the deleted parallel nodes; the
   deleted `.pm` files are gone.
 - `Target::LLVM` lowers the canonical nodes (`Subscript`, `PostfixDeref`, `ArrayRef`,
@@ -365,12 +450,14 @@ Current surface (the move):
 `Chalk::Target` does not exist yet (0 refs today).
 
 ### Two scopes (decide narrow-vs-full at execution time)
-- **Narrow (cheap, do alongside Phase 0):** move ONLY `Chalk::IR::Target::LLVM` →
+- **Narrow (cheap, do BEFORE Phase G — I8):** move ONLY `Chalk::IR::Target::LLVM` →
   `Chalk::Target::LLVM` (git mv + package rename + update the 14 `use` lines, all in
   t/), and create `Chalk::Target` as the base (promote `Bootstrap::Target`, leaving a
-  compat alias if the 153 Bootstrap consumers still reference the old base). Fixes the
-  immediate "LLVM shouldn't live under IR" problem; the Perl/C/XS family stays put for
-  now under a tracked follow-up.
+  compat alias if the 153 Bootstrap consumers still reference the old base; reconcile
+  the `generate`-vs-`lower` interface per F2-iface). **Do this FIRST so every Phase-G
+  and convergence test is written against the FINAL namespace** — not against
+  `Chalk::IR::Target::LLVM` then immediately renamed (I8). Fixes the "LLVM shouldn't
+  live under IR" wart; the Perl/C/XS family stays put under a tracked follow-up.
 - **Full (large, tied to the Bootstrap rename):** also migrate the ~153-file
   `Chalk::Bootstrap::{Perl,BNF}::Target::*` family (Perl/C/XS + the BNF/XS AST tree +
   EmitHelpers/ClassRegistry) into `Chalk::Target::*`. ~167 files touched; entangled
