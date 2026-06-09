@@ -3,10 +3,12 @@ title: "GAP group 6: regex sub-compiler (pattern to matcher)"
 state: in-progress
 urgency: normal
 milestone: codegen-harness
+blocked_by:
+- 019eaa51-c30a-70e5-8fbe-2f9732760c63
 blocks:
 - 019eaa51-bd3e-7b89-b376-c13304da68f7
 created: 2026-06-09T02:59:05.997424403Z
-updated: 2026-06-09T03:02:27.236604331Z
+updated: 2026-06-09T03:02:27.432730853Z
 sessions:
 - start_sha: f4149ea4cdf412c343610792324cddc1e34ba8d7
   end_sha: ""
