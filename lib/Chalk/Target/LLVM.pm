@@ -1235,17 +1235,14 @@ sub lower_value {
     elsif ($op eq 'Length') {
         return $self->_lower_length($node);
     }
-    elsif ($op eq 'ArrayRead') {
-        return $self->_lower_array_read($node);
+    elsif ($op eq 'Subscript') {
+        return $self->_lower_subscript($node);
     }
     elsif ($op eq 'ArrayWrite') {
         return $self->_lower_array_write($node);
     }
     elsif ($op eq 'HashLiteral') {
         return $self->_lower_hash_literal($node);
-    }
-    elsif ($op eq 'HashRead') {
-        return $self->_lower_hash_read($node);
     }
     elsif ($op eq 'HashWrite') {
         return $self->_lower_hash_write($node);
@@ -3047,6 +3044,26 @@ sub _lower_length {
     }
     else {
         die "GAP: Length operand has repr=$op_repr; only Array and Str are lowered runtime-free.";
+    }
+}
+
+# _lower_subscript: repr-dispatch on inputs[0] container.
+# Array container -> bounds-checked slot load (_lower_array_read body).
+# Hash container  -> memcmp key scan (_lower_hash_read body).
+# inputs[0] = container (Array or Hash), inputs[1] = index (Int) or key (Str).
+sub _lower_subscript {
+    my ($self, $node) = @_;
+    my $container = $node->inputs->[0];
+    my $container_repr = _require_repr($container, 'Subscript.container');
+
+    if ($container_repr eq 'Array') {
+        return $self->_lower_array_read($node);
+    }
+    elsif ($container_repr eq 'Hash') {
+        return $self->_lower_hash_read($node);
+    }
+    else {
+        die "GAP: Subscript container has repr=$container_repr; only Array and Hash are lowered runtime-free.";
     }
 }
 

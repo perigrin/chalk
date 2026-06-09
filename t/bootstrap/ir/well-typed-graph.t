@@ -177,4 +177,38 @@ use Chalk::IR::Graph::TypedInvariant;
     ok(scalar @{ $result->{violations} } > 0, 'H2-9: violations reported for ill-typed Length');
 }
 
+
+# H2-10 (Phase 1.1, bilateral): Subscript(Array, Int) passes the invariant.
+# Subscript container must be Array or Hash; index must be Int (array) or Str (hash).
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $arr = $f->make('ArrayLiteral', inputs => []);
+    $arr->set_representation('Array');
+    my $idx = $f->make('Constant', value => '0', const_type => 'integer');
+    $idx->set_representation('Int');
+    my $sub = $f->make('Subscript', inputs => [$arr, $idx]);
+    $sub->set_representation('Int');
+
+    my $result = Chalk::IR::Graph::TypedInvariant->check([$arr, $idx, $sub]);
+    ok($result->{ok}, 'H2-10 bilateral: Subscript(Array, Int) passes the invariant');
+    is(scalar @{ $result->{violations} }, 0, 'H2-10: no violations for Subscript(Array,Int)');
+}
+
+# H2-11 (Phase 1.1, bilateral): Subscript(Int, Int) FAILS — container must be Array or Hash.
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $not_ctr = $f->make('Constant', value => '5', const_type => 'integer');
+    $not_ctr->set_representation('Int');
+    my $idx = $f->make('Constant', value => '0', const_type => 'integer');
+    $idx->set_representation('Int');
+    my $sub = $f->make('Subscript', inputs => [$not_ctr, $idx]);
+    $sub->set_representation('Int');
+
+    my $result = Chalk::IR::Graph::TypedInvariant->check([$not_ctr, $idx, $sub]);
+    ok(!$result->{ok}, 'H2-11 bilateral: Subscript(Int, Int) FAILS (Int is not Array or Hash)');
+    ok(scalar @{ $result->{violations} } > 0, 'H2-11: violations reported for Subscript with Int container');
+}
+
 done_testing;

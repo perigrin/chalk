@@ -79,12 +79,12 @@ subtest 'A1: ArrayLiteral(1,2,3) + Length -> Int:3' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# A2: ArrayLiteral + ArrayRead (in-bounds) -> Int:2
+# A2: ArrayLiteral + Subscript (in-bounds) -> Int:2
 #
 # Equivalent to: my @a = (1,2,3); $a[1]
 # Result: Int:2. Bounds check is emitted but index=1 < len=3 always.
 # ---------------------------------------------------------------------------
-subtest 'A2: ArrayLiteral(1,2,3) + ArrayRead(idx=1) -> Int:2' => sub {
+subtest 'A2: ArrayLiteral(1,2,3) + Subscript(idx=1) -> Int:2' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
@@ -100,7 +100,7 @@ subtest 'A2: ArrayLiteral(1,2,3) + ArrayRead(idx=1) -> Int:2' => sub {
     my $idx = $f->make('Constant', value => '1', const_type => 'integer');
     $idx->set_representation('Int');
 
-    my $elem = $f->make('ArrayRead', inputs => [$arr, $idx]);
+    my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
     $elem->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$elem]);
@@ -122,12 +122,12 @@ subtest 'A2: ArrayLiteral(1,2,3) + ArrayRead(idx=1) -> Int:2' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# A3: ArrayRead out-of-bounds -> Undef:
+# A3: Subscript out-of-bounds -> Undef:
 #
 # Equivalent to: my @a = (1,2,3); $a[9]
 # Result: Undef:. Bounds check fails, undef slot returned. Never segfaults.
 # ---------------------------------------------------------------------------
-subtest 'A3: ArrayRead OOB (idx=9 on len=3) -> Undef:' => sub {
+subtest 'A3: Subscript OOB (idx=9 on len=3) -> Undef:' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
@@ -143,7 +143,7 @@ subtest 'A3: ArrayRead OOB (idx=9 on len=3) -> Undef:' => sub {
     my $idx = $f->make('Constant', value => '9', const_type => 'integer');
     $idx->set_representation('Int');
 
-    my $elem = $f->make('ArrayRead', inputs => [$arr, $idx]);
+    my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
     $elem->set_representation('Slot');
 
     my $ret = $f->make_cfg('Return', inputs => [$elem]);
@@ -165,12 +165,12 @@ subtest 'A3: ArrayRead OOB (idx=9 on len=3) -> Undef:' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# A4: HashLiteral + HashRead (existing key) -> Int:1
+# A4: HashLiteral + Subscript (existing key) -> Int:1
 #
 # Equivalent to: my %h = (a => 1, b => 2); $h{a}
 # Result: Int:1. Linear-scan lookup finds key "a".
 # ---------------------------------------------------------------------------
-subtest 'A4: HashLiteral(a=>1,b=>2) + HashRead("a") -> Int:1' => sub {
+subtest 'A4: HashLiteral(a=>1,b=>2) + Subscript("a") -> Int:1' => sub {
     my $f = _mk();
 
     my $ka = $f->make('Constant', value => 'a', const_type => 'string');
@@ -188,7 +188,7 @@ subtest 'A4: HashLiteral(a=>1,b=>2) + HashRead("a") -> Int:1' => sub {
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
     $lk->set_representation('Str');
 
-    my $val = $f->make('HashRead', inputs => [$hash, $lk]);
+    my $val = $f->make('Subscript', inputs => [$hash, $lk]);
     $val->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$val]);
@@ -210,12 +210,12 @@ subtest 'A4: HashLiteral(a=>1,b=>2) + HashRead("a") -> Int:1' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# A5: HashRead missing key -> Undef:
+# A5: Subscript missing key -> Undef:
 #
 # Equivalent to: my %h = (a => 1, b => 2); $h{z}
 # Result: Undef:. Key "z" not found -> undef slot.
 # ---------------------------------------------------------------------------
-subtest 'A5: HashRead missing key -> Undef:' => sub {
+subtest 'A5: Subscript missing key -> Undef:' => sub {
     my $f = _mk();
 
     my $ka = $f->make('Constant', value => 'a', const_type => 'string');
@@ -233,7 +233,7 @@ subtest 'A5: HashRead missing key -> Undef:' => sub {
     my $lk = $f->make('Constant', value => 'z', const_type => 'string');
     $lk->set_representation('Str');
 
-    my $val = $f->make('HashRead', inputs => [$hash, $lk]);
+    my $val = $f->make('Subscript', inputs => [$hash, $lk]);
     $val->set_representation('Slot');
 
     my $ret = $f->make_cfg('Return', inputs => [$val]);
@@ -281,7 +281,7 @@ subtest 'A6: ArrayRef[1,2,3] deref [0] -> Int:1' => sub {
     my $idx = $f->make('Constant', value => '0', const_type => 'integer');
     $idx->set_representation('Int');
 
-    my $elem = $f->make('ArrayRead', inputs => [$deref, $idx]);
+    my $elem = $f->make('Subscript', inputs => [$deref, $idx]);
     $elem->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$elem]);
@@ -331,7 +331,7 @@ subtest 'A7: HashRef{a=>1,b=>2} deref {a} -> Int:1' => sub {
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
     $lk->set_representation('Str');
 
-    my $val = $f->make('HashRead', inputs => [$deref, $lk]);
+    my $val = $f->make('Subscript', inputs => [$deref, $lk]);
     $val->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$val]);
@@ -352,12 +352,12 @@ subtest 'A7: HashRef{a=>1,b=>2} deref {a} -> Int:1' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# A8: ArrayWrite + ArrayRead -> Int:42
+# A8: ArrayWrite + Subscript -> Int:42
 #
 # Equivalent to: my @a = (1,2,3); $a[0] = 42; $a[0]
 # Result: Int:42. Store then load.
 # ---------------------------------------------------------------------------
-subtest 'A8: ArrayWrite(0,42) then ArrayRead(0) -> Int:42' => sub {
+subtest 'A8: ArrayWrite(0,42) then Subscript(0) -> Int:42' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
@@ -383,7 +383,7 @@ subtest 'A8: ArrayWrite(0,42) then ArrayRead(0) -> Int:42' => sub {
     my $idx2 = $f->make('Constant', value => '0', const_type => 'integer');
     $idx2->set_representation('Int');
 
-    my $elem = $f->make('ArrayRead', inputs => [$arr2, $idx2]);
+    my $elem = $f->make('Subscript', inputs => [$arr2, $idx2]);
     $elem->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$elem]);
@@ -403,12 +403,12 @@ subtest 'A8: ArrayWrite(0,42) then ArrayRead(0) -> Int:42' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# A9: HashWrite + HashRead -> Int:99
+# A9: HashWrite + Subscript -> Int:99
 #
 # Equivalent to: my %h = (k => 0); $h{k} = 99; $h{k}
 # Result: Int:99. Store then load.
 # ---------------------------------------------------------------------------
-subtest 'A9: HashWrite then HashRead -> Int:99' => sub {
+subtest 'A9: HashWrite then Subscript -> Int:99' => sub {
     my $f = _mk();
 
     my $kk = $f->make('Constant', value => 'k', const_type => 'string');
@@ -431,7 +431,7 @@ subtest 'A9: HashWrite then HashRead -> Int:99' => sub {
     my $rk = $f->make('Constant', value => 'k', const_type => 'string');
     $rk->set_representation('Str');
 
-    my $val = $f->make('HashRead', inputs => [$hash2, $rk]);
+    my $val = $f->make('Subscript', inputs => [$hash2, $rk]);
     $val->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$val]);
@@ -498,7 +498,7 @@ subtest 'A10: nested ArrayRef [[1,2],[3,4]] ->[1][0] -> Int:3' => sub {
     $idx1->set_representation('Int');
 
     # $r->[1] returns a slot containing an ArrayRef pointer
-    my $inner_ref_slot = $f->make('ArrayRead', inputs => [$outer_arr, $idx1]);
+    my $inner_ref_slot = $f->make('Subscript', inputs => [$outer_arr, $idx1]);
     $inner_ref_slot->set_representation('ArrayRef');
 
     # Deref inner: $r->[1][0]
@@ -508,7 +508,7 @@ subtest 'A10: nested ArrayRef [[1,2],[3,4]] ->[1][0] -> Int:3' => sub {
     my $idx0 = $f->make('Constant', value => '0', const_type => 'integer');
     $idx0->set_representation('Int');
 
-    my $elem = $f->make('ArrayRead', inputs => [$inner_arr, $idx0]);
+    my $elem = $f->make('Subscript', inputs => [$inner_arr, $idx0]);
     $elem->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$elem]);
@@ -544,6 +544,93 @@ subtest 'A11: TypeTag has Slot entry in llvm_prefixes' => sub {
         is($prefixes->{Slot}{perl_tag_prefix_int},   'Int:',    'Slot int prefix is Int:');
         is($prefixes->{Slot}{perl_tag_prefix_undef}, 'Undef:',  'Slot undef prefix is Undef:');
     }
+    done_testing;
+};
+
+# ---------------------------------------------------------------------------
+# A12: canonical Subscript(Array, idx) -> Int:2  (Phase 1.1)
+#
+# Subscript with Array container dispatches to bounds-checked slot load.
+# Equivalent to: my @a = (1,2,3); $a[1] -> Int:2
+# ---------------------------------------------------------------------------
+subtest 'A12: canonical Subscript(ArrayLiteral, idx=1) -> Int:2' => sub {
+    my $f = _mk();
+
+    my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
+    $c2->set_representation('Int');
+    my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
+    $arr->set_representation('Array');
+
+    my $idx = $f->make('Constant', value => '1', const_type => 'integer');
+    $idx->set_representation('Int');
+
+    my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
+    $elem->set_representation('Int');
+
+    my $ret = $f->make_cfg('Return', inputs => [$elem]);
+
+    my $ll;
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    ok(!$@, "A12 Subscript(Array) lower() does not die: $@") or diag("error: $@");
+
+    if (defined $ll) {
+        unlike($ll, qr/\bAV\b/,  'A12 .ll: no AV symbols');
+        unlike($ll, qr/libperl/, 'A12 .ll: no libperl reference');
+        like($ll, qr/icmp ult/,  'A12 .ll: bounds check (icmp ult) present');
+
+        my $out = run_ll($ll);
+        is($out, 'Int:2', 'A12 lli output is Int:2 ($a[1] via Subscript)');
+    }
+
+    done_testing;
+};
+
+# ---------------------------------------------------------------------------
+# A13: canonical Subscript(Hash, key) -> Int:1  (Phase 1.1)
+#
+# Subscript with Hash container dispatches to memcmp key scan.
+# Equivalent to: my %h = (a=>1, b=>2); $h{a} -> Int:1
+# ---------------------------------------------------------------------------
+subtest 'A13: canonical Subscript(HashLiteral, key="a") -> Int:1' => sub {
+    my $f = _mk();
+
+    my $ka = $f->make('Constant', value => 'a', const_type => 'string');
+    $ka->set_representation('Str');
+    my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
+    $v1->set_representation('Int');
+    my $kb = $f->make('Constant', value => 'b', const_type => 'string');
+    $kb->set_representation('Str');
+    my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
+    $v2->set_representation('Int');
+
+    my $hash = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
+    $hash->set_representation('Hash');
+
+    my $lk = $f->make('Constant', value => 'a', const_type => 'string');
+    $lk->set_representation('Str');
+
+    my $elem = $f->make('Subscript', inputs => [$hash, $lk]);
+    $elem->set_representation('Int');
+
+    my $ret = $f->make_cfg('Return', inputs => [$elem]);
+
+    my $ll;
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    ok(!$@, "A13 Subscript(Hash) lower() does not die: $@") or diag("error: $@");
+
+    if (defined $ll) {
+        unlike($ll, qr/\bHV\b/,  'A13 .ll: no HV symbols');
+        unlike($ll, qr/libperl/, 'A13 .ll: no libperl reference');
+
+        my $out = run_ll($ll);
+        is($out, 'Int:1', 'A13 lli output is Int:1 ($h{a} via Subscript)');
+    }
+
     done_testing;
 };
 

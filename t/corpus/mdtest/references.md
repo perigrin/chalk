@@ -72,7 +72,7 @@ context: scalar
 %c3  = Constant(3) :Int
 %arr = ArrayLiteral(%c1, %c2, %c3) :Array
 %idx = Constant(1) :Int
-%r   = ArrayRead(%arr, %idx) :Int
+%r   = Subscript(%arr, %idx) :Int
 return %r
 L: GREEN
 ```
@@ -101,7 +101,7 @@ context: scalar
 %v2   = Constant(2) :Int
 %hash = HashLiteral(%ka, %v1, %kb, %v2) :Hash
 %lk   = Constant("a") :Str
-%r    = HashRead(%hash, %lk) :Int
+%r    = Subscript(%hash, %lk) :Int
 return %r
 L: GREEN
 ```
@@ -132,7 +132,7 @@ context: scalar
 %ref   = MakeArrayRef(%inner) :ArrayRef
 %deref = ArrayDeref(%ref) :Array
 %idx   = Constant(0) :Int
-%r     = ArrayRead(%deref, %idx) :Int
+%r     = Subscript(%deref, %idx) :Int
 return %r
 L: GREEN
 ```
@@ -163,7 +163,7 @@ context: scalar
 %ref   = MakeHashRef(%inner) :HashRef
 %deref = HashDeref(%ref) :Hash
 %lk    = Constant("a") :Str
-%r     = HashRead(%deref, %lk) :Int
+%r     = Subscript(%deref, %lk) :Int
 return %r
 L: GREEN
 ```
@@ -195,7 +195,7 @@ context: scalar
 %nv   = Constant(42) :Int
 %arr2 = ArrayWrite(%arr, %idx, %nv) :Array
 %idx2 = Constant(0) :Int
-%r    = ArrayRead(%arr2, %idx2) :Int
+%r    = Subscript(%arr2, %idx2) :Int
 return %r
 L: GREEN
 ```
@@ -226,7 +226,7 @@ context: scalar
 %wv   = Constant(99) :Int
 %h2   = HashWrite(%hash, %wk, %wv) :Hash
 %rk   = Constant("k") :Str
-%r    = HashRead(%h2, %rk) :Int
+%r    = Subscript(%h2, %rk) :Int
 return %r
 L: GREEN
 ```
@@ -262,10 +262,10 @@ context: scalar
 %outer_ref = MakeArrayRef(%outer) :ArrayRef
 %outer_arr = ArrayDeref(%outer_ref) :Array
 %idx1      = Constant(1) :Int
-%inner_ref = ArrayRead(%outer_arr, %idx1) :ArrayRef
+%inner_ref = Subscript(%outer_arr, %idx1) :ArrayRef
 %inner_arr = ArrayDeref(%inner_ref) :Array
 %idx0      = Constant(0) :Int
-%r         = ArrayRead(%inner_arr, %idx0) :Int
+%r         = Subscript(%inner_arr, %idx0) :Int
 return %r
 L: GREEN
 ```
@@ -295,7 +295,7 @@ context: scalar
 %c3  = Constant(3) :Int
 %arr = ArrayLiteral(%c1, %c2, %c3) :Array
 %idx = Constant(9) :Int
-%r   = ArrayRead(%arr, %idx) :Slot
+%r   = Subscript(%arr, %idx) :Slot
 return %r
 L: GREEN
 ```
@@ -324,7 +324,7 @@ context: scalar
 %v2   = Constant(2) :Int
 %hash = HashLiteral(%ka, %v1, %kb, %v2) :Hash
 %lk   = Constant("z") :Str
-%r    = HashRead(%hash, %lk) :Slot
+%r    = Subscript(%hash, %lk) :Slot
 return %r
 L: GREEN
 ```
