@@ -1232,8 +1232,8 @@ sub lower_value {
     elsif ($op eq 'ArrayLiteral') {
         return $self->_lower_array_literal($node);
     }
-    elsif ($op eq 'ScalarLen') {
-        return $self->_lower_scalar_len($node);
+    elsif ($op eq 'Length') {
+        return $self->_lower_length($node);
     }
     elsif ($op eq 'ArrayRead') {
         return $self->_lower_array_read($node);
@@ -3014,21 +3014,40 @@ sub _lower_array_literal {
     return $arr;
 }
 
-# _lower_scalar_len: read the len field from an Array pointer.
-# input = [Array node]. Returns i64 (repr=Int).
-sub _lower_scalar_len {
+
+# _lower_length: repr-aware length of an Array or Str operand.
+# Array repr: load the len field from the %Array struct (array element count).
+# Str repr: load the len field from the %StrPair struct (byte length).
+# Both return i64 (repr=Int).
+sub _lower_length {
     my ($self, $node) = @_;
 
-    $self->{_need_aggregate_types} = 1;
+    my $operand = $node->inputs->[0];
+    my $op_repr = _require_repr($operand, 'Length.operand');
 
-    my $arr_ref = $self->lower_value($node->inputs->[0]);
-    my $len_ptr = $self->_fresh;
-    my $len     = $self->_fresh;
-    $self->_emit("  $len_ptr = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 0  ; ScalarLen: len ptr");
-    $self->_emit("  $len = load i64, i64* $len_ptr  ; ScalarLen: load len");
-
-    $self->{cache}{ $node->id } = $len;
-    return $len;
+    if ($op_repr eq 'Array') {
+        $self->{_need_aggregate_types} = 1;
+        my $arr_ref = $self->lower_value($operand);
+        my $len_ptr = $self->_fresh;
+        my $len     = $self->_fresh;
+        $self->_emit("  $len_ptr = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 0  ; Length(Array): len ptr");
+        $self->_emit("  $len = load i64, i64* $len_ptr  ; Length(Array): load len");
+        $self->{cache}{ $node->id } = $len;
+        return $len;
+    }
+    elsif ($op_repr eq 'Str') {
+        # %StrPair = { i8* ptr, i64 len } — field index 1 is the byte length.
+        my $str_ref = $self->lower_value($operand);
+        my $len_ptr = $self->_fresh;
+        my $len     = $self->_fresh;
+        $self->_emit("  $len_ptr = extractvalue %StrPair $str_ref, 1  ; Length(Str): extract len field");
+        $self->_emit("  $len = add i64 0, $len_ptr  ; Length(Str): len as i64");
+        $self->{cache}{ $node->id } = $len;
+        return $len;
+    }
+    else {
+        die "GAP: Length operand has repr=$op_repr; only Array and Str are lowered runtime-free.";
+    }
 }
 
 # _lower_array_read: bounds-checked element read.

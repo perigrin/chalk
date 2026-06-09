@@ -44,7 +44,7 @@ context: scalar
 %c2  = Constant(2) :Int
 %c3  = Constant(3) :Int
 %arr = ArrayLiteral(%c1, %c2, %c3) :Array
-%r   = ScalarLen(%arr) :Int
+%r   = Length(%arr) :Int
 return %r
 L: GREEN
 ```

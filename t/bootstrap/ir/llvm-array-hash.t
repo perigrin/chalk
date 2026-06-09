@@ -37,12 +37,12 @@ sub _mk {
 }
 
 # ---------------------------------------------------------------------------
-# A1: ArrayLiteral (1,2,3) + ScalarLen -> Int:3
+# A1: ArrayLiteral (1,2,3) + Length -> Int:3
 #
 # Equivalent to: my @a = (1,2,3); scalar @a
-# Result: Int:3. Array is intermediate; only len is returned.
+# Result: Int:3. Array is intermediate; Length reads its len field.
 # ---------------------------------------------------------------------------
-subtest 'A1: ArrayLiteral(1,2,3) + ScalarLen -> Int:3' => sub {
+subtest 'A1: ArrayLiteral(1,2,3) + Length -> Int:3' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
@@ -55,7 +55,7 @@ subtest 'A1: ArrayLiteral(1,2,3) + ScalarLen -> Int:3' => sub {
     my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $arr->set_representation('Array');
 
-    my $len = $f->make('ScalarLen', inputs => [$arr]);
+    my $len = $f->make('Length', inputs => [$arr]);
     $len->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$len]);

@@ -60,7 +60,6 @@ use Chalk::IR::Node::Call;
 use Chalk::IR::Node::HashRef;
 use Chalk::IR::Node::ArrayRef;
 use Chalk::IR::Node::ArrayLiteral;
-use Chalk::IR::Node::ScalarLen;
 use Chalk::IR::Node::ArrayRead;
 use Chalk::IR::Node::ArrayWrite;
 use Chalk::IR::Node::HashLiteral;
@@ -111,7 +110,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Not Negate Complement Defined UnaryPlus Ref Length
     PadAccess FieldAccess StashAccess Subscript Slice
     Call HashRef ArrayRef
-    ArrayLiteral ScalarLen ArrayRead ArrayWrite
+    ArrayLiteral ArrayRead ArrayWrite
     HashLiteral HashRead HashWrite
     MakeArrayRef MakeHashRef ArrayDeref HashDeref
     Interpolate AnonSub

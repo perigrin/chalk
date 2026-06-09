@@ -144,4 +144,37 @@ use Chalk::IR::Graph::TypedInvariant;
     ok(scalar @{ $result->{violations} } > 0, 'violations reported for bare-Int Divide');
 }
 
+
+# H2-8 (Phase 0, bilateral): Length with Array operand passes the invariant.
+# Length(Array) is the canonical array-count op; Array is a valid operand repr.
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1]);
+    $arr->set_representation('Array');
+    my $len = $f->make('Length', inputs => [$arr]);
+    $len->set_representation('Int');
+
+    my $result = Chalk::IR::Graph::TypedInvariant->check([$c1, $arr, $len]);
+    ok($result->{ok}, 'H2-8 bilateral: Length(Array)->Int passes the invariant');
+    is(scalar @{ $result->{violations} }, 0, 'H2-8: no violations for well-typed Length');
+}
+
+# H2-9 (Phase 0, bilateral): Length with Int operand FAILS the invariant.
+# Length requires Array or Str; an Int operand is a type error.
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $wrong = $f->make('Constant', value => '42', const_type => 'integer');
+    $wrong->set_representation('Int');
+    my $len = $f->make('Length', inputs => [$wrong]);
+    $len->set_representation('Int');
+
+    my $result = Chalk::IR::Graph::TypedInvariant->check([$wrong, $len]);
+    ok(!$result->{ok}, 'H2-9 bilateral: Length(Int) FAILS the invariant (Int is not Array or Str)');
+    ok(scalar @{ $result->{violations} } > 0, 'H2-9: violations reported for ill-typed Length');
+}
+
 done_testing;
