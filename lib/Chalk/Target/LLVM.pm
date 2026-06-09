@@ -59,6 +59,26 @@ sub lower {
 #
 # For ASCII printable chars (0x20-0x7E except \ and "), emit as-is.
 # For all others and for \ and ", emit as \XX (2 hex digits).
+# _require_repr($node, $where) -> $repr
+#
+# Assert that $node has a defined representation and return it. Dies loudly
+# (GAP) if representation is undef, naming $where so callers can locate the
+# offending site. Used at every lowering site that reads node->representation
+# to prevent silent undef -> 'Int' defaulting which masks TypeInference gaps.
+#
+# Distinction from the outer `defined $node ? (...) : 'Int'` pattern: that
+# outer default handles a *missing optional node* (legitimate — e.g. a method
+# body that has not been wired yet). This helper guards a *present node* whose
+# representation field was never set, which is always a TypeInference gap.
+sub _require_repr {
+    my ($node, $where) = @_;
+    my $r = $node->representation;
+    die "GAP: $where reached LLVM backend with NO representation (undef) — "
+      . "fix TypeInference so this node carries an explicit repr before lowering."
+        unless defined $r;
+    return $r;
+}
+
 sub _encode_c_string {
     my ($str) = @_;
     my $out = '';
@@ -239,7 +259,9 @@ sub _scan_class_registry {
                 if ($inp_op eq 'MethodDef') {
                     my $mname     = $inp->method_name;
                     my $body_node = $inp->body_node;
-                    my $ret_repr  = defined $body_node ? ($body_node->representation // 'Int') : 'Int';
+                    # Outer 'Int' default: body_node absent = method body not yet wired (legitimate skip).
+                    # _require_repr guards a present body_node with undef repr (TypeInference gap).
+                    my $ret_repr  = defined $body_node ? _require_repr($body_node, 'MethodDef.body_node') : 'Int';
                     # Avoid duplicate method entries
                     unless (grep { ($_->{name} // '') eq $mname } @{ $registry{$cname}{methods} }) {
                         push @{ $registry{$cname}{methods} }, {
@@ -947,6 +969,10 @@ sub lower_with_elaboration {
 package Chalk::Target::LLVM::Context;
 use 5.42.0;
 use utf8;
+
+# Re-export _require_repr from the main package so unqualified calls in this
+# package resolve correctly (both packages share the same implementation).
+*_require_repr = \&Chalk::Target::LLVM::_require_repr;
 
 # _method_fn_type($result_repr) -> LLVM fn type string for method signatures.
 # Duplicate of the module-level sub; both packages need it to avoid cross-package calls.
@@ -1750,7 +1776,7 @@ sub _ensure_i1 {
 sub _lower_vardecl {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation // 'Int';
+    my $repr = _require_repr($node, 'VarDecl');
     if ($repr eq 'Scalar') {
         die "GAP: VarDecl with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
@@ -1803,7 +1829,7 @@ sub _lower_vardecl {
 sub _lower_padaccess {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation // 'Int';
+    my $repr = _require_repr($node, 'PadAccess');
     if ($repr eq 'Scalar') {
         die "GAP: PadAccess with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
@@ -1856,7 +1882,7 @@ sub _lower_padaccess {
 sub _lower_assign {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation // 'Int';
+    my $repr = _require_repr($node, 'Assign');
     if ($repr eq 'Scalar') {
         die "GAP: Assign with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
@@ -1960,8 +1986,8 @@ sub _lower_ternary {
     my $fals_ref = $self->lower_value($fals_node);
 
     # Determine the branch type for the select.
-    my $true_repr = $true_node->representation // 'Int';
-    my $fals_repr = $fals_node->representation // 'Int';
+    my $true_repr = _require_repr($true_node, 'TernaryExpr.true_branch');
+    my $fals_repr = _require_repr($fals_node, 'TernaryExpr.false_branch');
 
     my $branch_type;
     if ($true_repr eq 'Int' && $fals_repr eq 'Int') {
@@ -2160,7 +2186,7 @@ sub _lower_defined_or {
     my $lhs_node = $inputs->[0];
     my $rhs_node = $inputs->[1];
 
-    my $lhs_repr = $lhs_node->representation // 'Int';
+    my $lhs_repr = _require_repr($lhs_node, 'DefinedOr.lhs');
 
     # Lower the LHS. For Undef-typed LHS, this produces the defined bit (i1).
     # For Int/Num/Str/Bool-typed LHS, this produces the payload value.
@@ -2240,7 +2266,7 @@ sub _lower_defined {
 
     my $inputs  = $node->inputs;
     my $operand = $inputs->[0];
-    my $op_repr = $operand->representation // 'Int';
+    my $op_repr = _require_repr($operand, 'Defined.operand');
 
     # Lower the operand to get its value ref (or defined bit for Undef-typed).
     my $op_ref = $self->lower_value($operand);
@@ -2455,7 +2481,7 @@ sub _wire_region_phis {
         my $then_val = $self->lower_value($inputs->[0]);
         my $else_val = $self->lower_value($inputs->[1]);
 
-        my $repr = $phi_node->representation // 'Int';
+        my $repr = _require_repr($phi_node, 'Region.Phi');
         my $llvm_type = _repr_to_llvm_type($repr);
         my $result    = $self->_fresh;
         $self->_emit("  $result = phi $llvm_type [ $then_val, %$then_label ], [ $else_val, %$else_label ]  ; Region phi");
@@ -2563,7 +2589,7 @@ sub _process_loop_node {
         # Look it up from body_vars via the VarDecl id that this phi tracks.
         my $backedge_ref = $self->_find_phi_backedge_value($phi_node, \%body_vars, $phi_ref);
 
-        my $repr      = $phi_node->representation // 'Int';
+        my $repr      = _require_repr($phi_node, 'Loop.Phi');
         my $llvm_type = _repr_to_llvm_type($repr);
         my $phi_line  = "  $phi_ref = phi $llvm_type [ $init_ref, %$preheader_label ], [ $backedge_ref, %$body_end_label ]  ; Loop phi";
         push @phi_lines, $phi_line;
@@ -2935,7 +2961,7 @@ sub _lower_array_read {
 
     my $arr_ref = $self->lower_value($node->inputs->[0]);
     my $idx_ref = $self->lower_value($node->inputs->[1]);
-    my $repr    = $node->representation // 'Int';
+    my $repr    = _require_repr($node, 'ArrayRead');
 
     # Load len and elems pointer from the Array struct.
     my $len_ptr  = $self->_fresh;
@@ -3121,7 +3147,7 @@ sub _lower_hash_read {
     my $hash_ref = $self->lower_value($node->inputs->[0]);
     my $lkey_ref = $self->lower_value($node->inputs->[1]);
     my $lkey_len = $self->_str_len_for($lkey_ref) // 0;
-    my $repr     = $node->representation // 'Int';
+    my $repr     = _require_repr($node, 'HashRead');
 
     # Load count and entries pointer from Hash struct (in current/pre_loop block).
     my $cnt_ptr  = $self->_fresh;
@@ -3417,7 +3443,9 @@ sub _lower_new {
         }
         my $fidx = $finfo->{field_index};
         my $slot_idx = $fidx + 1;  # +1 for vtable pointer at index 0
-        my $repr = defined $pval ? ($pval->representation // 'Int') : 'Int';
+        # Outer 'Int' default: pval absent = no param value node wired (legitimate).
+        # _require_repr guards a present pval with undef repr (TypeInference gap).
+        my $repr = defined $pval ? _require_repr($pval, 'New.:param.field') : 'Int';
 
         my $val_ref = $self->lower_value($pval);
 
@@ -3478,7 +3506,9 @@ sub _lower_new {
         if ($finfo->{has_default}) {
             # Has a default value node — bind it
             my $def_node = $finfo->{default_node};
-            my $def_repr = defined $def_node ? ($def_node->representation // 'Int') : 'Int';
+            # Outer 'Int' default: def_node absent = no default value wired (legitimate).
+            # _require_repr guards a present def_node with undef repr (TypeInference gap).
+            my $def_repr = defined $def_node ? _require_repr($def_node, 'New.default.field') : 'Int';
             my $def_ref  = defined $def_node ? $self->lower_value($def_node) : '0';
 
             my $def_gep = $self->_fresh;
@@ -3538,7 +3568,7 @@ sub _lower_method_call {
     my $obj_node    = $node->obj_node;
     my $cls_node    = $node->class_decl_node;
     my $class_name  = $cls_node->class_name;
-    my $result_repr = $node->representation // 'Int';
+    my $result_repr = _require_repr($node, 'MethodCall');
 
     # Verify class and method are in the registry
     my $reg = $self->{class_registry}{$class_name}
@@ -3636,7 +3666,7 @@ sub _lower_field_write_method_body {
     my $val_node    = $node->inputs->[0]  # inputs[0] is the new value in method context
         or die "LLVM MOP: FieldWrite in method body has no value node (inputs[0] undef)";
     my $field_index = $node->field_index;
-    my $val_repr    = $val_node->representation // 'Int';
+    my $val_repr    = _require_repr($val_node, 'FieldWrite(method).val');
     my $slot_idx    = $field_index + 1;
 
     my $obj_typed = $self->_fresh;
@@ -3670,7 +3700,9 @@ sub _lower_field_write_with_obj {
 
     my $val_node    = $node->new_val_node;
     my $field_index = $node->field_index;
-    my $val_repr    = defined $val_node ? ($val_node->representation // 'Int') : 'Int';
+    # Outer 'Int' default: val_node absent = no value wired (legitimate skip).
+    # _require_repr guards a present val_node with undef repr (TypeInference gap).
+    my $val_repr    = defined $val_node ? _require_repr($val_node, 'FieldWrite.val') : 'Int';
 
     my $slot_idx = $field_index + 1;
 
@@ -3744,7 +3776,7 @@ sub _lower_field_access_in_method {
     my $field_index = $node->field_index;
     my $class_name  = $self->{_method_class_name}
         or die "LLVM MOP: FieldAccess in method body but _method_class_name not set";
-    my $repr        = $node->representation // 'Int';
+    my $repr        = _require_repr($node, 'FieldAccess(method)');
 
     my $slot_idx  = $field_index + 1;
     my $obj_raw   = $self->{_method_self_name} // '%self';
@@ -3981,7 +4013,7 @@ sub _wire_region_phis_with_preblock {
         # Return to merge block to emit the phi instruction.
         $self->{current_idx} = $merge_idx;
 
-        my $repr      = $phi_node->representation // 'Int';
+        my $repr      = Chalk::Target::LLVM::Context::_require_repr($phi_node, 'ElaboratedContext.Region.Phi');
         my $llvm_type = Chalk::Target::LLVM::Context::_repr_to_llvm_type($repr);
         my $result    = $self->_fresh;
         $self->_emit("  $result = phi $llvm_type [ $then_val, %$then_label ], [ $else_val, %$else_label ]  ; Region phi");

@@ -86,4 +86,148 @@ subtest 'well-typed graph with explicit repr still lowers correctly' => sub {
         'well-typed Constant: lower() returns .ll text');
 };
 
+# ============================================================
+# G.6 extension: representative control-flow families across the 19 sites.
+# Each subtest proves that site N silently emits i64 before the fix (RED)
+# and dies loudly after the fix (GREEN).
+# ============================================================
+
+# Test 4: undef-repr VarDecl dies loudly (site: line ~1753, _lower_vardecl)
+subtest 'undef-repr VarDecl dies loudly instead of silently lowering as Int' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    # Build: my $x = 1; return $x
+    my $nx = $f->make('Constant', value => '$x', const_type => 'string');
+    $nx->set_representation('Str');
+    my $c1 = $f->make('Constant', value => 1, const_type => 'integer');
+    $c1->set_representation('Int');
+    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]);
+    # Intentionally do NOT set representation on vx — this is the gap.
+    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $rx->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+
+    my ($ll, $err);
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'undef-repr VarDecl: lower() dies loudly')
+        or diag("Got no error; .ll:\n" . substr($ll // '', 0, 300));
+    if (defined $err && length $err) {
+        like($err, qr/representation|repr|GAP/i,
+            'VarDecl error message mentions representation or GAP')
+            or diag("error: $err");
+    }
+};
+
+# Test 5: undef-repr PadAccess dies loudly (site: line ~1806, _lower_padaccess)
+subtest 'undef-repr PadAccess dies loudly instead of silently lowering as Int' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    my $nx = $f->make('Constant', value => '$x', const_type => 'string');
+    $nx->set_representation('Str');
+    my $c1 = $f->make('Constant', value => 1, const_type => 'integer');
+    $c1->set_representation('Int');
+    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]);
+    $vx->set_representation('Int');
+    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    # Intentionally do NOT set representation on PadAccess.
+    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+
+    my ($ll, $err);
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'undef-repr PadAccess: lower() dies loudly')
+        or diag("Got no error; .ll:\n" . substr($ll // '', 0, 300));
+    if (defined $err && length $err) {
+        like($err, qr/representation|repr|GAP/i,
+            'PadAccess error message mentions representation or GAP')
+            or diag("error: $err");
+    }
+};
+
+# Test 6: undef-repr Assign dies loudly (site: line ~1859, _lower_assign)
+subtest 'undef-repr Assign dies loudly instead of silently lowering as Int' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    my $nx = $f->make('Constant', value => '$x', const_type => 'string');
+    $nx->set_representation('Str');
+    my $c1 = $f->make('Constant', value => 1, const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2 = $f->make('Constant', value => 2, const_type => 'integer');
+    $c2->set_representation('Int');
+    my $vx  = $f->make('VarDecl', inputs => [$nx, $c1]);
+    $vx->set_representation('Int');
+    my $rxL = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    $rxL->set_representation('Int');
+    my $asg = $f->make('Assign', inputs => [$rxL, $c2]);
+    # Intentionally do NOT set representation on Assign.
+    my $ret = $f->make_cfg('Return', inputs => [$asg]);
+
+    my ($ll, $err);
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'undef-repr Assign: lower() dies loudly')
+        or diag("Got no error; .ll:\n" . substr($ll // '', 0, 300));
+    if (defined $err && length $err) {
+        like($err, qr/representation|repr|GAP/i,
+            'Assign error message mentions representation or GAP')
+            or diag("error: $err");
+    }
+};
+
+# Test 7: undef-repr TernaryExpr branch dies loudly (sites: lines ~1963/1964)
+subtest 'undef-repr TernaryExpr true-branch dies loudly' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    my $cond = $f->make('Constant', value => 1, const_type => 'integer');
+    $cond->set_representation('Bool');
+    my $true_c = $f->make('Constant', value => 10, const_type => 'integer');
+    # Intentionally do NOT set representation on true branch.
+    my $fals_c = $f->make('Constant', value => 20, const_type => 'integer');
+    $fals_c->set_representation('Int');
+    my $tern = $f->make('TernaryExpr', inputs => [$cond, $true_c, $fals_c]);
+    $tern->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$tern]);
+
+    my ($ll, $err);
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'undef-repr TernaryExpr true-branch: lower() dies loudly')
+        or diag("Got no error; .ll:\n" . substr($ll // '', 0, 300));
+    if (defined $err && length $err) {
+        like($err, qr/representation|repr|GAP/i,
+            'TernaryExpr error message mentions representation or GAP')
+            or diag("error: $err");
+    }
+};
+
+# Test 8: undef-repr DefinedOr lhs dies loudly (site: line ~2163, _lower_defined_or)
+subtest 'undef-repr DefinedOr lhs dies loudly' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    my $lhs = $f->make('Constant', value => 5, const_type => 'integer');
+    # Intentionally do NOT set representation on lhs.
+    my $rhs = $f->make('Constant', value => 99, const_type => 'integer');
+    $rhs->set_representation('Int');
+    my $dor = $f->make('DefinedOr', inputs => [$lhs, $rhs]);
+    $dor->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$dor]);
+
+    my ($ll, $err);
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'undef-repr DefinedOr lhs: lower() dies loudly')
+        or diag("Got no error; .ll:\n" . substr($ll // '', 0, 300));
+    if (defined $err && length $err) {
+        like($err, qr/representation|repr|GAP/i,
+            'DefinedOr error message mentions representation or GAP')
+            or diag("error: $err");
+    }
+};
+
 done_testing();
