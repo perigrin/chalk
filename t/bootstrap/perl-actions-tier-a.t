@@ -235,45 +235,71 @@ my sub is_use_info($node, $expected_name, $msg) {
 }
 
 # ============================================================
-# 3. Target.pm — class, 2 methods with param, die
+# 3. Bootstrap/Target.pm — compat alias :isa(Chalk::Target), empty body
 # ============================================================
 
 {
     my $ir = parse_file('lib/Chalk/Bootstrap/Target.pm');
-    ok(defined $ir, 'Target.pm: parse produces IR');
+    ok(defined $ir, 'Bootstrap/Target.pm: parse produces IR');
 
     SKIP: {
-        skip 'Target.pm: no IR', 15 unless defined $ir;
+        skip 'Bootstrap/Target.pm: no IR', 10 unless defined $ir;
 
-        is_constructor($ir, 'Program', 'Target.pm Program');
+        is_constructor($ir, 'Program', 'Bootstrap/Target.pm Program');
         my $stmts = program_stmts($ir);
         my $cls = $stmts->[-1];
-        is_class_node($cls, 'Target.pm class declaration');
-        is(class_name($cls), 'Chalk::Bootstrap::Target', 'Target.pm class name');
-        is(class_parent($cls), undef, 'Target.pm: no parent class');
+        is_class_node($cls, 'Bootstrap/Target.pm class declaration');
+        is(class_name($cls), 'Chalk::Bootstrap::Target', 'Bootstrap/Target.pm class name');
+        is(class_parent($cls), 'Chalk::Target', 'Bootstrap/Target.pm: parent class is Chalk::Target');
 
         my $body = class_body($cls);
         my @methods = grep { $_ isa Chalk::IR::MethodInfo
             || ($_ isa Chalk::IR::Node::Constructor && $_->class() eq 'MethodDecl')
         } $body->@*;
-        ok(scalar @methods >= 2, 'Target.pm: class body has at least 2 methods');
+        is(scalar @methods, 0, 'Bootstrap/Target.pm: alias has no methods of its own');
+    }
+}
+
+# ============================================================
+# 3b. Chalk/Target.pm — base class, 3 methods with param, die
+# ============================================================
+
+{
+    my $ir = parse_file('lib/Chalk/Target.pm');
+    ok(defined $ir, 'Chalk/Target.pm: parse produces IR');
+
+    SKIP: {
+        skip 'Chalk/Target.pm: no IR', 15 unless defined $ir;
+
+        is_constructor($ir, 'Program', 'Chalk/Target.pm Program');
+        my $stmts = program_stmts($ir);
+        my $cls = $stmts->[-1];
+        is_class_node($cls, 'Chalk/Target.pm class declaration');
+        is(class_name($cls), 'Chalk::Target', 'Chalk/Target.pm class name');
+        is(class_parent($cls), undef, 'Chalk/Target.pm: no parent class');
+
+        my $body = class_body($cls);
+        my @methods = grep { $_ isa Chalk::IR::MethodInfo
+            || ($_ isa Chalk::IR::Node::Constructor && $_->class() eq 'MethodDecl')
+        } $body->@*;
+        ok(scalar @methods >= 2, 'Chalk/Target.pm: class body has at least 2 methods');
 
         # Find generate($ir) method
         my ($m1) = grep { method_name($_) eq 'generate' } @methods;
-        ok(defined $m1, 'Target.pm: has generate method');
+        ok(defined $m1, 'Chalk/Target.pm: has generate method');
         if (defined $m1) {
             my $m1_params = method_params($m1);
-            ok(scalar $m1_params->@* >= 1, 'Target.pm generate has at least 1 param');
+            ok(scalar $m1_params->@* >= 1, 'Chalk/Target.pm generate has at least 1 param');
 
             # Body has Unwind (die)
             my $m1_body = method_body($m1);
-            is(scalar $m1_body->@*, 1, 'Target.pm generate body has 1 statement');
-            isa_ok($m1_body->[0], 'Chalk::IR::Node::Unwind', 'Target.pm generate dies (Unwind CFG node)');
+            is(scalar $m1_body->@*, 1, 'Chalk/Target.pm generate body has 1 statement');
+            isa_ok($m1_body->[0], 'Chalk::IR::Node::Unwind', 'Chalk/Target.pm generate dies (Unwind CFG node)');
         }
 
         # Find generate_distribution($ir) method
         my ($m2) = grep { method_name($_) eq 'generate_distribution' } @methods;
-        ok(defined $m2, 'Target.pm: has generate_distribution method');
+        ok(defined $m2, 'Chalk/Target.pm: has generate_distribution method');
     }
 }
 
