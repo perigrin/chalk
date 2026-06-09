@@ -1,12 +1,12 @@
 ---
 title: "Reconciliation 1/3: namespace move + Phase G (gate hardening)"
-state: reopened
+state: in-progress
 urgency: normal
 milestone: codegen-harness
 blocks:
 - 019eaacc-4dd8-7a5f-b095-29fc817b6442
 created: 2026-06-09T05:12:56.506078225Z
-updated: 2026-06-09T14:51:24.324301795Z
+updated: 2026-06-09T14:51:24.362883197Z
 sessions:
 - start_sha: d3fb9069fb70b3c25454813e6f93385dbe7d3ad1
   end_sha: 5b867a6aa3bd1f25ee6aab45f0e211044dee233e
@@ -18,6 +18,10 @@ sessions:
   commits: 2
   started_at: 2026-06-09T06:29:19.86210938Z
   ended_at: 2026-06-09T13:40:08.3748955Z
+- start_sha: 39d0649b7d1276b3137b4bd0628f91511f0e9419
+  end_sha: ""
+  commits: 0
+  started_at: 2026-06-09T14:51:24.362883197Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
@@ -37,6 +41,9 @@ transitions:
 - state: reopened
   actor: human:git-zhi
   timestamp: 2026-06-09T14:51:24.324301795Z
+- state: in-progress
+  actor: human:git-zhi
+  timestamp: 2026-06-09T14:51:24.362883197Z
 observed_paths:
 - docs/plans/2026-06-08-ir-taxonomy-reconciliation.md
 - lib/Chalk/Bootstrap/Target.pm
