@@ -2014,6 +2014,20 @@ sub _lower_and {
     my $lhs_node = $inputs->[0];
     my $rhs_node = $inputs->[1];
 
+    # Validate LHS repr: only Int operands use the icmp ne i64 truthiness path.
+    # G.7/F8: die loudly on non-Int operands instead of silently reinterpreting
+    # Bool(i1) or Num(double) as i64 (which would miscompile).
+    my $lhs_repr = $lhs_node->representation;
+    unless (defined $lhs_repr) {
+        die "GAP: And (&&) LHS operand has no representation at lowering time (G.7/F8). "
+          . "Fix TypeInference to annotate the operand.";
+    }
+    unless ($lhs_repr eq 'Int') {
+        die "GAP: And (&&) LHS operand has repr=$lhs_repr; only Int truthiness is lowered "
+          . "runtime-free via icmp ne i64 (G.7/F8). "
+          . "Insert an explicit Coerce(*->Bool) node before the And, or fix TypeInference.";
+    }
+
     # Lower the LHS in the current block.
     my $lhs_ref    = $self->lower_value($lhs_node);
     my $entry_label = $self->_current_block_label;
@@ -2056,6 +2070,20 @@ sub _lower_or {
     my $inputs = $node->inputs;
     my $lhs_node = $inputs->[0];
     my $rhs_node = $inputs->[1];
+
+    # Validate LHS repr: only Int operands use the icmp ne i64 truthiness path.
+    # G.7/F8: die loudly on non-Int operands instead of silently reinterpreting
+    # Bool(i1) or Num(double) as i64 (which would miscompile).
+    my $lhs_repr = $lhs_node->representation;
+    unless (defined $lhs_repr) {
+        die "GAP: Or (||) LHS operand has no representation at lowering time (G.7/F8). "
+          . "Fix TypeInference to annotate the operand.";
+    }
+    unless ($lhs_repr eq 'Int') {
+        die "GAP: Or (||) LHS operand has repr=$lhs_repr; only Int truthiness is lowered "
+          . "runtime-free via icmp ne i64 (G.7/F8). "
+          . "Insert an explicit Coerce(*->Bool) node before the Or, or fix TypeInference.";
+    }
 
     # Lower the LHS in the current block.
     my $lhs_ref    = $self->lower_value($lhs_node);
