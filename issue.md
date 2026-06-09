@@ -1,10 +1,19 @@
 ---
 title: "Phase 3a: SoN->LLVM lowering for literal-arithmetic slice + typed-IR contract in code"
-state: pending
+state: in-progress
 urgency: normal
 milestone: codegen-harness
 created: 2026-06-09T02:59:03.305405071Z
-updated: 2026-06-09T02:59:03.305405071Z
+updated: 2026-06-09T02:59:45.475475919Z
+sessions:
+- start_sha: f4149ea4cdf412c343610792324cddc1e34ba8d7
+  end_sha: ""
+  commits: 0
+  started_at: 2026-06-09T02:59:45.475475919Z
+transitions:
+- state: in-progress
+  actor: human:git-zhi
+  timestamp: 2026-06-09T02:59:45.475475919Z
 ---
 
 -
