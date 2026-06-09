@@ -851,7 +851,7 @@ sub lower_with_elaboration {
         push @lines, _emit_str_to_num_helper();
         $ctx->{_str_to_num_helper_emitted} = 1;
     }
-    # Post-class re-emit for _need_memcmp: a method body doing HashRead/HashLiteral
+    # Post-class re-emit for _need_memcmp: a method body doing Subscript(Hash)
     # sets _need_memcmp on $body_ctx (propagated to $ctx by G.5), but the prologue
     # memcmp declare runs BEFORE method bodies lower. If the flag was set only by a
     # method body, the prologue missed it. Emit here, guarded by _memcmp_emitted so
@@ -1050,11 +1050,11 @@ sub new {
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
         #   _need_memcmp => bool
-        #     Set when HashRead/HashWrite is lowered; triggers memcmp declaration.
+        #     Set when Subscript(Hash) is lowered; triggers memcmp declaration.
         #   _arr_table => { node_id => '%arr_ptr_ref' }
-        #     Maps ArrayLiteral/ArrayWrite node id -> LLVM %Array* pointer ref.
+        #     Maps ArrayRef/Assign(Array-lvalue) node id -> LLVM %Array* pointer ref.
         #   _hash_table => { node_id => '%hash_ptr_ref' }
-        #     Maps HashLiteral/HashWrite node id -> LLVM %Hash* pointer ref.
+        #     Maps HashRef/Assign(Hash-lvalue) node id -> LLVM %Hash* pointer ref.
         _need_aggregate_types => 0,
         _need_memcmp          => 0,
         _arr_table            => {},
