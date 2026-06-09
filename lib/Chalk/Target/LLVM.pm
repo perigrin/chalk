@@ -1229,8 +1229,11 @@ sub lower_value {
     elsif ($op eq 'Loop') {
         return $self->_lower_loop($node);
     }
-    elsif ($op eq 'ArrayLiteral') {
-        return $self->_lower_array_literal($node);
+    elsif ($op eq 'ArrayRef') {
+        return $self->_lower_array_ref($node);
+    }
+    elsif ($op eq 'HashRef') {
+        return $self->_lower_hash_ref($node);
     }
     elsif ($op eq 'Length') {
         return $self->_lower_length($node);
@@ -1244,23 +1247,8 @@ sub lower_value {
     elsif ($op eq 'ArrayWrite') {
         return $self->_lower_array_write($node);
     }
-    elsif ($op eq 'HashLiteral') {
-        return $self->_lower_hash_literal($node);
-    }
     elsif ($op eq 'HashWrite') {
         return $self->_lower_hash_write($node);
-    }
-    elsif ($op eq 'MakeArrayRef') {
-        return $self->_lower_make_array_ref($node);
-    }
-    elsif ($op eq 'MakeHashRef') {
-        return $self->_lower_make_hash_ref($node);
-    }
-    elsif ($op eq 'ArrayDeref') {
-        return $self->_lower_array_deref($node);
-    }
-    elsif ($op eq 'HashDeref') {
-        return $self->_lower_hash_deref($node);
     }
     # FieldAccess in a method body context: load from $self's struct
     elsif ($op eq 'FieldAccess' && $self->{_in_method_body}) {
@@ -3015,6 +3003,136 @@ sub _lower_array_literal {
 }
 
 
+# _lower_array_ref: canonical ref-producing array constructor.
+# inputs = [elem0, elem1, ...]. Returns i8* (ArrayRef repr).
+# The underlying %Array* is stored in _arr_table keyed by node id so that
+# Length/Subscript consumers can get the struct pointer without a bitcast.
+sub _lower_array_ref {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+
+    my $inputs = $node->inputs;
+    my $n      = scalar @$inputs;
+
+    # Allocate slot buffer: n * sizeof(%Slot).
+    my $slot_bytes = $n * 16;
+    my $slot_buf = $self->_fresh;
+    $self->_emit("  $slot_buf = call i8* \@malloc(i64 $slot_bytes)  ; ArrayRef: alloc $n slots");
+    my $slots = $self->_fresh;
+    $self->_emit("  $slots = bitcast i8* $slot_buf to %Slot*  ; ArrayRef: slot array ptr");
+
+    # Store each element as a defined slot {i1=true, i64=value}.
+    for my $i (0 .. $n - 1) {
+        my $elem_ref = $self->lower_value($inputs->[$i]);
+        my $slot_def = $self->_fresh;
+        my $slot_pay = $self->_fresh;
+        $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 0  ; ArrayRef: slot[$i] defined ptr");
+        $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 1  ; ArrayRef: slot[$i] payload ptr");
+        $self->_emit("  store i1 true, i1* $slot_def  ; ArrayRef: slot[$i] defined=true");
+        my $elem_i64;
+        my $elem_repr = $inputs->[$i]->representation // '';
+        if ($elem_repr eq 'ArrayRef' || $elem_repr eq 'HashRef') {
+            $elem_i64 = $self->_fresh;
+            $self->_emit("  $elem_i64 = ptrtoint i8* $elem_ref to i64  ; ArrayRef: ptr elem[$i] -> i64");
+        }
+        else {
+            $elem_i64 = $elem_ref;
+        }
+        $self->_emit("  store i64 $elem_i64, i64* $slot_pay  ; ArrayRef: slot[$i] payload=$elem_i64");
+    }
+
+    # Allocate Array header: { i64 len, i64 cap, %Slot* elems } = 24 bytes.
+    my $arr_buf = $self->_fresh;
+    $self->_emit("  $arr_buf = call i8* \@malloc(i64 24)  ; ArrayRef: alloc Array header");
+    my $arr = $self->_fresh;
+    $self->_emit("  $arr = bitcast i8* $arr_buf to %Array*  ; ArrayRef: Array ptr");
+    my $len_ptr = $self->_fresh;
+    my $cap_ptr = $self->_fresh;
+    my $elm_ptr = $self->_fresh;
+    $self->_emit("  $len_ptr = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0  ; ArrayRef: len ptr");
+    $self->_emit("  $cap_ptr = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 1  ; ArrayRef: cap ptr");
+    $self->_emit("  $elm_ptr = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2  ; ArrayRef: elems ptr");
+    $self->_emit("  store i64 $n, i64* $len_ptr  ; ArrayRef: len=$n");
+    $self->_emit("  store i64 $n, i64* $cap_ptr  ; ArrayRef: cap=$n");
+    $self->_emit("  store %Slot* $slots, %Slot** $elm_ptr  ; ArrayRef: store slots ptr");
+
+    # The canonical ref result is the i8* (Array* bitcast).
+    my $ref = $self->_fresh;
+    $self->_emit("  $ref = bitcast %Array* $arr to i8*  ; ArrayRef: Array* -> i8* ref");
+
+    $self->{cache}{ $node->id } = $ref;
+    # Track Array* in _arr_table for consumers (Length, Subscript) that need the struct.
+    $self->{_arr_table}{ $node->id } = $arr;
+    return $ref;
+}
+
+# _lower_hash_ref: canonical ref-producing hash constructor.
+# inputs = [key0, val0, key1, val1, ...]. Returns i8* (HashRef repr).
+# The underlying %Hash* is stored in _hash_table keyed by node id.
+sub _lower_hash_ref {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+    $self->{_need_memcmp}          = 1;
+
+    my $inputs = $node->inputs;
+    my $npairs = scalar(@$inputs) / 2;
+
+    my $entry_bytes = $npairs * 48;
+    my $ent_buf = $self->_fresh;
+    $self->_emit("  $ent_buf = call i8* \@malloc(i64 $entry_bytes)  ; HashRef: alloc $npairs entries");
+    my $ents = $self->_fresh;
+    $self->_emit("  $ents = bitcast i8* $ent_buf to %HashEntry*  ; HashRef: entry array ptr");
+
+    for my $i (0 .. $npairs - 1) {
+        my $key_ref = $self->lower_value($inputs->[ $i * 2     ]);
+        my $val_ref = $self->lower_value($inputs->[ $i * 2 + 1 ]);
+        my $key_len = $self->_str_len_for($key_ref) // 0;
+
+        my $e_kp = $self->_fresh;
+        my $e_kl = $self->_fresh;
+        my $e_ke = $self->_fresh;
+        my $e_vd = $self->_fresh;
+        my $e_vp = $self->_fresh;
+        $self->_emit("  $e_kp = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 0  ; HashRef: entry[$i] key_ptr ptr");
+        $self->_emit("  $e_kl = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 1  ; HashRef: entry[$i] key_len ptr");
+        $self->_emit("  $e_ke = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 2  ; HashRef: entry[$i] key_enc ptr");
+        $self->_emit("  $e_vd = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 3  ; HashRef: entry[$i] val_def ptr");
+        $self->_emit("  $e_vp = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 4  ; HashRef: entry[$i] val_pay ptr");
+        $self->_emit("  store i8* $key_ref, i8** $e_kp  ; HashRef: key ptr");
+        $self->_emit("  store i64 $key_len, i64* $e_kl  ; HashRef: key len=$key_len");
+        $self->_emit("  store i32 0, i32* $e_ke          ; HashRef: enc=0 (ASCII)");
+        $self->_emit("  store i1 true, i1* $e_vd         ; HashRef: defined=true");
+        $self->_emit("  store i64 $val_ref, i64* $e_vp   ; HashRef: value");
+    }
+
+    my $hash_buf = $self->_fresh;
+    $self->_emit("  $hash_buf = call i8* \@malloc(i64 24)  ; HashRef: alloc Hash header");
+    my $hash = $self->_fresh;
+    $self->_emit("  $hash = bitcast i8* $hash_buf to %Hash*  ; HashRef: Hash ptr");
+    my $cnt_ptr = $self->_fresh;
+    my $cap_ptr = $self->_fresh;
+    my $ent_ptr = $self->_fresh;
+    $self->_emit("  $cnt_ptr = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 0  ; HashRef: count ptr");
+    $self->_emit("  $cap_ptr = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 1  ; HashRef: cap ptr");
+    $self->_emit("  $ent_ptr = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 2  ; HashRef: entries ptr");
+    $self->_emit("  store i64 $npairs, i64* $cnt_ptr  ; HashRef: count=$npairs");
+    $self->_emit("  store i64 $npairs, i64* $cap_ptr  ; HashRef: cap=$npairs");
+    $self->_emit("  store %HashEntry* $ents, %HashEntry** $ent_ptr  ; HashRef: store entries ptr");
+
+    # The canonical ref result is the i8* (Hash* bitcast).
+    my $ref = $self->_fresh;
+    $self->_emit("  $ref = bitcast %Hash* $hash to i8*  ; HashRef: Hash* -> i8* ref");
+
+    $self->{cache}{ $node->id } = $ref;
+    # Track Hash* in _hash_table for consumers (Subscript, HashWrite) that need the struct.
+    $self->{_hash_table}{ $node->id } = $hash;
+    return $ref;
+}
+
 # _lower_length: repr-aware length of an Array or Str operand.
 # Array repr: load the len field from the %Array struct (array element count).
 # Str repr: load the len field from the %StrPair struct (byte length).
@@ -3025,9 +3143,18 @@ sub _lower_length {
     my $operand = $node->inputs->[0];
     my $op_repr = _require_repr($operand, 'Length.operand');
 
-    if ($op_repr eq 'Array') {
+    if ($op_repr eq 'Array' || $op_repr eq 'ArrayRef') {
         $self->{_need_aggregate_types} = 1;
-        my $arr_ref = $self->lower_value($operand);
+        # Ensure the operand is lowered (populates _arr_table for ArrayRef nodes).
+        $self->lower_value($operand);
+        my $arr_ref = $self->{_arr_table}{ $operand->id };
+        unless (defined $arr_ref) {
+            # ArrayRef emitted as i8*: bitcast to Array* to read the struct.
+            my $i8 = $self->{cache}{ $operand->id };
+            $arr_ref = $self->_fresh;
+            $self->_emit("  $arr_ref = bitcast i8* $i8 to %Array*  ; Length(ArrayRef): i8* -> Array*");
+            $self->{_arr_table}{ $operand->id } = $arr_ref;
+        }
         my $len_ptr = $self->_fresh;
         my $len     = $self->_fresh;
         $self->_emit("  $len_ptr = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 0  ; Length(Array): len ptr");
@@ -3059,14 +3186,45 @@ sub _lower_subscript {
     my $container = $node->inputs->[0];
     my $container_repr = _require_repr($container, 'Subscript.container');
 
-    if ($container_repr eq 'Array') {
+    if ($container_repr eq 'Array' || $container_repr eq 'ArrayRef') {
+        # ArrayRef containers: lower the container to populate _arr_table, then
+        # substitute the underlying Array* so _lower_array_read sees Array* not i8*.
+        if ($container_repr eq 'ArrayRef') {
+            $self->lower_value($container);
+            unless (exists $self->{_arr_table}{ $container->id }) {
+                my $i8 = $self->{cache}{ $container->id };
+                my $arr = $self->_fresh;
+                $self->_emit("  $arr = bitcast i8* $i8 to %Array*  ; Subscript(ArrayRef): i8* -> Array*");
+                $self->{_arr_table}{ $container->id } = $arr;
+                # Also update cache so _lower_array_read's lower_value returns Array*
+                $self->{cache}{ $container->id } = $arr;
+            }
+            else {
+                # Redirect cache to the Array* so _lower_array_read sees the struct ptr.
+                $self->{cache}{ $container->id } = $self->{_arr_table}{ $container->id };
+            }
+        }
         return $self->_lower_array_read($node);
     }
-    elsif ($container_repr eq 'Hash') {
+    elsif ($container_repr eq 'Hash' || $container_repr eq 'HashRef') {
+        # HashRef containers: same as ArrayRef pattern but for Hash*.
+        if ($container_repr eq 'HashRef') {
+            $self->lower_value($container);
+            unless (exists $self->{_hash_table}{ $container->id }) {
+                my $i8 = $self->{cache}{ $container->id };
+                my $hash = $self->_fresh;
+                $self->_emit("  $hash = bitcast i8* $i8 to %Hash*  ; Subscript(HashRef): i8* -> Hash*");
+                $self->{_hash_table}{ $container->id } = $hash;
+                $self->{cache}{ $container->id } = $hash;
+            }
+            else {
+                $self->{cache}{ $container->id } = $self->{_hash_table}{ $container->id };
+            }
+        }
         return $self->_lower_hash_read($node);
     }
     else {
-        die "GAP: Subscript container has repr=$container_repr; only Array and Hash are lowered runtime-free.";
+        die "GAP: Subscript container has repr=$container_repr; only Array/ArrayRef and Hash/HashRef are lowered runtime-free.";
     }
 }
 
@@ -3153,13 +3311,29 @@ sub _lower_array_read {
 }
 
 # _lower_array_write: store a value into an array element (in-bounds assumed for corpus).
-# inputs = [Array, index :Int, value :Int]. Returns the Array* (for chaining).
+# inputs = [Array or ArrayRef, index :Int, value :Int]. Returns the Array* (for chaining).
 sub _lower_array_write {
     my ($self, $node) = @_;
 
     $self->{_need_aggregate_types} = 1;
 
-    my $arr_ref = $self->lower_value($node->inputs->[0]);
+    my $container = $node->inputs->[0];
+    my $container_repr = $container->representation // '';
+    # Ensure we have the Array* (not i8*) for ArrayRef containers.
+    my $arr_ref;
+    if ($container_repr eq 'ArrayRef') {
+        $self->lower_value($container);
+        unless (exists $self->{_arr_table}{ $container->id }) {
+            my $i8 = $self->{cache}{ $container->id };
+            my $arr = $self->_fresh;
+            $self->_emit("  $arr = bitcast i8* $i8 to %Array*  ; ArrayWrite(ArrayRef): i8* -> Array*");
+            $self->{_arr_table}{ $container->id } = $arr;
+        }
+        $arr_ref = $self->{_arr_table}{ $container->id };
+    }
+    else {
+        $arr_ref = $self->lower_value($container);
+    }
     my $idx_ref = $self->lower_value($node->inputs->[1]);
     my $val_ref = $self->lower_value($node->inputs->[2]);
 
@@ -3372,7 +3546,7 @@ sub _lower_hash_read {
 }
 
 # _lower_hash_write: update an existing key's value in a hash (phi-based loop counter).
-# inputs = [Hash, key :Str, value :Int]. Returns the Hash* (for chaining).
+# inputs = [Hash or HashRef, key :Str, value :Int]. Returns the Hash* (for chaining).
 # Scans the hash for the key and updates val_payload if found. The corpus cases
 # (R6/R7) only write to keys that exist in the initial hash literal.
 sub _lower_hash_write {
@@ -3382,7 +3556,22 @@ sub _lower_hash_write {
     $self->{_need_malloc_memcpy}   = 1;
     $self->{_need_memcmp}          = 1;
 
-    my $hash_ref = $self->lower_value($node->inputs->[0]);
+    my $container = $node->inputs->[0];
+    my $container_repr = $container->representation // '';
+    my $hash_ref;
+    if ($container_repr eq 'HashRef') {
+        $self->lower_value($container);
+        unless (exists $self->{_hash_table}{ $container->id }) {
+            my $i8 = $self->{cache}{ $container->id };
+            my $hash = $self->_fresh;
+            $self->_emit("  $hash = bitcast i8* $i8 to %Hash*  ; HashWrite(HashRef): i8* -> Hash*");
+            $self->{_hash_table}{ $container->id } = $hash;
+        }
+        $hash_ref = $self->{_hash_table}{ $container->id };
+    }
+    else {
+        $hash_ref = $self->lower_value($container);
+    }
     my $wkey_ref = $self->lower_value($node->inputs->[1]);
     my $wkey_len = $self->_str_len_for($wkey_ref) // 0;
     my $wval_ref = $self->lower_value($node->inputs->[2]);

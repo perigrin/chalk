@@ -43,7 +43,7 @@ context: scalar
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %c3  = Constant(3) :Int
-%arr = ArrayLiteral(%c1, %c2, %c3) :Array
+%arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %r   = Length(%arr) :Int
 return %r
 L: GREEN
@@ -70,7 +70,7 @@ context: scalar
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %c3  = Constant(3) :Int
-%arr = ArrayLiteral(%c1, %c2, %c3) :Array
+%arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %idx = Constant(1) :Int
 %r   = Subscript(%arr, %idx) :Int
 return %r
@@ -99,7 +99,7 @@ context: scalar
 %v1   = Constant(1) :Int
 %kb   = Constant("b") :Str
 %v2   = Constant(2) :Int
-%hash = HashLiteral(%ka, %v1, %kb, %v2) :Hash
+%hash = HashRef(%ka, %v1, %kb, %v2) :HashRef
 %lk   = Constant("a") :Str
 %r    = Subscript(%hash, %lk) :Int
 return %r
@@ -128,8 +128,7 @@ context: scalar
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
-%inner = ArrayLiteral(%c1, %c2, %c3) :Array
-%ref   = MakeArrayRef(%inner) :ArrayRef
+%ref   = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %deref = PostfixDeref(%ref, sigil: "@") :Array
 %idx   = Constant(0) :Int
 %r     = Subscript(%deref, %idx) :Int
@@ -159,8 +158,7 @@ context: scalar
 %v1    = Constant(1) :Int
 %kb    = Constant("b") :Str
 %v2    = Constant(2) :Int
-%inner = HashLiteral(%ka, %v1, %kb, %v2) :Hash
-%ref   = MakeHashRef(%inner) :HashRef
+%ref   = HashRef(%ka, %v1, %kb, %v2) :HashRef
 %deref = PostfixDeref(%ref, sigil: "%") :Hash
 %lk    = Constant("a") :Str
 %r     = Subscript(%deref, %lk) :Int
@@ -190,7 +188,7 @@ context: scalar
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %c3   = Constant(3) :Int
-%arr  = ArrayLiteral(%c1, %c2, %c3) :Array
+%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %idx  = Constant(0) :Int
 %nv   = Constant(42) :Int
 %arr2 = ArrayWrite(%arr, %idx, %nv) :Array
@@ -221,7 +219,7 @@ context: scalar
 ```ir
 %kk   = Constant("k") :Str
 %v0   = Constant(0) :Int
-%hash = HashLiteral(%kk, %v0) :Hash
+%hash = HashRef(%kk, %v0) :HashRef
 %wk   = Constant("k") :Str
 %wv   = Constant(99) :Int
 %h2   = HashWrite(%hash, %wk, %wv) :Hash
@@ -254,12 +252,9 @@ context: scalar
 %ca2       = Constant(2) :Int
 %ca3       = Constant(3) :Int
 %ca4       = Constant(4) :Int
-%arr0      = ArrayLiteral(%ca1, %ca2) :Array
-%arr1      = ArrayLiteral(%ca3, %ca4) :Array
-%ref0      = MakeArrayRef(%arr0) :ArrayRef
-%ref1      = MakeArrayRef(%arr1) :ArrayRef
-%outer     = ArrayLiteral(%ref0, %ref1) :Array
-%outer_ref = MakeArrayRef(%outer) :ArrayRef
+%ref0      = ArrayRef(%ca1, %ca2) :ArrayRef
+%ref1      = ArrayRef(%ca3, %ca4) :ArrayRef
+%outer_ref = ArrayRef(%ref0, %ref1) :ArrayRef
 %outer_arr = PostfixDeref(%outer_ref, sigil: "@") :Array
 %idx1      = Constant(1) :Int
 %inner_ref = Subscript(%outer_arr, %idx1) :ArrayRef
@@ -293,7 +288,7 @@ context: scalar
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %c3  = Constant(3) :Int
-%arr = ArrayLiteral(%c1, %c2, %c3) :Array
+%arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %idx = Constant(9) :Int
 %r   = Subscript(%arr, %idx) :Slot
 return %r
@@ -322,7 +317,7 @@ context: scalar
 %v1   = Constant(1) :Int
 %kb   = Constant("b") :Str
 %v2   = Constant(2) :Int
-%hash = HashLiteral(%ka, %v1, %kb, %v2) :Hash
+%hash = HashRef(%ka, %v1, %kb, %v2) :HashRef
 %lk   = Constant("z") :Str
 %r    = Subscript(%hash, %lk) :Slot
 return %r

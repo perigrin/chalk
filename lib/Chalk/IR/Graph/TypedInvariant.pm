@@ -22,7 +22,7 @@ my %OP_REQUIRED_REPR = (
     Divide   => 'Num',  # Perl `/` is always float division; inputs must be Num
     Modulo   => 'Int',
     Concat   => 'Str',  # String concatenation requires Str operands (G3)
-    Length   => [qw(Array Str)],  # scalar @arr or length($str); operand must be Array or Str
+    Length   => [qw(Array ArrayRef Str)],  # scalar @arr or length($str); operand must be Array, ArrayRef, or Str
 );
 
 # Per-position required representation for ops with different constraints at each input.
@@ -31,9 +31,9 @@ my %OP_REQUIRED_REPR = (
 # Position 0 is inputs->[0], position 1 is inputs->[1], etc.
 my %OP_PER_POSITION_REPR = (
     # Subscript(container, key_or_index):
-    #   inputs[0] = container — must be Array or Hash
+    #   inputs[0] = container — must be Array, Hash, ArrayRef, or HashRef
     #   inputs[1] = key/index — unchecked (Int for array, Str for hash, both valid)
-    Subscript => [ [qw(Array Hash)], undef ],
+    Subscript => [ [qw(Array Hash ArrayRef HashRef)], undef ],
     # PostfixDeref(ref):
     #   inputs[0] = the ref — must be ArrayRef or HashRef
     PostfixDeref => [ [qw(ArrayRef HashRef)] ],
