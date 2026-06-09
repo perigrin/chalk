@@ -261,7 +261,8 @@ my sub is_use_info($node, $expected_name, $msg) {
 }
 
 # ============================================================
-# 3b. Chalk/Target.pm — base class, 3 methods with param, die
+# 3b. Chalk/Target.pm — Bootstrap-tier base, 2 methods with param, die
+#     (lower() removed; it belongs to Chalk::IR::Target, the typed-IR tier)
 # ============================================================
 
 {

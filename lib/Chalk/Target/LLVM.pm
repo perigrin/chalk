@@ -4,6 +4,12 @@ package Chalk::Target::LLVM;
 use 5.42.0;
 use utf8;
 
+# I4/I5: LLVM is the typed-IR-tier backend; it isa Chalk::IR::Target (not Chalk::Target).
+# Chalk::Target is the Bootstrap-tier base (generate/generate_distribution);
+# Chalk::IR::Target is the typed-IR-tier base (lower). Keeping them separate ensures
+# Bootstrap targets do not inherit an alien lower() stub.
+use parent 'Chalk::IR::Target';
+
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Schedule::Dominators;
 use Chalk::IR::Schedule::Elaborate;
@@ -375,6 +381,7 @@ sub _emit_class_registry_ir {
         push @lines, '; StrPair: {i8* ptr, i64 len} for Str method return values';
         push @lines, '%StrPair = type { i8*, i64 }';
         $ctx->{_need_strpair} = 1;
+        $ctx->{_strpair_emitted} = 1;  # I3: track emission to prevent double-declare in post-class re-emit
     }
 
     for my $cname (sort keys %$registry) {
@@ -482,6 +489,7 @@ sub _emit_class_registry_ir {
             $body_ctx->{_in_method_body} = 1;
             $body_ctx->{_method_self_name} = '%self';
             $body_ctx->{_method_class_name} = $cname;
+            $body_ctx->{_method_name} = $mname;  # I1: used to prefix str_const globals uniquely
             $body_ctx->{class_registry} = $registry;
             $body_ctx->{_need_strpair}  = $ctx->{_need_strpair} // 0;
 
@@ -851,6 +859,20 @@ sub lower_with_elaboration {
     if ($ctx->{_need_memcmp} && !$ctx->{_memcmp_emitted}) {
         push @lines, 'declare i32 @memcmp(i8* nocapture readonly, i8* nocapture readonly, i64)';
         $ctx->{_memcmp_emitted} = 1;
+    }
+
+    # Post-class re-emit for _need_strpair (I3):
+    # %StrPair is declared by _emit_class_registry_ir only when some method RETURNS Str
+    # (the LOCAL $need_strpair scan at line ~366 checks return_repr). But _need_strpair
+    # is also set during lower_value (e.g. _lower_new at ~3545 when binding a Str :param
+    # field), which runs BEFORE _emit_class_registry_ir. If the class has no Str-returning
+    # method (LOCAL scan returns 0) but a Str :param is bound, _lower_new emits %StrPair*
+    # references without %StrPair being declared — lli rejects. The _strpair_emitted flag
+    # (set at the existing line-376 emit site) prevents double-declare.
+    if ($ctx->{_need_strpair} && !$ctx->{_strpair_emitted}) {
+        push @lines, '; StrPair: {i8* ptr, i64 len} for Str values (post-class re-emit, I3)';
+        push @lines, '%StrPair = type { i8*, i64 }';
+        $ctx->{_strpair_emitted} = 1;
     }
 
     push @lines, '';
@@ -1336,8 +1358,21 @@ sub _lower_constant {
         my $total    = $byte_len + 1;  # +1 for NUL terminator
 
         # Allocate a unique global name for this string constant.
+        # I1: when lowering inside a method body, prefix by class/method so that
+        # two method bodies (each starting a fresh counter at 0) do not both emit
+        # @str_const_0 — which would be a duplicate symbol in the module.
+        # Method bodies set _in_method_body=1 and carry _method_class_name/_method_name.
         my $gidx    = scalar @{ $self->{_str_globals} };
-        my $gname   = "\@str_const_$gidx";
+        my $gname;
+        if ($self->{_in_method_body}
+            && defined $self->{_method_class_name}
+            && defined $self->{_method_name}) {
+            my $cls_slug  = $self->{_method_class_name};
+            my $meth_slug = $self->{_method_name};
+            $gname = "\@${cls_slug}__${meth_slug}__str_const_${gidx}";
+        } else {
+            $gname = "\@str_const_$gidx";
+        }
         push $self->{_str_globals}->@*, [$gname, $val, $byte_len];
 
         # GEP to get i8* from the global array.
@@ -2064,6 +2099,21 @@ sub _lower_and {
           . "Insert an explicit Coerce(*->Bool) node before the And, or fix TypeInference.";
     }
 
+    # I2: Validate RHS repr identically to LHS.
+    # A non-Int RHS would cause the phi to mix i64 with i1/double = invalid LLVM.
+    # The phi type is derived from the And node's repr (Int); merging a non-Int RHS
+    # ref into an Int phi is invalid IR.  Die loudly rather than produce a bad phi.
+    my $rhs_repr = $rhs_node->representation;
+    unless (defined $rhs_repr) {
+        die "GAP: And (&&) RHS operand has no representation at lowering time (I2/G.7/F8). "
+          . "Fix TypeInference to annotate the operand.";
+    }
+    unless ($rhs_repr eq 'Int') {
+        die "GAP: And (&&) RHS operand has repr=$rhs_repr; only Int truthiness is lowered "
+          . "runtime-free via icmp ne i64 (I2/G.7/F8). "
+          . "Insert an explicit Coerce(*->Bool) node before the And, or fix TypeInference.";
+    }
+
     # Lower the LHS in the current block.
     my $lhs_ref    = $self->lower_value($lhs_node);
     my $entry_label = $self->_current_block_label;
@@ -2124,6 +2174,19 @@ sub _lower_or {
     unless ($lhs_repr eq 'Int') {
         die "GAP: Or (||) LHS operand has repr=$lhs_repr; only Int truthiness is lowered "
           . "runtime-free via icmp ne i64 (G.7/F8). "
+          . "Insert an explicit Coerce(*->Bool) node before the Or, or fix TypeInference.";
+    }
+
+    # I2: Validate RHS repr identically to LHS.
+    # A non-Int RHS would cause the phi to mix i64 with i1/double = invalid LLVM.
+    my $rhs_repr = $rhs_node->representation;
+    unless (defined $rhs_repr) {
+        die "GAP: Or (||) RHS operand has no representation at lowering time (I2/G.7/F8). "
+          . "Fix TypeInference to annotate the operand.";
+    }
+    unless ($rhs_repr eq 'Int') {
+        die "GAP: Or (||) RHS operand has repr=$rhs_repr; only Int truthiness is lowered "
+          . "runtime-free via icmp ne i64 (I2/G.7/F8). "
           . "Insert an explicit Coerce(*->Bool) node before the Or, or fix TypeInference.";
     }
 

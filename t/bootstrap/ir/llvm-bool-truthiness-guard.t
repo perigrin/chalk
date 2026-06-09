@@ -119,4 +119,105 @@ subtest 'Or(Bool, Bool) GAPs loudly on non-Int operand' => sub {
         or diag("Got no error; .ll:\n" . substr($ll // '', 0, 200));
 };
 
+# I2 (R1 reopened): RHS guard missing — And/Or(Int, non-Int) must GAP loudly.
+# Before I2 fix: LHS guard passes (Int), RHS lowered silently with wrong type,
+# phi merges i64 with i1/double = invalid LLVM (miscompile or lli-reject).
+# After I2 fix: RHS repr checked identically to LHS; non-Int RHS dies loudly.
+
+# Build a Num-valued node: Constant(3.14 :Num)
+sub make_num_node {
+    my ($f, $val) = @_;
+    my $c = $f->make('Constant', value => $val, const_type => 'float');
+    $c->set_representation('Num');
+    return $c;
+}
+
+# Test 5: And(Int, Bool) — Int LHS passes guard, Bool RHS must GAP loudly
+subtest 'And(Int, Bool) GAPs loudly on non-Int RHS operand (I2)' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    my $lhs = $f->make('Constant', value => 5, const_type => 'integer');
+    $lhs->set_representation('Int');
+    my $rhs = make_bool_node($f, 1);   # Bool
+    my $and = $f->make('And', inputs => [$lhs, $rhs]);
+    $and->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$and]);
+
+    my ($ll, $err);
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'And(Int,Bool): lower() dies loudly on non-Int RHS operand (I2)')
+        or diag("Got no error — RHS guard is missing; .ll:\n" . substr($ll // '', 0, 300));
+
+    if (defined $err) {
+        like($err, qr/repr|representation|GAP|Bool|RHS/i,
+            'error mentions repr/Bool/GAP/RHS')
+            or diag("error: $err");
+    }
+};
+
+# Test 6: And(Int, Num) — Int LHS passes guard, Num RHS must GAP loudly
+subtest 'And(Int, Num) GAPs loudly on non-Int RHS operand (I2)' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    my $lhs = $f->make('Constant', value => 5, const_type => 'integer');
+    $lhs->set_representation('Int');
+    my $rhs = make_num_node($f, 3.14);
+    my $and = $f->make('And', inputs => [$lhs, $rhs]);
+    $and->set_representation('Num');
+    my $ret = $f->make_cfg('Return', inputs => [$and]);
+
+    my ($ll, $err);
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'And(Int,Num): lower() dies loudly on non-Int RHS operand (I2)')
+        or diag("Got no error — RHS guard is missing; .ll:\n" . substr($ll // '', 0, 300));
+
+    if (defined $err) {
+        like($err, qr/repr|representation|GAP|Num|RHS/i,
+            'error mentions repr/Num/GAP/RHS')
+            or diag("error: $err");
+    }
+};
+
+# Test 7: Or(Int, Bool) — must GAP loudly on non-Int RHS
+subtest 'Or(Int, Bool) GAPs loudly on non-Int RHS operand (I2)' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    my $lhs = $f->make('Constant', value => 0, const_type => 'integer');
+    $lhs->set_representation('Int');
+    my $rhs = make_bool_node($f, 1);   # Bool
+    my $or = $f->make('Or', inputs => [$lhs, $rhs]);
+    $or->set_representation('Bool');
+    my $ret = $f->make_cfg('Return', inputs => [$or]);
+
+    my ($ll, $err);
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'Or(Int,Bool): lower() dies loudly on non-Int RHS operand (I2)')
+        or diag("Got no error — RHS guard is missing; .ll:\n" . substr($ll // '', 0, 300));
+};
+
+# Test 8: Or(Int, Num) — must GAP loudly on non-Int RHS
+subtest 'Or(Int, Num) GAPs loudly on non-Int RHS operand (I2)' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    my $lhs = $f->make('Constant', value => 0, const_type => 'integer');
+    $lhs->set_representation('Int');
+    my $rhs = make_num_node($f, 2.718);
+    my $or = $f->make('Or', inputs => [$lhs, $rhs]);
+    $or->set_representation('Num');
+    my $ret = $f->make_cfg('Return', inputs => [$or]);
+
+    my ($ll, $err);
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'Or(Int,Num): lower() dies loudly on non-Int RHS operand (I2)')
+        or diag("Got no error — RHS guard is missing; .ll:\n" . substr($ll // '', 0, 300));
+};
+
 done_testing();
