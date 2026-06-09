@@ -346,12 +346,12 @@ subtest 'A7: HashRef{a=>1,b=>2} deref {a} -> Int:1' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# A8: ArrayWrite + Subscript -> Int:42
+# A8: Assign(Subscript-lvalue) + return stored value -> Int:42
 #
 # Equivalent to: my @a = (1,2,3); $a[0] = 42; $a[0]
-# Result: Int:42. Store then load.
+# Result: Int:42. Assign over Subscript lvalue stores and returns the value.
 # ---------------------------------------------------------------------------
-subtest 'A8: ArrayWrite(0,42) then Subscript(0) -> Int:42' => sub {
+subtest 'A8: Assign(Subscript-lvalue, 42) -> Int:42' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
@@ -367,17 +367,15 @@ subtest 'A8: ArrayWrite(0,42) then Subscript(0) -> Int:42' => sub {
     my $idx = $f->make('Constant', value => '0', const_type => 'integer');
     $idx->set_representation('Int');
 
+    # Subscript lvalue
+    my $lval = $f->make('Subscript', inputs => [$arr, $idx]);
+    $lval->set_representation('Int');
+
     my $newval = $f->make('Constant', value => '42', const_type => 'integer');
     $newval->set_representation('Int');
 
-    # ArrayWrite returns the array (for chaining)
-    my $arr2 = $f->make('ArrayWrite', inputs => [$arr, $idx, $newval]);
-    $arr2->set_representation('Array');
-
-    my $idx2 = $f->make('Constant', value => '0', const_type => 'integer');
-    $idx2->set_representation('Int');
-
-    my $elem = $f->make('Subscript', inputs => [$arr2, $idx2]);
+    # Assign returns the stored value (42)
+    my $elem = $f->make('Assign', inputs => [$lval, $newval]);
     $elem->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$elem]);
@@ -397,12 +395,12 @@ subtest 'A8: ArrayWrite(0,42) then Subscript(0) -> Int:42' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# A9: HashWrite + Subscript -> Int:99
+# A9: Assign(Hash-Subscript-lvalue) -> Int:99
 #
 # Equivalent to: my %h = (k => 0); $h{k} = 99; $h{k}
-# Result: Int:99. Store then load.
+# Result: Int:99. Assign over hash Subscript lvalue stores and returns 99.
 # ---------------------------------------------------------------------------
-subtest 'A9: HashWrite then Subscript -> Int:99' => sub {
+subtest 'A9: Assign(Hash-Subscript-lvalue, 99) -> Int:99' => sub {
     my $f = _mk();
 
     my $kk = $f->make('Constant', value => 'k', const_type => 'string');
@@ -415,17 +413,16 @@ subtest 'A9: HashWrite then Subscript -> Int:99' => sub {
 
     my $wk = $f->make('Constant', value => 'k', const_type => 'string');
     $wk->set_representation('Str');
+
+    # Hash Subscript lvalue
+    my $lval = $f->make('Subscript', inputs => [$hash, $wk]);
+    $lval->set_representation('Int');
+
     my $wv = $f->make('Constant', value => '99', const_type => 'integer');
     $wv->set_representation('Int');
 
-    # HashWrite returns the hash (for chaining)
-    my $hash2 = $f->make('HashWrite', inputs => [$hash, $wk, $wv]);
-    $hash2->set_representation('Hash');
-
-    my $rk = $f->make('Constant', value => 'k', const_type => 'string');
-    $rk->set_representation('Str');
-
-    my $val = $f->make('Subscript', inputs => [$hash2, $rk]);
+    # Assign returns the stored value (99)
+    my $val = $f->make('Assign', inputs => [$lval, $wv]);
     $val->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$val]);

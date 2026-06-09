@@ -1244,12 +1244,6 @@ sub lower_value {
     elsif ($op eq 'PostfixDeref') {
         return $self->_lower_postfix_deref($node);
     }
-    elsif ($op eq 'ArrayWrite') {
-        return $self->_lower_array_write($node);
-    }
-    elsif ($op eq 'HashWrite') {
-        return $self->_lower_hash_write($node);
-    }
     # FieldAccess in a method body context: load from $self's struct
     elsif ($op eq 'FieldAccess' && $self->{_in_method_body}) {
         return $self->_lower_field_access_in_method($node);
@@ -1973,11 +1967,90 @@ sub _lower_assign {
             return $rhs_ref;
         }
         elsif ($ctr_repr eq 'Hash' || $ctr_repr eq 'HashRef') {
-            # Hash element store: scan for key and update value (same as _lower_hash_write).
-            # Delegate to _lower_hash_write by creating a synthetic triple-input node view.
-            # For now, die with a clear GAP rather than duplicating the complex loop emitter.
-            die "GAP: Assign(HashSubscript-lvalue) element store not yet implemented — "
-              . "use HashWrite for hash element stores.";
+            # Hash element store: linear-scan key lookup and value update (same body as _lower_hash_write).
+            $self->{_need_aggregate_types} = 1;
+            $self->{_need_malloc_memcpy}   = 1;
+            $self->{_need_memcmp}          = 1;
+
+            my $hash_ref;
+            if ($ctr_repr eq 'HashRef') {
+                $self->lower_value($container);
+                unless (exists $self->{_hash_table}{ $container->id }) {
+                    my $i8 = $self->{cache}{ $container->id };
+                    my $hash = $self->_fresh;
+                    $self->_emit("  $hash = bitcast i8* $i8 to %Hash*  ; Assign(Hash-lvalue): i8* -> Hash*");
+                    $self->{_hash_table}{ $container->id } = $hash;
+                }
+                $hash_ref = $self->{_hash_table}{ $container->id };
+            }
+            else {
+                $hash_ref = $self->lower_value($container);
+            }
+            my $wkey_ref = $self->lower_value($key_idx);
+            my $wkey_len = $self->_str_len_for($wkey_ref) // 0;
+
+            my $cnt_ptr = $self->_fresh;
+            my $ent_ptr = $self->_fresh;
+            my $count   = $self->_fresh;
+            my $ents    = $self->_fresh;
+            $self->_emit("  $cnt_ptr = getelementptr inbounds %Hash, %Hash* $hash_ref, i32 0, i32 0  ; Assign(Hash-lvalue): count ptr");
+            $self->_emit("  $ent_ptr = getelementptr inbounds %Hash, %Hash* $hash_ref, i32 0, i32 2  ; Assign(Hash-lvalue): entries ptr");
+            $self->_emit("  $count = load i64, i64* $cnt_ptr  ; Assign(Hash-lvalue): load count");
+            $self->_emit("  $ents  = load %HashEntry*, %HashEntry** $ent_ptr  ; Assign(Hash-lvalue): load entries");
+
+            my $lbl_wloop = $self->_fresh_label('hwalp');
+            my $lbl_wchk  = $self->_fresh_label('hwchk');
+            my $lbl_wcmp  = $self->_fresh_label('hwcmp');
+            my $lbl_wupd  = $self->_fresh_label('hwupd');
+            my $lbl_wnxt  = $self->_fresh_label('hwnxt');
+            my $lbl_wend  = $self->_fresh_label('hwend');
+            my $lbl_wpre  = $self->_current_block_label;
+            my $wi_next   = $self->_fresh;
+
+            $self->_set_terminator("  br label \%$lbl_wloop");
+            $self->_new_block($lbl_wloop);
+            my $wi_phi = $self->_fresh;
+            $self->_emit("  $wi_phi = phi i64 [ 0, \%$lbl_wpre ], [ $wi_next, \%$lbl_wnxt ]  ; Assign(Hash-lvalue): loop counter");
+            my $wcond = $self->_fresh;
+            $self->_emit("  $wcond = icmp ult i64 $wi_phi, $count  ; Assign(Hash-lvalue): i < count?");
+            $self->_set_terminator("  br i1 $wcond, label \%$lbl_wchk, label \%$lbl_wend");
+
+            $self->_new_block($lbl_wchk);
+            my $went_p   = $self->_fresh;
+            my $went_kpp = $self->_fresh;
+            my $went_klp = $self->_fresh;
+            my $went_vpp = $self->_fresh;
+            my $went_kp  = $self->_fresh;
+            my $went_kl  = $self->_fresh;
+            $self->_emit("  $went_p   = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $wi_phi  ; Assign(Hash-lvalue): entry ptr");
+            $self->_emit("  $went_kpp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 0  ; Assign(Hash-lvalue): key_ptr field");
+            $self->_emit("  $went_klp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 1  ; Assign(Hash-lvalue): key_len field");
+            $self->_emit("  $went_vpp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 4  ; Assign(Hash-lvalue): val_pay field");
+            $self->_emit("  $went_kp  = load i8*,  i8**  $went_kpp  ; Assign(Hash-lvalue): entry key ptr");
+            $self->_emit("  $went_kl  = load i64,  i64*  $went_klp  ; Assign(Hash-lvalue): entry key len");
+            my $wlen_eq = $self->_fresh;
+            $self->_emit("  $wlen_eq = icmp eq i64 $went_kl, $wkey_len  ; Assign(Hash-lvalue): len eq");
+            $self->_set_terminator("  br i1 $wlen_eq, label \%$lbl_wcmp, label \%$lbl_wnxt");
+
+            $self->_new_block($lbl_wcmp);
+            my $wcmp_res  = $self->_fresh;
+            my $wis_match = $self->_fresh;
+            $self->_emit("  $wcmp_res  = call i32 \@memcmp(i8* nocapture readonly $went_kp, i8* nocapture readonly $wkey_ref, i64 $wkey_len)  ; Assign(Hash-lvalue): key memcmp");
+            $self->_emit("  $wis_match = icmp eq i32 $wcmp_res, 0  ; Assign(Hash-lvalue): key match?");
+            $self->_set_terminator("  br i1 $wis_match, label \%$lbl_wupd, label \%$lbl_wnxt");
+
+            $self->_new_block($lbl_wupd);
+            $self->_emit("  store i64 $rhs_ref, i64* $went_vpp  ; Assign(Hash-lvalue): update val_payload");
+            $self->_set_terminator("  br label \%$lbl_wend");
+
+            $self->_new_block($lbl_wnxt);
+            $self->_emit("  $wi_next = add i64 $wi_phi, 1  ; Assign(Hash-lvalue): i++");
+            $self->_set_terminator("  br label \%$lbl_wloop");
+
+            $self->_new_block($lbl_wend);
+
+            $self->{cache}{ $node->id } = $rhs_ref;
+            return $rhs_ref;
         }
         else {
             die "GAP: Assign(Subscript-lvalue) container has repr=$ctr_repr; "

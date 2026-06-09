@@ -190,10 +190,9 @@ context: scalar
 %c3   = Constant(3) :Int
 %arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %idx  = Constant(0) :Int
+%lval = Subscript(%arr, %idx) :Int
 %nv   = Constant(42) :Int
-%arr2 = ArrayWrite(%arr, %idx, %nv) :Array
-%idx2 = Constant(0) :Int
-%r    = Subscript(%arr2, %idx2) :Int
+%r    = Assign(%lval, %nv) :Int
 return %r
 L: GREEN
 ```
@@ -221,10 +220,9 @@ context: scalar
 %v0   = Constant(0) :Int
 %hash = HashRef(%kk, %v0) :HashRef
 %wk   = Constant("k") :Str
+%lval = Subscript(%hash, %wk) :Int
 %wv   = Constant(99) :Int
-%h2   = HashWrite(%hash, %wk, %wv) :Hash
-%rk   = Constant("k") :Str
-%r    = Subscript(%h2, %rk) :Int
+%r    = Assign(%lval, %wv) :Int
 return %r
 L: GREEN
 ```
