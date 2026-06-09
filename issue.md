@@ -1,6 +1,6 @@
 ---
 title: "Reconciliation 2/3: node convergence Phases 0-3 (aggregates)"
-state: reopened
+state: in-progress
 urgency: normal
 milestone: codegen-harness
 blocked_by:
@@ -8,13 +8,17 @@ blocked_by:
 blocks:
 - 019eaacc-4df6-7b46-915d-bd2aa1a4064f
 created: 2026-06-09T05:12:56.536057028Z
-updated: 2026-06-09T18:56:05.082598075Z
+updated: 2026-06-09T18:56:05.12300961Z
 sessions:
 - start_sha: 02e54ce652960f400b4d40d516d2fb38c696b2f7
   end_sha: af42bab262d433fd8f91d2d1d422facbe02333f3
   commits: 8
   started_at: 2026-06-09T17:26:22.456918877Z
   ended_at: 2026-06-09T18:22:29.35092724Z
+- start_sha: af42bab262d433fd8f91d2d1d422facbe02333f3
+  end_sha: ""
+  commits: 0
+  started_at: 2026-06-09T18:56:05.12300961Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
@@ -25,6 +29,9 @@ transitions:
 - state: reopened
   actor: human:git-zhi
   timestamp: 2026-06-09T18:56:05.082598075Z
+- state: in-progress
+  actor: human:git-zhi
+  timestamp: 2026-06-09T18:56:05.12300961Z
 observed_paths:
 - lib/Chalk/IR/Graph/TypedInvariant.pm
 - lib/Chalk/IR/Node/ArrayDeref.pm
