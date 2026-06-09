@@ -1910,8 +1910,13 @@ sub _lower_padaccess {
     return $val_ref;
 }
 
-# _lower_assign: lower the RHS value and update the var_table for the target VarDecl.
-# Returns the new SSA value.
+# _lower_assign: lower the RHS value and update the target.
+# Returns the new SSA value (the RHS).
+# Two modes:
+#  (a) Subscript-lvalue: inputs[0] is a Subscript node → emit an element store
+#      (bounds-checked slot write into the container array or hash).
+#  (b) Scalar rebind: inputs[0] is a PadAccess(VarDecl) or VarDecl →
+#      update var_table with the new SSA value.
 sub _lower_assign {
     my ($self, $node) = @_;
 
@@ -1920,24 +1925,76 @@ sub _lower_assign {
         die "GAP: Assign with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
-    # inputs[0] = lhs (PadAccess or direct VarDecl reference)
-    # inputs[1] = rhs (new value)
-    my $lhs     = $node->inputs->[0];
-    my $rhs     = $node->inputs->[1];
+    my $lhs = $node->inputs->[0];
+    my $rhs = $node->inputs->[1];
 
     my $rhs_ref = $self->lower_value($rhs);
 
-    # Find the VarDecl the lhs PadAccess points to.
+    # Mode (a): Subscript-lvalue — element store into Array or Hash.
+    if (defined $lhs && $lhs->operation eq 'Subscript') {
+        my $container = $lhs->inputs->[0];
+        my $key_idx   = $lhs->inputs->[1];
+        my $ctr_repr  = $container->representation // '';
+
+        if ($ctr_repr eq 'Array' || $ctr_repr eq 'ArrayRef') {
+            # Array element store: bounds-checked (same as _lower_array_write body).
+            $self->{_need_aggregate_types} = 1;
+
+            # Get the Array* (from _arr_table for ArrayRef containers).
+            my $arr_ref;
+            if ($ctr_repr eq 'ArrayRef') {
+                $self->lower_value($container);
+                unless (exists $self->{_arr_table}{ $container->id }) {
+                    my $i8 = $self->{cache}{ $container->id };
+                    my $arr = $self->_fresh;
+                    $self->_emit("  $arr = bitcast i8* $i8 to %Array*  ; Assign(Array-lvalue): i8* -> Array*");
+                    $self->{_arr_table}{ $container->id } = $arr;
+                }
+                $arr_ref = $self->{_arr_table}{ $container->id };
+            }
+            else {
+                $arr_ref = $self->lower_value($container);
+            }
+            my $idx_ref = $self->lower_value($key_idx);
+
+            # Load elems pointer and write the slot.
+            my $elem_ptr = $self->_fresh;
+            my $elems    = $self->_fresh;
+            $self->_emit("  $elem_ptr = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 2  ; Assign(Array-lvalue): elems ptr");
+            $self->_emit("  $elems = load %Slot*, %Slot** $elem_ptr  ; Assign(Array-lvalue): load elems");
+            my $slot_def = $self->_fresh;
+            my $slot_pay = $self->_fresh;
+            $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 0  ; Assign(Array-lvalue): slot def ptr");
+            $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 1  ; Assign(Array-lvalue): slot pay ptr");
+            $self->_emit("  store i1 true, i1* $slot_def  ; Assign(Array-lvalue): defined=true");
+            $self->_emit("  store i64 $rhs_ref, i64* $slot_pay  ; Assign(Array-lvalue): store value");
+
+            $self->{cache}{ $node->id } = $rhs_ref;
+            return $rhs_ref;
+        }
+        elsif ($ctr_repr eq 'Hash' || $ctr_repr eq 'HashRef') {
+            # Hash element store: scan for key and update value (same as _lower_hash_write).
+            # Delegate to _lower_hash_write by creating a synthetic triple-input node view.
+            # For now, die with a clear GAP rather than duplicating the complex loop emitter.
+            die "GAP: Assign(HashSubscript-lvalue) element store not yet implemented — "
+              . "use HashWrite for hash element stores.";
+        }
+        else {
+            die "GAP: Assign(Subscript-lvalue) container has repr=$ctr_repr; "
+              . "only Array/ArrayRef element stores are lowered runtime-free.";
+        }
+    }
+
+    # Mode (b): scalar rebind — find the VarDecl the lhs points to.
     my $vd = $lhs;
     if (defined $vd && $vd->operation eq 'PadAccess') {
         $vd = $lhs->inputs->[0];
     }
     unless (defined $vd && $vd->operation eq 'VarDecl') {
-        die "LLVM backend: Assign lhs must be a PadAccess(VarDecl) or VarDecl; "
+        die "LLVM backend: Assign lhs must be a PadAccess(VarDecl), VarDecl, or Subscript(lvalue); "
           . "got " . (defined $vd ? $vd->operation : 'undef');
     }
 
-    # Update var_table: the variable now holds the new SSA value.
     $self->{var_table}{ $vd->id } = $rhs_ref;
     $self->{cache}{ $node->id }   = $rhs_ref;
     return $rhs_ref;

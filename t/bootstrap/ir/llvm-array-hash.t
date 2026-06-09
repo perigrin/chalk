@@ -828,4 +828,56 @@ subtest 'A18: canonical HashRef(a=>1,b=>2) + Subscript("a") -> Int:1' => sub {
     done_testing;
 };
 
+# ---------------------------------------------------------------------------
+# A19: Assign(Subscript-lvalue) emits a store  (Phase 3.0)
+#
+# Assign(%lval, %nv) where %lval = Subscript(%arr, %idx=0) in lvalue position.
+# The Assign detects Subscript lvalue and emits an in-place slot write.
+# It returns the stored value (%nv=42). Verifies: no die, store emitted, Int:42.
+# ---------------------------------------------------------------------------
+subtest 'A19: Assign(Subscript-lvalue, 42) emits store and returns Int:42' => sub {
+    my $f = _mk();
+
+    my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
+    $c2->set_representation('Int');
+    my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+
+    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    $arr->set_representation('ArrayRef');
+
+    # Subscript(%arr, idx=0) in lvalue position
+    my $idx0 = $f->make('Constant', value => '0', const_type => 'integer');
+    $idx0->set_representation('Int');
+    my $lval = $f->make('Subscript', inputs => [$arr, $idx0]);
+    $lval->set_representation('Int');
+
+    my $nv = $f->make('Constant', value => '42', const_type => 'integer');
+    $nv->set_representation('Int');
+
+    # Assign is the element store; its return value is nv (42).
+    my $store = $f->make('Assign', inputs => [$lval, $nv]);
+    $store->set_representation('Int');
+
+    # Return the Assign result (42).
+    my $ret = $f->make_cfg('Return', inputs => [$store]);
+
+    my $ll;
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    ok(!$@, "A19 Assign(Subscript-lvalue) lower() does not die: $@")
+        or diag("error: $@");
+
+    if (defined $ll) {
+        unlike($ll, qr/libperl/, 'A19 .ll: no libperl reference');
+        like($ll, qr/store i1 true/, 'A19 .ll: emits slot-defined store');
+
+        my $out = run_ll($ll);
+        is($out, 'Int:42', 'A19 lli output is Int:42 (Assign returns stored value)');
+    }
+
+    done_testing;
+};
+
 done_testing;
