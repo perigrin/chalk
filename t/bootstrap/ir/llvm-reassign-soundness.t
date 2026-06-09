@@ -20,7 +20,7 @@ use Chalk::IR::Node::Region;
 use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::Phi;
 use Chalk::IR::Node::Return;
-use Chalk::IR::Target::LLVM;
+use Chalk::Target::LLVM;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 
@@ -113,7 +113,7 @@ sub int_const {
     is($rx1->id, $rxL->id,
         'Case (a): lhs of Assign also hash-cons to same PadAccess node');
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'Case (a): my $x=1; my $y=$x; $x=2; return $x+$y — lowers without dying')
         or diag("lower() died: $@");
 
@@ -186,7 +186,7 @@ sub int_const {
     ok($all_same,
         'Case (b): all five $x PadAccess nodes hash-cons to one node (stale-cache risk maximal)');
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'Case (b): my $x=1; y=$x; $x=2; z=$x; $x=3; return $x+$y+$z — lowers without dying')
         or diag("lower() died: $@");
 
@@ -266,7 +266,7 @@ for my $pair ([5, 6], [-1, 2]) {
     $vx->set_control_in($vn);
     $ret->set_control_in($if_node);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "Case (c) n=$n_val: if-branch reassign lowers without dying")
         or diag("lower() died: $@");
 
@@ -347,7 +347,7 @@ for my $pair ([5, 6], [-1, 2]) {
     $loop->set_control_in($vs);
     $ret->set_control_in($loop);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'Case (d): loop-carried $x reassign ($i<3; $x=$x+1; $s+=$x) lowers without dying')
         or diag("lower() died: $@");
 
@@ -427,7 +427,7 @@ for my $pair ([5, 6], [-1, 2]) {
     ok($all_same,
         'Case (e): all five $x accesses (3 reads + 2 assigns) hash-cons to one node');
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'Case (e): acc1=$x; $x=2; acc2=$x; $x=3; acc3=$x; return acc1+acc2+acc3 — lowers without dying')
         or diag("lower() died: $@");
 

@@ -14,7 +14,7 @@ use lib 'lib';
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Schedule::Dominators;
 use Chalk::IR::Schedule::Elaborate;
-use Chalk::IR::Target::LLVM;
+use Chalk::Target::LLVM;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 
@@ -203,7 +203,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
 
         # Route through LLVM backend using the elaboration pass.
         my $ll;
-        eval { $ll = Chalk::IR::Target::LLVM->lower_with_elaboration($ret, $elab) };
+        eval { $ll = Chalk::Target::LLVM->lower_with_elaboration($ret, $elab) };
         ok(!$@, "E4/B3: LLVM lowering via elaboration pass succeeds (got: $@)");
 
         SKIP: {
@@ -382,7 +382,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
         skip 'E6: lli not found', 5 unless -x $LLI;
 
         my $ll;
-        eval { $ll = Chalk::IR::Target::LLVM->lower_with_elaboration($ret, $elab) };
+        eval { $ll = Chalk::Target::LLVM->lower_with_elaboration($ret, $elab) };
         ok(!$@, "E6: LLVM lowering succeeds (got: $@)");
 
         SKIP: {
@@ -506,7 +506,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
         skip 'E7: lli not found', 6 unless -x $LLI;
 
         my $ll;
-        eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+        eval { $ll = Chalk::Target::LLVM->lower($ret) };
         ok(!$@, "E7: loop-nested-in-if lowers without dying (got: $@)");
 
         SKIP: {
@@ -666,7 +666,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
         skip 'M2: lli not found', 5 unless -x $LLI;
 
         my $ll;
-        eval { $ll = Chalk::IR::Target::LLVM->lower_with_elaboration($ret, $elab) };
+        eval { $ll = Chalk::Target::LLVM->lower_with_elaboration($ret, $elab) };
         ok(!$@, "M2: Region-as-control_in: LLVM lowering succeeds (got: $@)");
 
         SKIP: {
@@ -773,7 +773,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
         skip 'E9: lli not found', 6 unless -x $LLI;
 
         my $ll;
-        eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+        eval { $ll = Chalk::Target::LLVM->lower($ret) };
         ok(!$@, "E9: if-nested-in-loop lowers without dying (got: $@)");
 
         SKIP: {

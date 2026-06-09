@@ -10,7 +10,7 @@ use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Node::Return;
-use Chalk::IR::Target::LLVM;
+use Chalk::Target::LLVM;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 
@@ -79,7 +79,7 @@ sub run_ll {
 {
     my $ret = make_not_bool_str_graph(5);
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "CBS1: Coerce(Bool->Str) truthy-input lowers without dying (err: $@)");
     ok(defined $ll, 'CBS1: lower() returns defined text');
 }
@@ -92,7 +92,7 @@ sub run_ll {
 {
     my $ret = make_not_bool_str_graph(0);
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "CBS2: Coerce(Bool->Str) falsy-input lowers without dying (err: $@)");
     ok(defined $ll, 'CBS2: lower() returns defined text');
 }
@@ -104,7 +104,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my $ret = make_not_bool_str_graph(5);
-    my $ll  = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll  = Chalk::Target::LLVM->lower($ret);
 
     my ($exit, $out) = run_ll($ll);
 
@@ -119,7 +119,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my $ret = make_not_bool_str_graph(0);
-    my $ll  = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll  = Chalk::Target::LLVM->lower($ret);
 
     my ($exit, $out) = run_ll($ll);
 
@@ -135,7 +135,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my $ret = make_not_bool_str_graph(5);
-    my $ll  = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll  = Chalk::Target::LLVM->lower($ret);
 
     my ($exit, $out) = run_ll($ll);
 
@@ -150,7 +150,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my $ret = make_not_bool_str_graph(0);
-    my $ll  = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll  = Chalk::Target::LLVM->lower($ret);
 
     my ($exit, $out) = run_ll($ll);
 
@@ -163,7 +163,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my $ret = make_not_bool_str_graph(5);
-    my $ll  = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll  = Chalk::Target::LLVM->lower($ret);
 
     unlike($ll, qr/Perl_/,    'CBS7: false-face Bool->Str .ll: no Perl_ C-API');
     unlike($ll, qr/\bSV\b/,   'CBS7: false-face Bool->Str .ll: no SV type');
@@ -175,7 +175,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my $ret = make_not_bool_str_graph(0);
-    my $ll  = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll  = Chalk::Target::LLVM->lower($ret);
 
     unlike($ll, qr/Perl_/,    'CBS8: true-face Bool->Str .ll: no Perl_ C-API');
     unlike($ll, qr/\bSV\b/,   'CBS8: true-face Bool->Str .ll: no SV type');
@@ -188,7 +188,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my $ret_t = make_not_bool_str_graph(0);   # true face (Not(0) = true)
-    my $ll_t  = Chalk::IR::Target::LLVM->lower($ret_t);
+    my $ll_t  = Chalk::Target::LLVM->lower($ret_t);
 
     like($ll_t, qr/\@coerce_bool_str_true/,
         'CBS9: true-face .ll declares @coerce_bool_str_true global');
@@ -196,7 +196,7 @@ sub run_ll {
         'CBS9: true-face .ll declares @coerce_bool_str_false global');
 
     my $ret_f = make_not_bool_str_graph(5);   # false face (Not(5) = false)
-    my $ll_f  = Chalk::IR::Target::LLVM->lower($ret_f);
+    my $ll_f  = Chalk::Target::LLVM->lower($ret_f);
 
     like($ll_f, qr/\@coerce_bool_str_true/,
         'CBS9: false-face .ll declares @coerce_bool_str_true global');
@@ -231,7 +231,7 @@ sub run_ll {
     my $ret = $f->make_cfg('Return', inputs => [$not_node]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "F3A: Not(Bool) lowers without dying (err: $@)");
 
     SKIP: {
@@ -269,7 +269,7 @@ sub run_ll {
 
     my $ret = $f->make_cfg('Return', inputs => [$not_node]);
 
-    eval { Chalk::IR::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret) };
     like($@, qr/representation/i,
         'F3B: Not with undef-repr operand dies loudly mentioning representation');
 }

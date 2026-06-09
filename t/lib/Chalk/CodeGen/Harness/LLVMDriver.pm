@@ -9,7 +9,7 @@ use Carp      qw(croak);
 use File::Temp qw(tempfile);
 use Scalar::Util qw(blessed);
 
-use Chalk::IR::Target::LLVM;
+use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::BehaviorRecord;
 
 # The lli interpreter path.
@@ -20,7 +20,7 @@ my $LLI = '/usr/lib/llvm-15/bin/lli';
 # Takes a typed SoN graph (a Return node) and:
 #   1. Counts the number of typed (non-Scalar) values reachable from the Return
 #      to compute the runtime-free coverage fraction.
-#   2. Lowers the graph to LLVM IR text via Chalk::IR::Target::LLVM->lower().
+#   2. Lowers the graph to LLVM IR text via Chalk::Target::LLVM->lower().
 #   3. If lowering dies (Scalar-GAP or unsupported op), returns a GAP record.
 #   4. Writes the .ll to a temp file and runs via lli.
 #   5. Captures lli's stdout as the L return value.
@@ -51,7 +51,7 @@ sub run {
     # ---- Step 2: attempt lowering ----
     my ( $ll_text, $lower_error );
     eval {
-        $ll_text = Chalk::IR::Target::LLVM->lower($return_node);
+        $ll_text = Chalk::Target::LLVM->lower($return_node);
     };
     if ($@) {
         $lower_error = $@;

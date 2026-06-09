@@ -25,7 +25,7 @@ use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Node::Return;
-use Chalk::IR::Target::LLVM;
+use Chalk::Target::LLVM;
 
 # The lli interpreter path (same as in llvm-lowering.t).
 my $LLI = '/usr/lib/llvm-15/bin/lli';
@@ -708,7 +708,7 @@ sub _assess_one {
     my ($coverage, $scalar_count, $total_defs) = _compute_coverage($return_node);
 
     # Attempt to lower to LLVM IR text.
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($return_node) };
+    my $ll = eval { Chalk::Target::LLVM->lower($return_node) };
     if ($@) {
         my $err = $@;
         # lower() died — this is a GAP (Scalar reached backend, or unsupported op).

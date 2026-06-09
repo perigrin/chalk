@@ -10,7 +10,7 @@ use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::Return;
-use Chalk::IR::Target::LLVM;
+use Chalk::Target::LLVM;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 
@@ -35,7 +35,7 @@ subtest 'U1: Constant(undef) :Undef lowers without dying' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$cundef]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "lower() does not die for Undef-repr return: $@")
         or diag("error: $@");
 
@@ -89,7 +89,7 @@ subtest 'U2: DefinedOr(Int :defined, Int) => left operand via lli' => sub {
     $vdb->set_control_in($vda);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "lower() does not die for DefinedOr(Int,Int): $@")
         or diag("error: $@");
 
@@ -157,7 +157,7 @@ subtest 'U3: DefinedOr(Undef :undef, Int) => right operand via lli' => sub {
     $vdb->set_control_in($vda);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "lower() does not die for DefinedOr(Undef,Int): $@")
         or diag("error: $@");
 
@@ -223,7 +223,7 @@ subtest 'U5: Undef return repr prints "Undef:" via lli' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$cundef]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "lower() does not die for Undef return: $@")
         or diag("error: $@");
 

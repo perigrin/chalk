@@ -10,7 +10,7 @@ use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Add;
 use Chalk::IR::Node::Return;
-use Chalk::IR::Target::LLVM;
+use Chalk::Target::LLVM;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 
@@ -20,8 +20,8 @@ unless (-x $LLI) {
 }
 
 # L1: LLVM lowering module loads.
-ok(Chalk::IR::Target::LLVM->can('lower'),
-    'Chalk::IR::Target::LLVM has a lower() method');
+ok(Chalk::Target::LLVM->can('lower'),
+    'Chalk::Target::LLVM has a lower() method');
 
 # L2: hand-author the typed SoN graph for `return 1 + 2` and lower to LLVM IR text.
 # Graph: Constant(1,Int) + Constant(2,Int) -> Add(Int) -> Return
@@ -39,7 +39,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
 
     my $ret = $f->make_cfg('Return', inputs => [$add]);
 
-    my $ll = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll = Chalk::Target::LLVM->lower($ret);
 
     ok(defined $ll, 'lower() returns defined text');
     like($ll, qr/define.*\@main/, 'generated .ll contains a main function');
@@ -59,7 +59,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     $add->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$add]);
 
-    my $ll = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll = Chalk::Target::LLVM->lower($ret);
 
     unlike($ll, qr/Perl_/,  'generated .ll does not call Perl_ C-API functions');
     unlike($ll, qr/\bSV\b/, 'generated .ll does not mention SV type');
@@ -79,7 +79,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     $add->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$add]);
 
-    my $ll = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll = Chalk::Target::LLVM->lower($ret);
 
     # Write to temp file and run through lli
     my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -134,7 +134,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     $add->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$add]);
 
-    my $generated = Chalk::IR::Target::LLVM->lower($ret);
+    my $generated = Chalk::Target::LLVM->lower($ret);
 
     # The spike file contains this specific comment; generated output must not
     # simply be the spike file read back.
@@ -161,7 +161,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     my $ret = $f->make_cfg('Return', inputs => [$and]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "And node lowers without dying (got: $@)");
 
     SKIP: {
@@ -201,7 +201,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     my $ret = $f->make_cfg('Return', inputs => [$or]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "Or node lowers without dying (got: $@)");
 
     SKIP: {
@@ -240,7 +240,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     $phi->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$phi]);
 
-    eval { Chalk::IR::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret) };
     like($@, qr/Phi|missing|edge|predecessor|incoming/i,
         'Phi with no incoming values dies loudly (adversarial guard)');
 }
@@ -314,7 +314,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     $ret->set_control_in($if_node);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "If/else node lowers without dying (got: $@)");
 
     SKIP: {
@@ -423,7 +423,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     $ret->set_control_in($loop);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "Loop node lowers without dying (got: $@)");
 
     SKIP: {
@@ -511,7 +511,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     $ret->set_control_in($if_node);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "B3: one-branch if lowers without dying (got: $@)");
 
     SKIP: {
@@ -600,7 +600,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     $ret->set_control_in($if_node);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "B2: Num-typed if/else lowers without dying (got: $@)");
 
     SKIP: {
@@ -701,7 +701,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     $ret->set_control_in($if_node);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "B1: dependent body stmts lower without dying (got: $@)");
 
     SKIP: {
@@ -821,7 +821,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
     $ret->set_control_in($loop);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "H3: loop-with-body-comparison lowers without dying (got: $@)");
 
     SKIP: {
@@ -870,7 +870,7 @@ ok(Chalk::IR::Target::LLVM->can('lower'),
 
     my $ret = $f->make_cfg('Return', inputs => [$phi]);
 
-    eval { Chalk::IR::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret) };
     like($@, qr/Phi|undef|predecessor|incoming|missing/i,
         'H4/H5: Phi with undef incoming value slot dies loudly (predecessor guard)');
 }

@@ -10,7 +10,7 @@ use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::Return;
-use Chalk::IR::Target::LLVM;
+use Chalk::Target::LLVM;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 
@@ -61,7 +61,7 @@ subtest 'A1: ArrayLiteral(1,2,3) + ScalarLen -> Int:3' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$len]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "A1 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -106,7 +106,7 @@ subtest 'A2: ArrayLiteral(1,2,3) + ArrayRead(idx=1) -> Int:2' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$elem]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "A2 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -149,7 +149,7 @@ subtest 'A3: ArrayRead OOB (idx=9 on len=3) -> Undef:' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$elem]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "A3 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -194,7 +194,7 @@ subtest 'A4: HashLiteral(a=>1,b=>2) + HashRead("a") -> Int:1' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$val]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "A4 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -239,7 +239,7 @@ subtest 'A5: HashRead missing key -> Undef:' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$val]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "A5 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -287,7 +287,7 @@ subtest 'A6: ArrayRef[1,2,3] deref [0] -> Int:1' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$elem]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "A6 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -337,7 +337,7 @@ subtest 'A7: HashRef{a=>1,b=>2} deref {a} -> Int:1' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$val]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "A7 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -389,7 +389,7 @@ subtest 'A8: ArrayWrite(0,42) then ArrayRead(0) -> Int:42' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$elem]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "A8 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -437,7 +437,7 @@ subtest 'A9: HashWrite then HashRead -> Int:99' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$val]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "A9 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -514,7 +514,7 @@ subtest 'A10: nested ArrayRef [[1,2],[3,4]] ->[1][0] -> Int:3' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$elem]);
 
     my $ll;
-    eval { $ll = Chalk::IR::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "A10 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {

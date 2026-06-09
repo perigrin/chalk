@@ -7,7 +7,7 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
-use Chalk::IR::Target::LLVM;
+use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::TypeTag;
 
@@ -38,7 +38,7 @@ sub perl_oracle {
 # Helper: lower a Return node to LLVM IR, run lli, return output
 sub lli_run {
     my ($ret_node) = @_;
-    my $ll = Chalk::IR::Target::LLVM->lower($ret_node);
+    my $ll = Chalk::Target::LLVM->lower($ret_node);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -279,7 +279,7 @@ subtest 'adversarial: MethodCall on absent method dies loudly at lowering' => su
 
     my $died = false;
     my $error_msg = '';
-    eval { Chalk::IR::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret) };
     if ($@) {
         $died = true;
         $error_msg = $@;
@@ -332,7 +332,7 @@ subtest 'adversarial: MethodCall without ClassDecl dies loudly at lowering' => s
     my $ret = $f->make_cfg('Return', inputs => [ $bad_call ]);
 
     my $died = false;
-    eval { Chalk::IR::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret) };
     if ($@) {
         $died = true;
     }

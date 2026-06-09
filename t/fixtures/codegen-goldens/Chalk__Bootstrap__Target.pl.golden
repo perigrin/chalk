@@ -1,11 +1,7 @@
 use 5.42.0;
 use utf8;
 use experimental 'class';
-class Chalk::Bootstrap::Target {
-    method generate($ir) {
-        die 'Subclass must implement generate()';
-    }
-    method generate_distribution($ir) {
-        die 'Subclass must implement generate_distribution()';
-    }
+use warnings 'experimental::class';
+use Chalk::Target;
+class Chalk::Bootstrap::Target :isa(Chalk::Target) {
 }

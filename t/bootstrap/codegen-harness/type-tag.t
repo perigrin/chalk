@@ -198,7 +198,7 @@ if ($HAS_LLI) {
     require Chalk::IR::Node::Constant;
     require Chalk::IR::Node::Add;
     require Chalk::IR::Node::NumEq;
-    require Chalk::IR::Target::LLVM;
+    require Chalk::Target::LLVM;
 }
 
 sub _make_factory { return Chalk::IR::NodeFactory->new }
@@ -229,7 +229,7 @@ subtest 'round-trip: Int repr (1+2=3) lli tag == TypeTag prefix' => sub {
     $add->set_representation('Int');
     my $ret = $f->make_cfg( 'Return', inputs => [$add] );
 
-    my $ll           = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll           = Chalk::Target::LLVM->lower($ret);
     my ($out, $exit) = _run_lli($ll);
 
     is( $exit, 0,       'lli exits 0 for Int graph' );
@@ -255,7 +255,7 @@ subtest 'round-trip: Num repr (1.5) lli tag == TypeTag prefix' => sub {
     $c->set_representation('Num');
     my $ret = $f->make_cfg( 'Return', inputs => [$c] );
 
-    my $ll           = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll           = Chalk::Target::LLVM->lower($ret);
     my ($out, $exit) = _run_lli($ll);
 
     is( $exit, 0, 'lli exits 0 for Num graph' );
@@ -282,7 +282,7 @@ subtest 'round-trip: Bool repr true (1 == 1) lli tag == TypeTag prefix' => sub {
     $eq->set_representation('Bool');
     my $ret = $f->make_cfg( 'Return', inputs => [$eq] );
 
-    my $ll           = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll           = Chalk::Target::LLVM->lower($ret);
     my ($out, $exit) = _run_lli($ll);
 
     is( $exit, 0, 'lli exits 0 for Bool-true graph' );
@@ -308,7 +308,7 @@ subtest 'round-trip: Bool repr false (1 == 2) lli tag == TypeTag prefix' => sub 
     $eq->set_representation('Bool');
     my $ret = $f->make_cfg( 'Return', inputs => [$eq] );
 
-    my $ll           = Chalk::IR::Target::LLVM->lower($ret);
+    my $ll           = Chalk::Target::LLVM->lower($ret);
     my ($out, $exit) = _run_lli($ll);
 
     is( $exit, 0, 'lli exits 0 for Bool-false graph' );

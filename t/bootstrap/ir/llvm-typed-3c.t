@@ -18,7 +18,7 @@ use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Coerce;
-use Chalk::IR::Target::LLVM;
+use Chalk::Target::LLVM;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 
@@ -82,7 +82,7 @@ sub num_const {
 
     my $ret = $f->make_cfg('Return', inputs => [$div]);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, "arith-div DIV-1: Divide(Num) lowers without dying")
         or diag("lower() died: $@");
 
@@ -106,7 +106,7 @@ sub num_const {
     $div->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$div]);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok($@, 'arith-div DIV-2: Divide with Int repr still dies (preserves correctness guard)');
     like($@, qr/GAP|Divide.*Int|not.*float/i,
         'arith-div DIV-2: error message mentions Divide or Int repr problem');
@@ -134,7 +134,7 @@ sub num_const {
 
     my $ret = $f->make_cfg('Return', inputs => [$mod]);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'arith-mod MOD-1: Modulo(Int,Int) lowers without dying')
         or diag("lower() died: $@");
 
@@ -158,7 +158,7 @@ sub num_const {
     $mod->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$mod]);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'arith-mod MOD-2: Modulo(7,3) lowers without dying')
         or diag("lower() died: $@");
 
@@ -179,7 +179,7 @@ sub num_const {
     $mod->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$mod]);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'arith-mod MOD-3: Modulo(7,-3) lowers without dying')
         or diag("lower() died: $@");
 
@@ -229,7 +229,7 @@ sub num_const {
 
     my $ret  = $f->make_cfg('Return', inputs => [$pad]);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'VAR-1 (A1): my $x=1; return $x — lowers without dying')
         or diag("lower() died: $@");
 
@@ -274,7 +274,7 @@ sub num_const {
     my $ret  = $f->make_cfg('Return', inputs => [$pad]);
     $ret->set_control_in($asgn);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'VAR-2 (C1): my $x=1; $x=2; return $x — lowers without dying')
         or diag("lower() died: $@");
 
@@ -325,7 +325,7 @@ sub num_const {
     my $ret = $f->make_cfg('Return', inputs => [$ret_pad]);
     $ret->set_control_in($ca);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'VAR-3 (C2): my $x=1; $x+=2; return $x — lowers without dying')
         or diag("lower() died: $@");
 
@@ -369,7 +369,7 @@ sub num_const {
 
     my $ret  = $f->make_cfg('Return', inputs => [$tern]);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'CMP-1: TernaryExpr(NumGt(5,3), 1, 0) lowers without dying')
         or diag("lower() died: $@");
 
@@ -400,7 +400,7 @@ sub num_const {
 
     my $ret  = $f->make_cfg('Return', inputs => [$tern]);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'CMP-2: TernaryExpr(NumGt(1,3), 1, 0) lowers without dying')
         or diag("lower() died: $@");
 
@@ -428,7 +428,7 @@ sub num_const {
 
     my $ret  = $f->make_cfg('Return', inputs => [$tern]);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'CMP-3 (D6): return 5 > 0 ? 1 : 2 lowers without dying')
         or diag("lower() died: $@");
 
@@ -484,7 +484,7 @@ sub num_const {
     my $ret = $f->make_cfg('Return', inputs => [$add]);
     $ret->set_control_in($asg); $asg->set_control_in($vy); $vy->set_control_in($vx);
 
-    my $ll = eval { Chalk::IR::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(!$@, 'B1: read-before-and-after-reassign lowers correctly (scoped var_table is program-point-aware)')
         or diag("lower() died: $@");
 

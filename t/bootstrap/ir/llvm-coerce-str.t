@@ -10,7 +10,7 @@ use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Node::Return;
-use Chalk::IR::Target::LLVM;
+use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::TypeTag;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
@@ -153,7 +153,7 @@ subtest 'Coerce(Str->Num) adversarial cases: lli == perl oracle' => sub {
 
         # Build and lower
         my $ret_node = make_str_to_num_graph($str);
-        my $ll = eval { Chalk::IR::Target::LLVM->lower($ret_node) };
+        my $ll = eval { Chalk::Target::LLVM->lower($ret_node) };
         if ($@) {
             fail("$desc: LLVM lowering failed: $@");
             fail("$desc: (skip)");
@@ -198,7 +198,7 @@ subtest 'Coerce(Str->Bool) edge cases: lli == perl oracle' => sub {
         my ($str, $expected_tag, $desc) = @$tc;
 
         my $ret_node = make_str_to_bool_graph($str);
-        my $ll = eval { Chalk::IR::Target::LLVM->lower($ret_node) };
+        my $ll = eval { Chalk::Target::LLVM->lower($ret_node) };
         if ($@) {
             fail("$desc: LLVM lowering failed: $@");
             fail("$desc: (skip)");
@@ -232,7 +232,7 @@ subtest 'Coerce(Str->Num) lli numeric values match perl oracle' => sub {
         my ($str, $expected_tag, $desc) = @$tc;
 
         my $ret_node = make_str_to_num_graph($str);
-        my $ll = eval { Chalk::IR::Target::LLVM->lower($ret_node) };
+        my $ll = eval { Chalk::Target::LLVM->lower($ret_node) };
         if ($@) {
             fail("$desc: lowering failed");
             next;
