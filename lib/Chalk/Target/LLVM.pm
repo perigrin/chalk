@@ -764,6 +764,7 @@ sub lower_with_elaboration {
     # Declare memcmp when hash key comparison operations were emitted.
     if ($ctx->{_need_memcmp}) {
         push @lines, 'declare i32 @memcmp(i8* nocapture readonly, i8* nocapture readonly, i64)';
+        $ctx->{_memcmp_emitted} = 1;
     }
 
     # Emit LLVM type declarations for Array/Hash aggregate structures when needed.
@@ -841,6 +842,15 @@ sub lower_with_elaboration {
         push @lines, '';
         push @lines, _emit_str_to_num_helper();
         $ctx->{_str_to_num_helper_emitted} = 1;
+    }
+    # Post-class re-emit for _need_memcmp: a method body doing HashRead/HashLiteral
+    # sets _need_memcmp on $body_ctx (propagated to $ctx by G.5), but the prologue
+    # memcmp declare runs BEFORE method bodies lower. If the flag was set only by a
+    # method body, the prologue missed it. Emit here, guarded by _memcmp_emitted so
+    # a non-method hash op + a method hash op cannot double-declare.
+    if ($ctx->{_need_memcmp} && !$ctx->{_memcmp_emitted}) {
+        push @lines, 'declare i32 @memcmp(i8* nocapture readonly, i8* nocapture readonly, i64)';
+        $ctx->{_memcmp_emitted} = 1;
     }
 
     push @lines, '';
@@ -2078,6 +2088,12 @@ sub _lower_and {
     # End block: phi merges lhs (falsy path) and rhs (truthy path).
     $self->_new_block($end_label);
     my $result = $self->_fresh;
+    # G.7 guarantees the And node's own repr is Int (LHS guard above already died on
+    # non-Int). The `// 'Int'` default is intentional: it handles the narrow case where
+    # TypeInference annotated the LHS operands but did not annotate the And node itself.
+    # In that case Int is the only correct choice (short-circuit of two Int operands
+    # always yields Int). _require_repr is NOT used here to avoid a GAP-die on that
+    # legitimate-but-unannotated case; the LHS guard provides the real safety net.
     my $llvm_type = _repr_to_llvm_type($repr // 'Int');
     $self->_emit("  $result = phi $llvm_type [ $lhs_ref, %$entry_label ], [ $rhs_ref, %$rhs_end_label ]  ; And: phi");
 
@@ -2135,6 +2151,9 @@ sub _lower_or {
     # End block: phi merges lhs (truthy path) and rhs (falsy path).
     $self->_new_block($end_label);
     my $result = $self->_fresh;
+    # G.7 guarantees the Or node's own repr is Int (LHS guard above already died on
+    # non-Int). The `// 'Int'` default is intentional: same rationale as _lower_and —
+    # handles the unannotated-Or-node case without a spurious GAP-die. See _lower_and.
     my $llvm_type = _repr_to_llvm_type($repr // 'Int');
     $self->_emit("  $result = phi $llvm_type [ $lhs_ref, %$entry_label ], [ $rhs_ref, %$rhs_end_label ]  ; Or: phi");
 

@@ -1172,8 +1172,17 @@ sub _run_l_verdict_check {
         #
         # Pattern covers: Perl_ (API functions), SV/AV/HV (type names),
         # sv_/av_/hv_ (API prefixes), PL_ (globals), newSV (constructor), libperl (link ref).
+        #
+        # H2 fix: apply the guard only to instruction/declaration lines, NOT to string-constant
+        # payload lines.  A global constant like `@str_const_0 = ... c"an SV in a HV\00"`
+        # legitimately contains "SV"/"HV" as English words inside the payload but is
+        # not a libperl reference.  Strip lines that match the LLVM string-constant
+        # global pattern before grepping so those payloads cannot false-match.
         my $ll_text = $meta->{ll_text} // '';
-        if ($ll_text =~ /Perl_|\bSV\b|sv_|\bAV\b|\bHV\b|\bPL_|newSV|libperl/) {
+        # Remove string-constant global definition lines (the payload c"..." part).
+        # Pattern: optional-whitespace @<name> = ... constant [...] c"..."
+        (my $ll_stripped = $ll_text) =~ s/^[^\n]*\bconstant\b[^\n]*\bc"[^\n]*$//mg;
+        if ($ll_stripped =~ /Perl_|\bSV\b|sv_|\bAV\b|\bHV\b|\bPL_|newSV|libperl/) {
             push @$fail_reasons,
                 "case '$case->{title}': GREEN .ll contains a libperl symbol "
                 . "(violates runtime-free contract) — check emitter for Perl C-API leak";

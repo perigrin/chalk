@@ -32,10 +32,10 @@ class Chalk::Target {
     }
 
     method generate($ir) {
-        die ref($self) . " must implement generate()";
+        die "Subclass must implement generate()";
     }
 
     method generate_distribution($ir) {
-        die ref($self) . " must implement generate_distribution()";
+        die "Subclass must implement generate_distribution()";
     }
 }

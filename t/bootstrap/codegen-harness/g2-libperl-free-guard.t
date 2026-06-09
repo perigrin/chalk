@@ -94,4 +94,72 @@ subtest 'GREEN .ll with libperl symbol fails the guard' => sub {
         or diag("fail_reasons: " . join('; ', @{$result->{fail_reasons}}));
 };
 
+# Test 3: a GREEN .ll that contains libperl-lookalike words only inside a
+# string-constant payload must NOT be false-flagged.
+# H2: the guard greps the full .ll text including c"..." payload lines.
+# A string constant like `c"an SV in a HV\00"` matches \bSV\b and \bHV\b
+# even though there is no actual libperl reference — it is a string literal
+# that happens to contain "SV"/"HV" as English words. This produces a
+# false MISCOMPILE verdict on a genuinely runtime-free GREEN case.
+subtest 'GREEN .ll with SV/HV only inside string-constant payload must PASS guard' => sub {
+    no warnings 'redefine';
+    local *Chalk::CodeGen::Harness::LLVMDriver::run = sub {
+        my ($class, $return_node, $opts) = @_;
+        # Simulate: lowering succeeded with a string literal "an SV in a HV".
+        # The .ll text has the string as a global constant — no actual libperl call.
+        my $L = Chalk::CodeGen::Harness::BehaviorRecord->new(
+            return_values     => ['Int:42'],
+            wantarray_context => 'scalar',
+            stdout            => '',
+            stderr            => '',
+            exception         => undef,
+            object_state      => {},
+        );
+        my $meta = {
+            emitted_for_every_construct => 1,
+            marked_unsupported          => 0,
+            # The .ll has a string-constant global whose payload contains SV and HV
+            # as ordinary English words (not libperl references).
+            ll_text => join("\n",
+                '@str_const_0 = private unnamed_addr constant [15 x i8] c"an SV in a HV\00", align 1',
+                'define i32 @main() {',
+                'entry:',
+                '  %ptr = getelementptr inbounds [15 x i8], [15 x i8]* @str_const_0, i64 0, i64 0',
+                '  %r = call i32 (i8*, ...) @printf(i8* %ptr)',
+                '  ret i32 42',
+                '}',
+                'declare i32 @printf(i8*, ...)',
+            ),
+            runtime_free_fraction => 1.0,
+            lli_exit              => 0,
+        };
+        return ($L, $meta);
+    };
+
+    my $case = {
+        title        => 'synthetic-str-const-sv-hv-test',
+        source       => 'do { 42 }',
+        behavior     => "return: Int:42\ncontext: scalar\n",
+        ir           => "%c = Constant(42) :Int\nreturn %c\nL: GREEN\n",
+        source_pos   => undef,
+        behavior_pos => undef,
+        ir_pos       => undef,
+        _perl_actual => 'Int:42',
+    };
+
+    my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
+
+    # H2 fix: the guard must NOT fire on SV/HV that appear only inside a
+    # string-constant payload line. The case must PASS.
+    is($result->{overall}, 'PASS',
+        'GREEN case with SV/HV only in string-constant payload must PASS (no false libperl flag)')
+        or diag("unexpected fail_reasons: " . join('; ', @{$result->{fail_reasons} // []}));
+
+    my $has_false_libperl = defined $result->{fail_reasons}
+        && grep { /libperl/i } @{$result->{fail_reasons}};
+    ok(!$has_false_libperl,
+        'no libperl fail_reason for string-constant SV/HV (H2 false-positive must be gone)')
+        or diag("false-positive fail_reasons: " . join('; ', @{$result->{fail_reasons}}));
+};
+
 done_testing();
