@@ -1164,6 +1164,22 @@ sub _run_l_verdict_check {
                          lli_out => $lli_out, expected => $expected, meta => $meta };
             }
         }
+
+        # Central mechanical libperl-free guard (G.2/F4):
+        # A GREEN verdict certifies runtime-free — no libperl symbols allowed in the .ll.
+        # This guard fires on EVERY GREEN regardless of which .t file invokes the harness,
+        # replacing the absent/inconsistent per-.t unlike() calls (5/12 corpus files had none).
+        #
+        # Pattern covers: Perl_ (API functions), SV/AV/HV (type names),
+        # sv_/av_/hv_ (API prefixes), PL_ (globals), newSV (constructor), libperl (link ref).
+        my $ll_text = $meta->{ll_text} // '';
+        if ($ll_text =~ /Perl_|\bSV\b|sv_|\bAV\b|\bHV\b|\bPL_|newSV|libperl/) {
+            push @$fail_reasons,
+                "case '$case->{title}': GREEN .ll contains a libperl symbol "
+                . "(violates runtime-free contract) — check emitter for Perl C-API leak";
+            return { verdict => 'FAIL', actual => $actual_verdict, declared => $decl,
+                     meta => $meta, libperl_leak => 1 };
+        }
     }
 
     return { verdict => 'PASS', actual => $actual_verdict, declared => $decl,
