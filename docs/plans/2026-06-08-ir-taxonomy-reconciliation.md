@@ -1,7 +1,7 @@
 # Target-Layer Reconciliation: single IR vocabulary + a common `Chalk::Target` home
 
 **Date:** 2026-06-08 (revised 2026-06-09 to fold in the full architecture review)
-**Status:** PLAN — awaiting perigrin's approval before execution
+**Status:** PLAN — NEEDS REVISION before execution (plan-review 2026-06-09 found 5 Critical + 8 Important holes; see paad/architecture-reviews/2026-06-09-reconciliation-plan-review.md). Direction sound; sequencing/decomposition/specs need fixing.
 **Author:** drafted from two alignment audits (aggregate-nodes + MOP-nodes), then
 revised against the 5-specialist + verifier architecture review
 (`paad/architecture-reviews/2026-06-08-target-ir-layer-review.md`), run against
