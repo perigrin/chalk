@@ -1258,16 +1258,16 @@ sub _lower_constant {
     my $repr = $node->representation;
     my $val  = $node->value;
 
-    if (!defined $repr || $repr eq 'Scalar') {
-        if (!defined $repr) {
-            # Unassigned representation — treat as immediate if it looks like an integer
-            if (defined $val && $val =~ /\A-?\d+\z/) {
-                my $ref = $self->_fresh;
-                $self->_emit("  $ref = add i64 0, $val          ; Constant($val, untyped -> Int literal)");
-                $self->{cache}{$node->id} = $ref;
-                return $ref;
-            }
-        }
+    if (!defined $repr) {
+        # Undef representation: the TypeInference pass did not annotate this node.
+        # Die loudly instead of silently defaulting to Int — this masks upstream
+        # TypeInference bugs as plausible integer output (F7 fix / G.6).
+        # Consistent with _ensure_i1 which already dies on undef-repr inputs.
+        die "GAP: Constant node has no representation at lowering time "
+          . "(value=${\(defined $val ? $val : 'undef')}). "
+          . "Fix TypeInference to annotate this node, or set the representation explicitly.";
+    }
+    if ($repr eq 'Scalar') {
         die "GAP: Constant node with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
@@ -1358,7 +1358,11 @@ sub _lower_binop_int {
 
     my $repr = $node->representation;
     my $op   = $node->operation;
-    die "GAP: $op with repr=Scalar reached LLVM backend" if defined $repr && $repr eq 'Scalar';
+    unless (defined $repr) {
+        die "GAP: $op node has no representation at lowering time. "
+          . "Fix TypeInference to annotate this node (G.6/F7).";
+    }
+    die "GAP: $op with repr=Scalar reached LLVM backend" if $repr eq 'Scalar';
 
     my $inputs  = $node->inputs;
     my $lhs_ref = $self->lower_value($inputs->[0]);
