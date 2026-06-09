@@ -1,7 +1,34 @@
 # Target-Layer Reconciliation: single IR vocabulary + a common `Chalk::Target` home
 
 **Date:** 2026-06-08 (revised 2026-06-09 to fold in the full architecture review)
-**Status:** PLAN — REVISED 2026-06-09 to address the plan-review's 5 Critical + 8 Important holes (`paad/architecture-reviews/2026-06-09-reconciliation-plan-review.md`); awaiting perigrin's re-review. Fixes: C1 GREEN-invariant corrected for Phase G; C2 F8 = loud-die (verified it does NOT dissolve); C3 MOP-before-dispatch (Phases 4↔5 entangled, stated); C4 MOP phase decomposed 4.0–4.5; C5 TypedInvariant moved per-phase; I1/I2 ir-block syntaxes specified; I3 G.4 resolved; I4 nested-ref resolved; I6 G.0 baseline; I7 optimizer shape-oracle risk; I5 F10 filed in G.0.
+**Status:** PLAN — Phase G (namespace + gate hardening) COMPLETE 2026-06-09 on branch
+`phase1-lateral-bindings`. Commits: 4f359148 (namespace), 9461893f (G.1), 4da9373b (G.2),
+647b8e1f (G.5), c80532e8 (G.6), 59293100 (G.7). Node-convergence phases 0–6 are
+REMAINING WORK (not started).
+
+**G.0 Baseline (2026-06-09):**
+Pre-existing failures at the start of Phase G work:
+- t/bootstrap/mop/codegen-byte-compat.t: test 14 fails (Chalk__MOP__Class.pl.golden)
+- t/bootstrap/mop/codegen-byte-compat-schedule.t: test 14 fails (same)
+- t/bootstrap/mop/class-scope-vars.t: exits 255 at test 3
+- t/bootstrap/mop/ir-completeness.t: tests 242-244 fail (all marked # TODO)
+All ir/llvm-*.t, corpus/mdtest.t, codegen-harness/*.t: PASS.
+These pre-existing failures are NOT ours (stalled-MOP-migration surface).
+
+**F10 follow-up (deferred per I5):** The `LLVM.pm` `Context` package (2831 lines)
+bundles 4 separable responsibilities; `_process_if_node`/`_wire_region_phis` are
+duplicated between `Context` and `ElaboratedContext`. Pre-existing, orthogonal to
+Phase G and the node-convergence. Filed as a separate cleanup to address when the
+parallel node arms are deleted (Phase G reduces the problem surface; the real
+split is valuable AFTER the convergence removes ~18 parallel dispatch arms and the
+Context shrinks significantly). Deferral is labeled here, not drift.
+
+**Phase G GREEN-set result:** No currently-GREEN corpus cases newly-failed.
+All guards (G.1 MISCOMPILE classification, G.2 libperl-free, G.5 flag propagation,
+G.6 undef-repr, G.7 Bool/Or truthiness) latently protect against future bugs;
+no active corpus case exposed a pre-existing defect requiring triage.
+
+REVISED 2026-06-09 to address the plan-review's 5 Critical + 8 Important holes (`paad/architecture-reviews/2026-06-09-reconciliation-plan-review.md`); awaiting perigrin's re-review. Fixes: C1 GREEN-invariant corrected for Phase G; C2 F8 = loud-die (verified it does NOT dissolve); C3 MOP-before-dispatch (Phases 4↔5 entangled, stated); C4 MOP phase decomposed 4.0–4.5; C5 TypedInvariant moved per-phase; I1/I2 ir-block syntaxes specified; I3 G.4 resolved; I4 nested-ref resolved; I6 G.0 baseline; I7 optimizer shape-oracle risk; I5 F10 filed in G.0.
 **Author:** drafted from two alignment audits (aggregate-nodes + MOP-nodes), then
 revised against the 5-specialist + verifier architecture review
 (`paad/architecture-reviews/2026-06-08-target-ir-layer-review.md`), run against
