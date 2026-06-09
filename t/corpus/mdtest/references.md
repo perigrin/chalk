@@ -130,7 +130,7 @@ context: scalar
 %c3    = Constant(3) :Int
 %inner = ArrayLiteral(%c1, %c2, %c3) :Array
 %ref   = MakeArrayRef(%inner) :ArrayRef
-%deref = ArrayDeref(%ref) :Array
+%deref = PostfixDeref(%ref, sigil: "@") :Array
 %idx   = Constant(0) :Int
 %r     = Subscript(%deref, %idx) :Int
 return %r
@@ -161,7 +161,7 @@ context: scalar
 %v2    = Constant(2) :Int
 %inner = HashLiteral(%ka, %v1, %kb, %v2) :Hash
 %ref   = MakeHashRef(%inner) :HashRef
-%deref = HashDeref(%ref) :Hash
+%deref = PostfixDeref(%ref, sigil: "%") :Hash
 %lk    = Constant("a") :Str
 %r     = Subscript(%deref, %lk) :Int
 return %r
@@ -260,10 +260,10 @@ context: scalar
 %ref1      = MakeArrayRef(%arr1) :ArrayRef
 %outer     = ArrayLiteral(%ref0, %ref1) :Array
 %outer_ref = MakeArrayRef(%outer) :ArrayRef
-%outer_arr = ArrayDeref(%outer_ref) :Array
+%outer_arr = PostfixDeref(%outer_ref, sigil: "@") :Array
 %idx1      = Constant(1) :Int
 %inner_ref = Subscript(%outer_arr, %idx1) :ArrayRef
-%inner_arr = ArrayDeref(%inner_ref) :Array
+%inner_arr = PostfixDeref(%inner_ref, sigil: "@") :Array
 %idx0      = Constant(0) :Int
 %r         = Subscript(%inner_arr, %idx0) :Int
 return %r

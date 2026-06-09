@@ -65,8 +65,6 @@ use Chalk::IR::Node::HashLiteral;
 use Chalk::IR::Node::HashWrite;
 use Chalk::IR::Node::MakeArrayRef;
 use Chalk::IR::Node::MakeHashRef;
-use Chalk::IR::Node::ArrayDeref;
-use Chalk::IR::Node::HashDeref;
 use Chalk::IR::Node::Interpolate;
 use Chalk::IR::Node::AnonSub;
 use Chalk::IR::Node::RegexMatch;
@@ -110,7 +108,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Call HashRef ArrayRef
     ArrayLiteral ArrayWrite
     HashLiteral HashWrite
-    MakeArrayRef MakeHashRef ArrayDeref HashDeref
+    MakeArrayRef MakeHashRef
     Interpolate AnonSub
     RegexMatch RegexSubst TryCatch
     PostfixDeref CompoundAssign BacktickExpr Stringify VarDecl ListAssign

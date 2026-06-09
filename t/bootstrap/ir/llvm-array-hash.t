@@ -275,7 +275,7 @@ subtest 'A6: ArrayRef[1,2,3] deref [0] -> Int:1' => sub {
     my $ref = $f->make('MakeArrayRef', inputs => [$inner]);
     $ref->set_representation('ArrayRef');
 
-    my $deref = $f->make('ArrayDeref', inputs => [$ref]);
+    my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '@');
     $deref->set_representation('Array');
 
     my $idx = $f->make('Constant', value => '0', const_type => 'integer');
@@ -325,7 +325,7 @@ subtest 'A7: HashRef{a=>1,b=>2} deref {a} -> Int:1' => sub {
     my $ref = $f->make('MakeHashRef', inputs => [$inner]);
     $ref->set_representation('HashRef');
 
-    my $deref = $f->make('HashDeref', inputs => [$ref]);
+    my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '%');
     $deref->set_representation('Hash');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
@@ -491,7 +491,7 @@ subtest 'A10: nested ArrayRef [[1,2],[3,4]] ->[1][0] -> Int:3' => sub {
     $outer_ref->set_representation('ArrayRef');
 
     # Deref outer: $r->[1] = inner array ref (an ArrayRef pointer)
-    my $outer_arr = $f->make('ArrayDeref', inputs => [$outer_ref]);
+    my $outer_arr = $f->make('PostfixDeref', inputs => [$outer_ref], sigil => '@');
     $outer_arr->set_representation('Array');
 
     my $idx1 = $f->make('Constant', value => '1', const_type => 'integer');
@@ -502,7 +502,7 @@ subtest 'A10: nested ArrayRef [[1,2],[3,4]] ->[1][0] -> Int:3' => sub {
     $inner_ref_slot->set_representation('ArrayRef');
 
     # Deref inner: $r->[1][0]
-    my $inner_arr = $f->make('ArrayDeref', inputs => [$inner_ref_slot]);
+    my $inner_arr = $f->make('PostfixDeref', inputs => [$inner_ref_slot], sigil => '@');
     $inner_arr->set_representation('Array');
 
     my $idx0 = $f->make('Constant', value => '0', const_type => 'integer');
@@ -629,6 +629,103 @@ subtest 'A13: canonical Subscript(HashLiteral, key="a") -> Int:1' => sub {
 
         my $out = run_ll($ll);
         is($out, 'Int:1', 'A13 lli output is Int:1 ($h{a} via Subscript)');
+    }
+
+    done_testing;
+};
+
+# ---------------------------------------------------------------------------
+# A14: canonical PostfixDeref(@, ArrayRef) -> Array  (Phase 1.2)
+#
+# PostfixDeref(sigil="@", ref) deref an ArrayRef to Array*.
+# Equivalent to: my $r = [1,2,3]; ${deref $r}[0] -> Int:1 via Subscript
+# ---------------------------------------------------------------------------
+subtest 'A14: canonical PostfixDeref(sigil=@, ArrayRef) deref -> Int:1' => sub {
+    my $f = _mk();
+
+    my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
+    $c2->set_representation('Int');
+    my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+
+    my $inner = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
+    $inner->set_representation('Array');
+
+    my $ref = $f->make('MakeArrayRef', inputs => [$inner]);
+    $ref->set_representation('ArrayRef');
+
+    my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '@');
+    $deref->set_representation('Array');
+
+    my $idx = $f->make('Constant', value => '0', const_type => 'integer');
+    $idx->set_representation('Int');
+
+    my $elem = $f->make('Subscript', inputs => [$deref, $idx]);
+    $elem->set_representation('Int');
+
+    my $ret = $f->make_cfg('Return', inputs => [$elem]);
+
+    my $ll;
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    ok(!$@, "A14 PostfixDeref(@) lower() does not die: $@") or diag("error: $@");
+
+    if (defined $ll) {
+        unlike($ll, qr/\bAV\b/,  'A14 .ll: no AV symbols');
+        unlike($ll, qr/libperl/, 'A14 .ll: no libperl reference');
+
+        my $out = run_ll($ll);
+        is($out, 'Int:1', 'A14 lli output is Int:1 ($r->[0] via PostfixDeref)');
+    }
+
+    done_testing;
+};
+
+# ---------------------------------------------------------------------------
+# A15: canonical PostfixDeref(%, HashRef) -> Hash  (Phase 1.2)
+#
+# PostfixDeref(sigil="%", ref) derefs a HashRef to Hash*.
+# ---------------------------------------------------------------------------
+subtest 'A15: canonical PostfixDeref(sigil=%, HashRef) deref -> Int:1' => sub {
+    my $f = _mk();
+
+    my $ka = $f->make('Constant', value => 'a', const_type => 'string');
+    $ka->set_representation('Str');
+    my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
+    $v1->set_representation('Int');
+    my $kb = $f->make('Constant', value => 'b', const_type => 'string');
+    $kb->set_representation('Str');
+    my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
+    $v2->set_representation('Int');
+
+    my $inner = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
+    $inner->set_representation('Hash');
+
+    my $ref = $f->make('MakeHashRef', inputs => [$inner]);
+    $ref->set_representation('HashRef');
+
+    my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '%');
+    $deref->set_representation('Hash');
+
+    my $lk = $f->make('Constant', value => 'a', const_type => 'string');
+    $lk->set_representation('Str');
+
+    my $val = $f->make('Subscript', inputs => [$deref, $lk]);
+    $val->set_representation('Int');
+
+    my $ret = $f->make_cfg('Return', inputs => [$val]);
+
+    my $ll;
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    ok(!$@, "A15 PostfixDeref(%) lower() does not die: $@") or diag("error: $@");
+
+    if (defined $ll) {
+        unlike($ll, qr/\bHV\b/,  'A15 .ll: no HV symbols');
+        unlike($ll, qr/libperl/, 'A15 .ll: no libperl reference');
+
+        my $out = run_ll($ll);
+        is($out, 'Int:1', 'A15 lli output is Int:1 ($r->{a} via PostfixDeref)');
     }
 
     done_testing;

@@ -1238,6 +1238,9 @@ sub lower_value {
     elsif ($op eq 'Subscript') {
         return $self->_lower_subscript($node);
     }
+    elsif ($op eq 'PostfixDeref') {
+        return $self->_lower_postfix_deref($node);
+    }
     elsif ($op eq 'ArrayWrite') {
         return $self->_lower_array_write($node);
     }
@@ -3481,8 +3484,28 @@ sub _lower_make_hash_ref {
     return $ref;
 }
 
+# _lower_postfix_deref: repr-dispatch on sigil to dereference a ref value.
+# sigil="@" → ArrayRef (i8*) → Array* bitcast (_lower_array_deref body).
+# sigil="%" → HashRef  (i8*) → Hash*  bitcast (_lower_hash_deref body).
+# sigil="$" → scalar deref (not yet in corpus; GAPs loudly).
+# The input is the ref value (i8*); the output is the struct pointer.
+sub _lower_postfix_deref {
+    my ($self, $node) = @_;
+    my $sigil = $node->sigil();
+
+    if ($sigil eq '@') {
+        return $self->_lower_array_deref($node);
+    }
+    elsif ($sigil eq '%') {
+        return $self->_lower_hash_deref($node);
+    }
+    else {
+        die "GAP: PostfixDeref sigil='$sigil' is not yet lowered runtime-free (only @ and % are supported).";
+    }
+}
+
 # _lower_array_deref: cast i8* ref back to %Array*.
-# The input is an ArrayRef (i8*); the output is an Array* for use by ScalarLen/ArrayRead.
+# The input is an ArrayRef (i8*); the output is an Array* for use by Length/Subscript.
 sub _lower_array_deref {
     my ($self, $node) = @_;
 

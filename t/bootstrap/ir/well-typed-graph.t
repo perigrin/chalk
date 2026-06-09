@@ -211,4 +211,33 @@ use Chalk::IR::Graph::TypedInvariant;
     ok(scalar @{ $result->{violations} } > 0, 'H2-11: violations reported for Subscript with Int container');
 }
 
+
+# H2-12 (Phase 1.2, bilateral): PostfixDeref(ArrayRef) passes the invariant.
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $ref = $f->make('MakeArrayRef', inputs => []);
+    $ref->set_representation('ArrayRef');
+    my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '@');
+    $deref->set_representation('Array');
+
+    my $result = Chalk::IR::Graph::TypedInvariant->check([$ref, $deref]);
+    ok($result->{ok}, 'H2-12 bilateral: PostfixDeref(ArrayRef) passes the invariant');
+    is(scalar @{ $result->{violations} }, 0, 'H2-12: no violations for PostfixDeref(ArrayRef)');
+}
+
+# H2-13 (Phase 1.2, bilateral): PostfixDeref(Int) FAILS — input must be ArrayRef or HashRef.
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $not_ref = $f->make('Constant', value => '5', const_type => 'integer');
+    $not_ref->set_representation('Int');
+    my $deref = $f->make('PostfixDeref', inputs => [$not_ref], sigil => '@');
+    $deref->set_representation('Array');
+
+    my $result = Chalk::IR::Graph::TypedInvariant->check([$not_ref, $deref]);
+    ok(!$result->{ok}, 'H2-13 bilateral: PostfixDeref(Int) FAILS (Int is not ArrayRef or HashRef)');
+    ok(scalar @{ $result->{violations} } > 0, 'H2-13: violations reported for ill-typed PostfixDeref');
+}
+
 done_testing;
