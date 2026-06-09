@@ -1111,18 +1111,38 @@ sub _run_l_verdict_check {
     # Run through LLVMDriver
     my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
 
+    # Classify the LLVMDriver result using the three-way distinction:
+    #   GAP        = lowering DIED (marked_unsupported=1; no .ll was produced)
+    #   MISCOMPILE = .ll was produced (ll_text defined) but lli rejected it (lli_exit != 0)
+    #   GREEN      = .ll produced AND lli exited 0 AND emitted_for_every_construct=1
+    #
+    # The old single-branch !emitted_for_every_construct => GAP was wrong: it
+    # conflated lowering-failure (GAP) with lowering-succeeded-but-lli-rejected
+    # (MISCOMPILE), laundering real miscompiles as passing GAPs (F3).
     my $actual_verdict;
-    if ($meta->{marked_unsupported} || !$meta->{emitted_for_every_construct}) {
+    if ($meta->{marked_unsupported}) {
+        # Lowering threw — no .ll was produced at all.
         $actual_verdict = 'GAP';
-    } else {
+    } elsif (defined $meta->{ll_text} && ($meta->{lli_exit} // 0) != 0) {
+        # .ll was produced but lli rejected it — this is a MISCOMPILE, not a GAP.
+        $actual_verdict = 'MISCOMPILE';
+    } elsif ($meta->{emitted_for_every_construct}) {
         $actual_verdict = 'GREEN';
+    } else {
+        # Fallback: lowering did not mark unsupported but also did not
+        # emit for every construct (partial lowering) — treat as GAP.
+        $actual_verdict = 'GAP';
     }
 
     if ($actual_verdict ne $decl) {
         push @$fail_reasons,
             "case '$case->{title}': L verdict mismatch — "
             . "actual '$actual_verdict' but declared '$decl' "
-            . ($actual_verdict eq 'GAP' ? "(gap_reason: " . ($meta->{gap_reason} // 'unknown') . ")" : '');
+            . ($actual_verdict eq 'GAP'
+                ? "(gap_reason: " . ($meta->{gap_reason} // 'unknown') . ")"
+                : ($actual_verdict eq 'MISCOMPILE'
+                    ? "(lli_exit: " . ($meta->{lli_exit} // '?') . ")"
+                    : ''));
         return { verdict => 'FAIL', actual => $actual_verdict, declared => $decl,
                  meta => $meta };
     }
