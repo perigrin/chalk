@@ -267,6 +267,31 @@ class Chalk::IR::NodeFactory {
             return $node;
         }
 
+        # Assign over a Subscript/FieldAccess lvalue is an element/field STORE — a
+        # side effect that occupies a distinct control position. Like the deleted
+        # ArrayWrite/HashWrite/FieldWrite nodes (and VarDecl/ListAssign), two
+        # textually-identical stores in sequence are distinct side effects: each
+        # carries its own control_in, which is excluded from the content hash.
+        # Without per-call identity, two `$a[0]=v` (or `$field=v`) statements with
+        # identical lvalue+rhs would hash-cons to one node, silently dropping a
+        # store. A plain scalar-rebind Assign (lhs = PadAccess/VarDecl) is
+        # value-producing, not an aggregate store, and keeps content hash-consing.
+        if ($op_name eq 'Assign') {
+            my $lhs = ($args{inputs} && ref $args{inputs} eq 'ARRAY') ? $args{inputs}[0] : undef;
+            my $lhs_op = (defined $lhs && ref $lhs && $lhs->can('operation'))
+                ? $lhs->operation : '';
+            if ($lhs_op eq 'Subscript' || $lhs_op eq 'FieldAccess') {
+                my $class = $DATA_CLASSES{Assign}
+                    or die "Unknown node operation: Assign";
+                $cfg_counter++;
+                my $id = "Assign#${cfg_counter}";
+                my $node = $class->new( id => $id, %args );
+                $self->_register_consumers($node, %args);
+                $cache{$id} = $node;
+                return $node;
+            }
+        }
+
         my $class = $DATA_CLASSES{$op_name}
             or die "Unknown data node operation: $op_name";
 

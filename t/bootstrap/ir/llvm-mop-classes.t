@@ -242,6 +242,86 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
 };
 
 # ---------------------------------------------------------------------------
+# Test: Str field STORE inside a method body — Assign(FieldAccess-lvalue, Str)
+#
+# The field-store payload path must build a %StrPair for a Str rhs (matching the
+# field READ path, which reads a Str field via inttoptr i64 -> %StrPair*). A bare
+# `add i64 0, <i8*>` (the Bool/Int path) is invalid IR for a pointer rhs and would
+# be read back as a corrupt StrPair. Round-trip: set a Str field, then read it.
+#
+#   class Tag { field $s; method set { $s = "hi" } method get { return $s } }
+#   my $t = Tag->new; $t->set; $t->get   -> "hi"
+# ---------------------------------------------------------------------------
+
+subtest 'Str field store in method body: $t->set; $t->get => "hi" (Str)' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+
+    # field $s (Str), index 0, no :param
+    my $mf = Chalk::MOP::Field->new(
+        name       => 's',
+        sigil      => '$',
+        class      => undef,
+        fieldix    => 0,
+        type       => 'Str',
+        attributes => [],
+    );
+
+    # method set { $s = "hi" } — body: Assign(FieldAccess-lvalue(0,"Tag"), "hi")
+    my $hi = $f->make('Constant', value => 'hi', const_type => 'string');
+    $hi->set_representation('Str');
+    my $fa_lv = $f->make('FieldAccess', field_index => 0, field_stash => 'Tag', inputs => []);
+    $fa_lv->set_representation('Str');
+    my $store = $f->make('Assign', inputs => [$fa_lv, $hi]);
+    $store->set_representation('Str');
+    my $mi_set = Chalk::IR::MethodInfo->new(
+        name => 'set', body => [], body_node => $store, return_repr => 'Str',
+    );
+
+    # method get { return $s } — body: FieldAccess(0,"Tag") read
+    my $fa_rd = $f->make('FieldAccess', field_index => 0, field_stash => 'Tag', inputs => []);
+    $fa_rd->set_representation('Str');
+    my $mi_get = Chalk::IR::MethodInfo->new(
+        name => 'get', body => [], body_node => $fa_rd, return_repr => 'Str',
+    );
+
+    my $ci = Chalk::IR::ClassInfo->new(
+        name => 'Tag', methods => [$mi_set, $mi_get], fields => [$mf],
+    );
+
+    # my $t = Tag->new;
+    my $new_t = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        param_names => [], inputs => [$ci]);
+    $new_t->set_representation('Object');
+
+    # $t->set;  (control-position side effect, before get)
+    my $set_call = $f->make('Call', dispatch_kind => 'method', name => 'set',
+        inputs => [$new_t, $ci]);
+    $set_call->set_representation('Str');
+
+    # $t->get
+    my $get_call = $f->make('Call', dispatch_kind => 'method', name => 'get',
+        inputs => [$new_t, $ci]);
+    $get_call->set_representation('Str');
+
+    my $ret = $f->make_cfg('Return', inputs => [$get_call]);
+    $ret->set_control_in($set_call);
+
+    my ($lli_out, $ll_text);
+    eval { ($lli_out, $ll_text) = lli_run($ret) };
+    ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
+
+    my $oracle = eval { perl_oracle(q{
+        use feature 'class'; no warnings 'experimental::class';
+        class Tag { field $s; method set { $s = "hi" } method get { return $s } }
+        my $t = Tag->new; $t->set; $t->get
+    }) };
+    is($lli_out, $oracle, "lli output matches perl oracle: $oracle");
+
+    ok($ll_text !~ /Perl_|(?<![A-Za-z0-9_])SV(?![A-Za-z0-9_])|sv_|libperl|\bAV\b|\bHV\b/,
+        'generated .ll is libperl-free');
+};
+
+# ---------------------------------------------------------------------------
 # Test: Adversarial — Call(method) on absent method MUST die loudly
 # ---------------------------------------------------------------------------
 

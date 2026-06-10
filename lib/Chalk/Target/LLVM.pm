@@ -1955,9 +1955,41 @@ sub _lower_assign {
         # Store payload
         my $pay_gep = $self->_fresh;
         $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 1  ; FieldAccess-lvalue[$field_index] payload");
+        if ($val_repr eq 'Str') {
+            # Str field payload is a %StrPair* (as i64), mirroring _lower_call_new's
+            # :param Str binding and the field READ path (which reads it back via
+            # inttoptr i64 -> %StrPair*). A bare `add i64 0, <i8*>` would be invalid
+            # IR and read back as a corrupt StrPair.
+            my $len_ref  = $self->{_str_len_table}{$rhs_ref};
+            my $pair_raw = $self->_fresh;
+            my $pair_ptr = $self->_fresh;
+            $self->_emit("  $pair_raw = call i8* \@malloc(i64 16)  ; alloc StrPair for FieldAccess-lvalue[$field_index]");
+            $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
+            my $pp_gep = $self->_fresh;
+            $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
+            $self->_emit("  store i8* $rhs_ref, i8** $pp_gep  ; store str ptr");
+            my $pl_gep = $self->_fresh;
+            $self->_emit("  $pl_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
+            my $len_val = defined $len_ref ? $len_ref : 'zeroinitializer';
+            if ($len_val eq 'zeroinitializer') {
+                $len_val = $self->_fresh;
+                $self->_emit("  $len_val = call i64 \@strlen(i8* $rhs_ref)  ; strlen for Str FieldAccess-lvalue[$field_index]");
+            }
+            $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
+            my $pair_as_i64 = $self->_fresh;
+            $self->_emit("  $pair_as_i64 = ptrtoint %StrPair* $pair_ptr to i64  ; StrPair* -> i64 payload");
+            $self->_emit("  store i64 $pair_as_i64, i64* $pay_gep  ; FieldAccess-lvalue[$field_index] Str payload = StrPair*");
+            $self->{_need_strpair} = 1;
+            $self->{cache}{ $node->id } = $rhs_ref;
+            return $rhs_ref;
+        }
         my $pay_i64 = $self->_fresh;
         if ($val_repr eq 'Bool') {
             $self->_emit("  $pay_i64 = zext i1 $rhs_ref to i64  ; Bool->i64 FieldAccess-lvalue");
+        } elsif ($val_repr eq 'ArrayRef' || $val_repr eq 'HashRef') {
+            # Pointer-repr value: ptrtoint before storing into the i64 payload slot,
+            # mirroring the array/hash element-store branches.
+            $self->_emit("  $pay_i64 = ptrtoint i8* $rhs_ref to i64  ; $val_repr ptr -> i64 FieldAccess-lvalue");
         } else {
             $self->_emit("  $pay_i64 = add i64 0, $rhs_ref  ; identity: $val_repr->i64 FieldAccess-lvalue");
         }

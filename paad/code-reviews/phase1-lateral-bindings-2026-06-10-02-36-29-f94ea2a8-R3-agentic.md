@@ -24,6 +24,18 @@ code, not a regression. Highest-value items: the Str/ref field-store payload
 asymmetry, the Assign-over-lvalue hash-cons drop-store risk, and the deferred C5
 TypedInvariant coverage gap.
 
+**DISPOSITION (2026-06-10):** Both Important code findings were FIXED in this
+change-set (TDD, RED test first):
+- **I1** fixed — the FieldAccess-lvalue store now builds a `%StrPair` for a Str rhs
+  (matching the read path) and `ptrtoint`s an ArrayRef/HashRef rhs; pinned by a new
+  `llvm-mop-classes.t` Str-field-store-in-method round-trip (`Str:hi`, lli==perl).
+- **I2** fixed — `Assign` over a `Subscript`/`FieldAccess` lvalue now gets per-call
+  identity in `NodeFactory` (like the deleted FieldWrite/element-write), so identical
+  adjacent stores stay distinct; pinned by new `t/bootstrap/ir/assign-lvalue-identity.t`
+  (scalar-rebind Assign still hash-conses — preserved).
+- **I3** (C5 TypedInvariant) remains deferred to `019eaf54` per perigrin.
+The 4 Suggestions (S1-S4) are deferred to the follow-up issue.
+
 ## Critical Issues
 
 None found.
