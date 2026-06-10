@@ -1998,7 +1998,11 @@ sub _lower_assign {
                 $hash_ref = $self->lower_value($container);
             }
             my $wkey_ref = $self->lower_value($key_idx);
-            my $wkey_len = $self->_str_len_for($wkey_ref) // 0;
+            # See HashRead: a 0-length key makes the memcmp match any entry.
+            # Die loudly on an untracked length rather than default to 0.
+            my $wkey_len = $self->_str_len_for($wkey_ref)
+                // die "GAP: Assign(Hash-lvalue) key (ref=$wkey_ref) has no tracked "
+                     . "length — would emit a 0-length memcmp matching any entry.";
 
             my $cnt_ptr = $self->_fresh;
             my $ent_ptr = $self->_fresh;
@@ -2051,7 +2055,20 @@ sub _lower_assign {
             $self->_set_terminator("  br i1 $wis_match, label \%$lbl_wupd, label \%$lbl_wnxt");
 
             $self->_new_block($lbl_wupd);
-            $self->_emit("  store i64 $rhs_ref, i64* $went_vpp  ; Assign(Hash-lvalue): update val_payload");
+            # If the rhs is a pointer-repr value (ArrayRef/HashRef), ptrtoint before
+            # storing into the i64 payload slot — mirrors the array-lvalue branch
+            # above (and _lower_array_ref). Without this guard a ref value emits
+            # `store i64 i8*`, which is invalid IR.
+            my $wrhs_repr = $rhs->representation // '';
+            my $wrhs_i64;
+            if ($wrhs_repr eq 'ArrayRef' || $wrhs_repr eq 'HashRef') {
+                $wrhs_i64 = $self->_fresh;
+                $self->_emit("  $wrhs_i64 = ptrtoint i8* $rhs_ref to i64  ; Assign(Hash-lvalue): ptr rhs -> i64");
+            }
+            else {
+                $wrhs_i64 = $rhs_ref;
+            }
+            $self->_emit("  store i64 $wrhs_i64, i64* $went_vpp  ; Assign(Hash-lvalue): update val_payload");
             $self->_set_terminator("  br label \%$lbl_wend");
 
             $self->_new_block($lbl_wnxt);
@@ -3169,7 +3186,12 @@ sub _lower_hash_ref {
     for my $i (0 .. $npairs - 1) {
         my $key_ref = $self->lower_value($inputs->[ $i * 2     ]);
         my $val_ref = $self->lower_value($inputs->[ $i * 2 + 1 ]);
-        my $key_len = $self->_str_len_for($key_ref) // 0;
+        # The stored key length is later memcmp'd at read/update time; a 0-length
+        # key would make every lookup match this entry. Die loudly on an untracked
+        # length rather than default to 0 (matches the I-C loud-GAP contract).
+        my $key_len = $self->_str_len_for($key_ref)
+            // die "GAP: HashRef key (ref=$key_ref) has no tracked length — "
+                 . "stored key length 0 would make any lookup match this entry.";
 
         my $e_kp = $self->_fresh;
         my $e_kl = $self->_fresh;
@@ -3332,8 +3354,14 @@ sub _lower_array_read {
     $self->lower_value($container);
     # Prefer the already-resolved %Array* from _arr_table; this avoids depending on
     # the general value cache (which holds i8* for ArrayRef nodes, not %Array*).
+    # Defense-in-depth: a double-miss (neither table nor cache) would leave $arr_ref
+    # undef and silently emit a malformed `getelementptr ... %Array* <undef>`.
+    # lower_value($container) above always populates one of the two, so this is
+    # unreachable today — but die loudly rather than emit garbage IR if it ever is.
     my $arr_ref = $self->{_arr_table}{ $container->id }
-        // $self->{cache}{ $container->id };
+        // $self->{cache}{ $container->id }
+        // die "GAP: ArrayRead container (id=" . $container->id . ") resolved to "
+             . "neither _arr_table nor cache after lower_value — cannot emit slot load.";
     my $idx_ref = $self->lower_value($node->inputs->[1]);
     my $repr    = _require_repr($node, 'ArrayRead');
 
@@ -3428,10 +3456,21 @@ sub _lower_hash_read {
     $self->lower_value($container);
     # Prefer the already-resolved %Hash* from _hash_table; avoids depending on
     # the general value cache (which holds i8* for HashRef nodes, not %Hash*).
+    # Defense-in-depth: a double-miss would leave $hash_ref undef and silently emit
+    # malformed IR. lower_value($container) above always populates one — die loudly
+    # rather than emit garbage if it ever does not.
     my $hash_ref = $self->{_hash_table}{ $container->id }
-        // $self->{cache}{ $container->id };
+        // $self->{cache}{ $container->id }
+        // die "GAP: HashRead container (id=" . $container->id . ") resolved to "
+             . "neither _hash_table nor cache after lower_value — cannot emit key scan.";
     my $lkey_ref = $self->lower_value($node->inputs->[1]);
-    my $lkey_len = $self->_str_len_for($lkey_ref) // 0;
+    # The key length drives the memcmp scan; a silently-zeroed length makes a
+    # zero-length memcmp match ANY entry (spurious key match). If the key length
+    # is untracked it is a TypeInference/length-tracking gap — die loudly (matches
+    # the I-C loud-GAP contract), do NOT default to 0.
+    my $lkey_len = $self->_str_len_for($lkey_ref)
+        // die "GAP: HashRead key (ref=$lkey_ref) has no tracked length — "
+             . "would emit a 0-length memcmp matching any entry. Fix length tracking.";
     my $repr     = _require_repr($node, 'HashRead');
 
     # Load count and entries pointer from Hash struct (in current/pre_loop block).
@@ -3522,6 +3561,17 @@ sub _lower_hash_read {
         $self->_emit("  $result = phi i64 [ $vp_val, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; HashRead :Int payload");
         $self->{cache}{ $node->id } = $result;
         return $result;
+    }
+    elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
+        # Pointer element: phi-select payload then inttoptr (mirrors _lower_array_read).
+        # The slot payload holds a ref (ArrayRef/HashRef) stored as i64; reading it
+        # back as a usable pointer requires inttoptr i64 -> i8*.
+        my $raw_pay = $self->_fresh;
+        $self->_emit("  $raw_pay = phi i64 [ $vp_val, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; HashRead :$repr raw ptr payload");
+        my $ptr = $self->_fresh;
+        $self->_emit("  $ptr = inttoptr i64 $raw_pay to i8*  ; HashRead :$repr ptr");
+        $self->{cache}{ $node->id } = $ptr;
+        return $ptr;
     }
     else {
         # Slot repr: phi-select defined-bit and payload. Track payload for epilogue.

@@ -239,15 +239,24 @@ subtest 'I-B(Array-lvalue): Assign stores ArrayRef value -> ptrtoint needed' => 
 };
 
 # ---------------------------------------------------------------------------
-# I-B (HashRef value): missing ptrtoint guard in _lower_hash_ref when a
-# hash value has repr ArrayRef (or HashRef).
+# I-B (HashRef value) — V1+V2+V3 combined: round-trip a ref through a hash slot.
 #
-# HashRef("k" => innerArrayRef) — the value is an i8* but emits:
-#   store i64 i8* ...   <- LLVM type error
-# After fix: lli accepts and the hash's value slot holds the pointer.
-# We verify by returning Length(inner) = 2 from context (the inner is [1,2]).
+# This pins THREE findings end-to-end (the prior version of this test was
+# VACUOUS — V3 review: it wired Return to Length(inner) directly, so the hash
+# was never read back and neither guard was exercised):
+#   V1: the HashRef value store (_lower_hash_ref) must ptrtoint a ref-typed
+#       value (ArrayRef/HashRef) before `store i64`, else `store i64 i8*` is
+#       invalid IR.
+#   V2: reading a ref-valued slot back out via Subscript on a Hash/HashRef
+#       must inttoptr the i64 payload to i8* (the `ArrayRef||HashRef` result
+#       branch _lower_hash_read was missing — it returned i1, not i8*).
+#
+# Shape: my %h = ("k" => [1,2]); scalar $h{"k"}->@*  -> 2
+#   HashRef("k" => innerArrayRef)  (V1: store the ref)
+#   Subscript(%h, "k")             (V2: read the ref back, repr ArrayRef)
+#   Length(...)                    -> Int:2
 # ---------------------------------------------------------------------------
-subtest 'I-B(HashRef-value): HashRef stores ArrayRef value -> ptrtoint needed' => sub {
+subtest 'I-B(HashRef-value): ref stored in hash slot + read back -> ptrtoint/inttoptr' => sub {
     my $f = _mk();
 
     # Inner array: [1, 2]
@@ -258,19 +267,24 @@ subtest 'I-B(HashRef-value): HashRef stores ArrayRef value -> ptrtoint needed' =
     my $inner = $f->make('ArrayRef', inputs => [$c1, $c2]);
     $inner->set_representation('ArrayRef');
 
-    # Hash: { "k" => $inner }  -- value is ArrayRef (i8*)
+    # Hash: { "k" => $inner }  -- value is ArrayRef (i8*) (V1: store needs ptrtoint)
     my $key = $f->make('Constant', value => 'k', const_type => 'string');
     $key->set_representation('Str');
 
     my $hash = $f->make('HashRef', inputs => [$key, $inner]);
     $hash->set_representation('HashRef');
 
-    # Verify the .ll is valid by getting the length of the inner array directly
-    # (not through the hash read-back, which requires inttoptr — tested separately).
-    my $inner_len = $f->make('Length', inputs => [$inner]);
-    $inner_len->set_representation('Int');
+    # Read the ref back OUT of the hash slot (V2: read needs inttoptr).
+    my $key2 = $f->make('Constant', value => 'k', const_type => 'string');
+    $key2->set_representation('Str');
+    my $got = $f->make('Subscript', inputs => [$hash, $key2]);
+    $got->set_representation('ArrayRef');
 
-    my $ret = $f->make_cfg('Return', inputs => [$inner_len]);
+    # Length of the read-back ref = 2.
+    my $got_len = $f->make('Length', inputs => [$got]);
+    $got_len->set_representation('Int');
+
+    my $ret = $f->make_cfg('Return', inputs => [$got_len]);
 
     my $ll;
     eval { $ll = Chalk::Target::LLVM->lower($ret) };
@@ -281,10 +295,79 @@ subtest 'I-B(HashRef-value): HashRef stores ArrayRef value -> ptrtoint needed' =
 
         my $ec = ll_exit_code($ll);
         is($ec, 0, 'I-B(HashRef-value) .ll is valid LLVM IR (lli exit 0)')
-            or diag("I-B(HashRef-value): missing ptrtoint; store i64 i8* type mismatch:\n$ll");
+            or diag("I-B(HashRef-value): missing ptrtoint/inttoptr on hash ref slot:\n$ll");
 
         my $out = run_ll($ll);
-        is($out, 'Int:2', 'I-B(HashRef-value) lli output is Int:2 (inner array length)');
+        is($out, 'Int:2', 'I-B(HashRef-value) lli output is Int:2 (read-back inner array length)');
+    }
+
+    done_testing;
+};
+
+# ---------------------------------------------------------------------------
+# V1: hash element-store (Assign over a Hash Subscript-lvalue) of a ref value
+# lacks the ptrtoint guard the array-lvalue branch has.  _lower_assign's
+# hash-lvalue branch emits `store i64 $rhs_ref` at the matched-key update block
+# with NO ptrtoint when $rhs is ArrayRef/HashRef -> `store i64 i8*` invalid IR.
+#
+# Shape: my %h = ("k" => 0); $h{"k"} = [1,2]; scalar $h{"k"}->@*  -> 2
+#   HashRef("k" => 0)                       (existing key, Int value)
+#   Assign(Subscript(%h,"k"), innerArrayRef) (V1: element-store the ref)
+#   Length(Subscript(%h,"k"))                (V2 read branch: inttoptr)
+# After fix: lli accepts and returns Int:2.
+# ---------------------------------------------------------------------------
+subtest 'V1: hash element-store of a ref value -> ptrtoint guard' => sub {
+    my $f = _mk();
+
+    # Hash: { "k" => 0 }  (Int placeholder so the key exists for the update scan)
+    my $key = $f->make('Constant', value => 'k', const_type => 'string');
+    $key->set_representation('Str');
+    my $zero = $f->make('Constant', value => '0', const_type => 'integer');
+    $zero->set_representation('Int');
+    my $hash = $f->make('HashRef', inputs => [$key, $zero]);
+    $hash->set_representation('HashRef');
+
+    # Inner array: [1, 2]
+    my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
+    $c2->set_representation('Int');
+    my $inner = $f->make('ArrayRef', inputs => [$c1, $c2]);
+    $inner->set_representation('ArrayRef');
+
+    # $h{"k"} = $inner  -- element store of a ref (V1: store needs ptrtoint)
+    my $key_w = $f->make('Constant', value => 'k', const_type => 'string');
+    $key_w->set_representation('Str');
+    my $lval = $f->make('Subscript', inputs => [$hash, $key_w]);
+    $lval->set_representation('ArrayRef');
+    my $assign = $f->make('Assign', inputs => [$lval, $inner]);
+    $assign->set_representation('ArrayRef');
+
+    # Read back: Length(Subscript(%h,"k")) = 2
+    my $key_r = $f->make('Constant', value => 'k', const_type => 'string');
+    $key_r->set_representation('Str');
+    my $got = $f->make('Subscript', inputs => [$hash, $key_r]);
+    $got->set_representation('ArrayRef');
+    my $got_len = $f->make('Length', inputs => [$got]);
+    $got_len->set_representation('Int');
+
+    my $ret = $f->make_cfg('Return', inputs => [$got_len]);
+    # Thread the store as a control predecessor so it is emitted before the read.
+    $ret->set_control_in($assign) if $ret->can('set_control_in');
+
+    my $ll;
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    ok(!$@, "V1 lower() does not die: $@") or diag("error: $@");
+
+    SKIP: {
+        skip "V1 lowering failed, cannot run lli", 2 unless defined $ll;
+
+        my $ec = ll_exit_code($ll);
+        is($ec, 0, 'V1 .ll is valid LLVM IR (lli exit 0)')
+            or diag("V1: hash element-store missing ptrtoint; store i64 i8*:\n$ll");
+
+        my $out = run_ll($ll);
+        is($out, 'Int:2', 'V1 lli output is Int:2 (read-back inner array length)');
     }
 
     done_testing;
