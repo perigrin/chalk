@@ -1,6 +1,6 @@
 ---
 title: "Reconciliation 3/3: node convergence Phases 4-5 (MOP+dispatch) + docs"
-state: in-progress
+state: done
 urgency: normal
 milestone: codegen-harness
 blocked_by:
@@ -9,16 +9,20 @@ blocks:
 - 019eaa51-c48d-74ad-920e-da2f3ce94c5b
 - 019eaa51-bd3e-7b89-b376-c13304da68f7
 created: 2026-06-09T05:12:56.566413405Z
-updated: 2026-06-10T02:47:20.698046407Z
+updated: 2026-06-10T02:47:28.114144747Z
 sessions:
 - start_sha: b1a6dcea4421bd9726b002a0e0995f6c2d466f9f
-  end_sha: ""
+  end_sha: b1a6dcea4421bd9726b002a0e0995f6c2d466f9f
   commits: 0
   started_at: 2026-06-10T02:47:20.698046407Z
+  ended_at: 2026-06-10T02:47:28.114144747Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
   timestamp: 2026-06-10T02:47:20.698046407Z
+- state: done
+  actor: human:git-zhi
+  timestamp: 2026-06-10T02:47:28.114144747Z
 ---
 
 Reconciliation 3/3 (final): converge Cluster B (MOP + dispatch) onto the canonical MOP/ClassInfo layer + canonical Call, then docs. Plan: docs/plans/2026-06-08-ir-taxonomy-reconciliation.md (Cluster B ~130-145, I2 ClassInfo-input spec ~266-283, Phase 4 decomposed ~330-348, Phase 5 ~350-362, Phase 6 docs ~364, acceptance ~431-449). Blocks G6/G7. Read memory r2_node_convergence_baseline.md first.
