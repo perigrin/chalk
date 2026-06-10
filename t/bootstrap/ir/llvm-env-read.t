@@ -67,4 +67,50 @@ subtest 'EnvRead composes: length($ENV{...})' => sub {
     is($out, 'Int:7', 'length of the env value (runtime strlen)');
 };
 
+# Review findings 1+2 (one trigger): EnvRead inside METHOD BODIES must
+# (a) propagate _need_getenv to the module prologue (the F6 flag class —
+# otherwise the .ll references an undeclared @getenv), and (b) prefix its
+# key/empty globals by class/method (the @rxs_lit/@str_const symbol rule —
+# otherwise two bodies both emit @env_key_0, a duplicate symbol).
+subtest 'EnvRead in two method bodies: declared getenv, no duplicate globals' => sub {
+    local $ENV{CHALK_G7_TEST} = 'mbody';
+    require Chalk::IR::ClassInfo;
+    require Chalk::IR::MethodInfo;
+    my $f = _mk();
+
+    my $mk_body = sub {
+        my ($key) = @_;
+        my $e = $f->make('EnvRead', key => $key);
+        $e->set_representation('Str');
+        return $e;
+    };
+
+    my $mi_a = Chalk::IR::MethodInfo->new(
+        name => 'env_a', body => [], body_node => $mk_body->('CHALK_G7_TEST'),
+        return_repr => 'Str');
+    my $mi_b = Chalk::IR::MethodInfo->new(
+        name => 'env_b', body => [], body_node => $mk_body->('CHALK_G7_OTHER'),
+        return_repr => 'Str');
+    my $ci = Chalk::IR::ClassInfo->new(
+        name => 'Envy', methods => [$mi_a, $mi_b], fields => []);
+
+    my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        param_names => [], inputs => [$ci]);
+    $new_o->set_representation('Object');
+    my $call = $f->make('Call', dispatch_kind => 'method', name => 'env_a',
+        inputs => [$new_o, $ci]);
+    $call->set_representation('Str');
+    my $ret = $f->make_cfg('Return', inputs => [$call]);
+
+    my ($out, $ll) = eval { lli_run($ret) };
+    ok(!$@, 'two method bodies with EnvRead lower + run')
+        or do { diag("error: $@"); return };
+    is($out, 'Str:mbody', 'method-body EnvRead reads the env');
+    like($ll, qr/declare i8\* \@getenv/, '@getenv is declared (F6 propagation)');
+    my @defs = $ll =~ /^(\@\S*env_(?:key|empty)\S*) =/mg;
+    my %seen; my @dups = grep { $seen{$_}++ } @defs;
+    is(scalar @dups, 0, 'no duplicate @env_* global symbols')
+        or diag("duplicates: @dups");
+};
+
 done_testing;

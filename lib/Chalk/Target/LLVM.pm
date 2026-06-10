@@ -583,6 +583,7 @@ sub _emit_class_registry_ir {
                 _need_str_to_num_helper
                 _need_memcmp
                 _need_aggregate_types
+                _need_getenv
             )) {
                 $ctx->{$flag} = 1 if $body_ctx->{$flag};
             }
@@ -806,6 +807,7 @@ sub lower_with_elaboration {
         push @lines, 'declare i8* @getenv(i8* nocapture readonly)';
         push @lines, 'declare i64 @strlen(i8* nocapture readonly)';
         $ctx->{_strlen_declared} = 1;
+        $ctx->{_getenv_emitted}  = 1;
     }
 
     # Declare memcmp when hash key comparison operations were emitted.
@@ -855,8 +857,10 @@ sub lower_with_elaboration {
     # (because the prologue runs before method bodies are lowered — F6 fix).
     if (defined $class_registry && %$class_registry) {
         push @lines, '';
-        push @lines, 'declare i64 @strlen(i8* nocapture readonly)'
-            unless $ctx->{_strlen_declared};
+        unless ($ctx->{_strlen_declared}) {
+            push @lines, 'declare i64 @strlen(i8* nocapture readonly)';
+            $ctx->{_strlen_declared} = 1;
+        }
         my @class_lines = _emit_class_registry_ir($class_registry, $ctx);
         push @lines, @class_lines;
     }
@@ -899,6 +903,16 @@ sub lower_with_elaboration {
     if ($ctx->{_need_memcmp} && !$ctx->{_memcmp_emitted}) {
         push @lines, 'declare i32 @memcmp(i8* nocapture readonly, i8* nocapture readonly, i64)';
         $ctx->{_memcmp_emitted} = 1;
+    }
+
+    # Post-class re-emit for _need_getenv (same F6 pattern as memcmp): a
+    # method-body EnvRead sets the flag after the prologue ran.
+    if ($ctx->{_need_getenv} && !$ctx->{_getenv_emitted}) {
+        push @lines, 'declare i8* @getenv(i8* nocapture readonly)';
+        push @lines, 'declare i64 @strlen(i8* nocapture readonly)'
+            unless $ctx->{_strlen_declared};
+        $ctx->{_strlen_declared} = 1;
+        $ctx->{_getenv_emitted}  = 1;
     }
 
     # Post-class re-emit for _need_strpair (I3):
@@ -1630,17 +1644,14 @@ sub _lower_concat {
     my $buf_b = $self->_fresh;
     $self->_emit("  $buf_b = getelementptr inbounds i8, i8* $buf, i64 $len_a  ; Concat: ptr after lhs");
 
-    # Copy b's bytes (len_b+1 bytes including NUL from rhs_ref — or len_b+1 bytes).
-    # We copy len_b+1 to include the source NUL, completing the NUL terminator of result.
-    my $copy_b_len;
-    if ($len_b =~ /^\d+$/) {
-        $copy_b_len = $len_b + 1;
-    }
-    else {
-        $copy_b_len = $self->_fresh;
-        $self->_emit("  $copy_b_len = add i64 $len_b, 1  ; Concat: rhs copy len +1 for NUL");
-    }
-    $self->_emit("  call i8* \@memcpy(i8* $buf_b, i8* $rhs_ref, i64 $copy_b_len)  ; Concat: copy rhs+NUL");
+    # Copy b's bytes (exactly len_b), then store the NUL explicitly. Copying
+    # len_b+1 "to include the source NUL" is wrong for VIEW-typed inputs (a
+    # RegexCapture points into the middle of its subject — the byte past the
+    # view is the next subject byte, not NUL).
+    $self->_emit("  call i8* \@memcpy(i8* $buf_b, i8* $rhs_ref, i64 $len_b)  ; Concat: copy rhs");
+    my $nul_ptr = $self->_fresh;
+    $self->_emit("  $nul_ptr = getelementptr inbounds i8, i8* $buf, i64 $len_sum  ; Concat: NUL slot");
+    $self->_emit("  store i8 0, i8* $nul_ptr  ; Concat: NUL-terminate");
 
     # Track the result length and mark that malloc/memcpy declarations are needed.
     $self->{_str_len_table}{$buf} = $len_sum;
@@ -4759,6 +4770,8 @@ sub _lower_regex_capture {
     my ($self, $node) = @_;
 
     my $repr       = _require_repr($node, 'RegexCapture');
+    die "GAP: RegexCapture has repr=$repr; \$N capture values are Str"
+        unless $repr eq 'Str';
     my $match_node = $node->inputs->[0];
     my $n          = $node->n;
 
@@ -4800,19 +4813,29 @@ sub _lower_env_read {
     my ($self, $node) = @_;
 
     my $repr = _require_repr($node, 'EnvRead');
+    die "GAP: EnvRead has repr=$repr; %ENV values are Str" unless $repr eq 'Str';
     my $key  = $node->key;
     $self->{_need_getenv} = 1;
 
-    # Key + empty-string fallback as module globals.
+    # Key + empty-string fallback as module globals. Same symbol-prefix rule
+    # as @str_const_N/@rxs_lit_N: method bodies lower in fresh Contexts whose
+    # counters restart at 0, but the globals land at module scope — prefix by
+    # class/method so two bodies do not both emit @env_key_0.
+    my $gpfx = '';
+    if ($self->{_in_method_body}
+        && defined $self->{_method_class_name}
+        && defined $self->{_method_name}) {
+        $gpfx = "$self->{_method_class_name}__$self->{_method_name}__";
+    }
     my $gidx  = scalar @{ $self->{_str_globals} };
-    my $kname = "\@env_key_$gidx";
+    my $kname = "\@${gpfx}env_key_$gidx";
     push $self->{_str_globals}->@*, [ $kname, $key, length($key) ];
     my $ktotal = length($key) + 1;
     my $kptr = $self->_fresh;
     $self->_emit("  $kptr = getelementptr inbounds [$ktotal x i8], [$ktotal x i8]* $kname, i64 0, i64 0  ; EnvRead: key \"$key\"");
 
     my $eidx  = scalar @{ $self->{_str_globals} };
-    my $ename = "\@env_empty_$eidx";
+    my $ename = "\@${gpfx}env_empty_$eidx";
     push $self->{_str_globals}->@*, [ $ename, '', 0 ];
     my $eptr = $self->_fresh;
     $self->_emit("  $eptr = getelementptr inbounds [1 x i8], [1 x i8]* $ename, i64 0, i64 0  ; EnvRead: empty fallback");
