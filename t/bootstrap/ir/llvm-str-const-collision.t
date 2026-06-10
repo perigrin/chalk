@@ -68,9 +68,10 @@ sub build_dual_str_graph {
     );
     $new_obj->set_representation('Object');
 
-    my $call = $f->make('MethodCall',
-        method_name => 'get_first',
-        inputs      => [$new_obj, $ci],
+    my $call = $f->make('Call',
+        dispatch_kind => 'method',
+        name          => 'get_first',
+        inputs        => [$new_obj, $ci],
     );
     $call->set_representation('Str');
 
@@ -119,9 +120,10 @@ sub build_triple_str_graph {
 
     my $new_obj = $f->make('New', param_names => [], inputs => [$ci]);
     $new_obj->set_representation('Object');
-    my $call = $f->make('MethodCall',
-        method_name => 'get_alpha',
-        inputs      => [$new_obj, $ci],
+    my $call = $f->make('Call',
+        dispatch_kind => 'method',
+        name          => 'get_alpha',
+        inputs        => [$new_obj, $ci],
     );
     $call->set_representation('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);

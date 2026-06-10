@@ -87,10 +87,11 @@ subtest 'method-simple with ClassInfo: $g->greet => 42 (Int)' => sub {
     );
     $new_g->set_representation('Object');
 
-    # MethodCall: ClassInfo as inputs[1]
-    my $result = $f->make('MethodCall',
-        method_name => 'greet',
-        inputs      => [$new_g, $ci],
+    # Call(dispatch_kind='method'): ClassInfo as inputs[1]
+    my $result = $f->make('Call',
+        dispatch_kind => 'method',
+        name          => 'greet',
+        inputs        => [$new_g, $ci],
     );
     $result->set_representation('Int');
 
@@ -204,9 +205,10 @@ subtest 'field-basic with ClassInfo: $a->name => "cat" (Str)' => sub {
     );
     $new_a->set_representation('Object');
 
-    my $result = $f->make('MethodCall',
-        method_name => 'name',
-        inputs      => [$new_a, $ci],
+    my $result = $f->make('Call',
+        dispatch_kind => 'method',
+        name          => 'name',
+        inputs        => [$new_a, $ci],
     );
     $result->set_representation('Str');
 

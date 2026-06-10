@@ -83,7 +83,6 @@ use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::ExpressionList;
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Node::New;
-use Chalk::IR::Node::MethodCall;
 use Chalk::IR::Node::FieldWrite;
 
 my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
@@ -103,7 +102,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     ExpressionList
     Start Return Unwind
     Coerce
-    New MethodCall FieldWrite
+    New FieldWrite
 );
 
 # CFG ops that are NEVER hash-consed via make_cfg (each call allocates fresh).

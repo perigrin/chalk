@@ -75,9 +75,10 @@ sub build_str_param_int_return_graph {
     $new_obj->set_representation('Object');
 
     # Call the Int method (so the outer Return is Int, not Str)
-    my $call = $f->make('MethodCall',
-        method_name => 'get_int',
-        inputs      => [$new_obj, $ci],
+    my $call = $f->make('Call',
+        dispatch_kind => 'method',
+        name          => 'get_int',
+        inputs        => [$new_obj, $ci],
     );
     $call->set_representation('Int');
 
@@ -142,9 +143,10 @@ subtest 'Str-returning method: exactly one %StrPair (I3 no double-declare)' => s
     my $new_obj = $f->make('New', param_names => [], inputs => [$ci]);
     $new_obj->set_representation('Object');
 
-    my $call = $f->make('MethodCall',
-        method_name => 'get_str',
-        inputs      => [$new_obj, $ci],
+    my $call = $f->make('Call',
+        dispatch_kind => 'method',
+        name          => 'get_str',
+        inputs        => [$new_obj, $ci],
     );
     $call->set_representation('Str');
 

@@ -87,10 +87,11 @@ subtest 'method-simple: $g->greet => 42 (Int)' => sub {
     );
     $new_g->set_representation('Object');
 
-    # MethodCall: $g->greet
-    my $result = $f->make('MethodCall',
-        method_name => 'greet',
-        inputs      => [$new_g, $ci],
+    # Call: $g->greet
+    my $result = $f->make('Call',
+        dispatch_kind => 'method',
+        name          => 'greet',
+        inputs        => [$new_g, $ci],
     );
     $result->set_representation('Int');
 
@@ -211,10 +212,11 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
     );
     $new_a->set_representation('Object');
 
-    # MethodCall: $a->name
-    my $result = $f->make('MethodCall',
-        method_name => 'name',
-        inputs      => [$new_a, $ci],
+    # Call: $a->name
+    my $result = $f->make('Call',
+        dispatch_kind => 'method',
+        name          => 'name',
+        inputs        => [$new_a, $ci],
     );
     $result->set_representation('Str');
 
@@ -269,9 +271,10 @@ subtest 'adversarial: MethodCall on absent method dies loudly at lowering' => su
     $new_g->set_representation('Object');
 
     # Call 'wave' which is NOT defined — must die at lowering
-    my $bad_call = $f->make('MethodCall',
-        method_name => 'wave',   # absent from vtable!
-        inputs      => [$new_g, $ci],
+    my $bad_call = $f->make('Call',
+        dispatch_kind => 'method',
+        name          => 'wave',   # absent from vtable!
+        inputs        => [$new_g, $ci],
     );
     $bad_call->set_representation('Int');
 
@@ -325,11 +328,12 @@ subtest 'adversarial: MethodCall without ClassDecl dies loudly at lowering' => s
         fields  => [],
     );
 
-    # MethodCall on an object of KnownClass but using UndeclaredClass as the descriptor
+    # Call on an object of KnownClass but using UndeclaredClass as the descriptor
     # (no methods in UndeclaredClass -> must die)
-    my $bad_call = $f->make('MethodCall',
-        method_name => 'bar',
-        inputs      => [$new_k, $ci2],
+    my $bad_call = $f->make('Call',
+        dispatch_kind => 'method',
+        name          => 'bar',
+        inputs        => [$new_k, $ci2],
     );
     $bad_call->set_representation('Int');
 

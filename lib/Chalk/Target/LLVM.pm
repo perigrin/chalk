@@ -1288,9 +1288,6 @@ sub lower_value {
     elsif ($op eq 'New') {
         return $self->_lower_new($node);
     }
-    elsif ($op eq 'MethodCall') {
-        return $self->_lower_method_call($node);
-    }
     elsif ($op eq 'FieldWrite') {
         return $self->_lower_field_write($node);
     }
@@ -1298,6 +1295,12 @@ sub lower_value {
         && defined $node->inputs->[0]->representation
         && $node->inputs->[0]->representation eq 'Object') {
         return $self->_lower_ref_of_object($node);
+    }
+    # Call(dispatch_kind='method'): vtable-slot dispatch, canonical form of MethodCall.
+    # inputs[0] = invocant (obj node), inputs[1] = ClassInfo (class reference).
+    # name = method name. return repr from node->representation.
+    elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'method') {
+        return $self->_lower_call_method($node);
     }
     else {
         if (defined $node->representation && $node->representation eq 'Scalar') {
@@ -2688,10 +2691,10 @@ sub process_control_node {
     elsif ($op eq 'Loop') {
         $self->_process_loop_node($node);
     }
-    elsif ($op eq 'MethodCall') {
-        # Side-effecting method call in the control chain (e.g. $obj->inc).
-        # Lower it to ensure the call's side effects (field mutations) are emitted
-        # before subsequent operations that depend on them.
+    elsif ($op eq 'Call') {
+        # Call(dispatch_kind='method') is the canonical form of MethodCall.
+        # Side-effecting calls in the control chain must be lowered here so
+        # their field mutations are emitted before subsequent reads.
         $self->lower_value($node);
     }
     # Other ops in the control chain (Return, Unwind, Region, Proj, Phi, etc.)
@@ -3850,6 +3853,77 @@ sub _lower_new {
     $self->_emit("  $result = bitcast %${class_name}.obj* $obj_ref to i8*  ; New $class_name: -> Object (i8*)");
     $self->{cache}{ $node->id } = $result;
     return $result;
+}
+
+# _lower_call_method($node) -> $llvm_ref
+#
+# Lowers a Call(dispatch_kind='method') node: same vtable-dispatch logic as
+# _lower_method_call, but reads name from Call->name and class from inputs[1].
+# The invocant is inputs[0]; the class reference (ClassInfo) is inputs[1].
+sub _lower_call_method {
+    my ($self, $node) = @_;
+
+    my $method_name = $node->name;
+    my $obj_node    = $node->inputs->[0];
+    my $cls_node    = $node->inputs->[1];
+    my $class_name  = _class_name_from_class_node($cls_node);
+    my $result_repr = _require_repr($node, 'Call(method)');
+
+    # Verify class and method are in the registry
+    my $reg = $self->{class_registry}{$class_name}
+        or die "LLVM MOP: Call(method) '$method_name' on undeclared class '$class_name' — "
+             . "no ClassInfo registered for this class. Cannot emit vtable slot.";
+
+    my $methods = $reg->{methods} // [];
+    my ($minfo) = grep { ($_->{name} // '') eq $method_name } @$methods;
+    unless (defined $minfo) {
+        die "LLVM MOP: Call(method) '$method_name' is absent from class '$class_name' vtable — "
+          . "available methods: [" . join(', ', map { $_->{name} // '?' } @$methods) . "]. "
+          . "Cannot emit vtable dispatch to a non-existent slot.";
+    }
+
+    my $slot_idx = $minfo->{vtable_slot};
+
+    # Lower the object to get the raw pointer
+    my $obj_raw = $self->lower_value($obj_node);
+
+    # Load vtable pointer
+    my $obj_typed = $self->_fresh;
+    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; Call(method) $method_name: typed obj");
+    my $vt_gep = $self->_fresh;
+    $self->_emit("  $vt_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 0  ; vtable ptr slot");
+    my $vt_ptr = $self->_fresh;
+    $self->_emit("  $vt_ptr = load %${class_name}.vt*, %${class_name}.vt** $vt_gep  ; load vtable ptr");
+
+    # Load opaque fn ptr from vtable slot
+    my $fn_slot_llvm = 1 + $slot_idx;
+    my $fn_gep = $self->_fresh;
+    $self->_emit("  $fn_gep = getelementptr inbounds %${class_name}.vt, %${class_name}.vt* $vt_ptr, i64 0, i32 $fn_slot_llvm  ; method '$method_name' fn ptr slot");
+    my $opaque_fn = $self->_fresh;
+    $self->_emit("  $opaque_fn = load i8*, i8** $fn_gep  ; load opaque fn ptr for '$method_name'");
+
+    # Cast to actual fn-ptr type and call
+    my $fn_type  = _method_fn_type($result_repr);
+    my $typed_fn = $self->_fresh;
+    $self->_emit("  $typed_fn = bitcast i8* $opaque_fn to $fn_type*  ; cast to typed fn ptr");
+
+    my $result = $self->_fresh;
+    if ($result_repr eq 'Str') {
+        $self->{_need_strpair} = 1;
+        $self->_emit("  $result = call %StrPair $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> StrPair");
+        my $str_ptr = $self->_fresh;
+        my $str_len = $self->_fresh;
+        $self->_emit("  $str_ptr = extractvalue %StrPair $result, 0  ; Call(method) $method_name result ptr");
+        $self->_emit("  $str_len = extractvalue %StrPair $result, 1  ; Call(method) $method_name result len");
+        $self->{_str_len_table}{$str_ptr} = $str_len;
+        $self->{cache}{ $node->id } = $str_ptr;
+        return $str_ptr;
+    }
+    else {
+        $self->_emit("  $result = call i64 $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> i64");
+        $self->{cache}{ $node->id } = $result;
+        return $result;
+    }
 }
 
 # _lower_method_call($node) -> $llvm_ref

@@ -67,7 +67,7 @@ context: scalar
 %cls    = ClassInfo(name: "Animal", methods: [%mi], fields: [%mf])
 %nval   = Constant("cat") :Str
 %new_a  = New(%cls, %nval, param_names: "name") :Object
-%result = MethodCall(%new_a, %cls, method_name: "name") :Str
+%result = Call(%new_a, %cls, dispatch_kind: "method", name: "name") :Str
 return %result
 L: GREEN
 ```
@@ -103,8 +103,8 @@ context: scalar
 %lval   = Constant(10) :Int
 %rval   = Constant(20) :Int
 %new_p  = New(%cls, %lval, %rval, param_names: "left,right") :Object
-%lr     = MethodCall(%new_p, %cls, method_name: "left")  :Int
-%rr     = MethodCall(%new_p, %cls, method_name: "right") :Int
+%lr     = Call(%new_p, %cls, dispatch_kind: "method", name: "left")  :Int
+%rr     = Call(%new_p, %cls, dispatch_kind: "method", name: "right") :Int
 %result = Add(%lr, %rr) :Int
 return %result
 L: GREEN
@@ -137,7 +137,7 @@ context: scalar
 %mi     = MethodInfo(name: "greet", body_node: %body, return_repr: "Int")
 %cls    = ClassInfo(name: "Greeter", methods: [%mi])
 %new_g  = New(%cls) :Object
-%result = MethodCall(%new_g, %cls, method_name: "greet") :Int
+%result = Call(%new_g, %cls, dispatch_kind: "method", name: "greet") :Int
 return %result
 L: GREEN
 ```
@@ -181,8 +181,8 @@ context: scalar
 %cls       = ClassInfo(name: "Counter", methods: [%mi_inc, %mi_val], fields: [%mf_n])
 %ten       = Constant(10) :Int
 %new_c     = New(%cls, %ten, param_names: "n") :Object
-%inc_call  = MethodCall(%new_c, %cls, method_name: "inc") :Int
-%result    = MethodCall(%new_c, %cls, method_name: "val") :Int
+%inc_call  = Call(%new_c, %cls, dispatch_kind: "method", name: "inc") :Int
+%result    = Call(%new_c, %cls, dispatch_kind: "method", name: "val") :Int
 control: %inc_call -> %result
 return %result
 L: GREEN
@@ -216,7 +216,7 @@ context: scalar
 %base_cls  = ClassInfo(name: "Base", methods: [%mi_kind])
 %child_cls = ClassInfo(name: "Child", parent: "Base", parent_ci: %base_cls)
 %new_c     = New(%child_cls) :Object
-%result    = MethodCall(%new_c, %child_cls, method_name: "kind") :Str
+%result    = Call(%new_c, %child_cls, dispatch_kind: "method", name: "kind") :Str
 return %result
 L: GREEN
 ```
@@ -260,7 +260,7 @@ context: scalar
 %cls       = ClassInfo(name: "Box", methods: [%mi_dbl], fields: [%mf_val, %mf_dbl], adjusts: [%fw_dbl])
 %seven     = Constant(7) :Int
 %new_b     = New(%cls, %seven, param_names: "val") :Object
-%result    = MethodCall(%new_b, %cls, method_name: "double") :Int
+%result    = Call(%new_b, %cls, dispatch_kind: "method", name: "double") :Int
 return %result
 L: GREEN
 ```
