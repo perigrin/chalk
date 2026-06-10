@@ -800,6 +800,14 @@ sub lower_with_elaboration {
         push @lines, 'declare i8* @memcpy(i8*, i8*, i64)';
     }
 
+    # Declare getenv (+ strlen for the runtime value length) when EnvRead was
+    # emitted. Plain C host-interface functions — NOT libperl.
+    if ($ctx->{_need_getenv}) {
+        push @lines, 'declare i8* @getenv(i8* nocapture readonly)';
+        push @lines, 'declare i64 @strlen(i8* nocapture readonly)';
+        $ctx->{_strlen_declared} = 1;
+    }
+
     # Declare memcmp when hash key comparison operations were emitted.
     if ($ctx->{_need_memcmp}) {
         push @lines, 'declare i32 @memcmp(i8* nocapture readonly, i8* nocapture readonly, i64)';
@@ -847,7 +855,8 @@ sub lower_with_elaboration {
     # (because the prologue runs before method bodies are lowered — F6 fix).
     if (defined $class_registry && %$class_registry) {
         push @lines, '';
-        push @lines, 'declare i64 @strlen(i8* nocapture readonly)';
+        push @lines, 'declare i64 @strlen(i8* nocapture readonly)'
+            unless $ctx->{_strlen_declared};
         my @class_lines = _emit_class_registry_ir($class_registry, $ctx);
         push @lines, @class_lines;
     }
@@ -1307,6 +1316,15 @@ sub lower_value {
     # lowering resolves it statically and inlines the same matcher.
     elsif ($op eq 'Match') {
         return $self->_lower_match_apply($node);
+    }
+    # RegexCapture ($N magic var): a slot of the match node's result — a
+    # zero-copy {ptr,len} view into the subject at the captured offsets.
+    elsif ($op eq 'RegexCapture') {
+        return $self->_lower_regex_capture($node);
+    }
+    # EnvRead (%ENV{key}): host process state via the C getenv — not libperl.
+    elsif ($op eq 'EnvRead') {
+        return $self->_lower_env_read($node);
     }
     else {
         if (defined $node->representation && $node->representation eq 'Scalar') {
@@ -4676,6 +4694,8 @@ sub _lower_regex_match {
 
     # Record the capture offsets for downstream consumers (G7's $N magic vars
     # read these as graph-edge side data; s/// consumes them directly).
+    # subj_ptr rides along so a RegexCapture can materialize the $N view.
+    $match->{subj_ptr} = $subj_ptr;
     $self->{_regex_captures}{ $node->id } = $match;
 
     $self->{cache}{ $node->id } = $match->{matched};
@@ -4719,9 +4739,96 @@ sub _lower_match_apply {
     my $compiled = _compile_regex_pattern($pattern, '');
     my $match    = $self->_emit_regex_matcher($subj_ptr, $subj_len, $compiled, 'Match(qr)');
 
+    $match->{subj_ptr} = $subj_ptr;
     $self->{_regex_captures}{ $node->id } = $match;
     $self->{cache}{ $node->id } = $match->{matched};
     return $match->{matched};
+}
+
+# _lower_regex_capture($node) -> $llvm_ref (i8* view into the subject)
+#
+# Lowers RegexCapture ($N): inputs[0] is the RegexMatch/Match node whose
+# lowering recorded its capture offsets in _regex_captures. The value is a
+# ZERO-COPY view into the subject buffer — ptr = subj_ptr + cap_s[n],
+# len = cap_e[n] - cap_s[n] (the subject is immutable in this slice). On a
+# failed match the offsets are the 0 sentinels, so the view is the empty
+# string at offset 0; perl yields undef there — the realistic lib/ idiom
+# guards $N behind the match (matched ? $1 : ...), and the undef face is a
+# tracked follow-up alongside the L3 Undef-rep composition.
+sub _lower_regex_capture {
+    my ($self, $node) = @_;
+
+    my $repr       = _require_repr($node, 'RegexCapture');
+    my $match_node = $node->inputs->[0];
+    my $n          = $node->n;
+
+    # Lower the match first (idempotent via the value cache); its lowering
+    # records the capture offsets keyed by the match node's id.
+    $self->lower_value($match_node);
+    my $rec = $self->{_regex_captures}{ $match_node->id };
+    unless (defined $rec) {
+        my $mop = $match_node->can('operation') ? $match_node->operation : '?';
+        die "GAP: RegexCapture input (op=$mop) is not a regex match node — "
+          . "\$$n is a slot of a match result; only RegexMatch/Match produce one.";
+    }
+    my ($s_ref, $e_ref) = ($rec->{cap_s}[$n], $rec->{cap_e}[$n]);
+    unless (defined $s_ref && defined $e_ref) {
+        my $have = $#{ $rec->{cap_s} };
+        $have = 0 if $have < 0;
+        die "GAP: RegexCapture \$$n out of range — the pattern has $have capture "
+          . "group(s) (\$& / group 0 is a tracked follow-up).";
+    }
+
+    my $ptr = $self->_fresh;
+    $self->_emit("  $ptr = getelementptr inbounds i8, i8* $rec->{subj_ptr}, i64 $s_ref  ; RegexCapture: \$$n view ptr");
+    my $len = $self->_fresh;
+    $self->_emit("  $len = sub i64 $e_ref, $s_ref  ; RegexCapture: \$$n length");
+
+    $self->{_str_len_table}{$ptr} = $len;
+    $self->{cache}{ $node->id } = $ptr;
+    return $ptr;
+}
+
+# _lower_env_read($node) -> $llvm_ref (i8* value string)
+#
+# Lowers EnvRead: a getenv(key) call against host process state. A missing
+# key reads as the EMPTY string (perl yields undef there — the undef face is
+# a tracked follow-up that composes with the L3 Undef representation; the
+# NULL-guarded select keeps the read crash-free meanwhile). The value length
+# is a runtime strlen, tracked in _str_len_table.
+sub _lower_env_read {
+    my ($self, $node) = @_;
+
+    my $repr = _require_repr($node, 'EnvRead');
+    my $key  = $node->key;
+    $self->{_need_getenv} = 1;
+
+    # Key + empty-string fallback as module globals.
+    my $gidx  = scalar @{ $self->{_str_globals} };
+    my $kname = "\@env_key_$gidx";
+    push $self->{_str_globals}->@*, [ $kname, $key, length($key) ];
+    my $ktotal = length($key) + 1;
+    my $kptr = $self->_fresh;
+    $self->_emit("  $kptr = getelementptr inbounds [$ktotal x i8], [$ktotal x i8]* $kname, i64 0, i64 0  ; EnvRead: key \"$key\"");
+
+    my $eidx  = scalar @{ $self->{_str_globals} };
+    my $ename = "\@env_empty_$eidx";
+    push $self->{_str_globals}->@*, [ $ename, '', 0 ];
+    my $eptr = $self->_fresh;
+    $self->_emit("  $eptr = getelementptr inbounds [1 x i8], [1 x i8]* $ename, i64 0, i64 0  ; EnvRead: empty fallback");
+
+    my $raw = $self->_fresh;
+    $self->_emit("  $raw = call i8* \@getenv(i8* $kptr)  ; EnvRead: getenv(\"$key\")");
+    my $isnull = $self->_fresh;
+    $self->_emit("  $isnull = icmp eq i8* $raw, null  ; EnvRead: key unset?");
+    my $val = $self->_fresh;
+    $self->_emit("  $val = select i1 $isnull, i8* $eptr, i8* $raw  ; EnvRead: value (empty if unset)");
+    my $len = $self->_fresh;
+    $self->_emit("  $len = call i64 \@strlen(i8* $val)  ; EnvRead: value length");
+
+    $self->{_str_len_table}{$val} = $len;
+    $self->{cache}{ $node->id } = $val;
+    return $val;
 }
 
 # _parse_subst_replacement($replacement, $ngroups) -> \@segments

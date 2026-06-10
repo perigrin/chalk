@@ -466,10 +466,20 @@ perl regex engine.
 | `qr/pat/` | `Constant(const_type='regex')` with `:Regex` repr | no value materialized; the pattern is resolved statically at the application site. |
 | `$s =~ $qr` | `Match(subject, qr_constant)` (the `=~` BinOp) | statically resolves the rhs pattern and inlines the same matcher; a non-statically-resolvable rhs is a loud GAP. |
 | `s/pat/repl/` | `RegexSubst(subject)` (pattern/replacement/flags attrs) | match + splice: malloc, memcpy prefix + replacement segments (literals + `$N` captured slices) + suffix; non-match returns the subject unchanged. Result length is a runtime SSA in the string-length side table. |
+| `$1`..`$9` | `RegexCapture(match_node, n)` | a slot of the match node's result (the runtime-free-boundary doc's "value on a graph edge"): a zero-copy `{ptr,len}` view into the subject at the captured offsets. Reading an out-of-range group or a non-match input dies loudly. The undef face of a failed-match `$N` is a tracked follow-up (the guarded `matched ? $1 : ...` idiom — lib/'s dominant shape — never reads it). |
 
 Captures are plain SSA offset pairs into the subject buffer — **no `%MatchResult`
 struct is materialized**; a struct ABI would only be needed at a function
 boundary (a qr value escaping static tracking), which is a loud GAP today.
+
+### Host interface
+
+| Idiom | Canonical node | LLVM lowering |
+|-------|----------------|---------------|
+| `$ENV{KEY}` | `EnvRead(key)` (compile-time literal key) | `call i8* @getenv(key)` with a NULL-guarded empty-string fallback (perl yields undef for a missing key — the undef face is a tracked follow-up composing with the Undef representation); value length is a runtime `strlen`. Host C interface, not libperl. |
+
+`@ARGV`/`$0` (argv plumbing), `$!` (needs failing-syscall ops), I/O config
+vars, and env WRITES have zero uses in lib/ and are tracked follow-ups.
 Supported feature set: literals, `^`/`$` anchors (including perl's
 match-before-a-final-newline `$` rule), byte escapes (`\t\n\r\f\a\e\0`/`\xHH`),
 character classes (`[...]`/`[^...]`/`\d\w\s`/`.`), greedy quantifiers
