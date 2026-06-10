@@ -39,10 +39,14 @@ class Chalk::IR::Node {
     field $schedule_data :reader = undef;
 
     # Machine-level representation of the value produced by this node.
-    # Values: 'Int' (i64), 'Num' (double/f64), 'Ptr' (raw pointer),
-    # 'Struct' (struct-by-value), 'Scalar' (boxed Perl SV* — conservative
-    # fallback). Set post-construction by the IR builder or a lowering pass
-    # via set_representation(); undef = not yet assigned.
+    # Realized lattice (see typed-ir-representation.md): 'Bool' (i1),
+    # 'Int' (i64), 'Num' (double/f64), 'Str' ({ptr,len,encoding}),
+    # 'Undef'/'Slot' ({defined,payload}), 'Array' ({len,cap,Slot*}),
+    # 'Hash' (linear-scan table), 'ArrayRef'/'HashRef' (i8* to the boxed
+    # aggregate), 'Object' (i8* to {vtable*, Slot...}); plus the older
+    # 'Ptr'/'Struct'/'Scalar' (boxed Perl SV*, conservative fallback).
+    # Set post-construction by the IR builder or a lowering pass via
+    # set_representation(); undef = not yet assigned.
     # Excluded from content_hash: representation is a per-use lowering
     # decision, not a structural property of what value the node IS. Two
     # nodes with identical content (same literal, same operation, same

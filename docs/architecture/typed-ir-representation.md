@@ -263,11 +263,34 @@ IR without waiting for the untrusted parser).
 - Each validated idiom either fits the model or forces a documented revision to
   this doc. The model is proven incrementally by the LLVM corner, not asserted.
 
+## Realized representation lattice
+
+The runtime-free LLVM campaign (G2–G5) forced the lattice members and they are now
+load-bearing in `Chalk::Target::LLVM`:
+
+| Representation | LLVM type / shape |
+|----------------|-------------------|
+| `Bool` | `i1`. |
+| `Int` | `i64`. |
+| `Num` | `double`. |
+| `Str` | `{ptr, len, encoding}` where `encoding` is a tagged enum (UTF-8/UTF-16/ShiftJIS/EBCDIC), not a bool flag. ASCII slice implemented; non-ASCII is a tracked GAP. |
+| `Undef` | tagged scalar `{defined: i1, payload: i64}` (the niche-encoding alternative was rejected). |
+| `Slot` | `{defined: i1, payload: i64}` — the uniform field/element cell reused by `Array`, `Hash`, and class fields. |
+| `Array` | `{len, cap, %Slot*}`. |
+| `Hash` | linear-scan table of `%HashEntry {key_ptr, key_len, key_enc, val_def, val_pay}`. |
+| `ArrayRef` / `HashRef` | `i8*` to the boxed `%Array`/`%Hash`. |
+| `Object` | `i8*` to `{%Cls.vt*, %Slot, ...}` (vtable ptr header + one `%Slot` per field). |
+
+These reprs are **representation tags + LLVM types**, NOT IR nodes.
+
+## Coerce (resolved)
+
+`Coerce` is the node `Chalk::IR::Node::Coerce`, parameterized by `from_repr`/`to_repr`
+(both in `content_hash`) — a single node, not a sub-kind per coercion, and a node
+rather than an edge annotation. (This resolves the two questions previously open
+here.) It is a hash-distinct, explicit-on-edge node: a representation change is
+always a visible node in the graph, never an implicit reinterpretation.
+
 ## Open questions
-1. Representation lattice exact members beyond `i64`/`double`/`ptr`/`struct`/
-   `Scalar` (e.g. a distinct `Str` representation = `char*`+len, vs always-boxed
-   strings early). Decide as idioms force it.
-2. Where exactly `Coerce` nodes sit relative to the existing SoN node taxonomy —
-   a new `Chalk::IR::Node::Coerce`, or an annotation on edges. (Design in 3a.)
-3. Does `Coerce` need a sub-kind per coercion (`Str→Num`, `Int→Num`, ...) or one
-   node parameterized by from/to representation. (Lean: parameterized.)
+1. Whether the `Str` `encoding` enum is widened beyond the ASCII slice to the full
+   tagged set (UTF-16/ShiftJIS/EBCDIC) — tracked GAP, decide as idioms force it.

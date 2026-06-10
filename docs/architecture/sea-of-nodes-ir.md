@@ -350,6 +350,8 @@ Metadata for a method declaration, with an optional per-method computation graph
 | `return_type` | Optional declared return type string. |
 | `body` | Ordered list of statement IR nodes. **Transitional**: scheduled for removal once codegen walks `MOP::Method->graph` directly. See `docs/plans/2026-04-21-chalk-mop-migration-plan.md` (Phases 4 and 6). |
 | `graph` | `Chalk::IR::Graph` for the method body. Once `body` is removed, this is the sole representation. |
+| `body_node` | The single return-value IR node the LLVM backend lowers as the method body (optional). Set when a `ClassInfo` rides into a graph as a lowering input (see *LLVM lowering of the canonical MOP vocabulary* below). |
+| `return_repr` | The machine representation of the method's return value (`'Int'`, `'Str'`, `'Bool'`, `'Num'`), used by the LLVM backend to pick the vtable fn signature. Optional; defaults to `'Int'` at lowering when absent. |
 
 ### `Chalk::IR::SubInfo`
 
@@ -402,6 +404,52 @@ Program
   |         |- graph: Graph
   |- top_level_subs: [SubInfo, ...]
 ```
+
+---
+
+## LLVM lowering of the canonical MOP and aggregate vocabulary
+
+The LLVM backend (`Chalk::Target::LLVM`) lowers the **single canonical node
+vocabulary** — there is no parallel tier of lowering-only nodes. A reconciliation
+pass (`docs/plans/2026-06-08-ir-taxonomy-reconciliation.md`) converged the
+aggregate and feature-class MOP idioms onto the surface nodes the parser already
+emits. The mapping the backend implements:
+
+### Aggregates
+
+| Idiom | Canonical node(s) | LLVM lowering |
+|-------|-------------------|---------------|
+| `scalar @a` / `length $s` | `Length` (`UnaryOp`) | repr-dispatched: array-count (`%Array.len`) vs string length (`_str_len_table`). |
+| `$a[$i]` / `$h{$k}` (read) | `Subscript(container, index/key)` | repr-dispatched on the container: Array → bounds-checked slot load; Hash → `memcmp` key scan. |
+| `$a[$i] = v` / `$h{$k} = v` (write) | `Assign(Subscript-lvalue, value)` | element store: `_lower_assign` detects an lvalue `Subscript` and emits a slot store (with a `ptrtoint` guard for `ArrayRef`/`HashRef` values). |
+| `@$ref` / `%$ref` | `PostfixDeref(ref)` (carries `sigil`) | dereference by sigil (`@`→Array, `%`→Hash). |
+| `[ ... ]` / `{ ... }` | `ArrayRef` / `HashRef` | one canonical ref-producing constructor; the unboxed `%Array`/`%Hash` value is an emitter temp, not a node. |
+
+There are no `ScalarLen`, `ArrayRead`, `HashRead`, `ArrayDeref`, `HashDeref`,
+`ArrayLiteral`, `HashLiteral`, `MakeArrayRef`, `MakeHashRef`, `ArrayWrite`, or
+`HashWrite` nodes — those were the parallel G4 vocabulary and are deleted.
+
+### Feature-class MOP
+
+Class structure rides into a graph as a **`Chalk::IR::ClassInfo` metadata object**
+(carrying `MethodInfo` and `Chalk::MOP::Field` members), NOT as an in-graph node
+subtree. `Chalk::Target::LLVM::_scan_class_registry` walks the graph and, for each
+`ClassInfo` it finds as a node input, builds the per-class vtable + object struct +
+ADJUST order from the immutable read surface (`id()`/`name`/`methods`/`fields`/
+`adjusts`) — without wiring the stalled SoN-MOP migration internals.
+
+| Idiom | Canonical node | LLVM lowering |
+|-------|----------------|---------------|
+| `Foo->new(...)` | `Call(dispatch_kind='method', name='new')` | inputs[0] = the `ClassInfo`; malloc object struct, store vtable ptr, bind `:param` fields, run ADJUST blocks (base-first). |
+| `$obj->meth(...)` | `Call(dispatch_kind='method', name=meth)` | resolve the vtable slot from the invocant's `ClassInfo`; load + cast + indirect-call. Absent method / undeclared class → die loudly at lowering. |
+| `$self->{field}` (read) | `FieldAccess(field_index, field_stash)` | load the field's `%Slot` payload at the known struct offset. |
+| `$field = v` (write) | `Assign(FieldAccess-lvalue, value)` | field store: the `FieldAccess` lvalue carries `field_index` + `field_stash` (the class), so the store is self-describing — no ambient emitter mode-state selects the class. |
+| `ADJUST { ... }` | `Chalk::MOP::Phaser::Adjust` (on the `ClassInfo`) | the phaser's body (a sequence of `Assign(FieldAccess-lvalue, ...)`) runs as constructor code. |
+
+There are no `ClassDecl`, `MethodDef`, `FieldDef`, `AdjustBlock`, `New`, `MethodCall`,
+or `FieldWrite` nodes — those were the parallel G5 vocabulary and are deleted. Field
+store and element store both reduce to `Assign`-over-lvalue rather than a dedicated
+write node.
 
 ---
 
