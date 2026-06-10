@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the regex mdtest corpus topic (constructive format).
-# ABOUTME: Exercises R1-R3 regex idioms: all are Str/Scalar + regex-engine GAPs (no runtime-free regex lowering yet).
+# ABOUTME: R1 (literal match) lowers GREEN via the G6 regex sub-compiler; R2 (qr//) + R3 (s///) remain GAP until their tranches.
 use 5.42.0;
 use utf8;
 
@@ -79,20 +79,30 @@ for my $case (@$cases) {
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 3: Verify all cases declare L: GAP
+# SECTION 3: Verify per-case L verdicts
 #
-# Every regex idiom in this topic is a GAP — regex operations require
-# Str/Scalar representation and the regex engine, neither of which is in
-# the runtime-free lowering slice.
+# R1 (literal `=~`) is lowered runtime-free by the G6 regex sub-compiler — a
+# literal pattern compiles to a slide-loop matcher producing the i1 matched?
+# result, fed through a ternary to Int. It declares L: GREEN with a constructive
+# graph. R2 (qr//) and R3 (s///) remain GAP until their tranches (qr// matcher
+# value; s/// match + Str splice) are modelled.
 # ---------------------------------------------------------------------------
 
-subtest 'R1-R3 all declare L: GAP (Str/Scalar + regex engine not runtime-free lowerable)' => sub {
+my %EXPECTED_VERDICT = (
+    'R1' => 'GREEN',   # literal match — G6 T0
+    'R2' => 'GAP',     # qr// — pending
+    'R3' => 'GAP',     # s/// — pending
+);
+
+subtest 'per-case L verdicts (R1 GREEN via G6; R2/R3 still GAP)' => sub {
     plan tests => 3;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
         my $title   = $case->{title};
-        is($decl, 'GAP', "case '$title': declared L: GAP");
+        my ($key)   = $title =~ /\b(R[123])\b/;
+        my $want    = $EXPECTED_VERDICT{$key // ''} // 'GAP';
+        is($decl, $want, "case '$title': declared L: $want");
     }
 };
 

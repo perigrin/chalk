@@ -41,7 +41,13 @@ context: scalar
 ```
 
 ```ir
-L: GAP(regex match is RF: a regex sub-compiler lowers the pattern to a DFA/NFA matcher producing (matched?, $1..); GAP only until the regex sub-compiler (G6) is modelled, NOT a libperl/perl-regex-engine dependency)
+%s      = Constant("foobar") :Str
+%m      = RegexMatch(%s, pattern: "foo") :Bool
+%one    = Constant(1) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%m, %one, %zero) :Int
+return %result
+L: GREEN
 ```
 
 ## R2 qr// compiled regex

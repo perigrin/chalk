@@ -1291,6 +1291,12 @@ sub lower_value {
     elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'method') {
         return $self->_lower_call_method($node);
     }
+    # RegexMatch: lower a literal pattern to a runtime-free matcher (G6).
+    # inputs[0] = subject (Str, i8* + tracked len); pattern is a compile-time
+    # literal attr. Produces an i1 matched? (Bool repr).
+    elsif ($op eq 'RegexMatch') {
+        return $self->_lower_regex_match($node);
+    }
     else {
         if (defined $node->representation && $node->representation eq 'Scalar') {
             die "GAP: node op=$op repr=Scalar reached LLVM backend — cannot lower runtime-free. "
@@ -3956,6 +3962,122 @@ sub _lower_ref_of_object {
     $self->{_str_len_table}{$cn_ptr} = $name_len;
     $self->{cache}{ $node->id } = $cn_ptr;
     return $cn_ptr;
+}
+
+# ---------------------------------------------------------------------------
+# Regex sub-compiler (G6): lower a literal pattern to a runtime-free matcher.
+#
+# The pattern is a compile-time-known literal string (RegexMatch->pattern), so
+# the matcher is emitted as straight-line LLVM with NO libperl / perl regex
+# engine. The subject rides on the G3 Str representation (i8* ptr + a length
+# tracked in _str_len_table).
+#
+# Emission style (per the G6 spike): a shared outer "try each start offset"
+# slide loop wrapping a straight-line per-pattern inner recognizer. For T0 the
+# recognizer is an unrolled literal byte comparison; later tranches grow the
+# recognizer (anchors collapse the slide loop, classes/quantifiers/captures
+# extend the inner body) without changing this scaffold.
+# ---------------------------------------------------------------------------
+
+# _compile_regex_pattern($pattern, $flags) -> \%compiled
+#
+# Parse a literal regex pattern into the compiled form the emitter consumes.
+# T0: literal only — a list of expected bytes. Later tranches add anchors,
+# classes, quantifiers, and captures to this structure.
+sub _compile_regex_pattern {
+    my ($pattern, $flags) = @_;
+    my @bytes = map { ord } split //, $pattern;
+    return {
+        literal_bytes => \@bytes,   # the exact byte sequence to match
+    };
+}
+
+# _lower_regex_match($node) -> $llvm_ref (i1 matched?)
+sub _lower_regex_match {
+    my ($self, $node) = @_;
+
+    my $subj_node = $node->inputs->[0];
+    my $repr      = _require_repr($node, 'RegexMatch');
+
+    # Lower the subject to its i8* pointer and obtain its byte length.
+    my $subj_ptr  = $self->lower_value($subj_node);
+    my $subj_len  = $self->_str_len_for($subj_ptr)
+        // die "GAP: RegexMatch subject (ref=$subj_ptr) has no tracked length — "
+             . "the matcher needs the subject's byte length.";
+
+    my $compiled = _compile_regex_pattern($node->pattern, $node->flags);
+    my @plit     = $compiled->{literal_bytes}->@*;
+    my $plen     = scalar @plit;
+
+    # Empty pattern: matches at offset 0 unconditionally.
+    if ($plen == 0) {
+        my $r = $self->_fresh;
+        $self->_emit("  $r = add i1 true, false  ; RegexMatch //: empty pattern always matches");
+        $self->{cache}{ $node->id } = $r;
+        return $r;
+    }
+
+    # Slide loop: for start in 0 .. (len - plen), try the literal at start.
+    my $lbl_pre   = $self->_current_block_label;
+    my $lbl_head  = $self->_fresh_label('rxhead');
+    my $lbl_try   = $self->_fresh_label('rxtry');
+    my $lbl_cont  = $self->_fresh_label('rxcont');
+    my $lbl_hit   = $self->_fresh_label('rxhit');
+    my $lbl_miss  = $self->_fresh_label('rxmiss');
+    my $lbl_end   = $self->_fresh_label('rxend');
+    my $start_next = $self->_fresh;
+
+    $self->_set_terminator("  br label \%$lbl_head");
+
+    # Header: start phi + room check (start + plen <= len).
+    $self->_new_block($lbl_head);
+    my $start = $self->_fresh;
+    $self->_emit("  $start = phi i64 [ 0, \%$lbl_pre ], [ $start_next, \%$lbl_cont ]  ; RegexMatch: slide start");
+    my $start_end = $self->_fresh;
+    $self->_emit("  $start_end = add i64 $start, $plen  ; RegexMatch: start + plen");
+    my $room = $self->_fresh;
+    $self->_emit("  $room = icmp sle i64 $start_end, $subj_len  ; RegexMatch: room for pattern?");
+    $self->_set_terminator("  br i1 $room, label \%$lbl_try, label \%$lbl_miss");
+
+    # Try: unrolled literal byte comparison at this start offset.
+    $self->_new_block($lbl_try);
+    my $acc;  # running AND of per-byte equality
+    for my $i (0 .. $#plit) {
+        my $off  = $self->_fresh;
+        $self->_emit("  $off = add i64 $start, $i  ; RegexMatch: byte[$i] offset");
+        my $gep  = $self->_fresh;
+        $self->_emit("  $gep = getelementptr inbounds i8, i8* $subj_ptr, i64 $off  ; RegexMatch: &subject[start+$i]");
+        my $byte = $self->_fresh;
+        $self->_emit("  $byte = load i8, i8* $gep  ; RegexMatch: subject byte[$i]");
+        my $eq = $self->_fresh;
+        $self->_emit("  $eq = icmp eq i8 $byte, $plit[$i]  ; RegexMatch: byte[$i] == '" . chr($plit[$i]) . "'?");
+        if (!defined $acc) {
+            $acc = $eq;
+        }
+        else {
+            my $and = $self->_fresh;
+            $self->_emit("  $and = and i1 $acc, $eq  ; RegexMatch: literal match so far");
+            $acc = $and;
+        }
+    }
+    $self->_set_terminator("  br i1 $acc, label \%$lbl_hit, label \%$lbl_cont");
+
+    # Continue: advance the start offset.
+    $self->_new_block($lbl_cont);
+    $self->_emit("  $start_next = add i64 $start, 1  ; RegexMatch: next start");
+    $self->_set_terminator("  br label \%$lbl_head");
+
+    # Hit / miss feed the result phi.
+    $self->_new_block($lbl_hit);
+    $self->_set_terminator("  br label \%$lbl_end");
+    $self->_new_block($lbl_miss);
+    $self->_set_terminator("  br label \%$lbl_end");
+
+    $self->_new_block($lbl_end);
+    my $result = $self->_fresh;
+    $self->_emit("  $result = phi i1 [ true, \%$lbl_hit ], [ false, \%$lbl_miss ]  ; RegexMatch: matched?");
+    $self->{cache}{ $node->id } = $result;
+    return $result;
 }
 
 # _lower_field_access_in_method($node) -> $llvm_ref
