@@ -154,3 +154,33 @@ context: scalar
 return %result
 L: GREEN
 ```
+
+## R6 quantified identifier match
+
+Greedy quantifiers (`*`, `+`, `?`, `{n,m}`) make an atom consume a variable
+number of bytes. The regex sub-compiler (G6 T3) emits a greedy-consume loop
+plus a backoff loop per quantified atom, so a failed continuation backs off
+one repetition and retries (correct greedy backtracking via runtime loop
+structure). This case is the dominant lib/ pattern shape: anchored class +
+quantified class (a Perl identifier check).
+
+```perl
+# source
+my $s = "foo_1";
+$s =~ /^[A-Za-z_][A-Za-z0-9_]*$/ ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%s      = Constant("foo_1") :Str
+%m      = RegexMatch(%s, pattern: "^[A-Za-z_][A-Za-z0-9_]*$") :Bool
+%one    = Constant(1) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%m, %one, %zero) :Int
+return %result
+L: GREEN
+```

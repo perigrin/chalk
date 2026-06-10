@@ -4090,9 +4090,36 @@ sub _compile_regex_pattern {
             next;
         }
 
+        # Quantifiers (T3): attach {min,max} to the PRECEDING atom. max undef
+        # = unbounded. A quantifier with no preceding atom is malformed.
+        if ($c =~ /[*+?{]/) {
+            die "GAP: regex quantifier '$c' with no preceding atom in pattern '$pattern'"
+                unless @atoms;
+            my $atom = $atoms[-1];
+            die "GAP: double quantifier on one atom in pattern '$pattern' "
+              . "(non-greedy *? +? ?? not yet supported)"
+                if exists $atom->{min};
+            if ($c eq '*') { $atom->{min} = 0; $atom->{max} = undef; $i++; next }
+            if ($c eq '+') { $atom->{min} = 1; $atom->{max} = undef; $i++; next }
+            if ($c eq '?') { $atom->{min} = 0; $atom->{max} = 1;     $i++; next }
+            # {n} {n,} {n,m}
+            my $rest = join '', @chars[ $i .. $#chars ];
+            if ($rest =~ /^\{(\d+)(,(\d*))?\}/) {
+                my ($n, $has_comma, $m) = ($1, defined $2, $3);
+                $atom->{min} = 0 + $n;
+                $atom->{max} = $has_comma ? (length($m // '') ? 0 + $m : undef) : 0 + $n;
+                die "GAP: regex {n,m} with m < n in pattern '$pattern'"
+                    if defined $atom->{max} && $atom->{max} < $atom->{min};
+                $i += length($&);
+                next;
+            }
+            die "GAP: malformed regex counted quantifier near '"
+              . substr($rest, 0, 8) . "' in pattern '$pattern'";
+        }
+
         # Unsupported metachars die loudly rather than silently matching as
-        # literals (quantifiers arrive in T3; groups/alternation in T4/T5).
-        if ($c =~ /[*+?{}()|]/) {
+        # literals (groups/captures arrive in T4; alternation in T5).
+        if ($c =~ /[}()|]/) {
             die "GAP: regex metachar '$c' in pattern '$pattern' not yet supported "
               . "by the G6 sub-compiler (tranche pending)";
         }
@@ -4172,6 +4199,137 @@ sub _emit_atom_predicate {
     die "G6 internal: unknown regex atom kind '$atom->{kind}'";
 }
 
+# _emit_regex_seq($self, \@atoms, $idx, $pos_ref, \%ctx)
+#
+# Position-threaded recursive emission of atoms[$idx..]. $pos_ref is the SSA
+# value of the current subject position. %ctx carries subj_ptr/subj_len/
+# hit_lbl/fail_lbl/anch_e; fail_lbl is the CURRENT backtrack target (the
+# innermost enclosing backoff decrementer, or the slide-advance block at the
+# top level). Each atom is emitted exactly once; a quantified atom wraps the
+# continuation (the recursive call) in a backoff loop, giving correct greedy
+# backtracking via runtime loop structure rather than code duplication.
+#
+# Emission contract: called with a current open block; every path it emits
+# ends in a terminator (br to hit/fail or into its own loop structure).
+sub _emit_regex_seq {
+    my ($self, $atoms, $idx, $pos_ref, $ctx) = @_;
+
+    # Base: end of pattern. Check the end anchor, then hit.
+    if ($idx > $#$atoms) {
+        if ($ctx->{anch_e}) {
+            my $at_end = $self->_fresh;
+            $self->_emit("  $at_end = icmp eq i64 $pos_ref, $ctx->{subj_len}  ; RegexMatch \$: match ends at len?");
+            $self->_set_terminator("  br i1 $at_end, label \%$ctx->{hit_lbl}, label \%$ctx->{fail_lbl}");
+        }
+        else {
+            $self->_set_terminator("  br label \%$ctx->{hit_lbl}");
+        }
+        return;
+    }
+
+    my $atom  = $atoms->[$idx];
+    my $quant = exists $atom->{min};
+
+    if (!$quant) {
+        # Plain atom: bounds-check, load, predicate, advance position by one.
+        my $lbl_ld = $self->_fresh_label('rxa');
+        my $lbl_nx = $self->_fresh_label('rxn');
+        my $inb = $self->_fresh;
+        $self->_emit("  $inb = icmp ult i64 $pos_ref, $ctx->{subj_len}  ; RegexMatch atom[$idx]: in bounds?");
+        $self->_set_terminator("  br i1 $inb, label \%$lbl_ld, label \%$ctx->{fail_lbl}");
+
+        $self->_new_block($lbl_ld);
+        my $gep = $self->_fresh;
+        $self->_emit("  $gep = getelementptr inbounds i8, i8* $ctx->{subj_ptr}, i64 $pos_ref  ; RegexMatch atom[$idx]: byte ptr");
+        my $byte = $self->_fresh;
+        $self->_emit("  $byte = load i8, i8* $gep  ; RegexMatch atom[$idx]: subject byte");
+        my $ok = $self->_emit_atom_predicate($atom, $byte, "RegexMatch atom[$idx]");
+        my $pos_next = $self->_fresh;
+        $self->_emit("  $pos_next = add i64 $pos_ref, 1  ; RegexMatch atom[$idx]: advance");
+        $self->_set_terminator("  br i1 $ok, label \%$lbl_nx, label \%$ctx->{fail_lbl}");
+
+        $self->_new_block($lbl_nx);
+        $self->_emit_regex_seq($atoms, $idx + 1, $pos_next, $ctx);
+        return;
+    }
+
+    # Quantified atom {min,max} (max undef = unbounded): greedy-consume loop
+    # counts how many bytes the atom can take from $pos_ref, then a backoff
+    # loop tries the continuation at count c = greedy, greedy-1, ..., min.
+    my ($min, $max) = ($atom->{min}, $atom->{max});
+
+    my $lbl_cur   = $self->_current_block_label;
+    my $lbl_ghead = $self->_fresh_label('rxgh');   # greedy header (cnt phi)
+    my $lbl_gtest = $self->_fresh_label('rxgt');   # greedy predicate test
+    my $lbl_gbody = $self->_fresh_label('rxgb');   # greedy increment
+    my $lbl_gdone = $self->_fresh_label('rxgd');   # greedy done
+    my $lbl_bhead = $self->_fresh_label('rxbh');   # backoff header (c phi)
+    my $lbl_bbody = $self->_fresh_label('rxbb');   # backoff continuation
+    my $lbl_bdec  = $self->_fresh_label('rxbd');   # backoff decrement
+    my $cnt_next  = $self->_fresh;                 # forward ref for ghead phi
+    my $c_dec     = $self->_fresh;                 # forward ref for bhead phi
+
+    $self->_set_terminator("  br label \%$lbl_ghead");
+
+    # Greedy header: how many consumed so far; can we take one more?
+    $self->_new_block($lbl_ghead);
+    my $cnt = $self->_fresh;
+    $self->_emit("  $cnt = phi i64 [ 0, \%$lbl_cur ], [ $cnt_next, \%$lbl_gbody ]  ; RegexMatch q[$idx]: greedy count");
+    my $posg = $self->_fresh;
+    $self->_emit("  $posg = add i64 $pos_ref, $cnt  ; RegexMatch q[$idx]: greedy pos");
+    my $inb = $self->_fresh;
+    $self->_emit("  $inb = icmp ult i64 $posg, $ctx->{subj_len}  ; RegexMatch q[$idx]: in bounds?");
+    my $more = $inb;
+    if (defined $max) {
+        my $ltmax = $self->_fresh;
+        $self->_emit("  $ltmax = icmp ult i64 $cnt, $max  ; RegexMatch q[$idx]: below max $max?");
+        my $and = $self->_fresh;
+        $self->_emit("  $and = and i1 $inb, $ltmax  ; RegexMatch q[$idx]: may consume more?");
+        $more = $and;
+    }
+    $self->_set_terminator("  br i1 $more, label \%$lbl_gtest, label \%$lbl_gdone");
+
+    # Greedy test: does the atom match at posg?
+    $self->_new_block($lbl_gtest);
+    my $gep = $self->_fresh;
+    $self->_emit("  $gep = getelementptr inbounds i8, i8* $ctx->{subj_ptr}, i64 $posg  ; RegexMatch q[$idx]: byte ptr");
+    my $byte = $self->_fresh;
+    $self->_emit("  $byte = load i8, i8* $gep  ; RegexMatch q[$idx]: subject byte");
+    my $ok = $self->_emit_atom_predicate($atom, $byte, "RegexMatch q[$idx]");
+    $self->_set_terminator("  br i1 $ok, label \%$lbl_gbody, label \%$lbl_gdone");
+
+    # Greedy body: consume one and loop.
+    $self->_new_block($lbl_gbody);
+    $self->_emit("  $cnt_next = add i64 $cnt, 1  ; RegexMatch q[$idx]: consume");
+    $self->_set_terminator("  br label \%$lbl_ghead");
+
+    # Greedy done: enter the backoff loop with c = greedy count.
+    $self->_new_block($lbl_gdone);
+    $self->_set_terminator("  br label \%$lbl_bhead");
+
+    # Backoff header: try the continuation at count c; give up below min.
+    $self->_new_block($lbl_bhead);
+    my $c = $self->_fresh;
+    $self->_emit("  $c = phi i64 [ $cnt, \%$lbl_gdone ], [ $c_dec, \%$lbl_bdec ]  ; RegexMatch q[$idx]: backoff count");
+    my $ge_min = $self->_fresh;
+    $self->_emit("  $ge_min = icmp sge i64 $c, $min  ; RegexMatch q[$idx]: count >= min $min?");
+    $self->_set_terminator("  br i1 $ge_min, label \%$lbl_bbody, label \%$ctx->{fail_lbl}");
+
+    # Backoff body: the continuation at pos + c; its fail target is the
+    # decrementer (back off one and retry), NOT the outer fail.
+    $self->_new_block($lbl_bbody);
+    my $posb = $self->_fresh;
+    $self->_emit("  $posb = add i64 $pos_ref, $c  ; RegexMatch q[$idx]: continuation pos");
+    my %inner_ctx = ( $ctx->%*, fail_lbl => $lbl_bdec );
+    $self->_emit_regex_seq($atoms, $idx + 1, $posb, \%inner_ctx);
+
+    # Backoff decrement: one fewer repetition, retry.
+    $self->_new_block($lbl_bdec);
+    $self->_emit("  $c_dec = sub i64 $c, 1  ; RegexMatch q[$idx]: back off");
+    $self->_set_terminator("  br label \%$lbl_bhead");
+    return;
+}
+
 # _lower_regex_match($node) -> $llvm_ref (i1 matched?)
 sub _lower_regex_match {
     my ($self, $node) = @_;
@@ -4187,12 +4345,16 @@ sub _lower_regex_match {
 
     my $compiled = _compile_regex_pattern($node->pattern, $node->flags);
     my @atoms    = $compiled->{atoms}->@*;
-    my $plen     = scalar @atoms;   # each atom consumes exactly one byte (until T3)
     my $anch_s   = $compiled->{anchored_start};
     my $anch_e   = $compiled->{anchored_end};
 
+    # Minimum bytes the pattern can match (sum of per-atom min counts).
+    # Drives the slide-loop room check; quantified atoms may consume more.
+    my $min_len = 0;
+    $min_len += ($_->{min} // 1) for @atoms;
+
     # Empty pattern (possibly with anchors).
-    if ($plen == 0) {
+    if (scalar @atoms == 0) {
         my $r = $self->_fresh;
         if ($anch_s && $anch_e) {
             # /^$/ matches iff the subject is empty (start==end at offset 0).
@@ -4229,41 +4391,26 @@ sub _lower_regex_match {
     else {
         $self->_emit("  $start = phi i64 [ 0, \%$lbl_pre ], [ $start_next, \%$lbl_cont ]  ; RegexMatch: slide start");
     }
-    my $start_end = $self->_fresh;
-    $self->_emit("  $start_end = add i64 $start, $plen  ; RegexMatch: start + plen");
+    my $min_end = $self->_fresh;
+    $self->_emit("  $min_end = add i64 $start, $min_len  ; RegexMatch: start + min pattern length");
     my $room = $self->_fresh;
-    $self->_emit("  $room = icmp sle i64 $start_end, $subj_len  ; RegexMatch: room for pattern?");
+    $self->_emit("  $room = icmp sle i64 $min_end, $subj_len  ; RegexMatch: room for pattern?");
     $self->_set_terminator("  br i1 $room, label \%$lbl_try, label \%$lbl_miss");
 
-    # Try: unrolled per-atom predicate at this start offset.
+    # Try: position-threaded recursive emission of the atom sequence. Each
+    # atom's code is emitted once; quantified atoms emit a greedy-consume loop
+    # plus a backoff loop whose body holds the continuation, so backtracking
+    # happens via loop structure at runtime (fail targets thread to the
+    # innermost enclosing backoff; the outermost fail target is the slide
+    # advance). The end-anchor check lives in the recursion base (pos == len).
     $self->_new_block($lbl_try);
-    my $acc;  # running AND of per-atom satisfaction
-    for my $i (0 .. $#atoms) {
-        my $off  = $self->_fresh;
-        $self->_emit("  $off = add i64 $start, $i  ; RegexMatch: atom[$i] offset");
-        my $gep  = $self->_fresh;
-        $self->_emit("  $gep = getelementptr inbounds i8, i8* $subj_ptr, i64 $off  ; RegexMatch: &subject[start+$i]");
-        my $byte = $self->_fresh;
-        $self->_emit("  $byte = load i8, i8* $gep  ; RegexMatch: subject byte[$i]");
-        my $ok = $self->_emit_atom_predicate($atoms[$i], $byte, "RegexMatch atom[$i]");
-        if (!defined $acc) {
-            $acc = $ok;
-        }
-        else {
-            my $and = $self->_fresh;
-            $self->_emit("  $and = and i1 $acc, $ok  ; RegexMatch: atoms matched so far");
-            $acc = $and;
-        }
-    }
-    # End anchor ($): the match must end exactly at the subject length.
-    if ($anch_e) {
-        my $end_ok = $self->_fresh;
-        $self->_emit("  $end_ok = icmp eq i64 $start_end, $subj_len  ; RegexMatch \$: match ends at len?");
-        my $and = $self->_fresh;
-        $self->_emit("  $and = and i1 $acc, $end_ok  ; RegexMatch: literal + end-anchor");
-        $acc = $and;
-    }
-    $self->_set_terminator("  br i1 $acc, label \%$lbl_hit, label \%$lbl_cont");
+    $self->_emit_regex_seq(\@atoms, 0, $start, {
+        subj_ptr => $subj_ptr,
+        subj_len => $subj_len,
+        hit_lbl  => $lbl_hit,
+        fail_lbl => $lbl_cont,
+        anch_e   => $anch_e,
+    });
 
     # Continue: advance the start offset (or stop, if start-anchored).
     $self->_new_block($lbl_cont);

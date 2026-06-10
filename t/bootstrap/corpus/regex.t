@@ -31,7 +31,7 @@ unless (-f $REGEX_MD) {
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($REGEX_MD);
-is(scalar(@$cases), 5, 'regex.md has 5 cases (R1-R5)');
+is(scalar(@$cases), 6, 'regex.md has 6 cases (R1-R6)');
 
 my @titles = map { $_->{title} } @$cases;
 ok((grep { /R1.*regex.*match/i      } @titles), 'case: R1 regex match present');
@@ -39,6 +39,7 @@ ok((grep { /R2.*qr/i                } @titles), 'case: R2 qr// compiled regex pr
 ok((grep { /R3.*substitution/i      } @titles), 'case: R3 regex substitution present');
 ok((grep { /R4.*anchored/i          } @titles), 'case: R4 anchored match present');
 ok((grep { /R5.*class/i             } @titles), 'case: R5 character class present');
+ok((grep { /R6.*quantified/i        } @titles), 'case: R6 quantified identifier present');
 
 # ---------------------------------------------------------------------------
 # SECTION 2: Run all 3 cases end-to-end
@@ -96,10 +97,11 @@ my %EXPECTED_VERDICT = (
     'R3' => 'GAP',     # s/// — pending
     'R4' => 'GREEN',   # anchored match (^) — G6 T1
     'R5' => 'GREEN',   # character class — G6 T2
+    'R6' => 'GREEN',   # quantified identifier — G6 T3
 );
 
-subtest 'per-case L verdicts (R1/R4/R5 GREEN via G6; R2/R3 still GAP)' => sub {
-    plan tests => 5;
+subtest 'per-case L verdicts (R1/R4/R5/R6 GREEN via G6; R2/R3 still GAP)' => sub {
+    plan tests => 6;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);

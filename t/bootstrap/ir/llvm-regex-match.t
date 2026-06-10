@@ -265,4 +265,67 @@ subtest 'T2 escaped literal: "a.b" =~ /a\\.b/ => Bool:1; "axb" => Bool:' => sub 
     is($o2, 'Bool:', '/a\\.b/ does NOT match "axb" (escaped dot is literal)');
 };
 
+# ---------------------------------------------------------------------------
+# T3: greedy quantifiers — * + ? {n,m}. The inner recognizer becomes
+# position-threaded: a quantified atom greedily consumes then BACKS OFF if the
+# continuation fails (real backtracking, not naive maximal-munch).
+# ---------------------------------------------------------------------------
+
+# Helper: run one match and compare to expectation.
+sub try_match {
+    my ($subject, $pattern, $want, $label) = @_;
+    my $f = _mk();
+    my $m = match_node($f, $subject, $pattern);
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my ($out) = eval { lli_run($ret) };
+    if ($@) { fail("$label: lowering/lli failed: $@"); return }
+    is($out, $want, $label);
+}
+
+subtest 'T3 star: /ab*c/ — zero, many, and broken-tail cases' => sub {
+    try_match('ac',     'ab*c', 'Bool:1', '"ac"    =~ /ab*c/ (zero b)');
+    try_match('abbbc',  'ab*c', 'Bool:1', '"abbbc" =~ /ab*c/ (many b)');
+    try_match('abx',    'ab*c', 'Bool:',  '"abx"   !~ /ab*c/ (broken tail)');
+};
+
+subtest 'T3 plus: /ab+c/ — requires at least one' => sub {
+    try_match('ac',    'ab+c', 'Bool:',  '"ac"   !~ /ab+c/ (plus needs >=1)');
+    try_match('abc',   'ab+c', 'Bool:1', '"abc"  =~ /ab+c/');
+    try_match('abbc',  'ab+c', 'Bool:1', '"abbc" =~ /ab+c/');
+};
+
+subtest 'T3 optional: /ab?c/ — zero or one' => sub {
+    try_match('ac',    'ab?c', 'Bool:1', '"ac"   =~ /ab?c/ (zero)');
+    try_match('abc',   'ab?c', 'Bool:1', '"abc"  =~ /ab?c/ (one)');
+    try_match('abbc',  'ab?c', 'Bool:',  '"abbc" !~ /ab?c/ (two is too many)');
+};
+
+subtest 'T3 backtracking keystone: /a*ab/ — greedy must back off' => sub {
+    # Naive maximal-munch eats all the a's and then fails on 'ab'.
+    # Correct greedy-with-backoff matches: a* takes "aa", then "ab" matches.
+    try_match('aaab', 'a*ab', 'Bool:1', '"aaab" =~ /a*ab/ (backoff required)');
+    try_match('b',    'a*ab', 'Bool:',  '"b"    !~ /a*ab/');
+};
+
+subtest 'T3 counted: /^a{2,3}$/ — bounded repetition' => sub {
+    try_match('aa',    '^a{2,3}$', 'Bool:1', '"aa"   =~ /^a{2,3}$/');
+    try_match('aaa',   '^a{2,3}$', 'Bool:1', '"aaa"  =~ /^a{2,3}$/');
+    try_match('a',     '^a{2,3}$', 'Bool:',  '"a"    !~ /^a{2,3}$/ (too few)');
+    try_match('aaaa',  '^a{2,3}$', 'Bool:',  '"aaaa" !~ /^a{2,3}$/ (too many)');
+};
+
+subtest 'T3 the dominant lib/ shape: /^[A-Za-z_][A-Za-z0-9_]*$/' => sub {
+    my $pat = '^[A-Za-z_][A-Za-z0-9_]*$';
+    try_match('foo_1', $pat, 'Bool:1', '"foo_1" is a valid identifier');
+    try_match('_',     $pat, 'Bool:1', '"_" is a valid identifier');
+    try_match('9bad',  $pat, 'Bool:',  '"9bad" is NOT (leading digit)');
+    try_match('',      $pat, 'Bool:',  '"" is NOT (empty)');
+    try_match('a-b',   $pat, 'Bool:',  '"a-b" is NOT (dash)');
+};
+
+subtest 'T3 class quantifier: /\d+/ finds a digit run' => sub {
+    try_match('x42',  '\\d+', 'Bool:1', '"x42" =~ /\\d+/');
+    try_match('xyz',  '\\d+', 'Bool:',  '"xyz" !~ /\\d+/');
+};
+
 done_testing;
