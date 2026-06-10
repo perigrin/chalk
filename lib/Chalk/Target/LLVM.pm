@@ -3981,31 +3981,195 @@ sub _lower_ref_of_object {
 
 # _compile_regex_pattern($pattern, $flags) -> \%compiled
 #
-# Parse a literal regex pattern into the compiled form the emitter consumes.
-# T0: literal bytes. T1: leading ^ / trailing $ anchors. Later tranches add
-# classes, quantifiers, and captures to this structure.
+# Parse a literal regex pattern into the compiled form the emitter consumes:
+# a sequence of one-byte ATOMS plus anchor flags. Atom kinds:
+#   { kind => 'lit',   byte => $ord }                  — exact byte
+#   { kind => 'class', neg => 0|1, ranges => [[lo,hi],...] }
+#                                                      — byte in (or not in)
+#                                                        any of the ranges
+#                                                        (singles are [b,b])
+#   { kind => 'any' }                                  — . (any byte but \n)
+# Shorthands \d \w \s (and \D \W \S) desugar to classes; a backslash escape
+# of a metachar (\. \[ \$ ...) is a literal byte. T3 adds per-atom quantifiers.
 sub _compile_regex_pattern {
     my ($pattern, $flags) = @_;
 
     # T1 anchors: a leading ^ anchors the match at offset 0; a trailing $
     # anchors the match end at the subject length. They are not literal bytes.
+    # (A trailing escaped \$ is a literal dollar — handled by checking that the
+    # final $ is not preceded by a backslash.)
     my $anchored_start = 0;
     my $anchored_end   = 0;
     if ($pattern =~ /^\^/) {
         $anchored_start = 1;
         $pattern =~ s/^\^//;
     }
-    if ($pattern =~ /\$$/) {
+    if ($pattern =~ /(?<!\\)\$$/) {
         $anchored_end = 1;
         $pattern =~ s/\$$//;
     }
 
-    my @bytes = map { ord } split //, $pattern;
+    # Shorthand class definitions (byte ranges).
+    my %SHORTHAND = (
+        d => [ [ord('0'), ord('9')] ],
+        w => [ [ord('0'), ord('9')], [ord('A'), ord('Z')], [ord('a'), ord('z')],
+               [ord('_'), ord('_')] ],
+        s => [ [0x09, 0x0D], [ord(' '), ord(' ')] ],   # \t \n \v \f \r space
+    );
+
+    my @atoms;
+    my @chars = split //, $pattern;
+    my $i = 0;
+    while ($i <= $#chars) {
+        my $c = $chars[$i];
+
+        if ($c eq '\\') {
+            # Escape: shorthand class or literal metachar.
+            my $e = $chars[ $i + 1 ]
+                // die "GAP: regex pattern '$pattern' ends with a bare backslash";
+            if ($e =~ /^[dwsDWS]$/) {
+                push @atoms, {
+                    kind   => 'class',
+                    neg    => ($e =~ /[DWS]/) ? 1 : 0,
+                    ranges => $SHORTHAND{ lc $e },
+                };
+                $i += 2;
+                next;
+            }
+            # Any other escaped char is a literal byte (\. \[ \$ \\ \/ ...).
+            push @atoms, { kind => 'lit', byte => ord($e) };
+            $i += 2;
+            next;
+        }
+
+        if ($c eq '[') {
+            # Character class: [^? ... ] with ranges and escapes.
+            my $j   = $i + 1;
+            my $neg = 0;
+            if (($chars[$j] // '') eq '^') { $neg = 1; $j++ }
+            my @ranges;
+            my $first = 1;   # a ] as the FIRST member is a literal ]
+            while ($j <= $#chars) {
+                my $cc = $chars[$j];
+                last if $cc eq ']' && !$first;
+                $first = 0;
+                if ($cc eq '\\') {
+                    my $e = $chars[ $j + 1 ]
+                        // die "GAP: regex class in '$pattern' ends with a bare backslash";
+                    if ($e =~ /[dws]/i && exists $SHORTHAND{ lc $e }) {
+                        die "GAP: regex class shorthand \\$e inside [...] not yet supported "
+                          . "in pattern '$pattern'" if $e =~ /[DWS]/;
+                        push @ranges, $SHORTHAND{ lc $e }->@*;
+                        $j += 2;
+                        next;
+                    }
+                    $cc = $e;
+                    $j++;
+                }
+                # Range a-z (a dash not at the end and followed by a non-])?
+                if (($chars[ $j + 1 ] // '') eq '-' && ($chars[ $j + 2 ] // ']') ne ']') {
+                    my $hi = $chars[ $j + 2 ];
+                    $hi = $chars[ $j + 3 ] if $hi eq '\\';   # escaped range end
+                    push @ranges, [ ord($cc), ord($hi) ];
+                    $j += ($chars[ $j + 2 ] eq '\\') ? 4 : 3;
+                    next;
+                }
+                push @ranges, [ ord($cc), ord($cc) ];
+                $j++;
+            }
+            die "GAP: unterminated character class in regex pattern '$pattern'"
+                unless ($chars[$j] // '') eq ']';
+            push @atoms, { kind => 'class', neg => $neg, ranges => \@ranges };
+            $i = $j + 1;
+            next;
+        }
+
+        if ($c eq '.') {
+            push @atoms, { kind => 'any' };
+            $i++;
+            next;
+        }
+
+        # Unsupported metachars die loudly rather than silently matching as
+        # literals (quantifiers arrive in T3; groups/alternation in T4/T5).
+        if ($c =~ /[*+?{}()|]/) {
+            die "GAP: regex metachar '$c' in pattern '$pattern' not yet supported "
+              . "by the G6 sub-compiler (tranche pending)";
+        }
+
+        push @atoms, { kind => 'lit', byte => ord($c) };
+        $i++;
+    }
+
     return {
-        literal_bytes  => \@bytes,    # the exact byte sequence to match
+        atoms          => \@atoms,
         anchored_start => $anchored_start,
         anchored_end   => $anchored_end,
     };
+}
+
+# _emit_atom_predicate($self, $atom, $byte_ref, $label) -> $i1_ref
+#
+# Emit the LLVM predicate for one atom against an already-loaded subject byte.
+# Returns the i1 SSA ref that is true iff the byte satisfies the atom.
+sub _emit_atom_predicate {
+    my ($self, $atom, $byte_ref, $label) = @_;
+
+    if ($atom->{kind} eq 'lit') {
+        my $eq = $self->_fresh;
+        my $ch = $atom->{byte} >= 0x20 && $atom->{byte} <= 0x7e ? chr($atom->{byte}) : sprintf('\\x%02x', $atom->{byte});
+        $self->_emit("  $eq = icmp eq i8 $byte_ref, $atom->{byte}  ; $label: byte == '$ch'?");
+        return $eq;
+    }
+
+    if ($atom->{kind} eq 'any') {
+        # Perl . matches any byte except newline (no /s in the supported slice).
+        my $ne = $self->_fresh;
+        $self->_emit("  $ne = icmp ne i8 $byte_ref, 10  ; $label: . (any byte but \\n)");
+        return $ne;
+    }
+
+    if ($atom->{kind} eq 'class') {
+        # OR over ranges: (b >= lo && b <= hi) || ...
+        my $acc;
+        for my $r ($atom->{ranges}->@*) {
+            my ($lo, $hi) = @$r;
+            my $in;
+            if ($lo == $hi) {
+                $in = $self->_fresh;
+                $self->_emit("  $in = icmp eq i8 $byte_ref, $lo  ; $label: class member $lo");
+            }
+            else {
+                my $ge = $self->_fresh;
+                my $le = $self->_fresh;
+                $in = $self->_fresh;
+                $self->_emit("  $ge = icmp uge i8 $byte_ref, $lo  ; $label: class range lo");
+                $self->_emit("  $le = icmp ule i8 $byte_ref, $hi  ; $label: class range hi");
+                $self->_emit("  $in = and i1 $ge, $le  ; $label: in [$lo-$hi]?");
+            }
+            if (!defined $acc) {
+                $acc = $in;
+            }
+            else {
+                my $or = $self->_fresh;
+                $self->_emit("  $or = or i1 $acc, $in  ; $label: class union");
+                $acc = $or;
+            }
+        }
+        # Empty class [] matches nothing.
+        if (!defined $acc) {
+            $acc = $self->_fresh;
+            $self->_emit("  $acc = add i1 false, false  ; $label: empty class never matches");
+        }
+        if ($atom->{neg}) {
+            my $not = $self->_fresh;
+            $self->_emit("  $not = xor i1 $acc, true  ; $label: negated class");
+            return $not;
+        }
+        return $acc;
+    }
+
+    die "G6 internal: unknown regex atom kind '$atom->{kind}'";
 }
 
 # _lower_regex_match($node) -> $llvm_ref (i1 matched?)
@@ -4022,8 +4186,8 @@ sub _lower_regex_match {
              . "the matcher needs the subject's byte length.";
 
     my $compiled = _compile_regex_pattern($node->pattern, $node->flags);
-    my @plit     = $compiled->{literal_bytes}->@*;
-    my $plen     = scalar @plit;
+    my @atoms    = $compiled->{atoms}->@*;
+    my $plen     = scalar @atoms;   # each atom consumes exactly one byte (until T3)
     my $anch_s   = $compiled->{anchored_start};
     my $anch_e   = $compiled->{anchored_end};
 
@@ -4071,24 +4235,23 @@ sub _lower_regex_match {
     $self->_emit("  $room = icmp sle i64 $start_end, $subj_len  ; RegexMatch: room for pattern?");
     $self->_set_terminator("  br i1 $room, label \%$lbl_try, label \%$lbl_miss");
 
-    # Try: unrolled literal byte comparison at this start offset.
+    # Try: unrolled per-atom predicate at this start offset.
     $self->_new_block($lbl_try);
-    my $acc;  # running AND of per-byte equality
-    for my $i (0 .. $#plit) {
+    my $acc;  # running AND of per-atom satisfaction
+    for my $i (0 .. $#atoms) {
         my $off  = $self->_fresh;
-        $self->_emit("  $off = add i64 $start, $i  ; RegexMatch: byte[$i] offset");
+        $self->_emit("  $off = add i64 $start, $i  ; RegexMatch: atom[$i] offset");
         my $gep  = $self->_fresh;
         $self->_emit("  $gep = getelementptr inbounds i8, i8* $subj_ptr, i64 $off  ; RegexMatch: &subject[start+$i]");
         my $byte = $self->_fresh;
         $self->_emit("  $byte = load i8, i8* $gep  ; RegexMatch: subject byte[$i]");
-        my $eq = $self->_fresh;
-        $self->_emit("  $eq = icmp eq i8 $byte, $plit[$i]  ; RegexMatch: byte[$i] == '" . chr($plit[$i]) . "'?");
+        my $ok = $self->_emit_atom_predicate($atoms[$i], $byte, "RegexMatch atom[$i]");
         if (!defined $acc) {
-            $acc = $eq;
+            $acc = $ok;
         }
         else {
             my $and = $self->_fresh;
-            $self->_emit("  $and = and i1 $acc, $eq  ; RegexMatch: literal match so far");
+            $self->_emit("  $and = and i1 $acc, $ok  ; RegexMatch: atoms matched so far");
             $acc = $and;
         }
     }

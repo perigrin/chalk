@@ -149,4 +149,120 @@ subtest 'T1 full-string non-match: "foobar" =~ /^foo$/ => Bool:' => sub {
     is($out, 'Bool:', '/^foo$/ does NOT match "foobar"');
 };
 
+# ---------------------------------------------------------------------------
+# T2: character classes — [...], negated [^...], ranges, \d \w \s shorthands,
+# and `.` (any char). Each class atom is a predicate over one subject byte.
+# ---------------------------------------------------------------------------
+
+subtest 'T2 class range: "a9z" =~ /[0-9]/ => Bool:1' => sub {
+    my $f = _mk();
+    my $m = match_node($f, 'a9z', '[0-9]');
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my ($out, $ll);
+    eval { ($out, $ll) = lli_run($ret) };
+    ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
+    is($out, 'Bool:1', '/[0-9]/ finds the digit in "a9z"');
+};
+
+subtest 'T2 class range non-match: "abc" =~ /[0-9]/ => Bool:' => sub {
+    my $f = _mk();
+    my $m = match_node($f, 'abc', '[0-9]');
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my ($out, $ll);
+    eval { ($out, $ll) = lli_run($ret) };
+    ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
+    is($out, 'Bool:', '/[0-9]/ does NOT match "abc"');
+};
+
+subtest 'T2 multi-range class: "_x" =~ /^[A-Za-z_]/ => Bool:1' => sub {
+    my $f = _mk();
+    my $m = match_node($f, '_x', '^[A-Za-z_]');
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my ($out, $ll);
+    eval { ($out, $ll) = lli_run($ret) };
+    ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
+    is($out, 'Bool:1', '/^[A-Za-z_]/ matches "_x" (underscore in class)');
+};
+
+subtest 'T2 multi-range class non-match: "9x" =~ /^[A-Za-z_]/ => Bool:' => sub {
+    my $f = _mk();
+    my $m = match_node($f, '9x', '^[A-Za-z_]');
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my ($out, $ll);
+    eval { ($out, $ll) = lli_run($ret) };
+    ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
+    is($out, 'Bool:', '/^[A-Za-z_]/ does NOT match "9x"');
+};
+
+subtest 'T2 negated class: "abc" =~ /[^0-9]/ => Bool:1' => sub {
+    my $f = _mk();
+    my $m = match_node($f, 'abc', '[^0-9]');
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my ($out, $ll);
+    eval { ($out, $ll) = lli_run($ret) };
+    ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
+    is($out, 'Bool:1', '/[^0-9]/ matches a non-digit in "abc"');
+};
+
+subtest 'T2 negated class non-match: "123" =~ /[^0-9]/ => Bool:' => sub {
+    my $f = _mk();
+    my $m = match_node($f, '123', '[^0-9]');
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my ($out, $ll);
+    eval { ($out, $ll) = lli_run($ret) };
+    ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
+    is($out, 'Bool:', '/[^0-9]/ does NOT match an all-digit subject');
+};
+
+subtest 'T2 \\d shorthand: "x7" =~ /\\d/ => Bool:1' => sub {
+    my $f = _mk();
+    my $m = match_node($f, 'x7', '\\d');
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my ($out, $ll);
+    eval { ($out, $ll) = lli_run($ret) };
+    ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
+    is($out, 'Bool:1', '/\\d/ finds the digit in "x7"');
+};
+
+subtest 'T2 \\w shorthand: "--a" =~ /\\w/ => Bool:1; "---" => Bool:' => sub {
+    my $f = _mk();
+    my $m1 = match_node($f, '--a', '\\w');
+    my $r1 = $f->make_cfg('Return', inputs => [$m1]);
+    my ($o1) = eval { lli_run($r1) };
+    ok(!$@, "lowering + lli succeeded (match)") or do { diag("error: $@"); return };
+    is($o1, 'Bool:1', '/\\w/ matches the word char in "--a"');
+
+    my $f2 = _mk();
+    my $m2 = match_node($f2, '---', '\\w');
+    my $r2 = $f2->make_cfg('Return', inputs => [$m2]);
+    my ($o2) = eval { lli_run($r2) };
+    ok(!$@, "lowering + lli succeeded (non-match)") or do { diag("error: $@"); return };
+    is($o2, 'Bool:', '/\\w/ does NOT match "---"');
+};
+
+subtest 'T2 dot: "ab" =~ /a.b/ vs "axb" — . matches any char' => sub {
+    my $f = _mk();
+    my $m = match_node($f, 'axb', 'a.b');
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my ($out) = eval { lli_run($ret) };
+    ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
+    is($out, 'Bool:1', '/a.b/ matches "axb" (dot = any char)');
+};
+
+subtest 'T2 escaped literal: "a.b" =~ /a\\.b/ => Bool:1; "axb" => Bool:' => sub {
+    my $f = _mk();
+    my $m1 = match_node($f, 'a.b', 'a\\.b');
+    my $r1 = $f->make_cfg('Return', inputs => [$m1]);
+    my ($o1) = eval { lli_run($r1) };
+    ok(!$@, "lowering + lli succeeded (escaped dot match)") or do { diag("error: $@"); return };
+    is($o1, 'Bool:1', '/a\\.b/ matches literal "a.b"');
+
+    my $f2 = _mk();
+    my $m2 = match_node($f2, 'axb', 'a\\.b');
+    my $r2 = $f2->make_cfg('Return', inputs => [$m2]);
+    my ($o2) = eval { lli_run($r2) };
+    ok(!$@, "lowering + lli succeeded (escaped dot non-match)") or do { diag("error: $@"); return };
+    is($o2, 'Bool:', '/a\\.b/ does NOT match "axb" (escaped dot is literal)');
+};
+
 done_testing;

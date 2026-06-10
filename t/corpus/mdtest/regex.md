@@ -126,3 +126,31 @@ context: scalar
 return %result
 L: GREEN
 ```
+
+## R5 character class match
+
+A character class `[...]` matches one subject byte against a set of ranges and
+members; `\d`/`\w`/`\s` are shorthand classes and `.` matches any byte except
+newline. The regex sub-compiler (G6 T2) lowers each class atom to a range-icmp
+predicate over the loaded byte — runtime-free, libperl-free.
+
+```perl
+# source
+my $s = "a9z";
+$s =~ /[0-9]/ ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%s      = Constant("a9z") :Str
+%m      = RegexMatch(%s, pattern: "[0-9]") :Bool
+%one    = Constant(1) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%m, %one, %zero) :Int
+return %result
+L: GREEN
+```
