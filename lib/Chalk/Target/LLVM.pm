@@ -1297,6 +1297,11 @@ sub lower_value {
     elsif ($op eq 'RegexMatch') {
         return $self->_lower_regex_match($node);
     }
+    # RegexSubst: s/// = match + splice (prefix + replacement(+$N) + suffix).
+    # Produces the result string (i8*, runtime length in _str_len_table).
+    elsif ($op eq 'RegexSubst') {
+        return $self->_lower_regex_subst($node);
+    }
     else {
         if (defined $node->representation && $node->representation eq 'Scalar') {
             die "GAP: node op=$op repr=Scalar reached LLVM backend — cannot lower runtime-free. "
@@ -4018,6 +4023,8 @@ sub _compile_regex_pattern {
     );
 
     my @atoms;
+    my @paren_stack;   # open-group cap indices (undef = non-capturing)
+    my $ngroups = 0;   # capture group counter
     my @chars = split //, $pattern;
     my $i = 0;
     while ($i <= $#chars) {
@@ -4090,12 +4097,48 @@ sub _compile_regex_pattern {
             next;
         }
 
+        # Capture groups (T4): zero-width gopen/gclose markers around the
+        # enclosed atoms. (?:...) is non-capturing (markers with cap undef —
+        # transparent without alternation, but tracked so ')' pairs up).
+        # Quantified groups ((ab)+) are a pending tranche.
+        if ($c eq '(') {
+            my $cap;
+            if (($chars[$i+1] // '') eq '?' && ($chars[$i+2] // '') eq ':') {
+                $cap = undef;     # non-capturing
+                $i += 3;
+            }
+            elsif (($chars[$i+1] // '') eq '?') {
+                die "GAP: regex (?...) construct (lookaround/modifier/code) in "
+                  . "pattern '$pattern' not supported";
+            }
+            else {
+                $cap = ++$ngroups;
+                $i++;
+            }
+            push @atoms, { kind => 'gopen', cap => $cap };
+            push @paren_stack, $cap;
+            next;
+        }
+        if ($c eq ')') {
+            die "GAP: unbalanced ')' in regex pattern '$pattern'"
+                unless @paren_stack;
+            my $cap = pop @paren_stack;
+            push @atoms, { kind => 'gclose', cap => $cap };
+            $i++;
+            next;
+        }
+
         # Quantifiers (T3): attach {min,max} to the PRECEDING atom. max undef
         # = unbounded. A quantifier with no preceding atom is malformed.
         if ($c =~ /[*+?{]/) {
             die "GAP: regex quantifier '$c' with no preceding atom in pattern '$pattern'"
                 unless @atoms;
             my $atom = $atoms[-1];
+            die "GAP: quantified group (...)$c in pattern '$pattern' not yet "
+              . "supported by the G6 sub-compiler (tranche pending)"
+                if $atom->{kind} eq 'gclose';
+            die "GAP: regex quantifier '$c' directly after '(' in pattern '$pattern'"
+                if $atom->{kind} eq 'gopen';
             die "GAP: double quantifier on one atom in pattern '$pattern' "
               . "(non-greedy *? +? ?? not yet supported)"
                 if exists $atom->{min};
@@ -4118,8 +4161,8 @@ sub _compile_regex_pattern {
         }
 
         # Unsupported metachars die loudly rather than silently matching as
-        # literals (groups/captures arrive in T4; alternation in T5).
-        if ($c =~ /[}()|]/) {
+        # literals (alternation arrives in T5).
+        if ($c =~ /[}|]/) {
             die "GAP: regex metachar '$c' in pattern '$pattern' not yet supported "
               . "by the G6 sub-compiler (tranche pending)";
         }
@@ -4128,10 +4171,13 @@ sub _compile_regex_pattern {
         $i++;
     }
 
+    die "GAP: unbalanced '(' in regex pattern '$pattern'" if @paren_stack;
+
     return {
         atoms          => \@atoms,
         anchored_start => $anchored_start,
         anchored_end   => $anchored_end,
+        ngroups        => $ngroups,
     };
 }
 
@@ -4214,8 +4260,10 @@ sub _emit_atom_predicate {
 sub _emit_regex_seq {
     my ($self, $atoms, $idx, $pos_ref, $ctx) = @_;
 
-    # Base: end of pattern. Check the end anchor, then hit.
+    # Base: end of pattern. Record the whole-match end position (group 0),
+    # check the end anchor, then hit.
     if ($idx > $#$atoms) {
+        $ctx->{caps}{m0e} = $pos_ref;
         if ($ctx->{anch_e}) {
             my $at_end = $self->_fresh;
             $self->_emit("  $at_end = icmp eq i64 $pos_ref, $ctx->{subj_len}  ; RegexMatch \$: match ends at len?");
@@ -4228,6 +4276,23 @@ sub _emit_regex_seq {
     }
 
     my $atom  = $atoms->[$idx];
+
+    # Capture-group boundary markers (T4): zero-width — record the current
+    # position SSA as the group's start/end and continue. The records go into
+    # the SHARED $ctx->{caps} hashref (ctx is shallow-copied at backoff
+    # boundaries; the caps ref is shared by all copies). The recorded refs
+    # dominate the recursion base (the linear chain), so they are valid at the
+    # hit edge; on a backtracked retry the same SSA names hold the values of
+    # the CURRENT (ultimately successful) attempt.
+    if ($atom->{kind} eq 'gopen' || $atom->{kind} eq 'gclose') {
+        if (defined $atom->{cap}) {
+            my $slot = $atom->{kind} eq 'gopen' ? 's' : 'e';
+            $ctx->{caps}{$slot}[ $atom->{cap} ] = $pos_ref;
+        }
+        $self->_emit_regex_seq($atoms, $idx + 1, $pos_ref, $ctx);
+        return;
+    }
+
     my $quant = exists $atom->{min};
 
     if (!$quant) {
@@ -4330,6 +4395,140 @@ sub _emit_regex_seq {
     return;
 }
 
+# _emit_regex_matcher($self, $subj_ptr, $subj_len, $compiled, $tag) -> \%match
+#
+# Emit the full matcher (slide loop + position-threaded recognizer + end
+# merge) for an already-compiled pattern. Returns the END-block SSA values:
+#   matched — i1 (did the pattern match anywhere?)
+#   m0s/m0e — i64 whole-match start/end offsets (0 on miss)
+#   cap_s/cap_e — arrayrefs (1-based) of i64 capture-group offsets (0 on miss)
+# Captures are plain SSA offset pairs into the subject buffer — no struct is
+# materialized (a %MatchResult ABI is only needed at a function boundary,
+# i.e. a future qr//-as-function; per the G6 scope decision it is not built).
+sub _emit_regex_matcher {
+    my ($self, $subj_ptr, $subj_len, $compiled, $tag) = @_;
+    $tag //= 'RegexMatch';
+
+    my @atoms    = $compiled->{atoms}->@*;
+    my $anch_s   = $compiled->{anchored_start};
+    my $anch_e   = $compiled->{anchored_end};
+    my $ngroups  = $compiled->{ngroups} // 0;
+
+    # Minimum bytes the pattern can match (sum of per-atom min counts;
+    # zero-width group markers contribute nothing). Drives the slide-loop
+    # room check; quantified atoms may consume more.
+    my $min_len = 0;
+    for my $a (@atoms) {
+        next if $a->{kind} eq 'gopen' || $a->{kind} eq 'gclose';
+        $min_len += ($a->{min} // 1);
+    }
+
+    # Empty pattern (possibly with anchors).
+    if (scalar @atoms == 0) {
+        my $r = $self->_fresh;
+        if ($anch_s && $anch_e) {
+            # /^$/ matches iff the subject is empty (start==end at offset 0).
+            $self->_emit("  $r = icmp eq i64 $subj_len, 0  ; $tag /^\$/: empty subject?");
+        }
+        else {
+            # //, /^/, /$/ all match (empty string is present at offset 0 / end).
+            $self->_emit("  $r = add i1 true, false  ; $tag: empty pattern always matches");
+        }
+        return { matched => $r, m0s => '0', m0e => '0', cap_s => [], cap_e => [] };
+    }
+
+    # Slide loop: for start in 0 .. (len - min_len), try the pattern at start.
+    my $lbl_pre   = $self->_current_block_label;
+    my $lbl_head  = $self->_fresh_label('rxhead');
+    my $lbl_try   = $self->_fresh_label('rxtry');
+    my $lbl_cont  = $self->_fresh_label('rxcont');
+    my $lbl_hit   = $self->_fresh_label('rxhit');
+    my $lbl_miss  = $self->_fresh_label('rxmiss');
+    my $lbl_end   = $self->_fresh_label('rxend');
+    my $start_next = $self->_fresh;
+
+    $self->_set_terminator("  br label \%$lbl_head");
+
+    # Header: start phi + room check (start + min_len <= len).
+    # With a start anchor (^), there is no back-edge from the continue block
+    # (a failed try goes straight to miss), so the phi has only the entry edge.
+    $self->_new_block($lbl_head);
+    my $start = $self->_fresh;
+    if ($anch_s) {
+        $self->_emit("  $start = phi i64 [ 0, \%$lbl_pre ]  ; $tag ^: anchored at offset 0");
+    }
+    else {
+        $self->_emit("  $start = phi i64 [ 0, \%$lbl_pre ], [ $start_next, \%$lbl_cont ]  ; $tag: slide start");
+    }
+    my $min_end = $self->_fresh;
+    $self->_emit("  $min_end = add i64 $start, $min_len  ; $tag: start + min pattern length");
+    my $room = $self->_fresh;
+    $self->_emit("  $room = icmp sle i64 $min_end, $subj_len  ; $tag: room for pattern?");
+    $self->_set_terminator("  br i1 $room, label \%$lbl_try, label \%$lbl_miss");
+
+    # Try: position-threaded recursive emission of the atom sequence. Each
+    # atom's code is emitted once; quantified atoms emit a greedy-consume loop
+    # plus a backoff loop whose body holds the continuation, so backtracking
+    # happens via loop structure at runtime (fail targets thread to the
+    # innermost enclosing backoff; the outermost fail target is the slide
+    # advance). The end-anchor check lives in the recursion base (pos == len).
+    # The caps hashref is SHARED across the recursion's ctx copies; the seq
+    # records group-boundary position SSA refs + the whole-match end into it.
+    my %caps = ( s => [], e => [], m0e => undef );
+    $self->_new_block($lbl_try);
+    $self->_emit_regex_seq(\@atoms, 0, $start, {
+        subj_ptr => $subj_ptr,
+        subj_len => $subj_len,
+        hit_lbl  => $lbl_hit,
+        fail_lbl => $lbl_cont,
+        anch_e   => $anch_e,
+        caps     => \%caps,
+    });
+
+    # Continue: advance the start offset (or stop, if start-anchored).
+    $self->_new_block($lbl_cont);
+    $self->_emit("  $start_next = add i64 $start, 1  ; $tag: next start");
+    if ($anch_s) {
+        # Start anchor (^): only offset 0 is tried — a failed try means no match.
+        $self->_set_terminator("  br label \%$lbl_miss");
+    }
+    else {
+        $self->_set_terminator("  br label \%$lbl_head");
+    }
+
+    # Hit / miss feed the end-block phis.
+    $self->_new_block($lbl_hit);
+    $self->_set_terminator("  br label \%$lbl_end");
+    $self->_new_block($lbl_miss);
+    $self->_set_terminator("  br label \%$lbl_end");
+
+    # End merge: matched + the whole-match and capture-group offsets. All the
+    # recorded refs dominate the hit edge; miss feeds 0 sentinels (consumers
+    # must guard on matched — perl leaves $N undef on a failed match).
+    $self->_new_block($lbl_end);
+    my $matched = $self->_fresh;
+    $self->_emit("  $matched = phi i1 [ true, \%$lbl_hit ], [ false, \%$lbl_miss ]  ; $tag: matched?");
+    my $m0s = $self->_fresh;
+    $self->_emit("  $m0s = phi i64 [ $start, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; $tag: match start");
+    my $m0e = $self->_fresh;
+    $self->_emit("  $m0e = phi i64 [ $caps{m0e}, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; $tag: match end");
+    my (@cap_s, @cap_e);
+    for my $g (1 .. $ngroups) {
+        my ($s_ref, $e_ref) = ($caps{s}[$g], $caps{e}[$g]);
+        die "G6 internal: capture group $g has no recorded boundaries"
+            unless defined $s_ref && defined $e_ref;
+        my $sp = $self->_fresh;
+        $self->_emit("  $sp = phi i64 [ $s_ref, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; $tag: \$$g start");
+        my $ep = $self->_fresh;
+        $self->_emit("  $ep = phi i64 [ $e_ref, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; $tag: \$$g end");
+        $cap_s[$g] = $sp;
+        $cap_e[$g] = $ep;
+    }
+
+    return { matched => $matched, m0s => $m0s, m0e => $m0e,
+             cap_s => \@cap_s, cap_e => \@cap_e };
+}
+
 # _lower_regex_match($node) -> $llvm_ref (i1 matched?)
 sub _lower_regex_match {
     my ($self, $node) = @_;
@@ -4344,96 +4543,177 @@ sub _lower_regex_match {
              . "the matcher needs the subject's byte length.";
 
     my $compiled = _compile_regex_pattern($node->pattern, $node->flags);
-    my @atoms    = $compiled->{atoms}->@*;
-    my $anch_s   = $compiled->{anchored_start};
-    my $anch_e   = $compiled->{anchored_end};
+    my $match    = $self->_emit_regex_matcher($subj_ptr, $subj_len, $compiled, 'RegexMatch');
 
-    # Minimum bytes the pattern can match (sum of per-atom min counts).
-    # Drives the slide-loop room check; quantified atoms may consume more.
-    my $min_len = 0;
-    $min_len += ($_->{min} // 1) for @atoms;
+    # Record the capture offsets for downstream consumers (G7's $N magic vars
+    # read these as graph-edge side data; s/// consumes them directly).
+    $self->{_regex_captures}{ $node->id } = $match;
 
-    # Empty pattern (possibly with anchors).
-    if (scalar @atoms == 0) {
-        my $r = $self->_fresh;
-        if ($anch_s && $anch_e) {
-            # /^$/ matches iff the subject is empty (start==end at offset 0).
-            $self->_emit("  $r = icmp eq i64 $subj_len, 0  ; RegexMatch /^\$/: empty subject?");
+    $self->{cache}{ $node->id } = $match->{matched};
+    return $match->{matched};
+}
+
+# _parse_subst_replacement($replacement, $ngroups) -> \@segments
+#
+# Split an s/// replacement into literal runs and $N capture references.
+# Each segment is { kind => 'lit', text => ... } or { kind => 'cap', n => N }.
+# A backslash escapes the next char to a literal; $& $` $' and $N beyond the
+# pattern's group count die loudly as GAPs.
+sub _parse_subst_replacement {
+    my ($repl, $ngroups) = @_;
+    my @segs;
+    my $lit = '';
+    my @chars = split //, $repl;
+    my $i = 0;
+    my $flush = sub {
+        push @segs, { kind => 'lit', text => $lit } if length $lit;
+        $lit = '';
+    };
+    while ($i <= $#chars) {
+        my $c = $chars[$i];
+        if ($c eq '\\' && $i < $#chars) {
+            $lit .= $chars[ $i + 1 ];
+            $i += 2;
+            next;
+        }
+        if ($c eq '$' && $i < $#chars) {
+            my $n = $chars[ $i + 1 ];
+            if ($n =~ /^[1-9]$/) {
+                die "GAP: s/// replacement references \$$n but the pattern has "
+                  . "only $ngroups capture group(s)" if $n > $ngroups;
+                $flush->();
+                push @segs, { kind => 'cap', n => 0 + $n };
+                $i += 2;
+                next;
+            }
+            die "GAP: s/// replacement \$$n not supported (only \$1..\$9 capture refs)";
+        }
+        $lit .= $c;
+        $i++;
+    }
+    $flush->();
+    return \@segs;
+}
+
+# _lower_regex_subst($node) -> $llvm_ref (i8* result string)
+#
+# Lowers s///: run the matcher, then splice — result = prefix [0,m0s) +
+# replacement (literal segments + $N captured slices) + suffix [m0e,len).
+# A failed match returns the subject unchanged. First match only (/g is a
+# tracked follow-up). The result length is a runtime value tracked in
+# _str_len_table (the Str epilogue prints via "%.*s").
+sub _lower_regex_subst {
+    my ($self, $node) = @_;
+
+    my $subj_node = $node->inputs->[0];
+    my $repr      = _require_repr($node, 'RegexSubst');
+
+    my $flags = $node->flags // '';
+    die "GAP: s///$flags flags not yet supported by the G6 sub-compiler "
+      . "(/g is a tracked follow-up)" if length $flags;
+
+    my $subj_ptr  = $self->lower_value($subj_node);
+    my $subj_len  = $self->_str_len_for($subj_ptr)
+        // die "GAP: RegexSubst subject (ref=$subj_ptr) has no tracked length — "
+             . "the matcher needs the subject's byte length.";
+
+    my $compiled = _compile_regex_pattern($node->pattern, $node->flags);
+    my $segs     = _parse_subst_replacement($node->replacement // '',
+                                            $compiled->{ngroups} // 0);
+
+    my $match = $self->_emit_regex_matcher($subj_ptr, $subj_len, $compiled, 'RegexSubst');
+
+    $self->{_need_malloc_memcpy} = 1;
+
+    my $lbl_pre  = $self->_current_block_label;
+    my $lbl_do   = $self->_fresh_label('rxsdo');
+    my $lbl_done = $self->_fresh_label('rxsdn');
+    $self->_set_terminator("  br i1 $match->{matched}, label \%$lbl_do, label \%$lbl_done");
+
+    # Matched: build the spliced string.
+    $self->_new_block($lbl_do);
+    my $m0len = $self->_fresh;
+    $self->_emit("  $m0len = sub i64 $match->{m0e}, $match->{m0s}  ; RegexSubst: matched length");
+
+    # Replacement length: compile-time literal bytes + runtime capture lengths.
+    my $lit_total = 0;
+    $lit_total += length($_->{text}) for grep { $_->{kind} eq 'lit' } @$segs;
+    my $repl_len = $lit_total;   # SSA ref or constant
+    for my $seg (grep { $_->{kind} eq 'cap' } @$segs) {
+        my $n = $seg->{n};
+        my $clen = $self->_fresh;
+        $self->_emit("  $clen = sub i64 $match->{cap_e}[$n], $match->{cap_s}[$n]  ; RegexSubst: \$$n length");
+        $seg->{len_ref} = $clen;
+        my $acc = $self->_fresh;
+        $self->_emit("  $acc = add i64 $repl_len, $clen  ; RegexSubst: replacement length so far");
+        $repl_len = $acc;
+    }
+
+    my $keep = $self->_fresh;
+    $self->_emit("  $keep = sub i64 $subj_len, $m0len  ; RegexSubst: bytes kept from subject");
+    my $new_len = $self->_fresh;
+    $self->_emit("  $new_len = add i64 $keep, $repl_len  ; RegexSubst: result length");
+    my $alloc = $self->_fresh;
+    $self->_emit("  $alloc = add i64 $new_len, 1  ; RegexSubst: +1 for NUL");
+    my $buf = $self->_fresh;
+    $self->_emit("  $buf = call i8* \@malloc(i64 $alloc)  ; RegexSubst: result buffer");
+
+    # Prefix [0, m0s).
+    $self->_emit("  call i8* \@memcpy(i8* $buf, i8* $subj_ptr, i64 $match->{m0s})  ; RegexSubst: prefix");
+    my $cursor = $match->{m0s};   # dest offset after the prefix
+
+    # Replacement segments.
+    for my $seg (@$segs) {
+        my $dest = $self->_fresh;
+        $self->_emit("  $dest = getelementptr inbounds i8, i8* $buf, i64 $cursor  ; RegexSubst: dest cursor");
+        if ($seg->{kind} eq 'lit') {
+            my $text = $seg->{text};
+            my $blen = length $text;
+            my $gidx = scalar @{ $self->{_str_globals} };
+            my $gname = "\@rxs_lit_$gidx";
+            push $self->{_str_globals}->@*, [ $gname, $text, $blen ];
+            my $total = $blen + 1;
+            my $src = $self->_fresh;
+            $self->_emit("  $src = getelementptr inbounds [$total x i8], [$total x i8]* $gname, i64 0, i64 0  ; RegexSubst: literal segment");
+            $self->_emit("  call i8* \@memcpy(i8* $dest, i8* $src, i64 $blen)  ; RegexSubst: copy literal");
+            my $next = $self->_fresh;
+            $self->_emit("  $next = add i64 $cursor, $blen  ; RegexSubst: advance cursor");
+            $cursor = $next;
         }
         else {
-            # //, /^/, /$/ all match (empty string is present at offset 0 / end).
-            $self->_emit("  $r = add i1 true, false  ; RegexMatch: empty pattern always matches");
+            my $n = $seg->{n};
+            my $src = $self->_fresh;
+            $self->_emit("  $src = getelementptr inbounds i8, i8* $subj_ptr, i64 $match->{cap_s}[$n]  ; RegexSubst: \$$n source");
+            $self->_emit("  call i8* \@memcpy(i8* $dest, i8* $src, i64 $seg->{len_ref})  ; RegexSubst: copy \$$n");
+            my $next = $self->_fresh;
+            $self->_emit("  $next = add i64 $cursor, $seg->{len_ref}  ; RegexSubst: advance cursor");
+            $cursor = $next;
         }
-        $self->{cache}{ $node->id } = $r;
-        return $r;
     }
 
-    # Slide loop: for start in 0 .. (len - plen), try the literal at start.
-    my $lbl_pre   = $self->_current_block_label;
-    my $lbl_head  = $self->_fresh_label('rxhead');
-    my $lbl_try   = $self->_fresh_label('rxtry');
-    my $lbl_cont  = $self->_fresh_label('rxcont');
-    my $lbl_hit   = $self->_fresh_label('rxhit');
-    my $lbl_miss  = $self->_fresh_label('rxmiss');
-    my $lbl_end   = $self->_fresh_label('rxend');
-    my $start_next = $self->_fresh;
+    # Suffix [m0e, len) + NUL terminator.
+    my $sfx_dest = $self->_fresh;
+    $self->_emit("  $sfx_dest = getelementptr inbounds i8, i8* $buf, i64 $cursor  ; RegexSubst: suffix dest");
+    my $sfx_src = $self->_fresh;
+    $self->_emit("  $sfx_src = getelementptr inbounds i8, i8* $subj_ptr, i64 $match->{m0e}  ; RegexSubst: suffix source");
+    my $sfx_len = $self->_fresh;
+    $self->_emit("  $sfx_len = sub i64 $subj_len, $match->{m0e}  ; RegexSubst: suffix length");
+    $self->_emit("  call i8* \@memcpy(i8* $sfx_dest, i8* $sfx_src, i64 $sfx_len)  ; RegexSubst: suffix");
+    my $nul_ptr = $self->_fresh;
+    $self->_emit("  $nul_ptr = getelementptr inbounds i8, i8* $buf, i64 $new_len  ; RegexSubst: NUL slot");
+    $self->_emit("  store i8 0, i8* $nul_ptr  ; RegexSubst: NUL-terminate");
+    $self->_set_terminator("  br label \%$lbl_done");
 
-    $self->_set_terminator("  br label \%$lbl_head");
+    # Merge: spliced buffer on match, the original subject otherwise.
+    $self->_new_block($lbl_done);
+    my $res = $self->_fresh;
+    $self->_emit("  $res = phi i8* [ $buf, \%$lbl_do ], [ $subj_ptr, \%$lbl_pre ]  ; RegexSubst: result");
+    my $res_len = $self->_fresh;
+    $self->_emit("  $res_len = phi i64 [ $new_len, \%$lbl_do ], [ $subj_len, \%$lbl_pre ]  ; RegexSubst: result length");
 
-    # Header: start phi + room check (start + plen <= len).
-    # With a start anchor (^), there is no back-edge from the continue block
-    # (a failed try goes straight to miss), so the phi has only the entry edge.
-    $self->_new_block($lbl_head);
-    my $start = $self->_fresh;
-    if ($anch_s) {
-        $self->_emit("  $start = phi i64 [ 0, \%$lbl_pre ]  ; RegexMatch ^: anchored at offset 0");
-    }
-    else {
-        $self->_emit("  $start = phi i64 [ 0, \%$lbl_pre ], [ $start_next, \%$lbl_cont ]  ; RegexMatch: slide start");
-    }
-    my $min_end = $self->_fresh;
-    $self->_emit("  $min_end = add i64 $start, $min_len  ; RegexMatch: start + min pattern length");
-    my $room = $self->_fresh;
-    $self->_emit("  $room = icmp sle i64 $min_end, $subj_len  ; RegexMatch: room for pattern?");
-    $self->_set_terminator("  br i1 $room, label \%$lbl_try, label \%$lbl_miss");
-
-    # Try: position-threaded recursive emission of the atom sequence. Each
-    # atom's code is emitted once; quantified atoms emit a greedy-consume loop
-    # plus a backoff loop whose body holds the continuation, so backtracking
-    # happens via loop structure at runtime (fail targets thread to the
-    # innermost enclosing backoff; the outermost fail target is the slide
-    # advance). The end-anchor check lives in the recursion base (pos == len).
-    $self->_new_block($lbl_try);
-    $self->_emit_regex_seq(\@atoms, 0, $start, {
-        subj_ptr => $subj_ptr,
-        subj_len => $subj_len,
-        hit_lbl  => $lbl_hit,
-        fail_lbl => $lbl_cont,
-        anch_e   => $anch_e,
-    });
-
-    # Continue: advance the start offset (or stop, if start-anchored).
-    $self->_new_block($lbl_cont);
-    $self->_emit("  $start_next = add i64 $start, 1  ; RegexMatch: next start");
-    if ($anch_s) {
-        # Start anchor (^): only offset 0 is tried — a failed try means no match.
-        $self->_set_terminator("  br label \%$lbl_miss");
-    }
-    else {
-        $self->_set_terminator("  br label \%$lbl_head");
-    }
-
-    # Hit / miss feed the result phi.
-    $self->_new_block($lbl_hit);
-    $self->_set_terminator("  br label \%$lbl_end");
-    $self->_new_block($lbl_miss);
-    $self->_set_terminator("  br label \%$lbl_end");
-
-    $self->_new_block($lbl_end);
-    my $result = $self->_fresh;
-    $self->_emit("  $result = phi i1 [ true, \%$lbl_hit ], [ false, \%$lbl_miss ]  ; RegexMatch: matched?");
-    $self->{cache}{ $node->id } = $result;
-    return $result;
+    $self->{_str_len_table}{$res} = $res_len;
+    $self->{cache}{ $node->id } = $res;
+    return $res;
 }
 
 # _lower_field_access_in_method($node) -> $llvm_ref

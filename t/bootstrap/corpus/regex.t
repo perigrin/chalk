@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the regex mdtest corpus topic (constructive format).
-# ABOUTME: R1 (literal match) lowers GREEN via the G6 regex sub-compiler; R2 (qr//) + R3 (s///) remain GAP until their tranches.
+# ABOUTME: R1/R3-R6 lower GREEN via the G6 regex sub-compiler; R2 (qr//) remains GAP until its tranche.
 use 5.42.0;
 use utf8;
 
@@ -94,13 +94,13 @@ for my $case (@$cases) {
 my %EXPECTED_VERDICT = (
     'R1' => 'GREEN',   # literal match — G6 T0
     'R2' => 'GAP',     # qr// — pending
-    'R3' => 'GAP',     # s/// — pending
+    'R3' => 'GREEN',   # s/// — G6 T4 (match + splice)
     'R4' => 'GREEN',   # anchored match (^) — G6 T1
     'R5' => 'GREEN',   # character class — G6 T2
     'R6' => 'GREEN',   # quantified identifier — G6 T3
 );
 
-subtest 'per-case L verdicts (R1/R4/R5/R6 GREEN via G6; R2/R3 still GAP)' => sub {
+subtest 'per-case L verdicts (R1/R3-R6 GREEN via G6; R2 qr// still GAP)' => sub {
     plan tests => 6;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';

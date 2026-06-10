@@ -328,4 +328,19 @@ subtest 'T3 class quantifier: /\d+/ finds a digit run' => sub {
     try_match('xyz',  '\\d+', 'Bool:',  '"xyz" !~ /\\d+/');
 };
 
+# ---------------------------------------------------------------------------
+# T4 (match side): capture groups are transparent to MATCHING — /(foo)/
+# matches exactly where /foo/ does; (?:...) likewise. The capture VALUES are
+# consumed by s///$N (see llvm-regex-subst.t) and later by G7's $1.
+# ---------------------------------------------------------------------------
+
+subtest 'T4 groups transparent to matching' => sub {
+    try_match('xfoo',  '(foo)',      'Bool:1', '"xfoo" =~ /(foo)/ (group does not change matching)');
+    try_match('xyz',   '(foo)',      'Bool:',  '"xyz"  !~ /(foo)/');
+    try_match('ab',    'a(b)',       'Bool:1', '"ab"   =~ /a(b)/');
+    try_match('a1b',   'a(\\d)b',    'Bool:1', '"a1b"  =~ /a(\\d)b/ (class inside group)');
+    try_match('aXXb',  'a(X+)b',     'Bool:1', '"aXXb" =~ /a(X+)b/ (quantifier inside group)');
+    try_match('ab',    'a(?:b)',     'Bool:1', '"ab"   =~ /a(?:b)/ (non-capturing transparent)');
+};
+
 done_testing;

@@ -96,7 +96,10 @@ context: scalar
 ```
 
 ```ir
-L: GAP(s/// is RF: match (regex sub-compiler, G6) + Str rewrite (G3); GAP only until G6+G3 are modelled, NOT a libperl dependency)
+%s      = Constant("foobar") :Str
+%result = RegexSubst(%s, pattern: "foo", replacement: "baz") :Str
+return %result
+L: GREEN
 ```
 
 ## R4 anchored match (^)
