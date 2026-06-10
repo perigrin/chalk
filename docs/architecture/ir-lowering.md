@@ -4,11 +4,22 @@
 # IR Lowering and Code Generation
 
 This document describes Chalk's intermediate representation (IR) lowering pipeline and
-its code generation targets: Perl (primary), XS (performance), and C (native
-table compilation). An LLVM IR target is planned but deferred pending C/XS
-completion; see [`../llvm-target.md`](../llvm-target.md) for the rationale. This
+its code generation targets: Perl (primary), XS (performance), C (native
+table compilation), and LLVM (runtime-free, ACTIVE — `Chalk::Target::LLVM`,
+driven by the constructive mdtest corpus; see
+[`sea-of-nodes-ir.md`](sea-of-nodes-ir.md) "LLVM lowering of the canonical MOP
+and aggregate vocabulary" for the node-to-LLVM map, and
+[`../plans/2026-06-06-three-axis-codegen-and-typed-ir-contract.md`](../plans/2026-06-06-three-axis-codegen-and-typed-ir-contract.md)
+for the LLVM-first decision). This
 document covers the full pipeline from grammar and parse results through IR
 construction, IR fixups, and final source emission.
+
+The target namespace is consolidating under `Chalk::Target::*`:
+`lib/Chalk/Target.pm` is the `generate($ir)`-contract base (with
+`Chalk::Bootstrap::Target` as a compat alias for the legacy consumers), and
+`Chalk::Target::LLVM` (a `Chalk::IR::Target`, the typed-IR `lower` contract)
+already lives there. The Bootstrap-namespaced Perl/XS/C family migrates in a
+separate rename-tied issue (filed in git-zhi, 2026-06-10).
 
 ---
 

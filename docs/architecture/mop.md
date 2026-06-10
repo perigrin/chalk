@@ -241,3 +241,18 @@ Codegen migration to walk MOP graphs directly (and the eventual
 deletion of the metadata struct layer) is tracked in
 `docs/plans/2026-04-21-chalk-mop-migration-plan.md`. Until that lands,
 both representations coexist by design.
+
+### The LLVM backend consumes class structure via ClassInfo (2026-06)
+
+The IR-taxonomy reconciliation (R3) converged the LLVM backend's class
+handling onto this layer: there are no in-graph `ClassDecl`/`MethodDef`/
+`FieldDef`/`AdjustBlock` nodes. Class structure rides into a graph as an
+immutable `Chalk::IR::ClassInfo` (carrying `MethodInfo` objects — extended
+with `body_node`/`return_repr` for lowering — plus `Chalk::MOP::Field` and
+`Chalk::MOP::Phaser::Adjust` members), and `Chalk::Target::LLVM` builds its
+per-class vtable + object struct + ADJUST order from that read surface
+(`_scan_class_registry`/`_populate_registry_from_classinfo`). Only the
+immutable readers are consumed — the mutable `MOP::Class` declare-API and the
+stalled codegen-reads-MOP migration above are untouched by it. See
+`sea-of-nodes-ir.md` "LLVM lowering of the canonical MOP and aggregate
+vocabulary".

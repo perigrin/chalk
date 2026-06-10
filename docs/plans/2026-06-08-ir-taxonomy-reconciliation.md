@@ -1,10 +1,16 @@
 # Target-Layer Reconciliation: single IR vocabulary + a common `Chalk::Target` home
 
 **Date:** 2026-06-08 (revised 2026-06-09 to fold in the full architecture review)
-**Status:** PLAN — Phase G (namespace + gate hardening) COMPLETE 2026-06-09 on branch
-`phase1-lateral-bindings`. Commits: 4f359148 (namespace), 9461893f (G.1), 4da9373b (G.2),
-647b8e1f (G.5), c80532e8 (G.6), 59293100 (G.7). Node-convergence phases 0–6 are
-REMAINING WORK (not started).
+**Status:** COMPLETE 2026-06-10 on branch `phase1-lateral-bindings`. Phase G
+2026-06-09 (commits 4f359148 namespace, 9461893f G.1, 4da9373b G.2, 647b8e1f G.5,
+c80532e8 G.6, 59293100 G.7); node-convergence Phases 0–3 = R2 (fa7c0715..af42bab2
++ the reopen), Phases 4–5 = R3 (5cd5324d..3d550d5f), Phase 6 docs (f94ea2a8).
+Whole-branch review 2026-06-10 (paad/code-reviews/...-256a9b37-branch-agentic.md)
+verified the acceptance criteria; deferral labels: TypedInvariant per-phase
+coverage → zhi 019eaf54; the four follow-ups this plan referenced as "filed"
+(Bootstrap-target migration, F8 §2-purity Coerce route, I3 parser→LLVM
+equivalence gate, F10 Context split) are NOW actually filed (zhi 019eb316-*,
+2026-06-10 — they had not been, contra the text below).
 
 **G.0 Baseline (2026-06-09):**
 Pre-existing failures at the start of Phase G work:

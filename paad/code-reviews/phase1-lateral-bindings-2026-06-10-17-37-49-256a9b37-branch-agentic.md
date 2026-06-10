@@ -22,6 +22,29 @@ genuinely branch-attributable and should be fixed before merge; the rest ride
 as follow-ups — **which must actually be filed** (the verifier confirmed four
 of the reconciliation plan's "filed" deferrals were never filed).
 
+**DISPOSITION (2026-06-10, via receiving-code-review):**
+- **FIXED in 4769ecce** (TDD, RED-first): C4 (capture NUL invariant — RegexCapture
+  now copies to a NUL-terminated buffer; the zero-copy view is retired until the
+  Str repr carries lengths end-to-end), I1 (Call(method) per-call identity
+  restored to pu parity), I2 (MOP::Import keyword threaded; both goldens
+  regenerated, diffed-before-accept; dedup keyword-aware), I3 (serializer
+  round-trips RegexCapture.n/EnvRead.key/Call.param_names), I4 (registry GAP-die
+  on untyped fields + Call(method) node-vs-vtable ABI cross-check), ERRH-F3 +
+  STATE-F5 (all five Slot-store sites die GAP for unsupported reprs), CONTRACT-F4
+  (dead harness branches deleted).
+- **FILED as issues 019eb316-***: the pre-existing cache/identity family
+  (C1-C3, I5, I6, Graph.pm keying — the pre-B::SoN blocker), the
+  Bootstrap-target migration, F8 purity + I3 equivalence gate, F10 Context
+  split, and the consolidation/strictness suggestions.
+- **Docs corrected**: ir-lowering.md (LLVM active + Chalk::Target layer),
+  mop.md (LLVM consumes ClassInfo), runtime-free-boundary.md (dated G1-G7
+  status), the reconciliation plan's status header. zhi umbrella issue closed.
+- **Open question for perigrin**: CLAUDE.md "Plan Discipline" item 3 staleness
+  (the 92-site compat_class surface no longer exists) — needs a re-audit
+  before rewriting the figures; not unilaterally edited.
+- Verified after fixes: full ir/+corpus/ sweep clean; self-host tier +
+  JSON suites = only the 5 exact known-baseline failures.
+
 ## Critical Issues
 
 ### [C1] Value cache is stale for pure nodes over mutable-location reads — silent miscompile (PRE-EXISTING)

@@ -113,7 +113,7 @@ known at compile time.
   values the I/O ops read; if treated as `local`-dynamic globals, that's the
   dynamic-scope OOS question (see below). (Open edge — decide when I/O is tackled.)
 
-### Regex — a deferred RF SUB-COMPILER (not libperl)
+### Regex — an RF SUB-COMPILER (not libperl) — BUILT 2026-06-10 (G6)
 Perl's regex is large, but it is NOT interpreter-coupled in the dispatch sense: a
 literal pattern is a compile-time-known mini-language. The RF answer is a
 **regex sub-compiler** (pattern → DFA/NFA/bytecode matcher), emitted runtime-free
@@ -201,6 +201,21 @@ dispatch) or OOS (runtime-unknowable dispatch).
   later, against a contract already proven correct.
 
 ### Campaign sequence (leverage × cleanliness)
+
+> **STATUS 2026-06-10: items 1–7 are DONE** (G1–G7 closed in git-zhi,
+> milestone codegen-harness). 1–5 landed in the G2–G5 campaign (the MOP
+> lowering since converged onto ClassInfo + Call by the R1–R3 taxonomy
+> reconciliation). 6 (the regex sub-compiler) was BUILT in G6 — Option-B
+> core: literals, anchors (incl. `$`-before-final-newline), classes, byte
+> escapes, greedy quantifiers with backoff backtracking, capture groups,
+> qr// (`Constant(const_type='regex')` + `Match`), s/// splice; alternation/
+> `\Q\E`/`\G`/`/g`/non-greedy/backrefs/`!~`/flags die as explicit GAPs
+> (issue 019eb073). 7 landed its census-grounded core in G7: `RegexCapture`
+> ($N) + `EnvRead` (%ENV); @ARGV/$0/$!/I-O-config/env-writes/undef-faces
+> deferred (issue 019eb0d7 — zero lib/ uses). overload/tie remain G5b.
+> The hand-authored-IR-as-parser-spec framing remains accurate and
+> load-bearing.
+
 1. **cfg-blocks-phi** (control + &&/||) — RF, highest leverage, no value reps.
 2. **Bool repr + Coerce(Bool→*)** — RF, small, closes `!` + bare-bool.
 3. **Str** (buffer + coercions) — RF, the canonical coercion project, reused widely.
