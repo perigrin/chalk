@@ -302,42 +302,42 @@ Specifically:
    done?", answer against what the plan says needs to happen, not what has
    been committed. The April 4-7 migration was declared "Final" while its own
    plan listed outstanding Remaining Work.
-3. **Known stalled migration**: the April 4-7 SoN IR polymorphic migration
-   (see `docs/plans/2026-04-04-son-ir-polymorphic-migration.md` and
-   `docs/plans/2026-04-04-phase4-structural-split.md`, both superseded by
-   `docs/plans/2026-04-21-chalk-mop-migration-plan.md`) has substantial
-   *infrastructure* in place (typed nodes, NodeFactory, Graph.merge, MOP
-   scaffolding) but the cutover has not landed. Per Audit 3 findings
-   (`docs/plans/2026-04-25-audit-3-mop-ir-findings.md`), only **~30–40% of
-   acceptance criteria** are met — not the previously-claimed ~80%. Of the
-   polymorphic plan's 9 acceptance criteria, 0 are fully done, 2 are
-   partial, and 7 are not-started.
+3. **Known stalled migration**: the SoN-IR/MOP migration (plans:
+   `docs/plans/2026-04-04-son-ir-polymorphic-migration.md`, superseded by
+   `docs/plans/2026-04-21-chalk-mop-migration-plan.md`) is now **roughly
+   two-thirds complete** per the 2026-06-10 re-audit
+   (`docs/plans/2026-06-10-mop-migration-reaudit.md`) — the April-2026
+   "30–40%, 92 dispatch sites, Shim pending" figures are obsolete.
+   Shipped: Shim deleted; zero `compat_class` setters and zero
+   `->class()` readers in production; cfg side channel deleted (Context
+   carries graph/bindings/control_head/mop/factory);
+   `_build_method_graph` deleted — SSA with if/else and loop Phis is
+   built during parse; `Graph::body_stmts` gone and `Graph::nodes()` is
+   bidirectional; per-parse factory; the Perl target emits from MOP +
+   scheduler at golden parity; commit c7361f3c's prototype behavior is
+   retired.
 
-   Remaining work — the legacy class-name dispatch surface to retire — is
-   **92 sites total**: 61 `compat_class` setters in Actions.pm + 19
-   setters in Shim.pm + 12 `$node->class()` string-compare reader sites
-   across Actions.pm, EmitHelpers.pm, and StructPromotion.pm. Note: the
-   prior framing of "61 `make('Constructor', ...)` calls remaining" is
-   misleading — those literal calls *were* renamed to
-   `$typed->make('OpClass', ..., compat_class => 'BinaryExpr', ...)`,
-   but the contract (legacy class-name dispatch via `compat_class`) was
-   preserved. The literal moved; the contract did not.
+   Still open (do not call this migration done): the `($sa,$ctx)`
+   backchannel survives privately — Target::C's real entry is
+   `_generate_c_files($ir,$sa,$ctx)` and its public `generate($mop)` is a
+   stub (the same "literal moved, contract didn't" pattern compat_class
+   had); `Context::cfg_state()` is a legacy read adapter with codegen +
+   22 test-file consumers; `body` arrayrefs are dual-written on
+   MethodInfo / ClassInfo / SubInfo *and* MOP::Method / MOP::Sub with 15
+   reader sites left; the `compat_class` field is still on Node (17 test
+   files); `Actions::Program()` still returns `Chalk::IR::Program`, not
+   the MOP; StructPromotion's MOP path is analyze-only (`rewrite_mop`
+   unfiled); DCE is `run($graph,$factory)`, not `run($X)→$X`.
 
-   Other open items: Shim.pm deletion (1 production consumer + 4 test
-   files), codegen migration from `body()` to graph-walk (18 reader
-   sites), removal of `body` field from MethodInfo / ClassInfo / SubInfo,
-   removal of `compat_class` from Chalk::IR::Node, `_build_method_graph`
-   completion (currently a Return-collector + body_stmts seeder, not a
-   real SoN construction pass). Commit c7361f3c is explicitly a
-   prototype, not a fix; its behavior (Graph::body_stmts seeding) is
-   still in production.
-
-   **Highest-leverage single unblock:** Phase 3a-infra of the MOP
-   migration plan — promote `$graph` and `$scope` to Context fields and
-   delete the `update_cfg`/`cfg_state`/`inherited_cfg_state` side
-   channel. Mechanical, well-scoped, and unblocks every later phase
-   (3a-migration, 3b, 3c, 4, 5, 6, 7). Without it, bottom-up SSA
-   construction cannot start.
+   **Highest-leverage single unblock:** migrate Target::C's entry point
+   onto the schedule-driven MOP path (the Perl target already proves it)
+   — it is the last load-bearing consumer keeping the backchannel,
+   `cfg_state()`, the legacy Perl path, and the body dual-write alive.
+   **Caution:** Phase 6's "delete the metadata structs" now conflicts
+   with the R3 reconciliation (2026-06), which made immutable
+   ClassInfo/MethodInfo (`body_node`/`return_repr`) the LLVM backend's
+   read surface — reconcile in the target/IR architecture review before
+   deleting structs.
 4. **Prototype commits are promises**: commits labeled "prototype:", "draft:",
    "stopgap:", or "WIP:" in Chalk's git history must have a follow-up plan
    or issue. Do not treat prototype state as final. When summarizing work
