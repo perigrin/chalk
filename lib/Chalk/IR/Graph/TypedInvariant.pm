@@ -93,6 +93,9 @@ sub check {
     my @violations;
 
     for my $node ($nodes->@*) {
+        # Skip metadata objects (ClassInfo, MethodInfo, MOP::Field) that are not
+        # IR nodes — they do not carry an operation() and cannot be checked here.
+        next unless $node->can('operation');
         my $op = $node->operation();
 
         if (my $per_pos = $OP_PER_POSITION_REPR{$op}) {

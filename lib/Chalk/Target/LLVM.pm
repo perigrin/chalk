@@ -311,12 +311,12 @@ sub _populate_registry_from_classinfo {
         }
     }
 
-    # adjusts: ClassInfo may have ->adjusts; if absent, skip
-    if ($ci->can('adjusts')) {
-        for my $adj (@{ $ci->adjusts // [] }) {
-            # adj is a MOP::Phaser::Adjust or similar; body_nodes from ->graph
-            # For now: skip ADJUST bodies from ClassInfo (handled when present)
-        }
+    # adjusts: each entry is an arrayref of body IR nodes (the ADJUST block statements)
+    for my $adj_nodes (@{ $ci->adjusts // [] }) {
+        # adj_nodes is an arrayref of IR nodes (field stores, etc.)
+        push @{ $registry->{$cname}{adjusts} }, {
+            body_nodes => (ref $adj_nodes eq 'ARRAY' ? $adj_nodes : [$adj_nodes]),
+        };
     }
 }
 
@@ -353,87 +353,12 @@ sub _scan_class_registry {
             for my $mi (@{ $node->methods // [] }) {
                 push @queue, $mi->body_node if defined $mi->body_node;
             }
+            # Enqueue parent_ci so the parent's registry entry is populated.
+            push @queue, $node->parent_ci if $node->can('parent_ci') && defined $node->parent_ci;
             next;
         }
 
         my $op = $node->can('operation') ? $node->operation : '';
-
-        if ($op eq 'ClassDecl') {
-            my $cname  = $node->class_name;
-            my $parent = $node->can('parent_name') ? $node->parent_name : undef;
-            $registry{$cname} //= { methods => [], fields => [], adjusts => [], parent => undef };
-            $registry{$cname}{parent} //= $parent;
-            # ClassDecl.inputs = [MethodDef1, MethodDef2, ..., FieldDef1, FieldDef2...]
-            # Process each input to build the class's method/field lists.
-            # The walk will visit these inputs via the queue, but we process them HERE
-            # in ClassDecl context so we know which class they belong to.
-            my $inputs = $node->inputs // [];
-            my $mslot = scalar @{ $registry{$cname}{methods} };
-            for my $inp (@$inputs) {
-                next unless defined $inp;
-                my $inp_op = $inp->can('operation') ? $inp->operation : '';
-                if ($inp_op eq 'MethodDef') {
-                    my $mname     = $inp->method_name;
-                    my $body_node = $inp->body_node;
-                    # Outer 'Int' default: body_node absent = method body not yet wired (legitimate skip).
-                    # _require_repr guards a present body_node with undef repr (TypeInference gap).
-                    my $ret_repr  = defined $body_node ? _require_repr($body_node, 'MethodDef.body_node') : 'Int';
-                    # Avoid duplicate method entries
-                    unless (grep { ($_->{name} // '') eq $mname } @{ $registry{$cname}{methods} }) {
-                        push @{ $registry{$cname}{methods} }, {
-                            name        => $mname,
-                            body_node   => $body_node,
-                            return_repr => $ret_repr,
-                            vtable_slot => $mslot++,
-                        };
-                    }
-                }
-                elsif ($inp_op eq 'FieldDef') {
-                    my $fname       = $inp->field_name;
-                    my $fidx        = $inp->field_index;
-                    my $is_param    = $inp->is_param    // false;
-                    my $has_reader  = $inp->has_reader  // false;
-                    my $has_default = $inp->has_default // false;
-                    my $def_node    = $inp->can('default_node') ? $inp->default_node : undef;
-                    unless (grep { ($_->{field_index} // -1) == $fidx } @{ $registry{$cname}{fields} }) {
-                        push @{ $registry{$cname}{fields} }, {
-                            name         => $fname,
-                            field_index  => $fidx,
-                            is_param     => $is_param,
-                            has_reader   => $has_reader,
-                            has_default  => $has_default,
-                            default_node => $def_node,
-                        };
-                    }
-                    # :reader synthesis
-                    if ($has_reader) {
-                        unless (grep { ($_->{name} // '') eq $fname } @{ $registry{$cname}{methods} }) {
-                            # Use field_repr from FieldDef (defaults to 'Int')
-                            my $f_repr = $inp->can('field_repr') ? ($inp->field_repr // 'Int') : 'Int';
-                            push @{ $registry{$cname}{methods} }, {
-                                name               => $fname,
-                                body_node          => undef,
-                                return_repr        => $f_repr,
-                                vtable_slot        => $mslot++,
-                                is_reader_synth    => 1,
-                                reader_field_index => $fidx,
-                            };
-                        }
-                    }
-                }
-                elsif ($inp_op eq 'AdjustBlock') {
-                    # AdjustBlock: collect the body nodes for later ADJUST emission
-                    push @{ $registry{$cname}{adjusts} }, {
-                        body_nodes => [ $inp->body_nodes->@* ],
-                    };
-                }
-                elsif ($inp_op eq 'ClassDecl') {
-                    # Parent ClassDecl as direct input — record parent_name from its class_name.
-                    # The :isa resolution pass copies parent methods after full scan.
-                    $registry{$cname}{parent} //= $inp->class_name;
-                }
-            }
-        }
 
         # Enqueue all inputs
         if ($node->can('inputs') && defined $node->inputs) {
@@ -1360,26 +1285,6 @@ sub lower_value {
         return $self->_lower_field_access_in_method($node);
     }
     # MOP / class object operations (G5)
-    elsif ($op eq 'ClassDecl') {
-        # ClassDecl is a type-level declaration node — its LLVM "value" is a
-        # no-op sentinel. The class structure was emitted before @main by the
-        # pre-scan pass. Return a zero placeholder (never used as a value).
-        return 'zeroinitializer';
-    }
-    elsif ($op eq 'MethodDef') {
-        # MethodDef declares a method — the LLVM function was emitted before @main.
-        # Return a sentinel (never used directly as a runtime value).
-        return 'zeroinitializer';
-    }
-    elsif ($op eq 'FieldDef') {
-        # FieldDef declares a field — structural metadata only, no runtime value.
-        return 'zeroinitializer';
-    }
-    elsif ($op eq 'AdjustBlock') {
-        # AdjustBlock declares an ADJUST body — processed during New lowering.
-        # No runtime value produced; return sentinel.
-        return 'zeroinitializer';
-    }
     elsif ($op eq 'New') {
         return $self->_lower_new($node);
     }
@@ -2034,6 +1939,40 @@ sub _lower_assign {
     my $rhs = $node->inputs->[1];
 
     my $rhs_ref = $self->lower_value($rhs);
+
+    # Mode (fa): FieldAccess-lvalue — field store into a class object struct.
+    # Dissolves F9: the FieldAccess carries field_stash (class name) explicitly,
+    # so no ambient _method_class_name is needed to identify the class.
+    # The object pointer still comes from the ambient _method_self_name (the
+    # implicit $self in method and ADJUST body contexts).
+    if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'FieldAccess') {
+        my $field_index = $lhs->field_index;
+        my $class_name  = $lhs->field_stash;
+        my $val_repr    = _require_repr($rhs, 'Assign(FieldAccess-lvalue).rhs');
+        my $slot_idx    = $field_index + 1;
+        # Self pointer: must be in method/ADJUST body context
+        my $obj_raw = $self->{_method_self_name}
+            // die "LLVM MOP: Assign(FieldAccess-lvalue) used outside method/ADJUST body context "
+                 . "— _method_self_name not set";
+        my $obj_typed = $self->_fresh;
+        $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; Assign(FieldAccess-lvalue): typed self");
+        # Store defined=true
+        my $def_gep = $self->_fresh;
+        $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 0  ; FieldAccess-lvalue[$field_index] defined");
+        $self->_emit("  store i1 true, i1* $def_gep  ; FieldAccess-lvalue[$field_index] defined=true");
+        # Store payload
+        my $pay_gep = $self->_fresh;
+        $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 1  ; FieldAccess-lvalue[$field_index] payload");
+        my $pay_i64 = $self->_fresh;
+        if ($val_repr eq 'Bool') {
+            $self->_emit("  $pay_i64 = zext i1 $rhs_ref to i64  ; Bool->i64 FieldAccess-lvalue");
+        } else {
+            $self->_emit("  $pay_i64 = add i64 0, $rhs_ref  ; identity: $val_repr->i64 FieldAccess-lvalue");
+        }
+        $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; FieldAccess-lvalue[$field_index] payload");
+        $self->{cache}{ $node->id } = $pay_i64;
+        return $pay_i64;
+    }
 
     # Mode (a): Subscript-lvalue — element store into Array or Hash.
     if (defined $lhs && $lhs->operation eq 'Subscript') {

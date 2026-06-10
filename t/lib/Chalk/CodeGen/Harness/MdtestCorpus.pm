@@ -530,13 +530,20 @@ sub _build_node_from_rhs {
             my $ci_parent = $attrs{parent};
             # parent: "" -> undef, else string value
             $ci_parent = undef if defined $ci_parent && $ci_parent eq '';
-            my $ci_methods = $attrs{methods} // [];
-            my $ci_fields  = $attrs{fields}  // [];
+            my $ci_methods   = $attrs{methods}   // [];
+            my $ci_fields    = $attrs{fields}    // [];
+            my $ci_parent_ci = $attrs{parent_ci};  # optional ClassInfo object reference
+            # adjusts: each node ref in the list is the body node for one ADJUST block.
+            # Wrap each as a single-element arrayref for registry's body_nodes shape.
+            my $ci_adj_nodes = $attrs{adjusts} // [];
+            my $ci_adjusts   = [ map { [$_] } @$ci_adj_nodes ];
             return Chalk::IR::ClassInfo->new(
-                name    => $ci_name,
-                parent  => $ci_parent,
-                methods => (ref $ci_methods eq 'ARRAY' ? $ci_methods : [$ci_methods]),
-                fields  => (ref $ci_fields  eq 'ARRAY' ? $ci_fields  : [$ci_fields]),
+                name      => $ci_name,
+                parent    => $ci_parent,
+                parent_ci => $ci_parent_ci,
+                methods   => (ref $ci_methods eq 'ARRAY' ? $ci_methods : [$ci_methods]),
+                fields    => (ref $ci_fields  eq 'ARRAY' ? $ci_fields  : [$ci_fields]),
+                adjusts   => $ci_adjusts,
             );
         }
 

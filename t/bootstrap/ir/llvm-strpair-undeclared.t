@@ -7,6 +7,9 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
+use Chalk::MOP::Field;
 use Chalk::Target::LLVM;
 
 # I3 (R1 reopened):
@@ -36,26 +39,29 @@ unless (-x $LLI) {
 sub build_str_param_int_return_graph {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $fdef = $f->make('FieldDef',
-        field_name  => 'name',
-        field_index => 0,
-        is_param    => 1,
-        has_reader  => 0,
-        has_default => 0,
-        inputs      => [],
+    my $mf = Chalk::MOP::Field->new(
+        name       => 'name',
+        sigil      => '$',
+        class      => undef,
+        fieldix    => 0,
+        type       => 'Str',
+        attributes => [':param'],
     );
 
     # Method returns Int (not Str) — line 372 scan gets $need_strpair=0
     my $int_body = $f->make('Constant', value => 42, const_type => 'integer');
     $int_body->set_representation('Int');
-    my $meth = $f->make('MethodDef',
-        method_name => 'get_int',
-        inputs      => [ $int_body ],
+    my $mi = Chalk::IR::MethodInfo->new(
+        name        => 'get_int',
+        body        => [],
+        body_node   => $int_body,
+        return_repr => 'Int',
     );
 
-    my $cls = $f->make('ClassDecl',
-        class_name => 'StrParamIntReturn',
-        inputs     => [ $meth, $fdef ],
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'StrParamIntReturn',
+        methods => [$mi],
+        fields  => [$mf],
     );
 
     my $str_val = $f->make('Constant', value => 'hello', const_type => 'string');
@@ -64,14 +70,14 @@ sub build_str_param_int_return_graph {
     # New with Str :param — _lower_new at line ~3521 emits %StrPair instructions
     my $new_obj = $f->make('New',
         param_names => ['name'],
-        inputs      => [ $cls, $str_val ],
+        inputs      => [$ci, $str_val],
     );
     $new_obj->set_representation('Object');
 
     # Call the Int method (so the outer Return is Int, not Str)
     my $call = $f->make('MethodCall',
         method_name => 'get_int',
-        inputs      => [ $new_obj, $cls ],
+        inputs      => [$new_obj, $ci],
     );
     $call->set_representation('Int');
 
@@ -120,22 +126,25 @@ subtest 'Str-returning method: exactly one %StrPair (I3 no double-declare)' => s
     my $str_val = $f->make('Constant', value => 'world', const_type => 'string');
     $str_val->set_representation('Str');
 
-    my $meth = $f->make('MethodDef',
-        method_name => 'get_str',
-        inputs      => [ $str_val ],
+    my $mi = Chalk::IR::MethodInfo->new(
+        name        => 'get_str',
+        body        => [],
+        body_node   => $str_val,
+        return_repr => 'Str',
     );
 
-    my $cls = $f->make('ClassDecl',
-        class_name => 'StrReturn',
-        inputs     => [ $meth ],
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'StrReturn',
+        methods => [$mi],
+        fields  => [],
     );
 
-    my $new_obj = $f->make('New', param_names => [], inputs => [$cls]);
+    my $new_obj = $f->make('New', param_names => [], inputs => [$ci]);
     $new_obj->set_representation('Object');
 
     my $call = $f->make('MethodCall',
         method_name => 'get_str',
-        inputs      => [ $new_obj, $cls ],
+        inputs      => [$new_obj, $ci],
     );
     $call->set_representation('Str');
 

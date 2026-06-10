@@ -7,6 +7,8 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
 use Chalk::Target::LLVM;
 
 # I1 (R1 reopened):
@@ -37,37 +39,42 @@ sub build_dual_str_graph {
     # Method A: Constant("first" :Str)
     my $str_a = $f->make('Constant', value => 'first', const_type => 'string');
     $str_a->set_representation('Str');
-    my $meth_a = $f->make('MethodDef',
-        method_name => 'get_first',
-        inputs      => [ $str_a ],
+    my $mi_a = Chalk::IR::MethodInfo->new(
+        name        => 'get_first',
+        body        => [],
+        body_node   => $str_a,
+        return_repr => 'Str',
     );
 
     # Method B: Constant("second" :Str) — same index (0) in a fresh body_ctx
     my $str_b = $f->make('Constant', value => 'second', const_type => 'string');
     $str_b->set_representation('Str');
-    my $meth_b = $f->make('MethodDef',
-        method_name => 'get_second',
-        inputs      => [ $str_b ],
+    my $mi_b = Chalk::IR::MethodInfo->new(
+        name        => 'get_second',
+        body        => [],
+        body_node   => $str_b,
+        return_repr => 'Str',
     );
 
-    my $cls = $f->make('ClassDecl',
-        class_name => 'MultiStr',
-        inputs     => [ $meth_a, $meth_b ],
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'MultiStr',
+        methods => [$mi_a, $mi_b],
+        fields  => [],
     );
 
     my $new_obj = $f->make('New',
         param_names => [],
-        inputs      => [ $cls ],
+        inputs      => [$ci],
     );
     $new_obj->set_representation('Object');
 
     my $call = $f->make('MethodCall',
         method_name => 'get_first',
-        inputs      => [ $new_obj, $cls ],
+        inputs      => [$new_obj, $ci],
     );
     $call->set_representation('Str');
 
-    my $ret = $f->make_cfg('Return', inputs => [ $call ]);
+    my $ret = $f->make_cfg('Return', inputs => [$call]);
     return ($ret, $f);
 }
 
@@ -77,36 +84,44 @@ sub build_dual_str_graph {
 sub build_triple_str_graph {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # Three methods: "alpha", "beta", "gamma" — each body_ctx starts at idx=0
-    for my $pair (
-        ['get_alpha', 'alpha'],
-        ['get_beta',  'beta' ],
-        ['get_gamma', 'gamma'],
-    ) {
-        # (will be assembled below)
-    }
-
     my $str_a = $f->make('Constant', value => 'alpha', const_type => 'string');
     $str_a->set_representation('Str');
-    my $meth_a = $f->make('MethodDef', method_name => 'get_alpha', inputs => [$str_a]);
+    my $mi_a = Chalk::IR::MethodInfo->new(
+        name        => 'get_alpha',
+        body        => [],
+        body_node   => $str_a,
+        return_repr => 'Str',
+    );
 
     my $str_b = $f->make('Constant', value => 'beta', const_type => 'string');
     $str_b->set_representation('Str');
-    my $meth_b = $f->make('MethodDef', method_name => 'get_beta', inputs => [$str_b]);
+    my $mi_b = Chalk::IR::MethodInfo->new(
+        name        => 'get_beta',
+        body        => [],
+        body_node   => $str_b,
+        return_repr => 'Str',
+    );
 
     my $str_c = $f->make('Constant', value => 'gamma', const_type => 'string');
     $str_c->set_representation('Str');
-    my $meth_c = $f->make('MethodDef', method_name => 'get_gamma', inputs => [$str_c]);
-
-    my $cls = $f->make('ClassDecl',
-        class_name => 'TripleStr',
-        inputs     => [ $meth_a, $meth_b, $meth_c ],
+    my $mi_c = Chalk::IR::MethodInfo->new(
+        name        => 'get_gamma',
+        body        => [],
+        body_node   => $str_c,
+        return_repr => 'Str',
     );
-    my $new_obj = $f->make('New', param_names => [], inputs => [$cls]);
+
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'TripleStr',
+        methods => [$mi_a, $mi_b, $mi_c],
+        fields  => [],
+    );
+
+    my $new_obj = $f->make('New', param_names => [], inputs => [$ci]);
     $new_obj->set_representation('Object');
     my $call = $f->make('MethodCall',
         method_name => 'get_alpha',
-        inputs      => [ $new_obj, $cls ],
+        inputs      => [$new_obj, $ci],
     );
     $call->set_representation('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);

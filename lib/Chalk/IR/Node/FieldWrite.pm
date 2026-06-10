@@ -7,7 +7,7 @@ use experimental 'class';
 use Chalk::IR::Node;
 
 class Chalk::IR::Node::FieldWrite :isa(Chalk::IR::Node) {
-    # Zero-based field index (same as FieldDef::field_index).
+    # Zero-based field index (same as MOP::Field::fieldix).
     # The actual struct slot = field_index + 1 (after the vtable pointer).
     field $field_index :param :reader;
 

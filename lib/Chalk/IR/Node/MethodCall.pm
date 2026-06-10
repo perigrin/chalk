@@ -1,5 +1,5 @@
 # ABOUTME: MethodCall IR node — vtable-slot dispatch on a class instance.
-# ABOUTME: Inputs: [obj_node, ClassDecl_node, arg_1, ...]. Resolves method slot at lowering time.
+# ABOUTME: Inputs: [obj_node, ClassInfo_node, arg_1, ...]. Resolves method slot at lowering time.
 use 5.42.0;
 use utf8;
 use experimental 'class';

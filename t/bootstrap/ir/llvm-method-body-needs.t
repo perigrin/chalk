@@ -7,6 +7,9 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
+use Chalk::MOP::Field;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::TypeTag;
 
@@ -80,20 +83,20 @@ subtest 'method body Coerce(Bool->Str) emits no undeclared globals' => sub {
     $int_val->set_representation('Int');
 
     my $coerce_ib = $f->make('Coerce',
-        inputs    => [ $int_val ],
+        inputs    => [$int_val],
         from_repr => 'Int',
         to_repr   => 'Bool',
     );
     $coerce_ib->set_representation('Bool');
 
     my $coerce_bs = $f->make('Coerce',
-        inputs    => [ $coerce_ib ],
+        inputs    => [$coerce_ib],
         from_repr => 'Bool',
         to_repr   => 'Str',
     );
     $coerce_bs->set_representation('Str');
 
-    # MethodDef: coerce_str($self) -> Num { Coerce(Str->Num)("3.14") }
+    # MethodInfo: coerce_str($self) -> Num { Coerce(Str->Num)("3.14") }
     # The method's return repr is Num, the outer Return is Num.
     # The body sets _need_str_to_num_helper on $body_ctx.
     # Without G.5 fix: $ctx->{_need_str_to_num_helper} stays 0 → prologue
@@ -107,39 +110,40 @@ subtest 'method body Coerce(Bool->Str) emits no undeclared globals' => sub {
     my $str_val = $f->make('Constant', value => '3', const_type => 'string');
     $str_val->set_representation('Str');
 
-    # Also need the Coerce(Bool->Str) from above to test _need_bool_str_globals propagation.
-    # For _need_str_to_num_helper: the body node IS the Coerce(Str->Num).
     my $coerce_sn = $f->make('Coerce',
-        inputs    => [ $str_val ],
+        inputs    => [$str_val],
         from_repr => 'Str',
         to_repr   => 'Num',
     );
     $coerce_sn->set_representation('Num');
 
-    # MethodDef: coerce_str($self) -> Num { "3" -> Num = 3.0 }
-    my $meth = $f->make('MethodDef',
-        method_name => 'coerce_str',
-        inputs      => [ $coerce_sn ],
+    # MethodInfo: coerce_str($self) -> Num { "3" -> Num = 3.0 }
+    my $mi = Chalk::IR::MethodInfo->new(
+        name        => 'coerce_str',
+        body        => [],
+        body_node   => $coerce_sn,
+        return_repr => 'Num',
     );
 
-    my $cls = $f->make('ClassDecl',
-        class_name => 'StrNumClass',
-        inputs     => [ $meth ],
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'StrNumClass',
+        methods => [$mi],
+        fields  => [],
     );
 
     my $new_obj = $f->make('New',
         param_names => [],
-        inputs      => [ $cls ],
+        inputs      => [$ci],
     );
     $new_obj->set_representation('Object');
 
     my $call = $f->make('MethodCall',
         method_name => 'coerce_str',
-        inputs      => [ $new_obj, $cls ],
+        inputs      => [$new_obj, $ci],
     );
     $call->set_representation('Num');  # Outer return is Num, NOT Str
 
-    my $ret = $f->make_cfg('Return', inputs => [ $call ]);
+    my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     # Lower to LLVM IR
     my $ll_text;
@@ -148,30 +152,15 @@ subtest 'method body Coerce(Bool->Str) emits no undeclared globals' => sub {
         or do { diag("error: $@"); done_testing(); return };
 
     # The .ll must declare @chalk_str_to_num (propagated from body_ctx to ctx).
-    # Before G.5 fix: this declaration is MISSING because:
-    #   - outer result is Num (not Str), so the Str-prologue path at line 668 does NOT fire
-    #   - Num-prologue path does NOT emit @chalk_str_to_num
-    #   - _need_str_to_num_helper is set on $body_ctx but NOT propagated to $ctx
-    #   - line 753 check: $ctx->{_need_str_to_num_helper} is false -> helper not emitted
-    #   - method body calls @chalk_str_to_num which is undefined -> lli rejects
     ok($ll_text =~ /define.*chalk_str_to_num/, '.ll defines @chalk_str_to_num function (body_ctx flag propagated)')
         or diag("missing chalk_str_to_num DEFINITION in .ll (F6 bug: _need_str_to_num_helper not propagated);\n"
                 . "first 600 chars:\n" . substr($ll_text, 0, 600));
 
-    # lli acceptance: the pre-class-registry prologue does not have the declaration,
-    # but the post-class emission block adds it.  lli might still fail for unrelated
-    # reasons (e.g. the MethodCall Num-return type dispatch uses i64 unconditionally
-    # — that is a separate pre-existing limitation of the MOP lowering path, NOT F6).
-    # We only check that the declaration is present (above), not that lli accepts it,
-    # since the MethodCall Num-dispatch limitation is orthogonal to F6.
     my ($lli_out, undef, $err) = lli_run($ret);
     if (!defined $err) {
         like($lli_out, qr/^Num:3/, 'lli output is Num:3 (Str "3" -> Num 3.0)')
             or diag("lli_out='${\($lli_out//'undef')}'");
     } else {
-        # Tolerate lli failure due to pre-existing MethodCall Num-return type mismatch.
-        # The test confirms the F6 fix: _need_str_to_num_helper IS propagated and the
-        # declaration IS present (test 2). The MethodCall type mismatch is a separate issue.
         ok(1, 'lli test skipped: MethodCall Num-return type dispatch is a pre-existing limitation');
     }
 };
@@ -183,12 +172,6 @@ subtest 'method body Coerce(Bool->Str) emits no undeclared globals' => sub {
 subtest 'method body _need_memcmp propagated to prologue' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # Build a class with a field that has hash-key type (Str), which triggers
-    # _need_memcmp when the method body reads it. Use FieldAccess with a Str repr.
-    # A FieldAccess(:Str) in a method body triggers hash-key operations via memcmp.
-    # For simplicity, test that the _need_memcmp propagation doesn't BREAK an
-    # existing passing test (the actual hash-memcmp path is covered by array-hash tests).
-
     # Build a method that reads a Str field (triggers _need_strpair at minimum)
     my $field_read = $f->make('FieldAccess',
         field_index => 0,
@@ -197,23 +180,26 @@ subtest 'method body _need_memcmp propagated to prologue' => sub {
     );
     $field_read->set_representation('Str');
 
-    my $fdef = $f->make('FieldDef',
-        field_name  => 'val',
-        field_index => 0,
-        is_param    => 1,
-        has_reader  => 0,
-        has_default => 0,
-        inputs      => [],
+    my $mf = Chalk::MOP::Field->new(
+        name       => 'val',
+        sigil      => '$',
+        class      => undef,
+        fieldix    => 0,
+        type       => 'Str',
+        attributes => [':param'],
     );
 
-    my $meth = $f->make('MethodDef',
-        method_name => 'get_val',
-        inputs      => [ $field_read ],
+    my $mi = Chalk::IR::MethodInfo->new(
+        name        => 'get_val',
+        body        => [],
+        body_node   => $field_read,
+        return_repr => 'Str',
     );
 
-    my $cls = $f->make('ClassDecl',
-        class_name => 'StrClass',
-        inputs     => [ $meth, $fdef ],
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'StrClass',
+        methods => [$mi],
+        fields  => [$mf],
     );
 
     my $str_val = $f->make('Constant', value => 'hello', const_type => 'string');
@@ -221,17 +207,17 @@ subtest 'method body _need_memcmp propagated to prologue' => sub {
 
     my $new_obj = $f->make('New',
         param_names => ['val'],
-        inputs      => [ $cls, $str_val ],
+        inputs      => [$ci, $str_val],
     );
     $new_obj->set_representation('Object');
 
     my $call = $f->make('MethodCall',
         method_name => 'get_val',
-        inputs      => [ $new_obj, $cls ],
+        inputs      => [$new_obj, $ci],
     );
     $call->set_representation('Str');
 
-    my $ret = $f->make_cfg('Return', inputs => [ $call ]);
+    my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     my $ll_text;
     eval { $ll_text = Chalk::Target::LLVM->lower($ret) };
@@ -263,11 +249,6 @@ subtest 'method body _need_memcmp propagated to prologue' => sub {
 subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # Build: HashRef(a=>1) -> Subscript("a") :Int inside a method body.
-    # The Subscript(Hash) lowering calls _lower_hash_read which sets _need_memcmp=1.
-    # When lowered inside a method body (fresh $body_ctx), _need_memcmp must
-    # propagate to the outer $ctx so the post-class emission block can emit
-    # the declare.
     my $ka = $f->make('Constant', value => 'a', const_type => 'string');
     $ka->set_representation('Str');
     my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
@@ -283,29 +264,32 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
     $val->set_representation('Int');
 
     # Wrap in a class method body — the outer Return is Int.
-    my $meth = $f->make('MethodDef',
-        method_name => 'read_hash',
-        inputs      => [ $val ],
+    my $mi = Chalk::IR::MethodInfo->new(
+        name        => 'read_hash',
+        body        => [],
+        body_node   => $val,
+        return_repr => 'Int',
     );
 
-    my $cls = $f->make('ClassDecl',
-        class_name => 'HashBodyClass',
-        inputs     => [ $meth ],
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'HashBodyClass',
+        methods => [$mi],
+        fields  => [],
     );
 
     my $new_obj = $f->make('New',
         param_names => [],
-        inputs      => [ $cls ],
+        inputs      => [$ci],
     );
     $new_obj->set_representation('Object');
 
     my $call = $f->make('MethodCall',
         method_name => 'read_hash',
-        inputs      => [ $new_obj, $cls ],
+        inputs      => [$new_obj, $ci],
     );
     $call->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [ $call ]);
+    my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     my $ll_text;
     eval { $ll_text = Chalk::Target::LLVM->lower($ret) };
@@ -313,8 +297,6 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
         or do { diag("error: $@"); done_testing(); return };
 
     # The .ll MUST declare i32 @memcmp — set by _lower_hash_read in the method body.
-    # Without H1 fix: missing declare -> lli rejects with "use of undefined value '@memcmp'".
-    # With H1 fix: post-class re-emit block adds the declare -> lli accepts.
     like($ll_text, qr/declare i32 \@memcmp/,
         '.ll contains `declare i32 @memcmp` (propagated from method body to post-class emit)')
         or diag("missing 'declare i32 \@memcmp' in .ll;\n"

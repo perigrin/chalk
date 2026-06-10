@@ -3,22 +3,16 @@
 `feature class` MOP idioms: class declaration, fields, methods, ADJUST blocks,
 and inheritance via `:isa`.
 
-All idioms in this topic are `L: GAP` — but the GAP means "not modelled YET,"
-not "needs the interpreter." `feature class` is statically/lexically declared, so
-an object is a static `{class*, fields}` struct, a field read is a known offset
-load, and method dispatch is a known per-class vtable slot + indirect call (no
-runtime `@ISA` mutation in the subset). These are all runtime-free (RF); they are
-GAPs only until the MOP object-struct + static-vtable lowering is modelled
-(campaign group G5), NOT a libperl/Scalar-SV dependency. Behavior is specified by
-perl (the sole oracle); the IR shape records the honest GAP reason rather than
-constructing a partial graph.
+All idioms in this topic are `L: GREEN` — `feature class` is statically/lexically
+declared, so an object is a static `{class*, fields}` struct, a field read is a
+known offset load, and method dispatch is a known per-class vtable slot + indirect
+call (no runtime `@ISA` mutation in the subset). These are all runtime-free (RF).
 
 ## class-simple
 
 A minimal `class C {}` with no fields or methods. Instantiating it produces an
 object whose `ref()` is the class name. Because the class is statically declared,
-the object is a static `{class*, fields}` struct — runtime-free; lowered via G5
-MOP static vtable + object struct.
+the object is a static `{class*, fields}` struct — runtime-free.
 
 ```perl
 # source
@@ -35,7 +29,7 @@ context: scalar
 ```
 
 ```ir
-%cls    = ClassDecl(class_name: "Empty")
+%cls    = ClassInfo(name: "Empty")
 %new_e  = New(%cls) :Object
 %result = Ref(%new_e) :Str
 return %result
@@ -47,7 +41,7 @@ L: GREEN
 A field declared with `:param` requires the constructor to accept a named
 argument. A method that returns the field value reads from the object struct at a
 known offset — a typed struct field, not a Scalar SV* slot. The read is
-runtime-free; lowered via G5 MOP static vtable + object struct.
+runtime-free.
 
 ```perl
 # source
@@ -68,9 +62,9 @@ context: scalar
 
 ```ir
 %fa     = FieldAccess(field_index: 0, field_stash: "Animal") :Str
-%meth   = MethodDef(%fa, method_name: "name")
-%fdef   = FieldDef(field_name: "name", field_index: 0, is_param: true, has_reader: false, has_default: false)
-%cls    = ClassDecl(%meth, %fdef, class_name: "Animal")
+%mi     = MethodInfo(name: "name", body_node: %fa, return_repr: "Str")
+%mf     = MOP::Field(name: "name", fieldix: 0, param: true, reader: false, has_default: false, type: "Str")
+%cls    = ClassInfo(name: "Animal", methods: [%mi], fields: [%mf])
 %nval   = Constant("cat") :Str
 %new_a  = New(%cls, %nval, param_names: "name") :Object
 %result = MethodCall(%new_a, %cls, method_name: "name") :Str
@@ -83,8 +77,7 @@ L: GREEN
 Fields may combine `:param` (constructor binding) and `:reader` (auto-generated
 accessor method). The `:reader` attribute tells the MOP to synthesize a method
 that returns the field value — a known vtable slot returning a known struct
-offset load, statically resolved. Runtime-free; lowered via G5 MOP static vtable
-with synthesized reader methods.
+offset load, statically resolved. Runtime-free.
 
 ```perl
 # source
@@ -104,9 +97,9 @@ context: scalar
 ```
 
 ```ir
-%fd_l   = FieldDef(field_name: "left",  field_index: 0, is_param: true, has_reader: true, has_default: false, field_repr: "Int")
-%fd_r   = FieldDef(field_name: "right", field_index: 1, is_param: true, has_reader: true, has_default: false, field_repr: "Int")
-%cls    = ClassDecl(%fd_l, %fd_r, class_name: "Pair")
+%mf_l   = MOP::Field(name: "left",  fieldix: 0, param: true, reader: true, has_default: false, type: "Int")
+%mf_r   = MOP::Field(name: "right", fieldix: 1, param: true, reader: true, has_default: false, type: "Int")
+%cls    = ClassInfo(name: "Pair", fields: [%mf_l, %mf_r])
 %lval   = Constant(10) :Int
 %rval   = Constant(20) :Int
 %new_p  = New(%cls, %lval, %rval, param_names: "left,right") :Object
@@ -121,8 +114,7 @@ L: GREEN
 
 A method that ignores `$self` and returns a literal value is the simplest
 non-trivial method. The dispatch path is a known per-class vtable slot + indirect
-call (static, no runtime `@ISA` mutation), so it is runtime-free; lowered via G5
-MOP static vtable emission.
+call (static, no runtime `@ISA` mutation), so it is runtime-free.
 
 ```perl
 # source
@@ -142,8 +134,8 @@ context: scalar
 
 ```ir
 %body   = Constant(42) :Int
-%meth   = MethodDef(%body, method_name: "greet")
-%cls    = ClassDecl(%meth, class_name: "Greeter")
+%mi     = MethodInfo(name: "greet", body_node: %body, return_repr: "Int")
+%cls    = ClassInfo(name: "Greeter", methods: [%mi])
 %new_g  = New(%cls) :Object
 %result = MethodCall(%new_g, %cls, method_name: "greet") :Int
 return %result
@@ -155,8 +147,7 @@ L: GREEN
 A method that mutates a field (`$n += 1`) followed by a method that reads the
 same field exercises the full object-mutation + read sequence. The field write is
 a store to a known struct offset and the read is a load from the same offset —
-typed struct fields, not Scalar SV* slots. Both are runtime-free; lowered via G5
-MOP with FieldAccess + FieldWrite in method body context.
+typed struct fields, not Scalar SV* slots. Both are runtime-free.
 
 ```perl
 # source
@@ -178,15 +169,16 @@ context: scalar
 ```
 
 ```ir
-%fa_n      = FieldAccess(field_index: 0, field_stash: "Counter") :Int
+%fa_n_lv   = FieldAccess(field_index: 0, field_stash: "Counter") :Int
+%fa_n_rd   = FieldAccess(field_index: 0, field_stash: "Counter") :Int
 %one       = Constant(1) :Int
-%n_plus1   = Add(%fa_n, %one) :Int
-%fw_n      = FieldWrite(%n_plus1, field_index: 0) :Int
-%meth_inc  = MethodDef(%fw_n, method_name: "inc")
+%n_plus1   = Add(%fa_n_rd, %one) :Int
+%fw_n      = Assign(%fa_n_lv, %n_plus1) :Int
+%mi_inc    = MethodInfo(name: "inc", body_node: %fw_n, return_repr: "Int")
 %fa_n2     = FieldAccess(field_index: 0, field_stash: "Counter") :Int
-%meth_val  = MethodDef(%fa_n2, method_name: "val")
-%fdef_n    = FieldDef(field_name: "n", field_index: 0, is_param: true, has_reader: false, has_default: false, field_repr: "Int")
-%cls       = ClassDecl(%meth_inc, %meth_val, %fdef_n, class_name: "Counter")
+%mi_val    = MethodInfo(name: "val", body_node: %fa_n2, return_repr: "Int")
+%mf_n      = MOP::Field(name: "n", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
+%cls       = ClassInfo(name: "Counter", methods: [%mi_inc, %mi_val], fields: [%mf_n])
 %ten       = Constant(10) :Int
 %new_c     = New(%cls, %ten, param_names: "n") :Object
 %inc_call  = MethodCall(%new_c, %cls, method_name: "inc") :Int
@@ -201,8 +193,7 @@ L: GREEN
 A child class that inherits a method from a parent class via `:isa(Parent)`.
 The inherited-method lookup is a static vtable/MRO resolution at compile time
 (classes are lexically declared, no runtime `@ISA` mutation in the subset), so it
-is runtime-free; lowered via G5 MOP compile-time MRO flatten (parent vtable
-slots copied into child at lowering time).
+is runtime-free.
 
 ```perl
 # source
@@ -221,9 +212,9 @@ context: scalar
 
 ```ir
 %kind_body = Constant("base") :Str
-%meth_kind = MethodDef(%kind_body, method_name: "kind")
-%base_cls  = ClassDecl(%meth_kind, class_name: "Base")
-%child_cls = ClassDecl(%base_cls, class_name: "Child", parent_name: "Base")
+%mi_kind   = MethodInfo(name: "kind", body_node: %kind_body, return_repr: "Str")
+%base_cls  = ClassInfo(name: "Base", methods: [%mi_kind])
+%child_cls = ClassInfo(name: "Child", parent: "Base", parent_ci: %base_cls)
 %new_c     = New(%child_cls) :Object
 %result    = MethodCall(%new_c, %child_cls, method_name: "kind") :Str
 return %result
@@ -235,7 +226,7 @@ L: GREEN
 An `ADJUST` block runs after the constructor has bound all `:param` fields. It
 can compute derived fields from the constructor arguments. ADJUST is constructor
 code writing known struct field offsets — typed struct fields, not Scalar SV*
-slots — so it is runtime-free; lowered via G5 MOP ADJUST-as-constructor-code.
+slots — so it is runtime-free.
 
 ```perl
 # source
@@ -260,13 +251,13 @@ context: scalar
 %fa_val    = FieldAccess(field_index: 0, field_stash: "Box") :Int
 %two       = Constant(2) :Int
 %dbl_val   = Multiply(%fa_val, %two) :Int
-%fw_dbl    = FieldWrite(%dbl_val, field_index: 1) :Int
-%adj       = AdjustBlock(%fw_dbl)
+%fa_dbl_lv = FieldAccess(field_index: 1, field_stash: "Box") :Int
+%fw_dbl    = Assign(%fa_dbl_lv, %dbl_val) :Int
 %fa_dbl    = FieldAccess(field_index: 1, field_stash: "Box") :Int
-%meth_dbl  = MethodDef(%fa_dbl, method_name: "double")
-%fdef_val  = FieldDef(field_name: "val",    field_index: 0, is_param: true,  has_reader: false, has_default: false, field_repr: "Int")
-%fdef_dbl  = FieldDef(field_name: "double", field_index: 1, is_param: false, has_reader: false, has_default: false, field_repr: "Int")
-%cls       = ClassDecl(%meth_dbl, %fdef_val, %fdef_dbl, %adj, class_name: "Box")
+%mi_dbl    = MethodInfo(name: "double", body_node: %fa_dbl, return_repr: "Int")
+%mf_val    = MOP::Field(name: "val",    fieldix: 0, param: true,  reader: false, has_default: false, type: "Int")
+%mf_dbl    = MOP::Field(name: "double", fieldix: 1, param: false, reader: false, has_default: false, type: "Int")
+%cls       = ClassInfo(name: "Box", methods: [%mi_dbl], fields: [%mf_val, %mf_dbl], adjusts: [%fw_dbl])
 %seven     = Constant(7) :Int
 %new_b     = New(%cls, %seven, param_names: "val") :Object
 %result    = MethodCall(%new_b, %cls, method_name: "double") :Int

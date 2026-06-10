@@ -1,4 +1,4 @@
-# ABOUTME: Tests for G5 feature-class MOP lowering: ClassDecl, MethodDef, New, MethodCall, FieldWrite.
+# ABOUTME: Tests for G5 feature-class MOP lowering: ClassInfo, MethodInfo, MOP::Field, New, MethodCall.
 # ABOUTME: Verifies 7 class idioms lower correctly to LLVM IR with lli==perl (libperl-free).
 use 5.42.0;
 use utf8;
@@ -7,6 +7,9 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
+use Chalk::MOP::Field;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::TypeTag;
@@ -58,51 +61,41 @@ sub lli_run {
 subtest 'method-simple: $g->greet => 42 (Int)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # MethodDef body: greet($self) { return 42 }
+    # Method body: greet($self) { return 42 }
     my $body42 = $f->make('Constant', value => 42, const_type => 'integer');
     $body42->set_representation('Int');
 
-    # ClassDecl for Greeter: inputs = [MethodDef nodes...]
-    # We create a temporary ClassDecl first (MethodDef needs ClassDecl as input[0])
-    # then build ClassDecl with MethodDef as inputs.
-    # Workaround: build MethodDef with a placeholder, then build ClassDecl with MethodDef.
-    # Since ClassDecl is the anchor, and MethodDef needs to reference it, we use a
-    # two-pass approach: first build the ClassDecl with no methods, then build MethodDef
-    # referencing it, then build a FINAL ClassDecl with MethodDef as inputs.
-    # For the corpus ir-block shape, ClassDecl is declared first, MethodDef second;
-    # ClassDecl's inputs are the MethodDef nodes.
-    # But hash-consing: if ClassDecl's inputs include MethodDef which includes ClassDecl,
-    # we have a cycle. To break the cycle: MethodDef does NOT reference ClassDecl;
-    # instead ClassDecl references MethodDef.
-    # MethodDef.inputs = [body_node] (just the body, no ClassDecl reference)
-    # ClassDecl.inputs = [MethodDef1, MethodDef2, ..., FieldDef1, ...]
-    my $meth = $f->make('MethodDef',
-        method_name => 'greet',
-        inputs      => [ $body42 ],   # just the body node; no ClassDecl
+    # MethodInfo for greet
+    my $mi = Chalk::IR::MethodInfo->new(
+        name        => 'greet',
+        body        => [],
+        body_node   => $body42,
+        return_repr => 'Int',
     );
 
-    # ClassDecl for Greeter: inputs = [MethodDef nodes]
-    my $cls = $f->make('ClassDecl',
-        class_name  => 'Greeter',
-        inputs      => [ $meth ],
+    # ClassInfo for Greeter
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'Greeter',
+        methods => [$mi],
+        fields  => [],
     );
 
     # New: Greeter->new (no :param fields)
     my $new_g = $f->make('New',
         param_names => [],
-        inputs      => [ $cls ],
+        inputs      => [$ci],
     );
     $new_g->set_representation('Object');
 
     # MethodCall: $g->greet
     my $result = $f->make('MethodCall',
         method_name => 'greet',
-        inputs      => [ $new_g, $cls ],
+        inputs      => [$new_g, $ci],
     );
     $result->set_representation('Int');
 
     # Return node
-    my $ret = $f->make_cfg('Return', inputs => [ $result ]);
+    my $ret = $f->make_cfg('Return', inputs => [$result]);
 
     # Lower to LLVM IR and run
     my ($lli_out, $ll_text);
@@ -132,24 +125,25 @@ subtest 'class-simple: ref($e) => "Empty" (Str)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     # Empty class: no methods, no fields
-    my $cls = $f->make('ClassDecl',
-        class_name  => 'Empty',
-        inputs      => [],  # no methods or fields
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'Empty',
+        methods => [],
+        fields  => [],
     );
 
     my $new_e = $f->make('New',
         param_names => [],
-        inputs      => [ $cls ],
+        inputs      => [$ci],
     );
     $new_e->set_representation('Object');
 
     # ref($obj) = load class-name from vtable slot 0
     my $ref_result = $f->make('Ref',
-        inputs => [ $new_e ],
+        inputs => [$new_e],
     );
     $ref_result->set_representation('Str');
 
-    my $ret = $f->make_cfg('Return', inputs => [ $ref_result ]);
+    my $ret = $f->make_cfg('Return', inputs => [$ref_result]);
 
     my ($lli_out, $ll_text);
     eval { ($lli_out, $ll_text) = lli_run($ret) };
@@ -174,34 +168,37 @@ subtest 'class-simple: ref($e) => "Empty" (Str)' => sub {
 subtest 'field-basic: $a->name => "cat" (Str)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # FieldDef: $name :param at index 0 (no ClassDecl reference; ClassDecl takes it as input)
-    my $fdef = $f->make('FieldDef',
-        field_name  => 'name',
-        field_index => 0,
-        is_param    => true,
-        has_reader  => false,
-        has_default => false,
-        inputs      => [],
+    # MOP::Field: $name :param at index 0
+    my $mf = Chalk::MOP::Field->new(
+        name       => 'name',
+        sigil      => '$',
+        class      => undef,
+        fieldix    => 0,
+        type       => 'Str',
+        attributes => [':param'],
     );
 
-    # MethodDef: name($self) { return $name }
-    # The body is a FieldAccess: load field[0] from $self (implicit in method body context)
+    # FieldAccess: load field[0] from $self (implicit in method body context)
     my $field_read = $f->make('FieldAccess',
         field_index  => 0,
         field_stash  => 'Animal',
-        inputs       => [],   # $self is implicit in FieldAccess-in-method context
+        inputs       => [],
     );
     $field_read->set_representation('Str');
 
-    my $meth = $f->make('MethodDef',
-        method_name => 'name',
-        inputs      => [ $field_read ],  # just the body node
+    # MethodInfo for name
+    my $mi = Chalk::IR::MethodInfo->new(
+        name        => 'name',
+        body        => [],
+        body_node   => $field_read,
+        return_repr => 'Str',
     );
 
-    # ClassDecl for Animal: inputs = [MethodDef, FieldDef]
-    my $cls = $f->make('ClassDecl',
-        class_name  => 'Animal',
-        inputs      => [ $meth, $fdef ],
+    # ClassInfo for Animal: methods=[mi], fields=[mf]
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'Animal',
+        methods => [$mi],
+        fields  => [$mf],
     );
 
     # New: Animal->new(name => 'cat')
@@ -210,18 +207,18 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
 
     my $new_a = $f->make('New',
         param_names => ['name'],
-        inputs      => [ $cls, $name_val ],
+        inputs      => [$ci, $name_val],
     );
     $new_a->set_representation('Object');
 
     # MethodCall: $a->name
     my $result = $f->make('MethodCall',
         method_name => 'name',
-        inputs      => [ $new_a, $cls ],
+        inputs      => [$new_a, $ci],
     );
     $result->set_representation('Str');
 
-    my $ret = $f->make_cfg('Return', inputs => [ $result ]);
+    my $ret = $f->make_cfg('Return', inputs => [$result]);
 
     my ($lli_out, $ll_text);
     eval { ($lli_out, $ll_text) = lli_run($ret) };
@@ -249,33 +246,36 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
 subtest 'adversarial: MethodCall on absent method dies loudly at lowering' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # MethodDef: greet (no 'wave' method defined)
+    # MethodInfo: greet (no 'wave' method defined)
     my $body42 = $f->make('Constant', value => 42, const_type => 'integer');
     $body42->set_representation('Int');
-    my $meth = $f->make('MethodDef',
-        method_name => 'greet',
-        inputs      => [ $body42 ],
+    my $mi = Chalk::IR::MethodInfo->new(
+        name        => 'greet',
+        body        => [],
+        body_node   => $body42,
+        return_repr => 'Int',
     );
 
-    my $cls = $f->make('ClassDecl',
-        class_name  => 'Greeter',
-        inputs      => [ $meth ],
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'Greeter',
+        methods => [$mi],
+        fields  => [],
     );
 
     my $new_g = $f->make('New',
         param_names => [],
-        inputs      => [ $cls ],
+        inputs      => [$ci],
     );
     $new_g->set_representation('Object');
 
     # Call 'wave' which is NOT defined — must die at lowering
     my $bad_call = $f->make('MethodCall',
         method_name => 'wave',   # absent from vtable!
-        inputs      => [ $new_g, $cls ],
+        inputs      => [$new_g, $ci],
     );
     $bad_call->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [ $bad_call ]);
+    my $ret = $f->make_cfg('Return', inputs => [$bad_call]);
 
     my $died = false;
     my $error_msg = '';
@@ -291,7 +291,7 @@ subtest 'adversarial: MethodCall on absent method dies loudly at lowering' => su
 };
 
 # ---------------------------------------------------------------------------
-# Test: Adversarial — MethodCall on undeclared class (no ClassDecl in graph)
+# Test: Adversarial — MethodCall on undeclared class (no ClassInfo in graph)
 # ---------------------------------------------------------------------------
 
 subtest 'adversarial: MethodCall without ClassDecl dies loudly at lowering' => sub {
@@ -300,36 +300,40 @@ subtest 'adversarial: MethodCall without ClassDecl dies loudly at lowering' => s
     # KnownClass has 'foo' but NOT 'bar'
     my $body = $f->make('Constant', value => 1, const_type => 'integer');
     $body->set_representation('Int');
-    my $foo_meth = $f->make('MethodDef',
-        method_name => 'foo',
-        inputs      => [ $body ],
+    my $foo_mi = Chalk::IR::MethodInfo->new(
+        name        => 'foo',
+        body        => [],
+        body_node   => $body,
+        return_repr => 'Int',
     );
-    my $cls = $f->make('ClassDecl',
-        class_name  => 'KnownClass',
-        inputs      => [ $foo_meth ],
+    my $ci = Chalk::IR::ClassInfo->new(
+        name    => 'KnownClass',
+        methods => [$foo_mi],
+        fields  => [],
     );
 
     my $new_k = $f->make('New',
         param_names => [],
-        inputs      => [ $cls ],
+        inputs      => [$ci],
     );
     $new_k->set_representation('Object');
 
     # UndeclaredClass has NO methods
-    my $cls2 = $f->make('ClassDecl',
-        class_name  => 'UndeclaredClass',
-        inputs      => [],
+    my $ci2 = Chalk::IR::ClassInfo->new(
+        name    => 'UndeclaredClass',
+        methods => [],
+        fields  => [],
     );
 
     # MethodCall on an object of KnownClass but using UndeclaredClass as the descriptor
     # (no methods in UndeclaredClass -> must die)
     my $bad_call = $f->make('MethodCall',
         method_name => 'bar',
-        inputs      => [ $new_k, $cls2 ],
+        inputs      => [$new_k, $ci2],
     );
     $bad_call->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [ $bad_call ]);
+    my $ret = $f->make_cfg('Return', inputs => [$bad_call]);
 
     my $died = false;
     eval { Chalk::Target::LLVM->lower($ret) };

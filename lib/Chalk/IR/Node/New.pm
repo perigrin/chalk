@@ -1,5 +1,5 @@
 # ABOUTME: New IR node — constructs a class instance (malloc + vtable bind + :param binding).
-# ABOUTME: Inputs: [ClassDecl, param_val_1, param_val_2, ...] with param_name_i attrs.
+# ABOUTME: Inputs: [ClassInfo, param_val_1, param_val_2, ...] with param_name_i attrs.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -15,7 +15,7 @@ class Chalk::IR::Node::New :isa(Chalk::IR::Node) {
     method operation() { 'New' }
 
     method class_decl_node() {
-        # inputs[0] is always the ClassDecl node
+        # inputs[0] is the ClassInfo (or ClassDecl) node
         return $self->inputs->[0];
     }
 
