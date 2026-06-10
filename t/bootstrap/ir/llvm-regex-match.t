@@ -344,6 +344,89 @@ subtest 'T4 groups transparent to matching' => sub {
 };
 
 # ---------------------------------------------------------------------------
+# Escape semantics (review F1, LIVE): byte escapes \t \n \r \f \a \e \0 \xHH
+# must match the CONTROL byte, not the literal letter; assertion/unknown
+# alphanumeric escapes (\b \B \A \z \Z \G \p ...) must DIE GAP, never silently
+# literalize. lib/ uses s/\t/, \bRETVAL\b, /\A-?\d+\z/, [^\x20-\x7E].
+# ---------------------------------------------------------------------------
+
+subtest 'escape: \\t matches a TAB byte, not letter t' => sub {
+    try_match("a\tb", 'a\\tb', 'Bool:1', '"a<TAB>b" =~ /a\\tb/ (escape = tab byte)');
+    try_match('atb',  'a\\tb', 'Bool:',  '"atb"    !~ /a\\tb/ (NOT the literal letter t)');
+};
+
+subtest 'escape: \\n matches a NEWLINE byte' => sub {
+    try_match("a\nb", 'a\\nb', 'Bool:1', 'newline byte matched by \\n');
+    try_match('anb',  'a\\nb', 'Bool:',  'literal n NOT matched by \\n');
+};
+
+subtest 'escape: \\x hex escape matches the encoded byte' => sub {
+    try_match('axb', 'a\\x78b', 'Bool:1', '\\x78 is letter x by byte value');
+    try_match('aXb', 'a\\x78b', 'Bool:',  '\\x78 does not match X');
+};
+
+subtest 'escape: \\t inside a character class' => sub {
+    try_match("a\t", '[\\t]', 'Bool:1', '[\\t] matches a tab');
+    try_match('at',  '[\\t]', 'Bool:',  '[\\t] does not match letter t');
+};
+
+subtest 'escape: assertion/unknown alphanumeric escapes die GAP' => sub {
+    for my $pat ('a\\bb', '\\Afoo', 'foo\\z', '\\p{L}', 'a\\Bb') {
+        my $f = _mk();
+        my $m = match_node($f, 'abc', $pat);
+        my $ret = $f->make_cfg('Return', inputs => [$m]);
+        eval { Chalk::Target::LLVM->lower($ret) };
+        like($@, qr/GAP/, "pattern '$pat' dies as a loud GAP (not silent literal)");
+    }
+};
+
+# ---------------------------------------------------------------------------
+# Anchor semantics (review F2/F7): perl's $ also matches BEFORE a final
+# newline; an escaped backslash before a trailing $ does not demote the
+# anchor (backslash-run parity, not single-char lookbehind).
+# ---------------------------------------------------------------------------
+
+subtest '$ anchor matches before a trailing newline (perl semantics)' => sub {
+    try_match("foo\n",  'foo$',  'Bool:1', '"foo\\n" =~ /foo$/ ($ before final newline)');
+    try_match("foo\nx", 'foo$',  'Bool:',  '"foo\\nx" !~ /foo$/ (newline not final)');
+    try_match("\n",     '^$',    'Bool:1', '"\\n" =~ /^$/ (empty line)');
+    try_match('x',      '^$',    'Bool:',  '"x" !~ /^$/');
+};
+
+subtest 'trailing \\\\$ keeps the anchor (escaped backslash, then $)' => sub {
+    # Pattern chars: a \ \ $ — perl reads literal a, literal backslash, ANCHOR.
+    try_match("a\\",  'a\\\\$', 'Bool:1', '"a\\" =~ /a\\\\$/ (anchor after escaped backslash)');
+    try_match('a\\b', 'a\\\\$', 'Bool:',  '"a\\b" !~ /a\\\\$/ (backslash not at end)');
+};
+
+# ---------------------------------------------------------------------------
+# Guard pack (review): unsupported constructs DIE GAP, never silently diverge.
+# ---------------------------------------------------------------------------
+
+subtest 'guards: flags and mid-pattern anchors die GAP' => sub {
+    # Flags on the match side must not be silently ignored (/i would compile a
+    # case-sensitive matcher).
+    my $f = _mk();
+    my $subj = $f->make('Constant', value => 'FOO', const_type => 'string');
+    $subj->set_representation('Str');
+    my $m = $f->make('RegexMatch', pattern => 'foo', flags => 'i', inputs => [$subj]);
+    $m->set_representation('Bool');
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    eval { Chalk::Target::LLVM->lower($ret) };
+    like($@, qr/GAP/, 'RegexMatch with /i flags dies GAP (not silently case-sensitive)');
+
+    # Mid-pattern ^ and $ are assertions in perl (usually unmatchable), not
+    # literal bytes.
+    for my $pat ('a^b', 'a$b') {
+        my $f2 = _mk();
+        my $m2 = match_node($f2, 'a^b', $pat);
+        my $r2 = $f2->make_cfg('Return', inputs => [$m2]);
+        eval { Chalk::Target::LLVM->lower($r2) };
+        like($@, qr/GAP/, "mid-pattern anchor in '$pat' dies GAP (not literal byte)");
+    }
+};
+
+# ---------------------------------------------------------------------------
 # qr// (R2 shape): a compiled-regex VALUE is a Constant(const_type='regex')
 # with :Regex repr; applying it with =~ is the existing Match BinOp. The
 # lowering statically resolves the rhs pattern (compile-time literal) and

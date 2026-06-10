@@ -470,10 +470,13 @@ perl regex engine.
 Captures are plain SSA offset pairs into the subject buffer — **no `%MatchResult`
 struct is materialized**; a struct ABI would only be needed at a function
 boundary (a qr value escaping static tracking), which is a loud GAP today.
-Supported feature set: literals, `^`/`$` anchors, character classes
-(`[...]`/`[^...]`/`\d\w\s`/`.`), greedy quantifiers (`*`/`+`/`?`/`{n,m}`),
-capture groups, `(?:...)`. Alternation, `\Q...\E`, `\G`, `/g`, non-greedy
-quantifiers, and backrefs are tracked follow-ups that die as explicit GAPs.
+Supported feature set: literals, `^`/`$` anchors (including perl's
+match-before-a-final-newline `$` rule), byte escapes (`\t\n\r\f\a\e\0`/`\xHH`),
+character classes (`[...]`/`[^...]`/`\d\w\s`/`.`), greedy quantifiers
+(`*`/`+`/`?`/`{n,m}`), capture groups, `(?:...)`. Alternation, `\Q...\E`, `\G`,
+`/g`, non-greedy quantifiers, backrefs, `NotMatch` (`!~`), regex flags, and the
+assertion escapes (`\b\B\A\z\Z`) are tracked follow-ups that die as explicit
+GAPs (git-zhi `019eb073`).
 
 ---
 

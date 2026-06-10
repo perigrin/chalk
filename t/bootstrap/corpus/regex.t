@@ -24,10 +24,10 @@ unless (-f $REGEX_MD) {
 # ---------------------------------------------------------------------------
 # SECTION 1: Parse regex.md and verify case inventory
 #
-# All 3 regex idioms (R1-R3) must be present.  Every case is a pure-GAP
-# (Str/Scalar + regex engine; no runtime-free regex lowering in the current
-# Int/Num slice).  The corpus MUST record these GAPs honestly — a GREEN claim
-# for any of them would be a lie and must fail.
+# All regex idioms (R1-R6) must be present. R1-R6 carry constructive graphs
+# lowered by the G6 regex sub-compiler (literal/anchor/class/quantifier/
+# capture matching, qr// application, s/// splice); a GREEN claim must be
+# backed by an actual lowerable graph (the SECTION 5 guard enforces this).
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($REGEX_MD);
@@ -42,16 +42,13 @@ ok((grep { /R5.*class/i             } @titles), 'case: R5 character class presen
 ok((grep { /R6.*quantified/i        } @titles), 'case: R6 quantified identifier present');
 
 # ---------------------------------------------------------------------------
-# SECTION 2: Run all 3 cases end-to-end
+# SECTION 2: Run all cases end-to-end
 #
 # For each case:
 #   - behavior check must PASS (perl oracle vs declared return value)
-#   - ir-shape check must not FAIL (pure-GAP blocks trivially pass)
-#   - L-verdict check must PASS (all declare L: GAP, actual is also GAP)
-#
-# All regex cases are pure-GAP: the ir block contains only an L: GAP(...)
-# line with no node bindings.  The runner records the GAP without attempting
-# to build or lower a graph.
+#   - ir-shape check must not FAIL
+#   - L-verdict check must PASS (declared verdict matches the actual lowering:
+#     GREEN cases build, lower, and run under lli with lli==perl)
 # ---------------------------------------------------------------------------
 
 for my $case (@$cases) {
@@ -113,12 +110,11 @@ subtest 'per-case L verdicts (R1-R6 all GREEN via G6)' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 4: Negative guard — a regex case claiming GREEN must FAIL
+# SECTION 4: Negative guard — a GREEN claim without a graph must FAIL
 #
-# Regex idioms are not runtime-free lowerable.  If someone edits a regex case
-# to claim L: GREEN without an actual lowerable graph, the runner must catch
-# the lie.  A pure-GAP block (no node lines) combined with a GREEN claim is
-# the inconsistency the runner detects.
+# If someone edits a regex case to claim L: GREEN without an actual lowerable
+# graph, the runner must catch the lie.  A pure-GAP block (no node lines)
+# combined with a GREEN claim is the inconsistency the runner detects.
 # ---------------------------------------------------------------------------
 
 subtest 'guard: pure-GAP block with L: GREEN for regex match FAILS L verdict' => sub {

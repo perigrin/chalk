@@ -85,4 +85,63 @@ subtest 's/(\\w+)-(\\w+)/$2_$1/ — two captures, reordered' => sub {
         '$2 and $1 reorder the halves');
 };
 
+# Review F3: an end-anchored empty pattern splices at the END (append), not
+# at offset 0; with a trailing newline, before the newline (perl semantics).
+subtest 's/$/X/ appends (and respects a trailing newline)' => sub {
+    try_subst('abc',   '$', 'X', 'Str:abcX',  's/$/X/ appends to "abc"');
+    try_subst("abc\n", '$', 'X', "Str:abcX\n", 's/$/X/ inserts before the trailing newline');
+};
+
+# Review: $10 must not silently parse as $1 . "0".
+subtest 'replacement $N with multiple digits dies GAP' => sub {
+    my $f = _mk();
+    my $s = subst_node($f, 'a1b', '(\\d)', '[$10]');
+    my $ret = $f->make_cfg('Return', inputs => [$s]);
+    eval { Chalk::Target::LLVM->lower($ret) };
+    like($@, qr/GAP/, '$10 in a 1-group replacement dies GAP (not $1 . "0")');
+};
+
+# Review: s/// literal-segment globals inside method bodies need the same
+# class/method symbol prefix as @str_const_N (each method body lowers in a
+# fresh Context whose counter restarts; module-scope @rxs_lit_0 would collide).
+subtest 's/// in two method bodies: no duplicate @rxs_lit symbols' => sub {
+    require Chalk::IR::ClassInfo;
+    require Chalk::IR::MethodInfo;
+    my $f = _mk();
+
+    my $mk_body = sub {
+        my ($text) = @_;
+        my $subj = $f->make('Constant', value => $text, const_type => 'string');
+        $subj->set_representation('Str');
+        my $s = $f->make('RegexSubst',
+            pattern => 'o', replacement => 'LIT', flags => '', inputs => [$subj]);
+        $s->set_representation('Str');
+        return $s;
+    };
+
+    my $mi_a = Chalk::IR::MethodInfo->new(
+        name => 'meth_a', body => [], body_node => $mk_body->('foo'), return_repr => 'Str');
+    my $mi_b = Chalk::IR::MethodInfo->new(
+        name => 'meth_b', body => [], body_node => $mk_body->('boo'), return_repr => 'Str');
+    my $ci = Chalk::IR::ClassInfo->new(
+        name => 'Subby', methods => [$mi_a, $mi_b], fields => []);
+
+    my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        param_names => [], inputs => [$ci]);
+    $new_o->set_representation('Object');
+    my $call = $f->make('Call', dispatch_kind => 'method', name => 'meth_a',
+        inputs => [$new_o, $ci]);
+    $call->set_representation('Str');
+    my $ret = $f->make_cfg('Return', inputs => [$call]);
+
+    my ($out, $ll) = eval { lli_run($ret) };
+    ok(!$@, 'two method bodies with s/// lower + run (no duplicate symbol)')
+        or do { diag("error: $@"); return };
+    is($out, 'Str:fLITo', 'method-body s/// result correct');
+    my @defs = $ll =~ /^(\@\S*rxs_lit\S*) =/mg;
+    my %seen; my @dups = grep { $seen{$_}++ } @defs;
+    is(scalar @dups, 0, 'no duplicate @rxs_lit global symbols')
+        or diag("duplicates: @dups");
+};
+
 done_testing;

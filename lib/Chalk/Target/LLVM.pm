@@ -1384,7 +1384,10 @@ sub _lower_constant {
 
         # GEP to get i8* from the global array.
         my $ref = $self->_fresh;
-        $self->_emit("  $ref = getelementptr inbounds [$total x i8], [$total x i8]* $gname, i64 0, i64 0  ; Constant(\"$val\", Str) -> i8* ptr");
+        # Sanitize the comment text: a control byte (e.g. a newline in the
+        # string value) would split the IR line and break the module.
+        (my $val_cmt = $val) =~ s/[^\x20-\x7e]/./g;
+        $self->_emit("  $ref = getelementptr inbounds [$total x i8], [$total x i8]* $gname, i64 0, i64 0  ; Constant(\"$val_cmt\", Str) -> i8* ptr");
 
         # Record the byte-length as a compile-time literal for the output epilogue.
         $self->{_str_len_table}{$ref} = $byte_len;
@@ -4002,20 +4005,60 @@ sub _lower_ref_of_object {
 #   { kind => 'any' }                                  — . (any byte but \n)
 # Shorthands \d \w \s (and \D \W \S) desugar to classes; a backslash escape
 # of a metachar (\. \[ \$ ...) is a literal byte. T3 adds per-atom quantifiers.
+# Byte escapes the G6 sub-compiler resolves (regex-language escapes).
+my %REGEX_ESCAPE_BYTE = (
+    t => 0x09, n => 0x0A, r => 0x0D, f => 0x0C, a => 0x07, e => 0x1B, '0' => 0x00,
+);
+
+# _regex_escape_byte(\@chars, $idx, $pattern) -> ($byte, $consumed)
+#
+# Resolve a backslash escape; $idx is the char AFTER the backslash. Returns
+# the byte value and how many pattern chars were consumed (1, or 3 for \xHH).
+# Escaped punctuation is the literal byte; \t \n \r \f \a \e \0 map to their
+# control bytes; \xHH parses two hex digits. Assertion and unknown
+# ALPHANUMERIC escapes (\b \B \A \z \Z \G \p \N \c ...) DIE LOUDLY — perl
+# reserves them, so matching the literal letter would be a silent miscompile.
+sub _regex_escape_byte {
+    my ($chars, $idx, $pattern) = @_;
+    my $e = $chars->[$idx];
+    if ($e !~ /[A-Za-z0-9]/) {
+        return (ord($e), 1);                # \. \[ \$ \\ \/ ...
+    }
+    if (exists $REGEX_ESCAPE_BYTE{$e}) {
+        return ($REGEX_ESCAPE_BYTE{$e}, 1); # \t \n \r \f \a \e \0
+    }
+    if ($e eq 'x') {
+        my $hex = join '', grep { defined } @{$chars}[ $idx + 1, $idx + 2 ];
+        die "GAP: malformed \\x escape in regex pattern '$pattern' "
+          . "(need two hex digits)" unless $hex =~ /^[0-9A-Fa-f]{2}$/;
+        return (hex($hex), 3);
+    }
+    die "GAP: regex escape \\$e in pattern '$pattern' not supported by the G6 "
+      . "sub-compiler (assertions \\b \\B \\A \\z \\Z \\G and classes \\p \\N "
+      . "are pending tranches — refusing to silently match a literal '$e')";
+}
+
 sub _compile_regex_pattern {
     my ($pattern, $flags) = @_;
 
+    # No flag is implemented yet; silently ignoring one (e.g. /i compiling a
+    # case-sensitive matcher, /x treating whitespace as literal atoms) would
+    # be a silent miscompile. One gate here covers m//, qr//, and s///.
+    die "GAP: regex flags '$flags' not yet supported by the G6 sub-compiler"
+        if length($flags // '');
+
     # T1 anchors: a leading ^ anchors the match at offset 0; a trailing $
-    # anchors the match end at the subject length. They are not literal bytes.
-    # (A trailing escaped \$ is a literal dollar — handled by checking that the
-    # final $ is not preceded by a backslash.)
+    # anchors the match end at the subject length (or before a final newline,
+    # perl semantics). They are not literal bytes. A trailing escaped \$ is a
+    # literal dollar — the $ is an anchor only when preceded by an EVEN run of
+    # backslashes (\\$ = escaped backslash THEN anchor; \$ = literal dollar).
     my $anchored_start = 0;
     my $anchored_end   = 0;
     if ($pattern =~ /^\^/) {
         $anchored_start = 1;
         $pattern =~ s/^\^//;
     }
-    if ($pattern =~ /(?<!\\)\$$/) {
+    if ($pattern =~ /(\\*)\$$/ && length($1) % 2 == 0) {
         $anchored_end = 1;
         $pattern =~ s/\$$//;
     }
@@ -4037,7 +4080,7 @@ sub _compile_regex_pattern {
         my $c = $chars[$i];
 
         if ($c eq '\\') {
-            # Escape: shorthand class or literal metachar.
+            # Escape: shorthand class, byte escape, or literal punctuation.
             my $e = $chars[ $i + 1 ]
                 // die "GAP: regex pattern '$pattern' ends with a bare backslash";
             if ($e =~ /^[dwsDWS]$/) {
@@ -4049,9 +4092,9 @@ sub _compile_regex_pattern {
                 $i += 2;
                 next;
             }
-            # Any other escaped char is a literal byte (\. \[ \$ \\ \/ ...).
-            push @atoms, { kind => 'lit', byte => ord($e) };
-            $i += 2;
+            my ($byte, $used) = _regex_escape_byte(\@chars, $i + 1, $pattern);
+            push @atoms, { kind => 'lit', byte => $byte };
+            $i += 1 + $used;
             next;
         }
 
@@ -4066,29 +4109,48 @@ sub _compile_regex_pattern {
                 my $cc = $chars[$j];
                 last if $cc eq ']' && !$first;
                 $first = 0;
+                # Shorthand expansion inside the class: [\d_] etc.
                 if ($cc eq '\\') {
                     my $e = $chars[ $j + 1 ]
                         // die "GAP: regex class in '$pattern' ends with a bare backslash";
-                    if ($e =~ /[dws]/i && exists $SHORTHAND{ lc $e }) {
+                    if ($e =~ /^[dwsDWS]$/) {
                         die "GAP: regex class shorthand \\$e inside [...] not yet supported "
                           . "in pattern '$pattern'" if $e =~ /[DWS]/;
                         push @ranges, $SHORTHAND{ lc $e }->@*;
                         $j += 2;
                         next;
                     }
-                    $cc = $e;
-                    $j++;
                 }
-                # Range a-z (a dash not at the end and followed by a non-])?
-                if (($chars[ $j + 1 ] // '') eq '-' && ($chars[ $j + 2 ] // ']') ne ']') {
-                    my $hi = $chars[ $j + 2 ];
-                    $hi = $chars[ $j + 3 ] if $hi eq '\\';   # escaped range end
-                    push @ranges, [ ord($cc), ord($hi) ];
-                    $j += ($chars[ $j + 2 ] eq '\\') ? 4 : 3;
+                # One endpoint: a plain char or a resolved escape byte.
+                my ($lo, $lo_used);
+                if ($cc eq '\\') {
+                    ($lo, $lo_used) = _regex_escape_byte(\@chars, $j + 1, $pattern);
+                    $lo_used += 1;   # the backslash itself
+                }
+                else {
+                    ($lo, $lo_used) = (ord($cc), 1);
+                }
+                my $k = $j + $lo_used;
+                # Range lo-hi (a dash that is not the last member)?
+                if (($chars[$k] // '') eq '-' && ($chars[ $k + 1 ] // ']') ne ']') {
+                    my ($hi, $hi_used);
+                    if ($chars[ $k + 1 ] eq '\\') {
+                        ($hi, $hi_used) = _regex_escape_byte(\@chars, $k + 2, $pattern);
+                        $hi_used += 1;
+                    }
+                    else {
+                        ($hi, $hi_used) = (ord($chars[ $k + 1 ]), 1);
+                    }
+                    # Perl rejects a descending range at compile time; matching
+                    # nothing silently would be a miscompile.
+                    die "GAP: invalid [] range (lo > hi) in regex pattern '$pattern'"
+                        if $lo > $hi;
+                    push @ranges, [ $lo, $hi ];
+                    $j = $k + 1 + $hi_used;
                     next;
                 }
-                push @ranges, [ ord($cc), ord($cc) ];
-                $j++;
+                push @ranges, [ $lo, $lo ];
+                $j = $k;
             }
             die "GAP: unterminated character class in regex pattern '$pattern'"
                 unless ($chars[$j] // '') eq ']';
@@ -4167,10 +4229,13 @@ sub _compile_regex_pattern {
         }
 
         # Unsupported metachars die loudly rather than silently matching as
-        # literals (alternation arrives in T5).
-        if ($c =~ /[}|]/) {
+        # literals (alternation arrives in T5). Mid-pattern ^/$ are perl
+        # ASSERTIONS (usually unmatchable without /m) — matching them as
+        # literal bytes would silently diverge.
+        if ($c =~ /[}|^\$]/) {
             die "GAP: regex metachar '$c' in pattern '$pattern' not yet supported "
-              . "by the G6 sub-compiler (tranche pending)";
+              . "by the G6 sub-compiler (tranche pending; mid-pattern ^/\$ are "
+              . "assertions, not literals)";
         }
 
         push @atoms, { kind => 'lit', byte => ord($c) };
@@ -4267,13 +4332,35 @@ sub _emit_regex_seq {
     my ($self, $atoms, $idx, $pos_ref, $ctx) = @_;
 
     # Base: end of pattern. Record the whole-match end position (group 0),
-    # check the end anchor, then hit.
+    # check the end anchor, then hit. Perl's $ matches at the end of the
+    # subject OR immediately before a FINAL newline ("foo\n" =~ /foo$/ is
+    # true), so the anchor check is pos==len, or pos==len-1 with subj[pos]
+    # being a newline (the load is branch-guarded: pos==len-1 implies
+    # in-bounds).
     if ($idx > $#$atoms) {
         $ctx->{caps}{m0e} = $pos_ref;
         if ($ctx->{anch_e}) {
+            my $lbl_chknl = $self->_fresh_label('rxenl');
+            my $lbl_ldnl  = $self->_fresh_label('rxeld');
             my $at_end = $self->_fresh;
             $self->_emit("  $at_end = icmp eq i64 $pos_ref, $ctx->{subj_len}  ; RegexMatch \$: match ends at len?");
-            $self->_set_terminator("  br i1 $at_end, label \%$ctx->{hit_lbl}, label \%$ctx->{fail_lbl}");
+            $self->_set_terminator("  br i1 $at_end, label \%$ctx->{hit_lbl}, label \%$lbl_chknl");
+
+            $self->_new_block($lbl_chknl);
+            my $lenm1 = $self->_fresh;
+            $self->_emit("  $lenm1 = sub i64 $ctx->{subj_len}, 1  ; RegexMatch \$: len-1");
+            my $is_pre = $self->_fresh;
+            $self->_emit("  $is_pre = icmp eq i64 $pos_ref, $lenm1  ; RegexMatch \$: just before the last byte?");
+            $self->_set_terminator("  br i1 $is_pre, label \%$lbl_ldnl, label \%$ctx->{fail_lbl}");
+
+            $self->_new_block($lbl_ldnl);
+            my $gep = $self->_fresh;
+            $self->_emit("  $gep = getelementptr inbounds i8, i8* $ctx->{subj_ptr}, i64 $pos_ref  ; RegexMatch \$: last byte ptr");
+            my $byte = $self->_fresh;
+            $self->_emit("  $byte = load i8, i8* $gep  ; RegexMatch \$: last byte");
+            my $is_nl = $self->_fresh;
+            $self->_emit("  $is_nl = icmp eq i8 $byte, 10  ; RegexMatch \$: final newline?");
+            $self->_set_terminator("  br i1 $is_nl, label \%$ctx->{hit_lbl}, label \%$ctx->{fail_lbl}");
         }
         else {
             $self->_set_terminator("  br label \%$ctx->{hit_lbl}");
@@ -4429,17 +4516,53 @@ sub _emit_regex_matcher {
         $min_len += ($a->{min} // 1);
     }
 
-    # Empty pattern (possibly with anchors).
+    # Empty pattern (possibly with anchors). The $ anchor's position honors
+    # perl's final-newline rule: the effective end position is len-1 when the
+    # last byte is a newline, else len (so s/$/X/ inserts BEFORE a trailing
+    # newline, and /^$/ matches "\n").
     if (scalar @atoms == 0) {
+        if ($anch_e) {
+            # endpos = (len > 0 && subj[len-1] == '\n') ? len-1 : len
+            my $lbl_pre   = $self->_current_block_label;
+            my $lbl_ld    = $self->_fresh_label('rxeep');
+            my $lbl_merge = $self->_fresh_label('rxeem');
+            my $nonempty  = $self->_fresh;
+            $self->_emit("  $nonempty = icmp ugt i64 $subj_len, 0  ; $tag: non-empty subject?");
+            $self->_set_terminator("  br i1 $nonempty, label \%$lbl_ld, label \%$lbl_merge");
+
+            $self->_new_block($lbl_ld);
+            my $lenm1 = $self->_fresh;
+            $self->_emit("  $lenm1 = sub i64 $subj_len, 1  ; $tag: len-1");
+            my $gep = $self->_fresh;
+            $self->_emit("  $gep = getelementptr inbounds i8, i8* $subj_ptr, i64 $lenm1  ; $tag: last byte ptr");
+            my $byte = $self->_fresh;
+            $self->_emit("  $byte = load i8, i8* $gep  ; $tag: last byte");
+            my $is_nl = $self->_fresh;
+            $self->_emit("  $is_nl = icmp eq i8 $byte, 10  ; $tag: trailing newline?");
+            my $end_ld = $self->_fresh;
+            $self->_emit("  $end_ld = select i1 $is_nl, i64 $lenm1, i64 $subj_len  ; $tag: \$ position");
+            $self->_set_terminator("  br label \%$lbl_merge");
+
+            $self->_new_block($lbl_merge);
+            my $endpos = $self->_fresh;
+            $self->_emit("  $endpos = phi i64 [ $end_ld, \%$lbl_ld ], [ 0, \%$lbl_pre ]  ; $tag: effective end (len==0 -> 0)");
+
+            my $r = $self->_fresh;
+            if ($anch_s) {
+                # /^$/ matches iff the effective end is offset 0.
+                $self->_emit("  $r = icmp eq i64 $endpos, 0  ; $tag /^\$/: empty (or lone-newline) subject?");
+            }
+            else {
+                # /$/ always matches, at the effective end position.
+                $self->_emit("  $r = add i1 true, false  ; $tag /\$/: always matches at the end");
+            }
+            my $m0 = $anch_s ? '0' : $endpos;
+            return { matched => $r, m0s => $m0, m0e => $m0, cap_s => [], cap_e => [] };
+        }
+
+        # //, /^/ — match unconditionally at offset 0.
         my $r = $self->_fresh;
-        if ($anch_s && $anch_e) {
-            # /^$/ matches iff the subject is empty (start==end at offset 0).
-            $self->_emit("  $r = icmp eq i64 $subj_len, 0  ; $tag /^\$/: empty subject?");
-        }
-        else {
-            # //, /^/, /$/ all match (empty string is present at offset 0 / end).
-            $self->_emit("  $r = add i1 true, false  ; $tag: empty pattern always matches");
-        }
+        $self->_emit("  $r = add i1 true, false  ; $tag: empty pattern always matches");
         return { matched => $r, m0s => '0', m0e => '0', cap_s => [], cap_e => [] };
     }
 
@@ -4579,9 +4702,12 @@ sub _lower_match_apply {
         && $qr_node->can('const_type')
         && ($qr_node->const_type // '') eq 'regex')
     {
-        die "GAP: Match rhs (op=$qr_op) is not a statically-resolvable qr// "
-          . "literal — only compile-time-known patterns are lowered "
-          . "runtime-free (a runtime-computed pattern needs a matcher-fn ABI).";
+        my $why = ($qr_op eq 'Constant')
+            ? "a string-valued =~ rhs (perl treats it as a pattern) is not yet "
+            . "wired — it IS statically resolvable, just an unimplemented form"
+            : "a runtime-computed pattern would need a matcher-fn ABI";
+        die "GAP: Match rhs (op=$qr_op) is not a qr// literal "
+          . "(Constant const_type='regex') — $why.";
     }
     my $pattern = $qr_node->value;
 
@@ -4617,13 +4743,28 @@ sub _parse_subst_replacement {
     while ($i <= $#chars) {
         my $c = $chars[$i];
         if ($c eq '\\' && $i < $#chars) {
-            $lit .= $chars[ $i + 1 ];
+            my $e = $chars[ $i + 1 ];
+            # The replacement contract is COOKED BYTES: the parser resolves
+            # double-quotish escapes (\t, \n, \x..) before constructing the
+            # node; only \$ and \\ are substitution-level escapes here. An
+            # alphanumeric escape reaching this point would silently become
+            # the literal letter — die loudly instead.
+            die "GAP: s/// replacement escape \\$e not supported (the parser "
+              . "resolves double-quotish escapes; only \\\$ and punctuation "
+              . "escapes are handled here)" if $e =~ /[A-Za-z0-9]/;
+            $lit .= $e;
             $i += 2;
             next;
         }
         if ($c eq '$' && $i < $#chars) {
             my $n = $chars[ $i + 1 ];
             if ($n =~ /^[1-9]$/) {
+                # Perl reads the LONGEST digit run ($12 = group 12, not $1."2");
+                # multi-digit groups are beyond the supported slice — die rather
+                # than silently splitting into $1 . "2".
+                die "GAP: s/// replacement multi-digit capture ref \$$n$chars[$i+2] "
+                  . "not supported (perl reads it as one group number)"
+                    if ($chars[ $i + 2 ] // '') =~ /^\d$/;
                 die "GAP: s/// replacement references \$$n but the pattern has "
                   . "only $ngroups capture group(s)" if $n > $ngroups;
                 $flush->();
@@ -4714,8 +4855,19 @@ sub _lower_regex_subst {
         if ($seg->{kind} eq 'lit') {
             my $text = $seg->{text};
             my $blen = length $text;
+            # Same symbol-prefix rule as @str_const_N (see _lower_constant, I1):
+            # method bodies lower in fresh Contexts whose counters restart at 0,
+            # but the globals land at module scope — prefix by class/method so
+            # two bodies do not both emit @rxs_lit_0 (duplicate symbol).
             my $gidx = scalar @{ $self->{_str_globals} };
-            my $gname = "\@rxs_lit_$gidx";
+            my $gname;
+            if ($self->{_in_method_body}
+                && defined $self->{_method_class_name}
+                && defined $self->{_method_name}) {
+                $gname = "\@$self->{_method_class_name}__$self->{_method_name}__rxs_lit_${gidx}";
+            } else {
+                $gname = "\@rxs_lit_$gidx";
+            }
             push $self->{_str_globals}->@*, [ $gname, $text, $blen ];
             my $total = $blen + 1;
             my $src = $self->_fresh;
