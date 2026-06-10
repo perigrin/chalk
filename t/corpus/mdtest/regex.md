@@ -98,3 +98,31 @@ context: scalar
 ```ir
 L: GAP(s/// is RF: match (regex sub-compiler, G6) + Str rewrite (G3); GAP only until G6+G3 are modelled, NOT a libperl dependency)
 ```
+
+## R4 anchored match (^)
+
+A `^`-anchored pattern matches only at the start of the subject. The regex
+sub-compiler (G6 T1) lowers `^` by collapsing the slide loop to offset 0: the
+matcher tries the literal once at position 0 and reports no-match if it fails
+there, rather than sliding. Runtime-free, libperl-free.
+
+```perl
+# source
+my $s = "foobar";
+$s =~ /^foo/ ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%s      = Constant("foobar") :Str
+%m      = RegexMatch(%s, pattern: "^foo") :Bool
+%one    = Constant(1) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%m, %one, %zero) :Int
+return %result
+L: GREEN
+```

@@ -3982,13 +3982,29 @@ sub _lower_ref_of_object {
 # _compile_regex_pattern($pattern, $flags) -> \%compiled
 #
 # Parse a literal regex pattern into the compiled form the emitter consumes.
-# T0: literal only — a list of expected bytes. Later tranches add anchors,
+# T0: literal bytes. T1: leading ^ / trailing $ anchors. Later tranches add
 # classes, quantifiers, and captures to this structure.
 sub _compile_regex_pattern {
     my ($pattern, $flags) = @_;
+
+    # T1 anchors: a leading ^ anchors the match at offset 0; a trailing $
+    # anchors the match end at the subject length. They are not literal bytes.
+    my $anchored_start = 0;
+    my $anchored_end   = 0;
+    if ($pattern =~ /^\^/) {
+        $anchored_start = 1;
+        $pattern =~ s/^\^//;
+    }
+    if ($pattern =~ /\$$/) {
+        $anchored_end = 1;
+        $pattern =~ s/\$$//;
+    }
+
     my @bytes = map { ord } split //, $pattern;
     return {
-        literal_bytes => \@bytes,   # the exact byte sequence to match
+        literal_bytes  => \@bytes,    # the exact byte sequence to match
+        anchored_start => $anchored_start,
+        anchored_end   => $anchored_end,
     };
 }
 
@@ -4008,11 +4024,20 @@ sub _lower_regex_match {
     my $compiled = _compile_regex_pattern($node->pattern, $node->flags);
     my @plit     = $compiled->{literal_bytes}->@*;
     my $plen     = scalar @plit;
+    my $anch_s   = $compiled->{anchored_start};
+    my $anch_e   = $compiled->{anchored_end};
 
-    # Empty pattern: matches at offset 0 unconditionally.
+    # Empty pattern (possibly with anchors).
     if ($plen == 0) {
         my $r = $self->_fresh;
-        $self->_emit("  $r = add i1 true, false  ; RegexMatch //: empty pattern always matches");
+        if ($anch_s && $anch_e) {
+            # /^$/ matches iff the subject is empty (start==end at offset 0).
+            $self->_emit("  $r = icmp eq i64 $subj_len, 0  ; RegexMatch /^\$/: empty subject?");
+        }
+        else {
+            # //, /^/, /$/ all match (empty string is present at offset 0 / end).
+            $self->_emit("  $r = add i1 true, false  ; RegexMatch: empty pattern always matches");
+        }
         $self->{cache}{ $node->id } = $r;
         return $r;
     }
@@ -4030,9 +4055,16 @@ sub _lower_regex_match {
     $self->_set_terminator("  br label \%$lbl_head");
 
     # Header: start phi + room check (start + plen <= len).
+    # With a start anchor (^), there is no back-edge from the continue block
+    # (a failed try goes straight to miss), so the phi has only the entry edge.
     $self->_new_block($lbl_head);
     my $start = $self->_fresh;
-    $self->_emit("  $start = phi i64 [ 0, \%$lbl_pre ], [ $start_next, \%$lbl_cont ]  ; RegexMatch: slide start");
+    if ($anch_s) {
+        $self->_emit("  $start = phi i64 [ 0, \%$lbl_pre ]  ; RegexMatch ^: anchored at offset 0");
+    }
+    else {
+        $self->_emit("  $start = phi i64 [ 0, \%$lbl_pre ], [ $start_next, \%$lbl_cont ]  ; RegexMatch: slide start");
+    }
     my $start_end = $self->_fresh;
     $self->_emit("  $start_end = add i64 $start, $plen  ; RegexMatch: start + plen");
     my $room = $self->_fresh;
@@ -4060,12 +4092,26 @@ sub _lower_regex_match {
             $acc = $and;
         }
     }
+    # End anchor ($): the match must end exactly at the subject length.
+    if ($anch_e) {
+        my $end_ok = $self->_fresh;
+        $self->_emit("  $end_ok = icmp eq i64 $start_end, $subj_len  ; RegexMatch \$: match ends at len?");
+        my $and = $self->_fresh;
+        $self->_emit("  $and = and i1 $acc, $end_ok  ; RegexMatch: literal + end-anchor");
+        $acc = $and;
+    }
     $self->_set_terminator("  br i1 $acc, label \%$lbl_hit, label \%$lbl_cont");
 
-    # Continue: advance the start offset.
+    # Continue: advance the start offset (or stop, if start-anchored).
     $self->_new_block($lbl_cont);
     $self->_emit("  $start_next = add i64 $start, 1  ; RegexMatch: next start");
-    $self->_set_terminator("  br label \%$lbl_head");
+    if ($anch_s) {
+        # Start anchor (^): only offset 0 is tried — a failed try means no match.
+        $self->_set_terminator("  br label \%$lbl_miss");
+    }
+    else {
+        $self->_set_terminator("  br label \%$lbl_head");
+    }
 
     # Hit / miss feed the result phi.
     $self->_new_block($lbl_hit);
