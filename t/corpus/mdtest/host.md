@@ -17,9 +17,9 @@ set-key path).
 ## H1 capture read ($1)
 
 Reading `$1` after a match is a `RegexCapture` node taking the match node as
-input — a ZERO-COPY `{ptr,len}` view into the subject at the captured offsets
-(the subject is immutable in this slice). The capture offsets are the SSA
-pairs the G6 matcher records; no `%MatchResult` struct is materialized.
+input — the captured bytes are copied into a fresh NUL-terminated buffer at
+the offsets the G6 matcher records (every Str value in the backend is
+NUL-terminated; no `%MatchResult` struct is materialized).
 
 ```perl
 # source

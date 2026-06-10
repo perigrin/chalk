@@ -488,9 +488,11 @@ sub _build_node_from_rhs {
             return $factory->make('Phi', region => $region, values => \@inputs, %attrs);
         }
 
-        # New node and Call(name='new'): param_names attr is a comma-separated string -> arrayref.
+        # Call(name='new'): param_names attr is a comma-separated string -> arrayref.
         # e.g. param_names: "name" -> ['name']; param_names: "" -> []
-        if ($op eq 'New' || ($op eq 'Call' && ($attrs{name} // '') eq 'new')) {
+        # (The pre-convergence New/FieldDef special-cases are gone — those node
+        # types were deleted in R3; the factory croaks on them.)
+        if ($op eq 'Call' && ($attrs{name} // '') eq 'new') {
             if (exists $attrs{param_names}) {
                 my $pn = $attrs{param_names};
                 if (!defined $pn || $pn eq '') {
@@ -502,16 +504,6 @@ sub _build_node_from_rhs {
             }
             else {
                 $attrs{param_names} = [];
-            }
-        }
-
-        # FieldDef: is_param, has_reader, has_default are bare tokens "true"/"false" -> bool.
-        # field_repr is a string attr (e.g. "Int", "Str") — passed through as-is.
-        if ($op eq 'FieldDef') {
-            for my $bool_key (qw(is_param has_reader has_default)) {
-                if (exists $attrs{$bool_key}) {
-                    $attrs{$bool_key} = ($attrs{$bool_key} eq 'true') ? 1 : 0;
-                }
             }
         }
 

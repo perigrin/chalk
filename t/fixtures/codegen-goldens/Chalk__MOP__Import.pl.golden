@@ -5,6 +5,7 @@ class Chalk::MOP::Import {
     field $module :param :reader;
     field $class :param :reader;
     field $args :param = [];
+    field $keyword :param :reader = 'use';
     method args() {
         return $args->@*;
     }

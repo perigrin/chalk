@@ -281,7 +281,12 @@ sub _populate_registry_from_classinfo {
         my $has_reader  = $mf->has_reader  // false;
         my $has_default = $mf->has_default // false;
         my $def_node    = $mf->default_value;
-        my $f_repr      = $mf->type // 'Int';
+        # A missing field type silently defaulting to Int is the F7 silent-i64
+        # class: a Str field read back through the Int ABI ran with exit 0 and
+        # garbage output (branch-review I4). Die loudly instead.
+        my $f_repr      = $mf->type
+            // die "GAP: field '$fname' in class '$cname' has no declared repr "
+                 . "(type) — refusing to silently default to Int.";
         unless (grep { ($_->{field_index} // -1) == $fidx } @{ $registry->{$cname}{fields} }) {
             push @{ $registry->{$cname}{fields} }, {
                 name         => $fname,
@@ -2039,8 +2044,12 @@ sub _lower_assign {
             # Pointer-repr value: ptrtoint before storing into the i64 payload slot,
             # mirroring the array/hash element-store branches.
             $self->_emit("  $pay_i64 = ptrtoint i8* $rhs_ref to i64  ; $val_repr ptr -> i64 FieldAccess-lvalue");
+        } elsif ($val_repr eq 'Int') {
+            $self->_emit("  $pay_i64 = add i64 0, $rhs_ref  ; identity: Int->i64 FieldAccess-lvalue");
         } else {
-            $self->_emit("  $pay_i64 = add i64 0, $rhs_ref  ; identity: $val_repr->i64 FieldAccess-lvalue");
+            die "GAP: Assign(FieldAccess-lvalue) rhs repr=$val_repr cannot be "
+              . "stored in an i64 Slot payload (only Int/Bool/Str/ArrayRef/HashRef "
+              . "are lowered) — refusing to emit invalid IR.";
         }
         $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; FieldAccess-lvalue[$field_index] payload");
         $self->{cache}{ $node->id } = $pay_i64;
@@ -2092,8 +2101,13 @@ sub _lower_assign {
                 $rhs_i64 = $self->_fresh;
                 $self->_emit("  $rhs_i64 = ptrtoint i8* $rhs_ref to i64  ; Assign(Array-lvalue): ptr rhs -> i64");
             }
-            else {
+            elsif ($rhs_repr eq 'Int') {
                 $rhs_i64 = $rhs_ref;
+            }
+            else {
+                die "GAP: Assign(Array-lvalue) rhs repr=$rhs_repr cannot be stored "
+                  . "in an i64 Slot payload (only Int/ArrayRef/HashRef are lowered) "
+                  . "— refusing to emit invalid IR.";
             }
             $self->_emit("  store i64 $rhs_i64, i64* $slot_pay  ; Assign(Array-lvalue): store value");
 
@@ -2188,8 +2202,13 @@ sub _lower_assign {
                 $wrhs_i64 = $self->_fresh;
                 $self->_emit("  $wrhs_i64 = ptrtoint i8* $rhs_ref to i64  ; Assign(Hash-lvalue): ptr rhs -> i64");
             }
-            else {
+            elsif ($wrhs_repr eq 'Int') {
                 $wrhs_i64 = $rhs_ref;
+            }
+            else {
+                die "GAP: Assign(Hash-lvalue) rhs repr=$wrhs_repr cannot be stored "
+                  . "in an i64 Slot payload (only Int/ArrayRef/HashRef are lowered) "
+                  . "— refusing to emit invalid IR.";
             }
             $self->_emit("  store i64 $wrhs_i64, i64* $went_vpp  ; Assign(Hash-lvalue): update val_payload");
             $self->_set_terminator("  br label \%$lbl_wend");
@@ -3256,8 +3275,13 @@ sub _lower_array_ref {
             $elem_i64 = $self->_fresh;
             $self->_emit("  $elem_i64 = ptrtoint i8* $elem_ref to i64  ; ArrayRef: ptr elem[$i] -> i64");
         }
-        else {
+        elsif ($elem_repr eq 'Int') {
             $elem_i64 = $elem_ref;
+        }
+        else {
+            die "GAP: ArrayRef element[$i] repr=$elem_repr cannot be stored in an "
+              . "i64 Slot payload (only Int/ArrayRef/HashRef are lowered) — "
+              . "refusing to emit invalid IR.";
         }
         $self->_emit("  store i64 $elem_i64, i64* $slot_pay  ; ArrayRef: slot[$i] payload=$elem_i64");
     }
@@ -3339,8 +3363,13 @@ sub _lower_hash_ref {
             $val_i64 = $self->_fresh;
             $self->_emit("  $val_i64 = ptrtoint i8* $val_ref to i64  ; HashRef: ptr value[$i] -> i64");
         }
-        else {
+        elsif ($val_repr eq 'Int') {
             $val_i64 = $val_ref;
+        }
+        else {
+            die "GAP: HashRef value[$i] repr=$val_repr cannot be stored in an "
+              . "i64 Slot payload (only Int/ArrayRef/HashRef are lowered) — "
+              . "refusing to emit invalid IR.";
         }
         $self->_emit("  store i64 $val_i64, i64* $e_vp   ; HashRef: value");
     }
@@ -3859,6 +3888,14 @@ sub _lower_call_new {
         if ($finfo->{has_default}) {
             my $def_node = $finfo->{default_node};
             my $def_repr = defined $def_node ? _require_repr($def_node, 'Call(new).default.field') : 'Int';
+            # Only Int defaults are lowered (the :param binding path boxes Str
+            # into a StrPair and ptrtoints refs — the default path does not yet;
+            # a Str default stored as add i64 0,<i8*> was invalid IR. Tracked
+            # follow-up: share the slot-payload store helper across :param/
+            # default/FieldAccess-lvalue sites).
+            die "GAP: field '$pname' default value repr=$def_repr is not lowered "
+              . "(only Int defaults; Str/ref defaults are a tracked follow-up) — "
+              . "refusing to emit invalid IR." if $def_repr ne 'Int';
             my $def_ref  = defined $def_node ? $self->lower_value($def_node) : '0';
             my $def_gep = $self->_fresh;
             $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; default field[$fidx] defined");
@@ -3928,6 +3965,17 @@ sub _lower_call_method {
         die "LLVM MOP: Call(method) '$method_name' is absent from class '$class_name' vtable — "
           . "available methods: [" . join(', ', map { $_->{name} // '?' } @$methods) . "]. "
           . "Cannot emit vtable dispatch to a non-existent slot.";
+    }
+
+    # ABI cross-check: the call site is cast per the NODE's repr while the
+    # vtable function was DEFINED per the registry's return_repr. The i8*
+    # fn-ptr bitcast means lli ACCEPTS a mismatch — the silent-garbage
+    # channel (branch-review I4). Die loudly instead.
+    my $abi_repr = $minfo->{return_repr} // 'Int';
+    if ($result_repr ne $abi_repr) {
+        die "GAP: Call(method) '$method_name' node repr=$result_repr disagrees "
+          . "with class '$class_name' vtable ABI return_repr=$abi_repr — "
+          . "a mismatched indirect call would be silently wrong.";
     }
 
     my $slot_idx = $minfo->{vtable_slot};
@@ -4756,16 +4804,22 @@ sub _lower_match_apply {
     return $match->{matched};
 }
 
-# _lower_regex_capture($node) -> $llvm_ref (i8* view into the subject)
+# _lower_regex_capture($node) -> $llvm_ref (i8* NUL-terminated copy)
 #
 # Lowers RegexCapture ($N): inputs[0] is the RegexMatch/Match node whose
-# lowering recorded its capture offsets in _regex_captures. The value is a
-# ZERO-COPY view into the subject buffer — ptr = subj_ptr + cap_s[n],
-# len = cap_e[n] - cap_s[n] (the subject is immutable in this slice). On a
-# failed match the offsets are the 0 sentinels, so the view is the empty
-# string at offset 0; perl yields undef there — the realistic lib/ idiom
-# guards $N behind the match (matched ? $1 : ...), and the undef face is a
-# tracked follow-up alongside the L3 Undef-rep composition.
+# lowering recorded its capture offsets in _regex_captures. The captured
+# bytes are COPIED into a fresh NUL-terminated buffer (malloc len+1 +
+# memcpy + NUL), upholding the backend-wide invariant that EVERY Str SSA
+# value is NUL-terminated: length tracking is lost at phi merges, and the
+# fallbacks (epilogue printf %s, strlen) assume NUL — a zero-copy view into
+# the subject violated that and printed the subject tail when a capture
+# crossed an if/else merge (branch-review C4). Zero-copy views can return
+# when the Str representation carries explicit lengths end-to-end.
+#
+# On a failed match the offsets are the 0 sentinels, so the copy is the
+# empty string; perl yields undef there — the realistic lib/ idiom guards
+# $N behind the match (matched ? $1 : ...), and the undef face is a tracked
+# follow-up alongside the L3 Undef-rep composition.
 sub _lower_regex_capture {
     my ($self, $node) = @_;
 
@@ -4792,14 +4846,24 @@ sub _lower_regex_capture {
           . "group(s) (\$& / group 0 is a tracked follow-up).";
     }
 
-    my $ptr = $self->_fresh;
-    $self->_emit("  $ptr = getelementptr inbounds i8, i8* $rec->{subj_ptr}, i64 $s_ref  ; RegexCapture: \$$n view ptr");
+    $self->{_need_malloc_memcpy} = 1;
+
+    my $src = $self->_fresh;
+    $self->_emit("  $src = getelementptr inbounds i8, i8* $rec->{subj_ptr}, i64 $s_ref  ; RegexCapture: \$$n source");
     my $len = $self->_fresh;
     $self->_emit("  $len = sub i64 $e_ref, $s_ref  ; RegexCapture: \$$n length");
+    my $alloc = $self->_fresh;
+    $self->_emit("  $alloc = add i64 $len, 1  ; RegexCapture: +1 for NUL");
+    my $buf = $self->_fresh;
+    $self->_emit("  $buf = call i8* \@malloc(i64 $alloc)  ; RegexCapture: \$$n buffer");
+    $self->_emit("  call i8* \@memcpy(i8* $buf, i8* $src, i64 $len)  ; RegexCapture: copy \$$n");
+    my $nul = $self->_fresh;
+    $self->_emit("  $nul = getelementptr inbounds i8, i8* $buf, i64 $len  ; RegexCapture: NUL slot");
+    $self->_emit("  store i8 0, i8* $nul  ; RegexCapture: NUL-terminate");
 
-    $self->{_str_len_table}{$ptr} = $len;
-    $self->{cache}{ $node->id } = $ptr;
-    return $ptr;
+    $self->{_str_len_table}{$buf} = $len;
+    $self->{cache}{ $node->id } = $buf;
+    return $buf;
 }
 
 # _lower_env_read($node) -> $llvm_ref (i8* value string)

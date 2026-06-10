@@ -174,4 +174,40 @@ sub make_simple_graph {
     is($cb->value(), 'b', 'method_b Constant value correct');
 }
 
+# =============================================================================
+# Branch-review I3: the G6/G7 nodes round-trip — RegexCapture(n), EnvRead(key),
+# and Call param_names (the constructor arg list) must survive to_json/from_json.
+# =============================================================================
+
+{
+    my $f     = Chalk::IR::NodeFactory->new();
+    my $start = $f->make_cfg(q{Start});
+    my $subj  = $f->make(q{Constant}, value => q{ab-cd}, const_type => q{string});
+    my $m     = $f->make(q{RegexMatch}, pattern => q{(a)}, flags => q{}, inputs => [$subj]);
+    my $cap   = $f->make(q{RegexCapture}, n => 1, inputs => [$m]);
+    my $env   = $f->make(q{EnvRead}, key => q{CHALK_TEST});
+    my $call  = $f->make(q{Call}, dispatch_kind => q{method}, name => q{new},
+        param_names => [q{left}, q{right}], inputs => [$cap, $env]);
+    my $ret   = $f->make_cfg(q{Return}, inputs => [$start, $call]);
+    my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
+
+    my $json   = to_json({ g7 => $graph });
+    my $loaded = from_json($json);
+    ok(ref $loaded eq q{HASH}, q{G7 graph round-trips through JSON});
+    my $g = $loaded->{g7};
+    ok(defined $g, q{g7 graph present});
+
+    my ($cap2) = grep { $_->operation eq q{RegexCapture} } $g->nodes()->@*;
+    ok(defined $cap2, q{RegexCapture survived});
+    is($cap2->n, 1, q{RegexCapture n preserved});
+
+    my ($env2) = grep { $_->operation eq q{EnvRead} } $g->nodes()->@*;
+    ok(defined $env2, q{EnvRead survived});
+    is($env2->key, q{CHALK_TEST}, q{EnvRead key preserved});
+
+    my ($call2) = grep { $_->operation eq q{Call} } $g->nodes()->@*;
+    ok(defined $call2, q{Call survived});
+    is_deeply($call2->param_names, [q{left}, q{right}], q{Call param_names preserved});
+}
+
 done_testing();

@@ -1,7 +1,7 @@
 use 5.42.0;
 use utf8;
 use experimental 'class';
-use warnings 'experimental::class';
+no warnings 'experimental::class';
 use Chalk::Target;
 class Chalk::Bootstrap::Target :isa(Chalk::Target) {
 }

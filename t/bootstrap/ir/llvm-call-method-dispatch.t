@@ -152,4 +152,52 @@ subtest 'Call(dispatch_kind=method) on absent method dies loudly' => sub {
         'die message mentions missing method or vtable');
 };
 
+# Branch-review I4 guards: silent-Int defaults and ABI mismatches must die.
+subtest 'guard: a field with NO declared type dies GAP (no silent Int default)' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+
+    # field $name :param :reader (NO type) — the bound value is a Str; the
+    # registry defaulting the repr to Int produced exit-0 garbage output.
+    my $mf = Chalk::MOP::Field->new(
+        name => 'name', sigil => '$', class => undef, fieldix => 0,
+        attributes => [':param', ':reader'],
+    );
+    my $ci = Chalk::IR::ClassInfo->new(name => 'Untyped', methods => [], fields => [$mf]);
+    my $val = $f->make('Constant', value => 'cat', const_type => 'string');
+    $val->set_representation('Str');
+    my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        param_names => ['name'], inputs => [$ci, $val]);
+    $new_o->set_representation('Object');
+    my $call = $f->make('Call', dispatch_kind => 'method', name => 'name',
+        inputs => [$new_o, $ci]);
+    $call->set_representation('Str');
+    my $ret = $f->make_cfg('Return', inputs => [$call]);
+
+    eval { Chalk::Target::LLVM->lower($ret) };
+    like($@, qr/GAP/, 'untyped field dies GAP instead of silently lowering as Int');
+};
+
+subtest 'guard: Call(method) node repr disagreeing with the vtable ABI dies' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $body = $f->make('Constant', value => '42', const_type => 'integer');
+    $body->set_representation('Int');
+    my $mi = Chalk::IR::MethodInfo->new(
+        name => 'answer', body => [], body_node => $body, return_repr => 'Int');
+    my $ci = Chalk::IR::ClassInfo->new(name => 'Mismatch', methods => [$mi], fields => []);
+    my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        param_names => [], inputs => [$ci]);
+    $new_o->set_representation('Object');
+    # The node CLAIMS Str but the vtable define returns i64 — through the i8*
+    # fn-ptr bitcast lli ACCEPTS the wrong-ABI call (the silent channel).
+    my $call = $f->make('Call', dispatch_kind => 'method', name => 'answer',
+        inputs => [$new_o, $ci]);
+    $call->set_representation('Str');
+    my $ret = $f->make_cfg('Return', inputs => [$call]);
+
+    eval { Chalk::Target::LLVM->lower($ret) };
+    like($@, qr/GAP|repr|ABI|mismatch/i,
+        'node-vs-registry return-repr mismatch dies loudly');
+};
+
 done_testing;

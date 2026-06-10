@@ -82,4 +82,37 @@ subtest 'Assign with a non-lvalue lhs (scalar rebind) still hash-conses by conte
         'two identical scalar-rebind Assigns DO hash-cons (no aggregate store)');
 };
 
+# Branch-review I1: pu's MethodCall node had per-call identity ("New,
+# MethodCall, and FieldWrite have per-call identity"); the R3 convergence
+# onto Call narrowed the carve-out to name='new' only — a regression. Two
+# identical statement-position method calls ($obj->advance(); $obj->advance();)
+# are DISTINCT side effects and must not collapse to one node.
+subtest 'Call(dispatch_kind=method) has per-call identity (pu MethodCall parity)' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $obj = $f->make('Constant', value => 'obj-stand-in', const_type => 'string');
+    my $c1 = $f->make('Call', dispatch_kind => 'method', name => 'advance',
+        inputs => [$obj]);
+    my $c2 = $f->make('Call', dispatch_kind => 'method', name => 'advance',
+        inputs => [$obj]);
+
+    isnt($c1->id, $c2->id,
+        'two identical method-dispatch Calls are distinct nodes (not hash-consed)');
+};
+
+subtest 'Call(dispatch_kind=builtin/sub) keeps content hash-consing' => sub {
+    # Builtin/sub calls were hash-consed on pu (the statement-position effect
+    # chain rides control_in); preserving that here — the broader design
+    # question is tracked with the cache/identity family follow-up.
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $arg = $f->make('Constant', value => '1', const_type => 'integer');
+    my $b1 = $f->make('Call', dispatch_kind => 'builtin', name => 'push',
+        inputs => [$arg]);
+    my $b2 = $f->make('Call', dispatch_kind => 'builtin', name => 'push',
+        inputs => [$arg]);
+
+    is($b1->id, $b2->id, 'identical builtin Calls still hash-cons (pu parity)');
+};
+
 done_testing;

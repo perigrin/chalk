@@ -65,10 +65,15 @@ class Chalk::MOP::Class {
     }
 
     method declare_import($module, %opts) {
-        # Deduplicate: return existing import if the same module is already registered.
-        # Earley parse ambiguity can cause semantic actions to fire multiple times.
+        # Deduplicate: return existing import if the same module is already registered
+        # WITH the same keyword. Earley parse ambiguity can cause semantic actions to
+        # fire multiple times — but `use warnings;` and `no warnings '...';` are
+        # DIFFERENT declarations on the same module and must both survive.
+        my $kw = $opts{keyword} // 'use';
         for my $existing (@imports) {
-            return $existing if $existing->module() eq $module;
+            return $existing
+                if $existing->module() eq $module
+                && ($existing->keyword() // 'use') eq $kw;
         }
         my $import = Chalk::MOP::Import->new(
             module => $module,

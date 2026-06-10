@@ -117,26 +117,29 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return { 'main.pm' => $code };
     }
 
-    # Emit a `use` declaration from a Chalk::MOP::Import.
+    # Emit a `use`/`no` declaration from a Chalk::MOP::Import. The keyword
+    # must be preserved: emitting `no warnings '...'` as `use warnings '...'`
+    # INVERTS it (re-enables the warning the source silenced).
     method _emit_mop_import($import) {
-        my $module = $import->module;
-        my @args   = $import->args;
+        my $module  = $import->module;
+        my @args    = $import->args;
+        my $keyword = $import->keyword // 'use';
 
         # Version strings don't get quoted (matches legacy _emit_use_decl).
         if ($module =~ /^v?[0-9]/) {
             if (@args) {
                 my @arg_strs = map { $self->_emit_expr($_) } @args;
-                return "use $module " . join(', ', @arg_strs) . ";";
+                return "$keyword $module " . join(', ', @arg_strs) . ";";
             }
-            return "use $module;";
+            return "$keyword $module;";
         }
 
         if (@args) {
             my @arg_strs = map { $self->_emit_expr($_) } @args;
-            return "use $module " . join(', ', @arg_strs) . ";";
+            return "$keyword $module " . join(', ', @arg_strs) . ";";
         }
 
-        return "use $module;";
+        return "$keyword $module;";
     }
 
     # Emit a class declaration from a Chalk::MOP::Class. Walks fields

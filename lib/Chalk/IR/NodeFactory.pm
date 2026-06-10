@@ -253,10 +253,16 @@ class Chalk::IR::NodeFactory {
             return $node;
         }
 
-        # Call(name='new') has per-call identity (malloc side effect).
-        # Each call site constructs a distinct object even with identical arguments.
+        # Call(dispatch_kind='method') has per-call identity: construction
+        # (name='new') is a malloc side effect, and ANY method call is a
+        # statement-position side effect whose repetitions are distinct
+        # ($obj->advance(); $obj->advance();). This restores pu parity — the
+        # pre-convergence MethodCall node had per-call identity; narrowing it
+        # to name='new' during R3 was a regression (branch-review I1).
+        # Builtin/sub Calls keep content hash-consing (pu behavior; the
+        # broader statement-identity design is tracked with the cache/identity
+        # family follow-up).
         if ($op_name eq 'Call'
-            && ($args{name} // '') eq 'new'
             && ($args{dispatch_kind} // '') eq 'method')
         {
             my $class = $DATA_CLASSES{$op_name}

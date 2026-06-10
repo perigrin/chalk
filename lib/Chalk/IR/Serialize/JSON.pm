@@ -41,6 +41,9 @@ sub _extract_fields ($node, $id_remap) {
         return {
             dispatch_kind => $node->dispatch_kind,
             name          => $node->name,
+            # Constructor calls (name='new') carry the :param name list; losing
+            # it silently re-lowers with no bound params (branch-review I3).
+            param_names   => [ ($node->param_names // [])->@* ],
         };
     }
     if ($op eq 'Phi') {
@@ -79,6 +82,12 @@ sub _extract_fields ($node, $id_remap) {
             replacement => $node->replacement,
             flags       => $node->flags,
         };
+    }
+    if ($op eq 'RegexCapture') {
+        return { n => $node->n };
+    }
+    if ($op eq 'EnvRead') {
+        return { key => $node->key };
     }
     if ($op eq 'VarDecl') {
         return { scope => $node->scope };
@@ -238,6 +247,8 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'Call') {
             $args{dispatch_kind} = $fields->{dispatch_kind};
             $args{name}          = $fields->{name};
+            $args{param_names}   = $fields->{param_names}
+                if exists $fields->{param_names};
         }
         elsif ($op eq 'Phi') {
             $args{region} = $nodes[ $fields->{region} ];
@@ -271,6 +282,12 @@ sub _deserialize_graph ($method_data) {
             $args{pattern}     = $fields->{pattern}     // '';
             $args{replacement} = $fields->{replacement} // '';
             $args{flags}       = $fields->{flags}       // '';
+        }
+        elsif ($op eq 'RegexCapture') {
+            $args{n} = $fields->{n};
+        }
+        elsif ($op eq 'EnvRead') {
+            $args{key} = $fields->{key};
         }
         elsif ($op eq 'VarDecl') {
             $args{scope} = $fields->{scope} // 'my';

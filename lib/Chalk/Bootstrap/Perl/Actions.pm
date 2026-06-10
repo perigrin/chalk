@@ -306,7 +306,8 @@ class Chalk::Bootstrap::Perl::Actions {
             if (defined $main) {
                 for my $use (@use_decls) {
                     $main->declare_import($use->name(),
-                        args => [$use->args->@*],
+                        args    => [$use->args->@*],
+                        keyword => $use->keyword(),
                     );
                 }
                 for my $sub (@top_level_subs) {

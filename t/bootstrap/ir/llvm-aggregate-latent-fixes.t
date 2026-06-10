@@ -466,4 +466,57 @@ subtest 'I-D: Length(PostfixDeref(@$ref)) — scalar(@$ref) — valid IR' => sub
     done_testing;
 };
 
+# ---------------------------------------------------------------------------
+# Branch-review ERRH-F3: %Slot payload stores must DIE GAP for reprs they
+# cannot hold (Str/Num/...), not emit invalid `store i64 <i8*/double>` for
+# lli to reject. The contract is loud-at-lowering, not loud-at-lli.
+# ---------------------------------------------------------------------------
+subtest 'Slot stores die GAP for unsupported reprs (not invalid IR)' => sub {
+    # ArrayRef with a Str element
+    {
+        my $f = _mk();
+        my $s = $f->make('Constant', value => 'oops', const_type => 'string');
+        $s->set_representation('Str');
+        my $arr = $f->make('ArrayRef', inputs => [$s]);
+        $arr->set_representation('ArrayRef');
+        my $len = $f->make('Length', inputs => [$arr]);
+        $len->set_representation('Int');
+        my $ret = $f->make_cfg('Return', inputs => [$len]);
+        eval { Chalk::Target::LLVM->lower($ret) };
+        like($@, qr/GAP/, 'Str element in ArrayRef dies GAP at lowering');
+    }
+    # HashRef with a Str value
+    {
+        my $f = _mk();
+        my $k = $f->make('Constant', value => 'k', const_type => 'string');
+        $k->set_representation('Str');
+        my $v = $f->make('Constant', value => 'oops', const_type => 'string');
+        $v->set_representation('Str');
+        my $h = $f->make('HashRef', inputs => [$k, $v]);
+        $h->set_representation('HashRef');
+        my $ret = $f->make_cfg('Return', inputs => [$h]);
+        eval { Chalk::Target::LLVM->lower($ret) };
+        like($@, qr/GAP/, 'Str value in HashRef dies GAP at lowering');
+    }
+    # Element store of a Str rhs
+    {
+        my $f = _mk();
+        my $z = $f->make('Constant', value => '0', const_type => 'integer');
+        $z->set_representation('Int');
+        my $arr = $f->make('ArrayRef', inputs => [$z]);
+        $arr->set_representation('ArrayRef');
+        my $idx = $f->make('Constant', value => '0', const_type => 'integer');
+        $idx->set_representation('Int');
+        my $lv = $f->make('Subscript', inputs => [$arr, $idx]);
+        $lv->set_representation('Int');
+        my $s = $f->make('Constant', value => 'oops', const_type => 'string');
+        $s->set_representation('Str');
+        my $as = $f->make('Assign', inputs => [$lv, $s]);
+        $as->set_representation('Str');
+        my $ret = $f->make_cfg('Return', inputs => [$as]);
+        eval { Chalk::Target::LLVM->lower($ret) };
+        like($@, qr/GAP/, 'Str rhs in an element store dies GAP at lowering');
+    }
+};
+
 done_testing;
