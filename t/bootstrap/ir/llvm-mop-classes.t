@@ -1,5 +1,5 @@
-# ABOUTME: Tests for G5 feature-class MOP lowering: ClassInfo, MethodInfo, MOP::Field, New, MethodCall.
-# ABOUTME: Verifies 7 class idioms lower correctly to LLVM IR with lli==perl (libperl-free).
+# ABOUTME: Tests for feature-class MOP lowering: ClassInfo, MethodInfo, MOP::Field, Call(new), Call(method).
+# ABOUTME: Verifies the class idioms lower correctly to LLVM IR with lli==perl (libperl-free).
 use 5.42.0;
 use utf8;
 
@@ -242,10 +242,10 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# Test: Adversarial — MethodCall on absent method MUST die loudly
+# Test: Adversarial — Call(method) on absent method MUST die loudly
 # ---------------------------------------------------------------------------
 
-subtest 'adversarial: MethodCall on absent method dies loudly at lowering' => sub {
+subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     # MethodInfo: greet (no 'wave' method defined)
@@ -294,10 +294,10 @@ subtest 'adversarial: MethodCall on absent method dies loudly at lowering' => su
 };
 
 # ---------------------------------------------------------------------------
-# Test: Adversarial — MethodCall on undeclared class (no ClassInfo in graph)
+# Test: Adversarial — Call(method) on undeclared class (no ClassInfo in graph)
 # ---------------------------------------------------------------------------
 
-subtest 'adversarial: MethodCall without ClassDecl dies loudly at lowering' => sub {
+subtest 'adversarial: Call(method) without ClassInfo dies loudly at lowering' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     # KnownClass has 'foo' but NOT 'bar'
