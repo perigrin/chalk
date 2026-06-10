@@ -451,6 +451,30 @@ or `FieldWrite` nodes — those were the parallel G5 vocabulary and are deleted.
 store and element store both reduce to `Assign`-over-lvalue rather than a dedicated
 write node.
 
+### Regex (the G6 sub-compiler)
+
+A literal pattern is a compile-time-known mini-language: the backend compiles it
+to a runtime-free matcher emitted inline — a shared "try each start offset" slide
+loop wrapping a position-threaded recognizer (per-atom predicates; greedy
+quantifiers emit a consume loop plus a backoff loop holding the continuation, so
+backtracking is runtime loop structure, not code duplication). No libperl and no
+perl regex engine.
+
+| Idiom | Canonical node(s) | LLVM lowering |
+|-------|-------------------|---------------|
+| `$s =~ /pat/` | `RegexMatch(subject)` (pattern/flags are compile-time attrs) | inline matcher producing the i1 matched?; capture-group offsets are recorded as SSA pairs in a side table for downstream consumers (G7's `$N`). |
+| `qr/pat/` | `Constant(const_type='regex')` with `:Regex` repr | no value materialized; the pattern is resolved statically at the application site. |
+| `$s =~ $qr` | `Match(subject, qr_constant)` (the `=~` BinOp) | statically resolves the rhs pattern and inlines the same matcher; a non-statically-resolvable rhs is a loud GAP. |
+| `s/pat/repl/` | `RegexSubst(subject)` (pattern/replacement/flags attrs) | match + splice: malloc, memcpy prefix + replacement segments (literals + `$N` captured slices) + suffix; non-match returns the subject unchanged. Result length is a runtime SSA in the string-length side table. |
+
+Captures are plain SSA offset pairs into the subject buffer — **no `%MatchResult`
+struct is materialized**; a struct ABI would only be needed at a function
+boundary (a qr value escaping static tracking), which is a loud GAP today.
+Supported feature set: literals, `^`/`$` anchors, character classes
+(`[...]`/`[^...]`/`\d\w\s`/`.`), greedy quantifiers (`*`/`+`/`?`/`{n,m}`),
+capture groups, `(?:...)`. Alternation, `\Q...\E`, `\G`, `/g`, non-greedy
+quantifiers, and backrefs are tracked follow-ups that die as explicit GAPs.
+
 ---
 
 ## JSON Serialization
