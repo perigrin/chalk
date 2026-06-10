@@ -62,7 +62,7 @@ sub build_dual_str_graph {
         fields  => [],
     );
 
-    my $new_obj = $f->make('New',
+    my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => [],
         inputs      => [$ci],
     );
@@ -118,7 +118,7 @@ sub build_triple_str_graph {
         fields  => [],
     );
 
-    my $new_obj = $f->make('New', param_names => [], inputs => [$ci]);
+    my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new', param_names => [], inputs => [$ci]);
     $new_obj->set_representation('Object');
     my $call = $f->make('Call',
         dispatch_kind => 'method',

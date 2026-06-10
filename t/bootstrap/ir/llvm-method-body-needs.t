@@ -131,7 +131,7 @@ subtest 'method body Coerce(Bool->Str) emits no undeclared globals' => sub {
         fields  => [],
     );
 
-    my $new_obj = $f->make('New',
+    my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => [],
         inputs      => [$ci],
     );
@@ -206,7 +206,7 @@ subtest 'method body _need_memcmp propagated to prologue' => sub {
     my $str_val = $f->make('Constant', value => 'hello', const_type => 'string');
     $str_val->set_representation('Str');
 
-    my $new_obj = $f->make('New',
+    my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => ['val'],
         inputs      => [$ci, $str_val],
     );
@@ -279,7 +279,7 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
         fields  => [],
     );
 
-    my $new_obj = $f->make('New',
+    my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => [],
         inputs      => [$ci],
     );

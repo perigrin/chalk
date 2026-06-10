@@ -81,7 +81,7 @@ subtest 'method-simple: $g->greet => 42 (Int)' => sub {
     );
 
     # New: Greeter->new (no :param fields)
-    my $new_g = $f->make('New',
+    my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => [],
         inputs      => [$ci],
     );
@@ -132,7 +132,7 @@ subtest 'class-simple: ref($e) => "Empty" (Str)' => sub {
         fields  => [],
     );
 
-    my $new_e = $f->make('New',
+    my $new_e = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => [],
         inputs      => [$ci],
     );
@@ -206,7 +206,7 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
     my $name_val = $f->make('Constant', value => 'cat', const_type => 'string');
     $name_val->set_representation('Str');
 
-    my $new_a = $f->make('New',
+    my $new_a = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => ['name'],
         inputs      => [$ci, $name_val],
     );
@@ -264,7 +264,7 @@ subtest 'adversarial: MethodCall on absent method dies loudly at lowering' => su
         fields  => [],
     );
 
-    my $new_g = $f->make('New',
+    my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => [],
         inputs      => [$ci],
     );
@@ -315,7 +315,7 @@ subtest 'adversarial: MethodCall without ClassDecl dies loudly at lowering' => s
         fields  => [],
     );
 
-    my $new_k = $f->make('New',
+    my $new_k = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => [],
         inputs      => [$ci],
     );

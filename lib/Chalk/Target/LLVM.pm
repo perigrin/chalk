@@ -1284,13 +1284,6 @@ sub lower_value {
     elsif ($op eq 'FieldAccess' && $self->{_in_method_body}) {
         return $self->_lower_field_access_in_method($node);
     }
-    # MOP / class object operations (G5)
-    elsif ($op eq 'New') {
-        return $self->_lower_new($node);
-    }
-    elsif ($op eq 'FieldWrite') {
-        return $self->_lower_field_write($node);
-    }
     elsif ($op eq 'Ref' && defined $node->inputs->[0]
         && defined $node->inputs->[0]->representation
         && $node->inputs->[0]->representation eq 'Object') {
@@ -3855,15 +3848,153 @@ sub _lower_new {
     return $result;
 }
 
+# _lower_call_new($node) -> $llvm_ref
+#
+# Lowers a Call(dispatch_kind='method', name='new') node.
+# This is the canonical form of the New node: malloc + vtable bind + :param binding.
+# inputs[0] = ClassInfo, inputs[1..N] = :param values, param_names = [names].
+sub _lower_call_new {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+
+    my $cls_node    = $node->inputs->[0];
+    my $class_name  = _class_name_from_class_node($cls_node);
+    my $param_names = $node->can('param_names') ? ($node->param_names // []) : [];
+    # inputs[1..N] are the :param values
+    my $all_inputs  = $node->inputs // [];
+    my $param_vals  = scalar(@$all_inputs) > 1 ? [ @{$all_inputs}[1 .. $#$all_inputs] ] : [];
+
+    # Verify the class is registered
+    my $reg = $self->{class_registry}{$class_name}
+        or die "LLVM MOP: Call(new) references undeclared class '$class_name'";
+
+    # malloc the object
+    my $raw     = $self->_fresh;
+    my $obj_ref = $self->_fresh;
+    $self->_emit("  $raw     = call i8* \@malloc(i64 ptrtoint (%${class_name}.obj* getelementptr (%${class_name}.obj, %${class_name}.obj* null, i64 1) to i64))  ; Call(new) $class_name: sizeof");
+    $self->_emit("  $obj_ref = bitcast i8* $raw to %${class_name}.obj*  ; Call(new) $class_name: typed ptr");
+
+    # Store vtable pointer
+    my $vt_gep = $self->_fresh;
+    $self->_emit("  $vt_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 0  ; vtable ptr slot");
+    $self->_emit("  store %${class_name}.vt* \@${class_name}__vtable, %${class_name}.vt** $vt_gep  ; store vtable");
+
+    # Bind :param fields
+    my $fields = $reg->{fields} // [];
+    for my $i (0 .. $#$param_names) {
+        my $pname   = $param_names->[$i];
+        my $pval    = $param_vals->[$i];
+        my ($finfo) = grep { ($_->{name} // '') eq $pname } @$fields;
+        unless (defined $finfo) {
+            die "LLVM MOP: Call(new) $class_name: no :param field named '$pname' in class registry";
+        }
+        my $fidx = $finfo->{field_index};
+        my $slot_idx = $fidx + 1;
+        my $repr = defined $pval ? _require_repr($pval, 'Call(new).:param.field') : 'Int';
+        my $val_ref = $self->lower_value($pval);
+
+        my $def_gep = $self->_fresh;
+        $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; field[$fidx] defined bit");
+        $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' defined=true");
+        my $pay_gep = $self->_fresh;
+        $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; field[$fidx] payload");
+
+        if ($repr eq 'Str') {
+            my $len_ref  = $self->{_str_len_table}{$val_ref};
+            my $pair_raw = $self->_fresh;
+            my $pair_ptr = $self->_fresh;
+            $self->_emit("  $pair_raw = call i8* \@malloc(i64 16)  ; alloc StrPair for field '$pname'");
+            $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
+            my $pp_gep = $self->_fresh;
+            $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
+            $self->_emit("  store i8* $val_ref, i8** $pp_gep  ; store str ptr");
+            my $pl_gep = $self->_fresh;
+            $self->_emit("  $pl_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
+            my $len_val = defined $len_ref ? $len_ref : 'zeroinitializer';
+            if ($len_val eq 'zeroinitializer') {
+                $len_val = $self->_fresh;
+                $self->_emit("  $len_val = call i64 \@strlen(i8* $val_ref)  ; strlen for Str field '$pname'");
+            }
+            $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
+            my $pair_as_i64 = $self->_fresh;
+            $self->_emit("  $pair_as_i64 = ptrtoint %StrPair* $pair_ptr to i64  ; StrPair* -> i64 payload");
+            $self->_emit("  store i64 $pair_as_i64, i64* $pay_gep  ; field '$pname' Str payload = StrPair*");
+            $self->{_need_strpair} = 1;
+        } else {
+            my $pay_i64 = $self->_fresh;
+            if ($repr eq 'Bool') {
+                $self->_emit("  $pay_i64 = zext i1 $val_ref to i64  ; Bool->i64 for field '$pname'");
+            } else {
+                $self->_emit("  $pay_i64 = add i64 0, $val_ref  ; identity: $repr->i64 for field '$pname'");
+            }
+            $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; field '$pname' payload");
+        }
+    }
+
+    # Store default/uninit fields not provided as :param
+    for my $finfo (@$fields) {
+        my $pname = $finfo->{name} // '';
+        next if grep { $_ eq $pname } @$param_names;
+        my $fidx     = $finfo->{field_index};
+        my $slot_idx = $fidx + 1;
+        if ($finfo->{has_default}) {
+            my $def_node = $finfo->{default_node};
+            my $def_repr = defined $def_node ? _require_repr($def_node, 'Call(new).default.field') : 'Int';
+            my $def_ref  = defined $def_node ? $self->lower_value($def_node) : '0';
+            my $def_gep = $self->_fresh;
+            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; default field[$fidx] defined");
+            $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' default defined=true");
+            my $pay_gep = $self->_fresh;
+            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; default field[$fidx] payload");
+            my $pay_i64 = $self->_fresh;
+            $self->_emit("  $pay_i64 = add i64 0, $def_ref  ; default value for field '$pname'");
+            $self->_emit("  store i64 $pay_i64, i64* $pay_gep");
+        } else {
+            my $def_gep = $self->_fresh;
+            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; uninit field[$fidx] defined");
+            $self->_emit("  store i1 false, i1* $def_gep  ; field '$pname' not initialized");
+            my $pay_gep = $self->_fresh;
+            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; uninit field[$fidx] payload");
+            $self->_emit("  store i64 0, i64* $pay_gep  ; field '$pname' payload=0");
+        }
+    }
+
+    # ADJUST blocks
+    my $adjusts = $reg->{adjusts} // [];
+    for my $adj (@$adjusts) {
+        for my $fw_node (@{ $adj->{body_nodes} // [] }) {
+            local $self->{_in_method_body}    = 1;
+            local $self->{_method_self_name}  = $raw;
+            local $self->{_method_class_name} = $class_name;
+            $self->lower_value($fw_node);
+        }
+    }
+
+    # Return the raw i8* pointer (Object repr)
+    my $result = $self->_fresh;
+    $self->_emit("  $result = bitcast %${class_name}.obj* $obj_ref to i8*  ; Call(new) $class_name: -> Object (i8*)");
+    $self->{cache}{ $node->id } = $result;
+    return $result;
+}
+
 # _lower_call_method($node) -> $llvm_ref
 #
-# Lowers a Call(dispatch_kind='method') node: same vtable-dispatch logic as
-# _lower_method_call, but reads name from Call->name and class from inputs[1].
-# The invocant is inputs[0]; the class reference (ClassInfo) is inputs[1].
+# Lowers a Call(dispatch_kind='method') node.
+# When name='new': routes to the constructor lowering (_lower_call_new).
+# Otherwise: vtable-dispatch (same logic as the former _lower_method_call).
+# inputs[0] = ClassInfo (class reference) for name='new'.
+# inputs[0] = invocant (obj), inputs[1] = ClassInfo for regular method calls.
 sub _lower_call_method {
     my ($self, $node) = @_;
 
     my $method_name = $node->name;
+
+    # Route constructor calls to the construction lowering.
+    if ($method_name eq 'new') {
+        return $self->_lower_call_new($node);
+    }
     my $obj_node    = $node->inputs->[0];
     my $cls_node    = $node->inputs->[1];
     my $class_name  = _class_name_from_class_node($cls_node);
@@ -4196,13 +4327,21 @@ sub _infer_class_name_from_obj {
         my $cls_node = $obj_node->class_decl_node;
         return defined $cls_node ? _class_name_from_class_node($cls_node) : undef;
     }
+    # Call(dispatch_kind='method', name='new') is the canonical form of New.
+    if ($op eq 'Call' && $obj_node->can('dispatch_kind')
+        && ($obj_node->dispatch_kind // '') eq 'method'
+        && ($obj_node->name // '') eq 'new')
+    {
+        my $cls_node = $obj_node->inputs->[0];
+        return defined $cls_node ? _class_name_from_class_node($cls_node) : undef;
+    }
     # PadAccess to a variable holding a New — walk inputs
     if ($op eq 'PadAccess') {
         # Not yet supported in MOP: die to trigger diagnostic
         die "LLVM MOP: cannot infer class name from PadAccess — "
           . "method body self-reference via var not yet supported";
     }
-    die "LLVM MOP: cannot infer class name from op=$op — expected New or PadAccess";
+    die "LLVM MOP: cannot infer class name from op=$op — expected New, Call(new), or PadAccess";
 }
 
 1;

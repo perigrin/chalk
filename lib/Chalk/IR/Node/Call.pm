@@ -34,6 +34,11 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
     # in scope have been registered on the MOP.
     field $target :param :reader = undef;
 
+    # param_names: for Call(name='new'), the ordered list of :param field names
+    # matching inputs[1..N]. Mirrors the New node's param_names field.
+    # Empty/undef for non-constructor calls.
+    field $param_names :param :reader = [];
+
     method operation() { 'Call' }
 
     method content_hash() {

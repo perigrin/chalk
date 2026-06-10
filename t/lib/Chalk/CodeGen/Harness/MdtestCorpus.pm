@@ -482,9 +482,9 @@ sub _build_node_from_rhs {
             return $factory->make('Phi', region => $region, values => \@inputs, %attrs);
         }
 
-        # New node: param_names attr is a comma-separated string -> arrayref.
+        # New node and Call(name='new'): param_names attr is a comma-separated string -> arrayref.
         # e.g. param_names: "name" -> ['name']; param_names: "" -> []
-        if ($op eq 'New') {
+        if ($op eq 'New' || ($op eq 'Call' && ($attrs{name} // '') eq 'new')) {
             if (exists $attrs{param_names}) {
                 my $pn = $attrs{param_names};
                 if (!defined $pn || $pn eq '') {

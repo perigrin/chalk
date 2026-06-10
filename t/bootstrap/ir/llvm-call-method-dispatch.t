@@ -76,7 +76,7 @@ subtest 'Call(dispatch_kind=method, name=greet): $g->greet => 42 (Int)' => sub {
     );
 
     # New with ClassInfo
-    my $new_g = $f->make('New',
+    my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => [],
         inputs      => [$ci],
     );
@@ -132,7 +132,7 @@ subtest 'Call(dispatch_kind=method) on absent method dies loudly' => sub {
         fields  => [],
     );
 
-    my $new_g = $f->make('New', param_names => [], inputs => [$ci]);
+    my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new', param_names => [], inputs => [$ci]);
     $new_g->set_representation('Object');
 
     # Call 'wave' which does not exist

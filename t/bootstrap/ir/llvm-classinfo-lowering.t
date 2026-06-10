@@ -81,7 +81,7 @@ subtest 'method-simple with ClassInfo: $g->greet => 42 (Int)' => sub {
     );
 
     # New: ClassInfo as inputs[0]
-    my $new_g = $f->make('New',
+    my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => [],
         inputs      => [$ci],
     );
@@ -128,7 +128,7 @@ subtest 'class-simple with ClassInfo: ref($e) => "Empty" (Str)' => sub {
         fields  => [],
     );
 
-    my $new_e = $f->make('New',
+    my $new_e = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => [],
         inputs      => [$ci],
     );
@@ -199,7 +199,7 @@ subtest 'field-basic with ClassInfo: $a->name => "cat" (Str)' => sub {
     my $name_val = $f->make('Constant', value => 'cat', const_type => 'string');
     $name_val->set_representation('Str');
 
-    my $new_a = $f->make('New',
+    my $new_a = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => ['name'],
         inputs      => [$ci, $name_val],
     );

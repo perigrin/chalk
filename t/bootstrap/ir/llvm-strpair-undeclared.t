@@ -68,7 +68,7 @@ sub build_str_param_int_return_graph {
     $str_val->set_representation('Str');
 
     # New with Str :param — _lower_new at line ~3521 emits %StrPair instructions
-    my $new_obj = $f->make('New',
+    my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
         param_names => ['name'],
         inputs      => [$ci, $str_val],
     );
@@ -140,7 +140,7 @@ subtest 'Str-returning method: exactly one %StrPair (I3 no double-declare)' => s
         fields  => [],
     );
 
-    my $new_obj = $f->make('New', param_names => [], inputs => [$ci]);
+    my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new', param_names => [], inputs => [$ci]);
     $new_obj->set_representation('Object');
 
     my $call = $f->make('Call',

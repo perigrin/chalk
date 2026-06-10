@@ -30,7 +30,7 @@ context: scalar
 
 ```ir
 %cls    = ClassInfo(name: "Empty")
-%new_e  = New(%cls) :Object
+%new_e  = Call(%cls, dispatch_kind: "method", name: "new") :Object
 %result = Ref(%new_e) :Str
 return %result
 L: GREEN
@@ -66,7 +66,7 @@ context: scalar
 %mf     = MOP::Field(name: "name", fieldix: 0, param: true, reader: false, has_default: false, type: "Str")
 %cls    = ClassInfo(name: "Animal", methods: [%mi], fields: [%mf])
 %nval   = Constant("cat") :Str
-%new_a  = New(%cls, %nval, param_names: "name") :Object
+%new_a  = Call(%cls, %nval, dispatch_kind: "method", name: "new", param_names: "name") :Object
 %result = Call(%new_a, %cls, dispatch_kind: "method", name: "name") :Str
 return %result
 L: GREEN
@@ -102,7 +102,7 @@ context: scalar
 %cls    = ClassInfo(name: "Pair", fields: [%mf_l, %mf_r])
 %lval   = Constant(10) :Int
 %rval   = Constant(20) :Int
-%new_p  = New(%cls, %lval, %rval, param_names: "left,right") :Object
+%new_p  = Call(%cls, %lval, %rval, dispatch_kind: "method", name: "new", param_names: "left,right") :Object
 %lr     = Call(%new_p, %cls, dispatch_kind: "method", name: "left")  :Int
 %rr     = Call(%new_p, %cls, dispatch_kind: "method", name: "right") :Int
 %result = Add(%lr, %rr) :Int
@@ -136,7 +136,7 @@ context: scalar
 %body   = Constant(42) :Int
 %mi     = MethodInfo(name: "greet", body_node: %body, return_repr: "Int")
 %cls    = ClassInfo(name: "Greeter", methods: [%mi])
-%new_g  = New(%cls) :Object
+%new_g  = Call(%cls, dispatch_kind: "method", name: "new") :Object
 %result = Call(%new_g, %cls, dispatch_kind: "method", name: "greet") :Int
 return %result
 L: GREEN
@@ -180,7 +180,7 @@ context: scalar
 %mf_n      = MOP::Field(name: "n", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
 %cls       = ClassInfo(name: "Counter", methods: [%mi_inc, %mi_val], fields: [%mf_n])
 %ten       = Constant(10) :Int
-%new_c     = New(%cls, %ten, param_names: "n") :Object
+%new_c     = Call(%cls, %ten, dispatch_kind: "method", name: "new", param_names: "n") :Object
 %inc_call  = Call(%new_c, %cls, dispatch_kind: "method", name: "inc") :Int
 %result    = Call(%new_c, %cls, dispatch_kind: "method", name: "val") :Int
 control: %inc_call -> %result
@@ -215,7 +215,7 @@ context: scalar
 %mi_kind   = MethodInfo(name: "kind", body_node: %kind_body, return_repr: "Str")
 %base_cls  = ClassInfo(name: "Base", methods: [%mi_kind])
 %child_cls = ClassInfo(name: "Child", parent: "Base", parent_ci: %base_cls)
-%new_c     = New(%child_cls) :Object
+%new_c     = Call(%child_cls, dispatch_kind: "method", name: "new") :Object
 %result    = Call(%new_c, %child_cls, dispatch_kind: "method", name: "kind") :Str
 return %result
 L: GREEN
@@ -259,7 +259,7 @@ context: scalar
 %mf_dbl    = MOP::Field(name: "double", fieldix: 1, param: false, reader: false, has_default: false, type: "Int")
 %cls       = ClassInfo(name: "Box", methods: [%mi_dbl], fields: [%mf_val, %mf_dbl], adjusts: [%fw_dbl])
 %seven     = Constant(7) :Int
-%new_b     = New(%cls, %seven, param_names: "val") :Object
+%new_b     = Call(%cls, %seven, dispatch_kind: "method", name: "new", param_names: "val") :Object
 %result    = Call(%new_b, %cls, dispatch_kind: "method", name: "double") :Int
 return %result
 L: GREEN
