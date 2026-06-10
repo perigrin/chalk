@@ -15,11 +15,12 @@ class Chalk::IR::ClassInfo {
     # Content-based ID for use in NodeFactory hash-cons keys.
     # ClassInfo objects may appear as inputs inside hash-consed nodes,
     # so they must be addressable by id.
+    # Fields may be FieldInfo objects (have id()) or MOP::Field objects (use name).
     method id() {
-        my $parent_str = defined $parent ? $parent : 'undef';
-        my $fields_str = join(',', map { $_->id() } $fields->@*);
-        my $methods_str = join(',', map { $_->id() } $methods->@*);
-        my $subs_str = join(',', map { $_->id() } $subs->@*);
+        my $parent_str  = defined $parent ? $parent : 'undef';
+        my $fields_str  = join(',', map { $_->can('id') ? $_->id() : ref($_).':'.$_->name } $fields->@*);
+        my $methods_str = join(',', map { $_->can('id') ? $_->id() : ref($_).':'.$_->name } $methods->@*);
+        my $subs_str    = join(',', map { $_->can('id') ? $_->id() : ref($_).':'.$_->name } $subs->@*);
         return "ClassInfo:$name:$parent_str:[$fields_str]:[$methods_str]:[$subs_str]";
     }
 

@@ -13,6 +13,9 @@ use parent 'Chalk::IR::Target';
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Schedule::Dominators;
 use Chalk::IR::Schedule::Elaborate;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
+use Chalk::MOP::Field;
 
 # lower($return_node) -> $llvm_ir_text
 #
@@ -219,8 +222,103 @@ sub _method_fn_llvm_ret_type {
 }
 
 # ---------------------------------------------------------------------------
-# Class registry: scan graph for ClassDecl/MethodDef/FieldDef nodes.
+# Class registry: scan graph for ClassDecl/MethodDef/FieldDef/ClassInfo nodes.
 # ---------------------------------------------------------------------------
+
+# _class_name_from_class_node($node) -> $name
+#
+# Returns the class name from either a ClassDecl (->class_name) or a
+# ClassInfo (->name). Dies if neither accessor is available.
+sub _class_name_from_class_node {
+    my ($node) = @_;
+    return undef unless defined $node;
+    # ClassInfo uses ->name; ClassDecl uses ->class_name
+    return $node->name       if $node->can('name') && !$node->can('class_name');
+    return $node->class_name if $node->can('class_name');
+    return $node->name       if $node->can('name');
+    die "LLVM MOP: cannot determine class name from node type " . ref($node);
+}
+
+# _populate_registry_from_classinfo(\%registry, $ci) -> void
+#
+# Populates %registry from a Chalk::IR::ClassInfo object.
+# Mirrors the ClassDecl path in _scan_class_registry so downstream
+# emission (_emit_class_registry_ir) is unchanged.
+sub _populate_registry_from_classinfo {
+    my ($registry, $ci) = @_;
+    my $cname = $ci->name;
+    $registry->{$cname} //= { methods => [], fields => [], adjusts => [], parent => undef };
+    $registry->{$cname}{parent} //= $ci->parent;
+
+    my $mslot = scalar @{ $registry->{$cname}{methods} };
+
+    # Methods from ClassInfo->methods (each is a MethodInfo)
+    for my $mi (@{ $ci->methods // [] }) {
+        my $mname     = $mi->name;
+        my $body_node = $mi->body_node;
+        # Derive return_repr from body_node's representation if body_node is present
+        # and return_repr field was not explicitly set; use 'Int' as fallback.
+        my $ret_repr;
+        if (defined $mi->return_repr) {
+            $ret_repr = $mi->return_repr;
+        } elsif (defined $body_node) {
+            $ret_repr = _require_repr($body_node, 'MethodInfo.body_node');
+        } else {
+            $ret_repr = 'Int';
+        }
+        unless (grep { ($_->{name} // '') eq $mname } @{ $registry->{$cname}{methods} }) {
+            push @{ $registry->{$cname}{methods} }, {
+                name        => $mname,
+                body_node   => $body_node,
+                return_repr => $ret_repr,
+                vtable_slot => $mslot++,
+            };
+        }
+    }
+
+    # Fields from ClassInfo->fields (each is a MOP::Field)
+    for my $mf (@{ $ci->fields // [] }) {
+        my $fname       = $mf->name;
+        my $fidx        = $mf->fieldix;
+        my $is_param    = $mf->is_param    // false;
+        my $has_reader  = $mf->has_reader  // false;
+        my $has_default = $mf->has_default // false;
+        my $def_node    = $mf->default_value;
+        my $f_repr      = $mf->type // 'Int';
+        unless (grep { ($_->{field_index} // -1) == $fidx } @{ $registry->{$cname}{fields} }) {
+            push @{ $registry->{$cname}{fields} }, {
+                name         => $fname,
+                field_index  => $fidx,
+                is_param     => $is_param,
+                has_reader   => $has_reader,
+                has_default  => $has_default,
+                default_node => $def_node,
+                field_repr   => $f_repr,
+            };
+        }
+        # :reader synthesis
+        if ($has_reader) {
+            unless (grep { ($_->{name} // '') eq $fname } @{ $registry->{$cname}{methods} }) {
+                push @{ $registry->{$cname}{methods} }, {
+                    name               => $fname,
+                    body_node          => undef,
+                    return_repr        => $f_repr,
+                    vtable_slot        => $mslot++,
+                    is_reader_synth    => 1,
+                    reader_field_index => $fidx,
+                };
+            }
+        }
+    }
+
+    # adjusts: ClassInfo may have ->adjusts; if absent, skip
+    if ($ci->can('adjusts')) {
+        for my $adj (@{ $ci->adjusts // [] }) {
+            # adj is a MOP::Phaser::Adjust or similar; body_nodes from ->graph
+            # For now: skip ADJUST bodies from ClassInfo (handled when present)
+        }
+    }
+}
 
 # _scan_class_registry($return_node) -> \%registry
 #
@@ -245,6 +343,18 @@ sub _scan_class_registry {
         next unless defined $node;
         my $id = $node->id;
         next if $visited{$id}++;
+
+        # ClassInfo: canonical metadata object (no ->operation method).
+        # Populate registry directly from its fields/methods.
+        if (ref($node) && $node->isa('Chalk::IR::ClassInfo')) {
+            _populate_registry_from_classinfo(\%registry, $node);
+            # ClassInfo has no ->inputs; its methods/fields are embedded.
+            # Enqueue MethodInfo body_nodes so their sub-graphs are reachable.
+            for my $mi (@{ $node->methods // [] }) {
+                push @queue, $mi->body_node if defined $mi->body_node;
+            }
+            next;
+        }
 
         my $op = $node->can('operation') ? $node->operation : '';
 
@@ -1002,9 +1112,10 @@ package Chalk::Target::LLVM::Context;
 use 5.42.0;
 use utf8;
 
-# Re-export _require_repr from the main package so unqualified calls in this
+# Re-export helpers from the main package so unqualified calls in this
 # package resolve correctly (both packages share the same implementation).
-*_require_repr = \&Chalk::Target::LLVM::_require_repr;
+*_require_repr              = \&Chalk::Target::LLVM::_require_repr;
+*_class_name_from_class_node = \&Chalk::Target::LLVM::_class_name_from_class_node;
 
 # _method_fn_type($result_repr) -> LLVM fn type string for method signatures.
 # Duplicate of the module-level sub; both packages need it to avoid cross-package calls.
@@ -3660,7 +3771,7 @@ sub _lower_new {
     $self->{_need_malloc_memcpy}   = 1;
 
     my $cls_node    = $node->class_decl_node;
-    my $class_name  = $cls_node->class_name;
+    my $class_name  = _class_name_from_class_node($cls_node);
     my $param_names = $node->param_names // [];
     my $param_vals  = $node->param_values // [];
 
@@ -3815,7 +3926,7 @@ sub _lower_method_call {
     my $method_name = $node->method_name;
     my $obj_node    = $node->obj_node;
     my $cls_node    = $node->class_decl_node;
-    my $class_name  = $cls_node->class_name;
+    my $class_name  = _class_name_from_class_node($cls_node);
     my $result_repr = _require_repr($node, 'MethodCall');
 
     # Verify class and method are in the registry
@@ -4070,7 +4181,7 @@ sub _infer_class_name_from_obj {
     my $op = $obj_node->can('operation') ? $obj_node->operation : '';
     if ($op eq 'New') {
         my $cls_node = $obj_node->class_decl_node;
-        return defined $cls_node ? $cls_node->class_name : undef;
+        return defined $cls_node ? _class_name_from_class_node($cls_node) : undef;
     }
     # PadAccess to a variable holding a New — walk inputs
     if ($op eq 'PadAccess') {

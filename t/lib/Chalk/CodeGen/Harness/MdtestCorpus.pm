@@ -22,6 +22,9 @@ use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Graph::TypedInvariant;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
+use Chalk::MOP::Field;
 
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::BehaviorRecord;
@@ -244,7 +247,10 @@ sub build_graph_from_ir {
                 croak "build_graph_from_ir: could not build node for line: $raw_line";
             }
 
-            $node->set_representation($repr) if defined $repr;
+            # Only call set_representation on IR nodes (ClassInfo/MethodInfo/MOP::Field
+            # are metadata objects that do not have this method).
+            $node->set_representation($repr)
+                if defined $repr && $node->can('set_representation');
             $sym{$name} = $node;
             next;
         }
@@ -437,9 +443,23 @@ sub _build_node_from_rhs {
                 croak "build_graph_from_ir: $op input '$ref' undefined at $name"
                     unless exists $sym->{$ref};
                 push @inputs, $sym->{$ref};
-            } elsif ($arg =~ /^(\w+)\s*:\s*"(.*)"$/) {
+            } elsif ($arg =~ /^(\w+)\s*:\s*"(.*)"$/s) {
                 # Keyword attr: key: "quoted string"
                 $attrs{$1} = $2;
+            } elsif ($arg =~ /^(\w+)\s*:\s*\[([^\]]*)\]$/) {
+                # Keyword attr: key: [%a, %b, %c] — list of node refs
+                my ($key, $list_raw) = ($1, $2);
+                my @refs;
+                for my $item (split /\s*,\s*/, $list_raw) {
+                    $item =~ s/^\s+|\s+$//g;
+                    next unless length $item;
+                    croak "build_graph_from_ir: $op list-attr '$key' item '$item' is not a %ref at $name"
+                        unless $item =~ /^%\w+$/;
+                    croak "build_graph_from_ir: $op list-attr '$key' item '$item' undefined at $name"
+                        unless exists $sym->{$item};
+                    push @refs, $sym->{$item};
+                }
+                $attrs{$key} = \@refs;
             } elsif ($arg =~ /^(\w+)\s*:\s*(%\w+)$/) {
                 # Keyword attr: key: %node_ref — resolve to node object
                 my ($key, $ref) = ($1, $2);
@@ -489,7 +509,78 @@ sub _build_node_from_rhs {
             }
         }
 
+        # MethodInfo: construct a Chalk::IR::MethodInfo (not a hash-consed IR node).
+        # Stored in %sym so ClassInfo can reference it. Not passed to $factory->make().
+        if ($op eq 'MethodInfo') {
+            my $mi_name     = $attrs{name}        // croak "MethodInfo missing name at $name";
+            my $body_node   = $attrs{body_node};   # may be undef (resolved node or raw)
+            my $return_repr = $attrs{return_repr}; # may be undef
+            return Chalk::IR::MethodInfo->new(
+                name        => $mi_name,
+                body        => [],
+                return_type => $return_repr,
+                body_node   => $body_node,
+                return_repr => $return_repr,
+            );
+        }
+
+        # ClassInfo: construct Chalk::IR::ClassInfo directly.
+        if ($op eq 'ClassInfo') {
+            my $ci_name   = $attrs{name}    // croak "ClassInfo missing name at $name";
+            my $ci_parent = $attrs{parent};
+            # parent: "" -> undef, else string value
+            $ci_parent = undef if defined $ci_parent && $ci_parent eq '';
+            my $ci_methods = $attrs{methods} // [];
+            my $ci_fields  = $attrs{fields}  // [];
+            return Chalk::IR::ClassInfo->new(
+                name    => $ci_name,
+                parent  => $ci_parent,
+                methods => (ref $ci_methods eq 'ARRAY' ? $ci_methods : [$ci_methods]),
+                fields  => (ref $ci_fields  eq 'ARRAY' ? $ci_fields  : [$ci_fields]),
+            );
+        }
+
         return $factory->make($op, inputs => \@inputs, %attrs);
+    }
+
+    # MOP::Field: construct a Chalk::MOP::Field (not a hash-consed IR node).
+    # Handled outside the general N-ary block because the op name contains '::'.
+    if ($rhs =~ /^MOP::Field\(\s*(.*)\s*\)$/s) {
+        my $args_raw = $1;
+        my @raw_args = _split_args_respecting_quotes($args_raw);
+        my %attrs;
+        for my $arg (@raw_args) {
+            $arg =~ s/^\s+|\s+$//g;
+            next unless length $arg;
+            if ($arg =~ /^(\w+)\s*:\s*"(.*)"$/) {
+                $attrs{$1} = $2;
+            } elsif ($arg =~ /^(\w+)\s*:\s*(%\w+)$/) {
+                my ($key, $ref) = ($1, $2);
+                croak "MOP::Field kwarg '$key: $ref' references undefined '$ref' at $name"
+                    unless exists $sym->{$ref};
+                $attrs{$key} = $sym->{$ref};
+            } elsif ($arg =~ /^(\w+)\s*:\s*(\S+)$/) {
+                $attrs{$1} = $2;
+            } else {
+                croak "MOP::Field cannot parse arg '$arg' at $name";
+            }
+        }
+        # Translate param/reader booleans to attributes list
+        my @field_attrs;
+        push @field_attrs, ':param'   if ($attrs{param}   // 'false') eq 'true';
+        push @field_attrs, ':reader'  if ($attrs{reader}  // 'false') eq 'true';
+        my $has_default   = ($attrs{has_default}   // 'false') eq 'true';
+        my $default_value = $attrs{default_value};
+        return Chalk::MOP::Field->new(
+            name          => ($attrs{name}    // croak "MOP::Field missing name at $name"),
+            sigil         => '$',
+            class         => undef,
+            fieldix       => (defined $attrs{fieldix} ? $attrs{fieldix} + 0 : 0),
+            has_default   => $has_default,
+            default_value => $default_value,
+            type          => $attrs{type},
+            attributes    => \@field_attrs,
+        );
     }
 
     croak "build_graph_from_ir: could not parse RHS '$rhs' for $name";
@@ -498,13 +589,15 @@ sub _build_node_from_rhs {
 # _split_args_respecting_quotes($args_raw) -> @args
 #
 # Splits a comma-separated argument list but does NOT split inside double-quoted
-# strings. This handles cases like param_names: "left,right" where the comma
-# inside the quotes is part of the value, not an argument separator.
+# strings or square bracket lists. This handles cases like param_names: "left,right"
+# where the comma inside the quotes is part of the value, and methods: [%m1, %m2]
+# where the comma inside the brackets is part of the list.
 sub _split_args_respecting_quotes {
     my ($str) = @_;
     my @parts;
-    my $current = '';
-    my $in_quote = 0;
+    my $current   = '';
+    my $in_quote  = 0;
+    my $bracket_depth = 0;
     for my $i (0 .. length($str) - 1) {
         my $ch = substr($str, $i, 1);
         if ($ch eq '"' && !$in_quote) {
@@ -515,7 +608,15 @@ sub _split_args_respecting_quotes {
             $in_quote = 0;
             $current .= $ch;
         }
-        elsif ($ch eq ',' && !$in_quote) {
+        elsif ($ch eq '[' && !$in_quote) {
+            $bracket_depth++;
+            $current .= $ch;
+        }
+        elsif ($ch eq ']' && !$in_quote) {
+            $bracket_depth--;
+            $current .= $ch;
+        }
+        elsif ($ch eq ',' && !$in_quote && $bracket_depth == 0) {
             push @parts, $current;
             $current = '';
         }

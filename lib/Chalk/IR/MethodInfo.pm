@@ -11,6 +11,15 @@ class Chalk::IR::MethodInfo {
     field $body        :param :reader = [];
     field $graph       :param :reader = undef;
 
+    # body_node: the IR value node that this method lowers to (i.e., the root of
+    # the method's SoN sub-graph). Used by the LLVM backend to lower the method
+    # body. Defaults to undef; set when constructing MethodInfo from an ir-block.
+    field $body_node   :param :reader = undef;
+
+    # return_repr: the LLVM representation of the method's return value
+    # (e.g. 'Int', 'Str', 'Bool'). Defaults to undef; set from ir-block return_repr attr.
+    field $return_repr :param :reader = undef;
+
     # Content-based ID for use in NodeFactory hash-cons keys.
     # MethodInfo objects are not hash-consed themselves, but may appear as
     # inputs inside hash-consed Constructor nodes (e.g., ClassDecl body).
