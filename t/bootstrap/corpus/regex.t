@@ -93,14 +93,14 @@ for my $case (@$cases) {
 
 my %EXPECTED_VERDICT = (
     'R1' => 'GREEN',   # literal match — G6 T0
-    'R2' => 'GAP',     # qr// — pending
+    'R2' => 'GREEN',   # qr// — Constant(regex) + Match, statically inlined
     'R3' => 'GREEN',   # s/// — G6 T4 (match + splice)
     'R4' => 'GREEN',   # anchored match (^) — G6 T1
     'R5' => 'GREEN',   # character class — G6 T2
     'R6' => 'GREEN',   # quantified identifier — G6 T3
 );
 
-subtest 'per-case L verdicts (R1/R3-R6 GREEN via G6; R2 qr// still GAP)' => sub {
+subtest 'per-case L verdicts (R1-R6 all GREEN via G6)' => sub {
     plan tests => 6;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';

@@ -343,4 +343,44 @@ subtest 'T4 groups transparent to matching' => sub {
     try_match('ab',    'a(?:b)',     'Bool:1', '"ab"   =~ /a(?:b)/ (non-capturing transparent)');
 };
 
+# ---------------------------------------------------------------------------
+# qr// (R2 shape): a compiled-regex VALUE is a Constant(const_type='regex')
+# with :Regex repr; applying it with =~ is the existing Match BinOp. The
+# lowering statically resolves the rhs pattern (compile-time literal) and
+# inlines the same matcher — no new node class, no fn-ptr ABI.
+# ---------------------------------------------------------------------------
+
+subtest 'qr//: Constant(regex) + Match — "foobar" =~ qr/foo/ => Bool:1' => sub {
+    my $f = _mk();
+    my $subj = $f->make('Constant', value => 'foobar', const_type => 'string');
+    $subj->set_representation('Str');
+    my $qr = $f->make('Constant', value => 'foo', const_type => 'regex');
+    $qr->set_representation('Regex');
+    my $m = $f->make('Match', inputs => [$subj, $qr]);
+    $m->set_representation('Bool');
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+
+    my ($out, $ll);
+    eval { ($out, $ll) = lli_run($ret) };
+    ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
+    is($out, 'Bool:1', 'qr-value applied via Match matches');
+    ok($ll !~ /Perl_|(?<![A-Za-z0-9_])SV(?![A-Za-z0-9_])|sv_|libperl|\bAV\b|\bHV\b/,
+        'qr matcher .ll is libperl-free');
+};
+
+subtest 'qr// non-match: "xyz" =~ qr/foo/ => Bool:' => sub {
+    my $f = _mk();
+    my $subj = $f->make('Constant', value => 'xyz', const_type => 'string');
+    $subj->set_representation('Str');
+    my $qr = $f->make('Constant', value => 'foo', const_type => 'regex');
+    $qr->set_representation('Regex');
+    my $m = $f->make('Match', inputs => [$subj, $qr]);
+    $m->set_representation('Bool');
+    my $ret = $f->make_cfg('Return', inputs => [$m]);
+
+    my ($out) = eval { lli_run($ret) };
+    ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
+    is($out, 'Bool:', 'qr-value non-match is false');
+};
+
 done_testing;

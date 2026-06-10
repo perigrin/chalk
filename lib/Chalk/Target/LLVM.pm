@@ -1302,6 +1302,12 @@ sub lower_value {
     elsif ($op eq 'RegexSubst') {
         return $self->_lower_regex_subst($node);
     }
+    # Match (=~ with a compiled-regex VALUE, i.e. qr//): the rhs is a
+    # Constant(const_type='regex') whose pattern is compile-time known; the
+    # lowering resolves it statically and inlines the same matcher.
+    elsif ($op eq 'Match') {
+        return $self->_lower_match_apply($node);
+    }
     else {
         if (defined $node->representation && $node->representation eq 'Scalar') {
             die "GAP: node op=$op repr=Scalar reached LLVM backend — cannot lower runtime-free. "
@@ -4549,6 +4555,45 @@ sub _lower_regex_match {
     # read these as graph-edge side data; s/// consumes them directly).
     $self->{_regex_captures}{ $node->id } = $match;
 
+    $self->{cache}{ $node->id } = $match->{matched};
+    return $match->{matched};
+}
+
+# _lower_match_apply($node) -> $llvm_ref (i1 matched?)
+#
+# Lowers Match (=~ applying a compiled-regex VALUE): inputs[0] = subject Str,
+# inputs[1] = the qr// value. A qr// literal is a Constant(const_type='regex')
+# with :Regex repr — its pattern is compile-time known, so the application
+# inlines the same matcher RegexMatch uses. A qr value that cannot be resolved
+# statically (e.g. flowing through vars/containers the resolver cannot walk)
+# is a loud GAP — a matcher-function ABI is only built if that need is real.
+sub _lower_match_apply {
+    my ($self, $node) = @_;
+
+    my $subj_node = $node->inputs->[0];
+    my $qr_node   = $node->inputs->[1];
+    my $repr      = _require_repr($node, 'Match');
+
+    my $qr_op = $qr_node->can('operation') ? $qr_node->operation : '';
+    unless ($qr_op eq 'Constant'
+        && $qr_node->can('const_type')
+        && ($qr_node->const_type // '') eq 'regex')
+    {
+        die "GAP: Match rhs (op=$qr_op) is not a statically-resolvable qr// "
+          . "literal — only compile-time-known patterns are lowered "
+          . "runtime-free (a runtime-computed pattern needs a matcher-fn ABI).";
+    }
+    my $pattern = $qr_node->value;
+
+    my $subj_ptr = $self->lower_value($subj_node);
+    my $subj_len = $self->_str_len_for($subj_ptr)
+        // die "GAP: Match subject (ref=$subj_ptr) has no tracked length — "
+             . "the matcher needs the subject's byte length.";
+
+    my $compiled = _compile_regex_pattern($pattern, '');
+    my $match    = $self->_emit_regex_matcher($subj_ptr, $subj_len, $compiled, 'Match(qr)');
+
+    $self->{_regex_captures}{ $node->id } = $match;
     $self->{cache}{ $node->id } = $match->{matched};
     return $match->{matched};
 }

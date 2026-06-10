@@ -73,7 +73,14 @@ context: scalar
 ```
 
 ```ir
-L: GAP(qr// is RF: compiles a matcher value via the regex sub-compiler (G6); GAP only until G6 is modelled, NOT a libperl dependency)
+%qr     = Constant("foo", const_type: "regex") :Regex
+%s      = Constant("foobar") :Str
+%m      = Match(%s, %qr) :Bool
+%one    = Constant(1) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%m, %one, %zero) :Int
+return %result
+L: GREEN
 ```
 
 ## R3 regex substitution (s///)

@@ -380,6 +380,12 @@ sub _build_node_from_rhs {
         return $factory->make('Constant', value => undef, const_type => 'undef');
     }
 
+    # Constant("value", const_type: "kind") — explicit const_type override
+    # (e.g. a qr// literal: Constant("foo", const_type: "regex") :Regex).
+    if ($rhs =~ /^Constant\(\s*"(.*)"\s*,\s*const_type:\s*"(\w+)"\s*\)$/) {
+        return $factory->make('Constant', value => $1, const_type => $2);
+    }
+
     # Constant(value)  — value may be a number, negative number, or quoted string
     if ($rhs =~ /^Constant\(\s*(.*?)\s*\)$/) {
         my $val_raw = $1;
