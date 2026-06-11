@@ -248,25 +248,39 @@ deletion of the metadata struct layer) is tracked in
 `docs/plans/2026-04-21-chalk-mop-migration-plan.md`. Until that lands,
 both representations coexist by design.
 
-### The LLVM backend consumes class structure via ClassInfo (2026-06) — TRANSITIONAL
+### The LLVM backend reads the MOP directly (2026-06-11, zhi 019eb42a)
 
-> **Architecture-review resolution 2026-06-11** (perigrin;
-> `docs/plans/2026-06-11-target-ir-architecture-review-resolution.md`): the
-> metadata structs still delete eventually — the LLVM backend will read the
-> MOP directly (zhi issue "LLVM backend reads the MOP directly"), and this
-> ClassInfo consumption is a bridge, not the end-state read surface. The
-> node-input protocol (`id()`/`add_consumer`) and the corpus ir-block shape
-> migrate with that issue.
+The architecture-review resolution
+(`docs/plans/2026-06-11-target-ir-architecture-review-resolution.md`,
+executed per `docs/plans/2026-06-11-llvm-reads-mop-directly.md`) settled
+how class structure reaches the LLVM backend: **as compile-time context,
+not dataflow**. There are no in-graph class-structure nodes and no
+metadata object rides as a `Call` input. Instead:
 
-The IR-taxonomy reconciliation (R3) converged the LLVM backend's class
-handling onto this layer: there are no in-graph `ClassDecl`/`MethodDef`/
-`FieldDef`/`AdjustBlock` nodes. Class structure rides into a graph as an
-immutable `Chalk::IR::ClassInfo` (carrying `MethodInfo` objects — extended
-with `body_node`/`return_repr` for lowering — plus `Chalk::MOP::Field` and
-`Chalk::MOP::Phaser::Adjust` members), and `Chalk::Target::LLVM` builds its
-per-class vtable + object struct + ADJUST order from that read surface
-(`_scan_class_registry`/`_populate_registry_from_classinfo`). Only the
-immutable readers are consumed — the mutable `MOP::Class` declare-API and the
-stalled codegen-reads-MOP migration above are untouched by it. See
-`sea-of-nodes-ir.md` "LLVM lowering of the canonical MOP and aggregate
-vocabulary".
+- `Chalk::Target::LLVM->lower($return_node, mop => $mop)` receives a
+  **sealed** `Chalk::MOP` alongside the graph and builds its per-class
+  vtable + object struct + ADJUST order directly from `MOP::Class` /
+  `MOP::Method` / `MOP::Field` / `MOP::Phaser::Adjust`
+  (`_build_registry_from_mop`). An unsealed MOP is rejected.
+- `Call` nodes name their statically-known class via the `class_name`
+  attribute (hashed when present), resolved against that registry.
+  Constructor inputs are the `:param` values only; method-dispatch
+  inputs are invocant + args.
+- A method's lowering root is its graph's `Return` value (the durable
+  body shape — graphs + control chains); ADJUST bodies are recovered
+  from the phaser graph in control-chain order.
+
+`seal()` (below) is the contract boundary: the backend reads a surface
+that can no longer grow. The earlier `Chalk::IR::ClassInfo` bridge
+(R3's `_scan_class_registry`/`_populate_registry_from_classinfo`) is
+deleted from the LLVM tier; the Info structs themselves remain only for
+the legacy Program-structure path until MOP-migration 4/4 deletes them.
+
+### Sealing
+
+`Chalk::MOP::seal()` marks the end of parse-time accumulation: it seals
+the registry and every registered class (idempotently), and every
+`declare_*` dies afterwards. The metaobjects are mutable because they
+are parse-time accumulators — the Earley actions declare members as they
+complete — but post-parse consumers (the LLVM registry above) require an
+enforceably immutable read surface, not immutability-by-politeness.

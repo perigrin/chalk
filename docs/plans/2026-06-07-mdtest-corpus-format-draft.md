@@ -353,3 +353,23 @@ C. **Remaining topics** (variables, control-flow, logical, strings, classes,
    regex, ...) topic-by-topic, mining the archive inventory + existing corpus,
    each green before the next. The `llvm-gap-map.json` idiom table is retired
    into the corpus as topics land.
+
+## Amendment 2026-06-11 (zhi 019eb42a — MOP-direct class vocabulary)
+
+Class structure in ir blocks no longer constructs `ClassInfo(...)` /
+`MethodInfo(...)` metadata or passes a class object as a Call input.
+The vocabulary is now MOP-direct (the builder declares through the real
+`Chalk::MOP` API, seals the per-case MOP, and the runner hands it to
+`lower(mop => ...)`):
+
+```
+%cls = MOP::Class(name: "Pt")                        # parent: "Base" for :isa
+%mf  = MOP::Field(class: %cls, name: "x", param: true, type: "Int")
+%mi  = MOP::Method(class: %cls, name: "val", body: %fa, return_repr: "Int")
+%adj = MOP::Adjust(class: %cls, body: [%st_a, %st_b])
+%new = Call(%v, dispatch_kind: "method", name: "new", class: "Pt", param_names: "x") :Object
+%get = Call(%new, dispatch_kind: "method", name: "val", class: "Pt") :Int
+```
+
+Design: docs/plans/2026-06-11-llvm-reads-mop-directly.md. Builder contract
+tests: t/bootstrap/ir/build-mop.t.

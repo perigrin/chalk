@@ -55,6 +55,14 @@ immutable read surface) was considered and declined.
 
 ### Consequences (named now, designed in the new issue)
 
+> **EXECUTED 2026-06-11** (zhi 019eb42a;
+> `docs/plans/2026-06-11-llvm-reads-mop-directly.md`): the backend reads a
+> sealed MOP via `lower(mop => ...)`; consequence 2 resolved as option (b)
+> — class structure moved OFF the node-input channel (`Call.class_name` +
+> registry); consequence 3's corpus vocabulary migrated (`MOP::Class`/
+> `MOP::Field`/`MOP::Method`/`MOP::Adjust` lines). The ClassInfo bridge is
+> deleted from the LLVM tier; struct deletion itself remains with 4/4.
+
 1. **A new migration phase exists**: teach `Chalk::Target::LLVM` to build
    its class registry from `MOP::Class`/`MOP::Method`/`MOP::Field`/
    `MOP::Phaser::Adjust` directly (the Perl target already proves

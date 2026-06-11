@@ -350,8 +350,8 @@ Metadata for a method declaration, with an optional per-method computation graph
 | `return_type` | Optional declared return type string. |
 | `body` | Ordered list of statement IR nodes. **Transitional**: scheduled for removal once codegen walks `MOP::Method->graph` directly. See `docs/plans/2026-04-21-chalk-mop-migration-plan.md` (Phases 4 and 6). |
 | `graph` | `Chalk::IR::Graph` for the method body. Once `body` is removed, this is the sole representation. |
-| `body_node` | The single return-value IR node the LLVM backend lowers as the method body (optional). Set when a `ClassInfo` rides into a graph as a lowering input (see *LLVM lowering of the canonical MOP vocabulary* below). |
-| `return_repr` | The machine representation of the method's return value (`'Int'`, `'Str'`, `'Bool'`, `'Num'`), used by the LLVM backend to pick the vtable fn signature. Optional; defaults to `'Int'` at lowering when absent. |
+| `body_node` | **Dead since 019eb42a** (was the retired ClassInfo bridge's lowering input; the LLVM backend now takes a method's lowering root from `MOP::Method->graph`'s Return). Removed with the struct in MOP-migration 4/4. |
+| `return_repr` | **Dead since 019eb42a** (the LLVM backend now reads `MOP::Method->return_type`). Removed with the struct in MOP-migration 4/4. |
 
 ### `Chalk::IR::SubInfo`
 
@@ -431,26 +431,26 @@ There are no `ScalarLen`, `ArrayRead`, `HashRead`, `ArrayDeref`, `HashDeref`,
 
 ### Feature-class MOP
 
-Class structure rides into a graph as a **`Chalk::IR::ClassInfo` metadata object**
-(carrying `MethodInfo` and `Chalk::MOP::Field` members), NOT as an in-graph node
-subtree. `Chalk::Target::LLVM::_scan_class_registry` walks the graph and, for each
-`ClassInfo` it finds as a node input, builds the per-class vtable + object struct +
-ADJUST order from the immutable read surface (`id()`/`name`/`methods`/`fields`/
-`adjusts`) — without wiring the stalled SoN-MOP migration internals.
-
-> **TRANSITIONAL** (architecture-review resolution 2026-06-11,
-> `docs/plans/2026-06-11-target-ir-architecture-review-resolution.md`): the
-> metadata structs delete eventually; the backend will read `MOP::Class`/
-> `Method`/`Field` directly, and the ir-block `ClassInfo(...)` shape migrates
-> with it (zhi issue "LLVM backend reads the MOP directly").
+Class structure is **compile-time context, not dataflow** (zhi 019eb42a,
+`docs/plans/2026-06-11-llvm-reads-mop-directly.md`): it reaches the backend
+as a **sealed `Chalk::MOP`** handed alongside the graph
+(`lower($return_node, mop => $mop)`), NOT as an in-graph node subtree and
+NOT as a metadata object riding a `Call` input.
+`Chalk::Target::LLVM::_build_registry_from_mop` reads `MOP::Class` /
+`MOP::Method` / `MOP::Field` / `MOP::Phaser::Adjust` directly and builds
+the per-class vtable + object struct + ADJUST order; `Call` nodes name
+their statically-known class via the `class_name` attribute, resolved
+against that registry. A method's lowering root is its graph's `Return`
+value; ADJUST bodies are recovered from the phaser graph in control-chain
+order. An unsealed MOP is rejected loudly.
 
 | Idiom | Canonical node | LLVM lowering |
 |-------|----------------|---------------|
-| `Foo->new(...)` | `Call(dispatch_kind='method', name='new')` | inputs[0] = the `ClassInfo`; malloc object struct, store vtable ptr, bind `:param` fields, run ADJUST blocks (base-first). |
-| `$obj->meth(...)` | `Call(dispatch_kind='method', name=meth)` | resolve the vtable slot from the invocant's `ClassInfo`; load + cast + indirect-call. Absent method / undeclared class → die loudly at lowering. |
+| `Foo->new(...)` | `Call(dispatch_kind='method', name='new', class_name)` | inputs are the `:param` values; malloc object struct, store vtable ptr, bind `:param` fields, call the per-class `@Cls__ADJUST`. |
+| `$obj->meth(...)` | `Call(dispatch_kind='method', name=meth, class_name)` | resolve the vtable slot from the registry by `class_name`; load + cast + indirect-call. Absent method / undeclared class → die loudly at lowering. |
 | `$self->{field}` (read) | `FieldAccess(field_index, field_stash)` | load the field's `%Slot` payload at the known struct offset. |
 | `$field = v` (write) | `Assign(FieldAccess-lvalue, value)` | field store: the `FieldAccess` lvalue carries `field_index` + `field_stash` (the class), so the store is self-describing — no ambient emitter mode-state selects the class. |
-| `ADJUST { ... }` | `Chalk::MOP::Phaser::Adjust` (on the `ClassInfo`) | the phaser's body (a sequence of `Assign(FieldAccess-lvalue, ...)`) runs as constructor code. |
+| `ADJUST { ... }` | `Chalk::MOP::Phaser::Adjust` (on the class) | the phaser's body (statement-effect nodes in control-chain order) lowers once into `@Cls__ADJUST(i8* %self)`, called per `new`. |
 
 There are no `ClassDecl`, `MethodDef`, `FieldDef`, `AdjustBlock`, `New`, `MethodCall`,
 or `FieldWrite` nodes — those were the parallel G5 vocabulary and are deleted. Field
