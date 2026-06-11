@@ -10,6 +10,22 @@ class Chalk::MOP {
     field %classes;
     field $struct_promotion_schemas :reader = {};
 
+    # The MOP is a parse-time accumulator: declare_* fires per member as the
+    # Earley actions complete. seal() marks the moment construction ends —
+    # post-parse consumers (the LLVM backend's class registry in particular)
+    # read an enforceably immutable surface. Idempotent; propagates to every
+    # registered class.
+    field $sealed = false;
+
+    method is_sealed() { return $sealed }
+
+    method seal() {
+        return if $sealed;
+        $sealed = true;
+        $_->seal for values %classes;
+        return;
+    }
+
     ADJUST {
         # Seed implicit main class — all code belongs to a class
         my $main = Chalk::MOP::Class->new(name => 'main', mop => $self);
@@ -25,6 +41,8 @@ class Chalk::MOP {
     }
 
     method declare_class($name, %opts) {
+        die "Chalk::MOP: declare_class('$name') on a sealed MOP — "
+          . "construction ended at seal()" if $sealed;
         my $cls = Chalk::MOP::Class->new(
             name => $name,
             mop  => $self,

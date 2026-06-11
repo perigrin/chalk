@@ -25,6 +25,21 @@ class Chalk::MOP::Class {
     field @class_scope_vars;
     field @use_constants;
 
+    # Sealed flag: set by Chalk::MOP::seal() when parse-time accumulation
+    # ends. Every declare_* guards on it — the post-parse read surface
+    # (what the LLVM backend's class registry is built from) must not
+    # silently grow.
+    field $sealed = false;
+
+    method is_sealed() { return $sealed }
+    method seal()      { $sealed = true; return }
+
+    method _assert_unsealed($what) {
+        die "Chalk::MOP::Class: $what on sealed class '$name' — "
+          . "construction ended at seal()" if $sealed;
+        return;
+    }
+
     method fields()        { return @fields }
     method methods()       { return @methods }
     method subs()          { return @subs }
@@ -34,6 +49,7 @@ class Chalk::MOP::Class {
     method use_constants() { return @use_constants }
 
     method declare_field($field_name, %opts) {
+        $self->_assert_unsealed('declare_field');
         my $field = Chalk::MOP::Field->new(
             name    => $field_name,
             class   => $self,
@@ -45,6 +61,7 @@ class Chalk::MOP::Class {
     }
 
     method declare_method($method_name, %opts) {
+        $self->_assert_unsealed('declare_method');
         my $method = Chalk::MOP::Method->new(
             name  => $method_name,
             class => $self,
@@ -55,6 +72,7 @@ class Chalk::MOP::Class {
     }
 
     method declare_sub($sub_name, %opts) {
+        $self->_assert_unsealed('declare_sub');
         my $sub = Chalk::MOP::Sub->new(
             name  => $sub_name,
             class => $self,
@@ -65,6 +83,7 @@ class Chalk::MOP::Class {
     }
 
     method declare_import($module, %opts) {
+        $self->_assert_unsealed('declare_import');
         # Deduplicate: return existing import if the same module is already registered
         # WITH the same keyword. Earley parse ambiguity can cause semantic actions to
         # fire multiple times — but `use warnings;` and `no warnings '...';` are
@@ -85,6 +104,7 @@ class Chalk::MOP::Class {
     }
 
     method declare_adjust(%opts) {
+        $self->_assert_unsealed('declare_adjust');
         my $adjust = Chalk::MOP::Phaser::Adjust->new(
             class           => $self,
             source_position => scalar(@adjust_blocks),
@@ -95,6 +115,7 @@ class Chalk::MOP::Class {
     }
 
     method declare_class_scope_var($vardecl_node) {
+        $self->_assert_unsealed('declare_class_scope_var');
         # $vardecl_node is a Chalk::IR::Node::VarDecl already merged
         # into its upstream graph by Actions.pm. We do NOT merge it
         # into a class-side graph here — no class graph exists in this
@@ -108,6 +129,7 @@ class Chalk::MOP::Class {
     }
 
     method declare_use_constant($name, $value_node) {
+        $self->_assert_unsealed('declare_use_constant');
         # $name is a plain string (the constant name, no sigil).
         # $value_node is a Chalk::IR::Node::Constant (or similar IR node).
         # Returns a plain hashref entity, NOT a Chalk::MOP::UseConstant class
