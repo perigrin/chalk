@@ -83,6 +83,56 @@ subtest 'if-merge explicit Phi with a multi-block then-arm (I5)' => sub {
     is($out, 'Int:42', 'multi-block then-arm value flows through the merge phi (perl: 42)');
 };
 
+# my $n = 1; if/else merging TWO values: $u = $n>0 ? 5 : 7 and
+# $v = $n>0 ? [42]->[0] : 9; return $u + $v.
+# Phi A is wired first with the original tail labels; phi B's multi-block
+# then-arm extends the same then-tail. A one-at-a-time wiring leaves phi A
+# naming a block that no longer branches to the merge ("PHI node entries do
+# not match predecessors"). All arms must lower before any phi line is
+# emitted. perl: 5 + 42 = 47.
+subtest 'two explicit Phis on one Region, later arm multi-block (review C1)' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $nn = $f->make('Constant', value => '$n', const_type => 'string');
+    my $vn = $f->make('VarDecl', inputs => [$nn, int_const($f, 1)]);
+    $vn->set_representation('Int');
+
+    my $rn = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    $rn->set_representation('Int');
+    my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
+    $cmp->set_representation('Bool');
+
+    my $if_node = $f->make('If', inputs => [$vn, $cmp]);
+    my $proj0 = $f->make('Proj', inputs => [$if_node], index => 0);
+    my $proj1 = $f->make('Proj', inputs => [$if_node], index => 1);
+    my $region = $f->make('Region', inputs => [$proj0, $proj1]);
+    $if_node->set_region($region);
+
+    # Phi A: simple constant arms — wired first.
+    my $phi_a = $f->make('Phi', region => $region,
+        values => [int_const($f, 5), int_const($f, 7)]);
+    $phi_a->set_representation('Int');
+
+    # Phi B: multi-block then-arm (bounds-checked Subscript).
+    my $aref = $f->make('ArrayRef', inputs => [int_const($f, 42)]);
+    $aref->set_representation('ArrayRef');
+    my $sub = $f->make('Subscript', inputs => [$aref, int_const($f, 0)]);
+    $sub->set_representation('Int');
+    my $phi_b = $f->make('Phi', region => $region,
+        values => [$sub, int_const($f, 9)]);
+    $phi_b->set_representation('Int');
+
+    my $sum = $f->make('Add', inputs => [$phi_a, $phi_b]);
+    $sum->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$sum]);
+    $if_node->set_control_in($vn);
+    $ret->set_control_in($if_node);
+
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    is($exit, 0, 'lli exits 0 (valid IR)') or diag($out);
+    is($out, 'Int:47', 'both phis carry correct incoming labels (perl: 5+42=47)');
+};
+
 # my $s = 0; my $n = [3]->[0]; while ($n > 0) { $s += $n; $n-- } return $s;
 # The loop phi INIT value is a multi-block Subscript lowered in the
 # preheader. perl: 3+2+1 = 6.
@@ -187,6 +237,74 @@ subtest 'loop phi with a multi-block backedge value (I5)' => sub {
     my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
     is($exit, 0, 'lli exits 0 (valid IR)') or diag($out);
     is($out, 'Int:5', 'multi-block backedge value reaches the loop phi (perl: 5)');
+};
+
+# my $t = 0; if ($n > 0) { $t = 1 } else { $t = 2 }
+# explicit value V = $n>0 ? [40]->[0] + $t : 9;  return V + $t;
+# Covers two review gaps at once: (1) the elab phi for $t must name the
+# UPDATED tail labels after the explicit phi's multi-block arm extends the
+# then tail (the wiring reorder); (2) the arm's PadAccess($t) must read the
+# THEN-branch value via the branch var_table snapshot, not pre-branch or
+# merge state. perl: t=1, V = 40+1 = 41, return 41+1 = 42.
+subtest 'elab phi labels + branch-snapshot arm reads (review gaps 2+3)' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $nn = $f->make('Constant', value => '$n', const_type => 'string');
+    my $vn = $f->make('VarDecl', inputs => [$nn, int_const($f, 1)]);
+    $vn->set_representation('Int');
+
+    # my $t = 0;
+    my $nt = $f->make('Constant', value => '$t', const_type => 'string');
+    my $vt = $f->make('VarDecl', inputs => [$nt, int_const($f, 0)]);
+    $vt->set_representation('Int');
+
+    my $rn = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    $rn->set_representation('Int');
+    my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
+    $cmp->set_representation('Bool');
+
+    my $if_node = $f->make('If', inputs => [$vt, $cmp]);
+    my $proj0 = $f->make('Proj', inputs => [$if_node], index => 0);
+    my $proj1 = $f->make('Proj', inputs => [$if_node], index => 1);
+    my $region = $f->make('Region', inputs => [$proj0, $proj1]);
+    $if_node->set_region($region);
+
+    # then: $t = 1; else: $t = 2  (divergence -> elab phi for $t)
+    my $rt_lhs = $f->make('PadAccess', targ => 1, varname => '$t', inputs => [$vt]);
+    $rt_lhs->set_representation('Int');
+    my $asg_then = $f->make('Assign', inputs => [$rt_lhs, int_const($f, 1)]);
+    $asg_then->set_representation('Int');
+    $asg_then->set_control_in($proj0);
+    my $asg_else = $f->make('Assign', inputs => [$rt_lhs, int_const($f, 2)]);
+    $asg_else->set_representation('Int');
+    $asg_else->set_control_in($proj1);
+
+    # Explicit Phi: then-arm = [40]->[0] + $t (multi-block AND reads $t).
+    my $aref = $f->make('ArrayRef', inputs => [int_const($f, 40)]);
+    $aref->set_representation('ArrayRef');
+    my $sub = $f->make('Subscript', inputs => [$aref, int_const($f, 0)]);
+    $sub->set_representation('Int');
+    my $rt_arm = $f->make('PadAccess', targ => 1, varname => '$t', inputs => [$vt]);
+    $rt_arm->set_representation('Int');
+    my $arm = $f->make('Add', inputs => [$sub, $rt_arm]);
+    $arm->set_representation('Int');
+    my $phi = $f->make('Phi', region => $region, values => [$arm, int_const($f, 9)]);
+    $phi->set_representation('Int');
+
+    # return V + $t  ($t post-merge = the elab phi)
+    my $rt_post = $f->make('PadAccess', targ => 1, varname => '$t', inputs => [$vt]);
+    $rt_post->set_representation('Int');
+    my $sum = $f->make('Add', inputs => [$phi, $rt_post]);
+    $sum->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$sum]);
+    $if_node->set_control_in($vt);
+    $vt->set_control_in($vn);
+    $ret->set_control_in($if_node);
+
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    is($exit, 0, 'lli exits 0 (elab phi names the extended tail)') or diag($out);
+    is($out, 'Int:42',
+        'arm reads then-branch $t via snapshot; elab phi merges $t (perl: 41+1=42)');
 };
 
 done_testing;

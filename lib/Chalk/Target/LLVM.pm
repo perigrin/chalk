@@ -5497,28 +5497,51 @@ sub _wire_region_phis_with_preblock {
     my ($self, $region, $then_label, $else_label, $then_vars, $else_vars) = @_;
 
     my $consumers = $region->consumers // [];
-    for my $phi_node (@$consumers) {
-        next unless defined $phi_node && ref($phi_node);
-        next unless $phi_node->can('operation') && $phi_node->operation eq 'Phi';
-        next if exists $self->{cache}{ $phi_node->id };
+    my @phis = grep {
+        defined $_ && ref($_)
+            && $_->can('operation') && $_->operation eq 'Phi'
+            && !exists $self->{cache}{ $_->id }
+    } @$consumers;
+    return ($then_label, $else_label) unless @phis;
 
+    my $merge_idx = $self->_find_block_idx($self->_current_block_label);
+
+    # Pass 1: lower ALL arms for ALL phis. Emitting phi lines one at a time
+    # is wrong: a later phi's multi-block arm extends the same tail and
+    # re-points the branch-to-merge, leaving any already-emitted phi naming
+    # a block that no longer branches to the merge ("PHI node entries do
+    # not match predecessors"). Every phi line must name the FINAL tail
+    # labels, known only after all arms have lowered. (An earlier-lowered
+    # arm value defined in the pre-extension tail still dominates the final
+    # tail's branch, so the value/label pairing stays valid.)
+    my @wired;
+    for my $phi_node (@phis) {
         my $inputs = $phi_node->inputs;
         unless (defined $inputs && scalar @$inputs >= 2) {
             die "LLVM backend: Phi node (id=" . $phi_node->id . ") attached to Region "
               . "has fewer than 2 incoming values — missing predecessor edge";
         }
-
-        my $merge_idx = $self->_find_block_idx($self->_current_block_label);
-
+        for my $slot (0, 1) {
+            next if defined $inputs->[$slot];
+            # Bindings builds Phi([val, undef]) when a variable is bound in
+            # one branch only. Die with a diagnostic (mirrors _lower_phi's
+            # undef-arm guard) instead of crashing inside lower_value.
+            die "GAP: Region Phi (id=" . $phi_node->id . ") incoming slot $slot "
+              . "is undef (variable bound in one branch only) — cannot lower "
+              . "a one-sided merge value runtime-free.";
+        }
         my ($then_val, $else_val);
         ($then_val, $then_label) =
             $self->_lower_arm_in_tail($inputs->[0], $then_label, $then_vars);
         ($else_val, $else_label) =
             $self->_lower_arm_in_tail($inputs->[1], $else_label, $else_vars);
+        push @wired, [$phi_node, $then_val, $else_val];
+    }
 
-        # Return to merge block to emit the phi instruction.
-        $self->{current_idx} = $merge_idx;
-
+    # Pass 2: emit all phi lines into the merge block with the final labels.
+    $self->{current_idx} = $merge_idx;
+    for my $w (@wired) {
+        my ($phi_node, $then_val, $else_val) = @$w;
         my $repr      = Chalk::Target::LLVM::Context::_require_repr($phi_node, 'ElaboratedContext.Region.Phi');
         my $llvm_type = Chalk::Target::LLVM::Context::_repr_to_llvm_type($repr);
         my $result    = $self->_fresh;

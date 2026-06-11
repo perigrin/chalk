@@ -194,4 +194,115 @@ subtest 'pre-store binding keeps its old value (no over-correction)' => sub {
     is($out, 'Int:1', 'value bound before the store keeps the pre-store element (perl: 1)');
 };
 
+# my $x = 1; $x += 2; $x += 2; return $x;
+# Two textually-identical CompoundAssigns: per-call identity (Family-A) plus
+# re-lowered shared Add (Family-B) — both increments must fire. perl: 5.
+subtest 'repeat compound assign fires twice (C3 behavioral)' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $vd = $f->make('VarDecl', inputs => [
+        $f->make('Constant', value => 'x', const_type => 'string'),
+        int_const($f, 1),
+    ]);
+    $vd->set_representation('Int');
+
+    my $pa = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
+    $pa->set_representation('Int');
+    my $c2 = int_const($f, 2);
+
+    my $add1 = $f->make('Add', inputs => [$pa, $c2]);
+    $add1->set_representation('Int');
+    my $ca1 = $f->make('CompoundAssign', op => '+=', inputs => [$pa, $add1]);
+    $ca1->set_representation('Int');
+
+    my $add2 = $f->make('Add', inputs => [$pa, $c2]);
+    $add2->set_representation('Int');
+    my $ca2 = $f->make('CompoundAssign', op => '+=', inputs => [$pa, $add2]);
+    $ca2->set_representation('Int');
+
+    isnt($ca1->id, $ca2->id, 'precondition: the two CompoundAssigns are distinct (Family-A)');
+
+    my $ret_pad = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
+    $ret_pad->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$ret_pad]);
+    $ret->set_control_in($ca2);
+    $ca2->set_control_in($ca1);
+    $ca1->set_control_in($vd);
+
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    is($exit, 0, 'lli exits 0');
+    is($out, 'Int:5', 'both += fire (perl: 5)');
+};
+
+# class Pt { field $x :param; field $p; field $q;
+#            ADJUST { $p = $x; $x = 9; $q = $x } }
+# The two field READS of $x hash-cons to one FieldAccess consumed at two
+# program points within ONE lowering context (the ADJUST body); the
+# post-store read must see 9. perl: p+q = 5+9 = 14.
+subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' => sub {
+    require Chalk::IR::ClassInfo;
+    require Chalk::IR::MethodInfo;
+    require Chalk::MOP::Field;
+
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $mf_x = Chalk::MOP::Field->new(name => 'x', sigil => '$', class => undef,
+        fieldix => 0, type => 'Int', attributes => [':param']);
+    my $mf_p = Chalk::MOP::Field->new(name => 'p', sigil => '$', class => undef,
+        fieldix => 1, type => 'Int', attributes => []);
+    my $mf_q = Chalk::MOP::Field->new(name => 'q', sigil => '$', class => undef,
+        fieldix => 2, type => 'Int', attributes => []);
+
+    my $fa_x_rd1 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
+    $fa_x_rd1->set_representation('Int');
+    my $fa_p_lv = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
+    $fa_p_lv->set_representation('Int');
+    my $st_p = $f->make('Assign', inputs => [$fa_p_lv, $fa_x_rd1]);
+    $st_p->set_representation('Int');
+
+    my $fa_x_lv = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
+    $fa_x_lv->set_representation('Int');
+    my $st_x = $f->make('Assign', inputs => [$fa_x_lv, int_const($f, 9)]);
+    $st_x->set_representation('Int');
+
+    my $fa_x_rd2 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
+    $fa_x_rd2->set_representation('Int');
+    is($fa_x_rd2->id, $fa_x_rd1->id,
+        'precondition: the two field reads hash-cons to one node');
+    my $fa_q_lv = $f->make('FieldAccess', field_index => 2, field_stash => 'Pt', inputs => []);
+    $fa_q_lv->set_representation('Int');
+    my $st_q = $f->make('Assign', inputs => [$fa_q_lv, $fa_x_rd2]);
+    $st_q->set_representation('Int');
+
+    my $fa_p_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
+    $fa_p_rd->set_representation('Int');
+    my $getp = Chalk::IR::MethodInfo->new(name => 'getp', body => [],
+        body_node => $fa_p_rd, return_repr => 'Int');
+    my $fa_q_rd = $f->make('FieldAccess', field_index => 2, field_stash => 'Pt', inputs => []);
+    $fa_q_rd->set_representation('Int');
+    my $getq = Chalk::IR::MethodInfo->new(name => 'getq', body => [],
+        body_node => $fa_q_rd, return_repr => 'Int');
+
+    my $ci = Chalk::IR::ClassInfo->new(name => 'Pt', methods => [$getp, $getq],
+        fields => [$mf_x, $mf_p, $mf_q], adjusts => [[$st_p, $st_x, $st_q]]);
+
+    my $v5 = int_const($f, 5);
+    my $new = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        param_names => ['x'], inputs => [$ci, $v5]);
+    $new->set_representation('Object');
+    my $get_p = $f->make('Call', dispatch_kind => 'method', name => 'getp',
+        inputs => [$new, $ci]);
+    $get_p->set_representation('Int');
+    my $get_q = $f->make('Call', dispatch_kind => 'method', name => 'getq',
+        inputs => [$new, $ci]);
+    $get_q->set_representation('Int');
+    my $sum = $f->make('Add', inputs => [$get_p, $get_q]);
+    $sum->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$sum]);
+
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    is($exit, 0, 'lli exits 0');
+    is($out, 'Int:14', 'p keeps the pre-store value, q reads the stored one (perl: 5+9=14)');
+};
+
 done_testing;
