@@ -49,9 +49,12 @@ sub run {
         ( $total > 0 ) ? ( $non_scalar / $total ) : 1.0;
 
     # ---- Step 2: attempt lowering ----
+    # Class structure reaches the backend as a sealed MOP via $opts->{mop}
+    # (019eb42a MOP-direct contract) — never as graph metadata.
     my ( $ll_text, $lower_error );
     eval {
-        $ll_text = Chalk::Target::LLVM->lower($return_node);
+        $ll_text = Chalk::Target::LLVM->lower($return_node,
+            (defined $opts->{mop} ? (mop => $opts->{mop}) : ()));
     };
     if ($@) {
         $lower_error = $@;

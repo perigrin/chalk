@@ -22,9 +22,7 @@ use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Graph::TypedInvariant;
-use Chalk::IR::ClassInfo;
-use Chalk::IR::MethodInfo;
-use Chalk::MOP::Field;
+use Chalk::MOP;
 
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::BehaviorRecord;
@@ -163,10 +161,17 @@ sub rewrite_behavior {
 }
 
 # build_graph_from_ir($ir_block) -> $return_node_or_undef
+#                                 -> ($return_node, $mop) in list context
 #
 # Parses a named-SSA ir block and CONSTRUCTS a real SoN graph from it.
 # Each node line maps to a NodeFactory->make() call.  The constructed graph
 # is then available for TypedInvariant checking and LLVMDriver lowering.
+#
+# Class structure (019eb42a, MOP-direct): MOP::Class / MOP::Field /
+# MOP::Method / MOP::Adjust lines declare onto a per-build Chalk::MOP,
+# which is SEALED before return and handed to the backend via
+# lower(mop => ...). Call lines name their class via `class: "Name"`
+# (the class_name node attribute) — no metadata object rides as an input.
 #
 # Grammar handled:
 #   %name = Constant(value) :Repr
@@ -185,6 +190,7 @@ sub build_graph_from_ir {
 
     my $factory    = Chalk::IR::NodeFactory->new;
     my %sym;              # %name -> node object
+    my $build      = { mop => undef };   # per-build MOP, created lazily by MOP::Class lines
     my $return_name;      # the %name handed to 'return'
     my @control_seq;      # ordered list of %names from 'control:' line
     my @branch_edges;     # [ [$from_name, $to_name], ... ] from branch_control: lines
@@ -242,13 +248,13 @@ sub build_graph_from_ir {
                 $repr = $1;
             }
 
-            my $node = _build_node_from_rhs($factory, \%sym, $name, $rhs);
+            my $node = _build_node_from_rhs($factory, \%sym, $name, $rhs, $build);
             unless (defined $node) {
                 croak "build_graph_from_ir: could not build node for line: $raw_line";
             }
 
-            # Only call set_representation on IR nodes (ClassInfo/MethodInfo/MOP::Field
-            # are metadata objects that do not have this method).
+            # Only call set_representation on IR nodes (MOP metaobjects do
+            # not have this method).
             $node->set_representation($repr)
                 if defined $repr && $node->can('set_representation');
             $sym{$name} = $node;
@@ -330,7 +336,11 @@ sub build_graph_from_ir {
         }
     }
 
-    return $ret;
+    # Seal the per-build MOP (when class structure was declared): the
+    # backend requires a sealed read surface.
+    $build->{mop}->seal if defined $build->{mop};
+
+    return wantarray ? ($ret, $build->{mop}) : $ret;
 }
 
 # parse_l_verdict_from_ir($ir_block) -> 'GREEN' | 'GAP'
@@ -356,12 +366,13 @@ sub parse_l_verdict_from_ir {
 # PRIVATE: constructive node builder helpers
 # ---------------------------------------------------------------------------
 
-# _build_node_from_rhs($factory, \%sym, $name, $rhs) -> $node
+# _build_node_from_rhs($factory, \%sym, $name, $rhs, $build) -> $node
 #
-# Parses the RHS of a %name = RHS line and builds the corresponding IR node.
+# Parses the RHS of a %name = RHS line and builds the corresponding IR node
+# (or declares onto the per-build MOP for MOP::* lines, via $build->{mop}).
 # $rhs has already had :Repr stripped.
 sub _build_node_from_rhs {
-    my ($factory, $sym, $name, $rhs) = @_;
+    my ($factory, $sym, $name, $rhs, $build) = @_;
 
     # Coerce(%x : From -> To)
     if ($rhs =~ /^Coerce\(\s*(%\w+)\s*:\s*(\w+)\s*->\s*(\w+)\s*\)/) {
@@ -432,52 +443,14 @@ sub _build_node_from_rhs {
     if ($rhs =~ /^(\w+)\(\s*(.*)\s*\)$/s) {
         my ($op, $args_raw) = ($1, $2);
 
-        # Split on commas, respecting double-quoted strings (don't split inside "...").
-        # e.g. param_names: "left,right" must not be split at the comma inside quotes.
-        my @raw_args = _split_args_respecting_quotes($args_raw);
+        my ($inputs_ref, $attrs_ref) = _parse_op_args($op, $args_raw, $sym, $name);
+        my @inputs = @$inputs_ref;
+        my %attrs  = %$attrs_ref;
 
-        my @inputs;
-        my %attrs;
-
-        for my $arg (@raw_args) {
-            $arg =~ s/^\s+|\s+$//g;
-            next unless length $arg;
-
-            if ($arg =~ /^(%\w+)$/) {
-                # Input reference
-                my $ref = $1;
-                croak "build_graph_from_ir: $op input '$ref' undefined at $name"
-                    unless exists $sym->{$ref};
-                push @inputs, $sym->{$ref};
-            } elsif ($arg =~ /^(\w+)\s*:\s*"(.*)"$/s) {
-                # Keyword attr: key: "quoted string"
-                $attrs{$1} = $2;
-            } elsif ($arg =~ /^(\w+)\s*:\s*\[([^\]]*)\]$/) {
-                # Keyword attr: key: [%a, %b, %c] — list of node refs
-                my ($key, $list_raw) = ($1, $2);
-                my @refs;
-                for my $item (split /\s*,\s*/, $list_raw) {
-                    $item =~ s/^\s+|\s+$//g;
-                    next unless length $item;
-                    croak "build_graph_from_ir: $op list-attr '$key' item '$item' is not a %ref at $name"
-                        unless $item =~ /^%\w+$/;
-                    croak "build_graph_from_ir: $op list-attr '$key' item '$item' undefined at $name"
-                        unless exists $sym->{$item};
-                    push @refs, $sym->{$item};
-                }
-                $attrs{$key} = \@refs;
-            } elsif ($arg =~ /^(\w+)\s*:\s*(%\w+)$/) {
-                # Keyword attr: key: %node_ref — resolve to node object
-                my ($key, $ref) = ($1, $2);
-                croak "build_graph_from_ir: $op kwarg '$key: $ref' references undefined '$ref' at $name"
-                    unless exists $sym->{$ref};
-                $attrs{$key} = $sym->{$ref};
-            } elsif ($arg =~ /^(\w+)\s*:\s*(\S+)$/) {
-                # Keyword attr: key: bare_token
-                $attrs{$1} = $2;
-            } else {
-                croak "build_graph_from_ir: $op cannot parse arg '$arg' at $name";
-            }
+        # Call lines name their class via `class: "Name"` — translate to the
+        # node's class_name attribute (019eb42a MOP-direct contract).
+        if ($op eq 'Call' && exists $attrs{class}) {
+            $attrs{class_name} = delete $attrs{class};
         }
 
         # Phi node: NodeFactory::make('Phi', ...) expects region => $node, values => [...].
@@ -507,88 +480,137 @@ sub _build_node_from_rhs {
             }
         }
 
-        # MethodInfo: construct a Chalk::IR::MethodInfo (not a hash-consed IR node).
-        # Stored in %sym so ClassInfo can reference it. Not passed to $factory->make().
-        if ($op eq 'MethodInfo') {
-            my $mi_name     = $attrs{name}        // croak "MethodInfo missing name at $name";
-            my $body_node   = $attrs{body_node};   # may be undef (resolved node or raw)
-            my $return_repr = $attrs{return_repr}; # may be undef
-            return Chalk::IR::MethodInfo->new(
-                name        => $mi_name,
-                body        => [],
-                return_type => $return_repr,
-                body_node   => $body_node,
-                return_repr => $return_repr,
-            );
-        }
-
-        # ClassInfo: construct Chalk::IR::ClassInfo directly.
-        if ($op eq 'ClassInfo') {
-            my $ci_name   = $attrs{name}    // croak "ClassInfo missing name at $name";
-            my $ci_parent = $attrs{parent};
-            # parent: "" -> undef, else string value
-            $ci_parent = undef if defined $ci_parent && $ci_parent eq '';
-            my $ci_methods   = $attrs{methods}   // [];
-            my $ci_fields    = $attrs{fields}    // [];
-            my $ci_parent_ci = $attrs{parent_ci};  # optional ClassInfo object reference
-            # adjusts: each node ref in the list is the body node for one ADJUST block.
-            # Wrap each as a single-element arrayref for registry's body_nodes shape.
-            my $ci_adj_nodes = $attrs{adjusts} // [];
-            my $ci_adjusts   = [ map { [$_] } @$ci_adj_nodes ];
-            return Chalk::IR::ClassInfo->new(
-                name      => $ci_name,
-                parent    => $ci_parent,
-                parent_ci => $ci_parent_ci,
-                methods   => (ref $ci_methods eq 'ARRAY' ? $ci_methods : [$ci_methods]),
-                fields    => (ref $ci_fields  eq 'ARRAY' ? $ci_fields  : [$ci_fields]),
-                adjusts   => $ci_adjusts,
-            );
-        }
-
         return $factory->make($op, inputs => \@inputs, %attrs);
     }
 
-    # MOP::Field: construct a Chalk::MOP::Field (not a hash-consed IR node).
-    # Handled outside the general N-ary block because the op name contains '::'.
-    if ($rhs =~ /^MOP::Field\(\s*(.*)\s*\)$/s) {
-        my $args_raw = $1;
-        my @raw_args = _split_args_respecting_quotes($args_raw);
-        my %attrs;
-        for my $arg (@raw_args) {
-            $arg =~ s/^\s+|\s+$//g;
-            next unless length $arg;
-            if ($arg =~ /^(\w+)\s*:\s*"(.*)"$/) {
-                $attrs{$1} = $2;
-            } elsif ($arg =~ /^(\w+)\s*:\s*(%\w+)$/) {
-                my ($key, $ref) = ($1, $2);
-                croak "MOP::Field kwarg '$key: $ref' references undefined '$ref' at $name"
-                    unless exists $sym->{$ref};
-                $attrs{$key} = $sym->{$ref};
-            } elsif ($arg =~ /^(\w+)\s*:\s*(\S+)$/) {
-                $attrs{$1} = $2;
-            } else {
-                croak "MOP::Field cannot parse arg '$arg' at $name";
-            }
+    # MOP::* lines (handled outside the general N-ary block because the op
+    # name contains '::'): declare class structure onto the per-build
+    # Chalk::MOP via the real declare_* API — the same accumulation the
+    # parser performs. The MOP is sealed by build_graph_from_ir before
+    # return and handed to the backend via lower(mop => ...).
+    if ($rhs =~ /^MOP::(Class|Field|Method|Adjust)\(\s*(.*)\s*\)$/s) {
+        my ($kind, $args_raw) = ($1, $2);
+        my (undef, $attrs) = _parse_op_args("MOP::$kind", $args_raw, $sym, $name);
+
+        if ($kind eq 'Class') {
+            $build->{mop} //= Chalk::MOP->new;
+            my $cname = $attrs->{name} // croak "MOP::Class missing name at $name";
+            my %opts;
+            $opts{parent_name} = $attrs->{parent}
+                if defined $attrs->{parent} && length $attrs->{parent};
+            return $build->{mop}->declare_class($cname, %opts);
         }
-        # Translate param/reader booleans to attributes list
-        my @field_attrs;
-        push @field_attrs, ':param'   if ($attrs{param}   // 'false') eq 'true';
-        push @field_attrs, ':reader'  if ($attrs{reader}  // 'false') eq 'true';
-        my $has_default   = ($attrs{has_default}   // 'false') eq 'true';
-        my $default_value = $attrs{default_value};
-        return Chalk::MOP::Field->new(
-            name          => ($attrs{name}    // croak "MOP::Field missing name at $name"),
-            sigil         => '$',
-            class         => undef,
-            fieldix       => (defined $attrs{fieldix} ? $attrs{fieldix} + 0 : 0),
-            has_default   => $has_default,
-            default_value => $default_value,
-            type          => $attrs{type},
-            attributes    => \@field_attrs,
-        );
+
+        my $cls = $attrs->{class}
+            // croak "MOP::$kind requires class: %cls at $name";
+
+        if ($kind eq 'Field') {
+            my @field_attrs;
+            push @field_attrs, ':param'  if ($attrs->{param}  // 'false') eq 'true';
+            push @field_attrs, ':reader' if ($attrs->{reader} // 'false') eq 'true';
+            my $field = $cls->declare_field(
+                ($attrs->{name} // croak "MOP::Field missing name at $name"),
+                sigil         => '$',
+                has_default   => (($attrs->{has_default} // 'false') eq 'true'),
+                default_value => $attrs->{default_value},
+                type          => $attrs->{type},
+                attributes    => \@field_attrs,
+            );
+            # An explicit fieldix kwarg is asserted against the index derived
+            # from declaration order — drift here would silently shift slots.
+            if (defined $attrs->{fieldix} && $field->fieldix != $attrs->{fieldix}) {
+                croak "MOP::Field '$attrs->{name}' declared fieldix $attrs->{fieldix} "
+                    . "but declaration order derives " . $field->fieldix . " at $name";
+            }
+            return $field;
+        }
+
+        if ($kind eq 'Method') {
+            my $repr = $attrs->{return_repr};
+            my $m = $cls->declare_method(
+                ($attrs->{name} // croak "MOP::Method missing name at $name"),
+                (defined $repr ? (return_type => $repr) : ()),
+            );
+            # The method's lowering root is its graph's Return value.
+            if (defined $attrs->{body}) {
+                $m->graph->merge(
+                    $factory->make_cfg('Return', inputs => [ $attrs->{body} ]));
+            }
+            return $m;
+        }
+
+        # MOP::Adjust: body statements thread control_in in list order so the
+        # backend recovers statement order from the control chain.
+        my $body = $attrs->{body} // [];
+        $body = [$body] unless ref $body eq 'ARRAY';
+        my $adj = $cls->declare_adjust();
+        my $prev;
+        for my $st (@$body) {
+            $st->set_control_in($prev) if defined $prev;
+            $adj->graph->merge($st);
+            $prev = $st;
+        }
+        return $adj;
     }
 
     croak "build_graph_from_ir: could not parse RHS '$rhs' for $name";
+}
+
+# _parse_op_args($op, $args_raw, \%sym, $name) -> (\@inputs, \%attrs)
+#
+# Shared argument parser for Op(...) lines: positional %refs become inputs;
+# key: "quoted" / key: %ref / key: [%a, %b] / key: bare become attrs.
+sub _parse_op_args {
+    my ($op, $args_raw, $sym, $name) = @_;
+
+    # Split on commas, respecting double-quoted strings (don't split inside "...").
+    # e.g. param_names: "left,right" must not be split at the comma inside quotes.
+    my @raw_args = _split_args_respecting_quotes($args_raw);
+
+    my @inputs;
+    my %attrs;
+
+    for my $arg (@raw_args) {
+        $arg =~ s/^\s+|\s+$//g;
+        next unless length $arg;
+
+        if ($arg =~ /^(%\w+)$/) {
+            # Input reference
+            my $ref = $1;
+            croak "build_graph_from_ir: $op input '$ref' undefined at $name"
+                unless exists $sym->{$ref};
+            push @inputs, $sym->{$ref};
+        } elsif ($arg =~ /^(\w+)\s*:\s*"(.*)"$/s) {
+            # Keyword attr: key: "quoted string"
+            $attrs{$1} = $2;
+        } elsif ($arg =~ /^(\w+)\s*:\s*\[([^\]]*)\]$/) {
+            # Keyword attr: key: [%a, %b, %c] — list of node refs
+            my ($key, $list_raw) = ($1, $2);
+            my @refs;
+            for my $item (split /\s*,\s*/, $list_raw) {
+                $item =~ s/^\s+|\s+$//g;
+                next unless length $item;
+                croak "build_graph_from_ir: $op list-attr '$key' item '$item' is not a %ref at $name"
+                    unless $item =~ /^%\w+$/;
+                croak "build_graph_from_ir: $op list-attr '$key' item '$item' undefined at $name"
+                    unless exists $sym->{$item};
+                push @refs, $sym->{$item};
+            }
+            $attrs{$key} = \@refs;
+        } elsif ($arg =~ /^(\w+)\s*:\s*(%\w+)$/) {
+            # Keyword attr: key: %node_ref — resolve to node object
+            my ($key, $ref) = ($1, $2);
+            croak "build_graph_from_ir: $op kwarg '$key: $ref' references undefined '$ref' at $name"
+                unless exists $sym->{$ref};
+            $attrs{$key} = $sym->{$ref};
+        } elsif ($arg =~ /^(\w+)\s*:\s*(\S+)$/) {
+            # Keyword attr: key: bare_token
+            $attrs{$1} = $2;
+        } else {
+            croak "build_graph_from_ir: $op cannot parse arg '$arg' at $name";
+        }
+    }
+    return (\@inputs, \%attrs);
 }
 
 # _split_args_respecting_quotes($args_raw) -> @args
@@ -1193,9 +1215,10 @@ sub _run_l_verdict_check {
         }
     }
 
-    # Build the graph from the ir block
-    my $return_node;
-    eval { $return_node = __PACKAGE__->build_graph_from_ir($ir_text) };
+    # Build the graph from the ir block (list context: the per-case MOP,
+    # when the block declares class structure, rides along to the backend).
+    my ($return_node, $case_mop);
+    eval { ($return_node, $case_mop) = __PACKAGE__->build_graph_from_ir($ir_text) };
     if ($@) {
         my $err = $@;
         push @$fail_reasons,
@@ -1214,8 +1237,9 @@ sub _run_l_verdict_check {
         return { verdict => 'FAIL', actual => 'GAP', declared => $decl };
     }
 
-    # Run through LLVMDriver
-    my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
+    # Run through LLVMDriver (with the case's sealed MOP, when present)
+    my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node,
+        { (defined $case_mop ? (mop => $case_mop) : ()) });
 
     # Classify the LLVMDriver result using the three-way distinction:
     #   GAP        = lowering DIED (marked_unsupported=1; no .ll was produced)

@@ -103,13 +103,13 @@ context: scalar
 ```
 
 ```ir
+%cls    = MOP::Class(name: "_A5Tmp")
+%mf     = MOP::Field(class: %cls, name: "x", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
 %fa     = FieldAccess(field_index: 0, field_stash: "_A5Tmp") :Int
-%mi     = MethodInfo(name: "val", body_node: %fa, return_repr: "Int")
-%mf     = MOP::Field(name: "x", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
-%cls    = ClassInfo(name: "_A5Tmp", methods: [%mi], fields: [%mf])
+%mi     = MOP::Method(class: %cls, name: "val", body: %fa, return_repr: "Int")
 %v42    = Constant(42) :Int
-%new    = Call(%cls, %v42, dispatch_kind: "method", name: "new", param_names: "x") :Object
-%result = Call(%new, %cls, dispatch_kind: "method", name: "val") :Int
+%new    = Call(%v42, dispatch_kind: "method", name: "new", class: "_A5Tmp", param_names: "x") :Object
+%result = Call(%new, dispatch_kind: "method", name: "val", class: "_A5Tmp") :Int
 return %result
 L: GREEN
 ```

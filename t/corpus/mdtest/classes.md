@@ -29,8 +29,8 @@ context: scalar
 ```
 
 ```ir
-%cls    = ClassInfo(name: "Empty")
-%new_e  = Call(%cls, dispatch_kind: "method", name: "new") :Object
+%cls    = MOP::Class(name: "Empty")
+%new_e  = Call(dispatch_kind: "method", name: "new", class: "Empty") :Object
 %result = Ref(%new_e) :Str
 return %result
 L: GREEN
@@ -61,13 +61,13 @@ context: scalar
 ```
 
 ```ir
+%cls    = MOP::Class(name: "Animal")
+%mf     = MOP::Field(class: %cls, name: "name", fieldix: 0, param: true, reader: false, has_default: false, type: "Str")
 %fa     = FieldAccess(field_index: 0, field_stash: "Animal") :Str
-%mi     = MethodInfo(name: "name", body_node: %fa, return_repr: "Str")
-%mf     = MOP::Field(name: "name", fieldix: 0, param: true, reader: false, has_default: false, type: "Str")
-%cls    = ClassInfo(name: "Animal", methods: [%mi], fields: [%mf])
+%mi     = MOP::Method(class: %cls, name: "name", body: %fa, return_repr: "Str")
 %nval   = Constant("cat") :Str
-%new_a  = Call(%cls, %nval, dispatch_kind: "method", name: "new", param_names: "name") :Object
-%result = Call(%new_a, %cls, dispatch_kind: "method", name: "name") :Str
+%new_a  = Call(%nval, dispatch_kind: "method", name: "new", class: "Animal", param_names: "name") :Object
+%result = Call(%new_a, dispatch_kind: "method", name: "name", class: "Animal") :Str
 return %result
 L: GREEN
 ```
@@ -97,14 +97,14 @@ context: scalar
 ```
 
 ```ir
-%mf_l   = MOP::Field(name: "left",  fieldix: 0, param: true, reader: true, has_default: false, type: "Int")
-%mf_r   = MOP::Field(name: "right", fieldix: 1, param: true, reader: true, has_default: false, type: "Int")
-%cls    = ClassInfo(name: "Pair", fields: [%mf_l, %mf_r])
+%cls    = MOP::Class(name: "Pair")
+%mf_l   = MOP::Field(class: %cls, name: "left",  fieldix: 0, param: true, reader: true, has_default: false, type: "Int")
+%mf_r   = MOP::Field(class: %cls, name: "right", fieldix: 1, param: true, reader: true, has_default: false, type: "Int")
 %lval   = Constant(10) :Int
 %rval   = Constant(20) :Int
-%new_p  = Call(%cls, %lval, %rval, dispatch_kind: "method", name: "new", param_names: "left,right") :Object
-%lr     = Call(%new_p, %cls, dispatch_kind: "method", name: "left")  :Int
-%rr     = Call(%new_p, %cls, dispatch_kind: "method", name: "right") :Int
+%new_p  = Call(%lval, %rval, dispatch_kind: "method", name: "new", class: "Pair", param_names: "left,right") :Object
+%lr     = Call(%new_p, dispatch_kind: "method", name: "left", class: "Pair")  :Int
+%rr     = Call(%new_p, dispatch_kind: "method", name: "right", class: "Pair") :Int
 %result = Add(%lr, %rr) :Int
 return %result
 L: GREEN
@@ -133,11 +133,11 @@ context: scalar
 ```
 
 ```ir
+%cls    = MOP::Class(name: "Greeter")
 %body   = Constant(42) :Int
-%mi     = MethodInfo(name: "greet", body_node: %body, return_repr: "Int")
-%cls    = ClassInfo(name: "Greeter", methods: [%mi])
-%new_g  = Call(%cls, dispatch_kind: "method", name: "new") :Object
-%result = Call(%new_g, %cls, dispatch_kind: "method", name: "greet") :Int
+%mi     = MOP::Method(class: %cls, name: "greet", body: %body, return_repr: "Int")
+%new_g  = Call(dispatch_kind: "method", name: "new", class: "Greeter") :Object
+%result = Call(%new_g, dispatch_kind: "method", name: "greet", class: "Greeter") :Int
 return %result
 L: GREEN
 ```
@@ -169,20 +169,20 @@ context: scalar
 ```
 
 ```ir
+%cls       = MOP::Class(name: "Counter")
+%mf_n      = MOP::Field(class: %cls, name: "n", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
 %fa_n_lv   = FieldAccess(field_index: 0, field_stash: "Counter") :Int
 %fa_n_rd   = FieldAccess(field_index: 0, field_stash: "Counter") :Int
 %one       = Constant(1) :Int
 %n_plus1   = Add(%fa_n_rd, %one) :Int
 %fw_n      = Assign(%fa_n_lv, %n_plus1) :Int
-%mi_inc    = MethodInfo(name: "inc", body_node: %fw_n, return_repr: "Int")
+%mi_inc    = MOP::Method(class: %cls, name: "inc", body: %fw_n, return_repr: "Int")
 %fa_n2     = FieldAccess(field_index: 0, field_stash: "Counter") :Int
-%mi_val    = MethodInfo(name: "val", body_node: %fa_n2, return_repr: "Int")
-%mf_n      = MOP::Field(name: "n", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
-%cls       = ClassInfo(name: "Counter", methods: [%mi_inc, %mi_val], fields: [%mf_n])
+%mi_val    = MOP::Method(class: %cls, name: "val", body: %fa_n2, return_repr: "Int")
 %ten       = Constant(10) :Int
-%new_c     = Call(%cls, %ten, dispatch_kind: "method", name: "new", param_names: "n") :Object
-%inc_call  = Call(%new_c, %cls, dispatch_kind: "method", name: "inc") :Int
-%result    = Call(%new_c, %cls, dispatch_kind: "method", name: "val") :Int
+%new_c     = Call(%ten, dispatch_kind: "method", name: "new", class: "Counter", param_names: "n") :Object
+%inc_call  = Call(%new_c, dispatch_kind: "method", name: "inc", class: "Counter") :Int
+%result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
 control: %inc_call -> %result
 return %result
 L: GREEN
@@ -211,12 +211,12 @@ context: scalar
 ```
 
 ```ir
+%base_cls  = MOP::Class(name: "Base")
 %kind_body = Constant("base") :Str
-%mi_kind   = MethodInfo(name: "kind", body_node: %kind_body, return_repr: "Str")
-%base_cls  = ClassInfo(name: "Base", methods: [%mi_kind])
-%child_cls = ClassInfo(name: "Child", parent: "Base", parent_ci: %base_cls)
-%new_c     = Call(%child_cls, dispatch_kind: "method", name: "new") :Object
-%result    = Call(%new_c, %child_cls, dispatch_kind: "method", name: "kind") :Str
+%mi_kind   = MOP::Method(class: %base_cls, name: "kind", body: %kind_body, return_repr: "Str")
+%child_cls = MOP::Class(name: "Child", parent: "Base")
+%new_c     = Call(dispatch_kind: "method", name: "new", class: "Child") :Object
+%result    = Call(%new_c, dispatch_kind: "method", name: "kind", class: "Child") :Str
 return %result
 L: GREEN
 ```
@@ -248,19 +248,20 @@ context: scalar
 ```
 
 ```ir
+%cls       = MOP::Class(name: "Box")
+%mf_val    = MOP::Field(class: %cls, name: "val",    fieldix: 0, param: true,  reader: false, has_default: false, type: "Int")
+%mf_dbl    = MOP::Field(class: %cls, name: "double", fieldix: 1, param: false, reader: false, has_default: false, type: "Int")
 %fa_val    = FieldAccess(field_index: 0, field_stash: "Box") :Int
 %two       = Constant(2) :Int
 %dbl_val   = Multiply(%fa_val, %two) :Int
 %fa_dbl_lv = FieldAccess(field_index: 1, field_stash: "Box") :Int
 %fw_dbl    = Assign(%fa_dbl_lv, %dbl_val) :Int
+%adj       = MOP::Adjust(class: %cls, body: [%fw_dbl])
 %fa_dbl    = FieldAccess(field_index: 1, field_stash: "Box") :Int
-%mi_dbl    = MethodInfo(name: "double", body_node: %fa_dbl, return_repr: "Int")
-%mf_val    = MOP::Field(name: "val",    fieldix: 0, param: true,  reader: false, has_default: false, type: "Int")
-%mf_dbl    = MOP::Field(name: "double", fieldix: 1, param: false, reader: false, has_default: false, type: "Int")
-%cls       = ClassInfo(name: "Box", methods: [%mi_dbl], fields: [%mf_val, %mf_dbl], adjusts: [%fw_dbl])
+%mi_dbl    = MOP::Method(class: %cls, name: "double", body: %fa_dbl, return_repr: "Int")
 %seven     = Constant(7) :Int
-%new_b     = Call(%cls, %seven, dispatch_kind: "method", name: "new", param_names: "val") :Object
-%result    = Call(%new_b, %cls, dispatch_kind: "method", name: "double") :Int
+%new_b     = Call(%seven, dispatch_kind: "method", name: "new", class: "Box", param_names: "val") :Object
+%result    = Call(%new_b, dispatch_kind: "method", name: "double", class: "Box") :Int
 return %result
 L: GREEN
 ```

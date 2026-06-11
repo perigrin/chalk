@@ -46,7 +46,8 @@ ok((grep { /C2.*compound/i    } @titles), 'case: C2 compound assign then read pr
 #   - L-verdict (declared verdict matches the real L corner)
 #
 # GREEN cases: graph lowers via lli; lli output == perl oracle.
-# GAP case (A5): pure-GAP block, no graph to build or lower.
+# (A5 declares class structure via MOP::* lines; its sealed MOP rides to
+# the backend through LLVMDriver's mop opt.)
 # ---------------------------------------------------------------------------
 
 for my $case (@$cases) {
@@ -79,11 +80,12 @@ for my $case (@$cases) {
         my $decl_verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir(
             $case->{ir} // '');
         if ($decl_verdict eq 'GREEN') {
-            my $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir(
-                $case->{ir});
+            my ($return_node, $case_mop) =
+                Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($case->{ir});
             ok(defined $return_node, "$title: build_graph_from_ir returns a node");
             if (defined $return_node) {
-                my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
+                my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node,
+                    { (defined $case_mop ? (mop => $case_mop) : ()) });
                 ok(!$meta->{marked_unsupported},
                     "$title: built-from-block graph is truly GREEN (not marked_unsupported)");
                 my $lli_out  = $L->return_values->[0] // '';

@@ -13,9 +13,6 @@ use parent 'Chalk::IR::Target';
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Schedule::Dominators;
 use Chalk::IR::Schedule::Elaborate;
-use Chalk::IR::ClassInfo;
-use Chalk::IR::MethodInfo;
-use Chalk::MOP::Field;
 
 # lower($return_node) -> $llvm_ir_text
 #
@@ -222,158 +219,8 @@ sub _method_fn_llvm_ret_type {
 }
 
 # ---------------------------------------------------------------------------
-# Class registry: scan graph for ClassInfo metadata objects.
+# Class registry: built from the sealed MOP (019eb42a MOP-direct).
 # ---------------------------------------------------------------------------
-
-# _class_name_from_class_node($node) -> $name
-#
-# Returns the class name from a ClassInfo (->name). Dies if the accessor is
-# not available.
-sub _class_name_from_class_node {
-    my ($node) = @_;
-    return undef unless defined $node;
-    return $node->name if $node->can('name');
-    die "LLVM MOP: cannot determine class name from node type " . ref($node);
-}
-
-# _populate_registry_from_classinfo(\%registry, $ci) -> void
-#
-# Populates %registry from a Chalk::IR::ClassInfo object.
-# Mirrors the ClassDecl path in _scan_class_registry so downstream
-# emission (_emit_class_registry_ir) is unchanged.
-sub _populate_registry_from_classinfo {
-    my ($registry, $ci) = @_;
-    my $cname = $ci->name;
-    $registry->{$cname} //= { methods => [], fields => [], adjusts => [], parent => undef };
-    $registry->{$cname}{parent} //= $ci->parent;
-
-    my $mslot = scalar @{ $registry->{$cname}{methods} };
-
-    # Methods from ClassInfo->methods (each is a MethodInfo)
-    for my $mi (@{ $ci->methods // [] }) {
-        my $mname     = $mi->name;
-        my $body_node = $mi->body_node;
-        # Derive return_repr from body_node's representation if body_node is present
-        # and return_repr field was not explicitly set; use 'Int' as fallback.
-        my $ret_repr;
-        if (defined $mi->return_repr) {
-            $ret_repr = $mi->return_repr;
-        } elsif (defined $body_node) {
-            $ret_repr = _require_repr($body_node, 'MethodInfo.body_node');
-        } else {
-            $ret_repr = 'Int';
-        }
-        unless (grep { ($_->{name} // '') eq $mname } @{ $registry->{$cname}{methods} }) {
-            push @{ $registry->{$cname}{methods} }, {
-                name        => $mname,
-                body_node   => $body_node,
-                return_repr => $ret_repr,
-                vtable_slot => $mslot++,
-            };
-        }
-    }
-
-    # Fields from ClassInfo->fields (each is a MOP::Field)
-    for my $mf (@{ $ci->fields // [] }) {
-        my $fname       = $mf->name;
-        my $fidx        = $mf->fieldix;
-        my $is_param    = $mf->is_param    // false;
-        my $has_reader  = $mf->has_reader  // false;
-        my $has_default = $mf->has_default // false;
-        my $def_node    = $mf->default_value;
-        # A missing field type silently defaulting to Int is the F7 silent-i64
-        # class: a Str field read back through the Int ABI ran with exit 0 and
-        # garbage output (branch-review I4). Die loudly instead.
-        my $f_repr      = $mf->type
-            // die "GAP: field '$fname' in class '$cname' has no declared repr "
-                 . "(type) — refusing to silently default to Int.";
-        unless (grep { ($_->{field_index} // -1) == $fidx } @{ $registry->{$cname}{fields} }) {
-            push @{ $registry->{$cname}{fields} }, {
-                name         => $fname,
-                field_index  => $fidx,
-                is_param     => $is_param,
-                has_reader   => $has_reader,
-                has_default  => $has_default,
-                default_node => $def_node,
-                field_repr   => $f_repr,
-            };
-        }
-        # :reader synthesis
-        if ($has_reader) {
-            unless (grep { ($_->{name} // '') eq $fname } @{ $registry->{$cname}{methods} }) {
-                push @{ $registry->{$cname}{methods} }, {
-                    name               => $fname,
-                    body_node          => undef,
-                    return_repr        => $f_repr,
-                    vtable_slot        => $mslot++,
-                    is_reader_synth    => 1,
-                    reader_field_index => $fidx,
-                };
-            }
-        }
-    }
-
-    # adjusts: each entry is an arrayref of body IR nodes (the ADJUST block statements)
-    for my $adj_nodes (@{ $ci->adjusts // [] }) {
-        # adj_nodes is an arrayref of IR nodes (field stores, etc.)
-        push @{ $registry->{$cname}{adjusts} }, {
-            body_nodes => (ref $adj_nodes eq 'ARRAY' ? $adj_nodes : [$adj_nodes]),
-        };
-    }
-}
-
-# _scan_class_registry($return_node) -> \%registry
-#
-# Walks all reachable nodes from $return_node and, for every ClassInfo metadata
-# object found as a node input, populates the registry from its MethodInfo +
-# MOP::Field members (see _populate_registry_from_classinfo).
-#
-# Returns a hashref: { class_name => { methods => [...], fields => [...], parent => str } }
-# where each method entry is { name, vtable_slot, body_node, return_repr }
-# and each field entry is { name, field_index, is_param, has_reader, has_default, default_node }.
-sub _scan_class_registry {
-    my ($return_node) = @_;
-
-    my %registry;  # class_name -> { methods, fields, parent, adjusts }
-    my %visited;
-
-    # Walk the entire reachable graph
-    my @queue = ($return_node);
-    while (@queue) {
-        my $node = shift @queue;
-        next unless defined $node;
-        my $id = $node->id;
-        next if $visited{$id}++;
-
-        # ClassInfo: canonical metadata object (no ->operation method).
-        # Populate registry directly from its fields/methods.
-        if (ref($node) && $node->isa('Chalk::IR::ClassInfo')) {
-            _populate_registry_from_classinfo(\%registry, $node);
-            # ClassInfo has no ->inputs; its methods/fields are embedded.
-            # Enqueue MethodInfo body_nodes so their sub-graphs are reachable.
-            for my $mi (@{ $node->methods // [] }) {
-                push @queue, $mi->body_node if defined $mi->body_node;
-            }
-            # Enqueue parent_ci so the parent's registry entry is populated.
-            push @queue, $node->parent_ci if $node->can('parent_ci') && defined $node->parent_ci;
-            next;
-        }
-
-        my $op = $node->can('operation') ? $node->operation : '';
-
-        # Enqueue all inputs
-        if ($node->can('inputs') && defined $node->inputs) {
-            push @queue, grep { defined $_ } $node->inputs->@*;
-        }
-        if ($node->can('control_in') && defined $node->control_in) {
-            push @queue, $node->control_in;
-        }
-    }
-
-    _flatten_inheritance(\%registry);
-
-    return \%registry;
-}
 
 # _flatten_inheritance(\%registry) -> void
 #
@@ -882,14 +729,15 @@ sub lower_with_elaboration {
     # globals, and method body emission — all of which must appear BEFORE
     # @main in the LLVM module.
     #
-    # MOP-direct path (019eb42a): when the caller hands a sealed Chalk::MOP
-    # via mop => $mop, the registry is built from MOP::Class/Method/Field/
-    # Phaser::Adjust directly and Call nodes name their class via the
-    # class_name attribute. The graph-scan fallback (ClassInfo metadata
-    # riding as node inputs) is the transitional bridge being retired.
+    # MOP-direct (019eb42a): class structure reaches the backend ONLY as a
+    # sealed Chalk::MOP via mop => $mop; Call nodes name their class via the
+    # class_name attribute. Without a mop the registry is empty — a
+    # class_name Call then fails the registry lookup loudly. (The retired
+    # ClassInfo bridge used to scan the graph for metadata objects riding
+    # as node inputs.)
     my $class_registry = defined $opts{mop}
         ? _build_registry_from_mop($opts{mop})
-        : _scan_class_registry($return_node);
+        : {};
 
     # Build a context that knows the elaboration phi plan.
     my $ctx = Chalk::Target::LLVM::ElaboratedContext->new(elab => $elab,
@@ -1310,7 +1158,6 @@ use utf8;
 # Re-export helpers from the main package so unqualified calls in this
 # package resolve correctly (both packages share the same implementation).
 *_require_repr              = \&Chalk::Target::LLVM::_require_repr;
-*_class_name_from_class_node = \&Chalk::Target::LLVM::_class_name_from_class_node;
 
 # _method_fn_type($result_repr) -> LLVM fn type string for method signatures.
 # Duplicate of the module-level sub; both packages need it to avoid cross-package calls.
@@ -1621,7 +1468,7 @@ sub lower_value {
         return $self->_lower_ref_of_object($node);
     }
     # Call(dispatch_kind='method'): vtable-slot dispatch, canonical form of MethodCall.
-    # inputs[0] = invocant (obj node), inputs[1] = ClassInfo (class reference).
+    # inputs[0] = invocant (obj node); the class rides as the class_name attr.
     # name = method name. return repr from node->representation.
     elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'method') {
         return $self->_lower_call_method($node);
@@ -4122,27 +3969,20 @@ sub _lower_hash_deref {
 #
 # Lowers a Call(dispatch_kind='method', name='new') node.
 # This is the canonical form of the New node: malloc + vtable bind + :param binding.
-# inputs[0] = ClassInfo, inputs[1..N] = :param values, param_names = [names].
+# Inputs are the :param values; the class rides as the class_name attribute.
 sub _lower_call_new {
     my ($self, $node) = @_;
 
     $self->{_need_aggregate_types} = 1;
     $self->{_need_malloc_memcpy}   = 1;
 
-    # MOP-direct shape (class_name attribute set): inputs are ONLY the
-    # :param values — class structure is registry context, not an input.
-    # Transitional ClassInfo shape: inputs[0] = ClassInfo, values follow.
+    # MOP-direct shape: inputs are ONLY the :param values — class structure
+    # is registry context named by the class_name attribute, never an input.
     my $param_names = $node->can('param_names') ? ($node->param_names // []) : [];
-    my $all_inputs  = $node->inputs // [];
-    my ($class_name, $param_vals);
-    if ($node->can('class_name') && defined $node->class_name) {
-        $class_name = $node->class_name;
-        $param_vals = [ @$all_inputs ];
-    }
-    else {
-        $class_name = _class_name_from_class_node($all_inputs->[0]);
-        $param_vals = scalar(@$all_inputs) > 1 ? [ @{$all_inputs}[1 .. $#$all_inputs] ] : [];
-    }
+    my $class_name  = $node->class_name
+        // die "LLVM MOP: Call(new) has no class_name — the constructor must "
+             . "name its statically-known class (019eb42a MOP-direct contract).";
+    my $param_vals  = [ ($node->inputs // [])->@* ];
 
     # Verify the class is registered
     my $reg = $self->{class_registry}{$class_name}
@@ -4269,8 +4109,8 @@ sub _lower_call_new {
 # Lowers a Call(dispatch_kind='method') node.
 # When name='new': routes to the constructor lowering (_lower_call_new).
 # Otherwise: vtable-dispatch (same logic as the former _lower_method_call).
-# inputs[0] = ClassInfo (class reference) for name='new'.
-# inputs[0] = invocant (obj), inputs[1] = ClassInfo for regular method calls.
+# Inputs: the :param values for name='new'; inputs[0] = invocant for regular
+# method calls. The class rides as the class_name attribute (MOP-direct).
 sub _lower_call_method {
     my ($self, $node) = @_;
 
@@ -4282,16 +4122,16 @@ sub _lower_call_method {
     }
     my $obj_node    = $node->inputs->[0];
     # MOP-direct shape: the class rides as the class_name attribute.
-    # Transitional ClassInfo shape: inputs[1] = ClassInfo.
-    my $class_name  = ($node->can('class_name') && defined $node->class_name)
-        ? $node->class_name
-        : _class_name_from_class_node($node->inputs->[1]);
+    my $class_name  = $node->class_name
+        // die "LLVM MOP: Call(method) '$method_name' has no class_name — "
+             . "method dispatch must name its statically-known class "
+             . "(019eb42a MOP-direct contract).";
     my $result_repr = _require_repr($node, 'Call(method)');
 
     # Verify class and method are in the registry
     my $reg = $self->{class_registry}{$class_name}
         or die "LLVM MOP: Call(method) '$method_name' on undeclared class '$class_name' — "
-             . "no ClassInfo registered for this class. Cannot emit vtable slot.";
+             . "the class is not in the sealed MOP handed to lower(). Cannot emit vtable slot.";
 
     my $methods = $reg->{methods} // [];
     my ($minfo) = grep { ($_->{name} // '') eq $method_name } @$methods;
@@ -4365,7 +4205,7 @@ sub _lower_ref_of_object {
 
     my $obj_node = $node->inputs->[0];
 
-    # Walk obj_node back to the constructing Call(new) to find its ClassInfo.
+    # Walk obj_node back to the constructing Call(new) for its class_name.
     my $class_name = _infer_class_name_from_obj($obj_node);
     my $name_len   = length($class_name);  # compile-time known ASCII length
 
@@ -5489,8 +5329,8 @@ sub _lower_field_access_in_method {
 
 # _infer_class_name_from_obj($obj_node) -> $class_name
 #
-# Walks the obj_node back to find the class node (a ClassInfo). Currently supports:
-# - Call(dispatch_kind='method', name='new') (inputs[0] = ClassInfo) — construction
+# Walks the obj_node back to find the statically-known class name. Supports:
+# - Call(dispatch_kind='method', name='new') via its class_name attribute
 # - Other cases: die loudly (cannot infer class name)
 sub _infer_class_name_from_obj {
     my ($obj_node) = @_;
@@ -5501,11 +5341,9 @@ sub _infer_class_name_from_obj {
         && ($obj_node->dispatch_kind // '') eq 'method'
         && ($obj_node->name // '') eq 'new')
     {
-        # MOP-direct shape first; transitional ClassInfo-input shape second.
         return $obj_node->class_name
-            if $obj_node->can('class_name') && defined $obj_node->class_name;
-        my $cls_node = $obj_node->inputs->[0];
-        return defined $cls_node ? _class_name_from_class_node($cls_node) : undef;
+            // die "LLVM MOP: Call(new) has no class_name — cannot infer the "
+                 . "constructed class (019eb42a MOP-direct contract).";
     }
     # PadAccess to a variable holding a constructed object — walk inputs
     if ($op eq 'PadAccess') {
