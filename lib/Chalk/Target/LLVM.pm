@@ -535,9 +535,15 @@ sub _emit_class_registry_ir {
             push @lines, "define internal $fn_ret $fn_name(i8* %self) {  ; method body for ${cname}::${mname}";
             push @lines, 'entry:';
 
-            # Emit all instructions from the body context
+            # Emit all instructions from the body context. The block that
+            # was current at end of lowering renders LAST — the ret lines
+            # below attach textually to it (same multi-block-phi-arm
+            # ordering concern as the @main renderer). Block 0 keeps its
+            # manually emitted 'entry:' label and must stay first.
             my $body_blocks = $body_ctx->blocks;
-            for my $i (0 .. $#$body_blocks) {
+            my $body_final  = $body_ctx->{current_idx} // $#$body_blocks;
+            $body_final = $#$body_blocks if $body_final == 0 && $#$body_blocks > 0;
+            for my $i ((grep { $_ != $body_final } 0 .. $#$body_blocks), $body_final) {
                 my $blk = $body_blocks->[$i];
                 if ($i > 0) {
                     push @lines, $blk->{label} . ':';
@@ -938,7 +944,17 @@ sub lower_with_elaboration {
     push @lines, 'define i32 @main() {';
 
     my $blocks = $ctx->blocks;
-    for my $i (0 .. $#$blocks) {
+    # Render the block that was CURRENT when lowering finished last: the
+    # epilogue lines below (printf + ret) attach textually to the final
+    # rendered block and must close the block holding the Return value.
+    # Multi-block phi arms append continuation blocks after the merge block,
+    # so creation order no longer guarantees the current block is last.
+    # (Block order is otherwise semantically irrelevant in LLVM IR, except
+    # that the entry block must stay first — the current block at end of
+    # lowering is never the entry block when later blocks exist.)
+    my $final_idx = $ctx->{current_idx} // $#$blocks;
+    $final_idx = $#$blocks if $final_idx == 0 && $#$blocks > 0;
+    for my $i ((grep { $_ != $final_idx } 0 .. $#$blocks), $final_idx) {
         my $block = $blocks->[$i];
         push @lines, $block->{label} . ':';
         push @lines, $block->{insts}->@*;
@@ -2938,13 +2954,9 @@ sub _wire_region_phis {
 sub _process_loop_node {
     my ($self, $loop_node) = @_;
 
-    my $preheader_label = $self->_current_block_label;
     my $header_label    = $self->_fresh_label('loop.header.');
     my $body_label      = $self->_fresh_label('loop.body.');
     my $exit_label      = $self->_fresh_label('loop.exit.');
-
-    # Jump from preheader to the loop header.
-    $self->_set_terminator("  br label %$header_label  ; Loop: enter header");
 
     # ---- Lower init values in the preheader block ----
     # Each loop phi's inputs[0] is the initial value. Lower it NOW (while still
@@ -2952,6 +2964,12 @@ sub _process_loop_node {
     # the phi instruction in the header block. If lowered after opening the
     # header, the init value's definition would appear after the phi that
     # references it — invalid LLVM IR (forward reference not allowed in phi).
+    #
+    # This happens BEFORE the preheader's terminator is set and BEFORE its
+    # label is captured: a multi-block init value (bounds-checked Subscript,
+    # And/Or, ternary) consumes the current block's terminator and opens
+    # continuation blocks, so the block that actually falls through to the
+    # header is whatever is current AFTER lowering.
     my @loop_phis = _collect_loop_phis($loop_node);
 
     my @phi_records;    # [ { node, phi_ref, init_ref } ]
@@ -2970,6 +2988,11 @@ sub _process_loop_node {
             init_ref => $init_ref,
         };
     }
+
+    # Re-capture the preheader label (multi-block inits may have moved us),
+    # then jump from the preheader tail to the loop header.
+    my $preheader_label = $self->_current_block_label;
+    $self->_set_terminator("  br label %$header_label  ; Loop: enter header");
 
     # ---- Loop header ----
     # Open the header block. Phi instructions for loop-carried values are
@@ -2999,10 +3022,23 @@ sub _process_loop_node {
 
     # Process the body: VarDecl/Assign nodes reachable from the body Proj.
     $self->_process_loop_body($loop_node, $header_label);
-    my $body_end_label = $self->_current_block_label;
 
     # Collect the backedge values for each phi.
     my %body_vars = %{ $self->{var_table} };
+
+    # ---- Lower backedge values at the body tail ----
+    # The backedge value (phi inputs[1], wired via set_backedge) may not be
+    # pre-lowered by the body chain — and a multi-block backedge value
+    # (bounds-checked Subscript etc.) consumes the current block's terminator
+    # and opens continuation blocks. Lower BEFORE capturing the body-end
+    # label and setting the back-edge branch, so the phi's incoming label
+    # names the block that actually branches to the header.
+    for my $rec (@phi_records) {
+        $rec->{backedge_ref} =
+            $self->_find_phi_backedge_value($rec->{node}, \%body_vars, $rec->{phi_ref});
+    }
+
+    my $body_end_label = $self->_current_block_label;
 
     # Back-edge branch back to header.
     $self->_set_terminator("  br label %$header_label  ; Loop: back-edge");
@@ -3015,10 +3051,7 @@ sub _process_loop_node {
         my $phi_node = $rec->{node};
         my $phi_ref  = $rec->{phi_ref};
         my $init_ref = $rec->{init_ref};
-
-        # Backedge value: the updated value of the variable after the body.
-        # Look it up from body_vars via the VarDecl id that this phi tracks.
-        my $backedge_ref = $self->_find_phi_backedge_value($phi_node, \%body_vars, $phi_ref);
+        my $backedge_ref = $rec->{backedge_ref};
 
         my $repr      = _require_repr($phi_node, 'Loop.Phi');
         my $llvm_type = _repr_to_llvm_type($repr);
@@ -5337,6 +5370,16 @@ sub _process_if_node {
     # the exact key by region id (M1 fix: exact match, not substring regex, to
     # prevent Region#5 matching Region#59).
     if (defined $region) {
+        # Wire explicit Phi nodes on the Region FIRST: lowering their arm
+        # values may extend the then/else tails with continuation blocks
+        # (multi-block values), which changes the labels that actually
+        # branch into the merge. The elab phis below must name those
+        # updated labels, so take them from the wiring's return value.
+        # Arm values are lowered with each branch's var_table snapshot so
+        # variable reads are branch-correct.
+        ($then_end_label, $else_end_label) = $self->_wire_region_phis_with_preblock(
+            $region, $then_end_label, $else_end_label, \%then_var, \%else_var);
+
         my $phi_key = 'if.merge.' . $region->id;
         my $phi_recs = $self->{elab_phi_by_block}{$phi_key} // [];
 
@@ -5368,14 +5411,6 @@ sub _process_if_node {
             $self->{var_table}{$vd_id} = $phi_ref;
         }
 
-        # Wire explicit Phi nodes on the Region.
-        # Explicit Phi nodes (consumers of the Region) have their incoming values
-        # lowered in the PREDECESSOR blocks, not in the merge block, so that
-        # instructions appear before the phi in the correct block. We temporarily
-        # re-enter the then/else tail blocks to emit the incoming-value instructions
-        # (if not already cached), then return to the merge block.
-        $self->_wire_region_phis_with_preblock(
-            $region, $then_end_label, $else_end_label);
     }
 }
 
@@ -5390,8 +5425,16 @@ sub _process_if_node {
 # branch processing (e.g. a pure data node like Add that has no control_in
 # and is not in the body chain). Emitting it from the merge block would place
 # the instruction after the phi that references it — invalid in LLVM IR.
+#
+# A multi-block arm value (bounds-checked Subscript, And/Or, ternary)
+# consumes the tail block's branch-to-merge and opens continuation blocks;
+# _lower_arm_in_tail re-attaches the branch to the new tail and returns the
+# label that actually enters the merge. Arms are lowered with that branch's
+# var_table snapshot so variable reads see branch-final state, not merge
+# state. Returns the updated (then_label, else_label) — the caller must use
+# these for any further phi lines it emits into the same merge block.
 sub _wire_region_phis_with_preblock {
-    my ($self, $region, $then_label, $else_label) = @_;
+    my ($self, $region, $then_label, $else_label, $then_vars, $else_vars) = @_;
 
     my $consumers = $region->consumers // [];
     for my $phi_node (@$consumers) {
@@ -5405,17 +5448,13 @@ sub _wire_region_phis_with_preblock {
               . "has fewer than 2 incoming values — missing predecessor edge";
         }
 
-        # Lower incoming[0] in the then-tail block so the instruction precedes
-        # the phi in the correct predecessor.
         my $merge_idx = $self->_find_block_idx($self->_current_block_label);
-        my $then_idx  = $self->_find_block_idx($then_label);
-        $self->{current_idx} = $then_idx;
-        my $then_val = $self->lower_value($inputs->[0]);
 
-        # Lower incoming[1] in the else-tail block.
-        my $else_idx = $self->_find_block_idx($else_label);
-        $self->{current_idx} = $else_idx;
-        my $else_val = $self->lower_value($inputs->[1]);
+        my ($then_val, $else_val);
+        ($then_val, $then_label) =
+            $self->_lower_arm_in_tail($inputs->[0], $then_label, $then_vars);
+        ($else_val, $else_label) =
+            $self->_lower_arm_in_tail($inputs->[1], $else_label, $else_vars);
 
         # Return to merge block to emit the phi instruction.
         $self->{current_idx} = $merge_idx;
@@ -5426,4 +5465,36 @@ sub _wire_region_phis_with_preblock {
         $self->_emit("  $result = phi $llvm_type [ $then_val, %$then_label ], [ $else_val, %$else_label ]  ; Region phi");
         $self->{cache}{ $phi_node->id } = $result;
     }
+    return ($then_label, $else_label);
+}
+
+# _lower_arm_in_tail($arm_node, $tail_label, $var_snapshot) -> ($val, $end_label)
+# Lower a phi arm value inside the named predecessor tail block, with the
+# branch's var_table snapshot swapped in (when provided) so variable reads
+# are branch-correct. If the arm expands into continuation blocks, its
+# control flow consumed the tail's terminator: re-attach the saved
+# branch-to-merge to the new tail and report the new tail's label as the
+# phi's incoming label.
+sub _lower_arm_in_tail {
+    my ($self, $arm_node, $tail_label, $var_snapshot) = @_;
+
+    my $idx = $self->_find_block_idx($tail_label);
+    $self->{current_idx} = $idx;
+    my $saved_term = $self->{blocks}[$idx]{terminator};
+
+    my %merge_vars;
+    if (defined $var_snapshot) {
+        %merge_vars = %{ $self->{var_table} };
+        %{ $self->{var_table} } = %$var_snapshot;
+    }
+    my $val = $self->lower_value($arm_node);
+    if (defined $var_snapshot) {
+        %{ $self->{var_table} } = %merge_vars;
+    }
+
+    my $end_label = $self->_current_block_label;
+    if ($end_label ne $tail_label) {
+        $self->_set_terminator($saved_term);
+    }
+    return ($val, $end_label);
 }
