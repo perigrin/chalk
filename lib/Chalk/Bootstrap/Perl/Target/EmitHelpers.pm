@@ -317,7 +317,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     # Detect filter-gap merge artifact in a method's output:
     # method body has call_method (real work) but RETVAL is a bare string.
     # (Method name retains historical "stale_merge" naming pending rename;
-    # see _fix_postfix_chain in Perl/Actions.pm for the canonical
+    # see docs/plans/2026-05-09-fixup-audit-baseline.md for the canonical
     # filter-gap-merge explanation.)
     method _is_stale_merge($xs_output) {
         my $has_dispatch = $xs_output =~ /(?:call_method|${_current_slug}_\w+)\(/;

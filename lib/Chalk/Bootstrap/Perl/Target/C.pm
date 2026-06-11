@@ -1348,7 +1348,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 $block_node = $args->[0];
                 $list_node  = $args->[1];
             } elsif ($args->@* > 2) {
-                # Multi-item from _fixup_stmts: first N-1 args are block body,
+                # Multi-item args (map/grep BLOCK shape): first N-1 args are block body,
                 # last arg is the list source (e.g., map { STMT; EXPR } LIST).
                 $list_node = $args->[-1];
                 @block_body_items = $args->@[0 .. $#{$args} - 1];
@@ -1365,7 +1365,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $block_body;
             my $needs_topic_binding = false;
             if (@block_body_items) {
-                # Multi-item block from _fixup_stmts LIST_BUILTIN consumption.
+                # Multi-item block (map/grep BLOCK LIST shape).
                 # Items are the block body statements; last is the return value.
                 $needs_topic_binding = true;
                 my %map_vars = ($declared_vars ? $declared_vars->%* : ());

@@ -843,7 +843,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         # The global cfg_lookup (built from the Context tree) is already
         # populated; the graph schedule supplements it for nodes that may
         # have been missed due to filter-gap merges in the parser (see
-        # _fix_postfix_chain in Perl/Actions.pm for the canonical
+        # docs/plans/2026-05-09-fixup-audit-baseline.md for the canonical
         # filter-gap-merge explanation).
         if (defined $node->graph()) {
             my $sched = $node->graph()->schedule();
@@ -1211,7 +1211,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         # Filter-gap merge artifact: SubscriptExpr(BuiltinCall(exists, [$var]), $key)
         # should emit as exists($var->{$key}), not exists($var)->{$key}.
         # Push the subscript inside the builtin argument. (Precedence-inversion
-        # gap class — see _fix_postfix_chain in Perl/Actions.pm.)
+        # gap class — see docs/plans/2026-05-09-fixup-audit-baseline.md.)
         if (defined $target
                 && ($target isa Chalk::IR::Node::Call && $target->dispatch_kind() eq 'builtin')) {
             my $bname = $target->inputs()->[0]->value();

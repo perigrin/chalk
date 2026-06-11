@@ -15,9 +15,9 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
     # (e.g., `push @arr, $x`). Threaded from CallExpression alt 0 (paren
     # form) at parse time; defaults to false for backward compatibility
     # with the many sites that construct Call without setting it.
-    # Used by _push_methodcall_inward / _push_deref_inward to distinguish
-    # legitimate paren-form chains (no peel) from filter-gap merge
-    # artifacts (peel correct).
+    # Consumed by the ExpressionList reify in Perl/Actions.pm: a bare
+    # list-builtin call (paren_form false) absorbs the remaining list items
+    # into its args; a paren-form call does not.
     field $paren_form :param :reader = false;
 
     # Resolved callee handle (Chalk::MOP::Method or Chalk::MOP::Sub).

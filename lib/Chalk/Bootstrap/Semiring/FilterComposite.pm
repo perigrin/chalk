@@ -538,7 +538,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         # two survivors when filter-gap merge admits both derivations and
         # composition picks one. The picked side may lack cfg_state info that
         # the other survivor carries; on_merge transfers it. See
-        # _fix_postfix_chain in Perl/Actions.pm for the canonical
+        # docs/plans/2026-05-09-fixup-audit-baseline.md for the canonical
         # filter-gap-merge explanation.
         if ($self->_sa()->can('on_merge')) {
             $self->_sa()->on_merge($correct, $rejected);

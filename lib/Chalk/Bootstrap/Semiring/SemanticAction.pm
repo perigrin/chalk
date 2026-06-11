@@ -529,9 +529,8 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # The picked side may lack scope information that the other survivor
     # carries, because both were built independently before the chart-level
     # merge. This hook transfers scope from the other survivor when the
-    # picked one lacks it. See _fix_postfix_chain in Perl/Actions.pm for the
-    # canonical filter-gap-merge explanation; tracked by the fixup audit at
-    # docs/plans/2026-05-09-fixup-audit-baseline.md.
+    # picked one lacks it. See docs/plans/2026-05-09-fixup-audit-baseline.md
+    # for the canonical filter-gap-merge explanation.
     method on_merge($correct, $rejected) {
         return if $correct->is_zero() || $rejected->is_zero();
         my $correct_bindings  = $correct->bindings();

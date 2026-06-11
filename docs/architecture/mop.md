@@ -220,19 +220,25 @@ metadata struct types: `Chalk::IR::Program`, `Chalk::IR::ClassInfo`,
 `Chalk::IR::MethodInfo`, `Chalk::IR::SubInfo`, `Chalk::IR::UseInfo`,
 `Chalk::IR::FieldInfo`. See `sea-of-nodes-ir.md` for their shape.
 
-These structs are still produced during parsing and are still consumed
-by the code generators. They are the legacy representation of program
-structure. The MOP is the canonical post-parse representation, but
-codegen has not yet been migrated to read from it directly.
+These structs are still produced during parsing. They are the legacy
+representation of program structure. The MOP is the canonical post-parse
+representation; the production Perl target now emits from the MOP +
+scheduler (golden parity), but the migration is not complete (see
+`docs/plans/2026-06-10-mop-migration-reaudit.md` for the audited state).
 
 Specifically:
 
-- `MethodInfo->body` (an arrayref of IR statement nodes) is still the
-  source codegen walks. The `MOP::Method->graph` for the same method is
-  populated in parallel.
-- `MethodInfo->graph()` exists as a delegating accessor that reads from
-  the MOP-side graph; this is the bridge while the migration is in
-  flight.
+- `MethodInfo->body` (an arrayref of IR statement nodes) is still
+  DUAL-WRITTEN alongside the graph, but the production Perl emission
+  path no longer walks it (schedule-driven since the scheduler campaign).
+  Remaining `->body` readers: the legacy Perl path, StructPromotion, and
+  the Actions dual-write itself.
+- The graph bridge is value-level sharing, not delegation:
+  `MethodDefinition` builds the graph and stores it on `MethodInfo`
+  (Actions.pm); `ClassBlock` then copies `$item->graph()` into
+  `declare_method(graph => ...)`. The same `Graph` object lives on both
+  sides — the MOP side reads FROM `MethodInfo`, not the other way
+  around.
 - `Chalk::IR::Node->compat_class` still exists as a field on nodes for
   legacy `->class()` test reads. Production setters were stripped during
   Phase 7d.
