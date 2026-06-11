@@ -3,8 +3,10 @@ title: "MOP migration 1/4: Target::C entry-point onto the schedule-driven MOP pa
 state: pending
 urgency: normal
 milestone: codegen-harness
+blocks:
+- 019eb421-13ce-7811-b246-f17fac4fe338
 created: 2026-06-11T00:41:43.105256279Z
-updated: 2026-06-11T00:41:43.105256279Z
+updated: 2026-06-11T00:43:13.042411635Z
 ---
 
 Item 1 of the re-audit punch list (docs/plans/2026-06-10-mop-migration-reaudit.md s5) — the NEW highest-leverage single unblock for the stalled SoN-IR/MOP migration (~2/3 complete per the re-audit).
