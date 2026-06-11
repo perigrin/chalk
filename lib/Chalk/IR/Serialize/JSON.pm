@@ -44,6 +44,10 @@ sub _extract_fields ($node, $id_remap) {
             # Constructor calls (name='new') carry the :param name list; losing
             # it silently re-lowers with no bound params (branch-review I3).
             param_names   => [ ($node->param_names // [])->@* ],
+            # Method-dispatch calls name their statically-known class
+            # (019eb42a MOP-direct); losing it makes a reloaded call
+            # un-lowerable and changes its content hash.
+            (defined $node->class_name ? (class_name => $node->class_name) : ()),
         };
     }
     if ($op eq 'Phi') {
@@ -249,6 +253,8 @@ sub _deserialize_graph ($method_data) {
             $args{name}          = $fields->{name};
             $args{param_names}   = $fields->{param_names}
                 if exists $fields->{param_names};
+            $args{class_name}    = $fields->{class_name}
+                if exists $fields->{class_name};
         }
         elsif ($op eq 'Phi') {
             $args{region} = $nodes[ $fields->{region} ];

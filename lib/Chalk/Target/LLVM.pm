@@ -11,6 +11,7 @@ use utf8;
 use parent 'Chalk::IR::Target';
 
 use Chalk::IR::Node::Coerce;
+use Chalk::IR::NodeFactory;   # %STATEMENT_EFFECT_OPS (the shared statement-effect table)
 use Chalk::IR::Schedule::Dominators;
 use Chalk::IR::Schedule::Elaborate;
 
@@ -227,27 +228,43 @@ sub _method_fn_llvm_ret_type {
 # Resolve :isa inheritance: for each class with a parent, copy inherited
 # method slots from the parent into the child's vtable (compile-time MRO
 # flatten). Run AFTER the registry is fully populated so all parent classes
-# are present.
+# are present. Parents flatten BEFORE their children (memoized recursion,
+# cycle-guarded) — a single pass in name order would copy a parent's entry
+# as it currently stands, losing GRANDparent methods whenever the child
+# sorts before its parent.
 sub _flatten_inheritance {
     my ($registry) = @_;
-    for my $cname (sort keys %$registry) {
+    my %done;
+    my %in_progress;
+    my $flatten;
+    $flatten = sub {
+        my ($cname) = @_;
+        return if $done{$cname};
+        die "LLVM MOP: inheritance cycle through class '$cname'"
+            if $in_progress{$cname}++;
         my $parent = $registry->{$cname}{parent};
-        next unless defined $parent;
-        my $parent_reg = $registry->{$parent};
-        unless (defined $parent_reg) {
-            die "LLVM MOP: class '$cname' has :isa($parent) but '$parent' is not declared in this graph";
-        }
-        # Copy parent methods into child that don't already exist in child
-        for my $pmeth (@{ $parent_reg->{methods} }) {
-            unless (grep { ($_->{name} // '') eq $pmeth->{name} } @{ $registry->{$cname}{methods} }) {
-                push @{ $registry->{$cname}{methods} }, {
-                    %$pmeth,
-                    vtable_slot => scalar(@{ $registry->{$cname}{methods} }),
-                    inherited_from => $parent,
-                };
+        if (defined $parent) {
+            my $parent_reg = $registry->{$parent};
+            unless (defined $parent_reg) {
+                die "LLVM MOP: class '$cname' has :isa($parent) but '$parent' is not declared in this graph";
+            }
+            $flatten->($parent);
+            # Copy parent methods into child that don't already exist in child
+            for my $pmeth (@{ $parent_reg->{methods} }) {
+                unless (grep { ($_->{name} // '') eq $pmeth->{name} } @{ $registry->{$cname}{methods} }) {
+                    push @{ $registry->{$cname}{methods} }, {
+                        %$pmeth,
+                        vtable_slot => scalar(@{ $registry->{$cname}{methods} }),
+                        inherited_from => $parent,
+                    };
+                }
             }
         }
-    }
+        delete $in_progress{$cname};
+        $done{$cname} = 1;
+        return;
+    };
+    $flatten->($_) for sort keys %$registry;
     return;
 }
 
@@ -288,12 +305,23 @@ sub _build_registry_from_mop {
 sub _method_body_root {
     my ($mop_method) = @_;
     my $cname = $mop_method->class ? $mop_method->class->name : '?';
-    my $returns = $mop_method->graph ? $mop_method->graph->returns : [];
+    # Graph::returns() collects Return AND Unwind nodes in hash order —
+    # the contract is EXACTLY one Return (an early-return body would
+    # otherwise lower a nondeterministically chosen arm), and an Unwind
+    # (die/exception value) is never the body root.
+    my $all = $mop_method->graph ? $mop_method->graph->returns : [];
+    my @returns = grep {
+        blessed($_) && $_->can('operation') && $_->operation eq 'Return'
+    } @$all;
     die "GAP: method '" . $mop_method->name . "' in class '$cname' has no "
       . "Return in its graph — cannot determine the lowering root. "
       . "Merge a Return(value) into the method's graph."
-        unless $returns && @$returns;
-    my $value = $returns->[0]->inputs->[-1];
+        unless @returns;
+    die "GAP: method '" . $mop_method->name . "' in class '$cname' has "
+      . scalar(@returns) . " Returns — the lowering root must be exactly one "
+      . "(multi-exit method bodies are not lowered yet)."
+        if @returns > 1;
+    my $value = $returns[0]->inputs->[-1];
     die "GAP: method '" . $mop_method->name . "' in class '$cname' has a "
       . "Return with no value input." unless defined $value;
     return $value;
@@ -309,11 +337,15 @@ sub _method_body_root {
 # lower nondeterministically — die instead).
 sub _phaser_body_in_control_order {
     my ($phaser) = @_;
+    # Membership only (graph->members), NOT the input closure that nodes()
+    # walks: a Call/Assign appearing as an INPUT of a merged statement
+    # (e.g. the rhs of a field store) is a sub-expression, not a body
+    # statement — counting it produces a spurious second chain head.
     my @stmts = grep {
         blessed($_) && $_->can('operation')
             && (exists $Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS{ $_->operation }
                 || $_->operation eq 'VarDecl')
-    } $phaser->graph->nodes->@*;
+    } $phaser->graph->members->@*;
     return [] unless @stmts;
     return [@stmts] if @stmts == 1;
 
@@ -715,7 +747,10 @@ sub _emit_class_registry_ir {
     return @lines;
 }
 
-# lower_with_elaboration($class, $ret_node, $elab) -> $llvm_ir_text
+# lower_with_elaboration($class, $ret_node, $elab, %opts) -> $llvm_ir_text
+#
+# %opts: mop => a SEALED Chalk::MOP carrying class structure (required when
+# the graph contains class_name Calls; see _build_registry_from_mop).
 #
 # Variant of lower() that accepts a pre-computed Elaborate pass result for
 # phi placement at Region merge points. The $elab object carries emitted_phis()
@@ -5374,7 +5409,7 @@ sub new {
     my $self  = $class->SUPER::new(%args);
     $self->{elab} = $elab;
     # Class registry: maps class_name -> { methods => [...], fields => [...], parent => str }
-    # Built by _scan_class_registry() in lower_with_elaboration.
+    # Built by _build_registry_from_mop() from the sealed MOP (019eb42a).
     $self->{class_registry} = $class_registry // {};
     # Index emitted_phis by Region id -> list of phi records.
     # The Elaborate pass emits phis with block_id = the merge block id.

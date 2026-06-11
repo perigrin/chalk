@@ -76,10 +76,13 @@ subtest 'MOP::Adjust threads body statements in list order' => sub {
     my $ir = <<'END_IR';
 %cls    = MOP::Class(name: "Box")
 %mf_v   = MOP::Field(class: %cls, name: "v", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
-%fa_lv  = FieldAccess(field_index: 0, field_stash: "Box") :Int
+%mf_w   = MOP::Field(class: %cls, name: "w", fieldix: 1, param: false, reader: false, has_default: false, type: "Int")
+%fa_v   = FieldAccess(field_index: 0, field_stash: "Box") :Int
+%fa_w   = FieldAccess(field_index: 1, field_stash: "Box") :Int
 %nine   = Constant(9) :Int
-%st_a   = Assign(%fa_lv, %nine) :Int
-%st_b   = Assign(%fa_lv, %nine) :Int
+%three  = Constant(3) :Int
+%st_a   = Assign(%fa_v, %nine) :Int
+%st_b   = Assign(%fa_w, %three) :Int
 %adj    = MOP::Adjust(class: %cls, body: [%st_a, %st_b])
 %body   = Constant(1) :Int
 return %body
@@ -94,8 +97,14 @@ END_IR
     my @members = grep { blessed($_) && $_->can('operation') && $_->operation eq 'Assign' }
         $adj->graph->nodes->@*;
     is(scalar @members, 2, 'both statements are graph members');
-    my ($second) = grep { defined $_->control_in } @members;
-    ok(defined $second, 'the second statement is control-threaded after the first');
+    # Order, not just shape: the SECOND listed statement (the w-store) is
+    # threaded after the FIRST (the v-store) — reversing the threading loop
+    # must fail this.
+    my ($st_a) = grep { !defined $_->control_in } @members;
+    my ($st_b) = grep {  defined $_->control_in } @members;
+    ok(defined $st_a && defined $st_b, 'exactly one head and one threaded statement');
+    is($st_b->control_in->id, $st_a->id, 'list order is the chain order');
+    is($st_b->inputs->[0]->field_index, 1, 'the threaded statement is the second listed one');
 };
 
 subtest 'MOP::Class parent kwarg becomes parent_name' => sub {

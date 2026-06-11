@@ -85,7 +85,7 @@ for my $case (@$cases) {
             ok(defined $return_node, "$title: build_graph_from_ir returns a node");
             if (defined $return_node) {
                 my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node,
-                    { (defined $case_mop ? (mop => $case_mop) : ()) });
+                    { mop => $case_mop });
                 ok(!$meta->{marked_unsupported},
                     "$title: built-from-block graph is truly GREEN (not marked_unsupported)");
                 my $lli_out  = $L->return_values->[0] // '';

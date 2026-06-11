@@ -97,6 +97,14 @@ class Chalk::IR::Graph {
         return ++$cfg_counter;
     }
 
+    # Returns the nodes that were explicitly merged/seeded into this graph —
+    # the membership set ONLY, without the transitive input closure that
+    # nodes() walks. Use when "belongs to this graph" matters (e.g. which
+    # nodes are an ADJUST body's statements) rather than reachability.
+    method members() {
+        return [ values %cache ];
+    }
+
     # Returns the Start node for this graph, derived from the cache.
     # Preserves legacy param when provided; otherwise scans the cache.
     method start() {

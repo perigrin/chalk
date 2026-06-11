@@ -45,6 +45,17 @@ subtest 'declare works before seal, dies after' => sub {
     }
 };
 
+subtest 'seal propagates across multiple classes' => sub {
+    my $mop = Chalk::MOP->new;
+    my $a = $mop->declare_class('A');
+    my $b = $mop->declare_class('B');
+    $mop->seal;
+    ok($a->is_sealed && $b->is_sealed, 'both classes sealed');
+    my $err;
+    eval { $b->declare_method('late'); 1 } or $err = $@;
+    like($err, qr/sealed/, 'declaring on the second class dies too');
+};
+
 subtest 'seal is idempotent' => sub {
     my $mop = Chalk::MOP->new;
     $mop->declare_class('A');

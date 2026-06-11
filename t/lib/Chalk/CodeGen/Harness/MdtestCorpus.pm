@@ -1237,9 +1237,10 @@ sub _run_l_verdict_check {
         return { verdict => 'FAIL', actual => 'GAP', declared => $decl };
     }
 
-    # Run through LLVMDriver (with the case's sealed MOP, when present)
+    # Run through LLVMDriver (the case's sealed MOP, when present —
+    # LLVMDriver guards undef internally)
     my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node,
-        { (defined $case_mop ? (mop => $case_mop) : ()) });
+        { mop => $case_mop });
 
     # Classify the LLVMDriver result using the three-way distinction:
     #   GAP        = lowering DIED (marked_unsupported=1; no .ll was produced)
