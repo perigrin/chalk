@@ -3,8 +3,10 @@ title: LLVM backend reads the MOP directly (retire the ClassInfo bridge)
 state: pending
 urgency: normal
 milestone: codegen-harness
+blocks:
+- 019eb421-1401-78e6-8734-a7983effaf73
 created: 2026-06-11T00:52:25.803634304Z
-updated: 2026-06-11T00:52:25.803634304Z
+updated: 2026-06-11T00:52:25.989838412Z
 ---
 
 Architecture-review resolution 2026-06-11 (docs/plans/2026-06-11-target-ir-architecture-review-resolution.md): the metadata structs delete eventually; the LLVM backend should read MOP::Class/Method/Field/Phaser::Adjust directly (the Perl target proves MOP-driven emission). R3 ClassInfo consumption (_populate_registry_from_classinfo, MethodInfo.body_node/return_repr) is TRANSITIONAL.
