@@ -612,6 +612,67 @@ sub _emit_class_registry_ir {
             }
         }
 
+        # 4b. ADJUST function: one @Cls__ADJUST(i8* %self) per class with
+        # ADJUST blocks, lowered ONCE in a fresh context exactly like a
+        # method body. Call(new) calls it after :param/default binding.
+        # Lowering ADJUST bodies inline on the main context (the old shape)
+        # shared the main value cache across constructions: the second new
+        # of the same class cache-hit the body's statement nodes and
+        # silently skipped the second object's stores (review I6).
+        my $adjusts = $reg->{adjusts} // [];
+        my @adjust_stmts = map { @{ $_->{body_nodes} // [] } } @$adjusts;
+        if (@adjust_stmts) {
+            my $adj_ctx = Chalk::Target::LLVM::Context->new;
+            $adj_ctx->{_in_method_body}     = 1;
+            $adj_ctx->{_method_self_name}   = '%self';
+            $adj_ctx->{_method_class_name}  = $cname;
+            $adj_ctx->{_method_name}        = '__ADJUST';
+            $adj_ctx->{class_registry}      = $registry;
+            $adj_ctx->{_need_strpair}       = $ctx->{_need_strpair} // 0;
+
+            $adj_ctx->lower_value($_) for @adjust_stmts;
+
+            push @lines, "define internal void \@${cname}__ADJUST(i8* %self) {  ; ADJUST blocks for $cname";
+            push @lines, 'entry:';
+            my $adj_blocks = $adj_ctx->blocks;
+            my $adj_final  = $adj_ctx->{current_idx} // $#$adj_blocks;
+            $adj_final = $#$adj_blocks if $adj_final == 0 && $#$adj_blocks > 0;
+            for my $i ((grep { $_ != $adj_final } 0 .. $#$adj_blocks), $adj_final) {
+                my $blk = $adj_blocks->[$i];
+                if ($i > 0) {
+                    push @lines, $blk->{label} . ':';
+                }
+                push @lines, $blk->{insts}->@*;
+                if (defined $blk->{terminator}) {
+                    push @lines, $blk->{terminator};
+                }
+            }
+            push @lines, '  ret void';
+            push @lines, '}';
+            push @lines, '';
+
+            # Same flag/global propagation as the method-body loop above.
+            for my $flag (qw(
+                _need_malloc_memcpy
+                _need_strpair
+                _need_bool_str_globals
+                _need_str_to_num_helper
+                _need_memcmp
+                _need_aggregate_types
+                _need_getenv
+            )) {
+                $ctx->{$flag} = 1 if $adj_ctx->{$flag};
+            }
+            if (defined $adj_ctx->{_str_globals} && @{ $adj_ctx->{_str_globals} }) {
+                for my $g (@{ $adj_ctx->{_str_globals} }) {
+                    my ($gname, $content, $blen) = @$g;
+                    my $total = $blen + 1;
+                    my $enc = Chalk::Target::LLVM::_encode_c_string($content);
+                    push @lines, "$gname = private unnamed_addr constant [$total x i8] c\"$enc\\00\", align 1";
+                }
+            }
+        }
+
         # 5. Vtable global: @Cls__vtable = { class-name-ptr, fn-ptr0, fn-ptr1, ... }
         my $vt_global = '@' . $cname . '__vtable';
         my @vt_init;
@@ -4009,15 +4070,14 @@ sub _lower_call_new {
         }
     }
 
-    # ADJUST blocks
+    # ADJUST blocks: call the per-class @Cls__ADJUST function (emitted once
+    # by _emit_class_registry_ir in its own fresh context). Lowering the
+    # bodies inline here shared this context's value cache across
+    # constructions — the second new of the same class cache-hit the body's
+    # statement nodes and skipped its stores (review I6).
     my $adjusts = $reg->{adjusts} // [];
-    for my $adj (@$adjusts) {
-        for my $fw_node (@{ $adj->{body_nodes} // [] }) {
-            local $self->{_in_method_body}    = 1;
-            local $self->{_method_self_name}  = $raw;
-            local $self->{_method_class_name} = $class_name;
-            $self->lower_value($fw_node);
-        }
+    if (grep { @{ $_->{body_nodes} // [] } } @$adjusts) {
+        $self->_emit("  call void \@${class_name}__ADJUST(i8* $raw)  ; run ADJUST blocks");
     }
 
     # Return the raw i8* pointer (Object repr)
