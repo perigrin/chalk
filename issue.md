@@ -1,12 +1,21 @@
 ---
 title: Value-cache staleness + statement-identity family (pre-B::SoN blocker)
-state: pending
+state: in-progress
 urgency: normal
 milestone: codegen-harness
 blocks:
 - 019eaa51-bcfe-76b6-a02d-a23a65bd7498
 created: 2026-06-10T19:50:27.205441995Z
-updated: 2026-06-11T12:26:05.077693317Z
+updated: 2026-06-11T12:36:06.777303469Z
+sessions:
+- start_sha: 51724b453b35cf5c2137647d95ce2870c995d3e8
+  end_sha: ""
+  commits: 0
+  started_at: 2026-06-11T12:36:06.777303469Z
+transitions:
+- state: in-progress
+  actor: human:git-zhi
+  timestamp: 2026-06-11T12:36:06.777303469Z
 ---
 
 THE lateral-propagation axis, now with probe-proven reproducers (whole-branch review 2026-06-10, paad/code-reviews/...-256a9b37-branch-agentic.md; probes preserved in the report). ALL PRE-EXISTING pu architecture defects (verifier re-ran probes on pu) that bite on graph shapes the corpus deliberately avoids — they are the real blocker between hand-authored graphs and B::SoN feeding arbitrary parsed code (Phase 4/5). Fix BEFORE Phase 4 lands. See also memory phi_merge_strategy (the lateral-propagation-fix-first note).
