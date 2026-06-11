@@ -230,6 +230,35 @@ subtest 'Graph::nodes does not leak content-identical per-call orphans' => sub {
     ok(!$member{$s2->id}, 'content-identical orphan per-call node is NOT a member');
 };
 
+subtest 'content-hash ids that merely END in #N are not treated per-call' => sub {
+    # A content-hash id embeds input ids, so a hash-consed node whose LAST
+    # serialized input is per-call ends in #N too (every PadAccess over a
+    # VarDecl: "PadAccess|...|VarDecl#3"). The per-call discriminator must
+    # not match those — merge() must keep canonicalizing content-equal
+    # distinct objects for hash-consed nodes (review I1).
+    my $f = Chalk::IR::NodeFactory->new;
+    my $g = Chalk::IR::Graph->new;
+
+    my $vd = $f->make('VarDecl',
+        inputs => [
+            $f->make('Constant', value => 'x', const_type => 'string'),
+            $f->make('Constant', value => '1', const_type => 'integer'),
+        ]);
+    my $pa = $f->make('PadAccess', targ => 0, varname => 'x', inputs => [$vd]);
+    like($pa->id, qr/#\d+$/,
+        'precondition: the hash-consed PadAccess id ends in the per-call suffix');
+
+    # A content-identical node OBJECT built outside the factory (the shape
+    # deserialization and _seed produce).
+    require Chalk::IR::Node::PadAccess;
+    my $clone = Chalk::IR::Node::PadAccess->new(
+        id => $pa->content_hash, targ => 0, varname => 'x', inputs => [$vd]);
+
+    is($g->merge($pa), $pa, 'first merge returns the node');
+    is($g->merge($clone), $pa,
+        'merge canonicalizes the content-identical clone to the existing member');
+};
+
 subtest 'Graph::unmerge of a per-call node does not evict a content-identical sibling' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $g = Chalk::IR::Graph->new;

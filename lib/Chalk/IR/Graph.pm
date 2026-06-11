@@ -54,8 +54,11 @@ class Chalk::IR::Graph {
     # re-point a statement at the wrong side effect.
     method merge($node) {
         return unless defined $node && blessed($node);
+        # Per-call ids are bare "Op#N" tokens; content-hash ids are
+        # pipe-joined ("Op|...") and can END in an embedded per-call input
+        # id ("PadAccess|...|VarDecl#3"), so the suffix alone is not enough.
         my $id = $node->id();
-        if (defined $id && $id =~ /#\d+$/) {
+        if (defined $id && $id !~ /\|/ && $id =~ /#\d+$/) {
             $cache{$id} = $node;
             return $node;
         }
@@ -74,9 +77,10 @@ class Chalk::IR::Graph {
     method unmerge($node) {
         return unless defined $node && blessed($node);
         my $id = $node->id();
-        # Per-call nodes are keyed by id only; deleting by content_hash here
-        # could evict a content-identical sibling that is a distinct effect.
-        if (defined $id && $id =~ /#\d+$/) {
+        # Per-call nodes (bare "Op#N" ids, no pipe) are keyed by id only;
+        # deleting by content_hash here could evict a content-identical
+        # sibling that is a distinct effect.
+        if (defined $id && $id !~ /\|/ && $id =~ /#\d+$/) {
             delete $cache{$id};
             return;
         }
@@ -137,10 +141,11 @@ class Chalk::IR::Graph {
             return false unless blessed($n);
             my $id = $n->id();
             return true if exists $cache{$id};
-            # Per-call nodes are keyed by id only — a content-hash fallback
-            # would admit content-identical orphans (e.g., losing Earley
-            # alternatives that were never merged into any graph).
-            return false if defined $id && $id =~ /#\d+$/;
+            # Per-call nodes (bare "Op#N" ids, no pipe) are keyed by id only
+            # — a content-hash fallback would admit content-identical
+            # orphans (e.g., losing Earley alternatives that were never
+            # merged into any graph).
+            return false if defined $id && $id !~ /\|/ && $id =~ /#\d+$/;
             return true if $n->can('content_hash')
                 && exists $cache{$n->content_hash()};
             return false;
