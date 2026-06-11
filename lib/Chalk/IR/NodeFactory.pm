@@ -138,6 +138,18 @@ my %INPUT_SPECS = (
 );
 
 class Chalk::IR::NodeFactory {
+    # Statement-effect ops: ops whose statement-position occurrences are
+    # distinct side effects (a store, a call, a substitution, a guarded
+    # block). control_in is excluded from the content hash, so hash-consing
+    # these would collapse two textually-identical effects into one node and
+    # silently drop the second (whole-branch review C3). This table is a
+    # SHARED contract: make() gives these ops per-call identity, and the
+    # Block control-chain fixup in Actions.pm threads exactly this set via
+    # set_control_in. Both sites read this table — keep it the single source.
+    our %STATEMENT_EFFECT_OPS = map { $_ => 1 } qw(
+        Assign CompoundAssign RegexSubst TryCatch Call
+    );
+
     field %cache;
     field $cfg_counter = 0;
 
@@ -253,18 +265,13 @@ class Chalk::IR::NodeFactory {
             return $node;
         }
 
-        # Call(dispatch_kind='method') has per-call identity: construction
-        # (name='new') is a malloc side effect, and ANY method call is a
-        # statement-position side effect whose repetitions are distinct
-        # ($obj->advance(); $obj->advance();). This restores pu parity — the
-        # pre-convergence MethodCall node had per-call identity; narrowing it
-        # to name='new' during R3 was a regression (branch-review I1).
-        # Builtin/sub Calls keep content hash-consing (pu behavior; the
-        # broader statement-identity design is tracked with the cache/identity
-        # family follow-up).
-        if ($op_name eq 'Call'
-            && ($args{dispatch_kind} // '') eq 'method')
-        {
+        # Statement-effect ops (see %STATEMENT_EFFECT_OPS above) get per-call
+        # identity: every Assign (scalar rebind, element store, field store),
+        # CompoundAssign, RegexSubst, TryCatch, and Call — any dispatch kind —
+        # is a distinct side effect at its own control position. This subsumes
+        # the earlier narrower carve-outs (Assign-over-lvalue, Call-method) and
+        # the deleted ArrayWrite/HashWrite/FieldWrite per-call semantics.
+        if (exists $STATEMENT_EFFECT_OPS{$op_name}) {
             my $class = $DATA_CLASSES{$op_name}
                 or die "Unknown node operation: $op_name";
             $cfg_counter++;
@@ -273,31 +280,6 @@ class Chalk::IR::NodeFactory {
             $self->_register_consumers($node, %args);
             $cache{$id} = $node;
             return $node;
-        }
-
-        # Assign over a Subscript/FieldAccess lvalue is an element/field STORE — a
-        # side effect that occupies a distinct control position. Like the deleted
-        # ArrayWrite/HashWrite/FieldWrite nodes (and VarDecl/ListAssign), two
-        # textually-identical stores in sequence are distinct side effects: each
-        # carries its own control_in, which is excluded from the content hash.
-        # Without per-call identity, two `$a[0]=v` (or `$field=v`) statements with
-        # identical lvalue+rhs would hash-cons to one node, silently dropping a
-        # store. A plain scalar-rebind Assign (lhs = PadAccess/VarDecl) is
-        # value-producing, not an aggregate store, and keeps content hash-consing.
-        if ($op_name eq 'Assign') {
-            my $lhs = ($args{inputs} && ref $args{inputs} eq 'ARRAY') ? $args{inputs}[0] : undef;
-            my $lhs_op = (defined $lhs && ref $lhs && $lhs->can('operation'))
-                ? $lhs->operation : '';
-            if ($lhs_op eq 'Subscript' || $lhs_op eq 'FieldAccess') {
-                my $class = $DATA_CLASSES{Assign}
-                    or die "Unknown node operation: Assign";
-                $cfg_counter++;
-                my $id = "Assign#${cfg_counter}";
-                my $node = $class->new( id => $id, %args );
-                $self->_register_consumers($node, %args);
-                $cache{$id} = $node;
-                return $node;
-            }
         }
 
         my $class = $DATA_CLASSES{$op_name}

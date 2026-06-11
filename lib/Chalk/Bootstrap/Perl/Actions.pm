@@ -1714,13 +1714,12 @@ class Chalk::Bootstrap::Perl::Actions {
                     $s->set_control_in($current_control);
                 }
                 # Return/Unwind terminate the chain - don't advance control.
-            } elsif ($s isa Chalk::IR::Node::Call
-                        || $s isa Chalk::IR::Node::Assign
-                        || $s isa Chalk::IR::Node::CompoundAssign
-                        || $s isa Chalk::IR::Node::RegexSubst
-                        || $s isa Chalk::IR::Node::TryCatch) {
-                # Statement-position side-effect node. Constructed by
-                # its action (CallExpression, AssignmentExpression,
+            } elsif ($s isa Chalk::IR::Node
+                        && exists $Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS{ $s->operation }) {
+                # Statement-position side-effect node. The op set is the
+                # shared %STATEMENT_EFFECT_OPS table in NodeFactory — the
+                # same ops the factory gives per-call identity. Constructed
+                # by its action (CallExpression, AssignmentExpression,
                 # TryCatchStatement, etc.) without a control input
                 # field set, and sometimes without ever being merged
                 # into a graph. Thread it into the effect chain via the

@@ -46,8 +46,19 @@ class Chalk::IR::Graph {
     # Hash-cons a freshly-constructed data node into this graph.
     # If an identical node (same content_hash) already exists, returns the existing one.
     # Otherwise adds the node to the cache and returns it.
+    #
+    # Per-call nodes (counter-suffixed ids: VarDecl#3, Assign#7, If#2, ...)
+    # are keyed by id, never by content: two content-identical statement
+    # effects are distinct members, and merge must return the node it was
+    # handed — substituting a content-equal earlier member would silently
+    # re-point a statement at the wrong side effect.
     method merge($node) {
         return unless defined $node && blessed($node);
+        my $id = $node->id();
+        if (defined $id && $id =~ /#\d+$/) {
+            $cache{$id} = $node;
+            return $node;
+        }
         my $hash = $node->content_hash();
         if (exists $cache{$hash}) {
             return $cache{$hash};
@@ -62,10 +73,16 @@ class Chalk::IR::Graph {
     # representative in the graph.
     method unmerge($node) {
         return unless defined $node && blessed($node);
+        my $id = $node->id();
+        # Per-call nodes are keyed by id only; deleting by content_hash here
+        # could evict a content-identical sibling that is a distinct effect.
+        if (defined $id && $id =~ /#\d+$/) {
+            delete $cache{$id};
+            return;
+        }
         my $hash = $node->content_hash();
         delete $cache{$hash};
         # Also delete by id in case the node was added via _seed().
-        my $id = $node->id();
         delete $cache{$id} if defined $id && $id ne $hash;
         return;
     }
@@ -118,7 +135,12 @@ class Chalk::IR::Graph {
         # the result.
         my $in_cache = sub ($n) {
             return false unless blessed($n);
-            return true if exists $cache{$n->id()};
+            my $id = $n->id();
+            return true if exists $cache{$id};
+            # Per-call nodes are keyed by id only — a content-hash fallback
+            # would admit content-identical orphans (e.g., losing Earley
+            # alternatives that were never merged into any graph).
+            return false if defined $id && $id =~ /#\d+$/;
             return true if $n->can('content_hash')
                 && exists $cache{$n->content_hash()};
             return false;
