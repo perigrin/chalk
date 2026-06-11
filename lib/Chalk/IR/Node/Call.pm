@@ -39,12 +39,21 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
     # Empty/undef for non-constructor calls.
     field $param_names :param :reader = [];
 
+    # class_name: the statically-known class for method-dispatch calls
+    # (constructors included). Class structure is compile-time context, not
+    # dataflow — the backend resolves this name against a registry built
+    # from the sealed MOP; no metadata object rides as a node input
+    # (docs/plans/2026-06-11-llvm-reads-mop-directly.md). Undef for
+    # builtins/subs and for calls whose class is not statically known.
+    field $class_name :param :reader = undef;
+
     method operation() { 'Call' }
 
     method content_hash() {
         return join('|', 'Call',
             "dispatch_kind=$dispatch_kind",
             "name=$name",
+            (defined $class_name ? "class_name=$class_name" : ()),
             ($paren_form ? "paren_form=1" : ()),
             $self->_serialize_inputs());
     }
