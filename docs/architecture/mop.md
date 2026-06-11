@@ -248,7 +248,15 @@ deletion of the metadata struct layer) is tracked in
 `docs/plans/2026-04-21-chalk-mop-migration-plan.md`. Until that lands,
 both representations coexist by design.
 
-### The LLVM backend consumes class structure via ClassInfo (2026-06)
+### The LLVM backend consumes class structure via ClassInfo (2026-06) — TRANSITIONAL
+
+> **Architecture-review resolution 2026-06-11** (perigrin;
+> `docs/plans/2026-06-11-target-ir-architecture-review-resolution.md`): the
+> metadata structs still delete eventually — the LLVM backend will read the
+> MOP directly (zhi issue "LLVM backend reads the MOP directly"), and this
+> ClassInfo consumption is a bridge, not the end-state read surface. The
+> node-input protocol (`id()`/`add_consumer`) and the corpus ir-block shape
+> migrate with that issue.
 
 The IR-taxonomy reconciliation (R3) converged the LLVM backend's class
 handling onto this layer: there are no in-graph `ClassDecl`/`MethodDef`/

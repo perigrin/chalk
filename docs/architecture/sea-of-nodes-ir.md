@@ -438,6 +438,12 @@ subtree. `Chalk::Target::LLVM::_scan_class_registry` walks the graph and, for ea
 ADJUST order from the immutable read surface (`id()`/`name`/`methods`/`fields`/
 `adjusts`) — without wiring the stalled SoN-MOP migration internals.
 
+> **TRANSITIONAL** (architecture-review resolution 2026-06-11,
+> `docs/plans/2026-06-11-target-ir-architecture-review-resolution.md`): the
+> metadata structs delete eventually; the backend will read `MOP::Class`/
+> `Method`/`Field` directly, and the ir-block `ClassInfo(...)` shape migrates
+> with it (zhi issue "LLVM backend reads the MOP directly").
+
 | Idiom | Canonical node | LLVM lowering |
 |-------|----------------|---------------|
 | `Foo->new(...)` | `Call(dispatch_kind='method', name='new')` | inputs[0] = the `ClassInfo`; malloc object struct, store vtable ptr, bind `:param` fields, run ADJUST blocks (base-first). |

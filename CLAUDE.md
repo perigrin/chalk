@@ -333,11 +333,15 @@ Specifically:
    onto the schedule-driven MOP path (the Perl target already proves it)
    — it is the last load-bearing consumer keeping the backchannel,
    `cfg_state()`, the legacy Perl path, and the body dual-write alive.
-   **Caution:** Phase 6's "delete the metadata structs" now conflicts
-   with the R3 reconciliation (2026-06), which made immutable
-   ClassInfo/MethodInfo (`body_node`/`return_repr`) the LLVM backend's
-   read surface — reconcile in the target/IR architecture review before
-   deleting structs.
+   Per the LLVM-first decision it parks near-capstone with the C/XS axis
+   (chain filed as zhi "MOP migration 1/4..4/4").
+   **Structs decision (architecture review, 2026-06-11,
+   `docs/plans/2026-06-11-target-ir-architecture-review-resolution.md`):**
+   the metadata structs DELETE eventually — the LLVM backend will read
+   the MOP directly (its current ClassInfo consumption is a transitional
+   bridge; zhi issue "LLVM backend reads the MOP directly" owns the
+   rework and blocks the struct deletion in 4/4). Do not build new
+   permanent consumers on the Info structs.
 4. **Prototype commits are promises**: commits labeled "prototype:", "draft:",
    "stopgap:", or "WIP:" in Chalk's git history must have a follow-up plan
    or issue. Do not treat prototype state as final. When summarizing work
