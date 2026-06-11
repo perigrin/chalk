@@ -1,22 +1,37 @@
 ---
 title: Value-cache staleness + statement-identity family (pre-B::SoN blocker)
-state: in-progress
+state: done
 urgency: normal
 milestone: codegen-harness
 blocks:
 - 019eaa51-bcfe-76b6-a02d-a23a65bd7498
 - 019eb6ff-c505-71f7-9665-5e087be277fe
 created: 2026-06-10T19:50:27.205441995Z
-updated: 2026-06-11T14:05:04.819581497Z
+updated: 2026-06-11T14:05:04.921657378Z
 sessions:
 - start_sha: 51724b453b35cf5c2137647d95ce2870c995d3e8
-  end_sha: ""
-  commits: 0
+  end_sha: ca0fe1a188d2195391bb05876ac77f9871153ca1
+  commits: 7
   started_at: 2026-06-11T12:36:06.777303469Z
+  ended_at: 2026-06-11T14:05:04.921657378Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
   timestamp: 2026-06-11T12:36:06.777303469Z
+- state: done
+  actor: human:git-zhi
+  timestamp: 2026-06-11T14:05:04.921657378Z
+observed_paths:
+- lib/Chalk/Bootstrap/Perl/Actions.pm
+- lib/Chalk/IR/Graph.pm
+- lib/Chalk/IR/NodeFactory.pm
+- lib/Chalk/Target/LLVM.pm
+- t/bootstrap/ir/assign-lvalue-identity.t
+- t/bootstrap/ir/llvm-adjust-per-class-fn.t
+- t/bootstrap/ir/llvm-phi-multiblock-arms.t
+- t/bootstrap/ir/llvm-stale-value-cache.t
+- t/bootstrap/ir/statement-effect-identity.t
+- t/bootstrap/mop/build-graph-ifelse-trivial-phi.t
 ---
 
 THE lateral-propagation axis, now with probe-proven reproducers (whole-branch review 2026-06-10, paad/code-reviews/...-256a9b37-branch-agentic.md; probes preserved in the report). ALL PRE-EXISTING pu architecture defects (verifier re-ran probes on pu) that bite on graph shapes the corpus deliberately avoids — they are the real blocker between hand-authored graphs and B::SoN feeding arbitrary parsed code (Phase 4/5). Fix BEFORE Phase 4 lands. See also memory phi_merge_strategy (the lateral-propagation-fix-first note).
