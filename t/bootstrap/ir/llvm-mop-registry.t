@@ -1,5 +1,5 @@
-# ABOUTME: Tests for LLVM lowering of ClassInfo-carried graphs (Phase 4.0b).
-# ABOUTME: Verifies the LLVM backend can consume ClassInfo/MethodInfo/MOP::Field in place of ClassDecl.
+# ABOUTME: Tests that the LLVM backend builds its class registry from a sealed Chalk::MOP.
+# ABOUTME: Verifies method, empty-class, and :param-field programs lower and run via lli==perl.
 use 5.42.0;
 use utf8;
 
@@ -7,9 +7,7 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
-use Chalk::IR::ClassInfo;
-use Chalk::IR::MethodInfo;
-use Chalk::MOP::Field;
+use Chalk::MOP;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::TypeTag;
@@ -38,8 +36,8 @@ sub perl_oracle {
 }
 
 sub lli_run {
-    my ($ret_node) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret_node);
+    my ($ret_node, $mop) = @_;
+    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -53,54 +51,49 @@ sub lli_run {
 }
 
 # ---------------------------------------------------------------------------
-# Test 1: method-simple with ClassInfo (phase 4.0b)
+# Test 1: method-simple via the MOP registry
 # Greeter class with one method returning 42.
-# The New node carries ClassInfo as inputs[0] instead of ClassDecl.
+# (Intent-rewrite: this file previously exercised the ClassInfo bridge —
+# metadata riding the graph as Call inputs. The registry is now built from
+# the sealed MOP and Call nodes carry class_name instead.)
 # ---------------------------------------------------------------------------
 
-subtest 'method-simple with ClassInfo: $g->greet => 42 (Int)' => sub {
+subtest 'method-simple via MOP registry: $g->greet => 42 (Int)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     # Method body
     my $body42 = $f->make('Constant', value => 42, const_type => 'integer');
     $body42->set_representation('Int');
 
-    # Build MethodInfo (canonical)
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'greet',
-        body        => [],
-        body_node   => $body42,
-        return_repr => 'Int',
-    );
+    # MOP: class Greeter { method greet { return 42 } }
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Greeter');
+    my $m   = $cls->declare_method('greet', return_type => 'Int');
+    $m->graph->merge($f->make_cfg('Return', inputs => [$body42]));
+    $mop->seal;
 
-    # Build ClassInfo (canonical)
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'Greeter',
-        methods => [$mi],
-        fields  => [],
-    );
-
-    # New: ClassInfo as inputs[0]
+    # New: class structure is registry context, not an input
     my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'Greeter',
         param_names => [],
-        inputs      => [$ci],
+        inputs      => [],
     );
     $new_g->set_representation('Object');
 
-    # Call(dispatch_kind='method'): ClassInfo as inputs[1]
+    # Call(dispatch_kind='method'): resolved by class_name
     my $result = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'greet',
-        inputs        => [$new_g, $ci],
+        class_name    => 'Greeter',
+        inputs        => [$new_g],
     );
     $result->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$result]);
 
-    # This SHOULD fail right now (LLVM scanner doesn't know about ClassInfo yet = RED)
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret) };
-    ok(!$@, "lowering + lli with ClassInfo succeeded: $@") or do {
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
+    ok(!$@, "lowering + lli via MOP registry succeeded: $@") or do {
         diag("Error: $@");
         return;
     };
@@ -116,21 +109,20 @@ subtest 'method-simple with ClassInfo: $g->greet => 42 (Int)' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# Test 2: class-simple with ClassInfo (empty class, ref() => class name)
+# Test 2: class-simple via the MOP registry (empty class, ref() => class name)
 # ---------------------------------------------------------------------------
 
-subtest 'class-simple with ClassInfo: ref($e) => "Empty" (Str)' => sub {
+subtest 'class-simple via MOP registry: ref($e) => "Empty" (Str)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'Empty',
-        methods => [],
-        fields  => [],
-    );
+    my $mop = Chalk::MOP->new;
+    $mop->declare_class('Empty');
+    $mop->seal;
 
     my $new_e = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'Empty',
         param_names => [],
-        inputs      => [$ci],
+        inputs      => [],
     );
     $new_e->set_representation('Object');
 
@@ -142,8 +134,8 @@ subtest 'class-simple with ClassInfo: ref($e) => "Empty" (Str)' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$ref_result]);
 
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret) };
-    ok(!$@, "lowering + lli with ClassInfo (empty class) succeeded: $@") or do {
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
+    ok(!$@, "lowering + lli via MOP registry (empty class) succeeded: $@") or do {
         diag("Error: $@");
         return;
     };
@@ -158,10 +150,10 @@ subtest 'class-simple with ClassInfo: ref($e) => "Empty" (Str)' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# Test 3: field-basic with ClassInfo + MOP::Field (Str field, :reader method)
+# Test 3: field-basic via the MOP registry (Str :param field + method)
 # ---------------------------------------------------------------------------
 
-subtest 'field-basic with ClassInfo: $a->name => "cat" (Str)' => sub {
+subtest 'field-basic via MOP registry: $a->name => "cat" (Str)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     # FieldAccess: load field[0] from $self
@@ -172,51 +164,38 @@ subtest 'field-basic with ClassInfo: $a->name => "cat" (Str)' => sub {
     );
     $field_read->set_representation('Str');
 
-    # MethodInfo for the 'name' method
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'name',
-        body        => [],
-        body_node   => $field_read,
-        return_repr => 'Str',
-    );
-
-    # MOP::Field for $name :param
-    my $mf = Chalk::MOP::Field->new(
-        name       => 'name',
-        sigil      => '$',
-        class      => undef,
-        fieldix    => 0,
-        type       => 'Str',
-        attributes => [':param'],
-    );
-
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'Animal',
-        methods => [$mi],
-        fields  => [$mf],
-    );
+    # MOP: class Animal { field $name :param; method name { return $name } }
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Animal');
+    $cls->declare_field('name', sigil => '$', type => 'Str',
+        attributes => [':param']);
+    my $m = $cls->declare_method('name', return_type => 'Str');
+    $m->graph->merge($f->make_cfg('Return', inputs => [$field_read]));
+    $mop->seal;
 
     my $name_val = $f->make('Constant', value => 'cat', const_type => 'string');
     $name_val->set_representation('Str');
 
     my $new_a = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'Animal',
         param_names => ['name'],
-        inputs      => [$ci, $name_val],
+        inputs      => [$name_val],
     );
     $new_a->set_representation('Object');
 
     my $result = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'name',
-        inputs        => [$new_a, $ci],
+        class_name    => 'Animal',
+        inputs        => [$new_a],
     );
     $result->set_representation('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$result]);
 
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret) };
-    ok(!$@, "lowering + lli with ClassInfo (Str field) succeeded: $@") or do {
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
+    ok(!$@, "lowering + lli via MOP registry (Str field) succeeded: $@") or do {
         diag("Error: $@");
         return;
     };

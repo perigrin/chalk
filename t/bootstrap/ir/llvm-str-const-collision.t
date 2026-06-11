@@ -7,8 +7,7 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
-use Chalk::IR::ClassInfo;
-use Chalk::IR::MethodInfo;
+use Chalk::MOP;
 use Chalk::Target::LLVM;
 
 # I1 (R1 reopened):
@@ -34,110 +33,90 @@ unless (-x $LLI) {
 # before the I1 fix (duplicate symbol). After the fix, body globals are
 # prefixed by class/method name, producing unique names.
 sub build_dual_str_graph {
-    my $f = Chalk::IR::NodeFactory->new;
+    my $f   = Chalk::IR::NodeFactory->new;
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('MultiStr');
 
     # Method A: Constant("first" :Str)
     my $str_a = $f->make('Constant', value => 'first', const_type => 'string');
     $str_a->set_representation('Str');
-    my $mi_a = Chalk::IR::MethodInfo->new(
-        name        => 'get_first',
-        body        => [],
-        body_node   => $str_a,
-        return_repr => 'Str',
-    );
+    my $m_a = $cls->declare_method('get_first', return_type => 'Str');
+    $m_a->graph->merge($f->make_cfg('Return', inputs => [$str_a]));
 
     # Method B: Constant("second" :Str) — same index (0) in a fresh body_ctx
     my $str_b = $f->make('Constant', value => 'second', const_type => 'string');
     $str_b->set_representation('Str');
-    my $mi_b = Chalk::IR::MethodInfo->new(
-        name        => 'get_second',
-        body        => [],
-        body_node   => $str_b,
-        return_repr => 'Str',
-    );
+    my $m_b = $cls->declare_method('get_second', return_type => 'Str');
+    $m_b->graph->merge($f->make_cfg('Return', inputs => [$str_b]));
 
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'MultiStr',
-        methods => [$mi_a, $mi_b],
-        fields  => [],
-    );
+    $mop->seal;
 
     my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'MultiStr',
         param_names => [],
-        inputs      => [$ci],
+        inputs      => [],
     );
     $new_obj->set_representation('Object');
 
     my $call = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'get_first',
-        inputs        => [$new_obj, $ci],
+        class_name    => 'MultiStr',
+        inputs        => [$new_obj],
     );
     $call->set_representation('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$call]);
-    return ($ret, $f);
+    return ($ret, $f, $mop);
 }
 
 # Helper: build a class with THREE methods each having a Str constant.
 # Three fresh body contexts each emit @str_const_0, @str_const_1 — but the
 # indices reset, so body[1] and body[2] each produce @str_const_0 conflicts.
 sub build_triple_str_graph {
-    my $f = Chalk::IR::NodeFactory->new;
+    my $f   = Chalk::IR::NodeFactory->new;
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('TripleStr');
 
     my $str_a = $f->make('Constant', value => 'alpha', const_type => 'string');
     $str_a->set_representation('Str');
-    my $mi_a = Chalk::IR::MethodInfo->new(
-        name        => 'get_alpha',
-        body        => [],
-        body_node   => $str_a,
-        return_repr => 'Str',
-    );
+    my $m_a = $cls->declare_method('get_alpha', return_type => 'Str');
+    $m_a->graph->merge($f->make_cfg('Return', inputs => [$str_a]));
 
     my $str_b = $f->make('Constant', value => 'beta', const_type => 'string');
     $str_b->set_representation('Str');
-    my $mi_b = Chalk::IR::MethodInfo->new(
-        name        => 'get_beta',
-        body        => [],
-        body_node   => $str_b,
-        return_repr => 'Str',
-    );
+    my $m_b = $cls->declare_method('get_beta', return_type => 'Str');
+    $m_b->graph->merge($f->make_cfg('Return', inputs => [$str_b]));
 
     my $str_c = $f->make('Constant', value => 'gamma', const_type => 'string');
     $str_c->set_representation('Str');
-    my $mi_c = Chalk::IR::MethodInfo->new(
-        name        => 'get_gamma',
-        body        => [],
-        body_node   => $str_c,
-        return_repr => 'Str',
-    );
+    my $m_c = $cls->declare_method('get_gamma', return_type => 'Str');
+    $m_c->graph->merge($f->make_cfg('Return', inputs => [$str_c]));
 
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'TripleStr',
-        methods => [$mi_a, $mi_b, $mi_c],
-        fields  => [],
-    );
+    $mop->seal;
 
-    my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new', param_names => [], inputs => [$ci]);
+    my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name => 'TripleStr', param_names => [], inputs => []);
     $new_obj->set_representation('Object');
     my $call = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'get_alpha',
-        inputs        => [$new_obj, $ci],
+        class_name    => 'TripleStr',
+        inputs        => [$new_obj],
     );
     $call->set_representation('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
-    return ($ret, $f);
+    return ($ret, $f, $mop);
 }
 
 # Test 1: two method bodies each with a Str constant -> no duplicate @str_const_0
 # Before I1 fix: both emit @str_const_0 -> lli rejects with duplicate symbol.
 # After I1 fix: body globals are prefixed by class/method -> unique names.
 subtest 'two method bodies with Str constants: no duplicate @str_const_0' => sub {
-    my ($ret, $f) = build_dual_str_graph();
+    my ($ret, $f, $mop) = build_dual_str_graph();
 
     my ($ll, $err);
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, mop => $mop) };
     $err = $@;
 
     ok(!defined $err || !length $err,
@@ -169,10 +148,10 @@ subtest 'two method bodies with Str constants: no duplicate @str_const_0' => sub
 
 # Test 2: three method bodies each with a Str constant -> no duplicate globals
 subtest 'three method bodies with Str constants: no duplicate globals (I1)' => sub {
-    my ($ret, $f) = build_triple_str_graph();
+    my ($ret, $f, $mop) = build_triple_str_graph();
 
     my ($ll, $err);
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, mop => $mop) };
     $err = $@;
 
     ok(!defined $err || !length $err,

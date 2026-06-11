@@ -7,9 +7,7 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
-use Chalk::IR::ClassInfo;
-use Chalk::IR::MethodInfo;
-use Chalk::MOP::Field;
+use Chalk::MOP;
 use Chalk::Target::LLVM;
 
 # I3 (R1 reopened):
@@ -37,40 +35,29 @@ unless (-x $LLI) {
 # The outer graph calls the Int-returning method -> class scan returns $need_strpair=0
 # -> %StrPair NOT emitted. But _lower_new emits %StrPair* references during param binding.
 sub build_str_param_int_return_graph {
-    my $f = Chalk::IR::NodeFactory->new;
+    my $f   = Chalk::IR::NodeFactory->new;
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('StrParamIntReturn');
 
-    my $mf = Chalk::MOP::Field->new(
-        name       => 'name',
-        sigil      => '$',
-        class      => undef,
-        fieldix    => 0,
-        type       => 'Str',
-        attributes => [':param'],
-    );
+    $cls->declare_field('name', sigil => '$', type => 'Str',
+        attributes => [':param']);
 
     # Method returns Int (not Str) — line 372 scan gets $need_strpair=0
     my $int_body = $f->make('Constant', value => 42, const_type => 'integer');
     $int_body->set_representation('Int');
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'get_int',
-        body        => [],
-        body_node   => $int_body,
-        return_repr => 'Int',
-    );
+    my $m = $cls->declare_method('get_int', return_type => 'Int');
+    $m->graph->merge($f->make_cfg('Return', inputs => [$int_body]));
 
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'StrParamIntReturn',
-        methods => [$mi],
-        fields  => [$mf],
-    );
+    $mop->seal;
 
     my $str_val = $f->make('Constant', value => 'hello', const_type => 'string');
     $str_val->set_representation('Str');
 
     # New with Str :param — _lower_new at line ~3521 emits %StrPair instructions
     my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'StrParamIntReturn',
         param_names => ['name'],
-        inputs      => [$ci, $str_val],
+        inputs      => [$str_val],
     );
     $new_obj->set_representation('Object');
 
@@ -78,22 +65,23 @@ sub build_str_param_int_return_graph {
     my $call = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'get_int',
-        inputs        => [$new_obj, $ci],
+        class_name    => 'StrParamIntReturn',
+        inputs        => [$new_obj],
     );
     $call->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$call]);
-    return ($ret, $f);
+    return ($ret, $f, $mop);
 }
 
 # Test 1: Str :param field + Int-returning method -> .ll must have %StrPair declaration
 # Before I3 fix: _lower_new emits %StrPair* refs but %StrPair not declared -> lli rejects.
 # After I3 fix: post-class re-emit block adds %StrPair when _need_strpair set.
 subtest 'Str :param field + Int-returning method: %StrPair must be declared (I3)' => sub {
-    my ($ret, $f) = build_str_param_int_return_graph();
+    my ($ret, $f, $mop) = build_str_param_int_return_graph();
 
     my ($ll, $err);
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, mop => $mop) };
     $err = $@;
 
     ok(!defined $err || !length $err,
@@ -122,38 +110,34 @@ subtest 'Str :param field + Int-returning method: %StrPair must be declared (I3)
 # Test 2: a Str-returning method (line-376 path) still has exactly one %StrPair
 # (no double-declare from both line-376 emit AND post-class re-emit).
 subtest 'Str-returning method: exactly one %StrPair (I3 no double-declare)' => sub {
-    my $f = Chalk::IR::NodeFactory->new;
+    my $f   = Chalk::IR::NodeFactory->new;
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('StrReturn');
 
     my $str_val = $f->make('Constant', value => 'world', const_type => 'string');
     $str_val->set_representation('Str');
 
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'get_str',
-        body        => [],
-        body_node   => $str_val,
-        return_repr => 'Str',
-    );
+    my $m = $cls->declare_method('get_str', return_type => 'Str');
+    $m->graph->merge($f->make_cfg('Return', inputs => [$str_val]));
 
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'StrReturn',
-        methods => [$mi],
-        fields  => [],
-    );
+    $mop->seal;
 
-    my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new', param_names => [], inputs => [$ci]);
+    my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name => 'StrReturn', param_names => [], inputs => []);
     $new_obj->set_representation('Object');
 
     my $call = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'get_str',
-        inputs        => [$new_obj, $ci],
+        class_name    => 'StrReturn',
+        inputs        => [$new_obj],
     );
     $call->set_representation('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     my ($ll, $err);
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, mop => $mop) };
     $err = $@;
 
     ok(!defined $err || !length $err,

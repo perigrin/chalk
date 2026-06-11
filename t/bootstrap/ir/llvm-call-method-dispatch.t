@@ -1,5 +1,5 @@
-# ABOUTME: Tests for Phase 5.1: MethodCall → Call(dispatch_kind='method') in LLVM lowering.
-# ABOUTME: Verifies Call(dispatch_kind='method') lowers identically to MethodCall.
+# ABOUTME: Tests for Call(dispatch_kind='method') vtable dispatch in LLVM lowering.
+# ABOUTME: Verifies Call(dispatch_kind='method') resolves through the sealed-MOP class registry.
 use 5.42.0;
 use utf8;
 
@@ -7,9 +7,7 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
-use Chalk::IR::ClassInfo;
-use Chalk::IR::MethodInfo;
-use Chalk::MOP::Field;
+use Chalk::MOP;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::TypeTag;
 
@@ -37,8 +35,8 @@ sub perl_oracle {
 }
 
 sub lli_run {
-    my ($ret_node) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret_node);
+    my ($ret_node, $mop) = @_;
+    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -62,23 +60,16 @@ subtest 'Call(dispatch_kind=method, name=greet): $g->greet => 42 (Int)' => sub {
     my $body42 = $f->make('Constant', value => 42, const_type => 'integer');
     $body42->set_representation('Int');
 
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'greet',
-        body        => [],
-        body_node   => $body42,
-        return_repr => 'Int',
-    );
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Greeter');
+    my $m   = $cls->declare_method('greet', return_type => 'Int');
+    $m->graph->merge($f->make_cfg('Return', inputs => [$body42]));
+    $mop->seal;
 
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'Greeter',
-        methods => [$mi],
-        fields  => [],
-    );
-
-    # New with ClassInfo
     my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'Greeter',
         param_names => [],
-        inputs      => [$ci],
+        inputs      => [],
     );
     $new_g->set_representation('Object');
 
@@ -86,15 +77,15 @@ subtest 'Call(dispatch_kind=method, name=greet): $g->greet => 42 (Int)' => sub {
     my $result = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'greet',
-        inputs        => [$new_g, $ci],
+        class_name    => 'Greeter',
+        inputs        => [$new_g],
     );
     $result->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$result]);
 
-    # This SHOULD fail right now (Call dispatch_kind='method' not handled = RED)
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret) };
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
     ok(!$@, "Call(method) lowering + lli succeeded: $@") or do {
         diag("Error: $@");
         return;
@@ -119,34 +110,29 @@ subtest 'Call(dispatch_kind=method) on absent method dies loudly' => sub {
     my $body = $f->make('Constant', value => 1, const_type => 'integer');
     $body->set_representation('Int');
 
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'greet',
-        body        => [],
-        body_node   => $body,
-        return_repr => 'Int',
-    );
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Greeter');
+    my $m   = $cls->declare_method('greet', return_type => 'Int');
+    $m->graph->merge($f->make_cfg('Return', inputs => [$body]));
+    $mop->seal;
 
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'Greeter',
-        methods => [$mi],
-        fields  => [],
-    );
-
-    my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new', param_names => [], inputs => [$ci]);
+    my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name => 'Greeter', param_names => [], inputs => []);
     $new_g->set_representation('Object');
 
     # Call 'wave' which does not exist
     my $bad = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'wave',
-        inputs        => [$new_g, $ci],
+        class_name    => 'Greeter',
+        inputs        => [$new_g],
     );
     $bad->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$bad]);
 
     my $died = false;
-    eval { Chalk::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };
     ok($@, 'lowering dies for Call(method) on absent method');
     like($@ // '', qr/wave|absent|vtable|method/i,
         'die message mentions missing method or vtable');
@@ -158,22 +144,22 @@ subtest 'guard: a field with NO declared type dies GAP (no silent Int default)' 
 
     # field $name :param :reader (NO type) — the bound value is a Str; the
     # registry defaulting the repr to Int produced exit-0 garbage output.
-    my $mf = Chalk::MOP::Field->new(
-        name => 'name', sigil => '$', class => undef, fieldix => 0,
-        attributes => [':param', ':reader'],
-    );
-    my $ci = Chalk::IR::ClassInfo->new(name => 'Untyped', methods => [], fields => [$mf]);
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Untyped');
+    $cls->declare_field('name', sigil => '$', attributes => [':param', ':reader']);
+    $mop->seal;
+
     my $val = $f->make('Constant', value => 'cat', const_type => 'string');
     $val->set_representation('Str');
     my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
-        param_names => ['name'], inputs => [$ci, $val]);
+        class_name => 'Untyped', param_names => ['name'], inputs => [$val]);
     $new_o->set_representation('Object');
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'name',
-        inputs => [$new_o, $ci]);
+        class_name => 'Untyped', inputs => [$new_o]);
     $call->set_representation('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    eval { Chalk::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };
     like($@, qr/GAP/, 'untyped field dies GAP instead of silently lowering as Int');
 };
 
@@ -182,20 +168,23 @@ subtest 'guard: Call(method) node repr disagreeing with the vtable ABI dies' => 
 
     my $body = $f->make('Constant', value => '42', const_type => 'integer');
     $body->set_representation('Int');
-    my $mi = Chalk::IR::MethodInfo->new(
-        name => 'answer', body => [], body_node => $body, return_repr => 'Int');
-    my $ci = Chalk::IR::ClassInfo->new(name => 'Mismatch', methods => [$mi], fields => []);
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Mismatch');
+    my $m   = $cls->declare_method('answer', return_type => 'Int');
+    $m->graph->merge($f->make_cfg('Return', inputs => [$body]));
+    $mop->seal;
+
     my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
-        param_names => [], inputs => [$ci]);
+        class_name => 'Mismatch', param_names => [], inputs => []);
     $new_o->set_representation('Object');
     # The node CLAIMS Str but the vtable define returns i64 — through the i8*
     # fn-ptr bitcast lli ACCEPTS the wrong-ABI call (the silent channel).
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'answer',
-        inputs => [$new_o, $ci]);
+        class_name => 'Mismatch', inputs => [$new_o]);
     $call->set_representation('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    eval { Chalk::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };
     like($@, qr/GAP|repr|ABI|mismatch/i,
         'node-vs-registry return-repr mismatch dies loudly');
 };

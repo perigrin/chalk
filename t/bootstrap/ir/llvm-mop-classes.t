@@ -1,4 +1,4 @@
-# ABOUTME: Tests for feature-class MOP lowering: ClassInfo, MethodInfo, MOP::Field, Call(new), Call(method).
+# ABOUTME: Tests for feature-class MOP lowering: MOP::Class/Method/Field, Call(new), Call(method).
 # ABOUTME: Verifies the class idioms lower correctly to LLVM IR with lli==perl (libperl-free).
 use 5.42.0;
 use utf8;
@@ -7,9 +7,7 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
-use Chalk::IR::ClassInfo;
-use Chalk::IR::MethodInfo;
-use Chalk::MOP::Field;
+use Chalk::MOP;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::TypeTag;
@@ -40,8 +38,8 @@ sub perl_oracle {
 
 # Helper: lower a Return node to LLVM IR, run lli, return output
 sub lli_run {
-    my ($ret_node) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret_node);
+    my ($ret_node, $mop) = @_;
+    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -65,25 +63,18 @@ subtest 'method-simple: $g->greet => 42 (Int)' => sub {
     my $body42 = $f->make('Constant', value => 42, const_type => 'integer');
     $body42->set_representation('Int');
 
-    # MethodInfo for greet
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'greet',
-        body        => [],
-        body_node   => $body42,
-        return_repr => 'Int',
-    );
-
-    # ClassInfo for Greeter
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'Greeter',
-        methods => [$mi],
-        fields  => [],
-    );
+    # MOP: class Greeter { method greet { return 42 } }
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Greeter');
+    my $m   = $cls->declare_method('greet', return_type => 'Int');
+    $m->graph->merge($f->make_cfg('Return', inputs => [$body42]));
+    $mop->seal;
 
     # New: Greeter->new (no :param fields)
     my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'Greeter',
         param_names => [],
-        inputs      => [$ci],
+        inputs      => [],
     );
     $new_g->set_representation('Object');
 
@@ -91,7 +82,8 @@ subtest 'method-simple: $g->greet => 42 (Int)' => sub {
     my $result = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'greet',
-        inputs        => [$new_g, $ci],
+        class_name    => 'Greeter',
+        inputs        => [$new_g],
     );
     $result->set_representation('Int');
 
@@ -100,7 +92,7 @@ subtest 'method-simple: $g->greet => 42 (Int)' => sub {
 
     # Lower to LLVM IR and run
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret) };
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
 
     # lli==perl
@@ -126,15 +118,14 @@ subtest 'class-simple: ref($e) => "Empty" (Str)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     # Empty class: no methods, no fields
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'Empty',
-        methods => [],
-        fields  => [],
-    );
+    my $mop = Chalk::MOP->new;
+    $mop->declare_class('Empty');
+    $mop->seal;
 
     my $new_e = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'Empty',
         param_names => [],
-        inputs      => [$ci],
+        inputs      => [],
     );
     $new_e->set_representation('Object');
 
@@ -147,7 +138,7 @@ subtest 'class-simple: ref($e) => "Empty" (Str)' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$ref_result]);
 
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret) };
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
 
     my $oracle = eval { perl_oracle(q{
@@ -169,16 +160,6 @@ subtest 'class-simple: ref($e) => "Empty" (Str)' => sub {
 subtest 'field-basic: $a->name => "cat" (Str)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # MOP::Field: $name :param at index 0
-    my $mf = Chalk::MOP::Field->new(
-        name       => 'name',
-        sigil      => '$',
-        class      => undef,
-        fieldix    => 0,
-        type       => 'Str',
-        attributes => [':param'],
-    );
-
     # FieldAccess: load field[0] from $self (implicit in method body context)
     my $field_read = $f->make('FieldAccess',
         field_index  => 0,
@@ -187,28 +168,23 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
     );
     $field_read->set_representation('Str');
 
-    # MethodInfo for name
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'name',
-        body        => [],
-        body_node   => $field_read,
-        return_repr => 'Str',
-    );
-
-    # ClassInfo for Animal: methods=[mi], fields=[mf]
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'Animal',
-        methods => [$mi],
-        fields  => [$mf],
-    );
+    # MOP: class Animal { field $name :param; method name { return $name } }
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Animal');
+    $cls->declare_field('name', sigil => '$', type => 'Str',
+        attributes => [':param']);
+    my $m = $cls->declare_method('name', return_type => 'Str');
+    $m->graph->merge($f->make_cfg('Return', inputs => [$field_read]));
+    $mop->seal;
 
     # New: Animal->new(name => 'cat')
     my $name_val = $f->make('Constant', value => 'cat', const_type => 'string');
     $name_val->set_representation('Str');
 
     my $new_a = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'Animal',
         param_names => ['name'],
-        inputs      => [$ci, $name_val],
+        inputs      => [$name_val],
     );
     $new_a->set_representation('Object');
 
@@ -216,14 +192,15 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
     my $result = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'name',
-        inputs        => [$new_a, $ci],
+        class_name    => 'Animal',
+        inputs        => [$new_a],
     );
     $result->set_representation('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$result]);
 
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret) };
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
 
     my $oracle = eval { perl_oracle(q{
@@ -256,16 +233,6 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
 subtest 'Str field store in method body: $t->set; $t->get => "hi" (Str)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # field $s (Str), index 0, no :param
-    my $mf = Chalk::MOP::Field->new(
-        name       => 's',
-        sigil      => '$',
-        class      => undef,
-        fieldix    => 0,
-        type       => 'Str',
-        attributes => [],
-    );
-
     # method set { $s = "hi" } — body: Assign(FieldAccess-lvalue(0,"Tag"), "hi")
     my $hi = $f->make('Constant', value => 'hi', const_type => 'string');
     $hi->set_representation('Str');
@@ -273,41 +240,41 @@ subtest 'Str field store in method body: $t->set; $t->get => "hi" (Str)' => sub 
     $fa_lv->set_representation('Str');
     my $store = $f->make('Assign', inputs => [$fa_lv, $hi]);
     $store->set_representation('Str');
-    my $mi_set = Chalk::IR::MethodInfo->new(
-        name => 'set', body => [], body_node => $store, return_repr => 'Str',
-    );
 
     # method get { return $s } — body: FieldAccess(0,"Tag") read
     my $fa_rd = $f->make('FieldAccess', field_index => 0, field_stash => 'Tag', inputs => []);
     $fa_rd->set_representation('Str');
-    my $mi_get = Chalk::IR::MethodInfo->new(
-        name => 'get', body => [], body_node => $fa_rd, return_repr => 'Str',
-    );
 
-    my $ci = Chalk::IR::ClassInfo->new(
-        name => 'Tag', methods => [$mi_set, $mi_get], fields => [$mf],
-    );
+    # MOP: class Tag { field $s; method set; method get }
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Tag');
+    $cls->declare_field('s', sigil => '$', type => 'Str', attributes => []);
+    my $m_set = $cls->declare_method('set', return_type => 'Str');
+    $m_set->graph->merge($f->make_cfg('Return', inputs => [$store]));
+    my $m_get = $cls->declare_method('get', return_type => 'Str');
+    $m_get->graph->merge($f->make_cfg('Return', inputs => [$fa_rd]));
+    $mop->seal;
 
     # my $t = Tag->new;
     my $new_t = $f->make('Call', dispatch_kind => 'method', name => 'new',
-        param_names => [], inputs => [$ci]);
+        class_name => 'Tag', param_names => [], inputs => []);
     $new_t->set_representation('Object');
 
     # $t->set;  (control-position side effect, before get)
     my $set_call = $f->make('Call', dispatch_kind => 'method', name => 'set',
-        inputs => [$new_t, $ci]);
+        class_name => 'Tag', inputs => [$new_t]);
     $set_call->set_representation('Str');
 
     # $t->get
     my $get_call = $f->make('Call', dispatch_kind => 'method', name => 'get',
-        inputs => [$new_t, $ci]);
+        class_name => 'Tag', inputs => [$new_t]);
     $get_call->set_representation('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$get_call]);
     $ret->set_control_in($set_call);
 
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret) };
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
 
     my $oracle = eval { perl_oracle(q{
@@ -328,25 +295,19 @@ subtest 'Str field store in method body: $t->set; $t->get => "hi" (Str)' => sub 
 subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # MethodInfo: greet (no 'wave' method defined)
+    # class Greeter has 'greet' (no 'wave' method defined)
     my $body42 = $f->make('Constant', value => 42, const_type => 'integer');
     $body42->set_representation('Int');
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'greet',
-        body        => [],
-        body_node   => $body42,
-        return_repr => 'Int',
-    );
-
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'Greeter',
-        methods => [$mi],
-        fields  => [],
-    );
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Greeter');
+    my $m   = $cls->declare_method('greet', return_type => 'Int');
+    $m->graph->merge($f->make_cfg('Return', inputs => [$body42]));
+    $mop->seal;
 
     my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'Greeter',
         param_names => [],
-        inputs      => [$ci],
+        inputs      => [],
     );
     $new_g->set_representation('Object');
 
@@ -354,7 +315,8 @@ subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => 
     my $bad_call = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'wave',   # absent from vtable!
-        inputs        => [$new_g, $ci],
+        class_name    => 'Greeter',
+        inputs        => [$new_g],
     );
     $bad_call->set_representation('Int');
 
@@ -362,7 +324,7 @@ subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => 
 
     my $died = false;
     my $error_msg = '';
-    eval { Chalk::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };
     if ($@) {
         $died = true;
         $error_msg = $@;
@@ -374,53 +336,45 @@ subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => 
 };
 
 # ---------------------------------------------------------------------------
-# Test: Adversarial — Call(method) on undeclared class (no ClassInfo in graph)
+# Test: Adversarial — Call(method) on a class the sealed MOP never declared.
+# (Intent-rewrite: this previously dispatched against a methodless ClassInfo
+# descriptor riding the graph; MOP-direct resolves Call.class_name against
+# the sealed-MOP registry, so the equivalent is an unregistered class name.)
 # ---------------------------------------------------------------------------
 
-subtest 'adversarial: Call(method) without ClassInfo dies loudly at lowering' => sub {
+subtest 'adversarial: Call(method) on undeclared class dies loudly at lowering' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # KnownClass has 'foo' but NOT 'bar'
+    # KnownClass has 'foo' but UndeclaredClass is never declared in the MOP
     my $body = $f->make('Constant', value => 1, const_type => 'integer');
     $body->set_representation('Int');
-    my $foo_mi = Chalk::IR::MethodInfo->new(
-        name        => 'foo',
-        body        => [],
-        body_node   => $body,
-        return_repr => 'Int',
-    );
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'KnownClass',
-        methods => [$foo_mi],
-        fields  => [],
-    );
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('KnownClass');
+    my $m   = $cls->declare_method('foo', return_type => 'Int');
+    $m->graph->merge($f->make_cfg('Return', inputs => [$body]));
+    $mop->seal;
 
     my $new_k = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'KnownClass',
         param_names => [],
-        inputs      => [$ci],
+        inputs      => [],
     );
     $new_k->set_representation('Object');
 
-    # UndeclaredClass has NO methods
-    my $ci2 = Chalk::IR::ClassInfo->new(
-        name    => 'UndeclaredClass',
-        methods => [],
-        fields  => [],
-    );
-
-    # Call on an object of KnownClass but using UndeclaredClass as the descriptor
-    # (no methods in UndeclaredClass -> must die)
+    # Call on an object of KnownClass but using UndeclaredClass as the class
+    # (no such class in the sealed MOP -> must die)
     my $bad_call = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'bar',
-        inputs        => [$new_k, $ci2],
+        class_name    => 'UndeclaredClass',
+        inputs        => [$new_k],
     );
     $bad_call->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$bad_call]);
 
     my $died = false;
-    eval { Chalk::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };
     if ($@) {
         $died = true;
     }

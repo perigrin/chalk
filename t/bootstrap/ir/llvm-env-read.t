@@ -14,8 +14,8 @@ unless (-x $LLI) {
 }
 
 sub lli_run {
-    my ($ret) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret);
+    my ($ret, %opts) = @_;
+    my $ll = Chalk::Target::LLVM->lower($ret, %opts);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $fh $ll;
@@ -74,8 +74,7 @@ subtest 'EnvRead composes: length($ENV{...})' => sub {
 # otherwise two bodies both emit @env_key_0, a duplicate symbol).
 subtest 'EnvRead in two method bodies: declared getenv, no duplicate globals' => sub {
     local $ENV{CHALK_G7_TEST} = 'mbody';
-    require Chalk::IR::ClassInfo;
-    require Chalk::IR::MethodInfo;
+    require Chalk::MOP;
     my $f = _mk();
 
     my $mk_body = sub {
@@ -85,24 +84,23 @@ subtest 'EnvRead in two method bodies: declared getenv, no duplicate globals' =>
         return $e;
     };
 
-    my $mi_a = Chalk::IR::MethodInfo->new(
-        name => 'env_a', body => [], body_node => $mk_body->('CHALK_G7_TEST'),
-        return_repr => 'Str');
-    my $mi_b = Chalk::IR::MethodInfo->new(
-        name => 'env_b', body => [], body_node => $mk_body->('CHALK_G7_OTHER'),
-        return_repr => 'Str');
-    my $ci = Chalk::IR::ClassInfo->new(
-        name => 'Envy', methods => [$mi_a, $mi_b], fields => []);
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Envy');
+    my $mi_a = $cls->declare_method('env_a', return_type => 'Str');
+    $mi_a->graph->merge($f->make_cfg('Return', inputs => [$mk_body->('CHALK_G7_TEST')]));
+    my $mi_b = $cls->declare_method('env_b', return_type => 'Str');
+    $mi_b->graph->merge($f->make_cfg('Return', inputs => [$mk_body->('CHALK_G7_OTHER')]));
+    $mop->seal;
 
     my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
-        param_names => [], inputs => [$ci]);
+        class_name => 'Envy', param_names => [], inputs => []);
     $new_o->set_representation('Object');
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'env_a',
-        inputs => [$new_o, $ci]);
+        class_name => 'Envy', inputs => [$new_o]);
     $call->set_representation('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    my ($out, $ll) = eval { lli_run($ret) };
+    my ($out, $ll) = eval { lli_run($ret, mop => $mop) };
     ok(!$@, 'two method bodies with EnvRead lower + run')
         or do { diag("error: $@"); return };
     is($out, 'Str:mbody', 'method-body EnvRead reads the env');

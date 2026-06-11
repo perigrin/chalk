@@ -1,5 +1,5 @@
-# ABOUTME: Tests for Phase 5.2: New → Call(dispatch_kind='method', name='new') in LLVM lowering.
-# ABOUTME: Verifies Call(dispatch_kind='method', name='new') lowers identically to New.
+# ABOUTME: Tests for Call(dispatch_kind='method', name='new') construction in LLVM lowering.
+# ABOUTME: Verifies Call(new) resolves class structure through the sealed-MOP class registry.
 use 5.42.0;
 use utf8;
 
@@ -7,9 +7,7 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
-use Chalk::IR::ClassInfo;
-use Chalk::IR::MethodInfo;
-use Chalk::MOP::Field;
+use Chalk::MOP;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::TypeTag;
 
@@ -37,8 +35,8 @@ sub perl_oracle {
 }
 
 sub lli_run {
-    my ($ret_node) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret_node);
+    my ($ret_node, $mop) = @_;
+    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -58,17 +56,16 @@ sub lli_run {
 subtest 'Call(name=new): class-simple ref($e) => "Empty" (Str)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'Empty',
-        methods => [],
-        fields  => [],
-    );
+    my $mop = Chalk::MOP->new;
+    $mop->declare_class('Empty');
+    $mop->seal;
 
     # Use Call(name='new') instead of New node
     my $new_e = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'new',
-        inputs        => [$ci],
+        class_name    => 'Empty',
+        inputs        => [],
         param_names   => [],
     );
     $new_e->set_representation('Object');
@@ -78,9 +75,8 @@ subtest 'Call(name=new): class-simple ref($e) => "Empty" (Str)' => sub {
 
     my $ret = $f->make_cfg('Return', inputs => [$ref_result]);
 
-    # This SHOULD fail right now (Call name='new' not handled = RED)
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret) };
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
     ok(!$@, "Call(new) lowering + lli succeeded: $@") or do {
         diag("Error: $@");
         return;
@@ -102,28 +98,13 @@ subtest 'Call(name=new): class-simple ref($e) => "Empty" (Str)' => sub {
 subtest 'Call(name=new): field-attrs Pair->new(left=>10, right=>20), left+right => 30' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $mf_l = Chalk::MOP::Field->new(
-        name       => 'left',
-        sigil      => '$',
-        class      => undef,
-        fieldix    => 0,
-        type       => 'Int',
-        attributes => [':param', ':reader'],
-    );
-    my $mf_r = Chalk::MOP::Field->new(
-        name       => 'right',
-        sigil      => '$',
-        class      => undef,
-        fieldix    => 1,
-        type       => 'Int',
-        attributes => [':param', ':reader'],
-    );
-
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'Pair',
-        fields  => [$mf_l, $mf_r],
-        methods => [],
-    );
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Pair');
+    $cls->declare_field('left', sigil => '$', type => 'Int',
+        attributes => [':param', ':reader']);
+    $cls->declare_field('right', sigil => '$', type => 'Int',
+        attributes => [':param', ':reader']);
+    $mop->seal;
 
     my $lval = $f->make('Constant', value => 10, const_type => 'integer');
     $lval->set_representation('Int');
@@ -134,7 +115,8 @@ subtest 'Call(name=new): field-attrs Pair->new(left=>10, right=>20), left+right 
     my $new_p = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'new',
-        inputs        => [$ci, $lval, $rval],
+        class_name    => 'Pair',
+        inputs        => [$lval, $rval],
         param_names   => ['left', 'right'],
     );
     $new_p->set_representation('Object');
@@ -142,14 +124,16 @@ subtest 'Call(name=new): field-attrs Pair->new(left=>10, right=>20), left+right 
     my $lr = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'left',
-        inputs        => [$new_p, $ci],
+        class_name    => 'Pair',
+        inputs        => [$new_p],
     );
     $lr->set_representation('Int');
 
     my $rr = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'right',
-        inputs        => [$new_p, $ci],
+        class_name    => 'Pair',
+        inputs        => [$new_p],
     );
     $rr->set_representation('Int');
 
@@ -159,7 +143,7 @@ subtest 'Call(name=new): field-attrs Pair->new(left=>10, right=>20), left+right 
     my $ret = $f->make_cfg('Return', inputs => [$result]);
 
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret) };
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
     ok(!$@, "Call(new) with :param fields succeeded: $@") or do {
         diag("Error: $@");
         return;

@@ -240,18 +240,15 @@ subtest 'repeat compound assign fires twice (C3 behavioral)' => sub {
 # program points within ONE lowering context (the ADJUST body); the
 # post-store read must see 9. perl: p+q = 5+9 = 14.
 subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' => sub {
-    require Chalk::IR::ClassInfo;
-    require Chalk::IR::MethodInfo;
-    require Chalk::MOP::Field;
+    require Chalk::MOP;
 
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $mf_x = Chalk::MOP::Field->new(name => 'x', sigil => '$', class => undef,
-        fieldix => 0, type => 'Int', attributes => [':param']);
-    my $mf_p = Chalk::MOP::Field->new(name => 'p', sigil => '$', class => undef,
-        fieldix => 1, type => 'Int', attributes => []);
-    my $mf_q = Chalk::MOP::Field->new(name => 'q', sigil => '$', class => undef,
-        fieldix => 2, type => 'Int', attributes => []);
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Pt');
+    $cls->declare_field('x', sigil => '$', type => 'Int', attributes => [':param']);
+    $cls->declare_field('p', sigil => '$', type => 'Int', attributes => []);
+    $cls->declare_field('q', sigil => '$', type => 'Int', attributes => []);
 
     my $fa_x_rd1 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
     $fa_x_rd1->set_representation('Int');
@@ -274,33 +271,38 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     my $st_q = $f->make('Assign', inputs => [$fa_q_lv, $fa_x_rd2]);
     $st_q->set_representation('Int');
 
+    # Thread the ADJUST body order: st_p -> st_x -> st_q.
+    $st_x->set_control_in($st_p);
+    $st_q->set_control_in($st_x);
+    my $adj = $cls->declare_adjust();
+    $adj->graph->merge($_) for ($st_p, $st_x, $st_q);
+
     my $fa_p_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
     $fa_p_rd->set_representation('Int');
-    my $getp = Chalk::IR::MethodInfo->new(name => 'getp', body => [],
-        body_node => $fa_p_rd, return_repr => 'Int');
+    my $getp = $cls->declare_method('getp', return_type => 'Int');
+    $getp->graph->merge($f->make_cfg('Return', inputs => [$fa_p_rd]));
     my $fa_q_rd = $f->make('FieldAccess', field_index => 2, field_stash => 'Pt', inputs => []);
     $fa_q_rd->set_representation('Int');
-    my $getq = Chalk::IR::MethodInfo->new(name => 'getq', body => [],
-        body_node => $fa_q_rd, return_repr => 'Int');
+    my $getq = $cls->declare_method('getq', return_type => 'Int');
+    $getq->graph->merge($f->make_cfg('Return', inputs => [$fa_q_rd]));
 
-    my $ci = Chalk::IR::ClassInfo->new(name => 'Pt', methods => [$getp, $getq],
-        fields => [$mf_x, $mf_p, $mf_q], adjusts => [[$st_p, $st_x, $st_q]]);
+    $mop->seal;
 
     my $v5 = int_const($f, 5);
     my $new = $f->make('Call', dispatch_kind => 'method', name => 'new',
-        param_names => ['x'], inputs => [$ci, $v5]);
+        class_name => 'Pt', param_names => ['x'], inputs => [$v5]);
     $new->set_representation('Object');
     my $get_p = $f->make('Call', dispatch_kind => 'method', name => 'getp',
-        inputs => [$new, $ci]);
+        class_name => 'Pt', inputs => [$new]);
     $get_p->set_representation('Int');
     my $get_q = $f->make('Call', dispatch_kind => 'method', name => 'getq',
-        inputs => [$new, $ci]);
+        class_name => 'Pt', inputs => [$new]);
     $get_q->set_representation('Int');
     my $sum = $f->make('Add', inputs => [$get_p, $get_q]);
     $sum->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
     is($exit, 0, 'lli exits 0');
     is($out, 'Int:14', 'p keeps the pre-store value, q reads the stored one (perl: 5+9=14)');
 };

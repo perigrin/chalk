@@ -7,9 +7,7 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
-use Chalk::IR::ClassInfo;
-use Chalk::IR::MethodInfo;
-use Chalk::MOP::Field;
+use Chalk::MOP;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::TypeTag;
 
@@ -51,9 +49,9 @@ sub perl_oracle {
 
 # Helper: lower a Return node to .ll and run lli
 sub lli_run {
-    my ($ret_node) = @_;
+    my ($ret_node, %opts) = @_;
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret_node) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret_node, %opts) };
     return (undef, $ll, $@) if $@;
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -96,7 +94,7 @@ subtest 'method body Coerce(Bool->Str) emits no undeclared globals' => sub {
     );
     $coerce_bs->set_representation('Str');
 
-    # MethodInfo: coerce_str($self) -> Num { Coerce(Str->Num)("3.14") }
+    # Method: coerce_str($self) -> Num { Coerce(Str->Num)("3.14") }
     # The method's return repr is Num, the outer Return is Num.
     # The body sets _need_str_to_num_helper on $body_ctx.
     # Without G.5 fix: $ctx->{_need_str_to_num_helper} stays 0 → prologue
@@ -117,30 +115,25 @@ subtest 'method body Coerce(Bool->Str) emits no undeclared globals' => sub {
     );
     $coerce_sn->set_representation('Num');
 
-    # MethodInfo: coerce_str($self) -> Num { "3" -> Num = 3.0 }
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'coerce_str',
-        body        => [],
-        body_node   => $coerce_sn,
-        return_repr => 'Num',
-    );
-
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'StrNumClass',
-        methods => [$mi],
-        fields  => [],
-    );
+    # Method: coerce_str($self) -> Num { "3" -> Num = 3.0 }
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('StrNumClass');
+    my $mi = $cls->declare_method('coerce_str', return_type => 'Num');
+    $mi->graph->merge($f->make_cfg('Return', inputs => [$coerce_sn]));
+    $mop->seal;
 
     my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'StrNumClass',
         param_names => [],
-        inputs      => [$ci],
+        inputs      => [],
     );
     $new_obj->set_representation('Object');
 
     my $call = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'coerce_str',
-        inputs        => [$new_obj, $ci],
+        class_name    => 'StrNumClass',
+        inputs        => [$new_obj],
     );
     $call->set_representation('Num');  # Outer return is Num, NOT Str
 
@@ -148,7 +141,7 @@ subtest 'method body Coerce(Bool->Str) emits no undeclared globals' => sub {
 
     # Lower to LLVM IR
     my $ll_text;
-    eval { $ll_text = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll_text = Chalk::Target::LLVM->lower($ret, mop => $mop) };
     ok(!$@, 'Coerce(Str->Num) in method body (Num outer return): lower() does not die')
         or do { diag("error: $@"); done_testing(); return };
 
@@ -157,7 +150,7 @@ subtest 'method body Coerce(Bool->Str) emits no undeclared globals' => sub {
         or diag("missing chalk_str_to_num DEFINITION in .ll (F6 bug: _need_str_to_num_helper not propagated);\n"
                 . "first 600 chars:\n" . substr($ll_text, 0, 600));
 
-    my ($lli_out, undef, $err) = lli_run($ret);
+    my ($lli_out, undef, $err) = lli_run($ret, mop => $mop);
     if (!defined $err) {
         like($lli_out, qr/^Num:3/, 'lli output is Num:3 (Str "3" -> Num 3.0)')
             or diag("lli_out='${\($lli_out//'undef')}'");
@@ -181,53 +174,40 @@ subtest 'method body _need_memcmp propagated to prologue' => sub {
     );
     $field_read->set_representation('Str');
 
-    my $mf = Chalk::MOP::Field->new(
-        name       => 'val',
-        sigil      => '$',
-        class      => undef,
-        fieldix    => 0,
-        type       => 'Str',
-        attributes => [':param'],
-    );
-
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'get_val',
-        body        => [],
-        body_node   => $field_read,
-        return_repr => 'Str',
-    );
-
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'StrClass',
-        methods => [$mi],
-        fields  => [$mf],
-    );
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('StrClass');
+    $cls->declare_field('val', sigil => '$', type => 'Str', attributes => [':param']);
+    my $mi = $cls->declare_method('get_val', return_type => 'Str');
+    $mi->graph->merge($f->make_cfg('Return', inputs => [$field_read]));
+    $mop->seal;
 
     my $str_val = $f->make('Constant', value => 'hello', const_type => 'string');
     $str_val->set_representation('Str');
 
     my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'StrClass',
         param_names => ['val'],
-        inputs      => [$ci, $str_val],
+        inputs      => [$str_val],
     );
     $new_obj->set_representation('Object');
 
     my $call = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'get_val',
-        inputs        => [$new_obj, $ci],
+        class_name    => 'StrClass',
+        inputs        => [$new_obj],
     );
     $call->set_representation('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     my $ll_text;
-    eval { $ll_text = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll_text = Chalk::Target::LLVM->lower($ret, mop => $mop) };
     ok(!$@, 'StrClass method body: lower() does not die')
         or do { diag("error: $@"); done_testing(); return };
 
     # The .ll must accept lli without undeclared references
-    my ($lli_out, undef, $err) = lli_run($ret);
+    my ($lli_out, undef, $err) = lli_run($ret, mop => $mop);
     ok(!defined $err, 'lli accepts the .ll')
         or diag("lli error: $err\n.ll text:\n$ll_text");
 
@@ -266,36 +246,31 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
     $val->set_representation('Int');
 
     # Wrap in a class method body — the outer Return is Int.
-    my $mi = Chalk::IR::MethodInfo->new(
-        name        => 'read_hash',
-        body        => [],
-        body_node   => $val,
-        return_repr => 'Int',
-    );
-
-    my $ci = Chalk::IR::ClassInfo->new(
-        name    => 'HashBodyClass',
-        methods => [$mi],
-        fields  => [],
-    );
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('HashBodyClass');
+    my $mi = $cls->declare_method('read_hash', return_type => 'Int');
+    $mi->graph->merge($f->make_cfg('Return', inputs => [$val]));
+    $mop->seal;
 
     my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
+        class_name  => 'HashBodyClass',
         param_names => [],
-        inputs      => [$ci],
+        inputs      => [],
     );
     $new_obj->set_representation('Object');
 
     my $call = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'read_hash',
-        inputs        => [$new_obj, $ci],
+        class_name    => 'HashBodyClass',
+        inputs        => [$new_obj],
     );
     $call->set_representation('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     my $ll_text;
-    eval { $ll_text = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll_text = Chalk::Target::LLVM->lower($ret, mop => $mop) };
     ok(!$@, 'HashBodyClass lower() does not die')
         or do { diag("error: $@"); done_testing(); return };
 
@@ -312,7 +287,7 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
         or diag("found " . scalar(@memcmp_decls) . " declarations");
 
     # lli acceptance
-    my ($lli_out, undef, $err) = lli_run($ret);
+    my ($lli_out, undef, $err) = lli_run($ret, mop => $mop);
     ok(!defined $err, 'lli accepts the .ll (no undeclared @memcmp)')
         or diag("lli error: $err\nfirst 800 chars of .ll:\n" . substr($ll_text // '', 0, 800));
 };

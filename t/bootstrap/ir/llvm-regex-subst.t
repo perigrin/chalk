@@ -6,6 +6,7 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
+use Chalk::MOP;
 use Chalk::Target::LLVM;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
@@ -14,8 +15,8 @@ unless (-x $LLI) {
 }
 
 sub lli_run {
-    my ($ret) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret);
+    my ($ret, %lower_opts) = @_;
+    my $ll = Chalk::Target::LLVM->lower($ret, %lower_opts);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $fh $ll;
@@ -105,8 +106,6 @@ subtest 'replacement $N with multiple digits dies GAP' => sub {
 # class/method symbol prefix as @str_const_N (each method body lowers in a
 # fresh Context whose counter restarts; module-scope @rxs_lit_0 would collide).
 subtest 's/// in two method bodies: no duplicate @rxs_lit symbols' => sub {
-    require Chalk::IR::ClassInfo;
-    require Chalk::IR::MethodInfo;
     my $f = _mk();
 
     my $mk_body = sub {
@@ -119,22 +118,23 @@ subtest 's/// in two method bodies: no duplicate @rxs_lit symbols' => sub {
         return $s;
     };
 
-    my $mi_a = Chalk::IR::MethodInfo->new(
-        name => 'meth_a', body => [], body_node => $mk_body->('foo'), return_repr => 'Str');
-    my $mi_b = Chalk::IR::MethodInfo->new(
-        name => 'meth_b', body => [], body_node => $mk_body->('boo'), return_repr => 'Str');
-    my $ci = Chalk::IR::ClassInfo->new(
-        name => 'Subby', methods => [$mi_a, $mi_b], fields => []);
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Subby');
+    my $m_a = $cls->declare_method('meth_a', return_type => 'Str');
+    $m_a->graph->merge($f->make_cfg('Return', inputs => [$mk_body->('foo')]));
+    my $m_b = $cls->declare_method('meth_b', return_type => 'Str');
+    $m_b->graph->merge($f->make_cfg('Return', inputs => [$mk_body->('boo')]));
+    $mop->seal;
 
     my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
-        param_names => [], inputs => [$ci]);
+        class_name => 'Subby', param_names => [], inputs => []);
     $new_o->set_representation('Object');
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'meth_a',
-        inputs => [$new_o, $ci]);
+        class_name => 'Subby', inputs => [$new_o]);
     $call->set_representation('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    my ($out, $ll) = eval { lli_run($ret) };
+    my ($out, $ll) = eval { lli_run($ret, mop => $mop) };
     ok(!$@, 'two method bodies with s/// lower + run (no duplicate symbol)')
         or do { diag("error: $@"); return };
     is($out, 'Str:fLITo', 'method-body s/// result correct');

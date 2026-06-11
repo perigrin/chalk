@@ -7,9 +7,7 @@ use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
-use Chalk::IR::ClassInfo;
-use Chalk::IR::MethodInfo;
-use Chalk::MOP::Field;
+use Chalk::MOP;
 use Chalk::Target::LLVM;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
@@ -39,13 +37,13 @@ sub run_lli {
 
 # class Pt { field $x :param; field $y; ADJUST { $y = $x + 1 }
 #            method gety { $y } }
-sub build_pt_class {
+sub build_pt_mop {
     my ($f) = @_;
 
-    my $mf_x = Chalk::MOP::Field->new(name => 'x', sigil => '$', class => undef,
-        fieldix => 0, type => 'Int', attributes => [':param']);
-    my $mf_y = Chalk::MOP::Field->new(name => 'y', sigil => '$', class => undef,
-        fieldix => 1, type => 'Int', attributes => []);
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('Pt');
+    $cls->declare_field('x', sigil => '$', type => 'Int', attributes => [':param']);
+    $cls->declare_field('y', sigil => '$', type => 'Int', attributes => []);
 
     my $fa_x = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
     $fa_x->set_representation('Int');
@@ -57,32 +55,34 @@ sub build_pt_class {
     $fa_y_lv->set_representation('Int');
     my $asg = $f->make('Assign', inputs => [$fa_y_lv, $add]);
     $asg->set_representation('Int');
+    my $adj = $cls->declare_adjust();
+    $adj->graph->merge($asg);
 
     my $fa_y_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
     $fa_y_rd->set_representation('Int');
-    my $mi = Chalk::IR::MethodInfo->new(name => 'gety', body => [],
-        body_node => $fa_y_rd, return_repr => 'Int');
+    my $mi = $cls->declare_method('gety', return_type => 'Int');
+    $mi->graph->merge($f->make_cfg('Return', inputs => [$fa_y_rd]));
 
-    return Chalk::IR::ClassInfo->new(name => 'Pt', methods => [$mi],
-        fields => [$mf_x, $mf_y], adjusts => [[$asg]]);
+    $mop->seal;
+    return $mop;
 }
 
 # my $a = Pt->new(x => 5); return $a->gety;  => perl: 6
 subtest 'single new runs ADJUST (sanity)' => sub {
-    my $f  = Chalk::IR::NodeFactory->new;
-    my $ci = build_pt_class($f);
+    my $f   = Chalk::IR::NodeFactory->new;
+    my $mop = build_pt_mop($f);
 
     my $v5 = $f->make('Constant', value => '5', const_type => 'integer');
     $v5->set_representation('Int');
     my $new_a = $f->make('Call', dispatch_kind => 'method', name => 'new',
-        param_names => ['x'], inputs => [$ci, $v5]);
+        class_name => 'Pt', param_names => ['x'], inputs => [$v5]);
     $new_a->set_representation('Object');
     my $get_a = $f->make('Call', dispatch_kind => 'method', name => 'gety',
-        inputs => [$new_a, $ci]);
+        class_name => 'Pt', inputs => [$new_a]);
     $get_a->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$get_a]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
     is($exit, 0, 'lli exits 0');
     is($out, 'Int:6', 'ADJUST stores y = x + 1 (perl: 6)');
 };
@@ -90,8 +90,8 @@ subtest 'single new runs ADJUST (sanity)' => sub {
 # my $a = Pt->new(x => 5); my $b = Pt->new(x => 100);
 # return $a->gety + $b->gety;  => perl: 6 + 101 = 107
 subtest 'second new of the same class runs ADJUST too (I6)' => sub {
-    my $f  = Chalk::IR::NodeFactory->new;
-    my $ci = build_pt_class($f);
+    my $f   = Chalk::IR::NodeFactory->new;
+    my $mop = build_pt_mop($f);
 
     my $v5 = $f->make('Constant', value => '5', const_type => 'integer');
     $v5->set_representation('Int');
@@ -99,23 +99,23 @@ subtest 'second new of the same class runs ADJUST too (I6)' => sub {
     $v100->set_representation('Int');
 
     my $new_a = $f->make('Call', dispatch_kind => 'method', name => 'new',
-        param_names => ['x'], inputs => [$ci, $v5]);
+        class_name => 'Pt', param_names => ['x'], inputs => [$v5]);
     $new_a->set_representation('Object');
     my $new_b = $f->make('Call', dispatch_kind => 'method', name => 'new',
-        param_names => ['x'], inputs => [$ci, $v100]);
+        class_name => 'Pt', param_names => ['x'], inputs => [$v100]);
     $new_b->set_representation('Object');
 
     my $get_a = $f->make('Call', dispatch_kind => 'method', name => 'gety',
-        inputs => [$new_a, $ci]);
+        class_name => 'Pt', inputs => [$new_a]);
     $get_a->set_representation('Int');
     my $get_b = $f->make('Call', dispatch_kind => 'method', name => 'gety',
-        inputs => [$new_b, $ci]);
+        class_name => 'Pt', inputs => [$new_b]);
     $get_b->set_representation('Int');
     my $sum = $f->make('Add', inputs => [$get_a, $get_b]);
     $sum->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
     is($exit, 0, 'lli exits 0');
     is($out, 'Int:107', 'both objects get their own ADJUST stores (perl: 6+101=107)');
 };
