@@ -395,6 +395,80 @@ sub _scan_class_registry {
     return \%registry;
 }
 
+# _render_context_blocks($ctx, $skip_first_label) -> @llvm_lines
+#
+# Render a lowering context's basic blocks, with the block that was CURRENT
+# at end of lowering rendered LAST: epilogue lines (printf/ret) attach
+# textually to the final rendered block and must close the block holding
+# the result value. Multi-block phi arms append continuation blocks after
+# the merge block, so creation order does not guarantee the current block
+# is last. Block order is otherwise semantically irrelevant in LLVM IR,
+# except that the entry block must stay first — the current block at end
+# of lowering is never the entry block when later blocks exist (fallback
+# preserves creation order if it ever were). $skip_first_label suppresses
+# block 0's label for callers that emit their own 'entry:' line.
+sub _render_context_blocks {
+    my ($ctx, $skip_first_label) = @_;
+    my @lines;
+    my $blocks = $ctx->blocks;
+    my $final_idx = $ctx->{current_idx} // $#$blocks;
+    $final_idx = $#$blocks if $final_idx == 0 && $#$blocks > 0;
+    for my $i ((grep { $_ != $final_idx } 0 .. $#$blocks), $final_idx) {
+        my $block = $blocks->[$i];
+        unless ($skip_first_label && $i == 0) {
+            push @lines, $block->{label} . ':';
+        }
+        push @lines, $block->{insts}->@*;
+        if (defined $block->{terminator}) {
+            push @lines, $block->{terminator};
+        }
+    }
+    return @lines;
+}
+
+# _propagate_need_flags($dst_ctx, $src_ctx)
+#
+# Copy ALL _need_* helper/declaration flags from a body-lowering context up
+# to the main context. The prologue is assembled before bodies are lowered
+# and reads these flags from the main ctx; a flag set only on a body ctx
+# would be invisible to it, producing .ll that references undeclared
+# globals/helpers (the F6 bug class).
+my @NEED_FLAGS = qw(
+    _need_malloc_memcpy
+    _need_strpair
+    _need_bool_str_globals
+    _need_str_to_num_helper
+    _need_memcmp
+    _need_aggregate_types
+    _need_getenv
+);
+
+sub _propagate_need_flags {
+    my ($dst_ctx, $src_ctx) = @_;
+    for my $flag (@NEED_FLAGS) {
+        $dst_ctx->{$flag} = 1 if $src_ctx->{$flag};
+    }
+}
+
+# _render_str_globals($body_ctx) -> @llvm_lines
+#
+# Emit string-constant globals accumulated by a body-lowering context.
+# They cannot go in the main prologue (already emitted); the caller places
+# them in the class section near the function that references them.
+sub _render_str_globals {
+    my ($body_ctx) = @_;
+    my @lines;
+    if (defined $body_ctx->{_str_globals} && @{ $body_ctx->{_str_globals} }) {
+        for my $g (@{ $body_ctx->{_str_globals} }) {
+            my ($gname, $content, $blen) = @$g;
+            my $total = $blen + 1;
+            my $enc = _encode_c_string($content);
+            push @lines, "$gname = private unnamed_addr constant [$total x i8] c\"$enc\\00\", align 1";
+        }
+    }
+    return @lines;
+}
+
 # _emit_class_registry_ir(\%registry, $ctx) -> @llvm_lines
 #
 # Emits all class-related LLVM IR declarations: type defs, vtable globals,
@@ -535,24 +609,9 @@ sub _emit_class_registry_ir {
             push @lines, "define internal $fn_ret $fn_name(i8* %self) {  ; method body for ${cname}::${mname}";
             push @lines, 'entry:';
 
-            # Emit all instructions from the body context. The block that
-            # was current at end of lowering renders LAST — the ret lines
-            # below attach textually to it (same multi-block-phi-arm
-            # ordering concern as the @main renderer). Block 0 keeps its
-            # manually emitted 'entry:' label and must stay first.
-            my $body_blocks = $body_ctx->blocks;
-            my $body_final  = $body_ctx->{current_idx} // $#$body_blocks;
-            $body_final = $#$body_blocks if $body_final == 0 && $#$body_blocks > 0;
-            for my $i ((grep { $_ != $body_final } 0 .. $#$body_blocks), $body_final) {
-                my $blk = $body_blocks->[$i];
-                if ($i > 0) {
-                    push @lines, $blk->{label} . ':';
-                }
-                push @lines, $blk->{insts}->@*;
-                if (defined $blk->{terminator}) {
-                    push @lines, $blk->{terminator};
-                }
-            }
+            # Emit all instructions from the body context (current block
+            # renders last; the ret lines below attach textually to it).
+            push @lines, _render_context_blocks($body_ctx, 1);
 
             # Emit return instruction
             if ($ret_repr eq 'Str') {
@@ -582,34 +641,10 @@ sub _emit_class_registry_ir {
             push @lines, '}';
             push @lines, '';
 
-            # Propagate ALL _need_* flags from the method body context up to the main ctx.
-            # The prologue is assembled before method bodies are lowered; it reads these
-            # flags from $ctx to decide which helpers/declarations to emit.  Any flag set
-            # only on $body_ctx would be invisible to the prologue, producing .ll that
-            # references undeclared globals/helpers (F6 bug).
-            for my $flag (qw(
-                _need_malloc_memcpy
-                _need_strpair
-                _need_bool_str_globals
-                _need_str_to_num_helper
-                _need_memcmp
-                _need_aggregate_types
-                _need_getenv
-            )) {
-                $ctx->{$flag} = 1 if $body_ctx->{$flag};
-            }
-
-            # Emit string constant globals from the method body INLINE (before the define).
-            # They cannot go in the main prologue (already emitted); place them here in
-            # the class section, before the function that references them.
-            if (defined $body_ctx->{_str_globals} && @{ $body_ctx->{_str_globals} }) {
-                for my $g (@{ $body_ctx->{_str_globals} }) {
-                    my ($gname, $content, $blen) = @$g;
-                    my $total = $blen + 1;
-                    my $enc = Chalk::Target::LLVM::_encode_c_string($content);
-                    push @lines, "$gname = private unnamed_addr constant [$total x i8] c\"$enc\\00\", align 1";
-                }
-            }
+            # Propagate _need_* flags to the main ctx (F6 bug class) and
+            # emit the body's string-constant globals into the class section.
+            _propagate_need_flags($ctx, $body_ctx);
+            push @lines, _render_str_globals($body_ctx);
         }
 
         # 4b. ADJUST function: one @Cls__ADJUST(i8* %self) per class with
@@ -634,43 +669,14 @@ sub _emit_class_registry_ir {
 
             push @lines, "define internal void \@${cname}__ADJUST(i8* %self) {  ; ADJUST blocks for $cname";
             push @lines, 'entry:';
-            my $adj_blocks = $adj_ctx->blocks;
-            my $adj_final  = $adj_ctx->{current_idx} // $#$adj_blocks;
-            $adj_final = $#$adj_blocks if $adj_final == 0 && $#$adj_blocks > 0;
-            for my $i ((grep { $_ != $adj_final } 0 .. $#$adj_blocks), $adj_final) {
-                my $blk = $adj_blocks->[$i];
-                if ($i > 0) {
-                    push @lines, $blk->{label} . ':';
-                }
-                push @lines, $blk->{insts}->@*;
-                if (defined $blk->{terminator}) {
-                    push @lines, $blk->{terminator};
-                }
-            }
+            push @lines, _render_context_blocks($adj_ctx, 1);
             push @lines, '  ret void';
             push @lines, '}';
             push @lines, '';
 
             # Same flag/global propagation as the method-body loop above.
-            for my $flag (qw(
-                _need_malloc_memcpy
-                _need_strpair
-                _need_bool_str_globals
-                _need_str_to_num_helper
-                _need_memcmp
-                _need_aggregate_types
-                _need_getenv
-            )) {
-                $ctx->{$flag} = 1 if $adj_ctx->{$flag};
-            }
-            if (defined $adj_ctx->{_str_globals} && @{ $adj_ctx->{_str_globals} }) {
-                for my $g (@{ $adj_ctx->{_str_globals} }) {
-                    my ($gname, $content, $blen) = @$g;
-                    my $total = $blen + 1;
-                    my $enc = Chalk::Target::LLVM::_encode_c_string($content);
-                    push @lines, "$gname = private unnamed_addr constant [$total x i8] c\"$enc\\00\", align 1";
-                }
-            }
+            _propagate_need_flags($ctx, $adj_ctx);
+            push @lines, _render_str_globals($adj_ctx);
         }
 
         # 5. Vtable global: @Cls__vtable = { class-name-ptr, fn-ptr0, fn-ptr1, ... }
@@ -1004,25 +1010,9 @@ sub lower_with_elaboration {
     push @lines, '';
     push @lines, 'define i32 @main() {';
 
-    my $blocks = $ctx->blocks;
-    # Render the block that was CURRENT when lowering finished last: the
-    # epilogue lines below (printf + ret) attach textually to the final
-    # rendered block and must close the block holding the Return value.
-    # Multi-block phi arms append continuation blocks after the merge block,
-    # so creation order no longer guarantees the current block is last.
-    # (Block order is otherwise semantically irrelevant in LLVM IR, except
-    # that the entry block must stay first — the current block at end of
-    # lowering is never the entry block when later blocks exist.)
-    my $final_idx = $ctx->{current_idx} // $#$blocks;
-    $final_idx = $#$blocks if $final_idx == 0 && $#$blocks > 0;
-    for my $i ((grep { $_ != $final_idx } 0 .. $#$blocks), $final_idx) {
-        my $block = $blocks->[$i];
-        push @lines, $block->{label} . ':';
-        push @lines, $block->{insts}->@*;
-        if (defined $block->{terminator}) {
-            push @lines, $block->{terminator};
-        }
-    }
+    # Current block renders last: the epilogue lines below (printf + ret)
+    # attach textually to the final rendered block.
+    push @lines, _render_context_blocks($ctx, 0);
 
     if (!defined $result_repr || $result_repr eq 'Int') {
         push @lines, "  %result_i32 = trunc i64 $result_ref to i32";
