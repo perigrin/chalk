@@ -53,11 +53,11 @@ use Chalk::MOP::Field;
 # Placement is driven by the Elaborate pass; defs-dominate-uses holds by
 # construction via the scoped value map.
 sub lower {
-    my ($class, $return_node) = @_;
+    my ($class, $return_node, %opts) = @_;
 
     my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($return_node);
     my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($return_node, $dom);
-    return $class->lower_with_elaboration($return_node, $elab);
+    return $class->lower_with_elaboration($return_node, $elab, %opts);
 }
 
 # _encode_c_string($str) -> LLVM c"..." compatible escaped string (module-level helper)
@@ -370,29 +370,200 @@ sub _scan_class_registry {
         }
     }
 
-    # Resolve :isa inheritance: for each class with a parent, copy inherited
-    # method slots from the parent into the child's vtable (compile-time MRO flatten).
-    # This is done AFTER the full scan so all parent classes are in the registry.
-    for my $cname (keys %registry) {
-        my $parent = $registry{$cname}{parent};
+    _flatten_inheritance(\%registry);
+
+    return \%registry;
+}
+
+# _flatten_inheritance(\%registry) -> void
+#
+# Resolve :isa inheritance: for each class with a parent, copy inherited
+# method slots from the parent into the child's vtable (compile-time MRO
+# flatten). Run AFTER the registry is fully populated so all parent classes
+# are present.
+sub _flatten_inheritance {
+    my ($registry) = @_;
+    for my $cname (sort keys %$registry) {
+        my $parent = $registry->{$cname}{parent};
         next unless defined $parent;
-        my $parent_reg = $registry{$parent};
+        my $parent_reg = $registry->{$parent};
         unless (defined $parent_reg) {
             die "LLVM MOP: class '$cname' has :isa($parent) but '$parent' is not declared in this graph";
         }
         # Copy parent methods into child that don't already exist in child
         for my $pmeth (@{ $parent_reg->{methods} }) {
-            unless (grep { ($_->{name} // '') eq $pmeth->{name} } @{ $registry{$cname}{methods} }) {
-                push @{ $registry{$cname}{methods} }, {
+            unless (grep { ($_->{name} // '') eq $pmeth->{name} } @{ $registry->{$cname}{methods} }) {
+                push @{ $registry->{$cname}{methods} }, {
                     %$pmeth,
-                    vtable_slot => scalar(@{ $registry{$cname}{methods} }),
+                    vtable_slot => scalar(@{ $registry->{$cname}{methods} }),
                     inherited_from => $parent,
                 };
             }
         }
     }
+    return;
+}
 
+# _build_registry_from_mop($mop) -> \%registry
+#
+# MOP-direct registry construction (019eb42a,
+# docs/plans/2026-06-11-llvm-reads-mop-directly.md): read class structure
+# from a SEALED Chalk::MOP — MOP::Class / MOP::Method / MOP::Field /
+# MOP::Phaser::Adjust — instead of scanning the graph for ClassInfo
+# metadata objects. Class structure is compile-time context resolved by
+# name (Call.class_name), not dataflow. The implicit 'main' class (the
+# program container seeded by Chalk::MOP's ADJUST) is skipped: it is never
+# instantiated via Call(new).
+sub _build_registry_from_mop {
+    my ($mop) = @_;
+
+    die "LLVM MOP: lower(mop => ...) requires a SEALED MOP — the registry "
+      . "is a post-parse read surface and must not be built while "
+      . "declare_* can still fire. Call \$mop->seal first."
+        unless $mop->can('is_sealed') && $mop->is_sealed;
+
+    my %registry;
+    for my $cls (sort { $a->name cmp $b->name } $mop->classes) {
+        next if $cls->name eq 'main';
+        _populate_registry_from_mop_class(\%registry, $cls);
+    }
+    _flatten_inheritance(\%registry);
     return \%registry;
+}
+
+# _method_body_root($mop_method) -> $value_node
+#
+# The lowering root of a method body is its graph's Return value. The
+# graph (+ its control chain) is the durable body shape — the MethodInfo
+# body_node field and the MOP body arrayrefs are both transitional.
+# Return inputs are [$value] (typed-factory shape) or [$ctrl, $value]
+# (legacy Actions shape); the value is the LAST input either way.
+sub _method_body_root {
+    my ($mop_method) = @_;
+    my $cname = $mop_method->class ? $mop_method->class->name : '?';
+    my $returns = $mop_method->graph ? $mop_method->graph->returns : [];
+    die "GAP: method '" . $mop_method->name . "' in class '$cname' has no "
+      . "Return in its graph — cannot determine the lowering root. "
+      . "Merge a Return(value) into the method's graph."
+        unless $returns && @$returns;
+    my $value = $returns->[0]->inputs->[-1];
+    die "GAP: method '" . $mop_method->name . "' in class '$cname' has a "
+      . "Return with no value input." unless defined $value;
+    return $value;
+}
+
+# _phaser_body_in_control_order($phaser) -> \@statement_nodes
+#
+# ADJUST body statements from the phaser's graph, in control-chain order.
+# Statements are the graph's statement-position members (the shared
+# %STATEMENT_EFFECT_OPS table, plus VarDecl); order is recovered by
+# following control_in links from the chain head. A single statement needs
+# no threading; multiple statements REQUIRE it (an unordered body would
+# lower nondeterministically — die instead).
+sub _phaser_body_in_control_order {
+    my ($phaser) = @_;
+    my @stmts = grep {
+        blessed($_) && $_->can('operation')
+            && (exists $Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS{ $_->operation }
+                || $_->operation eq 'VarDecl')
+    } $phaser->graph->nodes->@*;
+    return [] unless @stmts;
+    return [@stmts] if @stmts == 1;
+
+    my %is_member = map { $_->id => $_ } @stmts;
+    my @heads = grep {
+        my $c = $_->can('control_in') ? $_->control_in : undef;
+        !(defined $c && blessed($c) && exists $is_member{ $c->id });
+    } @stmts;
+    die "GAP: ADJUST block has " . scalar(@stmts) . " statements but its "
+      . "control chain does not order them (found " . scalar(@heads) . " "
+      . "chain heads) — thread control_in in statement order."
+        unless @heads == 1;
+
+    my @ordered = ($heads[0]);
+    my %placed  = ($heads[0]->id => 1);
+    while (@ordered < @stmts) {
+        my $tail = $ordered[-1];
+        my ($next) = grep {
+            !$placed{ $_->id }
+                && defined $_->control_in
+                && blessed($_->control_in)
+                && $_->control_in->id eq $tail->id;
+        } @stmts;
+        die "GAP: ADJUST control chain is broken after statement "
+          . $tail->id . " — thread control_in in statement order."
+            unless defined $next;
+        push @ordered, $next;
+        $placed{ $next->id } = 1;
+    }
+    return \@ordered;
+}
+
+# _populate_registry_from_mop_class(\%registry, $mop_class) -> void
+#
+# The MOP-direct sibling of _populate_registry_from_classinfo: produces the
+# same registry record shape from a sealed MOP::Class so downstream emission
+# (_emit_class_registry_ir) is unchanged.
+sub _populate_registry_from_mop_class {
+    my ($registry, $cls) = @_;
+    my $cname = $cls->name;
+    $registry->{$cname} //= { methods => [], fields => [], adjusts => [], parent => undef };
+    $registry->{$cname}{parent} //= $cls->parent_name;
+
+    my $mslot = scalar @{ $registry->{$cname}{methods} };
+
+    for my $m ($cls->methods) {
+        my $mname     = $m->name;
+        my $body_node = _method_body_root($m);
+        my $ret_repr  = $m->return_type
+            // _require_repr($body_node, "MOP::Method '$mname' body root");
+        unless (grep { ($_->{name} // '') eq $mname } @{ $registry->{$cname}{methods} }) {
+            push @{ $registry->{$cname}{methods} }, {
+                name        => $mname,
+                body_node   => $body_node,
+                return_repr => $ret_repr,
+                vtable_slot => $mslot++,
+            };
+        }
+    }
+
+    for my $mf ($cls->fields) {
+        my $fname       = $mf->name;
+        my $fidx        = $mf->fieldix;
+        my $f_repr      = $mf->type
+            // die "GAP: field '$fname' in class '$cname' has no declared repr "
+                 . "(type) — refusing to silently default to Int.";
+        unless (grep { ($_->{field_index} // -1) == $fidx } @{ $registry->{$cname}{fields} }) {
+            push @{ $registry->{$cname}{fields} }, {
+                name         => $fname,
+                field_index  => $fidx,
+                is_param     => $mf->is_param    // false,
+                has_reader   => $mf->has_reader  // false,
+                has_default  => $mf->has_default // false,
+                default_node => $mf->default_value,
+                field_repr   => $f_repr,
+            };
+        }
+        if ($mf->has_reader) {
+            unless (grep { ($_->{name} // '') eq $fname } @{ $registry->{$cname}{methods} }) {
+                push @{ $registry->{$cname}{methods} }, {
+                    name               => $fname,
+                    body_node          => undef,
+                    return_repr        => $f_repr,
+                    vtable_slot        => $mslot++,
+                    is_reader_synth    => 1,
+                    reader_field_index => $fidx,
+                };
+            }
+        }
+    }
+
+    for my $phaser ($cls->adjust_blocks) {
+        push @{ $registry->{$cname}{adjusts} }, {
+            body_nodes => _phaser_body_in_control_order($phaser),
+        };
+    }
+    return;
 }
 
 # _render_context_blocks($ctx, $skip_first_label) -> @llvm_lines
@@ -705,12 +876,20 @@ sub _emit_class_registry_ir {
 # elaboration pass determined should be phi nodes at merge blocks. The LLVM
 # backend places phis using the dominator-tree scoped value map.
 sub lower_with_elaboration {
-    my ($class, $return_node, $elab) = @_;
+    my ($class, $return_node, $elab, %opts) = @_;
 
-    # Pre-scan for ClassInfo metadata objects and build a class registry.
-    # The registry drives class-type declarations, vtable globals, and method body
-    # emission — all of which must appear BEFORE @main in the LLVM module.
-    my $class_registry = _scan_class_registry($return_node);
+    # Build the class registry that drives class-type declarations, vtable
+    # globals, and method body emission — all of which must appear BEFORE
+    # @main in the LLVM module.
+    #
+    # MOP-direct path (019eb42a): when the caller hands a sealed Chalk::MOP
+    # via mop => $mop, the registry is built from MOP::Class/Method/Field/
+    # Phaser::Adjust directly and Call nodes name their class via the
+    # class_name attribute. The graph-scan fallback (ClassInfo metadata
+    # riding as node inputs) is the transitional bridge being retired.
+    my $class_registry = defined $opts{mop}
+        ? _build_registry_from_mop($opts{mop})
+        : _scan_class_registry($return_node);
 
     # Build a context that knows the elaboration phi plan.
     my $ctx = Chalk::Target::LLVM::ElaboratedContext->new(elab => $elab,
@@ -3950,12 +4129,20 @@ sub _lower_call_new {
     $self->{_need_aggregate_types} = 1;
     $self->{_need_malloc_memcpy}   = 1;
 
-    my $cls_node    = $node->inputs->[0];
-    my $class_name  = _class_name_from_class_node($cls_node);
+    # MOP-direct shape (class_name attribute set): inputs are ONLY the
+    # :param values — class structure is registry context, not an input.
+    # Transitional ClassInfo shape: inputs[0] = ClassInfo, values follow.
     my $param_names = $node->can('param_names') ? ($node->param_names // []) : [];
-    # inputs[1..N] are the :param values
     my $all_inputs  = $node->inputs // [];
-    my $param_vals  = scalar(@$all_inputs) > 1 ? [ @{$all_inputs}[1 .. $#$all_inputs] ] : [];
+    my ($class_name, $param_vals);
+    if ($node->can('class_name') && defined $node->class_name) {
+        $class_name = $node->class_name;
+        $param_vals = [ @$all_inputs ];
+    }
+    else {
+        $class_name = _class_name_from_class_node($all_inputs->[0]);
+        $param_vals = scalar(@$all_inputs) > 1 ? [ @{$all_inputs}[1 .. $#$all_inputs] ] : [];
+    }
 
     # Verify the class is registered
     my $reg = $self->{class_registry}{$class_name}
@@ -4094,8 +4281,11 @@ sub _lower_call_method {
         return $self->_lower_call_new($node);
     }
     my $obj_node    = $node->inputs->[0];
-    my $cls_node    = $node->inputs->[1];
-    my $class_name  = _class_name_from_class_node($cls_node);
+    # MOP-direct shape: the class rides as the class_name attribute.
+    # Transitional ClassInfo shape: inputs[1] = ClassInfo.
+    my $class_name  = ($node->can('class_name') && defined $node->class_name)
+        ? $node->class_name
+        : _class_name_from_class_node($node->inputs->[1]);
     my $result_repr = _require_repr($node, 'Call(method)');
 
     # Verify class and method are in the registry
@@ -5311,6 +5501,9 @@ sub _infer_class_name_from_obj {
         && ($obj_node->dispatch_kind // '') eq 'method'
         && ($obj_node->name // '') eq 'new')
     {
+        # MOP-direct shape first; transitional ClassInfo-input shape second.
+        return $obj_node->class_name
+            if $obj_node->can('class_name') && defined $obj_node->class_name;
         my $cls_node = $obj_node->inputs->[0];
         return defined $cls_node ? _class_name_from_class_node($cls_node) : undef;
     }
