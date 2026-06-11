@@ -1,21 +1,135 @@
 ---
 title: "mdtest-style typed-IR corpus: format + runner + migrate (before Phase 4)"
-state: in-progress
+state: done
 urgency: normal
 milestone: codegen-harness
 blocks:
 - 019eaa51-bcfe-76b6-a02d-a23a65bd7498
 created: 2026-06-09T02:59:04.160136359Z
-updated: 2026-06-09T03:01:43.256481072Z
+updated: 2026-06-11T14:16:23.86120548Z
 sessions:
 - start_sha: f4149ea4cdf412c343610792324cddc1e34ba8d7
-  end_sha: ""
-  commits: 0
+  end_sha: bb9cc90c01fa1b6eab34fedda709df01eb5dd6b6
+  commits: 61
   started_at: 2026-06-09T02:59:46.502692698Z
+  ended_at: 2026-06-11T14:16:23.86120548Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
   timestamp: 2026-06-09T02:59:46.502692698Z
+- state: done
+  actor: human:git-zhi
+  timestamp: 2026-06-11T14:16:23.86120548Z
+observed_paths:
+- CLAUDE.md
+- docs/architecture/ir-lowering.md
+- docs/architecture/mop.md
+- docs/architecture/runtime-free-boundary.md
+- docs/architecture/sea-of-nodes-ir.md
+- docs/architecture/typed-ir-representation.md
+- docs/plans/2026-06-08-ir-taxonomy-reconciliation.md
+- docs/plans/2026-06-10-mop-migration-reaudit.md
+- docs/plans/2026-06-11-target-ir-architecture-review-resolution.md
+- lib/Chalk/Bootstrap/Perl/Actions.pm
+- lib/Chalk/Bootstrap/Perl/Target/C.pm
+- lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm
+- lib/Chalk/Bootstrap/Perl/Target/Perl.pm
+- lib/Chalk/Bootstrap/Semiring/FilterComposite.pm
+- lib/Chalk/Bootstrap/Semiring/SemanticAction.pm
+- lib/Chalk/Bootstrap/Target.pm
+- lib/Chalk/IR/ClassInfo.pm
+- lib/Chalk/IR/Graph.pm
+- lib/Chalk/IR/Graph/TypedInvariant.pm
+- lib/Chalk/IR/MethodInfo.pm
+- lib/Chalk/IR/Node.pm
+- lib/Chalk/IR/Node/AdjustBlock.pm
+- lib/Chalk/IR/Node/ArrayDeref.pm
+- lib/Chalk/IR/Node/ArrayLiteral.pm
+- lib/Chalk/IR/Node/ArrayRead.pm
+- lib/Chalk/IR/Node/ArrayWrite.pm
+- lib/Chalk/IR/Node/Call.pm
+- lib/Chalk/IR/Node/ClassDecl.pm
+- lib/Chalk/IR/Node/EnvRead.pm
+- lib/Chalk/IR/Node/FieldDef.pm
+- lib/Chalk/IR/Node/FieldWrite.pm
+- lib/Chalk/IR/Node/HashDeref.pm
+- lib/Chalk/IR/Node/HashLiteral.pm
+- lib/Chalk/IR/Node/HashRead.pm
+- lib/Chalk/IR/Node/HashWrite.pm
+- lib/Chalk/IR/Node/MakeArrayRef.pm
+- lib/Chalk/IR/Node/MakeHashRef.pm
+- lib/Chalk/IR/Node/MethodCall.pm
+- lib/Chalk/IR/Node/MethodDef.pm
+- lib/Chalk/IR/Node/New.pm
+- lib/Chalk/IR/Node/RegexCapture.pm
+- lib/Chalk/IR/Node/ScalarLen.pm
+- lib/Chalk/IR/NodeFactory.pm
+- lib/Chalk/IR/Serialize/JSON.pm
+- lib/Chalk/IR/Target.pm
+- lib/Chalk/IR/Target/LLVM.pm
+- lib/Chalk/MOP/Class.pm
+- lib/Chalk/MOP/Import.pm
+- lib/Chalk/Target.pm
+- lib/Chalk/Target/LLVM.pm
+- paad/architecture-reviews/2026-06-09-reconciliation-plan-crochet-assess.md
+- paad/code-reviews/phase1-lateral-bindings-2026-06-09-18-52-00-af42bab2-R2-agentic.md
+- paad/code-reviews/phase1-lateral-bindings-2026-06-09-22-43-09-ff9b4d08-R2reopen-agentic.md
+- paad/code-reviews/phase1-lateral-bindings-2026-06-09-R1-agentic.md
+- paad/code-reviews/phase1-lateral-bindings-2026-06-10-02-36-29-f94ea2a8-R3-agentic.md
+- paad/code-reviews/phase1-lateral-bindings-2026-06-10-07-58-14-0eb83b94-G6-agentic.md
+- paad/code-reviews/phase1-lateral-bindings-2026-06-10-09-36-45-f5005718-G7-agentic.md
+- paad/code-reviews/phase1-lateral-bindings-2026-06-10-17-37-49-256a9b37-branch-agentic.md
+- paad/code-reviews/phase1-lateral-bindings-2026-06-11-13-52-37-d4823444-019eb316-issue.md
+- t/bootstrap/codegen-harness/g1-miscompile-classification.t
+- t/bootstrap/codegen-harness/g2-libperl-free-guard.t
+- t/bootstrap/codegen-harness/target-hierarchy.t
+- t/bootstrap/codegen-harness/type-tag.t
+- t/bootstrap/corpus/host.t
+- t/bootstrap/corpus/mdtest.t
+- t/bootstrap/corpus/regex.t
+- t/bootstrap/ir-serialize-json.t
+- t/bootstrap/ir/build-classinfo.t
+- t/bootstrap/ir/elaborate.t
+- t/bootstrap/ir/llvm-adjust-per-class-fn.t
+- t/bootstrap/ir/llvm-aggregate-latent-fixes.t
+- t/bootstrap/ir/llvm-array-hash.t
+- t/bootstrap/ir/llvm-bool-truthiness-guard.t
+- t/bootstrap/ir/llvm-call-method-dispatch.t
+- t/bootstrap/ir/llvm-call-new-dispatch.t
+- t/bootstrap/ir/llvm-classinfo-lowering.t
+- t/bootstrap/ir/llvm-coerce-bool-str.t
+- t/bootstrap/ir/llvm-coerce-str.t
+- t/bootstrap/ir/llvm-env-read.t
+- t/bootstrap/ir/llvm-gap-map.t
+- t/bootstrap/ir/llvm-lowering.t
+- t/bootstrap/ir/llvm-method-body-needs.t
+- t/bootstrap/ir/llvm-mop-classes.t
+- t/bootstrap/ir/llvm-phi-multiblock-arms.t
+- t/bootstrap/ir/llvm-reassign-soundness.t
+- t/bootstrap/ir/llvm-regex-capture.t
+- t/bootstrap/ir/llvm-regex-match.t
+- t/bootstrap/ir/llvm-regex-subst.t
+- t/bootstrap/ir/llvm-stale-value-cache.t
+- t/bootstrap/ir/llvm-str-const-collision.t
+- t/bootstrap/ir/llvm-strpair-undeclared.t
+- t/bootstrap/ir/llvm-typed-3c.t
+- t/bootstrap/ir/llvm-undef-defined-or.t
+- t/bootstrap/ir/llvm-undef-repr-guard.t
+- t/bootstrap/ir/statement-effect-identity.t
+- t/bootstrap/ir/well-typed-graph.t
+- t/bootstrap/mop/build-graph-ifelse-trivial-phi.t
+- t/bootstrap/perl-actions-tier-a.t
+- t/corpus/mdtest/classes.md
+- t/corpus/mdtest/host.md
+- t/corpus/mdtest/references.md
+- t/corpus/mdtest/regex.md
+- t/corpus/mdtest/variables.md
+- t/fixtures/codegen-goldens/Chalk__Bootstrap__Target.pl.golden
+- t/fixtures/codegen-goldens/Chalk__MOP__Import.pl.golden
+- t/fixtures/codegen-harness/llvm-gap-map.json
+- t/lib/Chalk/CodeGen/Harness/LLVMDriver.pm
+- t/lib/Chalk/CodeGen/Harness/LLVMGapMap.pm
+- t/lib/Chalk/CodeGen/Harness/MdtestCorpus.pm
 ---
 
 -
