@@ -1194,6 +1194,63 @@ sub _fresh {
     return '%tmp_' . $self->{counter};
 }
 
+# Ops that LOAD from a mutable memory location when lowered: a pad slot
+# (PadAccess reads var_table), an aggregate element (Subscript), or an object
+# field (FieldAccess). Their lowered value is program-point-dependent — a
+# later store changes what an identical load returns — so they must re-lower
+# at every consumption point, never serve from the value cache.
+my %MUTABLE_READ_OPS = map { $_ => 1 } qw(PadAccess Subscript FieldAccess);
+
+# Pure value ops the staleness predicate descends THROUGH: a pure node over a
+# mutable-location read is itself program-point-dependent (Add(PadAccess, 10)
+# after a reassign must re-read). The walk stops at everything else — side
+# effects (Assign/Call/RegexMatch/...) execute once at their control position
+# and their result SSA ref is fixed; Phi/Constant/VarDecl/ArrayRef/HashRef
+# likewise produce a fixed SSA value at a single program point.
+my %PURE_DESCEND_OPS = map { $_ => 1 } qw(
+    Add Subtract Multiply Divide Modulo Power Concat
+    NumEq NumNe NumLt NumGt NumLe NumGe NumCmp
+    StrEq StrNe StrLt StrGt StrLe StrGe StrCmp
+    And Or DefinedOr Xor Not Negate Complement Defined UnaryPlus
+    BitAnd BitOr BitXor LeftShift RightShift
+    Coerce Stringify Interpolate Length PostfixDeref Ref TernaryExpr
+    Repeat Range IsaOp Slice
+);
+
+# _reads_mutable_location($node) -> bool
+# True when lowering $node (or any pure node it transitively feeds on)
+# performs a mutable-location load — i.e. when a cached SSA ref for it can
+# go stale across a store (whole-branch review C1/C2). Structural property
+# of the graph, so memoized per node id for the lifetime of this lowering.
+sub _reads_mutable_location {
+    my ($self, $node) = @_;
+    my $id = $node->id();
+    return $self->{_mut_read_memo}{$id}
+        if exists $self->{_mut_read_memo}{$id};
+
+    my $op = $node->operation();
+    my $result = 0;
+    if (exists $MUTABLE_READ_OPS{$op}) {
+        $result = 1;
+    }
+    elsif (exists $PURE_DESCEND_OPS{$op}) {
+        # Seed the memo before descending so an unexpected cycle terminates
+        # (pure-op cycles do not occur; Phi backedges stop above).
+        $self->{_mut_read_memo}{$id} = 0;
+        INPUT: for my $input ($node->inputs()->@*) {
+            my @flat = (ref($input) eq 'ARRAY') ? $input->@* : ($input);
+            for my $el (@flat) {
+                next unless defined $el && blessed($el);
+                if ($self->_reads_mutable_location($el)) {
+                    $result = 1;
+                    last INPUT;
+                }
+            }
+        }
+    }
+    return $self->{_mut_read_memo}{$id} = $result;
+}
+
 # lower_value($node) -> $llvm_ref (a string like "%tmp_1" or "1" for constants)
 # Recursively lowers the data sub-graph rooted at $node, accumulating
 # LLVM IR instructions into the current basic block. Returns the LLVM value
@@ -1202,20 +1259,24 @@ sub lower_value {
     my ($self, $node) = @_;
 
     # Cache: if we already lowered this node (hash-cons sharing), reuse the
-    # previously computed SSA ref — except for PadAccess nodes.
+    # previously computed SSA ref — except for nodes that read mutable
+    # locations (directly or through pure ops).
     #
-    # PadAccess nodes are EXCLUDED from the cache-hit path: they must read the
-    # current var_table entry at the moment they are lowered. var_table is
-    # updated by Assign (and by phi emission at merge points), so a PadAccess
-    # for a reassigned variable must see the post-assign value, not a cached
-    # pre-assign SSA ref. Bypassing the cache here ensures every PadAccess
-    # re-invokes _lower_padaccess, which reads var_table[vd_id] and is always
-    # program-point-correct. See t/bootstrap/ir/llvm-reassign-soundness.t for
-    # the adversarial proof that this model is sound across straight-line,
-    # branch, and loop shapes.
+    # Such nodes are EXCLUDED from the cache-hit path: they must read the
+    # current state at the moment they are lowered. var_table is updated by
+    # Assign (and by phi emission at merge points), and aggregate elements /
+    # object fields are updated by element/field stores, so a load for a
+    # mutated location must see the post-store value, not a cached pre-store
+    # SSA ref. Bypassing the cache ensures every such node re-lowers and is
+    # always program-point-correct. See t/bootstrap/ir/llvm-reassign-soundness.t
+    # for the adversarial proof of the PadAccess/var_table model across
+    # straight-line, branch, and loop shapes, and
+    # t/bootstrap/ir/llvm-stale-value-cache.t for the pure-over-read and
+    # element/field store cases. Side-effecting ops STAY cached: they execute
+    # once at their control position; re-lowering would double the effect.
     my $id = $node->id();
     my $op = $node->operation();
-    if ($op ne 'PadAccess' && exists $self->{cache}{$id}) {
+    if (exists $self->{cache}{$id} && !$self->_reads_mutable_location($node)) {
         return $self->{cache}{$id};
     }
 
