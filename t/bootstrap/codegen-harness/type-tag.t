@@ -321,17 +321,18 @@ subtest 'round-trip: Bool repr false (1 == 2) lli tag == TypeTag prefix' => sub 
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 5 -- site-agreement: all three test-side tag sites produce equal output
+# SECTION 5 -- site-agreement: both test-side tag sites produce equal output
 # ---------------------------------------------------------------------------
 #
-# For each representative input, verify that MdtestCorpus::_infer_tag,
-# LLVMGapMap::_infer_oracle_tag, and TypeTag::infer_tag all produce equal output.
-# This documents that the refactor is behavior-preserving.
+# For each representative input, verify that MdtestCorpus::_infer_tag and
+# TypeTag::infer_tag produce equal output. This documents that the refactor
+# is behavior-preserving. (LLVMGapMap, the third site, was retired into the
+# mdtest corpus once all topic files landed — per the decided corpus spec,
+# docs/plans/2026-06-07-mdtest-corpus-format-draft.md.)
 # ---------------------------------------------------------------------------
 
 subtest 'site agreement: infer_tag variants agree on representative inputs' => sub {
     require Chalk::CodeGen::Harness::MdtestCorpus;
-    require Chalk::CodeGen::Harness::LLVMGapMap;
 
     my @cases = (
         [ undef,    'Undef:',   'undef'             ],
@@ -355,11 +356,9 @@ subtest 'site agreement: infer_tag variants agree on representative inputs' => s
 
         my $tt  = Chalk::CodeGen::Harness::TypeTag::infer_tag($input);
         my $mc  = Chalk::CodeGen::Harness::MdtestCorpus::_infer_tag($input);
-        my $lgm = Chalk::CodeGen::Harness::LLVMGapMap::_infer_oracle_tag($input);
 
         is( $tt,  $expected, "TypeTag::infer_tag($display) == '$expected'" );
         is( $mc,  $expected, "MdtestCorpus::_infer_tag agrees for $label" );
-        is( $lgm, $expected, "LLVMGapMap::_infer_oracle_tag agrees for $label" );
     }
 };
 

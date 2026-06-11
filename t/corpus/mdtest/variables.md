@@ -85,10 +85,9 @@ L: GREEN
 
 `field $x :param; return $x` — a class field declared with `:param`. Per
 docs/architecture/runtime-free-boundary.md field access is RF: a `feature class`
-is lexically declared, so the object is a static struct `{class*, fields}` and a
-field read is a known offset load — no libperl, no runtime SV slot. It is a GAP
-only until the MOP object-struct + field-offset lowering is modelled (campaign
-group G5), not because it needs the interpreter.
+is lexically declared, so the object is a static struct `{vtable*, fields}` and a
+field read is a known offset load — no libperl, no runtime SV slot. The MOP
+object-struct + field-offset lowering (campaign group G5) models exactly this.
 
 ```perl
 # source
@@ -104,7 +103,15 @@ context: scalar
 ```
 
 ```ir
-L: GAP(field access is RF: static struct {class*, fields} + known field-offset load; GAP only until MOP object-struct lowering (G5) is modelled, NOT a libperl dependency)
+%fa     = FieldAccess(field_index: 0, field_stash: "_A5Tmp") :Int
+%mi     = MethodInfo(name: "val", body_node: %fa, return_repr: "Int")
+%mf     = MOP::Field(name: "x", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
+%cls    = ClassInfo(name: "_A5Tmp", methods: [%mi], fields: [%mf])
+%v42    = Constant(42) :Int
+%new    = Call(%cls, %v42, dispatch_kind: "method", name: "new", param_names: "x") :Object
+%result = Call(%new, %cls, dispatch_kind: "method", name: "val") :Int
+return %result
+L: GREEN
 ```
 
 ## C1 reassign then read

@@ -2,17 +2,15 @@
 
 Regex match, compiled-regex (qr//), and substitution idioms.
 
-All cases in this topic are L: GAP — but the GAP means "not modelled YET," not
-"needs the interpreter." Core regex is runtime-free (RF): a literal pattern is a
-compile-time-known mini-language, and the RF answer is a regex sub-compiler
-(pattern -> DFA/NFA/bytecode matcher) emitted runtime-free, producing
-`(matched?, $1, $2, ...)`. `qr//` compiles a matcher value; `s///` is match + Str
-rewrite (the Str part riding on G3's Str representation). These are GAPs only
-until the regex sub-compiler (campaign group G6) and Str (G3) are modelled, NOT a
-libperl/perl-regex-engine dependency. (The genuinely-OOS regex feature is only
-`(?{ perl code })` — embedded runtime code; core patterns are RF.) The behavior
-is still specified by the perl oracle; the GAP records the honest reason a
-compile-time-only LLVM path cannot yet lower these idioms.
+Core regex is runtime-free (RF): a literal pattern is a compile-time-known
+mini-language, and the regex sub-compiler (campaign group G6) lowers it to an
+inlined matcher producing `(matched?, $1, $2, ...)` — no libperl, no
+perl-regex-engine. `qr//` compiles a matcher value (a `Constant` of
+const_type "regex" applied via `Match`); `s///` is match + Str rewrite riding
+on G3's Str representation. All cases in this topic are L: GREEN against that
+sub-compiler. (The genuinely-out-of-scope regex feature is only
+`(?{ perl code })` — embedded runtime code; core patterns are RF. Alternation,
+\Q\E, /g and friends are tracked as G6 fast-follows, zhi 019eb073.)
 
 Archive sources: `archive/pu-2026-03-24:t/corpus/ir/regex-match.chalk` (R1
 adapted to a runnable form), `archive/pu-2026-03-24:t/corpus/ir/regex-qr.chalk`
@@ -21,10 +19,9 @@ adapted to a runnable form), `archive/pu-2026-03-24:t/corpus/ir/regex-qr.chalk`
 ## R1 regex match (=~)
 
 The `=~` operator applies a literal regex to a string subject. The literal
-pattern is a compile-time-known mini-language: a regex sub-compiler lowers it to a
-DFA/NFA matcher that produces `(matched?, $1, $2, ...)` runtime-free. The IR is a
-GAP only until the regex sub-compiler (G6) is modelled, NOT a libperl/regex-engine
-dependency.
+pattern is a compile-time-known mini-language: the regex sub-compiler lowers it
+to an inlined matcher that produces `(matched?, $1, $2, ...)` runtime-free —
+no libperl/regex-engine dependency.
 
 Source: `archive/pu-2026-03-24:t/corpus/ir/regex-match.chalk`
 (`if ($x =~ m/pattern/) { 1 }` — adapted to a runnable form with concrete values).
@@ -54,8 +51,8 @@ L: GREEN
 
 The `qr//` operator compiles a regex into a first-class matcher value. The regex
 sub-compiler lowers the literal pattern to that matcher value runtime-free, and a
-subsequent `=~` is an indirect application of the same matcher. The IR is a GAP
-only until the regex sub-compiler (G6) is modelled, NOT a libperl dependency.
+subsequent `=~` is an application of the same matcher (`Match` over a `Constant`
+of const_type "regex" — statically resolved, no libperl dependency).
 
 Source: `archive/pu-2026-03-24:t/corpus/ir/regex-qr.chalk`
 (`my $re = qr/\d+/;` — adapted to a runnable form that also exercises the match).
@@ -86,9 +83,8 @@ L: GREEN
 ## R3 regex substitution (s///)
 
 The `s///` operator is a match followed by a Str rewrite. The match rides on the
-regex sub-compiler (G6) and the rewrite rides on G3's Str representation — both
-runtime-free. The IR is a GAP only until the regex sub-compiler (G6) and Str (G3)
-are modelled, NOT a libperl/regex-engine dependency.
+regex sub-compiler and the rewrite rides on G3's Str representation — both
+runtime-free, no libperl/regex-engine dependency.
 
 ```perl
 # source
