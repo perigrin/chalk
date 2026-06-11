@@ -3,8 +3,10 @@ title: "Cache/identity family follow-ups: RegexMatch identity, loop-exit phi wir
 state: pending
 urgency: normal
 milestone: v0.1
+blocked_by:
+- 019eb316-0c85-7a68-87fc-f0c1cd221b5a
 created: 2026-06-11T14:04:35.973450184Z
-updated: 2026-06-11T14:04:35.973450184Z
+updated: 2026-06-11T14:05:04.825007128Z
 ---
 
 Pre-existing same-family defects surfaced by the 019eb316 per-issue agentic review
