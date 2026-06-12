@@ -1239,14 +1239,8 @@ sub new {
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
         #   _need_memcmp => bool
         #     Set when Subscript(Hash) is lowered; triggers memcmp declaration.
-        #   _arr_table => { node_id => '%arr_ptr_ref' }
-        #     Maps ArrayRef/Assign(Array-lvalue) node id -> LLVM %Array* pointer ref.
-        #   _hash_table => { node_id => '%hash_ptr_ref' }
-        #     Maps HashRef/Assign(Hash-lvalue) node id -> LLVM %Hash* pointer ref.
         _need_aggregate_types => 0,
         _need_memcmp          => 0,
-        _arr_table            => {},
-        _hash_table           => {},
         # Slot repr tracking: parallel to _undef_defined_bit/_undef_payload for Undef.
         # Maps the SSA def-bit ref -> SSA payload ref (i64).
         # Used by the Slot return epilogue to retrieve both fields.
@@ -2255,21 +2249,8 @@ sub _lower_assign {
             # Array element store: bounds-checked (same as _lower_array_write body).
             $self->{_need_aggregate_types} = 1;
 
-            # Get the Array* (from _arr_table for ArrayRef containers).
-            my $arr_ref;
-            if ($ctr_repr eq 'ArrayRef') {
-                $self->lower_value($container);
-                unless (exists $self->{_arr_table}{ $container->id }) {
-                    my $i8 = $self->{cache}{ $container->id };
-                    my $arr = $self->_fresh;
-                    $self->_emit("  $arr = bitcast i8* $i8 to %Array*  ; Assign(Array-lvalue): i8* -> Array*");
-                    $self->{_arr_table}{ $container->id } = $arr;
-                }
-                $arr_ref = $self->{_arr_table}{ $container->id };
-            }
-            else {
-                $arr_ref = $self->lower_value($container);
-            }
+            # Typed pointer resolved at THIS use — see _container_ptr.
+            my $arr_ref = $self->_container_ptr($container, 'Array');
             my $idx_ref = $self->lower_value($key_idx);
 
             # Load elems pointer and write the slot.
@@ -2309,20 +2290,8 @@ sub _lower_assign {
             $self->{_need_malloc_memcpy}   = 1;
             $self->{_need_memcmp}          = 1;
 
-            my $hash_ref;
-            if ($ctr_repr eq 'HashRef') {
-                $self->lower_value($container);
-                unless (exists $self->{_hash_table}{ $container->id }) {
-                    my $i8 = $self->{cache}{ $container->id };
-                    my $hash = $self->_fresh;
-                    $self->_emit("  $hash = bitcast i8* $i8 to %Hash*  ; Assign(Hash-lvalue): i8* -> Hash*");
-                    $self->{_hash_table}{ $container->id } = $hash;
-                }
-                $hash_ref = $self->{_hash_table}{ $container->id };
-            }
-            else {
-                $hash_ref = $self->lower_value($container);
-            }
+            # Typed pointer resolved at THIS use — see _container_ptr.
+            my $hash_ref = $self->_container_ptr($container, 'Hash');
             my $wkey_ref = $self->lower_value($key_idx);
             # See HashRead: a 0-length key makes the memcmp match any entry.
             # Die loudly on an untracked length rather than default to 0.
@@ -3449,8 +3418,8 @@ sub _find_block_idx {
 
 # _lower_array_ref: canonical ref-producing array constructor.
 # inputs = [elem0, elem1, ...]. Returns i8* (ArrayRef repr).
-# The underlying %Array* is stored in _arr_table keyed by node id so that
-# Length/Subscript consumers can get the struct pointer without a bitcast.
+# Consumers (Length/Subscript/element stores) resolve the typed %Array* at
+# their own use via _container_ptr.
 sub _lower_array_ref {
     my ($self, $node) = @_;
 
@@ -3512,14 +3481,12 @@ sub _lower_array_ref {
     $self->_emit("  $ref = bitcast %Array* $arr to i8*  ; ArrayRef: Array* -> i8* ref");
 
     $self->{cache}{ $node->id } = $ref;
-    # Track Array* in _arr_table for consumers (Length, Subscript) that need the struct.
-    $self->{_arr_table}{ $node->id } = $arr;
     return $ref;
 }
 
 # _lower_hash_ref: canonical ref-producing hash constructor.
 # inputs = [key0, val0, key1, val1, ...]. Returns i8* (HashRef repr).
-# The underlying %Hash* is stored in _hash_table keyed by node id.
+# Consumers resolve the typed %Hash* at their own use via _container_ptr.
 sub _lower_hash_ref {
     my ($self, $node) = @_;
 
@@ -3599,8 +3566,6 @@ sub _lower_hash_ref {
     $self->_emit("  $ref = bitcast %Hash* $hash to i8*  ; HashRef: Hash* -> i8* ref");
 
     $self->{cache}{ $node->id } = $ref;
-    # Track Hash* in _hash_table for consumers (Subscript, HashWrite) that need the struct.
-    $self->{_hash_table}{ $node->id } = $hash;
     return $ref;
 }
 
@@ -3616,16 +3581,8 @@ sub _lower_length {
 
     if ($op_repr eq 'Array' || $op_repr eq 'ArrayRef') {
         $self->{_need_aggregate_types} = 1;
-        # Ensure the operand is lowered (populates _arr_table for ArrayRef nodes).
-        $self->lower_value($operand);
-        my $arr_ref = $self->{_arr_table}{ $operand->id };
-        unless (defined $arr_ref) {
-            # ArrayRef emitted as i8*: bitcast to Array* to read the struct.
-            my $i8 = $self->{cache}{ $operand->id };
-            $arr_ref = $self->_fresh;
-            $self->_emit("  $arr_ref = bitcast i8* $i8 to %Array*  ; Length(ArrayRef): i8* -> Array*");
-            $self->{_arr_table}{ $operand->id } = $arr_ref;
-        }
+        # Typed pointer resolved at THIS use — see _container_ptr.
+        my $arr_ref = $self->_container_ptr($operand, 'Array');
         my $len_ptr = $self->_fresh;
         my $len     = $self->_fresh;
         $self->_emit("  $len_ptr = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 0  ; Length(Array): len ptr");
@@ -3654,6 +3611,26 @@ sub _lower_length {
     }
 }
 
+# _container_ptr($container, $kind) -> typed aggregate pointer (%Array*/%Hash*)
+#
+# Resolves the container's typed pointer AT THE CURRENT PROGRAM POINT:
+# lower_value gives the container's value here (Family-B re-lowers
+# mutable-read containers, so a reassigned ref variable yields the NEW
+# aggregate's i8*), and Ref-repr containers are bitcast at the use. The old
+# _arr_table/_hash_table memoized the bitcast per NODE ID, populated once
+# and never invalidated — after a ref reassign every later subscript served
+# the OLD aggregate's pointer (019eb6ff item 3). A bitcast is a free no-op
+# cast; emitting one per use is always dominance-correct.
+sub _container_ptr {
+    my ($self, $container, $kind) = @_;
+    my $repr = $container->representation // '';
+    my $v = $self->lower_value($container);
+    return $v unless $repr eq "${kind}Ref";   # unboxed %Array*/%Hash* already
+    my $typed = $self->_fresh;
+    $self->_emit("  $typed = bitcast i8* $v to %${kind}*  ; ${kind}Ref -> ${kind}* (at use)");
+    return $typed;
+}
+
 # _lower_subscript: repr-dispatch on inputs[0] container.
 # Array container -> bounds-checked slot load (_lower_array_read body).
 # Hash container  -> memcmp key scan (_lower_hash_read body).
@@ -3664,33 +3641,9 @@ sub _lower_subscript {
     my $container_repr = _require_repr($container, 'Subscript.container');
 
     if ($container_repr eq 'Array' || $container_repr eq 'ArrayRef') {
-        # ArrayRef containers: populate _arr_table so _lower_array_read can resolve
-        # %Array* from there rather than from the general value cache (which holds i8*).
-        # Do NOT overwrite cache{container->id} — that would poison later lower_value
-        # calls on the same node (e.g. a PostfixDeref consuming the same ArrayRef).
-        if ($container_repr eq 'ArrayRef') {
-            $self->lower_value($container);
-            unless (exists $self->{_arr_table}{ $container->id }) {
-                my $i8 = $self->{cache}{ $container->id };
-                my $arr = $self->_fresh;
-                $self->_emit("  $arr = bitcast i8* $i8 to %Array*  ; Subscript(ArrayRef): i8* -> Array*");
-                $self->{_arr_table}{ $container->id } = $arr;
-            }
-        }
         return $self->_lower_array_read($node);
     }
     elsif ($container_repr eq 'Hash' || $container_repr eq 'HashRef') {
-        # HashRef containers: same as ArrayRef pattern but for Hash*.
-        # Do NOT overwrite cache{container->id} — same poison-prevention reason.
-        if ($container_repr eq 'HashRef') {
-            $self->lower_value($container);
-            unless (exists $self->{_hash_table}{ $container->id }) {
-                my $i8 = $self->{cache}{ $container->id };
-                my $hash = $self->_fresh;
-                $self->_emit("  $hash = bitcast i8* $i8 to %Hash*  ; Subscript(HashRef): i8* -> Hash*");
-                $self->{_hash_table}{ $container->id } = $hash;
-            }
-        }
         return $self->_lower_hash_read($node);
     }
     else {
@@ -3709,17 +3662,9 @@ sub _lower_array_read {
     $self->{_need_aggregate_types} = 1;
 
     my $container = $node->inputs->[0];
-    $self->lower_value($container);
-    # Prefer the already-resolved %Array* from _arr_table; this avoids depending on
-    # the general value cache (which holds i8* for ArrayRef nodes, not %Array*).
-    # Defense-in-depth: a double-miss (neither table nor cache) would leave $arr_ref
-    # undef and silently emit a malformed `getelementptr ... %Array* <undef>`.
-    # lower_value($container) above always populates one of the two, so this is
-    # unreachable today — but die loudly rather than emit garbage IR if it ever is.
-    my $arr_ref = $self->{_arr_table}{ $container->id }
-        // $self->{cache}{ $container->id }
-        // die "GAP: ArrayRead container (id=" . $container->id . ") resolved to "
-             . "neither _arr_table nor cache after lower_value — cannot emit slot load.";
+    # Typed pointer resolved at THIS use (re-lowered for mutable-read
+    # containers; bitcast for Ref reprs) — see _container_ptr.
+    my $arr_ref = $self->_container_ptr($container, 'Array');
     my $idx_ref = $self->lower_value($node->inputs->[1]);
     my $repr    = _require_repr($node, 'ArrayRead');
 
@@ -3811,16 +3756,9 @@ sub _lower_hash_read {
     $self->{_need_memcmp}          = 1;
 
     my $container = $node->inputs->[0];
-    $self->lower_value($container);
-    # Prefer the already-resolved %Hash* from _hash_table; avoids depending on
-    # the general value cache (which holds i8* for HashRef nodes, not %Hash*).
-    # Defense-in-depth: a double-miss would leave $hash_ref undef and silently emit
-    # malformed IR. lower_value($container) above always populates one — die loudly
-    # rather than emit garbage if it ever does not.
-    my $hash_ref = $self->{_hash_table}{ $container->id }
-        // $self->{cache}{ $container->id }
-        // die "GAP: HashRead container (id=" . $container->id . ") resolved to "
-             . "neither _hash_table nor cache after lower_value — cannot emit key scan.";
+    # Typed pointer resolved at THIS use (re-lowered for mutable-read
+    # containers; bitcast for Ref reprs) — see _container_ptr.
+    my $hash_ref = $self->_container_ptr($container, 'Hash');
     my $lkey_ref = $self->lower_value($node->inputs->[1]);
     # The key length drives the memcmp scan; a silently-zeroed length makes a
     # zero-length memcmp match ANY entry (spurious key match). If the key length
@@ -3965,7 +3903,6 @@ sub _lower_postfix_deref {
 
 # _lower_array_deref: cast i8* ref back to %Array*.
 # The input is an ArrayRef (i8*); the output is an Array* for use by Length/Subscript.
-# Populates _arr_table so Length/Subscript can resolve %Array* without a bitcast.
 sub _lower_array_deref {
     my ($self, $node) = @_;
 
@@ -3975,13 +3912,10 @@ sub _lower_array_deref {
     my $arr = $self->_fresh;
     $self->_emit("  $arr = bitcast i8* $ref_val to %Array*  ; ArrayDeref: i8* ref -> Array*");
     $self->{cache}{ $node->id } = $arr;
-    # Track in _arr_table so Length(PostfixDeref(@)) finds %Array* directly.
-    $self->{_arr_table}{ $node->id } = $arr;
     return $arr;
 }
 
 # _lower_hash_deref: cast i8* ref back to %Hash*.
-# Populates _hash_table so consumers can resolve %Hash* without a bitcast.
 sub _lower_hash_deref {
     my ($self, $node) = @_;
 
@@ -3991,8 +3925,6 @@ sub _lower_hash_deref {
     my $hash = $self->_fresh;
     $self->_emit("  $hash = bitcast i8* $ref_val to %Hash*  ; HashDeref: i8* ref -> Hash*");
     $self->{cache}{ $node->id } = $hash;
-    # Track in _hash_table so consumers can resolve %Hash* without a bitcast.
-    $self->{_hash_table}{ $node->id } = $hash;
     return $hash;
 }
 
