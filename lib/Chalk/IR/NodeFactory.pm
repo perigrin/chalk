@@ -155,6 +155,15 @@ class Chalk::IR::NodeFactory {
         RegexMatch Match NotMatch BacktickExpr
     );
 
+    # Allocation ops: aggregate literal constructors. Each occurrence
+    # ALLOCATES (the Call(new) precedent) — `[1,2]` and `[1,2]` are two
+    # distinct arrays, so hash-consing them to one node made one malloc
+    # that the two "distinct" refs silently aliased (019eb6ff item 4).
+    # Per-call identity like the statement effects, but NOT in
+    # %STATEMENT_EFFECT_OPS: allocations are value-producing and are not
+    # control-threaded by the Block fixup.
+    our %ALLOC_OPS = map { $_ => 1 } qw(ArrayRef HashRef);
+
     field %cache;
     field $cfg_counter = 0;
 
@@ -276,7 +285,7 @@ class Chalk::IR::NodeFactory {
         # is a distinct side effect at its own control position. This subsumes
         # the earlier narrower carve-outs (Assign-over-lvalue, Call-method) and
         # the deleted ArrayWrite/HashWrite/FieldWrite per-call semantics.
-        if (exists $STATEMENT_EFFECT_OPS{$op_name}) {
+        if (exists $STATEMENT_EFFECT_OPS{$op_name} || exists $ALLOC_OPS{$op_name}) {
             my $class = $DATA_CLASSES{$op_name}
                 or die "Unknown node operation: $op_name";
             $cfg_counter++;
