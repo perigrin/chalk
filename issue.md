@@ -1,6 +1,6 @@
 ---
 title: "Cache/identity family follow-ups: RegexMatch identity, loop-exit phi wiring, aggregate-table keying, collector drift"
-state: pending
+state: in-progress
 urgency: normal
 milestone: v0.1
 blocked_by:
@@ -8,7 +8,16 @@ blocked_by:
 blocks:
 - 019eaa51-bcfe-76b6-a02d-a23a65bd7498
 created: 2026-06-11T14:04:35.973450184Z
-updated: 2026-06-12T01:49:29.44151786Z
+updated: 2026-06-12T04:39:02.650467055Z
+sessions:
+- start_sha: d8406a4d7bfec4174defdb278ad7f22704105098
+  end_sha: ""
+  commits: 0
+  started_at: 2026-06-12T04:39:02.650467055Z
+transitions:
+- state: in-progress
+  actor: human:git-zhi
+  timestamp: 2026-06-12T04:39:02.650467055Z
 ---
 
 Pre-existing same-family defects surfaced by the 019eb316 per-issue agentic review
