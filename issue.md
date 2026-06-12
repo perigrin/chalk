@@ -5,8 +5,10 @@ urgency: normal
 milestone: v0.1
 blocked_by:
 - 019eb316-0c85-7a68-87fc-f0c1cd221b5a
+blocks:
+- 019eaa51-bcfe-76b6-a02d-a23a65bd7498
 created: 2026-06-11T14:04:35.973450184Z
-updated: 2026-06-11T14:05:04.825007128Z
+updated: 2026-06-12T01:49:29.44151786Z
 ---
 
 Pre-existing same-family defects surfaced by the 019eb316 per-issue agentic review
