@@ -138,16 +138,21 @@ my %INPUT_SPECS = (
 );
 
 class Chalk::IR::NodeFactory {
-    # Statement-effect ops: ops whose statement-position occurrences are
-    # distinct side effects (a store, a call, a substitution, a guarded
-    # block). control_in is excluded from the content hash, so hash-consing
-    # these would collapse two textually-identical effects into one node and
-    # silently drop the second (whole-branch review C3). This table is a
-    # SHARED contract: make() gives these ops per-call identity, and the
-    # Block control-chain fixup in Actions.pm threads exactly this set via
-    # set_control_in. Both sites read this table — keep it the single source.
+    # Statement-effect ops: ops whose occurrences are distinct side effects
+    # (a store, a call, a substitution, a guarded block — and a MATCH: it
+    # executes against its subject and writes capture state, so two
+    # textually-identical matches at different program points are distinct
+    # effects with their own capture records; likewise qx``). control_in is
+    # excluded from the content hash, so hash-consing these would collapse
+    # two textually-identical effects into one node and silently drop or
+    # stale-serve the second (whole-branch review C3; 019eb6ff item 1).
+    # This table is a SHARED contract: make() gives these ops per-call
+    # identity, the Block control-chain fixup in Actions.pm threads exactly
+    # this set via set_control_in, and the LLVM backend's chain/branch
+    # collectors read it. Keep it the single source.
     our %STATEMENT_EFFECT_OPS = map { $_ => 1 } qw(
         Assign CompoundAssign RegexSubst TryCatch Call
+        RegexMatch Match NotMatch BacktickExpr
     );
 
     field %cache;

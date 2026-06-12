@@ -17,11 +17,14 @@ use Chalk::IR::Graph;
 # is the single source of truth for both.
 
 subtest 'STATEMENT_EFFECT_OPS table is the shared contract' => sub {
-    my %expected = map { $_ => 1 } qw(Assign CompoundAssign RegexSubst TryCatch Call);
+    my %expected = map { $_ => 1 } qw(
+        Assign CompoundAssign RegexSubst TryCatch Call
+        RegexMatch Match NotMatch BacktickExpr
+    );
     is_deeply(
         { map { $_ => 1 } keys %Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS },
         \%expected,
-        'table contains exactly Assign/CompoundAssign/RegexSubst/TryCatch/Call');
+        'table contains exactly the statement-effect ops (incl. the match family, 019eb6ff)');
 };
 
 subtest 'Assign(FieldAccess-lvalue) has per-call identity' => sub {
