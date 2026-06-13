@@ -3,8 +3,10 @@ title: PostfixDeref at-use aggregate pointer + symmetric reassign coverage (019e
 state: pending
 urgency: normal
 milestone: v0.1
+blocked_by:
+- 019eb6ff-c505-71f7-9665-5e087be277fe
 created: 2026-06-13T12:49:35.616744405Z
-updated: 2026-06-13T12:49:35.616744405Z
+updated: 2026-06-13T12:49:41.681992883Z
 ---
 
 Low-severity coverage/path gap surfaced by the 019eb6ff per-issue review
