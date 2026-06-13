@@ -161,4 +161,50 @@ subtest 'capture records are per program point' => sub {
     is($out, 'Str:aa-aaa', 'each $1 reads its own match record (perl: aa-aaa)');
 };
 
+# my $re = qr/b/; my $s = "b"; my $y = ($s =~ $re); $s = "x";
+# my $z = ($s =~ $re); return $z;   perl: the second apply tests "x" -> false.
+# Match (qr-apply, Match node) gets the same per-call identity as RegexMatch.
+subtest 'qr-apply (Match) re-applied after subject reassign sees the new value' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $qr = $f->make('Constant', value => 'b', const_type => 'regex');
+    $qr->set_representation('Regex');
+
+    my $ns = $f->make('Constant', value => '$s', const_type => 'string');
+    my $vs = $f->make('VarDecl', inputs => [$ns, str_const($f, 'b')]);
+    $vs->set_representation('Str');
+
+    my $rs1 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    $rs1->set_representation('Str');
+    my $m1 = $f->make('Match', inputs => [$rs1, $qr]);
+    $m1->set_representation('Bool');
+    my $ny = $f->make('Constant', value => '$y', const_type => 'string');
+    my $vy = $f->make('VarDecl', inputs => [$ny, $m1]);
+    $vy->set_representation('Bool');
+
+    my $rsL = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $asg = $f->make('Assign', inputs => [$rsL, str_const($f, 'x')]);
+    $asg->set_representation('Str');
+
+    my $rs2 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $m2 = $f->make('Match', inputs => [$rs2, $qr]);
+    $m2->set_representation('Bool');
+    isnt($m2->id, $m1->id, 'precondition: the two qr-applies are distinct nodes');
+    my $nz = $f->make('Constant', value => '$z', const_type => 'string');
+    my $vz = $f->make('VarDecl', inputs => [$nz, $m2]);
+    $vz->set_representation('Bool');
+
+    my $rzF = $f->make('PadAccess', targ => 0, varname => '$z', inputs => [$vz]);
+    $rzF->set_representation('Bool');
+    my $ret = $f->make_cfg('Return', inputs => [$rzF]);
+    $ret->set_control_in($vz);
+    $vz->set_control_in($asg);
+    $asg->set_control_in($vy);
+    $vy->set_control_in($vs);
+
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    is($exit, 0, 'lli exits 0');
+    is($out, 'Bool:', 'the second qr-apply tests the reassigned subject (perl: false)');
+};
+
 done_testing;

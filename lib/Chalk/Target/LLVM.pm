@@ -584,6 +584,32 @@ sub _emit_class_registry_ir {
         $ctx->{_strpair_emitted} = 1;  # I3: track emission to prevent double-declare in post-class re-emit
     }
 
+    # Type pre-pass: emit EVERY class's vtable + object-struct type before any
+    # class body. An inherited ADJUST flattened into a child (019eb6ff item 6)
+    # carries the declaring ancestor's field_stash, so the child's
+    # @Child__ADJUST body GEPs into %Ancestor.obj. With per-class inline type
+    # defs in sort order, that GEP referenced an as-yet-undefined (opaque,
+    # unsized) struct whenever the child sorted before its ancestor — lli:
+    # "base element of getelementptr must be sized". Defining all struct types
+    # up front makes every cross-class GEP target sized regardless of order.
+    for my $cname (sort keys %$registry) {
+        my $reg     = $registry->{$cname};
+        my $methods = $reg->{methods} // [];
+        my $fields  = $reg->{fields}  // [];
+
+        # Vtable type: { i8* class-name, i8* slot0, i8* slot1, ... }
+        my $vt_type = '%' . $cname . '.vt';
+        my @vt_elems = ('i8*');  # slot 0 = class-name ptr
+        push @vt_elems, ('i8*') x scalar(@$methods);
+        push @lines, "$vt_type = type { " . join(', ', @vt_elems) . " }  ; vtable for $cname";
+
+        # Object struct type: { %Cls.vt*, %Slot, %Slot, ... }
+        my $obj_type = '%' . $cname . '.obj';
+        my @obj_elems = ($vt_type . '*');  # slot 0 = vtable ptr
+        push @obj_elems, ('%Slot') x scalar(@$fields);  # one %Slot per field
+        push @lines, "$obj_type = type { " . join(', ', @obj_elems) . " }  ; object struct for $cname";
+    }
+
     for my $cname (sort keys %$registry) {
         my $reg     = $registry->{$cname};
         my $methods = $reg->{methods} // [];
@@ -592,26 +618,16 @@ sub _emit_class_registry_ir {
         # Sort fields by field_index to ensure consistent struct layout
         my @sorted_fields = sort { ($a->{field_index} // 0) <=> ($b->{field_index} // 0) } @$fields;
 
-        # 1. Vtable type: { i8* class-name, i8* slot0, i8* slot1, ... }
-        my $vt_type = '%' . $cname . '.vt';
-        my $n_slots = scalar @$methods;
-        my @vt_elems = ('i8*');  # slot 0 = class-name ptr
-        push @vt_elems, ('i8*') x $n_slots;
-        push @lines, "$vt_type = type { " . join(', ', @vt_elems) . " }  ; vtable for $cname";
-
-        # 2. Object struct type: { %Cls.vt*, %Slot, %Slot, ... }
+        my $vt_type  = '%' . $cname . '.vt';
         my $obj_type = '%' . $cname . '.obj';
-        my @obj_elems = ($vt_type . '*');  # slot 0 = vtable ptr
-        push @obj_elems, ('%Slot') x scalar(@sorted_fields);  # one %Slot per field
-        push @lines, "$obj_type = type { " . join(', ', @obj_elems) . " }  ; object struct for $cname";
 
-        # 3. Class-name string constant
+        # Class-name string constant
         my $cn_name_global = '@' . $cname . '__class_name';
         my $cn_bytes = length($cname) + 1;  # +1 for NUL
         my $cn_enc   = _encode_c_string($cname);
         push @lines, "$cn_name_global = private unnamed_addr constant [$cn_bytes x i8] c\"$cn_enc\\00\", align 1";
 
-        # 4. Method body functions (one define per method)
+        # Method body functions (one define per method)
         for my $minfo (@$methods) {
             my $mname     = $minfo->{name};
             my $fn_name   = '@' . $cname . '__' . $mname;
@@ -769,7 +785,7 @@ sub _emit_class_registry_ir {
             push @lines, _render_str_globals($adj_ctx);
         }
 
-        # 5. Vtable global: @Cls__vtable = { class-name-ptr, fn-ptr0, fn-ptr1, ... }
+        # Vtable global: @Cls__vtable = { class-name-ptr, fn-ptr0, fn-ptr1, ... }
         my $vt_global = '@' . $cname . '__vtable';
         my @vt_init;
         push @vt_init, "i8* getelementptr inbounds ([$cn_bytes x i8], [$cn_bytes x i8]* $cn_name_global, i64 0, i64 0)";
@@ -2975,13 +2991,13 @@ sub process_control_node {
     elsif ($op eq 'Loop') {
         $self->_process_loop_node($node);
     }
-    elsif ($op eq 'VarDecl'
-        || exists $Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS{$op}) {
-        # Every statement-effect op (the shared table: Assign, CompoundAssign,
-        # Call, RegexSubst, RegexMatch, Match, NotMatch, BacktickExpr,
-        # TryCatch) plus VarDecl is lowered here so its side effect — a store,
-        # a dispatched call's field mutation, a substitution — is emitted at
-        # its control position, before any later read.
+    elsif (Chalk::IR::NodeFactory::is_statement_node($op)) {
+        # Every statement node (VarDecl + the shared statement-effect table:
+        # Assign, CompoundAssign, Call, RegexSubst, RegexMatch, Match,
+        # NotMatch, BacktickExpr, TryCatch) is lowered here so its side
+        # effect — a store, a dispatched call's field mutation, a
+        # substitution — is emitted at its control position, before any
+        # later read.
         $self->lower_value($node);
     }
     # Other ops in the control chain (Return, Unwind, Region, Proj, Phi, etc.)
@@ -3388,14 +3404,12 @@ sub _collect_body_recursive {
 
     my $op = $node->can('operation') ? $node->operation : '';
 
-    # Side-effect and control-flow nodes go into the body. The side-effect
-    # set is the shared %STATEMENT_EFFECT_OPS table (Assign, CompoundAssign,
-    # Call, RegexSubst, RegexMatch, Match, NotMatch, BacktickExpr, TryCatch)
-    # plus VarDecl; If/Loop are control. If/Loop branch bodies are
-    # discovered from their own Proj consumers by _process_if_node, so we do
-    # not recurse through them here.
-    if ($op eq 'VarDecl' || $op eq 'If' || $op eq 'Loop'
-        || exists $Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS{$op}) {
+    # Statement nodes (is_statement_node: VarDecl + the shared
+    # statement-effect table) and control flow (If/Loop) go into the body.
+    # If/Loop branch bodies are discovered from their own Proj consumers by
+    # _process_if_node, so we do not recurse through them here.
+    if ($op eq 'If' || $op eq 'Loop'
+        || Chalk::IR::NodeFactory::is_statement_node($op)) {
         push @$body, $node;
         return if $op eq 'If' || $op eq 'Loop';
     }

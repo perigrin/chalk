@@ -371,12 +371,10 @@ class Chalk::IR::Schedule::Elaborate {
         # Stop at Region (merge point) — handled by the enclosing If/Loop.
         return if $op eq 'Region';
 
-        # Include side-effect nodes and nested control. The side-effect set
-        # is the shared %STATEMENT_EFFECT_OPS table (Assign, CompoundAssign,
-        # Call, RegexSubst, RegexMatch, Match, NotMatch, BacktickExpr,
-        # TryCatch) plus VarDecl; If/Loop are control.
-        if ($op eq 'VarDecl' || $op eq 'If' || $op eq 'Loop'
-            || exists $Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS{$op}) {
+        # Statement nodes (is_statement_node: VarDecl + the shared
+        # statement-effect table) and nested control (If/Loop).
+        if ($op eq 'If' || $op eq 'Loop'
+            || Chalk::IR::NodeFactory::is_statement_node($op)) {
             push @$chain, $node;
             return if $op eq 'If' || $op eq 'Loop';  # their branches expanded separately
         }

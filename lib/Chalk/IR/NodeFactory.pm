@@ -345,3 +345,16 @@ class Chalk::IR::NodeFactory {
         return scalar keys %cache;
     }
 }
+
+# is_statement_node($op) -> bool
+# True for ops the backend collectors treat as statement-position body
+# members: VarDecl plus every statement-effect op (the shared
+# %STATEMENT_EFFECT_OPS table). NOT control flow (If/Loop) — callers that
+# also collect control add those explicitly. One predicate so adding an op
+# to the table is a single-site change, not a sweep across the collectors.
+sub Chalk::IR::NodeFactory::is_statement_node {
+    my ($op) = @_;
+    return 0 unless defined $op;
+    return 1 if $op eq 'VarDecl';
+    return exists $Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS{$op} ? 1 : 0;
+}
