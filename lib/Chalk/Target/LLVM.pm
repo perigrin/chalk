@@ -3025,38 +3025,6 @@ sub _process_branch_from_if {
     $self->_set_terminator("  br label %$merge_label  ; if branch $branch_idx: jump to merge");
 }
 
-# _wire_region_phis: find Phi nodes that are consumers of the Region node
-# and ensure their results are cached under their node ids.
-sub _wire_region_phis {
-    my ($self, $region, $then_label, $else_label) = @_;
-
-    my $consumers = $region->consumers // [];
-    for my $phi_node (@$consumers) {
-        next unless defined $phi_node && ref($phi_node);
-        next unless $phi_node->can('operation') && $phi_node->operation eq 'Phi';
-
-        # Skip if already cached.
-        next if exists $self->{cache}{ $phi_node->id };
-
-        my $inputs = $phi_node->inputs;
-        unless (defined $inputs && scalar @$inputs >= 2) {
-            die "LLVM backend: Phi node (id=" . $phi_node->id . ") attached to Region "
-              . "has fewer than 2 incoming values — missing predecessor edge";
-        }
-
-        # Lower both incoming values (they should already be in cache from
-        # branch processing above).
-        my $then_val = $self->lower_value($inputs->[0]);
-        my $else_val = $self->lower_value($inputs->[1]);
-
-        my $repr = _require_repr($phi_node, 'Region.Phi');
-        my $llvm_type = _repr_to_llvm_type($repr);
-        my $result    = $self->_fresh;
-        $self->_emit("  $result = phi $llvm_type [ $then_val, %$then_label ], [ $else_val, %$else_label ]  ; Region phi");
-        $self->{cache}{ $phi_node->id } = $result;
-    }
-}
-
 # _process_loop_node: lower a Loop node (while/foreach/postfix-while).
 #
 # Control flow:
@@ -3185,10 +3153,26 @@ sub _process_loop_node {
     # ---- Exit block ----
     $self->_new_block($exit_label);
 
-    # Wire exit Region phis.
+    # The loop-exit block's SOLE predecessor is the loop header (the
+    # false-condition branch). A Phi attached to the exit Region would be a
+    # then/else-shaped 2-arm merge naming body-end/preheader — neither
+    # branches to the exit block — i.e. structurally invalid. Loop-carried
+    # values flow through the HEADER phis (which the body and post-loop reads
+    # consume directly), so no real producer attaches an exit-Region phi.
+    # If one ever appears, fail loudly rather than emit broken IR (019eb6ff
+    # item 2): a single-predecessor merge needs no phi — read the header phi.
     my $exit_region = $loop_node->region;
     if (defined $exit_region) {
-        $self->_wire_region_phis($exit_region, $body_end_label, $preheader_label);
+        my @exit_phis = grep {
+            defined $_ && ref($_) && $_->can('operation') && $_->operation eq 'Phi'
+                && !exists $self->{cache}{ $_->id }
+        } ($exit_region->consumers // [])->@*;
+        die "GAP: loop-exit Region (id=" . $exit_region->id . ") has "
+          . scalar(@exit_phis) . " Phi consumer(s) — the exit block's single "
+          . "predecessor is the loop header, so a loop-carried value is the "
+          . "header phi itself, not an exit-merge phi. Read the header phi "
+          . "instead of attaching a Phi to the exit Region."
+            if @exit_phis;
     }
 
     # Update var_table with the final values (from exit path = body_vars at
