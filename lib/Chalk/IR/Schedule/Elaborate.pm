@@ -21,6 +21,8 @@ use utf8;
 use experimental 'class';
 no warnings 'experimental::class';
 
+use Chalk::IR::NodeFactory;   # %STATEMENT_EFFECT_OPS (the shared statement-effect table)
+
 class Chalk::IR::Schedule::Elaborate {
     # blocks: arrayref of elaborated blocks in dominator-preorder.
     # Each block is { id, ctrl_nodes, phi_nodes => [...] }
@@ -369,9 +371,12 @@ class Chalk::IR::Schedule::Elaborate {
         # Stop at Region (merge point) — handled by the enclosing If/Loop.
         return if $op eq 'Region';
 
-        # Include side-effect nodes and nested control.
-        if ($op eq 'VarDecl' || $op eq 'Assign' || $op eq 'CompoundAssign'
-            || $op eq 'If'   || $op eq 'Loop') {
+        # Include side-effect nodes and nested control. The side-effect set
+        # is the shared %STATEMENT_EFFECT_OPS table (Assign, CompoundAssign,
+        # Call, RegexSubst, RegexMatch, Match, NotMatch, BacktickExpr,
+        # TryCatch) plus VarDecl; If/Loop are control.
+        if ($op eq 'VarDecl' || $op eq 'If' || $op eq 'Loop'
+            || exists $Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS{$op}) {
             push @$chain, $node;
             return if $op eq 'If' || $op eq 'Loop';  # their branches expanded separately
         }

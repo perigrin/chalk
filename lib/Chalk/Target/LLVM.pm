@@ -2929,19 +2929,19 @@ sub _repr_to_llvm_type {
 sub process_control_node {
     my ($self, $node) = @_;
     my $op = $node->operation;
-    if ($op eq 'VarDecl' || $op eq 'Assign' || $op eq 'CompoundAssign') {
-        $self->lower_value($node);
-    }
-    elsif ($op eq 'If') {
+    if ($op eq 'If') {
         $self->_process_if_node($node);
     }
     elsif ($op eq 'Loop') {
         $self->_process_loop_node($node);
     }
-    elsif ($op eq 'Call') {
-        # Call(dispatch_kind='method') is the canonical form of MethodCall.
-        # Side-effecting calls in the control chain must be lowered here so
-        # their field mutations are emitted before subsequent reads.
+    elsif ($op eq 'VarDecl'
+        || exists $Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS{$op}) {
+        # Every statement-effect op (the shared table: Assign, CompoundAssign,
+        # Call, RegexSubst, RegexMatch, Match, NotMatch, BacktickExpr,
+        # TryCatch) plus VarDecl is lowered here so its side effect — a store,
+        # a dispatched call's field mutation, a substitution — is emitted at
+        # its control position, before any later read.
         $self->lower_value($node);
     }
     # Other ops in the control chain (Return, Unwind, Region, Proj, Phi, etc.)
@@ -3346,7 +3346,7 @@ sub _find_proj_consumer {
 }
 
 # _collect_branch_body($proj_node) -> ordered list of body side-effect nodes.
-# Walks consumers of the Proj node and collects VarDecl/Assign/CompoundAssign
+# Walks consumers of the Proj node and collects statement-effect + control
 # nodes in topological order (simplified: consumers of consumers).
 sub _collect_branch_body {
     my ($proj_node) = @_;
@@ -3364,15 +3364,15 @@ sub _collect_body_recursive {
 
     my $op = $node->can('operation') ? $node->operation : '';
 
-    # Side-effect and control-flow nodes go into the body.
-    # If/Loop nodes in a branch are processed via process_control_node,
-    # which dispatches to _process_if_node/_process_loop_node for nested
-    # control flow.
-    if ($op eq 'VarDecl' || $op eq 'Assign' || $op eq 'CompoundAssign'
-        || $op eq 'If' || $op eq 'Loop') {
+    # Side-effect and control-flow nodes go into the body. The side-effect
+    # set is the shared %STATEMENT_EFFECT_OPS table (Assign, CompoundAssign,
+    # Call, RegexSubst, RegexMatch, Match, NotMatch, BacktickExpr, TryCatch)
+    # plus VarDecl; If/Loop are control. If/Loop branch bodies are
+    # discovered from their own Proj consumers by _process_if_node, so we do
+    # not recurse through them here.
+    if ($op eq 'VarDecl' || $op eq 'If' || $op eq 'Loop'
+        || exists $Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS{$op}) {
         push @$body, $node;
-        # Do NOT recurse further for If/Loop — their branch bodies are
-        # discovered from their own Proj consumers by _process_if_node.
         return if $op eq 'If' || $op eq 'Loop';
     }
 
