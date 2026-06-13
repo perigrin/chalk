@@ -225,13 +225,21 @@ sub _method_fn_llvm_ret_type {
 
 # _flatten_inheritance(\%registry) -> void
 #
-# Resolve :isa inheritance: for each class with a parent, copy inherited
-# method slots from the parent into the child's vtable (compile-time MRO
+# Resolve :isa inheritance: for each class with a parent, flatten inherited
+# methods, FIELDS, and ADJUST blocks into the child (compile-time MRO
 # flatten). Run AFTER the registry is fully populated so all parent classes
 # are present. Parents flatten BEFORE their children (memoized recursion,
 # cycle-guarded) — a single pass in name order would copy a parent's entry
-# as it currently stands, losing GRANDparent methods whenever the child
+# as it currently stands, losing GRANDparent members whenever the child
 # sorts before its parent.
+#
+# Object-struct layout is base-first: a `feature class` subclass's struct
+# is [parent fields..., own fields...], and a field read names its
+# FLATTENED slot. The child's own fields, declared with per-class indices,
+# are renumbered to follow the inherited ones. ADJUST blocks run base-first
+# (the MRO order perl runs them in), so inherited adjusts are PREPENDED.
+# :param fields likewise come from the flattened set, so a child constructor
+# binds inherited :param fields.
 sub _flatten_inheritance {
     my ($registry) = @_;
     my %done;
@@ -249,16 +257,48 @@ sub _flatten_inheritance {
                 die "LLVM MOP: class '$cname' has :isa($parent) but '$parent' is not declared in this graph";
             }
             $flatten->($parent);
-            # Copy parent methods into child that don't already exist in child
+            my $child = $registry->{$cname};
+
+            # Fields: parent fields occupy the low struct slots; the child's
+            # own fields are renumbered to follow them. Inherited reader
+            # methods (below) and FieldAccess nodes both name flattened slots.
+            my @inherited = map { { %$_, inherited_from => $parent } }
+                @{ $parent_reg->{fields} };
+            my $base = scalar @inherited;
+            my @own;
+            my %remap;   # old per-class field_index -> flattened slot
+            for my $fi (0 .. $#{ $child->{fields} }) {
+                my $old = $child->{fields}[$fi]{field_index};
+                $remap{$old} = $base + $fi;
+                push @own, { $child->{fields}[$fi]->%*, field_index => $base + $fi };
+            }
+            $child->{fields} = [ @inherited, @own ];
+
+            # Own :reader methods were synthesized with the pre-renumber
+            # field index — fix them to the flattened slot.
+            for my $m (@{ $child->{methods} }) {
+                next unless $m->{is_reader_synth};
+                next if exists $m->{inherited_from};
+                $m->{reader_field_index} = $remap{ $m->{reader_field_index} }
+                    if exists $remap{ $m->{reader_field_index} };
+            }
+
+            # Methods: copy parent slots the child does not override. Reader
+            # methods carry reader_field_index — these are inherited fields,
+            # already at their parent slot, so the index is correct as-is.
             for my $pmeth (@{ $parent_reg->{methods} }) {
-                unless (grep { ($_->{name} // '') eq $pmeth->{name} } @{ $registry->{$cname}{methods} }) {
-                    push @{ $registry->{$cname}{methods} }, {
+                unless (grep { ($_->{name} // '') eq $pmeth->{name} } @{ $child->{methods} }) {
+                    push @{ $child->{methods} }, {
                         %$pmeth,
-                        vtable_slot => scalar(@{ $registry->{$cname}{methods} }),
+                        vtable_slot => scalar(@{ $child->{methods} }),
                         inherited_from => $parent,
                     };
                 }
             }
+
+            # ADJUST: base-first. The parent's (already-flattened) adjusts
+            # run before the child's own.
+            $child->{adjusts} = [ @{ $parent_reg->{adjusts} }, @{ $child->{adjusts} } ];
         }
         delete $in_progress{$cname};
         $done{$cname} = 1;
