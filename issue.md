@@ -1,6 +1,6 @@
 ---
 title: "Cache/identity family follow-ups: RegexMatch identity, loop-exit phi wiring, aggregate-table keying, collector drift"
-state: in-progress
+state: done
 urgency: normal
 milestone: v0.1
 blocked_by:
@@ -9,16 +9,32 @@ blocks:
 - 019eaa51-bcfe-76b6-a02d-a23a65bd7498
 - 019ec107-d180-7a26-93f8-12feeeffb6a1
 created: 2026-06-11T14:04:35.973450184Z
-updated: 2026-06-13T12:49:41.678042121Z
+updated: 2026-06-13T12:49:51.806916571Z
 sessions:
 - start_sha: d8406a4d7bfec4174defdb278ad7f22704105098
-  end_sha: ""
-  commits: 0
+  end_sha: aee6d5c89ba11a0ea057fb8ca1c25c756d717b90
+  commits: 8
   started_at: 2026-06-12T04:39:02.650467055Z
+  ended_at: 2026-06-13T12:49:51.806916571Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
   timestamp: 2026-06-12T04:39:02.650467055Z
+- state: done
+  actor: human:git-zhi
+  timestamp: 2026-06-13T12:49:51.806916571Z
+observed_paths:
+- lib/Chalk/IR/NodeFactory.pm
+- lib/Chalk/IR/Schedule/Elaborate.pm
+- lib/Chalk/Target/LLVM.pm
+- paad/code-reviews/phase1-lateral-bindings-2026-06-13-12-45-45-3de55c3a-019eb6ff-issue.md
+- t/bootstrap/ir/llvm-aggregate-table-keying.t
+- t/bootstrap/ir/llvm-collector-statement-effects.t
+- t/bootstrap/ir/llvm-inherited-adjust.t
+- t/bootstrap/ir/llvm-literal-alloc-identity.t
+- t/bootstrap/ir/llvm-loop-exit-region-phi.t
+- t/bootstrap/ir/llvm-regex-match-identity.t
+- t/bootstrap/ir/statement-effect-identity.t
 ---
 
 Pre-existing same-family defects surfaced by the 019eb316 per-issue agentic review
