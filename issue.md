@@ -10,7 +10,7 @@ blocked_by:
 blocks:
 - 019eaa51-b9eb-7bc5-bee4-ca6140dc8b81
 created: 2026-06-09T02:59:04.062678084Z
-updated: 2026-06-14T03:58:25.906947341Z
+updated: 2026-06-14T04:21:52.593722059Z
 sessions:
 - start_sha: 125deda16f98e24471678aaa7f4b363e237ed4cd
   end_sha: ""
@@ -22,12 +22,17 @@ transitions:
   timestamp: 2026-06-14T03:58:25.906947341Z
 ---
 
-Scoping brief: docs/plans/2026-06-12-phase4-bson-brief.md (the phase-shape decision the three-axis plan deferred to post-Phase-3).
+Scoping brief: docs/plans/2026-06-12-phase4-bson-brief.md. Stage 4a (seam re-audit) DONE 2026-06-14: docs/plans/2026-06-14-phase4a-seam-reaudit.md.
 
-Shape: 4a re-audit the seam (node parity vs TODAY's IR, son-compare baseline, cross-load of the new vocabulary) -> 4b computation-slice green through the corpus triple contract (behavior==oracle via P corner + L corner where runtime-free + ir-block shape subset + TypedInvariant) -> 4c class tier (B::SoN emits the SEALED MOP + Call.class_name; FromOptree method-body/field-write gaps) -> 4d regex/host tier (after 019eb6ff item 1 decides RegexMatch identity).
+4a HEADLINE (corrects April's stale "70/76"): today's IR = 84 node classes; SoN::FromOptree actually EMITS ~40. The class-name mirror (77/84) is NOT the contract. Zero R3-deleted nodes are produced (B::SoN is behind the deleted vocabulary, never coupled). Gap set: RegexCapture, EnvRead, Coerce, ExpressionList, ListAssign, CompoundAssign, Match/NotMatch binding, Interpolate, StructRef/FieldAccess + the ENTIRE MOP/class tier.
 
-Gate 0: 019eb6ff wired as blocker -- the verifier's backend must have no known miscompiles (RegexMatch staleness, loop-exit phi wiring, _arr_table keying) before "a divergence is a B::SoN bug" is a sound rule.
+THE THREE OPEN DECISIONS — DECIDED in 4a (grounded):
+(a) Conversion locus = KEEP THE JSON SEAM. Chalk's from_json already reconstructs per-call #N identity through Chalk's NodeFactory; B::SoN's own factory hash-conses (wrong identity), so in-process construction would drag Chalk's IR tree into perl5-son AND need the identity rules re-imported. JSON isolates it.
+(b) MOP emission = DECLARATIVE JSON section replayed Chalk-side via declare_*/seal. Chalk::MOP isn't cheaply loadable from perl5-son (pulls Graph/NodeFactory/Bindings); the corpus MOP::* vocabulary is the replay precedent.
+(c) Multi-exit bodies = NORMALIZE TO SINGLE-EXIT in FromOptree (merge returns via Region+Phi), NOT a gap-map entry.
 
-Known debts (April figures STALE, re-audit first): FromOptree PadAccess targ bug; fails on feature-class method bodies (zero overlap for class files); drops field writes; no MOP emission; node parity table outdated by G4/G6/G7/R3.
+SINGLE BIGGEST 4b BLOCKER (new finding, double-sided): multi-exit/early-return bodies. FromOptree truncates at the FIRST return (FromOptree.pm:290-304) or the whole sub is silently swallowed (B::SoN.pm:102 catch{}); LLVM _method_body_root DIES on >1 Return (LLVM.pm:360-363). Real lib/ is early-return-heavy -> nothing non-trivial flows until this is fixed. 4b starts here.
 
-Open decisions made in 4a: conversion locus (JSON load vs in-process NodeFactory), MOP emission side (build-there vs declarative replay through declare_*/seal), multi-exit method bodies (gap-map vs early Phi normalization).
+STILL-OPEN DEBTS (re-measured): field writes dropped (probe confirmed: $n+=1 -> FieldAccess;Add;Return, store absent); no MOP emission (largest 4c gap); PadAccess targ bug present (cosmetic-but-real, cross-graph identity); son-compare divergences are PURE node-ordering (not semantic) on its trivial-accessor corpus -- it does NOT certify the hard tiers; the mdtest corpus is the real work-list.
+
+SHAPE: 4b computation slice (start: single-exit normalization; then field/element writes, CompoundAssign, increment modeling) -> 4c class tier (declarative MOP JSON + Call.class_name) -> 4d regex/host/try (RegexCapture wiring, EnvRead, TryCatch) gated on 019eb6ff item 1. Gate 0 (019eb6ff) CLOSED. Branch sound to build on (whole-branch review 2026-06-13, 0 Critical).
