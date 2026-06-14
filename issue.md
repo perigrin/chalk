@@ -6,26 +6,32 @@ milestone: v0.1
 blocked_by:
 - 019eb6ff-c505-71f7-9665-5e087be277fe
 created: 2026-06-13T12:49:35.616744405Z
-updated: 2026-06-13T12:49:41.681992883Z
+updated: 2026-06-14T03:57:50.892210785Z
 ---
 
-Low-severity coverage/path gap surfaced by the 019eb6ff per-issue review
-(report: paad/code-reviews/phase1-lateral-bindings-2026-06-13-12-45-45-3de55c3a-019eb6ff-issue.md, finding G3).
+UPDATE 2026-06-14 (whole-branch agentic review, report:
+paad/code-reviews/phase1-lateral-bindings-2026-06-13-13-47-41-aee6d5c8-whole-branch.md):
+the CORRECTNESS worry that opened this issue is DISPROVED. PostfixDeref is
+in %PURE_DESCEND_OPS, so _reads_mutable_location descends through @$ref/%$ref
+to the PadAccess and the deref re-lowers with the fresh ref after a reassign.
+Probe-confirmed twice (review + re-run): `my $r=[1,2]; @$r; $r=[9,9,9]; @$r`
+gives the NEW array (Int:5), not a stale pointer. _lower_array_deref/
+_lower_hash_deref do NOT need to route through _container_ptr — the cache
+bypass already covers them.
 
-019eb6ff item 3 fixed stale typed-aggregate pointers by resolving them
-at-use via _container_ptr (Subscript/Length/element-store consumers). But
-PostfixDeref lowering (@$ref / %$ref, _lower_array_deref / _lower_hash_deref
-in Target/LLVM.pm) does NOT route through _container_ptr — it bitcasts
-lower_value(...) and caches by node id. A ref-variable reassigned and then
-read via postfix-deref could serve a stale typed pointer (same class as the
-fix-2 bug, different code path; predates 019eb6ff, not in its claim).
+So the original "route PostfixDeref through _container_ptr" task is DROPPED
+(no bug to fix). What remains is OPTIONAL coverage-locking, low priority:
 
-Also close the symmetric behavioral coverage on the at-use path: hash
-read/store after ref reassign and Length-after-reassign route through the
-SAME fixed _container_ptr (structurally covered) but have no lli test.
+1. Behavioral lli tests that lock the at-use path the 019eb6ff fix covers
+   structurally but doesn't test directly: hash read/store after ref
+   reassign, Length-after-reassign, postfix-deref-after-reassign. All route
+   through the now-fixed _container_ptr / the cache bypass; these would
+   regression-guard the fix, not find a bug.
+2. STATE-F5 (whole-branch review suggestion): Assign(Array-lvalue) with an
+   unboxed container repr='Array' GEPs a value that lowered to i8* — a late
+   lli type error reachable only via a malformed repr combination the corpus
+   never produces. A representation-discipline assertion ('Array' container
+   => value must be a %Array* producer) would convert the late type error
+   into an early GAP. Loud not silent, pre-existing.
 
-Scope: route PostfixDeref through _container_ptr (or an equivalent
-at-use resolution), add hash-reassign + Length-after-reassign + a
-postfix-deref-after-reassign lli case. Pick up on a future aggregate pass.
-Not gating Phase 4 (the postfix-deref-after-reassign shape does not appear
-in the corpus or B::SoN's near-term lib/ targets).
+Pick up on a future aggregate/representation pass. Not gating anything.
