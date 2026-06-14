@@ -1584,6 +1584,29 @@ sub lower_value {
     elsif ($op eq 'EnvRead') {
         return $self->_lower_env_read($node);
     }
+    # Statement-effect ops that carry per-call identity (they are in
+    # %STATEMENT_EFFECT_OPS, so the control collectors route them here) but
+    # have no runtime-free lowering yet. An honest GAP names the op so the
+    # corpus L-corner records a gap-map entry rather than misdirecting with a
+    # generic backend error (whole-branch review I1):
+    #   NotMatch     — !~ ; the negated-match runtime-free path is unbuilt
+    #                  (RegexMatch/Match exist; NotMatch is their negation).
+    #   BacktickExpr — qx`` ; command execution is a host-process effect.
+    #   TryCatch     — try/catch ; needs LLVM landingpad + a personality fn.
+    elsif ($op eq 'NotMatch') {
+        die "GAP: op=NotMatch (!~) is not lowered runtime-free yet — the "
+          . "negated-match path is unbuilt (RegexMatch/Match are; NotMatch "
+          . "is their negation).";
+    }
+    elsif ($op eq 'BacktickExpr') {
+        die "GAP: op=BacktickExpr (qx``) is not lowered runtime-free — "
+          . "command execution is a host-process effect (a future host tier).";
+    }
+    elsif ($op eq 'TryCatch') {
+        die "GAP: op=TryCatch (try/catch) is not lowered runtime-free yet — "
+          . "needs an LLVM landingpad + personality function for exception "
+          . "unwind.";
+    }
     else {
         if (defined $node->representation && $node->representation eq 'Scalar') {
             die "GAP: node op=$op repr=Scalar reached LLVM backend — cannot lower runtime-free. "
