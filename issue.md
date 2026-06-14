@@ -1,6 +1,6 @@
 ---
 title: "Phase 4: B::SoN as trusted IR/MOP producer (directional, verified through harness)"
-state: pending
+state: in-progress
 urgency: normal
 milestone: codegen-harness
 blocked_by:
@@ -10,7 +10,16 @@ blocked_by:
 blocks:
 - 019eaa51-b9eb-7bc5-bee4-ca6140dc8b81
 created: 2026-06-09T02:59:04.062678084Z
-updated: 2026-06-12T01:54:12.268241594Z
+updated: 2026-06-14T03:58:25.906947341Z
+sessions:
+- start_sha: 125deda16f98e24471678aaa7f4b363e237ed4cd
+  end_sha: ""
+  commits: 0
+  started_at: 2026-06-14T03:58:25.906947341Z
+transitions:
+- state: in-progress
+  actor: human:git-zhi
+  timestamp: 2026-06-14T03:58:25.906947341Z
 ---
 
 Scoping brief: docs/plans/2026-06-12-phase4-bson-brief.md (the phase-shape decision the three-axis plan deferred to post-Phase-3).
