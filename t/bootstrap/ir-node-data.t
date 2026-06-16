@@ -42,7 +42,7 @@ isa_ok($pad, 'Chalk::IR::Node::Access', 'PadAccess isa Access');
 is($pad->operation(), 'PadAccess', 'PadAccess operation');
 is($pad->targ(), 3, 'PadAccess targ');
 is($pad->varname(), '$x', 'PadAccess varname');
-like($pad->content_hash(), qr/PadAccess\|targ=3\|varname=\$x/, 'PadAccess content_hash');
+like($pad->content_hash(), qr/PadAccess\|varname=\$x/, 'PadAccess content_hash keyed on varname, not targ');
 
 my $fa = Chalk::IR::Node::FieldAccess->new(id => 'fa_0', field_index => 0, field_stash => 'MyClass');
 isa_ok($fa, 'Chalk::IR::Node::Access', 'FieldAccess isa Access');

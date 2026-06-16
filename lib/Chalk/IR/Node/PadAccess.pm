@@ -13,6 +13,12 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
     method operation() { 'PadAccess' }
 
     method content_hash() {
-        return join('|', 'PadAccess', "targ=$targ", "varname=$varname", $self->_serialize_inputs());
+        # Identity is the variable name plus inputs. `targ` (the pad-slot index)
+        # is CV-local and unstable across compilation units, so it is NOT
+        # identity-bearing: two semantically identical reads at different pad
+        # indices must hash-cons together. `targ` is retained as a field for
+        # diagnostics / round-trip only (no consumer reads it behaviorally;
+        # PadAccess resolves to its VarDecl via inputs[0]).
+        return join('|', 'PadAccess', "varname=$varname", $self->_serialize_inputs());
     }
 }
