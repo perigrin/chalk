@@ -16,6 +16,19 @@ use Chalk::IR::NodeFactory;
 # CFG node operations — these carry control tokens and are never hash-consed.
 my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
 
+# Map a B::SoN stamp lattice type to a Chalk representation. B::SoN carries type
+# info as a `stamp` (SoN::IR::Stamp lattice: Int < Num < Str < Scalar, plus
+# Boolean/Undef/refs); Chalk's backend requires an explicit `representation`.
+# Only the concrete, lowerable types map; anything else is left unset (the
+# backend's _require_repr then reports an honest GAP rather than mislowering).
+my %STAMP_TO_REPR = (
+    Int     => 'Int',
+    Num     => 'Num',
+    Str     => 'Str',
+    Boolean => 'Bool',
+    Undef   => 'Undef',
+);
+
 # -----------------------------------------------------------------------
 # _is_cfg($node) — true if the node is a CFG node
 # -----------------------------------------------------------------------
@@ -239,6 +252,20 @@ sub _deserialize_graph ($method_data) {
         # Resolve inputs from already-created nodes
         my @inputs = map { $nodes[$_] } ($nd->{inputs} // [])->@*;
 
+        # B::SoN serializes Return as inputs=[control, value] (control token
+        # first). Chalk's contract is inputs=[value] with control carried in
+        # control_in. Reconcile: when a Return leads with the Start control node
+        # and has a trailing value, split off the control (re-attached via
+        # control_in after construction below) and keep only the value as input.
+        # Scoped to a leading Start so an Unwind-controlled Return (die: the
+        # Unwind is the real exit and must stay a reachable input) is untouched.
+        my $bson_return_control;
+        if ($op eq 'Return' && @inputs >= 2
+                && blessed($inputs[0])
+                && $inputs[0]->operation eq 'Start') {
+            $bson_return_control = shift @inputs;
+        }
+
         # Build the argument hash, with inputs and any extra fields
         my %args = (inputs => \@inputs);
 
@@ -305,6 +332,19 @@ sub _deserialize_graph ($method_data) {
         }
         else {
             $node = $factory->make($op, %args);
+        }
+
+        # Re-attach a B::SoN Return's control token via control_in (it was split
+        # out of inputs above to match Chalk's Return contract).
+        if (defined $bson_return_control) {
+            $node->set_control_in($bson_return_control);
+        }
+
+        # Map a B::SoN stamp to a Chalk representation so the backend can lower
+        # the node runtime-free. Chalk's own serializer emits no stamp, so this
+        # only fires for B::SoN-produced JSON.
+        if (defined $nd->{stamp} && exists $STAMP_TO_REPR{ $nd->{stamp} }) {
+            $node->set_representation($STAMP_TO_REPR{ $nd->{stamp} });
         }
 
         push @nodes, $node;
