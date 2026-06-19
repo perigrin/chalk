@@ -121,6 +121,12 @@ my @slice = (
     # i1, so these now reach lli == perl (Bool:1 / Bool:).
     { topic => 'statements',  src => '1 < 2', expect => 'green' },
     { topic => 'statements',  src => '2 < 1', expect => 'green' },
+
+    # references R6/R7: array/hash element assignment. Under canonical ops
+    # (4b-4) these are array-build (aassign -> ArrayRef) + element store
+    # (aelem/helem lvalue + sassign -> Assign over Subscript) + element read.
+    { topic => 'references', src => 'my @a = (1, 2, 3); $a[0] = 42; $a[0]', expect => 'green' },
+    { topic => 'references', src => 'my %h = (k => 0); $h{k} = 99; $h{k}',  expect => 'green' },
 );
 
 my %tally = (green => 0, gap => 0, bug => 0);
