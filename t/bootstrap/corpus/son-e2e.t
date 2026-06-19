@@ -107,6 +107,7 @@ my @slice = (
     { topic => 'arithmetic', src => '-7 % 3', expect => 'green' },
     # statements (literals)
     { topic => 'statements',  src => '5',                 expect => 'green' },
+    { topic => 'statements',  src => 'my $x = 1; my $y = 2; $x + $y', expect => 'green' },
     # variables
     { topic => 'variables',   src => 'my $x = 1; $x',     expect => 'green' },
     { topic => 'variables',   src => 'my $x; $x = 1; $x', expect => 'green' },
@@ -115,21 +116,11 @@ my @slice = (
     { topic => 'strings',     src => q{my $s = 'hello'; $s},     expect => 'green' },
     { topic => 'strings',     src => q{"hello" . " world"},      expect => 'green' },
 
-    # --- Honest GAPs (newly localized by this runner; filed separately) ---
-    # GAP 1 (boolean-fold fidelity): a constant-folded comparison yields a
-    # boolean SV, but B::SoN emits it as Constant(const_type=string,
-    # stamp=Unknown) -- the boolean-ness (is_bool) and a lowerable
-    # representation are both lost. Producer-side fidelity gap.
-    { topic => 'statements',  src => '1 < 2', expect => 'gap',
-      gap => 'B::SoN folds (1<2) to a string Constant stamp=Unknown; is_bool lost' },
-    { topic => 'statements',  src => '2 < 1', expect => 'gap',
-      gap => 'B::SoN folds (2<1) to a string Constant stamp=Unknown; is_bool lost' },
-    # GAP 2 (computed-node representation): a non-folded arithmetic result
-    # (here $x + $y from two lexicals) produces an Add node, but B::SoN stamps
-    # only leaf Constants, not computed nodes, and Chalk's loader runs no
-    # representation inference -- so the Add reaches the backend with no repr.
-    { topic => 'statements',  src => 'my $x = 1; my $y = 2; $x + $y', expect => 'gap',
-      gap => 'B::SoN does not stamp computed nodes (Add); no repr inference on load' },
+    # Constant-folded comparisons: B::SoN recovers PL_sv_yes/PL_sv_no as a
+    # Boolean Constant (4b-3b), and the LLVM backend lowers a Bool constant to
+    # i1, so these now reach lli == perl (Bool:1 / Bool:).
+    { topic => 'statements',  src => '1 < 2', expect => 'green' },
+    { topic => 'statements',  src => '2 < 1', expect => 'green' },
 );
 
 my %tally = (green => 0, gap => 0, bug => 0);

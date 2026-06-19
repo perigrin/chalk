@@ -1642,6 +1642,16 @@ sub _lower_constant {
         $self->{cache}{$node->id} = $ref;
         return $ref;
     }
+    elsif ($repr eq 'Bool') {
+        # Bool constant -> i1 immediate. A folded comparison (1 < 2) reaches
+        # here as a Boolean Constant; Perl's true is 1, false is the empty
+        # string, so any truthy value lowers to i1 1 and a falsy one to i1 0.
+        my $bit = (defined $val && $val ne '' && $val ne '0') ? 1 : 0;
+        my $ref = $self->_fresh;
+        $self->_emit("  $ref = add i1 0, $bit            ; Constant(repr=Bool -> i1)");
+        $self->{cache}{$node->id} = $ref;
+        return $ref;
+    }
     elsif ($repr eq 'Num') {
         # Num constant -> double immediate
         my $ref = $self->_fresh;
