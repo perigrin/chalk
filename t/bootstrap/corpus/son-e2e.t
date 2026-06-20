@@ -132,6 +132,12 @@ my @slice = (
     # (4b-5) this is a read-modify-write: the add over an lvalue $x rebinds $x.
     { topic => 'variables', src => 'my $x = 1; $x += 2; $x', expect => 'green' },
 
+    # increment K1/K2: ++$i / $i++ are read-modify-write (preinc/predec ops,
+    # NOT TARGMY). 4b-6 lowers them to Add/Subtract($i, 1) + rebind; both corpus
+    # cases read $i after, so both expect 1.
+    { topic => 'increment', src => 'my $i = 0; ++$i; $i', expect => 'green' },
+    { topic => 'increment', src => 'my $i = 0; $i++; $i', expect => 'green' },
+
     # strings S4 (`$s .= 'b'`): deferred -- stays multiconcat+TARGMY even under
     # suppression (ck-stage fusion, not rpeep), the same mechanism as field
     # writes. Tracked with 4b-4b.
