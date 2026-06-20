@@ -1,6 +1,6 @@
 ---
 title: "4b-6: increment modeling in FromOptree"
-state: in-progress
+state: done
 urgency: normal
 milestone: v0.1
 blocked_by:
@@ -8,16 +8,20 @@ blocked_by:
 blocks:
 - 019eaa51-bcfe-76b6-a02d-a23a65bd7498
 created: 2026-06-15T22:14:45.983758246Z
-updated: 2026-06-20T19:08:02.391796938Z
+updated: 2026-06-20T19:08:02.504869143Z
 sessions:
 - start_sha: 8181964fb5a9bb2fefaf697f20ba100003301d91
-  end_sha: ""
+  end_sha: 8181964fb5a9bb2fefaf697f20ba100003301d91
   commits: 0
   started_at: 2026-06-20T19:08:02.391796938Z
+  ended_at: 2026-06-20T19:08:02.504869143Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
   timestamp: 2026-06-20T19:08:02.391796938Z
+- state: done
+  actor: human:git-zhi
+  timestamp: 2026-06-20T19:08:02.504869143Z
 ---
 
 Producer-side. ++/-- map to Call (OpMap:70-77); semantics + postinc return-value unverified. Model correctly. Unblocks increment K1/K2. Scope: docs/plans/2026-06-15-phase4b-scope.md
