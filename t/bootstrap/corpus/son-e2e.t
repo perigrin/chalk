@@ -127,6 +127,16 @@ my @slice = (
     # (aelem/helem lvalue + sassign -> Assign over Subscript) + element read.
     { topic => 'references', src => 'my @a = (1, 2, 3); $a[0] = 42; $a[0]', expect => 'green' },
     { topic => 'references', src => 'my %h = (k => 0); $h{k} = 99; $h{k}',  expect => 'green' },
+
+    # variables C2: numeric compound assignment (`$x += 2`). Under canonical ops
+    # (4b-5) this is a read-modify-write: the add over an lvalue $x rebinds $x.
+    { topic => 'variables', src => 'my $x = 1; $x += 2; $x', expect => 'green' },
+
+    # strings S4 (`$s .= 'b'`): deferred -- stays multiconcat+TARGMY even under
+    # suppression (ck-stage fusion, not rpeep), the same mechanism as field
+    # writes. Tracked with 4b-4b.
+    { topic => 'strings', src => q{my $s = 'a'; $s .= 'b'; $s}, expect => 'gap',
+      gap => 'multiconcat+TARGMY (.= ) survives suppression; with 4b-4b' },
 );
 
 my %tally = (green => 0, gap => 0, bug => 0);
