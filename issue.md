@@ -1,19 +1,23 @@
 ---
 title: "4b-4b: field writes + TARGMY result-to-pad stores in FromOptree"
-state: in-progress
+state: done
 urgency: normal
 milestone: v0.1
 created: 2026-06-19T12:20:35.872819956Z
-updated: 2026-06-21T03:29:09.595393977Z
+updated: 2026-06-21T03:29:09.627294506Z
 sessions:
 - start_sha: 21277cb3f6ab3cf625bfd4d690a2bcdccad9310b
-  end_sha: ""
+  end_sha: 21277cb3f6ab3cf625bfd4d690a2bcdccad9310b
   commits: 0
   started_at: 2026-06-21T03:29:09.595393977Z
+  ended_at: 2026-06-21T03:29:09.627294506Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
   timestamp: 2026-06-21T03:29:09.595393977Z
+- state: done
+  actor: human:git-zhi
+  timestamp: 2026-06-21T03:29:09.627294506Z
 ---
 
 4b-4 covered ARRAY/HASH element writes (R6/R7, green). Two related store-back gaps remain, both rooted in ck-stage (NOT rpeep) fusions that survive peephole suppression:
