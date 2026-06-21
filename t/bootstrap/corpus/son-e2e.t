@@ -138,11 +138,13 @@ my @slice = (
     { topic => 'increment', src => 'my $i = 0; ++$i; $i', expect => 'green' },
     { topic => 'increment', src => 'my $i = 0; $i++; $i', expect => 'green' },
 
-    # strings S4 (`$s .= 'b'`): deferred -- stays multiconcat+TARGMY even under
-    # suppression (ck-stage fusion, not rpeep), the same mechanism as field
-    # writes. Tracked with 4b-4b.
-    { topic => 'strings', src => q{my $s = 'a'; $s .= 'b'; $s}, expect => 'gap',
-      gap => 'multiconcat+TARGMY (.= ) survives suppression; with 4b-4b' },
+    # strings S4 (`$s .= 'b'`): a multiconcat with APPEND|TARGMY. 4b-4b handles
+    # the TARGMY store-back (write result to the targ slot + rebind).
+    { topic => 'strings', src => q{my $s = 'a'; $s .= 'b'; $s}, expect => 'green' },
+
+    # scalar self-assign (`$x = $x + 1`): an add with TARGMY (OPpTARGET_MY),
+    # writing its result in-place to the pad slot. 4b-4b rebinds the targ.
+    { topic => 'variables', src => 'my $x = 5; $x = $x + 1; $x', expect => 'green' },
 );
 
 my %tally = (green => 0, gap => 0, bug => 0);
