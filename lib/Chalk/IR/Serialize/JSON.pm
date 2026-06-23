@@ -365,7 +365,78 @@ sub from_json ($json_string) {
     for my $name (sort keys $data->{methods}->%*) {
         $graphs{$name} = _deserialize_graph($data->{methods}{$name});
     }
+
+    # 4c: a `classes` section (from B::SoN) is replayed into a sealed MOP.
+    # Returned only in list context; scalar context stays \%graphs for the
+    # existing single-return callers.
+    if (wantarray && ref $data->{classes} eq 'HASH' && %{ $data->{classes} }) {
+        my $mop = _replay_classes($data->{classes}, \%graphs);
+        return (\%graphs, $mop);
+    }
+
     return \%graphs;
+}
+
+# _replay_classes($classes, \%graphs) — rebuild a sealed Chalk::MOP from the
+# declarative class section, wiring each method to its loaded graph. Parents are
+# declared before children so `superclass =>` can reference the parent's class.
+sub _replay_classes ($classes, $graphs) {
+    require Chalk::MOP;
+
+    my $mop = Chalk::MOP->new;
+
+    for my $name (_classes_in_parent_order($classes)) {
+        my $cd     = $classes->{$name};
+        my $parent = $cd->{parent};
+        my $super  = (defined $parent && length $parent)
+            ? $mop->for_class($parent)
+            : undef;
+
+        my $cls = $mop->declare_class($name,
+            (defined $super  ? (superclass  => $super)  : ()),
+            (defined $parent ? (parent_name => $parent) : ()),
+        );
+
+        for my $f (($cd->{fields} // [])->@*) {
+            my $vname = $f->{name} // '$?';
+            my @attrs;
+            push @attrs, ':param'  if $f->{is_param};
+            push @attrs, ':reader' if $f->{is_reader};
+            $cls->declare_field($vname,
+                sigil      => substr($vname, 0, 1),
+                param_name => $f->{param_name},
+                attributes => \@attrs,
+            );
+        }
+
+        my $methods = $cd->{methods} // {};
+        for my $mname (sort keys %$methods) {
+            my $graph = $graphs->{ $methods->{$mname} };
+            $cls->declare_method($mname,
+                (defined $graph ? (graph => $graph) : ()),
+            );
+        }
+    }
+
+    $mop->seal;
+    return $mop;
+}
+
+# _classes_in_parent_order($classes) — class names sorted so a parent always
+# precedes its children (a child's superclass must already be declared).
+sub _classes_in_parent_order ($classes) {
+    my @order;
+    my %placed;
+    my $place;
+    $place = sub ($name) {
+        return if $placed{$name};
+        my $parent = $classes->{$name}{parent};
+        $place->($parent) if defined $parent && exists $classes->{$parent};
+        $placed{$name} = 1;
+        push @order, $name;
+    };
+    $place->($_) for sort keys %$classes;
+    return @order;
 }
 
 1;
