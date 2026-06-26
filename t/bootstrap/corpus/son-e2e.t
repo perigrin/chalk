@@ -29,32 +29,64 @@ plan skip_all => "perl 5.42 not found at $PERL" unless -x $PERL;
 # it is wrapped as a sub for B::SoN (which translates CVs). The sub's Return
 # carries the last expression's value, matching the perl oracle's do { ... }.
 # ---------------------------------------------------------------------------
+# Split a corpus source into class definitions (kept at file scope) and the
+# driver statements (wrapped as corpus_case). A `class Foo { ... }` compiled
+# inside the wrapper sub generates a spurious loop, so class defs must stay at
+# file scope. Returns ($prog_text, \@class_names).
+sub split_class_source ($clean) {
+    my @lines = split /\n/, $clean;
+    my (@head, @driver, @class_names);
+    my $depth = 0;
+    my $in_class = 0;
+    for my $line (@lines) {
+        if (!$in_class && $line =~ /^\s*(?:use|no)\s+/) {
+            push @head, $line;            # pragmas stay at file scope
+            next;
+        }
+        if (!$in_class && $line =~ /^\s*class\s+(\w[\w:]*)/) {
+            push @class_names, $1;
+            $in_class = 1;
+            $depth = 0;
+        }
+        if ($in_class) {
+            push @head, $line;
+            $depth += ($line =~ tr/{//);
+            $depth -= ($line =~ tr/}//);
+            $in_class = 0 if $depth <= 0;
+            next;
+        }
+        push @driver, $line;              # the executable driver
+    }
+    my $prog = join("\n", @head) . "\n"
+             . "package main;\n"
+             . "sub corpus_case {\n" . join("\n", @driver) . "\n}\n";
+    return ($prog, \@class_names);
+}
+
 sub run_through_bson ($source) {
-    # Wrap as a named sub in package main.
     (my $clean = $source) =~ s/^\s*#[^\n]*\n//gm;
     $clean =~ s/\s+$//;
-    my $prog = "package main;\nsub corpus_case {\n$clean\n}\n";
+
+    my ($prog, $class_names) = split_class_source($clean);
+    my @pkgs = ('package=main', map { "package=$_" } @$class_names);
+    my $pkg_opts = join(',', @pkgs);
 
     my ($fh, $tmp) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $prog;
     close $fh;
 
-    my $json = qx($PERL -I$SON -MO=SoN,json,package=main $tmp 2>/dev/null);
+    my $json = qx($PERL -I$SON -MO=SoN,json,$pkg_opts $tmp 2>/dev/null);
     return (undef, "B::SoN produced no JSON") unless $json =~ /\S/;
 
     my $data = eval { JSON::PP->new->decode($json) };
     return (undef, "JSON decode failed: $@") unless $data;
+    return (undef, "no main::corpus_case method")
+        unless $data->{methods}{'main::corpus_case'};
 
-    my $m = $data->{methods}{'main::corpus_case'};
-    return (undef, "no main::corpus_case method") unless $m;
-
-    my $filtered = {
-        version => 1, source => 'corpus',
-        methods => { 'main::corpus_case' => $m },
-    };
-
-    my $graphs = eval {
-        Chalk::IR::Serialize::JSON::from_json(JSON::PP->new->encode($filtered));
+    # Load the whole blob (all methods + the classes section). List context
+    # yields the sealed MOP when a classes section is present.
+    my ($graphs, $mop) = eval {
+        Chalk::IR::Serialize::JSON::from_json($json);
     };
     return (undef, "from_json failed: $@") unless $graphs;
 
@@ -64,7 +96,9 @@ sub run_through_bson ($source) {
     my $ret = $g->returns->[0];
     return (undef, "no Return node") unless $ret;
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval {
+        Chalk::Target::LLVM->lower($ret, (defined $mop ? (mop => $mop) : ()));
+    };
     return (undef, "LLVM lowering GAP: $@") if $@;
 
     # Run the emitted IR through lli.
@@ -145,6 +179,40 @@ my @slice = (
     # scalar self-assign (`$x = $x + 1`): an add with TARGMY (OPpTARGET_MY),
     # writing its result in-place to the pad slot. 4b-4b rebinds the targ.
     { topic => 'variables', src => 'my $x = 5; $x = $x + 1; $x', expect => 'green' },
+
+    # classes (4c): the no-default-no-ADJUST corpus cases. B::SoN -> classes
+    # section -> sealed MOP -> backend lower(mop=>) == perl.
+    { topic => 'classes',
+      src => "use feature 'class';\nno warnings 'experimental::class';\n"
+           . "class Greeter { method greet { 42 } }\n"
+           . "my \$g = Greeter->new;\n\$g->greet",
+      expect => 'green' },
+    # field-basic: a method returning a field. The field has no declared type
+    # yet (4c-1a emits no field type), so FieldAccess has no repr. Needs field
+    # type inference -- pairs with 4c-1b.
+    { topic => 'classes',
+      src => "use feature 'class';\nno warnings 'experimental::class';\n"
+           . "class Animal { field \$name :param;\nmethod name { \$name } }\n"
+           . "my \$a = Animal->new(name => 'cat');\n\$a->name",
+      expect => 'gap',
+      gap => 'field has no declared type; FieldAccess repr undef (needs field type inference)' },
+    # field-attrs: :reader methods returning fields -- same field-type gap.
+    { topic => 'classes',
+      src => "use feature 'class';\nno warnings 'experimental::class';\n"
+           . "class Pair { field \$left :param :reader;\nfield \$right :param :reader; }\n"
+           . "my \$p = Pair->new(left => 10, right => 20);\n\$p->left + \$p->right",
+      expect => 'gap',
+      gap => 'field has no declared type; :reader FieldAccess repr undef' },
+    # class-isa: an inherited method call ($c->kind where kind is on the parent).
+    # The Call-repr resolution keys by the static class, not the MRO -- needs
+    # inherited-method resolution.
+    { topic => 'classes',
+      src => "use feature 'class';\nno warnings 'experimental::class';\n"
+           . "class Base { method kind { 7 } }\n"
+           . "class Child :isa(Base) { }\n"
+           . "my \$c = Child->new;\n\$c->kind",
+      expect => 'gap',
+      gap => 'inherited method dispatch: Call-repr not resolved through the MRO' },
 );
 
 my %tally = (green => 0, gap => 0, bug => 0);

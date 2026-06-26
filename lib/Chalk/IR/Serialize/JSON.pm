@@ -419,7 +419,49 @@ sub _replay_classes ($classes, $graphs) {
     }
 
     $mop->seal;
+
+    # Stamp each method-dispatch Call with its callee's return representation.
+    # The backend requires a repr on the Call node and cross-checks it against
+    # the vtable ABI (the method body's return repr). Both derive from the same
+    # method body, so they agree -- this gives the Call site the repr it needs
+    # without inventing one. A constructor call (new) yields an object pointer;
+    # the backend handles its repr in _lower_call_new, so leave it unset.
+    _stamp_method_call_reprs($classes, $graphs);
+
     return $mop;
+}
+
+# _stamp_method_call_reprs($classes, \%graphs) — set each method Call's repr
+# from the resolved callee method's return repr (its body's Return value repr).
+sub _stamp_method_call_reprs ($classes, $graphs) {
+    # Build class::method -> return_repr from the loaded method graphs.
+    my %ret_repr;
+    for my $cname (keys %$classes) {
+        my $methods = $classes->{$cname}{methods} // {};
+        for my $mname (keys %$methods) {
+            my $g = $graphs->{ $methods->{$mname} } or next;
+            my ($ret) = $g->returns->@*;
+            next unless $ret;
+            my $val = $ret->inputs->[0];
+            next unless defined $val && blessed($val);
+            my $repr = $val->representation;
+            $ret_repr{"$cname\::$mname"} = $repr if defined $repr;
+        }
+    }
+
+    # Walk every graph's method Calls and stamp from the resolved callee.
+    for my $g (values %$graphs) {
+        for my $node ($g->nodes->@*) {
+            next unless $node->operation eq 'Call';
+            next unless ($node->dispatch_kind // '') eq 'method';
+            next if ($node->name // '') eq 'new';   # constructor: backend-handled
+            next if defined $node->representation;
+            my $class = $node->class_name // next;
+            my $repr  = $ret_repr{"$class\::" . ($node->name // '')} // next;
+            $node->set_representation($repr);
+        }
+    }
+    return;
 }
 
 # _classes_in_parent_order($classes) — class names sorted so a parent always
