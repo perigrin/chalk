@@ -402,10 +402,26 @@ sub _replay_classes ($classes, $graphs) {
             my @attrs;
             push @attrs, ':param'  if $f->{is_param};
             push @attrs, ':reader' if $f->{is_reader};
+
+            # A field default (4c-1b) rides as a graph-ref whose Return value is
+            # the default Constant; wire it as default_value + has_default. The
+            # field type (inferred from the default) becomes the field repr.
+            my ($default_node, $has_default);
+            if (defined $f->{default_ref}
+                && (my $dg = $graphs->{ $f->{default_ref} })) {
+                my ($dret) = $dg->returns->@*;
+                $default_node = $dret ? $dret->inputs->[0] : undef;
+                $has_default  = defined $default_node;
+            }
+
             $cls->declare_field($vname,
                 sigil      => substr($vname, 0, 1),
                 param_name => $f->{param_name},
                 attributes => \@attrs,
+                (defined $f->{type} ? (type => $f->{type}) : ()),
+                ($has_default
+                    ? (default_value => $default_node, has_default => true)
+                    : ()),
             );
         }
 
@@ -415,6 +431,13 @@ sub _replay_classes ($classes, $graphs) {
             $cls->declare_method($mname,
                 (defined $graph ? (graph => $graph) : ()),
             );
+        }
+
+        # ADJUST blocks (4c-1b): each rides as a graph-ref; replay via
+        # declare_adjust with the loaded graph.
+        for my $aref (($cd->{adjusts} // [])->@*) {
+            my $ag = $graphs->{$aref} or next;
+            $cls->declare_adjust(graph => $ag);
         }
     }
 
@@ -426,9 +449,82 @@ sub _replay_classes ($classes, $graphs) {
     # method body, so they agree -- this gives the Call site the repr it needs
     # without inventing one. A constructor call (new) yields an object pointer;
     # the backend handles its repr in _lower_call_new, so leave it unset.
+    _stamp_field_access_reprs($classes, $graphs);
+    _propagate_computed_reprs($graphs);
     _stamp_method_call_reprs($classes, $graphs);
 
     return $mop;
+}
+
+# _propagate_computed_reprs(\%graphs) — fixpoint-propagate representations onto
+# computed nodes whose inputs are now typed (e.g. a FieldAccess stamped from its
+# field type feeds an Add). Mirrors the producer's result-stamp rules so a field
+# read flowing into arithmetic carries a repr to the method body root.
+my %_COMPUTED_REPR = (
+    Add => 'join', Subtract => 'join', Multiply => 'join', Negate => 'join',
+    Divide => 'Num', Power => 'Num', Modulo => 'Int',
+    BitAnd => 'Int', BitOr => 'Int', BitXor => 'Int',
+    LeftShift => 'Int', RightShift => 'Int', Complement => 'Int',
+    Concat => 'Str', Length => 'Int',
+    (map { $_ => 'Bool' } qw(
+        NumEq NumLt NumGt NumLe NumGe NumNe StrEq StrLt StrGt StrLe StrGe StrNe)),
+    NumCmp => 'Int', StrCmp => 'Int',
+);
+# Widening order for the 'join' rule (Int < Num < Str).
+my %_REPR_RANK = (Int => 0, Num => 1, Str => 2);
+
+sub _propagate_computed_reprs ($graphs) {
+    for my $g (values %$graphs) {
+        my @nodes = $g->nodes->@*;
+        my $changed = 1;
+        while ($changed) {
+            $changed = 0;
+            for my $node (@nodes) {
+                next if defined $node->representation;
+                my $rule = $_COMPUTED_REPR{ $node->operation } // next;
+                if ($rule ne 'join') {
+                    $node->set_representation($rule);
+                    $changed = 1;
+                    next;
+                }
+                my @in = grep { defined && blessed($_) } $node->inputs->@*;
+                my @reprs = map { $_->representation } @in;
+                next if grep { !defined } @reprs;          # an input still untyped
+                next if grep { !exists $_REPR_RANK{$_} } @reprs;
+                my ($widest) = sort { $_REPR_RANK{$b} <=> $_REPR_RANK{$a} } @reprs;
+                $node->set_representation($widest);
+                $changed = 1;
+            }
+        }
+    }
+    return;
+}
+
+# _stamp_field_access_reprs($classes, \%graphs) — set each FieldAccess node's
+# representation from its declared field type. The field type comes from the
+# class section (4c-1b infers it from the field default); the backend needs a
+# repr on the FieldAccess to lower a field read.
+sub _stamp_field_access_reprs ($classes, $graphs) {
+    # Build (class, fieldix) -> type from the class sections.
+    my %field_type;
+    for my $cname (keys %$classes) {
+        for my $f (($classes->{$cname}{fields} // [])->@*) {
+            next unless defined $f->{type};
+            $field_type{"$cname\::" . ($f->{fieldix} // -1)} = $f->{type};
+        }
+    }
+
+    for my $g (values %$graphs) {
+        for my $node ($g->nodes->@*) {
+            next unless $node->operation eq 'FieldAccess';
+            next if defined $node->representation;
+            my $stash = $node->field_stash // next;
+            my $fidx  = $node->field_index;
+            my $type  = $field_type{"$stash\::" . ($fidx // -1)} // next;
+            $node->set_representation($type);
+        }
+    }
+    return;
 }
 
 # _stamp_method_call_reprs($classes, \%graphs) — set each method Call's repr
