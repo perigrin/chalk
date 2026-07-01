@@ -3,8 +3,10 @@ title: "RC5: TernaryExpr Int/Bool branch-repr mismatch on nested-if (Phase 4, 2 
 state: pending
 urgency: normal
 milestone: codegen-harness
+blocked_by:
+- 019f1bd3-1b58-725a-a996-0c0eb85910cb
 created: 2026-07-01T03:57:27.827922021Z
-updated: 2026-07-01T03:57:27.827922021Z
+updated: 2026-07-01T04:18:41.044884356Z
 ---
 
 Phase 4 corpus-wide root cause RC5 (2 cases). See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
