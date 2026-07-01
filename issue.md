@@ -3,8 +3,10 @@ title: "Phase 4 stage 4d: regex/host tier (regex.md + host.md through B::SoN)"
 state: pending
 urgency: normal
 milestone: codegen-harness
+blocked_by:
+- 019f1bd2-dca7-7a1a-8d9e-76b666eae7b9
 created: 2026-07-01T04:19:29.835915202Z
-updated: 2026-07-01T04:19:29.835915202Z
+updated: 2026-07-01T04:19:42.362490822Z
 ---
 
 Phase 4 stage 4d -- the regex/host tier (brief stage list). Named Phase-4 stage that currently exists only as scattered fast-follows, not a tracked stage. From the corpus-wide map: regex 0/6 green, host 0/3 green.
