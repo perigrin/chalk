@@ -367,13 +367,22 @@ sub from_json ($json_string) {
     }
 
     # 4c: a `classes` section (from B::SoN) is replayed into a sealed MOP.
-    # Returned only in list context; scalar context stays \%graphs for the
-    # existing single-return callers.
-    if (wantarray && ref $data->{classes} eq 'HASH' && %{ $data->{classes} }) {
-        my $mop = _replay_classes($data->{classes}, \%graphs);
-        return (\%graphs, $mop);
+    # The classes replay also seeds field-read reprs (which need the class
+    # field types) before the universal pass runs.
+    my $mop;
+    if (ref $data->{classes} eq 'HASH' && %{ $data->{classes} }) {
+        $mop = _replay_classes($data->{classes}, \%graphs);
     }
 
+    # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
+    # through computed + aggregate-read nodes for EVERY graph (class or not).
+    # The backend requires a repr on these nodes to lower them (RC1).
+    _seed_and_propagate_reprs(\%graphs);
+    _stamp_method_call_reprs($data->{classes} // {}, \%graphs);
+
+    # $mop is returned only in list context; scalar context stays \%graphs for
+    # the existing single-return callers.
+    return (\%graphs, $mop) if wantarray && defined $mop;
     return \%graphs;
 }
 
@@ -443,15 +452,11 @@ sub _replay_classes ($classes, $graphs) {
 
     $mop->seal;
 
-    # Stamp each method-dispatch Call with its callee's return representation.
-    # The backend requires a repr on the Call node and cross-checks it against
-    # the vtable ABI (the method body's return repr). Both derive from the same
-    # method body, so they agree -- this gives the Call site the repr it needs
-    # without inventing one. A constructor call (new) yields an object pointer;
-    # the backend handles its repr in _lower_call_new, so leave it unset.
+    # Seed FieldAccess reprs from the declared field types. The universal
+    # repr pass (_seed_and_propagate_reprs, run by from_json) then propagates
+    # them through computed/aggregate nodes; method-Call reprs are stamped
+    # afterward from the resolved callee's return repr.
     _stamp_field_access_reprs($classes, $graphs);
-    _propagate_computed_reprs($graphs);
-    _stamp_method_call_reprs($classes, $graphs);
 
     return $mop;
 }
@@ -473,6 +478,31 @@ my %_COMPUTED_REPR = (
 # Widening order for the 'join' rule (Int < Num < Str).
 my %_REPR_RANK = (Int => 0, Num => 1, Str => 2);
 
+# Aggregate/regex nodes whose OWN repr is fixed by their kind (RC1). An
+# ArrayRef/HashRef literal is a boxed aggregate pointer; a RegexMatch result is
+# a boolean.
+my %_SEED_REPR = (
+    ArrayRef   => 'ArrayRef',
+    HashRef    => 'HashRef',
+    RegexMatch => 'Bool',
+);
+
+# _seed_and_propagate_reprs(\%graphs) — the universal repr pass (runs for EVERY
+# graph, class or not). Seeds aggregate/regex node reprs, then fixpoint-
+# propagates through computed nodes and aggregate reads (Subscript) until no
+# more reprs can be derived.
+sub _seed_and_propagate_reprs ($graphs) {
+    for my $g (values %$graphs) {
+        for my $node ($g->nodes->@*) {
+            next if defined $node->representation;
+            my $seed = $_SEED_REPR{ $node->operation } // next;
+            $node->set_representation($seed);
+        }
+    }
+    _propagate_computed_reprs($graphs);
+    return;
+}
+
 sub _propagate_computed_reprs ($graphs) {
     for my $g (values %$graphs) {
         my @nodes = $g->nodes->@*;
@@ -481,7 +511,20 @@ sub _propagate_computed_reprs ($graphs) {
             $changed = 0;
             for my $node (@nodes) {
                 next if defined $node->representation;
-                my $rule = $_COMPUTED_REPR{ $node->operation } // next;
+                my $op = $node->operation;
+
+                # A Subscript reads an element out of an aggregate container:
+                # its repr is the element type, inferred from the container's
+                # element reprs (an ArrayRef/HashRef of Ints yields an Int).
+                if ($op eq 'Subscript') {
+                    my $repr = _element_repr( $node->inputs->[0] );
+                    next unless defined $repr;
+                    $node->set_representation($repr);
+                    $changed = 1;
+                    next;
+                }
+
+                my $rule = $_COMPUTED_REPR{$op} // next;
                 if ($rule ne 'join') {
                     $node->set_representation($rule);
                     $changed = 1;
@@ -498,6 +541,31 @@ sub _propagate_computed_reprs ($graphs) {
         }
     }
     return;
+}
+
+# _element_repr($container) — the element type of an ArrayRef/HashRef container,
+# inferred as the widest element repr of its inputs. For a HashRef the inputs
+# alternate key,value; the values are the odd positions. Returns undef when the
+# element types are not yet known.
+sub _element_repr ($container) {
+    return undef unless defined $container && blessed($container);
+    my $op = $container->operation;
+    my @in = $container->inputs->@*;
+    my @elems;
+    if ($op eq 'ArrayRef') {
+        @elems = @in;
+    }
+    elsif ($op eq 'HashRef') {
+        @elems = @in[ grep { $_ % 2 } 0 .. $#in ];   # odd = values
+    }
+    else {
+        return undef;   # container repr not a literal aggregate we can read
+    }
+    my @reprs = map { blessed($_) ? $_->representation : undef } @elems;
+    return undef unless @reprs;
+    return undef if grep { !defined || !exists $_REPR_RANK{$_} } @reprs;
+    my ($widest) = sort { $_REPR_RANK{$b} <=> $_REPR_RANK{$a} } @reprs;
+    return $widest;
 }
 
 # _stamp_field_access_reprs($classes, \%graphs) — set each FieldAccess node's
