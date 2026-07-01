@@ -3,8 +3,10 @@ title: "RC4: semantic miscompile -- inverted ternary/if + s/// + object-state (P
 state: pending
 urgency: normal
 milestone: codegen-harness
+blocks:
+- 019f1bd3-1b94-7c40-9189-0cdea873d7ed
 created: 2026-07-01T03:57:27.768613539Z
-updated: 2026-07-01T03:57:27.768613539Z
+updated: 2026-07-01T04:18:41.05037017Z
 ---
 
 Phase 4 corpus-wide root cause RC4 (4 cases, CORRECTNESS -- fix regardless of count). See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
