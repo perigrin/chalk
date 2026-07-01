@@ -4,16 +4,19 @@ state: pending
 urgency: normal
 milestone: codegen-harness
 created: 2026-07-01T03:56:57.313868946Z
-updated: 2026-07-01T03:56:57.313868946Z
+updated: 2026-07-01T04:05:05.066516754Z
 ---
 
-Phase 4 corpus-wide root cause RC1 (highest leverage, ~15 cases). See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
+Phase 4 corpus-wide root cause RC1. See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
 
-"reached LLVM backend with NO representation (undef)" -- a repr-inference gap on non-Constant nodes the 4c-1b repr machinery does not yet seed:
-- Subscript.container (7): references R2/R3/R4/R5/R8/R9/R10 -- an aggregate read whose container node carries no repr.
-- RegexMatch (4): regex R1/R4/R5.
-- MOP::Method body root + Call(method) (5): classes field-basic/field-attrs/class-isa/adjust/method-call-val + variables A5.
+REPR-INFERENCE PASS LANDED (Chalk b725af3d): from_json now runs a universal repr pass (_seed_and_propagate_reprs) for EVERY graph -- seeds ArrayRef->ArrayRef, HashRef->HashRef, RegexMatch->Bool; Subscript repr = container element type. Corpus-wide 24->26 GREEN: references R2 (array elem read) + R3 (hash elem read) now lower e2e.
 
-The loader has _stamp_field_access_reprs + _propagate_computed_reprs (4c-1b, Serialize/JSON) but they do not cover Subscript containers (ArrayRef/HashRef/aggregate reads), RegexMatch, or type-source-less fields. A repr-inference pass that seeds container/aggregate/regex reprs (from stamps + the ArrayRef/HashRef producer type) and propagates through Subscript/Length closes most of RC1.
+RESIDUALS (the original ~15 estimate over-counted -- several were DIFFERENT root causes, now split out):
+- CLOSED by RC1: R2, R3 (direct-aggregate element reads).
+- R4/R5/R8 anon-ref deref (my $r=[1,2,3]; $r->[0]): NOT repr -- a PRODUCER binding gap. The container ArrayRef is LOST; $r reads a bare PadAccess with no value. B::SoN does not bind $r to Ref(ArrayRef(...)) through the deref. Needs a producer anon-ref-binding fix (FromOptree). SPLIT: file/track as producer work.
+- R9/R10 (OOB array / missing hash key): now lower but return Int:0 not Undef: -- SEMANTICS (should be undef). Distinct from repr. -> RC4-adjacent (silent-wrong).
+- regex R1/R4/R5/R6: RegexMatch->Bool seeding worked; now blocked on RC5 (TernaryExpr Str/Int branch typing). -> RC5.
+- 019f0597 field-type-source (bare :param / ADJUST-written fields) still open -- the field slice of RC1 that needs a TYPE SOURCE, not just propagation.
+- R1 scalar count / A5 etc.: separate (Length/return-of-ArrayRef).
 
-SUBSUMES the narrow already-filed issue 019f0597 (field type inference: method returning a field) -- that is the field slice of RC1. Closing RC1 unblocks most of references + regex + the rest of classes.
+RC1 repr-inference goal MET. Remaining RC1-labeled cases are: field-type-source (019f0597) + anon-ref producer binding (to file). Everything else re-homed to RC4/RC5.
