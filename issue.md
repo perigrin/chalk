@@ -1,13 +1,22 @@
 ---
 title: "RC4: semantic miscompile -- inverted ternary/if + s/// + object-state (Phase 4, CORRECTNESS) + 4c object-state mutation across method calls"
-state: pending
+state: in-progress
 urgency: normal
 milestone: codegen-harness
 blocks:
 - 019f1bd3-1b94-7c40-9189-0cdea873d7ed
 - 019f1be7-47ac-7d06-823d-b1f959028a78
 created: 2026-07-01T03:57:27.768613539Z
-updated: 2026-07-01T04:19:42.490510141Z
+updated: 2026-07-01T04:23:41.990022058Z
+sessions:
+- start_sha: b725af3d23422f1fe1384f67082be32ff7420c98
+  end_sha: ""
+  commits: 0
+  started_at: 2026-07-01T04:23:41.990022058Z
+transitions:
+- state: in-progress
+  actor: human:git-zhi
+  timestamp: 2026-07-01T04:23:41.990022058Z
 ---
 
 Phase 4 corpus-wide root cause RC4 (4 cases, CORRECTNESS -- fix regardless of count). See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
