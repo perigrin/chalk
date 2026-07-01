@@ -254,15 +254,17 @@ sub _deserialize_graph ($method_data) {
 
         # B::SoN serializes Return as inputs=[control, value] (control token
         # first). Chalk's contract is inputs=[value] with control carried in
-        # control_in. Reconcile: when a Return leads with the Start control node
-        # and has a trailing value, split off the control (re-attached via
+        # control_in. Reconcile: when a Return leads with a CFG control node
+        # (Start, or a Region/If/Proj/Loop merge from a control-flow body) and
+        # has a trailing value, split off the control (re-attached via
         # control_in after construction below) and keep only the value as input.
-        # Scoped to a leading Start so an Unwind-controlled Return (die: the
-        # Unwind is the real exit and must stay a reachable input) is untouched.
+        # Unwind is EXCLUDED: for a die, the Unwind is the real exit and must
+        # stay a reachable input, not be demoted to control_in.
         my $bson_return_control;
         if ($op eq 'Return' && @inputs >= 2
                 && blessed($inputs[0])
-                && $inputs[0]->operation eq 'Start') {
+                && _is_cfg($inputs[0])
+                && $inputs[0]->operation ne 'Unwind') {
             $bson_return_control = shift @inputs;
         }
 
@@ -348,6 +350,20 @@ sub _deserialize_graph ($method_data) {
         }
 
         push @nodes, $node;
+    }
+
+    # Wire each Region's head back-pointer to the If/Loop that owns it. B::SoN's
+    # JSON does not carry it, but the backend's control-chain walk needs
+    # $region->head to reach the enclosing If/Loop (and emit its Phis). A Region
+    # merges Proj arms; the owning If/Loop is a Proj input's input.
+    for my $node (@nodes) {
+        next unless $node->operation eq 'Region';
+        next if $node->head;
+        my ($first_arm) = $node->inputs->@*;
+        next unless defined $first_arm && blessed($first_arm)
+            && $first_arm->operation eq 'Proj';
+        my $owner = $first_arm->inputs->[0];
+        $node->set_head($owner) if defined $owner && blessed($owner);
     }
 
     my $start   = $nodes[ $method_data->{start} ];
