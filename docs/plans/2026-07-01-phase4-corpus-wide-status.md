@@ -52,10 +52,20 @@ that seeds container/aggregate/regex/field reprs (from stamps + producer
 type info) closes most of RC1.
 
 ### RC2 — control-flow / logical lowers but crashes at runtime, `lli exited 1` (8)
-control-flow D2/D3/D4/D5 (while/foreach/postfix), logical L1/L2/L4
-(and/or/not). These EMIT LLVM IR that lli rejects at run time — a control-flow
-/ short-circuit lowering bug in the B::SoN -> backend path (not a type gap;
-the IR is malformed or the branch structure is wrong).
+DONE (logical short-circuit) + SPLIT (loops/not -> RC2b). Investigation showed
+this was TWO mechanisms, not one.
+
+- DONE — logical L1/L2 (`&&`/`||`): the producer built a malformed If/Region/Phi
+  that dropped the left operand (`$a && $b` -> Phi(7,7)). Fixed to emit And/Or
+  operand-returning nodes per corpus logical.md; the backend expands to br+phi
+  at lowering (same split as DefinedOr for `//`). Also fixed statement-modifier
+  guards (`return X if/unless C`) with correct continuation-Proj polarity.
+  End-to-end L1 -> Int:7, L2 -> Int:3. perl5-son a374d42; Chalk loader 6c36af9.
+  corpus-wide green 32 -> 34. (zhi 019f1bd2-dc60 done.)
+- MOVED to RC2b (019f1c1e) — loops D2/D3 (while/foreach: "Phi before its
+  enclosing loop structure" — a Loop Region/Phi ordering bug, different from
+  the and/or shape), `not` L4 (needs Bool repr), and postfix D4/D5 (now emit
+  clean And nodes but need Coerce(Bool->Int)).
 
 ### RC3 — producer fails to translate (dies), `no main::corpus_case method` (4)
 host H1/H2 ($1 capture), regex R2 (qr//), logical L3b (defined-or undef-left).
