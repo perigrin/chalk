@@ -1,10 +1,19 @@
 ---
 title: "RC1: repr-inference for Subscript/RegexMatch/field nodes (Phase 4, ~15 cases)"
-state: pending
+state: in-progress
 urgency: normal
 milestone: codegen-harness
 created: 2026-07-01T03:56:57.313868946Z
-updated: 2026-07-01T04:05:05.066516754Z
+updated: 2026-07-01T04:18:27.848321641Z
+sessions:
+- start_sha: b725af3d23422f1fe1384f67082be32ff7420c98
+  end_sha: ""
+  commits: 0
+  started_at: 2026-07-01T04:18:27.848321641Z
+transitions:
+- state: in-progress
+  actor: human:git-zhi
+  timestamp: 2026-07-01T04:18:27.848321641Z
 ---
 
 Phase 4 corpus-wide root cause RC1. See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
