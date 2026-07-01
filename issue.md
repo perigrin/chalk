@@ -1,10 +1,19 @@
 ---
 title: "RC2: control-flow + logical lower but crash at runtime (Phase 4, 8 cases)"
-state: pending
+state: in-progress
 urgency: normal
 milestone: codegen-harness
 created: 2026-07-01T03:57:11.648124386Z
-updated: 2026-07-01T03:57:11.648124386Z
+updated: 2026-07-01T04:49:42.41147947Z
+sessions:
+- start_sha: b725af3d23422f1fe1384f67082be32ff7420c98
+  end_sha: ""
+  commits: 0
+  started_at: 2026-07-01T04:49:42.41147947Z
+transitions:
+- state: in-progress
+  actor: human:git-zhi
+  timestamp: 2026-07-01T04:49:42.41147947Z
 ---
 
 Phase 4 corpus-wide root cause RC2 (8 cases). See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
