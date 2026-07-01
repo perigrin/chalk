@@ -3,8 +3,10 @@ title: "RC1: repr-inference for Subscript/RegexMatch/field nodes (Phase 4, ~15 c
 state: done
 urgency: normal
 milestone: codegen-harness
+blocks:
+- 019f1bda-4212-713b-9e01-3a96ad850d7e
 created: 2026-07-01T03:56:57.313868946Z
-updated: 2026-07-01T04:18:27.926005461Z
+updated: 2026-07-01T04:18:41.554927133Z
 sessions:
 - start_sha: b725af3d23422f1fe1384f67082be32ff7420c98
   end_sha: b725af3d23422f1fe1384f67082be32ff7420c98
