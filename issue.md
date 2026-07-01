@@ -6,8 +6,9 @@ milestone: codegen-harness
 blocked_by:
 - 019f1bd2-dca7-7a1a-8d9e-76b666eae7b9
 - 019f1bd3-1b58-725a-a996-0c0eb85910cb
+- 019f1bd3-1b94-7c40-9189-0cdea873d7ed
 created: 2026-07-01T04:19:29.835915202Z
-updated: 2026-07-01T04:19:42.494409798Z
+updated: 2026-07-01T04:19:42.623778064Z
 ---
 
 Phase 4 stage 4d -- the regex/host tier (brief stage list). Named Phase-4 stage that currently exists only as scattered fast-follows, not a tracked stage. From the corpus-wide map: regex 0/6 green, host 0/3 green.
