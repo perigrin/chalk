@@ -5,8 +5,10 @@ urgency: normal
 milestone: codegen-harness
 blocked_by:
 - 019f1bd3-1b58-725a-a996-0c0eb85910cb
+blocks:
+- 019f1be7-47ac-7d06-823d-b1f959028a78
 created: 2026-07-01T03:57:27.827922021Z
-updated: 2026-07-01T04:18:41.044884356Z
+updated: 2026-07-01T04:19:42.620331613Z
 ---
 
 Phase 4 corpus-wide root cause RC5 (2 cases). See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
