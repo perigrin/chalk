@@ -3,8 +3,10 @@ title: "RC3: producer dies translating capture/qr/dor (Phase 4, 4 cases)"
 state: pending
 urgency: normal
 milestone: codegen-harness
+blocks:
+- 019f1be7-47ac-7d06-823d-b1f959028a78
 created: 2026-07-01T03:57:11.719268733Z
-updated: 2026-07-01T03:57:11.719268733Z
+updated: 2026-07-01T04:19:42.358369468Z
 ---
 
 Phase 4 corpus-wide root cause RC3 (4 cases). See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
