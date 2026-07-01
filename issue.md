@@ -1,12 +1,12 @@
 ---
-title: "RC4: semantic miscompile -- inverted ternary/if + s/// + object-state (Phase 4, CORRECTNESS)"
+title: "RC4: semantic miscompile -- inverted ternary/if + s/// + object-state (Phase 4, CORRECTNESS) + 4c object-state mutation across method calls"
 state: pending
 urgency: normal
 milestone: codegen-harness
 blocks:
 - 019f1bd3-1b94-7c40-9189-0cdea873d7ed
 created: 2026-07-01T03:57:27.768613539Z
-updated: 2026-07-01T04:18:41.05037017Z
+updated: 2026-07-01T04:19:09.159299958Z
 ---
 
 Phase 4 corpus-wide root cause RC4 (4 cases, CORRECTNESS -- fix regardless of count). See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
@@ -17,3 +17,5 @@ SEMANTIC MISCOMPILES -- the graph lowers and runs but produces the WRONG value (
 - regex R3 s///: Str:foobar not Str:bazbar -- the substitution is not applied to the result.
 
 The inverted ternary/if is the priority -- a correctness bug that would corrupt any real lib/ code with conditionals. Localize whether it is B::SoN branch-ordering (Proj/Region arm order) or the backend TernaryExpr/If lowering reading arms in the wrong order.
+
+Localized by 4c-1b e2e (classes method-call). Counter->new(n=>10); $c->inc; $c->val LOWERS (after 4c-1b field typing) but returns the default/initial value, not the post-mutation value (got Int:0, want Int:11). The field state set by the constructor + mutated by $c->inc must persist into $c->val -- i.e. the object instance state across separate method-call statements. This is an object-lifetime/state lowering concern in the B::SoN->backend path (the three driver statements share one object), distinct from field TYPING (019f0597). Blocks method-call corpus case end-to-end.
