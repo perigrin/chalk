@@ -4,7 +4,7 @@ state: done
 urgency: normal
 milestone: codegen-harness
 created: 2026-07-01T05:19:46.301125195Z
-updated: 2026-07-03T06:18:50.031474196Z
+updated: 2026-07-03T21:41:24.488312177Z
 sessions:
 - start_sha: 96214d2af17ccadd460500300bdf9006fbc41b79
   end_sha: 5df3252337de2ce6069a94148b18fb3cb9b8a99f
@@ -80,3 +80,27 @@ type widening, until (or-condition) loops.
 Verification: perl5-son suite 303; Chalk IR suite 558; son-e2e 22 GREEN/3 GAP/0
 BUG (baseline preserved); son-compare + cross-load + emit + ir-serialize clean.
 perl5-son branch phase4b-single-exit pushed (a374d42..a9630f8).
+
+### Review Findings (2026-07-03, TIER_2 gate -- reopened)
+
+Full report: paad/code-reviews/phase1-lateral-bindings-2026-07-03-rc2b-5df32523.md
+20/20 findings verified. Fix pass scope (everything else filed as 019f29ed follow-ups):
+
+1. _walk_loop_body guards: die GAP for last/next/redo, cond_expr,
+   enterloop/enteriter, any branch op; die if a second condition mints Projs.
+   (C1+C2: silent miscompiles reproduced -- last-> Int:15 vs Int:1, if/else
+   in body -> Int:0 vs Int:103, nested while -> Int:3 vs Int:6.)
+2. Side-effecting-condition guard: die GAP when the loop condition segment
+   mutates any pad slot (C3/C5 class: while(\$i-- > 0) family, postfix init
+   contamination). Full lowering filed separately.
+3. Ambiguous-condition guard: die GAP when >1 icmp consumes header Phis
+   (C4: decoy body comparison hijacks the condition -> Int:5 vs Int:4).
+   Real control-wiring fix filed separately.
+4. Unstamped-backedge: die GAP instead of silently un-stamping (stale stamps
+   contaminate sibling Phi joins).
+5. foreach: IV_MAX bound guard; non-lexical iterator (targ==0) truthful GAP.
+6. perl5-son from_json: defer-patch forward Phi backedges (round-trip of its
+   own loop graphs currently dies); fix the false topo comment.
+7. Chalk _lower_ternary: coerce Int condition to i1 (icmp ne) mirroring
+   _lower_and -- makes bare-scalar guards (\$x = 7 if \$c) and plain ternary
+   (\$c ? 7 : 5) lowerable; loud GAP for other reprs.
