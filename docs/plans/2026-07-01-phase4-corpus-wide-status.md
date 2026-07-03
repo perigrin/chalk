@@ -11,7 +11,7 @@ Phase 4's gate ("across the corpus topics, behavior matching perl").
 
 | | count |
 |---|---|
-| **GREEN** (lli == perl) | **24** (39 as of 2026-07-03: RC1+RC2+RC2b+RC4 landed) |
+| **GREEN** (lli == perl) | **24** (45 as of 2026-07-03: RC1+RC2+RC2b+RC3+RC4 landed) |
 | GAP (corpus-declared: pragmas, non-ASCII, CodeRef) | 8 |
 | **BUG / worklist** (should lower, doesn't or wrong) | **36** (21 as of 2026-07-03) |
 
@@ -94,9 +94,30 @@ this was TWO mechanisms, not one.
   loop-carried type widening (GAP dies), until/or-condition loops (GAP die).
 
 ### RC3 — producer fails to translate (dies), `no main::corpus_case method` (4)
-host H1/H2 ($1 capture), regex R2 (qr//), logical L3b (defined-or undef-left).
-B::SoN dies translating these, so no method is emitted. Producer translation
-gaps (capture wiring, qr// node, dor edge case).
+DONE (2026-07-03, perl5-son aa0d644, zhi 019f1bd2-dca7). All four cases GREEN
+plus two more unlocked; corpus-wide green 39 -> 45, worklist 21 -> 15. The
+three actual mechanisms (none matched the filed "dor edge case" hypothesis —
+L3b died on the undef op, not on dor):
+- $N capture reads: `$1` compiles to gv+rv2sv (canonical under the rpeep
+  suppression B::SoN runs with) or gvsv (peep-fused); both had OpMap rows
+  that built StashAccess with no name extraction (constructor death). Now
+  direct handlers: a numbered GV becomes RegexCapture(match, n) :Str wired
+  to the sim-tracked last match (StackSim snapshots carry it into branch
+  arms, so the H2 guarded-ternary idiom works); other package scalars
+  become named StashAccess; a capture with no match in scope GAPs loudly.
+- qr// + application: the qr PMOP (pushed nothing -> stack underflow) is a
+  Constant(const_type 'regex') matcher value; regcomp stages the popped
+  pattern and the following match op emits Match(subject, matcher)
+  :Boolean — the backend's existing _lower_match_apply resolves the qr
+  constant statically.
+- undef op: `my $a = undef` is a lone undef op (nulled sassign; or
+  LVINTRO+TARGMY when rpeep runs) that hit generic dispatch as a
+  Constant with no value. Direct handler binds/pushes the Undef Constant;
+  undef(EXPR) mutation GAPs loudly.
+Latent silent-wrongness fixed en route: rv2sv over a non-gv kid (real
+scalar deref) and gvsv-in-arm previously died or mis-built; both are now
+explicit (GAP or handled). host and regex have their first greens; logical
+is fully green.
 
 ### RC4 — semantic miscompile, wrong value (4)
 - control-flow D6 ternary + D1 if/else: `Int:2 != Int:1` — branch selection
