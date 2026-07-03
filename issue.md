@@ -1,6 +1,6 @@
 ---
 title: "Phase 4: B::SoN as trusted IR/MOP producer (directional, verified through harness)"
-state: reopened
+state: in-progress
 urgency: normal
 milestone: codegen-harness
 blocked_by:
@@ -16,13 +16,17 @@ blocked_by:
 blocks:
 - 019eaa51-b9eb-7bc5-bee4-ca6140dc8b81
 created: 2026-06-09T02:59:04.062678084Z
-updated: 2026-07-03T22:18:57.86112496Z
+updated: 2026-07-03T22:19:07.645371947Z
 sessions:
 - start_sha: 125deda16f98e24471678aaa7f4b363e237ed4cd
   end_sha: 1afa515d8f3c900227c2a4a5f21ed0d1ffbf0c58
   commits: 20
   started_at: 2026-06-14T03:58:25.906947341Z
   ended_at: 2026-07-03T22:18:38.267976134Z
+- start_sha: 1afa515d8f3c900227c2a4a5f21ed0d1ffbf0c58
+  end_sha: ""
+  commits: 0
+  started_at: 2026-07-03T22:19:07.645371947Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
@@ -33,6 +37,9 @@ transitions:
 - state: reopened
   actor: human:git-zhi
   timestamp: 2026-07-03T22:18:57.86112496Z
+- state: in-progress
+  actor: human:git-zhi
+  timestamp: 2026-07-03T22:19:07.645371947Z
 observed_paths:
 - docs/plans/2026-06-14-phase4a-seam-reaudit.md
 - docs/plans/2026-06-15-phase4b-scope.md
