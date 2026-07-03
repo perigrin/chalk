@@ -1,10 +1,19 @@
 ---
 title: "RC2b: loop lowering (D2/D3) + not/Bool-repr (L4, D4/D5) (Phase 4)"
-state: pending
+state: in-progress
 urgency: normal
 milestone: codegen-harness
 created: 2026-07-01T05:19:46.301125195Z
-updated: 2026-07-01T05:19:46.301125195Z
+updated: 2026-07-03T04:56:38.418410821Z
+sessions:
+- start_sha: 96214d2af17ccadd460500300bdf9006fbc41b79
+  end_sha: ""
+  commits: 0
+  started_at: 2026-07-03T04:56:38.418410821Z
+transitions:
+- state: in-progress
+  actor: human:git-zhi
+  timestamp: 2026-07-03T04:56:38.418410821Z
 ---
 
 Phase 4 corpus-wide, split from RC2 (019f1bd2-dc60). See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
