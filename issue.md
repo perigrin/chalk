@@ -4,7 +4,7 @@ state: in-progress
 urgency: normal
 milestone: codegen-harness
 created: 2026-07-01T05:19:46.301125195Z
-updated: 2026-07-03T21:41:24.561556319Z
+updated: 2026-07-03T21:49:51.880109733Z
 sessions:
 - start_sha: 96214d2af17ccadd460500300bdf9006fbc41b79
   end_sha: 5df3252337de2ce6069a94148b18fb3cb9b8a99f
@@ -114,3 +114,13 @@ Full report: paad/code-reviews/phase1-lateral-bindings-2026-07-03-rc2b-5df32523.
 7. Chalk _lower_ternary: coerce Int condition to i1 (icmp ne) mirroring
    _lower_and -- makes bare-scalar guards (\$x = 7 if \$c) and plain ternary
    (\$c ? 7 : 5) lowerable; loud GAP for other reprs.
+### Review fix pass (2026-07-03, DONE)
+
+All 7 gate items landed (perl5-son b484a2f, Chalk 1afa515d):
+items 1-6 as loud GAP guards + the from_json defer-patch (round-trip
+restored); item 7 (_lower_ternary truthiness) is a FULL fix -- bare-scalar
+guards ($x = 7 if $c) and plain scalar ternaries are now GREEN e2e.
+Verified: reviewer repro cases now refuse at the producer (last-in-loop,
+decoy comparison); perl5-son suite 320; Chalk IR suite 560; corpus-wide
+green holds at 39. Real fixes for the guarded classes filed as the
+019f29ed family; loader Phi-slot hardening noted on 019f26a5 #5.
