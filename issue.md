@@ -4,7 +4,7 @@ state: in-progress
 urgency: normal
 milestone: codegen-harness
 created: 2026-07-01T05:19:46.301125195Z
-updated: 2026-07-03T04:56:38.418410821Z
+updated: 2026-07-03T06:18:49.996478251Z
 sessions:
 - start_sha: 96214d2af17ccadd460500300bdf9006fbc41b79
   end_sha: ""
@@ -44,3 +44,31 @@ confirm green count rises from 34.
 
 Cross-repo: producer fixes land in perl5-son (branch phase4b-single-exit),
 cross-referenced by stage name; backend/repr fixes land in Chalk.
+
+### Outcome (2026-07-03, DONE)
+
+All five cases GREEN; corpus-wide green 34 -> 39 (t/bootstrap/corpus/son-corpus-wide.t).
+Investigation FALSIFIED the filed hypotheses -- none of these needed Coerce(Bool->Int):
+
+- L4: Not missing from %RESULT_STAMP (perl5-son fa7e8ef). Bool: == perl.
+- D4: semantic miscompile -- the void-context and/or arm walk consumed the rest
+  of the sub. Fixed: arm stop-op at the convergence point + TernaryExpr(cond,
+  arm, base) rebinds (perl5-son 60c6ade). Bilateral if/unless + false-path green.
+- D2: producer built SSA post-hoc. Rewritten two-phase (scout -> pre-walk header
+  Phis -> set_backedge patch; Projs directly on Loop, exit Region) per the
+  corpus contract (perl5-son d20f1e1). Chalk loader defer-patches the forward
+  Phi-backedge ref a loop cycle forces (Chalk db166680, RED-first via a
+  hand-authored corpus-shape JSON that lowers to Int:6); producer DFS cuts
+  exactly the backedge so that is the only forward ref. Zero-iteration green.
+- D5: back-edge detected (arm walk stops on a pre-visited op) -> routed to the
+  while machinery (perl5-son b1530fb). Pre-test zero-iteration green.
+- D3: enteriter range form desugared to the corpus counted loop (induction Phi,
+  NumGt(high+1, i), synthesized +1 step) (perl5-son a9630f8). General-list
+  foreach = honest GAP. Empty-range green.
+
+Made loud instead of silently wrong: return inside a loop body, loop-carried
+type widening, until (or-condition) loops.
+
+Verification: perl5-son suite 303; Chalk IR suite 558; son-e2e 22 GREEN/3 GAP/0
+BUG (baseline preserved); son-compare + cross-load + emit + ir-serialize clean.
+perl5-son branch phase4b-single-exit pushed (a374d42..a9630f8).
