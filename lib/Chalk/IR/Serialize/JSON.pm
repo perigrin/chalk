@@ -243,6 +243,7 @@ sub _deserialize_graph ($method_data) {
     my @node_data = $method_data->{nodes}->@*;
 
     my @nodes;  # positional array of created node objects
+    my @backedge_patches;  # [phi_position, backedge_index] deferred wirings
 
     for my $nd (@node_data) {
         my $op     = $nd->{op};
@@ -287,6 +288,18 @@ sub _deserialize_graph ($method_data) {
         }
         elsif ($op eq 'Phi') {
             $args{region} = $nodes[ $fields->{region} ];
+            # A loop Phi's backedge input (inputs[1]) may reference a node
+            # LATER in the array -- the Phi<->backedge data cycle forces one
+            # forward edge in any serialization order, and a forward index
+            # resolves to undef in the single pass above. Defer it: construct
+            # the Phi with its init input only and wire inputs[1] via
+            # set_backedge once every node exists (the same post-construction
+            # patch the corpus builder uses for loop_backedge edges).
+            my @idx = ($nd->{inputs} // [])->@*;
+            if (@idx == 2 && $idx[1] >= @nodes) {
+                push @backedge_patches, [ scalar @nodes, $idx[1] ];
+                $args{inputs} = [ $inputs[0] ];
+            }
         }
         elsif ($op eq 'Proj') {
             $args{index} = $fields->{index};
@@ -350,6 +363,12 @@ sub _deserialize_graph ($method_data) {
         }
 
         push @nodes, $node;
+    }
+
+    # Wire the deferred loop-Phi backedges now that every node exists.
+    for my $patch (@backedge_patches) {
+        my ($phi_idx, $val_idx) = @$patch;
+        $nodes[$phi_idx]->set_backedge($nodes[$val_idx]);
     }
 
     # Wire each Region's head back-pointer to the If/Loop that owns it. B::SoN's
