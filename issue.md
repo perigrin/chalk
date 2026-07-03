@@ -1,6 +1,6 @@
 ---
 title: "Phase 4: B::SoN as trusted IR/MOP producer (directional, verified through harness)"
-state: in-progress
+state: done
 urgency: normal
 milestone: codegen-harness
 blocked_by:
@@ -16,16 +16,40 @@ blocked_by:
 blocks:
 - 019eaa51-b9eb-7bc5-bee4-ca6140dc8b81
 created: 2026-06-09T02:59:04.062678084Z
-updated: 2026-07-03T22:18:38.140635418Z
+updated: 2026-07-03T22:18:38.267976134Z
 sessions:
 - start_sha: 125deda16f98e24471678aaa7f4b363e237ed4cd
-  end_sha: ""
-  commits: 0
+  end_sha: 1afa515d8f3c900227c2a4a5f21ed0d1ffbf0c58
+  commits: 20
   started_at: 2026-06-14T03:58:25.906947341Z
+  ended_at: 2026-07-03T22:18:38.267976134Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
   timestamp: 2026-06-14T03:58:25.906947341Z
+- state: done
+  actor: human:git-zhi
+  timestamp: 2026-07-03T22:18:38.267976134Z
+observed_paths:
+- docs/plans/2026-06-14-phase4a-seam-reaudit.md
+- docs/plans/2026-06-15-phase4b-scope.md
+- docs/plans/2026-06-21-phase4c-scope.md
+- docs/plans/2026-07-01-phase4-corpus-wide-status.md
+- lib/Chalk/IR/Node/PadAccess.pm
+- lib/Chalk/IR/Serialize/JSON.pm
+- lib/Chalk/Target/LLVM.pm
+- paad/alignment-reviews/2026-07-03-rc2b-alignment.md
+- paad/code-reviews/phase1-lateral-bindings-2026-07-03-rc2b-5df32523.md
+- t/bootstrap/corpus/son-corpus-wide.t
+- t/bootstrap/corpus/son-e2e.t
+- t/bootstrap/ir-node-data.t
+- t/bootstrap/ir/llvm-ternary-truthiness.t
+- t/bootstrap/ir/padaccess-identity.t
+- t/bootstrap/ir/son-aggregate-repr.t
+- t/bootstrap/ir/son-classes-replay.t
+- t/bootstrap/ir/son-loop-backedge.t
+- t/bootstrap/ir/son-region-head.t
+- t/bootstrap/ir/son-return-repr-seam.t
 ---
 
 Scoping brief: docs/plans/2026-06-12-phase4-bson-brief.md. Stage 4a (seam re-audit) DONE 2026-06-14: docs/plans/2026-06-14-phase4a-seam-reaudit.md.
