@@ -64,11 +64,13 @@ sub parse_file {
 #
 # Runs a single case through all three checks:
 #   1. BEHAVIOR: run source under perl; assert or capture behavior block.
-#   2. IR-SHAPE: structural subset match of ir block against the real graph.
-#   3. L-VERDICT: run the real graph through LLVMDriver; assert L: line.
+#   2. IR-SHAPE: constructive self-consistency — build the graph FROM the ir
+#      block and TypedInvariant-check it. (Matching a PRODUCER's real graph
+#      against the block is shape_subset_check, used by the corpus-wide
+#      B::SoN runner; run_case has no real-graph input.)
+#   3. L-VERDICT: run the built graph through LLVMDriver; assert L: line.
 #
 # opts:
-#   graph_for    => coderef($tag) -> $return_node  (required for IR + L checks)
 #   capture_mode => bool  (if true: fill empty behavior block from perl oracle)
 #   md_path      => str   (required for capture-mode rewrite)
 #
@@ -995,9 +997,15 @@ sub shape_subset_check {
 # _sig_match($spec_sig, \@real_sigs) -> bool
 # A spec signature matches a real one on kind, declared repr, Constant
 # value, and Coerce from/to. Fields the spec leaves undef are unchecked.
+# A matched real signature is CONSUMED (multiset subset): two same-kind
+# spec nodes need two real nodes. Matching is greedy and edge-blind — it
+# compares node multisets, not operand wiring; rooted structural matching
+# is the upgrade path if a rewired-but-same-multiset regression ever slips
+# through.
 sub _sig_match {
     my ($spec, $real_sigs) = @_;
-    for my $sig (@$real_sigs) {
+    for my $i (0 .. $#$real_sigs) {
+        my $sig = $real_sigs->[$i];
         next unless $sig->{kind} eq $spec->{kind};
         if (defined $spec->{repr}) {
             next unless defined $sig->{repr} && $sig->{repr} eq $spec->{repr};
@@ -1009,6 +1017,7 @@ sub _sig_match {
             next unless ($sig->{from} // '') eq ($spec->{from} // '');
             next unless ($sig->{to}   // '') eq ($spec->{to}   // '');
         }
+        splice @$real_sigs, $i, 1;
         return true;
     }
     return false;
@@ -1103,14 +1112,6 @@ sub _visit_node {
     if ($kind eq 'Coerce') {
         $sig{from} = $node->can('from_repr') ? $node->from_repr : undef;
         $sig{to}   = $node->can('to_repr')   ? $node->to_repr   : undef;
-    }
-
-    # For arithmetic op nodes, capture input representations
-    if ($node->can('inputs') && defined $node->inputs) {
-        my @input_reprs = map {
-            defined $_ && $_->can('representation') ? $_->representation : undef
-        } $node->inputs->@*;
-        $sig{input_reprs} = \@input_reprs;
     }
 
     push @$sigs, \%sig;

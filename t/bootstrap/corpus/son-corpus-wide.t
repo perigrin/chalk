@@ -76,9 +76,9 @@ sub run_through_bson ($source) {
     print $lfh $ll; close $lfh;
     my $out = qx($LLI $lltmp 2>&1);
     my $exit = $? >> 8;
-    return (undef, "lli exited $exit", $g, $ret) if $exit != 0;
+    return (undef, "lli exited $exit", $g) if $exit != 0;
     chomp $out;
-    return ($out, undef, $g, $ret);
+    return ($out, undef, $g);
 }
 
 sub perl_oracle ($source) {
@@ -130,16 +130,16 @@ for my $md (@topics) {
         }
 
         my $oracle = perl_oracle($source);
-        my ($lli, $err, $g, $ret) = run_through_bson($source);
+        my ($lli, $err, $g) = run_through_bson($source);
 
         # The triple contract (Phase 4 gate): behavior AND shape AND invariant.
         my $behavior_ok = defined $lli && $lli eq $oracle;
 
         my ($shape_ok, $shape_why) = (0, 'no loaded graph');
         my ($inv_ok,   $inv_why)   = (0, 'no loaded graph');
-        if (defined $ret) {
+        if (defined $g) {
             my $shape = Chalk::CodeGen::Harness::MdtestCorpus
-                ->shape_subset_check($case->{ir}, $ret);
+                ->shape_subset_check($case->{ir}, $g->returns->[0]);
             $shape_ok  = $shape->{verdict} eq 'PASS';
             $shape_why = $shape->{verdict} eq 'FAIL'
                 ? 'missing [' . join(', ', $shape->{missing}->@*) . ']'
