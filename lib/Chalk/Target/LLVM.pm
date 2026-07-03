@@ -2558,8 +2558,12 @@ sub _lower_ternary {
     my $true_node = $inputs->[1];
     my $fals_node = $inputs->[2];
 
-    # Lower the condition: must produce an i1 (Bool representation).
-    my $cond_ref = $self->lower_value($cond_node);
+    # Lower the condition. Any scalar is a valid Perl guard (`$x = 7 if $c`,
+    # `$c ? 7 : 9`), so coerce to i1 via truthiness: Bool passes through,
+    # Int -> icmp ne, Num -> fcmp une (the same rule _lower_not applies).
+    my $cond_ref  = $self->lower_value($cond_node);
+    my $cond_repr = _require_repr($cond_node, 'TernaryExpr.condition');
+    $cond_ref = $self->_ensure_i1($cond_ref, $cond_repr);
 
     # Lower the true and false branches: must be same type (Int -> i64).
     my $true_ref = $self->lower_value($true_node);
