@@ -1,6 +1,6 @@
 ---
 title: "RC5: TernaryExpr Int/Bool branch-repr mismatch on nested-if (Phase 4, 2 cases)"
-state: in-progress
+state: done
 urgency: normal
 milestone: codegen-harness
 blocked_by:
@@ -8,16 +8,20 @@ blocked_by:
 blocks:
 - 019f1be7-47ac-7d06-823d-b1f959028a78
 created: 2026-07-01T03:57:27.827922021Z
-updated: 2026-07-03T22:34:44.648669711Z
+updated: 2026-07-03T22:34:55.345204738Z
 sessions:
 - start_sha: 1afa515d8f3c900227c2a4a5f21ed0d1ffbf0c58
-  end_sha: ""
+  end_sha: 1afa515d8f3c900227c2a4a5f21ed0d1ffbf0c58
   commits: 0
   started_at: 2026-07-03T21:54:59.729220118Z
+  ended_at: 2026-07-03T22:34:55.345204738Z
 transitions:
 - state: in-progress
   actor: human:git-zhi
   timestamp: 2026-07-03T21:54:59.729220118Z
+- state: done
+  actor: human:git-zhi
+  timestamp: 2026-07-03T22:34:55.345204738Z
 ---
 
 Phase 4 corpus-wide root cause RC5 (2 cases). See docs/plans/2026-07-01-phase4-corpus-wide-status.md.
