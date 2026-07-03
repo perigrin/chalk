@@ -11,9 +11,9 @@ Phase 4's gate ("across the corpus topics, behavior matching perl").
 
 | | count |
 |---|---|
-| **GREEN** (lli == perl) | **24** |
+| **GREEN** (lli == perl) | **24** (39 as of 2026-07-03: RC1+RC2+RC2b+RC4 landed) |
 | GAP (corpus-declared: pragmas, non-ASCII, CodeRef) | 8 |
-| **BUG / worklist** (should lower, doesn't or wrong) | **36** |
+| **BUG / worklist** (should lower, doesn't or wrong) | **36** (21 as of 2026-07-03) |
 
 Per topic (green / declared-gap / bug):
 
@@ -62,10 +62,36 @@ this was TWO mechanisms, not one.
   guards (`return X if/unless C`) with correct continuation-Proj polarity.
   End-to-end L1 -> Int:7, L2 -> Int:3. perl5-son a374d42; Chalk loader 6c36af9.
   corpus-wide green 32 -> 34. (zhi 019f1bd2-dc60 done.)
-- MOVED to RC2b (019f1c1e) — loops D2/D3 (while/foreach: "Phi before its
-  enclosing loop structure" — a Loop Region/Phi ordering bug, different from
-  the and/or shape), `not` L4 (needs Bool repr), and postfix D4/D5 (now emit
-  clean And nodes but need Coerce(Bool->Int)).
+- RC2b DONE (2026-07-03, zhi 019f1c1e): all five cases GREEN, corpus-wide
+  green 34 -> 39. Investigation falsified the filed hypotheses — none of
+  these needed Coerce(Bool->Int):
+  - L4 `not`: one-line producer gap — `Not` missing from %RESULT_STAMP
+    (perl5-son fa7e8ef). lli Bool: == perl.
+  - D4 postfix if: SEMANTIC MISCOMPILE, not a repr gap — the void-context
+    and/or arm walk consumed the rest of the sub (final `$x` read vanished,
+    conditional rebind lost). Fixed with an arm stop-op at the convergence
+    point + TernaryExpr(cond, arm, base) rebinds of the arm's pad effects
+    (perl5-son 60c6ade). Bilateral if/unless + false-path verified.
+  - D2 while: the producer built SSA post-hoc (Phis after the walk, so the
+    body read init constants; Return control was a body-side If Proj; If in
+    the header where the backend wants Projs on the Loop). Rewritten as
+    two-phase scout + pre-walk Phis + set_backedge patch (perl5-son d20f1e1);
+    Chalk loader learned to defer-patch the forward Phi-backedge reference a
+    loop cycle forces in any serialization order (Chalk db166680); the
+    producer's Graph::nodes DFS cuts exactly the loop-Phi backedge so that
+    is the ONLY forward reference (same commit). Zero-iteration verified.
+  - D5 postfix while: misclassified as value context (And node). The back-
+    edge is detected when the arm walk stops on a pre-visited op; routed to
+    the while machinery (perl5-son b1530fb). Pre-test zero-iteration
+    semantics verified.
+  - D3 foreach: enteriter modeled nothing (leaked list constant as the
+    condition, dangling $i). Range form desugared to the corpus counted
+    loop — induction Phi + NumGt(high+1, i) + synthesized +1 step
+    (perl5-son a9630f8). General-list foreach is an honest GAP. Empty-range
+    verified.
+  Latent bugs found and made loud instead of silent: function exit inside a
+  loop body (was silently swallowed -> wrong graph, now GAP dies),
+  loop-carried type widening (GAP dies), until/or-condition loops (GAP die).
 
 ### RC3 — producer fails to translate (dies), `no main::corpus_case method` (4)
 host H1/H2 ($1 capture), regex R2 (qr//), logical L3b (defined-or undef-left).
