@@ -11,7 +11,7 @@ Phase 4's gate ("across the corpus topics, behavior matching perl").
 
 | | count |
 |---|---|
-| **GREEN** (lli == perl) | **24** (45 as of 2026-07-03: RC1+RC2+RC2b+RC3+RC4 landed) |
+| **GREEN** (lli == perl) | **24** (45 as of 2026-07-03: RC1+RC2+RC2b+RC3+RC4+RC5 landed) |
 | GAP (corpus-declared: pragmas, non-ASCII, CodeRef) | 8 |
 | **BUG / worklist** (should lower, doesn't or wrong) | **36** (21 as of 2026-07-03) |
 
@@ -94,8 +94,9 @@ this was TWO mechanisms, not one.
   loop-carried type widening (GAP dies), until/or-condition loops (GAP die).
 
 ### RC3 — producer fails to translate (dies), `no main::corpus_case method` (4)
-DONE (2026-07-03, perl5-son aa0d644, zhi 019f1bd2-dca7). All four cases GREEN
-plus two more unlocked; corpus-wide green 39 -> 45, worklist 21 -> 15. The
+DONE (2026-07-03, perl5-son aa0d644, zhi 019f1bd2-dca7). All four cases GREEN;
+corpus-wide green 41 -> 45, worklist 19 -> 15 (the commit messages say
+39 -> 45 because RC5's 39 -> 41 had not been recorded here yet). The
 three actual mechanisms (none matched the filed "dor edge case" hypothesis —
 L3b died on the undef op, not on dor):
 - $N capture reads: `$1` compiles to gv+rv2sv (canonical under the rpeep
@@ -128,9 +129,11 @@ is fully green.
 These are the dangerous class (silently wrong, not a loud GAP).
 
 ### RC5 — TernaryExpr Int/Bool branch typing (2)
-control-flow D7/D9 nested-if: "TernaryExpr branches true=Int false=Bool".
-The two arms get different reprs (one folds to Bool). A branch-repr
-unification issue.
+DONE (2026-07-03, zhi RC5 arc). control-flow D7/D9 nested-if GREEN; corpus
+39 -> 41, control-flow FULLY GREEN. The filed branch-repr-unification
+hypothesis was wrong: the root was cond_expr non-recursion + a missing
+join-stop in the arm walk (see phase4_rc5_complete memory / perl5-son
+6b59303..7f13d42, which also closed four silent-drop paths found in review).
 
 ### Plus 1 straggler
 - classes class-simple: "cannot lower op=Call (not in literal-arithmetic
