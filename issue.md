@@ -16,7 +16,7 @@ blocked_by:
 blocks:
 - 019eaa51-b9eb-7bc5-bee4-ca6140dc8b81
 created: 2026-06-09T02:59:04.062678084Z
-updated: 2026-07-03T22:18:37.866516066Z
+updated: 2026-07-03T22:18:38.140635418Z
 sessions:
 - start_sha: 125deda16f98e24471678aaa7f4b363e237ed4cd
   end_sha: ""
@@ -51,3 +51,5 @@ function exit -- silent wrong control flow when E is undef. The dor fix needs
 the same exited-signal handling with real control threading (it is the
 ubiquitous lib/ idiom, so a GAP die here would be very loud -- prefer the
 real fix).
+
+CLOSED by RC5 (2026-07-03): _walk_branch dispatches nested cond_expr recursively (perl5-son 6b59303); pinned by t/from-optree-nested-if.t subtest 4 (rvalue nested ternary) and corpus D7/D9 GREEN.
