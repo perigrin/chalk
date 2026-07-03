@@ -1,5 +1,5 @@
 # ABOUTME: Phase 4 gate measurement: run EVERY mdtest corpus case through B::SoN.
-# ABOUTME: source -> B::SoN -> JSON -> Chalk -> backend -> lli == perl, per case, all topics.
+# ABOUTME: Triple contract per case: behavior (lli == perl) + shape (ir-block subset) + TypedInvariant.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -8,6 +8,7 @@ use File::Temp qw(tempfile);
 
 use lib 'lib', 't/lib';
 use Chalk::IR::Serialize::JSON ();
+use Chalk::IR::Graph::TypedInvariant;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::TypeTag;
 use Chalk::CodeGen::Harness::MdtestCorpus;
@@ -75,9 +76,9 @@ sub run_through_bson ($source) {
     print $lfh $ll; close $lfh;
     my $out = qx($LLI $lltmp 2>&1);
     my $exit = $? >> 8;
-    return (undef, "lli exited $exit") if $exit != 0;
+    return (undef, "lli exited $exit", $g, $ret) if $exit != 0;
     chomp $out;
-    return ($out, undef);
+    return ($out, undef, $g, $ret);
 }
 
 sub perl_oracle ($source) {
@@ -98,7 +99,8 @@ sub perl_oracle ($source) {
 # ---------------------------------------------------------------------------
 my @topics = sort glob('t/corpus/mdtest/*.md');
 
-my %tally = (green => 0, gap_declared => 0, bug => 0, no_source => 0);
+my %tally = (green => 0, gap_declared => 0, bug => 0, no_source => 0,
+             shape_ok => 0, inv_ok => 0, gate_green => 0);
 my %by_topic;
 my @bugs;
 
@@ -128,17 +130,46 @@ for my $md (@topics) {
         }
 
         my $oracle = perl_oracle($source);
-        my ($lli, $err) = run_through_bson($source);
+        my ($lli, $err, $g, $ret) = run_through_bson($source);
 
-        if (defined $lli && $lli eq $oracle) {
-            $tally{green}++;
-            $by_topic{$topic}{green}++;
-            pass("$label: lli '$lli' == perl '$oracle'");
+        # The triple contract (Phase 4 gate): behavior AND shape AND invariant.
+        my $behavior_ok = defined $lli && $lli eq $oracle;
+
+        my ($shape_ok, $shape_why) = (0, 'no loaded graph');
+        my ($inv_ok,   $inv_why)   = (0, 'no loaded graph');
+        if (defined $ret) {
+            my $shape = Chalk::CodeGen::Harness::MdtestCorpus
+                ->shape_subset_check($case->{ir}, $ret);
+            $shape_ok  = $shape->{verdict} eq 'PASS';
+            $shape_why = $shape->{verdict} eq 'FAIL'
+                ? 'missing [' . join(', ', $shape->{missing}->@*) . ']'
+                : ($shape->{reason} // '');
+
+            my $nodes = $g->nodes;
+            my $inv = Chalk::IR::Graph::TypedInvariant->check($nodes);
+            $inv_ok  = $inv->{ok} ? 1 : 0;
+            $inv_why = $inv->{ok} ? ''
+                : join('; ', map { $_->{message} } $inv->{violations}->@*);
+        }
+
+        $tally{green}++,      $by_topic{$topic}{green}++      if $behavior_ok;
+        $tally{shape_ok}++,   $by_topic{$topic}{shape}++      if $shape_ok;
+        $tally{inv_ok}++,     $by_topic{$topic}{inv}++        if $inv_ok;
+
+        if ($behavior_ok && $shape_ok && $inv_ok) {
+            $tally{gate_green}++;
+            $by_topic{$topic}{gate}++;
+            pass("$label: gate-green (behavior + shape + invariant)");
         }
         else {
+            my @why;
+            push @why, (defined $lli ? "lli '$lli' != perl '$oracle'" : $err)
+                unless $behavior_ok;
+            push @why, "shape: $shape_why"     unless $shape_ok;
+            push @why, "invariant: $inv_why"   unless $inv_ok;
+            my $why = join(' | ', @why);
             $tally{bug}++;
             $by_topic{$topic}{bug}++;
-            my $why = defined $lli ? "lli '$lli' != perl '$oracle'" : $err;
             push @bugs, "$label -> $why";
             # Not a test failure: this is the gap map. Mark TODO so red = worklist.
             TODO: {
@@ -153,15 +184,17 @@ for my $md (@topics) {
 # The map.
 # ---------------------------------------------------------------------------
 diag("");
-diag("=== Phase 4 corpus-wide status (B::SoN -> backend == perl) ===");
+diag("=== Phase 4 corpus-wide status (triple contract: behavior+shape+invariant) ===");
 for my $t (sort keys %by_topic) {
     my $b = $by_topic{$t};
-    diag(sprintf("  %-14s green=%-2d gap=%-2d bug=%-2d",
-        $t, $b->{green} // 0, $b->{gap} // 0, $b->{bug} // 0));
+    diag(sprintf("  %-14s gate=%-2d behavior=%-2d shape=%-2d inv=%-2d gap=%-2d worklist=%-2d",
+        $t, $b->{gate} // 0, $b->{green} // 0, $b->{shape} // 0,
+        $b->{inv} // 0, $b->{gap} // 0, $b->{bug} // 0));
 }
 diag("");
-diag(sprintf("TOTAL: green=%d  gap-declared=%d  bug/worklist=%d  (no-source sections=%d)",
-    @tally{qw(green gap_declared bug no_source)}));
+diag(sprintf(
+    "TOTAL: gate-green=%d  behavior=%d  shape=%d  invariant=%d  gap-declared=%d  worklist=%d  (no-source sections=%d)",
+    @tally{qw(gate_green green shape_ok inv_ok gap_declared bug no_source)}));
 if (@bugs) {
     diag("");
     diag("=== worklist (behavior gaps to close) ===");

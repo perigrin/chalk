@@ -951,6 +951,80 @@ sub _run_ir_shape_check {
     return { verdict => 'PASS', missing => [], built => true };
 }
 
+# shape_subset_check($class, $ir_text, $return_node) -> { verdict, missing }
+#
+# The SHAPE leg of the Phase 4 triple contract: every node signature the
+# case's ir block declares must exist in the real graph (loaded from B::SoN
+# or any other producer). The spec graph is built from the ir block by the
+# constructive builder; both graphs are reduced to node signatures (kind +
+# declared repr + Constant value + Coerce from/to) and each spec signature
+# must find a match among the real graph's — subset semantics, since a real
+# producer graph carries pads, VarDecls, and control shape the hand-authored
+# blocks omit.
+#
+# Verdicts: PASS (all spec signatures found, or nothing to enforce),
+# FAIL (missing => [readable signatures]), SKIP (no ir block, or the spec
+# block itself is unbuildable — unverifiable, NOT a pass).
+sub shape_subset_check {
+    my ($class, $ir_text, $return_node) = @_;
+
+    return { verdict => 'SKIP', missing => [], reason => 'no ir block' }
+        unless defined $ir_text && $ir_text =~ /\S/;
+    return { verdict => 'SKIP', missing => [], reason => 'no real graph' }
+        unless defined $return_node;
+    return { verdict => 'PASS', missing => [], reason => 'pure-GAP block; no shape to enforce' }
+        if _is_pure_gap_block($ir_text);
+
+    my $spec_return;
+    eval { $spec_return = __PACKAGE__->build_graph_from_ir($ir_text) };
+    if ($@ || !defined $spec_return) {
+        my $why = $@ || 'builder returned undef';
+        return { verdict => 'SKIP', missing => [], reason => "spec block unbuildable: $why" };
+    }
+
+    my @spec = _collect_node_signatures($spec_return);
+    my @real = _collect_node_signatures($return_node);
+
+    my @missing = map  { _sig_str($_) }
+                  grep { !_sig_match($_, \@real) } @spec;
+    return @missing
+        ? { verdict => 'FAIL', missing => \@missing }
+        : { verdict => 'PASS', missing => [] };
+}
+
+# _sig_match($spec_sig, \@real_sigs) -> bool
+# A spec signature matches a real one on kind, declared repr, Constant
+# value, and Coerce from/to. Fields the spec leaves undef are unchecked.
+sub _sig_match {
+    my ($spec, $real_sigs) = @_;
+    for my $sig (@$real_sigs) {
+        next unless $sig->{kind} eq $spec->{kind};
+        if (defined $spec->{repr}) {
+            next unless defined $sig->{repr} && $sig->{repr} eq $spec->{repr};
+        }
+        if ($spec->{kind} eq 'Constant' && defined $spec->{value}) {
+            next unless defined $sig->{value} && $sig->{value} eq $spec->{value};
+        }
+        if ($spec->{kind} eq 'Coerce') {
+            next unless ($sig->{from} // '') eq ($spec->{from} // '');
+            next unless ($sig->{to}   // '') eq ($spec->{to}   // '');
+        }
+        return true;
+    }
+    return false;
+}
+
+# _sig_str($sig) -> str — a readable form for missing-node reporting.
+sub _sig_str {
+    my ($sig) = @_;
+    my $s = $sig->{kind};
+    $s .= "(" . $sig->{value} . ")" if $sig->{kind} eq 'Constant' && defined $sig->{value};
+    $s .= "(" . ($sig->{from} // '?') . " -> " . ($sig->{to} // '?') . ")"
+        if $sig->{kind} eq 'Coerce';
+    $s .= " :" . $sig->{repr} if defined $sig->{repr};
+    return $s;
+}
+
 # _is_pure_gap_block($ir_text) -> bool
 # A pure-GAP block has an L: GAP(...) line and NO %name = ... node lines.
 sub _is_pure_gap_block {
@@ -993,68 +1067,6 @@ sub _collect_nodes_recursive {
     if ($node->can('control_in') && defined $node->control_in) {
         _collect_nodes_recursive($node->control_in, $visited, $nodes);
     }
-}
-
-# _parse_ir_block($text) -> { nodes => [...], l_verdict => str }
-#
-# Parses node-by-role lines:
-#   Constant(1) :Int        -> { kind=>'Constant', value=>'1', repr=>'Int' }
-#   Constant(-7) :Int       -> { kind=>'Constant', value=>'-7', repr=>'Int' }
-#   Coerce(Int -> Num)      -> { kind=>'Coerce', from=>'Int', to=>'Num' }
-#   Add(Int, Int) :Int      -> { kind=>'Add', arg_reprs=>['Int','Int'], repr=>'Int' }
-#   Return(Add)             -> { kind=>'Return', input_kind=>'Add' }
-#   L: GREEN                -> l_verdict = 'GREEN'
-#   L: GAP(reason)          -> l_verdict = 'GAP', gap_reason = 'reason'
-sub _parse_ir_block {
-    my ($text) = @_;
-
-    my @nodes;
-    my $l_verdict;
-    my $gap_reason;
-
-    for my $line (split /\n/, $text) {
-        # Strip inline comments
-        $line =~ s/\s*#.*$//;
-        next unless $line =~ /\S/;
-
-        # L: verdict line
-        if ($line =~ /^\s*L:\s*(GREEN|GAP(?:\(([^)]*)\))?)\s*$/) {
-            my $verdict = $1;
-            $gap_reason = $2 if defined $2;
-            $l_verdict  = ($verdict =~ /^GAP/) ? 'GAP' : 'GREEN';
-            next;
-        }
-
-        # Coerce(From -> To)
-        if ($line =~ /^\s*Coerce\(\s*(\w+)\s*->\s*(\w+)\s*\)/) {
-            push @nodes, {
-                kind  => 'Coerce',
-                from  => $1,
-                to    => $2,
-                raw   => "Coerce($1 -> $2)",
-            };
-            next;
-        }
-
-        # NodeKind(args) :Repr  or  NodeKind(args)
-        if ($line =~ /^\s*(\w+)\(([^)]*)\)(?:\s*:(\w+))?/) {
-            my ($kind, $args_raw, $repr) = ($1, $2, $3);
-            my @args = map { s/^\s+|\s+$//gr } split /,/, $args_raw;
-            push @nodes, {
-                kind      => $kind,
-                args      => \@args,
-                repr      => $repr,
-                raw       => "$kind($args_raw)" . (defined $repr ? " :$repr" : ''),
-            };
-            next;
-        }
-    }
-
-    return {
-        nodes     => \@nodes,
-        l_verdict => $l_verdict // 'GREEN',
-        gap_reason => $gap_reason,
-    };
 }
 
 # _collect_node_signatures($return_node) -> @signatures
@@ -1123,67 +1135,6 @@ sub _node_kind {
     my $class = ref($node) || blessed($node) || "$node";
     $class =~ s/.*:://;
     return $class;
-}
-
-# _find_node($req, \@real_nodes) -> bool
-# Returns true if the real graph contains a node matching $req.
-sub _find_node {
-    my ($req, $real_nodes) = @_;
-
-    for my $sig (@$real_nodes) {
-        next unless $sig->{kind} eq $req->{kind};
-
-        if ($req->{kind} eq 'Coerce') {
-            next unless (defined $sig->{from} && $sig->{from} eq ($req->{from} // ''));
-            next unless (defined $sig->{to}   && $sig->{to}   eq ($req->{to}   // ''));
-            return true;
-        }
-
-        if ($req->{kind} eq 'Constant') {
-            # Check value if provided in args
-            if (defined $req->{args} && @{ $req->{args} }) {
-                my $expected_val = $req->{args}[0];
-                # Strip quotes if present
-                $expected_val =~ s/^['"]|['"]$//g;
-                next unless defined $sig->{value} && $sig->{value} eq $expected_val;
-            }
-        }
-
-        if ($req->{kind} eq 'Return') {
-            # Return node — check input kind if specified
-            if (defined $req->{args} && @{ $req->{args} } && $req->{args}[0] ne '') {
-                # Declared as Return(Add) — we just check a Return exists (relaxed subset match)
-                # The input kind check would require extra traversal; just verify Return is present.
-            }
-        }
-
-        # Check representation if declared
-        if (defined $req->{repr}) {
-            next unless defined $sig->{repr} && $sig->{repr} eq $req->{repr};
-        }
-
-        # Check input representations for arithmetic ops
-        # e.g. Add(Int, Int) :Int requires inputs with Int repr
-        if (defined $req->{args} && @{ $req->{args} }
-            && $req->{kind} !~ /^(Constant|Return|Coerce)$/)
-        {
-            my @req_arg_reprs = grep { $_ =~ /^(Int|Num|Str|Bool|Scalar)$/ } @{ $req->{args} };
-            if (@req_arg_reprs) {
-                my @actual_reprs = grep { defined $_ } @{ $sig->{input_reprs} // [] };
-                my $match = true;
-                for my $i (0 .. $#req_arg_reprs) {
-                    unless (defined $actual_reprs[$i] && $actual_reprs[$i] eq $req_arg_reprs[$i]) {
-                        $match = false;
-                        last;
-                    }
-                }
-                next unless $match;
-            }
-        }
-
-        return true;
-    }
-    return false;
 }
 
 # ---------------------------------------------------------------------------

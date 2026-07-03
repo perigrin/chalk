@@ -140,10 +140,45 @@ join-stop in the arm walk (see phase4_rc5_complete memory / perl5-son
   slice)" — Empty->new; ref($e) returns a Str; the ref() builtin path.
 - host H3 (%ENV): Subscript on a Str repr — EnvRead not modeled (RC1-adjacent).
 
-## What this means vs the Phase 4 gate
+## Triple-contract re-audit (2026-07-03, zhi 019f1be7)
 
-- The gate is corpus-wide behavior (+ shape + invariant, which this runner
-  does NOT yet check — a separate tightening).
+The runner now enforces the full triple contract per case: behavior
+(lli == perl) AND shape (structural-subset of the case ir block, via
+MdtestCorpus::shape_subset_check — spec graph built by the constructive
+builder, signature subset match) AND invariant (TypedInvariant on the
+loaded graph). The stale pre-constructive matcher pair
+(_parse_ir_block/_find_node, no callers, could not parse named-SSA blocks)
+was deleted; _collect_node_signatures was resurrected as the shared
+signature collector.
+
+Re-audit of the 45 behavior-greens against the stricter bar:
+
+| leg | passing |
+|---|---|
+| behavior | 45 |
+| invariant | 49 |
+| shape | 9 |
+| **gate-green (all three)** | **9** |
+
+Shape is the discriminator, and its failures collapse to TWO systemic
+families (filed 2026-07-03 as the 019f2a50 pair, not per-case bugs):
+
+1. **Perl constant-folding** — literal arithmetic folds in op.c before
+   B::SoN walks the optree, so `Add(1,2)` specs meet a `Constant(3)` graph
+   (all 5 arithmetic cases, plus folded literals elsewhere).
+2. **VarDecl/PadAccess convention + reprs** — specs use the Chalk-parser
+   shape (`VarDecl(name-Constant "$x", value) :Int`, repr'd PadAccess);
+   the B::SoN loader emits `VarDecl(PadAccess, value)` with no name
+   Constant and unstamped PadAccess/VarDecl/And, so nearly every
+   lexical-using case is shape-red despite green behavior.
+
+Until those two land, Phase 4 completion is measured as gate-green=9, NOT
+behavior=45. That is the honest number vs the acceptance criterion.
+
+## What this means vs the Phase 4 gate (2026-07-01 baseline, behavior-only)
+
+- The gate is corpus-wide behavior (+ shape + invariant, which the runner
+  now checks — see the re-audit above).
 - 24/68 behavior-green. The remaining 36 are ~5 root causes; RC1 (missing
   repr) alone gates ~15, RC2 (control-flow runtime) another 8.
 - Highest leverage: RC1 repr-inference (unblocks references + regex + the
@@ -153,6 +188,7 @@ join-stop in the arm walk (see phase4_rc5_complete memory / perl5-son
   inverted ternary/if is a correctness bug, not a coverage gap.
 
 ## Note on the runner
-Behavior-only (lli == perl). Does NOT yet enforce the plan's shape-subset or
-TypedInvariant checks — a follow-up to make "green" mean the full triple
-contract. Also emits Test2 "Wide character" warnings on non-ASCII diag; benign.
+Enforces the full triple contract as of 2026-07-03 (see the re-audit
+section). "gate-green" means behavior + shape + invariant; the per-topic map
+reports each leg separately so behavior-only progress stays visible. Also
+emits Test2 "Wide character" warnings on non-ASCII diag; benign.
