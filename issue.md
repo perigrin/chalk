@@ -16,7 +16,7 @@ blocked_by:
 blocks:
 - 019eaa51-b9eb-7bc5-bee4-ca6140dc8b81
 created: 2026-06-09T02:59:04.062678084Z
-updated: 2026-07-03T22:19:07.645371947Z
+updated: 2026-07-03T22:19:34.251619596Z
 sessions:
 - start_sha: 125deda16f98e24471678aaa7f4b363e237ed4cd
   end_sha: 1afa515d8f3c900227c2a4a5f21ed0d1ffbf0c58
@@ -76,14 +76,3 @@ SINGLE BIGGEST 4b BLOCKER (new finding, double-sided): multi-exit/early-return b
 STILL-OPEN DEBTS (re-measured): field writes dropped (probe confirmed: $n+=1 -> FieldAccess;Add;Return, store absent); no MOP emission (largest 4c gap); PadAccess targ bug present (cosmetic-but-real, cross-graph identity); son-compare divergences are PURE node-ordering (not semantic) on its trivial-accessor corpus -- it does NOT certify the hard tiers; the mdtest corpus is the real work-list.
 
 SHAPE: 4b computation slice (start: single-exit normalization; then field/element writes, CompoundAssign, increment modeling) -> 4c class tier (declarative MOP JSON + Call.class_name) -> 4d regex/host/try (RegexCapture wiring, EnvRead, TryCatch) gated on 019eb6ff item 1. Gate 0 (019eb6ff) CLOSED. Branch sound to build on (whole-branch review 2026-06-13, 0 Critical).
-UPDATE 2026-07-03 (RC5): the cond_expr half is FIXED -- arms now stop at the
-join op (_find_join_addr) and nest recursively (perl5-son 6b59303), and a
-return inside an arm dies GAP (3d6c5ab). REMAINING SCOPE: dor arms only.
-Note the semantic angle beyond over-walk: `my $x = E // return "f"` treats the
-return as the dor FALLBACK VALUE (binds $x and continues) instead of a
-function exit -- silent wrong control flow when E is undef. The dor fix needs
-the same exited-signal handling with real control threading (it is the
-ubiquitous lib/ idiom, so a GAP die here would be very loud -- prefer the
-real fix).
-
-CLOSED by RC5 (2026-07-03): _walk_branch dispatches nested cond_expr recursively (perl5-son 6b59303); pinned by t/from-optree-nested-if.t subtest 4 (rvalue nested ternary) and corpus D7/D9 GREEN.
