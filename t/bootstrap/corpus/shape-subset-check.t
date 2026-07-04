@@ -561,17 +561,21 @@ END_IR
 
 subtest 'a genuine If (no real select) is NOT subsumed (teeth)' => sub {
     # If the real graph has no TernaryExpr select, the spec If is a real branch
-    # the producer failed to emit -- must FAIL, not be conceded.
+    # the producer failed to emit -- must FAIL, not be conceded. The If is on
+    # the control chain (reachable from Return) and the value is a runtime
+    # PadAccess (not a foldable ternary), so only the If rule is under test.
     my $spec = <<'END_IR';
 %n     = Constant(5) :Int
 %zero  = Constant(0) :Int
 %cmp   = NumGt(%n, %zero) :Bool
-%c1    = Constant(1) :Int
-%if    = If(%n, %cmp)
+%xn    = Constant("$x") :Str
+%vx    = VarDecl(%xn) :Int
+%if    = If(%vx, %cmp)
 %proj0 = Proj(%if, index: 0)
 %region = Region(%proj0)
-%sel   = TernaryExpr(%cmp, %c1, %c1) :Int
-return %sel
+%rx    = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx -> %if
 END_IR
     my $real = $C->build_graph_from_ir(<<'END_IR');
 %n    = Constant(5) :Int
@@ -637,6 +641,83 @@ END_IR
     my $res = $C->shape_subset_check($spec, $real);
     is($res->{verdict}, 'FAIL',
         'two spec Ifs are not both satisfied by one real select');
+};
+
+subtest 'a ternary over a folded comparison collapses to its arm (statements Comparison)' => sub {
+    # perl folds `1 < 2 ? 1 : 0` recursively: NumLt(1,2)->true, then the
+    # ternary selects arm 1, so the real graph is just Constant(1). The corpus
+    # keeps the NumLt+TernaryExpr shape; the fold subsumes the whole select.
+    my $spec = <<'END_IR';
+%one  = Constant(1) :Int
+%two  = Constant(2) :Int
+%cmp  = NumLt(%one, %two) :Bool
+%t    = Constant(1) :Int
+%f    = Constant(0) :Int
+%tern = TernaryExpr(%cmp, %t, %f) :Int
+return %tern
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%one = Constant(1) :Int
+return %one
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'folded ternary subsumed to its selected arm')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'a Concat of string literals folds to the joined Constant (S3)' => sub {
+    # perl folds `"hello" . " world"` to Constant("hello world"). The corpus
+    # keeps the Concat shape; the fold subsumes it when the joined string is
+    # present in the real graph.
+    my $spec = <<'END_IR';
+%lhs = Constant("hello") :Str
+%rhs = Constant(" world") :Str
+%cat = Concat(%lhs, %rhs) :Str
+return %cat
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%s = Constant("hello world") :Str
+return %s
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'folded Concat subsumed to the joined Constant')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'a Concat whose joined value is ABSENT still FAILs (teeth)' => sub {
+    my $spec = <<'END_IR';
+%lhs = Constant("hello") :Str
+%rhs = Constant(" world") :Str
+%cat = Concat(%lhs, %rhs) :Str
+return %cat
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%s = Constant("goodbye") :Str
+return %s
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL', 'a folded Concat whose value is absent stays required');
+};
+
+subtest 'a ternary whose folded arm is ABSENT from the real graph still FAILs (teeth)' => sub {
+    # If perl would select arm 1 but the real graph carries a wrong value (2),
+    # the fold's target Constant(1) is absent -> the ternary is NOT subsumed.
+    my $spec = <<'END_IR';
+%one  = Constant(1) :Int
+%two  = Constant(2) :Int
+%cmp  = NumLt(%one, %two) :Bool
+%t    = Constant(1) :Int
+%f    = Constant(0) :Int
+%tern = TernaryExpr(%cmp, %t, %f) :Int
+return %tern
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%wrong = Constant(2) :Int
+return %wrong
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL',
+        'a folded ternary whose arm value is absent stays required');
 };
 
 done_testing();

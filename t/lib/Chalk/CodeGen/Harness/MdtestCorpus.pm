@@ -1046,10 +1046,11 @@ sub shape_subset_check {
 # perl, so the folded value matches op.c exactly); the result repr is taken
 # from the spec op node's declared representation. Comparisons fold to perl's
 # boolean (1 / '' — the Constant(1)/Constant() :Boolean B::SoN emits). Str
-# comparisons are equally foldable but no corpus case uses them yet; deeper
-# recursive folding (a TernaryExpr over a folded-Bool condition collapsing to
-# its selected arm, e.g. `1 < 2 ? 1 : 0` -> Constant(1)) is a separate,
-# larger matcher concern and is NOT done here.
+# comparisons are equally foldable but no corpus case uses them yet. Recursive
+# folding IS done (zhi 019f2b61): a TernaryExpr over a folded condition
+# collapses to its selected arm (`1 < 2 ? 1 : 0` -> Constant(1), via
+# _fold_value), and a Concat of string literals folds to the joined Constant
+# (`"a" . "b"` -> Constant("ab")).
 my %_FOLD_OP = (
     Add      => sub ($a, $b) { $a + $b },
     Subtract => sub ($a, $b) { $a - $b },
@@ -1092,6 +1093,56 @@ sub _literal_operand {
 # literal under an arithmetic/Num op would coerce (warning + a spurious value
 # that could coincidentally match) — so the fold only fires on numeric operands.
 my %_NUMERIC_REPR = (Int => 1, Num => 1);
+
+# _str_literal($node) -> ($value) or ()
+# A Str Constant's value, or () if the node is not a string literal. Used by
+# the Concat fold (string concatenation of literals).
+sub _str_literal {
+    my ($node) = @_;
+    my ($value, $repr) = _literal_operand($node);
+    return () unless defined $value && ($repr // '') eq 'Str';
+    return ($value);
+}
+
+# _fold_value($node) -> ($value) or ()
+# Recursively fold a spec node to its compile-time value, mirroring perl's
+# op.c constant folding: a numeric Constant is its value; a foldable binop over
+# folded numeric operands is the computed value; a TernaryExpr whose condition
+# folds to a definite boolean selects the corresponding arm (itself folded).
+# Returns () when the node is not fully foldable (a non-literal operand, a
+# non-numeric operand, or a division/modulo by zero) — never a guessed value.
+sub _fold_value {
+    my ($node) = @_;
+    return () unless blessed($node);
+    my $kind = _node_kind($node);
+
+    # A literal (Constant, or Coerce over a Constant) folds to its value —
+    # but only a NUMERIC one (a string under arithmetic would coerce).
+    my ($lit, $lrepr) = _literal_operand($node);
+    if (defined $lit) {
+        return () unless $_NUMERIC_REPR{ $lrepr // '' };
+        return ($lit);
+    }
+
+    if (my $fold = $_FOLD_OP{$kind}) {
+        return () unless $node->can('inputs') && $node->inputs->@* == 2;
+        my ($a) = _fold_value($node->inputs->[0]);
+        my ($b) = _fold_value($node->inputs->[1]);
+        return () unless defined $a && defined $b;
+        my $v = eval { $fold->($a, $b) };
+        return defined $v ? ($v) : ();
+    }
+
+    if ($kind eq 'TernaryExpr') {
+        return () unless $node->can('inputs') && $node->inputs->@* == 3;
+        my ($cond, $t, $f) = $node->inputs->@*;
+        my ($cv) = _fold_value($cond);
+        return () unless defined $cv;
+        return _fold_value($cv ? $t : $f);
+    }
+
+    return ();
+}
 
 # _fold_satisfied_ids($spec_return, $real_return) -> { node_id => 1 }
 #
@@ -1147,6 +1198,33 @@ sub _fold_satisfied_ids {
         # fold (1/3) relies on identical stringification on both sides — fine
         # today, revisit if a repeating-decimal fold enters the corpus.
         next unless $real_const{ $value . "\0" . ($repr // '') };
+        $satisfied{ $node->id } = 1;
+    }
+
+    # Seed: a TernaryExpr over a folded comparison collapses to its selected arm
+    # (perl folds `1 < 2 ? 1 : 0` recursively to Constant(1)). Subsume the
+    # ternary when its recursive fold value is present in the real graph as a
+    # Constant of the ternary's repr; the fixpoint then subsumes its condition
+    # subtree and unselected arm.
+    for my $node (@nodes) {
+        next unless _node_kind($node) eq 'TernaryExpr';
+        my ($value) = _fold_value($node);
+        next unless defined $value;
+        my $repr = $node->can('representation') ? $node->representation : undef;
+        next unless $real_const{ $value . "\0" . ($repr // '') };
+        $satisfied{ $node->id } = 1;
+    }
+
+    # Seed: a Concat of string literals folds to the joined Constant (perl folds
+    # `"a" . "b"` to Constant("ab")). Subsume the Concat when the joined string
+    # is present in the real graph as a Str Constant.
+    for my $node (@nodes) {
+        next unless _node_kind($node) eq 'Concat';
+        next unless $node->can('inputs') && $node->inputs->@* == 2;
+        my ($l) = _str_literal($node->inputs->[0]);
+        my ($r) = _str_literal($node->inputs->[1]);
+        next unless defined $l && defined $r;
+        next unless $real_const{ ($l . $r) . "\0" . 'Str' };
         $satisfied{ $node->id } = 1;
     }
 

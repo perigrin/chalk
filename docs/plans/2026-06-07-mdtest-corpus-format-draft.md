@@ -486,3 +486,25 @@ dead-store analysis on the spec, distinct from value propagation).
 Implementation + teeth tests (element-store stays required; genuine If stays
 required): `_mark_assign_select_propagation` in `MdtestCorpus.pm`;
 `shape-subset-check.t`.
+
+## Amendment 2026-07-04 (zhi 019f2b61 — recursive/ternary + Concat fold)
+
+Extends fold-satisfaction to compound constant folds perl does in op.c before
+B::SoN walks. `_fold_value` recursively folds a spec node: a numeric Constant
+is its value; a foldable binop over folded operands is the computed value; a
+`TernaryExpr` whose condition folds to a definite boolean selects the
+corresponding (folded) arm. So `1 < 2 ? 1 : 0` folds NumLt(1,2)->true->arm 1
+-> Constant(1), and the matcher subsumes the whole NumLt+TernaryExpr shape when
+Constant(1) is present in the real graph. Separately, a `Concat` of Str
+literals folds to the joined Constant (`"a" . "b"` -> Constant("ab")).
+
+Same discipline as the binary fold: the fold fires only when the folded value
+is actually present in the real graph (never a guessed value), numeric folds
+gate on Int/Num operands, and the subsumption is consumer-fixpoint (the folded
+op, its condition subtree, and the unselected arm are dropped only when every
+consumer is subsumed). Teeth: a folded value ABSENT from the real graph (wrong
+arm / wrong join) stays required and FAILs.
+
+gate-green 41 -> 43 (statements Comparison, strings S3). `_fold_value` /
+`_str_literal` + the ternary/Concat seeds in `_fold_satisfied_ids`;
+contract tests in shape-subset-check.t.
