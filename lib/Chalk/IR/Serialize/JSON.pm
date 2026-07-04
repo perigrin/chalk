@@ -444,11 +444,23 @@ sub from_json ($json_string) {
 # _ctor_arg_reprs(\%graphs) -> ("class\0param_name" => repr, ...)
 # Scan every graph for Call(new) nodes; each binds param_names[i] to inputs[i],
 # so it records the repr of the argument passed for each named :param. First
-# construction wins (a class constructed twice with divergent arg types is a
-# corner the corpus does not exercise; //= keeps it deterministic).
+# first construction wins (//=). Two safety constraints the review flagged:
+#   (1) DETERMINISM: iterate graphs in a stable (sorted-key) order, so a class
+#       constructed more than once with divergent arg reprs resolves the same
+#       way every run (the determinism constraint).
+#   (2) SAFE REPRS ONLY: infer a field type only for reprs the :param-binding +
+#       field-read path actually lowers (Int, Str — proven by field-basic/A5).
+#       A Num-looking literal (3.0) whose value is integer would mis-type the
+#       field Num and lower into malformed IR (i64 value into a double slot);
+#       the constant-DEFAULT path GAPs loudly on Num, so the inference must not
+#       be LESS safe. Anything but Int/Str stays uninferred (an honest GAP,
+#       exactly as before this inference existed).
+my %_INFERABLE_FIELD_REPR = (Int => 1, Str => 1);
+
 sub _ctor_arg_reprs ($graphs) {
     my %map;
-    for my $g (values %$graphs) {
+    for my $key (sort keys %$graphs) {
+        my $g = $graphs->{$key};
         for my $node ($g->nodes->@*) {
             next unless $node->operation eq 'Call'
                 && ($node->name // '') eq 'new'
@@ -459,7 +471,7 @@ sub _ctor_arg_reprs ($graphs) {
             for my $i (0 .. $#$pn) {
                 my $arg  = $args[$i] or next;
                 my $repr = blessed($arg) ? $arg->representation : undef;
-                next unless defined $repr;
+                next unless defined $repr && $_INFERABLE_FIELD_REPR{$repr};
                 $map{"$class\0" . $pn->[$i]} //= $repr;
             }
         }
