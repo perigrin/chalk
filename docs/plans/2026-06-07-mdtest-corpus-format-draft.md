@@ -508,3 +508,18 @@ arm / wrong join) stays required and FAILs.
 gate-green 41 -> 43 (statements Comparison, strings S3). `_fold_value` /
 `_str_literal` + the ternary/Concat seeds in `_fold_satisfied_ids`;
 contract tests in shape-subset-check.t.
+
+## Amendment 2026-07-04 (zhi 019f1bda — implicit-deref scaffolding)
+
+perl models an aggregate deref ($r->[0]) as an implicit rv2av/rv2hv (an OpMap
+SKIP in the producer), so B::SoN emits Subscript(aggregate, idx) directly with
+NO PostfixDeref node. The corpus keeps the explicit PostfixDeref shape (it names
+the deref idiom); the matcher subsumes a spec PostfixDeref when the real graph
+emitted zero of them (existence conceded per-kind, same as pad/assign
+scaffolding). A producer that KEEPS a PostfixDeref must match it structurally --
+the concession fires only when the real graph propagated the deref away.
+
+Paired with the producer fix (a DREFAV/DREFHV padsv resolves to its bound ref
+despite OPf_MOD): gate-green 44 -> 46 (references R4/R5). Nested deref (R8) and
+out-of-bounds undef (R9/R10) are distinct. _mark_deref_scaffolding in
+MdtestCorpus.pm; contract test in shape-subset-check.t.

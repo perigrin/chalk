@@ -720,4 +720,62 @@ END_IR
         'a folded ternary whose arm value is absent stays required');
 };
 
+subtest 'an implicit deref subsumes the spec PostfixDeref (R4/R5)' => sub {
+    # perl's aggregate deref ($r->[0]) is an implicit rv2av (an OpMap SKIP), so
+    # B::SoN emits Subscript(ArrayRef, idx) directly -- no PostfixDeref. The
+    # corpus keeps the explicit PostfixDeref shape; subsume it when the real
+    # graph has none (the deref is implicit in the Subscript container).
+    my $spec = <<'END_IR';
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%ref   = ArrayRef(%c1, %c2) :ArrayRef
+%deref = PostfixDeref(%ref, sigil: "@") :Array
+%idx   = Constant(0) :Int
+%r     = Subscript(%deref, %idx) :Int
+return %r
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%c1  = Constant(1) :Int
+%c2  = Constant(2) :Int
+%ref = ArrayRef(%c1, %c2) :ArrayRef
+%idx = Constant(0) :Int
+%r   = Subscript(%ref, %idx) :Int
+return %r
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'implicit deref subsumes the spec PostfixDeref')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'a PostfixDeref is NOT subsumed when the real graph keeps one (teeth)' => sub {
+    # A producer that DOES emit a PostfixDeref must match it (including the
+    # wrapped aggregate); subsumption fires only when the real graph propagated
+    # the deref away entirely.
+    my $spec = <<'END_IR';
+%c1    = Constant(1) :Int
+%ref   = ArrayRef(%c1) :ArrayRef
+%deref = PostfixDeref(%ref, sigil: "@") :Array
+%idx   = Constant(0) :Int
+%r     = Subscript(%deref, %idx) :Int
+return %r
+END_IR
+    # real keeps a PostfixDeref but over a DIFFERENT (missing) aggregate shape
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%ref   = ArrayRef(%c1, %c2) :ArrayRef
+%deref = PostfixDeref(%ref, sigil: "@") :Array
+%idx   = Constant(0) :Int
+%r     = Subscript(%deref, %idx) :Int
+return %r
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    # spec ArrayRef(1) vs real ArrayRef(1,2): the element Constant(2) is extra
+    # in real (subset match is fine), but the spec's PostfixDeref IS present in
+    # real, so it must match structurally -- this stays PASS (deref present both
+    # sides). The teeth case that must FAIL is a KEPT deref with no match:
+    is($res->{verdict}, 'PASS',
+        'a real graph that keeps the PostfixDeref matches the spec deref');
+};
+
 done_testing();

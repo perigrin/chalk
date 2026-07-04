@@ -1021,6 +1021,13 @@ sub shape_subset_check {
     # genuine branches stay required. Rule in the corpus format doc.
     _mark_assign_select_propagation($spec_return, $return_node, \%satisfied);
 
+    # Deref-scaffolding (zhi 019f1bda): perl's aggregate deref ($r->[0]) is an
+    # implicit rv2av/rv2hv (an OpMap SKIP), so B::SoN emits Subscript(aggregate,
+    # idx) directly with no PostfixDeref. The corpus keeps the explicit
+    # PostfixDeref shape; subsume it when the real graph has none. A producer
+    # that KEEPS the deref must match it (a real PostfixDeref stays required).
+    _mark_deref_scaffolding($spec_return, $return_node, \%satisfied);
+
     my @spec = _collect_node_signatures($spec_return, \%satisfied);
     my @real = _collect_node_signatures($return_node);
 
@@ -1344,6 +1351,25 @@ sub _mark_assign_select_propagation {
                && $ifelse_propagated) {
             $satisfied->{ $node->id } = 1;
         }
+    }
+    return;
+}
+
+# _mark_deref_scaffolding($spec_return, $real_return, \%satisfied) — subsume a
+# spec PostfixDeref (the explicit `@$ref` / `%$ref` deref before a Subscript)
+# when the real graph emitted zero PostfixDeref: the producer models the
+# aggregate deref implicitly (rv2av/rv2hv is an OpMap SKIP), so its Subscript
+# takes the aggregate directly. Existence conceded per-kind, gated on the real
+# graph having none — a producer that KEEPS a PostfixDeref must match it.
+sub _mark_deref_scaffolding {
+    my ($spec_return, $real_return, $satisfied) = @_;
+
+    my %real_kind;
+    $real_kind{ _node_kind($_) } = 1 for _collect_all_nodes($real_return);
+    return if $real_kind{PostfixDeref};   # producer kept it — require a match
+
+    for my $node (_collect_all_nodes($spec_return)) {
+        $satisfied->{ $node->id } = 1 if _node_kind($node) eq 'PostfixDeref';
     }
     return;
 }
