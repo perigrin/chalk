@@ -441,11 +441,55 @@ sub from_json ($json_string) {
     return \%graphs;
 }
 
+# _ctor_arg_reprs(\%graphs) -> ("class\0param_name" => repr, ...)
+# Scan every graph for Call(new) nodes; each binds param_names[i] to inputs[i],
+# so it records the repr of the argument passed for each named :param. First
+# construction wins (a class constructed twice with divergent arg types is a
+# corner the corpus does not exercise; //= keeps it deterministic).
+sub _ctor_arg_reprs ($graphs) {
+    my %map;
+    for my $g (values %$graphs) {
+        for my $node ($g->nodes->@*) {
+            next unless $node->operation eq 'Call'
+                && ($node->name // '') eq 'new'
+                && $node->can('param_names');
+            my $class = $node->class_name // next;
+            my $pn    = $node->param_names // next;
+            my @args  = $node->inputs->@*;
+            for my $i (0 .. $#$pn) {
+                my $arg  = $args[$i] or next;
+                my $repr = blessed($arg) ? $arg->representation : undef;
+                next unless defined $repr;
+                $map{"$class\0" . $pn->[$i]} //= $repr;
+            }
+        }
+    }
+    return %map;
+}
+
 # _replay_classes($classes, \%graphs) — rebuild a sealed Chalk::MOP from the
 # declarative class section, wiring each method to its loaded graph. Parents are
 # declared before children so `superclass =>` can reference the parent's class.
 sub _replay_classes ($classes, $graphs) {
     require Chalk::MOP;
+
+    # A :param field with no default has no declared type (the producer only
+    # types a field from a constant default). Infer it from the CONSTRUCTOR
+    # ARGUMENT before building the MOP: a Call(new) binds param_names[i] ->
+    # inputs[i], so a field whose param_name matches carries the argument's
+    # repr. Fill it onto the raw field record so BOTH declare_field (the MOP /
+    # struct layout) and _stamp_field_access_reprs (the FieldAccess nodes) see
+    # it. Cross-graph: the Call(new) is in the driver graph, the field in a
+    # class section.
+    my %ctor_arg_repr = _ctor_arg_reprs($graphs);
+    for my $cname (keys %$classes) {
+        for my $f (($classes->{$cname}{fields} // [])->@*) {
+            next if defined $f->{type};
+            my $pn = $f->{param_name} // next;
+            my $repr = $ctor_arg_repr{"$cname\0$pn"} // next;
+            $f->{type} = $repr;
+        }
+    }
 
     my $mop = Chalk::MOP->new;
 
