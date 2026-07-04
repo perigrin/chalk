@@ -974,8 +974,13 @@ sub shape_subset_check {
         unless defined $ir_text && $ir_text =~ /\S/;
     return { verdict => 'SKIP', missing => [], reason => 'no real graph' }
         unless defined $return_node;
-    return { verdict => 'PASS', missing => [], reason => 'pure-GAP block; no shape to enforce' }
-        if _is_pure_gap_block($ir_text);
+    if (_is_pure_gap_block($ir_text)) {
+        # Only a declared-GAP block passes vacuously; a node-line-free block
+        # claiming L: GREEN is a malformed spec, not a free pass.
+        return __PACKAGE__->parse_l_verdict_from_ir($ir_text) eq 'GAP'
+            ? { verdict => 'PASS', missing => [], reason => 'pure-GAP block; no shape to enforce' }
+            : { verdict => 'SKIP', missing => [], reason => 'malformed spec: no node lines but not a declared GAP' };
+    }
 
     my $spec_return;
     eval { $spec_return = __PACKAGE__->build_graph_from_ir($ir_text) };
@@ -987,8 +992,18 @@ sub shape_subset_check {
     my @spec = _collect_node_signatures($spec_return);
     my @real = _collect_node_signatures($return_node);
 
+    # Match most-constrained spec signatures first so a lax sig (undef
+    # fields are unchecked) cannot consume the one real node a stricter
+    # same-kind sibling needed — greedy first-fit would false-FAIL there.
+    # ponytail: this only bites lax-vs-strict same-kind sibling collisions
+    # (e.g. an unstamped Add and an :Int Add contending for one real :Int
+    # Add — _sig_match(Add) discriminates on kind+repr only). No current
+    # corpus case hits it; the sort is a proven-reachable hedge (verified
+    # against greedy order), not mystery defense. Upgrade path if it grows
+    # load-bearing: bipartite matching (see 019f2af2 rooted-matching item).
+    my @ordered = sort { _sig_specificity($b) <=> _sig_specificity($a) } @spec;
     my @missing = map  { _sig_str($_) }
-                  grep { !_sig_match($_, \@real) } @spec;
+                  grep { !_sig_match($_, \@real) } @ordered;
     return @missing
         ? { verdict => 'FAIL', missing => \@missing }
         : { verdict => 'PASS', missing => [] };
@@ -1021,6 +1036,12 @@ sub _sig_match {
         return true;
     }
     return false;
+}
+
+# _sig_specificity($sig) -> int — how many constraint fields the sig declares.
+sub _sig_specificity {
+    my ($sig) = @_;
+    return scalar grep { defined $sig->{$_} } qw(repr value from to);
 }
 
 # _sig_str($sig) -> str — a readable form for missing-node reporting.
@@ -1093,6 +1114,9 @@ sub _collect_node_signatures {
 sub _visit_node {
     my ($node, $visited, $sigs) = @_;
     return unless defined $node;
+    # Producer graphs may carry arrayref inputs (e.g. Call arg lists) —
+    # the same guard Graph::nodes and TypedInvariant carry.
+    return unless blessed($node);
 
     my $id = $node->id;
     return if $visited->{$id}++;

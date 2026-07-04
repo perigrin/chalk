@@ -67,14 +67,17 @@ sub run_through_bson ($source) {
     my ($graphs, $mop) = eval { Chalk::IR::Serialize::JSON::from_json($json) };
     return (undef, "from_json failed: $@")           unless $graphs;
     my $g = $graphs->{'main::corpus_case'} or return (undef, "no loaded graph");
-    my $ret = $g->returns->[0] or return (undef, "no Return node");
+    my $ret = $g->returns->[0] or return (undef, "no Return node", $g);
 
     my $ll = eval { Chalk::Target::LLVM->lower($ret, (defined $mop ? (mop => $mop) : ())) };
-    return (undef, "lower: $@") if $@;
+    return (undef, "lower: $@", $g) if $@;
 
     my ($lfh, $lltmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $lfh $ll; close $lfh;
     my $out = qx($LLI $lltmp 2>&1);
+    if (my $sig = $? & 127) {
+        return (undef, "lli died on signal $sig", $g);
+    }
     my $exit = $? >> 8;
     return (undef, "lli exited $exit", $g) if $exit != 0;
     chomp $out;
@@ -138,15 +141,19 @@ for my $md (@topics) {
         my ($shape_ok, $shape_why) = (0, 'no loaded graph');
         my ($inv_ok,   $inv_why)   = (0, 'no loaded graph');
         if (defined $g) {
-            my $shape = Chalk::CodeGen::Harness::MdtestCorpus
-                ->shape_subset_check($case->{ir}, $g->returns->[0]);
+            # Each leg is exception-isolated: a die in one graph walk must
+            # cost that case only, not abort the whole gap map.
+            my $shape = eval {
+                Chalk::CodeGen::Harness::MdtestCorpus
+                    ->shape_subset_check($case->{ir}, $g->returns->[0]);
+            } // { verdict => 'FAIL', missing => [], reason => "died: $@" };
             $shape_ok  = $shape->{verdict} eq 'PASS';
-            $shape_why = $shape->{verdict} eq 'FAIL'
+            $shape_why = $shape->{verdict} eq 'FAIL' && $shape->{missing}->@*
                 ? 'missing [' . join(', ', $shape->{missing}->@*) . ']'
                 : ($shape->{reason} // '');
 
-            my $nodes = $g->nodes;
-            my $inv = Chalk::IR::Graph::TypedInvariant->check($nodes);
+            my $inv = eval { Chalk::IR::Graph::TypedInvariant->check($g->nodes) }
+                // { ok => 0, violations => [{ message => "died: $@" }] };
             $inv_ok  = $inv->{ok} ? 1 : 0;
             $inv_why = $inv->{ok} ? ''
                 : join('; ', map { $_->{message} } $inv->{violations}->@*);
@@ -197,8 +204,13 @@ diag(sprintf(
     @tally{qw(gate_green green shape_ok inv_ok gap_declared bug no_source)}));
 if (@bugs) {
     diag("");
-    diag("=== worklist (behavior gaps to close) ===");
+    diag("=== worklist (triple-contract gaps to close) ===");
     diag("  $_") for @bugs;
 }
+
+# The gate floor: the worklist is TODO (red = worklist, not regression), but
+# already-certified gate-green cases must never silently regress. Raise the
+# floor as the shape-contract families (019f2a50 pair) land.
+cmp_ok($tally{gate_green}, '>=', 9, 'gate-green floor (was 9 at 2026-07-04)');
 
 done_testing();

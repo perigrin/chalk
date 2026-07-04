@@ -142,8 +142,8 @@ join-stop in the arm walk (see phase4_rc5_complete memory / perl5-son
 
 ## Triple-contract re-audit (2026-07-03, zhi 019f1be7)
 
-The runner now enforces the full triple contract per case: behavior
-(lli == perl) AND shape (structural-subset of the case ir block, via
+The runner enforces three legs per case: behavior AND shape
+(structural-subset of the case ir block, via
 MdtestCorpus::shape_subset_check — spec graph built by the constructive
 builder, signature subset match) AND invariant (TypedInvariant on the
 loaded graph). The stale pre-constructive matcher pair
@@ -151,12 +151,29 @@ loaded graph). The stale pre-constructive matcher pair
 was deleted; _collect_node_signatures was resurrected as the shared
 signature collector.
 
-Re-audit of the 45 behavior-greens against the stricter bar:
+**Two acknowledged narrowings vs the brief's gate** (brief lines 31-38),
+both filed for follow-up, NOT silently dropped:
+- **Behavior is L-corner only.** The brief's behavior leg has two corners:
+  the P corner (Target::Perl, schedule-driven) is the full-coverage corner,
+  the L corner (LLVM/lli) covers only the runtime-free slice. This runner
+  exercises L. Runtime-needing cases (ArrayRef returns, class dispatch)
+  therefore read behavior-red here even where the P corner would be green.
+- **Shape is edge-blind.** `_sig_match` compares node-signature multisets
+  (kind + declared repr + Constant value + Coerce from/to), not operand
+  wiring; a right-kinds/wrong-wiring graph passes shape (behavior co-gating
+  moderates the risk). Rooted structural matching is the upgrade path.
+- **Per-method class graphs are unchecked.** Only `main::corpus_case`'s
+  graph is shape/invariant-checked; class-tier method-body graphs are not.
+
+Re-audit of the 45 behavior-greens against the stricter bar
+(invariant=59 after the lower-failure path was fixed to thread the loaded
+graph — ~10 cases whose graph loads but lowering fails are now
+invariant-measured instead of reported "no loaded graph"):
 
 | leg | passing |
 |---|---|
-| behavior | 45 |
-| invariant | 49 |
+| behavior (L corner) | 45 |
+| invariant | 59 |
 | shape | 9 |
 | **gate-green (all three)** | **9** |
 
@@ -173,7 +190,10 @@ families (filed 2026-07-03 as the 019f2a50 pair, not per-case bugs):
    lexical-using case is shape-red despite green behavior.
 
 Until those two land, Phase 4 completion is measured as gate-green=9, NOT
-behavior=45. That is the honest number vs the acceptance criterion.
+behavior=45. That is the honest number vs the acceptance criterion — with
+the caveat that the behavior leg itself is the L corner only (see the two
+narrowings above); a full-gate number needs the P corner and rooted shape
+matching, both filed as follow-ups.
 
 ## What this means vs the Phase 4 gate (2026-07-01 baseline, behavior-only)
 
