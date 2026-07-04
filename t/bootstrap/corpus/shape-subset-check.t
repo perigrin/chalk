@@ -819,4 +819,65 @@ END_IR
         'a non-Bool Coerce feeding an Add stays required');
 };
 
+subtest 'a dead-store init is subsumed when a reassign overwrites it (C1)' => sub {
+    # `my $x = 1; $x = 2; $x` — the init `1` is overwritten by `$x = 2` before
+    # any read, so B::SoN const-propagates the pad to `2` and never materialises
+    # the dead Constant(1). The corpus keeps the pre-optimisation shape; subsume
+    # the init Constant of a propagated VarDecl that a reassigning Assign kills.
+    my $spec = <<'END_IR';
+%xn   = Constant("$x") :Str
+%one  = Constant(1) :Int
+%vx   = VarDecl(%xn, %one) :Int
+%two  = Constant(2) :Int
+%lhs  = PadAccess(%vx, "$x") :Int
+%as   = Assign(%lhs, %two) :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx -> %as
+END_IR
+    my $real = $C->build_graph_from_ir("%r = Constant(2) :Int\nreturn %r\n");
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'dead Constant(1) subsumed; live Constant(2) matches')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'a live init (no reassign) is NOT subsumed (teeth)' => sub {
+    # Without a reassigning Assign, the init value IS the result — it must stay
+    # required so a producer that returns the wrong constant still FAILs. This
+    # is what keeps the dead-store rule from swallowing every VarDecl init.
+    my $spec = <<'END_IR';
+%xn   = Constant("$x") :Str
+%one  = Constant(1) :Int
+%vx   = VarDecl(%xn, %one) :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx
+END_IR
+    my $real = $C->build_graph_from_ir("%r = Constant(2) :Int\nreturn %r\n");
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL',
+        'no reassign -> the init Constant(1) is the live value and stays required');
+};
+
+subtest 'a reassign to the WRONG value still FAILs (dead-store value teeth)' => sub {
+    # The dead init is subsumed, but the REASSIGNED value stays required: a
+    # producer that propagates the wrong final value must still FAIL. Real graph
+    # carries Constant(3), not the reassigned Constant(2).
+    my $spec = <<'END_IR';
+%xn   = Constant("$x") :Str
+%one  = Constant(1) :Int
+%vx   = VarDecl(%xn, %one) :Int
+%two  = Constant(2) :Int
+%lhs  = PadAccess(%vx, "$x") :Int
+%as   = Assign(%lhs, %two) :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx -> %as
+END_IR
+    my $real = $C->build_graph_from_ir("%r = Constant(3) :Int\nreturn %r\n");
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL',
+        'the reassigned value Constant(2) is still required (wrong value FAILs)');
+};
+
 done_testing();

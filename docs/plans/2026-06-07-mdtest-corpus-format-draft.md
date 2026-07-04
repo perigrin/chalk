@@ -536,3 +536,23 @@ absorbed -- a Coerce to any other repr, or feeding a non-truthiness consumer
 REQUIRED. gate-green 48 -> 49 (logical L4). _mark_coerce_absorption /
 %_TRUTHINESS_OP in MdtestCorpus.pm; teeth test (non-Bool Coerce feeding an Add
 stays required) in shape-subset-check.t.
+
+## Amendment 2026-07-04 (zhi 019f2e10 — dead-store init subsumption)
+
+`my $x = 1; $x = 2; $x` overwrites the init `1` before any read, so perl
+const-propagates the pad to `2` and never materialises `Constant(1)`. The
+corpus keeps the pre-optimisation shape (`VarDecl(init=1)` + reassigning
+`Assign(-> 2)`); the matcher subsumes a propagated VarDecl's INIT value
+Constant ONLY when it is a dead store: a reassigning plain `Assign` (lhs
+PadAccess binding that VarDecl) overwrites the pad, AND the init Constant flows
+nowhere but the VarDecl (sole consumer). This is the one exception to the
+pad-scaffolding rule's "the init value is never subsumed" -- earned by the
+dead-store predicate.
+
+Teeth: a LIVE init (no reassigning Assign, e.g. `my $x = 1; $x`) stays REQUIRED,
+so a producer returning the wrong initial constant still FAILs; the REASSIGNED
+value stays required (a wrong final value FAILs); a `CompoundAssign` (+=) READS
+the pad first and so does NOT count as an overwriting store. gate-green 49 ->
+50 (variables C1). _reassigned_decls + the inputs[1] branch in
+_mark_pad_scaffolding (MdtestCorpus.pm); three teeth in shape-subset-check.t
+(dead-store subsumed, live init required, wrong reassign FAILs).

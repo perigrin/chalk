@@ -1266,9 +1266,13 @@ sub _fold_satisfied_ids {
 # PROPAGATED the pad away. Subsumption is conceded per-kind ONLY when the real
 # graph has NO node of that kind — i.e. propagation actually happened. A
 # producer that KEEPS the pad (Chalk) is not conceded: its pad nodes must
-# match the spec including repr (a mis-typed kept pad FAILs). The VarDecl's
-# INIT value is never subsumed; a name Constant is subsumed only when the
-# VarDecl is its sole consumer (a bare Constant used elsewhere survives).
+# match the spec including repr (a mis-typed kept pad FAILs). A name Constant is
+# subsumed only when the VarDecl is its sole consumer (a bare Constant used
+# elsewhere survives). A VarDecl's INIT value is subsumed ONLY as a dead store
+# (zhi 019f2e10): when a reassigning Assign overwrites the pad before any read,
+# perl const-propagates to the reassigned value and never materialises the init
+# — but a LIVE init (no reassign) stays required, so a wrong initial value still
+# FAILs. See _reassigned_decls for the dead-store predicate.
 sub _mark_pad_scaffolding {
     my ($spec_return, $real_return, $satisfied) = @_;
     my @nodes = _collect_all_nodes($spec_return);
@@ -1279,12 +1283,16 @@ sub _mark_pad_scaffolding {
     my $pad_propagated  = !$real_kind{PadAccess};
     my $decl_propagated = !$real_kind{VarDecl};
 
-    # Consumer counts so a name-Constant shared beyond its VarDecl survives.
+    # Consumer counts so a name-Constant / dead init shared beyond its VarDecl
+    # survives.
     my %consumers;
     for my $node (@nodes) {
         next unless $node->can('inputs') && defined $node->inputs;
         $consumers{ $_->id }++ for grep { blessed($_) } $node->inputs->@*;
     }
+
+    # VarDecls whose pad a reassigning Assign overwrites (dead-store inits).
+    my %reassigned = _reassigned_decls(\@nodes);
 
     for my $node (@nodes) {
         my $kind = _node_kind($node);
@@ -1293,16 +1301,45 @@ sub _mark_pad_scaffolding {
         }
         elsif ($kind eq 'VarDecl' && $decl_propagated) {
             $satisfied->{ $node->id } = 1;
-            # inputs[0] is the name Constant; subsume it only if this VarDecl
-            # is its sole consumer.
-            my $name = $node->can('inputs') && $node->inputs->@* ? $node->inputs->[0] : undef;
+            my @in = $node->can('inputs') && $node->inputs ? $node->inputs->@* : ();
+            # inputs[0] is the name Constant; subsume it only if this VarDecl is
+            # its sole consumer.
+            my $name = $in[0];
             if (blessed($name) && _node_kind($name) eq 'Constant'
                 && ($consumers{ $name->id } // 0) == 1) {
                 $satisfied->{ $name->id } = 1;
             }
+            # inputs[1] is the init value. Subsume it ONLY as a dead store: the
+            # VarDecl is reassigned (overwritten before read) AND the init
+            # Constant flows nowhere but this VarDecl (a shared live read keeps
+            # it required). A live init stays required.
+            my $init = $in[1];
+            if ($reassigned{ $node->id } && blessed($init)
+                && _node_kind($init) eq 'Constant'
+                && ($consumers{ $init->id } // 0) == 1) {
+                $satisfied->{ $init->id } = 1;
+            }
         }
     }
     return;
+}
+
+# _reassigned_decls(\@spec_nodes) -> ( vardecl_id => 1 ) for every VarDecl the
+# spec overwrites with a plain Assign whose lhs is a PadAccess binding it. Such
+# a VarDecl's init value is a dead store (overwritten before any read), so the
+# init Constant may be subsumed. A CompoundAssign (+=) READS the pad first, so
+# it does NOT kill the init — only a plain Assign counts.
+sub _reassigned_decls {
+    my ($nodes) = @_;
+    my %reassigned;
+    for my $node (@$nodes) {
+        next unless _node_kind($node) eq 'Assign';
+        my $lhs = $node->can('inputs') && $node->inputs->@* ? $node->inputs->[0] : undef;
+        next unless blessed($lhs) && _node_kind($lhs) eq 'PadAccess';
+        my $decl = $lhs->can('inputs') && $lhs->inputs->@* ? $lhs->inputs->[0] : undef;
+        $reassigned{ $decl->id } = 1 if blessed($decl) && _node_kind($decl) eq 'VarDecl';
+    }
+    return %reassigned;
 }
 
 # _mark_assign_select_propagation($spec_return, $real_return, \%satisfied) —
