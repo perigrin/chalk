@@ -1005,13 +1005,14 @@ sub shape_subset_check {
     # propagates lexical pads away before B::SoN walks, so `my $x = 1; $x`
     # loads as just Constant(1) — no VarDecl/PadAccess/name-Constant. The
     # corpus keeps the pad-explicit shape (it names the lexical idiom); the
-    # pad scaffolding (name-Constant + VarDecl + PadAccess) is subsumed. The
-    # bound VALUE (the VarDecl init, and every computed node) stays required,
-    # so a propagated real graph must still carry the right value. A producer
-    # that keeps the pad (Chalk) still matches — the extra scaffolding is
-    # incidental under subset semantics.
+    # pad scaffolding (name-Constant + VarDecl + PadAccess) is subsumed ONLY
+    # when the real graph actually propagated it away (has no pad node). The
+    # bound VALUE stays required, so a propagated real graph must still carry
+    # the right value. A producer that KEEPS the pad (Chalk) is NOT conceded:
+    # its pad nodes must match the spec including repr — so a mis-typed kept
+    # pad still FAILs.
     my %satisfied = %$folded;
-    _mark_pad_scaffolding($spec_return, \%satisfied);
+    _mark_pad_scaffolding($spec_return, $return_node, \%satisfied);
 
     my @spec = _collect_node_signatures($spec_return, \%satisfied);
     my @real = _collect_node_signatures($return_node);
@@ -1160,16 +1161,24 @@ sub _fold_satisfied_ids {
     return \%satisfied;
 }
 
-# _mark_pad_scaffolding($spec_return, \%satisfied) — add the ids of lexical
-# pad scaffolding (each VarDecl, its name Constant, and every PadAccess that
-# reads it) to the satisfied set, so they are not required of a producer that
-# propagated the pad away. The VarDecl's INIT value (inputs[1]) is NOT
-# subsumed — the propagated real graph must still carry the right value. A
-# name Constant is subsumed only when the VarDecl is its sole consumer (a bare
-# Constant used elsewhere keeps its signature).
+# _mark_pad_scaffolding($spec_return, $real_return, \%satisfied) — add the ids
+# of lexical pad scaffolding (each VarDecl, its name Constant, and every
+# PadAccess) to the satisfied set, so they are not required of a producer that
+# PROPAGATED the pad away. Subsumption is conceded per-kind ONLY when the real
+# graph has NO node of that kind — i.e. propagation actually happened. A
+# producer that KEEPS the pad (Chalk) is not conceded: its pad nodes must
+# match the spec including repr (a mis-typed kept pad FAILs). The VarDecl's
+# INIT value is never subsumed; a name Constant is subsumed only when the
+# VarDecl is its sole consumer (a bare Constant used elsewhere survives).
 sub _mark_pad_scaffolding {
-    my ($spec_return, $satisfied) = @_;
+    my ($spec_return, $real_return, $satisfied) = @_;
     my @nodes = _collect_all_nodes($spec_return);
+
+    # Which pad kinds did the real graph propagate away (emit zero of)?
+    my %real_kind;
+    $real_kind{ _node_kind($_) } = 1 for _collect_all_nodes($real_return);
+    my $pad_propagated  = !$real_kind{PadAccess};
+    my $decl_propagated = !$real_kind{VarDecl};
 
     # Consumer counts so a name-Constant shared beyond its VarDecl survives.
     my %consumers;
@@ -1180,10 +1189,10 @@ sub _mark_pad_scaffolding {
 
     for my $node (@nodes) {
         my $kind = _node_kind($node);
-        if ($kind eq 'PadAccess') {
+        if ($kind eq 'PadAccess' && $pad_propagated) {
             $satisfied->{ $node->id } = 1;
         }
-        elsif ($kind eq 'VarDecl') {
+        elsif ($kind eq 'VarDecl' && $decl_propagated) {
             $satisfied->{ $node->id } = 1;
             # inputs[0] is the name Constant; subsume it only if this VarDecl
             # is its sole consumer.

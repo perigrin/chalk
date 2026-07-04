@@ -414,6 +414,32 @@ END_IR
         or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
 };
 
+subtest 'a pad-KEEPING producer with a mis-typed pad still FAILs (repr not dropped)' => sub {
+    # Propagation concedes EXISTENCE (B::SoN dropped the pad), not REPR. A
+    # producer that KEEPS the pad (Chalk) but stamps it :Str where the spec
+    # demands :Int is a real type bug the gate must still catch. (Review
+    # finding: unconditional subsumption dropped the repr check.)
+    my $spec = <<'END_IR';
+%one  = Constant(1) :Int
+%xn   = Constant("$x") :Str
+%vx   = VarDecl(%xn, %one) :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%one  = Constant(1) :Int
+%xn   = Constant("$x") :Str
+%vx   = VarDecl(%xn, %one) :Str
+%rx   = PadAccess(%vx, "$x") :Str
+return %rx
+control: %vx
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL',
+        'a kept-but-mis-typed pad is not papered over by propagation-satisfaction');
+};
+
 subtest 'operand-returning And/Or load unstamped but match the spec :Int (L1/L2)' => sub {
     # perl's && / || are operand-returning: `$a && $b` loads as And with no
     # repr (:-), but the corpus spec declares And :Int. The matcher accepts the

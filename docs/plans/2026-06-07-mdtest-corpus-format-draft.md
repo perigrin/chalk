@@ -423,12 +423,16 @@ fully-propagated, 0 vardecl-retained. The Chalk parser does NOT propagate
 (no pass yet), so it emits the pad-explicit shape.
 
 **Rule:** the corpus ir block keeps the PAD-EXPLICIT shape (it names the
-lexical idiom), and the matcher subsumes the pad scaffolding: each
+lexical idiom), and the matcher subsumes the pad scaffolding — each
 `PadAccess`, each `VarDecl`, and a `VarDecl`'s name `Constant` (subsumed
-only when the VarDecl is its sole consumer). The bound VALUE (the VarDecl
-init, and every computed node) stays REQUIRED — a propagated real graph must
-still carry the right value. A producer that keeps the pad (Chalk) still
-matches directly; propagation-satisfaction is additive.
+only when the VarDecl is its sole consumer) — but ONLY when the real graph
+actually propagated that pad kind away (emits zero of it). The concession is
+EXISTENCE, not repr: a producer that KEEPS the pad (Chalk) is not conceded,
+so a kept-but-mis-typed pad (`:Str` where the spec demands `:Int`) still
+FAILs. The bound VALUE (the VarDecl init, and every computed node) stays
+REQUIRED — a propagated real graph must still carry the right value.
+Propagation-satisfaction is additive: a pad-keeping producer matches the
+pad-explicit shape directly.
 
 **Operand-returning repr concession:** perl's `&&`/`||`/`//` are
 operand-returning (`$a && $b` yields `$a` or `$b`), so `And`/`Or`/`DefinedOr`
