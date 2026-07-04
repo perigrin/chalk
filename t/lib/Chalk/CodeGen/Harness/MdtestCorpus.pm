@@ -992,11 +992,13 @@ sub shape_subset_check {
     # Fold-satisfaction (zhi 019f2a50): perl constant-folds literal arithmetic
     # in op.c before B::SoN walks, so `1 + 2` loads as a single Constant(3),
     # not Add(1, 2). The corpus keeps the unfolded operation shape (it names
-    # the op under test); a foldable op whose direct inputs are all literal
-    # Constants is satisfied by a real Constant of the folded value, and its
-    # operand Constants (and Coerce wrappers) are subsumed. A producer that
-    # does NOT fold (Chalk) still matches the literal shape directly. The rule
-    # is recorded in docs/plans/2026-06-07-mdtest-corpus-format-draft.md.
+    # the op under test); a foldable op over all-literal NUMERIC Constants is
+    # satisfied by a real Constant of the folded value. The op, and any input
+    # (Coerce wrapper / operand Constant) whose every spec consumer is a
+    # subsumed fold op, are dropped by id — a literal shared with a non-fold
+    # consumer keeps its signature. A producer that does NOT fold (Chalk) still
+    # matches the literal shape directly. Rule recorded in
+    # docs/plans/2026-06-07-mdtest-corpus-format-draft.md.
     my $folded = _fold_satisfied_ids($spec_return, $return_node);
 
     my @spec = _collect_node_signatures($spec_return, $folded);
@@ -1046,27 +1048,43 @@ my %_FOLD_OP = (
 # A node is a literal operand if it is a Constant, or a Coerce wrapping a
 # Constant (the Divide corpus shape coerces its Int operands to Num). Returns
 # the Constant's value, or undef if the operand is not literal.
+# _literal_operand($node) -> ($value, $repr, $const_node) or ()
+# A node is a literal operand if it is a Constant, or a Coerce wrapping a
+# Constant (the Divide corpus shape coerces its Int operands to Num). Returns
+# the underlying Constant's value + representation + node, or () if the operand
+# is not literal. The repr is the fold's numeric-type gate; the node lets the
+# caller credit exactly the right operand signature.
 sub _literal_operand {
     my ($node) = @_;
-    return undef unless blessed($node);
+    return () unless blessed($node);
     my $kind = _node_kind($node);
     if ($kind eq 'Coerce' && $node->can('inputs') && $node->inputs->@*) {
         $node = $node->inputs->[0];
-        return undef unless blessed($node);
+        return () unless blessed($node);
         $kind = _node_kind($node);
     }
-    return undef unless $kind eq 'Constant' && $node->can('value');
-    return $node->value;
+    return () unless $kind eq 'Constant' && $node->can('value');
+    my $repr = $node->can('representation') ? $node->representation : undef;
+    return ($node->value, $repr, $node);
 }
+
+# Reprs perl's numeric operators fold without coercion warnings. A string
+# literal under an arithmetic/Num op would coerce (warning + a spurious value
+# that could coincidentally match) — so the fold only fires on numeric operands.
+my %_NUMERIC_REPR = (Int => 1, Num => 1);
 
 # _fold_satisfied_ids($spec_return, $real_return) -> { node_id => 1 }
 #
-# Finds foldable spec op nodes (arithmetic over all-literal direct inputs)
-# whose folded Constant is present in the real graph, and returns the set of
-# spec node ids subsumed by that fold: the op node itself, its Coerce wrappers,
-# and its operand Constants. These are excluded from the plain subset match so
-# a folded producer graph (perl/B::SoN) is not asked to also contain the
-# unfolded operands.
+# Finds foldable spec op nodes (arithmetic/Num-comparison over all-literal,
+# NUMERIC direct inputs) whose folded Constant is present in the real graph,
+# and returns the set of spec node ids subsumed by that fold: the op node and
+# any input node (a Coerce wrapper, or an operand Constant) whose EVERY spec
+# consumer is a subsumed fold op. The signature collector dedups by id, so this
+# is a node-set: a Constant shared with a non-fold consumer (e.g. an
+# independent Coerce) is NOT subsumed — its single signature must survive to
+# satisfy that consumer. Solving sole-consumer bottom-up is a fixpoint (a
+# Coerce becomes subsumable only once its fold op is), so iterate to a stable
+# set over the (small) spec graph.
 sub _fold_satisfied_ids {
     my ($spec_return, $real_return) = @_;
 
@@ -1077,32 +1095,54 @@ sub _fold_satisfied_ids {
         $real_const{ $sig->{value} . "\0" . ($sig->{repr} // '') } = 1;
     }
 
+    my @nodes = _collect_all_nodes($spec_return);
+
+    # Consumer edges over the reachable spec graph: consumers{child_id} = [parent_ids].
+    my %consumers;
+    for my $node (@nodes) {
+        next unless $node->can('inputs') && defined $node->inputs;
+        for my $in ($node->inputs->@*) {
+            push $consumers{ $in->id }->@*, $node->id if blessed($in);
+        }
+    }
+
+    # Seed: satisfied fold ops. An op node has no consumers issue — it is the
+    # folded-away node itself, always absent from the real graph.
     my %satisfied;
-    for my $node (_collect_all_nodes($spec_return)) {
-        my $kind = _node_kind($node);
-        my $fold = $_FOLD_OP{$kind} or next;
+    for my $node (@nodes) {
+        my $fold = $_FOLD_OP{ _node_kind($node) } or next;
         next unless $node->can('inputs') && $node->inputs->@* == 2;
-
         my ($lhs, $rhs) = $node->inputs->@*;
-        my $lv = _literal_operand($lhs);
-        my $rv = _literal_operand($rhs);
+        my ($lv, $lrepr) = _literal_operand($lhs);
+        my ($rv, $rrepr) = _literal_operand($rhs);
         next unless defined $lv && defined $rv;
-
+        # Only fold over numeric literals — never coerce a string (warning +
+        # spurious value that could coincidentally match a real Constant).
+        next unless $_NUMERIC_REPR{ $lrepr // '' } && $_NUMERIC_REPR{ $rrepr // '' };
         my $repr = $node->can('representation') ? $node->representation : undef;
         my $value = eval { $fold->($lv, $rv) };
         next unless defined $value;   # e.g. modulo/divide by zero — no fold
-
+        # ponytail: the value-key is string-eq. Both sides are perl-default NV
+        # stringification (15 sig figs), so 3/4=0.75 matches; a non-terminating
+        # fold (1/3) relies on identical stringification on both sides — fine
+        # today, revisit if a repeating-decimal fold enters the corpus.
         next unless $real_const{ $value . "\0" . ($repr // '') };
-
-        # The fold is present: mark the op, its Coerce wrappers, and the
-        # operand Constants as satisfied.
         $satisfied{ $node->id } = 1;
-        for my $operand ($lhs, $rhs) {
-            $satisfied{ $operand->id } = 1;
-            if (_node_kind($operand) eq 'Coerce'
-                && $operand->can('inputs') && $operand->inputs->@*) {
-                $satisfied{ $operand->inputs->[0]->id } = 1;
-            }
+    }
+
+    # Fixpoint: a non-fold node (a Coerce wrapper, or an operand Constant) is
+    # subsumed once ALL its consumers are subsumed — extending the folded-away
+    # region inward. A node shared with a non-subsumed consumer stays required.
+    my $changed = 1;
+    while ($changed) {
+        $changed = 0;
+        for my $node (@nodes) {
+            my $id = $node->id;
+            next if $satisfied{$id};
+            my $cs = $consumers{$id} or next;   # unconsumed (the Return) stays
+            next if grep { !$satisfied{$_} } @$cs;
+            $satisfied{$id} = 1;
+            $changed = 1;
         }
     }
     return \%satisfied;

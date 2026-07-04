@@ -384,17 +384,23 @@ parser does NOT fold (no fold pass yet), so it emits the unfolded op shape.
 
 **Rule:** the corpus ir block keeps the UNFOLDED operation shape (it names
 the operation under test), and the shape matcher treats a foldable op node
-whose direct inputs are all literal `Constant`s (through an optional
+whose direct inputs are all literal, NUMERIC `Constant`s (through an optional
 `Coerce`) as SATISFIED by a real `Constant` of the folded value with the
-op's declared representation. The subsumed operand `Constant`s (and `Coerce`
-wrappers) are satisfied by the same fold — they do not appear in the folded
-producer graph. A non-folding producer (Chalk) still matches the literal
-shape directly; fold-satisfaction is additive.
+op's declared representation. The op node, and any input (`Coerce` wrapper /
+operand `Constant`) whose EVERY reachable spec consumer is a subsumed fold
+op, are dropped — they do not appear in the folded producer graph. A literal
+`Constant` shared with a NON-fold consumer (e.g. an independent `Coerce`)
+keeps its signature so that consumer's requirement survives. A non-folding
+producer (Chalk) still matches the literal shape directly; fold-satisfaction
+is additive.
 
 Folded ops: `Add Subtract Multiply Divide Modulo` and the Num comparisons
 `NumLt NumGt NumLe NumGe NumEq NumNe`. The folded value is computed with
-perl's own operator (perl-folds-perl — matches op.c exactly). NOT folded
-(deliberately, filed as follow-ups):
+perl's own operator (perl-folds-perl — matches op.c exactly). The fold
+requires NUMERIC operand reprs (Int/Num) — a `Str` literal under a numeric
+op is NOT folded (perl would coerce it with a warning and a spurious value
+that could coincidentally match). NOT folded (deliberately, filed as
+follow-ups):
 - recursive / nested folding, incl. a `TernaryExpr` over a folded-Bool
   condition collapsing to its selected arm (`1 < 2 ? 1 : 0` ->
   `Constant(1)`) — zhi 019f2b61.

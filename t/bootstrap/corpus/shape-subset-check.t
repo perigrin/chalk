@@ -260,6 +260,55 @@ END_IR
         or diag('missing: ' . join('; ', ($rf->{missing} // [])->@*));
 };
 
+subtest 'a fold operand still required by another consumer is NOT over-satisfied' => sub {
+    # Constant(2) is a fold operand of Add(2,3) AND a LIVE operand of a Coerce
+    # that itself feeds the returned top Add — so the Coerce (and thus its
+    # Constant(2) input) is reachable. The real graph has the inner fold result
+    # Constant(5) and a top Add + Coerce, but NO standalone Constant(2). The
+    # fold subsumes the inner Add (and Constant(3), its sole consumer), but
+    # Constant(2) has a non-fold consumer (the Coerce), so it must survive as a
+    # requirement — absent in the real graph, this must FAIL. An id-set skip
+    # that dropped Constant(2) for all consumers would false-PASS.
+    my $spec = <<'END_IR';
+%c2  = Constant(2) :Int
+%c3  = Constant(3) :Int
+%add = Add(%c2, %c3) :Int
+%cd  = Coerce(%c2 : Int -> Num) :Num
+%top = Add(%add, %cd) :Int
+return %top
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%five = Constant(5) :Int
+%c9   = Constant(9) :Int
+%cd   = Coerce(%c9 : Int -> Num) :Num
+%top  = Add(%five, %cd) :Int
+return %top
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL',
+        'shared fold operand still required by a live Coerce is not over-satisfied')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'a non-numeric literal under an arithmetic op does not fold (no warn, no false PASS)' => sub {
+    # Add(Constant("foo"):Str, Constant(2):Int) must NOT fold: perl would coerce
+    # "foo" to 0 with a warning and spuriously match Constant(2). The fold gate
+    # requires numeric operand reprs. (Review finding: repr-blind fold.)
+    my @warnings;
+    local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+    my $spec = <<'END_IR';
+%s   = Constant("foo") :Str
+%c   = Constant(2) :Int
+%add = Add(%s, %c) :Int
+return %add
+END_IR
+    my $res = $C->shape_subset_check($spec, folded_real(2, 'Int'));
+    is($res->{verdict}, 'FAIL',
+        'Str "foo" operand is not fold-coerced into a numeric match');
+    is(scalar(@warnings), 0, 'no numeric-coercion warning leaked to STDERR')
+        or diag("warnings: @warnings");
+};
+
 subtest 'the unfolded shape still matches an unfolded real graph (Chalk path)' => sub {
     # Fold-satisfaction is additive: a producer that does NOT fold (Chalk)
     # still matches the literal spec directly.
