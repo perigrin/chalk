@@ -455,6 +455,10 @@ sub _populate_registry_from_mop_class {
         unless (grep { ($_->{field_index} // -1) == $fidx } @{ $registry->{$cname}{fields} }) {
             push @{ $registry->{$cname}{fields} }, {
                 name         => $fname,
+                # The bare :param key (sigil-free, e.g. 'n' for field '$n').
+                # A constructor Call binds by this key; native callers that
+                # pass bare param_names fall back to matching name.
+                param_name   => (($mf->can('param_name') ? $mf->param_name : undef) // $fname),
                 field_index  => $fidx,
                 is_param     => $mf->is_param    // false,
                 has_reader   => $mf->has_reader  // false,
@@ -4046,7 +4050,11 @@ sub _lower_call_new {
     for my $i (0 .. $#$param_names) {
         my $pname   = $param_names->[$i];
         my $pval    = $param_vals->[$i];
-        my ($finfo) = grep { ($_->{name} // '') eq $pname } @$fields;
+        # Bind by the bare :param key; fall back to the (possibly sigil-
+        # prefixed) field name for native callers that pass bare param_names.
+        my ($finfo) = grep {
+            ($_->{param_name} // '') eq $pname || ($_->{name} // '') eq $pname
+        } @$fields;
         unless (defined $finfo) {
             die "LLVM MOP: Call(new) $class_name: no :param field named '$pname' in class registry";
         }
@@ -4093,10 +4101,13 @@ sub _lower_call_new {
         }
     }
 
-    # Store default/uninit fields not provided as :param
+    # Store default/uninit fields not provided as :param. Match the same
+    # namespace the bind loop used: a field is "provided" if either its bare
+    # param_name or its (sigil-prefixed) name appears in param_names.
     for my $finfo (@$fields) {
         my $pname = $finfo->{name} // '';
-        next if grep { $_ eq $pname } @$param_names;
+        my $fkey  = $finfo->{param_name} // '';
+        next if grep { $_ eq $fkey || $_ eq $pname } @$param_names;
         my $fidx     = $finfo->{field_index};
         my $slot_idx = $fidx + 1;
         if ($finfo->{has_default}) {
