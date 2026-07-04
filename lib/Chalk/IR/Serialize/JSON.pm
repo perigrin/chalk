@@ -27,6 +27,7 @@ my %STAMP_TO_REPR = (
     Str     => 'Str',
     Boolean => 'Bool',
     Undef   => 'Undef',
+    Object  => 'Object',
 );
 
 # -----------------------------------------------------------------------
@@ -269,6 +270,19 @@ sub _deserialize_graph ($method_data) {
             $bson_return_control = shift @inputs;
         }
 
+        # A B::SoN void statement-effect Call leads with its control token
+        # (inputs=[control, invocant, args]). Chalk's contract is
+        # inputs=[invocant, args] with control carried in control_in, so it is
+        # threaded into the effect chain (and survives DCE) instead of being an
+        # orphaned data node whose side effect is lost. The producer only sets
+        # is_stmt_effect when it prepended control, so inputs[0] IS the control
+        # (a CFG node, or a preceding stmt-effect Call in a chain).
+        my $bson_stmt_control;
+        if ($op eq 'Call' && $fields->{is_stmt_effect}
+                && @inputs >= 1 && blessed($inputs[0])) {
+            $bson_stmt_control = shift @inputs;
+        }
+
         # Build the argument hash, with inputs and any extra fields
         my %args = (inputs => \@inputs);
 
@@ -353,6 +367,12 @@ sub _deserialize_graph ($method_data) {
         # out of inputs above to match Chalk's Return contract).
         if (defined $bson_return_control) {
             $node->set_control_in($bson_return_control);
+        }
+
+        # Re-attach a B::SoN void statement-effect Call's control token, threading
+        # it into the effect chain (it was split out of inputs above).
+        if (defined $bson_stmt_control) {
+            $node->set_control_in($bson_stmt_control);
         }
 
         # Map a B::SoN stamp to a Chalk representation so the backend can lower
