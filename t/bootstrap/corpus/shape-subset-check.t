@@ -145,4 +145,133 @@ END_IR
         or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
 }
 
+# ---------------------------------------------------------------------------
+# Fold-satisfaction (zhi 019f2a50): perl constant-folds literal arithmetic in
+# op.c before B::SoN walks the optree, so `1 + 2` loads as a single
+# Constant(3), not Add(Constant(1), Constant(2)). The corpus keeps the
+# unfolded operation shape (it names the op under test), and the matcher
+# learns that an arithmetic-op spec node over all-literal Constants is
+# SATISFIED by a real Constant of the folded value + the op's declared repr.
+# The subsumed operand Constants are satisfied by the fold too (they do not
+# appear in the folded real graph). Chalk not folding is a known gap.
+# ---------------------------------------------------------------------------
+
+# The folded real graph, exactly as B::SoN emits it: one Constant.
+sub folded_real ($value, $repr) {
+    return $C->build_graph_from_ir("%r = Constant($value) :$repr\nreturn %r\n");
+}
+
+subtest 'Add over literals is satisfied by the folded Constant' => sub {
+    my $spec = <<'END_IR';
+%c1  = Constant(1) :Int
+%c2  = Constant(2) :Int
+%add = Add(%c1, %c2) :Int
+return %add
+END_IR
+    my $res = $C->shape_subset_check($spec, folded_real(3, 'Int'));
+    is($res->{verdict}, 'PASS', 'Add(1,2):Int satisfied by Constant(3):Int')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'Subtract / Multiply / Modulo over literals fold' => sub {
+    my %cases = (
+        'Subtract' => ['%c1 = Constant(5) :Int' . "\n" . '%c2 = Constant(3) :Int' . "\n" . '%o = Subtract(%c1, %c2) :Int', 2, 'Int'],
+        'Multiply' => ['%c1 = Constant(3) :Int' . "\n" . '%c2 = Constant(4) :Int' . "\n" . '%o = Multiply(%c1, %c2) :Int', 12, 'Int'],
+        'Modulo'   => ['%c1 = Constant(-7) :Int' . "\n" . '%c2 = Constant(3) :Int' . "\n" . '%o = Modulo(%c1, %c2) :Int', 2, 'Int'],
+    );
+    for my $op (sort keys %cases) {
+        my ($nodes, $val, $repr) = $cases{$op}->@*;
+        my $spec = "$nodes\nreturn %o\n";
+        my $res = $C->shape_subset_check($spec, folded_real($val, $repr));
+        is($res->{verdict}, 'PASS', "$op over literals -> Constant($val):$repr")
+            or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+    }
+};
+
+subtest 'Divide over literals folds through Coerce to a Num Constant' => sub {
+    # The Float division corpus shape: Coerce(Int->Num) on each operand.
+    my $spec = <<'END_IR';
+%c3  = Constant(3) :Int
+%c4  = Constant(4) :Int
+%d3  = Coerce(%c3 : Int -> Num) :Num
+%d4  = Coerce(%c4 : Int -> Num) :Num
+%div = Divide(%d3, %d4) :Num
+return %div
+END_IR
+    my $res = $C->shape_subset_check($spec, folded_real('0.75', 'Num'));
+    is($res->{verdict}, 'PASS', 'Divide(3,4):Num satisfied by Constant(0.75):Num')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'a WRONG folded value still FAILs (fold is checked, not assumed)' => sub {
+    my $spec = <<'END_IR';
+%c1  = Constant(1) :Int
+%c2  = Constant(2) :Int
+%add = Add(%c1, %c2) :Int
+return %add
+END_IR
+    # Real graph folds to the wrong constant (4, not 3).
+    my $res = $C->shape_subset_check($spec, folded_real(4, 'Int'));
+    is($res->{verdict}, 'FAIL', 'Add(1,2) is NOT satisfied by Constant(4)');
+};
+
+subtest 'an op whose direct input is a non-literal does not fold-match' => sub {
+    # Outer Add's first operand is an Add node, not a literal Constant. Only a
+    # DIRECT-all-literals op folds (matching the corpus's single-op arithmetic
+    # cases); a nested op is not fold-collapsed, so a bare folded Constant must
+    # NOT satisfy it. (Recursive folding of nested literal trees is out of
+    # scope — no corpus case needs it.)
+    my $spec = <<'END_IR';
+%c1  = Constant(1) :Int
+%c2  = Constant(2) :Int
+%i   = Add(%c1, %c2) :Int
+%c3  = Constant(3) :Int
+%o   = Add(%i, %c3) :Int
+return %o
+END_IR
+    my $res = $C->shape_subset_check($spec, folded_real(6, 'Int'));
+    is($res->{verdict}, 'FAIL',
+        'a nested Add is not fold-satisfied by a single folded Constant');
+};
+
+subtest 'literal comparison folds to a Bool Constant (statements 1<2)' => sub {
+    # perl folds `1 < 2` to a boolean in op.c; B::SoN emits Constant(1):Boolean
+    # for true and Constant():Boolean (empty string) for false.
+    my $true_spec = <<'END_IR';
+%one = Constant(1) :Int
+%two = Constant(2) :Int
+%cmp = NumLt(%one, %two) :Bool
+return %cmp
+END_IR
+    my $rt = $C->shape_subset_check($true_spec, folded_real(1, 'Bool'));
+    is($rt->{verdict}, 'PASS', 'NumLt(1,2):Bool satisfied by Constant(1):Bool')
+        or diag('missing: ' . join('; ', ($rt->{missing} // [])->@*));
+
+    my $false_spec = <<'END_IR';
+%two = Constant(2) :Int
+%one = Constant(1) :Int
+%cmp = NumLt(%two, %one) :Bool
+return %cmp
+END_IR
+    # false folds to the empty-string Bool constant.
+    my $real_false = $C->build_graph_from_ir("%r = Constant() :Bool\nreturn %r\n");
+    my $rf = $C->shape_subset_check($false_spec, $real_false);
+    is($rf->{verdict}, 'PASS', 'NumLt(2,1):Bool satisfied by Constant():Bool')
+        or diag('missing: ' . join('; ', ($rf->{missing} // [])->@*));
+};
+
+subtest 'the unfolded shape still matches an unfolded real graph (Chalk path)' => sub {
+    # Fold-satisfaction is additive: a producer that does NOT fold (Chalk)
+    # still matches the literal spec directly.
+    my $spec = <<'END_IR';
+%c1  = Constant(1) :Int
+%c2  = Constant(2) :Int
+%add = Add(%c1, %c2) :Int
+return %add
+END_IR
+    my $real = $C->build_graph_from_ir($spec);
+    my $res  = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'unfolded spec still matches an unfolded real graph');
+};
+
 done_testing();

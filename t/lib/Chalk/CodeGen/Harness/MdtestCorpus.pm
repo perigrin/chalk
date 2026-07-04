@@ -989,7 +989,17 @@ sub shape_subset_check {
         return { verdict => 'SKIP', missing => [], reason => "spec block unbuildable: $why" };
     }
 
-    my @spec = _collect_node_signatures($spec_return);
+    # Fold-satisfaction (zhi 019f2a50): perl constant-folds literal arithmetic
+    # in op.c before B::SoN walks, so `1 + 2` loads as a single Constant(3),
+    # not Add(1, 2). The corpus keeps the unfolded operation shape (it names
+    # the op under test); a foldable op whose direct inputs are all literal
+    # Constants is satisfied by a real Constant of the folded value, and its
+    # operand Constants (and Coerce wrappers) are subsumed. A producer that
+    # does NOT fold (Chalk) still matches the literal shape directly. The rule
+    # is recorded in docs/plans/2026-06-07-mdtest-corpus-format-draft.md.
+    my $folded = _fold_satisfied_ids($spec_return, $return_node);
+
+    my @spec = _collect_node_signatures($spec_return, $folded);
     my @real = _collect_node_signatures($return_node);
 
     # Match most-constrained spec signatures first so a lax sig (undef
@@ -1007,6 +1017,95 @@ sub shape_subset_check {
     return @missing
         ? { verdict => 'FAIL', missing => \@missing }
         : { verdict => 'PASS', missing => [] };
+}
+
+# Ops the corpus specs use whose all-literal form perl folds in op.c before
+# B::SoN walks. The value is computed with perl's own operator (perl-folds-
+# perl, so the folded value matches op.c exactly); the result repr is taken
+# from the spec op node's declared representation. Comparisons fold to perl's
+# boolean (1 / '' — the Constant(1)/Constant() :Boolean B::SoN emits). Str
+# comparisons are equally foldable but no corpus case uses them yet; deeper
+# recursive folding (a TernaryExpr over a folded-Bool condition collapsing to
+# its selected arm, e.g. `1 < 2 ? 1 : 0` -> Constant(1)) is a separate,
+# larger matcher concern and is NOT done here.
+my %_FOLD_OP = (
+    Add      => sub ($a, $b) { $a + $b },
+    Subtract => sub ($a, $b) { $a - $b },
+    Multiply => sub ($a, $b) { $a * $b },
+    Divide   => sub ($a, $b) { $a / $b },
+    Modulo   => sub ($a, $b) { $a % $b },
+    NumLt    => sub ($a, $b) { $a <  $b },
+    NumGt    => sub ($a, $b) { $a >  $b },
+    NumLe    => sub ($a, $b) { $a <= $b },
+    NumGe    => sub ($a, $b) { $a >= $b },
+    NumEq    => sub ($a, $b) { $a == $b },
+    NumNe    => sub ($a, $b) { $a != $b },
+);
+
+# _literal_operand($node) -> (defined value) or undef
+# A node is a literal operand if it is a Constant, or a Coerce wrapping a
+# Constant (the Divide corpus shape coerces its Int operands to Num). Returns
+# the Constant's value, or undef if the operand is not literal.
+sub _literal_operand {
+    my ($node) = @_;
+    return undef unless blessed($node);
+    my $kind = _node_kind($node);
+    if ($kind eq 'Coerce' && $node->can('inputs') && $node->inputs->@*) {
+        $node = $node->inputs->[0];
+        return undef unless blessed($node);
+        $kind = _node_kind($node);
+    }
+    return undef unless $kind eq 'Constant' && $node->can('value');
+    return $node->value;
+}
+
+# _fold_satisfied_ids($spec_return, $real_return) -> { node_id => 1 }
+#
+# Finds foldable spec op nodes (arithmetic over all-literal direct inputs)
+# whose folded Constant is present in the real graph, and returns the set of
+# spec node ids subsumed by that fold: the op node itself, its Coerce wrappers,
+# and its operand Constants. These are excluded from the plain subset match so
+# a folded producer graph (perl/B::SoN) is not asked to also contain the
+# unfolded operands.
+sub _fold_satisfied_ids {
+    my ($spec_return, $real_return) = @_;
+
+    # Real Constant values indexed by "value\0repr" for O(1) fold lookup.
+    my %real_const;
+    for my $sig (_collect_node_signatures($real_return)) {
+        next unless $sig->{kind} eq 'Constant' && defined $sig->{value};
+        $real_const{ $sig->{value} . "\0" . ($sig->{repr} // '') } = 1;
+    }
+
+    my %satisfied;
+    for my $node (_collect_all_nodes($spec_return)) {
+        my $kind = _node_kind($node);
+        my $fold = $_FOLD_OP{$kind} or next;
+        next unless $node->can('inputs') && $node->inputs->@* == 2;
+
+        my ($lhs, $rhs) = $node->inputs->@*;
+        my $lv = _literal_operand($lhs);
+        my $rv = _literal_operand($rhs);
+        next unless defined $lv && defined $rv;
+
+        my $repr = $node->can('representation') ? $node->representation : undef;
+        my $value = eval { $fold->($lv, $rv) };
+        next unless defined $value;   # e.g. modulo/divide by zero — no fold
+
+        next unless $real_const{ $value . "\0" . ($repr // '') };
+
+        # The fold is present: mark the op, its Coerce wrappers, and the
+        # operand Constants as satisfied.
+        $satisfied{ $node->id } = 1;
+        for my $operand ($lhs, $rhs) {
+            $satisfied{ $operand->id } = 1;
+            if (_node_kind($operand) eq 'Coerce'
+                && $operand->can('inputs') && $operand->inputs->@*) {
+                $satisfied{ $operand->inputs->[0]->id } = 1;
+            }
+        }
+    }
+    return \%satisfied;
 }
 
 # _sig_match($spec_sig, \@real_sigs) -> bool
@@ -1099,20 +1198,23 @@ sub _collect_nodes_recursive {
     }
 }
 
-# _collect_node_signatures($return_node) -> @signatures
+# _collect_node_signatures($return_node, $skip_ids) -> @signatures
 #
 # Walks the reachable graph from a Return node and collects a list of
 # node-descriptor hashrefs (kind, repr, value, from, to, ...) for matching.
+# $skip_ids (optional hashref of node-id => 1) omits fold-satisfied nodes
+# from the spec side so they are not re-required by the plain subset match.
 sub _collect_node_signatures {
-    my ($return_node) = @_;
+    my ($return_node, $skip_ids) = @_;
     my %visited;
     my @sigs;
-    _visit_node($return_node, \%visited, \@sigs);
+    _visit_node($return_node, \%visited, \@sigs, $skip_ids // {});
     return @sigs;
 }
 
 sub _visit_node {
-    my ($node, $visited, $sigs) = @_;
+    my ($node, $visited, $sigs, $skip_ids) = @_;
+    $skip_ids //= {};
     return unless defined $node;
     # Producer graphs may carry arrayref inputs (e.g. Call arg lists) —
     # the same guard Graph::nodes and TypedInvariant carry.
@@ -1120,6 +1222,19 @@ sub _visit_node {
 
     my $id = $node->id;
     return if $visited->{$id}++;
+
+    # A fold-satisfied node (op + its operand Constants/Coerce) is recorded as
+    # visited so its inputs are still traversed, but produces no signature —
+    # it was already matched by the folded real Constant.
+    if ($skip_ids->{$id}) {
+        if ($node->can('inputs') && defined $node->inputs) {
+            _visit_node($_, $visited, $sigs, $skip_ids) for $node->inputs->@*;
+        }
+        if ($node->can('control_in') && defined $node->control_in) {
+            _visit_node($node->control_in, $visited, $sigs, $skip_ids);
+        }
+        return;
+    }
 
     # Build the signature for this node
     my $kind = _node_kind($node);
@@ -1143,13 +1258,13 @@ sub _visit_node {
     # Recurse into inputs (data flow)
     if ($node->can('inputs') && defined $node->inputs) {
         for my $inp ($node->inputs->@*) {
-            _visit_node($inp, $visited, $sigs) if defined $inp;
+            _visit_node($inp, $visited, $sigs, $skip_ids) if defined $inp;
         }
     }
 
     # Recurse into control_in (control flow)
     if ($node->can('control_in') && defined $node->control_in) {
-        _visit_node($node->control_in, $visited, $sigs);
+        _visit_node($node->control_in, $visited, $sigs, $skip_ids);
     }
 }
 

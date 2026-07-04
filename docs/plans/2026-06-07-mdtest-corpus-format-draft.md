@@ -373,3 +373,35 @@ The vocabulary is now MOP-direct (the builder declares through the real
 
 Design: docs/plans/2026-06-11-llvm-reads-mop-directly.md. Builder contract
 tests: t/bootstrap/ir/build-mop.t.
+
+## Amendment 2026-07-04 (zhi 019f2a50 — constant-fold satisfaction)
+
+Extends shape-match rule #2. Perl constant-folds literal arithmetic and
+literal comparisons in op.c BEFORE B::SoN walks the optree, so `1 + 2`
+loads as a single `Constant(3)`, not `Add(Constant(1), Constant(2))`, and
+`1 < 2` loads as `Constant(1) :Boolean`, not `NumLt(1, 2)`. The Chalk
+parser does NOT fold (no fold pass yet), so it emits the unfolded op shape.
+
+**Rule:** the corpus ir block keeps the UNFOLDED operation shape (it names
+the operation under test), and the shape matcher treats a foldable op node
+whose direct inputs are all literal `Constant`s (through an optional
+`Coerce`) as SATISFIED by a real `Constant` of the folded value with the
+op's declared representation. The subsumed operand `Constant`s (and `Coerce`
+wrappers) are satisfied by the same fold — they do not appear in the folded
+producer graph. A non-folding producer (Chalk) still matches the literal
+shape directly; fold-satisfaction is additive.
+
+Folded ops: `Add Subtract Multiply Divide Modulo` and the Num comparisons
+`NumLt NumGt NumLe NumGe NumEq NumNe`. The folded value is computed with
+perl's own operator (perl-folds-perl — matches op.c exactly). NOT folded
+(deliberately, filed as follow-ups):
+- recursive / nested folding, incl. a `TernaryExpr` over a folded-Bool
+  condition collapsing to its selected arm (`1 < 2 ? 1 : 0` ->
+  `Constant(1)`) — zhi 019f2b61.
+- Str comparisons over literals (no corpus case uses them yet).
+
+A fold only satisfies if the computed `Constant` is ACTUALLY present in the
+real graph (honest-GAP discipline — never assumed). Implementation +
+contract tests: `_fold_satisfied_ids` / `%_FOLD_OP` in
+`t/lib/Chalk/CodeGen/Harness/MdtestCorpus.pm`;
+`t/bootstrap/corpus/shape-subset-check.t`.
