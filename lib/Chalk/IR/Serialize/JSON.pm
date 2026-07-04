@@ -550,6 +550,16 @@ sub _seed_and_propagate_reprs ($graphs) {
     for my $g (values %$graphs) {
         for my $node ($g->nodes->@*) {
             next if defined $node->representation;
+            # A qr// compiled-regex literal is a Constant of const_type 'regex';
+            # its repr is Regex (the matcher value the backend resolves
+            # statically). Keyed on const_type, not node kind, so it can't live
+            # in the op-keyed seed table.
+            if ($node->operation eq 'Constant'
+                && $node->can('const_type')
+                && ($node->const_type // '') eq 'regex') {
+                $node->set_representation('Regex');
+                next;
+            }
             my $seed = $_SEED_REPR{ $node->operation } // next;
             $node->set_representation($seed);
         }

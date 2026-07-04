@@ -211,6 +211,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, '>=', 43, 'gate-green floor (43 after recursive ternary/Concat fold)');
+cmp_ok($tally{gate_green}, '>=', 44, 'gate-green floor (44 after qr// Regex repr)');
 
 done_testing();
