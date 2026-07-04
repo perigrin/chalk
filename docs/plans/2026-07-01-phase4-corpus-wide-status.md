@@ -131,9 +131,19 @@ is fully green.
   only regex node emitted unstamped, so it reached the LLVM backend with no
   repr; stamped `:Str` at emission like RegexCapture/Match. R3 gate-green;
   floor 28 -> 29.
-- classes method-call: `Int:0 != Int:11` — object-state not persisted
-  (filed 019f1007). STILL OPEN — the residual RC4 miscompile.
-These are the dangerous class (silently wrong, not a loud GAP).
+- classes method-call: `Int:0 != Int:11` — object-state not persisted. DONE
+  (2026-07-04, perl5-son a31f3f4, Chalk 9b273800). TWO bugs: (a) void method
+  calls ($c->inc) got no control edge so Chalk DCE'd them, losing the
+  mutation — producer now threads void calls (OPf_WANT_VOID) onto the control
+  chain (is_stmt_effect + control input), loader control-splits them like
+  Return; (b) Counter->new(n=>10) stored the field default not the param —
+  producer splits new's kv-list into param_names+values, backend matches on
+  the bare param_name. Plus: constructor Call stamped :Object (shape leg).
+  method-simple + method-call gate-green; gate-green 29 -> 31. Adjacent
+  out-of-scope s/// idioms and the classes NO-representation family stay open
+  (019f2d79 / 019f0597 / 019f2dc9).
+RC4 is the dangerous class (silently wrong, not a loud GAP). ALL RC4
+miscompiles are now CLOSED: inverted-branch, s///, and object-state.
 
 ### RC5 — TernaryExpr Int/Bool branch typing (2)
 DONE (2026-07-03, zhi RC5 arc). control-flow D7/D9 nested-if GREEN; corpus
