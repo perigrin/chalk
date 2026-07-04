@@ -449,3 +449,34 @@ guards so they don't mask real branch/assignment bugs.
 Implementation + contract tests: `_mark_pad_scaffolding` /
 `%_OPERAND_RETURNING` in `t/lib/Chalk/CodeGen/Harness/MdtestCorpus.pm`;
 `t/bootstrap/corpus/shape-subset-check.t`.
+
+## Amendment 2026-07-04 (zhi 019f2d47 — assignment + if/else-select propagation)
+
+Completes the two propagation categories deferred above. Perl propagates a
+pure scalar/field rebind's stored value to the read site (no `Assign`/
+`CompoundAssign` survives — `$x = 1; $x` and `$i++; $i` load as the final
+value), and a branch whose arms are pure values into a `TernaryExpr` select
+(no `If`/`Proj`/`Region` — `if ($c) { $x=1 } else { $x=2 } $x` loads as
+`NumGt + TernaryExpr`).
+
+**Rule (same shape as pad-scaffolding — concede EXISTENCE per-kind, gated on
+the real graph having zero of it):**
+- Subsume a spec `Assign`/`CompoundAssign` ONLY when the real graph has none
+  AND its lhs (`inputs[0]`) is a `PadAccess`/`FieldAccess` (a pure rebind). An
+  element/aggregate store (`Subscript` lhs) is a real effect and stays
+  REQUIRED — subsuming it would mask a dropped array/hash write.
+- Subsume spec `If`/`Proj`/`Region` ONLY when the real graph has no `If` AND
+  carries a `TernaryExpr` select. A genuine branch (no real select) stays
+  REQUIRED.
+
+The bound value nodes are never subsumed; a propagated real graph must still
+carry the right value. Reach: control-flow D1/D4/D7/D9, increment K1/K2,
+strings S4, variables A4/C2 — gate-green 32 -> 41.
+
+NOT handled: dead-store elimination (variables C1: `my $x=1; $x=2; $x` — the
+initial `Constant(1)` is a dead store perl removes; subsuming it needs a
+dead-store analysis on the spec, distinct from value propagation).
+
+Implementation + teeth tests (element-store stays required; genuine If stays
+required): `_mark_assign_select_propagation` in `MdtestCorpus.pm`;
+`shape-subset-check.t`.

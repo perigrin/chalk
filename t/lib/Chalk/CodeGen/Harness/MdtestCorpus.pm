@@ -1014,6 +1014,13 @@ sub shape_subset_check {
     my %satisfied = %$folded;
     _mark_pad_scaffolding($spec_return, $return_node, \%satisfied);
 
+    # Assignment + if/else-select propagation (zhi 019f2d47): perl propagates a
+    # pure scalar rebind's value to the read site (no Assign survives) and a
+    # pure-value branch into a select (no If survives). Subsume that scaffolding
+    # only when the real graph actually propagated it away; effectful stores and
+    # genuine branches stay required. Rule in the corpus format doc.
+    _mark_assign_select_propagation($spec_return, $return_node, \%satisfied);
+
     my @spec = _collect_node_signatures($spec_return, \%satisfied);
     my @real = _collect_node_signatures($return_node);
 
@@ -1201,6 +1208,52 @@ sub _mark_pad_scaffolding {
                 && ($consumers{ $name->id } // 0) == 1) {
                 $satisfied->{ $name->id } = 1;
             }
+        }
+    }
+    return;
+}
+
+# _mark_assign_select_propagation($spec_return, $real_return, \%satisfied) —
+# subsume propagated assignment + if/else scaffolding, mirroring the pad rule
+# (subsume a spec node kind ONLY when the real graph emitted zero of it, so a
+# producer that KEEPS it is not conceded). Two categories:
+#   (1) Assign/CompoundAssign: perl propagates a pure scalar/field rebind's
+#       stored value to the read site, so no assign node survives. Subsume a
+#       spec Assign/CompoundAssign whose lhs (inputs[0]) is a PadAccess or
+#       FieldAccess -- a pure rebind. An element/aggregate store (Subscript
+#       lhs) is a real effect and stays required.
+#   (2) If/Proj/Region: perl propagates a branch whose arms are pure values
+#       into a TernaryExpr select. Subsume the spec CFG scaffolding ONLY when
+#       the real graph has no If AND carries the equivalent select. A genuine
+#       branch (no real select) stays required.
+# The bound value nodes are never subsumed here (the value must still match).
+sub _mark_assign_select_propagation {
+    my ($spec_return, $real_return, $satisfied) = @_;
+    my @nodes = _collect_all_nodes($spec_return);
+
+    my %real_kind;
+    $real_kind{ _node_kind($_) } = 1 for _collect_all_nodes($real_return);
+
+    my $assign_propagated  = !$real_kind{Assign};
+    my $caccign_propagated = !$real_kind{CompoundAssign};
+    # if/else -> select is conceded only when the real graph replaced the
+    # branch with a select: no If survives AND a TernaryExpr is present.
+    my $ifelse_propagated  = !$real_kind{If} && $real_kind{TernaryExpr};
+
+    for my $node (@nodes) {
+        my $kind = _node_kind($node);
+        if (($kind eq 'Assign' && $assign_propagated)
+            || ($kind eq 'CompoundAssign' && $caccign_propagated)) {
+            # Pure rebind only: lhs (inputs[0]) is a PadAccess/FieldAccess.
+            my $lhs = $node->can('inputs') && $node->inputs->@*
+                ? $node->inputs->[0] : undef;
+            my $lk = blessed($lhs) ? _node_kind($lhs) : '';
+            $satisfied->{ $node->id } = 1
+                if $lk eq 'PadAccess' || $lk eq 'FieldAccess';
+        }
+        elsif (($kind eq 'If' || $kind eq 'Proj' || $kind eq 'Region')
+               && $ifelse_propagated) {
+            $satisfied->{ $node->id } = 1;
         }
     }
     return;

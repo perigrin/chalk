@@ -461,4 +461,128 @@ END_IR
         or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
 };
 
+subtest 'a propagated scalar Assign is subsumed (A4/C1)' => sub {
+    # perl propagates `my $x=1; $x=1; $x` to the final value, so no Assign
+    # survives -- the real graph is just Constant(1). The corpus keeps the
+    # assign-explicit shape; subsume the spec Assign when the real graph
+    # propagated it away (has zero Assign).
+    my $spec = <<'END_IR';
+%xn  = Constant("$x") :Str
+%vx  = VarDecl(%xn) :Int
+%one = Constant(1) :Int
+%lhs = PadAccess(%vx, "$x") :Int
+%as  = Assign(%lhs, %one) :Int
+%rx  = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx -> %as
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%one = Constant(1) :Int
+return %one
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'propagated Assign subsumed')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'a propagated CompoundAssign is subsumed (K1/K2/C2)' => sub {
+    my $spec = <<'END_IR';
+%xn  = Constant("$i") :Str
+%vx  = VarDecl(%xn) :Int
+%one = Constant(1) :Int
+%lhs = PadAccess(%vx, "$i") :Int
+%ca  = CompoundAssign(%lhs, %one, op: "+=") :Int
+%rx  = PadAccess(%vx, "$i") :Int
+return %rx
+control: %vx -> %ca
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%one = Constant(1) :Int
+return %one
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'propagated CompoundAssign subsumed')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'an if/else with pure-value arms is subsumed by a real TernaryExpr (D1)' => sub {
+    # perl propagates a branch whose arms are pure values into a select, so
+    # B::SoN loads NumGt + TernaryExpr with NO If/Proj/Region. Subsume the
+    # spec CFG scaffolding when the real graph has no If AND has the select.
+    my $spec = <<'END_IR';
+%n     = Constant(5) :Int
+%zero  = Constant(0) :Int
+%cmp   = NumGt(%n, %zero) :Bool
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%if    = If(%n, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%region = Region(%proj0, %proj1)
+%sel   = TernaryExpr(%cmp, %c1, %c2) :Int
+return %sel
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%n    = Constant(5) :Int
+%zero = Constant(0) :Int
+%cmp  = NumGt(%n, %zero) :Bool
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%sel  = TernaryExpr(%cmp, %c1, %c2) :Int
+return %sel
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'if/else scaffolding subsumed by the real select')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'an element-store Assign is NOT subsumed (effectful, teeth)' => sub {
+    # Only a pure scalar rebind (Assign with a PadAccess lhs) propagates. An
+    # element store (Subscript lhs) is a real effect the real graph must carry;
+    # subsuming it would mask a dropped array/hash write.
+    my $spec = <<'END_IR';
+%arr  = ArrayRef() :ArrayRef
+%idx  = Constant(0) :Int
+%lhs  = Subscript(%arr, %idx) :Int
+%one  = Constant(1) :Int
+%as   = Assign(%lhs, %one) :Int
+%rd   = Subscript(%arr, %idx) :Int
+return %rd
+control: %arr -> %as
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%one = Constant(1) :Int
+return %one
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL',
+        'an element-store Assign stays required (not papered over)');
+};
+
+subtest 'a genuine If (no real select) is NOT subsumed (teeth)' => sub {
+    # If the real graph has no TernaryExpr select, the spec If is a real branch
+    # the producer failed to emit -- must FAIL, not be conceded.
+    my $spec = <<'END_IR';
+%n     = Constant(5) :Int
+%zero  = Constant(0) :Int
+%cmp   = NumGt(%n, %zero) :Bool
+%c1    = Constant(1) :Int
+%if    = If(%n, %cmp)
+%proj0 = Proj(%if, index: 0)
+%region = Region(%proj0)
+%sel   = TernaryExpr(%cmp, %c1, %c1) :Int
+return %sel
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%n    = Constant(5) :Int
+%zero = Constant(0) :Int
+%cmp  = NumGt(%n, %zero) :Bool
+%c1   = Constant(1) :Int
+return %c1
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL',
+        'a spec If with no real select stays required');
+};
+
 done_testing();

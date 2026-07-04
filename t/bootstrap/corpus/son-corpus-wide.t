@@ -211,6 +211,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, '>=', 32, 'gate-green floor (32 after class-isa inherited dispatch)');
+cmp_ok($tally{gate_green}, '>=', 41, 'gate-green floor (41 after assign/if-else propagation)');
 
 done_testing();
