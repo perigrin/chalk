@@ -122,10 +122,17 @@ is fully green.
 
 ### RC4 — semantic miscompile, wrong value (4)
 - control-flow D6 ternary + D1 if/else: `Int:2 != Int:1` — branch selection
-  INVERTED (returns the else value).
+  INVERTED (returns the else value). DONE (perl5-son 94eee4b).
+- regex R3 s///: `foobar != bazbar` — substitution not applied. DONE
+  (perl5-son f42ea10). Two producer bugs: (a) `s///` is an in-place pad
+  mutation but the handler only pushed the RegexSubst, never rebound the pad,
+  so a later read of the lexical saw the pre-subst Constant; fixed with
+  `$sim->define($targ, $node)` (mirrors padsv_store). (b) RegexSubst was the
+  only regex node emitted unstamped, so it reached the LLVM backend with no
+  repr; stamped `:Str` at emission like RegexCapture/Match. R3 gate-green;
+  floor 28 -> 29.
 - classes method-call: `Int:0 != Int:11` — object-state not persisted
-  (filed 019f1007).
-- regex R3 s///: `foobar != bazbar` — substitution not applied.
+  (filed 019f1007). STILL OPEN — the residual RC4 miscompile.
 These are the dangerous class (silently wrong, not a loud GAP).
 
 ### RC5 — TernaryExpr Int/Bool branch typing (2)
