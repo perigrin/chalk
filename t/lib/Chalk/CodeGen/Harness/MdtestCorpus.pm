@@ -1231,25 +1231,36 @@ sub _mark_assign_select_propagation {
     my ($spec_return, $real_return, $satisfied) = @_;
     my @nodes = _collect_all_nodes($spec_return);
 
-    my %real_kind;
-    $real_kind{ _node_kind($_) } = 1 for _collect_all_nodes($real_return);
+    my (%real_kind, %real_count);
+    for my $n (_collect_all_nodes($real_return)) { $real_kind{ _node_kind($n) } = 1; $real_count{ _node_kind($n) }++; }
+    my %spec_count;
+    $spec_count{ _node_kind($_) }++ for @nodes;
 
     my $assign_propagated  = !$real_kind{Assign};
     my $caccign_propagated = !$real_kind{CompoundAssign};
     # if/else -> select is conceded only when the real graph replaced the
-    # branch with a select: no If survives AND a TernaryExpr is present.
-    my $ifelse_propagated  = !$real_kind{If} && $real_kind{TernaryExpr};
+    # branch with a select: no If survives AND the real graph carries at least
+    # as many TernaryExpr selects as the spec has Ifs. The count gate stops one
+    # unrelated select from masking a genuinely dropped branch (each propagated
+    # If becomes exactly one select).
+    my $ifelse_propagated  = !$real_kind{If}
+        && ($real_count{TernaryExpr} // 0) >= ($spec_count{If} // 0)
+        && ($spec_count{If} // 0) > 0;
 
     for my $node (@nodes) {
         my $kind = _node_kind($node);
         if (($kind eq 'Assign' && $assign_propagated)
             || ($kind eq 'CompoundAssign' && $caccign_propagated)) {
-            # Pure rebind only: lhs (inputs[0]) is a PadAccess/FieldAccess.
+            # Pure LEXICAL rebind only: lhs (inputs[0]) is a PadAccess. A pad is
+            # SSA-like and propagates safely. A FieldAccess store is an
+            # object-state mutation of shared heap (the RC4 class) and is NOT a
+            # pure rebind — never subsume it, or a dropped field write-back
+            # becomes a false green. Element stores (Subscript lhs) likewise
+            # stay required.
             my $lhs = $node->can('inputs') && $node->inputs->@*
                 ? $node->inputs->[0] : undef;
             my $lk = blessed($lhs) ? _node_kind($lhs) : '';
-            $satisfied->{ $node->id } = 1
-                if $lk eq 'PadAccess' || $lk eq 'FieldAccess';
+            $satisfied->{ $node->id } = 1 if $lk eq 'PadAccess';
         }
         elsif (($kind eq 'If' || $kind eq 'Proj' || $kind eq 'Region')
                && $ifelse_propagated) {

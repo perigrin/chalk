@@ -585,4 +585,58 @@ END_IR
         'a spec If with no real select stays required');
 };
 
+subtest 'a FieldAccess-store Assign is NOT subsumed (object-state effect, teeth)' => sub {
+    # A field write-back ($self->{n} = ...) is an object-state mutation of
+    # shared heap -- the RC4 class. Only a lexical PadAccess rebind propagates;
+    # subsuming a FieldAccess store would false-green a dropped field write.
+    # (Review finding: FieldAccess was wrongly treated as a pure rebind.)
+    my $spec = <<'END_IR';
+%fa_lv = FieldAccess(field_index: 0, field_stash: "C") :Int
+%one   = Constant(1) :Int
+%fa_rd = FieldAccess(field_index: 0, field_stash: "C") :Int
+%add   = Add(%fa_rd, %one) :Int
+%as    = Assign(%fa_lv, %add) :Int
+%ret   = FieldAccess(field_index: 0, field_stash: "C") :Int
+return %ret
+control: %as
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%ret = FieldAccess(field_index: 0, field_stash: "C") :Int
+return %ret
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL',
+        'a dropped field write-back is not papered over');
+};
+
+subtest 'a dropped branch is NOT masked by one unrelated select (count gate, teeth)' => sub {
+    # Two spec Ifs but the real graph has only ONE TernaryExpr: a genuinely
+    # dropped branch. The count gate (real selects >= spec Ifs) refuses to
+    # subsume -- one unrelated select must not satisfy two propagated branches.
+    # The two Ifs are on the control chain (reachable from Return via
+    # control_in), as in a real branch; the return value threads through them.
+    my $spec = <<'END_IR';
+%n     = Constant(5) :Int
+%zero  = Constant(0) :Int
+%cmp   = NumGt(%n, %zero) :Bool
+%c1    = Constant(1) :Int
+%if1   = If(%n, %cmp)
+%if2   = If(%n, %cmp)
+%sel   = TernaryExpr(%cmp, %c1, %c1) :Int
+return %sel
+control: %if1 -> %if2 -> %sel
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%n    = Constant(5) :Int
+%zero = Constant(0) :Int
+%cmp  = NumGt(%n, %zero) :Bool
+%c1   = Constant(1) :Int
+%sel  = TernaryExpr(%cmp, %c1, %c1) :Int
+return %sel
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL',
+        'two spec Ifs are not both satisfied by one real select');
+};
+
 done_testing();

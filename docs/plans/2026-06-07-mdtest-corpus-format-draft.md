@@ -462,12 +462,18 @@ value), and a branch whose arms are pure values into a `TernaryExpr` select
 **Rule (same shape as pad-scaffolding — concede EXISTENCE per-kind, gated on
 the real graph having zero of it):**
 - Subsume a spec `Assign`/`CompoundAssign` ONLY when the real graph has none
-  AND its lhs (`inputs[0]`) is a `PadAccess`/`FieldAccess` (a pure rebind). An
-  element/aggregate store (`Subscript` lhs) is a real effect and stays
-  REQUIRED — subsuming it would mask a dropped array/hash write.
+  AND its lhs (`inputs[0]`) is a `PadAccess` — a pure LEXICAL rebind (SSA-like,
+  propagates safely). A `FieldAccess` store is an object-state mutation of
+  shared heap (the RC4 class) and is NOT a pure rebind; an element/aggregate
+  store (`Subscript` lhs) is likewise a real effect. Both stay REQUIRED —
+  subsuming them would mask a dropped field/array/hash write (review finding:
+  FieldAccess was wrongly conceded).
 - Subsume spec `If`/`Proj`/`Region` ONLY when the real graph has no `If` AND
-  carries a `TernaryExpr` select. A genuine branch (no real select) stays
-  REQUIRED.
+  carries at least as many `TernaryExpr` selects as the spec has `If`s (each
+  propagated branch becomes exactly one select). The count gate stops one
+  unrelated select from masking a genuinely dropped branch (review finding:
+  the graph-global gate was too coarse). A genuine branch (no matching select)
+  stays REQUIRED.
 
 The bound value nodes are never subsumed; a propagated real graph must still
 carry the right value. Reach: control-flow D1/D4/D7/D9, increment K1/K2,
