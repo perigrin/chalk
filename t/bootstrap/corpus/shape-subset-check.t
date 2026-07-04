@@ -778,4 +778,45 @@ END_IR
         'a real graph that keeps the PostfixDeref matches the spec deref');
 };
 
+subtest 'a Coerce(->Bool) feeding a Not is absorbed by the real Not (L4)' => sub {
+    # perl's ! does its own truthiness coercion, so B::SoN emits Not(operand)
+    # directly -- no explicit Coerce(Int->Bool). The corpus keeps the explicit
+    # Coerce; subsume it when it feeds a Not and the real graph has none.
+    my $spec = <<'END_IR';
+%five = Constant(5) :Int
+%b    = Coerce(%five : Int -> Bool) :Bool
+%nb   = Not(%b) :Bool
+return %nb
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%five = Constant(5) :Int
+%nb   = Not(%five) :Bool
+return %nb
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'the Not-feeding Coerce(->Bool) is absorbed')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'a Coerce NOT feeding a truthiness op stays required (teeth)' => sub {
+    # A Coerce whose consumer is not a truthiness op (e.g. it feeds an Add) is
+    # a real representation change the producer must carry; do not absorb it.
+    my $spec = <<'END_IR';
+%five = Constant(5) :Int
+%n    = Coerce(%five : Int -> Num) :Num
+%one  = Constant(1) :Num
+%sum  = Add(%n, %one) :Num
+return %sum
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%five = Constant(5) :Int
+%one  = Constant(1) :Num
+%sum  = Add(%five, %one) :Num
+return %sum
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL',
+        'a non-Bool Coerce feeding an Add stays required');
+};
+
 done_testing();

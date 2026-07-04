@@ -523,3 +523,16 @@ Paired with the producer fix (a DREFAV/DREFHV padsv resolves to its bound ref
 despite OPf_MOD): gate-green 44 -> 46 (references R4/R5). Nested deref (R8) and
 out-of-bounds undef (R9/R10) are distinct. _mark_deref_scaffolding in
 MdtestCorpus.pm; contract test in shape-subset-check.t.
+
+## Amendment 2026-07-04 (zhi L4 — Coerce-to-Bool absorption)
+
+perl truthiness ops coerce their operand internally, so `!$a` emits
+`Not(operand)` directly -- no explicit `Coerce(Int -> Bool)`. The corpus keeps
+the explicit Coerce (it names the coercion edge); the matcher subsumes a spec
+`Coerce(X -> Bool)` whose SOLE consumer is a truthiness op (Not) when the real
+graph carries no such Coerce shape. Only Coerce-to-Bool into a truthiness op is
+absorbed -- a Coerce to any other repr, or feeding a non-truthiness consumer
+(e.g. Coerce(Int -> Num) into an Add), is a real representation change and stays
+REQUIRED. gate-green 48 -> 49 (logical L4). _mark_coerce_absorption /
+%_TRUTHINESS_OP in MdtestCorpus.pm; teeth test (non-Bool Coerce feeding an Add
+stays required) in shape-subset-check.t.

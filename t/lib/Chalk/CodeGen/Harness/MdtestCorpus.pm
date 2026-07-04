@@ -1028,6 +1028,13 @@ sub shape_subset_check {
     # that KEEPS the deref must match it (a real PostfixDeref stays required).
     _mark_deref_scaffolding($spec_return, $return_node, \%satisfied);
 
+    # Coerce-to-Bool absorption (zhi L4): perl's ! (and other truthiness ops)
+    # coerce their operand internally, so B::SoN emits Not(operand) directly
+    # with no explicit Coerce(X -> Bool). The corpus keeps the explicit Coerce;
+    # subsume it when its sole consumer is a truthiness op and the real graph
+    # carries no such Coerce.
+    _mark_coerce_absorption($spec_return, $return_node, \%satisfied);
+
     my @spec = _collect_node_signatures($spec_return, \%satisfied);
     my @real = _collect_node_signatures($return_node);
 
@@ -1372,6 +1379,56 @@ sub _mark_deref_scaffolding {
         $satisfied->{ $node->id } = 1 if _node_kind($node) eq 'PostfixDeref';
     }
     return;
+}
+
+# Truthiness ops that coerce their operand to a boolean internally, so an
+# explicit Coerce(X -> Bool) feeding one is redundant in the producer's graph.
+my %_TRUTHINESS_OP = (Not => 1);
+
+# _mark_coerce_absorption($spec_return, $real_return, \%satisfied) — subsume a
+# spec Coerce(X -> Bool) whose SOLE consumer is a truthiness op (Not), when the
+# real graph carries no such Coerce: the op does its own coercion, so B::SoN
+# feeds the operand directly. Only Coerce(-> Bool) into a truthiness op is
+# absorbed — a Coerce to any other repr, or feeding a non-truthiness consumer,
+# is a real representation change and stays required.
+sub _mark_coerce_absorption {
+    my ($spec_return, $real_return, $satisfied) = @_;
+    my @nodes = _collect_all_nodes($spec_return);
+
+    # Which Coerce (from -> to) shapes does the real graph carry? A real Coerce
+    # of the same shape means the producer did NOT absorb it — require a match.
+    my %real_coerce;
+    for my $node (_collect_all_nodes($real_return)) {
+        next unless _node_kind($node) eq 'Coerce';
+        $real_coerce{ _coerce_shape($node) } = 1;
+    }
+
+    # Consumers of each spec node (by id).
+    my %consumers;
+    for my $node (@nodes) {
+        next unless $node->can('inputs') && defined $node->inputs;
+        for my $in ($node->inputs->@*) {
+            push $consumers{ $in->id }->@*, $node if blessed($in);
+        }
+    }
+
+    for my $node (@nodes) {
+        next unless _node_kind($node) eq 'Coerce';
+        next unless ($node->can('to_repr') ? ($node->to_repr // '') : '') eq 'Bool';
+        next if $real_coerce{ _coerce_shape($node) };   # producer kept it
+        my $cs = $consumers{ $node->id } // [];
+        next unless @$cs == 1 && $_TRUTHINESS_OP{ _node_kind($cs->[0]) };
+        $satisfied->{ $node->id } = 1;
+    }
+    return;
+}
+
+# _coerce_shape($node) -> "from->to" for a Coerce node (for real/spec matching).
+sub _coerce_shape {
+    my ($node) = @_;
+    my $from = $node->can('from_repr') ? ($node->from_repr // '') : '';
+    my $to   = $node->can('to_repr')   ? ($node->to_repr   // '') : '';
+    return "$from->$to";
 }
 
 # _sig_match($spec_sig, \@real_sigs) -> bool
