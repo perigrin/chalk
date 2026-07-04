@@ -411,3 +411,37 @@ real graph (honest-GAP discipline — never assumed). Implementation +
 contract tests: `_fold_satisfied_ids` / `%_FOLD_OP` in
 `t/lib/Chalk/CodeGen/Harness/MdtestCorpus.pm`;
 `t/bootstrap/corpus/shape-subset-check.t`.
+
+## Amendment 2026-07-04 (zhi 019f2a50 — propagation satisfaction)
+
+Extends shape-match rule #2, sibling to constant-fold satisfaction. Perl's
+optree copy/const-propagates lexical pads away BEFORE B::SoN walks it, so
+`my $x = 1; $x` loads as just `Constant(1)` — NO `VarDecl`, NO `PadAccess`,
+NO name `Constant("$x") :Str`. Even a value-armed if/else propagates to a
+`TernaryExpr` select. A per-case map of all 26 lexical cases found 23
+fully-propagated, 0 vardecl-retained. The Chalk parser does NOT propagate
+(no pass yet), so it emits the pad-explicit shape.
+
+**Rule:** the corpus ir block keeps the PAD-EXPLICIT shape (it names the
+lexical idiom), and the matcher subsumes the pad scaffolding: each
+`PadAccess`, each `VarDecl`, and a `VarDecl`'s name `Constant` (subsumed
+only when the VarDecl is its sole consumer). The bound VALUE (the VarDecl
+init, and every computed node) stays REQUIRED — a propagated real graph must
+still carry the right value. A producer that keeps the pad (Chalk) still
+matches directly; propagation-satisfaction is additive.
+
+**Operand-returning repr concession:** perl's `&&`/`||`/`//` are
+operand-returning (`$a && $b` yields `$a` or `$b`), so `And`/`Or`/`DefinedOr`
+load UNSTAMPED — the loader infers the operand type. The corpus spec pins it
+(`And :Int`). The matcher accepts an unstamped real `And`/`Or`/`DefinedOr`
+against the spec's declared repr. (`Boolean` vs `Bool` needs no concession —
+the loader's `STAMP_TO_REPR` already maps `Boolean -> Bool`.)
+
+NOT subsumed here (deeper propagation, filed 019f2d47): if/else -> select
+(`If`/`Proj`/`Region` scaffolding) and `Assign`/`CompoundAssign` propagated
+to the read site. Those weaken the shape check more and need per-category
+guards so they don't mask real branch/assignment bugs.
+
+Implementation + contract tests: `_mark_pad_scaffolding` /
+`%_OPERAND_RETURNING` in `t/lib/Chalk/CodeGen/Harness/MdtestCorpus.pm`;
+`t/bootstrap/corpus/shape-subset-check.t`.

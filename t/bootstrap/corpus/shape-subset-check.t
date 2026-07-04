@@ -323,4 +323,116 @@ END_IR
     is($res->{verdict}, 'PASS', 'unfolded spec still matches an unfolded real graph');
 };
 
+# ---------------------------------------------------------------------------
+# Propagation-satisfaction (zhi 019f2a50): perl's optree copy/const-propagates
+# lexical pads away before B::SoN walks, so `my $x = 1; $x` loads as just
+# Constant(1) — no VarDecl/PadAccess/name-Constant. The corpus keeps the
+# pad-explicit shape (it names the lexical idiom); the matcher treats a spec
+# VarDecl+PadAccess read chain as satisfied when the value the VarDecl binds is
+# present in the real graph (the pad was propagated). The scaffolding
+# (name-Constant, VarDecl, PadAccess) is subsumed; the value stays required.
+# A non-propagating producer (Chalk) still matches the pad-explicit shape.
+# ---------------------------------------------------------------------------
+
+subtest 'a propagated pad (my $x = 1; $x) is satisfied by the value directly (A1)' => sub {
+    # Spec: full pad scaffolding. Real: just Constant(1) (pad propagated away).
+    my $spec = <<'END_IR';
+%one  = Constant(1) :Int
+%xn   = Constant("$x") :Str
+%vx   = VarDecl(%xn, %one) :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx
+END_IR
+    my $real = $C->build_graph_from_ir("%r = Constant(1) :Int\nreturn %r\n");
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'pad scaffolding subsumed; Constant(1) matches')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'a propagated pad over a computed select (D6 ternary) matches the value graph' => sub {
+    # Spec: NumGt + TernaryExpr + pad scaffolding. Real (B::SoN): the select
+    # value graph with the pad propagated away.
+    my $spec = <<'END_IR';
+%n    = Constant(5) :Int
+%zero = Constant(0) :Int
+%cmp  = NumGt(%n, %zero) :Bool
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%tern = TernaryExpr(%cmp, %c1, %c2) :Int
+%xn   = Constant("$x") :Str
+%vx   = VarDecl(%xn, %tern) :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%n    = Constant(5) :Int
+%zero = Constant(0) :Int
+%cmp  = NumGt(%n, %zero) :Bool
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%tern = TernaryExpr(%cmp, %c1, %c2) :Int
+return %tern
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'pad subsumed; the NumGt/TernaryExpr core matches')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'propagation does not subsume the value node itself (still required)' => sub {
+    # The VarDecl init value must still be present. If the real graph lacks it,
+    # propagation-satisfaction must NOT paper over the missing value.
+    my $spec = <<'END_IR';
+%one  = Constant(1) :Int
+%xn   = Constant("$x") :Str
+%vx   = VarDecl(%xn, %one) :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx
+END_IR
+    # Real graph folds/propagates to the WRONG value (2, not 1).
+    my $real = $C->build_graph_from_ir("%r = Constant(2) :Int\nreturn %r\n");
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'FAIL', 'the bound value Constant(1) is still required');
+};
+
+subtest 'the pad-explicit shape still matches a pad-explicit real graph (Chalk path)' => sub {
+    # Propagation-satisfaction is additive: a producer that keeps the pad
+    # (Chalk) still matches the pad-explicit spec directly.
+    my $spec = <<'END_IR';
+%one  = Constant(1) :Int
+%xn   = Constant("$x") :Str
+%vx   = VarDecl(%xn, %one) :Int
+%rx   = PadAccess(%vx, "$x") :Int
+return %rx
+control: %vx
+END_IR
+    my $real = $C->build_graph_from_ir($spec);
+    my $res  = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'pad-explicit spec still matches a pad-explicit real graph')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
+subtest 'operand-returning And/Or load unstamped but match the spec :Int (L1/L2)' => sub {
+    # perl's && / || are operand-returning: `$a && $b` loads as And with no
+    # repr (:-), but the corpus spec declares And :Int. The matcher accepts the
+    # unstamped And/Or/DefinedOr against the spec's declared repr.
+    my $spec = <<'END_IR';
+%a   = Constant(3) :Int
+%b   = Constant(7) :Int
+%and = And(%a, %b) :Int
+return %and
+END_IR
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%a   = Constant(3) :Int
+%b   = Constant(7) :Int
+%and = And(%a, %b)
+return %and
+END_IR
+    my $res = $C->shape_subset_check($spec, $real);
+    is($res->{verdict}, 'PASS', 'unstamped And matches spec And :Int')
+        or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
+};
+
 done_testing();

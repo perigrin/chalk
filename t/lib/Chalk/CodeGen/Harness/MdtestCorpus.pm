@@ -1001,7 +1001,19 @@ sub shape_subset_check {
     # docs/plans/2026-06-07-mdtest-corpus-format-draft.md.
     my $folded = _fold_satisfied_ids($spec_return, $return_node);
 
-    my @spec = _collect_node_signatures($spec_return, $folded);
+    # Propagation-satisfaction (zhi 019f2a50): perl's optree copy/const-
+    # propagates lexical pads away before B::SoN walks, so `my $x = 1; $x`
+    # loads as just Constant(1) — no VarDecl/PadAccess/name-Constant. The
+    # corpus keeps the pad-explicit shape (it names the lexical idiom); the
+    # pad scaffolding (name-Constant + VarDecl + PadAccess) is subsumed. The
+    # bound VALUE (the VarDecl init, and every computed node) stays required,
+    # so a propagated real graph must still carry the right value. A producer
+    # that keeps the pad (Chalk) still matches — the extra scaffolding is
+    # incidental under subset semantics.
+    my %satisfied = %$folded;
+    _mark_pad_scaffolding($spec_return, \%satisfied);
+
+    my @spec = _collect_node_signatures($spec_return, \%satisfied);
     my @real = _collect_node_signatures($return_node);
 
     # Match most-constrained spec signatures first so a lax sig (undef
@@ -1148,6 +1160,43 @@ sub _fold_satisfied_ids {
     return \%satisfied;
 }
 
+# _mark_pad_scaffolding($spec_return, \%satisfied) — add the ids of lexical
+# pad scaffolding (each VarDecl, its name Constant, and every PadAccess that
+# reads it) to the satisfied set, so they are not required of a producer that
+# propagated the pad away. The VarDecl's INIT value (inputs[1]) is NOT
+# subsumed — the propagated real graph must still carry the right value. A
+# name Constant is subsumed only when the VarDecl is its sole consumer (a bare
+# Constant used elsewhere keeps its signature).
+sub _mark_pad_scaffolding {
+    my ($spec_return, $satisfied) = @_;
+    my @nodes = _collect_all_nodes($spec_return);
+
+    # Consumer counts so a name-Constant shared beyond its VarDecl survives.
+    my %consumers;
+    for my $node (@nodes) {
+        next unless $node->can('inputs') && defined $node->inputs;
+        $consumers{ $_->id }++ for grep { blessed($_) } $node->inputs->@*;
+    }
+
+    for my $node (@nodes) {
+        my $kind = _node_kind($node);
+        if ($kind eq 'PadAccess') {
+            $satisfied->{ $node->id } = 1;
+        }
+        elsif ($kind eq 'VarDecl') {
+            $satisfied->{ $node->id } = 1;
+            # inputs[0] is the name Constant; subsume it only if this VarDecl
+            # is its sole consumer.
+            my $name = $node->can('inputs') && $node->inputs->@* ? $node->inputs->[0] : undef;
+            if (blessed($name) && _node_kind($name) eq 'Constant'
+                && ($consumers{ $name->id } // 0) == 1) {
+                $satisfied->{ $name->id } = 1;
+            }
+        }
+    }
+    return;
+}
+
 # _sig_match($spec_sig, \@real_sigs) -> bool
 # A spec signature matches a real one on kind, declared repr, Constant
 # value, and Coerce from/to. Fields the spec leaves undef are unchecked.
@@ -1156,13 +1205,22 @@ sub _fold_satisfied_ids {
 # compares node multisets, not operand wiring; rooted structural matching
 # is the upgrade path if a rewired-but-same-multiset regression ever slips
 # through.
+# perl's &&, ||, // are operand-RETURNING (`$a && $b` yields $a or $b), so
+# their result repr is the operand's — which B::SoN leaves unstamped, letting
+# the loader infer it. The corpus spec pins the operand type (:Int). Accept an
+# unstamped real And/Or/DefinedOr against the spec's declared repr.
+my %_OPERAND_RETURNING = (And => 1, Or => 1, DefinedOr => 1);
+
 sub _sig_match {
     my ($spec, $real_sigs) = @_;
     for my $i (0 .. $#$real_sigs) {
         my $sig = $real_sigs->[$i];
         next unless $sig->{kind} eq $spec->{kind};
         if (defined $spec->{repr}) {
-            next unless defined $sig->{repr} && $sig->{repr} eq $spec->{repr};
+            # Operand-returning ops load unstamped; accept undef real repr.
+            unless ($_OPERAND_RETURNING{ $spec->{kind} } && !defined $sig->{repr}) {
+                next unless defined $sig->{repr} && $sig->{repr} eq $spec->{repr};
+            }
         }
         if ($spec->{kind} eq 'Constant' && defined $spec->{value}) {
             next unless defined $sig->{value} && $sig->{value} eq $spec->{value};
