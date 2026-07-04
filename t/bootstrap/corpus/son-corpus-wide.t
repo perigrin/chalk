@@ -21,6 +21,12 @@ plan skip_all => "perl5-son not found at $SON" unless -f "$SON/B/SoN.pm";
 plan skip_all => "lli not found at $LLI"        unless -x $LLI;
 plan skip_all => "perl 5.42 not found at $PERL" unless -x $PERL;
 
+# host.md H3 ($ENV{CHALK_G7_TEST}) declares its env dependency in the case
+# prose: both the perl oracle and lli inherit this runner's environment (they
+# are qx() child processes). Set it so H3 gate-greens here as it does in the
+# dedicated host.t runner (which sets the same var).
+local $ENV{CHALK_G7_TEST} = 'hostval';
+
 # ---------------------------------------------------------------------------
 # The B::SoN pipeline (class-aware), reused shape from son-e2e.t.
 # ---------------------------------------------------------------------------
@@ -211,6 +217,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, '>=', 49, 'gate-green floor (49 after Coerce-to-Bool absorption)');
+cmp_ok($tally{gate_green}, '>=', 50, 'gate-green floor (50 after EnvRead producer, host H3)');
 
 done_testing();

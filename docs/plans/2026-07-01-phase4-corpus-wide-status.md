@@ -156,6 +156,11 @@ join-stop in the arm walk (see phase4_rc5_complete memory / perl5-son
 - classes class-simple: "cannot lower op=Call (not in literal-arithmetic
   slice)" — Empty->new; ref($e) returns a Str; the ref() builtin path.
 - host H3 (%ENV): Subscript on a Str repr — EnvRead not modeled (RC1-adjacent).
+  DONE 2026-07-04 (perl5-son d3b3f9e, Chalk 61852875): the producer now emits
+  EnvRead(key) for $ENV{K} (the Chalk getenv lowering already existed); the
+  helem guard qualifies the environment stash to main::ENV so %Foo::ENV is not
+  mistaken for the process env (review-caught getenv miscompile). gate-green
+  49 -> 50, host worklist 0.
 
 ## Triple-contract re-audit (2026-07-03, zhi 019f1be7)
 
