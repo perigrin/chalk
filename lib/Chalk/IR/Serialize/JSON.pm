@@ -676,7 +676,18 @@ sub _stamp_method_call_reprs ($classes, $graphs) {
             next if ($node->name // '') eq 'new';   # constructor: backend-handled
             next if defined $node->representation;
             my $class = $node->class_name // next;
-            my $repr  = $ret_repr{"$class\::" . ($node->name // '')} // next;
+            my $mname = $node->name // '';
+            # Resolve the method through the class's MRO: a call on Child of a
+            # method inherited from Base has no Child::m entry, so walk the
+            # parent chain until the method is found (or the chain ends).
+            my $repr;
+            my $c = $class;
+            my %seen;
+            while (defined $c && !$seen{$c}++) {
+                if (defined(my $r = $ret_repr{"$c\::$mname"})) { $repr = $r; last; }
+                $c = $classes->{$c}{parent};
+            }
+            defined $repr or next;
             $node->set_representation($repr);
         }
     }
