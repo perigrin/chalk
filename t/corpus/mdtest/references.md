@@ -349,3 +349,31 @@ context: scalar
 ```ir
 L: GAP(sort+join+keys requires list-context ops not yet in LLVM slice; deferred to list-operators campaign group)
 ```
+
+## R12 aliased element store (store via ref, read via name)
+
+Storing through an alias `$r->[0] = 42` (where `$r = \@a`) mutates the SAME
+underlying array as `@a`, so a subsequent `$a[0]` must see `42`. Today the
+element store is not materialized into a shared backing location: the producer's
+read-back cache is keyed on `(container_node, index)`, and `$r->[0]` and `$a[0]`
+are DIFFERENT container nodes for the one array, so the read via `@a` sees the
+stale literal `1` instead of the stored `42` (a MISCOMPILE). This is distinct
+from R6 (same-name, same-index, which the cache handles correctly). See zhi
+019f330b.
+
+```perl
+# source
+my @a = (1, 2, 3);
+my $r = \@a;
+$r->[0] = 42;
+$a[0]
+```
+
+```behavior
+return: 42
+context: scalar
+```
+
+```ir
+L: GAP(aliased element store not materialized; a read through a different name for the same aggregate sees the stale value -- zhi 019f330b)
+```
