@@ -86,12 +86,31 @@ mechanism. The merge/Region/Phi/loop-header infrastructure is reused, not rebuil
 - `_control_chain_nodes` / repr closure already added for stmt-effect Assigns;
   extend it to reach the memory chain if a memory node needs typing.
 
-### Backend (Chalk LLVM)
+### Backend (Chalk LLVM) -- CORRECTED SCOPE (recon was wrong here)
 
-- For STRAIGHT-LINE code: NO change (recon-proven). Once the pre-store read is a
-  DISTINCT node (different memory input -> different content_hash -> not
-  hash-consed with the post-store read), Subscript re-lowers (%MUTABLE_READ_OPS)
-  at its own program point and `_emit` preserves order.
+The recon claimed "no backend change for straight-line." WRONG. The producer's
+memory input makes reads DISTINCT nodes, but Chalk lowers a pure-data read LAZILY
+at its CONSUMER (the Return, processed AFTER the control-chain walk emits the
+stores). So a pre-store read (mem=MemStart) is still emitted after the store and
+reads the mutated array. The scalar case is correct only because the producer
+snapshots scalars into var_table via scope-binding -- aggregates have no such
+snapshot.
+
+THE CORRECT MODEL (canonical Sea-of-Nodes memory-SSA): the memory input is a real
+scheduling constraint. A load Load(mem, addr) is placed AFTER the node producing
+`mem` and before any later memory version. So the backend must EMIT A MUTABLE READ
+AT ITS MEMORY INPUT'S CONTROL POSITION, not lazily at its consumer:
+- A read with mem=MemStart: emit at function entry (before any store), freeze its
+  value, consumers use the frozen value.
+- A read with mem=Store_N: emit after Store_N.
+FEASIBLE via the existing consumer-walk: a memory-producing node (MemStart / a
+store Assign) has `consumers()`; its Subscript consumers are exactly the reads
+valid at that memory version. When the control walk reaches a memory node, emit +
+freeze its read consumers before advancing. This mirrors how stores are
+materialized at their control position, and how var_table snapshots scalars.
+
+This is a MEDIUM backend change (a mutable-read scheduler keyed on the memory
+edge), not zero. It is the real heart of memory-SSA and generalizes to 2b/2c/2d.
 - For BRANCHES/LOOPS: the memory Phi must lower. A MemPhi that selects between two
   memory values (which are store nodes / MemStart) needs a lowering -- but memory
   values are not materialized data (a store already emitted its effect), so a
