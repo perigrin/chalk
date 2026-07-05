@@ -30,7 +30,7 @@ unless (-f $REFERENCES_MD) {
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($REFERENCES_MD);
-is(scalar(@$cases), 11, 'references.md has 11 cases (R1-R11)');
+is(scalar(@$cases), 13, 'references.md has 13 cases (R1-R11, R12 aliased-store GAP, R13 cross-index)');
 
 my @titles = map { $_->{title} } @$cases;
 ok((grep { /R1.*array.*literal/i }        @titles), 'case: R1 array literal present');
@@ -55,7 +55,8 @@ ok((grep { /R11.*hash.*keys.*sorted/i }   @titles), 'case: R11 hash keys sorted 
 #   - .ll must be libperl-free (no Perl_/SV/AV/HV/sv_/libperl)
 # ---------------------------------------------------------------------------
 
-my @green_cases = grep { $_->{title} !~ /R11/i } @$cases;
+# R11 (keys-sorted) and R12 (aliased element store) are declared GAPs, not GREEN.
+my @green_cases = grep { $_->{title} !~ /R11|R12/i } @$cases;
 
 for my $case (@green_cases) {
     my $title = $case->{title};
@@ -125,7 +126,7 @@ subtest 'R11 hash keys sorted order: declares L: GAP (list-ops deferred)' => sub
 # ---------------------------------------------------------------------------
 
 subtest 'all R1-R10 cases declare L: GREEN' => sub {
-    plan tests => 10;
+    plan tests => scalar(@green_cases);
     for my $case (@green_cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
@@ -139,7 +140,7 @@ subtest 'all R1-R10 cases declare L: GREEN' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'all R1-R10 ir blocks have constructive node lines' => sub {
-    plan tests => 10;
+    plan tests => scalar(@green_cases);
     for my $case (@green_cases) {
         my $ir_text   = $case->{ir} // '';
         my $has_nodes = ($ir_text =~ /^\s*%\w+\s*=/m) ? 1 : 0;

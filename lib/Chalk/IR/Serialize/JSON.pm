@@ -257,28 +257,40 @@ sub _deserialize_graph ($method_data) {
         # B::SoN serializes Return as inputs=[control, value] (control token
         # first). Chalk's contract is inputs=[value] with control carried in
         # control_in. Reconcile: when a Return leads with a CFG control node
-        # (Start, or a Region/If/Proj/Loop merge from a control-flow body) and
-        # has a trailing value, split off the control (re-attached via
-        # control_in after construction below) and keep only the value as input.
+        # (Start, or a Region/If/Proj/Loop merge from a control-flow body) OR a
+        # threaded element-store Assign (a stmt-effect that already carries its
+        # own control_in from the split above) and has a trailing value, split
+        # off the leading control (re-attached via control_in below) and keep
+        # only the value as input. Without this a leading stmt-effect Assign is
+        # mistaken for the return VALUE, so `$a[0]=42; $a[1]` would return the
+        # store (42) not $a[1]. A leading stmt-effect Call is NOT split here (it
+        # is threaded by a separate downstream mechanism, and its repr is not
+        # stamped at construction); only the element-store Assign case is new.
         # Unwind is EXCLUDED: for a die, the Unwind is the real exit and must
         # stay a reachable input, not be demoted to control_in.
         my $bson_return_control;
         if ($op eq 'Return' && @inputs >= 2
                 && blessed($inputs[0])
-                && _is_cfg($inputs[0])
-                && $inputs[0]->operation ne 'Unwind') {
+                && $inputs[0]->operation ne 'Unwind'
+                && (_is_cfg($inputs[0])
+                    || ($inputs[0]->operation eq 'Assign'
+                        && $inputs[0]->can('control_in')
+                        && defined $inputs[0]->control_in))) {
             $bson_return_control = shift @inputs;
         }
 
-        # A B::SoN void statement-effect Call leads with its control token
-        # (inputs=[control, invocant, args]). Chalk's contract is
-        # inputs=[invocant, args] with control carried in control_in, so it is
-        # threaded into the effect chain (and survives DCE) instead of being an
-        # orphaned data node whose side effect is lost. The producer only sets
-        # is_stmt_effect when it prepended control, so inputs[0] IS the control
-        # (a CFG node, or a preceding stmt-effect Call in a chain).
+        # A B::SoN statement-effect node leads with its control token: a void
+        # Call (inputs=[control, invocant, args]) or an element-store Assign
+        # (inputs=[control, target, value]). Chalk's contract carries control in
+        # control_in, so split off inputs[0] and reattach it below -- the effect
+        # is threaded into the control chain (survives DCE, ordered) instead of
+        # being an orphaned data node whose side effect is lost, and the
+        # remaining inputs match the Chalk shape (Call: [invocant, args]; Assign:
+        # [target, value]). The producer only sets is_stmt_effect when it
+        # prepended control, so inputs[0] IS the control (a CFG node, or a
+        # preceding stmt-effect node in a chain).
         my $bson_stmt_control;
-        if ($op eq 'Call' && $fields->{is_stmt_effect}
+        if (($op eq 'Call' || $op eq 'Assign') && $fields->{is_stmt_effect}
                 && @inputs >= 1 && blessed($inputs[0])) {
             $bson_stmt_control = shift @inputs;
         }
@@ -627,9 +639,48 @@ sub _seed_and_propagate_reprs ($graphs) {
     return;
 }
 
+# _control_chain_nodes($graph) — the statement-effect nodes reachable ONLY via
+# control_in (an element-store Assign / void Call demoted to control_in), PLUS
+# their transitive input closure. $g->nodes walks inputs from the returns' value
+# only, so a store's value subtree (e.g. `$a[0] = $b[0]`, where $b[0] is reached
+# only through the store) is otherwise unseen and stays untyped. Follows
+# control_in from every returns() node, then closes over inputs of each.
+sub _control_chain_nodes ($graph) {
+    my %seen;
+    my @out;
+    # Seed: the control_in predecessor of each return + effect in the chain.
+    my @q;
+    for my $r (grep { blessed($_) } $graph->returns->@*) {
+        my $c = $r->can('control_in') ? $r->control_in : undef;
+        push @q, $c if defined $c && blessed($c);
+    }
+    while (my $n = shift @q) {
+        next unless blessed($n);
+        next if $seen{ $n->id }++;
+        push @out, $n;
+        # Follow control_in (chained effects) AND inputs (the effect's operands).
+        my $c = $n->can('control_in') ? $n->control_in : undef;
+        push @q, $c if defined $c && blessed($c);
+        push @q, grep { blessed($_) } $n->inputs->@*
+            if $n->can('inputs') && defined $n->inputs;
+    }
+    return @out;
+}
+
 sub _propagate_computed_reprs ($graphs) {
     for my $g (values %$graphs) {
-        my @nodes = $g->nodes->@*;
+        # $g->nodes walks inputs only; a threaded statement-effect node (an
+        # element-store Assign / void Call) reached only via control_in is not in
+        # it. Augment with the control-chain nodes so their reprs get inferred
+        # too -- else a store of a value whose repr this pass derives (e.g. a
+        # Subscript) leaves the Assign untyped and it hits the backend NO-REPR
+        # guard.
+        my %seen;
+        my @nodes;
+        for my $n ($g->nodes->@*, _control_chain_nodes($g)) {
+            next unless blessed($n);
+            push @nodes, $n unless $seen{ $n->id }++;
+        }
         my $changed = 1;
         while ($changed) {
             $changed = 0;
@@ -658,6 +709,20 @@ sub _propagate_computed_reprs ($graphs) {
                     }
                     my $repr = _element_repr( $node->inputs->[0] );
                     next unless defined $repr;
+                    $node->set_representation($repr);
+                    $changed = 1;
+                    next;
+                }
+
+                # An Assign's result IS the stored value, so its repr is the
+                # value input's (inputs[-1], the rhs; a stmt-effect store's
+                # leading control was already split off by the loader). Run in
+                # the fixpoint so the value's own repr (e.g. a Subscript inferred
+                # this same pass) is available before the Assign is stamped.
+                if ($op eq 'Assign') {
+                    my $value = $node->inputs->[-1];
+                    next unless defined $value && blessed($value);
+                    my $repr = $value->representation // next;
                     $node->set_representation($repr);
                     $changed = 1;
                     next;

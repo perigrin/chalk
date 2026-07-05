@@ -353,12 +353,13 @@ L: GAP(sort+join+keys requires list-context ops not yet in LLVM slice; deferred 
 ## R12 aliased element store (store via ref, read via name)
 
 Storing through an alias `$r->[0] = 42` (where `$r = \@a`) mutates the SAME
-underlying array as `@a`, so a subsequent `$a[0]` must see `42`. Today the
-element store is not materialized into a shared backing location: the producer's
-read-back cache is keyed on `(container_node, index)`, and `$r->[0]` and `$a[0]`
-are DIFFERENT container nodes for the one array, so the read via `@a` sees the
-stale literal `1` instead of the stored `42` (a MISCOMPILE). This is distinct
-from R6 (same-name, same-index, which the cache handles correctly). See zhi
+underlying array as `@a`, so a subsequent `$a[0]` must see `42`. Element stores
+now materialize (the store is a real threaded memory write, the read a real
+load), so a same-name store/read is correct. But `$r->[0]` subscripts the `Ref`
+node while `$a[0]` subscripts the `ArrayRef` node: the backend does not yet
+resolve `Subscript(Ref(array))` and `Subscript(array)` to the SAME heap pointer,
+so the aliased store is an honest GAP (no longer a silent miscompile). Closing it
+needs the `Ref` container to resolve to its target's backing location. See zhi
 019f330b.
 
 ```perl
@@ -375,5 +376,40 @@ context: scalar
 ```
 
 ```ir
-L: GAP(aliased element store not materialized; a read through a different name for the same aggregate sees the stale value -- zhi 019f330b)
+L: GAP(aliased element store: Subscript over a Ref does not resolve to the target's backing location yet -- zhi 019f330b)
+```
+
+## R13 element store then read a DIFFERENT index (materialized load)
+
+`$a[0] = 42; $a[1]` stores into slot 0, then reads slot 1 -- an independent
+element. The read must be a real load of slot 1 (`2`), NOT the last stored value
+(`42`). This is the teeth for the materialize path: a value-substitution read-back
+would return `42` here; a real memory load returns `2`.
+
+```perl
+# source
+my @a = (1, 2, 3);
+$a[0] = 42;
+$a[1]
+```
+
+```behavior
+return: 2
+context: scalar
+```
+
+```ir
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%c3   = Constant(3) :Int
+%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%i0   = Constant(0) :Int
+%lval = Subscript(%arr, %i0)
+%v42  = Constant(42) :Int
+%st   = Assign(%lval, %v42) :Int
+%i1   = Constant(1) :Int
+%rd   = Subscript(%arr, %i1) :Int
+return %rd
+control: %st
+L: GREEN
 ```
