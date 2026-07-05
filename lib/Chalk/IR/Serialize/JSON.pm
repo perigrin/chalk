@@ -660,6 +660,21 @@ sub _propagate_computed_reprs ($graphs) {
                     next;
                 }
 
+                # ref($obj) is modelled as Ref(Object) and lowers to the class
+                # name -- a Str (backend _lower_ref_of_object). Only Ref over an
+                # Object is this class-name case; Ref over a scalar (the \
+                # operator) is a reference constructor and stays untyped here (an
+                # honest GAP). Input-dependent, so it waits in the fixpoint until
+                # the operand's Object repr is known (class-simple).
+                if ($op eq 'Ref') {
+                    my $in = $node->inputs->[0];
+                    next unless defined $in && blessed($in)
+                        && ($in->representation // '') eq 'Object';
+                    $node->set_representation('Str');
+                    $changed = 1;
+                    next;
+                }
+
                 my $rule = $_COMPUTED_REPR{$op} // next;
                 if ($rule ne 'join') {
                     $node->set_representation($rule);
