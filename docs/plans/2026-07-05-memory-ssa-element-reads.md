@@ -135,8 +135,17 @@ edge), not zero. It is the real heart of memory-SSA and generalizes to 2b/2c/2d.
   019f3354 for straight-line code. Memory field + MemStart + load-takes-memory
   (3 sites) + store-produces-memory. Branch/loop memory-Phi asserted as an honest
   GAP (die loudly, not miscompile) until 2b.
-- **2b: branch/loop memory-Phi.** merge() + loop-header memory Phi + MemPhi
-  lowering. Makes stores-in-branches / stores-in-loops correct.
+- **2b: branch/loop memory-Phi.** CORRECT MODEL (canonical SoN, confirmed): an
+  element store in a branch is CONTROL-DEPENDENT on the branch -- pin its control
+  to Proj(If, true) so it is emitted inside the guarded block (the backend's
+  _process_branch_from_if already emits guarded Assign effects), and merge memory
+  with a Phi over the Region (the read after takes it). A memory-Phi is a
+  scheduling token, NOT a runtime value-select. REJECTED false-start (reverted):
+  a memory value-select TernaryExpr(cond, store_mem, MemStart) -- the scalar
+  value idiom misapplied to memory, which the backend cannot `select`. The
+  producer's and-void-branch handler already builds If/Proj for the guarded-EXIT
+  case (`return X if C`); extend it to a non-exit body with a memory-Phi. Loops:
+  a header memory-Phi like other loop-carried values. See zhi 019f33f6.
 - **2c: FieldAccess** (object fields, same %MUTABLE_READ_OPS hazard) via the same
   memory value.
 - **2d: R12 aliasing** (Subscript over a Ref) -- the memory value makes a store via
