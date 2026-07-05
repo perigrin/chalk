@@ -77,6 +77,7 @@ use Chalk::IR::Node::TernaryExpr;
 use Chalk::IR::Node::StructRef;
 use Chalk::IR::Node::StructFieldAccess;
 use Chalk::IR::Node::Start;
+use Chalk::IR::Node::MemStart;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
 use Chalk::IR::Node::If;
@@ -101,7 +102,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     PostfixDeref CompoundAssign BacktickExpr Stringify VarDecl ListAssign
     TernaryExpr StructRef StructFieldAccess
     ExpressionList
-    Start Return Unwind
+    Start MemStart Return Unwind
     Coerce
 );
 

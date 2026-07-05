@@ -875,6 +875,15 @@ sub lower_with_elaboration {
                 $ctrl = $ctrl->can('control_in') ? $ctrl->control_in : undef;
             }
         }
+        # Memory-SSA: scan the graph's memory shape (a store under a branch/loop
+        # needs phase 2b), then freeze the element reads valid at ENTRY
+        # (memory=MemStart), before the control chain emits any store, so a
+        # pre-store read observes the initial array state. MemStart is a data node
+        # (not in the chain); find it from the return-reachable graph.
+        $ctx->_scan_memory_shape($return_node);
+        my $memstart = $ctx->_find_memstart($return_node);
+        $ctx->_freeze_memory_reads($memstart) if defined $memstart;
+
         for my $node (reverse @chain) {
             $ctx->process_control_node($node);
         }
@@ -1458,6 +1467,16 @@ sub lower_value {
     # once at their control position; re-lowering would double the effect.
     my $id = $node->id();
     my $op = $node->operation();
+    # Memory-SSA: a Subscript with a memory input (inputs[2]) that has already
+    # been frozen (_freeze_memory_reads emitted it at its memory version's
+    # control position) is served from the cache -- its memory input fixes its
+    # program point, so it is NOT program-point-ambiguous and must NOT re-read
+    # (re-reading at the consumer would observe a LATER memory state). This is the
+    # opposite of a bare mutable read (no memory input), which still re-reads.
+    if ($op eq 'Subscript' && exists $self->{cache}{$id}
+            && defined $node->inputs->[2]) {
+        return $self->{cache}{$id};
+    }
     if (exists $self->{cache}{$id} && !$self->_reads_mutable_location($node)) {
         return $self->{cache}{$id};
     }
@@ -3045,9 +3064,119 @@ sub process_control_node {
         # substitution — is emitted at its control position, before any
         # later read.
         $self->lower_value($node);
+        # Memory-SSA: an element-store Assign PRODUCES a new memory version.
+        # Emit + freeze the element reads that observe THIS version (its
+        # Subscript consumers whose memory input is this store) right after the
+        # store, before the next store supersedes it. Their frozen value is used
+        # by their (later-processed) consumers, so a read observes the memory
+        # state at its own program point.
+        $self->_freeze_memory_reads($node) if $op eq 'Assign';
     }
     # Other ops in the control chain (Return, Unwind, Region, Proj, Phi, etc.)
     # are either handled by their driving structure or ignored here.
+}
+
+# _has_branch_guarded_store — true if the graph is NOT straight-line for the
+# purpose of element memory: it contains an element-store Assign AND a control
+# region (If/Loop). Memory-SSA phase 2a handles straight-line only; a store under
+# a branch/loop needs a memory-Phi (2b). Computed ONCE from the return-reachable
+# graph (inputs + control_in) and cached on $self; set by _scan_memory_shape at
+# the lowering entry hook (where the return node is in scope).
+sub _has_branch_guarded_store {
+    my ($self) = @_;
+    return $self->{_branch_guarded_store} // 0;
+}
+
+sub _scan_memory_shape {
+    my ($self, $return_node) = @_;
+
+    # A store is memory-SSA-SAFE (phase 2a) only if it is on the return's linear
+    # control_in EFFECT CHAIN -- a straight-line store the memory scheduler
+    # orders. A store reachable ONLY via consumers (an orphaned branch-arm store
+    # the producer did not merge into the return path -- phase 2b) is UNSAFE: its
+    # effect is not on the chain, so a following element read would silently
+    # observe the wrong memory version. Collect on-chain stores, then check for
+    # any element store NOT on the chain.
+    my %on_chain;
+    my $c = $return_node->can('control_in') ? $return_node->control_in : undef;
+    my %cseen;
+    while (defined $c && blessed($c) && !$cseen{ $c->id }++) {
+        $on_chain{ $c->id } = 1 if $c->operation eq 'Assign';
+        # follow the head of a Region/If/Loop too, so on-chain branch stores
+        # (once 2b threads them) are recognised.
+        $c = $c->can('control_in') ? $c->control_in : undef;
+    }
+
+    my $unsafe = 0;
+    my %seen;
+    my @q = ($return_node);
+    while (my $n = shift @q) {
+        next unless blessed($n);
+        next if $seen{ $n->id }++;
+        if ($n->operation eq 'Assign' && $self->_is_element_store($n)
+                && !$on_chain{ $n->id }) {
+            $unsafe = 1;   # an element store not on the return's effect chain
+        }
+        push @q, grep { blessed($_) } $n->inputs->@*
+            if $n->can('inputs') && defined $n->inputs;
+        push @q, $n->control_in
+            if $n->can('control_in') && defined $n->control_in;
+        push @q, grep { blessed($_) } $n->consumers->@*
+            if $n->can('consumers') && defined $n->consumers;
+    }
+    $self->{_branch_guarded_store} = $unsafe;
+    return;
+}
+
+# An element store Assign has a Subscript lhs (inputs[0] after control split, or
+# inputs[1] with control) -- distinguish from a scalar/field rebind.
+sub _is_element_store {
+    my ($self, $assign) = @_;
+    for my $in ($assign->inputs->@*) {
+        return 1 if blessed($in) && $in->operation eq 'Subscript';
+    }
+    return 0;
+}
+
+# _find_memstart($return_node) — the graph's MemStart node (the initial memory
+# value), found by walking the return-reachable inputs + control_in. One per
+# graph. Returns undef if the graph has no MemStart (no element reads).
+sub _find_memstart {
+    my ($self, $return_node) = @_;
+    my %seen;
+    my @q = ($return_node);
+    while (my $n = shift @q) {
+        next unless blessed($n);
+        next if $seen{ $n->id }++;
+        return $n if $n->operation eq 'MemStart';
+        push @q, grep { blessed($_) } $n->inputs->@*
+            if $n->can('inputs') && defined $n->inputs;
+        push @q, $n->control_in
+            if $n->can('control_in') && defined $n->control_in;
+    }
+    return undef;
+}
+
+# _freeze_memory_reads($mem_node) — emit and cache the element-read Subscripts
+# whose MEMORY input (inputs[2]) is $mem_node, so they load against the memory
+# version $mem_node represents (MemStart = entry, a store = post-store) and are
+# frozen at that point. A memory-having Subscript is thus lowered ONCE at its
+# memory version's control position, not re-read at its consumer (which is
+# processed later, after subsequent stores). The consumer then uses the frozen
+# SSA ref. This is the memory-SSA scheduler: the memory edge places the load.
+sub _freeze_memory_reads {
+    my ($self, $mem_node) = @_;
+    return unless $mem_node->can('consumers');
+    for my $c ($mem_node->consumers->@*) {
+        next unless blessed($c) && $c->operation eq 'Subscript';
+        # A memory-having read: inputs[2] is the memory version. Guard against a
+        # 2-input lvalue Subscript (no memory input).
+        my $mem = $c->inputs->[2];
+        next unless defined $mem && blessed($mem) && $mem->id eq $mem_node->id;
+        next if exists $self->{cache}{ $c->id };   # already frozen
+        my $ref = $self->lower_value($c);
+        $self->{cache}{ $c->id } = $ref;           # freeze at this memory version
+    }
 }
 
 # _process_if_node: forward to the concrete subclass.
@@ -3721,6 +3850,18 @@ sub _container_ptr {
 # inputs[0] = container (Array or Hash), inputs[1] = index (Int) or key (Str).
 sub _lower_subscript {
     my ($self, $node) = @_;
+
+    # Memory-SSA phase 2a is STRAIGHT-LINE only. An element read whose correct
+    # memory version depends on a store under a control region (an element store
+    # inside an if/loop) needs a memory-Phi at the merge (phase 2b), which is not
+    # yet lowered. Rather than mislower (freeze the read at the wrong memory
+    # version -> a silent WRONG value), GAP loudly. A memory-having read (inputs[2]
+    # set) in a graph that also has a branch-guarded element store is refused.
+    if (defined $node->inputs->[2] && $self->_has_branch_guarded_store) {
+        die "GAP: element read across a branch-guarded store needs a memory-Phi "
+          . "(memory-SSA phase 2b, zhi 019f33f6) -- refusing to mislower.";
+    }
+
     my $container = $node->inputs->[0];
     my $container_repr = _require_repr($container, 'Subscript.container');
 
