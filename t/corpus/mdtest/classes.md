@@ -31,7 +31,7 @@ context: scalar
 ```ir
 %cls    = MOP::Class(name: "Empty")
 %new_e  = Call(dispatch_kind: "method", name: "new", class: "Empty") :Object
-%result = Ref(%new_e) :Str
+%result = RefType(%new_e) :Str
 return %result
 L: GREEN
 ```

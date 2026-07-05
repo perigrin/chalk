@@ -582,6 +582,9 @@ my %_COMPUTED_REPR = (
     BitAnd => 'Int', BitOr => 'Int', BitXor => 'Int',
     LeftShift => 'Int', RightShift => 'Int', Complement => 'Int',
     Concat => 'Str', Length => 'Int',
+    # ref($x) reads the type/class name of a reference -- always a Str,
+    # regardless of the operand (ref($obj) -> class name, ref([...]) -> "ARRAY").
+    RefType => 'Str',
     (map { $_ => 'Bool' } qw(
         NumEq NumLt NumGt NumLe NumGe NumNe StrEq StrLt StrGt StrLe StrGe StrNe)),
     NumCmp => 'Int', StrCmp => 'Int',

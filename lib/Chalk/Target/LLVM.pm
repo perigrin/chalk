@@ -1395,7 +1395,7 @@ my %PURE_DESCEND_OPS = map { $_ => 1 } qw(
     StrEq StrNe StrLt StrGt StrLe StrGe StrCmp
     And Or DefinedOr Xor Not Negate Complement Defined UnaryPlus
     BitAnd BitOr BitXor LeftShift RightShift
-    Coerce Stringify Interpolate Length PostfixDeref Ref TernaryExpr
+    Coerce Stringify Interpolate Length PostfixDeref Ref RefType TernaryExpr
     Repeat Range IsaOp Slice
 );
 
@@ -1551,7 +1551,12 @@ sub lower_value {
     elsif ($op eq 'FieldAccess' && $self->{_in_method_body}) {
         return $self->_lower_field_access_in_method($node);
     }
-    elsif ($op eq 'Ref' && defined $node->inputs->[0]
+    # RefType (ref($x)): reads the type/class name of a reference. Over an Object
+    # it is the class name (statically the object's class); other reference kinds
+    # (ref([...]) -> "ARRAY") are not yet lowered and stay an honest GAP. This is
+    # distinct from Ref (the \ operator, a reference constructor): ref() takes a
+    # reference and yields a Str, \ takes a value and yields a reference.
+    elsif ($op eq 'RefType' && defined $node->inputs->[0]
         && defined $node->inputs->[0]->representation
         && $node->inputs->[0]->representation eq 'Object') {
         return $self->_lower_ref_of_object($node);
