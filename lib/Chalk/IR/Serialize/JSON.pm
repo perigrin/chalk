@@ -637,7 +637,22 @@ sub _propagate_computed_reprs ($graphs) {
                 # A Subscript reads an element out of an aggregate container:
                 # its repr is the element type, inferred from the container's
                 # element reprs (an ArrayRef/HashRef of Ints yields an Int).
+                # BUT a statically-provable MISS (an out-of-bounds literal array
+                # index, or a hash key absent from a literal HashRef) reads
+                # perl's undef, not an element -- it must load as Slot (the
+                # tagged {defined=false} path the backend prints as Undef:), NOT
+                # the element type (which the backend prints as the payload 0, a
+                # silent miscompile). Only fires over a SCALAR-literal aggregate
+                # (a Constant index/key and a container whose inputs are all
+                # plain scalars -- no nested list-flattening aggregate); a
+                # dynamic index/key or a flattened container stays the element
+                # repr (019f2e25).
                 if ($op eq 'Subscript') {
+                    if (_static_miss( $node->inputs->[0], $node->inputs->[1] )) {
+                        $node->set_representation('Slot');
+                        $changed = 1;
+                        next;
+                    }
                     my $repr = _element_repr( $node->inputs->[0] );
                     next unless defined $repr;
                     $node->set_representation($repr);
@@ -687,6 +702,52 @@ sub _element_repr ($container) {
     return undef if grep { !defined || !exists $_REPR_RANK{$_} } @reprs;
     my ($widest) = sort { $_REPR_RANK{$b} <=> $_REPR_RANK{$a} } @reprs;
     return $widest;
+}
+
+# _static_miss($container, $index) — true iff a Subscript read is a provable
+# MISS at load time: an out-of-bounds integer index into a literal ArrayRef, or
+# a string key absent from a literal HashRef. Only literal-over-literal accesses
+# are decidable here; a dynamic container or index returns false (the read keeps
+# the element repr and is bounds-checked at runtime). A miss reads perl's undef,
+# so the Subscript must load as Slot, not the element type.
+sub _static_miss ($container, $index) {
+    return false unless defined $container && blessed($container);
+    return false unless defined $index && blessed($index)
+        && $index->operation eq 'Constant';
+    my $op = $container->operation;
+
+    # A nested aggregate input is Perl list-flattening ((@x, 99) / (%base, ...)):
+    # it occupies ONE input slot but expands to many elements at runtime, so a
+    # static length or key-scan over inputs is wrong. Bail to element-repr (a
+    # HIT) -- deciding a miss here would turn a valid read into a false Slot
+    # (undef). Only a scalar-literal aggregate (all inputs plain scalars) is
+    # statically decidable.
+    my $flattens = grep {
+        blessed($_) && ($_->operation eq 'ArrayRef' || $_->operation eq 'HashRef')
+    } $container->inputs->@*;
+    return false if $flattens;
+
+    if ($op eq 'ArrayRef') {
+        # An integer literal index; out of bounds (or negative past the start)
+        # is a miss. A negative index within range (perl's from-the-end) is NOT
+        # a miss, so only flag idx >= len or idx < -len.
+        return false unless ($index->const_type // '') eq 'integer';
+        my $idx = $index->value;
+        my $len = scalar $container->inputs->@*;
+        return ($idx >= $len || $idx < -$len) ? true : false;
+    }
+    if ($op eq 'HashRef') {
+        # A string key absent from the literal keys (even positions) is a miss.
+        my $key = $index->value // return false;
+        my @in  = $container->inputs->@*;
+        for my $i (grep { $_ % 2 == 0 } 0 .. $#in) {   # even = keys
+            my $k = $in[$i];
+            next unless blessed($k) && $k->operation eq 'Constant';
+            return false if ($k->value // '') eq $key;   # present -> not a miss
+        }
+        return true;   # exhausted the literal keys with no match
+    }
+    return false;   # container not a literal aggregate we can decide
 }
 
 # _stamp_field_access_reprs($classes, \%graphs) — set each FieldAccess node's
