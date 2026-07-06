@@ -84,4 +84,19 @@ subtest 'a store in an UNtaken if-arm is not visible (2b memory-Phi)' => sub {
     is("$kind:$out", 'value:Int:1', 'store in the untaken arm is not visible -> 1');
 };
 
+subtest 'a dropped element read-modify-write GAPs, never miscompiles' => sub {
+    # $a[i] += / ++ has a producer bug: the store-back is dropped (zhi 019f342f),
+    # so the Add result is DEAD. The backend must GAP loudly rather than lower the
+    # following read to the pre-modify value. Legitimate arith-over-element
+    # ($a[0]+$a[1], $a[0]=$a[0]+1) is data-reachable and must NOT GAP.
+    my ($k1) = lower_and_run('my @a=(1,2,3); $a[0]+=4; $a[0]');
+    is($k1, 'gap', 'straight-line element += (dropped store) GAPs');
+    my ($k2) = lower_and_run('my @a=(1,2,3); my $c=1; if($c){$a[0]+=4} $a[0]');
+    is($k2, 'gap', 'branch-guarded element += (dropped store) GAPs');
+    my ($k3, $o3) = lower_and_run('my @a=(1,2,3); $a[0]+$a[1]');
+    is("$k3:$o3", 'value:Int:3', 'legit arith over two element reads does NOT GAP');
+    my ($k4, $o4) = lower_and_run('my @a=(5,6,7); $a[0]=$a[0]+1; $a[0]');
+    is("$k4:$o4", 'value:Int:6', 'element read + explicit store-back does NOT GAP');
+};
+
 done_testing();

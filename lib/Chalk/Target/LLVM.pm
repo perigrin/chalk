@@ -3123,6 +3123,21 @@ sub _scan_memory_shape {
         $c = $c->can('control_in') ? $c->control_in : undef;
     }
 
+    # Data-reachable set: nodes reachable from the Return via inputs + control_in
+    # (NOT consumers). A node in the full graph but NOT here is DEAD (orphaned).
+    my %data_reachable;
+    {
+        my @dq = ($return_node);
+        while (my $n = shift @dq) {
+            next unless blessed($n);
+            next if $data_reachable{ $n->id }++;
+            push @dq, grep { blessed($_) } $n->inputs->@*
+                if $n->can('inputs') && defined $n->inputs;
+            push @dq, $n->control_in
+                if $n->can('control_in') && defined $n->control_in;
+        }
+    }
+
     my $unsafe = 0;
     my %seen;
     my @q = ($return_node);
@@ -3133,6 +3148,16 @@ sub _scan_memory_shape {
                 && !$on_chain{ $n->id }) {
             $unsafe = 1;   # an element store not on the return's effect chain
         }
+        # An element read-modify-write ($a[i] += / ++) whose store-back was
+        # dropped by the producer (pre-existing, zhi 019f342f): the arithmetic op
+        # reads an element Subscript, but its result is DEAD (not on the Return's
+        # data path) -- the store-back is missing. A following read then observes
+        # the pre-modify value: a silent miscompile. Flag unsafe so the read GAPs
+        # loudly. A legitimate `$a[0]+$a[1]` differs: its Add IS data-reachable
+        # (the return value), so it is not flagged.
+        if ($self->_is_arith_over_element($n) && !$data_reachable{ $n->id }) {
+            $unsafe = 1;
+        }
         push @q, grep { blessed($_) } $n->inputs->@*
             if $n->can('inputs') && defined $n->inputs;
         push @q, $n->control_in
@@ -3142,6 +3167,18 @@ sub _scan_memory_shape {
     }
     $self->{_branch_guarded_store} = $unsafe;
     return;
+}
+
+# An arithmetic op (Add/Subtract/Multiply/Divide/Modulo) directly consuming an
+# element Subscript -- the element read-modify-write pattern ($a[i] += x).
+sub _is_arith_over_element {
+    my ($self, $node) = @_;
+    my %arith = map { $_ => 1 } qw(Add Subtract Multiply Divide Modulo);
+    return 0 unless $arith{ $node->operation };
+    for my $in ($node->inputs->@*) {
+        return 1 if blessed($in) && $in->operation eq 'Subscript';
+    }
+    return 0;
 }
 
 # An element store Assign has a Subscript lhs (inputs[0] after control split, or
