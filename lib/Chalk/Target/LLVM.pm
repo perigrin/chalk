@@ -3138,6 +3138,33 @@ sub _scan_memory_shape {
         }
     }
 
+    # Stores merged through a memory-Phi (the branch/loop 2b shape): collect the
+    # store nodes that are an INPUT of some memory-Phi. Checked by INPUT, not by
+    # the store's consumers -- the JSON loader does not reconstruct the back-edge
+    # consumer edge (a loop memory-Phi's back-edge store has empty consumers), so
+    # a consumer-side check would miss it. Two passes: gather merged-store ids
+    # first, then flag off-chain stores that are NOT in that set.
+    my %merged_store;
+    {
+        my %s2; my @q2 = ($return_node);
+        while (my $n = shift @q2) {
+            next unless blessed($n);
+            next if $s2{ $n->id }++;
+            if ($n->operation eq 'Phi' && _is_memory_phi($n)) {
+                for my $in ($n->inputs->@*) {
+                    $merged_store{ $in->id } = 1
+                        if blessed($in) && $in->operation eq 'Assign';
+                }
+            }
+            push @q2, grep { blessed($_) } $n->inputs->@*
+                if $n->can('inputs') && defined $n->inputs;
+            push @q2, $n->control_in
+                if $n->can('control_in') && defined $n->control_in;
+            push @q2, grep { blessed($_) } $n->consumers->@*
+                if $n->can('consumers') && defined $n->consumers;
+        }
+    }
+
     my $unsafe = 0;
     my %seen;
     my @q = ($return_node);
@@ -3145,8 +3172,10 @@ sub _scan_memory_shape {
         next unless blessed($n);
         next if $seen{ $n->id }++;
         if ($n->operation eq 'Assign' && $self->_is_element_store($n)
-                && !$on_chain{ $n->id }) {
-            $unsafe = 1;   # an element store not on the return's effect chain
+                && !$on_chain{ $n->id }
+                && !$merged_store{ $n->id }) {
+            $unsafe = 1;   # an element store neither on the effect chain nor
+                           # merged through a memory-Phi (unhandled shape)
         }
         # An element read-modify-write ($a[i] += / ++) whose store-back was
         # dropped by the producer (pre-existing, zhi 019f342f): the arithmetic op
@@ -3270,6 +3299,27 @@ sub _prelower_branch_store_operands {
     return;
 }
 
+# _prelower_loop_store_operands($loop_node): for each element-store Assign in
+# the loop body, lower its aggregate CONTAINER now (in the current preheader
+# block) so the container's SSA ref dominates the in-body store AND the post-loop
+# read (the loop may run zero times -> the body block does not dominate the
+# exit). The container is a pre-loop aggregate (loop-invariant); lowering it here
+# is idempotent and cached, so the body/read reuse the dominating ref. The index
+# is deliberately NOT pre-lowered -- it may be the loop-Phi (header-defined).
+sub _prelower_loop_store_operands {
+    my ($self, $loop_node) = @_;
+    my $body_proj = _find_proj_consumer($loop_node, 0);
+    return unless defined $body_proj;
+    for my $node (_collect_branch_body($body_proj)) {
+        next unless $node->operation eq 'Assign';
+        my ($target) = grep { blessed($_) && $_->operation eq 'Subscript' }
+                            $node->inputs->@*;
+        next unless defined $target;
+        $self->lower_value($target->inputs->[0]);   # container only
+    }
+    return;
+}
+
 sub _process_branch_from_if {
     my ($self, $if_node, $branch_idx, $merge_label) = @_;
 
@@ -3329,6 +3379,14 @@ sub _process_loop_node {
     # continuation blocks, so the block that actually falls through to the
     # header is whatever is current AFTER lowering.
     my @loop_phis = _collect_loop_phis($loop_node);
+
+    # A body element store's aggregate container (`my @a=...` defined pre-loop)
+    # must be lowered in the PREHEADER so its SSA ref dominates BOTH the in-body
+    # store and the post-loop read (the loop may run zero times, so the body
+    # block does not dominate the exit). Mirrors _prelower_branch_store_operands.
+    # The index is NOT pre-lowered here -- it may be the loop-Phi (defined in the
+    # header), which the body lowering resolves.
+    $self->_prelower_loop_store_operands($loop_node);
 
     my @phi_records;    # [ { node, phi_ref, init_ref } ]
 
@@ -3539,14 +3597,19 @@ sub _process_loop_body {
     }
 }
 
-# _collect_loop_phis: find all Phi nodes whose region is this Loop node.
+# _collect_loop_phis: find all VALUE Phi nodes whose region is this Loop node.
+# A memory-Phi (its inputs are memory versions: MemStart or an element-store
+# Assign) is a scheduling token, NOT a runtime value -- it is excluded here (it
+# has no repr and no lowerable init) and instead threads through the memory
+# scheduler: the post-loop read whose memory input IS this Phi loads the merged
+# heap (see _lower_subscript's Phi-memory path).
 sub _collect_loop_phis {
     my ($loop_node) = @_;
     my @phis;
     my $consumers = $loop_node->consumers // [];
     for my $c (@$consumers) {
         next unless defined $c && $c->can('operation');
-        if ($c->operation eq 'Phi') {
+        if ($c->operation eq 'Phi' && !_is_memory_phi($c)) {
             # Check that this Phi's region IS the loop node.
             my $r = $c->region;
             if (defined $r && $r->id eq $loop_node->id) {
@@ -3555,6 +3618,26 @@ sub _collect_loop_phis {
         }
     }
     return @phis;
+}
+
+# A memory-Phi merges memory versions (MemStart / element-store Assign), not
+# scalar values. It is a scheduling token: the read that consumes it loads the
+# merged heap. Distinguished from a value-Phi by its inputs being memory nodes.
+sub _is_memory_phi {
+    my ($phi) = @_;
+    return 0 unless blessed($phi) && $phi->operation eq 'Phi';
+    my $inputs = $phi->inputs // [];
+    return 0 unless @$inputs;
+    for my $in (@$inputs) {
+        next unless blessed($in);
+        return 1 if $in->operation eq 'MemStart';
+        # an element store: an Assign whose lhs is a Subscript
+        if ($in->operation eq 'Assign') {
+            return 1 if grep { blessed($_) && $_->operation eq 'Subscript' }
+                             $in->inputs->@*;
+        }
+    }
+    return 0;
 }
 
 # _find_phi_backedge_value: find the backedge value for a Loop phi node.

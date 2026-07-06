@@ -94,6 +94,34 @@ subtest 'a flat if/else stores in both arms and reads the taken arm (2b-3)' => s
     is("$k0:$o0", 'value:Int:8', 'c false selects the false arm store -> 8');
 };
 
+subtest 'a while-loop element store is visible after the loop (2b-4 memory-Phi)' => sub {
+    # `my @a=(1,2,3); my $i=0; while($i<3){$a[$i]=$i*2+10; $i=$i+1} $a[1]` -- the body
+    # stores through a loop-header memory-Phi; the post-loop read observes the
+    # merged memory. a[1] = 1*2+10 = 12. The store value is deliberately DISTINCT
+    # from the initializer (a[1] was 2) so a dropped loop-store / elided memory-Phi
+    # would read 2 and fail -- the assertion discriminates a working store, not a
+    # value that coincides with the init.
+    my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $i=0; while($i<3){$a[$i]=$i*2+10; $i=$i+1} $a[1]');
+    is("$kind:$out", 'value:Int:12', 'while-loop element store visible after loop -> 12');
+};
+
+subtest 'a foreach-range element store is visible after the loop (2b-4 memory-Phi)' => sub {
+    # `my @a=(0,0,0); for my $i (0..2){$a[$i]=$i+1} $a[2]` -- the foreach-range
+    # body stores through the loop-header memory-Phi. a[2] = 2+1 = 3.
+    my ($kind, $out) = lower_and_run('my @a=(0,0,0); for my $i (0..2){$a[$i]=$i+1} $a[2]');
+    is("$kind:$out", 'value:Int:3', 'foreach-range element store visible after loop -> 3');
+};
+
+subtest 'a read BEFORE the loop snapshots pre-loop memory (WAR ordering holds)' => sub {
+    # `my @a=(5,6,7); my $x=$a[0]; my $i=0; while($i<3){$a[0]=$i; $i=$i+1} $x*10+$a[0]`
+    # -- the pre-loop read $x=$a[0] must snapshot the PRE-loop value (5), while the
+    # post-loop read $a[0] observes the loop's final store (2). If the header
+    # memory-Phi contaminated the earlier read, $x would be 2 and the result 22
+    # instead of 5*10+2 = 52.
+    my ($kind, $out) = lower_and_run('my @a=(5,6,7); my $x=$a[0]; my $i=0; while($i<3){$a[0]=$i; $i=$i+1} $x*10+$a[0]');
+    is("$kind:$out", 'value:Int:52', 'pre-loop read snapshots 5, post-loop read 2 -> 52');
+};
+
 subtest 'a NESTED branch-guarded store still GAPs-or-errors, never miscompiles (out of 2b-3 scope)' => sub {
     # Nested branches are out of scope for the flat if/else work. Today the
     # nested shape does not even reach _handle_cond_expr: the outer
