@@ -136,15 +136,16 @@ subtest 'a NESTED branch-guarded store still GAPs-or-errors, never miscompiles (
     isnt($kind, 'value', "nested branch store does not silently lower (got $kind:$out)");
 };
 
-subtest 'a dropped element read-modify-write GAPs, never miscompiles' => sub {
-    # $a[i] += / ++ has a producer bug: the store-back is dropped (zhi 019f342f),
-    # so the Add result is DEAD. The backend must GAP loudly rather than lower the
-    # following read to the pre-modify value. Legitimate arith-over-element
-    # ($a[0]+$a[1], $a[0]=$a[0]+1) is data-reachable and must NOT GAP.
-    my ($k1) = lower_and_run('my @a=(1,2,3); $a[0]+=4; $a[0]');
-    is($k1, 'gap', 'straight-line element += (dropped store) GAPs');
-    my ($k2) = lower_and_run('my @a=(1,2,3); my $c=1; if($c){$a[0]+=4} $a[0]');
-    is($k2, 'gap', 'branch-guarded element += (dropped store) GAPs');
+subtest 'an element read-modify-write stores back (019f342f)' => sub {
+    # $a[i] += / ++ now emits the element store-back (zhi 019f342f-ad73): the
+    # producer reads the pre-store value through a memory-pinned rvalue Subscript,
+    # computes the new value, and stores it back. A following read observes the
+    # updated element. (Was a dropped-store GAP before the fix; full RMW-as-value
+    # coverage lives in t/bootstrap/element-rmw-memory-ssa.t.)
+    my ($k1, $o1) = lower_and_run('my @a=(1,2,3); $a[0]+=4; $a[0]');
+    is("$k1:$o1", 'value:Int:5', 'straight-line element += stores back -> 5');
+    my ($k2, $o2) = lower_and_run('my @a=(1,2,3); my $c=1; if($c){$a[0]+=4} $a[0]');
+    is("$k2:$o2", 'value:Int:5', 'branch-guarded element += stores back (2b memory-Phi) -> 5');
     my ($k3, $o3) = lower_and_run('my @a=(1,2,3); $a[0]+$a[1]');
     is("$k3:$o3", 'value:Int:3', 'legit arith over two element reads does NOT GAP');
     my ($k4, $o4) = lower_and_run('my @a=(5,6,7); $a[0]=$a[0]+1; $a[0]');
@@ -162,6 +163,18 @@ subtest 'a control-only-reachable loop-body store lowers (result unread)' => sub
     # lowers and the whole method returns the pre-loop 5.
     my ($kind, $out) = lower_and_run('my @a=(5,6,7); my $x=$a[0]; my $i=0; while($i<3){$a[0]=$i; $i=$i+1} $x');
     is("$kind:$out", 'value:Int:5', 'control-only loop-body store lowers, returns pre-loop 5');
+};
+
+subtest 'a straight-line store BEFORE a while loop is not false-GAPed (019f342f)' => sub {
+    # `my @a=(1,2,3); $a[0]=5; my $r=$a[0]; my $i=0; while($i<2){$i=$i+1} $r`
+    # -- the store $a[0]=5 and the read $r=$a[0] are straight-line; the while loop
+    # touches only $i, not the array. _scan_memory_shape walked the return's
+    # control_in chain to find on-chain stores, but a Region/Loop links its
+    # predecessor through control-flow INPUTS (Region->Proj->Loop->store), not a
+    # linear control_in, so the pre-loop store was misclassified off-chain and the
+    # read GAPed. Following the control-flow head recognizes the on-chain store.
+    my ($kind, $out) = lower_and_run('my @a=(1,2,3); $a[0]=5; my $r=$a[0]; my $i=0; while($i<2){$i=$i+1} $r');
+    is("$kind:$out", 'value:Int:5', 'pre-loop store/read lowers (not a false GAP), returns 5');
 };
 
 done_testing();

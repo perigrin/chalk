@@ -3116,14 +3116,34 @@ sub _scan_memory_shape {
     # effect is not on the chain, so a following element read would silently
     # observe the wrong memory version. Collect on-chain stores, then check for
     # any element store NOT on the chain.
+    # Walk the control graph backward from the Return, collecting on-chain Assign
+    # stores. A store is on-chain if control reaches it from the Return. Control
+    # flows two ways: a straight-line effect links its predecessor via control_in,
+    # but a merge/loop links its predecessor through control-flow INPUTS -- a
+    # Region reaches its arms via Proj inputs, a Proj reaches its owner via the
+    # Loop/If input, and a Loop reaches its pre-loop predecessor via control_in.
+    # So a straight-line store BEFORE a loop is reached as
+    # Return -control_in-> Region -input-> Proj -input-> Loop -control_in-> store.
+    # Following control_in ALONE stops at the Region (whose control_in is undef),
+    # misclassifying the pre-loop store off-chain and false-GAPing the read
+    # (019f342f). Follow both control_in AND the control-flow inputs of
+    # Region/Proj/Loop/If nodes.
+    my %CF_NODE = map { $_ => 1 } qw(Region Proj Loop If);
     my %on_chain;
-    my $c = $return_node->can('control_in') ? $return_node->control_in : undef;
     my %cseen;
-    while (defined $c && blessed($c) && !$cseen{ $c->id }++) {
+    my @cq;
+    push @cq, $return_node->control_in
+        if $return_node->can('control_in') && defined $return_node->control_in;
+    while (my $c = shift @cq) {
+        next unless blessed($c) && !$cseen{ $c->id }++;
         $on_chain{ $c->id } = 1 if $c->operation eq 'Assign';
-        # follow the head of a Region/If/Loop too, so on-chain branch stores
-        # (once 2b threads them) are recognised.
-        $c = $c->can('control_in') ? $c->control_in : undef;
+        push @cq, $c->control_in
+            if $c->can('control_in') && defined $c->control_in;
+        # A control-flow node reaches its control predecessors through its inputs
+        # (Region<-Proj, Proj<-Loop/If, Loop<-body/entry), so follow those too.
+        push @cq, grep { blessed($_) && ($CF_NODE{ $_->operation } || $_->operation eq 'Assign') }
+            $c->inputs->@*
+            if $CF_NODE{ $c->operation } && $c->can('inputs') && defined $c->inputs;
     }
 
     # Data-reachable set: nodes reachable from the Return via inputs + control_in
