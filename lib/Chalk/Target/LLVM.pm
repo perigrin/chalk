@@ -1348,6 +1348,18 @@ sub _emit {
     push $self->{blocks}[ $self->{current_idx} ]{insts}->@*, $inst;
 }
 
+# _emit_entry($inst) -> push $inst into the ENTRY block (block 0). A pure,
+# rematerializable value (a Constant) emitted here dominates ALL blocks, so it is
+# valid at any use site -- avoids an "instruction does not dominate all uses"
+# error when a shared node (e.g. a hash-consed index constant) is first lowered
+# inside a branch block but used after the merge (memory-SSA phase 2b). The entry
+# block's terminator is appended after its instruction list, so unshifting/pushing
+# an instruction before the terminator is safe.
+sub _emit_entry {
+    my ($self, $inst) = @_;
+    push $self->{blocks}[0]{insts}->@*, $inst;
+}
+
 # _set_terminator($term) -> set the current block's terminator instruction.
 # A block must have exactly one terminator. Call this before _new_block().
 sub _set_terminator {
@@ -1664,9 +1676,13 @@ sub _lower_constant {
     }
 
     if ($repr eq 'Int') {
-        # Int constant -> i64 immediate via add i64 0, VALUE
+        # Int constant -> i64 immediate via add i64 0, VALUE. Emit into the ENTRY
+        # block: a constant is pure and, when hash-consed across blocks (e.g. an
+        # index shared by a branch-guarded store and a post-merge read, memory-SSA
+        # 2b), a branch-local emit would not dominate the post-merge use. Entry
+        # placement dominates all uses.
         my $ref = $self->_fresh;
-        $self->_emit("  $ref = add i64 0, $val          ; Constant($val, repr=Int -> i64)");
+        $self->_emit_entry("  $ref = add i64 0, $val          ; Constant($val, repr=Int -> i64)");
         $self->{cache}{$node->id} = $ref;
         return $ref;
     }
@@ -3192,6 +3208,31 @@ sub _process_if_node {
 # Walks the consumers of the Proj node for this branch, executing any
 # VarDecl/Assign side-effect nodes and leaving the current block at the
 # end of the branch.
+# _prelower_branch_store_operands($if_node): for each element-store Assign guarded
+# by one of $if_node's Projs, lower its container and index NOW (in the current,
+# pre-branch block). A branch-guarded store and a post-merge read share these
+# (hash-consed); lowering them before the branch makes their refs dominate every
+# use. Pure ops (Constant, ArrayRef/HashRef container) -- lowering is idempotent
+# and cached, so the store/read reuse the cached, dominating refs.
+sub _prelower_branch_store_operands {
+    my ($self, $if_node) = @_;
+    for my $proj (grep { blessed($_) && $_->operation eq 'Proj' }
+                       $if_node->consumers->@*) {
+        for my $node (_collect_branch_body($proj)) {
+            next unless $node->operation eq 'Assign';
+            # An element store: inputs = [target, value] with target a Subscript
+            # (control is control_in, split off by the loader).
+            my ($target) = grep { blessed($_) && $_->operation eq 'Subscript' }
+                                $node->inputs->@*;
+            next unless defined $target;
+            # container = inputs[0], index = inputs[1] of the Subscript lvalue.
+            $self->lower_value($target->inputs->[0]);
+            $self->lower_value($target->inputs->[1]);
+        }
+    }
+    return;
+}
+
 sub _process_branch_from_if {
     my ($self, $if_node, $branch_idx, $merge_label) = @_;
 
@@ -3851,13 +3892,16 @@ sub _container_ptr {
 sub _lower_subscript {
     my ($self, $node) = @_;
 
-    # Memory-SSA phase 2a is STRAIGHT-LINE only. An element read whose correct
-    # memory version depends on a store under a control region (an element store
-    # inside an if/loop) needs a memory-Phi at the merge (phase 2b), which is not
-    # yet lowered. Rather than mislower (freeze the read at the wrong memory
-    # version -> a silent WRONG value), GAP loudly. A memory-having read (inputs[2]
-    # set) in a graph that also has a branch-guarded element store is refused.
-    if (defined $node->inputs->[2] && $self->_has_branch_guarded_store) {
+    # Memory-SSA: an element read whose memory version depends on a store under a
+    # control region needs a memory-Phi at the merge (phase 2b). When the read's
+    # memory input IS a proper memory-Phi over a Region (the handled 2b shape), the
+    # store is control-dependent on the branch (emitted only when taken) and the
+    # read loads the merged heap post-Region -- lower it normally. Otherwise (a
+    # branch-guarded store with no memory-Phi reaching this read -- an unhandled
+    # shape) GAP loudly rather than mislower to the wrong (pre-store) value.
+    my $mem = $node->inputs->[2];
+    my $mem_is_phi = defined $mem && $mem->operation eq 'Phi';
+    if (defined $mem && !$mem_is_phi && $self->_has_branch_guarded_store) {
         die "GAP: element read across a branch-guarded store needs a memory-Phi "
           . "(memory-SSA phase 2b, zhi 019f33f6) -- refusing to mislower.";
     }
@@ -5608,6 +5652,14 @@ sub _process_if_node {
     my $then_label  = $self->_fresh_label('if.then.');
     my $else_label  = $self->_fresh_label('if.else.');
     my $merge_label = $self->_fresh_label('if.merge.');
+
+    # Memory-SSA 2b: a branch-guarded element store and the post-merge read share
+    # the store's container and index (hash-consed). Lazy lowering would emit them
+    # inside the guarded THEN block, so the post-merge read's use would not be
+    # dominated. Pre-lower each guarded element store's container + index HERE, in
+    # the pre-branch block (which dominates both the store and the merge), so the
+    # shared refs are cached and dominance-correct.
+    $self->_prelower_branch_store_operands($if_node);
 
     $self->_set_terminator("  br i1 $cond_ref, label %$then_label, label %$else_label  ; If (elab): branch");
 

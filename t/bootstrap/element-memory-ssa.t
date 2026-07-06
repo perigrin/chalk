@@ -71,13 +71,17 @@ subtest 'straight-line stores/reads stay correct (regression)' => sub {
     }
 };
 
-subtest 'a branch-guarded store is an HONEST GAP, never a miscompile (2a boundary)' => sub {
-    # A store inside an if-arm needs a memory-Phi (phase 2b). Until then, an
-    # element read that could be affected must GAP loudly, NOT silently return the
-    # wrong (pre-store) value.
+subtest 'a store in a taken if-arm is visible after the branch (2b memory-Phi)' => sub {
+    # `if ($c) { $a[0] = 9 } $a[0]` -- the store is control-dependent on the
+    # branch; the post-branch read takes the merged memory (memory-Phi). With
+    # $c true the store ran -> 9.
     my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $c=1; if($c){$a[0]=9} $a[0]');
-    is($kind, 'gap', 'branch-guarded store + read is a GAP (not a wrong value)')
-        or diag("got $kind: $out");
+    is("$kind:$out", 'value:Int:9', 'store in the taken arm is visible -> 9');
+};
+
+subtest 'a store in an UNtaken if-arm is not visible (2b memory-Phi)' => sub {
+    my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $c=0; if($c){$a[0]=9} $a[0]');
+    is("$kind:$out", 'value:Int:1', 'store in the untaken arm is not visible -> 1');
 };
 
 done_testing();
