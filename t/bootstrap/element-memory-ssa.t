@@ -123,15 +123,14 @@ subtest 'a read BEFORE the loop snapshots pre-loop memory (WAR ordering holds)' 
 };
 
 subtest 'a NESTED branch-guarded store still GAPs-or-errors, never miscompiles (out of 2b-3 scope)' => sub {
-    # Nested branches are out of scope for the flat if/else work. Today the
-    # nested shape does not even reach _handle_cond_expr: the outer
-    # if($c){if($d){...}} compiles to a loop-shaped optree that crashes the
-    # producer's while-loop translator (zhi 019f34cc), so B::SoN emits no graph
-    # and lower_and_run returns 'err'. That is incidental, not a structural
-    # nested-branch refusal -- so this subtest pins the ANTI-MISCOMPILE
-    # invariant (never a value), not the specific mechanism. When 019f34cc
-    # reroutes the nested case through _handle_cond_expr's (currently unguarded)
-    # recursion, this must stay non-value: a correct nested lowering or an
+    # Nested branches are out of scope for the flat if/else work. The outer
+    # if($c){if($d){...}} inner branch join used to be misread as an
+    # EXPR-while-COND loop back-edge and crash the while-loop translator; that
+    # crash is fixed (zhi 019f34cc), so the producer now GAPs LOUDLY (the arm
+    # does not converge) rather than crashing -- B::SoN emits no graph and
+    # lower_and_run returns 'err'. This subtest pins the ANTI-MISCOMPILE
+    # invariant (never a value): a future nested lowering (2b-3 composed
+    # branches) must stay non-value here -- a correct nested lowering or an
     # honest GAP, never a silently-wrong value.
     my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $c=1; my $d=1; if($c){if($d){$a[0]=7}} $a[0]');
     isnt($kind, 'value', "nested branch store does not silently lower (got $kind:$out)");
