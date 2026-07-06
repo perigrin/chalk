@@ -2374,7 +2374,10 @@ sub _lower_assign {
 
     # Mode (a): Subscript-lvalue — element store into Array or Hash.
     if (defined $lhs && $lhs->operation eq 'Subscript') {
-        my $container = $lhs->inputs->[0];
+        # Unwrap a Ref container (`$r->[0]=...` where $r=\@a) to its aliased
+        # target: \@a and @a share backing storage, so the store must resolve to
+        # the SAME aggregate the array name resolves to (memory-SSA phase 2d).
+        my $container = $self->_unwrap_ref_container($lhs->inputs->[0]);
         my $key_idx   = $lhs->inputs->[1];
         my $ctr_repr  = $container->representation // '';
 
@@ -3985,6 +3988,20 @@ sub _lower_length {
     }
 }
 
+# _unwrap_ref_container($container) -> the aliased target of a `\` reference.
+#
+# `my $r = \@a` builds a Ref node wrapping the @a ArrayRef; in Perl \@a and @a
+# share backing storage, so a store/read through the Ref must resolve to the
+# SAME aggregate as the ArrayRef it wraps. The Ref node carries no repr of its
+# own (it is a transparent alias), so we unwrap it to its input container. This
+# is a no-op for every non-Ref container.
+sub _unwrap_ref_container {
+    my ($self, $container) = @_;
+    return $container unless defined $container
+        && $container->operation eq 'Ref';
+    return $container->inputs->[0];
+}
+
 # _container_ptr($container, $kind) -> typed aggregate pointer (%Array*/%Hash*)
 #
 # Resolves the container's typed pointer AT THE CURRENT PROGRAM POINT:
@@ -3997,6 +4014,7 @@ sub _lower_length {
 # cast; emitting one per use is always dominance-correct.
 sub _container_ptr {
     my ($self, $container, $kind) = @_;
+    $container = $self->_unwrap_ref_container($container);
     my $repr = $container->representation // '';
     my $v = $self->lower_value($container);
     return $v unless $repr eq "${kind}Ref";   # unboxed %Array*/%Hash* already

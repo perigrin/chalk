@@ -217,6 +217,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, q{>=}, 57, q{gate-green floor (57; memory-SSA 2a WAR fix teeth are in t/bootstrap/element-memory-ssa.t, not the corpus)});
+cmp_ok($tally{gate_green}, q{>=}, 58, q{gate-green floor (58; memory-SSA 2d aliased element store R12 -- teeth in t/bootstrap/ref-alias-memory-ssa.t)});
 
 done_testing();

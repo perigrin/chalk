@@ -353,14 +353,15 @@ L: GAP(sort+join+keys requires list-context ops not yet in LLVM slice; deferred 
 ## R12 aliased element store (store via ref, read via name)
 
 Storing through an alias `$r->[0] = 42` (where `$r = \@a`) mutates the SAME
-underlying array as `@a`, so a subsequent `$a[0]` must see `42`. Element stores
-now materialize (the store is a real threaded memory write, the read a real
-load), so a same-name store/read is correct. But `$r->[0]` subscripts the `Ref`
-node while `$a[0]` subscripts the `ArrayRef` node: the backend does not yet
-resolve `Subscript(Ref(array))` and `Subscript(array)` to the SAME heap pointer,
-so the aliased store is an honest GAP (no longer a silent miscompile). Closing it
-needs the `Ref` container to resolve to its target's backing location. See zhi
-019f330b.
+underlying array as `@a`, so a subsequent `$a[0]` must see `42`. `$r->[0]`
+subscripts the `Ref` node while `$a[0]` subscripts the `ArrayRef` node the `Ref`
+wraps. Because `\@a` and `@a` share backing storage in Perl, the `Ref` is a
+transparent alias: the store-lvalue path unwraps it to its target `ArrayRef`, so
+both the store and the read resolve to the SAME aggregate pointer (the ArrayRef's
+canonical i8*, cached and re-bitcast at each use). The store's memory write is
+therefore visible to the read (the read's memory input already threads the store
+Assign — memory-SSA phase 2a). No new alias analysis is needed: unwrapping the
+`Ref` container to its input is the whole fix.
 
 ```perl
 # source
@@ -376,7 +377,19 @@ context: scalar
 ```
 
 ```ir
-L: GAP(aliased element store: Subscript over a Ref does not resolve to the target's backing location yet -- zhi 019f330b)
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%c3   = Constant(3) :Int
+%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%ref  = Ref(%arr)
+%i0   = Constant(0) :Int
+%lval = Subscript(%ref, %i0)
+%v42  = Constant(42) :Int
+%st   = Assign(%lval, %v42) :Int
+%rd   = Subscript(%arr, %i0) :Int
+return %rd
+control: %st
+L: GREEN
 ```
 
 ## R13 element store then read a DIFFERENT index (materialized load)
