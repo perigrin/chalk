@@ -406,14 +406,23 @@ sub _deserialize_graph ($method_data) {
     # Wire each Region's head back-pointer to the If/Loop that owns it. B::SoN's
     # JSON does not carry it, but the backend's control-chain walk needs
     # $region->head to reach the enclosing If/Loop (and emit its Phis). A Region
-    # merges Proj arms; the owning If/Loop is a Proj input's input.
+    # merges arms; each arm's control is a Proj of the owning If/Loop -- either
+    # DIRECTLY (an empty arm's control IS the Proj, the 2b-1 if-only shape) or
+    # via the arm's control_in chain (an arm that STORED advanced its control to
+    # the store node, whose control_in is the Proj -- the 2b-3 if/else both-arms-
+    # store shape). Follow control_in from the first arm until a Proj is found.
     for my $node (@nodes) {
         next unless $node->operation eq 'Region';
         next if $node->head;
-        my ($first_arm) = $node->inputs->@*;
-        next unless defined $first_arm && blessed($first_arm)
-            && $first_arm->operation eq 'Proj';
-        my $owner = $first_arm->inputs->[0];
+        my ($arm) = $node->inputs->@*;
+        my %seen;
+        while (defined $arm && blessed($arm)
+                && $arm->operation ne 'Proj' && !$seen{$arm->id}++) {
+            $arm = $arm->can('control_in') ? $arm->control_in : undef;
+        }
+        next unless defined $arm && blessed($arm)
+            && $arm->operation eq 'Proj';
+        my $owner = $arm->inputs->[0];
         $node->set_head($owner) if defined $owner && blessed($owner);
     }
 

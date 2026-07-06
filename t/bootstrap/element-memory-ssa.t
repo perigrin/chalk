@@ -84,6 +84,31 @@ subtest 'a store in an UNtaken if-arm is not visible (2b memory-Phi)' => sub {
     is("$kind:$out", 'value:Int:1', 'store in the untaken arm is not visible -> 1');
 };
 
+subtest 'a flat if/else stores in both arms and reads the taken arm (2b-3)' => sub {
+    # `if ($c) { $a[0] = 7 } else { $a[0] = 8 } $a[0]` -- BOTH arms store the
+    # same element; the post-branch read takes the merged memory (a memory-Phi
+    # with two store inputs). c true -> 7, c false -> 8.
+    my ($k1, $o1) = lower_and_run('my @a=(1,2,3); my $c=1; if($c){$a[0]=7}else{$a[0]=8} $a[0]');
+    is("$k1:$o1", 'value:Int:7', 'c true selects the true arm store -> 7');
+    my ($k0, $o0) = lower_and_run('my @a=(1,2,3); my $c=0; if($c){$a[0]=7}else{$a[0]=8} $a[0]');
+    is("$k0:$o0", 'value:Int:8', 'c false selects the false arm store -> 8');
+};
+
+subtest 'a NESTED branch-guarded store still GAPs-or-errors, never miscompiles (out of 2b-3 scope)' => sub {
+    # Nested branches are out of scope for the flat if/else work. Today the
+    # nested shape does not even reach _handle_cond_expr: the outer
+    # if($c){if($d){...}} compiles to a loop-shaped optree that crashes the
+    # producer's while-loop translator (zhi 019f34cc), so B::SoN emits no graph
+    # and lower_and_run returns 'err'. That is incidental, not a structural
+    # nested-branch refusal -- so this subtest pins the ANTI-MISCOMPILE
+    # invariant (never a value), not the specific mechanism. When 019f34cc
+    # reroutes the nested case through _handle_cond_expr's (currently unguarded)
+    # recursion, this must stay non-value: a correct nested lowering or an
+    # honest GAP, never a silently-wrong value.
+    my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $c=1; my $d=1; if($c){if($d){$a[0]=7}} $a[0]');
+    isnt($kind, 'value', "nested branch store does not silently lower (got $kind:$out)");
+};
+
 subtest 'a dropped element read-modify-write GAPs, never miscompiles' => sub {
     # $a[i] += / ++ has a producer bug: the store-back is dropped (zhi 019f342f),
     # so the Add result is DEAD. The backend must GAP loudly rather than lower the
