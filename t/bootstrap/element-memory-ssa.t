@@ -151,4 +151,17 @@ subtest 'a dropped element read-modify-write GAPs, never miscompiles' => sub {
     is("$k4:$o4", 'value:Int:6', 'element read + explicit store-back does NOT GAP');
 };
 
+subtest 'a control-only-reachable loop-body store lowers (result unread)' => sub {
+    # `my @a=(5,6,7); my $x=$a[0]; my $i=0; while($i<3){$a[0]=$i; $i=$i+1} $x`
+    # -- the return is the PRE-loop read $x (5); the in-loop store $a[0]=$i is
+    # threaded as a pure statement effect (its RESULT is never read, no post-loop
+    # read observes its memory). The store Assign is thus reachable only via the
+    # loop body's control edge, not the value graph, so the loader's repr pass
+    # never stamped it and the backend GAPed with repr=undef (019f3559). Its repr
+    # is derivable at the store site (rhs $i is Int); once stamped the store
+    # lowers and the whole method returns the pre-loop 5.
+    my ($kind, $out) = lower_and_run('my @a=(5,6,7); my $x=$a[0]; my $i=0; while($i<3){$a[0]=$i; $i=$i+1} $x');
+    is("$kind:$out", 'value:Int:5', 'control-only loop-body store lowers, returns pre-loop 5');
+};
+
 done_testing();

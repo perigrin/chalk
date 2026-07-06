@@ -654,6 +654,16 @@ sub _seed_and_propagate_reprs ($graphs) {
 # only, so a store's value subtree (e.g. `$a[0] = $b[0]`, where $b[0] is reached
 # only through the store) is otherwise unseen and stays untyped. Follows
 # control_in from every returns() node, then closes over inputs of each.
+#
+# A loop-body / branch-body store whose RESULT is never read (no value edge and
+# no post-body read observes its memory) is reachable only through the body's
+# control node (a Proj). The Return's control_in chain reaches the Loop/If via
+# the exit Region's inputs, but the BODY Proj hangs off the Loop/If as a
+# consumer, and the store hangs off that body Proj as a consumer. So this walk
+# also follows consumers that are Projs (the CFG body entry) or statement effects
+# (nodes carrying a control_in — the stores themselves). The consumer step is
+# scoped to those two kinds — arbitrary value fan-out is not pulled in — so it
+# discovers control-only-reachable stores without over-collecting (019f3559).
 sub _control_chain_nodes ($graph) {
     my %seen;
     my @out;
@@ -672,6 +682,18 @@ sub _control_chain_nodes ($graph) {
         push @q, $c if defined $c && blessed($c);
         push @q, grep { blessed($_) } $n->inputs->@*
             if $n->can('inputs') && defined $n->inputs;
+        # Follow consumers that are body Projs (the CFG entry into a loop/branch
+        # body) or statement effects (nodes carrying a control_in — the stores
+        # themselves): a body-nested store hangs off its body Proj as a consumer,
+        # and that Proj hangs off the Loop/If as a consumer, so consumers are the
+        # only edges that reach it.
+        if ($n->can('consumers') && defined $n->consumers) {
+            push @q, grep {
+                blessed($_)
+                    && ($_->operation eq 'Proj'
+                        || ($_->can('control_in') && defined $_->control_in))
+            } $n->consumers->@*;
+        }
     }
     return @out;
 }
