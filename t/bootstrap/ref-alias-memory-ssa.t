@@ -68,16 +68,18 @@ subtest 'aliased HASH store via ref is visible through the hash name' => sub {
     is("$kind:$out", 'value:Int:9', 'aliased hash store visible through the name -> 9');
 };
 
-subtest 'read via a ref ($r->[0] as rvalue) is not lowered yet' => sub {
-    # The 2d fix resolves the Ref container on the STORE lvalue path and in
-    # _container_ptr, but _lower_subscript does not unwrap a Ref container on the
-    # read path, so a bare rvalue read through a ref GAPs LOUDLY (honest, never a
-    # miscompile). Filed as a follow-up. When the read-side unwrap lands, drop
-    # the todo and assert Int:42.
-    todo 'read-via-ref rvalue unwrap not implemented (follow-up)' => sub {
-        my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $r=\@a; $r->[0]=42; $r->[0]');
-        is("$kind:$out", 'value:Int:42', 'read through the ref sees the aliased store -> 42');
-    };
+subtest 'read via a ref ($r->[0] as rvalue) resolves the aliased target' => sub {
+    # _lower_subscript unwraps a Ref container on the read path (zhi 019f37af),
+    # mirroring the 2d store-lvalue path + _container_ptr: $r=\@a shares backing
+    # storage, so $r->[0] reads the same aggregate $a[0] would. perl oracle = 42.
+    my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $r=\@a; $r->[0]=42; $r->[0]');
+    is("$kind:$out", 'value:Int:42', 'read through the ref sees the aliased store -> 42');
+    # A hash-ref rvalue read resolves the same way (the HashRef branch).
+    my ($hk, $ho) = lower_and_run('my %h=(a=>1); my $r=\%h; $r->{a}=9; $r->{a}');
+    is("$hk:$ho", 'value:Int:9', 'read through a hash ref sees the aliased store -> 9');
+    # A read via a ref BEFORE any store still resolves the aliased aggregate.
+    my ($rk, $ro) = lower_and_run('my @a=(5,6,7); my $r=\@a; $r->[1]');
+    is("$rk:$ro", 'value:Int:6', 'read via a ref with no store reads the initializer -> 6');
 };
 
 done_testing();

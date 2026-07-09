@@ -4064,7 +4064,12 @@ sub _lower_subscript {
           . "(memory-SSA phase 2b, zhi 019f33f6) -- refusing to mislower.";
     }
 
-    my $container = $node->inputs->[0];
+    # Unwrap a Ref container (`$r->[0]` as an rvalue, where $r=\@a) to its aliased
+    # target ArrayRef/HashRef, mirroring the store-lvalue path and _container_ptr
+    # (memory-SSA phase 2d). A Ref carries no repr of its own, so without this the
+    # repr dispatch below would GAP on it; _lower_array_read/_lower_hash_read then
+    # resolve the shared aggregate via _container_ptr (which also unwraps).
+    my $container = $self->_unwrap_ref_container($node->inputs->[0]);
     my $container_repr = _require_repr($container, 'Subscript.container');
 
     if ($container_repr eq 'Array' || $container_repr eq 'ArrayRef') {

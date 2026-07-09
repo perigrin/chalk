@@ -778,11 +778,22 @@ sub _propagate_computed_reprs ($graphs) {
     return;
 }
 
+# _unwrap_ref($container) — a Ref container (`$r->[0]` where $r=\@a) aliases its
+# target aggregate, so element-repr / static-miss inference must read the wrapped
+# ArrayRef/HashRef, not the Ref (which carries no aggregate structure of its own).
+# No-op for every non-Ref container. Mirrors Target::LLVM::_unwrap_ref_container.
+sub _unwrap_ref ($container) {
+    return $container unless defined $container && blessed($container)
+        && $container->operation eq 'Ref';
+    return $container->inputs->[0];
+}
+
 # _element_repr($container) — the element type of an ArrayRef/HashRef container,
 # inferred as the widest element repr of its inputs. For a HashRef the inputs
 # alternate key,value; the values are the odd positions. Returns undef when the
 # element types are not yet known.
 sub _element_repr ($container) {
+    $container = _unwrap_ref($container);
     return undef unless defined $container && blessed($container);
     my $op = $container->operation;
     my @in = $container->inputs->@*;
@@ -810,6 +821,7 @@ sub _element_repr ($container) {
 # the element repr and is bounds-checked at runtime). A miss reads perl's undef,
 # so the Subscript must load as Slot, not the element type.
 sub _static_miss ($container, $index) {
+    $container = _unwrap_ref($container);
     return false unless defined $container && blessed($container);
     return false unless defined $index && blessed($index)
         && $index->operation eq 'Constant';
