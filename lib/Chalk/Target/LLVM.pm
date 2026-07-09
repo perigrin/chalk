@@ -4414,6 +4414,16 @@ sub _lower_call_new {
         my $fidx = $finfo->{field_index};
         my $slot_idx = $fidx + 1;
         my $repr = defined $pval ? _require_repr($pval, 'Call(new).:param.field') : 'Int';
+        # The payload is STORED using the constructor argument's repr but READ
+        # back using the field's DECLARED repr (the FieldAccess path). If they
+        # disagree the read misinterprets the stored bits (an Int stored where a
+        # Str field's StrPair* is expected inttoptrs to garbage and segfaults),
+        # so refuse loudly rather than emit crashing IR (zhi 019f378f).
+        my $field_repr = $finfo->{field_repr};
+        die "GAP: Call(new) $class_name field '$pname' declared repr=$field_repr "
+          . "but constructor argument repr=$repr — repr conflict, refusing to "
+          . "emit mismatched store/read IR."
+            if defined $field_repr && $field_repr ne $repr;
         my $val_ref = $self->lower_value($pval);
 
         my $def_gep = $self->_fresh;
@@ -4603,7 +4613,14 @@ sub _lower_call_method {
         return $str_ptr;
     }
     else {
-        $self->_emit("  $result = call i64 $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> i64");
+        # The call's return type MUST match the typed fn pointer's return type
+        # ($fn_type, cast above from $result_repr), or lli rejects the module.
+        # Int -> i64, Bool -> i1, Num -> double. An unsupported repr already died
+        # in _method_fn_type above.
+        my $ret_ty = $result_repr eq 'Bool' ? 'i1'
+                   : $result_repr eq 'Num'  ? 'double'
+                   :                          'i64';
+        $self->_emit("  $result = call $ret_ty $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> $ret_ty");
         $self->{cache}{ $node->id } = $result;
         return $result;
     }
