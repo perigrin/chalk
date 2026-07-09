@@ -468,9 +468,13 @@ sub _populate_registry_from_mop_class {
             };
         }
         if ($mf->has_reader) {
-            unless (grep { ($_->{name} // '') eq $fname } @{ $registry->{$cname}{methods} }) {
+            # The :reader accessor method is named after the field with the
+            # sigil stripped ($left -> left); the call site dispatches on that
+            # bare name.
+            my $rname = $fname =~ s/^[\$\@%]//r;
+            unless (grep { ($_->{name} // '') eq $rname } @{ $registry->{$cname}{methods} }) {
                 push @{ $registry->{$cname}{methods} }, {
-                    name               => $fname,
+                    name               => $rname,
                     body_node          => undef,
                     return_repr        => $f_repr,
                     vtable_slot        => $mslot++,

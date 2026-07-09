@@ -429,7 +429,23 @@ sub _deserialize_graph ($method_data) {
     my $start   = $nodes[ $method_data->{start} ];
     my @returns = map { $nodes[$_] } $method_data->{returns}->@*;
 
-    return Chalk::IR::Graph->new(start => $start, returns => \@returns);
+    my $graph = Chalk::IR::Graph->new(start => $start, returns => \@returns);
+
+    # A statement-effect node reachable ONLY through a Return's control_in chain
+    # (a field store in an ADJUST body, whose result value is not the Return
+    # value) is not seeded by start/returns and would be dropped from the graph's
+    # membership. Merge each Return's control_in chain so those stores count as
+    # body statements (the ADJUST emitter reads graph->members).
+    for my $r (@returns) {
+        my $c = $r->can('control_in') ? $r->control_in : undef;
+        my %seen;
+        while (defined $c && blessed($c) && !$seen{ $c->id }++) {
+            $graph->merge($c);
+            $c = $c->can('control_in') ? $c->control_in : undef;
+        }
+    }
+
+    return $graph;
 }
 
 # -----------------------------------------------------------------------
@@ -442,19 +458,42 @@ sub from_json ($json_string) {
         $graphs{$name} = _deserialize_graph($data->{methods}{$name});
     }
 
-    # 4c: a `classes` section (from B::SoN) is replayed into a sealed MOP.
-    # The classes replay also seeds field-read reprs (which need the class
-    # field types) before the universal pass runs.
+    # 4c: a `classes` section (from B::SoN) is replayed into a sealed MOP. Field
+    # types must be inferred onto the raw records BEFORE the MOP is sealed, so
+    # each declared field carries its type (the backend reads it from the MOP).
     my $mop;
     if (ref $data->{classes} eq 'HASH' && %{ $data->{classes} }) {
-        $mop = _replay_classes($data->{classes}, \%graphs);
+        my $classes = $data->{classes};
+
+        # A :param field's type comes from the constructor argument.
+        _infer_param_field_types($classes, \%graphs);
+        # Stamp the field reads that are already typed, then propagate so an
+        # ADJUST expression over them (`$val * 2`) carries a repr.
+        _stamp_field_access_reprs($classes, \%graphs);
+        _seed_and_propagate_reprs(\%graphs);
+        # An ADJUST-only field (no :param, no default) is typed from the value an
+        # ADJUST stores into it (Assign(FieldAccess-lvalue, value)). Re-stamp the
+        # now-typed field reads (the accessor body's FieldAccess) after.
+        if (_infer_field_types_from_stores($classes, \%graphs)) {
+            _stamp_field_access_reprs($classes, \%graphs);
+        }
+
+        $mop = _replay_classes($classes, \%graphs);
     }
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
     # through computed + aggregate-read nodes for EVERY graph (class or not).
     # The backend requires a repr on these nodes to lower them (RC1).
     _seed_and_propagate_reprs(\%graphs);
+
     _stamp_method_call_reprs($data->{classes} // {}, \%graphs);
+
+    # Stamping method Calls newly types nodes that a computed expression consumes
+    # (e.g. Add over two method-Call results): those Call reprs did not exist
+    # when the first propagation ran. A second, idempotent propagation pass now
+    # resolves the computed consumers. It re-derives only nodes still lacking a
+    # repr, so a graph with no method Calls is unaffected.
+    _seed_and_propagate_reprs(\%graphs);
 
     # $mop is returned only in list context; scalar context stays \%graphs for
     # the existing single-return callers.
@@ -506,23 +545,8 @@ sub _ctor_arg_reprs ($graphs) {
 sub _replay_classes ($classes, $graphs) {
     require Chalk::MOP;
 
-    # A :param field with no default has no declared type (the producer only
-    # types a field from a constant default). Infer it from the CONSTRUCTOR
-    # ARGUMENT before building the MOP: a Call(new) binds param_names[i] ->
-    # inputs[i], so a field whose param_name matches carries the argument's
-    # repr. Fill it onto the raw field record so BOTH declare_field (the MOP /
-    # struct layout) and _stamp_field_access_reprs (the FieldAccess nodes) see
-    # it. Cross-graph: the Call(new) is in the driver graph, the field in a
-    # class section.
-    my %ctor_arg_repr = _ctor_arg_reprs($graphs);
-    for my $cname (keys %$classes) {
-        for my $f (($classes->{$cname}{fields} // [])->@*) {
-            next if defined $f->{type};
-            my $pn = $f->{param_name} // next;
-            my $repr = $ctor_arg_repr{"$cname\0$pn"} // next;
-            $f->{type} = $repr;
-        }
-    }
+    # Field types are inferred onto the raw records before this point (ctor-arg
+    # and ADJUST-store passes in from_json), so declare_field below sees them.
 
     my $mop = Chalk::MOP->new;
 
@@ -861,6 +885,78 @@ sub _static_miss ($container, $index) {
     return false;   # container not a literal aggregate we can decide
 }
 
+# _infer_param_field_types($classes, \%graphs) — type a :param field with no
+# declared type from the CONSTRUCTOR ARGUMENT: a Call(new) binds param_names[i]
+# -> inputs[i], so a field whose param_name matches carries the argument's repr.
+# Fills the raw field record so declare_field (the MOP / struct layout) and
+# _stamp_field_access_reprs (the FieldAccess nodes) both see it. Cross-graph: the
+# Call(new) is in the driver graph, the field in a class section. Returns the
+# number of field types newly inferred.
+sub _infer_param_field_types ($classes, $graphs) {
+    my %ctor_arg_repr = _ctor_arg_reprs($graphs);
+    my $inferred = 0;
+    for my $cname (keys %$classes) {
+        for my $f (($classes->{$cname}{fields} // [])->@*) {
+            next if defined $f->{type};
+            my $pn = $f->{param_name} // next;
+            my $repr = $ctor_arg_repr{"$cname\0$pn"} // next;
+            $f->{type} = $repr;
+            $inferred++;
+        }
+    }
+    return $inferred;
+}
+
+# _infer_field_types_from_stores($classes, \%graphs) — type a field with no
+# declared type from the value an ADJUST block stores into it. An ADJUST store
+# is Assign(control, FieldAccess(ix)-lvalue, value); when the value carries a
+# repr, that repr is the field's type. Writes the type onto the raw field record
+# (so _stamp_field_access_reprs and the MOP both see it) only when the field is
+# still untyped — never overrides a declared or constructor-argument type.
+# Returns the number of field types newly inferred.
+sub _infer_field_types_from_stores ($classes, $graphs) {
+    # (class, fieldix) -> stored value repr, from Assign(FieldAccess-lvalue, val).
+    # A stmt-effect field store is threaded via control_in (not a data input of
+    # the Return), so it is reachable only by following control_in as well as
+    # data inputs -- Graph::nodes walks data edges, so collect the store nodes by
+    # a BFS over both edge kinds from each Return.
+    my %store_repr;
+    for my $g (values %$graphs) {
+        my %seen;
+        my @queue = grep { blessed($_) } $g->returns->@*;
+        while (my $node = shift @queue) {
+            next if $seen{ $node->id }++;
+            push @queue, grep { blessed($_) } $node->inputs->@*;
+            push @queue, $node->control_in
+                if $node->can('control_in') && blessed($node->control_in);
+
+            next unless $node->operation eq 'Assign';
+            # A loaded stmt-effect Assign carries control in control_in, so its
+            # data inputs are [target, value].
+            my ($lv, $val) = ($node->inputs->[0], $node->inputs->[1]);
+            next unless blessed($lv) && $lv->operation eq 'FieldAccess';
+            next unless blessed($val);
+            my $repr = $val->representation // next;
+            my $key  = ($lv->field_stash // '') . "\0" . ($lv->field_index // -1);
+            # A field written with conflicting reprs across stores is ambiguous;
+            # leave it untyped (a GAP) rather than pick one (a possible miscompile).
+            $store_repr{$key} = exists $store_repr{$key}
+                && ($store_repr{$key} // '') ne $repr ? undef : $repr;
+        }
+    }
+
+    my $inferred = 0;
+    for my $cname (keys %$classes) {
+        for my $f (($classes->{$cname}{fields} // [])->@*) {
+            next if defined $f->{type};
+            my $repr = $store_repr{"$cname\0" . ($f->{fieldix} // -1)} // next;
+            $f->{type} = $repr;
+            $inferred++;
+        }
+    }
+    return $inferred;
+}
+
 # _stamp_field_access_reprs($classes, \%graphs) — set each FieldAccess node's
 # representation from its declared field type. The field type comes from the
 # class section (4c-1b infers it from the field default); the backend needs a
@@ -903,6 +999,16 @@ sub _stamp_method_call_reprs ($classes, $graphs) {
             next unless defined $val && blessed($val);
             my $repr = $val->representation;
             $ret_repr{"$cname\::$mname"} = $repr if defined $repr;
+        }
+
+        # A :reader field has no method graph — the backend synthesizes the
+        # accessor. Its return repr IS the field type (filled by _replay_classes
+        # from the default or the constructor argument). The reader method is
+        # named after the field, sigil-stripped.
+        for my $f (($classes->{$cname}{fields} // [])->@*) {
+            next unless $f->{is_reader} && defined $f->{type};
+            my $rname = ($f->{name} // '') =~ s/^[\$\@%]//r;
+            $ret_repr{"$cname\::$rname"} = $f->{type} if length $rname;
         }
     }
 
