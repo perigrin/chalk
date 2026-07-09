@@ -4465,7 +4465,14 @@ sub _lower_call_new {
         my $slot_idx = $fidx + 1;
         if ($finfo->{has_default}) {
             my $def_node = $finfo->{default_node};
-            my $def_repr = defined $def_node ? _require_repr($def_node, 'Call(new).default.field') : 'Int';
+            # has_default promises a default value node. If it is missing the MOP
+            # is ill-formed: silently storing 0 reads at runtime identically to a
+            # real default of 0, so a malformed IR would look like a miscompile
+            # (this cost a full false-miscompile chase during 2c recon). Refuse
+            # loudly instead (zhi 019f378f).
+            die "LLVM MOP: field '$pname' has has_default=true but no default "
+              . "value node — ill-formed MOP." unless defined $def_node;
+            my $def_repr = _require_repr($def_node, 'Call(new).default.field');
             # Only Int defaults are lowered (the :param binding path boxes Str
             # into a StrPair and ptrtoints refs — the default path does not yet;
             # a Str default stored as add i64 0,<i8*> was invalid IR. Tracked
@@ -4474,7 +4481,7 @@ sub _lower_call_new {
             die "GAP: field '$pname' default value repr=$def_repr is not lowered "
               . "(only Int defaults; Str/ref defaults are a tracked follow-up) — "
               . "refusing to emit invalid IR." if $def_repr ne 'Int';
-            my $def_ref  = defined $def_node ? $self->lower_value($def_node) : '0';
+            my $def_ref  = $self->lower_value($def_node);
             my $def_gep = $self->_fresh;
             $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; default field[$fidx] defined");
             $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' default defined=true");
