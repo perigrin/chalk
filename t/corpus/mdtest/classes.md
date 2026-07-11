@@ -223,6 +223,47 @@ return %result
 L: GREEN
 ```
 
+## method-call-chain
+
+A CHAIN of two void mutating calls followed by a read: `$c->inc; $c->inc;
+$c->val`. Each `inc` stores the incremented field back, and the two stores are
+memory-ordered (call 2 observes call 1's store), so `val` reads the accumulated
+value. The non-tail `inc` is a void statement effect threaded via control_in;
+without ordering both it and the field mutation would be lost (zhi 019f2dee).
+
+```perl
+# source
+use feature 'class';
+no warnings 'experimental::class';
+class Counter {
+    field $n :param = 0;
+    method inc { $n += 1 }
+    method val { return $n }
+}
+my $c = Counter->new(n => 10);
+$c->inc;
+$c->inc;
+$c->val
+```
+
+```behavior
+return: Int:12
+context: scalar
+```
+
+```ir
+%cls       = MOP::Class(name: "Counter")
+%mf_n      = MOP::Field(class: %cls, name: "n", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
+%ten       = Constant(10) :Int
+%new_c     = Call(%ten, dispatch_kind: "method", name: "new", class: "Counter", param_names: "n") :Object
+%inc1      = Call(%new_c, dispatch_kind: "method", name: "inc", class: "Counter") :Int
+%inc2      = Call(%new_c, dispatch_kind: "method", name: "inc", class: "Counter") :Int
+%result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
+control: %inc1 -> %inc2 -> %result
+return %result
+L: GREEN
+```
+
 ## class-isa
 
 A child class that inherits a method from a parent class via `:isa(Parent)`.

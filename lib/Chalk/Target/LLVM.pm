@@ -367,6 +367,36 @@ sub _method_body_root {
     return $value;
 }
 
+# _method_body_stmts($mop_method) -> \@stmt_nodes
+#
+# The method body's statement-effect nodes (field-store Assign, void Call) in
+# control order, recovered by following the Return's control_in chain. A method
+# like `method inc { $n += 1 }` produces Start->Assign->Return, where the Assign
+# is a stmt-effect field store threaded via control_in; the Return's value input
+# is the += result, NOT the store. The store must be emitted before the value is
+# returned or the field mutation is lost. Returns [] for a store-free body
+# (e.g. `method val { return $n }`), which is a plain value read.
+sub _method_body_stmts {
+    my ($mop_method) = @_;
+    my $graph = $mop_method->graph or return [];
+    my @returns = grep {
+        blessed($_) && $_->can('operation') && $_->operation eq 'Return'
+    } @{ $graph->returns };
+    return [] unless @returns == 1;
+
+    my @chain;
+    my $ctrl = $returns[0]->can('control_in') ? $returns[0]->control_in : undef;
+    while (defined $ctrl && blessed($ctrl)) {
+        my $op = $ctrl->can('operation') ? $ctrl->operation : '';
+        last if $op eq 'Start';
+        push @chain, $ctrl;
+        $ctrl = $ctrl->can('control_in') ? $ctrl->control_in : undef;
+    }
+    # control_in points predecessor-ward, so the chain is tail-first; reverse
+    # to statement order (earliest first).
+    return [ reverse @chain ];
+}
+
 # _phaser_body_in_control_order($phaser) -> \@statement_nodes
 #
 # ADJUST body statements from the phaser's graph, in control-chain order.
@@ -440,6 +470,7 @@ sub _populate_registry_from_mop_class {
             push @{ $registry->{$cname}{methods} }, {
                 name        => $mname,
                 body_node   => $body_node,
+                body_stmts  => _method_body_stmts($m),
                 return_repr => $ret_repr,
                 vtable_slot => $mslot++,
             };
@@ -717,6 +748,13 @@ sub _emit_class_registry_ir {
             $body_ctx->{class_registry} = $registry;
             $body_ctx->{_need_strpair}  = $ctx->{_need_strpair} // 0;
 
+            # Emit the body's statement effects (field-store Assign, void Call)
+            # in control order BEFORE the return value, so a `method inc { $n +=
+            # 1 }` writes the field back. Same shape as the main graph's control
+            # chain and the ADJUST body loop.
+            $body_ctx->process_control_node($_)
+                for @{ $minfo->{body_stmts} // [] };
+
             # Lower the body value node into the method body context
             my $body_val = $body_ctx->lower_value($body_node);
 
@@ -857,26 +895,40 @@ sub lower_with_elaboration {
     # continue from head.control_in. This matches the Elaborate pass's M2 path.
     {
         my @chain;
-        my $ctrl = $return_node->control_in;
-        while (defined $ctrl) {
-            my $op = $ctrl->can('operation') ? $ctrl->operation : '';
-            if ($op eq 'Region') {
-                # Region-as-control_in: push the owning If/Loop (the head) so
-                # process_control_node handles it correctly, then continue from
-                # the head's control_in predecessor.
-                my $head = $ctrl->can('head') ? $ctrl->head : undef;
-                if (defined $head) {
-                    push @chain, $head;
-                    $ctrl = $head->can('control_in') ? $head->control_in : undef;
+        my %seen;
+        # Seed the control chain from Return.control_in AND from any trailing
+        # void statement-effect Calls carried as extra Return inputs. A void
+        # method call (`$c->inc;`) is NOT the return value, so the loader keeps
+        # it as inputs[1..] (a data input) rather than demoting it to
+        # control_in; its own control_in chain threads the preceding effects.
+        # Without seeding here the effect is never scheduled and the mutation
+        # is lost (and it hits the NO-REPR guard).
+        my @seeds = grep { defined && blessed($_) } (
+            $return_node->control_in,
+            @{ $return_node->inputs }[ 1 .. $#{ $return_node->inputs } ],
+        );
+        for my $ctrl (@seeds) {
+            while (defined $ctrl && blessed($ctrl)) {
+                last if $seen{ $ctrl->id }++;
+                my $op = $ctrl->can('operation') ? $ctrl->operation : '';
+                if ($op eq 'Region') {
+                    # Region-as-control_in: push the owning If/Loop (the head) so
+                    # process_control_node handles it correctly, then continue
+                    # from the head's control_in predecessor.
+                    my $head = $ctrl->can('head') ? $ctrl->head : undef;
+                    if (defined $head) {
+                        push @chain, $head;
+                        $ctrl = $head->can('control_in') ? $head->control_in : undef;
+                    }
+                    else {
+                        push @chain, $ctrl;
+                        last;
+                    }
                 }
                 else {
                     push @chain, $ctrl;
-                    last;
+                    $ctrl = $ctrl->can('control_in') ? $ctrl->control_in : undef;
                 }
-            }
-            else {
-                push @chain, $ctrl;
-                $ctrl = $ctrl->can('control_in') ? $ctrl->control_in : undef;
             }
         }
         # Memory-SSA: scan the graph's memory shape (a store under a branch/loop

@@ -728,11 +728,23 @@ sub _seed_and_propagate_reprs ($graphs) {
 sub _control_chain_nodes ($graph) {
     my %seen;
     my @out;
-    # Seed: the control_in predecessor of each return + effect in the chain.
+    # Seed: the control_in predecessor of each return + effect in the chain,
+    # PLUS any trailing void statement-effect Calls carried as extra Return
+    # inputs. A void method call (`$c->inc;`) is not the return value, so the
+    # loader keeps it as inputs[1..] rather than demoting it to control_in; its
+    # own control_in chain threads the preceding void effects. Seeding from it
+    # here lets those effects be discovered and repr-stamped (else the backend
+    # NO-REPR guard fires on a non-tail void Call).
     my @q;
     for my $r (grep { blessed($_) } $graph->returns->@*) {
         my $c = $r->can('control_in') ? $r->control_in : undef;
         push @q, $c if defined $c && blessed($c);
+        if ($r->can('inputs') && defined $r->inputs) {
+            my @ins = $r->inputs->@*;
+            push @q, grep {
+                blessed($_) && $_->can('control_in') && defined $_->control_in
+            } @ins[ 1 .. $#ins ];
+        }
     }
     while (my $n = shift @q) {
         next unless blessed($n);
@@ -1091,8 +1103,14 @@ sub _stamp_method_call_reprs ($classes, $graphs) {
     }
 
     # Walk every graph's method Calls and stamp from the resolved callee.
+    # Augment $g->nodes (input closure only) with the control-chain nodes: a
+    # void method Call (`$c->inc;`) reached only via control_in is otherwise
+    # unseen here and hits the backend NO-REPR guard.
     for my $g (values %$graphs) {
-        for my $node ($g->nodes->@*) {
+        my %seen;
+        my @nodes = grep { !$seen{ $_->id }++ }
+            ($g->nodes->@*, _control_chain_nodes($g));
+        for my $node (@nodes) {
             next unless $node->operation eq 'Call';
             next unless ($node->dispatch_kind // '') eq 'method';
             next if ($node->name // '') eq 'new';   # constructor: backend-handled
