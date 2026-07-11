@@ -134,4 +134,42 @@ PL
     is( $out, perl_val($prog), 'lli == perl' );
 };
 
+# A Str field DEFAULT (field $msg :param = "hi"), constructed with NO arg, must
+# box the default the same way a Str :param does (StrPair) -- not GAP like it
+# did when only Int defaults lowered (019f4512).
+subtest 'str default: unsupplied Str :param uses its default (-> "hi")' => sub {
+    my $prog = <<'PL' . qq{sub corpus_case { my \$g = Greeter->new; \$g->hello }\n};
+use feature 'class';
+no warnings 'experimental::class';
+class Greeter {
+    field $msg :param = "hi";
+    method hello { $msg }
+}
+package main;
+PL
+    my ( $kind, $out ) = lower_and_run($prog);
+    is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
+    is( $out, 'Str:hi', 'lli returns the Str default -> hi' );
+    is( $out, perl_val($prog), 'lli == perl' );
+};
+
+# The default is SKIPPED when the Str :param is supplied -- the ctor-arg Str
+# path (which already worked) must still win, so the default helper refactor
+# does not double-store or clobber.
+subtest 'str default: a supplied Str :param overrides the default (-> "bye")' => sub {
+    my $prog = <<'PL' . qq{sub corpus_case { my \$g = Greeter->new(msg => "bye"); \$g->hello }\n};
+use feature 'class';
+no warnings 'experimental::class';
+class Greeter {
+    field $msg :param = "hi";
+    method hello { $msg }
+}
+package main;
+PL
+    my ( $kind, $out ) = lower_and_run($prog);
+    is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
+    is( $out, 'Str:bye', 'lli returns the supplied arg -> bye' );
+    is( $out, perl_val($prog), 'lli == perl' );
+};
+
 done_testing();

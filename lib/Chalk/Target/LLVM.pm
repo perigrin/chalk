@@ -4403,6 +4403,62 @@ sub _lower_hash_deref {
 
 # _lower_call_new($node) -> $llvm_ref
 #
+# _store_field_payload($val_ref, $repr, $pay_gep, $pname) — store a lowered
+# value into an object field's i64 payload slot, boxing per repr. Shared across
+# the :param binding path and the default-value path so a Str default boxes the
+# same way a Str :param does (019f4512): Str -> malloc a %StrPair, store ptr+len,
+# ptrtoint to i64; Bool -> zext i1 to i64; anything else (Int/refs already an
+# i64) -> identity. The Str length is read from _str_len_table (keyed by the
+# value's SSA ref), falling back to a runtime strlen when the length is not
+# compile-time tracked. Caller has already emitted the defined-bit store and
+# resolved $pay_gep.
+sub _store_field_payload {
+    my ($self, $val_ref, $repr, $pay_gep, $pname) = @_;
+
+    if ($repr eq 'Str') {
+        my $len_ref  = $self->{_str_len_table}{$val_ref};
+        my $pair_raw = $self->_fresh;
+        my $pair_ptr = $self->_fresh;
+        $self->_emit("  $pair_raw = call i8* \@malloc(i64 16)  ; alloc StrPair for field '$pname'");
+        $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
+        my $pp_gep = $self->_fresh;
+        $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
+        $self->_emit("  store i8* $val_ref, i8** $pp_gep  ; store str ptr");
+        my $pl_gep = $self->_fresh;
+        $self->_emit("  $pl_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
+        my $len_val = defined $len_ref ? $len_ref : 'zeroinitializer';
+        if ($len_val eq 'zeroinitializer') {
+            $len_val = $self->_fresh;
+            $self->_emit("  $len_val = call i64 \@strlen(i8* $val_ref)  ; strlen for Str field '$pname'");
+        }
+        $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
+        my $pair_as_i64 = $self->_fresh;
+        $self->_emit("  $pair_as_i64 = ptrtoint %StrPair* $pair_ptr to i64  ; StrPair* -> i64 payload");
+        $self->_emit("  store i64 $pair_as_i64, i64* $pay_gep  ; field '$pname' Str payload = StrPair*");
+        $self->{_need_strpair} = 1;
+    } else {
+        my $pay_i64 = $self->_fresh;
+        if ($repr eq 'Bool') {
+            $self->_emit("  $pay_i64 = zext i1 $val_ref to i64  ; Bool->i64 for field '$pname'");
+        } elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
+            # Pointer-repr value: ptrtoint before storing into the i64 payload,
+            # mirroring the FieldAccess-lvalue store. A bare `add i64 0, <ptr>`
+            # would be invalid IR. (A ref :param/default is blocked upstream
+            # today by a method-body repr GAP, so this path is a guard against a
+            # latent miscompile if that GAP is later closed, not a live path.)
+            $self->_emit("  $pay_i64 = ptrtoint i8* $val_ref to i64  ; $repr ptr -> i64 for field '$pname'");
+        } elsif ($repr eq 'Int') {
+            $self->_emit("  $pay_i64 = add i64 0, $val_ref  ; identity: Int->i64 for field '$pname'");
+        } else {
+            die "GAP: field '$pname' value repr=$repr cannot be stored in an i64 "
+              . "payload (only Int/Bool/Str/ArrayRef/HashRef are lowered) — "
+              . "refusing to emit invalid IR.";
+        }
+        $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; field '$pname' payload");
+    }
+    return;
+}
+
 # Lowers a Call(dispatch_kind='method', name='new') node.
 # This is the canonical form of the New node: malloc + vtable bind + :param binding.
 # Inputs are the :param values; the class rides as the class_name attribute.
@@ -4469,36 +4525,7 @@ sub _lower_call_new {
         my $pay_gep = $self->_fresh;
         $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; field[$fidx] payload");
 
-        if ($repr eq 'Str') {
-            my $len_ref  = $self->{_str_len_table}{$val_ref};
-            my $pair_raw = $self->_fresh;
-            my $pair_ptr = $self->_fresh;
-            $self->_emit("  $pair_raw = call i8* \@malloc(i64 16)  ; alloc StrPair for field '$pname'");
-            $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
-            my $pp_gep = $self->_fresh;
-            $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
-            $self->_emit("  store i8* $val_ref, i8** $pp_gep  ; store str ptr");
-            my $pl_gep = $self->_fresh;
-            $self->_emit("  $pl_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
-            my $len_val = defined $len_ref ? $len_ref : 'zeroinitializer';
-            if ($len_val eq 'zeroinitializer') {
-                $len_val = $self->_fresh;
-                $self->_emit("  $len_val = call i64 \@strlen(i8* $val_ref)  ; strlen for Str field '$pname'");
-            }
-            $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
-            my $pair_as_i64 = $self->_fresh;
-            $self->_emit("  $pair_as_i64 = ptrtoint %StrPair* $pair_ptr to i64  ; StrPair* -> i64 payload");
-            $self->_emit("  store i64 $pair_as_i64, i64* $pay_gep  ; field '$pname' Str payload = StrPair*");
-            $self->{_need_strpair} = 1;
-        } else {
-            my $pay_i64 = $self->_fresh;
-            if ($repr eq 'Bool') {
-                $self->_emit("  $pay_i64 = zext i1 $val_ref to i64  ; Bool->i64 for field '$pname'");
-            } else {
-                $self->_emit("  $pay_i64 = add i64 0, $val_ref  ; identity: $repr->i64 for field '$pname'");
-            }
-            $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; field '$pname' payload");
-        }
+        $self->_store_field_payload($val_ref, $repr, $pay_gep, $pname);
     }
 
     # Store default/uninit fields not provided as :param. Match the same
@@ -4520,23 +4547,15 @@ sub _lower_call_new {
             die "LLVM MOP: field '$pname' has has_default=true but no default "
               . "value node — ill-formed MOP." unless defined $def_node;
             my $def_repr = _require_repr($def_node, 'Call(new).default.field');
-            # Only Int defaults are lowered (the :param binding path boxes Str
-            # into a StrPair and ptrtoints refs — the default path does not yet;
-            # a Str default stored as add i64 0,<i8*> was invalid IR. Tracked
-            # follow-up: share the slot-payload store helper across :param/
-            # default/FieldAccess-lvalue sites).
-            die "GAP: field '$pname' default value repr=$def_repr is not lowered "
-              . "(only Int defaults; Str/ref defaults are a tracked follow-up) — "
-              . "refusing to emit invalid IR." if $def_repr ne 'Int';
             my $def_ref  = $self->lower_value($def_node);
             my $def_gep = $self->_fresh;
             $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; default field[$fidx] defined");
             $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' default defined=true");
             my $pay_gep = $self->_fresh;
             $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; default field[$fidx] payload");
-            my $pay_i64 = $self->_fresh;
-            $self->_emit("  $pay_i64 = add i64 0, $def_ref  ; default value for field '$pname'");
-            $self->_emit("  store i64 $pay_i64, i64* $pay_gep");
+            # Box the default the same way a :param value is (Str -> StrPair,
+            # Bool -> zext, else identity) via the shared payload-store helper.
+            $self->_store_field_payload($def_ref, $def_repr, $pay_gep, $pname);
         } else {
             my $def_gep = $self->_fresh;
             $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; uninit field[$fidx] defined");

@@ -72,6 +72,41 @@ return %result
 L: GREEN
 ```
 
+## field-str-default
+
+A `:param` field with a Str DEFAULT. Constructed with no argument, the field
+takes its default value. The default is boxed into a %StrPair the same way a
+supplied Str `:param` is, via the shared field-payload store helper — earlier
+only Int defaults lowered and a Str default GAPped (019f4512).
+
+```perl
+# source
+use feature 'class';
+no warnings 'experimental::class';
+class Greeter {
+    field $msg :param = "hi";
+    method hello { return $msg }
+}
+my $g = Greeter->new;
+$g->hello
+```
+
+```behavior
+return: Str:hi
+context: scalar
+```
+
+```ir
+%cls    = MOP::Class(name: "Greeter")
+%mf     = MOP::Field(class: %cls, name: "msg", fieldix: 0, param: true, reader: false, has_default: true, type: "Str")
+%fa     = FieldAccess(field_index: 0, field_stash: "Greeter") :Str
+%mi     = MOP::Method(class: %cls, name: "hello", body: %fa, return_repr: "Str")
+%new_g  = Call(dispatch_kind: "method", name: "new", class: "Greeter") :Object
+%result = Call(%new_g, dispatch_kind: "method", name: "hello", class: "Greeter") :Str
+return %result
+L: GREEN
+```
+
 ## field-attrs
 
 Fields may combine `:param` (constructor binding) and `:reader` (auto-generated
