@@ -967,6 +967,13 @@ sub _run_ir_shape_check {
 # Verdicts: PASS (all spec signatures found, or nothing to enforce),
 # FAIL (missing => [readable signatures]), SKIP (no ir block, or the spec
 # block itself is unbuildable — unverifiable, NOT a pass).
+# perl's &&, ||, // are operand-RETURNING (`$a && $b` yields $a or $b), so
+# their result repr is the operand's — which B::SoN leaves unstamped, letting
+# the loader infer it. The corpus spec pins the operand type (:Int). Accept an
+# unstamped real And/Or/DefinedOr against the spec's declared repr. Read by
+# both the multiset _sig_match and the rooted _pair_match.
+my %_OPERAND_RETURNING = (And => 1, Or => 1, DefinedOr => 1);
+
 sub shape_subset_check {
     my ($class, $ir_text, $return_node) = @_;
 
@@ -1050,9 +1057,513 @@ sub shape_subset_check {
     my @ordered = sort { _sig_specificity($b) <=> _sig_specificity($a) } @spec;
     my @missing = map  { _sig_str($_) }
                   grep { !_sig_match($_, \@real) } @ordered;
-    return @missing
-        ? { verdict => 'FAIL', missing => \@missing }
-        : { verdict => 'PASS', missing => [] };
+    return { verdict => 'FAIL', missing => \@missing }
+        if @missing;
+
+    # Rooted-wiring gate (zhi 019f2af2 item 2): the multiset check above proves
+    # every declared node EXISTS in the real graph, but is edge-blind — it
+    # passes a right-kinds/wrong-WIRING graph (operand swap, dropped store,
+    # buried fold constant, root wrapping). AND a rooted walk: the spec Return
+    # value must MATCH the real Return value operand-by-position, seeing through
+    # the same satisfaction rules as transparent wrappers. If the walk rejects
+    # the wiring, FAIL even though the multiset held.
+    unless (_rooted_match($spec_return, $return_node, \%satisfied)) {
+        return { verdict => 'FAIL', missing => ['<rooted wiring mismatch at return value>'] };
+    }
+
+    return { verdict => 'PASS', missing => [] };
+}
+
+# ---------------------------------------------------------------------------
+# PRIVATE: rooted-wiring match (edge-precise, position-locked)
+# ---------------------------------------------------------------------------
+
+# _rooted_match($spec_return, $real_return, \%satisfied) -> bool
+#
+# The wiring leg of the shape contract. Both arguments are Return nodes; the
+# value operand is inputs[0]. The spec's resolved return value must MATCH the
+# real's resolved return value at the return position (NO subset-descent into
+# real operands there — that is the H3 fix: a real return that WRAPS the spec
+# value, e.g. Add(a-b, 100), is rejected). Sub-values are matched positionally,
+# seeing through the satisfaction rules (subsumed pad/coerce/deref/fold/store)
+# as transparent value-equivalences.
+sub _rooted_match {
+    my ($spec_return, $real_return, $satisfied) = @_;
+    my $spec_val = _return_value($spec_return);
+    my $real_val = _return_value($real_return);
+    return true unless defined $spec_val;   # nothing to enforce
+    return false unless defined $real_val;
+
+    my $ctx = {
+        satisfied    => $satisfied,
+        pad_multi    => _pad_multi_assigned($spec_return),
+        pairing      => {},   # (spec_id\0real_id) pairs in progress — cycle guard
+    };
+    return _node_match($spec_val, $real_val, $ctx);
+}
+
+# _return_value($return_node) -> the value operand (inputs[0]) or undef.
+sub _return_value {
+    my ($n) = @_;
+    return undef unless blessed($n) && $n->can('inputs') && $n->inputs->@*;
+    return $n->inputs->[0];
+}
+
+# _pad_multi_assigned($spec_return) -> { vardecl_id => 1 }
+#
+# The set of pads (keyed by their VarDecl node id) whose value at a read is a
+# BRANCH MERGE the spec cannot name — resolving to {any}. A pad merges when it
+# is written by 2+ distinct stores, OR by a single store that is CONDITIONAL
+# (control-dependent on a Proj — a postfix-if / one-armed branch, whose read
+# merges the store value with the fall-through init). An UNCONDITIONAL single
+# store (RMW increment, compound-assign, concat-assign) is NOT a merge: it
+# resolves to that store's value. Stores are found by a BIDIRECTIONAL walk
+# (inputs + control_in + consumers) because branch stores hang off Proj/Region
+# control edges the forward return-walk never reaches.
+sub _pad_multi_assigned {
+    my ($spec_return) = @_;
+    my %store_vd;      # vardecl_id => count of distinct stores
+    my %cond_vd;       # vardecl_id => a store is conditional (under a Proj)
+    for my $node (_collect_bidirectional($spec_return)) {
+        my $k = _node_kind($node);
+        next unless $k eq 'Assign' || $k eq 'CompoundAssign';
+        my $vd = _store_target_vardecl($node) // next;
+        $store_vd{ $vd->id }++;
+        $cond_vd{ $vd->id } = 1 if _store_is_conditional($node);
+    }
+    return {
+        map  { $_ => 1 }
+        grep { $store_vd{$_} >= 2 || $cond_vd{$_} }
+        keys %store_vd
+    };
+}
+
+# _store_is_conditional($store) -> bool — is this store control-dependent on a
+# Proj (i.e. it fires only on one arm of a branch)? Walk the control_in chain
+# for a Proj node.
+sub _store_is_conditional {
+    my ($store) = @_;
+    my %seen;
+    my $ctrl = $store->can('control_in') ? $store->control_in : undef;
+    while (blessed($ctrl) && !$seen{ $ctrl->id }++) {
+        return true if _node_kind($ctrl) eq 'Proj';
+        $ctrl = $ctrl->can('control_in') ? $ctrl->control_in : undef;
+    }
+    return false;
+}
+
+# _store_target_vardecl($assign) -> the VarDecl bound by the store's lhs
+# PadAccess, or undef if the lhs is not a pad rebind.
+sub _store_target_vardecl {
+    my ($assign) = @_;
+    return undef unless $assign->can('inputs') && $assign->inputs->@*;
+    my $lhs = $assign->inputs->[0];
+    return undef unless blessed($lhs) && _node_kind($lhs) eq 'PadAccess';
+    return undef unless $lhs->can('inputs') && $lhs->inputs->@*;
+    my $vd = $lhs->inputs->[0];
+    return blessed($vd) ? $vd : undef;
+}
+
+# _last_pad_store($padaccess, $ctx) -> the single store node to this pad, or ().
+# Returns the store (Assign/CompoundAssign) when EXACTLY one exists; a
+# multi-store (branch) pad is handled as {any} before this is consulted.
+sub _last_pad_store {
+    my ($padaccess) = @_;
+    return () unless $padaccess->can('inputs') && $padaccess->inputs->@*;
+    my $vd = $padaccess->inputs->[0];
+    return () unless blessed($vd);
+    my @stores;
+    for my $node (_collect_bidirectional($padaccess)) {
+        my $k = _node_kind($node);
+        next unless $k eq 'Assign' || $k eq 'CompoundAssign';
+        my $svd = _store_target_vardecl($node);
+        push @stores, $node if defined $svd && $svd->id eq $vd->id;
+    }
+    return @stores == 1 ? ($stores[0]) : ();
+}
+
+# _collect_bidirectional($node) -> @nodes reachable via inputs + control_in +
+# consumers (the whole connected spec graph, so branch-control stores hanging
+# off Proj/Region are visible). Deduped.
+sub _collect_bidirectional {
+    my ($start) = @_;
+    my %seen;
+    my @queue = ($start);
+    my @out;
+    while (my $n = shift @queue) {
+        next unless blessed($n);
+        next if $seen{ $n->id }++;
+        push @out, $n;
+        if ($n->can('inputs') && defined $n->inputs) {
+            push @queue, grep { blessed($_) } $n->inputs->@*;
+        }
+        push @queue, $n->control_in
+            if $n->can('control_in') && defined $n->control_in;
+        push @queue, $n->consumers->@*
+            if $n->can('consumers') && defined $n->consumers;
+    }
+    return @out;
+}
+
+# _resolve($node, $ctx) -> ($resolved_node, $any) — see-through the transparent
+# satisfaction wrappers to the VALUE a node stands for. Returns ($node, 0)
+# normally, or (undef, 1) for {any} (a branch-merged pad the spec can't name).
+# Applied on BOTH spec and real nodes so the two resolve to the same shape:
+#   Coerce / PostfixDeref            -> inputs[0] (transparent representation
+#                                       change / implicit aggregate deref)
+#   Assign/CompoundAssign(Subscript) -> the lval Subscript read (an element
+#                                       store returns the read-back slot value)
+#   Assign/CompoundAssign(PadAccess) -> the store's rhs (a scalar rebind
+#                                       returns its assigned value)
+#   PadAccess                        -> {any} if branch-merged; else its single
+#                                       store's value; else its VarDecl init;
+#                                       else uninitialised (unresolvable -> the
+#                                       node itself, which cannot match a value)
+# Resolution iterates to a fixpoint (a pad may resolve to a store rhs that is
+# itself a Coerce, etc.).
+sub _resolve {
+    my ($node, $ctx, $store_seen) = @_;
+    $store_seen //= {};
+    my %guard;
+    while (blessed($node)) {
+        last if $guard{ $node->id }++;    # cycle guard
+        my $k = _node_kind($node);
+
+        if (($k eq 'Coerce' || $k eq 'PostfixDeref')
+            && $node->can('inputs') && $node->inputs->@*) {
+            $node = $node->inputs->[0];
+            next;
+        }
+
+        if ($k eq 'Assign' || $k eq 'CompoundAssign') {
+            next if _advance_store(\$node);
+            last;
+        }
+
+        if ($k eq 'PadAccess') {
+            my ($next, $any) = _resolve_pad($node, $ctx, $store_seen);
+            return (undef, 1) if $any;
+            last unless defined $next;      # uninitialised — stays the pad
+            $node = $next;
+            next;
+        }
+
+        last;
+    }
+    return ($node, 0);
+}
+
+# _advance_store(\$node) — resolve an Assign/CompoundAssign in place; returns
+# true if it advanced $node. An element store (Subscript lval) resolves to the
+# lval read; a pad rebind resolves to the store rhs.
+sub _advance_store {
+    my ($ref) = @_;
+    my $node = $$ref;
+    return false unless $node->can('inputs') && $node->inputs->@* >= 2;
+    my ($lhs, $rhs) = ($node->inputs->[0], $node->inputs->[1]);
+    if (blessed($lhs) && _node_kind($lhs) eq 'Subscript') {
+        $$ref = $lhs;   # element store returns the read-back slot
+        return true;
+    }
+    $$ref = $rhs;       # scalar rebind returns its rhs
+    return true;
+}
+
+# _resolve_pad($padaccess, $ctx) -> ($value_node, $any)
+# ($node, 1) for a branch-merged pad ({any}); (init_or_store_rhs, 0) for a
+# resolvable pad; (undef, 0) for an uninitialised read (no store, no init).
+sub _resolve_pad {
+    my ($padaccess, $ctx, $store_seen) = @_;
+    $store_seen //= {};
+    my $vd = $padaccess->can('inputs') && $padaccess->inputs->@*
+        ? $padaccess->inputs->[0] : undef;
+    return (undef, 0) unless blessed($vd);
+
+    # Branch-merged pad (2+ stores) — the merged value is unnameable: {any}.
+    return (undef, 1) if $ctx->{pad_multi}{ $vd->id };
+
+    my $init = ($vd->can('inputs') && $vd->inputs->@* >= 2 && blessed($vd->inputs->[1]))
+        ? $vd->inputs->[1] : undef;
+
+    # Single store — the pad reads that store's value. A PRE-store RMW read
+    # (the pre-store operand inside the store's own rhs, e.g. $s in $s .= "b" /
+    # $i in $i = $i + 1) sees the pad INIT, not the post-store value. The
+    # pre-store read may be a DISTINCT node ($i_r vs the $i return read, as
+    # B::SoN emits) OR hash-cons to the SAME node as the return read (S4, same
+    # varname). Both are handled by tracking the pad's IDENTITY (its VarDecl
+    # id): the FIRST resolution of a pad to its store rhs marks the VarDecl;
+    # any read of the SAME pad reached while that store rhs is being expanded
+    # is a pre-store read and resolves to the init.
+    my ($store) = _last_pad_store($padaccess);
+    if (defined $store) {
+        return ($init, 0) if $store_seen->{ $vd->id };
+        $store_seen->{ $vd->id } = 1;
+        my $node = $store;
+        _advance_store(\$node);
+        return ($node, 0);
+    }
+
+    # No store — a VarDecl init (inputs[1]) is the pad's value.
+    return ($init, 0) if defined $init;
+
+    # No store and no init — uninitialised read.
+    return (undef, 0);
+}
+
+# _node_match($spec, $real, $ctx) -> bool — positional structural match after
+# resolving both sides through the transparent wrappers. Spec operands must
+# match real operands at the same index (extra trailing real inputs, e.g. a
+# threaded MemStart/store or a read-back store operand, are ignored — the spec
+# never names them). NO subset-descent: the resolved real node must BE the
+# resolved spec node's counterpart, not sit deeper inside a wrapping real op.
+# Commutative ops whose operands may be paired as a bijection rather than
+# strictly by index. Operand ORDER does not change the value, so a lax-vs-strict
+# same-kind operand reordering (shape-subset-check test 7) is a valid match,
+# while for NON-commutative ops a swap changes the result and must be rejected.
+my %_COMMUTATIVE = (Add => 1, Multiply => 1, And => 1, Or => 1);
+
+# _deref_sigil_ok($spec, $real) -> bool — when BOTH nodes are PostfixDeref,
+# their sigils must agree ('@' array-deref vs '%' hash-deref are behaviorally
+# distinct). If either side is not a PostfixDeref the see-through handles it and
+# there is no sigil to compare. Returns true unless a spec deref names a sigil
+# the real deref does not share.
+sub _deref_sigil_ok {
+    my ($spec, $real) = @_;
+    return true unless blessed($spec) && _node_kind($spec) eq 'PostfixDeref'
+                    && blessed($real) && _node_kind($real) eq 'PostfixDeref';
+    my $ss = $spec->can('sigil') ? $spec->sigil : undef;
+    return true unless defined $ss;      # lax spec — sigil unchecked
+    my $rr = $real->can('sigil') ? $real->sigil : undef;
+    return defined $rr && $rr eq $ss;
+}
+
+sub _node_match {
+    my ($spec, $real, $ctx, $store_seen, $in_descent) = @_;
+    $store_seen //= {};
+
+    # Sigil gate: _resolve sees THROUGH a PostfixDeref to its inputs[0],
+    # dropping the sigil. A spec @-deref and a real %-deref then resolve to the
+    # same ref and match — masking an array-vs-hash miscompile. Compare the
+    # sigil on the pre-resolution nodes before seeing through.
+    return false unless _deref_sigil_ok($spec, $real);
+
+    my ($rs, $any_s) = _resolve($spec, $ctx, $store_seen);
+    return true if $any_s;                  # {any} spec pad accepts anything
+    my ($rr) = _resolve($real, $ctx, $store_seen);
+
+    return false unless blessed($rs) && blessed($rr);
+
+    # Cycle guard: a loop Phi's backedge input points back into the body,
+    # making the operand graph cyclic. Co-inductively assume a pair already
+    # being matched holds (bisimulation) — this both terminates and is the
+    # correct equivalence for loop-carried values.
+    my $pair_key = $rs->id . "\0" . $rr->id;
+    return true if $ctx->{pairing}{$pair_key};
+    local $ctx->{pairing}{$pair_key} = 1;
+
+    # Structural match first: same pair predicate + operand match. Operands are
+    # matched positionally by default; for a COMMUTATIVE op (Add/Multiply/&&/||)
+    # a consistent bijection is allowed so a lax spec operand cannot steal the
+    # real operand a strict same-kind sibling needs (shape-subset-check test 7).
+    # A NON-commutative op (Subtract, DefinedOr, NumLt, Subscript) keeps strict
+    # by-index pairing — operand ORDER is load-bearing, so an operand SWAP
+    # (T2/H1) stays rejected.
+    if (_pair_match($rs, $rr)) {
+        my @sin = $rs->can('inputs') && defined $rs->inputs ? $rs->inputs->@* : ();
+        my @rin = $rr->can('inputs') && defined $rr->inputs ? $rr->inputs->@* : ();
+        # Children are NOT descent — a matched child may itself fold, so reset
+        # the descent flag for the operand walk.
+        return true
+            if _match_operands(\@sin, \@rin, $ctx, $store_seen,
+                               $_COMMUTATIVE{ _node_kind($rs) });
+    }
+
+    # Fold fallback: perl folds a literal-arithmetic spec op to a Constant that
+    # B::SoN loads directly, so a fold-satisfied spec node matches the real node
+    # BEING its folded Constant at THIS position (value-anchored, no descent). A
+    # folded-away op whose value is merely buried elsewhere in the real graph
+    # (T3: real returns TernaryExpr(2,99,2)=99 with a stray Constant(2)) does
+    # NOT match here — the real return node must itself be the folded Constant.
+    # ANCHORED at the node _node_match was CALLED on: the fold fallback does NOT
+    # fire while descending into real inputs (else T3's stray Constant(2), found
+    # deeper, would re-open the hole).
+    if (!$in_descent && $ctx->{satisfied}{ $rs->id }) {
+        my ($fv) = _fold_value($rs);
+        ($fv) = _concat_fold_value($rs) unless defined $fv;
+        return true if defined $fv
+            && _node_kind($rr) eq 'Constant'
+            && $rr->can('value') && defined $rr->value && $rr->value eq $fv;
+    }
+
+    # Subset-descent (structural only): the spec declares a SUBGRAPH of the real
+    # graph, so a real node that WRAPS the spec value (real Multiply(Add,9) for a
+    # spec Add) matches by finding the spec subtree deeper. Retry the SPEC node
+    # against each real input. Descent runs the structural path ONLY — the
+    # value-anchored fold fallback stays anchored above (in_descent=1), so a
+    # folded spec op cannot latch onto a stray Constant buried in the real graph.
+    for my $ri (_rin_for_descent($rr)) {
+        return true if _node_match($rs, $ri, $ctx, $store_seen, 1);
+    }
+
+    return false;
+}
+
+# _operand_specificity($node) -> how constrained a spec operand is, so the
+# commutative bijection matches the pickiest operand first. A defined
+# representation is the discriminator the pair-match keys on (a lax undef-repr
+# operand matches anything); Constants add their value as a further constraint.
+sub _operand_specificity {
+    my ($node) = @_;
+    return 0 unless blessed($node);
+    my $s = 0;
+    $s++ if $node->can('representation') && defined $node->representation;
+    $s++ if _node_kind($node) eq 'Constant' && $node->can('value') && defined $node->value;
+    return $s;
+}
+
+# _rin_for_descent($real) -> the real node's blessed inputs, for subset-descent.
+sub _rin_for_descent {
+    my ($real) = @_;
+    return () unless blessed($real) && $real->can('inputs') && defined $real->inputs;
+    return grep { blessed($_) } $real->inputs->@*;
+}
+
+# _match_operands(\@sin, \@rin, $ctx, $store_seen, $commutative) -> bool — pair
+# each blessed spec operand to a real operand. By INDEX when non-commutative
+# (order is load-bearing — an operand SWAP must fail: T2/H1). As a consistent
+# BIJECTION (each real operand used once) when commutative — try position
+# first, then any other not-yet-consumed real operand — so a lax spec operand
+# does not steal the real operand a strict same-kind sibling needs. Children
+# reset in_descent (a matched child may itself fold).
+sub _match_operands {
+    my ($sin, $rin, $ctx, $store_seen, $commutative) = @_;
+
+    # The bijection may only REORDER a commutative op's operands, never DROP a
+    # real operand: an extra real operand changes a commutative op's value
+    # (Add(3,999,7) != Add(3,7)). So permute only when the blessed-operand
+    # counts match; otherwise fall back to strict by-index (a genuine trailing
+    # effect on a non-commutative op is still ignored by the index walk).
+    my $sn = grep { blessed($_) } @$sin;
+    my $rn = grep { blessed($_) } @$rin;
+    $commutative &&= ($sn == $rn);
+
+    # Commutative bijection: match the MOST-CONSTRAINED spec operand first, so a
+    # lax operand (undef repr, matches anything) does not greedily consume the
+    # one real operand a strict same-kind sibling needs (shape-subset-check test
+    # 7 — mirrors the constrained-first sort on the multiset leg). Index order is
+    # preserved for the non-commutative case.
+    my @order = 0 .. $#$sin;
+    @order = sort { _operand_specificity($sin->[$b]) <=> _operand_specificity($sin->[$a]) }
+        @order if $commutative;
+
+    my %used;   # real index already consumed (bijection)
+    SPEC: for my $i (@order) {
+        my $s = $sin->[$i];
+        next unless blessed($s);            # spec undef/arrayref slot — skip
+        # Non-commutative (or mismatched arity): index only. Commutative with
+        # equal arity: position first, then any other unused real operand.
+        my @cand = $commutative ? ($i, grep { $_ != $i } 0 .. $#$rin) : ($i);
+        for my $j (@cand) {
+            next if $used{$j};
+            next unless defined $rin->[$j] && blessed($rin->[$j]);
+            if (_node_match($s, $rin->[$j], $ctx, $store_seen, 0)) {
+                $used{$j} = 1;
+                next SPEC;
+            }
+        }
+        return false;                       # no real operand matched this spec
+    }
+    return true;
+}
+
+# _concat_fold_value($node) -> ($joined) or () — a Concat of two string
+# literals folds to their concatenation (perl folds `"a" . "b"` to a single
+# Constant); mirrors the Concat seed in _fold_satisfied_ids.
+sub _concat_fold_value {
+    my ($node) = @_;
+    return () unless blessed($node) && _node_kind($node) eq 'Concat';
+    return () unless $node->can('inputs') && $node->inputs->@* == 2;
+    my ($l) = _str_literal($node->inputs->[0]);
+    my ($r) = _str_literal($node->inputs->[1]);
+    return () unless defined $l && defined $r;
+    return ($l . $r);
+}
+
+# _pair_match($spec, $real) -> bool — the PAIR predicate: same kind, same
+# declared repr (operand-returning ops load unstamped — accept undef real
+# repr), same Constant value, same Coerce from/to, AND same distinguishing
+# LEAF attributes (FieldAccess field_index/field_stash; PadAccess varname).
+# The leaf-attr comparison is the H1 fix: a swap of two same-kind NON-literal
+# operands (FieldAccess field0 vs field1) is invisible to a kind+repr compare.
+sub _pair_match {
+    my ($spec, $real) = @_;
+    my $sk = _node_kind($spec);
+    return false unless $sk eq _node_kind($real);
+
+    # Repr: a spec-declared repr must match the real repr. An UNSTAMPED real
+    # node (undef repr) is accepted against any spec repr — B::SoN leaves nested
+    # operand-position nodes unstamped for the loader to infer, and the multiset
+    # leg already proved the stamped node EXISTS; the rooted leg enforces WIRING,
+    # so re-failing on a stamp the loader will fill would false-FAIL a valid
+    # lax/strict operand split (shape-subset-check test 7). A real repr that is
+    # DEFINED but DIFFERENT still fails (an :Int spec vs a :Num real Divide).
+    my $srepr = $spec->can('representation') ? $spec->representation : undef;
+    my $rrepr = $real->can('representation') ? $real->representation : undef;
+    if (defined $srepr && defined $rrepr) {
+        return false unless $rrepr eq $srepr;
+    }
+
+    if ($sk eq 'Constant') {
+        my $sv = $spec->can('value') ? $spec->value : undef;
+        my $rv = $real->can('value') ? $real->value : undef;
+        if (defined $sv) {
+            return false unless defined $rv && $rv eq $sv;
+        }
+    }
+
+    if ($sk eq 'Coerce') {
+        return false unless _coerce_shape($spec) eq _coerce_shape($real);
+    }
+
+    if ($sk eq 'FieldAccess') {
+        return false unless _leaf_eq($spec, $real, 'field_index');
+        return false unless _leaf_eq($spec, $real, 'field_stash');
+    }
+
+    if ($sk eq 'PadAccess') {
+        return false unless _leaf_eq($spec, $real, 'varname');
+    }
+
+    # Other leaf-identifying attrs (the H1 leaf-attr-swap class): an EnvRead read
+    # the wrong env key, a RegexCapture the wrong group, a StashAccess the wrong
+    # stash var. Each must agree when the spec names it (a lax spec leaves it
+    # undef, unchecked). These are LEAF nodes with no nested wiring, so the check
+    # is unambiguous. A Call's callee (name/dispatch_kind) swap is the same class
+    # but the check conflicts with legitimate nested-receiver wiring (method-call
+    # threads a void call through the receiver chain) -- filed as a follow-up.
+    if ($sk eq 'EnvRead') {
+        return false unless _leaf_eq($spec, $real, 'key');
+    }
+    if ($sk eq 'RegexCapture') {
+        return false unless _leaf_eq($spec, $real, 'n');
+    }
+    if ($sk eq 'StashAccess') {
+        return false unless _leaf_eq($spec, $real, 'stash_name');
+        return false unless _leaf_eq($spec, $real, 'var_name');
+    }
+
+    return true;
+}
+
+# _leaf_eq($a, $b, $attr) -> bool — compare a distinguishing leaf attribute
+# when the spec node names it; if the spec leaves it undef the field is
+# unchecked (lax spec).
+sub _leaf_eq {
+    my ($a, $b, $attr) = @_;
+    my $av = $a->can($attr) ? $a->$attr : undef;
+    return true unless defined $av;
+    my $bv = $b->can($attr) ? $b->$attr : undef;
+    return defined $bv && $bv eq $av;
 }
 
 # Ops the corpus specs use whose all-literal form perl folds in op.c before
@@ -1438,13 +1949,8 @@ sub _coerce_shape {
 # spec nodes need two real nodes. Matching is greedy and edge-blind — it
 # compares node multisets, not operand wiring; rooted structural matching
 # is the upgrade path if a rewired-but-same-multiset regression ever slips
-# through.
-# perl's &&, ||, // are operand-RETURNING (`$a && $b` yields $a or $b), so
-# their result repr is the operand's — which B::SoN leaves unstamped, letting
-# the loader infer it. The corpus spec pins the operand type (:Int). Accept an
-# unstamped real And/Or/DefinedOr against the spec's declared repr.
-my %_OPERAND_RETURNING = (And => 1, Or => 1, DefinedOr => 1);
-
+# through. Operand-returning ops (%_OPERAND_RETURNING, defined above) load
+# unstamped; the spec's declared repr is accepted against an undef real repr.
 sub _sig_match {
     my ($spec, $real_sigs) = @_;
     for my $i (0 .. $#$real_sigs) {
