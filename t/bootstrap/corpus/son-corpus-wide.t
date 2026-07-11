@@ -217,6 +217,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, q{>=}, 64, q{gate-green floor (64; F1 direct sub call + R1b array-in-scalar-context; worklist empty)});
+cmp_ok($tally{gate_green}, q{>=}, 65, q{gate-green floor (65; F1 direct sub call + R1b/R3b array/hash in scalar context; worklist empty)});
 
 done_testing();

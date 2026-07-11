@@ -3999,6 +3999,20 @@ sub _lower_length {
         $self->{cache}{ $node->id } = $len;
         return $len;
     }
+    elsif ($op_repr eq 'Hash' || $op_repr eq 'HashRef') {
+        # scalar %h: the key count. The %Hash struct is
+        # { i64 count, i64 cap, %HashEntry* entries }, so the count is field 0
+        # (parallel to %Array's len). Modern perl's `scalar %h` yields the key
+        # count, which is exactly this field.
+        $self->{_need_aggregate_types} = 1;
+        my $hash_ref = $self->_container_ptr($operand, 'Hash');
+        my $cnt_ptr  = $self->_fresh;
+        my $cnt      = $self->_fresh;
+        $self->_emit("  $cnt_ptr = getelementptr inbounds %Hash, %Hash* $hash_ref, i32 0, i32 0  ; Length(Hash): count ptr");
+        $self->_emit("  $cnt = load i64, i64* $cnt_ptr  ; Length(Hash): load key count");
+        $self->{cache}{ $node->id } = $cnt;
+        return $cnt;
+    }
     elsif ($op_repr eq 'Str') {
         # lower_value for Str returns i8* (ptr to NUL-terminated bytes).
         # The length is tracked separately in _str_len_table, keyed by the i8* SSA ref.

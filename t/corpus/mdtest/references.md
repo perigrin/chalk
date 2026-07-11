@@ -136,6 +136,36 @@ return %r
 L: GREEN
 ```
 
+## R3b hash in scalar context (key count)
+
+Assigning a hash to a scalar (`my $n = %h`) imposes scalar context; modern perl
+yields the key count. The producer wraps the HashRef in a `Length` (like the
+array case), and the backend loads the `count` field of the `%Hash` struct
+(`{count, cap, HashEntry*}`, field 0) — a pure load, no libperl.
+
+```perl
+# source
+my %h = (a => 1, b => 2);
+my $n = %h;
+$n
+```
+
+```behavior
+return: 2
+context: scalar
+```
+
+```ir
+%ka   = Constant("a") :Str
+%v1   = Constant(1) :Int
+%kb   = Constant("b") :Str
+%v2   = Constant(2) :Int
+%hash = HashRef(%ka, %v1, %kb, %v2) :HashRef
+%r    = Length(%hash) :Int
+return %r
+L: GREEN
+```
+
 ## R4 anonymous array ref and deref
 
 An anonymous array constructor `[1, 2, 3]` allocates a `{len, cap, Slot*}`

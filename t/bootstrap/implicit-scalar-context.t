@@ -54,15 +54,29 @@ subtest 'array assigned to a scalar yields the count (019f300f)' => sub {
     is($v0, 'Int:0', 'my $n = @a over () -> Int:0') or diag($e0 // '');
 };
 
-# A hash assigned to a scalar (my $n = %h) also imposes scalar context: the
-# producer now wraps it in Length. But Length(HashRef) backend lowering is a
-# SEPARATE chain link (019f3004) -- so the producer half is done here and the
-# backend GAPs honestly (a loud die, not a miscompile). Assert that handoff.
-subtest 'hash in scalar context: producer wraps Length, backend GAPs honestly' => sub {
-    my ($v, $e) = run_i64('my %h = (a => 1, b => 2); my $n = %h; $n');
-    is($v, undef, 'my $n = %h does not lower yet (Length(HashRef) is 019f3004)');
-    like($e, qr/Length operand has repr=HashRef/,
-        'the GAP is loud: Length(HashRef) not lowered runtime-free (not a miscompile)');
+# A hash assigned to a scalar (my $n = %h) imposes scalar context: the producer
+# wraps it in Length(HashRef), and the backend lowers it as the key count (a
+# load of the %Hash count field) -- perl's modern scalar %h. Assert against the
+# perl oracle rather than a hardcoded number.
+sub oracle_int ($body) {
+    my ($fh, $tmp) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh "use 5.42.0;\nmy \$_result = do {\n$body\n};\nprint qq{Int:\$_result};\n";
+    close $fh;
+    my $out = qx($PERL $tmp 2>&1); chomp $out; return $out;
+}
+
+subtest 'hash in scalar context yields the key count (019f3004)' => sub {
+    my $body2 = 'my %h = (a => 1, b => 2); my $n = %h; $n';
+    my ($v, $e) = run_i64($body2);
+    is($v, oracle_int($body2), 'my $n = %h -> key count (matches perl)') or diag($e // '');
+
+    my $body3 = 'my %h = (a => 1, b => 2, c => 3); my $n = %h; $n';
+    my ($v3, $e3) = run_i64($body3);
+    is($v3, oracle_int($body3), 'my $n = %h over 3 keys -> 3 (matches perl)') or diag($e3 // '');
+
+    my $body0 = 'my %h = (); my $n = %h; $n';
+    my ($v0, $e0) = run_i64($body0);
+    is($v0, oracle_int($body0), 'my $n = %h over empty -> 0 (matches perl)') or diag($e0 // '');
 };
 
 done_testing();
