@@ -1602,6 +1602,14 @@ sub lower_value {
     elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'method') {
         return $self->_lower_call_method($node);
     }
+    # Call(dispatch_kind='direct'): a direct named-sub call. The callee graph
+    # was resolved by the loader (resolved_graph). F1 handles the no-argument
+    # form: inline the callee's result subgraph at this call site.
+    # ponytail: inline no-arg callee; a real LLVM `define`+`call` and argument
+    # binding land when F3 (arg-passing direct calls) is implemented.
+    elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'direct') {
+        return $self->_lower_call_direct($node);
+    }
     # RegexMatch: lower a literal pattern to a runtime-free matcher (G6).
     # inputs[0] = subject (Str, i8* + tracked len); pattern is a compile-time
     # literal attr. Produces an i1 matched? (Bool repr).
@@ -4549,6 +4557,44 @@ sub _lower_call_new {
 # Otherwise: vtable-dispatch (same logic as the former _lower_method_call).
 # Inputs: the :param values for name='new'; inputs[0] = invocant for regular
 # method calls. The class rides as the class_name attribute (MOP-direct).
+# _lower_call_direct($node) -> $llvm_ref
+#
+# Lower a direct named-sub call (dispatch_kind='direct'). The loader resolved
+# the callee to its graph (resolved_graph). F1 scope: a no-argument callee whose
+# body is a single Return — inline its result subgraph at this call site. A call
+# with arguments (F3) needs parameter binding and is an honest GAP for now.
+sub _lower_call_direct {
+    my ($self, $node) = @_;
+
+    my $name  = $node->name;
+    my $graph = $node->can('resolved_graph') ? $node->resolved_graph : undef;
+    die "GAP: direct call to '$name' has no resolved callee graph — the loader "
+      . "could not resolve the sub name to a graph (an unknown or builtin sub)."
+        unless defined $graph;
+
+    # F1 scope: no arguments. Passing args requires binding the callee's
+    # parameters (@_) to the argument values, which is F3.
+    die "GAP: direct call to '$name' passes arguments — argument binding for "
+      . "direct sub calls is not lowered yet (F3)."
+        if $node->inputs->@*;
+
+    my @returns = grep {
+        blessed($_) && $_->can('operation') && $_->operation eq 'Return'
+    } $graph->returns->@*;
+    die "GAP: direct call to '$name': callee graph has "
+      . scalar(@returns) . " Returns — exactly one is required to inline."
+        if @returns != 1;
+
+    my $value = $returns[0]->inputs->[-1];
+    die "GAP: direct call to '$name': callee Return has no value input."
+        unless defined $value;
+
+    # Inline the callee's result subgraph in the current context. The callee has
+    # no parameters, so no value from this context leaks in and no binding is
+    # needed.
+    return $self->lower_value($value);
+}
+
 sub _lower_call_method {
     my ($self, $node) = @_;
 

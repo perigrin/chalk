@@ -449,6 +449,37 @@ sub _deserialize_graph ($method_data) {
 }
 
 # -----------------------------------------------------------------------
+# _resolve_direct_calls(\%graphs) — attach each direct sub call's callee graph.
+# A Call with dispatch_kind='direct' names its callee (fully-qualified, e.g.
+# main::foo); resolve that name against the loaded graph set and stash the graph
+# on the Call via set_resolved_graph so the backend can lower the call. Calls
+# whose name has no matching graph (builtins, unresolved) are left as-is.
+sub _resolve_direct_calls ($graphs) {
+    for my $gname (sort keys $graphs->%*) {
+        for my $node ($graphs->{$gname}->nodes->@*) {
+            next unless $node->operation eq 'Call'
+                && $node->can('dispatch_kind')
+                && ($node->dispatch_kind // '') eq 'direct';
+            my $callee = $graphs->{ $node->name } or next;
+            $node->set_resolved_graph($callee);
+
+            # Stamp the Call's repr from the callee's Return value, so the
+            # backend and the shape contract see the call result's type. The
+            # callee's single Return input[-1] is its result value.
+            unless (defined $node->representation) {
+                my ($ret) = grep {
+                    blessed($_) && $_->can('operation')
+                        && $_->operation eq 'Return'
+                } $callee->returns->@*;
+                my $val = $ret ? $ret->inputs->[-1] : undef;
+                $node->set_representation($val->representation)
+                    if $val && defined $val->representation;
+            }
+        }
+    }
+    return;
+}
+
 # from_json($json_string) — deserialize JSON to named Chalk::IR::Graph instances.
 # -----------------------------------------------------------------------
 sub from_json ($json_string) {
@@ -457,6 +488,12 @@ sub from_json ($json_string) {
     for my $name (sort keys $data->{methods}->%*) {
         $graphs{$name} = _deserialize_graph($data->{methods}{$name});
     }
+
+    # Resolve each direct sub call (dispatch_kind='direct') to its callee graph
+    # by name, so the backend can lower the call to the callee's result. A
+    # top-level named sub is its own graph (keyed by fully-qualified name), not a
+    # MOP class method; the Call carries the graph on resolved_graph.
+    _resolve_direct_calls(\%graphs);
 
     # 4c: a `classes` section (from B::SoN) is replayed into a sealed MOP. Field
     # types must be inferred onto the raw records BEFORE the MOP is sealed, so

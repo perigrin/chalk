@@ -47,6 +47,14 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
     # builtins/subs and for calls whose class is not statically known.
     field $class_name :param :reader = undef;
 
+    # resolved_graph: for a direct sub call (dispatch_kind='direct'), the callee
+    # Chalk::IR::Graph, resolved by name against the loaded graph set. The
+    # backend lowers a direct call by lowering this graph's result. Distinct
+    # from $target (a MOP::Method/Sub handle for method dispatch); a top-level
+    # sub is not a MOP class method, so it rides here. Not part of content_hash
+    # (a late decoration, like $target).
+    field $resolved_graph :param :reader = undef;
+
     method operation() { 'Call' }
 
     method content_hash() {
@@ -62,6 +70,13 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
     # Phase 4 post-pass once the MOP has every class's methods registered.
     method set_target($mop_method) {
         $target = $mop_method;
+        return;
+    }
+
+    # Late-binding setter for a direct call's resolved callee graph. Applied by
+    # the JSON loader once every graph is deserialized.
+    method set_resolved_graph($graph) {
+        $resolved_graph = $graph;
         return;
     }
 }

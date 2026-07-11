@@ -21,11 +21,11 @@ chain to sub chain for the subs topic).
 
 A named sub is defined and immediately called. The sub returns a constant
 integer value. The IR models the sub definition as a separate graph and the
-call site as a Call node with dispatch_kind=sub. This is RF: the sub lowers to
-a function pointer plus a captured-environment struct, and the call — whose
-target is statically known — lowers to an indirect call (not dynamic dispatch,
-which would require a runtime-computed target). The GAP is only that the
-CodeRef representation and call lowering are not modelled yet.
+call site as a Call node with dispatch_kind=direct — the target is statically
+known (a bareword named sub), so it is a direct call, not dynamic dispatch. The
+loader resolves the Call's name (main::foo) to the callee graph, and the backend
+lowers the no-argument call by inlining the callee's result. This is RF: no
+libperl/SV dependency.
 
 Archive source: `sub helper($x) { return $x + 1; }` (sub-simple.chalk).
 
@@ -41,7 +41,9 @@ context: scalar
 ```
 
 ```ir
-L: GAP(CodeRef is RF: a function pointer + captured-env struct, call = indirect call to a statically-known target; GAP only until CodeRef representation is modelled, NOT a libperl/SV dependency)
+%call = Call(dispatch_kind: "direct", name: "main::foo") :Int
+return %call
+L: GREEN
 ```
 
 ## F2 anonymous sub
