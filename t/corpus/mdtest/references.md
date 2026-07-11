@@ -49,6 +49,36 @@ return %r
 L: GREEN
 ```
 
+## R1b array in implicit scalar context (assignment)
+
+Assigning an array to a scalar (`my $n = @a`) imposes scalar context WITHOUT an
+explicit `scalar` op — perl counts the array. The producer keys on the RHS being
+an aggregate-variable read (padav) and wraps it in a `Length`, exactly as
+`scalar @a` does; an anon-ref literal (`my $r = [1,2,3]`) is a scalar reference
+and is left alone. The graph is identical to R1: the count is a pure load.
+
+```perl
+# source
+my @a = (1, 2, 3);
+my $n = @a;
+$n
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+%c1  = Constant(1) :Int
+%c2  = Constant(2) :Int
+%c3  = Constant(3) :Int
+%arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%r   = Length(%arr) :Int
+return %r
+L: GREEN
+```
+
 ## R2 array element read
 
 Reading an element `$a[1]` from a declared array is a bounds-checked index
