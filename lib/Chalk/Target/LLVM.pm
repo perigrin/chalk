@@ -4114,12 +4114,23 @@ sub _lower_array_read {
     $self->_emit("  $len   = load i64, i64* $len_ptr   ; ArrayRead: load len");
     $self->_emit("  $elems = load %Slot*, %Slot** $elem_ptr  ; ArrayRead: load elems");
 
+    # Apply perl's from-the-end adjustment: idx < 0 ? idx + len : idx. The
+    # bounds check below is unsigned (icmp ult), so a still-negative adjusted
+    # index (a negative OOB read, idx < -len) stays huge-unsigned and correctly
+    # fails the check, landing on the OOB path -- no separate guard needed.
+    my $is_neg = $self->_fresh;
+    my $adj_neg = $self->_fresh;
+    my $idx = $self->_fresh;
+    $self->_emit("  $is_neg  = icmp slt i64 $idx_ref, 0  ; ArrayRead: index is negative?");
+    $self->_emit("  $adj_neg = add i64 $idx_ref, $len     ; ArrayRead: from-the-end (idx + len)");
+    $self->_emit("  $idx = select i1 $is_neg, i64 $adj_neg, i64 $idx_ref  ; ArrayRead: adjusted index");
+
     # Emit bounds-check: in_bounds = (idx < len).
     my $ok    = $self->_fresh;
     my $lbl_inb = $self->_fresh_label('arr_inb');
     my $lbl_oob = $self->_fresh_label('arr_oob');
     my $lbl_end = $self->_fresh_label('arr_end');
-    $self->_emit("  $ok = icmp ult i64 $idx_ref, $len  ; ArrayRead: bounds check (idx < len)");
+    $self->_emit("  $ok = icmp ult i64 $idx, $len  ; ArrayRead: bounds check (idx < len)");
     $self->_set_terminator("  br i1 $ok, label \%$lbl_inb, label \%$lbl_oob");
     $self->_new_block($lbl_inb);
 
@@ -4129,7 +4140,7 @@ sub _lower_array_read {
     my $slot_pay = $self->_fresh;
     my $def_val  = $self->_fresh;
     my $pay_val  = $self->_fresh;
-    $self->_emit("  $slot_p   = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref  ; ArrayRead: slot ptr");
+    $self->_emit("  $slot_p   = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx  ; ArrayRead: slot ptr");
     $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 0  ; ArrayRead: slot defined ptr");
     $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 1  ; ArrayRead: slot payload ptr");
     $self->_emit("  $def_val  = load i1,  i1*  $slot_def  ; ArrayRead: load defined bit");
