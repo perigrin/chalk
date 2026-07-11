@@ -812,12 +812,37 @@ sub _unwrap_ref ($container) {
     return $container->inputs->[0];
 }
 
+# _resolve_aggregate($node) — follow a chain of Subscript reads over LITERAL
+# aggregates at CONSTANT indices back to the concrete aggregate node being read,
+# so a nested deref ($r->[1][0]) can be typed statically. `Subscript(ArrayRef
+# literal, const idx)` resolves to the ArrayRef's idx-th input; a HashRef needs a
+# literal-key scan (not modelled -- returns the node unchanged, an honest fall
+# through to undef). Returns the node unchanged when it is not a resolvable
+# Subscript. Cycle-guarded via a bounded depth (aggregate nesting is shallow).
+sub _resolve_aggregate ($node) {
+    my $depth = 0;
+    while (blessed($node) && $node->operation eq 'Subscript' && $depth++ < 64) {
+        my $c   = _unwrap_ref($node->inputs->[0]);
+        my $idx = $node->inputs->[1];
+        last unless blessed($c) && $c->operation eq 'ArrayRef'
+            && blessed($idx) && $idx->operation eq 'Constant'
+            && ($idx->const_type // '') eq 'integer';
+        my $i   = $idx->value;
+        my @els = $c->inputs->@*;
+        # Only a provable in-bounds literal index resolves; anything else stays a
+        # Subscript (falls through to undef -- an honest GAP, not a guess).
+        last if $i < 0 || $i > $#els;
+        $node = _unwrap_ref($els[$i]);
+    }
+    return $node;
+}
+
 # _element_repr($container) — the element type of an ArrayRef/HashRef container,
 # inferred as the widest element repr of its inputs. For a HashRef the inputs
 # alternate key,value; the values are the odd positions. Returns undef when the
 # element types are not yet known.
 sub _element_repr ($container) {
-    $container = _unwrap_ref($container);
+    $container = _resolve_aggregate(_unwrap_ref($container));
     return undef unless defined $container && blessed($container);
     my $op = $container->operation;
     my @in = $container->inputs->@*;
@@ -833,7 +858,17 @@ sub _element_repr ($container) {
     }
     my @reprs = map { blessed($_) ? $_->representation : undef } @elems;
     return undef unless @reprs;
-    return undef if grep { !defined || !exists $_REPR_RANK{$_} } @reprs;
+    return undef if grep { !defined } @reprs;
+    # A NESTED aggregate: the elements are themselves aggregates ([[1,2],[3,4]]).
+    # Aggregate reprs (ArrayRef/HashRef) are not scalar-widenable, so the element
+    # type is that repr only when every element shares it homogeneously; a mixed
+    # aggregate/scalar or ArrayRef/HashRef element set has no single element type
+    # (references R8). Scalar elements fall through to the widening below.
+    my %uniq = map { $_ => 1 } @reprs;
+    if (keys %uniq == 1 && ($reprs[0] eq 'ArrayRef' || $reprs[0] eq 'HashRef')) {
+        return $reprs[0];
+    }
+    return undef if grep { !exists $_REPR_RANK{$_} } @reprs;
     my ($widest) = sort { $_REPR_RANK{$b} <=> $_REPR_RANK{$a} } @reprs;
     return $widest;
 }
@@ -845,7 +880,13 @@ sub _element_repr ($container) {
 # the element repr and is bounds-checked at runtime). A miss reads perl's undef,
 # so the Subscript must load as Slot, not the element type.
 sub _static_miss ($container, $index) {
-    $container = _unwrap_ref($container);
+    # Resolve a nested container the SAME way _element_repr does: a Subscript over
+    # a literal aggregate at a constant index resolves to the inner literal, so an
+    # OOB inner index ($r->[1][5]) is a provable miss. This MUST mirror
+    # _element_repr's resolution -- if the two disagree, an OOB nested read gets
+    # the element type (Int) instead of a Slot and silently reads 0 instead of
+    # undef (a miscompile; found by the R8 nested-deref adversarial review).
+    $container = _resolve_aggregate(_unwrap_ref($container));
     return false unless defined $container && blessed($container);
     return false unless defined $index && blessed($index)
         && $index->operation eq 'Constant';
