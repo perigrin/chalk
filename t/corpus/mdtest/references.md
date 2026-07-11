@@ -486,3 +486,73 @@ return %rd
 control: %st
 L: GREEN
 ```
+
+## R14 element read before a store to the SAME slot (WAR ordering)
+
+`my $x = $a[0]; $a[0] = 99; $x` reads slot 0 (`5`), THEN overwrites it. The read
+must observe the value live at its program point (`5`), not the final slot value
+(`99`). The read is memory-ordered before the store: it is a distinct load pinned
+to the pre-store memory, not a pure data node the scheduler floats past the store
+(the read/store WAR hazard, zhi 019f3354, closed by the memory-SSA milestone).
+
+```perl
+# source
+my @a = (5, 6, 7);
+my $x = $a[0];
+$a[0] = 99;
+$x
+```
+
+```behavior
+return: 5
+context: scalar
+```
+
+```ir
+%c5   = Constant(5) :Int
+%c6   = Constant(6) :Int
+%c7   = Constant(7) :Int
+%arr  = ArrayRef(%c5, %c6, %c7) :ArrayRef
+%i0   = Constant(0) :Int
+%rd   = Subscript(%arr, %i0) :Int
+%v99  = Constant(99) :Int
+%lval = Subscript(%arr, %i0)
+%st   = Assign(%lval, %v99) :Int
+return %rd
+control: %st
+L: GREEN
+```
+
+## R15 interleaved read between two stores to the SAME slot (WAR ordering)
+
+`$a[0] = 1; my $x = $a[0]; $a[0] = 2; $x + $a[0]` stores 1, reads (`1`), stores 2,
+then reads again (`2`). The mid read must see `1` (its program point) and the
+final read `2` -- two distinct loads at distinct memory versions, so
+`$x + $a[0]` is `3`, not `4` (both reads collapsing to the final value).
+
+```perl
+# source
+my @a = (1, 2, 3);
+$a[0] = 1;
+my $x = $a[0];
+$a[0] = 2;
+$x + $a[0]
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%c3   = Constant(3) :Int
+%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%i0   = Constant(0) :Int
+%rd1  = Subscript(%arr, %i0) :Int
+%rd2  = Subscript(%arr, %i0) :Int
+%sum  = Add(%rd1, %rd2) :Int
+return %sum
+L: GREEN
+```
