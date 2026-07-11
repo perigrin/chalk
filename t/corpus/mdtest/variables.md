@@ -117,11 +117,20 @@ L: GREEN
 ## C1 reassign then read
 
 `my $x = 1; $x = 2; return $x` — a declaration initialised to `1`, followed
-by a plain reassignment to `2`, with a single read of the final value. The
-`Assign` updates the var-table from `1` to `2`. The result `PadAccess` is
-distinct from the lhs `PadAccess` (same varname, same VarDecl — BUT the lhs
-is never lowered as a read, so `reads_of_var` is empty and the B1 poison
-guard never fires). The lli output is `2`.
+by a plain reassignment to `2`, with a single read of the final value.
+
+The IR is a Sea-of-Nodes SSA graph, and dead-store elimination is IMPLICIT in
+its construction: a pad slot is modelled as an immutable value binding at each
+program point, so the reassignment `$x = 2` simply rebinds the slot to
+`Constant(2)`, and the sole read observes that binding. The init `1` is never
+observed by any read (no read-before-reassign, no read-through-copy), so it is
+not reachable from the Return and does not appear in the graph — the SSA graph
+IS `Constant(2)`. This is not an optimization applied to a fuller graph; it is
+what the SSA construction produces. (Contrast the read-before-reassign case
+`my $x = 1; my $y = $x; $x = 2; $y`, where the copy binds `$y` to the live
+value `1` at that point, so THAT graph correctly returns `Constant(1)` — SSA
+captures the distinction; the init is dead here only because it is genuinely
+never read.)
 
 ```perl
 # source
@@ -134,15 +143,8 @@ context: scalar
 ```
 
 ```ir
-%xn   = Constant("$x") :Str
-%one  = Constant(1) :Int
-%vx   = VarDecl(%xn, %one) :Int
 %two  = Constant(2) :Int
-%lhs  = PadAccess(%vx, "$x") :Int
-%as   = Assign(%lhs, %two) :Int
-%rx   = PadAccess(%vx, "$x") :Int
-return %rx
-control: %vx -> %as
+return %two
 L: GREEN
 ```
 

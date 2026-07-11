@@ -217,6 +217,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, q{>=}, 61, q{gate-green floor (61; references R8 nested aggregate deref -- teeth in t/bootstrap/ir/son-aggregate-repr.t)});
+cmp_ok($tally{gate_green}, q{>=}, 62, q{gate-green floor (62; variables C1 dead-store -- SSA graph IS Constant(2), spec corrected from the stale var-table model; the worklist is empty)});
 
 done_testing();
