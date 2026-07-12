@@ -2,7 +2,9 @@
 
 Named sub definitions, anonymous subs (closures), and chained sub calls.
 
-All cases in this topic are L: GAP — but CodeRef is runtime-free (RF). Per the
+The direct-call cases (F1 named sub, F1v void call) are GREEN; the CodeRef
+cases (F2 closure, F3 chained) remain L: GAP — but CodeRef is runtime-free
+(RF). Per the
 runtime-free boundary, named subs and closures are RF: a CodeRef's
 representation is a function pointer plus a captured-environment struct (NOT an
 SV*), and a call is an indirect call. A statically-known call target is RF —
@@ -43,6 +45,37 @@ context: scalar
 ```ir
 %call = Call(dispatch_kind: "direct", name: "main::foo") :Int
 return %call
+L: GREEN
+```
+
+## F1v void direct call
+
+A named sub is called in VOID statement position — `side();` — for its side
+effect, with its result discarded, and a later value is returned. The call is
+NOT the return value; it is a statement effect that must be threaded onto the
+control chain (is_stmt_effect) so it is ordered and survives DCE. Without that
+threading the pushed Call is dead in void context and the call vanishes
+silently (zhi 019f26a5). The loader seeds the single-exit Return from the
+stmt-effect Call as well as the returned value, so the call is scheduled before
+the Return. This is RF: a direct call to a statically-known target.
+
+```perl
+# source
+sub side { 42 }
+my $n = 7;
+side();
+$n
+```
+
+```behavior
+return: 7
+context: scalar
+```
+
+```ir
+%call = Call(dispatch_kind: "direct", name: "main::side")
+%n = Constant(7) :Int
+return %n
 L: GREEN
 ```
 
