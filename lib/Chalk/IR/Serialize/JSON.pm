@@ -414,16 +414,35 @@ sub _deserialize_graph ($method_data) {
     for my $node (@nodes) {
         next unless $node->operation eq 'Region';
         next if $node->head;
-        my ($arm) = $node->inputs->@*;
-        my %seen;
-        while (defined $arm && blessed($arm)
-                && $arm->operation ne 'Proj' && !$seen{$arm->id}++) {
-            $arm = $arm->can('control_in') ? $arm->control_in : undef;
+        # Scan EVERY input for the owning Proj, not just the first. An early-
+        # return merge normalized to single-exit (`return X if C`, `E // return
+        # X`) builds Region inputs = [pre-branch-control, exit-Proj] -- the Proj
+        # is at index 1, and inputs[0] (the pre-branch control, often Start) has
+        # no control_in chain to a Proj. Checking only inputs[0] left head unset,
+        # so the backend pushed the bare Region and never wired the If's Phi
+        # (Phi-before-Region die). Follow each arm's control_in until a Proj.
+        my $owner;
+        for my $start ($node->inputs->@*) {
+            my $arm = $start;
+            my %seen;
+            while (defined $arm && blessed($arm)
+                    && $arm->operation ne 'Proj' && !$seen{$arm->id}++) {
+                $arm = $arm->can('control_in') ? $arm->control_in : undef;
+            }
+            next unless defined $arm && blessed($arm)
+                && $arm->operation eq 'Proj';
+            my $cand = $arm->inputs->[0];
+            if (defined $cand && blessed($cand)) { $owner = $cand; last }
         }
-        next unless defined $arm && blessed($arm)
-            && $arm->operation eq 'Proj';
-        my $owner = $arm->inputs->[0];
-        $node->set_head($owner) if defined $owner && blessed($owner);
+        next unless defined $owner;
+        # set_region installs BOTH directions: If.region -> this Region (the
+        # forward pointer the backend's _process_if_node reads to wire the merge
+        # Phis) AND Region.head -> the If (the back-pointer the control-chain
+        # walk follows). Setting only head left If.region unset, so the backend
+        # skipped Phi wiring. Fall back to set_head for an owner without
+        # set_region (defensive; If/Loop both have it).
+        if ($owner->can('set_region')) { $owner->set_region($node) }
+        else                           { $node->set_head($owner) }
     }
 
     my $start   = $nodes[ $method_data->{start} ];
@@ -659,6 +678,12 @@ sub _replay_classes ($classes, $graphs) {
 # field type feeds an Add). Mirrors the producer's result-stamp rules so a field
 # read flowing into arithmetic carries a repr to the method body root.
 my %_COMPUTED_REPR = (
+    # A Phi (control-flow value merge) and a TernaryExpr carry the JOIN of their
+    # arm reprs -- a merge of two Ints is Int, an Int|Str widens to Str -- the
+    # same rule _make_ternary uses. An early-return merged into single-exit
+    # (`return X if C`, `E // return X`) reaches the backend as a Region+Phi over
+    # the exit values, which the backend cannot lower without an explicit repr.
+    Phi => 'join', TernaryExpr => 'join',
     Add => 'join', Subtract => 'join', Multiply => 'join', Negate => 'join',
     Divide => 'Num', Power => 'Num', Modulo => 'Int',
     BitAnd => 'Int', BitOr => 'Int', BitXor => 'Int',
@@ -667,8 +692,12 @@ my %_COMPUTED_REPR = (
     # ref($x) reads the type/class name of a reference -- always a Str,
     # regardless of the operand (ref($obj) -> class name, ref([...]) -> "ARRAY").
     RefType => 'Str',
+    # Predicates are always Boolean. Defined/Not gate an early-return guard
+    # (`E // return X` lowers to If(Not(Defined(E)))); the backend needs an
+    # explicit Bool repr on the If condition to emit an i1 branch.
     (map { $_ => 'Bool' } qw(
-        NumEq NumLt NumGt NumLe NumGe NumNe StrEq StrLt StrGt StrLe StrGe StrNe)),
+        NumEq NumLt NumGt NumLe NumGe NumNe StrEq StrLt StrGt StrLe StrGe StrNe
+        Defined Not)),
     NumCmp => 'Int', StrCmp => 'Int',
 );
 # Widening order for the 'join' rule (Int < Num < Str).

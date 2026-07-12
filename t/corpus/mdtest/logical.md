@@ -160,6 +160,49 @@ control: %vda -> %vdb
 L: GREEN
 ```
 
+## L3c defined-or with an early-return fallback
+
+Perl `//` whose fallback is a function EXIT: `my $x = $a // return 99`. This is
+NOT the operand-selecting `DefinedOr` -- the fallback LEAVES the sub when `$a`
+is undefined, so it is a guarded early return, not a value. For `$a = 3`
+(defined) the sub falls through: `$x = 3`, and returns `$x + 1 = 4`.
+
+The producer models it as a guarded exit -- `If(Not(Defined($a)))` -- true when
+`$a` is undef (the early-return path, the If's TRUE branch so it aligns with the
+exit value in the single-exit Phi); the main path continues on the FALSE Proj
+(index 1) where `$a` is defined and the dor value is `$a`. The two exits (the
+early `return 99` and the fall-through `$x + 1`) merge through a Region + Phi
+into the single-exit Return. Was a silent miscompile (the fallback return was
+dropped and `$a // return 99` degenerated to `DefinedOr($a, $a)`); zhi
+019f26a5.
+
+```perl
+# source
+my $a = 3;
+my $x = $a // return 99;
+$x + 1
+```
+
+```behavior
+return: 4
+context: scalar
+```
+
+```ir
+%a   = Constant(3) :Int
+%def = Defined(%a) :Bool
+%nd  = Not(%def) :Bool
+%if  = If(%nd)
+%p1  = Proj(%if, index: 1)
+%c99 = Constant(99) :Int
+%c1  = Constant(1) :Int
+%add = Add(%a, %c1) :Int
+%reg = Region(%p1)
+%phi = Phi(%c99, %add) :Int
+return %phi
+L: GREEN
+```
+
 ## L4 not
 
 Perl `!` returns a genuine BOOLEAN: `!5` is `false`, `!0` is `true`. These are
