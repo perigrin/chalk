@@ -190,6 +190,59 @@ branch_control: %lp0 -> %s_new
 L: GREEN
 ```
 
+## D2c while loop with a bare-truthiness header
+
+A bare-scalar header (`while ($n)`) has no comparison -- the condition is the
+loop-carried value's truthiness. The producer synthesizes an explicit
+`NumNe($n, 0)` truthiness test and wires ITS control edge to the Loop, so the
+backend still recovers an icmp condition structurally. Without this, the header
+node is a Phi (not an icmp), the backend's strategy 1 skips it, and any body
+comparison on the loop-carried value is picked as the exit test (silent
+miscompile, e.g. `while ($n){ my $c=$n>2; ... }` returned 2 not 4).
+
+```perl
+# source
+my $n = 3;
+my $s = 0;
+while ($n) { $s += $n; $n-- }
+$s
+```
+
+```behavior
+return: 6
+context: scalar
+```
+
+```ir
+%c3    = Constant(3) :Int
+%c0a   = Constant(0) :Int
+%zero  = Constant(0) :Int
+%one   = Constant(1) :Int
+%nn    = Constant("$n") :Str
+%sn    = Constant("$s") :Str
+%vn    = VarDecl(%nn, %c3) :Int
+%vs    = VarDecl(%sn, %c0a) :Int
+%rn0   = PadAccess(%vn, "$n") :Int
+%rs0   = PadAccess(%vs, "$s") :Int
+%loop  = Loop(%vs)
+%n_phi = Phi(%rn0, region: %loop) :Int
+%s_phi = Phi(%rs0, region: %loop) :Int
+%cmp   = NumNe(%n_phi, %zero) :Bool
+%s_new = Add(%s_phi, %n_phi) :Int
+%n_new = Subtract(%n_phi, %one) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+control: %vn -> %vs -> %loop
+loop_backedge: %n_phi -> %n_new
+loop_backedge: %s_phi -> %s_new
+branch_control: %loop -> %cmp
+branch_control: %lp0 -> %n_new
+branch_control: %lp0 -> %s_new
+L: GREEN
+```
+
 ## D3 foreach loop
 
 A foreach over a range desugars to a counted loop: an induction variable, a
