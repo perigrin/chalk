@@ -138,6 +138,58 @@ branch_control: %lp0 -> %s_new
 L: GREEN
 ```
 
+## D2b while loop with a body decoy comparison
+
+The loop body contains its own comparison on the loop-carried variable (`$n >
+-5`). A first-icmp-consumer-of-a-header-Phi heuristic could pick that decoy as
+the loop condition and iterate one extra time (silent miscompile, RC2b C4). The
+producer wires the header condition's control edge to the Loop
+(`branch_control: %loop -> %cmp`), so the backend recovers it structurally
+(`_lower_loop_condition` strategy 1) regardless of body comparisons.
+
+```perl
+# source
+my $n = 3;
+my $s = 0;
+while ($n > 0) { my $c = $n > -5; $s += $n; $n-- }
+$s
+```
+
+```behavior
+return: 6
+context: scalar
+```
+
+```ir
+%c3    = Constant(3) :Int
+%c0a   = Constant(0) :Int
+%c0b   = Constant(0) :Int
+%one   = Constant(1) :Int
+%nn    = Constant("$n") :Str
+%sn    = Constant("$s") :Str
+%vn    = VarDecl(%nn, %c3) :Int
+%vs    = VarDecl(%sn, %c0a) :Int
+%rn0   = PadAccess(%vn, "$n") :Int
+%rs0   = PadAccess(%vs, "$s") :Int
+%loop  = Loop(%vs)
+%n_phi = Phi(%rn0, region: %loop) :Int
+%s_phi = Phi(%rs0, region: %loop) :Int
+%cmp   = NumGt(%n_phi, %c0b) :Bool
+%s_new = Add(%s_phi, %n_phi) :Int
+%n_new = Subtract(%n_phi, %one) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+control: %vn -> %vs -> %loop
+loop_backedge: %n_phi -> %n_new
+loop_backedge: %s_phi -> %s_new
+branch_control: %loop -> %cmp
+branch_control: %lp0 -> %n_new
+branch_control: %lp0 -> %s_new
+L: GREEN
+```
+
 ## D3 foreach loop
 
 A foreach over a range desugars to a counted loop: an induction variable, a

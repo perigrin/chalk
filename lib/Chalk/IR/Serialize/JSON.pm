@@ -394,6 +394,17 @@ sub _deserialize_graph ($method_data) {
             $node->set_representation($STAMP_TO_REPR{ $nd->{stamp} });
         }
 
+        # A loop-header condition carries a control edge to its Loop. Demote it
+        # to control_in so the backend recovers the condition structurally
+        # (LLVM.pm _lower_loop_condition strategy 1) instead of by the ambiguous
+        # first-icmp-consumer heuristic. set_control_in registers the condition
+        # in the Loop's consumers, which is what strategy 1 scans. The condition
+        # consumes the header Phi (which regions the Loop), so the Loop always
+        # precedes it in topo order -- a backward reference, wired inline.
+        if (defined $nd->{loop_control}) {
+            $node->set_control_in($nodes[ $nd->{loop_control} ]);
+        }
+
         push @nodes, $node;
     }
 
