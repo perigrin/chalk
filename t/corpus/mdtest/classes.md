@@ -341,3 +341,52 @@ context: scalar
 return %result
 L: GREEN
 ```
+
+## conditional-void-call
+
+A void mutating method call GUARDED by a runtime condition: `$c->inc if $x > 3`.
+The call runs only when the guard is true, so its field store is
+control-dependent on the branch: it is walked on the true Proj (control-threaded)
+and a Region merges the taken/not-taken edges. The post-branch `val` read
+observes the merged state. Without building the branch control flow, the void
+call rebinds no pad slot and the effect is silently dropped when taken (zhi
+019f2df7). The invocant (the `new` construction bound to `$c`) is used both in
+the guarded arm and after the merge, so it is pre-lowered in the dominating
+pre-branch block.
+
+```perl
+# source
+use feature 'class';
+no warnings 'experimental::class';
+class Counter {
+    field $n :param = 0;
+    method inc { $n = $n + 1 }
+    method val { return $n }
+}
+my $c = Counter->new(n => 10);
+my $x = 5;
+$c->inc if $x > 3;
+$c->val
+```
+
+```behavior
+return: Int:11
+context: scalar
+```
+
+```ir
+%ten       = Constant(10) :Int
+%new_c     = Call(%ten, dispatch_kind: "method", name: "new", class: "Counter", param_names: "n") :Object
+%five      = Constant(5) :Int
+%three     = Constant(3) :Int
+%cmp       = NumGt(%five, %three) :Bool
+%if        = If(%cmp)
+%proj0     = Proj(%if, index: 0)
+%proj1     = Proj(%if, index: 1)
+%inc       = Call(%new_c, dispatch_kind: "method", name: "inc", class: "Counter") :Int
+%region    = Region(%proj1, %inc)
+%result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
+return %result
+branch_control: %proj0 -> %inc
+L: GREEN
+```

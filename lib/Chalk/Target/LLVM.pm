@@ -3369,10 +3369,18 @@ sub _process_if_node {
 # and cached, so the store/read reuse the cached, dominating refs.
 sub _prelower_branch_store_operands {
     my ($self, $if_node) = @_;
+    # Collect the set of nodes that belong to a branch body so a pre-branch emit
+    # never hoists a value that is itself branch-local (defined inside the arm).
+    my %branch_body;
+    my @bodies;
     for my $proj (grep { blessed($_) && $_->operation eq 'Proj' }
                        $if_node->consumers->@*) {
-        for my $node (_collect_branch_body($proj)) {
-            next unless $node->operation eq 'Assign';
+        my @nodes = _collect_branch_body($proj);
+        push @bodies, @nodes;
+        $branch_body{ $_->id } = 1 for @nodes;
+    }
+    for my $node (@bodies) {
+        if ($node->operation eq 'Assign') {
             # An element store: inputs = [target, value] with target a Subscript
             # (control is control_in, split off by the loader).
             my ($target) = grep { blessed($_) && $_->operation eq 'Subscript' }
@@ -3381,6 +3389,26 @@ sub _prelower_branch_store_operands {
             # container = inputs[0], index = inputs[1] of the Subscript lvalue.
             $self->lower_value($target->inputs->[0]);
             $self->lower_value($target->inputs->[1]);
+        }
+        elsif ($node->operation eq 'Call'
+            && $node->can('dispatch_kind')
+            && ($node->dispatch_kind // '') eq 'method') {
+            # A branch-guarded void method call (`$c->inc if ...`). Its INVOCANT
+            # (inputs[0] after the control_in edge is split off by the loader) is
+            # a value defined BEFORE the branch (e.g. the `Call new` bound to $c)
+            # and is ALSO used post-merge by a later read. Lazy lowering would
+            # emit it inside the guarded arm block, so the post-merge use would
+            # not be dominated ("instruction does not dominate all uses"). Lower
+            # it HERE, in the pre-branch block (which dominates both the arm and
+            # the merge), so the shared ref is cached and dominance-correct --
+            # the same pre-lowering the element-store operands above rely on.
+            # Skip an invocant that is itself branch-local (defined in the arm):
+            # hoisting it out of its guard would be unsound.
+            my ($invocant) = grep { blessed($_) && $_->operation ne 'Proj' }
+                                  $node->inputs->@*;
+            next unless defined $invocant;
+            next if $branch_body{ $invocant->id };
+            $self->lower_value($invocant);
         }
     }
     return;
@@ -3826,6 +3854,14 @@ sub _collect_body_recursive {
     return if $visited->{$id}++;
 
     my $op = $node->can('operation') ? $node->operation : '';
+
+    # A Region is the MERGE point where the branch arms rejoin: anything reached
+    # only THROUGH it is post-branch, not part of this arm. Stop here so an
+    # unconditional statement effect that follows the branch (control_in=Region,
+    # e.g. `$c->inc if $x>3; $c->inc;`) is NOT swept into the then-arm body and
+    # dropped when the guard is false (zhi 019f2df7). The Region itself and its
+    # post-merge consumers are handled by the outer control chain.
+    return if $op eq 'Region';
 
     # Statement nodes (is_statement_node: VarDecl + the shared
     # statement-effect table) and control flow (If/Loop) go into the body.
