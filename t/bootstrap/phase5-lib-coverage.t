@@ -82,12 +82,15 @@ if (%{ $sum->{gap_hist} }) {
     }
 }
 diag('');
-diag('  DIAGNOSIS (2026-07-13): coverage is ~0 not merely because methods hit the');
-diag('  NO-REPR GAP, but because B::SoN invoked as `perl -MO=SoN <module.pm>` walks');
-diag('  the loaded producer + deps, and a deeply-namespaced feature-class module');
-diag('  (Chalk::IR::Node::Constant) contributes ZERO own units (stage NO_OWN) --');
-diag('  package= empties the output rather than scoping it. Getting a real chalk');
-diag('  class module to emit its OWN methods is the first Phase-5 blocker.');
+diag('  DIAGNOSIS (2026-07-13, corrected): real chalk feature-class modules DO');
+diag('  emit their own methods (with -I<libdir> so their `use Chalk::...` deps');
+diag('  resolve -- the earlier NO_OWN reading was a harness bug, not a producer');
+diag('  limit). Coverage is 0% because every emitted own unit fails LOWERING, in');
+diag('  two GAP classes: (1) MOP::Method body root reached the backend with NO');
+diag('  representation (real methods use more feature surface than the corpus);');
+diag('  (2) a bodyless-ish accessor method (`method operation { \'Constant\' }`)');
+diag('  yields a graph with no Return node. Both are backend/producer GAPs to');
+diag('  triage by frequency across real methods, NOT by corpus idiom.');
 
 cmp_ok($sum->{lowered}, '>=', 0,
     'Phase-5 lib/ coverage is well-defined (trend number; raise the floor as it lands)');

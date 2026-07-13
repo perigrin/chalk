@@ -16,11 +16,11 @@ use JSON::PP ();
 #
 #   NO_JSON    : B::SoN emitted no decodable JSON at all.
 #   LOAD_FAIL  : Chalk::IR::Serialize::JSON::from_json died.
-#   NO_OWN     : loaded, but this file contributed ZERO own units to the graph
-#                (the common case today: B::SoN, invoked as a compiler backend on
-#                a module, walks the loaded producer + deps, and a deeply-namespaced
-#                `feature class` module's own methods are not emitted -- the real
-#                blocker to any lib/ coverage; see the harness test's DIAGNOSIS).
+#   NO_OWN     : loaded, but this file contributed ZERO own units. With the chalk
+#                lib dir on @INC (-I$libdir), real feature-class modules DO emit
+#                their own methods, so NO_OWN now means the file genuinely defines
+#                no translatable own units (rare); an emission miss is instead a
+#                NO_JSON (the file's deps or structure defeated B::SoN entirely).
 #   OK         : own units found; `own` and `lowered` count how many of them the
 #                LLVM backend lowers without dying. `top_gap` is the most common
 #                lowering-failure reason (the NO-REPR / unhandled-op GAP class).
@@ -39,6 +39,12 @@ sub measure_file {
     my $perl = $opts->{perl} // $^X;
     my $son  = $opts->{son}
         // $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
+    # The chalk lib dir MUST be on @INC for B::SoN: a real chalk module's own
+    # `use Chalk::...` deps have to resolve or its feature-class body never fully
+    # compiles and B::SoN emits NOTHING for the target (the earlier false
+    # "NO_OWN / package= empties output" reading was this missing -Ilib, not a
+    # producer limitation -- zhi 019f5da9).
+    my $libdir = $opts->{libdir} // 'lib';
     my $to   = $opts->{timeout} // 90;
 
     my %res = (file => $file, stage => '?', own => 0, lowered => 0,
@@ -50,9 +56,10 @@ sub measure_file {
     while (<$fh>) { $own_pkg{$1} = 1 if /^\s*(?:package|class)\s+([\w:]+)/ }
     close $fh;
 
-    # Stage 1: B::SoN JSON. Count stderr GAP lines (skipped subs) as a signal.
+    # Stage 1: B::SoN JSON. -I$libdir so the file's own `use Chalk::...` resolve.
+    # Count stderr GAP lines (skipped subs) as a signal.
     my $errf = "/tmp/p5lib_$$.err";
-    my $json = qx($perl -I$son -MO=SoN,json $file 2>$errf);
+    my $json = qx($perl -I$son -I$libdir -MO=SoN,json $file 2>$errf);
     if (open my $eh, '<', $errf) { local $/; my $e = <$eh>; $res{gaps} = () = $e =~ /^B::SoN: skipped/mg; close $eh }
     unlink $errf;
 
