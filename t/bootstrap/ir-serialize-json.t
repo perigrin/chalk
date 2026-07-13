@@ -210,4 +210,45 @@ sub make_simple_graph {
     is_deeply($call2->param_names, [q{left}, q{right}], q{Call param_names preserved});
 }
 
+# =============================================================================
+# Test: to_json refuses to silently corrupt a LOADED loop graph (zhi
+# 019f29ed-974a). from_json moves control into control_in and attaches the loop
+# condition to its Loop via a loop_control edge -- neither is a value input, so
+# on a loaded control-flow graph those nodes can fall outside the input-reachable
+# serializable set. Serializing anyway would emit a positional ref to a node not
+# in the output: valid-looking but UNLOWERABLE JSON (a loop with no condition).
+# No live consumer round-trips a loaded graph today; rather than corrupt
+# silently, to_json must DIE loudly (GAP-not-corruption). A freshly-built graph
+# (control in inputs) still round-trips and must NOT trip the guard.
+# =============================================================================
+
+{
+    # A minimal while-loop producer graph: `my $s=0; my $n=3; while ($n>0){
+    # $s+=$n; $n-=1 } $s`. Node 11 = NumGt(n_phi, 0) loop_control:1 is the
+    # condition, attached to the Loop (id 1) via loop_control.
+    my $loop_json = <<'JSON';
+{"methods":{"main::corpus_case":{"nodes":[{"cfg":true,"id":0,"inputs":[],"op":"Start"},{"cfg":true,"id":1,"inputs":[0],"op":"Loop"},{"cfg":true,"fields":{"index":1},"id":2,"inputs":[1],"op":"Proj"},{"cfg":true,"id":3,"inputs":[2],"op":"Region"},{"fields":{"const_type":"integer","value":"0"},"id":4,"inputs":[],"op":"Constant","stamp":"Int"},{"fields":{"region":1},"id":5,"inputs":[4,10],"op":"Phi","stamp":"Int"},{"cfg":true,"id":6,"inputs":[3,5],"op":"Return"},{"cfg":true,"fields":{"index":0},"id":7,"inputs":[1],"op":"Proj"},{"fields":{"const_type":"integer","value":"3"},"id":8,"inputs":[],"op":"Constant","stamp":"Int"},{"fields":{"region":1},"id":9,"inputs":[8,13],"op":"Phi","stamp":"Int"},{"id":10,"inputs":[5,9],"op":"Add","stamp":"Int"},{"id":11,"inputs":[9,4],"loop_control":1,"op":"NumGt","stamp":"Boolean"},{"fields":{"const_type":"integer","value":"1"},"id":12,"inputs":[],"op":"Constant","stamp":"Int"},{"id":13,"inputs":[9,12],"op":"Subtract","stamp":"Int"}],"returns":[6],"start":0}},"source":null,"version":1}
+JSON
+
+    my ($g1) = from_json($loop_json);
+    my $graph = $g1->{'main::corpus_case'};
+    ok(defined $graph, 'loaded the loop graph');
+
+    # to_json must DIE loudly rather than emit corrupt (condition-less) JSON.
+    my $err = do { local $@; eval { to_json({ 'main::corpus_case' => $graph }); 1 } ? '' : $@ };
+    like($err, qr/GAP: to_json cannot faithfully round-trip/,
+        'to_json dies loudly on a loaded loop graph, not silent corruption');
+}
+
+{
+    # A freshly-BUILT graph (control in inputs, no control_in threading) must
+    # still round-trip cleanly and NOT trip the guard.
+    my $graph = make_simple_graph();
+    my $json  = do { local $@; eval { to_json({ main => $graph }) } };
+    ok(defined $json && $json =~ /\S/,
+        'a freshly-built graph still serializes (guard does not over-fire)');
+    my $loaded = from_json($json);
+    ok(exists $loaded->{main}, 'and it round-trips');
+}
+
 done_testing();

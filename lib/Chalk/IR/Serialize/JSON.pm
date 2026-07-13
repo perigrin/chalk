@@ -185,6 +185,38 @@ sub _serialize_graph ($graph) {
         $id_remap{ $node->id } = $pos++;
     }
 
+    # GAP-not-corruption boundary (zhi 019f29ed-974a): from_json moves control
+    # into control_in and attaches a loop CONDITION to its Loop via a
+    # loop_control edge; the condition is a value-input of nothing on the return
+    # path, so the input-reachable node set ($graph->nodes / _all_nodes_topo)
+    # can OMIT it entirely (it is not referenced BY any captured node, so no
+    # dangling positional ref is produced -- it is simply dropped). Serializing
+    # anyway emits a loop with no condition: valid-looking but UNLOWERABLE JSON.
+    # No live consumer round-trips a loaded graph today. Rather than emit
+    # silently-broken JSON, detect a Loop whose loop_control condition is not in
+    # the captured set and die loudly. A freshly-built graph (control in inputs,
+    # no loop_control edge yet, or its condition captured as an input) round-trips
+    # and does not trip this.
+    for my $node ($topo_nodes->@*) {
+        next unless $node->operation eq 'Loop';
+        my $cons = $node->can('consumers') ? ($node->consumers // []) : [];
+        for my $c ($cons->@*) {
+            next unless blessed($c);
+            # from_json demotes a loaded loop condition's loop_control edge to
+            # control_in on the Chalk node; the condition is a Loop consumer whose
+            # control_in IS the Loop.
+            my $ci = $c->can('control_in') ? $c->control_in : undef;
+            next unless defined $ci && blessed($ci) && $ci->id eq $node->id;
+            next if exists $id_remap{ $c->id };   # condition captured: fine
+            die "GAP: to_json cannot faithfully round-trip this graph — a Loop's "
+              . "condition (" . $c->operation . ", attached via control_in) is "
+              . "not in the serializable node set. from_json threads a loaded "
+              . "loop condition via control_in, leaving it unreachable from the "
+              . "return path; round-trip of loaded loop graphs is not yet "
+              . "supported (zhi 019f29ed-974a).\n";
+        }
+    }
+
     # Emit each node
     my @nodes;
     for my $node ($topo_nodes->@*) {
