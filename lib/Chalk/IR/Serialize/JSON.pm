@@ -283,8 +283,28 @@ sub _deserialize_graph ($method_data) {
         my $fields = $nd->{fields} // {};
         my $is_cfg = $nd->{cfg}    // 0;
 
-        # Resolve inputs from already-created nodes
-        my @inputs = map { $nodes[$_] } ($nd->{inputs} // [])->@*;
+        # Resolve inputs from already-created nodes. Nodes are built in array
+        # order, so a valid input index is < the current node count; an index at
+        # or beyond it is a FORWARD reference that resolves to undef here. The one
+        # sanctioned forward edge is a loop Phi's backedge (inputs[1]), deferred
+        # and patched below. Any OTHER forward index is a producer ordering bug
+        # that would silently become an undef input and crash DEEP in the backend
+        # (seen at LLVM.pm before the Graph::nodes DFS fix). Die at the seam,
+        # naming the node/slot/index, so a future ordering bug is an immediate,
+        # legible loader error rather than an opaque backend crash (zhi 019f26a5).
+        my @input_idx = ($nd->{inputs} // [])->@*;
+        my $phi_backedge_slot =
+            ($op eq 'Phi' && @input_idx == 2 && $input_idx[1] >= @nodes) ? 1 : -1;
+        for my $slot (0 .. $#input_idx) {
+            my $idx = $input_idx[$slot];
+            next if $slot == $phi_backedge_slot;   # sanctioned deferred backedge
+            next if defined $idx && $idx >= 0 && $idx < @nodes;
+            die "IR load: node #" . scalar(@nodes) . " ($op) input slot $slot "
+              . "references index " . ($idx // 'undef') . ", which is not an "
+              . "already-created node (have " . scalar(@nodes) . "); an "
+              . "unresolvable forward input reference is a producer ordering bug.";
+        }
+        my @inputs = map { $nodes[$_] } @input_idx;
 
         # B::SoN serializes Return as inputs=[control, value] (control token
         # first). Chalk's contract is inputs=[value] with control carried in

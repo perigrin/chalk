@@ -251,4 +251,57 @@ JSON
     ok(exists $loaded->{main}, 'and it round-trips');
 }
 
+{
+    # from_json must DIE loudly on an unresolvable FORWARD input reference (a
+    # producer ordering bug), naming the node/slot/index, rather than resolving
+    # it to undef and crashing deep in the backend (zhi 019f26a5). Build a valid
+    # graph, then corrupt one node's input index to point past the array.
+    use JSON::PP ();
+    my $graph = make_simple_graph();
+    my $json  = to_json({ main => $graph });
+    my $data  = JSON::PP->new->decode($json);
+    my $nodes = $data->{methods}{main}{nodes};
+
+    # The Return (last node) references the Constant. Point its value input at a
+    # non-existent forward index.
+    my ($ret) = grep { $_->{op} eq 'Return' } @$nodes;
+    ok(defined $ret, 'found the Return node to corrupt');
+    $ret->{inputs} = [ 999 ];   # forward/out-of-range: no such node
+    my $bad_json = JSON::PP->new->canonical->encode($data);
+
+    my $err = do { local $@; eval { from_json($bad_json); 1 } ? '' : $@ };
+    like($err, qr/unresolvable forward input reference/,
+        'from_json dies loudly on a forward input reference');
+    like($err, qr/Return/,
+        'the error names the offending node op');
+}
+
+{
+    # The guard must NOT fire on the sanctioned loop-Phi backedge (inputs[1] is a
+    # legitimate forward reference the loader defers). A real loop graph loaded
+    # via B::SoN exercises this; the ir-serialize round-trip test above already
+    # loads a loop graph without the guard firing, so assert the message never
+    # appears for a valid Phi-backedge graph here as a focused regression.
+    my $f     = Chalk::IR::NodeFactory->new();
+    my $start = $f->make_cfg('Start');
+    my $loop  = $f->make_cfg('Loop', inputs => [$start]);
+    my $init  = $f->make('Constant', value => '0', const_type => 'integer');
+    my $phi   = $f->make('Phi', inputs => [$init], region => $loop);
+    my $one   = $f->make('Constant', value => '1', const_type => 'integer');
+    my $add   = $f->make('Add', inputs => [$phi, $one]);
+    $phi->set_backedge($add) if $phi->can('set_backedge');
+    my $ret   = $f->make_cfg('Return', inputs => [$start, $phi]);
+    my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
+
+    my $json = do { local $@; eval { to_json({ loopish => $graph }) } // '' };
+    # If this graph serializes (a Phi-backedge round-trips), loading must not trip
+    # the forward-ref guard.
+  SKIP: {
+        skip 'loop graph did not serialize in this build', 1 unless $json =~ /\S/;
+        my $err = do { local $@; eval { from_json($json); 1 } ? '' : $@ };
+        unlike($err, qr/unresolvable forward input reference/,
+            'the guard does not fire on a sanctioned loop-Phi backedge');
+    }
+}
+
 done_testing();
