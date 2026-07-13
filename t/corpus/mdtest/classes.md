@@ -552,3 +552,70 @@ branch_control: %proj1 -> %store_f
 return %result
 L: GREEN
 ```
+
+## self-method-call in a value position
+
+A method that calls a SIBLING method on `$self` in a value position
+(`method m { $self->flag() ? 10 : 20 }`) currently GAPs: the `$self->flag()` Call
+does not record its statically-known class, so the backend refuses
+("Call(method) 'flag' has no class_name"). The class IS static -- it is the
+enclosing class -- so the producer should stamp the self-call's class_name (as it
+does for `$obj->method` on an external object in method-call). This is the most
+common NO-REPR trigger in real lib/ methods (e.g. Chalk::Grammar::Symbol::to_string
+calls `$self->is_terminal()`), so closing it unblocks a large fraction of the
+Phase-5 lib/ coverage.
+
+```perl
+# source
+use feature 'class';
+no warnings 'experimental::class';
+class Widget {
+    method flag { 1 }
+    method pick { $self->flag() ? 10 : 20 }
+}
+Widget->new->pick
+```
+
+```behavior
+return: Int:10
+context: scalar
+```
+
+```ir
+L: GAP(self-method-call $self->flag() does not stamp its statically-known class_name; a value-position self dispatch needs the enclosing class recorded like an external $obj->method call does)
+```
+
+## conditional string append (.= guarded by a postfix if)
+
+A method that appends to a string only when a field is defined
+(`method m { my $s = $v; $s .= $q if defined $q; $s }`) currently GAPs at the
+method body root NO representation -- the branch-guarded `.=` field/local append in
+a return-value position is not yet lowered (distinct from the branch-guarded
+element/field STORE, which is; this is a value-context conditional Concat). This is
+the second NO-REPR trigger in Chalk::Grammar::Symbol::to_string
+(`$str .= $quantifier if defined $quantifier`).
+
+```perl
+# source
+use feature 'class';
+no warnings 'experimental::class';
+class Tagged {
+    field $v :param;
+    field $q :param = undef;
+    method render {
+        my $s = $v;
+        $s .= $q if defined $q;
+        $s
+    }
+}
+Tagged->new(v => "a", q => "b")->render
+```
+
+```behavior
+return: Str:ab
+context: scalar
+```
+
+```ir
+L: GAP(a value-context conditional string append -- $s .= $x if defined $x -- feeding the method return is not yet lowered; the branch-guarded Concat residual reaches the method body root with no representation)
+```

@@ -132,3 +132,36 @@ context: scalar
 ```ir
 L: GAP(CodeRef is RF: each call is an indirect call to a statically-known target via a function pointer; GAP only until CodeRef representation is modelled, NOT a libperl/SV dependency)
 ```
+
+## F4 sub returning a list flattens into the caller's list assignment
+
+`sub inner { return (10, 20, 30) }` returns a LIST; `my @x = inner()` binds @x to
+all three elements, so `scalar @x` is 3. The producer currently types the direct
+Call as a scalar Int and wraps it as a single element (ArrayRef(Call)), so
+`scalar @x` returns 1 -- a silent miscompile. This is the list-flattening class
+(variables.md A9-A11) at a sub-call boundary, and it is the caller-side half of
+the no-Return list-returning method that poisons the shared MOP (Phase-5:
+Chalk::IR::Node::_serialize_inputs returns @parts). The target: a list-returning
+call in a list-assignment RHS flattens its result.
+
+```perl
+# source
+sub inner { return (10, 20, 30) }
+my @x = inner();
+scalar @x
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+%c1    = Constant(10) :Int
+%c2    = Constant(20) :Int
+%c3    = Constant(30) :Int
+%arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%len   = Length(%arr) :Int
+return %len
+L: GREEN
+```

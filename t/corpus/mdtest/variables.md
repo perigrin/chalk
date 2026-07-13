@@ -279,3 +279,94 @@ context: scalar
 return %len
 L: GREEN
 ```
+
+## A9 list-copy flattens the source array
+
+`my @b = @a` copies @a's ELEMENTS into @b (a list-context assignment), so
+`scalar @b` is @a's length, not 1. The producer currently wraps the source
+aggregate as a single element (ArrayRef(ArrayRef(...))) so `scalar @b` returns 1
+-- a silent miscompile of the same list-flattening class as A8's `(1..4)`. The
+target: an array variable read in the list-context RHS of a list assignment
+flattens to its elements.
+
+```perl
+# source
+my @a = (1, 2, 3);
+my @b = @a;
+scalar @b
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%c3    = Constant(3) :Int
+%arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%len   = Length(%arr) :Int
+return %len
+L: GREEN
+```
+
+## A10 list literal flattens an interpolated array
+
+`my @b = (@a, 4)` builds a list that FLATTENS @a's elements and appends the
+scalar, so @b is (1, 2, 3, 4) and `scalar @b` is 4. The producer currently counts
+the array as one element (returning 2 for `(@a, 4)`) -- the list-flattening gap
+applied to an array embedded in a list literal.
+
+```perl
+# source
+my @a = (1, 2, 3);
+my @b = (@a, 4);
+scalar @b
+```
+
+```behavior
+return: 4
+context: scalar
+```
+
+```ir
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%c3    = Constant(3) :Int
+%c4    = Constant(4) :Int
+%arr   = ArrayRef(%c1, %c2, %c3, %c4) :ArrayRef
+%len   = Length(%arr) :Int
+return %len
+L: GREEN
+```
+
+## A11 list literal flattens two arrays
+
+`my @c = (@a, @b)` flattens BOTH arrays into @c, so with @a = (1, 2) and
+@b = (3, 4), @c is (1, 2, 3, 4) and `scalar @c` is 4 (the producer currently
+returns 2). Multi-array flatten is the general form of A9/A10.
+
+```perl
+# source
+my @a = (1, 2);
+my @b = (3, 4);
+my @c = (@a, @b);
+scalar @c
+```
+
+```behavior
+return: 4
+context: scalar
+```
+
+```ir
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%c3    = Constant(3) :Int
+%c4    = Constant(4) :Int
+%arr   = ArrayRef(%c1, %c2, %c3, %c4) :ArrayRef
+%len   = Length(%arr) :Int
+return %len
+L: GREEN
+```
