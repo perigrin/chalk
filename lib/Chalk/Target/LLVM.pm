@@ -372,22 +372,33 @@ sub _method_body_root {
     return $value;
 }
 
-# _method_body_return($mop_method) -> $return_node | undef
+# _method_body_return($mop_method) -> $return_node
 #
 # The single Return node of a method's graph — the control root the body's
 # statement effects (field-store Assign, void Call) hang off. The method body is
 # lowered by walking this Return's control chain through _process_control_chain,
 # the same mechanism the top-level graph uses, so a BRANCHED body (an if/else
 # whose arms store a field) lowers to real basic blocks. A linear control_in walk
-# would stop at a merge Region and drop the branch arms. Returns undef for a
-# store-free body (`method val { $n }`) whose Return has no control chain.
+# would stop at a merge Region and drop the branch arms.
+#
+# The exactly-one-Return invariant is the same one _method_body_root enforces
+# (and it runs first at registry-build time, so this die is a belt-and-braces
+# guard). GAP loudly on a graph without a single unique Return rather than
+# returning undef — a silent undef would bare-deref in Dominators->from_return_node
+# and _process_control_chain, turning a lowering GAP into an opaque crash.
 sub _method_body_return {
     my ($mop_method) = @_;
-    my $graph = $mop_method->graph or return undef;
+    my $mname = $mop_method->name // '?';
+    my $graph = $mop_method->graph
+        or die "GAP: method '$mname' has no graph — cannot determine the body "
+             . "control root.";
     my @returns = grep {
         blessed($_) && $_->can('operation') && $_->operation eq 'Return'
     } @{ $graph->returns };
-    return @returns == 1 ? $returns[0] : undef;
+    die "GAP: method '$mname' has " . scalar(@returns) . " Returns — the body "
+      . "control root must be exactly one (a multi-exit body is not lowered yet)."
+        unless @returns == 1;
+    return $returns[0];
 }
 
 # _phaser_body_in_control_order($phaser) -> \@statement_nodes
