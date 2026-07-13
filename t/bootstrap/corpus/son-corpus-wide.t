@@ -217,6 +217,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, q{>=}, 82, q{gate-green floor (82; + strings S6/S7/S8: the multiconcat decoder lowers dynamic .=, interpolation, and interpolation with constant text segments to a left-folded Concat chain; worklist empty)});
+cmp_ok($tally{gate_green}, q{>=}, 83, q{gate-green floor (83; + field-attrs-custom-param: a :reader field with a custom :param(NAME) recovers its variable name from the class field metadata so the reader is detected, not emitted as a shadowing method; worklist empty)});
 
 done_testing();

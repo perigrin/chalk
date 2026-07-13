@@ -145,6 +145,48 @@ return %result
 L: GREEN
 ```
 
+## field-attrs-custom-param
+
+A `:reader` field whose `:param(NAME)` gives the constructor parameter a name
+DIFFERENT from the field variable (`field $left :param(alpha) :reader`). The
+reader accessor is still named after the VARIABLE (`left`), not the param. The
+field's variable name must come from the class's own field metadata
+(`xhv_class_fields`), not `$` . param_name -- else the reader is mis-detected and
+emitted as a shadowing user-method that GAPs (zhi 019f4625). Neither field is
+referenced by any method or ADJUST body, which is exactly the case that exposed
+the bug.
+
+```perl
+# source
+use feature 'class';
+no warnings 'experimental::class';
+class Pair {
+    field $left  :param(alpha) :reader;
+    field $right :param(beta)  :reader;
+}
+my $p = Pair->new(alpha => 10, beta => 20);
+$p->left - $p->right
+```
+
+```behavior
+return: Int:-10
+context: scalar
+```
+
+```ir
+%cls    = MOP::Class(name: "Pair")
+%mf_l   = MOP::Field(class: %cls, name: "left",  fieldix: 0, param: true, reader: true, has_default: false, type: "Int")
+%mf_r   = MOP::Field(class: %cls, name: "right", fieldix: 1, param: true, reader: true, has_default: false, type: "Int")
+%lval   = Constant(10) :Int
+%rval   = Constant(20) :Int
+%new_p  = Call(%lval, %rval, dispatch_kind: "method", name: "new", class: "Pair", param_names: "alpha,beta") :Object
+%lr     = Call(%new_p, dispatch_kind: "method", name: "left", class: "Pair")  :Int
+%rr     = Call(%new_p, dispatch_kind: "method", name: "right", class: "Pair") :Int
+%result = Subtract(%lr, %rr) :Int
+return %result
+L: GREEN
+```
+
 ## method-simple
 
 A method that ignores `$self` and returns a literal value is the simplest
