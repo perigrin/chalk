@@ -122,6 +122,97 @@ return %pa2
 L: GREEN
 ```
 
+## S6 dynamic concat-assign (.= a variable)
+
+A `.=` whose right-hand side is a VARIABLE (`$s .= $t`) rather than a literal.
+perl compiles it to a dynamic `multiconcat` (OPpMULTICONCAT_APPEND, nargs=1): the
+operand `$t` rides the stack and the aux_list holds only empty segments. The
+decoder folds `$s . $t` into a Concat. Both operands are Str, so the Concat lowers
+via the shared malloc+memcpy path. (The const-append `$s .= "b"` of S4 is the
+nargs=0 form of the same op.)
+
+```perl
+# source
+my $s = "a";
+my $t = "b";
+$s .= $t;
+$s
+```
+
+```behavior
+return: ab
+context: scalar
+```
+
+```ir
+%va   = Constant("a") :Str
+%vb   = Constant("b") :Str
+%cat  = Concat(%va, %vb) :Str
+return %cat
+L: GREEN
+```
+
+## S7 string interpolation (qq{$a$b})
+
+Interpolation `qq{$a$b}` compiles to a fresh (non-APPEND) `multiconcat` that
+builds a new Str from the two dynamic operands with empty segments between them.
+The decoder folds `$a . $b` into a Concat and binds it to the new lexical `$c`.
+
+```perl
+# source
+my $a = "x";
+my $b = "y";
+my $c = "$a$b";
+$c
+```
+
+```behavior
+return: xy
+context: scalar
+```
+
+```ir
+%va   = Constant("x") :Str
+%vb   = Constant("y") :Str
+%cat  = Concat(%va, %vb) :Str
+return %cat
+L: GREEN
+```
+
+## S8 interpolation with constant text segments
+
+Interpolation whose format has constant text between the operands
+(`qq{p-$a-m-$b-q}`) — the multiconcat aux_list slices the flat segment string
+`"p--m--q"` by the per-segment lengths and the decoder interleaves them with the
+operands: `"p-" . $a . "-m-" . $b . "-q"`, a left-folded Concat chain.
+
+```perl
+# source
+my $a = "x";
+my $b = "y";
+my $c = "p-$a-m-$b-q";
+$c
+```
+
+```behavior
+return: p-x-m-y-q
+context: scalar
+```
+
+```ir
+%p    = Constant("p-") :Str
+%va   = Constant("x") :Str
+%c1   = Concat(%p, %va) :Str
+%m    = Constant("-m-") :Str
+%c2   = Concat(%c1, %m) :Str
+%vb   = Constant("y") :Str
+%c3   = Concat(%c2, %vb) :Str
+%q    = Constant("-q") :Str
+%c4   = Concat(%c3, %q) :Str
+return %c4
+L: GREEN
+```
+
 ## S5 non-ASCII string (non-default encoding, explicit GAP boundary)
 
 A string containing non-ASCII characters such as cafe-with-accent (cafe\x{e9})
