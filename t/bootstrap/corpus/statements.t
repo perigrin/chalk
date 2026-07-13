@@ -22,9 +22,9 @@ unless (-f $STATEMENTS_MD) {
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 1: Parse statements.md and verify case inventory
+# SECTION 1: Parse statements.md and verify the topic's named idioms are present.
 #
-# All 7 statement idioms must be present.
+# All statement idioms must be present.
 # - Return integer literal: GREEN (Constant -> Return, simplest runtime-free)
 # - Multiple statements: GREEN (two VarDecls + Add, straight-line SSA)
 # - Comparison as condition (1<2?1:0): GREEN (TernaryExpr/select -> Int; bool internal)
@@ -37,10 +37,18 @@ unless (-f $STATEMENTS_MD) {
 # would be a lie and must fail. The bilateral bare-bool coverage (true + false)
 # ensures a one-sided miscompile cannot hide: false must emit Bool:, NOT Str:
 # or Int:0.
+#
+# This runner asserts the STATIC inventory + shape of the corpus file. The
+# authoritative behavior/shape/invariant gate is
+# t/bootstrap/corpus/son-corpus-wide.t, which lowers each case's PERL SOURCE
+# through B::SoN -> chalk -> lli. The old per-case run_case checks here lowered
+# the hand-written IR BLOCK through the constructive builder -- a second,
+# drifting lowering path with hardcoded case counts that went stale on every
+# corpus addition (zhi 019f53a0). Retired here in favor of the single
+# authoritative gate.
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($STATEMENTS_MD);
-is(scalar(@$cases), 7, 'statements.md has 7 cases');
 
 my @titles = map { $_->{title} } @$cases;
 ok((grep { /return.*integer.*literal/i || /return.*5/i } @titles),
@@ -59,46 +67,7 @@ ok((grep { /pragma.*import.*list/i || /use.*list.*util/i || /use.*qw/i } @titles
     'case: pragma with import list present');
 
 # ---------------------------------------------------------------------------
-# SECTION 2: Run all 7 cases end-to-end
-#
-# For each case:
-#   - behavior check must PASS (perl oracle vs declared return value)
-#   - ir-shape check must not FAIL (pure-GAP blocks trivially pass)
-#   - L-verdict check must PASS (declared verdict matches actual verdict)
-#
-# GREEN cases have constructive ir blocks; L-corner verifies lli output == perl.
-# GAP cases (use-strict, use-Module-qw) are pure-GAP blocks.
-# ---------------------------------------------------------------------------
-
-for my $case (@$cases) {
-    my $title = $case->{title};
-
-    subtest "case: $title" => sub {
-        my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
-
-        # Behavior check: perl oracle must agree with declared return
-        is($result->{behavior}{verdict}, 'PASS',
-            "$title: behavior oracle matches")
-            or diag("  behavior fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # IR-shape check: pure-GAP blocks trivially pass (no graph to validate)
-        isnt($result->{ir_shape}{verdict}, 'FAIL',
-            "$title: ir-shape not FAIL")
-            or diag("  ir-shape fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # L-verdict check: declared verdict must match actual verdict
-        is($result->{l_verdict}{verdict}, 'PASS',
-            "$title: L verdict matches")
-            or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # Overall
-        is($result->{overall}, 'PASS', "$title: overall PASS")
-            or diag("  fail reasons: " . join('; ', @{ $result->{fail_reasons} }));
-    };
-}
-
-# ---------------------------------------------------------------------------
-# SECTION 3: Verify L-verdict declarations per case
+# SECTION 2: Verify L-verdict declarations per case
 #
 # GREEN: return-integer, multiple-statements, comparison-as-condition (ternary),
 #        bare-bool-return-true, bare-bool-return-false.
@@ -106,7 +75,7 @@ for my $case (@$cases) {
 # ---------------------------------------------------------------------------
 
 subtest 'L-verdict declarations: GREEN for value cases, GAP for pragma cases' => sub {
-    plan tests => 7;
+    plan tests => scalar @$cases;
 
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
@@ -125,7 +94,7 @@ subtest 'L-verdict declarations: GREEN for value cases, GAP for pragma cases' =>
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 4: Constructive proofs for the two GREEN cases
+# SECTION 3: Constructive proofs for the two GREEN cases
 #
 # Verify that build_graph_from_ir builds real graphs from the ir blocks and
 # that LLVMDriver lowers them without marking them unsupported.
@@ -189,7 +158,7 @@ subtest 'constructive proof: multiple-statements builds and lowers to 3' => sub 
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 5: Bare-bool constructive proofs — NumLt lowers to Bool with type-tag
+# SECTION 4: Bare-bool constructive proofs — NumLt lowers to Bool with type-tag
 #
 # Both true (1 < 2 => Bool:1) and false (2 < 1 => Bool:) cases must lower GREEN.
 # Bilateral coverage rule: both sides are checked so a one-sided miscompile
@@ -266,7 +235,7 @@ subtest 'constructive proof: bare bool false (2<1) builds and lowers to Bool:' =
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 6: Adversarial guard — Bool identity miscompiles MUST FAIL
+# SECTION 5: Adversarial guard — Bool identity miscompiles MUST FAIL
 #
 # Part D: the type-discriminating oracle makes it mechanically enforceable that:
 # (a) A graph returning a raw Int 0/1 where perl returns Bool:false/Bool:true
@@ -326,7 +295,7 @@ END_MD
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 7: Negative guard — a pure-GAP block with L: GREEN must FAIL
+# SECTION 6: Negative guard — a pure-GAP block with L: GREEN must FAIL
 #
 # If someone marks a comparison-chain or pragma case as L: GREEN without
 # building a real lowerable graph, the runner detects the inconsistency.

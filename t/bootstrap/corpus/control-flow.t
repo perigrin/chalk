@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the control-flow mdtest corpus topic (constructive format).
-# ABOUTME: D6 (ternary->select) and D1/D2/D3/D4/D5/D7 (cfg-blocks-phi) are GREEN; D8 (try/catch) is GAP.
+# ABOUTME: Asserts the topic's static inventory + L declarations; behavior/shape/invariant is owned by son-corpus-wide.t.
 use 5.42.0;
 use utf8;
 
@@ -22,16 +22,22 @@ unless (-f $CONTROL_FLOW_MD) {
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 1: Parse control-flow.md and verify case inventory
+# SECTION 1: Parse control-flow.md and verify the topic's named idioms are present.
 #
-# All 8 control-flow idioms (D1-D8) must be present.
+# This runner asserts the STATIC inventory + L declarations of the corpus file.
+# The authoritative behavior/shape/invariant gate is
+# t/bootstrap/corpus/son-corpus-wide.t, which lowers each case's PERL SOURCE
+# through B::SoN -> chalk -> lli. The old per-case run_case checks here lowered
+# the hand-written IR BLOCK through the constructive builder -- a second,
+# drifting lowering path with hardcoded case counts that went stale on every
+# corpus addition (zhi 019f53a0). Retired in favor of the single authoritative
+# gate; the presence/declaration checks below lower nothing and stay.
 #   D6: GREEN via TernaryExpr -> select i1
 #   D1/D2/D3/D4/D5/D7: GREEN via cfg-blocks-phi (br + phi)
 #   D8: GAP (needs LLVM landingpad — different capability)
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($CONTROL_FLOW_MD);
-is(scalar(@$cases), 9, 'control-flow.md has 9 cases (D1-D9)');
 
 my @titles = map { $_->{title} } @$cases;
 ok((grep { /D6.*ternary/i } @titles),    'case: D6 ternary present');
@@ -45,41 +51,6 @@ ok((grep { /D8.*try/i }     @titles),    'case: D8 try/catch present');
 ok((grep { /D9.*nested.*runtime/i } @titles), 'case: D9 nested if runtime-false present');
 
 # ---------------------------------------------------------------------------
-# SECTION 2: Run all 8 cases end-to-end
-#
-# For each case:
-#   - behavior check must PASS (perl oracle vs declared return value)
-#   - ir-shape check must not FAIL
-#   - L-verdict check must PASS (declared verdict matches actual verdict)
-#
-# D6, D1-D5, D7 declare L: GREEN.
-# D8 declares L: GAP (landingpad not in this scope).
-# ---------------------------------------------------------------------------
-
-for my $case (@$cases) {
-    my $title = $case->{title};
-
-    subtest "case: $title" => sub {
-        my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
-
-        is($result->{behavior}{verdict}, 'PASS',
-            "$title: behavior oracle matches")
-            or diag("  behavior fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        isnt($result->{ir_shape}{verdict}, 'FAIL',
-            "$title: ir-shape not FAIL")
-            or diag("  ir-shape fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        is($result->{l_verdict}{verdict}, 'PASS',
-            "$title: L verdict matches")
-            or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        is($result->{overall}, 'PASS', "$title: overall PASS")
-            or diag("  fail reasons: " . join('; ', @{ $result->{fail_reasons} }));
-    };
-}
-
-# ---------------------------------------------------------------------------
 # SECTION 3: Verify L-verdict declarations per case
 #
 # D8 (try/catch) is the only remaining GAP — needs LLVM landingpad.
@@ -87,7 +58,7 @@ for my $case (@$cases) {
 # ---------------------------------------------------------------------------
 
 subtest 'D1-D7 and D9 declare L: GREEN; D8 declares L: GAP' => sub {
-    plan tests => 9;
+    plan tests => scalar @$cases;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);

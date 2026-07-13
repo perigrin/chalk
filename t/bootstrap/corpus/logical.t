@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the logical-operators mdtest corpus topic (constructive format).
-# ABOUTME: L1 (&&), L2 (||), L3 (//), L3b (undef-left //), L4 (!) are all GREEN.
+# ABOUTME: Asserts the topic's static inventory + L declarations; behavior/shape/invariant is owned by son-corpus-wide.t.
 use 5.42.0;
 use utf8;
 
@@ -22,9 +22,18 @@ unless (-f $LOGICAL_MD) {
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 1: Parse logical.md and verify case inventory
+# SECTION 1: Parse logical.md and verify the topic's named idioms are present.
 #
-# All 5 logical idioms (L1-L4 + L3b) must be present.
+# This runner asserts the STATIC inventory + L declarations of the corpus file.
+# The authoritative behavior/shape/invariant gate is
+# t/bootstrap/corpus/son-corpus-wide.t, which lowers each case's PERL SOURCE
+# through B::SoN -> chalk -> lli. The old per-case run_case checks here lowered
+# the hand-written IR BLOCK through the constructive builder -- a second,
+# drifting lowering path with hardcoded case counts that went stale on every
+# corpus addition, and it could not build the L3c early-return single-exit shape
+# that son-corpus-wide.t gates GREEN (zhi 019f53a0). Retired in favor of the
+# single authoritative gate; the presence/declaration checks below lower nothing
+# and stay.
 #   L1  (&&):  GREEN — cfg-blocks-phi lands And lowering (branch+phi)
 #   L2  (||):  GREEN — cfg-blocks-phi lands Or lowering (branch+phi)
 #   L3  (//):  GREEN — DefinedOr with Int-typed LHS (always defined); Undef repr + definedness branch
@@ -33,7 +42,6 @@ unless (-f $LOGICAL_MD) {
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($LOGICAL_MD);
-is(scalar(@$cases), 6, 'logical.md has 6 cases (L1-L4 + L3b + L3c)');
 
 my @titles = map { $_->{title} } @$cases;
 ok((grep { /L1.*logical.*and/i       } @titles), 'case: L1 logical and present');
@@ -42,66 +50,6 @@ ok((grep { /L3.*defined.*or/i        } @titles), 'case: L3 defined-or present');
 ok((grep { /L3b.*defined.*or.*undef/i} @titles), 'case: L3b defined-or undef-left present');
 ok((grep { /L3c.*early.return/i      } @titles), 'case: L3c defined-or early-return present');
 ok((grep { /L4.*not/i                } @titles), 'case: L4 not present');
-
-# L3c (`E // return X`) is an early-return merge normalized to single-exit
-# (Region over [exit-control, continue-Proj]). It is GREEN in the authoritative
-# JSON-loader gate (son-corpus-wide.t) but the per-topic constructive builder
-# (MdtestCorpus->run_case) cannot build this shape -- its ir-block is authored
-# for the loader path, and the constructive If/Region/Phi DSL models both-arms-
-# are-Projs merges, not an exit-control-as-Start merge. This is the known
-# per-topic-runner drift (zhi 019f53a0). The behavior leg still runs; the
-# constructive lowering / L-verdict divergence is expected and skipped here.
-my %constructive_gap = ('L3c defined-or with an early-return fallback' => 1);
-
-# ---------------------------------------------------------------------------
-# SECTION 2: Run all 5 cases end-to-end
-#
-# For each case:
-#   - behavior check must PASS (perl oracle vs declared return value)
-#   - ir-shape check must not FAIL (pure-GAP blocks trivially pass)
-#   - L-verdict check must PASS (declared verdict matches actual verdict)
-#
-# All 5 cases declare L: GREEN.
-# ---------------------------------------------------------------------------
-
-for my $case (@$cases) {
-    my $title = $case->{title};
-
-    subtest "case: $title" => sub {
-        my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
-
-        # Behavior check: perl oracle must agree with declared return. This runs
-        # for every case, including the constructive-GAP one (the perl oracle
-        # does not use the constructive builder).
-        is($result->{behavior}{verdict}, 'PASS',
-            "$title: behavior oracle matches")
-            or diag("  behavior fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # A case the constructive builder cannot lower (early-return single-exit
-        # merge; zhi 019f53a0) is GREEN in the authoritative JSON-loader gate but
-        # GAPs here. Its ir-shape/L-verdict/overall divergence is expected drift,
-        # not a regression -- skip those legs (behavior above is the real check).
-        if ($constructive_gap{$title}) {
-            note("$title: constructive-path GAP is the known per-topic runner "
-               . "drift (zhi 019f53a0); GREEN in the authoritative son-corpus-wide.t gate");
-            return;
-        }
-
-        # IR-shape check: pure-GAP blocks trivially pass (no graph to validate)
-        isnt($result->{ir_shape}{verdict}, 'FAIL',
-            "$title: ir-shape not FAIL")
-            or diag("  ir-shape fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # L-verdict check: declared verdict must match actual verdict
-        is($result->{l_verdict}{verdict}, 'PASS',
-            "$title: L verdict matches")
-            or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # Overall
-        is($result->{overall}, 'PASS', "$title: overall PASS")
-            or diag("  fail reasons: " . join('; ', @{ $result->{fail_reasons} }));
-    };
-}
 
 # ---------------------------------------------------------------------------
 # SECTION 3: Verify L-verdict declarations per case
@@ -114,8 +62,8 @@ for my $case (@$cases) {
 #   L4  (!):   GREEN — Bool repr + Not + Coerce(Int->Bool) + type-tagged Bool return
 # ---------------------------------------------------------------------------
 
-subtest 'All 6 cases declare L: GREEN' => sub {
-    plan tests => 6;
+subtest 'All cases declare L: GREEN' => sub {
+    plan tests => scalar @$cases;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);

@@ -7,7 +7,6 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::CodeGen::Harness::MdtestCorpus;
-use Chalk::CodeGen::Harness::LLVMDriver;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 
@@ -28,7 +27,6 @@ unless (-f $VARIABLES_MD) {
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($VARIABLES_MD);
-is(scalar(@$cases), 5, 'variables.md has 5 cases');
 
 my @titles = map { $_->{title} } @$cases;
 ok((grep { /A1.*my.decl/i     } @titles), 'case: A1 my-decl with init present');
@@ -38,65 +36,44 @@ ok((grep { /C1.*reassign/i    } @titles), 'case: C1 reassign then read present')
 ok((grep { /C2.*compound/i    } @titles), 'case: C2 compound assign then read present');
 
 # ---------------------------------------------------------------------------
-# SECTION 2: Run all five cases end-to-end
+# SECTION 4: Every GREEN case's ir block declares L: GREEN (static parse).
 #
-# For each case the runner checks:
-#   - behavior oracle (perl says the right thing)
-#   - ir-shape (graph builds and passes TypedInvariant, or pure-GAP)
-#   - L-verdict (declared verdict matches the real L corner)
-#
-# GREEN cases: graph lowers via lli; lli output == perl oracle.
-# (A5 declares class structure via MOP::* lines; its sealed MOP rides to
-# the backend through LLVMDriver's mop opt.)
+# The authoritative behavior/shape/invariant gate is
+# t/bootstrap/corpus/son-corpus-wide.t, which lowers each case's PERL SOURCE
+# through B::SoN -> chalk -> lli. The old per-case run_case checks here lowered
+# the hand-written IR BLOCK through the constructive builder -- a second,
+# drifting lowering path (zhi 019f53a0). Retired in favor of the single
+# authoritative gate; the static presence/verdict/node-line checks lower
+# nothing and stay.
 # ---------------------------------------------------------------------------
 
-for my $case (@$cases) {
-    my $title = $case->{title};
+subtest 'every GREEN-declared case parses its L: GREEN verdict' => sub {
+    my @green = grep {
+        Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($_->{ir} // '') eq 'GREEN'
+    } @$cases;
+    plan tests => scalar @green;
+    for my $case (@green) {
+        my $title = $case->{title};
+        my $decl  = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($case->{ir} // '');
+        is($decl, 'GREEN', "case '$title': declared L: GREEN");
+    }
+};
 
-    subtest "case: $title" => sub {
-        my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
+# ---------------------------------------------------------------------------
+# SECTION 5: Every GREEN ir block has %name = ... node lines (constructive graph).
+# ---------------------------------------------------------------------------
 
-        # Behavior check
-        is($result->{behavior}{verdict}, 'PASS',
-            "$title: behavior oracle matches")
-            or diag("  behavior fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # IR-shape check (TypedInvariant on the built graph, or pure-GAP pass)
-        isnt($result->{ir_shape}{verdict}, 'FAIL',
-            "$title: ir-shape not FAIL")
-            or diag("  ir-shape fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # L-verdict check
-        is($result->{l_verdict}{verdict}, 'PASS',
-            "$title: L verdict matches")
-            or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # Overall
-        is($result->{overall}, 'PASS', "$title: overall PASS")
-            or diag("  fail reasons: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # For GREEN cases: prove the graph built from the block goes through lli
-        # and matches the perl oracle (the load-bearing proof of GREEN).
-        my $decl_verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir(
-            $case->{ir} // '');
-        if ($decl_verdict eq 'GREEN') {
-            my ($return_node, $case_mop) =
-                Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($case->{ir});
-            ok(defined $return_node, "$title: build_graph_from_ir returns a node");
-            if (defined $return_node) {
-                my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node,
-                    { mop => $case_mop });
-                ok(!$meta->{marked_unsupported},
-                    "$title: built-from-block graph is truly GREEN (not marked_unsupported)");
-                my $lli_out  = $L->return_values->[0] // '';
-                my $perl_out = $case->{_perl_actual} // '';
-                if (length $perl_out) {
-                    is($lli_out, $perl_out,
-                        "$title: lli output '$lli_out' == perl oracle '$perl_out' (built from block)");
-                }
-            }
-        }
-    };
-}
+subtest 'all GREEN ir blocks have node lines' => sub {
+    my @green = grep {
+        Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($_->{ir} // '') eq 'GREEN'
+    } @$cases;
+    plan tests => scalar @green;
+    for my $case (@green) {
+        my $title    = $case->{title};
+        my $ir_text  = $case->{ir} // '';
+        my $has_node = ($ir_text =~ /^\s*%\w+\s*=/m) ? 1 : 0;
+        ok($has_node, "case '$title': GREEN ir block has node lines (constructive graph)");
+    }
+};
 
 done_testing;

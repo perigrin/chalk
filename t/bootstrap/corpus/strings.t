@@ -22,13 +22,21 @@ unless (-f $STRINGS_MD) {
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 1: Parse strings.md and verify case inventory
+# SECTION 1: Parse strings.md and verify the topic's named idioms are present.
 #
-# 5 string cases (S1-S4 GREEN, S5 GAP non-ASCII boundary).
+# String cases: S1-S4 GREEN, S5 GAP (non-ASCII boundary).
+#
+# This runner asserts the STATIC inventory + shape of the corpus file. The
+# authoritative behavior/shape/invariant gate is
+# t/bootstrap/corpus/son-corpus-wide.t, which lowers each case's PERL SOURCE
+# through B::SoN -> chalk -> lli. The old per-case run_case checks here lowered
+# the hand-written IR BLOCK through the constructive builder -- a second,
+# drifting lowering path with hardcoded case counts that went stale on every
+# corpus addition (zhi 019f53a0). Retired here in favor of the single
+# authoritative gate.
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($STRINGS_MD);
-is(scalar(@$cases), 5, 'strings.md has 5 cases (S1-S4 + S5 non-ASCII GAP)');
 
 my @titles = map { $_->{title} } @$cases;
 ok((grep { /S1.*single/i         } @titles), 'case: S1 single-quoted literal present');
@@ -37,49 +45,20 @@ ok((grep { /S3.*concat.*dot/i    } @titles), 'case: S3 dot concat present');
 ok((grep { /S4.*concat.*assign/i } @titles), 'case: S4 concat-assign present');
 ok((grep { /S5.*non.ASCII/i      } @titles), 'case: S5 non-ASCII GAP boundary present');
 
-# ---------------------------------------------------------------------------
-# SECTION 2: Run S1-S4 end-to-end (GREEN cases)
-#
-# For each case:
-#   - behavior check must PASS (perl oracle vs declared return value)
-#   - ir-shape check must not FAIL (builds real graph, TypedInvariant passes)
-#   - L-verdict check must PASS (builds graph, lowers to LLVM IR, lli==perl)
-# ---------------------------------------------------------------------------
-
+# @green_cases: every case except the S5 non-ASCII GAP boundary. Feeds the
+# L-verdict declaration check (SECTION 2) and the libperl-free .ll probe
+# (SECTION 5).
 my @green_cases = grep { $_->{title} !~ /S5/i } @$cases;
 
-for my $case (@green_cases) {
-    my $title = $case->{title};
-
-    subtest "case: $title" => sub {
-        my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
-
-        is($result->{behavior}{verdict}, 'PASS',
-            "$title: behavior oracle matches")
-            or diag("  behavior fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        isnt($result->{ir_shape}{verdict}, 'FAIL',
-            "$title: ir-shape not FAIL")
-            or diag("  ir-shape fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        is($result->{l_verdict}{verdict}, 'PASS',
-            "$title: L verdict matches (GREEN)")
-            or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        is($result->{overall}, 'PASS', "$title: overall PASS")
-            or diag("  fail reasons: " . join('; ', @{ $result->{fail_reasons} }));
-    };
-}
-
 # ---------------------------------------------------------------------------
-# SECTION 3: Verify L: verdict for each case
+# SECTION 2: Verify L: verdict for each case
 #
 # S1-S4: must declare and achieve L: GREEN
 # S5: must declare L: GAP (explicit non-ASCII boundary)
 # ---------------------------------------------------------------------------
 
 subtest 'S1-S4 declare and achieve L: GREEN' => sub {
-    plan tests => 4;
+    plan tests => scalar @green_cases;
     for my $case (@green_cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
@@ -97,7 +76,7 @@ subtest 'S5 declares L: GAP (non-ASCII boundary)' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 4: Run S5 (GAP) and verify it does NOT lower
+# SECTION 3: Run S5 (GAP) and verify it does NOT lower
 # ---------------------------------------------------------------------------
 
 subtest 'S5 non-ASCII GAP: pure-GAP block stays GAP, not lowered' => sub {
@@ -112,7 +91,7 @@ subtest 'S5 non-ASCII GAP: pure-GAP block stays GAP, not lowered' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 5: Negative guard — a string case claiming GREEN with a pure-GAP
+# SECTION 4: Negative guard — a string case claiming GREEN with a pure-GAP
 #            block must FAIL (harness integrity check)
 # ---------------------------------------------------------------------------
 
@@ -156,7 +135,7 @@ END_MD
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 6: Libperl-free guard — emitted .ll for S1-S4 must not reference
+# SECTION 5: Libperl-free guard — emitted .ll for S1-S4 must not reference
 #            Perl_/SV*/sv_ symbols (the LLVM backend must be runtime-free)
 # ---------------------------------------------------------------------------
 

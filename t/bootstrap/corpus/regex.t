@@ -22,16 +22,25 @@ unless (-f $REGEX_MD) {
 }
 
 # ---------------------------------------------------------------------------
-# SECTION 1: Parse regex.md and verify case inventory
+# SECTION 1: Parse regex.md and verify the topic's named idioms are present.
 #
 # All regex idioms (R1-R6) must be present. R1-R6 carry constructive graphs
 # lowered by the G6 regex sub-compiler (literal/anchor/class/quantifier/
 # capture matching, qr// application, s/// splice); a GREEN claim must be
-# backed by an actual lowerable graph (the SECTION 5 guard enforces this).
+# backed by an actual lowerable graph (the SECTION 4 guard enforces this).
+#
+# This runner asserts the STATIC inventory + shape of the corpus file. The
+# authoritative behavior/shape/invariant gate is
+# t/bootstrap/corpus/son-corpus-wide.t, which lowers each case's PERL SOURCE
+# through B::SoN -> chalk -> lli. The old per-case run_case checks here lowered
+# the hand-written IR BLOCK through the constructive builder -- a second,
+# drifting lowering path with hardcoded case counts that went stale on every
+# corpus addition (zhi 019f53a0). Retired here in favor of the single
+# authoritative gate; the presence/L-verdict/guard checks below lower nothing
+# and stay.
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($REGEX_MD);
-is(scalar(@$cases), 6, 'regex.md has 6 cases (R1-R6)');
 
 my @titles = map { $_->{title} } @$cases;
 ok((grep { /R1.*regex.*match/i      } @titles), 'case: R1 regex match present');
@@ -42,44 +51,7 @@ ok((grep { /R5.*class/i             } @titles), 'case: R5 character class presen
 ok((grep { /R6.*quantified/i        } @titles), 'case: R6 quantified identifier present');
 
 # ---------------------------------------------------------------------------
-# SECTION 2: Run all cases end-to-end
-#
-# For each case:
-#   - behavior check must PASS (perl oracle vs declared return value)
-#   - ir-shape check must not FAIL
-#   - L-verdict check must PASS (declared verdict matches the actual lowering:
-#     GREEN cases build, lower, and run under lli with lli==perl)
-# ---------------------------------------------------------------------------
-
-for my $case (@$cases) {
-    my $title = $case->{title};
-
-    subtest "case: $title" => sub {
-        my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
-
-        # Behavior check: perl oracle must agree with declared return
-        is($result->{behavior}{verdict}, 'PASS',
-            "$title: behavior oracle matches")
-            or diag("  behavior fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # IR-shape check: pure-GAP blocks trivially pass (no graph to validate)
-        isnt($result->{ir_shape}{verdict}, 'FAIL',
-            "$title: ir-shape not FAIL")
-            or diag("  ir-shape fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # L-verdict check: declared GAP must match actual GAP
-        is($result->{l_verdict}{verdict}, 'PASS',
-            "$title: L verdict matches")
-            or diag("  L fail: " . join('; ', @{ $result->{fail_reasons} }));
-
-        # Overall
-        is($result->{overall}, 'PASS', "$title: overall PASS")
-            or diag("  fail reasons: " . join('; ', @{ $result->{fail_reasons} }));
-    };
-}
-
-# ---------------------------------------------------------------------------
-# SECTION 3: Verify per-case L verdicts
+# SECTION 2: Verify per-case L verdicts
 #
 # R1 (literal `=~`) is lowered runtime-free by the G6 regex sub-compiler — a
 # literal pattern compiles to a slide-loop matcher producing the i1 matched?
@@ -98,7 +70,7 @@ my %EXPECTED_VERDICT = (
 );
 
 subtest 'per-case L verdicts (R1-R6 all GREEN via G6)' => sub {
-    plan tests => 6;
+    plan tests => scalar @$cases;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
@@ -110,7 +82,7 @@ subtest 'per-case L verdicts (R1-R6 all GREEN via G6)' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 4: Negative guard — a GREEN claim without a graph must FAIL
+# SECTION 3: Negative guard — a GREEN claim without a graph must FAIL
 #
 # If someone edits a regex case to claim L: GREEN without an actual lowerable
 # graph, the runner must catch the lie.  A pure-GAP block (no node lines)

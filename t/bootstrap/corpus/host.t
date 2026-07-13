@@ -1,5 +1,5 @@
 # ABOUTME: Runner for the host mdtest corpus topic (constructive format).
-# ABOUTME: H1-H3 exercise $N capture edges + %ENV reads (G7); all lower GREEN via lli==perl.
+# ABOUTME: Asserts the topic's static inventory + L declarations; behavior/shape/invariant is owned by son-corpus-wide.t.
 use 5.42.0;
 use utf8;
 
@@ -26,11 +26,19 @@ unless (-f $HOST_MD) {
 local $ENV{CHALK_G7_TEST} = 'hostval';
 
 # ---------------------------------------------------------------------------
-# SECTION 1: Parse host.md and verify case inventory
+# SECTION 1: Parse host.md and verify the topic's named idioms are present.
+#
+# This runner asserts the STATIC inventory + L declarations of the corpus file.
+# The authoritative behavior/shape/invariant gate is
+# t/bootstrap/corpus/son-corpus-wide.t, which lowers each case's PERL SOURCE
+# through B::SoN -> chalk -> lli. The old per-case run_case checks here lowered
+# the hand-written IR BLOCK through the constructive builder -- a second,
+# drifting lowering path with hardcoded case counts that went stale on every
+# corpus addition (zhi 019f53a0). Retired in favor of the single authoritative
+# gate; the presence/declaration checks below lower nothing and stay.
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($HOST_MD);
-is(scalar(@$cases), 3, 'host.md has 3 cases (H1-H3)');
 
 my @titles = map { $_->{title} } @$cases;
 ok((grep { /H1.*capture/i  } @titles), 'case: H1 capture read present');
@@ -38,36 +46,11 @@ ok((grep { /H2.*guarded/i  } @titles), 'case: H2 guarded capture present');
 ok((grep { /H3.*environ/i  } @titles), 'case: H3 environment read present');
 
 # ---------------------------------------------------------------------------
-# SECTION 2: Run all cases end-to-end
-#
-# For each case: behavior must PASS (perl oracle), ir-shape must not FAIL,
-# and the L verdict must PASS (declared GREEN backed by an actual lowering
-# with lli==perl).
-# ---------------------------------------------------------------------------
-
-for my $case (@$cases) {
-    my $title = $case->{title};
-
-    subtest "case: $title" => sub {
-        my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
-
-        is($result->{behavior}{verdict}, 'PASS', "$title: behavior oracle matches")
-            or diag('  behavior fail: ' . join('; ', @{ $result->{fail_reasons} }));
-        isnt($result->{ir_shape}{verdict}, 'FAIL', "$title: ir-shape not FAIL")
-            or diag('  ir-shape fail: ' . join('; ', @{ $result->{fail_reasons} }));
-        is($result->{l_verdict}{verdict}, 'PASS', "$title: L verdict matches")
-            or diag('  L fail: ' . join('; ', @{ $result->{fail_reasons} }));
-        is($result->{overall}, 'PASS', "$title: overall PASS")
-            or diag('  fail reasons: ' . join('; ', @{ $result->{fail_reasons} }));
-    };
-}
-
-# ---------------------------------------------------------------------------
 # SECTION 3: All cases declare L: GREEN
 # ---------------------------------------------------------------------------
 
 subtest 'H1-H3 all declare L: GREEN' => sub {
-    plan tests => 3;
+    plan tests => scalar @$cases;
     for my $case (@$cases) {
         my $decl = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($case->{ir} // '');
         is($decl, 'GREEN', "case '$case->{title}': declared L: GREEN");
