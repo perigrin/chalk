@@ -72,6 +72,28 @@ subtest 'shift/pop mutate the array; a later read observes the drain' => sub {
     }
 };
 
+subtest 'a constant range/list literal expands to all its elements (zhi 019f5942)' => sub {
+    # `my @q=(1..4)` constant-folds to a const[AV] whose N elements the producer
+    # must expand into an N-element ArrayRef. Reading only the first element built
+    # a 1-element array (scalar @q -> 1, a silent miscompile). Now the AV is fully
+    # expanded, so scalar @q == 4 and element reads see the whole range.
+    my @cases = (
+        ['my @q=(1..4); scalar @q'      => 'Int:4'],
+        ['my @q=(1..4); $q[2]'          => 'Int:3'],
+        ['my @q=(1..4); $q[0]+$q[3]'    => 'Int:5'],
+        ['my @q=(2..5); scalar @q'      => 'Int:4'],
+        ['my @q=(5..5); scalar @q'      => 'Int:1'],   # single-element range
+        # a genuine array-of-one-arrayref (`[...]`, an anonlist) must NOT be
+        # flattened by the const-range expansion -- scalar @a is 1, not 3.
+        ['my @a=([1,2,3]); scalar @a'   => 'Int:1'],
+        ['my @q=(1,2,3); scalar @q'     => 'Int:3'],   # non-folded list, unchanged
+    );
+    for my $c (@cases) {
+        my ($kind, $out) = lower_and_run($c->[0]);
+        is("$kind:$out", "value:$c->[1]", "[$c->[0]] -> $c->[1]");
+    }
+};
+
 subtest 'an element read interleaved between two shifts observes each version (WAR)' => sub {
     # `shift; $p=$q[0]; shift; $r=$q[0]` -- $p must be pinned at the memory
     # version after the FIRST shift, before the second shift advances the elems
@@ -204,18 +226,23 @@ subtest 'unsound drain shapes GAP, never miscompile (soundness guards)' => sub {
     # these shapes must GAP loudly rather than mislower:
     #  - the drained array is ALSO read before the loop (`scalar @q`);
     #  - the body RE-FILLS the array (`push @q, ...`);
-    #  - `defined(my $x = shift @q)` as the condition (Defined is not an icmp);
-    #  - `(1..4)` constant-folds to a const aggregate the producer can't expand.
+    #  - `defined(my $x = shift @q)` as the condition (Defined is not an icmp).
     for my $body (
         'my @q=(5,6,7); my $before=scalar @q; my $s=0; while (my $x=shift @q){$s+=$x} $before',
         'my @q=(3); my $s=0; while (my $x = shift @q) { $s += $x; push @q, $x - 1 } $s',
         'my @q=(1,2,0,3); my $s=0; while (defined(my $x = shift @q)) { $s += $x } $s',
-        'my @q=(1..4); my $s=0; while (my $x = shift @q) { $s += $x } $s',
     ) {
         my ($kind, $out) = lower_and_run($body);
         isnt($kind, 'value', "[$body] does NOT lower to a value (GAPs)")
             or diag("unexpectedly lowered to: $out");
     }
+
+    # A drain over a constant RANGE `(1..4)` now lowers correctly (the folded
+    # const AV is expanded to a 4-element ArrayRef, zhi 019f5942) -- it is no
+    # longer an unsound shape. It drains 1+2+3+4 = 10.
+    my ($rk, $ro) = lower_and_run(
+        'my @q=(1..4); my $s=0; while (my $x = shift @q) { $s += $x } $s');
+    is("$rk:$ro", 'value:Int:10', 'a drain over (1..4) lowers correctly (was a GAP) -> 10');
 };
 
 subtest 'a read BEFORE the loop snapshots pre-loop memory (WAR ordering holds)' => sub {

@@ -249,3 +249,33 @@ return %pp
 control: %pp
 L: GREEN
 ```
+
+## A8 constant range literal expands to all its elements
+
+`my @q = (1..4)` constant-folds (in perl) to a single `const[AV]` holding the
+four elements. The producer must expand that folded AV into a full 4-element
+`ArrayRef`, not read only its first element (which built a 1-element array, so
+`scalar @q` returned 1 — a silent miscompile). With the AV expanded, `scalar @q`
+counts all four.
+
+```perl
+# source
+my @q = (1..4);
+scalar @q
+```
+
+```behavior
+return: 4
+context: scalar
+```
+
+```ir
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%c3    = Constant(3) :Int
+%c4    = Constant(4) :Int
+%arr   = ArrayRef(%c1, %c2, %c3, %c4) :ArrayRef
+%len   = Length(%arr) :Int
+return %len
+L: GREEN
+```

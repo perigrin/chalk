@@ -217,6 +217,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, q{>=}, 76, q{gate-green floor (76; + A6/A7 shift/pop lower as stamped memory statement effects on a mutable Array; worklist empty)});
+cmp_ok($tally{gate_green}, q{>=}, 77, q{gate-green floor (77; + A8 constant range (1..4) expands the folded const AV to a 4-element ArrayRef; worklist empty)});
 
 done_testing();
