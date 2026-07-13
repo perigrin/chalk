@@ -188,3 +188,64 @@ return %rx
 control: %vx -> %ca
 L: GREEN
 ```
+
+## A6 shift from a lexical array
+
+`my @q = (1,2,3); shift @q` removes and returns the FIRST element (1). `shift`
+mutates the array in place: it advances the array header's element pointer by
+one slot and decrements its length (an O(1) front-drop), so a later whole-array
+read observes the drained array. The mutation is modelled as a memory statement
+effect — the `Call(builtin shift)` leads with control, takes the array and the
+current memory, and produces the new memory version — so it is ordered on the
+effect chain (not orphaned) and its result is stamped with the array's element
+type.
+
+```perl
+# source
+my @q = (1, 2, 3);
+shift @q
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%c3    = Constant(3) :Int
+%arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%mem   = MemStart()
+%sh    = Call(%arr, %mem, dispatch_kind: "builtin", name: "shift") :Int
+return %sh
+control: %sh
+L: GREEN
+```
+
+## A7 pop from a lexical array
+
+`my @q = (5,6); pop @q` removes and returns the LAST element (6), decrementing
+the array's length. Like `shift`, it is a stamped memory statement effect.
+
+```perl
+# source
+my @q = (5, 6);
+pop @q
+```
+
+```behavior
+return: 6
+context: scalar
+```
+
+```ir
+%c5    = Constant(5) :Int
+%c6    = Constant(6) :Int
+%arr   = ArrayRef(%c5, %c6) :ArrayRef
+%mem   = MemStart()
+%pp    = Call(%arr, %mem, dispatch_kind: "builtin", name: "pop") :Int
+return %pp
+control: %pp
+L: GREEN
+```

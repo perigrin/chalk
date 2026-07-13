@@ -1662,6 +1662,12 @@ sub lower_value {
     elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'direct') {
         return $self->_lower_call_direct($node);
     }
+    # Call(dispatch_kind='builtin'): a Perl builtin. shift/pop remove and return
+    # an element from a mutable %Array (the array-drain primitives).
+    elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
+            && defined $node->name && ($node->name eq 'shift' || $node->name eq 'pop')) {
+        return $self->_lower_builtin_shift_pop($node);
+    }
     # RegexMatch: lower a literal pattern to a runtime-free matcher (G6).
     # inputs[0] = subject (Str, i8* + tracked len); pattern is a compile-time
     # literal attr. Produces an i1 matched? (Bool repr).
@@ -3152,8 +3158,12 @@ sub process_control_node {
         # Subscript consumers whose memory input is this store) right after the
         # store, before the next store supersedes it. Their frozen value is used
         # by their (later-processed) consumers, so a read observes the memory
-        # state at its own program point.
-        $self->_freeze_memory_reads($node) if $op eq 'Assign';
+        # state at its own program point. A shift/pop Call is likewise a memory
+        # version producer (it mutates the array header) -- an element read whose
+        # memory input is THIS shift/pop must be frozen here, before a later
+        # shift/pop advances the header again (WAR hazard).
+        $self->_freeze_memory_reads($node)
+            if $op eq 'Assign' || $self->_is_array_mutating_call($node);
     }
     # Other ops in the control chain (Return, Unwind, Region, Proj, Phi, etc.)
     # are either handled by their driving structure or ignored here.
@@ -3333,6 +3343,18 @@ sub _find_memstart {
 # memory version's control position, not re-read at its consumer (which is
 # processed later, after subsequent stores). The consumer then uses the frozen
 # SSA ref. This is the memory-SSA scheduler: the memory edge places the load.
+# _is_array_mutating_call($node) — true for a shift/pop builtin Call, which
+# mutates its array's header (a new memory version). Such a Call must freeze its
+# memory-consuming element reads at its program point, exactly like an element
+# store, so an interleaved read is not sunk past a later mutation (WAR hazard).
+sub _is_array_mutating_call {
+    my ($self, $node) = @_;
+    return 0 unless blessed($node) && $node->operation eq 'Call';
+    return 0 unless $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin';
+    my $name = $node->name // '';
+    return ($name eq 'shift' || $name eq 'pop') ? 1 : 0;
+}
+
 sub _freeze_memory_reads {
     my ($self, $mem_node) = @_;
     return unless $mem_node->can('consumers');
@@ -4291,6 +4313,107 @@ sub _lower_array_read {
         $self->{cache}{ $node->id } = $def_phi;
         return $def_phi;
     }
+}
+
+# _load_array_header($array, $tag) -> ($arr_ref, $len_ptr, $elem_ptr, $len, $elems)
+# Resolve the typed %Array* (at this use, via _container_ptr) and load the len
+# and elems fields plus their pointers. The $tag labels the emitted comments.
+# The len/elems POINTERS are returned so a mutating caller (shift/pop) can store
+# an updated header back through them.
+sub _load_array_header {
+    my ($self, $array, $tag) = @_;
+    $self->{_need_aggregate_types} = 1;
+    my $arr_ref  = $self->_container_ptr($array, 'Array');
+    my $len_ptr  = $self->_fresh;
+    my $elem_ptr = $self->_fresh;
+    my $len      = $self->_fresh;
+    my $elems    = $self->_fresh;
+    $self->_emit("  $len_ptr  = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 0  ; $tag: len ptr");
+    $self->_emit("  $elem_ptr = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 2  ; $tag: elems ptr");
+    $self->_emit("  $len   = load i64, i64* $len_ptr    ; $tag: load len");
+    $self->_emit("  $elems = load %Slot*, %Slot** $elem_ptr  ; $tag: load elems");
+    return ($arr_ref, $len_ptr, $elem_ptr, $len, $elems);
+}
+
+# _lower_builtin_shift_pop: remove and return an element from a mutable %Array.
+#   pop @a   -> return slot[len-1].payload, then len := len-1
+#   shift @a -> return slot[0].payload, then elems := elems+1, len := len-1
+# The shift front-drop advances the elems pointer by one slot (O(1), no memmove)
+# and the header's len is decremented -- a later read/Length re-loads elems+len
+# from the header (via _container_ptr) and observes the drained array. An empty
+# array (len == 0) yields undef: represented as its defined-bit (i1 false) with a
+# 0 payload, matching the ArrayRead Slot convention. Int elements only for now;
+# other element reprs GAP loudly.
+#
+# inputs[0] is the array operand (or, when threaded as a statement effect, the
+# control leads and the array is inputs[1]); resolve it by repr, not position.
+sub _lower_builtin_shift_pop {
+    my ($self, $node) = @_;
+    $self->{_need_aggregate_types} = 1;
+
+    my $name = $node->name;   # 'shift' or 'pop'
+    my $repr = $node->representation // 'Int';
+    die "GAP: $name element repr=$repr not lowered (only Int elements yet)"
+        unless $repr eq 'Int';
+
+    # The array is the sole aggregate-repr input. Post-load the loader has already
+    # moved the leading control token to control_in (the is_stmt_effect contract),
+    # so the reachable inputs are [array, memory]; pick the array by repr rather
+    # than a fixed index to stay robust to that shape.
+    my ($array) = grep {
+        my $r = $_->representation // '';
+        $r eq 'Array' || $r eq 'ArrayRef'
+    } $node->inputs->@*;
+    die "GAP: $name operand is not an Array/ArrayRef" unless defined $array;
+
+    my ($arr_ref, $len_ptr, $elem_ptr, $len, $elems)
+        = $self->_load_array_header($array, $name);
+
+    # Empty check: len == 0 -> undef (defined=false, payload 0).
+    my $empty = $self->_fresh;
+    my $lbl_ne  = $self->_fresh_label("${name}_ne");
+    my $lbl_mt  = $self->_fresh_label("${name}_mt");
+    my $lbl_end = $self->_fresh_label("${name}_end");
+    $self->_emit("  $empty = icmp eq i64 $len, 0  ; $name: array empty?");
+    $self->_set_terminator("  br i1 $empty, label \%$lbl_mt, label \%$lbl_ne");
+
+    # Non-empty: read the removed element, then update the header. pop removes the
+    # last index (len-1); shift removes index 0 (the literal used directly below).
+    $self->_new_block($lbl_ne);
+    my $idx;
+    if ($name eq 'pop') {
+        $idx = $self->_fresh;
+        $self->_emit("  $idx = sub i64 $len, 1  ; pop: last index (len-1)");
+    }
+    else {
+        $idx = '0';
+    }
+    my $slot_p   = $self->_fresh;
+    my $slot_pay = $self->_fresh;
+    my $pay_val  = $self->_fresh;
+    $self->_emit("  $slot_p   = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx  ; $name: slot ptr");
+    $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 1  ; $name: payload ptr");
+    $self->_emit("  $pay_val  = load i64, i64* $slot_pay  ; $name: load payload");
+    # Update the header: len := len-1; shift also advances elems by one slot.
+    my $new_len = $self->_fresh;
+    $self->_emit("  $new_len = sub i64 $len, 1  ; $name: new len");
+    $self->_emit("  store i64 $new_len, i64* $len_ptr  ; $name: store new len");
+    if ($name eq 'shift') {
+        my $new_elems = $self->_fresh;
+        $self->_emit("  $new_elems = getelementptr inbounds %Slot, %Slot* $elems, i64 1  ; shift: drop front (elems+1)");
+        $self->_emit("  store %Slot* $new_elems, %Slot** $elem_ptr  ; shift: store advanced elems");
+    }
+    $self->_set_terminator("  br label \%$lbl_end");
+
+    # Empty: nothing to remove.
+    $self->_new_block($lbl_mt);
+    $self->_set_terminator("  br label \%$lbl_end");
+
+    $self->_new_block($lbl_end);
+    my $result = $self->_fresh;
+    $self->_emit("  $result = phi i64 [ $pay_val, \%$lbl_ne ], [ 0, \%$lbl_mt ]  ; $name :Int result (0 if empty)");
+    $self->{cache}{ $node->id } = $result;
+    return $result;
 }
 
 # _lower_hash_read: linear-scan key lookup using phi-based loop counter.

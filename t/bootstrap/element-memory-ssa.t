@@ -58,6 +58,36 @@ subtest 'interleaved read/store observes each program point' => sub {
     is($out, 'Int:3', 'lli returns 3 (1 + 2), not 4');
 };
 
+subtest 'shift/pop mutate the array; a later read observes the drain' => sub {
+    my @cases = (
+        # single mutation, then a whole-array read
+        ['my @q=(1,2,3); my $x=shift @q; scalar @q'     => 'Int:2'],
+        ['my @q=(1,2,3); my $x=pop @q; scalar @q'       => 'Int:2'],
+        # after a shift front-drop, $q[0] is the NEW first element
+        ['my @q=(10,20,30); my $x=shift @q; $q[0]'      => 'Int:20'],
+    );
+    for my $c (@cases) {
+        my ($kind, $out) = lower_and_run($c->[0]);
+        is("$kind:$out", "value:$c->[1]", "[$c->[0]] -> $c->[1]");
+    }
+};
+
+subtest 'an element read interleaved between two shifts observes each version (WAR)' => sub {
+    # `shift; $p=$q[0]; shift; $r=$q[0]` -- $p must be pinned at the memory
+    # version after the FIRST shift, before the second shift advances the elems
+    # pointer again. Without freezing the read at its program point, $p sinks to
+    # the post-second-shift value (a silent WAR miscompile: 60 instead of 50).
+    my ($kind, $out) = lower_and_run(
+        'my @q=(10,20,30,40); my $a=shift @q; my $p=$q[0]; my $b=shift @q; my $r=$q[0]; $p+$r');
+    is("$kind:$out", 'value:Int:50', 'interleaved shift reads pin per-version -> 50, not 60');
+};
+
+subtest 'an element read interleaved between two pops observes each version (WAR)' => sub {
+    my ($kind, $out) = lower_and_run(
+        'my @q=(10,20,30,40); my $a=pop @q; my $p=$q[2]; my $b=pop @q; my $r=$q[1]; $p+$r');
+    is("$kind:$out", 'value:Int:50', 'interleaved pop reads pin per-version -> 50, not 20');
+};
+
 subtest 'straight-line stores/reads stay correct (regression)' => sub {
     my @cases = (
         ['my @a=(1,2,3); $a[0]=42; $a[0]'          => 'Int:42'],
