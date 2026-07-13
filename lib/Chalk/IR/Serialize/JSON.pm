@@ -727,11 +727,12 @@ sub _replay_classes ($classes, $graphs) {
 
     $mop->seal;
 
-    # Seed FieldAccess reprs from the declared field types. The universal
-    # repr pass (_seed_and_propagate_reprs, run by from_json) then propagates
-    # them through computed/aggregate nodes; method-Call reprs are stamped
-    # afterward from the resolved callee's return repr.
-    _stamp_field_access_reprs($classes, $graphs);
+    # FieldAccess reprs are stamped by from_json's pre-seal pass (before
+    # _replay_classes is called), and _mop->seal / class replay does not create
+    # new FieldAccess nodes or re-type fields, so a tail re-stamp here is
+    # redundant (idempotent) -- removed in the 019f4625 cleanup pass. The
+    # universal repr pass (_seed_and_propagate_reprs) and method-Call stamping
+    # run afterward in from_json as before.
 
     return $mop;
 }
