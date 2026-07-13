@@ -130,7 +130,7 @@ subtest 'class-simple: ref($e) => "Empty" (Str)' => sub {
     $new_e->set_representation('Object');
 
     # ref($obj) = load class-name from vtable slot 0
-    my $ref_result = $f->make('Ref',
+    my $ref_result = $f->make(q{RefType},
         inputs => [$new_e],
     );
     $ref_result->set_representation('Str');

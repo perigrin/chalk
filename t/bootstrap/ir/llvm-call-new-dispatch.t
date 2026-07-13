@@ -70,7 +70,7 @@ subtest 'Call(name=new): class-simple ref($e) => "Empty" (Str)' => sub {
     );
     $new_e->set_representation('Object');
 
-    my $ref_result = $f->make('Ref', inputs => [$new_e]);
+    my $ref_result = $f->make(q{RefType}, inputs => [$new_e]);
     $ref_result->set_representation('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$ref_result]);

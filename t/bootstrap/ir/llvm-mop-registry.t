@@ -126,7 +126,7 @@ subtest 'class-simple via MOP registry: ref($e) => "Empty" (Str)' => sub {
     );
     $new_e->set_representation('Object');
 
-    my $ref_result = $f->make('Ref',
+    my $ref_result = $f->make(q{RefType},
         inputs => [$new_e],
     );
     $ref_result->set_representation('Str');
