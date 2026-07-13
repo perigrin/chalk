@@ -1368,7 +1368,7 @@ sub _node_match {
     # A NON-commutative op (Subtract, DefinedOr, NumLt, Subscript) keeps strict
     # by-index pairing — operand ORDER is load-bearing, so an operand SWAP
     # (T2/H1) stays rejected.
-    if (_pair_match($rs, $rr)) {
+    if (_pair_match($rs, $rr, $in_descent)) {
         my @sin = $rs->can('inputs') && defined $rs->inputs ? $rs->inputs->@* : ();
         my @rin = $rr->can('inputs') && defined $rr->inputs ? $rr->inputs->@* : ();
         # Children are NOT descent — a matched child may itself fold, so reset
@@ -1496,7 +1496,7 @@ sub _concat_fold_value {
 # The leaf-attr comparison is the H1 fix: a swap of two same-kind NON-literal
 # operands (FieldAccess field0 vs field1) is invisible to a kind+repr compare.
 sub _pair_match {
-    my ($spec, $real) = @_;
+    my ($spec, $real, $in_descent) = @_;
     my $sk = _node_kind($spec);
     return false unless $sk eq _node_kind($real);
 
@@ -1550,6 +1550,21 @@ sub _pair_match {
     if ($sk eq 'StashAccess') {
         return false unless _leaf_eq($spec, $real, 'stash_name');
         return false unless _leaf_eq($spec, $real, 'var_name');
+    }
+
+    # A Call's callee (name/dispatch_kind) is a distinguishing leaf attr too: a
+    # return-position callee swap (spec name "kind" vs real name "other", or
+    # method-vs-sub dispatch) must FAIL the shape leg. But enforcing it at EVERY
+    # position breaks legitimate NESTED-receiver wiring: a method-call threads a
+    # void call through the receiver chain (new -> inc[void] -> val), so the real
+    # val-Call's receiver is a DIFFERENT Call than the spec's straight new-Call
+    # receiver. That nested receiver is reached by DESCENT (in_descent=1); only at
+    # the RETURN position (in_descent falsey) is the pairing the spec-declared
+    # callee, where the swap must be caught. Pin the callee attrs there only
+    # (zhi 019f51a0).
+    if ($sk eq 'Call' && !$in_descent) {
+        return false unless _leaf_eq($spec, $real, 'name');
+        return false unless _leaf_eq($spec, $real, 'dispatch_kind');
     }
 
     return true;

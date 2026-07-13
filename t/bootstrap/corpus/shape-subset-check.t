@@ -819,4 +819,46 @@ END_IR
         'a non-Bool Coerce feeding an Add stays required');
 };
 
+# ---------------------------------------------------------------------------
+# H1 Call-callee-swap (zhi 019f51a0): a RETURN-POSITION Call whose callee
+# (name / dispatch_kind) differs from the spec must FAIL the shape leg — the
+# same leaf-attr-swap class as FieldAccess/EnvRead/StashAccess. The check is
+# pinned to the return position so legitimate nested-receiver wiring still
+# passes (covered by the method-call corpus case).
+# ---------------------------------------------------------------------------
+{
+    my $real = $C->build_graph_from_ir(<<'END_IR');
+%recv   = Call(dispatch_kind: "method", name: "new", class: "C") :Object
+%result = Call(%recv, dispatch_kind: "method", name: "kind", class: "C") :Str
+return %result
+END_IR
+
+    # Matching callee: PASSES.
+    my $spec_ok = <<'END_IR';
+%recv   = Call(dispatch_kind: "method", name: "new", class: "C") :Object
+%result = Call(%recv, dispatch_kind: "method", name: "kind", class: "C") :Str
+return %result
+END_IR
+    is($C->shape_subset_check($spec_ok, $real)->{verdict}, 'PASS',
+        'a matching return-position Call callee passes');
+
+    # Swapped callee NAME: must FAIL.
+    my $spec_name = <<'END_IR';
+%recv   = Call(dispatch_kind: "method", name: "new", class: "C") :Object
+%result = Call(%recv, dispatch_kind: "method", name: "other", class: "C") :Str
+return %result
+END_IR
+    is($C->shape_subset_check($spec_name, $real)->{verdict}, 'FAIL',
+        'a return-position Call NAME swap fails the shape leg (was a false PASS)');
+
+    # Swapped dispatch_kind (method vs sub): must FAIL.
+    my $spec_disp = <<'END_IR';
+%recv   = Call(dispatch_kind: "method", name: "new", class: "C") :Object
+%result = Call(%recv, dispatch_kind: "sub", name: "kind", class: "C") :Str
+return %result
+END_IR
+    is($C->shape_subset_check($spec_disp, $real)->{verdict}, 'FAIL',
+        'a return-position Call dispatch_kind swap fails the shape leg');
+}
+
 done_testing();
