@@ -165,6 +165,45 @@ subtest 'a foreach-range element store is visible after the loop (2b-4 memory-Ph
     is("$kind:$out", 'value:Int:3', 'foreach-range element store visible after loop -> 3');
 };
 
+subtest 'a shift-drain loop consumes the array through a loop memory-Phi' => sub {
+    # `while (my $x = shift @q) { $s += $x }` -- the DOMINANT worklist-drain idiom.
+    # The shift mutates @q in the loop CONDITION; @q's memory threads through a
+    # loop-header memory-Phi so each iteration shifts off the previous drain, and
+    # the loop-invariant array literal is built ONCE in the preheader (not
+    # re-initialized each iteration, which would loop forever). Drains to empty.
+    my ($k1, $o1) = lower_and_run('my @q=(1,2,3); my $s=0; while (my $x = shift @q) { $s += $x } $s');
+    is("$k1:$o1", 'value:Int:6', 'shift-drain accumulates 1+2+3 -> 6');
+
+    # pop-drain (drains from the end): same total.
+    my ($k2, $o2) = lower_and_run('my @q=(10,20,30); my $s=0; while (my $x = pop @q) { $s += $x } $s');
+    is("$k2:$o2", 'value:Int:60', 'pop-drain accumulates 10+20+30 -> 60');
+
+    # the drained value is UNUSED in the body (a pure count): the array is off the
+    # return value path, so its repr is inferred structurally at the shift.
+    my ($k3, $o3) = lower_and_run('my @q=(5,5,5,5); my $n=0; while (my $x = shift @q) { $n += 1 } $n');
+    is("$k3:$o3", 'value:Int:4', 'shift-drain count (value unused) -> 4');
+};
+
+subtest 'unsound drain shapes GAP, never miscompile (soundness guards)' => sub {
+    # Each of these was found (adversarial verification) to miscompile/crash/hang
+    # before its guard. The in-place drain destroys the pre-loop array, so any of
+    # these shapes must GAP loudly rather than mislower:
+    #  - the drained array is ALSO read before the loop (`scalar @q`);
+    #  - the body RE-FILLS the array (`push @q, ...`);
+    #  - `defined(my $x = shift @q)` as the condition (Defined is not an icmp);
+    #  - `(1..4)` constant-folds to a const aggregate the producer can't expand.
+    for my $body (
+        'my @q=(5,6,7); my $before=scalar @q; my $s=0; while (my $x=shift @q){$s+=$x} $before',
+        'my @q=(3); my $s=0; while (my $x = shift @q) { $s += $x; push @q, $x - 1 } $s',
+        'my @q=(1,2,0,3); my $s=0; while (defined(my $x = shift @q)) { $s += $x } $s',
+        'my @q=(1..4); my $s=0; while (my $x = shift @q) { $s += $x } $s',
+    ) {
+        my ($kind, $out) = lower_and_run($body);
+        isnt($kind, 'value', "[$body] does NOT lower to a value (GAPs)")
+            or diag("unexpectedly lowered to: $out");
+    }
+};
+
 subtest 'a read BEFORE the loop snapshots pre-loop memory (WAR ordering holds)' => sub {
     # `my @a=(5,6,7); my $x=$a[0]; my $i=0; while($i<3){$a[0]=$i; $i=$i+1} $x*10+$a[0]`
     # -- the pre-loop read $x=$a[0] must snapshot the PRE-loop value (5), while the

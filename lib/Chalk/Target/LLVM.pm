@@ -3457,6 +3457,59 @@ sub _prelower_loop_store_operands {
     return;
 }
 
+# _prelower_loop_drain_operands($loop_node): a shift/pop that drains an array in
+# the loop condition or body carries the ARRAY as a loop-invariant operand (the
+# literal `@q` is built once, pre-loop; the shift mutates its header in place
+# each iteration). Lower that array in the PREHEADER so it is constructed ONCE
+# and its SSA ref dominates every iteration -- otherwise the ArrayRef is emitted
+# inside the header and re-initialized each iteration (an infinite drain). Mirror
+# of _prelower_loop_store_operands for the shift/pop drain primitive.
+sub _prelower_loop_drain_operands {
+    my ($self, $loop_node) = @_;
+    # A drain Call (shift/pop) reads the loop's memory-Phi and produces the next
+    # memory version (the memory-Phi's backedge input). Find the memory-Phis on
+    # this Loop, then any array-mutating Call among their inputs/consumers, and
+    # pre-lower its loop-invariant array operand in the preheader.
+    my %seen;
+    for my $c (($loop_node->consumers // [])->@*) {
+        next unless blessed($c) && $c->operation eq 'Phi' && _is_memory_phi($c);
+        my $r = $c->region;
+        next unless defined $r && $r->id eq $loop_node->id;
+        for my $n ($c->inputs->@*, ($c->consumers // [])->@*) {
+            next unless blessed($n) && !$seen{$n->id}++;
+            next unless $self->_is_array_mutating_call($n);
+            # Identify the array by op OR repr (its repr may be unset when the
+            # drained value is off the return path); match _lower_builtin_shift_pop.
+            my ($array) = grep {
+                my $op  = blessed($_) ? $_->operation : '';
+                my $rep = (blessed($_) && $_->representation) // '';
+                $op eq 'ArrayRef' || $op eq 'HashRef'
+                    || $rep eq 'Array' || $rep eq 'ArrayRef'
+            } $n->inputs->@*;
+            next unless defined $array;
+
+            # SOUNDNESS (GAP-not-miscompile): the drain mutates the array header
+            # IN PLACE, so the pre-loop array literal is destroyed as the loop
+            # runs. That is safe ONLY when the array is consumed by nothing but
+            # its shift/pop drain Call(s) -- any OTHER consumer (a pre-loop
+            # `scalar @q` Length, an element Subscript, a `push` re-fill) would
+            # observe the drained/corrupted array, not the value it expects. GAP
+            # loudly on that shape rather than mislower. A bare ArrayRef literal
+            # drained-only has exactly its drain Calls as consumers.
+            for my $u (($array->consumers // [])->@*) {
+                next unless blessed($u);
+                next if $self->_is_array_mutating_call($u);   # a drain Call: fine
+                die "GAP: a drained array is also read/mutated elsewhere "
+                  . "(op=@{[$u->operation]}) — the in-place drain would corrupt "
+                  . "that use (pre-loop scalar/element read, push re-fill, or a "
+                  . "second drain); not yet lowered.";
+            }
+            $self->lower_value($array);
+        }
+    }
+    return;
+}
+
 sub _process_branch_from_if {
     my ($self, $if_node, $branch_idx, $merge_label) = @_;
 
@@ -3524,6 +3577,9 @@ sub _process_loop_node {
     # The index is NOT pre-lowered here -- it may be the loop-Phi (defined in the
     # header), which the body lowering resolves.
     $self->_prelower_loop_store_operands($loop_node);
+    # A shift/pop drain's array is loop-invariant (built once, mutated in place):
+    # pre-lower it in the preheader so it is not re-initialized each iteration.
+    $self->_prelower_loop_drain_operands($loop_node);
 
     my @phi_records;    # [ { node, phi_ref, init_ref } ]
 
@@ -4356,15 +4412,25 @@ sub _lower_builtin_shift_pop {
     die "GAP: $name element repr=$repr not lowered (only Int elements yet)"
         unless $repr eq 'Int';
 
-    # The array is the sole aggregate-repr input. Post-load the loader has already
-    # moved the leading control token to control_in (the is_stmt_effect contract),
-    # so the reachable inputs are [array, memory]; pick the array by repr rather
-    # than a fixed index to stay robust to that shape.
+    # The array is the aggregate input. Post-load the loader has already moved the
+    # leading control token to control_in (the is_stmt_effect contract), so the
+    # reachable inputs are [array, memory]. Identify the array structurally: it is
+    # an aggregate node (ArrayRef/HashRef op, or Array/ArrayRef repr), never the
+    # memory version (a MemStart/Phi/Assign). Matching by op as well as repr is
+    # robust when the array is off the value path and its repr was not inferred
+    # (e.g. `while (shift @q) { ... }` where the drained value is unused).
     my ($array) = grep {
-        my $r = $_->representation // '';
-        $r eq 'Array' || $r eq 'ArrayRef'
+        my $op   = blessed($_) ? $_->operation : '';
+        my $repr = (blessed($_) && $_->representation) // '';
+        $op eq 'ArrayRef' || $op eq 'HashRef'
+            || $repr eq 'Array' || $repr eq 'ArrayRef'
     } $node->inputs->@*;
     die "GAP: $name operand is not an Array/ArrayRef" unless defined $array;
+    # The array's repr may be unset if it is off the return value path; the
+    # container-pointer resolution needs it. An ArrayRef literal is always the
+    # ArrayRef repr (a boxed aggregate pointer).
+    $array->set_representation('ArrayRef')
+        if !defined $array->representation && $array->operation eq 'ArrayRef';
 
     my ($arr_ref, $len_ptr, $elem_ptr, $len, $elems)
         = $self->_load_array_header($array, $name);
