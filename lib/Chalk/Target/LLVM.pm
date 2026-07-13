@@ -6261,11 +6261,34 @@ sub _wire_region_phis_with_preblock {
     my ($self, $region, $then_label, $else_label, $then_vars, $else_vars) = @_;
 
     my $consumers = $region->consumers // [];
-    my @phis = grep {
+    my @all_phis = grep {
         defined $_ && ref($_)
             && $_->can('operation') && $_->operation eq 'Phi'
             && !exists $self->{cache}{ $_->id }
     } @$consumers;
+
+    # A memory-Phi (inputs include MemStart or an element-store Assign) merges
+    # MEMORY versions, not a value: its element-store arm mutates the heap under
+    # the branch, and the post-merge read re-loads from the aggregate at its own
+    # program point, so it needs no value phi line (lowering its arms as values
+    # would hit MemStart/Assign, which are not values). Wire only the value phis.
+    my (@mem_phis, @phis);
+    for my $p (@all_phis) {
+        if (Chalk::Target::LLVM::Context::_is_memory_phi($p)) { push @mem_phis, $p }
+        else                                                  { push @phis,     $p }
+    }
+
+    # 2b-3 mixed effect: an arm that BOTH rebinds a scalar (a value-Phi) AND
+    # stores an element (a memory-Phi) merges on the same Region. The value-Phi's
+    # arm order for this shape is not yet reconciled with the element store, and
+    # wiring it produces a wrong value (the scalar reads the wrong arm). This was
+    # a loud GAP before memory-Phis were skipped; keep it loud rather than
+    # silently miscompiling.
+    if (@mem_phis && @phis) {
+        die "GAP: a branch arm that both rebinds a scalar and stores an element "
+          . "(2b-3 mixed effect) is not yet lowered — refusing to mislower.";
+    }
+
     return ($then_label, $else_label) unless @phis;
 
     my $merge_idx = $self->_find_block_idx($self->_current_block_label);

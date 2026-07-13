@@ -124,6 +124,29 @@ subtest 'a flat if/else stores in both arms and reads the taken arm (2b-3)' => s
     is("$k0:$o0", 'value:Int:8', 'c false selects the false arm store -> 8');
 };
 
+subtest 'a read of a DIFFERENT element after a guarded store is correct' => sub {
+    # `if($c){$a[0]=9} $a[0]+$a[1]` -- the guarded store touches slot 0; the
+    # post-merge reads of slot 0 (9) and slot 1 (unchanged 2) both re-load from
+    # the array. c true -> 9 + 2 = 11.
+    my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $c=1; if($c){$a[0]=9} $a[0]+$a[1]');
+    is("$kind:$out", 'value:Int:11', 'guarded slot-0 store + slot-1 read -> 11');
+};
+
+subtest 'a guarded hash store is visible after the branch (memory-Phi over %Hash)' => sub {
+    my ($kind, $out) = lower_and_run('my %h=(a=>1); my $c=1; if($c){$h{a}=9} $h{a}');
+    is("$kind:$out", 'value:Int:9', 'guarded hash store is visible -> 9');
+};
+
+subtest 'a mixed scalar-rebind + element-store arm GAPs, never miscompiles (2b-3 mixed)' => sub {
+    # `if($c){$x=9; $a[0]=7} $x+$a[0]` -- ONE arm both rebinds a scalar (a
+    # value-Phi) and stores an element (a memory-Phi) on the same Region. The
+    # value-Phi's arm order is not yet reconciled with the element store; wiring
+    # it read the wrong arm (12 instead of 16). Must GAP loudly, not miscompile.
+    my ($kind, $out) = lower_and_run(
+        'my @a=(1,2,3); my $c=1; my $x=5; if($c){$x=9;$a[0]=7} $x+$a[0]');
+    is($kind, 'gap', 'the mixed scalar+element-store arm GAPs (not a wrong value)');
+};
+
 subtest 'a while-loop element store is visible after the loop (2b-4 memory-Phi)' => sub {
     # `my @a=(1,2,3); my $i=0; while($i<3){$a[$i]=$i*2+10; $i=$i+1} $a[1]` -- the body
     # stores through a loop-header memory-Phi; the post-loop read observes the
