@@ -217,6 +217,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, q{>=}, 83, q{gate-green floor (83; + field-attrs-custom-param: a :reader field with a custom :param(NAME) recovers its variable name from the class field metadata so the reader is detected, not emitted as a shadowing method; worklist empty)});
+cmp_ok($tally{gate_green}, q{>=}, 84, q{gate-green floor (84; + D10 do-block value: a do { ... } block lowers to its last-expression value via the B::SoN optree walker, superseding the pre-B::SoN M20 Do-IR-node/grammar plan; worklist empty)});
 
 done_testing();

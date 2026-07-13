@@ -514,3 +514,31 @@ context: scalar
 ```ir
 L: GAP(needs LLVM landingpad + personality function for exception unwind)
 ```
+
+## D10 do-block value
+
+A `do { ... }` block evaluates its statements and yields the value of its last
+expression (`my $x = do { my $t = 5; $t + 1 }` binds $x to 6). B::SoN walks the
+do-block's enter/leave scope and the SSA construction folds the intermediate
+`my $t = 5` binding into the final expression, so the graph is just the value
+computation. (The M20 "Do IR node + DoBlock grammar" was the pre-B::SoN Chalk
+grammar plan; the B::SoN optree walker supersedes it — do-blocks lower directly.)
+
+```perl
+# source
+my $x = do { my $t = 5; $t + 1 };
+$x
+```
+
+```behavior
+return: 6
+context: scalar
+```
+
+```ir
+%five = Constant(5) :Int
+%one  = Constant(1) :Int
+%sum  = Add(%five, %one) :Int
+return %sum
+L: GREEN
+```
