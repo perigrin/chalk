@@ -184,6 +184,20 @@ subtest 'a shift-drain loop consumes the array through a loop memory-Phi' => sub
     is("$k3:$o3", 'value:Int:4', 'shift-drain count (value unused) -> 4');
 };
 
+subtest 'a do-block in a loop body with a body-local var lowers correctly (zhi 019f59b1)' => sub {
+    # `while ($i<3){ $s = $s + do { my $t=$i; $t+1 }; $i=$i+1 } $s` -- the do-block
+    # is inlined (not a nested loop), but its body-local `my $t=$i` used to
+    # mis-wire $s's loop-Phi backedge to Add($i_phi, $i_next) instead of
+    # Add($s_phi, $t+1): a silent off-by-one (returned 5, not 6). Either lower
+    # correctly to 6 or GAP loudly -- never a silent wrong value.
+    my ($k, $o) = lower_and_run(
+        'my $i=0; my $s=0; while ($i<3){ $s = $s + do { my $t=$i; $t+1 }; $i=$i+1 } $s');
+    # Correct-or-GAP, never the silent 5. A lowered value MUST be Int:6.
+    my $outcome = ($k eq 'value') ? "$k:$o" : 'gap';
+    ok($outcome eq 'value:Int:6' || $outcome eq 'gap',
+        "do-block accumulator lowers to 6 or GAPs, never a silent wrong value (got $k:$o)");
+};
+
 subtest 'unsound drain shapes GAP, never miscompile (soundness guards)' => sub {
     # Each of these was found (adversarial verification) to miscompile/crash/hang
     # before its guard. The in-place drain destroys the pre-loop array, so any of
