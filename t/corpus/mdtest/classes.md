@@ -390,3 +390,64 @@ return %result
 branch_control: %proj0 -> %inc
 L: GREEN
 ```
+
+## method-branched-field-store
+
+A method whose body is an if/else that mutates a field in BOTH arms
+(`method bump { if ($n < 100) { $n = $n + 5 } else { $n = $n + 1 } }`). Each arm's
+field store is control-dependent on its own branch Proj and a Region merges the
+arms, so the mutation persists exactly like a straight-line `$n += 1` store. The
+method body lowers through the same control-chain elaboration the top-level graph
+uses; a linear control_in walk would stop at the merge Region and drop the arm
+stores, leaving the field unmutated (zhi 019f5368: `bump; val` returned 10, not
+15). The method's own return value is the discarded assignment residual (Undef).
+
+```perl
+# source
+use feature 'class';
+no warnings 'experimental::class';
+class Counter {
+    field $n :param = 0;
+    method bump { if ($n < 100) { $n = $n + 5 } else { $n = $n + 1 } }
+    method val { $n }
+}
+my $c = Counter->new(n => 10);
+$c->bump;
+$c->val
+```
+
+```behavior
+return: Int:15
+context: scalar
+```
+
+```ir
+%cls       = MOP::Class(name: "Counter")
+%mf_n      = MOP::Field(class: %cls, name: "n", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
+%fa_rd     = FieldAccess(field_index: 0, field_stash: "Counter") :Int
+%hundred   = Constant(100) :Int
+%cmp       = NumLt(%fa_rd, %hundred) :Bool
+%if        = If(%cmp)
+%proj0     = Proj(%if, index: 0)
+%proj1     = Proj(%if, index: 1)
+%five      = Constant(5) :Int
+%sum_t     = Add(%fa_rd, %five) :Int
+%fa_lv_t   = FieldAccess(field_index: 0, field_stash: "Counter") :Int
+%store_t   = Assign(%fa_lv_t, %sum_t) :Int
+%one       = Constant(1) :Int
+%sum_f     = Add(%fa_rd, %one) :Int
+%fa_lv_f   = FieldAccess(field_index: 0, field_stash: "Counter") :Int
+%store_f   = Assign(%fa_lv_f, %sum_f) :Int
+%region    = Region(%store_t, %store_f)
+%mi_bump   = MOP::Method(class: %cls, name: "bump", body: %region, return_repr: "Undef")
+%fa_val    = FieldAccess(field_index: 0, field_stash: "Counter") :Int
+%mi_val    = MOP::Method(class: %cls, name: "val", body: %fa_val, return_repr: "Int")
+%ten       = Constant(10) :Int
+%new_c     = Call(%ten, dispatch_kind: "method", name: "new", class: "Counter", param_names: "n") :Object
+%bump_call = Call(%new_c, dispatch_kind: "method", name: "bump", class: "Counter") :Undef
+%result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
+control: %bump_call -> %result
+branch_control: %proj0 -> %store_t
+return %result
+L: GREEN
+```

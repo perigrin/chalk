@@ -206,6 +206,10 @@ sub _method_fn_type {
     return '%StrPair (i8*)' if $result_repr eq 'Str';
     return 'i1 (i8*)'   if $result_repr eq 'Bool';
     return 'double (i8*)' if $result_repr eq 'Num';
+    # Undef return: a method whose body value is statically undef (e.g. an
+    # if/else field-mutation whose discarded residual is the assignment value).
+    # Undef lowers to the i1 defined-bit (always false), same shape as Bool.
+    return 'i1 (i8*)'   if $result_repr eq 'Undef';
     die "LLVM MOP: unsupported method return repr '$result_repr'";
 }
 
@@ -216,6 +220,7 @@ sub _method_fn_llvm_ret_type {
     return '%StrPair' if $repr eq 'Str';
     return 'i1'       if $repr eq 'Bool';
     return 'double'   if $repr eq 'Num';
+    return 'i1'       if $repr eq 'Undef';   # defined-bit, always false
     die "LLVM MOP: unsupported method return repr '$repr' for fn return type";
 }
 
@@ -367,34 +372,22 @@ sub _method_body_root {
     return $value;
 }
 
-# _method_body_stmts($mop_method) -> \@stmt_nodes
+# _method_body_return($mop_method) -> $return_node | undef
 #
-# The method body's statement-effect nodes (field-store Assign, void Call) in
-# control order, recovered by following the Return's control_in chain. A method
-# like `method inc { $n += 1 }` produces Start->Assign->Return, where the Assign
-# is a stmt-effect field store threaded via control_in; the Return's value input
-# is the += result, NOT the store. The store must be emitted before the value is
-# returned or the field mutation is lost. Returns [] for a store-free body
-# (e.g. `method val { return $n }`), which is a plain value read.
-sub _method_body_stmts {
+# The single Return node of a method's graph — the control root the body's
+# statement effects (field-store Assign, void Call) hang off. The method body is
+# lowered by walking this Return's control chain through _process_control_chain,
+# the same mechanism the top-level graph uses, so a BRANCHED body (an if/else
+# whose arms store a field) lowers to real basic blocks. A linear control_in walk
+# would stop at a merge Region and drop the branch arms. Returns undef for a
+# store-free body (`method val { $n }`) whose Return has no control chain.
+sub _method_body_return {
     my ($mop_method) = @_;
-    my $graph = $mop_method->graph or return [];
+    my $graph = $mop_method->graph or return undef;
     my @returns = grep {
         blessed($_) && $_->can('operation') && $_->operation eq 'Return'
     } @{ $graph->returns };
-    return [] unless @returns == 1;
-
-    my @chain;
-    my $ctrl = $returns[0]->can('control_in') ? $returns[0]->control_in : undef;
-    while (defined $ctrl && blessed($ctrl)) {
-        my $op = $ctrl->can('operation') ? $ctrl->operation : '';
-        last if $op eq 'Start';
-        push @chain, $ctrl;
-        $ctrl = $ctrl->can('control_in') ? $ctrl->control_in : undef;
-    }
-    # control_in points predecessor-ward, so the chain is tail-first; reverse
-    # to statement order (earliest first).
-    return [ reverse @chain ];
+    return @returns == 1 ? $returns[0] : undef;
 }
 
 # _phaser_body_in_control_order($phaser) -> \@statement_nodes
@@ -470,7 +463,7 @@ sub _populate_registry_from_mop_class {
             push @{ $registry->{$cname}{methods} }, {
                 name        => $mname,
                 body_node   => $body_node,
-                body_stmts  => _method_body_stmts($m),
+                body_return => _method_body_return($m),
                 return_repr => $ret_repr,
                 vtable_slot => $mslot++,
             };
@@ -739,21 +732,29 @@ sub _emit_class_registry_ir {
                 next;
             }
 
-            # Lower the method body into a fresh context
-            my $body_ctx = Chalk::Target::LLVM::Context->new;
+            # Lower the method body through an ElaboratedContext, the SAME path
+            # the top-level graph uses. A branched body (`method bump { if(C){$n=
+            # $n+5}else{$n=$n+1} }`) has its field stores guarded by If/Proj; only
+            # ElaboratedContext's _process_if_node emits those as real basic blocks
+            # (the base Context stubs it out). The elab plan places any merge phi.
+            my $body_return = $minfo->{body_return};
+            my $body_dom  = Chalk::IR::Schedule::Dominators->from_return_node($body_return);
+            my $body_elab = Chalk::IR::Schedule::Elaborate->from_return_node($body_return, $body_dom);
+            my $body_ctx  = Chalk::Target::LLVM::ElaboratedContext->new(
+                elab           => $body_elab,
+                class_registry => $registry,
+            );
             $body_ctx->{_in_method_body} = 1;
             $body_ctx->{_method_self_name} = '%self';
             $body_ctx->{_method_class_name} = $cname;
             $body_ctx->{_method_name} = $mname;  # I1: used to prefix str_const globals uniquely
-            $body_ctx->{class_registry} = $registry;
             $body_ctx->{_need_strpair}  = $ctx->{_need_strpair} // 0;
 
-            # Emit the body's statement effects (field-store Assign, void Call)
-            # in control order BEFORE the return value, so a `method inc { $n +=
-            # 1 }` writes the field back. Same shape as the main graph's control
-            # chain and the ADJUST body loop.
-            $body_ctx->process_control_node($_)
-                for @{ $minfo->{body_stmts} // [] };
+            # Emit the body's statement effects (field-store Assign, void Call, and
+            # any branch-guarded If) in control order BEFORE the return value, so a
+            # `method inc { $n += 1 }` writes the field back and a branched `bump`
+            # emits both guarded stores. Same mechanism as the top-level graph.
+            _process_control_chain($body_ctx, $body_return);
 
             # Lower the body value node into the method body context
             my $body_val = $body_ctx->lower_value($body_node);
@@ -785,6 +786,11 @@ sub _emit_class_registry_ir {
                 push @lines, "  ret double $body_val";
             }
             elsif ($ret_repr eq 'Bool') {
+                push @lines, "  ret i1 $body_val";
+            }
+            elsif ($ret_repr eq 'Undef') {
+                # Undef-returning method (discarded if/else field-mutation
+                # residual): the body value is the i1 defined-bit (always 0).
                 push @lines, "  ret i1 $body_val";
             }
             else {
@@ -849,6 +855,72 @@ sub _emit_class_registry_ir {
     return @lines;
 }
 
+# _process_control_chain($ctx, $return_node) -> void
+#
+# Walk the control chain from $return_node and drive each control node through
+# $ctx->process_control_node (VarDecl/Assign/If/Loop). Shared by the top-level
+# graph (lower_with_elaboration) and each method body (_emit_class_registry_ir)
+# so a branched method body — an if/else whose arms store a field — lowers to
+# real basic blocks exactly like a branched top-level statement, instead of the
+# old flat body_stmts list that stopped at the Region and dropped the arms.
+#
+# When Return.control_in is a Region (not an If/Loop directly), we walk via the
+# Region's head back-pointer to find the If/Loop that owns it, then continue
+# from head.control_in. This matches the Elaborate pass's M2 path.
+sub _process_control_chain {
+    my ($ctx, $return_node) = @_;
+
+    my @chain;
+    my %seen;
+    # Seed the control chain from Return.control_in AND from any trailing void
+    # statement-effect Calls carried as extra Return inputs. A void method call
+    # (`$c->inc;`) is NOT the return value, so the loader keeps it as inputs[1..]
+    # (a data input) rather than demoting it to control_in; its own control_in
+    # chain threads the preceding effects. Without seeding here the effect is
+    # never scheduled and the mutation is lost (and it hits the NO-REPR guard).
+    my @seeds = grep { defined && blessed($_) } (
+        $return_node->control_in,
+        @{ $return_node->inputs }[ 1 .. $#{ $return_node->inputs } ],
+    );
+    for my $ctrl (@seeds) {
+        while (defined $ctrl && blessed($ctrl)) {
+            last if $seen{ $ctrl->id }++;
+            my $op = $ctrl->can('operation') ? $ctrl->operation : '';
+            if ($op eq 'Region') {
+                # Region-as-control_in: push the owning If/Loop (the head) so
+                # process_control_node handles it correctly, then continue from
+                # the head's control_in predecessor.
+                my $head = $ctrl->can('head') ? $ctrl->head : undef;
+                if (defined $head) {
+                    push @chain, $head;
+                    $ctrl = $head->can('control_in') ? $head->control_in : undef;
+                }
+                else {
+                    push @chain, $ctrl;
+                    last;
+                }
+            }
+            else {
+                push @chain, $ctrl;
+                $ctrl = $ctrl->can('control_in') ? $ctrl->control_in : undef;
+            }
+        }
+    }
+    # Memory-SSA: scan the graph's memory shape (a store under a branch/loop
+    # needs phase 2b), then freeze the element reads valid at ENTRY
+    # (memory=MemStart), before the control chain emits any store, so a pre-store
+    # read observes the initial array state. MemStart is a data node (not in the
+    # chain); find it from the return-reachable graph.
+    $ctx->_scan_memory_shape($return_node);
+    my $memstart = $ctx->_find_memstart($return_node);
+    $ctx->_freeze_memory_reads($memstart) if defined $memstart;
+
+    for my $node (reverse @chain) {
+        $ctx->process_control_node($node);
+    }
+    return;
+}
+
 # lower_with_elaboration($class, $ret_node, $elab, %opts) -> $llvm_ir_text
 #
 # %opts: mop => a SEALED Chalk::MOP carrying class structure (required when
@@ -888,62 +960,7 @@ sub lower_with_elaboration {
     }
 
     # Process the control chain — VarDecl/Assign/If/Loop.
-    # ElaboratedContext._process_if_node uses the elab phis for phi placement.
-    #
-    # When Return.control_in is a Region (not an If/Loop directly), we walk via
-    # the Region's head back-pointer to find the If/Loop that owns it, then
-    # continue from head.control_in. This matches the Elaborate pass's M2 path.
-    {
-        my @chain;
-        my %seen;
-        # Seed the control chain from Return.control_in AND from any trailing
-        # void statement-effect Calls carried as extra Return inputs. A void
-        # method call (`$c->inc;`) is NOT the return value, so the loader keeps
-        # it as inputs[1..] (a data input) rather than demoting it to
-        # control_in; its own control_in chain threads the preceding effects.
-        # Without seeding here the effect is never scheduled and the mutation
-        # is lost (and it hits the NO-REPR guard).
-        my @seeds = grep { defined && blessed($_) } (
-            $return_node->control_in,
-            @{ $return_node->inputs }[ 1 .. $#{ $return_node->inputs } ],
-        );
-        for my $ctrl (@seeds) {
-            while (defined $ctrl && blessed($ctrl)) {
-                last if $seen{ $ctrl->id }++;
-                my $op = $ctrl->can('operation') ? $ctrl->operation : '';
-                if ($op eq 'Region') {
-                    # Region-as-control_in: push the owning If/Loop (the head) so
-                    # process_control_node handles it correctly, then continue
-                    # from the head's control_in predecessor.
-                    my $head = $ctrl->can('head') ? $ctrl->head : undef;
-                    if (defined $head) {
-                        push @chain, $head;
-                        $ctrl = $head->can('control_in') ? $head->control_in : undef;
-                    }
-                    else {
-                        push @chain, $ctrl;
-                        last;
-                    }
-                }
-                else {
-                    push @chain, $ctrl;
-                    $ctrl = $ctrl->can('control_in') ? $ctrl->control_in : undef;
-                }
-            }
-        }
-        # Memory-SSA: scan the graph's memory shape (a store under a branch/loop
-        # needs phase 2b), then freeze the element reads valid at ENTRY
-        # (memory=MemStart), before the control chain emits any store, so a
-        # pre-store read observes the initial array state. MemStart is a data node
-        # (not in the chain); find it from the return-reachable graph.
-        $ctx->_scan_memory_shape($return_node);
-        my $memstart = $ctx->_find_memstart($return_node);
-        $ctx->_freeze_memory_reads($memstart) if defined $memstart;
-
-        for my $node (reverse @chain) {
-            $ctx->process_control_node($node);
-        }
-    }
+    _process_control_chain($ctx, $return_node);
 
     my $value_node  = $return_node->inputs->[0];
     my $result_ref  = $ctx->lower_value($value_node);
@@ -1327,6 +1344,7 @@ sub _method_fn_type {
     return '%StrPair (i8*)' if $result_repr eq 'Str';
     return 'i1 (i8*)'   if $result_repr eq 'Bool';
     return 'double (i8*)' if $result_repr eq 'Num';
+    return 'i1 (i8*)'   if $result_repr eq 'Undef';   # defined-bit, always false
     die "LLVM MOP: unsupported method return repr '$result_repr'";
 }
 
@@ -2689,6 +2707,14 @@ sub _lower_ternary {
     # Determine the branch type for the select.
     my $true_repr = _require_repr($true_node, 'TernaryExpr.true_branch');
     my $fals_repr = _require_repr($fals_node, 'TernaryExpr.false_branch');
+
+    # Both arms statically Undef (a discarded if/else field-mutation residual):
+    # the result is Undef regardless of the guard. The Undef repr is the i1
+    # defined-bit (always false), so short-circuit to a constant 0 -- no select.
+    if ($true_repr eq 'Undef' && $fals_repr eq 'Undef') {
+        $self->{cache}{$node->id} = '0';
+        return '0';
+    }
 
     my $branch_type;
     if ($true_repr eq 'Int' && $fals_repr eq 'Int') {
@@ -4985,12 +5011,12 @@ sub _lower_call_method {
     }
     else {
         # The call's return type MUST match the typed fn pointer's return type
-        # ($fn_type, cast above from $result_repr), or lli rejects the module.
-        # Int -> i64, Bool -> i1, Num -> double. An unsupported repr already died
-        # in _method_fn_type above.
-        my $ret_ty = $result_repr eq 'Bool' ? 'i1'
-                   : $result_repr eq 'Num'  ? 'double'
-                   :                          'i64';
+        # ($fn_type, cast above from $result_repr), or lli rejects the module. Str
+        # (%StrPair) was handled above; the same repr->LLVM-return-type authority
+        # that DEFINED each method (_method_fn_llvm_ret_type) names the type here,
+        # so call and definition can never disagree (and an unsupported repr dies
+        # there once, not in a parallel inline table).
+        my $ret_ty = Chalk::Target::LLVM::_method_fn_llvm_ret_type($result_repr);
         $self->_emit("  $result = call $ret_ty $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> $ret_ty");
         $self->{cache}{ $node->id } = $result;
         return $result;
