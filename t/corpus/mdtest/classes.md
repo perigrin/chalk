@@ -586,6 +586,40 @@ return %result
 L: GREEN
 ```
 
+## self-method-call result feeding arithmetic
+
+A method whose body CONSUMES a self-call in a computed expression
+(`method use_it { $self->a() + 1 }`). The self-call `$self->a()` is typed from
+the callee's return_repr, and `use_it`'s own return_repr is then that Add's Int --
+but only on a LATER inference pass, since the Add has no repr until its self-call
+input is stamped. The loader's return_repr inference is a FIXPOINT (stamp calls +
+re-propagate until stable), so a caller of `use_it` gets its repr (zhi 019f5e57).
+This arith-over-call pattern is pervasive in real lib/ methods.
+
+```perl
+# source
+use feature 'class';
+no warnings 'experimental::class';
+class Adder {
+    method base { 5 }
+    method plus_one { $self->base() + 1 }
+}
+Adder->new->plus_one
+```
+
+```behavior
+return: Int:6
+context: scalar
+```
+
+```ir
+%cls    = MOP::Class(name: "Adder")
+%new_a  = Call(dispatch_kind: "method", name: "new", class: "Adder") :Object
+%result = Call(%new_a, dispatch_kind: "method", name: "plus_one", class: "Adder") :Int
+return %result
+L: GREEN
+```
+
 ## conditional string append (.= guarded by a postfix if)
 
 A method that appends to a string only when a field is defined

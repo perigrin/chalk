@@ -605,14 +605,18 @@ sub from_json ($json_string) {
     # The backend requires a repr on these nodes to lower them (RC1).
     _seed_and_propagate_reprs(\%graphs);
 
-    _stamp_method_call_reprs($data->{classes} // {}, \%graphs);
-
-    # Stamping method Calls newly types nodes that a computed expression consumes
-    # (e.g. Add over two method-Call results): those Call reprs did not exist
-    # when the first propagation ran. A second, idempotent propagation pass now
-    # resolves the computed consumers. It re-derives only nodes still lacking a
-    # repr, so a graph with no method Calls is unaffected.
-    _seed_and_propagate_reprs(\%graphs);
+    # Stamp method Calls from the callee's return_repr, then re-propagate: a Call
+    # newly types nodes a computed expression consumes (Add over a method-Call
+    # result), which the next propagation resolves. This is a FIXPOINT: a method
+    # whose BODY consumes a call (`method use_it { $self->a() + 1 }`) has no
+    # return_repr until its internal call is stamped AND its body root re-derived,
+    # so a caller of use_it can only be stamped on a LATER pass. Loop stamp +
+    # propagate until a pass stamps nothing new (zhi 019f5e57). Bounded by the
+    # finite number of Call nodes; a graph with no method Calls converges in one
+    # pass (stamped==0 immediately).
+    while (_stamp_method_call_reprs($data->{classes} // {}, \%graphs) > 0) {
+        _seed_and_propagate_reprs(\%graphs);
+    }
 
     # $mop is returned only in list context; scalar context stays \%graphs for
     # the existing single-return callers.
@@ -1199,6 +1203,7 @@ sub _stamp_method_call_reprs ($classes, $graphs) {
     # Augment $g->nodes (input closure only) with the control-chain nodes: a
     # void method Call (`$c->inc;`) reached only via control_in is otherwise
     # unseen here and hits the backend NO-REPR guard.
+    my $stamped = 0;
     for my $g (values %$graphs) {
         my %seen;
         my @nodes = grep { !$seen{ $_->id }++ }
@@ -1222,9 +1227,10 @@ sub _stamp_method_call_reprs ($classes, $graphs) {
             }
             defined $repr or next;
             $node->set_representation($repr);
+            $stamped++;
         }
     }
-    return;
+    return $stamped;
 }
 
 # _classes_in_parent_order($classes) — class names sorted so a parent always
