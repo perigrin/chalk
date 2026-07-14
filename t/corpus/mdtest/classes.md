@@ -556,14 +556,11 @@ L: GREEN
 ## self-method-call in a value position
 
 A method that calls a SIBLING method on `$self` in a value position
-(`method m { $self->flag() ? 10 : 20 }`) currently GAPs: the `$self->flag()` Call
-does not record its statically-known class, so the backend refuses
-("Call(method) 'flag' has no class_name"). The class IS static -- it is the
-enclosing class -- so the producer should stamp the self-call's class_name (as it
-does for `$obj->method` on an external object in method-call). This is the most
-common NO-REPR trigger in real lib/ methods (e.g. Chalk::Grammar::Symbol::to_string
-calls `$self->is_terminal()`), so closing it unblocks a large fraction of the
-Phase-5 lib/ coverage.
+(`method pick { $self->flag() ? 10 : 20 }`). The `$self->flag()` Call records its
+statically-known class (the enclosing class, from the CV stash) so the backend
+dispatches it, and the self receiver lowers to the method's %self object pointer
+(zhi 019f5dec). This is the most common method-dispatch shape in real lib/ methods
+(e.g. Chalk::Grammar::Symbol::to_string calls `$self->is_terminal()`).
 
 ```perl
 # source
@@ -582,7 +579,11 @@ context: scalar
 ```
 
 ```ir
-L: GAP(self-method-call $self->flag() does not stamp its statically-known class_name; a value-position self dispatch needs the enclosing class recorded like an external $obj->method call does)
+%cls    = MOP::Class(name: "Widget")
+%new_w  = Call(dispatch_kind: "method", name: "new", class: "Widget") :Object
+%result = Call(%new_w, dispatch_kind: "method", name: "pick", class: "Widget") :Int
+return %result
+L: GREEN
 ```
 
 ## conditional string append (.= guarded by a postfix if)

@@ -2333,6 +2333,21 @@ sub _lower_vardecl {
 sub _lower_padaccess {
     my ($self, $node) = @_;
 
+    # The method receiver `$self`: a PadAccess with varname '$self' and NO VarDecl
+    # input (it is not a declared lexical -- it is the method's implicit object
+    # pointer). Inside a method body the object arrives as %self; a self-method
+    # dispatch ($self->m()) lowers its receiver to that pointer. Handle before the
+    # VarDecl lookup, which would die "no VarDecl input" (zhi 019f5dec).
+    if ($self->{_in_method_body}
+            && $node->can('varname') && ($node->varname // '') eq '$self'
+            && !defined $node->inputs->[0]) {
+        my $self_ref = $self->{_method_self_name}
+            // die "LLVM backend: a \$self receiver PadAccess in a method body "
+                 . "has no _method_self_name to lower to.";
+        $self->{cache}{ $node->id } = $self_ref;
+        return $self_ref;
+    }
+
     my $repr = _require_repr($node, 'PadAccess');
     if ($repr eq 'Scalar') {
         die "GAP: PadAccess with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
