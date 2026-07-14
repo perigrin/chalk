@@ -465,3 +465,36 @@ context: scalar
 return %len
 L: GAP(splice array length mutation not memory-modeled: new length not observed by a later read)
 ```
+
+## A15 deref of a runtime array-ref GAPs
+
+`my $r = \@a; my @b = @$r` derefs a RUNTIME array-ref -- $r is bound to a
+Reference node (`\@a`), not a literal ArrayRef, so its elements are not known at
+compile time and cannot be statically flattened (unlike A12, where $r is a
+literal `[1,2,3]`). Leaving the single ref as one element would make `scalar @b`
+return 1 (a silent miscompile); the producer GAPs it loudly instead. Flip to
+`L: GREEN` when a runtime array-ref deref is lowered (a real deref + copy).
+zhi 019f5e42.
+
+```perl
+# source
+my @a = (1, 2, 3);
+my $r = \@a;
+my @b = @$r;
+scalar @b
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%c3    = Constant(3) :Int
+%arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%len   = Length(%arr) :Int
+return %len
+L: GAP(deref of a runtime array-ref: elements not statically known, needs a real deref+copy)
+```

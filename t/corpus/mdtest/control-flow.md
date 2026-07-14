@@ -286,6 +286,46 @@ branch_control: %lp0 -> %i_new
 L: GREEN
 ```
 
+## D3b foreach over a lexical array
+
+A foreach over an ARRAY (not a range) iterates each element in turn. `for` and
+`foreach` are aliases -- the same `enteriter` optree -- and both spellings lower
+identically. With @a = (10, 20, 30) the loop sums to 60. Unlike the range form
+(D3, counted 1..N with synthesized bounds), an array foreach iterates the array's
+own elements: the loop is bounded by the array length and the induction variable
+reads element[i] each pass. This is the iteration primitive real lib/ methods use
+(`for my $input ($self->inputs->@*) { ... }`).
+
+```perl
+# source
+my @a = (10, 20, 30);
+my $s = 0;
+for my $x (@a) { $s += $x }
+$s
+```
+
+```behavior
+return: 60
+context: scalar
+```
+
+```ir
+%c10   = Constant(10) :Int
+%c20   = Constant(20) :Int
+%c30   = Constant(30) :Int
+%arr   = ArrayRef(%c10, %c20, %c30) :ArrayRef
+%len   = Length(%arr) :Int
+%c0    = Constant(0) :Int
+%loop  = Loop
+%i_phi = Phi(region: %loop) :Int
+%s_phi = Phi(region: %loop) :Int
+%cmp   = NumGt(%len, %i_phi) :Bool
+%elem  = Slot(%arr, %i_phi) :Int
+%s_new = Add(%s_phi, %elem) :Int
+return %s_phi
+L: GREEN
+```
+
 ## D4 postfix if
 
 A postfix `EXPR if COND` is syntactic sugar for a single-branch conditional: the
