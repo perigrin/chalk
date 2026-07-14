@@ -217,6 +217,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, q{>=}, 84, q{gate-green floor (84; the worklist is INTENTIONALLY non-empty: the list-flatten cases (variables A9-A11, subs F4) pin the Phase-5 list-context-flattening miscompile as red->green targets, and the two classes GAP cases (self-method-call, conditional append) pin the NO-REPR triggers; raise the floor as they land)});
+cmp_ok($tally{gate_green}, q{>=}, 87, q{gate-green floor (87; + variables A9-A11: a bare array variable read as a list-assignment source flattens its elements (zhi 019f5deb), no longer wrapping the aggregate as one element. The remaining worklist item subs F4 (list-returning-call flatten) and the two classes NO-REPR GAP cases are the still-open Phase-5 targets)});
 
 done_testing();
