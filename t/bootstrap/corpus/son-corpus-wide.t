@@ -217,6 +217,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, q{>=}, 90, q{gate-green floor (90; variables A12 my @b=@$r flattens an array-ref variable deref (rv2av over a padsv bound to a literal ArrayRef) -- was a silent scalar-@b==1 miscompile (zhi 019f5e42). A13 push/unshift is a declared GAP (array-growing mutation is not memory-modeled, so a later read sees the old length); worklist empty, gap-declared 9 -> 10)});
+cmp_ok($tally{gate_green}, q{>=}, 90, q{gate-green floor (90; variables A12 my @b=@$r flattens an array-ref variable deref (was a silent scalar-@b==1 miscompile, zhi 019f5e42). A13 push/unshift and A14 splice are declared GAPs -- array length mutation is not memory-modeled, so a later read sees the old length (zhi 019f5e42/019f5ed3); worklist empty, gap-declared 11)});
 
 done_testing();

@@ -435,3 +435,33 @@ context: scalar
 return %len
 L: GAP(push/unshift array-growing mutation not memory-modeled: new length not observed by a later read)
 ```
+
+## A14 splice shrinks a lexical array
+
+`splice(@a, 1, 1)` removes one element, so with @a = (1, 2, 3) the result is
+(1, 3) and `scalar @a` is 2. splice mutates array length like push/unshift, and
+like them the mutation is not memory-modeled (only shift/pop are memory-SSA
+modeled), so a later `scalar @a` reads the PRE-splice binding and returns 3 -- a
+silent miscompile. The producer now GAPs splice loudly. Flip to `L: GREEN` when
+the length mutation is memory-modeled like shift/pop. zhi 019f5ed3.
+
+```perl
+# source
+my @a = (1, 2, 3);
+splice(@a, 1, 1);
+scalar @a
+```
+
+```behavior
+return: 2
+context: scalar
+```
+
+```ir
+%c1    = Constant(1) :Int
+%c3    = Constant(3) :Int
+%arr   = ArrayRef(%c1, %c3) :ArrayRef
+%len   = Length(%arr) :Int
+return %len
+L: GAP(splice array length mutation not memory-modeled: new length not observed by a later read)
+```
