@@ -370,3 +370,68 @@ context: scalar
 return %len
 L: GREEN
 ```
+
+## A12 list-copy flattens an array-ref variable deref
+
+`my @b = @$r` derefs an arrayref VARIABLE in list context, so with
+`$r = [1, 2, 3]` @b is (1, 2, 3) and `scalar @b` is 3. The producer flattened
+only a const-range rv2av (A8) and a bare padav (A9-A11); an rv2av over a padsv
+bound to a literal ArrayRef wrapped the single ref as ONE element, so
+`scalar @b` returned 1 (a silent miscompile). The rv2av-flatten path now also
+fires over a padsv kid in list context. A `@$r` over a RUNTIME ref (not a
+literal ArrayRef node) stays a loud producer GAP. zhi 019f5e42.
+
+```perl
+# source
+my $r = [1, 2, 3];
+my @b = @$r;
+scalar @b
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%c3    = Constant(3) :Int
+%arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%len   = Length(%arr) :Int
+return %len
+L: GREEN
+```
+
+## A13 push onto a lexical array grows it
+
+`push @b, 3` appends to @b, so with @b = (1, 2) the result is (1, 2, 3) and
+`scalar @b` is 3. push/unshift GROW the array, but unlike shift/pop (which are
+memory-SSA modeled -- the Call becomes the new memory version) the growing
+mutation is not threaded onto @b's memory version, so a later `scalar @b` reads
+the PRE-push binding and returns 2 -- a silent miscompile. The producer now
+GAPs push/unshift loudly. Flip to `L: GREEN` when the growing mutation is
+memory-modeled like shift/pop. zhi 019f5e42.
+
+```perl
+# source
+my @a = (1, 2);
+my @b = @a;
+push @b, 3;
+scalar @b
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%c3    = Constant(3) :Int
+%arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%len   = Length(%arr) :Int
+return %len
+L: GAP(push/unshift array-growing mutation not memory-modeled: new length not observed by a later read)
+```
