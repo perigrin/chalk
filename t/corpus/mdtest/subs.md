@@ -136,13 +136,21 @@ L: GAP(CodeRef is RF: each call is an indirect call to a statically-known target
 ## F4 sub returning a list flattens into the caller's list assignment
 
 `sub inner { return (10, 20, 30) }` returns a LIST; `my @x = inner()` binds @x to
-all three elements, so `scalar @x` is 3. The producer currently types the direct
-Call as a scalar Int and wraps it as a single element (ArrayRef(Call)), so
-`scalar @x` returns 1 -- a silent miscompile. This is the list-flattening class
-(variables.md A9-A11) at a sub-call boundary, and it is the caller-side half of
-the no-Return list-returning method that poisons the shared MOP (Phase-5:
-Chalk::IR::Node::_serialize_inputs returns @parts). The target: a list-returning
-call in a list-assignment RHS flattens its result.
+all three elements, so `scalar @x` is 3. Modeling this requires a multi-value
+call return: the callee must yield every value (not just the last) AND the
+caller's list-assignment must flatten them. The producer previously kept only
+the last return value (`$args->[-1]` / a single `pop_node` at leavesub),
+silently dropping 10 and 20, so `scalar @x` returned 1 -- a silent miscompile.
+
+The sub body is compiled once and is context-independent, so the producer
+cannot know the caller's runtime wantarray; a >1-value return cannot be soundly
+collapsed to one scalar Return. Per GAP-not-miscompile the producer now refuses
+the multi-value list return loudly (`_leavesub_returns_list` detects the trailing
+OP_LIST / OP_RETURN with >1 value child). Flip to `L: GREEN` when a multi-value
+return is modeled as a list result the caller's aassign flattens (this is the
+list-flattening class variables.md A9-A11 at a sub-call boundary, and the
+caller-side half of the no-Return list-returning method that poisons the shared
+MOP -- Phase-5: Chalk::IR::Node::_serialize_inputs returns @parts). zhi 019f5e41.
 
 ```perl
 # source
@@ -163,5 +171,5 @@ context: scalar
 %arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %len   = Length(%arr) :Int
 return %len
-L: GREEN
+L: GAP(multi-value list return: callee drops all-but-last, needs list-result + caller flatten)
 ```

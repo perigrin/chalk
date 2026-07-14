@@ -217,6 +217,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, q{>=}, 89, q{gate-green floor (89; + self-method-call result feeding arithmetic: the loader's method return_repr inference is now a fixpoint (stamp calls + re-propagate until stable), so a method whose body consumes a call gets a return_repr and its callers lower (zhi 019f5e57). Remaining worklist: subs F4 (list-returning-call flatten))});
+cmp_ok($tally{gate_green}, q{>=}, 89, q{gate-green floor (89; subs F4 (multi-value list return) is now a declared GAP -- the producer refuses a >1-value return loudly instead of silently dropping all-but-last (zhi 019f5e41), so worklist is empty. gap-declared 8 -> 9)});
 
 done_testing();
