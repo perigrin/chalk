@@ -3347,14 +3347,28 @@ sub _scan_memory_shape {
     return;
 }
 
-# An arithmetic op (Add/Subtract/Multiply/Divide/Modulo) directly consuming an
-# element Subscript -- the element read-modify-write pattern ($a[i] += x).
+# The element read-modify-write pattern ($a[i] += x): an arithmetic op
+# (Add/Subtract/Multiply/Divide/Modulo) that READS an element Subscript AND whose
+# result feeds an element STORE back. Both halves are required: a scalar
+# accumulator over an array element (`$s += $x` in a foreach, lowered to
+# Add($s_phi, Subscript(arr,i))) reads a Subscript too, but its result feeds the
+# accumulator Phi/return, not an element store -- it is NOT an RMW, and flagging
+# it as one spuriously GAPs a legitimate foreach accumulator whose value is dead
+# (e.g. the sub returns `scalar @a`, not the accumulator). Require the store side
+# so only a true $a[i]-op= is caught (zhi 019f5da9 foreach false-positive).
 sub _is_arith_over_element {
     my ($self, $node) = @_;
     my %arith = map { $_ => 1 } qw(Add Subtract Multiply Divide Modulo);
     return 0 unless $arith{ $node->operation };
-    for my $in ($node->inputs->@*) {
-        return 1 if blessed($in) && $in->operation eq 'Subscript';
+    my $reads_element = grep {
+        blessed($_) && $_->operation eq 'Subscript'
+    } $node->inputs->@*;
+    return 0 unless $reads_element;
+    # The RMW store-back: a consumer Assign whose lhs is an element Subscript.
+    return 0 unless $node->can('consumers') && defined $node->consumers;
+    for my $c ($node->consumers->@*) {
+        return 1 if blessed($c) && $c->operation eq 'Assign'
+            && $self->_is_element_store($c);
     }
     return 0;
 }
@@ -3417,6 +3431,15 @@ sub _freeze_memory_reads {
         my $mem = $c->inputs->[2];
         next unless defined $mem && blessed($mem) && $mem->id eq $mem_node->id;
         next if exists $self->{cache}{ $c->id };   # already frozen
+        # A read whose INDEX (or container) is a loop-header Phi cannot be frozen
+        # at entry -- the Phi has no SSA ref until _lower_loop emits it inside the
+        # header. An `arr[$i]` element read in a foreach body is exactly this: its
+        # index is the induction Phi, so it belongs in the loop body, not at
+        # MemStart. Freezing it here would lower the Phi before its Loop is
+        # processed (the Phi-before-loop guard). Leave it for the loop body walk.
+        next if grep {
+            blessed($_) && $_->operation eq 'Phi' && !exists $self->{cache}{ $_->id }
+        } @{ $c->inputs }[0, 1];
         my $ref = $self->lower_value($c);
         $self->{cache}{ $c->id } = $ref;           # freeze at this memory version
     }

@@ -316,14 +316,84 @@ context: scalar
 %arr   = ArrayRef(%c10, %c20, %c30) :ArrayRef
 %len   = Length(%arr) :Int
 %c0    = Constant(0) :Int
-%loop  = Loop
-%i_phi = Phi(region: %loop) :Int
-%s_phi = Phi(region: %loop) :Int
+%c1    = Constant(1) :Int
+%loop  = Loop(%c0)
+%i_phi = Phi(%c0, region: %loop) :Int
+%s_phi = Phi(%c0, region: %loop) :Int
 %cmp   = NumGt(%len, %i_phi) :Bool
-%elem  = Slot(%arr, %i_phi) :Int
+%elem  = Subscript(%arr, %i_phi) :Int
 %s_new = Add(%s_phi, %elem) :Int
+%i_new = Add(%i_phi, %c1) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
 return %s_phi
+loop_backedge: %i_phi -> %i_new
+loop_backedge: %s_phi -> %s_new
 L: GREEN
+```
+
+## D3c array is intact after a foreach reads it
+
+A foreach reads @a but does not mutate it, so `scalar @a` after the loop is
+still 3. The loop's element reads (Subscript over the array) must not be treated
+as an array mutation. An earlier over-conservative heuristic
+(`_is_arith_over_element`) flagged the accumulator `Add($s, arr[i])` as a
+possible element read-modify-write (`$a[i] += x`) and spuriously GAPped the read
+whenever the accumulator's value was dead (here the sub returns `scalar @a`, not
+$s). The heuristic now also requires the arith result to feed an element STORE
+before treating it as an RMW, so a scalar accumulator over array elements lowers.
+zhi 019f5da9.
+
+```perl
+# source
+my @a = (2, 4, 6);
+my $s = 0;
+for my $x (@a) { $s += $x }
+scalar @a
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+%c2    = Constant(2) :Int
+%c4    = Constant(4) :Int
+%c6    = Constant(6) :Int
+%arr   = ArrayRef(%c2, %c4, %c6) :ArrayRef
+%len   = Length(%arr) :Int
+return %len
+L: GREEN
+```
+
+## D3d foreach body that writes the iterator GAPs (aliasing)
+
+In Perl `for my $x (@a)` ALIASES $x to each element, so a body write `$x = ...`
+mutates @a in place: `for my $x (@a) { $x = $x + 1 } $a[0]` returns 11, not 10.
+This lowering binds $x to a READ-ONLY element copy (Subscript(arr, i)), so a
+write to $x would not propagate back to @a -- a silent miscompile. The producer
+GAPs a foreach body that assigns its iterator loudly instead. Flip to `L: GREEN`
+when the aliasing write-back is modeled. zhi 019f5da9.
+
+```perl
+# source
+my @a = (10, 20);
+for my $x (@a) { $x = $x + 1 }
+$a[0]
+```
+
+```behavior
+return: 11
+context: scalar
+```
+
+```ir
+%c10   = Constant(10) :Int
+%c11   = Constant(11) :Int
+return %c11
+L: GAP(foreach body writes the iterator: aliasing write-back to the array not modeled)
 ```
 
 ## D4 postfix if

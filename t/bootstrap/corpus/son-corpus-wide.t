@@ -217,6 +217,6 @@ if (@bugs) {
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
 # already-certified gate-green cases must never silently regress. Raise the
 # floor as the shape-contract families (019f2a50 pair) land.
-cmp_ok($tally{gate_green}, q{>=}, 90, q{gate-green floor (90; variables A12 my @b=@$r flattens an array-ref variable deref (was a silent scalar-@b==1 miscompile, zhi 019f5e42). A13 push/unshift and A14 splice are declared GAPs -- array length mutation is not memory-modeled, so a later read sees the old length (zhi 019f5e42/019f5ed3); worklist empty, gap-declared 11)});
+cmp_ok($tally{gate_green}, q{>=}, 92, q{gate-green floor (92; control-flow D3b/D3c foreach over a lexical array lowers end-to-end -- a new counted loop over the array's elements (induction 0..len-1, iterator = Subscript(arr,i)), the iteration primitive real lib/ methods use; D3c pins that a foreach reading the array does not corrupt its post-loop length (the _is_arith_over_element RMW heuristic now requires an element store-back, not just a Subscript read). for/foreach are aliases. D3d: a foreach body that writes its iterator GAPs (aliasing write-back unmodeled). zhi 019f5da9, gap-declared 13)});
 
 done_testing();

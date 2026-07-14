@@ -786,7 +786,21 @@ my %_SEED_REPR = (
 # more reprs can be derived.
 sub _seed_and_propagate_reprs ($graphs) {
     for my $g (values %$graphs) {
-        for my $node ($g->nodes->@*) {
+        # Seed over $g->nodes PLUS the control-chain closure. A loop CONDITION
+        # (a comparison with control_in=Loop) and its input closure -- e.g. the
+        # `Length(@a)` bound of a foreach-over-array (`for my $x (@a)`) and the
+        # array ArrayRef -- are reachable only via the Loop's consumers, not the
+        # Return value chain, so $g->nodes alone omits them. Without a seed the
+        # ArrayRef/Length never get a repr and hit the backend NO-REPR guard when
+        # the loop-condition is lowered (only visible when the body does not also
+        # read an element, which would pull the array into the value chain).
+        my %seen;
+        my @seed_nodes;
+        for my $n ($g->nodes->@*, _control_chain_nodes($g)) {
+            next unless blessed($n);
+            push @seed_nodes, $n unless $seen{ $n->id }++;
+        }
+        for my $node (@seed_nodes) {
             next if defined $node->representation;
             # A qr// compiled-regex literal is a Constant of const_type 'regex';
             # its repr is Regex (the matcher value the backend resolves
