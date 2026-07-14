@@ -358,6 +358,58 @@ return %last
 L: GREEN
 ```
 
+## D3e element-indexed loop accumulator
+
+`for my $i (0..$#a) { $s += $a[$i] }` reads each element by its loop-carried
+index and accumulates. This is the #2 real-lib loop pattern (after foreach-over-
+array). Two bugs blocked it: (1) the body scout had no memory, so the element
+read's Subscript had an undef memory input and crashed (masked by B::SoN as a
+silent sub-drop); (2) the element read was unstamped, so the accumulator's
+back-edge Add($s_phi, Subscript) was unstamped and the loop-carried-stamp check
+refused it. Fixed by seeding the scout with a MemStart and stamping a
+DYNAMIC-index rvalue element read with the container's element type (a LITERAL
+index stays unstamped so the out-of-bounds -> Slot analysis still runs, ref R9).
+zhi 019f5da9, 019f6198.
+
+```perl
+# source
+my @a = (10, 20, 30);
+my $s = 0;
+for my $i (0..$#a) { $s += $a[$i] }
+$s
+```
+
+```behavior
+return: 60
+context: scalar
+```
+
+```ir
+%c10   = Constant(10) :Int
+%c20   = Constant(20) :Int
+%c30   = Constant(30) :Int
+%arr   = ArrayRef(%c10, %c20, %c30) :ArrayRef
+%len   = Length(%arr) :Int
+%c1    = Constant(1) :Int
+%last  = Subtract(%len, %c1) :Int
+%bound = Add(%last, %c1) :Int
+%c0    = Constant(0) :Int
+%loop  = Loop(%c0)
+%i_phi = Phi(%c0, region: %loop) :Int
+%s_phi = Phi(%c0, region: %loop) :Int
+%cmp   = NumGt(%bound, %i_phi) :Bool
+%elem  = Subscript(%arr, %i_phi) :Int
+%s_new = Add(%s_phi, %elem) :Int
+%i_new = Add(%i_phi, %c1) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+loop_backedge: %i_phi -> %i_new
+loop_backedge: %s_phi -> %s_new
+L: GREEN
+```
+
 ## D3b foreach over a lexical array
 
 A foreach over an ARRAY (not a range) iterates each element in turn. `for` and
