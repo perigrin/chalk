@@ -286,6 +286,78 @@ branch_control: %lp0 -> %i_new
 L: GREEN
 ```
 
+## D3a foreach over a range with a runtime high bound
+
+`for my $i (0..$n)` with a runtime `$n` desugars to the same counted loop as the
+constant range (D3), but the continuation bound is computed at run time:
+NumGt(Add($n, 1), i_phi) instead of a folded constant. This is the #1 Phase-5
+lib/ blocker -- 28 real methods use `for (0..$#x)` / `for (0..$n)`. A runtime LOW
+bound (`for my $i ($lo..$hi)`) still GAPs (loop-carried-stamp fixpoint). zhi
+019f5da9.
+
+```perl
+# source
+my $n = 3;
+my $s = 0;
+for my $i (0..$n) { $s += $i }
+$s
+```
+
+```behavior
+return: 6
+context: scalar
+```
+
+```ir
+%c0    = Constant(0) :Int
+%c1    = Constant(1) :Int
+%cn    = Constant(3) :Int
+%bound = Add(%cn, %c1) :Int
+%loop  = Loop(%c0)
+%i_phi = Phi(%c0, region: %loop) :Int
+%s_phi = Phi(%c0, region: %loop) :Int
+%cmp   = NumGt(%bound, %i_phi) :Bool
+%s_new = Add(%s_phi, %i_phi) :Int
+%i_new = Add(%i_phi, %c1) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+loop_backedge: %i_phi -> %i_new
+loop_backedge: %s_phi -> %s_new
+L: GREEN
+```
+
+## D3a2 array last-index $#a is length minus one
+
+`$#a` is the array's LAST INDEX (length - 1), not its length: for a 3-element
+array `$#a` is 2. The producer once modelled av2arylen as Length (a silent
+off-by-one that made `for my $i (0..$#a)` run one extra iteration); it now emits
+Subtract(Length, 1). zhi 019f5da9.
+
+```perl
+# source
+my @a = (10, 20, 30);
+$#a
+```
+
+```behavior
+return: 2
+context: scalar
+```
+
+```ir
+%c10   = Constant(10) :Int
+%c20   = Constant(20) :Int
+%c30   = Constant(30) :Int
+%arr   = ArrayRef(%c10, %c20, %c30) :ArrayRef
+%len   = Length(%arr) :Int
+%c1    = Constant(1) :Int
+%last  = Subtract(%len, %c1) :Int
+return %last
+L: GREEN
+```
+
 ## D3b foreach over a lexical array
 
 A foreach over an ARRAY (not a range) iterates each element in turn. `for` and
