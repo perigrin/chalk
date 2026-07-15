@@ -654,3 +654,40 @@ context: scalar
 ```ir
 L: GAP(a value-context conditional string append -- $s .= $x if defined $x -- feeding the method return is not yet lowered; the branch-guarded Concat residual reaches the method body root with no representation)
 ```
+
+## arrayref-field element read
+
+A field whose default is an aggregate literal (`field $items = [10,20,30]`) is
+an ArrayRef, and reading an element by index (`$items->[0]`) yields the element.
+The producer once dropped an aggregate field default entirely (only scalar const
+defaults were emitted), so the field typed as its first element's scalar type
+("integer") and the read GAPped. Now the producer emits the anonlist default as
+an ArrayRef graph, the loader lifts the field type to ArrayRef (and the field's
+element type from the default's elements), and the backend reads the boxed i8*
+payload (inttoptr) so _container_ptr can index it. This is the field foundation
+for `for my $x ($items->@*)` (the #1 lib/ blocker; the foreach loop itself still
+GAPs on the loop-carried element stamp -- a follow-up). zhi 019f61ad.
+
+```perl
+# source
+use feature 'class';
+no warnings 'experimental::class';
+class Bag {
+    field $items = [10, 20, 30];
+    method first { $items->[0] }
+}
+Bag->new->first
+```
+
+```behavior
+return: Int:10
+context: scalar
+```
+
+```ir
+%cls    = MOP::Class(name: "Bag")
+%new_b  = Call(dispatch_kind: "method", name: "new", class: "Bag") :Object
+%result = Call(%new_b, dispatch_kind: "method", name: "first", class: "Bag") :Int
+return %result
+L: GREEN
+```

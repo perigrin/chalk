@@ -6196,6 +6196,17 @@ sub _lower_field_access_in_method {
         $self->{cache}{ $node->id } = $sp;
         return $sp;
     }
+    elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
+        # An aggregate-ref field: the payload i64 is a boxed i8* (the store side
+        # does `ptrtoint i8* -> i64`; _store_field_payload). Read is the mirror:
+        # inttoptr i64 -> i8*. _container_ptr then bitcasts this i8* to %Array*/
+        # %Hash* at the use (it keys on repr eq "${kind}Ref"), so a `$items->[0]`
+        # / `scalar $items->@*` / a foreach over the field lowers (zhi 019f61ad).
+        my $ptr = $self->_fresh;
+        $self->_emit("  $ptr = inttoptr i64 $pay to i8*  ; $repr payload -> i8*");
+        $self->{cache}{ $node->id } = $ptr;
+        return $ptr;
+    }
     else {
         # Int: payload is i64 directly
         $self->{cache}{ $node->id } = $pay;

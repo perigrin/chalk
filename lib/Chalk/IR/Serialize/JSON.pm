@@ -702,11 +702,28 @@ sub _replay_classes ($classes, $graphs) {
                 $has_default  = defined $default_node;
             }
 
+            # A field whose default is an aggregate literal (`field $items = []`
+            # / `[1,2,3]` / `{}`) is an ArrayRef/HashRef, regardless of what the
+            # producer inferred for its `type` (which reads the first element's
+            # scalar type -- e.g. "integer" for `[10,20,30]`, a wrong scalar
+            # type). The default node is already repr-seeded ArrayRef/HashRef by
+            # %_SEED_REPR, and that repr is unambiguous (unlike the ctor-arg /
+            # ADJUST-store scalar inference, which the %_INFERABLE_FIELD_REPR gate
+            # guards), so lift it to the field type. This is what makes a
+            # FieldAccess to the field (and its :reader Call) carry ArrayRef so a
+            # `$items->[0]` / `scalar $items->@*` / `for my $x ($items->@*)`
+            # lowers (zhi 019f61ad).
+            my $field_type = $f->{type};
+            if (defined $default_node && $default_node->can('representation')
+                    && ($default_node->representation // '') =~ /^(?:Array|Hash)Ref$/) {
+                $field_type = $default_node->representation;
+            }
+
             $cls->declare_field($vname,
                 sigil      => substr($vname, 0, 1),
                 param_name => $f->{param_name},
                 attributes => \@attrs,
-                (defined $f->{type} ? (type => $f->{type}) : ()),
+                (defined $field_type ? (type => $field_type) : ()),
                 ($has_default
                     ? (default_value => $default_node, has_default => true)
                     : ()),
@@ -1163,23 +1180,52 @@ sub _infer_field_types_from_stores ($classes, $graphs) {
 # class section (4c-1b infers it from the field default); the backend needs a
 # repr on the FieldAccess to lower a field read.
 sub _stamp_field_access_reprs ($classes, $graphs) {
-    # Build (class, fieldix) -> type from the class sections.
-    my %field_type;
+    # Build (class, fieldix) -> type from the class sections. For an aggregate
+    # (ArrayRef/HashRef) field, also record its ELEMENT type from the default's
+    # elements -- an `field $items = [10,20,30]` field reads Int elements. A
+    # Subscript over a FieldAccess to that field (`$items->[0]`, `$items->@*` in
+    # a loop) then carries the element repr (zhi 019f61ad).
+    my (%field_type, %field_elem_type);
     for my $cname (keys %$classes) {
         for my $f (($classes->{$cname}{fields} // [])->@*) {
-            next unless defined $f->{type};
-            $field_type{"$cname\::" . ($f->{fieldix} // -1)} = $f->{type};
+            my $key = "$cname\::" . ($f->{fieldix} // -1);
+            $field_type{$key} = $f->{type} if defined $f->{type};
+            # An aggregate default's element repr (widest of its elements).
+            if (defined $f->{default_ref}
+                    && (my $dg = $graphs->{ $f->{default_ref} })) {
+                my ($dret) = $dg->returns->@*;
+                my $default = $dret ? $dret->inputs->[0] : undef;
+                if (defined $default && blessed($default)
+                        && $default->operation =~ /^(?:Array|Hash)Ref$/) {
+                    my $er = _element_repr($default);
+                    $field_elem_type{$key} = $er if defined $er;
+                }
+            }
         }
     }
 
     for my $g (values %$graphs) {
         for my $node ($g->nodes->@*) {
-            next unless $node->operation eq 'FieldAccess';
-            next if defined $node->representation;
-            my $stash = $node->field_stash // next;
-            my $fidx  = $node->field_index;
-            my $type  = $field_type{"$stash\::" . ($fidx // -1)} // next;
-            $node->set_representation($type);
+            if ($node->operation eq 'FieldAccess' && !defined $node->representation) {
+                my $stash = $node->field_stash // next;
+                my $fidx  = $node->field_index;
+                my $type  = $field_type{"$stash\::" . ($fidx // -1)} // next;
+                $node->set_representation($type);
+                next;
+            }
+            # A Subscript reading an element out of an aggregate FIELD: its repr
+            # is the field's element type (the container is a FieldAccess, not a
+            # literal aggregate _element_repr can read). A LITERAL constant index
+            # is left for the OOB->Slot path (references R9); only a non-literal
+            # index needs this (its own _element_repr sees a FieldAccess).
+            if ($node->operation eq 'Subscript' && !defined $node->representation) {
+                my $cont = $node->inputs->[0];
+                next unless blessed($cont) && $cont->operation eq 'FieldAccess';
+                my $er = $field_elem_type{
+                    ($cont->field_stash // '') . '::' . ($cont->field_index // -1) };
+                next unless defined $er;
+                $node->set_representation($er);
+            }
         }
     }
     return;
