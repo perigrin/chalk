@@ -100,6 +100,71 @@ ok(Chalk::Target::LLVM->can('lower'),
         "lli output '$lli_out' matches perl oracle '$perl_out'");
 }
 
+# L4b: a Num-repr Add over a mixed (Num, Int) operand pair lowers as `fadd
+# double` and sitofp's the Int operand. 019f63e9: the repr-join widens
+# Add(Num, Int) to Num (e.g. a Num-init loop accumulator `$s=$s+$x`), but the
+# backend used to emit `add i64` over a double operand -- lli rejected it
+# ("double but expected i64"). The fix: repr=Num arithmetic emits the float op
+# and promotes the Int operand with sitofp.
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $cn = $f->make('Constant', value => '1.5', const_type => 'number');
+    $cn->set_representation('Num');
+    my $ci = $f->make('Constant', value => '3', const_type => 'integer');
+    $ci->set_representation('Int');
+    # The repr-join (Serialize::JSON) widens Add(Num, Int) -> Num.
+    my $add = $f->make('Add', inputs => [$cn, $ci]);
+    $add->set_representation('Num');
+    my $ret = $f->make_cfg('Return', inputs => [$add]);
+
+    my $ll = Chalk::Target::LLVM->lower($ret);
+
+    like($ll, qr/fadd double/,  'L4b .ll: Num-repr Add emits fadd double');
+    like($ll, qr/sitofp i64/,   'L4b .ll: Int operand promoted with sitofp');
+    unlike($ll, qr/add i64 %tmp\S* to|add i64.*Add\(repr=Int\)/,
+        'L4b .ll: no i64 add for the Num Add');
+
+    my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+    binmode $fh, ':utf8';
+    print $fh $ll;
+    close $fh;
+    my $lli_out = qx($LLI $tmp 2>&1);
+    my $exit    = $? >> 8;
+    is($exit, 0, 'L4b lli exits cleanly on Num Add .ll');
+    chomp $lli_out;
+    # perl oracle: 1.5 + 3 = 4.5 (type-tagged Num).
+    is($lli_out, 'Num:4.5', "L4b lli output is Num:4.5 (1.5+3, fadd double)");
+}
+
+# L4c: bilateral teeth for L4b -- an Int-repr Add stays `add i64` and does NOT
+# sitofp. Guards against the Num path swallowing all-Int arithmetic.
+{
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $c1 = $f->make('Constant', value => '2', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2 = $f->make('Constant', value => '4', const_type => 'integer');
+    $c2->set_representation('Int');
+    my $add = $f->make('Add', inputs => [$c1, $c2]);
+    $add->set_representation('Int');
+    my $ret = $f->make_cfg('Return', inputs => [$add]);
+
+    my $ll = Chalk::Target::LLVM->lower($ret);
+
+    like($ll, qr/add i64/,       'L4c .ll: Int-repr Add stays add i64');
+    unlike($ll, qr/fadd double/, 'L4c .ll: no fadd double for the Int Add');
+    unlike($ll, qr/sitofp/,      'L4c .ll: no sitofp for all-Int arithmetic');
+
+    my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+    binmode $fh, ':utf8';
+    print $fh $ll;
+    close $fh;
+    my $lli_out = qx($LLI $tmp 2>&1);
+    chomp $lli_out;
+    is($lli_out, 'Int:6', "L4c lli output is Int:6 (2+4, add i64)");
+}
+
 # L5: runtime-free coverage — every value-def has a non-Scalar representation.
 # The Add graph for 1+2 is fully Int; no Scalar values, so coverage = 100%.
 {

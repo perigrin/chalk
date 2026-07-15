@@ -1886,6 +1886,12 @@ sub _lower_constant {
     }
 }
 
+# Integer -> float op names for a Num-repr arithmetic result. The loader's
+# repr-join (Serialize::JSON _propagate_computed_reprs) already widens an
+# Add/Subtract/Multiply over any Num operand to Num; the backend must then
+# emit the float op and sitofp any Int operand into a double.
+my %_INT_TO_FLOAT_OP = (add => 'fadd', sub => 'fsub', mul => 'fmul');
+
 sub _lower_binop_int {
     my ($self, $node, $llvm_op) = @_;
 
@@ -1898,6 +1904,23 @@ sub _lower_binop_int {
     die "GAP: $op with repr=Scalar reached LLVM backend" if $repr eq 'Scalar';
 
     my $inputs  = $node->inputs;
+
+    # A Num-repr arithmetic op (the repr-join widened it because at least one
+    # operand is Num — e.g. a Num-init loop accumulator `$s=$s+$x`) lowers as a
+    # float op over doubles: each Int operand is sitofp'd to double first. An
+    # `add i64` over a double operand is invalid IR (lli verify: "double but
+    # expected i64"). 019f63e9.
+    if ($repr eq 'Num') {
+        my $fop = $_INT_TO_FLOAT_OP{$llvm_op}
+            // die "GAP: $op with repr=Num has no float LLVM op for '$llvm_op'";
+        my $lhs_ref = $self->_lower_as_double($inputs->[0]);
+        my $rhs_ref = $self->_lower_as_double($inputs->[1]);
+        my $ref = $self->_fresh;
+        $self->_emit("  $ref = $fop double $lhs_ref, $rhs_ref  ; $op(repr=Num) -> double $fop");
+        $self->{cache}{$node->id} = $ref;
+        return $ref;
+    }
+
     my $lhs_ref = $self->lower_value($inputs->[0]);
     my $rhs_ref = $self->lower_value($inputs->[1]);
 
@@ -1905,6 +1928,21 @@ sub _lower_binop_int {
     $self->_emit("  $ref = $llvm_op i64 $lhs_ref, $rhs_ref  ; $op(repr=Int) -> i64 $llvm_op");
     $self->{cache}{$node->id} = $ref;
     return $ref;
+}
+
+# _lower_as_double($node) -> an SSA double ref for $node, inserting a
+# `sitofp i64 -> double` when the operand's representation is Int. A Num operand
+# passes through unchanged. Used by Num-repr arithmetic to promote Int operands.
+sub _lower_as_double {
+    my ($self, $node) = @_;
+    my $ref  = $self->lower_value($node);
+    my $orep = (ref($node) && $node->can('representation'))
+        ? $node->representation : undef;
+    return $ref if defined $orep && $orep eq 'Num';
+    # Int (or a bare untyped operand feeding a Num op) -> sitofp to double.
+    my $conv = $self->_fresh;
+    $self->_emit("  $conv = sitofp i64 $ref to double  ; promote Int operand to double for Num arithmetic");
+    return $conv;
 }
 
 sub _lower_divide {
@@ -2990,6 +3028,15 @@ sub _lower_defined_or {
         # lhs_ref IS the defined bit (i1 false for Constant(undef)).
         $defined_cond = $lhs_ref;
     }
+    elsif ($lhs_repr eq 'Slot') {
+        # A Slot LHS (an array/hash element read) is runtime-decided: lhs_ref IS
+        # the i1 defined-bit from the bounds/key check, and its i64 PAYLOAD is
+        # recorded in _slot_payload keyed by that bit. Branch on the real bit --
+        # folding to always-defined would use the def-bit (i1) as the value where
+        # the i64 payload is expected, and reading `$a[$i] // rhs` on an
+        # out-of-bounds index must yield the rhs, not the element (019f6654).
+        $defined_cond = $lhs_ref;
+    }
     else {
         # Non-Undef LHS: always defined. Emit i1 true as a compile-time constant.
         # The optimizer will take the defined branch always, but the IR is
@@ -3034,6 +3081,12 @@ sub _lower_defined_or {
                 $self->_emit("  $lhs_phi_val = add $llvm_type 0, 0  ; DefinedOr: undef LHS payload fallback");
             }
         }
+    }
+    elsif ($lhs_repr eq 'Slot') {
+        # lhs_ref is the Slot's i1 def-bit; the i64 payload (the element value on
+        # the defined path) is recorded in _slot_payload keyed by that bit.
+        $lhs_phi_val = $self->{_slot_payload}{ $lhs_ref }
+            // die "LLVM backend: DefinedOr Slot LHS missing payload in _slot_payload table";
     }
     else {
         $lhs_phi_val = $lhs_ref;

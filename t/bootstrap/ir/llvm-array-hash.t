@@ -255,6 +255,104 @@ subtest 'A3e: Defined(Subscript in-bounds, Int) -> Bool:1 (true)' => sub {
 };
 
 # ---------------------------------------------------------------------------
+# A3f: DefinedOr over an OOB array read -> Int:99 (rhs)  (019f6654)
+#
+# Equivalent to: my @a = (1,2,3); $a[9] // 99
+# The OOB Subscript is repr Slot. `//` must branch on its RUNTIME defined bit
+# and, on the DEFINED path, yield the Slot's i64 PAYLOAD (not the def-bit).
+# The bug: _lower_defined_or treated a Slot LHS as always-defined and used the
+# i1 def-bit as the i64 phi value -- lli rejected "i1 but expected i64", and a
+# well-typed variant would silently yield the element instead of the rhs on OOB.
+# ---------------------------------------------------------------------------
+subtest 'A3f: DefinedOr(Subscript OOB Slot, 99) -> Int:99 (rhs)' => sub {
+    my $f = _mk();
+
+    my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
+    $c2->set_representation('Int');
+    my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+
+    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    $arr->set_representation('ArrayRef');
+
+    my $idx = $f->make('Constant', value => '9', const_type => 'integer');
+    $idx->set_representation('Int');
+
+    my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
+    $elem->set_representation('Slot');
+
+    my $rhs = $f->make('Constant', value => '99', const_type => 'integer');
+    $rhs->set_representation('Int');
+
+    my $dor = $f->make('DefinedOr', inputs => [$elem, $rhs]);
+    $dor->set_representation('Int');
+
+    my $ret = $f->make_cfg('Return', inputs => [$dor]);
+
+    my $ll;
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    ok(!$@, "A3f lower() does not die: $@") or diag("error: $@");
+
+    if (defined $ll) {
+        like($ll, qr/icmp ult/, 'A3f .ll: bounds check (icmp ult) present (not folded)');
+
+        my $out = run_ll($ll);
+        is($out, 'Int:99', 'A3f lli output is Int:99 (OOB element // 99 = 99)');
+    }
+
+    done_testing;
+};
+
+# ---------------------------------------------------------------------------
+# A3g: DefinedOr over an in-bounds array read -> Int:2 (element)  (019f6654 teeth)
+#
+# Equivalent to: my @a = (1,2,3); $a[1] // 99
+# The in-bounds Subscript is repr Int (always defined). `//` must yield the
+# element, not the rhs. Bilateral teeth for A3f: the Slot fix must not make
+# every `element // rhs` yield the rhs.
+# ---------------------------------------------------------------------------
+subtest 'A3g: DefinedOr(Subscript in-bounds Int, 99) -> Int:2 (element)' => sub {
+    my $f = _mk();
+
+    my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
+    $c2->set_representation('Int');
+    my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+
+    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    $arr->set_representation('ArrayRef');
+
+    my $idx = $f->make('Constant', value => '1', const_type => 'integer');
+    $idx->set_representation('Int');
+
+    my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
+    $elem->set_representation('Int');
+
+    my $rhs = $f->make('Constant', value => '99', const_type => 'integer');
+    $rhs->set_representation('Int');
+
+    my $dor = $f->make('DefinedOr', inputs => [$elem, $rhs]);
+    $dor->set_representation('Int');
+
+    my $ret = $f->make_cfg('Return', inputs => [$dor]);
+
+    my $ll;
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    ok(!$@, "A3g lower() does not die: $@") or diag("error: $@");
+
+    if (defined $ll) {
+        my $out = run_ll($ll);
+        is($out, 'Int:2', 'A3g lli output is Int:2 (in-bounds element // 99 = element)');
+    }
+
+    done_testing;
+};
+
+# ---------------------------------------------------------------------------
 # A4: HashRef + Subscript (existing key) -> Int:1
 #
 # Equivalent to: my %h = (a => 1, b => 2); $h{a}
