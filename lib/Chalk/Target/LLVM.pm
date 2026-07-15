@@ -487,7 +487,19 @@ sub _populate_registry_from_mop_class {
         my $f_repr      = $mf->type
             // die "GAP: field '$fname' in class '$cname' has no declared repr "
                  . "(type) — refusing to silently default to Int.";
-        unless (grep { ($_->{field_index} // -1) == $fidx } @{ $registry->{$cname}{fields} }) {
+        # A field already at this index is either the SAME field re-encountered
+        # (idempotent re-add across inheritance passes — skip it) or a DIFFERENT
+        # field colliding on the slot (malformed MOP — the second would be
+        # silently dropped, shifting no slots but losing the field). Croak on the
+        # real collision; skip only the exact re-add.
+        my ($existing) = grep { ($_->{field_index} // -1) == $fidx }
+                              @{ $registry->{$cname}{fields} };
+        if ($existing && ($existing->{name} // '') ne $fname) {
+            die "GAP: class '$cname' has two distinct fields at field_index "
+              . "$fidx ('$existing->{name}' and '$fname') — a duplicate field_index "
+              . "would silently drop the second field.";
+        }
+        unless ($existing) {
             push @{ $registry->{$cname}{fields} }, {
                 name         => $fname,
                 # The bare :param key (sigil-free, e.g. 'n' for field '$n').

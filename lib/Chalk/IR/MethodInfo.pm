@@ -23,10 +23,18 @@ class Chalk::IR::MethodInfo {
     # Content-based ID for use in NodeFactory hash-cons keys.
     # MethodInfo objects are not hash-consed themselves, but may appear as
     # inputs inside hash-consed Constructor nodes (e.g., ClassDecl body).
+    # The R3-added body_node and return_repr fields MUST participate: two
+    # MethodInfos that differ only in the IR graph they lower to, or only in
+    # their LLVM return representation, are semantically distinct, and a shared
+    # id would let a hash-cons key silently dedup one away.
     method id() {
         my $params_str = join(',', map { defined $_ ? "$_" : 'undef' } $params->@*);
         my $rt = defined $return_type ? $return_type : 'undef';
-        return "MethodInfo:$name:[$params_str]:$rt";
+        my $bn = defined $body_node
+            ? ($body_node->can('id') ? $body_node->id() : "$body_node")
+            : 'undef';
+        my $rr = defined $return_repr ? $return_repr : 'undef';
+        return "MethodInfo:$name:[$params_str]:$rt:$bn:$rr";
     }
 
     # No-op: MethodInfo does not participate in the use-def chain.

@@ -145,6 +145,53 @@ sub _fresh {
     return '%tmp_' . $self->{counter};
 }
 
+# _module_global_name($tag, $content) -> ($gname, $byte_len, $total)
+#
+# Allocate one module-scope string-constant global and register it in
+# _str_globals. This is the single owner of the symbol-prefix + byte-length
+# computation shared by @str_const_N, @rxs_lit_N, and @env_key_N (previously
+# triplicated, and micro-diverged: some sites used CHAR length instead of BYTE
+# length, producing wrong [N x i8] sizes for any non-ASCII content).
+#
+#   $tag     — global-name stem (e.g. 'str_const', 'rxs_lit', 'env_key').
+#   $content — the string bytes the global will hold.
+#
+# I1 symbol-prefix rule: method bodies lower in fresh Contexts whose counters
+# restart at 0, but every global lands at module scope. Prefix by class/method
+# so two bodies do not both emit e.g. @str_const_0 (a duplicate symbol).
+#
+# G6 S4: the sanitized name (everything after the leading '@') must be a legal
+# unquoted LLVM identifier (\w+). A class name containing '::' would produce an
+# illegal identifier that silently corrupts the module — die loudly instead.
+#
+# Returns the LLVM global name (with leading '@'), the byte length, and the
+# array size ($byte_len + 1, for the NUL terminator). The global is pushed onto
+# _str_globals as [ $gname, $content, $byte_len ]; the caller only emits the
+# getelementptr that references it.
+sub _module_global_name {
+    my ($self, $tag, $content) = @_;
+
+    my $byte_len = do { use bytes; length($content) };
+
+    my $prefix = '';
+    if ($self->{_in_method_body}
+        && defined $self->{_method_class_name}
+        && defined $self->{_method_name}) {
+        $prefix = "$self->{_method_class_name}__$self->{_method_name}__";
+    }
+
+    my $gidx  = scalar @{ $self->{_str_globals} };
+    my $ident = "${prefix}${tag}_${gidx}";
+    die "GAP: LLVM global name '\@$ident' is not a legal unquoted identifier "
+      . "(\\w+) — a class or method name likely contains '::' or other "
+      . "non-identifier characters"
+        unless $ident =~ /\A\w+\z/;
+
+    my $gname = "\@$ident";
+    push $self->{_str_globals}->@*, [ $gname, $content, $byte_len ];
+    return ($gname, $byte_len, $byte_len + 1);
+}
+
 # Ops that LOAD from a mutable memory location when lowered: a pad slot
 # (PadAccess reads var_table), an aggregate element (Subscript), or an object
 # field (FieldAccess). Their lowered value is program-point-dependent — a
@@ -476,26 +523,13 @@ sub _lower_constant {
         # The name-constant Constant("s") :Str for VarDecl names is also Str repr but
         # should not be printed — it is used only as a VarDecl name marker. We lower
         # it to the same ptr-to-global pattern; the len is tracked but unused for names.
-        my $byte_len = do { use bytes; length($val) };
-        my $total    = $byte_len + 1;  # +1 for NUL terminator
-
-        # Allocate a unique global name for this string constant.
-        # I1: when lowering inside a method body, prefix by class/method so that
-        # two method bodies (each starting a fresh counter at 0) do not both emit
-        # @str_const_0 — which would be a duplicate symbol in the module.
-        # Method bodies set _in_method_body=1 and carry _method_class_name/_method_name.
-        my $gidx    = scalar @{ $self->{_str_globals} };
-        my $gname;
-        if ($self->{_in_method_body}
-            && defined $self->{_method_class_name}
-            && defined $self->{_method_name}) {
-            my $cls_slug  = $self->{_method_class_name};
-            my $meth_slug = $self->{_method_name};
-            $gname = "\@${cls_slug}__${meth_slug}__str_const_${gidx}";
-        } else {
-            $gname = "\@str_const_$gidx";
-        }
-        push $self->{_str_globals}->@*, [$gname, $val, $byte_len];
+        # Allocate a unique global name + byte length for this string constant.
+        # The symbol-prefix rule (I1) and byte-length computation live in the
+        # shared _module_global_name helper. The name-constant Constant("s") :Str
+        # for VarDecl names is also Str repr but should not be printed — it is
+        # used only as a VarDecl name marker. We lower it to the same
+        # ptr-to-global pattern; the len is tracked but unused for names.
+        my ($gname, $byte_len, $total) = $self->_module_global_name('str_const', $val);
 
         # GEP to get i8* from the global array.
         my $ref = $self->_fresh;
@@ -1137,54 +1171,17 @@ sub _lower_assign {
         my $def_gep = $self->_fresh;
         $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 0  ; FieldAccess-lvalue[$field_index] defined");
         $self->_emit("  store i1 true, i1* $def_gep  ; FieldAccess-lvalue[$field_index] defined=true");
-        # Store payload
+        # Store payload — the repr-dispatched boxing (Str StrPair, Bool zext,
+        # ref ptrtoint, Int identity) is owned by _store_field_payload, shared
+        # with the :param binding and default-value paths so every field write
+        # boxes a given repr identically. The Assign expression's value is what
+        # the helper returns (the i8* for Str, the boxed i64 otherwise).
         my $pay_gep = $self->_fresh;
         $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 1  ; FieldAccess-lvalue[$field_index] payload");
-        if ($val_repr eq 'Str') {
-            # Str field payload is a %StrPair* (as i64), mirroring _lower_call_new's
-            # :param Str binding and the field READ path (which reads it back via
-            # inttoptr i64 -> %StrPair*). A bare `add i64 0, <i8*>` would be invalid
-            # IR and read back as a corrupt StrPair.
-            my $len_ref  = $self->{_str_len_table}{$rhs_ref};
-            my $pair_raw = $self->_fresh;
-            my $pair_ptr = $self->_fresh;
-            $self->_emit("  $pair_raw = call i8* \@malloc(i64 16)  ; alloc StrPair for FieldAccess-lvalue[$field_index]");
-            $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
-            my $pp_gep = $self->_fresh;
-            $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
-            $self->_emit("  store i8* $rhs_ref, i8** $pp_gep  ; store str ptr");
-            my $pl_gep = $self->_fresh;
-            $self->_emit("  $pl_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
-            my $len_val = defined $len_ref ? $len_ref : 'zeroinitializer';
-            if ($len_val eq 'zeroinitializer') {
-                $len_val = $self->_fresh;
-                $self->_emit("  $len_val = call i64 \@strlen(i8* $rhs_ref)  ; strlen for Str FieldAccess-lvalue[$field_index]");
-            }
-            $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
-            my $pair_as_i64 = $self->_fresh;
-            $self->_emit("  $pair_as_i64 = ptrtoint %StrPair* $pair_ptr to i64  ; StrPair* -> i64 payload");
-            $self->_emit("  store i64 $pair_as_i64, i64* $pay_gep  ; FieldAccess-lvalue[$field_index] Str payload = StrPair*");
-            $self->{_need_strpair} = 1;
-            $self->{cache}{ $node->id } = $rhs_ref;
-            return $rhs_ref;
-        }
-        my $pay_i64 = $self->_fresh;
-        if ($val_repr eq 'Bool') {
-            $self->_emit("  $pay_i64 = zext i1 $rhs_ref to i64  ; Bool->i64 FieldAccess-lvalue");
-        } elsif ($val_repr eq 'ArrayRef' || $val_repr eq 'HashRef') {
-            # Pointer-repr value: ptrtoint before storing into the i64 payload slot,
-            # mirroring the array/hash element-store branches.
-            $self->_emit("  $pay_i64 = ptrtoint i8* $rhs_ref to i64  ; $val_repr ptr -> i64 FieldAccess-lvalue");
-        } elsif ($val_repr eq 'Int') {
-            $self->_emit("  $pay_i64 = add i64 0, $rhs_ref  ; identity: Int->i64 FieldAccess-lvalue");
-        } else {
-            die "GAP: Assign(FieldAccess-lvalue) rhs repr=$val_repr cannot be "
-              . "stored in an i64 Slot payload (only Int/Bool/Str/ArrayRef/HashRef "
-              . "are lowered) — refusing to emit invalid IR.";
-        }
-        $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; FieldAccess-lvalue[$field_index] payload");
-        $self->{cache}{ $node->id } = $pay_i64;
-        return $pay_i64;
+        my $stored = $self->_store_field_payload($rhs_ref, $val_repr, $pay_gep,
+                                                 "FieldAccess-lvalue[$field_index]");
+        $self->{cache}{ $node->id } = $stored;
+        return $stored;
     }
 
     # Mode (a): Subscript-lvalue — element store into Array or Hash.
@@ -3478,15 +3475,22 @@ sub _lower_hash_deref {
 
 # _lower_call_new($node) -> $llvm_ref
 #
-# _store_field_payload($val_ref, $repr, $pay_gep, $pname) — store a lowered
-# value into an object field's i64 payload slot, boxing per repr. Shared across
-# the :param binding path and the default-value path so a Str default boxes the
-# same way a Str :param does (019f4512): Str -> malloc a %StrPair, store ptr+len,
-# ptrtoint to i64; Bool -> zext i1 to i64; anything else (Int/refs already an
-# i64) -> identity. The Str length is read from _str_len_table (keyed by the
-# value's SSA ref), falling back to a runtime strlen when the length is not
-# compile-time tracked. Caller has already emitted the defined-bit store and
-# resolved $pay_gep.
+# _store_field_payload($val_ref, $repr, $pay_gep, $pname) -> $stored_ref
+#
+# Store a lowered value into an object field's i64 payload slot, boxing per repr.
+# The single owner of the slot-payload store dispatch, shared across the :param
+# binding path, the default-value path, and the FieldAccess-lvalue assign path so
+# every write boxes a given repr identically (019f4512): Str -> malloc a %StrPair,
+# store ptr+len, ptrtoint to i64; Bool -> zext i1 to i64; ArrayRef/HashRef ->
+# ptrtoint i8* to i64; Int -> identity. The Str length is read from
+# _str_len_table (keyed by the value's SSA ref), falling back to a runtime strlen
+# when the length is not compile-time tracked. Caller has already emitted the
+# defined-bit store and resolved $pay_gep.
+#
+# Returns the SSA ref that represents the field's value at this program point:
+# the original i8* string ref for Str, or the boxed i64 payload for everything
+# else. Callers that use the assign expression as a value (FieldAccess-lvalue)
+# cache this; the :param / default callers ignore it.
 sub _store_field_payload {
     my ($self, $val_ref, $repr, $pay_gep, $pname) = @_;
 
@@ -3511,27 +3515,26 @@ sub _store_field_payload {
         $self->_emit("  $pair_as_i64 = ptrtoint %StrPair* $pair_ptr to i64  ; StrPair* -> i64 payload");
         $self->_emit("  store i64 $pair_as_i64, i64* $pay_gep  ; field '$pname' Str payload = StrPair*");
         $self->{_need_strpair} = 1;
-    } else {
-        my $pay_i64 = $self->_fresh;
-        if ($repr eq 'Bool') {
-            $self->_emit("  $pay_i64 = zext i1 $val_ref to i64  ; Bool->i64 for field '$pname'");
-        } elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
-            # Pointer-repr value: ptrtoint before storing into the i64 payload,
-            # mirroring the FieldAccess-lvalue store. A bare `add i64 0, <ptr>`
-            # would be invalid IR. (A ref :param/default is blocked upstream
-            # today by a method-body repr GAP, so this path is a guard against a
-            # latent miscompile if that GAP is later closed, not a live path.)
-            $self->_emit("  $pay_i64 = ptrtoint i8* $val_ref to i64  ; $repr ptr -> i64 for field '$pname'");
-        } elsif ($repr eq 'Int') {
-            $self->_emit("  $pay_i64 = add i64 0, $val_ref  ; identity: Int->i64 for field '$pname'");
-        } else {
-            die "GAP: field '$pname' value repr=$repr cannot be stored in an i64 "
-              . "payload (only Int/Bool/Str/ArrayRef/HashRef are lowered) — "
-              . "refusing to emit invalid IR.";
-        }
-        $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; field '$pname' payload");
+        return $val_ref;
     }
-    return;
+
+    my $pay_i64 = $self->_fresh;
+    if ($repr eq 'Bool') {
+        $self->_emit("  $pay_i64 = zext i1 $val_ref to i64  ; Bool->i64 for field '$pname'");
+    } elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
+        # Pointer-repr value: ptrtoint before storing into the i64 payload,
+        # mirroring the array/hash element-store branches. A bare
+        # `add i64 0, <ptr>` would be invalid IR.
+        $self->_emit("  $pay_i64 = ptrtoint i8* $val_ref to i64  ; $repr ptr -> i64 for field '$pname'");
+    } elsif ($repr eq 'Int') {
+        $self->_emit("  $pay_i64 = add i64 0, $val_ref  ; identity: Int->i64 for field '$pname'");
+    } else {
+        die "GAP: field '$pname' value repr=$repr cannot be stored in an i64 "
+          . "payload (only Int/Bool/Str/ArrayRef/HashRef are lowered) — "
+          . "refusing to emit invalid IR.";
+    }
+    $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; field '$pname' payload");
+    return $pay_i64;
 }
 
 # Lowers a Call(dispatch_kind='method', name='new') node.
@@ -4654,26 +4657,19 @@ sub _lower_env_read {
     my $key  = $node->key;
     $self->{_need_getenv} = 1;
 
-    # Key + empty-string fallback as module globals. Same symbol-prefix rule
-    # as @str_const_N/@rxs_lit_N: method bodies lower in fresh Contexts whose
-    # counters restart at 0, but the globals land at module scope — prefix by
-    # class/method so two bodies do not both emit @env_key_0.
-    my $gpfx = '';
-    if ($self->{_in_method_body}
-        && defined $self->{_method_class_name}
-        && defined $self->{_method_name}) {
-        $gpfx = "$self->{_method_class_name}__$self->{_method_name}__";
-    }
-    my $gidx  = scalar @{ $self->{_str_globals} };
-    my $kname = "\@${gpfx}env_key_$gidx";
-    push $self->{_str_globals}->@*, [ $kname, $key, length($key) ];
-    my $ktotal = length($key) + 1;
+    # Key as a per-node module global (same symbol-prefix + byte-length rule as
+    # @str_const_N/@rxs_lit_N, owned by _module_global_name).
+    my ($kname, undef, $ktotal) = $self->_module_global_name('env_key', $key);
     my $kptr = $self->_fresh;
     $self->_emit("  $kptr = getelementptr inbounds [$ktotal x i8], [$ktotal x i8]* $kname, i64 0, i64 0  ; EnvRead: key \"$key\"");
 
-    my $eidx  = scalar @{ $self->{_str_globals} };
-    my $ename = "\@${gpfx}env_empty_$eidx";
-    push $self->{_str_globals}->@*, [ $ename, '', 0 ];
+    # Empty-string fallback: the content is identical for every EnvRead, so
+    # share ONE @env_empty global across all EnvRead nodes in this context
+    # instead of emitting a symbol-unique @env_empty_N per node.
+    my $ename = $self->{_env_empty_global} //= do {
+        my ($n) = $self->_module_global_name('env_empty', '');
+        $n;
+    };
     my $eptr = $self->_fresh;
     $self->_emit("  $eptr = getelementptr inbounds [1 x i8], [1 x i8]* $ename, i64 0, i64 0  ; EnvRead: empty fallback");
 
@@ -4821,22 +4817,9 @@ sub _lower_regex_subst {
         $self->_emit("  $dest = getelementptr inbounds i8, i8* $buf, i64 $cursor  ; RegexSubst: dest cursor");
         if ($seg->{kind} eq 'lit') {
             my $text = $seg->{text};
-            my $blen = length $text;
-            # Same symbol-prefix rule as @str_const_N (see _lower_constant, I1):
-            # method bodies lower in fresh Contexts whose counters restart at 0,
-            # but the globals land at module scope — prefix by class/method so
-            # two bodies do not both emit @rxs_lit_0 (duplicate symbol).
-            my $gidx = scalar @{ $self->{_str_globals} };
-            my $gname;
-            if ($self->{_in_method_body}
-                && defined $self->{_method_class_name}
-                && defined $self->{_method_name}) {
-                $gname = "\@$self->{_method_class_name}__$self->{_method_name}__rxs_lit_${gidx}";
-            } else {
-                $gname = "\@rxs_lit_$gidx";
-            }
-            push $self->{_str_globals}->@*, [ $gname, $text, $blen ];
-            my $total = $blen + 1;
+            # Same symbol-prefix + byte-length rule as @str_const_N (I1) — the
+            # byte length is the memcpy size below, so it must count bytes.
+            my ($gname, $blen, $total) = $self->_module_global_name('rxs_lit', $text);
             my $src = $self->_fresh;
             $self->_emit("  $src = getelementptr inbounds [$total x i8], [$total x i8]* $gname, i64 0, i64 0  ; RegexSubst: literal segment");
             $self->_emit("  call i8* \@memcpy(i8* $dest, i8* $src, i64 $blen)  ; RegexSubst: copy literal");

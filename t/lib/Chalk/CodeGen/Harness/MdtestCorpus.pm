@@ -407,7 +407,14 @@ sub _build_node_from_rhs {
             my $str_val = $1;
             return $factory->make('Constant', value => $str_val, const_type => 'string');
         }
-        # Bare value (integer or negative integer)
+        # Bare value (integer or negative integer). A ',' or ':' here means the
+        # value was mis-parsed — e.g. an unquoted const_type override
+        # (Constant(x, const_type: foo)) or a stray delimiter — which would
+        # otherwise become a garbage integer Constant. Fail loudly instead.
+        croak "build_graph_from_ir: Constant bare value '$val_raw' contains a "
+            . "',' or ':' — quote the value or use the "
+            . "Constant(\"v\", const_type: \"kind\") form at $name"
+            if $val_raw =~ /[,:]/;
         return $factory->make('Constant', value => $val_raw, const_type => 'integer');
     }
 
@@ -492,7 +499,21 @@ sub _build_node_from_rhs {
     # return and handed to the backend via lower(mop => ...).
     if ($rhs =~ /^MOP::(Class|Field|Method|Adjust)\(\s*(.*)\s*\)$/s) {
         my ($kind, $args_raw) = ($1, $2);
-        my (undef, $attrs) = _parse_op_args("MOP::$kind", $args_raw, $sym, $name);
+        my ($inputs, $attrs) = _parse_op_args("MOP::$kind", $args_raw, $sym, $name);
+
+        # MOP::* lines carry all their data as kwargs (class:, name:, body:, ...).
+        # A positional %ref input has no binding here and was silently discarded
+        # before — croak so a mis-authored line fails loudly instead of dropping
+        # the input.
+        croak "build_graph_from_ir: MOP::$kind takes no positional inputs but got "
+            . scalar(@$inputs) . " (use kwargs like body: %ref) at $name"
+            if @$inputs;
+
+        # MOP::Method reads name/return_repr/body; a 'params:' attr is not
+        # consumed and would be silently ignored — croak rather than drop it.
+        croak "build_graph_from_ir: MOP::Method 'params:' attr is not supported "
+            . "(method params are not modeled by the harness) at $name"
+            if $kind eq 'Method' && exists $attrs->{params};
 
         if ($kind eq 'Class') {
             $build->{mop} //= Chalk::MOP->new;
