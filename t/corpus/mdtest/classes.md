@@ -691,3 +691,38 @@ context: scalar
 return %result
 L: GREEN
 ```
+
+## foreach over an arrayref field
+
+`for my $x ($items->@*)` where `$items` is an arrayref field iterates its
+elements. This is the #1 Phase-5 lib/ blocker (28 methods -- e.g.
+Chalk::Grammar::Rule::is_terminal_rule's `for my $alt ($expressions->@*)`). The
+field-deref bound (a FieldAccess) routes into the array-foreach translation, and
+the loop-carried accumulator's back-edge (`Add($s_phi, Subscript)`, where the
+element Subscript's stamp is deferred to the loader) no longer GAPs at the
+loop-Phi stamp check: a numeric accumulator recurrence keeps its init stamp (the
+fixpoint no-op), and the loader types the element read. zhi 019f6198, 019f61ad.
+
+```perl
+# source
+use feature 'class';
+no warnings 'experimental::class';
+class Bag {
+    field $items = [10, 20, 30];
+    method total { my $s = 0; for my $x ($items->@*) { $s = $s + $x } $s }
+}
+Bag->new->total
+```
+
+```behavior
+return: Int:60
+context: scalar
+```
+
+```ir
+%cls    = MOP::Class(name: "Bag")
+%new_b  = Call(dispatch_kind: "method", name: "new", class: "Bag") :Object
+%result = Call(%new_b, dispatch_kind: "method", name: "total", class: "Bag") :Int
+return %result
+L: GREEN
+```
