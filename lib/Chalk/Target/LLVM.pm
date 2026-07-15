@@ -3050,6 +3050,12 @@ sub _lower_defined_or {
 # defined($x) is true iff $x is NOT Undef.
 # Static dispatch on the operand's representation:
 #   Undef repr: always false (the operand IS undef). Returns the stored defined bit.
+#   Slot repr:  runtime-decided. A Slot is the tagged {defined, payload} an
+#               array/hash element read produces; its lowered value IS the
+#               runtime defined bit (i1) from the bounds/key check. A dynamic
+#               (or provably-OOB) element read can MISS at runtime, so defined()
+#               must consult that bit -- folding to true silently miscompiles
+#               defined($a[$i]) on an out-of-bounds index (019f61ab).
 #   Other repr: always true (Int/Num/Str/Bool are always defined). Returns i1 1.
 sub _lower_defined {
     my ($self, $node) = @_;
@@ -3061,8 +3067,9 @@ sub _lower_defined {
     # Lower the operand to get its value ref (or defined bit for Undef-typed).
     my $op_ref = $self->lower_value($operand);
 
-    if ($op_repr eq 'Undef') {
-        # op_ref IS the defined bit (i1) from _lower_constant's alloca/load.
+    if ($op_repr eq 'Undef' || $op_repr eq 'Slot') {
+        # op_ref IS the defined bit (i1): from _lower_constant's alloca/load for
+        # Undef, or from the array/hash read's bounds/key check for Slot.
         $self->{cache}{$node->id} = $op_ref;
         return $op_ref;
     }

@@ -165,6 +165,96 @@ subtest 'A3: Subscript OOB (idx=9 on len=3) -> Undef:' => sub {
 };
 
 # ---------------------------------------------------------------------------
+# A3d: Defined over an OOB array read -> Bool: (false)  (019f61ab)
+#
+# Equivalent to: my @a = (1,2,3); defined($a[9])
+# The OOB Subscript is repr Slot (its runtime defined bit is the answer).
+# defined() over it must consult the runtime bounds/defined check, NOT fold to
+# compile-time true. Guards the silent miscompile where Defined(Slot) returned
+# i1 true and defined() of an out-of-bounds element wrongly reported true.
+# ---------------------------------------------------------------------------
+subtest 'A3d: Defined(Subscript OOB, Slot) -> Bool: (false)' => sub {
+    my $f = _mk();
+
+    my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
+    $c2->set_representation('Int');
+    my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+
+    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    $arr->set_representation('ArrayRef');
+
+    my $idx = $f->make('Constant', value => '9', const_type => 'integer');
+    $idx->set_representation('Int');
+
+    my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
+    $elem->set_representation('Slot');
+
+    my $def = $f->make('Defined', inputs => [$elem]);
+    $def->set_representation('Bool');
+
+    my $ret = $f->make_cfg('Return', inputs => [$def]);
+
+    my $ll;
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    ok(!$@, "A3d lower() does not die: $@") or diag("error: $@");
+
+    if (defined $ll) {
+        like($ll, qr/icmp ult/, 'A3d .ll: bounds check (icmp ult) present (not folded)');
+
+        my $out = run_ll($ll);
+        is($out, 'Bool:', 'A3d lli output is Bool: (defined(OOB element) is false)');
+    }
+
+    done_testing;
+};
+
+# ---------------------------------------------------------------------------
+# A3e: Defined over an in-bounds array read -> Bool:1 (true)  (019f61ab, teeth)
+#
+# Equivalent to: my @a = (1,2,3); defined($a[1])
+# The in-bounds Subscript is repr Int. defined() of a defined element is true.
+# Bilateral teeth for A3d: the fix must not turn every array-read defined() false.
+# ---------------------------------------------------------------------------
+subtest 'A3e: Defined(Subscript in-bounds, Int) -> Bool:1 (true)' => sub {
+    my $f = _mk();
+
+    my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
+    $c1->set_representation('Int');
+    my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
+    $c2->set_representation('Int');
+    my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
+    $c3->set_representation('Int');
+
+    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    $arr->set_representation('ArrayRef');
+
+    my $idx = $f->make('Constant', value => '1', const_type => 'integer');
+    $idx->set_representation('Int');
+
+    my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
+    $elem->set_representation('Int');
+
+    my $def = $f->make('Defined', inputs => [$elem]);
+    $def->set_representation('Bool');
+
+    my $ret = $f->make_cfg('Return', inputs => [$def]);
+
+    my $ll;
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    ok(!$@, "A3e lower() does not die: $@") or diag("error: $@");
+
+    if (defined $ll) {
+        my $out = run_ll($ll);
+        is($out, 'Bool:1', 'A3e lli output is Bool:1 (defined(in-bounds element) is true)');
+    }
+
+    done_testing;
+};
+
+# ---------------------------------------------------------------------------
 # A4: HashRef + Subscript (existing key) -> Int:1
 #
 # Equivalent to: my %h = (a => 1, b => 2); $h{a}
