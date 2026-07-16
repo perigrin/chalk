@@ -190,3 +190,35 @@ context: scalar
 return %result
 L: GREEN
 ```
+
+## R7 negated match (!~)
+
+The `!~` operator is the negation of `=~`. Perl compiles it to a `match` op
+wrapped in a `not` op (there is no distinct notmatch op), so the producer emits
+`Not(RegexMatch(...))` — the already-lowered `RegexMatch` matcher feeding the
+runtime-free `Not` (an i1 xor). No dedicated NotMatch lowering is needed; the
+negation rides on the existing Match + Not arms. This case uses a pattern that
+DOES match the subject, so the negation must flip a real match to false (the
+ternary takes the else arm) — a bilateral check against R1's matching `=~`.
+
+```perl
+# source
+my $s = "hello";
+$s !~ /ell/ ? 111 : 222
+```
+
+```behavior
+return: 222
+context: scalar
+```
+
+```ir
+%s      = Constant("hello") :Str
+%m      = RegexMatch(%s, pattern: "ell") :Bool
+%nm     = Not(%m) :Bool
+%t      = Constant(111) :Int
+%e      = Constant(222) :Int
+%result = TernaryExpr(%nm, %t, %e) :Int
+return %result
+L: GREEN
+```
