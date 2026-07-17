@@ -116,7 +116,8 @@ duplicate.
 single return value in the epilogue; there is no `Print` node in the producer
 and no `_lower_print` in the backend. (Verified: `print` maps to a generic
 `Call` in perl5-son `OpMap.pm:258`; not in `%STATEMENT_EFFECT_OPS`
-`NodeFactory.pm:155`; no `Print` dispatch branch in `Context.pm:395-470`.)
+`NodeFactory.pm:155`; no `Print` arm in the op-dispatch chain at
+`lib/Chalk/Target/LLVM/Context.pm:294-454`.)
 - **R1.0 (EFFECT-BY-DEFAULT — the load-bearing correctness change)** Producer
   (perl5-son `SoN::FromOptree`): every `Call`-producing builtin/listop/unop node
   is constructed effect-pinned (`is_stmt_effect => true`) BY DEFAULT, not just at
@@ -126,8 +127,21 @@ and no `_lower_print` in the backend. (Verified: `print` maps to a generic
   - **Acceptance:** `chomp $s; length $s` → the chomp effect survives (length 2,
     not 3); `sideeffect(); 42` still survives; a PURE call in value context
     (`my $x = uc($s)`) is still a floatable data node (no CSE regression — the
-    allow-list demotes it). Bilateral: an effectful-and-unused call is KEPT; a
-    pure-and-unused call is DROPPED (correct DCE).
+    allow-list demotes it; verified today `uc($s)` twice hash-conses to ONE
+    node). Bilateral: an effectful-and-unused call is KEPT; a pure-and-unused
+    call is DROPPED (correct DCE).
+  - **LANDING GATE (non-regression):** after the flip, `son-corpus-wide.t`
+    re-runs GREEN with gate-green ==98 and worklist=0 (existing hand corpus does
+    not regress). Blast radius is measured-zero (the only builtin Calls in green
+    shape contracts are `shift`/`pop`, already effect-pinned via `%mem`; no pure
+    builtin appears in any green shape), but assert it explicitly since the audit
+    was ir-block-scoped, not a full per-case graph dump.
+  - **Allow-list note:** the purity allow-list is CORRECTNESS-SAFE when
+    incomplete — an omitted pure builtin gets needlessly pinned (missed
+    optimization, never a miscompile), so it may be grown incrementally. Canonical
+    source = the perl5-son OpMap pure set. `substr` MUST be context-qualified
+    (rvalue `substr($s,0,1)` is pure; lvalue `substr($s,0,1)="X"` MUTATES and must
+    stay pinned — a flat name would wrongly whitelist the mutating form).
 - **R1.1** Producer: add a `print` listop handler emitting a `Print` node.
   Under R1.0 it is effect-pinned by default (print is NOT on the purity
   allow-list). Subject = the LIST of print args: **walk the whole
@@ -141,10 +155,12 @@ and no `_lower_print` in the backend. (Verified: `print` maps to a generic
 - **R1.2** Backend (`lib/Chalk/Target/LLVM.pm`): `_lower_print` emits a libc
   write of the arg bytes to fd 1 (`write`/`fputs`/`printf` — the C-call declare
   path is proven; verify the exact line). Add an `elsif ($op eq 'Print')` branch
-  in the op-dispatch chain (`LLVM.pm:~1555-1582`) alongside the RegexSubst arm
-  (`LLVM.pm:~1679`). (NOTE: all LLVM lowering dispatch lives in
-  `lib/Chalk/Target/LLVM.pm`, NOT a `Context.pm` — earlier `Context.pm:NNN`
-  citations were wrong.)
+  in the op-dispatch chain alongside the RegexSubst arm
+  (`lib/Chalk/Target/LLVM/Context.pm:418`; the chain runs ~294-454). (NOTE:
+  the op-dispatch `_lower_node` chain and all `_lower_*` arms live in
+  `lib/Chalk/Target/LLVM/Context.pm` (4950 lines); `LLVM.pm` (1359 lines) holds
+  only the `lower_with_elaboration` entry + epilogue. Verify lines before
+  editing — files drift.)
 - **R1.3** Ordering: `print` output precedes the epilogue `TYPE:value` line, on
   both the perl oracle and lli sides (the corpus gate captures full stdout via
   `qx` — verified `son-corpus-wide.t:83` lli, `:101` oracle, byte-compared
@@ -187,8 +203,9 @@ and the coerced Str carries a string length like any other Str. So there is no
     wrapper. Acceptance: node dump shows the wrapper present, no raw Int operand
     into `Concat`.
   - **R1b-b (backend, chalk):** add the `Coerce[Int→Str]` arm to `_lower_coerce`
-    (`lib/Chalk/Target/LLVM.pm:~2055`; verified ~10 arms today, none Int→Str —
-    falls through to `die`). It must
+    (`lib/Chalk/Target/LLVM/Context.pm:819`; ~10 arms today, none Int→Str —
+    falls through to `die "LLVM backend: cannot lower Coerce"` at Context.pm:934).
+    It must
     BOTH emit the decimal digits AND record the **runtime** length in
     `_str_len_table` (the length is the integer's digit count, computed at
     runtime — this is the non-trivial part; there is no "Int has no length"
@@ -256,7 +273,8 @@ through B::SoN → from_json → LLVM → lli, and asserts lli stdout == perl st
   many lines), not the chomped single-line repr `run_through_bson` compares.
 - **R2.3** **NO epilogue type-tag.** A `.t` file's real output is raw TAP
   (`ok 1\n`), not `Int:1`. The epilogue is hard-baked into
-  `Target::LLVM::lower_with_elaboration` (`LLVM.pm:1244-1345`) with no suppress
+  `Target::LLVM::lower_with_elaboration` (`LLVM.pm:957`, epilogue ~997) with no
+  suppress
   seam (opts carries only `mop`), so this is NOT a pure harness instruction.
   **DECISION (R2.3b — runner-side strip, no backend change):** the Mode-1 runner
   strips exactly the FINAL line, and only when it matches the compiler epilogue
@@ -441,9 +459,11 @@ finding. All applied:
    defect: `print` is an `OP_LIST` listop that never reaches the void-Call
    construction branch, so its effect node is never built (not "DCE'd from a
    hash"). R1.1 rewritten to the real mechanism; added R1.1a (consumer table).
-3. **[MODERATE] Stale `Context.pm:NNN` citations** — all LLVM dispatch is in
-   `lib/Chalk/Target/LLVM.pm` (RegexSubst ~1679, dispatch ~1555, `_lower_coerce`
-   ~2055). Fixed R1.2, R1b-b.
+3. **[MODERATE] Stale `Context.pm:NNN` citations** — CORRECTED AGAIN in round 4
+   (round 3 over-corrected to `LLVM.pm`, which was ALSO wrong). Ground truth: the
+   op-dispatch `_lower_node` chain + all `_lower_*` arms are in
+   `lib/Chalk/Target/LLVM/Context.pm` (RegexSubst arm :418, `_lower_coerce` :819,
+   die :934); `LLVM.pm` holds only `lower_with_elaboration` :957 + epilogue :997.
 4. **[MODERATE] R2.0.2 conflated logical-arm with if-block.** Split: R2.0.2 =
    `&&`/`||` arm; new R2.0.3 = if/else/loop block body.
 5. **[MODERATE] R2.3b strip unbounded for R4/R5.** Scoped to t/base (verified
@@ -465,3 +485,25 @@ the load-bearing correctness change — and it dissolves the whole
 silent-effect-drop class (MEASURED: `chomp $s; length $s` drops the mutation
 today) rather than patching print alone. Asymmetry rationale: wrong-pure =
 silent miscompile; wrong-effect = missed optimization. Correctness > performance.
+
+## Re-assess round 4 findings applied (2026-07-17, 2 R1.0 probes + dual critics)
+
+The round that came back SUBSTANTIVELY CLEAN. Both feasibility probes CONFIRMED
+R1.0: (1) pure value-context builtins CSE today (`uc($s)` twice → one node) and
+the allow-list preserves that — a CSE regression is missed-optimization only,
+never a miscompile; (2) blast radius on the 98 green corpus cases is
+MEASURED-ZERO — the only builtin Calls in green shape contracts are `shift`/`pop`,
+already effect-pinned. Both critics agreed the substance is sound; the only
+surviving defect was mechanical:
+
+1. **[SERIOUS→fixed] Citation over-correction (my error, round 3).** Round 3
+   "fixed" the stale `Context.pm` citations by declaring everything is in
+   `LLVM.pm` — the INVERSE of reality; it pointed past `LLVM.pm`'s EOF (1359
+   lines). Ground truth: dispatch + `_lower_*` arms are in
+   `lib/Chalk/Target/LLVM/Context.pm` (RegexSubst :418, `_lower_coerce` :819, die
+   :934); `LLVM.pm` has only `lower_with_elaboration` :957 + epilogue. All
+   citations re-pointed and verified against the code this round.
+2. **[MODERATE→fixed] R1.0 lacked a non-regression landing gate** — added
+   (son-corpus-wide.t stays ==98 post-flip), which both probes recommended.
+3. **[MINOR→fixed] Allow-list `…` ambiguity** — noted it is correctness-safe when
+   incomplete + `substr` must be context-qualified (rvalue pure, lvalue mutates).
