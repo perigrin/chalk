@@ -7,3 +7,6 @@ t/bootstrap/.oracle-cache/
 .claire/
 .claude/
 perl-tests/
+
+# crochet machine-specific capabilities manifest
+.claude/crochet/capabilities.json
