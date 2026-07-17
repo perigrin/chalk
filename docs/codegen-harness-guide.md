@@ -292,3 +292,27 @@ $PERL script/print-gap-map.pl
 - `script/print-gap-map.pl` + `t/fixtures/codegen-harness/gap-map.json` — fixed
   hand-graph snapshot.
 - `docs/plans/2026-06-07-mdtest-corpus-format-draft.md` — the corpus format spec.
+
+## Harvester reproducibility (pinned perl5 blead SHA)
+
+The `t/`-conformance harvester sources its corpus from a checkout of perl5
+blead (`~/dev/perl5`). A corpus harvested against an unpinned/moving Perl is a
+corrupted oracle, so the SHA is **pinned** as a single source of truth.
+
+- **Pinned SHA:** `94e5086608`
+- **Single source of truth:** `t/lib/Chalk/CodeGen/Harness/HarvestPin.pm`
+  (`HarvestPin->pinned_sha`). No other harness module hard-codes the SHA; the
+  test `t/bootstrap/corpus/harvest-pin.t` enforces that invariant.
+- **Decision — regenerate-gated-on-SHA (not vendor):** the corpus does not
+  exist yet, so we do NOT vendor Perl's `t/` into this repo. Instead, a future
+  harvest run must call `HarvestPin->verify_checkout($perl5_path)` first and
+  **refuse to proceed** unless the checkout is at the pin with a clean tree.
+  `verify_checkout` only VERIFIES — it never regenerates or mutates the
+  checkout. Re-harvest is a deliberate, separate act (no implicit drift).
+- **Drift is LOUD.** `verify_checkout` returns `status` of `ok` / `mismatch`
+  (HEAD is a different SHA — detail names both) / `absent` (checkout missing) /
+  `dirty` (`git status --porcelain` non-empty — never harvest from a dirty
+  tree). Every non-`ok` status carries `loud => 1`.
+
+Bumping the pin is intentional: change the literal in `HarvestPin.pm` (and this
+note), then re-run `harvest-pin.t`.
