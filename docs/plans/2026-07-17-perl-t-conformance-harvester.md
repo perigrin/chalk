@@ -49,6 +49,49 @@ Assertion-level harvestability in t/op (the decisive cut):
 Feature fit: t/op/t/opbasic exercise arithmetic, string, compare, control flow
 — exactly Chalk's RF strength — not lib/'s self-hosting frontend.
 
+## Perl's OWN test-ordering is the authoritative sequencing (t/README + t/TEST)
+
+Do not guess tier order — Perl documents the dependency/capability ladder its
+tests bootstrap in. `t/TEST:562` runs:
+
+    base  comp  run  cmd  io  re  opbasic  op  uni  mro  class  perf  test_pl
+
+and `t/TEST:556-559` explains why:
+- **base first** — TEST *bails out* if base fails; base sanity-tests the rest.
+- then **comp** — validates `require` works.
+- then **run** — validates `-M` works.
+- then everything else can `-MTestInit`.
+
+The load-bearing constraint (`t/README:25-28`): **t/base tests must be runnable
+with plain miniperl alone — they must NOT assume `require` works, let alone
+`require Config.pm, strict, or warnings`.** That is EXACTLY Chalk's runtime-free,
+no-runtime-`use`/`require` subset. `t/base` is definitionally the minimal-
+interpreter ring, so it is the correct Mode-1 starting point — now authoritative,
+not a friendliness guess.
+
+Mapping Perl's ladder onto Chalk (they are NOT identical — Chalk has no runtime
+module loading, so the ladder's `require`/`-M` rungs do not map):
+- **base** — minimal-interpreter ring. START HERE. MEASURED: 6/9 files fully in
+  subset (cond, if, num, pat, translate, while — no require/eval/open/modules);
+  lex/rs/term reach past miniperl (eval/open) and loud-skip. Those 6 exercise
+  print (98), string/num compare (eq 53, == 22, ne, !=, <=, >=), short-circuit
+  (|| 11, && 4), if/unless/while, my — squarely RF. (One =~ in pat.t → skip.)
+- **comp** — Perl's purpose here is "does require work"; for Chalk only the pure
+  COMPILATION tests matter, not the require-validation. Cherry-pick, don't
+  assume the whole ring maps.
+- **run** — "does -M work" — largely N/A for Chalk (no -M). Mostly skip.
+- **cmd** — control-flow commands; in-subset, a good early ring.
+- **re** — regex; PARKED (019f6c68). Skip regardless of Perl's ordering.
+- **opbasic, op** — the core-semantics motherlode; opbasic is framework-free
+  (Mode 1), op is Test::More (Mode 2).
+- **uni** — unicode; ties to G3 non-ASCII, mostly out-of-subset for now.
+- **class** — modern `feature class` OO; Chalk supports it — a real later ring.
+
+So the Chalk Mode-1 ring order is Perl's order minus the non-mapping rungs:
+**base → cmd → opbasic → (cherry-picked comp) → op(Mode 2) → class**, with
+re/run/uni skipped or deferred. This REPLACES the earlier guessed
+t/base→t/opbasic→t/cmd→t/comp sequence.
+
 ## TWO HARVEST MODES (perigrin, 2026-07-17): the test file IS an oracle
 
 Key refinement: a framework-free `.t` file is ALREADY an executable oracle — it
@@ -210,10 +253,12 @@ now continuously regenerated as the driver.
    backend `_lower_print`. Real core-feature work, gates Mode 1. Corpus cases in
    the hand corpus (host/statements tier) with the full tri-fold.
 2. **Mode 1 runner**: compile a framework-free `.t` file -> lli -> assert stdout
-   == perl stdout. Proving ground = t/base (9 files, 100% framework-free, pure
-   literal `print "ok"`).
-3. **Widen Mode 1**: t/opbasic -> t/cmd -> t/comp. Skip-histogram (loud, counted)
-   names the next feature to build as each tier stalls.
+   == perl stdout. Proving ground = t/base (Perl's authoritative FIRST ring;
+   6/9 files fully in-subset, pure literal `print "ok"`). The 3 miniperl-
+   exceeding files (lex/rs/term) loud-skip.
+3. **Widen Mode 1 in Perl's ladder order** (minus non-mapping rungs): t/cmd ->
+   t/opbasic -> cherry-picked t/comp. re/run/uni skipped/deferred. Skip-histogram
+   (loud, counted) names the next feature to build as each ring stalls.
 4. **Interpolating print** (multiconcat decoder, 019ee838) — unlocks the
    `print "ok $n\n"` counter idiom that many files use.
 5. **Mode 2 (extraction)**: only after Mode 1 is trusted and t/op (Test::More)
