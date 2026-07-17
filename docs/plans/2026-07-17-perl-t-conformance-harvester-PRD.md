@@ -53,22 +53,66 @@ module loading, so `require`/`-M` rungs and `re` do not map):
 ## Requirements
 
 ### R1 — print-to-stdout lowering (literal LIST, bare STDOUT) [FIRST BRICK]
+**R1 is a CORRECTNESS FIX, not just a feature (perigrin, verified 2026-07-17).**
+`print` today is a live SILENT MISCOMPILE: `print "SIDE\n"; 42` lowers to a graph
+with NO print node (producer ops: Start/Constant/Return only) — perl prints
+`SIDE\nInt:42`, Chalk lli emits just `Int:42`. The print's side effect is
+silently dropped.
+
+**Root cause (mechanism corrected after reassess round 3, verified):** the
+producer (perl5-son `SoN::FromOptree`) DOES have a void-statement-effect path —
+a void-context call gets `is_stmt_effect => true` and is control-threaded
+(`FromOptree.pm:993-1010, 1032-1043`, gated on `OPf_WANT_VOID` =
+`($op->flags & 3) == 1`). A bare `print` statement IS `OPf_WANT_VOID` (optree
+shows `<@> print vK`). RegexSubst and void method/sub calls ride this path — which
+is why a sequence of two `s///` both survive (`RegexSubst=2`). BUT `print` is an
+`OP_LIST` listop (`pushmark → args → print`), NOT an `entersub`, so it does NOT
+reach the void-Call construction branch — it is dropped BEFORE a node is built
+(no Call node emitted at all). So the defect is not "DCE on an impure node in a
+membership hash" (my earlier framing was wrong — there is no
+`%STATEMENT_EFFECT_OPS` in the producer; that hash is a Chalk CONSUMER-side table
+at `NodeFactory.pm:155`). The defect is: **the print listop never enters the
+void-statement-effect construction path, so its side effect is never built.**
+
+**The bug is WIDER than print (measured):** `warn "W\n"; 1` and
+`printf "%d\n",5; 1` also drop their effect (Start/Constant/Return only) — the
+listop-builtins-in-void-context class is uniformly dropped. So the principled
+fix is general: **route a void-context listop-builtin (print/printf/warn/say/…)
+through the statement-effect construction path so it gets `is_stmt_effect` +
+control-threading and is not lost.** R1 delivers `print` specifically (the
+harvester's need); the general defect should be filed as a standalone
+correctness bug that R1 is the first instance of.
+
+NOTE: a `print`-lowering stub issue `019f6e1c` already exists (created before
+this PRD); reconcile it during refinement — reframe it as this correctness fix,
+or fold it into R1, rather than leaving a duplicate.
+
 `print LIST` must lower to real stdout. Today the backend only printf's the
 single return value in the epilogue; there is no `Print` node in the producer
 and no `_lower_print` in the backend. (Verified: `print` maps to a generic
 `Call` in perl5-son `OpMap.pm:258`; not in `%STATEMENT_EFFECT_OPS`
 `NodeFactory.pm:155`; no `Print` dispatch branch in `Context.pm:395-470`.)
-- **R1.1** Producer (perl5-son `SoN::FromOptree`): a `print` handler emits a
-  `Print` IR node and ADDS `Print` to `%STATEMENT_EFFECT_OPS` (so it gets
-  per-call identity + Block control-threading, exactly as RegexSubst does — this
-  threading is load-bearing for R2.0, see there). Subject = the LIST of print
-  args: **walk the whole `pushmark..print` span and emit each literal element**,
+- **R1.1** Producer (perl5-son `SoN::FromOptree`): add a `print` listop handler
+  that emits a `Print` node at its construction site with
+  `is_stmt_effect => true` under the `OPf_WANT_VOID` check (`($op->flags & 3)
+  == 1`), mirroring the void-Call sites at `FromOptree.pm:993-1010/1032-1043` so
+  it inherits the same control-threading. (There is NO `%STATEMENT_EFFECT_OPS` in
+  this repo — that is the Chalk consumer table; see R1.1a.) Subject = the LIST of
+  print args: **walk the whole `pushmark..print` span and emit each element**,
   not a single input. (`print "ok ", 1, "\n"` is `pushmark→const→const→const→
-  print` — multiple stack args.)
-- **R1.2** Backend (`Chalk::Target::LLVM`): `_lower_print` emits a libc write of
-  the arg bytes to fd 1 (`write`/`fputs`/`printf` — the C-call declare path at
-  `LLVM.pm:1085` is proven). Add an `elsif ($op eq 'Print')` branch alongside
-  the RegexSubst branch (`Context.pm:418`).
+  print`.)
+- **R1.1a** Consumer (Chalk): if the loader/scheduler keys statement-effects off
+  `%STATEMENT_EFFECT_OPS` (`NodeFactory.pm:155`, currently Assign/CompoundAssign/
+  RegexSubst/TryCatch/Call/RegexMatch/Match/NotMatch/BacktickExpr — no Print),
+  add `Print` there so the consumer treats it as an effect. Verify whether it is
+  needed (the node carries `is_stmt_effect` already).
+- **R1.2** Backend (`lib/Chalk/Target/LLVM.pm`): `_lower_print` emits a libc
+  write of the arg bytes to fd 1 (`write`/`fputs`/`printf` — the C-call declare
+  path is proven; verify the exact line). Add an `elsif ($op eq 'Print')` branch
+  in the op-dispatch chain (`LLVM.pm:~1555-1582`) alongside the RegexSubst arm
+  (`LLVM.pm:~1679`). (NOTE: all LLVM lowering dispatch lives in
+  `lib/Chalk/Target/LLVM.pm`, NOT a `Context.pm` — earlier `Context.pm:NNN`
+  citations were wrong.)
 - **R1.3** Ordering: `print` output precedes the epilogue `TYPE:value` line, on
   both the perl oracle and lli sides (the corpus gate captures full stdout via
   `qx` — verified `son-corpus-wide.t:83` lli, `:101` oracle, byte-compared
@@ -111,7 +155,8 @@ and the coerced Str carries a string length like any other Str. So there is no
     wrapper. Acceptance: node dump shows the wrapper present, no raw Int operand
     into `Concat`.
   - **R1b-b (backend, chalk):** add the `Coerce[Int→Str]` arm to `_lower_coerce`
-    (verified: 10 arms today, none Int→Str — falls through to `die`). It must
+    (`lib/Chalk/Target/LLVM.pm:~2055`; verified ~10 arms today, none Int→Str —
+    falls through to `die`). It must
     BOTH emit the decimal digits AND record the **runtime** length in
     `_str_len_table` (the length is the integer's digit count, computed at
     runtime — this is the non-trivial part; there is no "Int has no length"
@@ -138,17 +183,22 @@ A `t/base` file is TOP-LEVEL statements, not a `sub`. Two facts, both verified
   not the test.
 
 **Resolution (supersedes "Producer untouched"):** faithful multi-statement
-lowering is delivered by **R1's effect-op threading** — adding `Print` to
-`%STATEMENT_EFFECT_OPS` gives each `print` statement a control edge, so a
-sequence of top-level void prints all survive (same mechanism that keeps a
-sequence of `Assign`s). So R2.0 depends on R1; the earlier blanket "producer
-untouched" is WRONG and is replaced by: **no NEW producer node types beyond
-R1's `Print`** (the wrap is source-prep; the threading is R1's Print effect-op).
+lowering is delivered by **R1 routing the void print listop through the producer's
+existing `is_stmt_effect` construction path** (`FromOptree.pm:993-1010`) — that
+gives each `print` statement a control edge, so a sequence of top-level void
+prints all survive (the same path that keeps a sequence of void `s///`/method
+calls). So R2.0 depends on R1; the earlier blanket "producer untouched" is WRONG
+and is replaced by: **R1 adds a `Print` node + routes the print listop into the
+existing void-effect path** (not a NEW threading mechanism — the mechanism
+exists; print just doesn't reach it today).
 - **R2.0.1 (anti-statement-drop):** a wrapped body of N independent top-level
   void statements must produce a graph where ALL N are control-threaded (none
-  dropped as a discarded value).
-- **Acceptance:** `sub __main__ { print "a\n"; print "b\n"; print "c\n"; }`
-  lowers so lli stdout is `a\nb\nc\n` (NOT just `c\n`). An unwrapped bare program
+  dropped as a discarded value). **Testable at TWO layers:** (producer/graph)
+  N top-level void statements → N `is_stmt_effect` nodes on the control chain
+  (assertable before the backend exists); (behavioral) lli stdout equality.
+- **Acceptance:** graph-level: `sub __main__ { print "a\n"; print "b\n";
+  print "c\n"; }` yields 3 control-threaded Print nodes. Behavioral (once R1.2
+  lands): lli stdout is `a\nb\nc\n` (NOT just `c\n`). An unwrapped bare program
   correctly yields no graph (documents why the wrap is needed).
 - **KNOWN GAP (measured):** a `print` in a logical short-circuit ARM
   (`$x==$x && (print ...)`) or a statement-modifier (`print ... if ...`) is a
@@ -178,33 +228,66 @@ through B::SoN → from_json → LLVM → lli, and asserts lli stdout == perl st
   `Target::LLVM::lower_with_elaboration` (`LLVM.pm:1244-1345`) with no suppress
   seam (opts carries only `mop`), so this is NOT a pure harness instruction.
   **DECISION (R2.3b — runner-side strip, no backend change):** the Mode-1 runner
-  strips a single trailing `^(Int|Num|Bool|Str|Undef|Slot):.*$` epilogue line
-  from lli stdout before comparison. Chosen over a backend `suppress_epilogue`
-  flag to avoid a Target::LLVM change for a test-only need. (Rides on R1: until a
-  wrapped body can emit its own `print` stdout, the epilogue is the only output —
-  nothing to strip.) (Contrast: R1's hand-corpus cases KEEP the epilogue, since
-  they test a returned value alongside the print.)
+  strips exactly the FINAL line, and only when it matches the compiler epilogue
+  `^(Int|Num|Bool|Str|Undef):.*$` (NOT `Slot` — that is an internal repr never
+  emitted as a top-level tag). Chosen over a backend `suppress_epilogue` flag to
+  avoid a Target::LLVM change for a test-only need. **Scoped to Mode-1 t/base,
+  where it is VERIFIED SAFE** (measured: no cond/if/num/pat/translate/while TAP
+  line matches the pattern). **LOUD GAP for R4/R5 widening:** t/op Test::More
+  descriptions can legitimately be `ok 5 - Str:foo roundtrip`, and the epilogue
+  is currently exactly one line — a future multi-value return emitting >1 tag
+  would break the single-line strip. Before R4/R5, replace pattern-matching with
+  a robust scheme (sentinel-guarded epilogue channel, or compare against the
+  known epilogue for the case's return value). (Rides on R1: until a wrapped body
+  emits its own `print` stdout, the epilogue is the only output.) (Contrast: R1's
+  hand-corpus cases KEEP the epilogue, since they test a returned value.)
 - **R2.4** Invariant leg = TypedInvariant over the loaded graph(s).
 - **R2.5** A file that fails to lower produces a LOUD, COUNTED skip naming the
   first unsupported construct — never a silent pass or silent drop
   (GAP-not-silent-skip invariant). The skip histogram is a first-class output.
-- **Acceptance:** the runner passes on ≥1 fully-in-subset t/base file end-to-end
-  whose assertions are TOP-LEVEL prints (candidate: `num.t`, `translate.t`, or
-  `while.t` — NOT `cond.t`/`if.t`, whose prints are `&&`-arm/if-block, blocked on
-  R2.0.2) and loud-skips a miniperl-exceeding one (`lex.t`) with a named reason.
+- **Acceptance:** the runner passes end-to-end on a **synthetic literal-only
+  top-level-print `.t`** (`print "1..3\n"; print "ok 1\n"; print "ok 2\n";
+  print "ok 3\n";` — the ONLY shape R1 alone handles; this is what R2.0.1 tests)
+  and loud-skips a miniperl-exceeding file (`lex.t`) with a named reason.
+  **NO stock t/base file passes under R1 alone** (see R3) — the synthetic file
+  is the first real acceptance.
 
 ### R3 — Mode 1 proving ground: t/base
-Run Mode 1 over t/base (Perl's authoritative first ring). Measured 2026-07-17,
-6/9 files in-subset (cond, if, num, pat, translate, while; lex/rs/term
-loud-skip), further split by print SHAPE:
-- **Top-level-print (R1 handles): `num.t` (60 top-level prints, 0 arm),
-  `translate.t` (8/0), `while.t` (3/0), `pat.t` (1/0).** These are the real first
-  candidates.
-- **Arm/if-block-print (needs R2.0.2): `cond.t` (8 `&&`/`||`-arm), `if.t` (2 in
-  if-blocks).** Blocked on R2.0.2; loud-skip until it lands.
-- **Acceptance:** each top-level-print file PASSes (stdout==perl) or produces a
-  counted skip naming the missing feature; the arm-print files loud-skip citing
-  R2.0.2. No silent drops. A monotonic floor locks the passing count.
+Run Mode 1 over t/base (Perl's authoritative first ring). **CRITICAL correction
+(reassess round 3): NO stock t/base file is purely top-level literal prints.**
+My round-2 "top-level vs `&&`-arm" split was on the wrong axis — I counted `^print`
+lines, but every file's ASSERTION prints need more than R1. Per-file construct
+debt (measured @94e5086608), each mapped to its blocking requirement:
+
+| file | assertion-print shape | blocked on |
+|------|----------------------|-----------|
+| num.t | `print $cond ? "ok N\n" : "not ok N # $a\n"` (ternary arg + string-eq + package `$a` + coercion) | R1(ternary-arg) + R1b + string-eq + package-scalar |
+| translate.t | `print $i+1 . " - ... $i"` inside a `for` loop | R1b (Concat+Int→Str) + loop-body + R1(list) |
+| while.t | `ok N` inside `if(){}else{}` blocks | if-block void-print threading (R2.0.3) |
+| pat.t | prints inside if/else; uses `//` regex | R2.0.3 + regex (PARKED) |
+| cond.t | 8 prints in `&&`/`||` arms | R2.0.2 |
+| if.t | 2 prints in if-blocks | R2.0.3 |
+
+So t/base is NOT reachable under R1 alone. The honest sequence: R1 lands
+(synthetic file passes) → then the blockers above land one at a time, each
+UN-skipping its files. Each blocker is a NEW named requirement, NOT assumed:
+**R2.0.3** (void print statement inside an if/else/loop BLOCK body — distinct
+from R2.0.2's logical-op arm; if/else already builds Region/Phi per RC5, so this
+is void-effect threading inside an existing Block), plus **string-eq**,
+**package-scalar reads**, and **ternary-valued print args** as their own GAPs.
+- **Acceptance:** each t/base file either PASSes (once ALL its listed blockers
+  land) or produces a counted skip naming its FIRST unmet blocker from the table.
+  No file is claimed to pass before its blockers land. No silent drops. A
+  monotonic floor locks the passing count (starting at 0 stock files, +synthetic).
+
+### R2.0.3 — void statement inside an if/else/loop BLOCK body (GAP, filed)
+Distinct from R2.0.2 (logical-op arm). A `print` that is a statement inside an
+`if(){}else{}` or loop block body. Chalk already builds if/else with Region/Phi
+(RC5); this is threading a void effect inside that Block. Empirically confirm
+whether it already threads under R1 before assigning it as a blocker — it may be
+partially free.
+- **Acceptance:** `if ($c) { print "a\n" } else { print "b\n" }` fires the
+  correct branch's print; bilateral (both arms).
 
 ### R4 — Mode 1 widening (Perl ring order)
 Extend Mode 1 to t/cmd → t/opbasic → cherry-picked t/comp. The skip histogram
@@ -306,3 +389,33 @@ health"). The critique returned **clean=FALSE** with 8 findings; all applied:
 Probe verdicts: R1 FEASIBLE (with LIST/filehandle caveats now in R1); R2.0
 FEASIBLE_WITH_CAVEAT (the statement-drop, now R2.0.1); R1b FEASIBLE_WITH_CAVEAT
 (no Coerce node, now R1b-a/b); R2.3 = runner-strip.
+
+## Re-assess round 3 findings applied (2026-07-17, dual independent critics)
+
+Both critics returned clean=FALSE and CONVERGED on the same critical + serious
+finding. All applied:
+
+1. **[CRITICAL] R2/R3 had no reachable real-file pass candidate.** My round-2
+   "top-level-print" reclassification was on the WRONG axis — I counted `^print`
+   lines, but every stock t/base file's ASSERTION prints are ternary-arg
+   (num.t), loop-body+coerced (translate.t), or if-block (while.t/pat.t/if.t) —
+   all blocked. NO stock t/base file passes under R1 alone. Fix: R2's first
+   acceptance is a SYNTHETIC literal-only file; R3 got a per-file construct-debt
+   table mapping each file to its blockers; added R2.0.3 (if/else/loop block-body
+   void print) + named GAPs (string-eq, package-scalar, ternary-arg).
+2. **[SERIOUS] `%STATEMENT_EFFECT_OPS` mechanism was wrong.** That hash is a
+   Chalk CONSUMER table (`NodeFactory.pm:155`); the perl5-son PRODUCER uses a
+   per-site `is_stmt_effect` flag gated on `OPf_WANT_VOID`. Verified the real
+   defect: `print` is an `OP_LIST` listop that never reaches the void-Call
+   construction branch, so its effect node is never built (not "DCE'd from a
+   hash"). R1.1 rewritten to the real mechanism; added R1.1a (consumer table).
+3. **[MODERATE] Stale `Context.pm:NNN` citations** — all LLVM dispatch is in
+   `lib/Chalk/Target/LLVM.pm` (RegexSubst ~1679, dispatch ~1555, `_lower_coerce`
+   ~2055). Fixed R1.2, R1b-b.
+4. **[MODERATE] R2.0.2 conflated logical-arm with if-block.** Split: R2.0.2 =
+   `&&`/`||` arm; new R2.0.3 = if/else/loop block body.
+5. **[MODERATE] R2.3b strip unbounded for R4/R5.** Scoped to t/base (verified
+   safe), dropped `Slot`, flagged as a LOUD GAP requiring a robust scheme before
+   R4/R5 widening.
+6. **[MINOR] R2.0.1 not producer-testable** — added a graph-level assertion
+   (N void statements → N control-threaded nodes) alongside the stdout check.
