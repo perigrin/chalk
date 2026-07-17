@@ -59,48 +59,80 @@ with NO print node (producer ops: Start/Constant/Return only) — perl prints
 `SIDE\nInt:42`, Chalk lli emits just `Int:42`. The print's side effect is
 silently dropped.
 
-**Root cause (mechanism corrected after reassess round 3, verified):** the
-producer (perl5-son `SoN::FromOptree`) DOES have a void-statement-effect path —
-a void-context call gets `is_stmt_effect => true` and is control-threaded
-(`FromOptree.pm:993-1010, 1032-1043`, gated on `OPf_WANT_VOID` =
-`($op->flags & 3) == 1`). A bare `print` statement IS `OPf_WANT_VOID` (optree
-shows `<@> print vK`). RegexSubst and void method/sub calls ride this path — which
-is why a sequence of two `s///` both survive (`RegexSubst=2`). BUT `print` is an
-`OP_LIST` listop (`pushmark → args → print`), NOT an `entersub`, so it does NOT
-reach the void-Call construction branch — it is dropped BEFORE a node is built
-(no Call node emitted at all). So the defect is not "DCE on an impure node in a
-membership hash" (my earlier framing was wrong — there is no
-`%STATEMENT_EFFECT_OPS` in the producer; that hash is a Chalk CONSUMER-side table
-at `NodeFactory.pm:155`). The defect is: **the print listop never enters the
-void-statement-effect construction path, so its side effect is never built.**
+**Root cause — a WRONG CLASSIFICATION DEFAULT (perigrin, verified 2026-07-17).**
+The producer has a void-statement-effect path — a void-context node gets
+`is_stmt_effect => true` and is pinned to the control chain
+(`FromOptree.pm:993-1010`, gated on `OPf_WANT_VOID`). But that pinning is applied
+per-site: **`entersub` (user-sub) calls reach it, but builtin listop/unop nodes
+(`print`, `chomp`, `printf`, `warn`, …) do NOT** — they are built as floating
+value nodes, so when their value is unused they are dropped and their effect is
+LOST. This is Chalk's Sea-of-Nodes effect classification having the WRONG
+DEFAULT: it defaults a `Call` to PURE (floatable, DCE-if-unused) and pins only
+the ones a per-site check happens to reach. The safe polarity is the inverse
+(see "Effect-by-default" below).
 
-**The bug is WIDER than print (measured):** `warn "W\n"; 1` and
-`printf "%d\n",5; 1` also drop their effect (Start/Constant/Return only) — the
-listop-builtins-in-void-context class is uniformly dropped. So the principled
-fix is general: **route a void-context listop-builtin (print/printf/warn/say/…)
-through the statement-effect construction path so it gets `is_stmt_effect` +
-control-threading and is not lost.** R1 delivers `print` specifically (the
-harvester's need); the general defect should be filed as a standalone
-correctness bug that R1 is the first instance of.
+**The bug is a BROAD CLASS (measured), not IO-specific:**
+- `print "SIDE\n"; 42` → `Start/Constant/Return` — print effect lost.
+- `warn "W\n"; 1`, `printf "%d\n",5; 1` → effect lost.
+- **`chomp $s; length $s` → `Start/Constant/Length/Return`** — the `chomp`
+  MUTATION is lost; Chalk computes `length` of the un-chomped string (perl: 2;
+  Chalk: wrong). A mutating builtin, not IO — proving the class is wide.
+- `sideeffect(); 42` → `Call` PRESENT (survives) — confirming `entersub` IS
+  correctly pinned; only the builtin-listop/unop sites are not.
+
+### R1's fix: EFFECT-BY-DEFAULT, PURITY-BY-PROOF (perigrin)
+The principled fix is not "route print (and then chomp, and then warn, …) one at
+a time." It is to **invert the default**: build every `Call`-producing node as
+effect-bearing (pinned, `is_stmt_effect`), and DEMOTE to a pure floatable data
+node ONLY when purity is PROVEN. This matches LLVM (`readnone` is opt-in; a call
+is effectful by default), GHC (`IO` is the default world, purity is earned), and
+the Sea-of-Nodes construction discipline Chalk already follows. The asymmetry is
+the whole point: a wrong "pure" default is a SILENT MISCOMPILE (what we have); a
+wrong "effect" default is only a MISSED OPTIMIZATION (a pure call needlessly
+pinned) — never wrong output. Correctness > performance, expressed as the IR's
+classification policy.
+- **Purity proof mechanism (initial):** an ALLOW-LIST of known-pure builtins
+  (`uc lc ucfirst lcfirst fc quotemeta index rindex substr(rvalue) join sprintf
+  pack unpack reverse length abs int sqrt …`) that MAY be demoted to floatable
+  data nodes (so they keep hash-consing/CSE). Everything else — `print printf
+  warn say chomp chop push pop shift unshift splice ++ -- entersub` and any
+  unrecognized builtin/user call — stays effect-pinned by default. (A real
+  purity analysis over user subs is a later refinement.)
+- **Why this over the narrow fix:** it fixes `print` AND `chomp`/`warn`/`printf`
+  AND every future builtin at once, and turns the question from "did we remember
+  to pin this one?" (miscompile if forgotten) into "did we prove this one pure?"
+  (slow if forgotten). It disarms the whole landmine field.
+
+R1 delivers `print` end-to-end (the harvester's need) ON TOP OF this inverted
+default, so the default flip is the load-bearing correctness change and print is
+its first exercised instance.
 
 NOTE: a `print`-lowering stub issue `019f6e1c` already exists (created before
-this PRD); reconcile it during refinement — reframe it as this correctness fix,
-or fold it into R1, rather than leaving a duplicate.
+this PRD); reconcile it during refinement — reframe it under this
+effect-by-default correctness fix, or fold it into R1, rather than leaving a
+duplicate.
 
 `print LIST` must lower to real stdout. Today the backend only printf's the
 single return value in the epilogue; there is no `Print` node in the producer
 and no `_lower_print` in the backend. (Verified: `print` maps to a generic
 `Call` in perl5-son `OpMap.pm:258`; not in `%STATEMENT_EFFECT_OPS`
 `NodeFactory.pm:155`; no `Print` dispatch branch in `Context.pm:395-470`.)
-- **R1.1** Producer (perl5-son `SoN::FromOptree`): add a `print` listop handler
-  that emits a `Print` node at its construction site with
-  `is_stmt_effect => true` under the `OPf_WANT_VOID` check (`($op->flags & 3)
-  == 1`), mirroring the void-Call sites at `FromOptree.pm:993-1010/1032-1043` so
-  it inherits the same control-threading. (There is NO `%STATEMENT_EFFECT_OPS` in
-  this repo — that is the Chalk consumer table; see R1.1a.) Subject = the LIST of
-  print args: **walk the whole `pushmark..print` span and emit each element**,
-  not a single input. (`print "ok ", 1, "\n"` is `pushmark→const→const→const→
-  print`.)
+- **R1.0 (EFFECT-BY-DEFAULT — the load-bearing correctness change)** Producer
+  (perl5-son `SoN::FromOptree`): every `Call`-producing builtin/listop/unop node
+  is constructed effect-pinned (`is_stmt_effect => true`) BY DEFAULT, not just at
+  the `entersub` site. A node is DEMOTED to a floatable pure data node only if it
+  is on the purity ALLOW-LIST. This fixes the whole class (print/chomp/warn/…) at
+  the construction policy, not per-op.
+  - **Acceptance:** `chomp $s; length $s` → the chomp effect survives (length 2,
+    not 3); `sideeffect(); 42` still survives; a PURE call in value context
+    (`my $x = uc($s)`) is still a floatable data node (no CSE regression — the
+    allow-list demotes it). Bilateral: an effectful-and-unused call is KEPT; a
+    pure-and-unused call is DROPPED (correct DCE).
+- **R1.1** Producer: add a `print` listop handler emitting a `Print` node.
+  Under R1.0 it is effect-pinned by default (print is NOT on the purity
+  allow-list). Subject = the LIST of print args: **walk the whole
+  `pushmark..print` span and emit each element**, not a single input.
+  (`print "ok ", 1, "\n"` is `pushmark→const→const→const→print`.)
 - **R1.1a** Consumer (Chalk): if the loader/scheduler keys statement-effects off
   `%STATEMENT_EFFECT_OPS` (`NodeFactory.pm:155`, currently Assign/CompoundAssign/
   RegexSubst/TryCatch/Call/RegexMatch/Match/NotMatch/BacktickExpr — no Print),
@@ -183,14 +215,13 @@ A `t/base` file is TOP-LEVEL statements, not a `sub`. Two facts, both verified
   not the test.
 
 **Resolution (supersedes "Producer untouched"):** faithful multi-statement
-lowering is delivered by **R1 routing the void print listop through the producer's
-existing `is_stmt_effect` construction path** (`FromOptree.pm:993-1010`) — that
-gives each `print` statement a control edge, so a sequence of top-level void
-prints all survive (the same path that keeps a sequence of void `s///`/method
-calls). So R2.0 depends on R1; the earlier blanket "producer untouched" is WRONG
-and is replaced by: **R1 adds a `Print` node + routes the print listop into the
-existing void-effect path** (not a NEW threading mechanism — the mechanism
-exists; print just doesn't reach it today).
+lowering is delivered by **R1.0's effect-by-default** — every `Call`/builtin node
+is effect-pinned unless proven pure, so a sequence of top-level void prints (and
+`chomp`s, and any effectful statement) all survive on the control chain. So R2.0
+depends on R1 (specifically R1.0); the earlier blanket "producer untouched" is
+WRONG and is replaced by: **R1.0 flips the construction default + R1.1 adds the
+`Print` node.** (The `is_stmt_effect` mechanism already exists; R1.0 makes it the
+default instead of a per-site opt-in.)
 - **R2.0.1 (anti-statement-drop):** a wrapped body of N independent top-level
   void statements must produce a graph where ALL N are control-threaded (none
   dropped as a discarded value). **Testable at TWO layers:** (producer/graph)
@@ -332,9 +363,10 @@ Pin the perl5 blead SHA the corpus is harvested against (currently
 
 ## Dependencies & ordering
 
-R1 (print + `Print` effect-op threading) is the FIRST BRICK — it gates R2.0
-(faithful multi-statement lowering DEPENDS on R1's effect-threading; the wrap
-alone miscompiles) and R2, and is a real RF core feature. Order:
+R1 is the FIRST BRICK, and **R1.0 (effect-by-default) is its load-bearing
+correctness change** — it gates R2.0 (faithful multi-statement lowering depends
+on effect-pinning; without it the wrap miscompiles) and fixes a broad silent-
+miscompile class (print/chomp/warn/… all drop today). Order:
 **R1 → R2.0 → R2 → R3 → R4 → R5 → R6**, with R7 spanning. Two side-chains,
 sequenced when they become the gating skip:
 - **R2.0.2** (void print in `&&`/`||` arm) — gates cond.t/if.t; parallel to R3.
@@ -419,3 +451,17 @@ finding. All applied:
    R4/R5 widening.
 6. **[MINOR] R2.0.1 not producer-testable** — added a graph-level assertion
    (N void statements → N control-threaded nodes) alongside the stdout check.
+
+## Effect-by-default reframe (2026-07-17, perigrin)
+
+Prompted by "do other languages do purity analysis like escape analysis but for
+side effects?" — yes: effect systems (Koka/GHC `IO`), purity attributes (LLVM
+`readnone`, GCC `__attribute__((pure/const))`), and Sea-of-Nodes effect-chain
+pinning. All make the OPTIMIZATION opt-in and EFFECT the default. Chalk had it
+backwards (default pure, pin a per-site list), which is why print/chomp/warn
+silently dropped. perigrin's fix: **default all `Call` nodes to effect-bearing;
+prove purity (allow-list, later real analysis) to demote.** This became R1.0 —
+the load-bearing correctness change — and it dissolves the whole
+silent-effect-drop class (MEASURED: `chomp $s; length $s` drops the mutation
+today) rather than patching print alone. Asymmetry rationale: wrong-pure =
+silent miscompile; wrong-effect = missed optimization. Correctness > performance.
