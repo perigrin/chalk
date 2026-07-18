@@ -1587,6 +1587,45 @@ my %ICMP_PREDICATE = (
     NumNe => 'ne',
 );
 
+# Float predicates for the same comparison ops, used when an operand is Num or
+# Str (numified to a double). ORDERED predicates (o*) for </<=/>/>=/==; UNORDERED
+# not-equal (une) for != — matches perl's numeric != on non-NaN doubles and
+# treats NaN operands as "not equal", the perl-consistent NaN behavior.
+my %FCMP_PREDICATE = (
+    NumGt => 'ogt',
+    NumLt => 'olt',
+    NumGe => 'oge',
+    NumLe => 'ole',
+    NumEq => 'oeq',
+    NumNe => 'une',
+);
+
+# _coerce_ref_to_num($ref, $repr): return a `double` SSA ref for a value, coercing
+# by its representation. Int -> sitofp; Num -> passthrough; Str -> the perl
+# leading-numeric rule via @chalk_str_to_num (same emit as Coerce[Str->Num]).
+# Used by numeric comparison over non-Int operands (`"0" == "0"`, the cond.t
+# blocker). A Bool/aggregate operand is a loud GAP (numeric compare over a
+# boolean is not a shape we lower runtime-free).
+sub _coerce_ref_to_num {
+    my ($self, $ref, $repr, $op) = @_;
+    return $ref if defined $repr && $repr eq 'Num';
+    if (!defined $repr || $repr eq 'Int') {
+        my $d = $self->_fresh;
+        $self->_emit("  $d = sitofp i64 $ref to double  ; $op: Int operand -> double");
+        return $d;
+    }
+    if ($repr eq 'Str') {
+        my $len_ref = $self->_str_len_for($ref) // 0;
+        $self->{_need_str_to_num_helper} = 1;
+        my $d = $self->_fresh;
+        $self->_emit("  $d = call double \@chalk_str_to_num(i8* $ref, i64 $len_ref)  ; $op: Str operand -> double (leading-numeric)");
+        return $d;
+    }
+    die "GAP: $op numeric comparison over a $repr operand is not lowered "
+      . "runtime-free (only Int, Num, and Str operands numify). Coerce the "
+      . "operand or fix TypeInference.";
+}
+
 sub _lower_icmp_int {
     my ($self, $node) = @_;
 
@@ -1597,15 +1636,35 @@ sub _lower_icmp_int {
         die "GAP: $op with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
-    my $pred = $ICMP_PREDICATE{$op}
-        or die "LLVM backend: unknown comparison op=$op";
-
     my $inputs  = $node->inputs;
-    my $lhs_ref = $self->lower_value($inputs->[0]);
-    my $rhs_ref = $self->lower_value($inputs->[1]);
+    my $lhs_node = $inputs->[0];
+    my $rhs_node = $inputs->[1];
+    my $lhs_repr = $lhs_node->representation;
+    my $rhs_repr = $rhs_node->representation;
+    my $lhs_ref = $self->lower_value($lhs_node);
+    my $rhs_ref = $self->lower_value($rhs_node);
 
+    # If BOTH operands are Int, compare as i64 (the fast integer path). If either
+    # is Num or Str, perl numifies both and compares as numbers -> coerce each to
+    # a double and fcmp. `"0" == "0"` (Str operands) is the t/base/cond.t blocker;
+    # `3 == 3.0` (Int vs Num) also lands here.
+    my $lhs_int = !defined $lhs_repr || $lhs_repr eq 'Int';
+    my $rhs_int = !defined $rhs_repr || $rhs_repr eq 'Int';
+    if ($lhs_int && $rhs_int) {
+        my $pred = $ICMP_PREDICATE{$op}
+            or die "LLVM backend: unknown comparison op=$op";
+        my $ref = $self->_fresh;
+        $self->_emit("  $ref = icmp $pred i64 $lhs_ref, $rhs_ref  ; $op(Bool) -> i1 icmp $pred");
+        $self->{cache}{$node->id} = $ref;
+        return $ref;
+    }
+
+    my $fpred = $FCMP_PREDICATE{$op}
+        or die "LLVM backend: unknown comparison op=$op";
+    my $lhs_d = $self->_coerce_ref_to_num($lhs_ref, $lhs_repr, $op);
+    my $rhs_d = $self->_coerce_ref_to_num($rhs_ref, $rhs_repr, $op);
     my $ref = $self->_fresh;
-    $self->_emit("  $ref = icmp $pred i64 $lhs_ref, $rhs_ref  ; $op(Bool) -> i1 icmp $pred");
+    $self->_emit("  $ref = fcmp $fpred double $lhs_d, $rhs_d  ; $op(Bool) -> i1 fcmp $fpred (numified operands)");
     $self->{cache}{$node->id} = $ref;
     return $ref;
 }

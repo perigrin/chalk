@@ -548,6 +548,92 @@ return %r
 L: GREEN
 ```
 
+## L9 numeric equality (==) over Str operands — t/base/cond.t blocker
+
+Perl `==` is NUMERIC: string operands are numified (leading-numeric rule) then
+compared as numbers. `"0" == "0"` numifies both to 0 and is TRUE. This is the
+t/base/cond.t blocker: `$x == $x` where `$x` is a string package scalar. The
+backend must coerce each Str operand to Num (double, via @chalk_str_to_num) and
+`fcmp oeq` the doubles — NOT `icmp i64` on the raw i8* pointers.
+
+Bilateral against L6 (StrEq): L6 is BYTE equality (memcmp), L9 is NUMERIC
+equality (numify then compare). `"0"` and `"0"` are byte-equal here too, so the
+distinguishing case is L9b (`" 3"` vs `"3"` — numerically equal, byte-unequal).
+
+```perl
+# source
+my $x = "0"; ($x == $x) ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%x0 = Constant("0") :Str
+%eq = NumEq(%x0, %x0) :Bool
+%t  = Constant(1) :Int
+%f  = Constant(0) :Int
+%r  = TernaryExpr(%eq, %t, %f) :Int
+return %r
+L: GREEN
+```
+
+## L9b numeric equality — byte-unequal but numerically equal (`" 3"` == `"3"`)
+
+The case that separates NUMERIC `==` from BYTE `eq`: `" 3"` (leading space) and
+`"3"` are byte-UNEQUAL (StrEq would be false) but numerically EQUAL (both numify
+to 3), so `==` is TRUE. Proves the operands are numified, not memcmp'd.
+
+```perl
+# source
+my $a = " 3"; my $b = "3"; ($a == $b) ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%a = Constant(" 3") :Str
+%b = Constant("3") :Str
+%eq = NumEq(%a, %b) :Bool
+%t  = Constant(1) :Int
+%f  = Constant(0) :Int
+%r  = TernaryExpr(%eq, %t, %f) :Int
+return %r
+L: GREEN
+```
+
+## L9c numeric inequality (!=) over Str operands (cond.t `$x != $x`)
+
+The `!=` polarity, matching cond.t's `$x != $x` / `$x != $y` lines. `"0" != "1"`
+numifies to `0 != 1` = TRUE. `fcmp une` (unordered-or-not-equal) is the float
+`!=` predicate.
+
+```perl
+# source
+my $x = "0"; my $y = "1"; ($x != $y) ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%x = Constant("0") :Str
+%y = Constant("1") :Str
+%ne = NumNe(%x, %y) :Bool
+%t  = Constant(1) :Int
+%f  = Constant(0) :Int
+%r  = TernaryExpr(%ne, %t, %f) :Int
+return %r
+L: GREEN
+```
+
 ## L8 void call in an `and` arm — t/ near-miss (simple form GREEN)
 
 `EXPR and (print ...)` — the low-precedence `and` form of the `&&`-arm void print
