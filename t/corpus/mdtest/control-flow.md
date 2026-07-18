@@ -90,6 +90,97 @@ branch_control: %proj1 -> %as2
 L: GREEN
 ```
 
+## D1a void print in a true if arm
+
+An if/else whose ARMS only `print` (no assignment, no value) is a void
+statement-effect branch: each arm's `print` fires on its own control path and
+nothing is merged into a value. The producer once collapsed such a branch to the
+pad-rebind merge path — which merges nothing (a void print rebinds no pad slot),
+leaving both Print nodes unpinned so NEITHER fired (a silent effect drop). The
+fix routes the branch through the same real control flow an element/field-store
+arm uses: an `If` with `Proj(true, 0)` / `Proj(false, 1)`, each arm walked on its
+Proj so the `print` is control-dependent on it, and a `Region` merging the arms.
+For `$c = 1` the TRUE arm is taken, so stdout is `a\n`; the block's trailing `1`
+returns `Int:1`.
+
+```perl
+# source
+my $c = 1; if ($c) { print "a\n" } else { print "b\n" } 1
+```
+
+```behavior
+stdout: a\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%sa = Constant("a\n") :Str
+%pa = Print(%sa) :Bool
+%sb = Constant("b\n") :Str
+%pb = Print(%sb) :Bool
+%c  = Constant(1) :Int
+return %c
+L: GREEN
+```
+
+## D1b void print in a false if arm (else arm fires)
+
+Bilateral to D1a: with `$c = 0` the FALSE (else) arm is taken, so its `print`
+fires and stdout is `b\n`; the block's trailing `1` returns `Int:1`. The TRUE
+arm's `print` is control-dependent on `Proj(true, 0)` and so emits nothing when
+the guard is false — the two Print nodes are each pinned to their own arm's Proj,
+proving the merge is genuine control flow and not a straight-line both-arms walk.
+
+```perl
+# source
+my $c = 0; if ($c) { print "a\n" } else { print "b\n" } 1
+```
+
+```behavior
+stdout: b\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%sa = Constant("a\n") :Str
+%pa = Print(%sa) :Bool
+%sb = Constant("b\n") :Str
+%pb = Print(%sb) :Bool
+%c  = Constant(1) :Int
+return %c
+L: GREEN
+```
+
+## D3f void print inside a loop body
+
+A `print` as the sole statement of a `foreach` body is a per-iteration void
+statement effect: it fires once per pass, control-pinned inside the loop, and the
+loop's trailing `1` returns `Int:1`. For `1..2` the body runs twice, so stdout is
+`x\nx\n`. (Unlike the if/else block, the loop body's control chain already
+threads a void print — this case is a bilateral acceptance guard that the
+loop-body effect path stays green alongside the if/else fix.)
+
+```perl
+# source
+for my $i (1..2) { print "x\n" } 1
+```
+
+```behavior
+stdout: x\nx\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%sx = Constant("x\n") :Str
+%px = Print(%sx) :Bool
+%c  = Constant(1) :Int
+return %c
+L: GREEN
+```
+
 ## D2 while loop
 
 A while loop requires a back-edge in the control-flow graph: a header block with
