@@ -969,9 +969,11 @@ L: GREEN
 ## T1 list-context ternary (t/base blocker: print $c ? "y" : "n")
 
 The dominant t/base assertion idiom `print $cond ? "ok N\n" : "not ok N\n"` — a
-ternary in LIST context as a print arg. The producer does not yet lower a
-list-context ternary. This case pins the t/base blocker; flip to GREEN when
-list-context ternary lowering lands.
+ternary in LIST context as a print arg. Each arm produces exactly ONE value (a
+single string), so the ternary lowers to a `TernaryExpr(%cond, %y, %n)` selecting
+the printed string — the same select shape as a scalar-context ternary. A
+list-context ternary whose arm produces a genuine multi-element list
+(`$c ? (1,2) : (3,4)`) still GAPs.
 
 ```perl
 # source
@@ -987,7 +989,15 @@ context: scalar
 ```
 
 ```ir
-L: GAP(list-context ternary not yet lowered — the t/base print-ternary assertion idiom)
+%c    = Constant(1) :Int
+%y    = Constant("y\n") :Str
+%n    = Constant("n\n") :Str
+%tern = TernaryExpr(%c, %y, %n) :Str
+%p    = Print(%tern) :Bool
+%one  = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
 ```
 
 ## T2 die inside a branch arm (t/base blocker: rs.t/term.t)
@@ -1058,7 +1068,10 @@ L: GAP(taken die aborts (lli exits 255); the equality harness cannot assert an a
 ## T3 cond_expr inside a loop body (t/base blocker: translate.t)
 
 A ternary (cond_expr) used inside a while-loop body — the translate.t blocker.
-Flip to GREEN when cond_expr-in-loop-body lowering lands.
+The loop body walker dispatches a `cond_expr` to the shared `_handle_cond_expr`
+(the same select construction the main walk uses) instead of GAPping, so the
+body's `$i > 1 ? 10 : 1` lowers to a `TernaryExpr` feeding the `$s` accumulator's
+back-edge Add. Sums `10 + 1 + 1 = 12` over the three passes ($i = 0, 1, 2).
 
 ```perl
 # source
@@ -1074,7 +1087,35 @@ context: scalar
 ```
 
 ```ir
-L: GAP(cond_expr inside a loop body not yet lowered)
+%c0i   = Constant(0) :Int
+%c0s   = Constant(0) :Int
+%c3    = Constant(3) :Int
+%c1    = Constant(1) :Int
+%c10   = Constant(10) :Int
+%one   = Constant(1) :Int
+%in    = Constant("$i") :Str
+%sn    = Constant("$s") :Str
+%vi    = VarDecl(%in, %c0i) :Int
+%vs    = VarDecl(%sn, %c0s) :Int
+%ri0   = PadAccess(%vi, "$i") :Int
+%rs0   = PadAccess(%vs, "$s") :Int
+%loop  = Loop(%vs)
+%i_phi = Phi(%ri0, region: %loop) :Int
+%s_phi = Phi(%rs0, region: %loop) :Int
+%cmp   = NumLt(%i_phi, %c3) :Bool
+%gt    = NumGt(%i_phi, %c1) :Bool
+%tern  = TernaryExpr(%gt, %c10, %one) :Int
+%s_new = Add(%s_phi, %tern) :Int
+%i_new = Add(%i_phi, %one) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+control: %vi -> %vs -> %loop
+loop_backedge: %i_phi -> %i_new
+loop_backedge: %s_phi -> %s_new
+branch_control: %loop -> %cmp
+L: GREEN
 ```
 
 ## T4 loop control (last) inside a loop body (t/base blocker: while.t)
