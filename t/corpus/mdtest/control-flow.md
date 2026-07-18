@@ -1120,8 +1120,16 @@ L: GREEN
 
 ## T4 loop control (last) inside a loop body (t/base blocker: while.t)
 
-A `last` statement inside a while-loop body — the while.t blocker. Flip to GREEN
-when loop-control (last/next) inside a loop body lowers.
+A `last if COND` at the head of a headless `while (1)` body — the while.t
+blocker. The `1` header folds away, so this conditional break IS the loop's
+continuation, negated: the loop runs while NOT COND. The producer hoists the
+`last`'s guard (`$i >= 3`, a NumGe) into the loop's continuation condition by
+negating the comparison (NumLt over the same operands, wired to the Loop as its
+control edge) and continues the body walk on the false (continue) arm. The result
+is the ordinary single-exit Loop/Phi/Proj/Region shape the backend already
+lowers — no new multi-exit loop model. Loop runs `$i` = 0,1,2 accumulating `$s` =
+0+1+2 = 3, then the negated header `$i < 3` fails at `$i` = 3. Was a producer GAP
+("loop control (last) inside a loop body not yet lowered"); now lowers to Int:3.
 
 ```perl
 # source
@@ -1137,7 +1145,97 @@ context: scalar
 ```
 
 ```ir
-L: GAP(loop control (last) inside a loop body not yet lowered)
+%start = Start()
+%c0    = Constant(0) :Int
+%c1    = Constant(1) :Int
+%c3    = Constant(3) :Int
+%loop  = Loop(%start)
+%s_phi = Phi(%c0, region: %loop) :Int
+%i_phi = Phi(%c0, region: %loop) :Int
+%cmp   = NumLt(%i_phi, %c3) :Bool
+%s_new = Add(%s_phi, %i_phi) :Int
+%i_new = Add(%i_phi, %c1) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+control: %start -> %loop
+loop_backedge: %i_phi -> %i_new
+loop_backedge: %s_phi -> %s_new
+branch_control: %loop -> %cmp
+L: GREEN
+```
+
+## T4b last with an equality guard (bilateral: negation over NumEq, distinct count)
+
+Bilateral against T4: the `last if` guard is an EQUALITY (`$i == 4`, a NumEq),
+so the negated continuation is a NumNe over the SAME operands — proving the
+producer's comparison-negation table covers more than the NumGe/NumLt pair. The
+distinct exit value (4, not 3) makes the iteration count itself the check: the
+loop runs `$i` = 0,1,2,3 (four passes) accumulating `$s` = 0+1+2+3 = 6, then the
+negated header `$i != 4` fails at `$i` = 4. A wrong negation (or an off-by-one in
+where the exit fires) would give a different sum, so the value pins that the
+`last` takes effect at the correct control point — before the fifth `$s += $i`.
+
+```perl
+# source
+my $i = 0;
+my $s = 0;
+while (1) { last if $i == 4; $s += $i; $i++ }
+$s
+```
+
+```behavior
+return: 6
+context: scalar
+```
+
+```ir
+%start = Start()
+%c0    = Constant(0) :Int
+%c1    = Constant(1) :Int
+%c4    = Constant(4) :Int
+%loop  = Loop(%start)
+%s_phi = Phi(%c0, region: %loop) :Int
+%i_phi = Phi(%c0, region: %loop) :Int
+%cmp   = NumNe(%i_phi, %c4) :Bool
+%s_new = Add(%s_phi, %i_phi) :Int
+%i_new = Add(%i_phi, %c1) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+control: %start -> %loop
+loop_backedge: %i_phi -> %i_new
+loop_backedge: %s_phi -> %s_new
+branch_control: %loop -> %cmp
+L: GREEN
+```
+
+## T4c last not at the head of a loop body (loud GAP: bottom/mid-loop exit)
+
+A `last if COND` that is NOT the first body statement (`BODY; last if C`) is a
+bottom/mid-loop exit, not a header continuation. Hoisting its check to the loop
+top would reorder the exit test ahead of the statements that ran before it in
+source order — a miscompile. The producer refuses loudly instead. Flip to GREEN
+only when a genuine multi-exit loop model (a mid-body break edge to the loop
+exit, distinct from the header continuation) is built.
+
+```perl
+# source
+my $i = 0;
+my $s = 0;
+while (1) { $s += 10; last if $i >= 2; $i++ }
+$s
+```
+
+```behavior
+return: 30
+context: scalar
+```
+
+```ir
+L: GAP(last not at the head of a loop body not yet lowered)
 ```
 
 ## T5 direct no-arg named-sub call (t/ near-miss — simple form GREEN)
