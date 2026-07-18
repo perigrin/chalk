@@ -1334,10 +1334,13 @@ L: GAP(value-context ternary with a branch-guarded element store not yet lowered
 
 ## T9 statement-modifier inside an if/else arm (t/ blocker: untranslatable arm op)
 
-An if/else whose arm contains a statement modifier (`$x = 5 if $x < 10`) — the arm
-does not reach the join in a straight walk, so it currently GAPs (the "untranslatable
-op inside an arm" class). Flip to GREEN when a nested statement modifier inside a
-branch arm lowers.
+An if/else whose TRUE arm contains a statement modifier (`$x = 5 if $x < 10`). The
+modifier compiles to a void-context `and(COND, STORE)` — the arm walk hit that `and`
+op and stopped BEFORE the join (an "untranslatable op inside an arm" GAP). The fix
+recurses into the same void-context `and`/`or` pad-rebind merge the main walk uses:
+the modifier's guarded store becomes `TernaryExpr(COND, stored, prior)` for the
+rebound slot, so the arm reaches the join and its value merges into the outer
+if/else. With `$c = 1` the true arm runs and `$x < 10` holds, so `$x = 5`.
 
 ```perl
 # source
@@ -1353,5 +1356,13 @@ context: scalar
 ```
 
 ```ir
-L: GAP(untranslatable op inside an if/else arm (arm did not reach the join) not yet lowered)
+%c1    = Constant(1) :Int
+%x0    = Constant(0) :Int
+%c10   = Constant(10) :Int
+%lt    = NumLt(%x0, %c10) :Bool
+%c5    = Constant(5) :Int
+%mtern = TernaryExpr(%lt, %c5, %x0) :Int
+%otern = TernaryExpr(%c1, %mtern, %c1) :Int
+return %otern
+L: GREEN
 ```
