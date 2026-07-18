@@ -335,10 +335,13 @@ L: GREEN
 
 ## L6 string equality (eq) — t/base blocker (if.t/num.t string compare)
 
-The `eq` string-comparison operator lowers to a `StrEq` op the backend does not
-yet handle (only literal-arithmetic compares lower). The if.t/num.t assertions
-compare strings. Flip to GREEN when StrEq lowering lands (byte-compare of the two
-Str {ptr,len} buffers).
+The `eq` string-comparison operator lowers to a `StrEq` op: a byte-compare of the
+two Str {ptr,len} buffers. Equality = same length AND memcmp==0. StrEq yields a
+Bool (i1) that the ternary condition selects on. The if.t/num.t assertions compare
+strings; this is the blocker they hit. The `my $a=..; my $b=..` operands
+propagate to Str constants (perl folds the pad reads), leaving a genuine StrEq
+node on distinct constants — perl folds `"x" eq "x"` outright only when BOTH sides
+are literal in the same op, which is why the pad form keeps the compare.
 
 ```perl
 # source
@@ -353,14 +356,80 @@ context: scalar
 ```
 
 ```ir
-L: GAP(op=StrEq not lowered — string comparison not in the literal-arithmetic slice)
+%ax = Constant("x") :Str
+%bx = Constant("x") :Str
+%eq = StrEq(%ax, %bx) :Bool
+%t  = Constant(1) :Int
+%f  = Constant(0) :Int
+%r  = TernaryExpr(%eq, %t, %f) :Int
+return %r
+L: GREEN
+```
+
+## L6b string equality — unequal same-length (eq is false)
+
+Bilateral against L6: two DIFFERENT single-char strings. Same length, differing
+bytes, so the memcmp is nonzero and `eq` is false — the ternary selects the false
+arm (0). This proves the memcmp leg is real, not a constant-true.
+
+```perl
+# source
+my $a = "x";
+my $b = "y";
+($a eq $b) ? 1 : 0
+```
+
+```behavior
+return: 0
+context: scalar
+```
+
+```ir
+%ax = Constant("x") :Str
+%by = Constant("y") :Str
+%eq = StrEq(%ax, %by) :Bool
+%t  = Constant(1) :Int
+%f  = Constant(0) :Int
+%r  = TernaryExpr(%eq, %t, %f) :Int
+return %r
+L: GREEN
+```
+
+## L6c string equality — different length (length guard, eq is false)
+
+Bilateral against L6: "ab" vs "abc" — DIFFERENT lengths. The length guard
+short-circuits to false BEFORE any memcmp (a memcmp of len_a bytes over the shorter
+buffer would over-read). `eq` is false, ternary selects 0. This proves the length
+guard gates the memcmp.
+
+```perl
+# source
+my $a = "ab";
+my $b = "abc";
+($a eq $b) ? 1 : 0
+```
+
+```behavior
+return: 0
+context: scalar
+```
+
+```ir
+%aab  = Constant("ab") :Str
+%babc = Constant("abc") :Str
+%eq   = StrEq(%aab, %babc) :Bool
+%t    = Constant(1) :Int
+%f    = Constant(0) :Int
+%r    = TernaryExpr(%eq, %t, %f) :Int
+return %r
+L: GREEN
 ```
 
 ## L7 string inequality (ne) — t/base blocker
 
-The `ne` operator lowers to `StrNe`, the negation of StrEq — same backend gap.
-Bilateral with L6: L6 tests eq of equal strings, L7 tests ne of DIFFERENT strings
-(both true). Flip to GREEN when StrNe lowering lands.
+The `ne` operator lowers to `StrNe`, the negation of StrEq — same byte-compare,
+result xored with 1. Bilateral with L6: L6 tests eq of equal strings, L7 tests ne
+of DIFFERENT strings (both true).
 
 ```perl
 # source
@@ -375,7 +444,43 @@ context: scalar
 ```
 
 ```ir
-L: GAP(op=StrNe not lowered — string comparison not in the literal-arithmetic slice)
+%ax = Constant("x") :Str
+%by = Constant("y") :Str
+%ne = StrNe(%ax, %by) :Bool
+%t  = Constant(1) :Int
+%f  = Constant(0) :Int
+%r  = TernaryExpr(%ne, %t, %f) :Int
+return %r
+L: GREEN
+```
+
+## L7b string inequality — equal strings (ne is false)
+
+Bilateral against L7: two EQUAL strings, so `ne` is false (StrEq true, xored to
+false) and the ternary selects the false arm (0). This proves the xor negation is
+real, not a constant-true.
+
+```perl
+# source
+my $a = "x";
+my $b = "x";
+($a ne $b) ? 1 : 0
+```
+
+```behavior
+return: 0
+context: scalar
+```
+
+```ir
+%ax = Constant("x") :Str
+%bx = Constant("x") :Str
+%ne = StrNe(%ax, %bx) :Bool
+%t  = Constant(1) :Int
+%f  = Constant(0) :Int
+%r  = TernaryExpr(%ne, %t, %f) :Int
+return %r
+L: GREEN
 ```
 
 ## L8 void call in an `and` arm — t/ near-miss (simple form GREEN)

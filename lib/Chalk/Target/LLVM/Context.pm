@@ -328,6 +328,9 @@ sub lower_value {
         || $op eq 'NumEq' || $op eq 'NumNe') {
         return $self->_lower_icmp_int($node);
     }
+    elsif ($op eq 'StrEq' || $op eq 'StrNe') {
+        return $self->_lower_str_compare($node, $op eq 'StrEq');
+    }
     elsif ($op eq 'Not') {
         return $self->_lower_not($node);
     }
@@ -1503,6 +1506,84 @@ sub _lower_icmp_int {
     $self->_emit("  $ref = icmp $pred i64 $lhs_ref, $rhs_ref  ; $op(Bool) -> i1 icmp $pred");
     $self->{cache}{$node->id} = $ref;
     return $ref;
+}
+
+# ---------------------------------------------------------------------------
+# String comparison: StrEq (eq) and StrNe (ne).
+#
+# A Str value in this backend is {ptr (i8*), len} — the byte-length tracked in
+# _str_len_table keyed by the ptr's SSA ref (the same accessor Concat and the
+# regex slices use). String equality is: same length AND memcmp(a, b, len) == 0.
+# The length guard must gate the memcmp — memcmp reads len_a bytes from BOTH
+# buffers, so calling it when the lengths differ would over-read the shorter
+# one. So a branch, not a select (a select evaluates both arms):
+#
+#   entry:      len_eq = icmp eq i64 len_a, len_b
+#               br i1 len_eq, %cmp, %end     ; unequal length -> not equal
+#   cmp:        m = call i32 @memcmp(a, b, len_a)
+#               bytes_eq = icmp eq i32 m, 0
+#               br %end
+#   end:        equal = phi i1 [ false, %entry ], [ bytes_eq, %cmp ]
+#
+# StrEq returns `equal`; StrNe returns `xor i1 equal, true` (the negation).
+# Both yield an i1 (Bool repr), consumed by the ternary condition / return.
+# ---------------------------------------------------------------------------
+sub _lower_str_compare {
+    my ($self, $node, $is_eq) = @_;
+
+    my $op = $node->operation;
+    my $repr = $node->representation;
+    if (defined $repr && $repr eq 'Scalar') {
+        die "GAP: $op with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+    }
+
+    my $inputs  = $node->inputs;
+    my $lhs_ref = $self->lower_value($inputs->[0]);
+    my $rhs_ref = $self->lower_value($inputs->[1]);
+
+    # Both operand lengths must be tracked; a Str with no recorded length can't
+    # be compared byte-exact (an untracked length would make the len guard and
+    # the memcmp size guesses). GAP loudly rather than emit a wrong-size memcmp.
+    my $len_a = $self->_str_len_for($lhs_ref)
+        // die "GAP: $op cannot lower — lhs operand length not tracked in "
+             . "_str_len_table (ptr=$lhs_ref). String compare needs both {ptr,len}.";
+    my $len_b = $self->_str_len_for($rhs_ref)
+        // die "GAP: $op cannot lower — rhs operand length not tracked in "
+             . "_str_len_table (ptr=$rhs_ref). String compare needs both {ptr,len}.";
+
+    $self->{_need_memcmp} = 1;
+
+    my $entry_label = $self->_current_block_label;
+    my $len_eq = $self->_fresh;
+    $self->_emit("  $len_eq = icmp eq i64 $len_a, $len_b  ; $op: same length?");
+
+    my $cmp_label = $self->_fresh_label('streq.cmp.');
+    my $end_label = $self->_fresh_label('streq.end.');
+    $self->_set_terminator("  br i1 $len_eq, label %$cmp_label, label %$end_label  ; $op: length guard gates memcmp");
+
+    # cmp block: lengths equal, byte-compare.
+    $self->_new_block($cmp_label);
+    my $memcmp_res = $self->_fresh;
+    my $bytes_eq   = $self->_fresh;
+    $self->_emit("  $memcmp_res = call i32 \@memcmp(i8* nocapture readonly $lhs_ref, i8* nocapture readonly $rhs_ref, i64 $len_a)  ; $op: byte compare");
+    $self->_emit("  $bytes_eq = icmp eq i32 $memcmp_res, 0  ; $op: bytes equal?");
+    my $cmp_end_label = $self->_current_block_label;   # memcmp emits no blocks; == $cmp_label
+    $self->_set_terminator("  br label %$end_label  ; $op: cmp falls through to end");
+
+    # end block: phi. Length-mismatch path is false; byte path carries bytes_eq.
+    $self->_new_block($end_label);
+    my $equal = $self->_fresh;
+    $self->_emit("  $equal = phi i1 [ false, %$entry_label ], [ $bytes_eq, %$cmp_end_label ]  ; $op: equal?");
+
+    my $result = $equal;
+    unless ($is_eq) {
+        # StrNe = negation of equality (xor i1 equal, true).
+        $result = $self->_fresh;
+        $self->_emit("  $result = xor i1 $equal, true  ; StrNe: negate equality");
+    }
+
+    $self->{cache}{$node->id} = $result;
+    return $result;
 }
 
 sub _lower_ternary {
