@@ -332,3 +332,81 @@ return %nb
 control: %vd
 L: GREEN
 ```
+
+## L6 string equality (eq) — t/base blocker (if.t/num.t string compare)
+
+The `eq` string-comparison operator lowers to a `StrEq` op the backend does not
+yet handle (only literal-arithmetic compares lower). The if.t/num.t assertions
+compare strings. Flip to GREEN when StrEq lowering lands (byte-compare of the two
+Str {ptr,len} buffers).
+
+```perl
+# source
+my $a = "x";
+my $b = "x";
+($a eq $b) ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+L: GAP(op=StrEq not lowered — string comparison not in the literal-arithmetic slice)
+```
+
+## L7 string inequality (ne) — t/base blocker
+
+The `ne` operator lowers to `StrNe`, the negation of StrEq — same backend gap.
+Bilateral with L6: L6 tests eq of equal strings, L7 tests ne of DIFFERENT strings
+(both true). Flip to GREEN when StrNe lowering lands.
+
+```perl
+# source
+my $a = "x";
+my $b = "y";
+($a ne $b) ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+L: GAP(op=StrNe not lowered — string comparison not in the literal-arithmetic slice)
+```
+
+## L8 void call in an `and` arm — t/ near-miss (simple form GREEN)
+
+`EXPR and (print ...)` — the low-precedence `and` form of the `&&`-arm void print
+(I7). The SIMPLE form already lowers (the arm print is effect-threaded on the taken
+control path). The t/ files hit a harder variant (an `and` arm that combines a
+void call with a scalar rebind — the 2b-3 mixed-effect GAP), which still GAPs.
+This case locks the working simple form.
+
+```perl
+# source
+my $c = 1;
+$c and (print "y\n");
+1
+```
+
+```behavior
+stdout: y
+return: 1
+context: scalar
+```
+
+```ir
+%c      = Constant(1) :Int
+%if     = If(%c) :Control
+%pt     = Proj(%if, index: 0) :Control
+%msg    = Constant("y\n") :Str
+%print  = Print(%pt, %msg) :Bool
+%region = Region(%if, %print) :Control
+%one    = Constant(1) :Int
+return %one
+L: GREEN
+```

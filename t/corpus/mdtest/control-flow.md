@@ -965,3 +965,117 @@ context: scalar
 return %sum
 L: GREEN
 ```
+
+## T1 list-context ternary (t/base blocker: print $c ? "y" : "n")
+
+The dominant t/base assertion idiom `print $cond ? "ok N\n" : "not ok N\n"` — a
+ternary in LIST context as a print arg. The producer does not yet lower a
+list-context ternary. This case pins the t/base blocker; flip to GREEN when
+list-context ternary lowering lands.
+
+```perl
+# source
+my $c = 1;
+print $c ? "y\n" : "n\n";
+1
+```
+
+```behavior
+stdout: y
+return: 1
+context: scalar
+```
+
+```ir
+L: GAP(list-context ternary not yet lowered — the t/base print-ternary assertion idiom)
+```
+
+## T2 die inside a branch arm (t/base blocker: rs.t/term.t)
+
+A `die` statement inside an if/else arm — the rs.t / term.t blocker. The producer
+does not yet lower `die` in a branch arm. Flip to GREEN when die-in-arm lowering
+lands (needs the die effect threaded on the arm control path).
+
+```perl
+# source
+my $c = 0;
+if ($c) { die "boom\n" } else { 1 }
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+L: GAP(die inside a branch arm not yet lowered)
+```
+
+## T3 cond_expr inside a loop body (t/base blocker: translate.t)
+
+A ternary (cond_expr) used inside a while-loop body — the translate.t blocker.
+Flip to GREEN when cond_expr-in-loop-body lowering lands.
+
+```perl
+# source
+my $i = 0;
+my $s = 0;
+while ($i < 3) { $s += ($i > 1 ? 10 : 1); $i++ }
+$s
+```
+
+```behavior
+return: 12
+context: scalar
+```
+
+```ir
+L: GAP(cond_expr inside a loop body not yet lowered)
+```
+
+## T4 loop control (last) inside a loop body (t/base blocker: while.t)
+
+A `last` statement inside a while-loop body — the while.t blocker. Flip to GREEN
+when loop-control (last/next) inside a loop body lowers.
+
+```perl
+# source
+my $i = 0;
+my $s = 0;
+while (1) { last if $i >= 3; $s += $i; $i++ }
+$s
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+L: GAP(loop control (last) inside a loop body not yet lowered)
+```
+
+## T5 direct no-arg named-sub call (t/ near-miss — simple form GREEN)
+
+A direct call to a named sub with no args. The SIMPLE form already lowers (the
+callee is resolved and inlined). The t/ files hit the HARDER variant — a call to
+`main::is` (Test::More) with no resolvable callee graph, or an arg-passing call —
+which still GAPs. This case locks the working simple form.
+
+```perl
+# source
+sub helper { 42 }
+my $x = helper();
+$x
+```
+
+```behavior
+return: 42
+context: scalar
+```
+
+```ir
+%call   = Call(dispatch_kind: "direct", name: "main::helper") :Int
+return %call
+L: GREEN
+```
