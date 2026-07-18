@@ -1267,8 +1267,15 @@ L: GREEN
 
 Round 1 (T4) handled a HEAD-of-body `last if` (hoistable as a negated loop header).
 A `last` deeper in the body (`BODY; last if C`) is a bottom/mid-loop exit — hoisting
-its check to the header would reorder it ahead of earlier body statements. Currently
-a loud GAP; flip to GREEN when mid-body loop-exit control-flow lands.
+its check to the header would reorder it ahead of earlier body statements. The
+producer builds a MID-BODY `If(C)` at the `last`'s position: its TRUE Proj routes to
+the loop's exit edge (reusing the loop's own exit Proj/Region — the same single-exit
+Region a header-false exit lands on), its FALSE Proj continues the body. Sound only
+when the exit value reads a header Phi at the break point (here `$s` is unmodified
+before the `last`, so both exit paths carry `%s_phi`); a value mutated before the
+`last` and read post-loop is the multi-exit merge case and stays a loud GAP. Loop
+runs `$i` = 1 (last? no, `$s`=0+1=1), `$i` = 2 (last? no, `$s`=1+2=3), `$i` = 3 (last
+YES → exit before `$s += 3`), so `$s` = 3.
 
 ```perl
 # source
@@ -1284,14 +1291,40 @@ context: scalar
 ```
 
 ```ir
-L: GAP(last not at the head of a loop body not yet lowered — mid/bottom-loop exit)
+%start = Start()
+%c0    = Constant(0) :Int
+%c1    = Constant(1) :Int
+%c3    = Constant(3) :Int
+%c5    = Constant(5) :Int
+%loop  = Loop(%start)
+%i_phi = Phi(%c0, region: %loop) :Int
+%s_phi = Phi(%c0, region: %loop) :Int
+%cmp   = NumLt(%i_phi, %c5) :Bool
+%i_new = Add(%i_phi, %c1) :Int
+%brk   = NumEq(%i_new, %c3) :Bool
+%if    = If(%brk)
+%s_new = Add(%s_phi, %i_new) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+control: %start -> %loop
+loop_backedge: %i_phi -> %i_new
+loop_backedge: %s_phi -> %s_new
+branch_control: %loop -> %cmp
+L: GREEN
 ```
 
 ## T7 next inside a loop body (t/ blocker: loop control next)
 
-`next` continues to the next iteration (a control edge to the loop header/continue
-block). Round 1 handled `last` at the head; `next` is unhandled. Flip to GREEN when
-`next` (continue-edge) lowering lands.
+`next` continues to the next iteration — it skips the REST of the body this pass.
+`next if C` at position P is exactly `if (!C) { REST-OF-BODY }`: the remaining body
+statements run only when the guard is NOT taken, and the back-edge is unchanged. So
+the producer lowers it as a mid-body `If(C)` whose FALSE Proj runs the rest of the
+body (`$s += $i`) and whose TRUE Proj is empty (skip to the back-edge); `merge()`
+Regions the two arms and Phis the accumulator into the back-edge. No loop-control
+edge is needed — a `next` is a guard on the remainder, not a control transfer. Over
+`$i` = 1,2,3 with `$i == 2` skipped, `$s` = 1 + 3 = 4.
 
 ```perl
 # source
@@ -1306,7 +1339,27 @@ context: scalar
 ```
 
 ```ir
-L: GAP(loop control (next) inside a loop body not yet lowered)
+%start = Start()
+%c0    = Constant(0) :Int
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%c4    = Constant(4) :Int
+%loop  = Loop(%start)
+%i_phi = Phi(%c1, region: %loop) :Int
+%s_phi = Phi(%c0, region: %loop) :Int
+%cont  = NumGt(%c4, %i_phi) :Bool
+%skip  = NumEq(%i_phi, %c2) :Bool
+%if    = If(%skip)
+%s_add = Add(%s_phi, %i_phi) :Int
+%i_new = Add(%i_phi, %c1) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %s_phi
+control: %start -> %loop
+loop_backedge: %i_phi -> %i_new
+branch_control: %loop -> %cont
+L: GREEN
 ```
 
 ## T8 value-context ternary with a branch-guarded element store (t/ blocker)

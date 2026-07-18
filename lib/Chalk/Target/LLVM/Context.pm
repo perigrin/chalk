@@ -2579,7 +2579,20 @@ sub _process_branch_from_if {
     # Find the Proj node for this branch: it is a consumer of the If node
     # with index == branch_idx.
     my $proj = _find_proj_consumer($if_node, $branch_idx);
+
+    # A mid-body `last` break arm: this arm's Proj feeds the enclosing loop's
+    # exit Region. The arm leaves the loop -- terminate with a branch to the
+    # loop's exit block (NOT the If merge), mirroring the die-arm's non-rejoining
+    # terminator. The exit block reads the loop's header phis. Checked before the
+    # no-body early return so an empty break arm (`last if C` with nothing after)
+    # is handled too.
+    my $break_exit = defined $proj ? $self->_arm_loop_exit_label($proj) : undef;
+
     unless (defined $proj) {
+        if (defined $break_exit) {
+            $self->_set_terminator("  br label %$break_exit  ; if branch $branch_idx: mid-body last -> loop exit");
+            return;
+        }
         # No body for this branch — just jump to merge.
         $self->_set_terminator("  br label %$merge_label  ; if branch $branch_idx: no body, jump to merge");
         return;
@@ -2605,7 +2618,33 @@ sub _process_branch_from_if {
         return;
     }
 
+    # Mid-body `last` break arm (Proj feeds the enclosing loop's exit Region):
+    # branch to the loop exit instead of the merge (see the early-return note).
+    if (defined $break_exit) {
+        $self->_set_terminator("  br label %$break_exit  ; if branch $branch_idx: mid-body last -> loop exit");
+        return;
+    }
+
     $self->_set_terminator("  br label %$merge_label  ; if branch $branch_idx: jump to merge");
+}
+
+# _arm_loop_exit_label($proj) -> the loop.exit label if this If-arm Proj feeds
+# the enclosing loop's exit Region (a mid-body `last`), else undef. The producer
+# adds the break arm's Proj as an input of the loop's exit Region, so the Proj's
+# Region consumer whose id matches the top-of-stack loop context is the exit.
+sub _arm_loop_exit_label {
+    my ($self, $proj) = @_;
+    my $stack = $self->{_loop_ctx_stack};
+    return undef unless $stack && @$stack;
+    my $ctx = $stack->[-1];
+    my $exit_id = $ctx->{exit_region_id};
+    return undef unless defined $exit_id;
+    for my $c (($proj->consumers // [])->@*) {
+        next unless defined $c && ref($c) && $c->can('operation');
+        next unless $c->operation eq 'Region';
+        return $ctx->{exit_label} if $c->id eq $exit_id;
+    }
+    return undef;
 }
 
 # _find_unwind_consumer($proj) -> the Unwind node whose control is $proj, or
@@ -2655,6 +2694,11 @@ sub _process_loop_node {
     my $header_label    = $self->_fresh_label('loop.header.');
     my $body_label      = $self->_fresh_label('loop.body.');
     my $exit_label      = $self->_fresh_label('loop.exit.');
+
+    # The loop's exit Region (its consumers are the exit-Phi merge for a mid-body
+    # `last`; its id identifies "the block that routes to this loop's exit" for
+    # the loop-context stack below).
+    my $exit_region = $loop_node->region;
 
     # ---- Lower init values in the preheader block ----
     # Each loop phi's inputs[0] is the initial value. Lower it NOW (while still
@@ -2742,8 +2786,18 @@ sub _process_loop_node {
     # Save pre-body var_table for collecting backedge updates.
     my %pre_body_vars = %{ $self->{var_table} };
 
+    # Loop context for a mid-body `last`: a nested If whose taken arm's Proj
+    # feeds THIS loop's exit Region branches to the exit block (not the If
+    # merge). _process_branch_from_if consults the top of this stack. Push
+    # before the body walk, pop after (nested loops stack).
+    my $exit_region_id = defined $exit_region ? $exit_region->id : undef;
+    push @{ $self->{_loop_ctx_stack} //= [] },
+        { exit_label => $exit_label, exit_region_id => $exit_region_id };
+
     # Process the body: VarDecl/Assign nodes reachable from the body Proj.
     $self->_process_loop_body($loop_node, $header_label);
+
+    pop @{ $self->{_loop_ctx_stack} };
 
     # Collect the backedge values for each phi.
     my %body_vars = %{ $self->{var_table} };
@@ -2786,26 +2840,28 @@ sub _process_loop_node {
     # ---- Exit block ----
     $self->_new_block($exit_label);
 
-    # The loop-exit block's SOLE predecessor is the loop header (the
-    # false-condition branch). A Phi attached to the exit Region would be a
-    # then/else-shaped 2-arm merge naming body-end/preheader — neither
-    # branches to the exit block — i.e. structurally invalid. Loop-carried
-    # values flow through the HEADER phis (which the body and post-loop reads
-    # consume directly), so no real producer attaches an exit-Region phi.
-    # If one ever appears, fail loudly rather than emit broken IR (019eb6ff
-    # item 2): a single-predecessor merge needs no phi — read the header phi.
-    my $exit_region = $loop_node->region;
+    # A single-exit loop's exit block has ONE predecessor (the header's
+    # false-condition branch), so loop-carried values flow through the HEADER
+    # phis and no exit-Region phi is needed. A MID-BODY `last` makes the exit
+    # a real 2-way merge (header-false OR break); its exit Region carries a Phi
+    # per slot that DIFFERS between the two paths. Such a Phi is:
+    #   - DEAD (no live consumer): the differing slot is not read post-loop (the
+    #     common `last` that only breaks); the producer attaches it defensively
+    #     and it DCEs away. Skip it silently.
+    #   - LIVE (has a consumer): a slot rebound before the break AND read after
+    #     the loop -- a genuine multi-exit value merge, not yet lowered. Fail
+    #     loudly (GAP, not miscompile).
     if (defined $exit_region) {
-        my @exit_phis = grep {
+        my @live_exit_phis = grep {
             defined $_ && ref($_) && $_->can('operation') && $_->operation eq 'Phi'
                 && !exists $self->{cache}{ $_->id }
+                && _phi_has_live_consumer($_)
         } ($exit_region->consumers // [])->@*;
         die "GAP: loop-exit Region (id=" . $exit_region->id . ") has "
-          . scalar(@exit_phis) . " Phi consumer(s) — the exit block's single "
-          . "predecessor is the loop header, so a loop-carried value is the "
-          . "header phi itself, not an exit-merge phi. Read the header phi "
-          . "instead of attaching a Phi to the exit Region."
-            if @exit_phis;
+          . scalar(@live_exit_phis) . " LIVE Phi consumer(s) — a slot rebound "
+          . "before a mid-body `last` and read post-loop is a multi-exit value "
+          . "merge (the two exit paths disagree), not yet lowered."
+            if @live_exit_phis;
     }
 
     # Update var_table with the final values (from exit path = body_vars at
@@ -2909,6 +2965,18 @@ sub _process_loop_body {
 # has no repr and no lowerable init) and instead threads through the memory
 # scheduler: the post-loop read whose memory input IS this Phi loads the merged
 # heap (see _lower_subscript's Phi-memory path).
+# A Phi is LIVE if any node consumes its value. An exit-Region Phi built for a
+# mid-body `last`'s differing slot is DEAD (no consumer) when that slot is not
+# read post-loop -- the producer attaches it defensively so a genuine post-loop
+# read (a live consumer) surfaces as a loud multi-exit GAP instead of a
+# miscompile. Distinguishes the common break-only `last` (dead) from the
+# unsupported multi-exit value merge (live).
+sub _phi_has_live_consumer {
+    my ($phi) = @_;
+    my $consumers = $phi->consumers // [];
+    return scalar(grep { defined $_ && ref($_) } @$consumers) > 0;
+}
+
 sub _collect_loop_phis {
     my ($loop_node) = @_;
     my @phis;
