@@ -852,6 +852,13 @@ my %_COMPUTED_REPR = (
     # (`return X if C`, `E // return X`) reaches the backend as a Region+Phi over
     # the exit values, which the backend cannot lower without an explicit repr.
     Phi => 'join', TernaryExpr => 'join',
+    # And (&&) / Or (||) RETURN ONE OF THEIR OPERANDS (`$a && $b` is $a or $b, not a
+    # fresh boolean), so the result repr is the operands' -- and both operands must
+    # share a machine type for the backend's merge phi. The 'same' rule requires the
+    # two operand reprs to agree and yields that repr. This types Bool && Bool -> Bool
+    # (a comparison guard && a print, the cond.t idiom) as well as Int && Int -> Int
+    # -- unlike 'join', which cannot widen Bool (it has no _REPR_RANK).
+    And => 'same', Or => 'same',
     Add => 'join', Subtract => 'join', Multiply => 'join', Negate => 'join',
     Divide => 'Num', Power => 'Num', Modulo => 'Int',
     BitAnd => 'Int', BitOr => 'Int', BitXor => 'Int',
@@ -1044,7 +1051,7 @@ sub _propagate_computed_reprs ($graphs) {
                 }
 
                 my $rule = $_COMPUTED_REPR{$op} // next;
-                if ($rule ne 'join') {
+                if ($rule ne 'join' && $rule ne 'same') {
                     $node->set_representation($rule);
                     $changed = 1;
                     next;
@@ -1052,6 +1059,16 @@ sub _propagate_computed_reprs ($graphs) {
                 my @in = grep { defined && blessed($_) } $node->inputs->@*;
                 my @reprs = map { $_->representation } @in;
                 next if grep { !defined } @reprs;          # an input still untyped
+                if ($rule eq 'same') {
+                    # And/Or: the result IS one operand, so both must share a repr.
+                    # Leave untyped (the backend GAPs loudly) on a genuine mismatch
+                    # rather than guess a widened type the merge phi can't express.
+                    my %uniq = map { $_ => 1 } @reprs;
+                    next unless keys %uniq == 1;
+                    $node->set_representation($reprs[0]);
+                    $changed = 1;
+                    next;
+                }
                 next if grep { !exists $_REPR_RANK{$_} } @reprs;
                 my ($widest) = sort { $_REPR_RANK{$b} <=> $_REPR_RANK{$a} } @reprs;
                 $node->set_representation($widest);

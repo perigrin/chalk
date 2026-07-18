@@ -288,6 +288,71 @@ return %c
 L: GREEN
 ```
 
+## L5d last-statement `&&` with a print arm (Bool operands, WANT=0)
+
+The cond.t idiom: `EXPR && (print ...)` as the LAST statement of the block, so its
+value is the block's RETURN (OPf_WANT=0, NOT OPf_WANT_VOID). Unlike L5 (which has a
+trailing `1`, making the `&&` a mid-body VOID statement that the producer lowers to
+control flow), the last-statement form is lowered as a value-returning `And` node
+whose operands are BOTH Bool (the `StrEq` guard and the `Print`, which returns a
+`builtin::is_bool` boolean).
+
+`$x eq $x` is always true, so the `&&` reaches the print arm: stdout is `y\n`. Perl
+`A && B` returns B when A is truthy, so the block returns the print's Bool `1`. The
+backend expands `And` into short-circuit br+phi: the Bool LHS is already the i1 branch
+condition (its truthiness is the identity, no `icmp ne i64`), the print fires only on
+the truthy branch, and the i1 phi merges the two Bool operands. (t/base/cond.t.)
+
+```perl
+# source
+my $x = "a"; $x eq $x && (print "y\n")
+```
+
+```behavior
+stdout: y\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%xa = Constant("a") :Str
+%eq = StrEq(%xa, %xa) :Bool
+%s0 = Constant("y\n") :Str
+%p  = Print(%s0) :Bool
+%r  = And(%eq, %p) :Bool
+return %r
+L: GREEN
+```
+
+## L5e last-statement `||` with a print arm (Bool operands, WANT=0)
+
+Bilateral `||` polarity of L5d, matching cond.t's actual last line (`$x != $x ||
+(print ...)`). `$x ne $x` is always FALSE, so `||` short-circuits to the RIGHT arm and
+the print fires: stdout is `y\n`. Perl `A || B` returns B when A is falsy, so the
+block returns the print's Bool `1`. The backend `Or` br+phi tests the Bool LHS
+directly (i1 truthiness = identity) and merges an i1 phi.
+
+```perl
+# source
+my $x = "a"; $x ne $x || (print "y\n")
+```
+
+```behavior
+stdout: y\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%xa = Constant("a") :Str
+%ne = StrNe(%xa, %xa) :Bool
+%s0 = Constant("y\n") :Str
+%p  = Print(%s0) :Bool
+%r  = Or(%ne, %p) :Bool
+return %r
+L: GREEN
+```
+
 ## L4 not
 
 Perl `!` returns a genuine BOOLEAN: `!5` is `false`, `!0` is `true`. These are

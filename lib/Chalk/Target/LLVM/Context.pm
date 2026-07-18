@@ -1785,6 +1785,58 @@ sub _lower_ternary {
 # in the RHS only happen if the test takes the rhs branch).
 # ---------------------------------------------------------------------------
 
+# _shortcircuit_i1_cond: emit the i1 branch condition for an And/Or LHS given
+# its representation, and validate the operand repr for the short-circuit path.
+#
+# Int truthiness is `icmp ne i64 %v, 0`. Bool is already an i1 (a comparison
+# result, a `!`, or a print's builtin::is_bool return) — its truthiness is the
+# identity, so we branch on the value directly with no extra instruction. Any
+# other repr (Num, Str, ...) is a loud GAP: reinterpreting a double/i8* as i64
+# would miscompile. $op_tag ('And'/'Or') and $side ('LHS'/'RHS') name the GAP.
+sub _shortcircuit_i1_cond {
+    my ($self, $ref, $repr, $op_tag, $side) = @_;
+    my $sym = $op_tag eq 'And' ? '&&' : '||';
+    unless (defined $repr) {
+        die "GAP: $op_tag ($sym) $side operand has no representation at lowering time (G.7/F8). "
+          . "Fix TypeInference to annotate the operand.";
+    }
+    if ($repr eq 'Int') {
+        my $cond = $self->_fresh;
+        $self->_emit("  $cond = icmp ne i64 $ref, 0  ; $op_tag: test $side truthiness (Int)");
+        return $cond;
+    }
+    if ($repr eq 'Bool') {
+        # Already an i1 — the value IS the branch condition.
+        return $ref;
+    }
+    die "GAP: $op_tag ($sym) $side operand has repr=$repr; only Int and Bool truthiness are "
+      . "lowered runtime-free (G.7/F8). Insert an explicit Coerce(*->Bool) node before the "
+      . "$op_tag, or fix TypeInference.";
+}
+
+# _shortcircuit_phi_repr: pick the repr (hence LLVM type) for the merge phi of an
+# And/Or. `A && B` returns one of its operands, so the phi's arms are the two
+# operand refs and its type must be a single machine type both arms share.
+#
+# The And/Or node's own repr is often unannotated for the short-circuit form
+# (`$x eq $x && print ...`), so we derive the phi type from the operands: if both
+# operands share a repr, use it; if the node itself carries a concrete repr, trust
+# it. A genuine mismatch (Int LHS, Bool RHS) can't phi over two machine types —
+# GAP loudly rather than emit invalid IR.
+sub _shortcircuit_phi_repr {
+    my ($self, $node_repr, $lhs_repr, $rhs_repr, $op_tag) = @_;
+    my $sym = $op_tag eq 'And' ? '&&' : '||';
+    if (defined $lhs_repr && defined $rhs_repr && $lhs_repr eq $rhs_repr) {
+        return $lhs_repr;
+    }
+    # Operands disagree: fall back to a concrete node repr if one exists.
+    return $node_repr if defined $node_repr && $node_repr ne 'Scalar';
+    die "GAP: $op_tag ($sym) operands have mismatched reprs (LHS="
+      . (defined $lhs_repr ? $lhs_repr : 'undef') . ", RHS="
+      . (defined $rhs_repr ? $rhs_repr : 'undef') . "); a merge phi needs one shared "
+      . "machine type. Insert a Coerce so both operands share a repr, or fix TypeInference.";
+}
+
 sub _lower_and {
     my ($self, $node) = @_;
 
@@ -1797,42 +1849,17 @@ sub _lower_and {
     my $lhs_node = $inputs->[0];
     my $rhs_node = $inputs->[1];
 
-    # Validate LHS repr: only Int operands use the icmp ne i64 truthiness path.
-    # G.7/F8: die loudly on non-Int operands instead of silently reinterpreting
-    # Bool(i1) or Num(double) as i64 (which would miscompile).
+    # Validate operand reprs: Int (icmp ne i64) and Bool (already i1) both lower
+    # runtime-free. `$x eq $y && (print ...)` is Bool && Bool (a comparison guard
+    # and a print's builtin::is_bool return) — the cond.t idiom. Any other repr is
+    # a loud GAP (see _shortcircuit_i1_cond).
     my $lhs_repr = $lhs_node->representation;
-    unless (defined $lhs_repr) {
-        die "GAP: And (&&) LHS operand has no representation at lowering time (G.7/F8). "
-          . "Fix TypeInference to annotate the operand.";
-    }
-    unless ($lhs_repr eq 'Int') {
-        die "GAP: And (&&) LHS operand has repr=$lhs_repr; only Int truthiness is lowered "
-          . "runtime-free via icmp ne i64 (G.7/F8). "
-          . "Insert an explicit Coerce(*->Bool) node before the And, or fix TypeInference.";
-    }
-
-    # I2: Validate RHS repr identically to LHS.
-    # A non-Int RHS would cause the phi to mix i64 with i1/double = invalid LLVM.
-    # The phi type is derived from the And node's repr (Int); merging a non-Int RHS
-    # ref into an Int phi is invalid IR.  Die loudly rather than produce a bad phi.
     my $rhs_repr = $rhs_node->representation;
-    unless (defined $rhs_repr) {
-        die "GAP: And (&&) RHS operand has no representation at lowering time (I2/G.7/F8). "
-          . "Fix TypeInference to annotate the operand.";
-    }
-    unless ($rhs_repr eq 'Int') {
-        die "GAP: And (&&) RHS operand has repr=$rhs_repr; only Int truthiness is lowered "
-          . "runtime-free via icmp ne i64 (I2/G.7/F8). "
-          . "Insert an explicit Coerce(*->Bool) node before the And, or fix TypeInference.";
-    }
 
-    # Lower the LHS in the current block.
+    # Lower the LHS in the current block, then test its truthiness.
     my $lhs_ref    = $self->lower_value($lhs_node);
     my $entry_label = $self->_current_block_label;
-
-    # Test LHS truthiness (nonzero for Int).
-    my $cond = $self->_fresh;
-    $self->_emit("  $cond = icmp ne i64 $lhs_ref, 0  ; And: test lhs truthiness");
+    my $cond = $self->_shortcircuit_i1_cond($lhs_ref, $lhs_repr, 'And', 'LHS');
 
     # Allocate block labels.
     my $rhs_label = $self->_fresh_label('and.rhs.');
@@ -1841,22 +1868,22 @@ sub _lower_and {
     # Conditional branch: truthy -> rhs block; falsy -> end block with lhs.
     $self->_set_terminator("  br i1 $cond, label %$rhs_label, label %$end_label  ; And: short-circuit branch");
 
-    # RHS block: evaluate the RHS, then jump to end.
+    # RHS block: evaluate the RHS, then jump to end. Validate its repr here so a
+    # side-effect-only RHS (a print) is still checked against the phi type below.
     $self->_new_block($rhs_label);
     my $rhs_ref       = $self->lower_value($rhs_node);
     my $rhs_end_label = $self->_current_block_label;   # may differ if rhs has its own blocks
     $self->_set_terminator("  br label %$end_label  ; And: rhs falls through to end");
 
-    # End block: phi merges lhs (falsy path) and rhs (truthy path).
+    # End block: phi merges lhs (falsy path) and rhs (truthy path). The phi type is
+    # the operands' common repr — the And node's own repr is often unannotated for the
+    # short-circuit form, so derive it from the operands. Int && Int -> i64, Bool &&
+    # Bool -> i1. Mixed operand reprs (Int LHS, Bool RHS) would need a phi over two
+    # machine types, which is invalid LLVM: GAP loudly rather than emit a bad phi.
+    my $phi_repr = $self->_shortcircuit_phi_repr($repr, $lhs_repr, $rhs_repr, 'And');
     $self->_new_block($end_label);
     my $result = $self->_fresh;
-    # G.7 guarantees the And node's own repr is Int (LHS guard above already died on
-    # non-Int). The `// 'Int'` default is intentional: it handles the narrow case where
-    # TypeInference annotated the LHS operands but did not annotate the And node itself.
-    # In that case Int is the only correct choice (short-circuit of two Int operands
-    # always yields Int). _require_repr is NOT used here to avoid a GAP-die on that
-    # legitimate-but-unannotated case; the LHS guard provides the real safety net.
-    my $llvm_type = _repr_to_llvm_type($repr // 'Int');
+    my $llvm_type = _repr_to_llvm_type($phi_repr);
     $self->_emit("  $result = phi $llvm_type [ $lhs_ref, %$entry_label ], [ $rhs_ref, %$rhs_end_label ]  ; And: phi");
 
     $self->{cache}{$node->id} = $result;
@@ -1875,40 +1902,16 @@ sub _lower_or {
     my $lhs_node = $inputs->[0];
     my $rhs_node = $inputs->[1];
 
-    # Validate LHS repr: only Int operands use the icmp ne i64 truthiness path.
-    # G.7/F8: die loudly on non-Int operands instead of silently reinterpreting
-    # Bool(i1) or Num(double) as i64 (which would miscompile).
+    # Validate operand reprs: Int (icmp ne i64) and Bool (already i1) both lower
+    # runtime-free. `$x ne $y || (print ...)` is Bool || Bool — the cond.t idiom.
+    # Any other repr is a loud GAP (see _shortcircuit_i1_cond).
     my $lhs_repr = $lhs_node->representation;
-    unless (defined $lhs_repr) {
-        die "GAP: Or (||) LHS operand has no representation at lowering time (G.7/F8). "
-          . "Fix TypeInference to annotate the operand.";
-    }
-    unless ($lhs_repr eq 'Int') {
-        die "GAP: Or (||) LHS operand has repr=$lhs_repr; only Int truthiness is lowered "
-          . "runtime-free via icmp ne i64 (G.7/F8). "
-          . "Insert an explicit Coerce(*->Bool) node before the Or, or fix TypeInference.";
-    }
-
-    # I2: Validate RHS repr identically to LHS.
-    # A non-Int RHS would cause the phi to mix i64 with i1/double = invalid LLVM.
     my $rhs_repr = $rhs_node->representation;
-    unless (defined $rhs_repr) {
-        die "GAP: Or (||) RHS operand has no representation at lowering time (I2/G.7/F8). "
-          . "Fix TypeInference to annotate the operand.";
-    }
-    unless ($rhs_repr eq 'Int') {
-        die "GAP: Or (||) RHS operand has repr=$rhs_repr; only Int truthiness is lowered "
-          . "runtime-free via icmp ne i64 (I2/G.7/F8). "
-          . "Insert an explicit Coerce(*->Bool) node before the Or, or fix TypeInference.";
-    }
 
-    # Lower the LHS in the current block.
+    # Lower the LHS in the current block, then test its truthiness.
     my $lhs_ref    = $self->lower_value($lhs_node);
     my $entry_label = $self->_current_block_label;
-
-    # Test LHS truthiness (nonzero for Int).
-    my $cond = $self->_fresh;
-    $self->_emit("  $cond = icmp ne i64 $lhs_ref, 0  ; Or: test lhs truthiness");
+    my $cond = $self->_shortcircuit_i1_cond($lhs_ref, $lhs_repr, 'Or', 'LHS');
 
     # Allocate block labels.
     my $rhs_label = $self->_fresh_label('or.rhs.');
@@ -1923,13 +1926,13 @@ sub _lower_or {
     my $rhs_end_label = $self->_current_block_label;
     $self->_set_terminator("  br label %$end_label  ; Or: rhs falls through to end");
 
-    # End block: phi merges lhs (truthy path) and rhs (falsy path).
+    # End block: phi merges lhs (truthy path) and rhs (falsy path). Same phi-type
+    # rule as _lower_and: the operands' common repr, or a concrete node repr; a
+    # mismatch GAPs loudly.
+    my $phi_repr = $self->_shortcircuit_phi_repr($repr, $lhs_repr, $rhs_repr, 'Or');
     $self->_new_block($end_label);
     my $result = $self->_fresh;
-    # G.7 guarantees the Or node's own repr is Int (LHS guard above already died on
-    # non-Int). The `// 'Int'` default is intentional: same rationale as _lower_and —
-    # handles the unannotated-Or-node case without a spurious GAP-die. See _lower_and.
-    my $llvm_type = _repr_to_llvm_type($repr // 'Int');
+    my $llvm_type = _repr_to_llvm_type($phi_repr);
     $self->_emit("  $result = phi $llvm_type [ $lhs_ref, %$entry_label ], [ $rhs_ref, %$rhs_end_label ]  ; Or: phi");
 
     $self->{cache}{$node->id} = $result;
