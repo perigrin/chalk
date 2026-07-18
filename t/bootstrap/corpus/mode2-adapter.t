@@ -61,7 +61,12 @@ Chalk::CodeGen::Harness::Mode2Adapter->run_cases(\@cases);
 my $hand_after = hand_gate_green();
 is($hand_before, $hand_after,
    'harvested conformance run does NOT change hand gate-green (tallies never conflated)');
-is($hand_before, 106, 'hand gate-green baseline is 106 (unchanged by harvested tally)');
+# The hand gate-green number is a real, non-zero property of the hand corpus that
+# rises as the hand corpus grows — assert it is present and plausible, NOT a
+# frozen literal (a hardcoded value goes stale the moment any later issue raises
+# the gate; the invariant is that the harvested run does not TOUCH it, proved
+# above, not that it equals a specific number).
+cmp_ok($hand_before, '>', 0, 'hand gate-green baseline is a real non-zero number (unchanged by harvested tally)');
 isnt($c->{pass}, $hand_before,
      'the harvested-conformance number is a DIFFERENT number than hand gate-green');
 
