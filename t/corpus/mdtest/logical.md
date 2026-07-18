@@ -490,6 +490,66 @@ return %r
 L: GREEN
 ```
 
+## L6d string equality with an INT operand (`$a eq "1"`, t/base/num.t blocker)
+
+Perl `eq` compares STRINGS, so an Int operand is stringified to its decimal form
+first: `1 eq "1"` stringifies `1` to `"1"` and byte-compares (equal, true).
+The backend stringifies the Int operand (the shared int-to-decimal renderer,
+`_emit_int_to_str`, also used by interpolation's Stringify[Int]) into a
+length-tracked {ptr,len}, then runs the same length-guard + memcmp as a Str/Str
+compare. This is the t/base/num.t first blocker (`$a = 1; $a eq "1"`), and also
+covers octal/hex/binary integer literals (`0x100 eq "256"`) since those are Ints.
+
+```perl
+# source
+my $a = 1; ($a eq "1") ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%a  = Constant(1) :Int
+%s1 = Constant("1") :Str
+%eq = StrEq(%a, %s1) :Bool
+%t  = Constant(1) :Int
+%f  = Constant(0) :Int
+%r  = TernaryExpr(%eq, %t, %f) :Int
+return %r
+L: GREEN
+```
+
+## L6e int-eq is a real byte compare (negative int, and a mismatch is false)
+
+Bilateral against L6d: a NEGATIVE int stringifies with its sign (`-1` -> `"-1"`,
+the renderer prepends '-'), so `-1 eq "-1"` is true; and a value/string mismatch
+(`1 eq "2"`) is false — proving the stringified bytes are really compared, not a
+constant-true. This case uses the mismatch (`1 eq "2"` -> 0) as the distinguishing
+check.
+
+```perl
+# source
+my $a = 1; ($a eq "2") ? 1 : 0
+```
+
+```behavior
+return: 0
+context: scalar
+```
+
+```ir
+%a  = Constant(1) :Int
+%s2 = Constant("2") :Str
+%eq = StrEq(%a, %s2) :Bool
+%t  = Constant(1) :Int
+%f  = Constant(0) :Int
+%r  = TernaryExpr(%eq, %t, %f) :Int
+return %r
+L: GREEN
+```
+
 ## L7 string inequality (ne) — t/base blocker
 
 The `ne` operator lowers to `StrNe`, the negation of StrEq — same byte-compare,

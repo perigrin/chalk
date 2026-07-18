@@ -928,6 +928,19 @@ sub _lower_stringify {
     }
 
     my $val = $self->lower_value($input);
+    my $ptr = $self->_emit_int_to_str($val);
+    $self->{cache}{ $node->id } = $ptr;
+    return $ptr;
+}
+
+# _emit_int_to_str($val_ref) -> $ptr (an i8* to a runtime-rendered decimal string,
+# with its byte length recorded in _str_len_table). The int-to-decimal renderer
+# shared by Stringify[Int] (interpolation coercion) and StrEq/StrNe over an Int
+# operand (`$a eq "1"` where $a is an int -- perl stringifies the number for the
+# comparison). No libc: an int-to-decimal loop into a malloc'd buffer.
+sub _emit_int_to_str {
+    my ($self, $val) = @_;
+
     $self->{_need_malloc_memcpy} = 1;   # for @malloc
 
     # buf[0..23]; digits fill from index 22 backward, index 23 holds the NUL.
@@ -996,7 +1009,6 @@ sub _lower_stringify {
     $self->_emit("  $len = sub i64 23, $start_idx  ; Stringify[Int]: result byte length");
 
     $self->{_str_len_table}{$ptr} = $len;
-    $self->{cache}{ $node->id } = $ptr;
     return $ptr;
 }
 
@@ -1695,6 +1707,21 @@ sub _lower_icmp_int {
 # StrEq returns `equal`; StrNe returns `xor i1 equal, true` (the negation).
 # Both yield an i1 (Bool repr), consumed by the ternary condition / return.
 # ---------------------------------------------------------------------------
+# _str_compare_operand($input, $op, $side) -> an i8* Str ref (with a tracked
+# length) for a StrEq/StrNe operand. A Str operand lowers as-is; an Int operand
+# is stringified to its decimal form (perl stringifies a number for `eq`/`ne`);
+# any other repr (Num, aggregate) is a loud GAP.
+sub _str_compare_operand {
+    my ($self, $input, $op, $side) = @_;
+    my $repr = $input->representation // '';
+    my $ref  = $self->lower_value($input);
+    return $ref if $repr eq 'Str';
+    return $self->_emit_int_to_str($ref) if $repr eq 'Int';
+    die "GAP: $op $side operand has repr=$repr; string comparison stringifies "
+      . "only Str (as-is) and Int (decimal) operands runtime-free. Num/aggregate "
+      . "stringification for `eq`/`ne` is unbuilt.";
+}
+
 sub _lower_str_compare {
     my ($self, $node, $is_eq) = @_;
 
@@ -1705,8 +1732,11 @@ sub _lower_str_compare {
     }
 
     my $inputs  = $node->inputs;
-    my $lhs_ref = $self->lower_value($inputs->[0]);
-    my $rhs_ref = $self->lower_value($inputs->[1]);
+    # `eq`/`ne` compare STRINGS: an Int operand (`$a eq "1"` where $a is an int)
+    # is stringified to its decimal form first (perl's string context), so both
+    # operands become length-tracked {ptr,len} Str values for the memcmp.
+    my $lhs_ref = $self->_str_compare_operand($inputs->[0], $op, 'lhs');
+    my $rhs_ref = $self->_str_compare_operand($inputs->[1], $op, 'rhs');
 
     # Both operand lengths must be tracked; a Str with no recorded length can't
     # be compared byte-exact (an untracked length would make the len guard and
