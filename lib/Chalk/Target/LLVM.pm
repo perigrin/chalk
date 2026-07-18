@@ -588,6 +588,7 @@ my @NEED_FLAGS = qw(
     _need_getenv
     _need_print_str_fmt
     _need_print_int_fmt
+    _need_exit
 );
 
 sub _propagate_need_flags {
@@ -1118,6 +1119,12 @@ sub lower_with_elaboration {
     if ($ctx->{_need_malloc_memcpy}) {
         push @lines, 'declare i8* @malloc(i64)';
         push @lines, 'declare i8* @memcpy(i8*, i8*, i64)';
+    }
+
+    # Declare exit when a `die` arm was lowered (Unwind -> exit(255) + unreachable).
+    # A plain C host-interface function — NOT libperl.
+    if ($ctx->{_need_exit}) {
+        push @lines, 'declare void @exit(i32)';
     }
 
     # Declare getenv (+ strlen for the runtime value length) when EnvRead was

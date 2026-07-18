@@ -2530,7 +2530,44 @@ sub _process_branch_from_if {
         $self->process_control_node($body_node);
     }
 
+    # A `die` arm carries an Unwind whose control is this Proj: the arm aborts
+    # (exit + unreachable) and does NOT rejoin the merge. Emit the abort as this
+    # block's terminator instead of `br %merge`, so the merge block's predecessor
+    # from this arm is dead (its phi never sees a value from here). The other
+    # (live) arm's value dominates the merge unconditionally.
+    my $unwind = _find_unwind_consumer($proj);
+    if (defined $unwind) {
+        $self->_emit_unwind_terminator($unwind, "if branch $branch_idx: die (abort)");
+        return;
+    }
+
     $self->_set_terminator("  br label %$merge_label  ; if branch $branch_idx: jump to merge");
+}
+
+# _find_unwind_consumer($proj) -> the Unwind node whose control is $proj, or
+# undef. A die arm's Unwind lists the arm's Proj as its control input, so it
+# appears as a consumer of the Proj.
+sub _find_unwind_consumer {
+    my ($node) = @_;
+    for my $c (($node->consumers // [])->@*) {
+        next unless defined $c && $c->can('operation');
+        return $c if $c->operation eq 'Unwind';
+    }
+    return undef;
+}
+
+# _emit_unwind_terminator($unwind, $why) -> terminate the current block with a
+# runtime-free abort: `call void @exit(i32 255)` + `unreachable`. A `die` is
+# lowered as a process abort (no libperl, no exception machinery). The message
+# operand (the Unwind's non-control input) is not printed runtime-free; the abort
+# is the observable effect (non-zero exit). Sets _need_exit so the prologue
+# declares @exit.
+sub _emit_unwind_terminator {
+    my ($self, $unwind, $why) = @_;
+    $self->{_need_exit} = 1;
+    $self->_emit("  call void \@exit(i32 255)  ; $why");
+    $self->_set_terminator("  unreachable  ; $why");
+    return;
 }
 
 # _process_loop_node: lower a Loop node (while/foreach/postfix-while).

@@ -53,18 +53,31 @@ ok((grep { /D9.*nested.*runtime/i } @titles), 'case: D9 nested if runtime-false 
 # ---------------------------------------------------------------------------
 # SECTION 3: Verify L-verdict declarations per case
 #
-# D8 (try/catch) is the only remaining GAP — needs LLVM landingpad.
-# D6 (ternary) + D1-D5 + D7 are GREEN via their respective lowering paths.
+# Most cases are GREEN via their respective lowering paths. A handful are
+# declared GAP by design and are exempted from the GREEN expectation:
+#   D3d: foreach body that writes the iterator (aliasing write-back not modeled)
+#   D8:  try/catch (needs an LLVM landingpad — a different capability)
+#   T1:  list-context ternary (t/base print-ternary blocker)
+#   T2b: TAKEN die aborts (the equality harness cannot assert an abort)
+#   T3:  cond_expr inside a loop body (t/base blocker)
+#   T4:  loop control (last) inside a loop body (t/base blocker)
+# The authoritative behavior/shape/invariant gate is son-corpus-wide.t; here we
+# only assert each case's DECLARED verdict matches its known status.
 # ---------------------------------------------------------------------------
 
-subtest 'D1-D7 and D9 declare L: GREEN; D8 declares L: GAP' => sub {
+subtest 'declared L verdicts (GAP-by-design cases exempted from GREEN)' => sub {
     plan tests => scalar @$cases;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
         my $title   = $case->{title};
-        if ($title =~ /D8.*try/i) {
-            is($decl, 'GAP', "case '$title': declared L: GAP (try/catch needs landingpad)");
+        if ($title =~ /D3d.*iterator/i
+            || $title =~ /D8.*try/i
+            || $title =~ /T1 list-context ternary/i
+            || $title =~ /T2b die inside the TAKEN/i
+            || $title =~ /T3 cond_expr inside a loop/i
+            || $title =~ /T4 loop control/i) {
+            is($decl, 'GAP', "case '$title': declared L: GAP (GAP by design)");
         } else {
             is($decl, 'GREEN', "case '$title': declared L: GREEN");
         }

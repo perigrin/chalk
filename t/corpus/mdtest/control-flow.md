@@ -992,9 +992,16 @@ L: GAP(list-context ternary not yet lowered — the t/base print-ternary asserti
 
 ## T2 die inside a branch arm (t/base blocker: rs.t/term.t)
 
-A `die` statement inside an if/else arm — the rs.t / term.t blocker. The producer
-does not yet lower `die` in a branch arm. Flip to GREEN when die-in-arm lowering
-lands (needs the die effect threaded on the arm control path).
+A `die` statement inside an if/else arm — the rs.t / term.t blocker. A `die` is a
+runtime-free abort: the die arm becomes a control path that does NOT merge a value
+(it aborts via `exit(255)` + `unreachable`), so the `Region` merging the arms sees
+only the LIVE (non-die) arm. For `$c = 0` the `die` arm is NOT taken, so the `else`
+arm's `1` is returned; the `die` arm's `Unwind` is control-dependent on
+`Proj(true, 0)` and never fires. The producer routes the branch through the same
+real control flow a void-print arm uses (`If` + `Proj` + `Region`), building the
+`Unwind` on the die arm's `Proj`; the LLVM backend lowers `Unwind` to `exit(255)`
++ `unreachable`, so the merge's die predecessor is dead and the live value
+dominates.
 
 ```perl
 # source
@@ -1008,7 +1015,44 @@ context: scalar
 ```
 
 ```ir
-L: GAP(die inside a branch arm not yet lowered)
+%boom = Constant("boom\n") :Str
+%uw   = Unwind(%boom)
+%one  = Constant(1) :Int
+return %one
+L: GREEN
+```
+
+## T2b die inside the TAKEN branch arm (bilateral abort proof)
+
+Bilateral to T2: with `$c = 1` the `die` arm IS taken, so the program ABORTS
+(`exit(255)` + `unreachable`) rather than returning the else arm's `42`. This is
+the load-bearing correctness property of die-in-arm lowering: a TAKEN die must
+abort, NEVER silently return the untaken arm's value. Verified out-of-band: the
+lowered `.ll` reaches `if.then.1: call void @exit(i32 255); unreachable`, and
+`lli` exits 255 with no stdout (it does NOT print `Int:42`).
+
+This case is a corpus-declared GAP because the triple-contract harness compares
+lli's stdout against the perl oracle for EQUALITY: a taken die makes both the
+oracle (`die "boom\n"` kills the perl script) and lli (exit 255) abort, so there
+is no equal value to assert — `run_through_bson` returns the `lli exited 255`
+error, not a matchable result. The abort is proven by T2's not-taken GREEN
+(the die arm's `Unwind` lowers) plus the out-of-band abort check above; asserting
+a non-zero exit as a behavior match would require a distinct abort-oracle path
+the harness does not model.
+
+```perl
+# source
+my $c = 1;
+if ($c) { die "boom\n" } else { 42 }
+```
+
+```behavior
+return: 42
+context: scalar
+```
+
+```ir
+L: GAP(taken die aborts (lli exits 255); the equality harness cannot assert an abort against the perl die-oracle — proven out-of-band, see T2b prose)
 ```
 
 ## T3 cond_expr inside a loop body (t/base blocker: translate.t)
