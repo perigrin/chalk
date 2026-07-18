@@ -596,3 +596,70 @@ return %gr2
 control: %st1 -> %st2
 L: GREEN
 ```
+
+## A19 package variable holding a string (our $g = "str")
+
+A package/global scalar can hold a STRING, not just an Int (`our $g = "hi"; $g`).
+A Str value is a `(ptr, len)` pair in this backend, so a Str package scalar is
+modeled as TWO mutable module-level slots — `@pkg_main_g_ptr` (`i8*`) and
+`@pkg_main_g_len` (`i64`) — not the single `i64` slot an Int global uses. The
+`our $g = "hi"` store writes both slots (the string-constant pointer and its byte
+length); the `$g` read loads both and re-registers the loaded ptr in the length
+table so a downstream print/return slices exactly `len` bytes. The producer stamps
+the StashAccess with the RHS value's repr (Str here), not a hardcoded Int — the
+store lvalue and the read hash-cons to one node, so the read inherits the Str repr.
+This is the t/base blocker for cond.t / if.t / pat.t (package string globals).
+
+```perl
+# source
+our $g = "hi";
+$g
+```
+
+```behavior
+return: hi
+context: scalar
+```
+
+```ir
+%c     = Constant("hi") :Str
+%gl    = StashAccess(stash_name: "main", var_name: "g") :Str
+%st    = Assign(%gl, %c) :Str
+%gr    = StashAccess(stash_name: "main", var_name: "g") :Str
+return %gr
+control: %st
+L: GREEN
+```
+
+## A20 reassign a string package global reads the new value
+
+`our $g = "hi"; $g = "bye"; $g` re-stores a DIFFERENT string into the same two
+slots. The final read must observe the re-stored `(ptr, len)` — "bye" (len 3), not
+"hi" (len 2) — proving the Str package global is a genuine mutable location (both
+slots re-written on the second store), not a cached pre-store read. Bilateral with
+A18 (the Int RMW): A18 re-stores an Int into one slot; A20 re-stores a Str across
+two slots, and the differing lengths (2 vs 3) make a stale-read miscompile visible.
+
+```perl
+# source
+our $g = "hi";
+$g = "bye";
+$g
+```
+
+```behavior
+return: bye
+context: scalar
+```
+
+```ir
+%c1    = Constant("hi") :Str
+%c2    = Constant("bye") :Str
+%gl    = StashAccess(stash_name: "main", var_name: "g") :Str
+%st1   = Assign(%gl, %c1) :Str
+%st2   = Assign(%gl, %c2) :Str
+%gr    = StashAccess(stash_name: "main", var_name: "g") :Str
+return %gr
+control: %st1 -> %st2
+L: GREEN
+```

@@ -54,6 +54,10 @@ sub new {
         # Deduped by qualified name so store and read resolve the SAME slot and
         # the module preamble emits each global exactly once.
         _pkg_globals          => {},
+        # Str package-scalar globals: each Str `our $g` is a PAIR of mutable
+        # slots (an i8* ptr and an i64 len), deduped by qualified name.
+        #   _pkg_str_globals => { "main::g" => ["\@pkg_main_g_ptr", "\@pkg_main_g_len"], ... }
+        _pkg_str_globals      => {},
         _str_len_table        => {},
         _need_malloc_memcpy   => 0,
         _need_str_to_num_helper => 0,
@@ -218,6 +222,27 @@ sub _pkg_global_name {
     my $gname = "\@$ident";
     $self->{_pkg_globals}{$qual} = $gname;
     return $gname;
+}
+
+# _pkg_str_global_names($stash, $var) -> ($ptr_gname, $len_gname)
+#
+# A Str package/global scalar (`our $g = "hi"`) needs TWO mutable module-level
+# slots — an i8* pointer and an i64 length — because a Str value is a (ptr, len)
+# pair. Registered once per qualified name in _pkg_str_globals so store and read
+# resolve the SAME pair and the module preamble emits each exactly once (an i8*
+# null slot and an i64 0 slot). Same identifier rule as _pkg_global_name.
+sub _pkg_str_global_names {
+    my ($self, $stash, $var) = @_;
+    my $qual  = "${stash}::${var}";
+    my $ident = "pkg_${stash}_${var}";
+    die "GAP: package-global slot '\@$ident' (from $qual) is not a legal "
+      . "unquoted LLVM identifier (\\w+) — the stash or variable name likely "
+      . "contains '::' or other non-identifier characters"
+        unless $ident =~ /\A\w+\z/;
+    my $pname = "\@${ident}_ptr";
+    my $lname = "\@${ident}_len";
+    $self->{_pkg_str_globals}{$qual} = [ $pname, $lname ];
+    return ($pname, $lname);
 }
 
 # Ops that LOAD from a mutable memory location when lowered: a pad slot
@@ -1344,10 +1369,23 @@ sub _lower_assign {
     # runtime-free (the slot is i64), matching the read side.
     if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'StashAccess') {
         my $rhs_repr = _require_repr($rhs, 'Assign(StashAccess-lvalue).rhs');
-        die "GAP: Assign(StashAccess-lvalue) rhs repr=$rhs_repr; only Int "
-          . "package scalars are lowered runtime-free (i64 slot)."
-            unless $rhs_repr eq 'Int';
         my $var   = $lhs->var_name;
+        # A Str package scalar needs TWO mutable slots (an i8* ptr and an i64
+        # len), since a Str value is a (ptr, len) pair. Store both; the read
+        # loads both and re-registers the loaded ptr in the length table.
+        if ($rhs_repr eq 'Str') {
+            my ($pname, $lname) = $self->_pkg_str_global_names($lhs->stash_name, $var);
+            my $len_ref = $self->_str_len_for($rhs_ref)
+                // die "GAP: Assign(StashAccess-lvalue) Str rhs has no tracked "
+                     . "length (\$$var); only length-tracked Str values lower.";
+            $self->_emit("  store i8* $rhs_ref, i8** $pname  ; Assign(StashAccess-lvalue): store \$$var ptr (Str package scalar)");
+            $self->_emit("  store i64 $len_ref, i64* $lname  ; Assign(StashAccess-lvalue): store \$$var len (Str package scalar)");
+            $self->{cache}{ $node->id } = $rhs_ref;
+            return $rhs_ref;
+        }
+        die "GAP: Assign(StashAccess-lvalue) rhs repr=$rhs_repr; only Int and "
+          . "Str package scalars are lowered runtime-free."
+            unless $rhs_repr eq 'Int';
         my $gname = $self->_pkg_global_name($lhs->stash_name, $var);
         $self->_emit("  store i64 $rhs_ref, i64* $gname  ; Assign(StashAccess-lvalue): store \$$var (package scalar)");
         $self->{cache}{ $node->id } = $rhs_ref;
@@ -5212,11 +5250,24 @@ sub _lower_stash_access {
     my ($self, $node) = @_;
 
     my $repr = _require_repr($node, 'StashAccess');
-    die "GAP: StashAccess repr=$repr; only Int package scalars are lowered "
-      . "runtime-free (a Str/ref slot needs a differently-typed global)."
+    my $var  = $node->var_name;
+    # A Str package scalar: load BOTH slots (ptr + len) and re-register the
+    # loaded ptr's length so a downstream print/concat/return slices exactly
+    # len bytes. Mirrors the two-slot store.
+    if ($repr eq 'Str') {
+        my ($pname, $lname) = $self->_pkg_str_global_names($node->stash_name, $var);
+        my $ptr = $self->_fresh;
+        my $len = $self->_fresh;
+        $self->_emit("  $ptr = load i8*, i8** $pname  ; StashAccess: read \$$var ptr (Str package scalar)");
+        $self->_emit("  $len = load i64, i64* $lname  ; StashAccess: read \$$var len (Str package scalar)");
+        $self->{_str_len_table}{$ptr} = $len;
+        $self->{cache}{ $node->id } = $ptr;
+        return $ptr;
+    }
+    die "GAP: StashAccess repr=$repr; only Int and Str package scalars are "
+      . "lowered runtime-free (a ref slot needs a differently-typed global)."
         unless $repr eq 'Int';
 
-    my $var   = $node->var_name;
     my $gname = $self->_pkg_global_name($node->stash_name, $var);
     my $val   = $self->_fresh;
     $self->_emit("  $val = load i64, i64* $gname  ; StashAccess: read \$$var (package scalar)");

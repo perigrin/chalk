@@ -1126,6 +1126,19 @@ sub lower_with_elaboration {
         }
     }
 
+    # Emit Str package-scalar globals (StashAccess with a Str repr): a PAIR of
+    # mutable slots per qualified name — an i8* ptr (null-init) and an i64 len
+    # (zero-init). An unwritten Str package scalar reads as (null, 0), an empty
+    # string. Emitted once each via the _pkg_str_globals dedupe map.
+    if (defined $ctx->{_pkg_str_globals} && %{ $ctx->{_pkg_str_globals} }) {
+        push @lines, '';
+        for my $qual (sort keys $ctx->{_pkg_str_globals}->%*) {
+            my ($pname, $lname) = $ctx->{_pkg_str_globals}{$qual}->@*;
+            push @lines, "$pname = internal global i8* null, align 8  ; Str package scalar \$$qual (ptr)";
+            push @lines, "$lname = internal global i64 0, align 8  ; Str package scalar \$$qual (len)";
+        }
+    }
+
     # Declare malloc/memcpy when Str concat or aggregate operations were emitted.
     # These are plain C host-interface functions — NOT libperl.
     if ($ctx->{_need_malloc_memcpy}) {
