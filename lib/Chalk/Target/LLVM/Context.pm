@@ -418,6 +418,11 @@ sub lower_value {
     elsif ($op eq 'RegexSubst') {
         return $self->_lower_regex_subst($node);
     }
+    # Print: a control-pinned statement effect. Emit each list arg to stdout
+    # (Str via printf("%.*s"), Int via printf("%d")); print yields boolean 1.
+    elsif ($op eq 'Print') {
+        return $self->_lower_print($node);
+    }
     # Match (=~ with a compiled-regex VALUE, i.e. qr//): the rhs is a
     # Constant(const_type='regex') whose pattern is compile-time known; the
     # lowering resolves it statically and inlines the same matcher.
@@ -4861,6 +4866,71 @@ sub _lower_regex_subst {
     $self->{_str_len_table}{$res} = $res_len;
     $self->{cache}{ $node->id } = $res;
     return $res;
+}
+
+# _lower_print($node) -> $llvm_ref (an i1 1, Bool repr)
+#
+# A control-pinned statement effect: emit each list argument to stdout in order,
+# then yield print's boolean 1 (perl's print returns a genuine Bool). The loader
+# already split the leading control token off inputs, so inputs are exactly the
+# printed values. Each argument is emitted by its representation:
+#   Str  -> printf("%.*s", (i32)len, ptr)  — exactly len bytes, embedded-NUL safe;
+#           the length comes from the compile-time/runtime _str_len_table.
+#   Int  -> printf("%d", (i32)val)         — the i64 value truncated to i32,
+#           mirroring the Int return epilogue.
+# Any other repr is an honest GAP (Num/Bool/aggregate print is not wired). The
+# output is emitted BEFORE the return-value epilogue because it lands in @main's
+# control-chain instructions, which precede the epilogue printf.
+sub _lower_print {
+    my ($self, $node) = @_;
+
+    for my $arg ($node->inputs->@*) {
+        next unless defined $arg;
+        my $repr = $arg->representation;
+        my $ref  = $self->lower_value($arg);
+
+        if (defined $repr && $repr eq 'Str') {
+            my $len = $self->_str_len_for($ref);
+            die "GAP: Print of a Str arg whose length is not tracked in "
+              . "_str_len_table — cannot emit exactly-len bytes."
+                unless defined $len;
+            # printf's %.*s precision arg is i32. A literal length passes through;
+            # an SSA (i64) length is truncated to i32.
+            my $len32 = ($len =~ /\A\d+\z/) ? $len : do {
+                my $t = $self->_fresh;
+                $self->_emit("  $t = trunc i64 $len to i32  ; Print: Str length -> i32");
+                $t;
+            };
+            $self->{_need_print_str_fmt} = 1;
+            my $fp = $self->_fresh;
+            $self->_emit("  $fp = getelementptr inbounds [5 x i8], [5 x i8]* \@fmt_print_str, i64 0, i64 0  ; Print: %.*s fmt");
+            $self->_emit("  call i32 (i8*, ...) \@printf(i8* $fp, i32 $len32, i8* $ref)  ; Print: emit Str arg");
+        }
+        elsif (!defined $repr || $repr eq 'Int') {
+            # Int payload is i64; printf %d takes i32 (matches the Int epilogue).
+            my $v32 = $self->_fresh;
+            $self->_emit("  $v32 = trunc i64 $ref to i32  ; Print: Int arg -> i32");
+            $self->{_need_print_int_fmt} = 1;
+            my $fp = $self->_fresh;
+            $self->_emit("  $fp = getelementptr inbounds [3 x i8], [3 x i8]* \@fmt_print_int, i64 0, i64 0  ; Print: %d fmt");
+            $self->_emit("  call i32 (i8*, ...) \@printf(i8* $fp, i32 $v32)  ; Print: emit Int arg");
+        }
+        else {
+            die "GAP: Print of a $repr arg is not lowered runtime-free "
+              . "(only Str and Int list args are emitted).";
+        }
+    }
+
+    # print returns a genuine boolean 1. Materialize an i1 1 runtime-opaquely so
+    # the value-context read (`my $ok = print ...`) tags Bool:1. alloca/store/load
+    # keeps it opaque to the optimizer, matching the Undef/Bool constant pattern.
+    my $slot = $self->_fresh;
+    $self->_emit("  $slot = alloca i1  ; Print: return-value slot");
+    $self->_emit("  store i1 1, i1* $slot  ; Print: yields boolean 1");
+    my $ref = $self->_fresh;
+    $self->_emit("  $ref = load i1, i1* $slot  ; Print: read boolean 1");
+    $self->{cache}{ $node->id } = $ref;
+    return $ref;
 }
 
 # _lower_field_access_in_method($node) -> $llvm_ref

@@ -368,6 +368,20 @@ sub parse_l_verdict_from_ir {
 # PRIVATE: constructive node builder helpers
 # ---------------------------------------------------------------------------
 
+# _cook_dq_escapes($raw) -> $cooked
+#
+# Cooks the double-quotish escapes a spec ir-block string Constant may carry so
+# its bytes match the producer's cooked graph (perl cooks "hi\n" to hi<LF> in
+# op.c; the shape check compares Constant values byte-for-byte). Only the common
+# escapes the corpus uses are handled — enough for print/string idioms.
+sub _cook_dq_escapes {
+    my ($raw) = @_;
+    my %map = ( 'n' => "\n", 't' => "\t", 'r' => "\r", '0' => "\0",
+                '\\' => "\\", '"' => '"' );
+    $raw =~ s/\\([ntr0\\"])/$map{$1}/g;
+    return $raw;
+}
+
 # _build_node_from_rhs($factory, \%sym, $name, $rhs, $build) -> $node
 #
 # Parses the RHS of a %name = RHS line and builds the corresponding IR node
@@ -402,10 +416,17 @@ sub _build_node_from_rhs {
     # Constant(value)  — value may be a number, negative number, or quoted string
     if ($rhs =~ /^Constant\(\s*(.*?)\s*\)$/) {
         my $val_raw = $1;
-        # Quoted string: Constant("$x") or Constant('x')
-        if ($val_raw =~ /^"(.*)"$/ || $val_raw =~ /^'(.*)'$/) {
-            my $str_val = $1;
-            return $factory->make('Constant', value => $str_val, const_type => 'string');
+        # Double-quoted string: Constant("hi\n") — cook double-quotish escapes so
+        # the spec Constant's bytes match the producer's cooked graph (perl cooks
+        # "hi\n" to hi<LF> in op.c before B::SoN walks; the shape check compares
+        # Constant values byte-for-byte, so an uncooked '\n' would false-FAIL).
+        if ($val_raw =~ /^"(.*)"$/) {
+            return $factory->make('Constant',
+                value => _cook_dq_escapes($1), const_type => 'string');
+        }
+        # Single-quoted string: Constant('x') — literal, no escape cooking.
+        if ($val_raw =~ /^'(.*)'$/) {
+            return $factory->make('Constant', value => $1, const_type => 'string');
         }
         # Bare value (integer or negative integer). A ',' or ':' here means the
         # value was mis-parsed — e.g. an unquoted const_type override
@@ -885,6 +906,20 @@ sub _behavior_matches {
 
     # Compute a tag for the declared return value if it is not already tagged.
     my $decl_tagged = _infer_tag($declared_return);
+
+    # stdout: prefix — a print statement writes to stdout BEFORE the oracle
+    # fragment prints the return tag, so the actual output is <stdout><tag>. When
+    # a behavior block declares a stdout: line, the expected actual is the cooked
+    # declared stdout followed by the return tag. (Escapes are cooked so `stdout:
+    # hi\n` matches the real newline; the oracle chomps a single trailing newline,
+    # so we chomp the expected the same way.)
+    if (defined $declared->{stdout}) {
+        my $expected = _cook_dq_escapes($declared->{stdout}) . $decl_tagged;
+        $expected =~ s/\n\z//;   # match _run_expr_under_perl's single chomp
+        return $actual eq $expected
+            ? (true, '')
+            : (false, "stdout+tag mismatch: got '$actual', expected '$expected'");
+    }
 
     # Compare tags exactly.
     if ($actual eq $decl_tagged) {

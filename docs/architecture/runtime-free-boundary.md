@@ -99,6 +99,27 @@ known at compile time.
   call to the handler slot. Same static-dispatch mechanism. **RF** (was wrongly
   LP) — provided the tie class is a literal (runtime-computed class → OOS).
 
+### `print` — an ordered stdout effect — BUILT (Print node + `_lower_print`)
+`print LIST` to the default handle is a runtime-free host effect: it writes bytes
+to fd 1 via C `printf`, NOT libperl. **RF.** The producer emits a control-pinned
+`Print` node (a bare `print` is `OPf_WANT_VOID`, so it leads with a control token
+and carries `is_stmt_effect`); the loader demotes that token to `control_in`
+(threading the effect on the control chain so it survives DCE and stays ordered)
+and seeds the node's repr as **Bool** — perl's `print` returns a genuine
+`builtin::is_bool` boolean, so `my $ok = print ...` reads `Bool:1`, not `Int:1`.
+`_lower_print` emits each list arg by representation: a **Str** via
+`printf("%.*s", len, ptr)` (exactly `len` bytes from the tracked `_str_len_table`,
+embedded-NUL safe), an **Int** via `printf("%d")` on the i64 truncated to i32.
+The output lands in `@main`'s control-chain instructions, which precede the
+return-value epilogue printf, so a `print` before the block value emits first.
+Two sequential prints are two distinct statement effects (per-call identity via
+`%STATEMENT_EFFECT_OPS`), threaded in program order. **OOS at the boundary:** an
+explicit filehandle (`print STDOUT ...` / `print $fh ...`) sets `OPf_STACKED`;
+the runtime-free backend writes only to stdout, so honoring a handle would
+misroute — the producer GAPs (dies) LOUDLY on the stacked form rather than
+silently emitting to fd 1. `Num`/aggregate list args are an honest GAP (only Str
+and Int list args are emitted today).
+
 ### "Magic" variables — per-variable; mostly graph-produced values or host state
 - **`$1`..`$9`, `$&`, `$+{...}`** = OUTPUTS of a regex-match operation. A match
   node produces `(matched?, $1, $2, ...)`; reading `$1` = reading a slot of the

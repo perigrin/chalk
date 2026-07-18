@@ -82,10 +82,17 @@ subtest 'L-verdict declarations: GREEN for value cases, GAP for pragma cases' =>
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
         my $title   = $case->{title};
 
+        # Print cases: GREEN except the explicit-filehandle form, which the
+        # producer GAPs (the runtime-free backend writes only to stdout). The
+        # exclusion keys on "filehandle"/"explicit" (NOT "stdout", which the
+        # GREEN titles legitimately contain: "print ... to stdout").
+        my $is_print_green = $title =~ /print/i && $title !~ /filehandle|explicit/i;
+
         if (   $title =~ /return.*integer.*literal/i
             || $title =~ /multiple.*statement/i
             || $title =~ /comparison.*condition/i
-            || $title =~ /bare.*bool/i) {
+            || $title =~ /bare.*bool/i
+            || $is_print_green) {
             is($decl, 'GREEN', "case '$title': declared L: GREEN");
         } else {
             is($decl, 'GAP', "case '$title': declared L: GAP");

@@ -318,6 +318,12 @@ sub _deserialize_graph ($method_data) {
         # store (42) not $a[1]. A leading stmt-effect Call is NOT split here (it
         # is threaded by a separate downstream mechanism, and its repr is not
         # stamped at construction); only the element-store Assign case is new.
+        # A leading stmt-effect Print IS split: `print ...; EXPR` serializes as
+        # Return[Print, value], and in the value-context `my $ok = print ...; $ok`
+        # the SAME Print is both control (inputs[0]) and the return value
+        # (inputs[1]) -- demoting inputs[0] to control_in leaves the Print (or a
+        # later value) as the sole return input, so the effect threads on the
+        # control chain and the return reads print's boolean.
         # Unwind is EXCLUDED: for a die, the Unwind is the real exit and must
         # stay a reachable input, not be demoted to control_in.
         my $bson_return_control;
@@ -325,7 +331,8 @@ sub _deserialize_graph ($method_data) {
                 && blessed($inputs[0])
                 && $inputs[0]->operation ne 'Unwind'
                 && (_is_cfg($inputs[0])
-                    || ($inputs[0]->operation eq 'Assign'
+                    || (($inputs[0]->operation eq 'Assign'
+                            || $inputs[0]->operation eq 'Print')
                         && $inputs[0]->can('control_in')
                         && defined $inputs[0]->control_in))) {
             $bson_return_control = shift @inputs;
@@ -342,7 +349,7 @@ sub _deserialize_graph ($method_data) {
         # prepended control, so inputs[0] IS the control (a CFG node, or a
         # preceding stmt-effect node in a chain).
         my $bson_stmt_control;
-        if (($op eq 'Call' || $op eq 'Assign') && $fields->{is_stmt_effect}
+        if (($op eq 'Call' || $op eq 'Assign' || $op eq 'Print') && $fields->{is_stmt_effect}
                 && @inputs >= 1 && blessed($inputs[0])) {
             $bson_stmt_control = shift @inputs;
         }
@@ -444,6 +451,14 @@ sub _deserialize_graph ($method_data) {
         # only fires for B::SoN-produced JSON.
         if (defined $nd->{stamp} && exists $STAMP_TO_REPR{ $nd->{stamp} }) {
             $node->set_representation($STAMP_TO_REPR{ $nd->{stamp} });
+        }
+
+        # A Print carries no stamp (the producer leaves it unstamped), but perl's
+        # print returns a genuine boolean (builtin::is_bool true), so a
+        # value-context `my $ok = print ...` reads Bool:1. Seed the repr as Bool
+        # so the return epilogue tags it correctly.
+        if ($op eq 'Print') {
+            $node->set_representation('Bool');
         }
 
         # A loop-header condition carries a control edge to its Loop. Demote it

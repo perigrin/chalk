@@ -19,7 +19,7 @@ use Chalk::IR::Graph;
 subtest 'STATEMENT_EFFECT_OPS table is the shared contract' => sub {
     my %expected = map { $_ => 1 } qw(
         Assign CompoundAssign RegexSubst TryCatch Call
-        RegexMatch Match NotMatch BacktickExpr
+        RegexMatch Match NotMatch BacktickExpr Print
     );
     is_deeply(
         { map { $_ => 1 } keys %Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS },

@@ -205,3 +205,138 @@ context: scalar
 ```ir
 L: GAP(compile-time: use Module qw(...) is compile-time import; function calls (sum) require Scalar ABI, not in runtime-free slice)
 ```
+
+## Print a string literal to stdout
+
+A bare `print "hi\n"` writes its argument to stdout as an ordered statement
+effect, then the block yields `1`. The Print node is control-pinned (a void
+`print` is `OPf_WANT_VOID`) so it survives DCE and emits before the return-value
+epilogue. The printed string is emitted as raw bytes (`printf("%.*s", len, ptr)`),
+so the stdout is `hi\n`; the block value is the trailing `Int:1`.
+
+```perl
+# source
+print "hi\n"; 1
+```
+
+```behavior
+stdout: hi\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%s0   = Constant("hi\n") :Str
+%p    = Print(%s0) :Bool
+%c    = Constant(1) :Int
+return %c
+control: %p
+L: GREEN
+```
+
+## Print a mixed argument list to stdout
+
+`print LIST` emits every list element in order. A mixed Str/Int list
+(`"ok ", 1, "\n"`) emits each argument by its representation — a Str via
+`printf("%.*s")` and an Int via `printf("%d")` — producing the concatenated
+`ok 1\n`. The block value is the trailing `Int:1`.
+
+```perl
+# source
+print "ok ", 1, "\n"; 1
+```
+
+```behavior
+stdout: ok 1\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%s0   = Constant("ok ") :Str
+%i1   = Constant(1) :Int
+%s2   = Constant("\n") :Str
+%p    = Print(%s0, %i1, %s2) :Bool
+%c    = Constant(1) :Int
+return %c
+control: %p
+L: GREEN
+```
+
+## Two prints emit in order
+
+Two sequential `print` statements are two distinct statement effects, threaded
+on the control chain in program order. Both survive DCE (neither is the block
+value) and emit before the return-value epilogue, so the stdout is `a\nb\n` in
+order. The block value is the trailing `Int:1`.
+
+```perl
+# source
+print "a\n"; print "b\n"; 1
+```
+
+```behavior
+stdout: a\nb\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%s0   = Constant("a\n") :Str
+%p0   = Print(%s0) :Bool
+%s1   = Constant("b\n") :Str
+%p1   = Print(%s1) :Bool
+%c    = Constant(1) :Int
+return %c
+control: %p0 -> %p1
+L: GREEN
+```
+
+## Print as a value (my $ok = print)
+
+`print` returns a genuine boolean (`builtin::is_bool` true) — `1` on success.
+Reading its return value (`my $ok = print "x\n"; $ok`) yields `Bool:1` in the
+type-tagged oracle, NOT `Int:1`: the Print node's representation is Bool. The
+stdout is `x\n`; the block value is the Print's boolean `1`.
+
+```perl
+# source
+my $ok = print "x\n"; $ok
+```
+
+```behavior
+stdout: x\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%s0   = Constant("x\n") :Str
+%p    = Print(%s0) :Bool
+return %p
+control: %p
+L: GREEN
+```
+
+## Print to an explicit filehandle (STDOUT): GAP
+
+`print STDOUT ...` (and `print $fh ...`) set `OPf_STACKED` and push a gv/rv2gv
+handle operand before the args. The runtime-free backend writes only to stdout,
+so honoring an explicit handle would be a miscompile — the producer GAPs (dies)
+on the stacked form rather than silently misrouting. This is a loud GAP at the
+producer, recorded here as a corpus-declared GAP.
+
+```perl
+# source
+print STDOUT "x\n"; 1
+```
+
+```behavior
+stdout: x\n
+return: Int:1
+context: scalar
+```
+
+```ir
+L: GAP(explicit filehandle: print STDOUT ... / print $fh ... sets OPf_STACKED; the runtime-free backend writes only to stdout, so an explicit handle is a loud producer GAP, never a silent misroute)
+```

@@ -586,6 +586,8 @@ my @NEED_FLAGS = qw(
     _need_memcmp
     _need_aggregate_types
     _need_getenv
+    _need_print_str_fmt
+    _need_print_int_fmt
 );
 
 sub _propagate_need_flags {
@@ -1079,6 +1081,18 @@ sub lower_with_elaboration {
         push @lines, '@coerce_bool_str_true  = private unnamed_addr constant [2 x i8] c"1\00", align 1';
         push @lines, '@coerce_bool_str_false = private unnamed_addr constant [1 x i8] c"\00",   align 1';
         $ctx->{_bool_str_globals_emitted} = 1;
+    }
+
+    # Print emits its list args with a raw (untagged) printf format per arg type.
+    # These are distinct from the return-value epilogue formats (which prepend a
+    # type tag): a printed value is the raw content, not a tagged result.
+    if ($ctx->{_need_print_str_fmt}) {
+        # "%.*s\0" = 5 bytes = [5 x i8]
+        push @lines, '@fmt_print_str = private unnamed_addr constant [5 x i8] c"%.*s\00", align 1';
+    }
+    if ($ctx->{_need_print_int_fmt}) {
+        # "%d\0" = 3 bytes = [3 x i8]
+        push @lines, '@fmt_print_int = private unnamed_addr constant [3 x i8] c"%d\00", align 1';
     }
 
     push @lines, '';

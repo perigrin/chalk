@@ -65,6 +65,7 @@ use Chalk::IR::Node::AnonSub;
 use Chalk::IR::Node::RegexMatch;
 use Chalk::IR::Node::RegexSubst;
 use Chalk::IR::Node::RegexCapture;
+use Chalk::IR::Node::Print;
 use Chalk::IR::Node::EnvRead;
 use Chalk::IR::Node::TryCatch;
 use Chalk::IR::Node::PostfixDeref;
@@ -98,7 +99,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     PadAccess FieldAccess StashAccess Subscript Slice
     Call HashRef ArrayRef
     Interpolate AnonSub
-    RegexMatch RegexSubst RegexCapture EnvRead TryCatch
+    RegexMatch RegexSubst RegexCapture Print EnvRead TryCatch
     PostfixDeref CompoundAssign BacktickExpr Stringify VarDecl ListAssign
     TernaryExpr StructRef StructFieldAccess
     ExpressionList
@@ -154,7 +155,7 @@ class Chalk::IR::NodeFactory {
     # collectors read it. Keep it the single source.
     our %STATEMENT_EFFECT_OPS = map { $_ => 1 } qw(
         Assign CompoundAssign RegexSubst TryCatch Call
-        RegexMatch Match NotMatch BacktickExpr
+        RegexMatch Match NotMatch BacktickExpr Print
     );
 
     # Allocation ops: aggregate literal constructors. Each occurrence
