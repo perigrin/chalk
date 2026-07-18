@@ -501,10 +501,13 @@ L: GAP(deref of a runtime array-ref: elements not statically known, needs a real
 
 ## A16 package variable read (our $g) — t/ blocker: StashAccess
 
-A package/global variable (`our $g = 5; $g`) reads through a StashAccess node the
-backend does not yet lower (`op=StashAccess not in literal-arithmetic slice`). t/
-files use package vars. Flip to GREEN when StashAccess reads lower runtime-free (a
-global slot load).
+A package/global variable (`our $g = 5; $g`) models the stash slot as a
+module-level LLVM global `@pkg_main_g` (an `i64` slot). The `our $g = 5` store is
+a statement effect: an `Assign(StashAccess-lvalue, value)` threaded onto the
+control chain that lowers to `store i64 5, i64* @pkg_main_g`. The `$g` read is a
+`StashAccess` load (`load i64, i64* @pkg_main_g`) — a mutable-location read, so it
+re-lowers at every use and observes the post-store value. t/ files use package
+vars.
 
 ```perl
 # source
@@ -518,5 +521,78 @@ context: scalar
 ```
 
 ```ir
-L: GAP(op=StashAccess not lowered — package/global variable read not in the literal-arithmetic slice)
+%c5    = Constant(5) :Int
+%gl    = StashAccess(stash_name: "main", var_name: "g") :Int
+%st    = Assign(%gl, %c5) :Int
+%gr    = StashAccess(stash_name: "main", var_name: "g") :Int
+return %gr
+control: %st
+L: GREEN
+```
+
+## A17 two distinct package globals — no aliasing
+
+`our $g = 5; our $h = 7; $g + $h` proves two package scalars are DISTINCT
+module-level slots (`@pkg_main_g` and `@pkg_main_h`), not one aliased cell: the
+sum is 12, not 14 (which a single shared slot would yield). Each store threads
+onto the control chain; the reads load their own slot.
+
+```perl
+# source
+our $g = 5;
+our $h = 7;
+$g + $h
+```
+
+```behavior
+return: 12
+context: scalar
+```
+
+```ir
+%c5    = Constant(5) :Int
+%c7    = Constant(7) :Int
+%gl    = StashAccess(stash_name: "main", var_name: "g") :Int
+%stg   = Assign(%gl, %c5) :Int
+%hl    = StashAccess(stash_name: "main", var_name: "h") :Int
+%sth   = Assign(%hl, %c7) :Int
+%gr    = StashAccess(stash_name: "main", var_name: "g") :Int
+%hr    = StashAccess(stash_name: "main", var_name: "h") :Int
+%sum   = Add(%gr, %hr) :Int
+return %sum
+control: %stg -> %sth
+L: GREEN
+```
+
+## A18 read-modify-write a package global
+
+`our $g = 5; $g = $g + 1; $g` re-stores into the SAME slot: the second store
+reads the post-init value (5), adds 1, and writes 6 back. The final read observes
+the re-stored value. This exercises store + read + re-store against one
+`@pkg_main_g` slot (the mutable-read model must NOT serve a cached pre-store read).
+
+```perl
+# source
+our $g = 5;
+$g = $g + 1;
+$g
+```
+
+```behavior
+return: 6
+context: scalar
+```
+
+```ir
+%c5    = Constant(5) :Int
+%c1    = Constant(1) :Int
+%gl    = StashAccess(stash_name: "main", var_name: "g") :Int
+%st1   = Assign(%gl, %c5) :Int
+%gr1   = StashAccess(stash_name: "main", var_name: "g") :Int
+%inc   = Add(%gr1, %c1) :Int
+%st2   = Assign(%gl, %inc) :Int
+%gr2   = StashAccess(stash_name: "main", var_name: "g") :Int
+return %gr2
+control: %st1 -> %st2
+L: GREEN
 ```

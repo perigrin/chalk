@@ -48,6 +48,12 @@ sub new {
         #   _need_malloc_memcpy => bool
         #     Set when a Concat node is lowered; triggers malloc/memcpy declarations.
         _str_globals          => [],
+        # Package-scalar globals (StashAccess): each package/global scalar (`our
+        # $g`) is one module-level i64 slot `@pkg_<stash>_<var>` initialized to 0.
+        #   _pkg_globals => { "main::g" => "\@pkg_main_g", ... }
+        # Deduped by qualified name so store and read resolve the SAME slot and
+        # the module preamble emits each global exactly once.
+        _pkg_globals          => {},
         _str_len_table        => {},
         _need_malloc_memcpy   => 0,
         _need_str_to_num_helper => 0,
@@ -192,12 +198,34 @@ sub _module_global_name {
     return ($gname, $byte_len, $byte_len + 1);
 }
 
+# _pkg_global_name($stash, $var) -> LLVM global name for a package-scalar slot.
+#
+# A package/global scalar (`our $g`, a StashAccess node) is modeled as a single
+# module-level i64 slot named `@pkg_<stash>_<var>`. Registered once per qualified
+# name in _pkg_globals so the store and the read resolve the SAME slot and the
+# module preamble (Target/LLVM.pm) emits each `@pkg_...` global exactly once as
+# `internal global i64 0`. The name must be a legal unquoted LLVM identifier
+# (\w+); a stash containing '::' would not be — die loudly rather than corrupt
+# the module (same rule as _module_global_name).
+sub _pkg_global_name {
+    my ($self, $stash, $var) = @_;
+    my $qual  = "${stash}::${var}";
+    my $ident = "pkg_${stash}_${var}";
+    die "GAP: package-global slot '\@$ident' (from $qual) is not a legal "
+      . "unquoted LLVM identifier (\\w+) — the stash or variable name likely "
+      . "contains '::' or other non-identifier characters"
+        unless $ident =~ /\A\w+\z/;
+    my $gname = "\@$ident";
+    $self->{_pkg_globals}{$qual} = $gname;
+    return $gname;
+}
+
 # Ops that LOAD from a mutable memory location when lowered: a pad slot
 # (PadAccess reads var_table), an aggregate element (Subscript), or an object
 # field (FieldAccess). Their lowered value is program-point-dependent — a
 # later store changes what an identical load returns — so they must re-lower
 # at every consumption point, never serve from the value cache.
-my %MUTABLE_READ_OPS = map { $_ => 1 } qw(PadAccess Subscript FieldAccess);
+my %MUTABLE_READ_OPS = map { $_ => 1 } qw(PadAccess Subscript FieldAccess StashAccess);
 
 # Pure value ops the staleness predicate descends THROUGH: a pure node over a
 # mutable-location read is itself program-point-dependent (Add(PadAccess, 10)
@@ -456,6 +484,12 @@ sub lower_value {
     # EnvRead (%ENV{key}): host process state via the C getenv — not libperl.
     elsif ($op eq 'EnvRead') {
         return $self->_lower_env_read($node);
+    }
+    # StashAccess (`our $g`): a package/global scalar read — load the module-level
+    # i64 slot. A mutable-location read (in %MUTABLE_READ_OPS), so it re-lowers at
+    # every use and observes the post-store value.
+    elsif ($op eq 'StashAccess') {
+        return $self->_lower_stash_access($node);
     }
     # Statement-effect ops that carry per-call identity (they are in
     # %STATEMENT_EFFECT_OPS, so the control collectors route them here) but
@@ -1301,6 +1335,23 @@ sub _lower_assign {
                                                  "FieldAccess-lvalue[$field_index]");
         $self->{cache}{ $node->id } = $stored;
         return $stored;
+    }
+
+    # Mode (sa): StashAccess-lvalue — package/global scalar store (`our $g = 5`).
+    # Store the rhs into the module-level i64 slot @pkg_<stash>_<var> (the same
+    # slot the StashAccess READ loads). A statement effect threaded onto the
+    # control chain; the stored value is the Assign's result. Only Int is lowered
+    # runtime-free (the slot is i64), matching the read side.
+    if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'StashAccess') {
+        my $rhs_repr = _require_repr($rhs, 'Assign(StashAccess-lvalue).rhs');
+        die "GAP: Assign(StashAccess-lvalue) rhs repr=$rhs_repr; only Int "
+          . "package scalars are lowered runtime-free (i64 slot)."
+            unless $rhs_repr eq 'Int';
+        my $var   = $lhs->var_name;
+        my $gname = $self->_pkg_global_name($lhs->stash_name, $var);
+        $self->_emit("  store i64 $rhs_ref, i64* $gname  ; Assign(StashAccess-lvalue): store \$$var (package scalar)");
+        $self->{cache}{ $node->id } = $rhs_ref;
+        return $rhs_ref;
     }
 
     # Mode (a): Subscript-lvalue — element store into Array or Hash.
@@ -5076,6 +5127,31 @@ sub _lower_env_read {
     $self->_emit("  $len = call i64 \@strlen(i8* $val)  ; EnvRead: value length");
 
     $self->{_str_len_table}{$val} = $len;
+    $self->{cache}{ $node->id } = $val;
+    return $val;
+}
+
+# _lower_stash_access($node) -> $llvm_ref (i64 loaded value)
+#
+# A package/global scalar read (`our $g`): load the module-level i64 slot
+# `@pkg_<stash>_<var>`. The slot is registered (and emitted once) via
+# _pkg_global_name. A mutable-location read (StashAccess is in %MUTABLE_READ_OPS),
+# so lower_value bypasses the value cache and this re-lowers at every use — a load
+# after a store observes the post-store value. Only Int-repr package scalars are
+# lowered runtime-free; any other repr is an honest GAP (a Str/ref package scalar
+# would need a differently-typed slot).
+sub _lower_stash_access {
+    my ($self, $node) = @_;
+
+    my $repr = _require_repr($node, 'StashAccess');
+    die "GAP: StashAccess repr=$repr; only Int package scalars are lowered "
+      . "runtime-free (a Str/ref slot needs a differently-typed global)."
+        unless $repr eq 'Int';
+
+    my $var   = $node->var_name;
+    my $gname = $self->_pkg_global_name($node->stash_name, $var);
+    my $val   = $self->_fresh;
+    $self->_emit("  $val = load i64, i64* $gname  ; StashAccess: read \$$var (package scalar)");
     $self->{cache}{ $node->id } = $val;
     return $val;
 }

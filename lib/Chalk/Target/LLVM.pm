@@ -1114,6 +1114,18 @@ sub lower_with_elaboration {
         }
     }
 
+    # Emit package-scalar globals (StashAccess): one mutable i64 slot per
+    # package/global scalar (`our $g`), keyed by qualified name in _pkg_globals so
+    # each is emitted exactly once and store/read resolve the same slot. Zero-init:
+    # an unwritten package scalar reads as 0 (the numeric undef the backend uses).
+    if (defined $ctx->{_pkg_globals} && %{ $ctx->{_pkg_globals} }) {
+        push @lines, '';
+        for my $qual (sort keys $ctx->{_pkg_globals}->%*) {
+            my $gname = $ctx->{_pkg_globals}{$qual};
+            push @lines, "$gname = internal global i64 0, align 8  ; package scalar \$$qual";
+        }
+    }
+
     # Declare malloc/memcpy when Str concat or aggregate operations were emitted.
     # These are plain C host-interface functions — NOT libperl.
     if ($ctx->{_need_malloc_memcpy}) {
