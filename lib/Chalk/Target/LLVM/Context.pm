@@ -2690,6 +2690,7 @@ sub _process_branch_from_if {
 
     unless (defined $proj) {
         if (defined $break_exit) {
+            $self->_record_break_block($break_exit);
             $self->_set_terminator("  br label %$break_exit  ; if branch $branch_idx: mid-body last -> loop exit");
             return;
         }
@@ -2721,6 +2722,7 @@ sub _process_branch_from_if {
     # Mid-body `last` break arm (Proj feeds the enclosing loop's exit Region):
     # branch to the loop exit instead of the merge (see the early-return note).
     if (defined $break_exit) {
+        $self->_record_break_block($break_exit);
         $self->_set_terminator("  br label %$break_exit  ; if branch $branch_idx: mid-body last -> loop exit");
         return;
     }
@@ -2745,6 +2747,22 @@ sub _arm_loop_exit_label {
         return $ctx->{exit_label} if $c->id eq $exit_id;
     }
     return undef;
+}
+
+# _record_break_block($exit_label): note the CURRENT block as a break predecessor
+# of the loop whose exit is $exit_label. The exit block's multi-exit Phi needs
+# each break arm's [value, %break_block] pair; the break block is whatever block
+# is current when the break terminator is emitted (an If-arm block). Recorded in
+# the matching loop-ctx-stack entry so the exit-block emission can build the Phi.
+sub _record_break_block {
+    my ($self, $exit_label) = @_;
+    my $stack = $self->{_loop_ctx_stack} // return;
+    for my $ctx (reverse @$stack) {
+        next unless ($ctx->{exit_label} // '') eq $exit_label;
+        push @{ $ctx->{break_blocks} //= [] }, $self->_current_block_label;
+        return;
+    }
+    return;
 }
 
 # _find_unwind_consumer($proj) -> the Unwind node whose control is $proj, or
@@ -2897,7 +2915,9 @@ sub _process_loop_node {
     # Process the body: VarDecl/Assign nodes reachable from the body Proj.
     $self->_process_loop_body($loop_node, $header_label);
 
-    pop @{ $self->{_loop_ctx_stack} };
+    # Capture the ctx (with any mid-body `last` break-block labels the body walk
+    # recorded) before popping it -- the exit-block Phi emission below needs them.
+    my $loop_ctx = pop @{ $self->{_loop_ctx_stack} };
 
     # Collect the backedge values for each phi.
     my %body_vars = %{ $self->{var_table} };
@@ -2949,19 +2969,47 @@ sub _process_loop_node {
     #     common `last` that only breaks); the producer attaches it defensively
     #     and it DCEs away. Skip it silently.
     #   - LIVE (has a consumer): a slot rebound before the break AND read after
-    #     the loop -- a genuine multi-exit value merge, not yet lowered. Fail
-    #     loudly (GAP, not miscompile).
+    #     the loop (`while(C){...$x=..; last if D} $x`). Emit a real exit Phi over
+    #     the two paths: [header-Phi value, %header] + [break-point value, %break].
     if (defined $exit_region) {
         my @live_exit_phis = grep {
             defined $_ && ref($_) && $_->can('operation') && $_->operation eq 'Phi'
                 && !exists $self->{cache}{ $_->id }
                 && _phi_has_live_consumer($_)
         } ($exit_region->consumers // [])->@*;
-        die "GAP: loop-exit Region (id=" . $exit_region->id . ") has "
-          . scalar(@live_exit_phis) . " LIVE Phi consumer(s) — a slot rebound "
-          . "before a mid-body `last` and read post-loop is a multi-exit value "
-          . "merge (the two exit paths disagree), not yet lowered."
-            if @live_exit_phis;
+
+        # The exit block's predecessors, in the exit Region's input order: the
+        # header-false edge (from the header block) first, then each break block
+        # recorded as the body's mid-body `last` arms terminated. The exit Phi's
+        # inputs align 1:1 with these predecessors (the producer builds the Phi
+        # over [header-value, break-value...] matching the Region predecessors).
+        my @break_blocks = ($loop_ctx->{break_blocks} // [])->@*;
+        my @pred_labels  = ($header_label, @break_blocks);
+
+        for my $phi (@live_exit_phis) {
+            my $inputs = $phi->inputs;
+            unless (defined $inputs && @$inputs == @pred_labels) {
+                die "GAP: loop-exit Phi (id=" . $phi->id . ") has "
+                  . (defined $inputs ? scalar(@$inputs) : 0) . " inputs but the "
+                  . "exit block has " . scalar(@pred_labels) . " predecessor(s) "
+                  . "(header + " . scalar(@break_blocks) . " break) — cannot align "
+                  . "a multi-exit merge Phi.";
+            }
+            my $repr      = _require_repr($phi, 'Loop.exit.Phi');
+            my $llvm_type = _repr_to_llvm_type($repr);
+            # Each input value (the header Phi and the break-point value) is
+            # computed in a block that dominates the exit (the header block for
+            # both the header Phi and the loop-body Add), so lower_value returns a
+            # dominating SSA ref.
+            my @arms = map {
+                my $v = $self->lower_value($inputs->[$_]);
+                "[ $v, %$pred_labels[$_] ]"
+            } 0 .. $#pred_labels;
+            my $phi_ref = $self->_fresh;
+            $self->_emit("  $phi_ref = phi $llvm_type " . join(", ", @arms)
+                . "  ; loop-exit multi-exit merge (header OR mid-body last)");
+            $self->{cache}{ $phi->id } = $phi_ref;
+        }
     }
 
     # Update var_table with the final values (from exit path = body_vars at

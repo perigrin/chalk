@@ -1300,6 +1300,58 @@ context: scalar
 L: GAP(last not at the head of a loop body not yet lowered)
 ```
 
+## T4d mid-body `last` in a CONDITIONAL loop, slot read post-loop (multi-exit merge)
+
+The multi-exit value merge: a `while (COND) { STMT; last if D }` where a slot
+rebound BEFORE the mid-body `last` is READ AFTER the loop. The loop exits via TWO
+paths — the header-false edge (COND fails) OR the mid-body break (D true) — which
+disagree on the slot's value, so the exit block needs a real Phi over
+[header-Phi-value (header-false path), break-point value (break path)].
+
+`$x` counts up from 0; the guard `$x < 100` never fails first, so the loop exits
+via the `last if $x == 3` break at `$x` = 3. The post-loop `$x` reads the exit
+Phi, whose break arm carries the break-point value (3). Was a loud backend GAP
+("loop-exit Region has N LIVE Phi consumer(s) ... multi-exit value merge"); now
+the exit block emits `phi [header-Phi, %header], [break-value, %break-block]`.
+
+Bilateral coverage note: the SAME loop shape with the break NOT taken (`while
+($x < 3){ $x=$x+1; last if $x==99 }`) exits via the header-false edge at `$x` = 3
+— the exit Phi's header arm — also 3, proving both arms feed the merge correctly.
+
+```perl
+# source
+my $x = 0; while ($x < 100) { $x = $x + 1; last if $x == 3; } $x
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+%start = Start()
+%c0    = Constant(0) :Int
+%c1    = Constant(1) :Int
+%c3    = Constant(3) :Int
+%c100  = Constant(100) :Int
+%loop  = Loop(%start)
+%x_phi = Phi(%c0, region: %loop) :Int
+%hcond = NumLt(%x_phi, %c100) :Bool
+%x_new = Add(%x_phi, %c1) :Int
+%bcond = NumEq(%x_new, %c3) :Bool
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%if    = If(%lp0, %bcond)
+%brk   = Proj(%if, index: 0)
+%xexit = Phi(%x_phi, %x_new, region: %loop) :Int
+%lreg  = Region(%lp1, %brk)
+return %xexit
+control: %start -> %loop
+loop_backedge: %x_phi -> %x_new
+branch_control: %loop -> %hcond
+L: GREEN
+```
+
 ## T5 direct no-arg named-sub call (t/ near-miss — simple form GREEN)
 
 A direct call to a named sub with no args. The SIMPLE form already lowers (the
