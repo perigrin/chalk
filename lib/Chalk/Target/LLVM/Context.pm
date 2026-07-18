@@ -1624,6 +1624,26 @@ sub _lower_ternary {
         return '0';
     }
 
+    # Str branches (`print $c ? "y\n" : "n\n"`): a Str is {ptr, len}. Select the
+    # i8* ptr on the guard, AND select the length so _str_len_table tracks the
+    # chosen arm's byte count (a downstream print/concat slices exactly len
+    # bytes). Both arms must be Str; a length must be tracked for each.
+    if ($true_repr eq 'Str' && $fals_repr eq 'Str') {
+        my $true_len = $self->_str_len_for($true_ref)
+            // die "LLVM backend: TernaryExpr Str true-branch (ref=$true_ref) has no tracked length";
+        my $fals_len = $self->_str_len_for($fals_ref)
+            // die "LLVM backend: TernaryExpr Str false-branch (ref=$fals_ref) has no tracked length";
+        my $ptr = $self->_fresh;
+        $self->_emit("  $ptr = select i1 $cond_ref, i8* $true_ref, i8* $fals_ref"
+            . "  ; TernaryExpr(Str) -> select ptr");
+        my $len = $self->_fresh;
+        $self->_emit("  $len = select i1 $cond_ref, i64 $true_len, i64 $fals_len"
+            . "  ; TernaryExpr(Str) -> select len");
+        $self->{_str_len_table}{$ptr} = $len;
+        $self->{cache}{$node->id} = $ptr;
+        return $ptr;
+    }
+
     my $branch_type;
     if ($true_repr eq 'Int' && $fals_repr eq 'Int') {
         $branch_type = 'i64';
