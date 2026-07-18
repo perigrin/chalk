@@ -2518,6 +2518,19 @@ sub _process_loop_node {
     # the exit Proj.
     my $cond_val_ref = $self->_lower_loop_condition($loop_node);
 
+    # A CONDITION-mutated slot (`while ($i-- > 0)`) runs its mutation on the
+    # failing (N+1th) pass too, so its post-loop value is the Phi back-edge
+    # (`Subtract(phi, 1)`), which the producer binds the post-loop read to. That
+    # back-edge is otherwise lowered at the body tail -- a block the loop-exit does
+    # NOT descend through -- so a post-loop read of it fails LLVM dominance. Detect
+    # such a back-edge by its consumer set: a plain body-carried recurrence is
+    # consumed ONLY by its own Phi (post-loop reads take the Phi), whereas a
+    # condition-mutation back-edge has an EXTRA consumer (the post-loop read).
+    # Pre-lower those HERE, in the header block (which dominates both body and
+    # exit) -- they are pure functions of the header Phi + preheader values, all
+    # of which are already defined -- so the cached SSA ref dominates every use.
+    $self->_prelower_condition_mutation_backedges(\@phi_records);
+
     # Conditional branch: condition true -> body; false -> exit.
     $self->_set_terminator("  br i1 $cond_val_ref, label %$body_label, label %$exit_label  ; Loop: header branch");
 
@@ -2729,6 +2742,41 @@ sub _is_memory_phi {
         }
     }
     return 0;
+}
+
+# _prelower_condition_mutation_backedges: lower, in the CURRENT (header) block,
+# any loop-Phi back-edge value that is read post-loop -- a CONDITION-mutated slot
+# (`while ($i-- > 0)`). Perl runs a while condition N+1 times: the failing pass
+# still applies the mutation, so the post-loop value is the back-edge, not the
+# header Phi. The producer binds the post-loop read to that back-edge. Its natural
+# lowering site is the body tail, which the loop-exit block does not descend
+# through -- so a post-loop use is not dominated. But a condition-mutation
+# back-edge is a pure function of the header Phi (defined at the header top) plus
+# preheader-invariant values, so lowering it HERE (header block, dominating both
+# body and exit) makes its cached SSA ref valid at every use.
+#
+# Detection is structural: a plain body-carried recurrence's back-edge is consumed
+# ONLY by its own Phi (post-loop reads take the Phi itself), so it needs no header
+# hoist. A condition-mutation back-edge has an ADDITIONAL consumer (the post-loop
+# read). Hoist only those -- a body back-edge stays body-lowered (it may depend on
+# body values not yet defined here).
+sub _prelower_condition_mutation_backedges {
+    my ($self, $phi_records) = @_;
+    my %phi_id = map { $_->{node}->id => 1 } @$phi_records;
+    for my $rec (@$phi_records) {
+        my $backedge = $rec->{node}->inputs->[1];
+        next unless defined $backedge && blessed($backedge);
+        # A back-edge read outside the loop-Phi set: a non-Phi consumer, or a Phi
+        # that is not one of THIS loop's header Phis.
+        my $read_post_loop = grep {
+            defined $_ && blessed($_)
+                && !($_->operation eq 'Phi' && $phi_id{ $_->id })
+        } ($backedge->consumers // [])->@*;
+        next unless $read_post_loop;
+        # Lower it in the header block; the cache now holds a header-dominating ref
+        # that the body tail (_find_phi_backedge_value) and the post-loop read reuse.
+        $self->lower_value($backedge);
+    }
 }
 
 # _find_phi_backedge_value: find the backedge value for a Loop phi node.

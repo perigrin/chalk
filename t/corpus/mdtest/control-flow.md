@@ -334,6 +334,104 @@ branch_control: %lp0 -> %s_new
 L: GREEN
 ```
 
+## D2d while loop whose CONDITION mutates a slot
+
+Perl evaluates a `while` condition N+1 times: the final, FAILING evaluation still
+applies its side effects. `while ($i-- > 0)` decrements `$i` on the failing pass
+too, so the post-loop `$i` is `-1`, not the header Phi's exit value `0`. The
+two-phase loop translation models the condition mutation as the header Phi's
+back-edge (`Subtract($i_phi, 1)`); the post-loop read binds to that back-edge (the
+value after the failing pass), NOT the Phi (its value on the pass that FAILED).
+The backend lowers the condition-mutation back-edge in the loop header (where it
+dominates the exit) so the post-loop use is well-formed. Was a producer GAP
+("side-effecting loop condition not yet lowered"); now lowers to Int:-1.
+
+```perl
+# source
+my $i = 3;
+while ($i-- > 0) { }
+$i
+```
+
+```behavior
+return: -1
+context: scalar
+```
+
+```ir
+%c3    = Constant(3) :Int
+%zero  = Constant(0) :Int
+%one   = Constant(1) :Int
+%in    = Constant("$i") :Str
+%vi    = VarDecl(%in, %c3) :Int
+%ri0   = PadAccess(%vi, "$i") :Int
+%loop  = Loop(%vi)
+%i_phi = Phi(%ri0, region: %loop) :Int
+%cmp   = NumGt(%i_phi, %zero) :Bool
+%i_new = Subtract(%i_phi, %one) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %i_new
+control: %vi -> %loop
+loop_backedge: %i_phi -> %i_new
+branch_control: %loop -> %cmp
+L: GREEN
+```
+
+## D2e postfix while whose CONDITION mutates a slot
+
+The postfix form (`STMT while COND`) of a condition mutation. Perl runs the
+`$n-- > 0` test N+1 times; the body `$t = $t + $n` accumulates only on the N
+passing passes. `$n=3` gives passes with `$n` = 2, 1, 0 (the decremented values
+the body reads), summing `$t` to `2+1+0 = 3`. The postfix path delegates to the
+same two-phase loop translation at the `enter` scope op, so no pre-evaluation
+leaks into the Phi inits (the `$n` Phi init stays 3). `$t` is body-mutated, so its
+post-loop read takes its Phi; `$n` is condition-mutated (unused post-loop here).
+Was a producer GAP; now lowers to Int:3.
+
+```perl
+# source
+my $n = 3;
+my $t = 0;
+$t = $t + $n while $n-- > 0;
+$t
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+%c3    = Constant(3) :Int
+%c0    = Constant(0) :Int
+%zero  = Constant(0) :Int
+%one   = Constant(1) :Int
+%nn    = Constant("$n") :Str
+%tn    = Constant("$t") :Str
+%vn    = VarDecl(%nn, %c3) :Int
+%vt    = VarDecl(%tn, %c0) :Int
+%rn0   = PadAccess(%vn, "$n") :Int
+%rt0   = PadAccess(%vt, "$t") :Int
+%loop  = Loop(%vt)
+%n_phi = Phi(%rn0, region: %loop) :Int
+%t_phi = Phi(%rt0, region: %loop) :Int
+%cmp   = NumGt(%n_phi, %zero) :Bool
+%t_new = Add(%t_phi, %n_phi) :Int
+%n_new = Subtract(%n_phi, %one) :Int
+%lp0   = Proj(%loop, index: 0)
+%lp1   = Proj(%loop, index: 1)
+%lreg  = Region(%lp1)
+return %t_phi
+control: %vn -> %vt -> %loop
+loop_backedge: %n_phi -> %n_new
+loop_backedge: %t_phi -> %t_new
+branch_control: %loop -> %cmp
+branch_control: %lp0 -> %t_new
+L: GREEN
+```
+
 ## D3 foreach loop
 
 A foreach over a range desugars to a counted loop: an induction variable, a
