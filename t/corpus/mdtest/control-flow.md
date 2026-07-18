@@ -1262,3 +1262,96 @@ context: scalar
 return %call
 L: GREEN
 ```
+
+## T6 mid-body last (t/ blocker: last NOT at the head of a loop body)
+
+Round 1 (T4) handled a HEAD-of-body `last if` (hoistable as a negated loop header).
+A `last` deeper in the body (`BODY; last if C`) is a bottom/mid-loop exit — hoisting
+its check to the header would reorder it ahead of earlier body statements. Currently
+a loud GAP; flip to GREEN when mid-body loop-exit control-flow lands.
+
+```perl
+# source
+my $i = 0;
+my $s = 0;
+while ($i < 5) { $i++; last if $i == 3; $s += $i }
+$s
+```
+
+```behavior
+return: 3
+context: scalar
+```
+
+```ir
+L: GAP(last not at the head of a loop body not yet lowered — mid/bottom-loop exit)
+```
+
+## T7 next inside a loop body (t/ blocker: loop control next)
+
+`next` continues to the next iteration (a control edge to the loop header/continue
+block). Round 1 handled `last` at the head; `next` is unhandled. Flip to GREEN when
+`next` (continue-edge) lowering lands.
+
+```perl
+# source
+my $s = 0;
+for my $i (1..3) { next if $i == 2; $s += $i }
+$s
+```
+
+```behavior
+return: 4
+context: scalar
+```
+
+```ir
+L: GAP(loop control (next) inside a loop body not yet lowered)
+```
+
+## T8 value-context ternary with a branch-guarded element store (t/ blocker)
+
+A ternary in value context whose result is stored into an array element
+(`$a[0] = $c ? 9 : 8`). The store is branch-guarded by the ternary select. Currently
+a loud GAP; flip to GREEN when value-context-ternary-into-element-store lowers.
+
+```perl
+# source
+my @a = (1, 2, 3);
+my $c = 1;
+$a[0] = $c ? 9 : 8;
+$a[0]
+```
+
+```behavior
+return: 9
+context: scalar
+```
+
+```ir
+L: GAP(value-context ternary with a branch-guarded element store not yet lowered)
+```
+
+## T9 statement-modifier inside an if/else arm (t/ blocker: untranslatable arm op)
+
+An if/else whose arm contains a statement modifier (`$x = 5 if $x < 10`) — the arm
+does not reach the join in a straight walk, so it currently GAPs (the "untranslatable
+op inside an arm" class). Flip to GREEN when a nested statement modifier inside a
+branch arm lowers.
+
+```perl
+# source
+my $c = 1;
+my $x = 0;
+if ($c) { $x = 5 if $x < 10 } else { $x = 1 }
+$x
+```
+
+```behavior
+return: 5
+context: scalar
+```
+
+```ir
+L: GAP(untranslatable op inside an if/else arm (arm did not reach the join) not yet lowered)
+```

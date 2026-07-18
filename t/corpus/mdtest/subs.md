@@ -173,3 +173,28 @@ context: scalar
 return %len
 L: GAP(multi-value list return: callee drops all-but-last, needs list-result + caller flatten)
 ```
+
+## F5 direct sub call with arguments (t/ blocker: F3 argument binding)
+
+A direct call to a named sub PASSING arguments (`f(10)` where `f` reads
+`shift`/`@_`). Earlier work lowered a no-arg direct call (inline the callee value);
+an arg-passing call needs argument binding into the callee params — currently a loud
+GAP (`direct call ... passes arguments`). This is the load-bearing blocker for t/op
+(Test::More `is`/`ok` are arg-passing calls). Flip to GREEN when direct-call argument
+binding lands.
+
+```perl
+# source
+sub f { my $x = shift; $x + 1 }
+my $r = f(10);
+$r
+```
+
+```behavior
+return: 11
+context: scalar
+```
+
+```ir
+L: GAP(direct call passes arguments — argument binding into the callee not yet lowered (F3))
+```

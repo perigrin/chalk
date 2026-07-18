@@ -498,3 +498,25 @@ context: scalar
 return %len
 L: GAP(deref of a runtime array-ref: elements not statically known, needs a real deref+copy)
 ```
+
+## A16 package variable read (our $g) — t/ blocker: StashAccess
+
+A package/global variable (`our $g = 5; $g`) reads through a StashAccess node the
+backend does not yet lower (`op=StashAccess not in literal-arithmetic slice`). t/
+files use package vars. Flip to GREEN when StashAccess reads lower runtime-free (a
+global slot load).
+
+```perl
+# source
+our $g = 5;
+$g
+```
+
+```behavior
+return: 5
+context: scalar
+```
+
+```ir
+L: GAP(op=StashAccess not lowered — package/global variable read not in the literal-arithmetic slice)
+```
