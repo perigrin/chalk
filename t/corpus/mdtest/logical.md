@@ -203,6 +203,91 @@ return %phi
 L: GREEN
 ```
 
+## L5 void print in a true && arm
+
+`EXPR && (print ...)` in VOID context is a short-circuit whose RHS arm is
+evaluated for its SIDE EFFECT (the `print`), not its value — the same statement
+modifier shape as `print ... if EXPR`. The arm fires ONLY when the left operand
+is truthy. For `$x == $x` (always true) the print fires, so stdout is `y\n`; the
+block's trailing `1` is the return value `Int:1`.
+
+The producer effect-threads the void arm `print` on the arm's control path (the
+If's TRUE Proj) exactly like an element-store or void-call arm, and merges the
+arms so the Print is control-dependent on the guard — it survives DCE and emits
+only when the arm is taken.
+
+```perl
+# source
+my $x = 1; $x == $x && (print "y\n"); 1
+```
+
+```behavior
+stdout: y\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%s0 = Constant("y\n") :Str
+%p  = Print(%s0) :Bool
+%c  = Constant(1) :Int
+return %c
+L: GREEN
+```
+
+## L5b void print in a false && arm (does not fire)
+
+Bilateral to L5: when the left operand is FALSE the `&&` short-circuits and the
+arm `print` does NOT fire. For `$x != $x` (always false) the print is skipped, so
+stdout is empty; the block's trailing `1` returns `Int:1`. The Print is
+control-dependent on the guard's TRUE Proj, so a false guard emits nothing.
+
+```perl
+# source
+my $x = 1; $x != $x && (print "y\n"); 1
+```
+
+```behavior
+return: Int:1
+context: scalar
+```
+
+```ir
+%s0 = Constant("y\n") :Str
+%p  = Print(%s0) :Bool
+%c  = Constant(1) :Int
+return %c
+L: GREEN
+```
+
+## L5c void print in a false || arm (fires when left is false)
+
+The `||` polarity of L5: `EXPR || (print ...)` fires the arm `print` when the
+left operand is FALSE (`||` short-circuits on a truthy left). For `$x != $x`
+(always false) the arm is reached, so stdout is `y\n`; the block's trailing `1`
+returns `Int:1`. The producer builds the body on the FALSE Proj for `or`
+(matching the `unless` polarity), so the Print is control-dependent on the guard
+being false.
+
+```perl
+# source
+my $x = 1; $x != $x || (print "y\n"); 1
+```
+
+```behavior
+stdout: y\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%s0 = Constant("y\n") :Str
+%p  = Print(%s0) :Bool
+%c  = Constant(1) :Int
+return %c
+L: GREEN
+```
+
 ## L4 not
 
 Perl `!` returns a genuine BOOLEAN: `!5` is `false`, `!0` is `true`. These are
