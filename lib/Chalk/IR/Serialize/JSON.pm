@@ -577,6 +577,63 @@ sub _resolve_direct_calls ($graphs) {
     return;
 }
 
+# -----------------------------------------------------------------------
+# _seed_direct_call_arg_reprs(\%graphs) -> count of nodes newly stamped.
+#
+# A callee compiled in isolation reads its Nth positional argument via a
+# `shift @_` (Call(builtin,shift) over StashAccess(*,_)), which has no type on
+# its own -- so an expression over it (`shift + 1`) stays untyped and the
+# backend's NO-REPR guard would fire. The type is known at the CALL site: it is
+# the argument's repr. Stamp the callee's single `shift @_` read with the
+# resolved call's argument repr so the universal propagation carries the type
+# into the callee body (and then to the Call result via _resolve_direct_calls'
+# return-value stamp). Only the sound single-`shift`, single-argument shape is
+# seeded (the backend inlines exactly that shape; other @_ shapes GAP there).
+# Run inside the repr fixpoint: a callee-of-a-callee is typed once its own
+# callee's shift is stamped on a prior pass.
+sub _seed_direct_call_arg_reprs ($graphs) {
+    my $stamped = 0;
+    for my $gname (sort keys $graphs->%*) {
+        for my $node ($graphs->{$gname}->nodes->@*) {
+            next unless $node->operation eq 'Call'
+                && $node->can('dispatch_kind')
+                && ($node->dispatch_kind // '') eq 'direct'
+                && $node->can('resolved_graph') && $node->resolved_graph;
+            my @args = grep { blessed($_) } $node->inputs->@*;
+            next unless @args;
+
+            # Find the callee's positional `shift @_` reads (single-shift shape).
+            my $callee = $node->resolved_graph;
+            my @shifts = grep {
+                my $n = $_;
+                blessed($n) && $n->operation eq 'Call'
+                    && $n->can('dispatch_kind')
+                    && ($n->dispatch_kind // '') eq 'builtin'
+                    && defined $n->name && $n->name eq 'shift'
+                    && do {
+                        my ($op) = grep { blessed($_) } $n->inputs->@*;
+                        $op && $op->operation eq 'StashAccess'
+                            && $op->can('var_name') && ($op->var_name // '') eq '_';
+                    };
+            } $callee->nodes->@*;
+            next unless @shifts == 1 && @args == 1;
+
+            my $arg_repr = $args[0]->representation // next;
+            # ponytail: monomorphic callee assumption — the callee's shift is
+            # stamped by the FIRST caller's arg repr and shared across call
+            # sites. A second caller with a DIFFERENT repr (Str vs Int) does not
+            # re-stamp; the backend then lowers its arg through the first repr's
+            # ops, which lli rejects as a type mismatch (a loud verify error, not
+            # a silent miscompile). Per-callsite specialization if polymorphic
+            # direct calls ever need to lower.
+            next if defined $shifts[0]->representation;
+            $shifts[0]->set_representation($arg_repr);
+            $stamped++;
+        }
+    }
+    return $stamped;
+}
+
 # from_json($json_string) — deserialize JSON to named Chalk::IR::Graph instances.
 # -----------------------------------------------------------------------
 sub from_json ($json_string) {
@@ -631,6 +688,17 @@ sub from_json ($json_string) {
     # pass (stamped==0 immediately).
     while (_stamp_method_call_reprs($data->{classes} // {}, \%graphs) > 0) {
         _seed_and_propagate_reprs(\%graphs);
+    }
+
+    # Direct-call argument binding (F5): a callee's `shift @_` arg-read is typed
+    # from the caller's argument repr, then the callee body (and the Call result)
+    # re-derive. Fixpoint: a callee reached through a chain is typed once the
+    # outer call's arg is known on a prior pass. After seeding, the Call's own
+    # result repr is picked up from the callee Return via _resolve_direct_calls'
+    # stamp logic, which we re-run to catch calls newly resolvable this pass.
+    while (_seed_direct_call_arg_reprs(\%graphs) > 0) {
+        _seed_and_propagate_reprs(\%graphs);
+        _resolve_direct_calls(\%graphs);
     }
 
     # $mop is returned only in list context; scalar context stays \%graphs for

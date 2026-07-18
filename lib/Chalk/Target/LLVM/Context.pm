@@ -256,6 +256,19 @@ sub _reads_mutable_location {
 sub lower_value {
     my ($self, $node) = @_;
 
+    # Argument binding for an inlined direct call (F5): while a callee is being
+    # inlined at a call site, its positional argument reads (a `shift @_`) are
+    # bound to the caller's already-lowered argument SSA refs. The binding is
+    # keyed by the callee node's refaddr (its string id can collide with a
+    # caller node's id — both graphs number `Call#N` from their own factory),
+    # and consulted BEFORE the cache so the arg-read never reaches
+    # _lower_builtin_shift_pop (which has no @_ array to drain). See
+    # _lower_call_direct for how the frame is built and torn down.
+    if ($self->{_arg_bind}) {
+        my $bound = $self->{_arg_bind}{ refaddr($node) };
+        return $bound if defined $bound;
+    }
+
     # Cache: if we already lowered this node (hash-cons sharing), reuse the
     # previously computed SSA ref — except for nodes that read mutable
     # locations (directly or through pure ops).
@@ -3960,9 +3973,22 @@ sub _lower_call_new {
 # _lower_call_direct($node) -> $llvm_ref
 #
 # Lower a direct named-sub call (dispatch_kind='direct'). The loader resolved
-# the callee to its graph (resolved_graph). F1 scope: a no-argument callee whose
-# body is a single Return — inline its result subgraph at this call site. A call
-# with arguments (F3) needs parameter binding and is an honest GAP for now.
+# the callee to its graph (resolved_graph). The callee is inlined at the call
+# site: the caller's Call inputs are its arguments, and the callee's single
+# Return value subgraph is lowered in the current context.
+#
+# No-argument callee (F1): inline the result subgraph directly; nothing from
+# this context leaks in.
+#
+# Argument-passing callee (F5): the caller's Call inputs are the arguments, and
+# the callee reads its Nth positional argument via a `shift @_` (a
+# Call(builtin,shift) over StashAccess(*,_)). Since the callee is INLINED (not
+# a real call frame), each such arg-read is bound by SSA substitution to the
+# caller's already-lowered argument ref — this is runtime-free inlining, not a
+# call ABI. Only the single-positional-`shift` shape is sound: two `shift`s
+# hash-cons to one node (their ordering is lost), and `my ($a,$b)=@_` /
+# `$_[N]` do not connect to the args in the graph — those GAP loudly rather
+# than miscompile.
 sub _lower_call_direct {
     my ($self, $node) = @_;
 
@@ -3971,12 +3997,6 @@ sub _lower_call_direct {
     die "GAP: direct call to '$name' has no resolved callee graph — the loader "
       . "could not resolve the sub name to a graph (an unknown or builtin sub)."
         unless defined $graph;
-
-    # F1 scope: no arguments. Passing args requires binding the callee's
-    # parameters (@_) to the argument values, which is F3.
-    die "GAP: direct call to '$name' passes arguments — argument binding for "
-      . "direct sub calls is not lowered yet (F3)."
-        if $node->inputs->@*;
 
     my @returns = grep {
         blessed($_) && $_->can('operation') && $_->operation eq 'Return'
@@ -3989,10 +4009,94 @@ sub _lower_call_direct {
     die "GAP: direct call to '$name': callee Return has no value input."
         unless defined $value;
 
-    # Inline the callee's result subgraph in the current context. The callee has
-    # no parameters, so no value from this context leaks in and no binding is
-    # needed.
+    my @args = $node->inputs->@*;
+
+    # No-argument callee: inline the result subgraph directly.
+    return $self->lower_value($value) unless @args;
+
+    # Argument-passing callee: bind the callee's positional arg-reads to the
+    # caller's argument values. Find the callee's `shift @_` reads first (this
+    # validates the shape and GAPs loudly on any @_ access that inlining cannot
+    # bind soundly), then lower the caller's args in this context.
+    my @arg_reads = $self->_collect_positional_arg_reads($graph, $name);
+    die "GAP: direct call to '$name': callee reads " . scalar(@arg_reads)
+      . " positional argument(s) via `shift \@_` but the call passes "
+      . scalar(@args) . " — arity mismatch, cannot bind."
+        if @arg_reads != @args;
+
+    my @arg_refs = map { $self->lower_value($_) } @args;
+
+    # Push the arg-binding frame (refaddr-keyed; see lower_value), inline the
+    # callee's result subgraph, then tear the frame down. Nested inlined calls
+    # each add their own callee's arg-reads to the shared frame — the refaddr
+    # keys are per-node, so an inner callee's shift never shadows an outer's.
+    local $self->{_arg_bind} = { ($self->{_arg_bind} // {})->%* };
+    $self->{_arg_bind}{ refaddr($arg_reads[$_]) } = $arg_refs[$_]
+        for 0 .. $#arg_reads;
+
     return $self->lower_value($value);
+}
+
+# _collect_positional_arg_reads($graph, $name) -> @shift_nodes
+#
+# Find the callee graph's positional argument reads: Call(builtin, shift) nodes
+# whose operand is StashAccess(*, _) (i.e. `shift @_`). Returns them in graph
+# order. Dies (loud GAP) on any OTHER access to @_ that inlining cannot bind:
+# a `pop @_`, a list assignment `my (...) = @_`, or a `$_[N]` subscript — those
+# shapes do not carry the positional binding the caller's args need.
+sub _collect_positional_arg_reads {
+    my ($self, $graph, $name) = @_;
+
+    my @shifts;
+    for my $n ($graph->nodes->@*) {
+        next unless blessed($n);
+        my $op = $n->operation;
+
+        # `shift @_` / `pop @_`: the arg-read we can bind (shift only).
+        if ($op eq 'Call' && $n->can('dispatch_kind')
+                && ($n->dispatch_kind // '') eq 'builtin'
+                && defined $n->name && ($n->name eq 'shift' || $n->name eq 'pop')) {
+            my ($operand) = grep { blessed($_) } $n->inputs->@*;
+            next unless defined $operand
+                && $operand->operation eq 'StashAccess'
+                && $operand->can('var_name') && ($operand->var_name // '') eq '_';
+            die "GAP: direct call to '$name': callee reads \@_ via `pop` — only "
+              . "positional `shift \@_` argument binding is inlined (`pop \@_` "
+              . "reads from the end, which inlining does not model)."
+                if $n->name eq 'pop';
+            push @shifts, $n;
+        }
+        # `my (...) = @_` / `$_[N]`: @_ accessed as an aggregate. The producer
+        # does not connect these to the caller's args in the graph, so inlining
+        # cannot bind them — GAP loudly rather than miscompile.
+        elsif ($op eq 'StashAccess'
+                && $n->can('var_name') && ($n->var_name // '') eq '_') {
+            # A `shift @_` consumes its StashAccess(_) operand; that consumer is
+            # handled above. Any OTHER consumer (list-assign, subscript, deref)
+            # is an @_ shape inlining cannot bind.
+            my @other = grep {
+                blessed($_) && !( $_->operation eq 'Call'
+                    && $_->can('dispatch_kind')
+                    && ($_->dispatch_kind // '') eq 'builtin'
+                    && defined $_->name && $_->name eq 'shift' )
+            } $n->consumers->@*;
+            die "GAP: direct call to '$name': callee accesses \@_ as an aggregate "
+              . "(a list assignment `my (...) = \@_` or a `\$_[N]` subscript) — "
+              . "inlining only binds positional `shift \@_` reads; this shape does "
+              . "not connect to the caller's arguments in the graph."
+                if @other;
+        }
+    }
+
+    # More than one distinct `shift @_` cannot be ordered: two textually-distinct
+    # `shift`s hash-cons to a single node (same content), so the graph cannot say
+    # which reads arg 0 and which reads arg 1. A single `shift` binds arg 0.
+    die "GAP: direct call to '$name': callee has " . scalar(@shifts)
+      . " `shift \@_` reads — multiple positional shifts hash-cons to one node "
+      . "and lose their order; only a single-argument `shift \@_` callee inlines."
+        if @shifts > 1;
+
+    return @shifts;
 }
 
 sub _lower_call_method {

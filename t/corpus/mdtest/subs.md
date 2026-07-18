@@ -176,12 +176,18 @@ L: GAP(multi-value list return: callee drops all-but-last, needs list-result + c
 
 ## F5 direct sub call with arguments (t/ blocker: F3 argument binding)
 
-A direct call to a named sub PASSING arguments (`f(10)` where `f` reads
-`shift`/`@_`). Earlier work lowered a no-arg direct call (inline the callee value);
-an arg-passing call needs argument binding into the callee params — currently a loud
-GAP (`direct call ... passes arguments`). This is the load-bearing blocker for t/op
-(Test::More `is`/`ok` are arg-passing calls). Flip to GREEN when direct-call argument
-binding lands.
+A direct call to a named sub PASSING arguments (`f(10)` where `f` reads its
+argument via `shift`/`@_`). Earlier work lowered a no-arg direct call (inline the
+callee value); an arg-passing call binds the argument into the callee's parameter
+read. Since the callee is INLINED (not a real call frame), the caller's Call input
+is bound by SSA substitution to the callee's positional `shift @_` read — the
+loader types the callee's `shift` read from the argument's repr (so the callee body
+`$x + 1` carries an Int repr), and the backend intercepts the callee's `shift` node
+during inlining and returns the caller's argument ref. This is the load-bearing
+blocker for t/op (Test::More `is`/`ok` are arg-passing calls). GREEN for the sound
+single-positional-`shift` shape; a callee that reads `@_` as an aggregate (a
+list-assign `my ($a,$b)=@_` or a `$_[N]` subscript) or via multiple `shift`s (which
+hash-cons to one node and lose their order) GAPs loudly — see F6/F7.
 
 ```perl
 # source
@@ -196,5 +202,58 @@ context: scalar
 ```
 
 ```ir
-L: GAP(direct call passes arguments — argument binding into the callee not yet lowered (F3))
+%call = Call(dispatch_kind: "direct", name: "main::f") :Int
+return %call
+L: GREEN
+```
+
+## F6 identity sub returns its shifted argument
+
+A callee whose whole body is a single `shift` returns its first argument
+unchanged. The `shift @_` read is the callee's Return value directly, so the
+inline binding substitutes the caller's argument ref for the whole call — the
+bilateral counterpart to F5 (F5 computes over the arg; F6 returns it verbatim).
+
+```perl
+# source
+sub id { shift }
+id(99)
+```
+
+```behavior
+return: 99
+context: scalar
+```
+
+```ir
+%call = Call(dispatch_kind: "direct", name: "main::id") :Int
+return %call
+L: GREEN
+```
+
+## F7 list-assign of @_ into named params GAPs
+
+A callee that reads its arguments as an aggregate — `my ($a,$b) = @_` — does NOT
+carry the positional binding the caller's args need: the producer emits the pad
+params but does not connect the list-assign to `@_` in the graph, so the two
+PadAccess reads have no def linking them to the caller's `3` and `4`. Inlining
+binds only positional `shift @_` reads; this shape (and its `$_[N]`-subscript and
+multiple-`shift` siblings) GAPs loudly rather than miscompiling to a stale/zero
+value. Flip to GREEN when the producer connects `my (...) = @_` to the call
+arguments (a multi-parameter binding, the caller-side analogue of F4's
+multi-value return).
+
+```perl
+# source
+sub add { my ($a, $b) = @_; $a + $b }
+add(3, 4)
+```
+
+```behavior
+return: 7
+context: scalar
+```
+
+```ir
+L: GAP(list-assign of @_ into named params — inlining binds only positional `shift @_`; `my (...) = @_` does not connect to the call arguments in the graph)
 ```
