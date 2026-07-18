@@ -120,6 +120,22 @@ misroute — the producer GAPs (dies) LOUDLY on the stacked form rather than
 silently emitting to fd 1. `Num`/aggregate list args are an honest GAP (only Str
 and Int list args are emitted today).
 
+### Effect-by-default `Call` classification — the policy behind `is_stmt_effect`
+Every `Call`-producing builtin/listop node is constructed EFFECT-PINNED by default
+(`is_stmt_effect`, control-threaded), and DEMOTED to a pure floatable data node
+only when the op is on the OpMap purity allow-list (`is_pure`: `uc lc ucfirst
+lcfirst fc quotemeta index rindex substr-rvalue join sprintf pack unpack reverse
+length abs int sqrt`; `substr` is rvalue-only — an `OPf_MOD` lvalue `substr`
+stays pinned). This is the opposite of the naive default and is the mechanism
+that makes `print` (above) and any effectful statement survive: a `Call` whose
+value is unused must still run for its side effect. The asymmetry is the whole
+argument — **a wrong "pure" default is a SILENT MISCOMPILE** (the effect is
+DCE'd away, e.g. `chomp $s; length $s` computing the length of the un-chomped
+string), **a wrong "effect" default is only a missed optimization** (a pure call
+needlessly pinned). Correctness > performance, expressed as the IR's
+classification policy. Matches LLVM `readnone`-is-opt-in, GHC `IO`-is-the-default,
+and the Sea-of-Nodes effect-chain discipline.
+
 ### "Magic" variables — per-variable; mostly graph-produced values or host state
 - **`$1`..`$9`, `$&`, `$+{...}`** = OUTPUTS of a regex-match operation. A match
   node produces `(matched?, $1, $2, ...)`; reading `$1` = reading a slot of the
