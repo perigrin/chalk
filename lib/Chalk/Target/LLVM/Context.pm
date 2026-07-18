@@ -309,6 +309,9 @@ sub lower_value {
     elsif ($op eq 'Coerce') {
         return $self->_lower_coerce($node);
     }
+    elsif ($op eq 'Stringify') {
+        return $self->_lower_stringify($node);
+    }
     elsif ($op eq 'VarDecl') {
         return $self->_lower_vardecl($node);
     }
@@ -819,6 +822,101 @@ sub _lower_concat {
 
     $self->{cache}{$node->id} = $buf;
     return $buf;
+}
+
+# _lower_stringify($node) -> $llvm_ref (an i8*, runtime byte-length in _str_len_table)
+#
+# Stringify(value) is the value->Str coercion the producer emits for a non-Str
+# operand of an interpolation Concat ("ok $n"). For an Int operand it renders the
+# decimal digit string at runtime: the length (digit count, plus a sign) is a
+# RUNTIME value, recorded in _str_len_table so the consuming Concat / return
+# epilogue can slice exactly len bytes.
+#
+# Implementation: an int-to-decimal loop, no libc. malloc a 24-byte buffer (fits
+# INT64_MIN's 20 digits + sign + NUL), write the digits from the end backward
+# (do-while so zero writes one '0'), prepend '-' for a negative value, and return
+# a pointer to the first written byte with the runtime length.
+sub _lower_stringify {
+    my ($self, $node) = @_;
+
+    my $input = $node->inputs->[0];
+    my $from  = $input->representation // '';
+    if ($from ne 'Int') {
+        die "GAP: Stringify from repr=$from is not lowered runtime-free yet "
+          . "(only Int->Str is wired; Num/aggregate stringification is unbuilt).";
+    }
+
+    my $val = $self->lower_value($input);
+    $self->{_need_malloc_memcpy} = 1;   # for @malloc
+
+    # buf[0..23]; digits fill from index 22 backward, index 23 holds the NUL.
+    my $buf = $self->_fresh;
+    $self->_emit("  $buf = call i8* \@malloc(i64 24)  ; Stringify[Int]: digit buffer");
+    my $nul_slot = $self->_fresh;
+    $self->_emit("  $nul_slot = getelementptr inbounds i8, i8* $buf, i64 23  ; Stringify[Int]: NUL slot");
+    $self->_emit("  store i8 0, i8* $nul_slot  ; Stringify[Int]: NUL-terminate");
+
+    # Sign: neg = (val < 0); magnitude = neg ? 0 - val : val.
+    # ponytail: 0 - INT64_MIN overflows (UB); the corpus/int range is small. A
+    # full-range renderer would extract the last digit from the negative value
+    # before negating -- upgrade path if INT64_MIN stringification is ever needed.
+    my $neg = $self->_fresh;
+    $self->_emit("  $neg = icmp slt i64 $val, 0  ; Stringify[Int]: negative?");
+    my $negated = $self->_fresh;
+    $self->_emit("  $negated = sub i64 0, $val  ; Stringify[Int]: magnitude if negative");
+    my $mag0 = $self->_fresh;
+    $self->_emit("  $mag0 = select i1 $neg, i64 $negated, i64 $val  ; Stringify[Int]: magnitude");
+
+    my $lbl_pre  = $self->_current_block_label;
+    my $lbl_loop = $self->_fresh_label('s2i.loop.');
+    my $lbl_sign = $self->_fresh_label('s2i.sign.');
+
+    my $mag_next = $self->_fresh;
+    my $idx_next = $self->_fresh;
+
+    # do-while: always write one digit (so 0 -> "0"), loop while quotient != 0.
+    $self->_set_terminator("  br label \%$lbl_loop");
+    $self->_new_block($lbl_loop);
+    my $mag_phi = $self->_fresh;
+    $self->_emit("  $mag_phi = phi i64 [ $mag0, \%$lbl_pre ], [ $mag_next, \%$lbl_loop ]  ; Stringify[Int]: current magnitude");
+    my $idx_phi = $self->_fresh;
+    $self->_emit("  $idx_phi = phi i64 [ 22, \%$lbl_pre ], [ $idx_next, \%$lbl_loop ]  ; Stringify[Int]: write index");
+    my $rem = $self->_fresh;
+    $self->_emit("  $rem = urem i64 $mag_phi, 10  ; Stringify[Int]: last digit");
+    my $ch = $self->_fresh;
+    $self->_emit("  $ch = trunc i64 $rem to i8  ; Stringify[Int]: digit as i8");
+    my $ch_ascii = $self->_fresh;
+    $self->_emit("  $ch_ascii = add i8 $ch, 48  ; Stringify[Int]: digit + '0'");
+    my $slot = $self->_fresh;
+    $self->_emit("  $slot = getelementptr inbounds i8, i8* $buf, i64 $idx_phi  ; Stringify[Int]: digit slot");
+    $self->_emit("  store i8 $ch_ascii, i8* $slot  ; Stringify[Int]: write digit");
+    $self->_emit("  $mag_next = udiv i64 $mag_phi, 10  ; Stringify[Int]: drop last digit");
+    $self->_emit("  $idx_next = sub i64 $idx_phi, 1  ; Stringify[Int]: move left");
+    my $more = $self->_fresh;
+    $self->_emit("  $more = icmp ne i64 $mag_next, 0  ; Stringify[Int]: more digits?");
+    $self->_set_terminator("  br i1 $more, label \%$lbl_loop, label \%$lbl_sign");
+
+    # Sign block: the first digit is at $idx_phi (the last-written slot). Prepend
+    # '-' one slot to its left when negative, and pick the result start pointer.
+    $self->_new_block($lbl_sign);
+    my $first_digit = $self->_fresh;   # index of the most-significant digit written
+    $self->_emit("  $first_digit = phi i64 [ $idx_phi, \%$lbl_loop ]  ; Stringify[Int]: first-digit index");
+    my $sign_idx = $self->_fresh;
+    $self->_emit("  $sign_idx = sub i64 $first_digit, 1  ; Stringify[Int]: sign slot");
+    my $sign_slot = $self->_fresh;
+    $self->_emit("  $sign_slot = getelementptr inbounds i8, i8* $buf, i64 $sign_idx  ; Stringify[Int]: sign slot ptr");
+    $self->_emit("  store i8 45, i8* $sign_slot  ; Stringify[Int]: write '-' (harmless when unused)");
+    # start = neg ? sign_idx : first_digit
+    my $start_idx = $self->_fresh;
+    $self->_emit("  $start_idx = select i1 $neg, i64 $sign_idx, i64 $first_digit  ; Stringify[Int]: result start index");
+    my $ptr = $self->_fresh;
+    $self->_emit("  $ptr = getelementptr inbounds i8, i8* $buf, i64 $start_idx  ; Stringify[Int]: result ptr");
+    my $len = $self->_fresh;
+    $self->_emit("  $len = sub i64 23, $start_idx  ; Stringify[Int]: result byte length");
+
+    $self->{_str_len_table}{$ptr} = $len;
+    $self->{cache}{ $node->id } = $ptr;
+    return $ptr;
 }
 
 sub _lower_coerce {

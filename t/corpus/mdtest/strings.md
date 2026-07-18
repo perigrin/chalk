@@ -213,6 +213,124 @@ return %c4
 L: GREEN
 ```
 
+## S9 interpolation of an integer (Int->Str coercion)
+
+In Chalk `"ok $n"` is COERCION, not interpolation: the non-Str operand `$n` is
+stringified before the Concat. The multiconcat decoder wraps a non-Str operand
+(here the folded Int Constant `3`) in a `Stringify` (Int->Str), so the Concat
+sees only Str inputs. The Stringify lowers to an int-to-decimal loop that renders
+the digits and records the RUNTIME digit-count length in `_str_len_table`, so the
+Concat can slice exactly `len` bytes. The result is `Str:ok 3`.
+
+```perl
+# source
+my $n = 3;
+"ok $n"
+```
+
+```behavior
+return: ok 3
+context: scalar
+```
+
+```ir
+%s0  = Constant("ok ") :Str
+%n   = Constant(3) :Int
+%sf  = Stringify(%n) :Str
+%cat = Concat(%s0, %sf) :Str
+return %cat
+L: GREEN
+```
+
+## S10 interpolation of a negative integer (sign in the digit-count length)
+
+The digit-count length the Stringify records must include the sign: `-5` is two
+bytes, not one. The int-to-decimal loop renders the magnitude then prepends `-`,
+and the recorded length spans the `-`. Surrounding literal text (`val `) forces a
+genuine Str (a lone `"$n"` degenerates to the number itself in perl, which the
+oracle tags Int); the result is `Str:val -5`.
+
+```perl
+# source
+my $n = -5;
+"val $n"
+```
+
+```behavior
+return: val -5
+context: scalar
+```
+
+```ir
+%s0  = Constant("val ") :Str
+%n   = Constant(-5) :Int
+%sf  = Stringify(%n) :Str
+%cat = Concat(%s0, %sf) :Str
+return %cat
+L: GREEN
+```
+
+## S11 interpolation of zero (do-while emits one '0')
+
+Zero has no nonzero quotient, so a plain divide-until-zero loop would emit no
+digit. The renderer is a do-while: it always writes one digit, so `0` renders as
+the single byte `0` (length 1). Surrounding literal text (`val `) forces a genuine
+Str (a lone `"$n"` degenerates to the number in perl, tagged Int); the result is
+`Str:val 0`.
+
+```perl
+# source
+my $n = 0;
+"val $n"
+```
+
+```behavior
+return: val 0
+context: scalar
+```
+
+```ir
+%s0  = Constant("val ") :Str
+%n   = Constant(0) :Int
+%sf  = Stringify(%n) :Str
+%cat = Concat(%s0, %sf) :Str
+return %cat
+L: GREEN
+```
+
+## S12 print an interpolated integer to stdout
+
+`print "ok $n\n"` combines I2's Print statement effect with the Int->Str coerce:
+the interpolation builds `Concat("ok ", Stringify($n), "\n")`, print emits it to
+stdout via `printf("%.*s", len, ptr)` using the Concat's tracked runtime length,
+and the block yields the trailing `Int:1`. The stdout is `ok 3\n`.
+
+```perl
+# source
+my $n = 3;
+print "ok $n\n"; 1
+```
+
+```behavior
+stdout: ok 3\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%s0  = Constant("ok ") :Str
+%n   = Constant(3) :Int
+%sf  = Stringify(%n) :Str
+%c1  = Concat(%s0, %sf) :Str
+%nl  = Constant("\n") :Str
+%cat = Concat(%c1, %nl) :Str
+%p   = Print(%cat) :Bool
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
+
 ## S5 non-ASCII string (non-default encoding, explicit GAP boundary)
 
 A string containing non-ASCII characters such as cafe-with-accent (cafe\x{e9})
