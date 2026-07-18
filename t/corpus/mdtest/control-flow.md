@@ -153,6 +153,68 @@ return %c
 L: GREEN
 ```
 
+## D1c if/else with STRING-eq guard and print arms (t/base if.t shape)
+
+The exact t/base/if.t idiom: a string-compare guard (`$x eq $x`) selecting which
+arm's `print` fires. D1a/D1b used a numeric guard; here the guard is `StrEq`, and
+the arm prints carry TAP-style text. With `$x = "t"`, `$x eq $x` is true, so the
+TRUE arm prints `ok 1\n`; the FALSE arm's `not ok 1\n` is suppressed. The trailing
+`1` keeps the if/else in VOID context (the shape the void-print control-flow fix
+covers). Only ONE print fires — a both-arms straight-line walk would print both.
+t/base/if.t is exactly two of these (an eq guard then an ne guard) and is the
+first real Perl core test file to pass end-to-end through Chalk.
+
+```perl
+# source
+my $x = "t"; if ($x eq $x) { print "ok 1\n" } else { print "not ok 1\n" } 1
+```
+
+```behavior
+stdout: ok 1\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%so = Constant("ok 1\n") :Str
+%po = Print(%so) :Bool
+%sn = Constant("not ok 1\n") :Str
+%pn = Print(%sn) :Bool
+%c  = Constant(1) :Int
+return %c
+L: GREEN
+```
+
+## D1d if/else with STRING-ne guard, else arm fires (t/base if.t bilateral)
+
+The second half of t/base/if.t: an `ne` guard whose ELSE arm fires. With
+`$x ne $x` false, the ELSE arm prints `ok 2\n` and the TRUE arm's `not ok 2\n` is
+suppressed — the guard's polarity flips which arm is taken vs D1c. Together D1c/D1d
+are exactly t/base/if.t's two statements and prove each print is pinned to its own
+arm's `Proj` (only the taken arm fires); the differing taken-arm makes a both-arms
+regression visible in stdout. The trailing `1` keeps it void.
+
+```perl
+# source
+my $x = "t"; if ($x ne $x) { print "not ok 2\n" } else { print "ok 2\n" } 1
+```
+
+```behavior
+stdout: ok 2\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%st = Constant("not ok 2\n") :Str
+%pt = Print(%st) :Bool
+%se = Constant("ok 2\n") :Str
+%pe = Print(%se) :Bool
+%c  = Constant(1) :Int
+return %c
+L: GREEN
+```
+
 ## D3f void print inside a loop body
 
 A `print` as the sole statement of a `foreach` body is a per-iteration void
