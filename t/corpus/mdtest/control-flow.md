@@ -215,6 +215,37 @@ return %c
 L: GREEN
 ```
 
+## D1e if/else arms sharing the SAME string constant (dominance: hoist GEP to entry)
+
+Both arms print the SAME string literal (`"same\n"`), so the producer hash-conses
+it to ONE Str Constant node. If the backend emitted its GEP branch-locally (in the
+first arm it lowers), the sibling arm's use would not be dominated by that
+definition — lli rejects with "Instruction does not dominate all uses". The Str
+constant GEP is a pure pointer to a module global, so it is emitted in the ENTRY
+block (which dominates every block), the same placement rule the Int/Bool constant
+cases use. This is a t/cmd/elsif.t blocker (its four `print "not ok N '$x'\n"` else
+arms share substrings that hash-cons to shared Str constants across branches).
+
+```perl
+# source
+my $x = 1; if ($x == 1) { print "same\n" } else { print "same\n" } 1
+```
+
+```behavior
+stdout: same\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%s  = Constant("same\n") :Str
+%pt = Print(%s) :Bool
+%pe = Print(%s) :Bool
+%c  = Constant(1) :Int
+return %c
+L: GREEN
+```
+
 ## D3f void print inside a loop body
 
 A `print` as the sole statement of a `foreach` body is a per-iteration void

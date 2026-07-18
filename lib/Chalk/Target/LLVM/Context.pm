@@ -614,12 +614,18 @@ sub _lower_constant {
         # ptr-to-global pattern; the len is tracked but unused for names.
         my ($gname, $byte_len, $total) = $self->_module_global_name('str_const', $val);
 
-        # GEP to get i8* from the global array.
+        # GEP to get i8* from the global array. Emit into the ENTRY block: the
+        # GEP is a pure pointer to a module global, and a hash-consed Str constant
+        # shared across blocks (the SAME literal in both arms of an if/else, e.g.
+        # `if(C){print "x"}else{print "x"}`) would, if emitted branch-locally, not
+        # dominate the sibling arm's use (lli: "Instruction does not dominate all
+        # uses"). Entry placement dominates every use. Same rule as the Int/Bool
+        # constant cases above.
         my $ref = $self->_fresh;
         # Sanitize the comment text: a control byte (e.g. a newline in the
         # string value) would split the IR line and break the module.
         (my $val_cmt = $val) =~ s/[^\x20-\x7e]/./g;
-        $self->_emit("  $ref = getelementptr inbounds [$total x i8], [$total x i8]* $gname, i64 0, i64 0  ; Constant(\"$val_cmt\", Str) -> i8* ptr");
+        $self->_emit_entry("  $ref = getelementptr inbounds [$total x i8], [$total x i8]* $gname, i64 0, i64 0  ; Constant(\"$val_cmt\", Str) -> i8* ptr");
 
         # Record the byte-length as a compile-time literal for the output epilogue.
         $self->{_str_len_table}{$ref} = $byte_len;
