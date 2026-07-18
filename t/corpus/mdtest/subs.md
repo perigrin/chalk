@@ -257,3 +257,31 @@ context: scalar
 ```ir
 L: GAP(list-assign of @_ into named params — inlining binds only positional `shift @_`; `my (...) = @_` does not connect to the call arguments in the graph)
 ```
+
+## F8 positional `$_[0]` subscript binds the argument (t/cmd/elsif.t blocker)
+
+A callee that reads its first argument as `$_[0]` (a subscript on `@_`, not
+`shift @_`). The producer emits `Subscript(Constant("_"), Constant(0), Mem)` —
+the `@_` array by name at index 0. Inlining binds it exactly like a positional
+`shift @_`: the caller's argument ref substitutes for the Subscript node during
+inlining (keyed by refaddr, consulted before _lower_subscript). This is the
+t/cmd/elsif.t blocker (`sub foo { if ($_[0] == 1) {...} }`). GREEN for a single
+`$_[N]` read; multiple distinct `$_[N]` subscripts (arg 0 AND arg 1) are a
+multi-positional shape that still GAPs (like multiple `shift`s).
+
+```perl
+# source
+sub f { $_[0] + 1 }
+f(10)
+```
+
+```behavior
+return: 11
+context: scalar
+```
+
+```ir
+%call = Call(dispatch_kind: "direct", name: "main::f") :Int
+return %call
+L: GREEN
+```

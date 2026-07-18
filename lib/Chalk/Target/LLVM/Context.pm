@@ -4315,6 +4315,7 @@ sub _collect_positional_arg_reads {
     my ($self, $graph, $name) = @_;
 
     my @shifts;
+    my %subscripts;   # index => the $_[index] Subscript node
     for my $n ($graph->nodes->@*) {
         next unless blessed($n);
         my $op = $n->operation;
@@ -4333,14 +4334,30 @@ sub _collect_positional_arg_reads {
                 if $n->name eq 'pop';
             push @shifts, $n;
         }
-        # `my (...) = @_` / `$_[N]`: @_ accessed as an aggregate. The producer
-        # does not connect these to the caller's args in the graph, so inlining
-        # cannot bind them — GAP loudly rather than miscompile.
+        # `$_[N]`: a positional subscript on @_. The producer emits
+        # `Subscript(Constant("_"), Constant(N), Mem)` — the @_ array by NAME (a
+        # Constant, not a StashAccess) at a literal index. This IS bindable: the
+        # caller's Nth argument substitutes for the whole Subscript node during
+        # inlining (keyed by refaddr, like a `shift @_`). Collect them keyed by
+        # index so a single `$_[0]` reader binds arg 0.
+        elsif ($op eq 'Subscript') {
+            my @in = grep { blessed($_) } $n->inputs->@*;
+            my ($container, $index) = @in;
+            next unless defined $container && $container->operation eq 'Constant'
+                && $container->can('value') && ($container->value // '') eq '_';
+            next unless defined $index && $index->operation eq 'Constant'
+                && $index->can('value') && defined $index->value
+                && $index->value =~ /^\d+$/;
+            $subscripts{ $index->value } = $n;
+        }
+        # `my (...) = @_`: @_ accessed as an aggregate via a StashAccess. The
+        # producer does not connect the list-assign to the caller's args in the
+        # graph, so inlining cannot bind it — GAP loudly rather than miscompile.
         elsif ($op eq 'StashAccess'
                 && $n->can('var_name') && ($n->var_name // '') eq '_') {
             # A `shift @_` consumes its StashAccess(_) operand; that consumer is
-            # handled above. Any OTHER consumer (list-assign, subscript, deref)
-            # is an @_ shape inlining cannot bind.
+            # handled above. Any OTHER consumer (list-assign, deref) is an @_
+            # shape inlining cannot bind.
             my @other = grep {
                 blessed($_) && !( $_->operation eq 'Call'
                     && $_->can('dispatch_kind')
@@ -4348,11 +4365,34 @@ sub _collect_positional_arg_reads {
                     && defined $_->name && $_->name eq 'shift' )
             } $n->consumers->@*;
             die "GAP: direct call to '$name': callee accesses \@_ as an aggregate "
-              . "(a list assignment `my (...) = \@_` or a `\$_[N]` subscript) — "
-              . "inlining only binds positional `shift \@_` reads; this shape does "
-              . "not connect to the caller's arguments in the graph."
+              . "(a list assignment `my (...) = \@_`) — inlining only binds "
+              . "positional `shift \@_` / `\$_[N]` reads; this shape does not "
+              . "connect to the caller's arguments in the graph."
                 if @other;
         }
+    }
+
+    # A callee reads its positional args via EITHER `shift @_` OR `$_[N]`
+    # subscripts, not both (mixing them is an unusual shape we do not bind).
+    die "GAP: direct call to '$name': callee mixes `shift \@_` and `\$_[N]` "
+      . "positional reads — inlining binds one positional style per callee."
+        if @shifts && %subscripts;
+
+    # A single positional read binds arg 0. Multiple distinct `$_[N]` subscripts
+    # (arg 0 AND arg 1) are a multi-arg shape; only a single-positional callee
+    # inlines (the same single-arg constraint as `shift @_`, which hash-conses).
+    if (%subscripts) {
+        die "GAP: direct call to '$name': callee reads "
+          . scalar(keys %subscripts) . " distinct `\$_[N]` positional subscripts "
+          . "— only a single-argument positional callee inlines."
+            if keys %subscripts > 1;
+        # The lone subscript reads arg N; return it (the caller binds arg[0] to it
+        # only when N == 0, which the arity check below enforces via count).
+        my ($idx) = keys %subscripts;
+        die "GAP: direct call to '$name': callee reads `\$_[$idx]` (arg $idx) but "
+          . "only a single first-argument `\$_[0]` positional read inlines."
+            if $idx != 0;
+        return ($subscripts{0});
     }
 
     # More than one distinct `shift @_` cannot be ordered: two textually-distinct

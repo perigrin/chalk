@@ -551,9 +551,24 @@ sub _deserialize_graph ($method_data) {
 # main::foo); resolve that name against the loaded graph set and stash the graph
 # on the Call via set_resolved_graph so the backend can lower the call. Calls
 # whose name has no matching graph (builtins, unresolved) are left as-is.
+# _all_graph_nodes($g) -> ($g->nodes PLUS control-chain nodes), deduped by id.
+# $g->nodes walks inputs from the returns' value only, so a Call embedded in an
+# if CONDITION (`if (($x = foo(1)) == 1)`) -- reached via control_in, not the
+# Return value chain -- is absent. The call-stamping passes must see it to type
+# the Call result (and thus the `$x = foo(1)` Assign consuming it).
+sub _all_graph_nodes ($g) {
+    my %seen;
+    my @out;
+    for my $n ($g->nodes->@*, _control_chain_nodes($g)) {
+        next unless blessed($n);
+        push @out, $n unless $seen{ $n->id }++;
+    }
+    return @out;
+}
+
 sub _resolve_direct_calls ($graphs) {
     for my $gname (sort keys $graphs->%*) {
-        for my $node ($graphs->{$gname}->nodes->@*) {
+        for my $node (_all_graph_nodes($graphs->{$gname})) {
             next unless $node->operation eq 'Call'
                 && $node->can('dispatch_kind')
                 && ($node->dispatch_kind // '') eq 'direct';
@@ -594,7 +609,7 @@ sub _resolve_direct_calls ($graphs) {
 sub _seed_direct_call_arg_reprs ($graphs) {
     my $stamped = 0;
     for my $gname (sort keys $graphs->%*) {
-        for my $node ($graphs->{$gname}->nodes->@*) {
+        for my $node (_all_graph_nodes($graphs->{$gname})) {
             next unless $node->operation eq 'Call'
                 && $node->can('dispatch_kind')
                 && ($node->dispatch_kind // '') eq 'direct'
@@ -602,9 +617,12 @@ sub _seed_direct_call_arg_reprs ($graphs) {
             my @args = grep { blessed($_) } $node->inputs->@*;
             next unless @args;
 
-            # Find the callee's positional `shift @_` reads (single-shift shape).
+            # Find the callee's single positional argument read: either a
+            # `shift @_` (Call builtin shift over StashAccess(_)) or a `$_[0]`
+            # subscript (Subscript over Constant("_") at index 0). Both bind the
+            # first argument; stamp whichever the callee uses.
             my $callee = $node->resolved_graph;
-            my @shifts = grep {
+            my @reads = grep {
                 my $n = $_;
                 blessed($n) && $n->operation eq 'Call'
                     && $n->can('dispatch_kind')
@@ -616,18 +634,31 @@ sub _seed_direct_call_arg_reprs ($graphs) {
                             && $op->can('var_name') && ($op->var_name // '') eq '_';
                     };
             } $callee->nodes->@*;
-            next unless @shifts == 1 && @args == 1;
+            unless (@reads) {
+                # `$_[0]`: Subscript(Constant("_"), Constant(0), Mem).
+                @reads = grep {
+                    my $n = $_;
+                    blessed($n) && $n->operation eq 'Subscript' && do {
+                        my ($c, $i) = grep { blessed($_) } $n->inputs->@*;
+                        $c && $c->operation eq 'Constant' && $c->can('value')
+                            && ($c->value // '') eq '_'
+                            && $i && $i->operation eq 'Constant' && $i->can('value')
+                            && defined $i->value && $i->value eq '0';
+                    };
+                } $callee->nodes->@*;
+            }
+            next unless @reads == 1 && @args == 1;
 
             my $arg_repr = $args[0]->representation // next;
-            # ponytail: monomorphic callee assumption — the callee's shift is
+            # ponytail: monomorphic callee assumption — the callee's arg read is
             # stamped by the FIRST caller's arg repr and shared across call
             # sites. A second caller with a DIFFERENT repr (Str vs Int) does not
             # re-stamp; the backend then lowers its arg through the first repr's
             # ops, which lli rejects as a type mismatch (a loud verify error, not
             # a silent miscompile). Per-callsite specialization if polymorphic
             # direct calls ever need to lower.
-            next if defined $shifts[0]->representation;
-            $shifts[0]->set_representation($arg_repr);
+            next if defined $reads[0]->representation;
+            $reads[0]->set_representation($arg_repr);
             $stamped++;
         }
     }
@@ -700,6 +731,11 @@ sub from_json ($json_string) {
         _seed_and_propagate_reprs(\%graphs);
         _resolve_direct_calls(\%graphs);
     }
+    # The loop stamps a Call's result repr in _resolve_direct_calls AFTER the
+    # pass's _seed_and_propagate_reprs already ran, so a consumer of the call
+    # result (an `$x = foo(5)` Assign) is still untyped when the loop exits. Run
+    # one final propagation so the now-stamped Calls flow into their consumers.
+    _seed_and_propagate_reprs(\%graphs);
 
     # $mop is returned only in list context; scalar context stays \%graphs for
     # the existing single-return callers.
