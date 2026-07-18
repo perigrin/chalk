@@ -22,7 +22,7 @@ sub make_vardecl ($var_name) {
     );
     return Chalk::IR::Node::VarDecl->new(
         id     => 'vd_' . $id_counter++,
-        inputs => [undef, $name_const, undef],
+        inputs => [$name_const, undef],
     );
 }
 
