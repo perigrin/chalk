@@ -223,6 +223,20 @@ class Chalk::IR::NodeFactory {
                     $el->add_consumer($node);
                 }
             }
+            # The JSON loader (Serialize::JSON::_deserialize_graph) builds a
+            # deserialized Phi's inputs via `inputs => [...]`, not `values`,
+            # so $values is undef on that path and the loop above never
+            # runs. Register consumers from the plain `inputs` key too, via
+            # the same generic helper make_cfg() uses, so a round-tripped
+            # Phi's init input gets back-registered. Mutually exclusive with
+            # the $values branch above (a caller passes one key or the
+            # other, never both) and safe against the loader's deferred
+            # loop-Phi backedge patch: the forward-referenced backedge is
+            # excluded from `inputs` at construction time and wired later
+            # via Phi::set_backedge, which does its own add_consumer.
+            elsif (defined $args{inputs}) {
+                $self->_register_consumers($node, inputs => $args{inputs});
+            }
             $cache{$id} = $node;
             return $node;
         }
