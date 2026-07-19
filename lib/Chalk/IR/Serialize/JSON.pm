@@ -114,14 +114,20 @@ sub _extract_fields ($node, $id_remap) {
 }
 
 # -----------------------------------------------------------------------
-# _all_nodes_topo($graph) — return all nodes in topological order.
-# Graph->nodes() does a DFS over inputs[] only; Phi nodes reference a
-# region via a separate field (not inputs[]), so Region may appear after
-# Phi in Graph->nodes() output. This function re-sorts to ensure
-# Phi region references are always serialized before their Phi nodes.
+# _all_nodes_topo($graph_or_nodes) — return all nodes in topological order.
+# Accepts either a Chalk::IR::Graph (calls ->nodes) or a plain arrayref of
+# already-reachable nodes (a caller that computed its own reachable set via
+# a full inputs+consumers BFS, e.g. a producer whose graph was never
+# incrementally merge()'d into a Graph's own membership cache). Graph->nodes
+# does a DFS over inputs[] only; Phi nodes reference a region via a separate
+# field (not inputs[]), so Region may appear after Phi in the base list.
+# This function re-sorts to ensure Phi region references are always
+# serialized before their Phi nodes.
 # -----------------------------------------------------------------------
-sub _all_nodes_topo ($graph) {
-    my $base = $graph->nodes;
+sub _all_nodes_topo ($graph_or_nodes) {
+    my $base = ref($graph_or_nodes) eq 'ARRAY'
+        ? $graph_or_nodes
+        : $graph_or_nodes->nodes;
 
     # Collect any Phi region nodes not already in the base list.
     my %seen = map { $_->id => 1 } $base->@*;

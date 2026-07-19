@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
+use Scalar::Util qw(blessed);
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
 use Chalk::IR::Serialize::JSON qw(to_json from_json);
@@ -330,6 +331,48 @@ subtest '_all_nodes_topo is exported for cross-repo reuse' => sub {
     ok(exists $pos{ $region->id }, 'the merge Phi region is present in the topo order');
     ok($pos{ $region->id } < $pos{ $phi->id },
         'the region precedes its Phi in the topo order');
+};
+
+# _all_nodes_topo also accepts a plain arrayref of nodes in place of a Graph
+# object. A producer whose nodes are reachable ONLY via consumers() of an
+# already-included node (never as an input on the Return's value chain) --
+# e.g. a while-loop's false-exit Proj, a consumer of Loop with no downstream
+# input reference -- needs a full inputs+consumers BFS from start+returns to
+# find them; Chalk::IR::Graph::nodes() cannot supply that (its consumer walk
+# is gated on its own incrementally-built membership cache, populated via
+# merge() as Actions.pm constructs each node -- a producer that instead
+# builds the whole graph via a bare factory and wraps start/returns into a
+# Graph only at the end never populates that cache). Accepting a plain node
+# list lets a caller supply its own BFS while still reusing the shared
+# Phi-region-precedes-Phi topo-sort.
+subtest '_all_nodes_topo accepts a plain arrayref of nodes' => sub {
+    my $f      = Chalk::IR::NodeFactory->new();
+    my $start  = $f->make_cfg('Start');
+    my $loop   = $f->make_cfg('Loop', inputs => [$start]);
+    my $proj1  = $f->make_cfg('Proj', inputs => [$loop], index => 1);
+    my $proj0  = $f->make_cfg('Proj', inputs => [$loop], index => 0);
+    my $region = $f->make_cfg('Region', inputs => [$proj1]);
+    my $init   = $f->make('Constant', value => '0', const_type => 'integer');
+    my $phi    = $f->make('Phi', inputs => [$init], region => $loop);
+    my $ret    = $f->make_cfg('Return', inputs => [$region, $phi]);
+
+    # A full inputs+consumers BFS from start+returns (mirroring the
+    # pre-unification SoN::IR::Graph::nodes() contract), passed as a plain
+    # arrayref rather than a Chalk::IR::Graph.
+    my @worklist = ($start, $ret);
+    my %seen;
+    my @all;
+    while (my $n = shift @worklist) {
+        next if $seen{ $n->id }++;
+        push @all, $n;
+        push @worklist, grep { blessed($_) } $n->inputs->@*;
+        push @worklist, $n->consumers->@* if $n->can('consumers');
+    }
+
+    my $ordered = Chalk::IR::Serialize::JSON::_all_nodes_topo(\@all);
+    my %pos = map { $ordered->[$_]->id => $_ } 0 .. $#$ordered;
+    ok(exists $pos{ $proj0->id },
+        'a node reachable only via consumers (the false-exit Proj) is present');
 };
 
 done_testing();
