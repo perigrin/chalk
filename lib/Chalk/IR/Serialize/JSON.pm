@@ -129,16 +129,59 @@ sub _all_nodes_topo ($graph_or_nodes) {
         ? $graph_or_nodes
         : $graph_or_nodes->nodes;
 
-    # Collect any Phi region nodes not already in the base list.
+    # Collect any Phi region nodes AND control_in-linked nodes not already in
+    # the base list. Graph::nodes()'s membership cache is seeded by
+    # merge()/_seed() and its consumer walk is filtered to cached members
+    # (Graph.pm's `in_cache` check) -- a node reachable ONLY via a control_in
+    # edge (produce-time control: set_control_in registers the use-def edge
+    # via add_consumer, but never merge()s the node into the graph's own
+    # cache) is invisible to that walk and would silently vanish from the
+    # serialized output. Two distinct shapes need adding:
+    #   (a) a node whose control predecessor is missing (walk control_in
+    #       BACKWARD from every base node -- e.g. a void statement-effect
+    #       Call reached only via a Return's control_in); and
+    #   (b) a node that is itself missing because its only inbound edge is
+    #       ITS OWN control_in pointing at an already-reachable node (e.g. a
+    #       loop condition whose control_in is the Loop, but nothing's
+    #       inputs() reference the condition) -- walk FORWARD via consumers()
+    #       and keep any consumer whose control_in points back at the node
+    #       being walked.
+    # Fixpoint both directions together (an added node can itself expose
+    # further control_in-only neighbors) until nothing new is found.
     my %seen = map { $_->id => 1 } $base->@*;
     my @extra;
-    for my $node ($base->@*) {
-        if ($node->operation eq 'Phi') {
-            my $region = $node->region;
-            next unless defined $region;
-            next if $seen{ $region->id }++;
-            push @extra, $region;
+    my @frontier = $base->@*;
+    while (@frontier) {
+        my @next_frontier;
+        for my $node (@frontier) {
+            if ($node->operation eq 'Phi') {
+                my $region = $node->region;
+                if (defined $region && !$seen{ $region->id }++) {
+                    push @extra, $region;
+                    push @next_frontier, $region;
+                }
+            }
+            # (a) backward: this node's own control predecessor.
+            if ($node->can('control_in') && defined $node->control_in) {
+                my $ctrl = $node->control_in;
+                if (!$seen{ $ctrl->id }++) {
+                    push @extra, $ctrl;
+                    push @next_frontier, $ctrl;
+                }
+            }
+            # (b) forward: a consumer whose control_in IS this node.
+            if ($node->can('consumers')) {
+                for my $c ($node->consumers->@*) {
+                    next unless blessed($c);
+                    next unless $c->can('control_in') && defined $c->control_in
+                        && $c->control_in->id eq $node->id;
+                    next if $seen{ $c->id }++;
+                    push @extra, $c;
+                    push @next_frontier, $c;
+                }
+            }
         }
+        @frontier = @next_frontier;
     }
 
     # Always re-sort via DFS post-order so that Phi regions are guaranteed
@@ -148,7 +191,19 @@ sub _all_nodes_topo ($graph_or_nodes) {
     my %in_progress;
     my @order;
 
-    # Predecessors of a node are its inputs plus, for Phi, its region.
+    # Predecessors of a node are its inputs plus, for Phi, its region, plus
+    # (control-aware topo) its control_in edge when it has one. A node whose
+    # ONLY inbound edge is control_in (e.g. a void statement-effect Call with
+    # no data consumer) has no ordering constraint from inputs() alone and
+    # could otherwise be emitted AFTER whatever reads it via control_in (e.g.
+    # a Return whose control_in it is) -- a genuine forward reference the
+    # loader would reject. Adding control_in as a predecessor here forces it
+    # to be visited (and thus emitted) before its control_in consumer,
+    # exactly like any other producer edge. control_in never closes a cycle
+    # back through itself the way a loop Phi's backedge does (it is a
+    # straight-line control chain: Start -> effect -> effect -> ... ->
+    # Return/Loop), so no cycle-cut exclusion is needed here.
+    #
     # A LOOP header Phi's second input (inputs[1], the back-edge value) is
     # the cycle-closing edge: it necessarily forward-references in any
     # serialization order (the loader defer-patches it via set_backedge once
@@ -172,6 +227,9 @@ sub _all_nodes_topo ($graph_or_nodes) {
         my @preds = grep { defined $_ && blessed($_) } @in;
         if ($n->operation eq 'Phi' && defined $n->region) {
             push @preds, $n->region;
+        }
+        if ($n->can('control_in') && defined $n->control_in) {
+            push @preds, $n->control_in;
         }
         return @preds;
     };
@@ -210,38 +268,6 @@ sub _serialize_graph ($graph) {
         $id_remap{ $node->id } = $pos++;
     }
 
-    # GAP-not-corruption boundary (zhi 019f29ed-974a): from_json moves control
-    # into control_in and attaches a loop CONDITION to its Loop via a
-    # loop_control edge; the condition is a value-input of nothing on the return
-    # path, so the input-reachable node set ($graph->nodes / _all_nodes_topo)
-    # can OMIT it entirely (it is not referenced BY any captured node, so no
-    # dangling positional ref is produced -- it is simply dropped). Serializing
-    # anyway emits a loop with no condition: valid-looking but UNLOWERABLE JSON.
-    # No live consumer round-trips a loaded graph today. Rather than emit
-    # silently-broken JSON, detect a Loop whose loop_control condition is not in
-    # the captured set and die loudly. A freshly-built graph (control in inputs,
-    # no loop_control edge yet, or its condition captured as an input) round-trips
-    # and does not trip this.
-    for my $node ($topo_nodes->@*) {
-        next unless $node->operation eq 'Loop';
-        my $cons = $node->can('consumers') ? ($node->consumers // []) : [];
-        for my $c ($cons->@*) {
-            next unless blessed($c);
-            # from_json demotes a loaded loop condition's loop_control edge to
-            # control_in on the Chalk node; the condition is a Loop consumer whose
-            # control_in IS the Loop.
-            my $ci = $c->can('control_in') ? $c->control_in : undef;
-            next unless defined $ci && blessed($ci) && $ci->id eq $node->id;
-            next if exists $id_remap{ $c->id };   # condition captured: fine
-            die "GAP: to_json cannot faithfully round-trip this graph — a Loop's "
-              . "condition (" . $c->operation . ", attached via control_in) is "
-              . "not in the serializable node set. from_json threads a loaded "
-              . "loop condition via control_in, leaving it unreachable from the "
-              . "return path; round-trip of loaded loop graphs is not yet "
-              . "supported (zhi 019f29ed-974a).\n";
-        }
-    }
-
     # Emit each node
     my @nodes;
     for my $node ($topo_nodes->@*) {
@@ -255,6 +281,18 @@ sub _serialize_graph ($graph) {
         );
         $entry{cfg}    = JSON::PP::true if _is_cfg($node);
         $entry{fields} = $fields        if defined $fields;
+        # Produce-time control: emit the control_in edge as its own wire key
+        # so from_json can decode it back onto control_in directly, instead
+        # of the old convention of flattening control into inputs[0] plus a
+        # transitional producer-side marker table. _all_nodes_topo's control-
+        # aware walk (membership fixpoint + control_in-as-predecessor
+        # ordering) guarantees a node's control predecessor is always
+        # captured, and always emitted before it, whenever the node itself
+        # is -- so the referenced index always resolves on load.
+        if ($node->can('control_in') && defined $node->control_in
+                && exists $id_remap{ $node->control_in->id }) {
+            $entry{control_in} = $id_remap{ $node->control_in->id };
+        }
 
         push @nodes, \%entry;
     }
@@ -330,54 +368,6 @@ sub _deserialize_graph ($method_data) {
               . "unresolvable forward input reference is a producer ordering bug.";
         }
         my @inputs = map { $nodes[$_] } @input_idx;
-
-        # B::SoN serializes Return as inputs=[control, value] (control token
-        # first). Chalk's contract is inputs=[value] with control carried in
-        # control_in. Reconcile: when a Return leads with a CFG control node
-        # (Start, or a Region/If/Proj/Loop merge from a control-flow body) OR a
-        # threaded element-store Assign (a stmt-effect that already carries its
-        # own control_in from the split above) and has a trailing value, split
-        # off the leading control (re-attached via control_in below) and keep
-        # only the value as input. Without this a leading stmt-effect Assign is
-        # mistaken for the return VALUE, so `$a[0]=42; $a[1]` would return the
-        # store (42) not $a[1]. A leading stmt-effect Call is NOT split here (it
-        # is threaded by a separate downstream mechanism, and its repr is not
-        # stamped at construction); only the element-store Assign case is new.
-        # A leading stmt-effect Print IS split: `print ...; EXPR` serializes as
-        # Return[Print, value], and in the value-context `my $ok = print ...; $ok`
-        # the SAME Print is both control (inputs[0]) and the return value
-        # (inputs[1]) -- demoting inputs[0] to control_in leaves the Print (or a
-        # later value) as the sole return input, so the effect threads on the
-        # control chain and the return reads print's boolean.
-        # Unwind is EXCLUDED: for a die, the Unwind is the real exit and must
-        # stay a reachable input, not be demoted to control_in.
-        my $bson_return_control;
-        if ($op eq 'Return' && @inputs >= 2
-                && blessed($inputs[0])
-                && $inputs[0]->operation ne 'Unwind'
-                && (_is_cfg($inputs[0])
-                    || (($inputs[0]->operation eq 'Assign'
-                            || $inputs[0]->operation eq 'Print')
-                        && $inputs[0]->can('control_in')
-                        && defined $inputs[0]->control_in))) {
-            $bson_return_control = shift @inputs;
-        }
-
-        # A B::SoN statement-effect node leads with its control token: a void
-        # Call (inputs=[control, invocant, args]) or an element-store Assign
-        # (inputs=[control, target, value]). Chalk's contract carries control in
-        # control_in, so split off inputs[0] and reattach it below -- the effect
-        # is threaded into the control chain (survives DCE, ordered) instead of
-        # being an orphaned data node whose side effect is lost, and the
-        # remaining inputs match the Chalk shape (Call: [invocant, args]; Assign:
-        # [target, value]). The producer only sets is_stmt_effect when it
-        # prepended control, so inputs[0] IS the control (a CFG node, or a
-        # preceding stmt-effect node in a chain).
-        my $bson_stmt_control;
-        if (($op eq 'Call' || $op eq 'Assign' || $op eq 'Print') && $fields->{is_stmt_effect}
-                && @inputs >= 1 && blessed($inputs[0])) {
-            $bson_stmt_control = shift @inputs;
-        }
 
         # Build the argument hash, with inputs and any extra fields
         my %args = (inputs => \@inputs);
@@ -459,16 +449,14 @@ sub _deserialize_graph ($method_data) {
             $node = $factory->make($op, %args);
         }
 
-        # Re-attach a B::SoN Return's control token via control_in (it was split
-        # out of inputs above to match Chalk's Return contract).
-        if (defined $bson_return_control) {
-            $node->set_control_in($bson_return_control);
-        }
-
-        # Re-attach a B::SoN void statement-effect Call's control token, threading
-        # it into the effect chain (it was split out of inputs above).
-        if (defined $bson_stmt_control) {
-            $node->set_control_in($bson_stmt_control);
+        # Produce-time control: decode a genuine control_in wire key, emitted
+        # by to_json for a graph built with control_in set directly (never
+        # flattened into inputs[0]). Control-aware topo (_all_nodes_topo)
+        # guarantees a node's control predecessor is always serialized
+        # before it, so the referenced index is always already constructed
+        # here.
+        if (defined $nd->{control_in}) {
+            $node->set_control_in($nodes[ $nd->{control_in} ]);
         }
 
         # Map a B::SoN stamp to a Chalk representation so the backend can lower
@@ -484,17 +472,6 @@ sub _deserialize_graph ($method_data) {
         # so the return epilogue tags it correctly.
         if ($op eq 'Print') {
             $node->set_representation('Bool');
-        }
-
-        # A loop-header condition carries a control edge to its Loop. Demote it
-        # to control_in so the backend recovers the condition structurally
-        # (LLVM.pm _lower_loop_condition strategy 1) instead of by the ambiguous
-        # first-icmp-consumer heuristic. set_control_in registers the condition
-        # in the Loop's consumers, which is what strategy 1 scans. The condition
-        # consumes the header Phi (which regions the Loop), so the Loop always
-        # precedes it in topo order -- a backward reference, wired inline.
-        if (defined $nd->{loop_control}) {
-            $node->set_control_in($nodes[ $nd->{loop_control} ]);
         }
 
         push @nodes, $node;

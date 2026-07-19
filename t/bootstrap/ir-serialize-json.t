@@ -212,33 +212,56 @@ sub make_simple_graph {
 }
 
 # =============================================================================
-# Test: to_json refuses to silently corrupt a LOADED loop graph (zhi
-# 019f29ed-974a). from_json moves control into control_in and attaches the loop
-# condition to its Loop via a loop_control edge -- neither is a value input, so
-# on a loaded control-flow graph those nodes can fall outside the input-reachable
-# serializable set. Serializing anyway would emit a positional ref to a node not
-# in the output: valid-looking but UNLOWERABLE JSON (a loop with no condition).
-# No live consumer round-trips a loaded graph today; rather than corrupt
-# silently, to_json must DIE loudly (GAP-not-corruption). A freshly-built graph
-# (control in inputs) still round-trips and must NOT trip the guard.
+# Test: to_json faithfully round-trips a LOADED loop graph whose condition is
+# attached to its Loop via control_in (produce-time control). Historically
+# (zhi 019f29ed-974a) from_json demoted control into control_in and attached
+# the loop condition to its Loop via a loop_control side-key; neither was a
+# value input, so on a loaded control-flow graph those nodes could fall
+# outside the input-reachable serializable set, and to_json refused to emit
+# the resulting condition-less (unlowerable) JSON, dying loudly instead
+# (GAP-not-corruption). _all_nodes_topo is now control-aware (control_in is
+# both a membership-extending edge and a topo predecessor), so the condition
+# is always captured and always ordered before the Loop's other consumers --
+# the old GAP no longer applies, and to_json round-trips the graph faithfully
+# instead of refusing it. A freshly-built graph (control in inputs) still
+# round-trips too.
 # =============================================================================
 
 {
     # A minimal while-loop producer graph: `my $s=0; my $n=3; while ($n>0){
-    # $s+=$n; $n-=1 } $s`. Node 11 = NumGt(n_phi, 0) loop_control:1 is the
-    # condition, attached to the Loop (id 1) via loop_control.
+    # $s+=$n; $n-=1 } $s`. Node 11 = NumGt(n_phi, 0) control_in:1 is the
+    # condition, attached to the Loop (id 1) via control_in (produce-time
+    # control wire key).
     my $loop_json = <<'JSON';
-{"methods":{"main::corpus_case":{"nodes":[{"cfg":true,"id":0,"inputs":[],"op":"Start"},{"cfg":true,"id":1,"inputs":[0],"op":"Loop"},{"cfg":true,"fields":{"index":1},"id":2,"inputs":[1],"op":"Proj"},{"cfg":true,"id":3,"inputs":[2],"op":"Region"},{"fields":{"const_type":"integer","value":"0"},"id":4,"inputs":[],"op":"Constant","stamp":"Int"},{"fields":{"region":1},"id":5,"inputs":[4,10],"op":"Phi","stamp":"Int"},{"cfg":true,"id":6,"inputs":[3,5],"op":"Return"},{"cfg":true,"fields":{"index":0},"id":7,"inputs":[1],"op":"Proj"},{"fields":{"const_type":"integer","value":"3"},"id":8,"inputs":[],"op":"Constant","stamp":"Int"},{"fields":{"region":1},"id":9,"inputs":[8,13],"op":"Phi","stamp":"Int"},{"id":10,"inputs":[5,9],"op":"Add","stamp":"Int"},{"id":11,"inputs":[9,4],"loop_control":1,"op":"NumGt","stamp":"Boolean"},{"fields":{"const_type":"integer","value":"1"},"id":12,"inputs":[],"op":"Constant","stamp":"Int"},{"id":13,"inputs":[9,12],"op":"Subtract","stamp":"Int"}],"returns":[6],"start":0}},"source":null,"version":1}
+{"methods":{"main::corpus_case":{"nodes":[{"cfg":true,"id":0,"inputs":[],"op":"Start"},{"cfg":true,"id":1,"inputs":[0],"op":"Loop"},{"cfg":true,"fields":{"index":1},"id":2,"inputs":[1],"op":"Proj"},{"cfg":true,"id":3,"inputs":[2],"op":"Region"},{"fields":{"const_type":"integer","value":"0"},"id":4,"inputs":[],"op":"Constant","stamp":"Int"},{"fields":{"region":1},"id":5,"inputs":[4,10],"op":"Phi","stamp":"Int"},{"cfg":true,"id":6,"inputs":[5],"op":"Return"},{"cfg":true,"fields":{"index":0},"id":7,"inputs":[1],"op":"Proj"},{"fields":{"const_type":"integer","value":"3"},"id":8,"inputs":[],"op":"Constant","stamp":"Int"},{"fields":{"region":1},"id":9,"inputs":[8,13],"op":"Phi","stamp":"Int"},{"id":10,"inputs":[5,9],"op":"Add","stamp":"Int"},{"id":11,"inputs":[9,4],"control_in":1,"op":"NumGt","stamp":"Boolean"},{"fields":{"const_type":"integer","value":"1"},"id":12,"inputs":[],"op":"Constant","stamp":"Int"},{"id":13,"inputs":[9,12],"op":"Subtract","stamp":"Int"}],"returns":[6],"start":0}},"source":null,"version":1}
 JSON
 
     my ($g1) = from_json($loop_json);
     my $graph = $g1->{'main::corpus_case'};
     ok(defined $graph, 'loaded the loop graph');
 
-    # to_json must DIE loudly rather than emit corrupt (condition-less) JSON.
-    my $err = do { local $@; eval { to_json({ 'main::corpus_case' => $graph }); 1 } ? '' : $@ };
-    like($err, qr/GAP: to_json cannot faithfully round-trip/,
-        'to_json dies loudly on a loaded loop graph, not silent corruption');
+    # _all_nodes_topo (not Graph::nodes(), which does not walk a Phi's
+    # region field) is the reachability contract to_json itself relies on;
+    # use it here too to confirm the condition is genuinely captured.
+    my $topo = Chalk::IR::Serialize::JSON::_all_nodes_topo($graph);
+    my ($loop_node) = grep { $_->operation eq 'Loop' } $topo->@*;
+    ok(defined $loop_node, 'the Loop node is present after load');
+    my ($cond_node) = grep { $_->operation eq 'NumGt' } $topo->@*;
+    ok(defined $cond_node, 'the loop condition is reachable from the loaded graph');
+    ok(defined $cond_node->control_in && $cond_node->control_in->id eq $loop_node->id,
+        q{the condition's control_in resolved to the Loop});
+
+    # to_json must round-trip faithfully, not die.
+    my $json = do { local $@; eval { to_json({ 'main::corpus_case' => $graph }) } };
+    ok(defined $json && $json =~ /\S/,
+        'to_json round-trips a loaded loop graph instead of refusing it');
+
+    my $reloaded = from_json($json);
+    my $graph2 = $reloaded->{'main::corpus_case'};
+    ok(defined $graph2, 're-loading the round-tripped JSON succeeds');
+    my $topo2 = Chalk::IR::Serialize::JSON::_all_nodes_topo($graph2);
+    my ($cond_node2) = grep { $_->operation eq 'NumGt' } $topo2->@*;
+    ok(defined $cond_node2, 'the loop condition survives a second round-trip');
 }
 
 {
