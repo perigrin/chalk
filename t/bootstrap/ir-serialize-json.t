@@ -304,4 +304,32 @@ JSON
     }
 }
 
+# _all_nodes_topo is exported for reuse by perl5-son's own JSON serializer
+# (SoN::Serialize::JSON), which needs the identical Phi-region-precedes-Phi
+# topo-order fix once B::SoN's FromOptree builds Chalk::IR::Node objects via
+# a Chalk::IR::Graph: Chalk::IR::Graph::nodes() walks inputs()/consumers()
+# only, so a merge-Phi's region (a separate named field, not an inputs[]
+# edge) can otherwise be missing from -- or ordered after -- the node the
+# Phi refers to it by position.
+subtest '_all_nodes_topo is exported for cross-repo reuse' => sub {
+    require Chalk::IR::Serialize::JSON;
+    ok(Chalk::IR::Serialize::JSON->can('_all_nodes_topo'),
+        '_all_nodes_topo is callable via the package');
+
+    my $f      = Chalk::IR::NodeFactory->new();
+    my $start  = $f->make_cfg('Start');
+    my $region = $f->make_cfg('Region', inputs => [$start]);
+    my $left   = $f->make('Constant', value => '1', const_type => 'integer');
+    my $right  = $f->make('Constant', value => '2', const_type => 'integer');
+    my $phi    = $f->make('Phi', inputs => [$left, $right], region => $region);
+    my $ret    = $f->make_cfg('Return', inputs => [$region, $phi]);
+    my $graph  = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
+
+    my $ordered = Chalk::IR::Serialize::JSON::_all_nodes_topo($graph);
+    my %pos = map { $ordered->[$_]->id => $_ } 0 .. $#$ordered;
+    ok(exists $pos{ $region->id }, 'the merge Phi region is present in the topo order');
+    ok($pos{ $region->id } < $pos{ $phi->id },
+        'the region precedes its Phi in the topo order');
+};
+
 done_testing();
