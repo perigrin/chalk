@@ -62,6 +62,10 @@ sub _extract_fields ($node, $id_remap) {
             # (019eb42a MOP-direct); losing it makes a reloaded call
             # un-lowerable and changes its content hash.
             (defined $node->class_name ? (class_name => $node->class_name) : ()),
+            # paren_form is part of content_hash (Call.pm) -- losing it would
+            # change a reloaded call's identity/hash-consing behavior relative
+            # to the graph that produced it.
+            paren_form => $node->paren_form,
         };
     }
     if ($op eq 'Phi') {
@@ -109,6 +113,12 @@ sub _extract_fields ($node, $id_remap) {
     }
     if ($op eq 'VarDecl') {
         return { scope => $node->scope };
+    }
+    if ($op eq 'Coerce') {
+        return {
+            from_repr => $node->from_repr,
+            to_repr   => $node->to_repr,
+        };
     }
     return undef;
 }
@@ -385,6 +395,8 @@ sub _deserialize_graph ($method_data) {
                 if exists $fields->{param_names};
             $args{class_name}    = $fields->{class_name}
                 if exists $fields->{class_name};
+            $args{paren_form}    = $fields->{paren_form}
+                if exists $fields->{paren_form};
         }
         elsif ($op eq 'Phi') {
             $args{region} = $nodes[ $fields->{region} ];
@@ -439,6 +451,10 @@ sub _deserialize_graph ($method_data) {
         }
         elsif ($op eq 'VarDecl') {
             $args{scope} = $fields->{scope} // 'my';
+        }
+        elsif ($op eq 'Coerce') {
+            $args{from_repr} = $fields->{from_repr};
+            $args{to_repr}   = $fields->{to_repr};
         }
 
         my $node;
