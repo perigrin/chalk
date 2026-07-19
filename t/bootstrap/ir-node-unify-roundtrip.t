@@ -241,18 +241,26 @@ sub _value_inputs {
 }
 
 sub _node_key {
-    my ($node, $memo) = @_;
+    my ($node, $memo, $in_progress) = @_;
     $memo //= {};
+    $in_progress //= {};
     return '<undef>' unless blessed($node);
     my $id = $node->id;
     return $memo->{$id} if exists $memo->{$id};
-    # Cycle guard: seed a placeholder before recursing, so a backedge
-    # (Phi's second input pointing through Add back to itself) terminates
-    # instead of looping forever. The placeholder is the node's OWN
-    # operation + a marker; this is sufficient because the cycle always
-    # closes back through the SAME Phi, which both graphs traverse
-    # identically (same recursion order) when isomorphic.
-    $memo->{$id} = "<in-progress:$id>";
+    # Cycle guard: a backedge (Phi's second input pointing through Add back
+    # to itself) must terminate instead of recursing forever. The guard is
+    # keyed by OPERATION, not by the mid-visit node's literal id: a literal-
+    # id placeholder cached into $memo would become part of some OTHER
+    # node's permanent structural key whenever that other node's own
+    # top-level _node_key call is what closes the cycle back through this
+    # node -- and WHICH node is visited first (Phi vs. the Add that reads
+    # it) is an artefact of the caller's traversal order, not of graph
+    # structure, so two isomorphic graphs visited in different orders would
+    # embed different literal ids and spuriously compare unequal. Returning
+    # a purely structural placeholder (never written to $memo) keeps the
+    # key order-independent while still terminating the recursion.
+    return "<cycle:" . $node->operation . ">" if $in_progress->{$id};
+    local $in_progress->{$id} = 1;
 
     my @parts = ($node->operation);
     if ($node->operation eq 'Constant') {
@@ -267,17 +275,17 @@ sub _node_key {
         push @parts, 'index=' . ($node->index // '');
     }
     if ($node->operation eq 'Phi' && defined $node->region) {
-        push @parts, 'region=' . _node_key($node->region, $memo);
+        push @parts, 'region=' . _node_key($node->region, $memo, $in_progress);
     }
     for my $in (_value_inputs($node)) {
         if (!defined $in) {
             push @parts, 'undef';
         }
         elsif (ref($in) eq 'ARRAY') {
-            push @parts, '[' . join(',', map { _node_key($_, $memo) } $in->@*) . ']';
+            push @parts, '[' . join(',', map { _node_key($_, $memo, $in_progress) } $in->@*) . ']';
         }
         else {
-            push @parts, _node_key($in, $memo);
+            push @parts, _node_key($in, $memo, $in_progress);
         }
     }
     my $key = join('|', @parts);

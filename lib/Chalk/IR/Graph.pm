@@ -133,18 +133,42 @@ class Chalk::IR::Graph {
     method nodes() {
         # Returns a topologically-sorted list of nodes in this graph.
         #
-        # Walks both inputs() and consumers() from every cached node.
-        # Inputs are followed unconditionally (the legacy input-closure
-        # behavior — transitive inputs of cached nodes appear in the
-        # result even if they were not separately merged in).
+        # Two separate passes over two separate edge sets, deliberately not
+        # conflated:
         #
-        # Consumers are followed only when they are themselves in
-        # %cache. This is the membership filter that keeps the walk
-        # graph-local: consumer pointers can reach foreign nodes
-        # (the Bootstrap singleton's hash-cons cache is process-wide)
-        # or orphan nodes (built by losing Earley alternatives and
-        # never merged into any graph), and those must not appear in
-        # the result.
+        #   1. MEMBERSHIP: which nodes belong in the result. Walks both
+        #      inputs() and consumers() from every cached node (bidirectional
+        #      reachability) so a node connected to the graph only via a
+        #      consumer pointer (e.g. a void statement-effect with no data
+        #      consumer above it) is still found. Consumers are followed only
+        #      when they are themselves in %cache -- this is the filter that
+        #      keeps the walk graph-local: consumer pointers can reach
+        #      foreign nodes (the Bootstrap singleton's hash-cons cache is
+        #      process-wide) or orphan nodes (built by losing Earley
+        #      alternatives and never merged into any graph), and those must
+        #      not appear in the result.
+        #
+        #   2. ORDER: a topological sort of the membership set using ONLY
+        #      producer edges (inputs, plus a Phi's region). A "consumer" is
+        #      never a node's producer -- treating consumers as descend-first
+        #      DFS children (as pass 1 must, for reachability) makes a
+        #      post-order DFS finalize the consumer BEFORE the producer it
+        #      reads, a real forward reference. This bit the loop-Phi case
+        #      first (a Phi's init input can itself be a root visited before
+        #      the Phi, pulling the Phi in early as a consumer-child) but is
+        #      not specific to Phi -- any node with more than one path into
+        #      the graph can race the same way. Ordering by producer edges
+        #      only avoids that class of bug entirely; it is exactly the
+        #      pre-unification SoN::IR::Graph::nodes() shape (which never
+        #      walked consumers in its topo-sort), generalized to the
+        #      unified Node hierarchy's region field.
+        #
+        # A LOOP header Phi's inputs[1] (the backedge value) is the one
+        # exception: it necessarily closes a cycle back to the Phi through
+        # the loop body, and the Chalk loader defer-patches exactly that
+        # edge via set_backedge once every node has been loaded. Cutting
+        # inputs[1] out of a loop Phi's producer edges is what makes it the
+        # sole, sanctioned forward reference in the order.
         my $in_cache = sub ($n) {
             return false unless blessed($n);
             my $id = $n->id();
@@ -159,6 +183,37 @@ class Chalk::IR::Graph {
             return false;
         };
 
+        # --- Pass 1: membership, via bidirectional reachability. ---
+        my %member;
+        my @frontier = values %cache;
+        $member{ $_->id() } = $_ for @frontier;
+        while (@frontier) {
+            my @next_frontier;
+            for my $n (@frontier) {
+                my @neighbors;
+                for my $input ($n->inputs()->@*) {
+                    if (ref($input) eq 'ARRAY') {
+                        push @neighbors, grep { defined && blessed($_) } $input->@*;
+                        next;
+                    }
+                    push @neighbors, $input if defined $input && blessed($input);
+                }
+                if ($n->can('consumers')) {
+                    for my $c ($n->consumers()->@*) {
+                        push @neighbors, $c if $in_cache->($c);
+                    }
+                }
+                for my $nb (@neighbors) {
+                    next if exists $member{ $nb->id() };
+                    $member{ $nb->id() } = $nb;
+                    push @next_frontier, $nb;
+                }
+            }
+            @frontier = @next_frontier;
+        }
+
+        # --- Pass 2: order, via a producer-edges-only DFS over the
+        # membership set. ---
         # Iterative post-order DFS. Each stack frame is
         # [$node, $emit_phase]:
         #   $emit_phase = 0 — first visit; push children, then re-push
@@ -186,35 +241,39 @@ class Chalk::IR::Graph {
         # Sort by id for a stable root order; this changes nothing about
         # which nodes are visited (membership), only the order two
         # structurally-isomorphic graphs are walked in.
-        for my $root (sort { $a->id() cmp $b->id() } values %cache) {
+        for my $root (sort { $a->id() cmp $b->id() } values %member) {
             push @stack, [$root, 0];
         }
 
-        # Helper: collect the child nodes of $n in the order the
-        # recursive version would have visited them — inputs first
-        # (with array-of-arrayrefs flattening), then cache-filtered
-        # consumers. The returned list is what we push on the stack
-        # in REVERSE so pop()-LIFO yields the original left-to-right
-        # visit order.
-        my $children_of = sub ($n) {
-            my @children;
+        # Helper: collect the producer nodes of $n (its predecessors) in
+        # the order the recursive version would have visited them --
+        # inputs (with array-of-arrayrefs flattening), plus a Phi's region
+        # (referenced via a separate field, not inputs[]). The returned
+        # list is what we push on the stack in REVERSE so pop()-LIFO
+        # yields the original left-to-right visit order.
+        my $producers_of = sub ($n) {
+            my @preds;
+            my $loop_phi = $n->operation() eq 'Phi'
+                && defined $n->region()
+                && $n->region()->operation() eq 'Loop';
+            my $slot = -1;
             for my $input ($n->inputs()->@*) {
+                $slot++;
+                next if $loop_phi && $slot == 1;
                 if (ref($input) eq 'ARRAY') {
                     for my $el ($input->@*) {
-                        push @children, $el
+                        push @preds, $el
                             if defined $el && blessed($el);
                     }
                     next;
                 }
-                push @children, $input
+                push @preds, $input
                     if defined $input && blessed($input);
             }
-            if ($n->can('consumers')) {
-                for my $c ($n->consumers()->@*) {
-                    push @children, $c if $in_cache->($c);
-                }
+            if ($n->operation() eq 'Phi' && defined $n->region()) {
+                push @preds, $n->region();
             }
-            return @children;
+            return @preds;
         };
 
         while (@stack) {
@@ -239,11 +298,11 @@ class Chalk::IR::Graph {
             # all children — LIFO stack means children pop first.
             push @stack, [$n, 1];
 
-            # Push children in reverse so leftmost pops first,
+            # Push producers in reverse so leftmost pops first,
             # matching the recursive visitor's left-to-right order.
-            my @children = $children_of->($n);
-            for my $c (reverse @children) {
-                push @stack, [$c, 0];
+            my @preds = $producers_of->($n);
+            for my $p (reverse @preds) {
+                push @stack, [$p, 0];
             }
         }
 
