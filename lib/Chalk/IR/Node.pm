@@ -105,6 +105,15 @@ class Chalk::IR::Node {
         return;
     }
 
+    # Late-binding setter for the stamp (type-lattice hint carried from
+    # B::SoN). A loop header Phi's stamp is only knowable after the body
+    # walk computes the back-edge value's stamp, so the producer patches
+    # it in post-construction, mirroring set_control_in/set_representation.
+    method set_stamp($new_stamp) {
+        $stamp = $new_stamp;
+        return;
+    }
+
     # Late-binding setter for the effect-chain predecessor.
     # Maintains the bidirectional use-def edge by adjusting consumer
     # registration on the old and new predecessors. Called by the

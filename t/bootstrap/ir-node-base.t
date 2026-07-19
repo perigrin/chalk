@@ -35,6 +35,15 @@ is(scalar $producer->consumers()->@*, 0, 'remove_consumer removes it');
 my $stamped = Chalk::IR::Node->new(id => 's1', stamp => 'Int');
 is($stamped->stamp(), 'Int', 'stamp is set from constructor');
 
+# Stamp can be patched post-construction via set_stamp (mirrors
+# set_control_in/set_representation's late-binding-setter style). A loop
+# header Phi's stamp is only knowable after the body walk computes the
+# back-edge value's stamp, so the producer patches it in after the fact.
+my $late_stamped = Chalk::IR::Node->new(id => 's2');
+is($late_stamped->stamp(), undef, 'stamp defaults to undef before set_stamp');
+$late_stamped->set_stamp('Num');
+is($late_stamped->stamp(), 'Num', 'set_stamp patches the stamp post-construction');
+
 # class() returns compat_class when set
 my $compat = Chalk::IR::Node->new(id => 'compat_1', compat_class => 'BinaryExpr');
 is($compat->class(), 'BinaryExpr', 'class() returns compat_class when set');
