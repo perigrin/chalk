@@ -174,7 +174,19 @@ class Chalk::IR::Graph {
         my %visited;
         my %temp;
         my @stack;
-        for my $root (values %cache) {
+        # Root order must be deterministic across process runs, not just
+        # within one: `values %cache` iterates in Perl's per-process
+        # randomized hash order, which is stable call-to-call in the SAME
+        # process but differs across separate runs. With few seeded roots
+        # (the legacy start/returns-only callers) the DFS is almost
+        # entirely driven by input-edge recursion from those fixed roots,
+        # so this went unnoticed; once a caller seeds many roots (e.g. a
+        # full reachable-closure merge), root VISIT order becomes root
+        # ITERATION order and leaks hash randomization into the result.
+        # Sort by id for a stable root order; this changes nothing about
+        # which nodes are visited (membership), only the order two
+        # structurally-isomorphic graphs are walked in.
+        for my $root (sort { $a->id() cmp $b->id() } values %cache) {
             push @stack, [$root, 0];
         }
 
