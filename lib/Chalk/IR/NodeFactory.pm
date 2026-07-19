@@ -330,6 +330,25 @@ class Chalk::IR::NodeFactory {
         return $node;
     }
 
+    # Construct a data node WITHOUT hash-consing, even when its op would
+    # normally dedupe by content_hash. B::SoN's FromOptree scout walk (a
+    # throwaway pre-pass detecting loop-carried slot mutation) builds
+    # placeholder Constants that must stay independently identifiable by
+    # object identity even when their content (e.g. value => 'scout') is
+    # identical across placeholders — hash-consing them to one node would
+    # silently break the mutation check ($after != $ph). Mirrors
+    # SoN::IR::NodeFactory::make_unique.
+    method make_unique($op_name, %args) {
+        my $class = $DATA_CLASSES{$op_name}
+            or die "Unknown data node operation: $op_name";
+        $cfg_counter++;
+        my $id = "${op_name}#unique${cfg_counter}";
+        my $node = $class->new( id => $id, %args );
+        $self->_register_consumers($node, %args);
+        $cache{$id} = $node;
+        return $node;
+    }
+
     method make_cfg($op_name, %args) {
         my $class = $CFG_CLASSES{$op_name}
             or die "Unknown CFG node operation: $op_name";

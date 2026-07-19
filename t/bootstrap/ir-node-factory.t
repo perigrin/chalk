@@ -73,4 +73,28 @@ isa_ok($fa, 'Chalk::IR::Node::FieldAccess');
 is(scalar $left->consumers()->@*, 1, 'left has 1 consumer (add)');
 is($left->consumers()->[0], $add, 'left consumer is add');
 
+# make_unique() bypasses hash-consing entirely, even for data ops that would
+# otherwise dedupe by content_hash. B::SoN's FromOptree scout walk (a
+# throwaway pre-pass that detects loop-carried slot mutation) builds
+# placeholder Constants that must stay independently identifiable by object
+# identity ($after != $ph) -- if two placeholders with identical content
+# hash-consed to ONE node, that mutation-detection would break silently.
+my $ph1 = $f->make_unique('Constant', value => 'scout', const_type => 'string');
+my $ph2 = $f->make_unique('Constant', value => 'scout', const_type => 'string');
+isa_ok($ph1, 'Chalk::IR::Node::Constant');
+ok($ph1 != $ph2, 'make_unique never hash-conses, even with identical content');
+
+# make_unique() output is invisible to make()'s content-hash cache: a
+# subsequent make() call with the same content builds yet another distinct
+# object, never reusing $ph1/$ph2 -- proving make_unique never populates the
+# content-hash cache key make() looks up.
+my $consed = $f->make('Constant', value => 'scout', const_type => 'string');
+ok($consed != $ph1 && $consed != $ph2,
+    'make() never returns a make_unique-built node for matching content');
+
+# make_unique() still registers consumers, same as make()/make_cfg().
+my $unique_add = $f->make_unique('Add', inputs => [$ph1, $ph2]);
+ok((grep { $_ == $unique_add } $ph1->consumers()->@*),
+    'make_unique registers the new node as a consumer of its inputs');
+
 done_testing();
