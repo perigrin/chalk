@@ -149,8 +149,27 @@ sub _all_nodes_topo ($graph_or_nodes) {
     my @order;
 
     # Predecessors of a node are its inputs plus, for Phi, its region.
+    # A LOOP header Phi's second input (inputs[1], the back-edge value) is
+    # the cycle-closing edge: it necessarily forward-references in any
+    # serialization order (the loader defer-patches it via set_backedge once
+    # every node exists). Treating it as an ordinary predecessor to visit
+    # eagerly picks whichever side of the Phi<->backedge cycle the caller's
+    # (unordered) input list happens to reach first: if the Phi is visited
+    # before the value that reads it (e.g. an Add computing the next
+    # iteration), descending into the backedge hits that Add's in-progress
+    # cycle guard and lets the Add finish -- and get appended -- BEFORE the
+    # Phi, producing a genuine (non-sanctioned) forward reference. Exclude
+    # the backedge from a loop Phi's predecessors so only its init input
+    # (inputs[0]) and region are visited eagerly, mirroring the
+    # pre-unification SoN::IR::Graph::nodes() cycle-cut. A MERGE Phi (region
+    # is a Region, not a Loop) has no such cycle and keeps both inputs.
     my $predecessors = sub ($n) {
-        my @preds = grep { defined $_ && blessed($_) } $n->inputs->@*;
+        my @in = $n->inputs->@*;
+        if ($n->operation eq 'Phi' && defined $n->region
+                && $n->region->operation eq 'Loop') {
+            @in = @in[0];
+        }
+        my @preds = grep { defined $_ && blessed($_) } @in;
         if ($n->operation eq 'Phi' && defined $n->region) {
             push @preds, $n->region;
         }

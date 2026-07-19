@@ -375,4 +375,51 @@ subtest '_all_nodes_topo accepts a plain arrayref of nodes' => sub {
         'a node reachable only via consumers (the false-exit Proj) is present');
 };
 
+# A loop-header Phi's backedge input (inputs[1]) is the cycle-closing edge
+# that necessarily forward-references in ANY serialization order (the loader
+# defer-patches it via set_backedge once every node exists -- see the
+# "sanctioned loop-Phi backedge" guard elsewhere in this file). _all_nodes_topo
+# must NOT treat that backedge as an ordinary predecessor to eagerly visit:
+# if the Phi happens to be visited before the value that consumes it (e.g. an
+# Add computing the next iteration, itself reading the Phi), visiting the
+# Phi's predecessors would descend into the Add via the backedge, hit the
+# Add-is-in-progress cycle guard, and let the Add finish (get appended) BEFORE
+# the Phi -- producing a genuine forward reference (Add -> Phi) that is NOT
+# the sanctioned backedge and that the loader correctly refuses to load.
+subtest 'a loop Phi backedge is never treated as a topo predecessor to visit' => sub {
+    my $f     = Chalk::IR::NodeFactory->new();
+    my $start = $f->make_cfg('Start');
+    my $loop  = $f->make_cfg('Loop', inputs => [$start]);
+    my $init  = $f->make('Constant', value => '0', const_type => 'integer');
+    my $phi   = $f->make('Phi', inputs => [$init], region => $loop);
+    my $one   = $f->make('Constant', value => '1', const_type => 'integer');
+    my $add   = $f->make('Add', inputs => [$phi, $one]);
+    $phi->set_backedge($add);
+    my $proj  = $f->make_cfg('Proj', inputs => [$loop], index => 1);
+    my $ret   = $f->make_cfg('Return', inputs => [$proj, $phi]);
+
+    # Construct the reachable-node list in an order that visits the Phi
+    # BEFORE the Add -- the shape that triggers the bug (a caller's BFS
+    # order need not match construction order; this is exactly what a
+    # producer computing its own inputs+consumers BFS can hand in).
+    my @all = ($start, $loop, $init, $phi, $one, $add, $proj, $ret);
+
+    my $ordered = Chalk::IR::Serialize::JSON::_all_nodes_topo(\@all);
+    my %pos = map { $ordered->[$_]->id => $_ } 0 .. $#$ordered;
+    ok($pos{ $phi->id } < $pos{ $add->id },
+        'the Phi precedes the Add that reads it (no spurious forward reference)');
+
+    # Full round-trip proof: to_json/from_json over a Graph built with this
+    # merge order must not trip the loader's forward-input-reference guard.
+    my $region_wrap = $f->make_cfg('Region', inputs => [$proj]);
+    my $ret2 = $f->make_cfg('Return', inputs => [$region_wrap, $phi]);
+    my $g = Chalk::IR::Graph->new(start => $start, returns => [$ret2]);
+    $g->merge($_) for ($start, $loop, $init, $phi, $one, $add, $proj, $region_wrap, $ret2);
+
+    my $json = to_json({ main => $g });
+    my $graphs = eval { from_json($json) };
+    ok(!$@, 'round-trips without the forward-input-reference guard firing')
+        or diag("from_json died: $@");
+};
+
 done_testing();
