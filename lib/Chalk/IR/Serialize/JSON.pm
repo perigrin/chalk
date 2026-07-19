@@ -167,7 +167,7 @@ sub _all_nodes_topo ($graph_or_nodes) {
         my @in = $n->inputs->@*;
         if ($n->operation eq 'Phi' && defined $n->region
                 && $n->region->operation eq 'Loop') {
-            @in = @in[0];
+            @in = ($in[0]);
         }
         my @preds = grep { defined $_ && blessed($_) } @in;
         if ($n->operation eq 'Phi' && defined $n->region) {
