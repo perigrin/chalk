@@ -6,7 +6,6 @@ use Test::More;
 
 use lib 'lib';
 use Scalar::Util qw(blessed);
-use JSON::PP ();
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
 use Chalk::IR::Serialize::JSON qw(to_json from_json);
@@ -213,43 +212,33 @@ sub make_simple_graph {
 }
 
 # =============================================================================
-# Test: a LOADED loop graph whose condition is attached via a genuine
-# control_in wire key (produce-time control, i3) round-trips cleanly. Before
-# i3, control_in only arose from the loader's OWN demotion of a flattened
-# is_stmt_effect/loop_control convention, so a node reachable ONLY via
-# control_in fell outside the input-reachable serializable set
-# (_all_nodes_topo walked inputs only) and to_json had to refuse loudly
-# (zhi 019f29ed-974a) rather than emit condition-less, unlowerable JSON.
-# _all_nodes_topo is now control-aware (walks control_in as a predecessor
-# AND as a membership-extending edge), so this round-trips instead of dying.
+# Test: to_json refuses to silently corrupt a LOADED loop graph (zhi
+# 019f29ed-974a). from_json moves control into control_in and attaches the loop
+# condition to its Loop via a loop_control edge -- neither is a value input, so
+# on a loaded control-flow graph those nodes can fall outside the input-reachable
+# serializable set. Serializing anyway would emit a positional ref to a node not
+# in the output: valid-looking but UNLOWERABLE JSON (a loop with no condition).
+# No live consumer round-trips a loaded graph today; rather than corrupt
+# silently, to_json must DIE loudly (GAP-not-corruption). A freshly-built graph
+# (control in inputs) still round-trips and must NOT trip the guard.
 # =============================================================================
 
 {
     # A minimal while-loop producer graph: `my $s=0; my $n=3; while ($n>0){
-    # $s+=$n; $n-=1 } $s`. Node 11 = NumGt(n_phi, 0) is the loop condition,
-    # attached to the Loop (id 1) via a genuine control_in wire key.
+    # $s+=$n; $n-=1 } $s`. Node 11 = NumGt(n_phi, 0) loop_control:1 is the
+    # condition, attached to the Loop (id 1) via loop_control.
     my $loop_json = <<'JSON';
-{"methods":{"main::corpus_case":{"nodes":[{"cfg":true,"id":0,"inputs":[],"op":"Start"},{"cfg":true,"id":1,"inputs":[0],"op":"Loop"},{"cfg":true,"fields":{"index":1},"id":2,"inputs":[1],"op":"Proj"},{"cfg":true,"id":3,"inputs":[2],"op":"Region"},{"fields":{"const_type":"integer","value":"0"},"id":4,"inputs":[],"op":"Constant","stamp":"Int"},{"fields":{"region":1},"id":5,"inputs":[4,10],"op":"Phi","stamp":"Int"},{"cfg":true,"id":6,"inputs":[3,5],"op":"Return"},{"cfg":true,"fields":{"index":0},"id":7,"inputs":[1],"op":"Proj"},{"fields":{"const_type":"integer","value":"3"},"id":8,"inputs":[],"op":"Constant","stamp":"Int"},{"fields":{"region":1},"id":9,"inputs":[8,13],"op":"Phi","stamp":"Int"},{"id":10,"inputs":[5,9],"op":"Add","stamp":"Int"},{"id":11,"inputs":[9,4],"control_in":1,"op":"NumGt","stamp":"Boolean"},{"fields":{"const_type":"integer","value":"1"},"id":12,"inputs":[],"op":"Constant","stamp":"Int"},{"id":13,"inputs":[9,12],"op":"Subtract","stamp":"Int"}],"returns":[6],"start":0}},"source":null,"version":1}
+{"methods":{"main::corpus_case":{"nodes":[{"cfg":true,"id":0,"inputs":[],"op":"Start"},{"cfg":true,"id":1,"inputs":[0],"op":"Loop"},{"cfg":true,"fields":{"index":1},"id":2,"inputs":[1],"op":"Proj"},{"cfg":true,"id":3,"inputs":[2],"op":"Region"},{"fields":{"const_type":"integer","value":"0"},"id":4,"inputs":[],"op":"Constant","stamp":"Int"},{"fields":{"region":1},"id":5,"inputs":[4,10],"op":"Phi","stamp":"Int"},{"cfg":true,"id":6,"inputs":[3,5],"op":"Return"},{"cfg":true,"fields":{"index":0},"id":7,"inputs":[1],"op":"Proj"},{"fields":{"const_type":"integer","value":"3"},"id":8,"inputs":[],"op":"Constant","stamp":"Int"},{"fields":{"region":1},"id":9,"inputs":[8,13],"op":"Phi","stamp":"Int"},{"id":10,"inputs":[5,9],"op":"Add","stamp":"Int"},{"id":11,"inputs":[9,4],"loop_control":1,"op":"NumGt","stamp":"Boolean"},{"fields":{"const_type":"integer","value":"1"},"id":12,"inputs":[],"op":"Constant","stamp":"Int"},{"id":13,"inputs":[9,12],"op":"Subtract","stamp":"Int"}],"returns":[6],"start":0}},"source":null,"version":1}
 JSON
 
     my ($g1) = from_json($loop_json);
     my $graph = $g1->{'main::corpus_case'};
     ok(defined $graph, 'loaded the loop graph');
 
-    my $json2 = do { local $@; eval { to_json({ 'main::corpus_case' => $graph }) } };
-    ok(defined $json2 && $json2 =~ /\S/,
-        'to_json round-trips a loaded loop graph whose condition is control_in-only');
-    my $reloaded = from_json($json2);
-    ok(exists $reloaded->{'main::corpus_case'}, 'and it reloads successfully');
-    # Check the wire content directly: Graph::nodes()'s own cached DFS has no
-    # control_in awareness (untouched by this issue, per plan scope), so a
-    # control_in-only node is not itself membership-authoritative there --
-    # the property this fix guarantees is that the SERIALIZED wire carries
-    # the condition, not that a subsequent ->nodes() re-walk finds it.
-    my $data2 = JSON::PP->new->decode($json2);
-    my @cond = grep { $_->{op} eq 'NumGt' }
-        $data2->{methods}{'main::corpus_case'}{nodes}->@*;
-    is(scalar(@cond), 1, 'the loop condition survives the round-trip (not dropped)');
+    # to_json must DIE loudly rather than emit corrupt (condition-less) JSON.
+    my $err = do { local $@; eval { to_json({ 'main::corpus_case' => $graph }); 1 } ? '' : $@ };
+    like($err, qr/GAP: to_json cannot faithfully round-trip/,
+        'to_json dies loudly on a loaded loop graph, not silent corruption');
 }
 
 {
