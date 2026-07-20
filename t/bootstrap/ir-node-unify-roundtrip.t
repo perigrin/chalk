@@ -617,4 +617,67 @@ subtest 'negative: input edge whose target lacks back-registration -> equiv reje
         or diag('equiv incorrectly accepted the corrupted graph');
 };
 
+# =============================================================================
+# head/region wire edge: Region.head/If.region must survive to_json/from_json
+# as a DECODED wire reference, not a load-time re-derivation. The loader's
+# control_in-chain reconstruction walk (the one that used to live in
+# _deserialize_graph, keyed off `next if $node->head`) has been deleted --
+# this subtest is only green because set_region() at produce time (here,
+# and in FromOptree/Actions.pm) causes to_json to emit a `head` wire key that
+# from_json decodes directly onto the freshly-built If/Region pair.
+# =============================================================================
+sub make_if_else_graph {
+    my $f     = Chalk::IR::NodeFactory->new();
+    my $start = $f->make_cfg('Start');
+
+    my $cond    = $f->make('Constant', value => '1', const_type => 'integer');
+    my $if_node = $f->make_cfg('If', inputs => [$start, $cond]);
+    my $true_proj  = $f->make_cfg('Proj', inputs => [$if_node], index => 0);
+    my $false_proj = $f->make_cfg('Proj', inputs => [$if_node], index => 1);
+
+    # Both arms are empty (their control IS the Proj directly -- the 2b-1
+    # shape): the merge Region's inputs are the two Projs with no
+    # intervening statement-effect.
+    my $region = $f->make_cfg('Region', inputs => [$true_proj, $false_proj]);
+    $if_node->set_region($region);   # produce-time wiring under test
+
+    my $ten    = $f->make('Constant', value => '10', const_type => 'integer');
+    my $twenty = $f->make('Constant', value => '20', const_type => 'integer');
+    my $phi    = $f->make('Phi', region => $region, values => [$ten, $twenty]);
+
+    my $ret = $f->make_cfg('Return', inputs => [$region, $phi]);
+    my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
+    return ($graph, { if_node => $if_node, region => $region });
+}
+
+subtest 'head/region wire edge survives round-trip via decode, not re-derivation' => sub {
+    my ($graph, $parts) = make_if_else_graph();
+
+    ok(defined $parts->{region}->head
+        && $parts->{region}->head->id eq $parts->{if_node}->id,
+        'fixture sanity: set_region wired Region.head -> If at produce time');
+    ok(defined $parts->{if_node}->region
+        && $parts->{if_node}->region->id eq $parts->{region}->id,
+        'fixture sanity: set_region wired If.region -> Region at produce time');
+
+    my $json   = to_json({ if_else_case => $graph });
+    like($json, qr/"head"\s*:\s*\d+/, 'to_json emits a head wire key for the Region');
+
+    my $loaded = from_json($json);
+    my $loaded_graph = $loaded->{if_else_case};
+    ok(defined $loaded_graph, 'round-trip: graph present after from_json');
+
+    my ($loaded_region) = grep { blessed($_) && $_->operation eq 'Region' }
+        $loaded_graph->nodes->@*;
+    my ($loaded_if) = grep { blessed($_) && $_->operation eq 'If' }
+        $loaded_graph->nodes->@*;
+    ok(defined $loaded_region && defined $loaded_if,
+        'round-tripped graph has one Region and one If') or return;
+
+    ok(defined $loaded_region->head && $loaded_region->head->id eq $loaded_if->id,
+        'round-tripped Region.head points at the round-tripped If');
+    ok(defined $loaded_if->region && $loaded_if->region->id eq $loaded_region->id,
+        'round-tripped If.region points at the round-tripped Region');
+};
+
 done_testing();

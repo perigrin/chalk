@@ -303,6 +303,17 @@ sub _serialize_graph ($graph) {
                 && exists $id_remap{ $node->control_in->id }) {
             $entry{control_in} = $id_remap{ $node->control_in->id };
         }
+        # Region.head -> the owning If/Loop, set at produce time (FromOptree's
+        # StackSim::merge / _build_single_exit / Loop exit-Region sites; the
+        # hand-written frontend's IfStatement/loop actions via set_region).
+        # An If/Loop is always a control predecessor of the Region it owns,
+        # so it is always already in the topo order (and hence in %id_remap)
+        # by the time the Region itself is emitted -- no forward-ref defer-
+        # patch needed (unlike the loop-Phi backedge).
+        if ($node->operation eq 'Region' && defined $node->head
+                && exists $id_remap{ $node->head->id }) {
+            $entry{head} = $id_remap{ $node->head->id };
+        }
 
         push @nodes, \%entry;
     }
@@ -475,6 +486,16 @@ sub _deserialize_graph ($method_data) {
             $node->set_control_in($nodes[ $nd->{control_in} ]);
         }
 
+        # Produce-time head/region: decode the genuine head wire key, emitted
+        # by to_json for a Region whose owning If/Loop was set at produce
+        # time (set_region installs both If.region and Region.head). The
+        # owning If/Loop is always a control predecessor of the Region, so
+        # control-aware topo guarantees it is already constructed here --
+        # no defer-patch needed, unlike the loop-Phi backedge.
+        if ($op eq 'Region' && defined $nd->{head}) {
+            $nodes[ $nd->{head} ]->set_region($node);
+        }
+
         # Map a B::SoN stamp to a Chalk representation so the backend can lower
         # the node runtime-free. Chalk's own serializer emits no stamp, so this
         # only fires for B::SoN-produced JSON.
@@ -497,48 +518,6 @@ sub _deserialize_graph ($method_data) {
     for my $patch (@backedge_patches) {
         my ($phi_idx, $val_idx) = @$patch;
         $nodes[$phi_idx]->set_backedge($nodes[$val_idx]);
-    }
-
-    # Wire each Region's head back-pointer to the If/Loop that owns it. B::SoN's
-    # JSON does not carry it, but the backend's control-chain walk needs
-    # $region->head to reach the enclosing If/Loop (and emit its Phis). A Region
-    # merges arms; each arm's control is a Proj of the owning If/Loop -- either
-    # DIRECTLY (an empty arm's control IS the Proj, the 2b-1 if-only shape) or
-    # via the arm's control_in chain (an arm that STORED advanced its control to
-    # the store node, whose control_in is the Proj -- the 2b-3 if/else both-arms-
-    # store shape). Follow control_in from the first arm until a Proj is found.
-    for my $node (@nodes) {
-        next unless $node->operation eq 'Region';
-        next if $node->head;
-        # Scan EVERY input for the owning Proj, not just the first. An early-
-        # return merge normalized to single-exit (`return X if C`, `E // return
-        # X`) builds Region inputs = [pre-branch-control, exit-Proj] -- the Proj
-        # is at index 1, and inputs[0] (the pre-branch control, often Start) has
-        # no control_in chain to a Proj. Checking only inputs[0] left head unset,
-        # so the backend pushed the bare Region and never wired the If's Phi
-        # (Phi-before-Region die). Follow each arm's control_in until a Proj.
-        my $owner;
-        for my $start ($node->inputs->@*) {
-            my $arm = $start;
-            my %seen;
-            while (defined $arm && blessed($arm)
-                    && $arm->operation ne 'Proj' && !$seen{$arm->id}++) {
-                $arm = $arm->can('control_in') ? $arm->control_in : undef;
-            }
-            next unless defined $arm && blessed($arm)
-                && $arm->operation eq 'Proj';
-            my $cand = $arm->inputs->[0];
-            if (defined $cand && blessed($cand)) { $owner = $cand; last }
-        }
-        next unless defined $owner;
-        # set_region installs BOTH directions: If.region -> this Region (the
-        # forward pointer the backend's _process_if_node reads to wire the merge
-        # Phis) AND Region.head -> the If (the back-pointer the control-chain
-        # walk follows). Setting only head left If.region unset, so the backend
-        # skipped Phi wiring. Fall back to set_head for an owner without
-        # set_region (defensive; If/Loop both have it).
-        if ($owner->can('set_region')) { $owner->set_region($node) }
-        else                           { $node->set_head($owner) }
     }
 
     my $start   = $nodes[ $method_data->{start} ];
