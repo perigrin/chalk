@@ -36,7 +36,7 @@ unless (-f $ARITHMETIC_MD) {
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($ARITHMETIC_MD);
-is(scalar(@$cases), 5, 'arithmetic.md has 5 cases');
+ok(scalar(@$cases) >= 5, 'arithmetic.md has at least the 5 original cases');
 
 my @case_titles = map { $_->{title} } @$cases;
 ok((grep { /Integer addition/ } @case_titles),       'case: Integer addition present');
@@ -45,11 +45,23 @@ ok((grep { /Integer multiplication/ } @case_titles), 'case: Integer multiplicati
 ok((grep { /Float division/ } @case_titles),         'case: Float division present');
 ok((grep { /Integer modulo/ } @case_titles),         'case: Integer modulo right-sign present');
 
-# Run all 5 cases (no graph_for — the graph is built from the ir block)
+# Run every case (no graph_for — the graph is built from the ir block). A case
+# whose ir block is a declared worklist entry (L: GREEN but a known B::SoN gap,
+# same convention as son-corpus-wide.t's tally) is TODO-wrapped: red there is
+# the worklist, not a regression, and must never silently mask a real FAIL.
+my %KNOWN_WORKLIST = map { $_ => 1 } (
+    'Integer literal exceeding 32 bits',
+    'Integer literal at INT64_MIN',
+    'Float division of two variables',
+);
+
 for my $case (@$cases) {
     my $title = $case->{title};
+    my $is_worklist = $KNOWN_WORKLIST{$title};
 
     subtest "case: $title" => sub {
+        local $TODO = "B::SoN gap (worklist, not a regression)" if $is_worklist;
+
         my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
 
         # Behavior check

@@ -318,6 +318,36 @@ control: %p
 L: GREEN
 ```
 
+## Print a value exceeding 32 bits to stdout
+
+`print` renders an Int argument via `printf("%d")` on the machine i64. A
+value that exceeds 32 bits (`4294967296`, i.e. `2**32`) must print its full
+decimal form — perl does. This is a worklist case: the current LLVM backend's
+int-print epilogue narrows through an i32 somewhere on the print path, so it
+prints `0` (the low 32 bits of `4294967296` truncated) instead of the correct
+`4294967296`. The block value (`Int:1`, the trailing bare `1`) is unaffected —
+only the printed digits are wrong.
+
+```perl
+# source
+print 4294967296, "\n"; 1
+```
+
+```behavior
+stdout: 4294967296\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%s0   = Constant(4294967296) :Int
+%p    = Print(%s0) :Bool
+%c    = Constant(1) :Int
+return %c
+control: %p
+L: GREEN
+```
+
 ## Print to an explicit filehandle (STDOUT): GAP
 
 `print STDOUT ...` (and `print $fh ...`) set `OPf_STACKED` and push a gv/rv2gv
