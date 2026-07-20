@@ -50,8 +50,6 @@ ok((grep { /Integer modulo/ } @case_titles),         'case: Integer modulo right
 # same convention as son-corpus-wide.t's tally) is TODO-wrapped: red there is
 # the worklist, not a regression, and must never silently mask a real FAIL.
 my %KNOWN_WORKLIST = map { $_ => 1 } (
-    'Integer literal exceeding 32 bits',
-    'Integer literal at INT64_MIN',
     'Float division of two variables',
 );
 

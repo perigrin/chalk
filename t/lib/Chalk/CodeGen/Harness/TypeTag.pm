@@ -135,7 +135,7 @@ END_FRAGMENT
 # Each entry:
 #   Int:
 #     perl_tag_prefix => 'Int:'
-#     llvm_fmt_c      => 'Int:%d\0A\00'   (LLVM c"..." syntax, 8 bytes)
+#     llvm_fmt_c      => 'Int:%lld\0A\00'   (LLVM c"..." syntax, 10 bytes; %lld reads the full i64)
 #   Num:
 #     perl_tag_prefix => 'Num:'
 #     llvm_fmt_c      => 'Num:%g\0A\00'   (8 bytes)
@@ -152,7 +152,7 @@ sub llvm_prefixes {
     return {
         Int => {
             perl_tag_prefix => 'Int:',
-            llvm_fmt_c      => 'Int:%d\0A\00',
+            llvm_fmt_c      => 'Int:%lld\0A\00',
         },
         Num => {
             perl_tag_prefix => 'Num:',
@@ -178,7 +178,7 @@ sub llvm_prefixes {
         Slot => {
             perl_tag_prefix_int   => 'Int:',
             perl_tag_prefix_undef => 'Undef:',
-            llvm_fmt_int_c        => 'Int:%d\0A\00',
+            llvm_fmt_int_c        => 'Int:%lld\0A\00',
             llvm_fmt_undef_c      => 'Undef:\0A\00',
         },
     };

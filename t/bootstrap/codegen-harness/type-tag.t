@@ -159,7 +159,7 @@ subtest 'tag_live_value: finite values unchanged after non-finite fix' => sub {
 subtest 'LLVM prefix table: Int repr matches LLVM.pm constant' => sub {
     my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
     is( $prefixes->{Int}{perl_tag_prefix}, 'Int:',          'Int perl_tag_prefix is "Int:"' );
-    is( $prefixes->{Int}{llvm_fmt_c},      'Int:%d\0A\00',  'Int llvm_fmt_c matches LLVM.pm constant' );
+    is( $prefixes->{Int}{llvm_fmt_c},      'Int:%lld\0A\00',  'Int llvm_fmt_c matches LLVM.pm constant' );
 };
 
 subtest 'LLVM prefix table: Num repr matches LLVM.pm constant' => sub {

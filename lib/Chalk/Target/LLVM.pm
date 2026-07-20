@@ -1000,8 +1000,10 @@ sub lower_with_elaboration {
     # so Bool is distinguishable from its Str coercion. Tags: Int:<n> Num:<g> Bool:1/Bool:
     # Format strings and string constants are per-representation, libperl-free.
     if (!defined $result_repr || $result_repr eq 'Int') {
-        # "Int:%d\n" = 7 bytes: 'I','n','t',':','%','d','\n','\0' = [8 x i8]
-        push @lines, '@fmt = private unnamed_addr constant [8 x i8] c"Int:%d\0A\00", align 1';
+        # "Int:%lld\n\0" = I,n,t,:,%,l,l,d,\n,\0 = 10 bytes = [10 x i8]
+        # %lld (not %d) so printf reads the full i64 payload -- Perl Int is 64-bit
+        # and a bare %d truncates the varargs read to 32 bits on LP64 targets.
+        push @lines, '@fmt = private unnamed_addr constant [10 x i8] c"Int:%lld\0A\00", align 1';
     }
     elsif ($result_repr eq 'Num') {
         # Finite path: "Num:%g\n\0" = 8 bytes = [8 x i8]
@@ -1064,8 +1066,8 @@ sub lower_with_elaboration {
     elsif ($result_repr eq 'Slot') {
         # Slot result: a tagged-scalar {i1 defined, i64 payload} from array/hash reads.
         # If defined=true: print "Int:<payload>\n". If defined=false: print "Undef:\n".
-        # "Int:%d\n\0" = 8 bytes; "Undef:\n\0" = 8 bytes.
-        push @lines, '@fmt_slot_int   = private unnamed_addr constant [8 x i8] c"Int:%d\0A\00",  align 1';
+        # "Int:%lld\n\0" = 10 bytes (full i64 payload, not a 32-bit-truncated read); "Undef:\n\0" = 8 bytes.
+        push @lines, '@fmt_slot_int   = private unnamed_addr constant [10 x i8] c"Int:%lld\0A\00",  align 1';
         push @lines, '@fmt_slot_undef = private unnamed_addr constant [8 x i8] c"Undef:\0A\00",  align 1';
         push @lines, '@fmt_slot_s     = private unnamed_addr constant [3 x i8] c"%s\00",          align 1';
     }
@@ -1092,8 +1094,10 @@ sub lower_with_elaboration {
         push @lines, '@fmt_print_str = private unnamed_addr constant [5 x i8] c"%.*s\00", align 1';
     }
     if ($ctx->{_need_print_int_fmt}) {
-        # "%d\0" = 3 bytes = [3 x i8]
-        push @lines, '@fmt_print_int = private unnamed_addr constant [3 x i8] c"%d\00", align 1';
+        # "%lld\0" = %,l,l,d,\0 = 5 bytes = [5 x i8]
+        # %lld so printf reads the full i64 arg -- a bare %d truncates the
+        # varargs read to 32 bits on LP64 targets.
+        push @lines, '@fmt_print_int = private unnamed_addr constant [5 x i8] c"%lld\00", align 1';
     }
 
     push @lines, '';
@@ -1288,9 +1292,8 @@ sub lower_with_elaboration {
     push @lines, _render_context_blocks($ctx, 0);
 
     if (!defined $result_repr || $result_repr eq 'Int') {
-        push @lines, "  %result_i32 = trunc i64 $result_ref to i32";
-        push @lines, '  %fmt_ptr = getelementptr inbounds [8 x i8], [8 x i8]* @fmt, i64 0, i64 0';
-        push @lines, '  call i32 (i8*, ...) @printf(i8* %fmt_ptr, i32 %result_i32)';
+        push @lines, '  %fmt_ptr = getelementptr inbounds [10 x i8], [10 x i8]* @fmt, i64 0, i64 0';
+        push @lines, "  call i32 (i8*, ...) \@printf(i8* %fmt_ptr, i64 $result_ref)";
     }
     elsif ($result_repr eq 'Num') {
         # Non-finite detection: fcmp uno for NaN; fcmp oeq against +Inf/-Inf constants.
@@ -1374,10 +1377,8 @@ sub lower_with_elaboration {
         push @lines, "  br i1 $def_bit, label \%$def_lbl, label \%$und_lbl";
         push @lines, '';
         push @lines, "$def_lbl:";
-        my $pay32 = $ctx->_fresh;
-        push @lines, "  $pay32 = trunc i64 $pay_val to i32  ; Slot defined: truncate payload for printf %d";
-        push @lines, '  %slot_fmt_int_ptr = getelementptr inbounds [8 x i8], [8 x i8]* @fmt_slot_int, i64 0, i64 0';
-        push @lines, "  call i32 (i8*, ...) \@printf(i8* %slot_fmt_int_ptr, i32 $pay32)";
+        push @lines, '  %slot_fmt_int_ptr = getelementptr inbounds [10 x i8], [10 x i8]* @fmt_slot_int, i64 0, i64 0';
+        push @lines, "  call i32 (i8*, ...) \@printf(i8* %slot_fmt_int_ptr, i64 $pay_val)";
         push @lines, "  br label \%$end_lbl";
         push @lines, '';
         push @lines, "$und_lbl:";

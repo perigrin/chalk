@@ -5676,13 +5676,11 @@ sub _lower_print {
             $self->_emit("  call i32 (i8*, ...) \@printf(i8* $fp, i32 $len32, i8* $ref)  ; Print: emit Str arg");
         }
         elsif (!defined $repr || $repr eq 'Int') {
-            # Int payload is i64; printf %d takes i32 (matches the Int epilogue).
-            my $v32 = $self->_fresh;
-            $self->_emit("  $v32 = trunc i64 $ref to i32  ; Print: Int arg -> i32");
+            # Int payload is i64; printf %lld takes the full i64 (matches the Int epilogue).
             $self->{_need_print_int_fmt} = 1;
             my $fp = $self->_fresh;
-            $self->_emit("  $fp = getelementptr inbounds [3 x i8], [3 x i8]* \@fmt_print_int, i64 0, i64 0  ; Print: %d fmt");
-            $self->_emit("  call i32 (i8*, ...) \@printf(i8* $fp, i32 $v32)  ; Print: emit Int arg");
+            $self->_emit("  $fp = getelementptr inbounds [5 x i8], [5 x i8]* \@fmt_print_int, i64 0, i64 0  ; Print: %lld fmt");
+            $self->_emit("  call i32 (i8*, ...) \@printf(i8* $fp, i64 $ref)  ; Print: emit Int arg");
         }
         else {
             die "GAP: Print of a $repr arg is not lowered runtime-free "
