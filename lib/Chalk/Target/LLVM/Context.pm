@@ -751,10 +751,14 @@ sub _lower_divide {
         die "GAP: Divide with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
-    # Num representation: fdiv double
+    # Num representation: fdiv double. Each operand is promoted to double via
+    # _lower_as_double first -- an Int operand (e.g. a Num-init loop divisor,
+    # or plain `$a/$b` where both are Int) would otherwise feed a raw i64 to
+    # fdiv, which lli rejects ("defined with type 'i64' but expected
+    # 'double'"). Mirrors _lower_binop_int's Num arm (Context.pm:702-703).
     my $inputs  = $node->inputs;
-    my $lhs_ref = $self->lower_value($inputs->[0]);
-    my $rhs_ref = $self->lower_value($inputs->[1]);
+    my $lhs_ref = $self->_lower_as_double($inputs->[0]);
+    my $rhs_ref = $self->_lower_as_double($inputs->[1]);
 
     my $ref = $self->_fresh;
     $self->_emit("  $ref = fdiv double $lhs_ref, $rhs_ref  ; Divide(repr=Num) -> fdiv double");

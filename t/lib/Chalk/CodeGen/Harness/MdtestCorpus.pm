@@ -1967,11 +1967,19 @@ sub _mark_deref_scaffolding {
 # explicit Coerce(X -> Bool) feeding one is redundant in the producer's graph.
 my %_TRUTHINESS_OP = (Not => 1);
 
+# Numeric arithmetic ops that numify their operands internally (perl's `/`,
+# `%`, etc. coerce an Int operand to Num as part of the op itself), so an
+# explicit Coerce(X -> Num) feeding one is redundant in the producer's graph.
+# Reuses %_FOLD_OP's op set: the same ops that fold over literals are the ones
+# that auto-numify when they DON'T fold (e.g. a Divide of two live pad reads).
+my %_NUMIFYING_OP = map { $_ => 1 } keys %_FOLD_OP;
+
 # _mark_coerce_absorption($spec_return, $real_return, \%satisfied) — subsume a
-# spec Coerce(X -> Bool) whose SOLE consumer is a truthiness op (Not), when the
-# real graph carries no such Coerce: the op does its own coercion, so B::SoN
-# feeds the operand directly. Only Coerce(-> Bool) into a truthiness op is
-# absorbed — a Coerce to any other repr, or feeding a non-truthiness consumer,
+# spec Coerce(X -> Bool) whose SOLE consumer is a truthiness op (Not), or a
+# spec Coerce(X -> Num) whose SOLE consumer is a numifying arithmetic op, when
+# the real graph carries no such Coerce: the op does its own coercion, so
+# B::SoN feeds the operand directly. Only these two absorbed shapes are
+# subsumed — a Coerce to any other repr, or feeding a non-absorbing consumer,
 # is a real representation change and stays required.
 sub _mark_coerce_absorption {
     my ($spec_return, $real_return, $satisfied) = @_;
@@ -1996,10 +2004,13 @@ sub _mark_coerce_absorption {
 
     for my $node (@nodes) {
         next unless _node_kind($node) eq 'Coerce';
-        next unless ($node->can('to_repr') ? ($node->to_repr // '') : '') eq 'Bool';
         next if $real_coerce{ _coerce_shape($node) };   # producer kept it
+        my $to = $node->can('to_repr') ? ($node->to_repr // '') : '';
         my $cs = $consumers{ $node->id } // [];
-        next unless @$cs == 1 && $_TRUTHINESS_OP{ _node_kind($cs->[0]) };
+        next unless @$cs == 1;
+        my $sole_kind = _node_kind($cs->[0]);
+        next unless ($to eq 'Bool' && $_TRUTHINESS_OP{$sole_kind})
+                 || ($to eq 'Num'  && $_NUMIFYING_OP{$sole_kind});
         $satisfied->{ $node->id } = 1;
     }
     return;
