@@ -127,10 +127,21 @@ target, proved via lli, INT64_MIN correct for free).
 
 **Step 3 — fix the divide miscompile.** `_lower_divide` Num path promotes Int
 operands via `_lower_as_double` (mirror `_lower_binop_int`, Context.pm:702-703).
-Add a corpus case `my $x=3; my $y=4; $x/$y` (expect `Num:0.75`). Proof: the case
-flips from lli-reject to GREEN; floor +1. Risk: LOW (a 2-line mirror of an
-existing call; NO both-Int fast path in Divide to disturb — Int-repr Divide dies
-at :741-746; MEASURED patched: `3/4`->`Num:0.75`, Num/Num passthrough unbroken).
+Add a corpus case `my $x=3; my $y=4; $x/$y` (expect `Num:0.75`). Risk: LOW (a
+2-line mirror of an existing call; NO both-Int fast path in Divide to disturb —
+Int-repr Divide dies at :741-746; MEASURED patched: `3/4`->`Num:0.75`, Num/Num
+passthrough unbroken).
+
+MEASUREMENT CORRECTION (landed as commit 0b0f6eda, this claim was wrong):
+the fix greens ONLY the behavior + shape legs, NOT the full triple contract.
+The gate's TypedInvariant leg stays RED because Divide requires its inputs to
+be Num OR bridged by an explicit `Coerce` node (TypedInvariant.pm:22, pinned by
+well-typed-graph.t H2-6/H2-7), and B::SoN emits `Divide(Int,Int)` stamped Num
+with NO Coerce node. So gate-green holds at 152, the divide case stays
+worklisted, and the floor does NOT rise (still 148). Inserting the real
+`Coerce(Int->Num)` node is the coercion-node work fenced to the runtime-MOP
+pilot — filed as pilot issue 019f82f1, NOT built here. The original "floor +1"
+was a behavior-only measurement; it omitted the invariant leg.
 
 **Step 4 — FILE (do not build) three parked issues:**
 - **DEDUP (evicted here per assessment — it is the pilot's opening commit):** the
@@ -154,9 +165,13 @@ at :741-746; MEASURED patched: `3/4`->`Num:0.75`, Num/Num passthrough unbroken).
   runtime-MOP pilot; it is the pilot's opening move, not a bug-fix.
 
 ## THE BOUNDARY
-**Delivers:** three i32-truncation sites fixed via one format-string pass (floor
-148->150+); the divide `(Int,Num)` miscompile fixed; the numify-warning gap +
-the coercion-emission DEDUP + print-args-as-nodes all measured/specced and FILED
+**Delivers (as landed):** three i32-truncation sites fixed via one
+format-string pass (gate 148->152, commit 523f9c87); the divide `(Int,Int)`->fdiv
+miscompile fixed at the BACKEND (commit 0b0f6eda) — behavior + shape green, but
+gate-green holds at 152 and the case stays worklisted because its IR needs a
+`Coerce(Int->Num)` node the fix does not insert (invariant leg red; filed as
+pilot 019f82f1). The numify-warning gap + the coercion-emission DEDUP +
+print-args-as-nodes + the Divide Coerce-node insertion all measured/specced and FILED
 (dedup evicted to the pilot per assessment — see Step 4); the runtime-MOP vtable
 groundwork correctly deferred. This cleanup is intentionally TINY: ~4 bug-fix
 edits + tests + filing, no refactor, no new abstraction.
