@@ -4316,6 +4316,19 @@ sub _lower_call_direct {
     die "GAP: direct call to '$name': callee Return has no value input."
         unless defined $value;
 
+    # A pure callee's Return.control_in is Start (pure pad/data work sits off
+    # the control chain); an effectful callee's is a Print/Assign/store or a
+    # loop/branch Region. Inlining lowers ONLY the Return's value subgraph
+    # below, so an effectful callee's control-chain effect(s) would otherwise
+    # be silently dropped at inline time — GAP loudly instead.
+    my $control_in = $returns[0]->control_in;
+    die "GAP: direct call to '$name': callee has effect(s) on its control "
+      . "chain (print/store/...) that inlining does not yet thread in "
+      . "program order."
+        if defined $control_in
+        && !(blessed($control_in) && $control_in->can('operation')
+             && $control_in->operation eq 'Start');
+
     my @args = $node->inputs->@*;
 
     # No-argument callee: inline the result subgraph directly.

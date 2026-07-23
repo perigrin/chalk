@@ -285,3 +285,36 @@ context: scalar
 return %call
 L: GREEN
 ```
+
+## F9 effectful callee inline drops the print — GAP not miscompile (Slice B Commit 1)
+
+A callee whose body performs an effect (`print`) and then returns a value that
+the caller uses — `sub f { print "x"; 2 } my $r = f(); $r`. The callee's Return
+value subgraph is just the constant `2`, but its `control_in` chain carries the
+`print "x"` (`Return.control_in -> Print -> Start`, program order). Inlining
+today lowers ONLY the Return's value input (`_lower_call_direct`,
+`$returns[0]->inputs->[-1]`) and never walks `control_in`, so the callee's
+`print "x"` is SILENTLY DROPPED at inline time: `lli` would emit `Int:2` while
+perl emits `xInt:2` — a silent miscompile, not a declared GAP. Slice B Commit 1
+closes this by GAPping loudly instead: `_lower_call_direct` now dies unless the
+callee's `Return.control_in` is `undef` or a `Start` node, since a pure callee's
+`control_in` is always `Start` (pure pad/data work sits off the control chain)
+while an effectful callee's is a `Print`/`Assign`/store or a loop/branch
+`Region`. Ordered inline lowering of the effect chain is Slice B Commit 2, not
+this commit.
+
+```perl
+# source
+sub f { print "x"; 2 }
+my $r = f();
+$r
+```
+
+```behavior
+return: 2
+context: scalar
+```
+
+```ir
+L: GAP(direct call to 'f': callee has effect(s) on its control chain (print/store/...) that inlining does not yet thread in program order)
+```
