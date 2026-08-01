@@ -145,6 +145,16 @@ note the row's From is the bundle and add an API-shape guard note citing
 JSON.pm:739 / LLVM.pm:53. Make the doc edit; skip the test.
 
 ## The decision gate — build Chalk::Meta::Type only when ALL of:
+
+> **STATUS 2026-08-01: GATE NOT MET. Registry stays deferred.** Slice A is green
+> (C2 proven). Slice B is **PARTIAL** — C5 proven for the STRAIGHT-LINE PRINT
+> shape only; the loop+effect shape (Slice B's actual subject) is PARKED and C4
+> was never built. N=1, not N>=3. The architecture is NOT falsified (no store was
+> dropped or reordered — the no-go condition below did not fire), but it is NOT
+> earned. Full outcome record:
+> `2026-07-23-slice-b-inliner-effect-ordering.md` "## OUTCOME (2026-08-01)".
+> Do not read the completed `coercion-slice-b` milestone as satisfying this gate.
+
 - Slice A green (C2 proven).
 - Slice B green WITH its C4 shape-block assertion (C5 + C4 proven). **If B cannot
   keep effects in order, STOP — architecture falsified, no registry warranted.**

@@ -239,3 +239,64 @@ implementation-measured value (NOT hardcoded), self-verified BY THE COORDINATOR
 (not a subagent self-report), on committed HEAD, run with
 $HOME/.local/share/pvm/versions/5.42.0/bin/perl -Ilib -It/lib. RED-first corpus
 case required. GAP-not-miscompile invariant enforced after Commit 1.
+
+## OUTCOME (2026-08-01) — PARTIAL GREEN. Read this before citing Slice B.
+
+**Slice B did NOT fully discharge its own charter. It is PARTIAL, not green.**
+Milestone `coercion-slice-b` completed with all its issues done, but the
+milestone scope was deliberately narrower than this document's title
+("inliner on a loop+effect callee"). Do not read "milestone complete" as
+"Slice B green."
+
+### What IS proven
+- **C5 for the STRAIGHT-LINE PRINT shape only.** An inlined callee whose
+  `Return.control_in` chain is `Print -> ... -> Start` now has its effects
+  threaded in PROGRAM ORDER at the call site (`_lower_call_direct` ->
+  `_collect_straight_line_effect_chain` + `_lower_inlined_effects_then_value`).
+  Corpus: subs.md F9 (ordered print), F10 (cross-graph cache-collision proof --
+  caller and callee Print ids DO collide in the real B::SoN graph, measured),
+  F11 (two-call-site double-emission, GREEN not fenced). Gate 153 -> 156.
+- **The silent effect-drop miscompile class is CLOSED** (Commit 1): both
+  effect-attachment paths -- `Return.control_in` AND `Return.inputs[1..]` (the
+  trailing void statement-effect) -- now GAP loudly instead of dropping.
+- **Two latent cross-graph collision hazards fixed**, both from the same root
+  cause (id-keyed tables shared across graphs that number nodes from separate
+  factories): `{cache}` (Commit 2-print) and `_mut_read_memo` (zhi 019fbe27, a
+  REACHABLE stale-value miscompile, RED-proven `Int:3` vs correct `Int:2`).
+
+### What is NOT proven (and therefore what the decision gate still lacks)
+- **C5 for the LOOP+EFFECT shape -- this document title's actual subject --
+  is PARKED, not proven.** See "Commit 2-loop-store" above. It needs the
+  memory-SSA re-entrancy work (localizing `_scan_memory_shape`'s cached
+  `_branch_guarded_store`, per-callee elaboration plans).
+- **C4 was never built.** The shape-block assertion (dead pure callee code
+  ABSENT from the emitted `.ll`) needs new corpus machinery and is
+  near-tautological as specified. Slice B proves C5 only, exactly as this
+  document's own C4-rider section warned.
+
+### Consequence for the registry decision gate
+`2026-07-22-coercion-architecture-slice-plan.md:147-153` requires "Slice B
+green WITH its C4 shape-block assertion (C5 + C4 proven)" plus N>=3 real
+coercion insertions. **NONE of those three conditions is met** (C5 partial, C4
+absent, N=1). `Chalk::Meta::Type` therefore remains DEFERRED. The architecture
+is NOT falsified -- the no-go condition (a dropped or reordered store) did not
+occur -- but it is NOT earned either.
+
+### Load-bearing precondition on the parked work
+`_lower_inlined_effects_then_value` documents a DOUBLE-LOWER invariant: the
+fresh `{cache}` is scoped to the effect drive, so a value node also referenced
+by an effect is lowered twice. That is safe ONLY because the Print-only guard
+admits only pure-idempotent or no-emit-PadAccess value nodes. **Widening that
+guard (i.e. the parked loop-store slice) MUST re-establish the invariant or it
+silently reintroduces a double-effect miscompile.** An adversarial review
+constructed the miscompiling shape; it is gated closed today only by the
+Print-only restriction.
+
+### Cross-roadmap note (why the PARK matters more than its label suggests)
+The bare-file protocol's third, previously unbudgeted line item is INTER-GRAPH
+CALLS: "a real file = `__PROGRAM__` + N sub graphs it calls; the current inliner
+INLINES ONLY, SILENTLY DROPS effectful callee bodies." Slice B retired the
+silent-drop half of that risk. But real lib/ methods contain loops and stores,
+not straight-line prints -- so **Commit 2-loop-store sits on the critical path
+to lib/ self-hosting (the project North Star), not merely on the coercion
+registry's path.** Budget it accordingly.
