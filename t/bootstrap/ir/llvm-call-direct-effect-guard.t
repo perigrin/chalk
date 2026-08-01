@@ -1,6 +1,6 @@
-# ABOUTME: Teeth for _lower_call_direct's effectful-callee GAP guard (Slice B
-# ABOUTME: Commit 1), covering BOTH effect-attachment paths: Return.control_in
-# ABOUTME: and Return.inputs[1..] (a defensive guard; see body for reachability).
+# ABOUTME: Teeth for _lower_call_direct's effectful-callee handling (Slice B
+# ABOUTME: Commits 1+2-print): a straight-line Print-only control chain now
+# ABOUTME: inlines; every other effect shape (Assign, Return.inputs[1..]) GAPs.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -33,15 +33,51 @@ subtest 'pure callee (Return.control_in = Start, inputs = [value]) still inlines
     ok(defined $out, 'lowering returned a value ref');
 };
 
-subtest 'effectful callee via Return.control_in (Print, not Start) GAPs' => sub {
+# Slice B Commit 2-print narrowed the guard: a STRAIGHT-LINE Print-only
+# control chain (Print -> ... -> Start, no Region/Loop/If/Assign) is now
+# threaded in program order rather than GAPping (see
+# _collect_straight_line_effect_chain / _lower_inlined_effects_then_value).
+# The GAP is preserved for every OTHER effect shape (below).
+subtest 'effectful callee via Return.control_in (straight-line Print, not Start) inlines' => sub {
     my $f       = Chalk::IR::NodeFactory->new;
     my $start   = $f->make('Start');
     my $str     = $f->make('Constant', value => 'x', const_type => 'string');
+    $str->set_representation('Str');
     my $print   = $f->make('Print', inputs => [$str]);
     $print->set_control_in($start);
     my $value   = $f->make('Constant', value => 2, const_type => 'integer');
+    $value->set_representation('Int');
     my $ret     = $f->make_cfg('Return', inputs => [$value]);
     $ret->set_control_in($print);
+    my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
+
+    my $call = $f->make('Call',
+        dispatch_kind  => 'direct',
+        name           => 'main::f',
+        resolved_graph => $graph,
+    );
+
+    my $ctx = mk_ctx();
+    my $out = eval { $ctx->_lower_call_direct($call) };
+    ok(!$@, 'no GAP for a straight-line print-only callee') or diag $@;
+    ok(defined $out, 'lowering returned a value ref');
+};
+
+subtest 'effectful callee via Return.control_in (Assign, not Start/Print) still GAPs' => sub {
+    my $f       = Chalk::IR::NodeFactory->new;
+    my $start   = $f->make('Start');
+    my $name_c  = $f->make('Constant', value => 's', const_type => 'string');
+    my $init    = $f->make('Constant', value => 1, const_type => 'integer');
+    $init->set_representation('Int');
+    my $vd      = $f->make('VarDecl', inputs => [$name_c, $init]);
+    my $rhs     = $f->make('Constant', value => 5, const_type => 'integer');
+    $rhs->set_representation('Int');
+    my $assign  = $f->make('Assign', inputs => [$vd, $rhs]);
+    $assign->set_control_in($start);
+    my $value   = $f->make('Constant', value => 2, const_type => 'integer');
+    $value->set_representation('Int');
+    my $ret     = $f->make_cfg('Return', inputs => [$value]);
+    $ret->set_control_in($assign);
     my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
 
     my $call = $f->make('Call',

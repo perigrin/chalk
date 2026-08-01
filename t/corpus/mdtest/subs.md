@@ -286,22 +286,22 @@ return %call
 L: GREEN
 ```
 
-## F9 effectful callee inline drops the print — GAP not miscompile (Slice B Commit 1)
+## F9 effectful callee inline threads its print in program order (Slice B Commit 2-print)
 
 A callee whose body performs an effect (`print`) and then returns a value that
 the caller uses — `sub f { print "x"; 2 } my $r = f(); $r`. The callee's Return
 value subgraph is just the constant `2`, but its `control_in` chain carries the
-`print "x"` (`Return.control_in -> Print -> Start`, program order). Inlining
-today lowers ONLY the Return's value input (`_lower_call_direct`,
-`$returns[0]->inputs->[-1]`) and never walks `control_in`, so the callee's
-`print "x"` is SILENTLY DROPPED at inline time: `lli` would emit `Int:2` while
-perl emits `xInt:2` — a silent miscompile, not a declared GAP. Slice B Commit 1
-closes this by GAPping loudly instead: `_lower_call_direct` now dies unless the
-callee's `Return.control_in` is `undef` or a `Start` node, since a pure callee's
-`control_in` is always `Start` (pure pad/data work sits off the control chain)
-while an effectful callee's is a `Print`/`Assign`/store or a loop/branch
-`Region`. Ordered inline lowering of the effect chain is Slice B Commit 2, not
-this commit.
+`print "x"` (`Return.control_in -> Print -> Start`, program order). Slice B
+Commit 1 first converted the silent drop into a loud GAP (`_lower_call_direct`
+died unless the callee's `Return.control_in` was `undef`/`Start`). Commit
+2-print now threads a STRAIGHT-LINE Print-only chain (no Region/Loop/If/Assign
+anywhere on it): `_collect_straight_line_effect_chain` walks `control_in` back
+to `Start`, and `_lower_inlined_effects_then_value` drives it through
+`process_control_node` (oldest-first) inside the arg-bind frame, splicing the
+callee's `print "x"` onto the caller's control chain BEFORE the Return value is
+lowered — `lli` now emits `xInt:2`, matching perl. Any OTHER effect shape
+(Assign/store, or a Region/Loop/If on the chain — the parked loop-store slice)
+still GAPs; see F12.
 
 ```perl
 # source
@@ -311,10 +311,105 @@ $r
 ```
 
 ```behavior
+stdout: x
 return: 2
 context: scalar
 ```
 
 ```ir
-L: GAP(direct call to 'f': callee has effect(s) on its control chain (print/store/...) that inlining does not yet thread in program order)
+%call = Call(dispatch_kind: "direct", name: "main::f") :Int
+return %call
+L: GREEN
+```
+
+## F10 cross-graph cache-collision: caller AND callee both print, order preserved
+
+The load-bearing hazard: `lower_value`'s cache is keyed by the node's STRING id
+(`Print#N`), and each graph numbers its nodes from its OWN factory — a callee
+`Print#N` can collide with an unrelated CALLER `Print#N`. A caller print
+BEFORE the call, plus an inlined callee print, both survive and land in
+program order only if the inliner does not silently serve the callee's print
+from the caller's cached ref (or vice versa). `_lower_inlined_effects_then_value`
+swaps the WHOLE cache to a fresh hash for the duration of the callee's chain
+drive (mirrors the existing refaddr-keyed `_arg_bind` frame pattern), so the
+callee's `Print` node is never cache-hit against the caller's identically-numbered
+node.
+
+```perl
+# source
+sub f { print "callee"; 2 }
+print "caller";
+my $r = f();
+$r
+```
+
+```behavior
+stdout: callercallee
+return: 2
+context: scalar
+```
+
+```ir
+%call = Call(dispatch_kind: "direct", name: "main::f") :Int
+return %call
+L: GREEN
+```
+
+## F11 same effectful callee inlined at two call sites emits its print twice
+
+Side-effecting ops STAY cached once lowered (they execute once at their
+control position) — so a naive fix that merely computed the callee's effect
+under its real string id would drop the SECOND inline's print (the two calls'
+`Print` nodes are the SAME node object, cached after the first inline). Since
+`_lower_inlined_effects_then_value` swaps to a fresh cache per INLINE
+INSTANCE (not per node), each call site re-lowers and re-emits the callee's
+print independently — matching perl, which runs the sub body twice.
+
+```perl
+# source
+sub f { print "y"; 2 }
+my $a = f();
+my $b = f();
+$a + $b
+```
+
+```behavior
+stdout: yy
+return: 4
+context: scalar
+```
+
+```ir
+%call1 = Call(dispatch_kind: "direct", name: "main::f") :Int
+%call2 = Call(dispatch_kind: "direct", name: "main::f") :Int
+%sum   = Add(%call1, %call2) :Int
+return %sum
+L: GREEN
+```
+
+## F12 loop-effect callee (parked loop-store shape) still GAPs, not a broken lowering
+
+A callee whose control chain contains a `Region` (a loop that prints, then
+returns a value) is the PARKED loop-store shape (Slice B Commit 2-loop-store,
+not built here — memory-SSA re-entrancy is a separate slice).
+`_collect_straight_line_effect_chain` GAPs loudly on any non-`Print`,
+non-`Start` node it meets walking `control_in` — a `Region` here included — so
+this shape is never attempted, only ever a clean GAP, never a reordered or
+dropped effect.
+
+```perl
+# source
+sub g { for my $i (1..2) { print "z" } 9 }
+my $r = g();
+$r
+```
+
+```behavior
+stdout: zz
+return: 9
+context: scalar
+```
+
+```ir
+L: GAP(direct call to 'g': callee has effect(s) on its control chain (print/store/...) that inlining does not yet thread in program order)
 ```

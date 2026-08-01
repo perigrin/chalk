@@ -4318,16 +4318,13 @@ sub _lower_call_direct {
 
     # A pure callee's Return.control_in is Start (pure pad/data work sits off
     # the control chain); an effectful callee's is a Print/Assign/store or a
-    # loop/branch Region. Inlining lowers ONLY the Return's value subgraph
-    # below, so an effectful callee's control-chain effect(s) would otherwise
-    # be silently dropped at inline time — GAP loudly instead.
+    # loop/branch Region. A STRAIGHT-LINE effect chain (Print -> ... -> Start,
+    # no Region/Loop/If/Assign) is threaded in program order by
+    # _collect_straight_line_effect_chain below (Slice B Commit 2-print). Any
+    # OTHER shape (a loop/branch effect, or a store) still GAPs loudly here —
+    # that heavier memory-SSA-re-entrant case is a separate, parked slice.
     my $control_in = $returns[0]->control_in;
-    die "GAP: direct call to '$name': callee has effect(s) on its control "
-      . "chain (print/store/...) that inlining does not yet thread in "
-      . "program order."
-        if defined $control_in
-        && !(blessed($control_in) && $control_in->can('operation')
-             && $control_in->operation eq 'Start');
+    my @effect_chain = $self->_collect_straight_line_effect_chain($control_in, $name);
 
     # A trailing VOID statement-effect attaches on Return.inputs[1..] rather
     # than control_in (see Chalk::IR::Serialize::JSON's _control_chain_nodes,
@@ -4348,8 +4345,10 @@ sub _lower_call_direct {
 
     my @args = $node->inputs->@*;
 
-    # No-argument callee: inline the result subgraph directly.
-    return $self->lower_value($value) unless @args;
+    # No-argument callee: thread its straight-line effect chain (if any), then
+    # inline the result subgraph.
+    return $self->_lower_inlined_effects_then_value(\@effect_chain, $value)
+        unless @args;
 
     # Argument-passing callee: bind the callee's positional arg-reads to the
     # caller's argument values. Find the callee's `shift @_` reads first (this
@@ -4364,12 +4363,83 @@ sub _lower_call_direct {
     my @arg_refs = map { $self->lower_value($_) } @args;
 
     # Push the arg-binding frame (refaddr-keyed; see lower_value), inline the
-    # callee's result subgraph, then tear the frame down. Nested inlined calls
-    # each add their own callee's arg-reads to the shared frame — the refaddr
-    # keys are per-node, so an inner callee's shift never shadows an outer's.
+    # callee's effect chain + result subgraph, then tear the frame down. Nested
+    # inlined calls each add their own callee's arg-reads to the shared frame —
+    # the refaddr keys are per-node, so an inner callee's shift never shadows
+    # an outer's.
     local $self->{_arg_bind} = { ($self->{_arg_bind} // {})->%* };
     $self->{_arg_bind}{ refaddr($arg_reads[$_]) } = $arg_refs[$_]
         for 0 .. $#arg_reads;
+
+    return $self->_lower_inlined_effects_then_value(\@effect_chain, $value);
+}
+
+# _collect_straight_line_effect_chain($control_in, $name) -> @chain (newest-first)
+#
+# Collects the callee Return's control_in effect chain for Slice B Commit
+# 2-print. Returns the chain in DISCOVERY order (newest-first, i.e. the order
+# control_in walking naturally produces — the same order the top-level driver
+# collects it in before reversing, LLVM.pm ~911-933). An empty list means a
+# pure callee (control_in undef or Start): nothing to thread.
+#
+# GAPs loudly — the existing Commit 1 behavior — unless every node on the
+# chain is a straight-line Print. Only Print is measured/verified for
+# cross-graph inline splicing (Slice B Commit 2-print's scope); any other
+# statement-effect (Assign/store, RegexSubst, a nested Call, ...) or a
+# Region/Loop/If (the parked loop-store shape, memory-SSA re-entrancy — a
+# separate slice) keeps GAPping rather than attempt an unverified lowering.
+sub _collect_straight_line_effect_chain {
+    my ($self, $control_in, $name) = @_;
+
+    my @chain;
+    my $c = $control_in;
+    while (defined $c) {
+        die "GAP: direct call to '$name': callee has effect(s) on its control "
+          . "chain (print/store/...) that inlining does not yet thread in "
+          . "program order."
+            unless blessed($c) && $c->can('operation');
+
+        my $op = $c->operation;
+        last if $op eq 'Start';
+
+        die "GAP: direct call to '$name': callee has effect(s) on its control "
+          . "chain (print/store/...) that inlining does not yet thread in "
+          . "program order."
+            unless $op eq 'Print';
+
+        push @chain, $c;
+        $c = $c->can('control_in') ? $c->control_in : undef;
+    }
+    return @chain;
+}
+
+# _lower_inlined_effects_then_value(\@effect_chain, $value) -> $llvm_ref
+#
+# Threads a callee's straight-line effect chain (oldest-first; @effect_chain
+# is newest-first per _collect_straight_line_effect_chain, so this reverses
+# it) through process_control_node INSIDE the arg-bind frame, splicing the
+# callee's effects into the caller's control chain in program order, then
+# lowers the Return value.
+#
+# CROSS-GRAPH CACHE COLLISION (load-bearing): lower_value's cache is keyed by
+# the node's STRING id (Context.pm ~341), but each graph numbers its nodes
+# from its OWN factory (NodeFactory.pm counter), so a callee Print#N can
+# collide with an unrelated caller Print#N. Since the effect-emitting subs
+# (_lower_print et al) write `$self->{cache}{$node->id} = ...` directly
+# (there is no shared setter to intercept), the ONLY safe way to guarantee a
+# callee's effect is never served from — or silently folded into — the
+# caller's cache is to swap the ENTIRE cache to a fresh hash for the duration
+# of the chain drive (mirrors _arg_bind's existing local-scoped-frame
+# pattern). This also gives the correct TWO-CALL-SITE behavior for free: each
+# inline gets its own fresh cache, so a callee inlined twice re-lowers (and
+# re-emits) its effect both times rather than being served a stale cached ref.
+sub _lower_inlined_effects_then_value {
+    my ($self, $effect_chain, $value) = @_;
+
+    if ($effect_chain->@*) {
+        local $self->{cache} = {};
+        $self->process_control_node($_) for reverse $effect_chain->@*;
+    }
 
     return $self->lower_value($value);
 }
