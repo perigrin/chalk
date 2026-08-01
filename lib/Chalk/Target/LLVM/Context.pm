@@ -4450,8 +4450,30 @@ sub _collect_straight_line_effect_chain {
 # loop-store slice: admitting a Region/store/nested Call) MUST re-establish this
 # invariant — scope the cache swap to cover $value too, or prove the shared node
 # stays pure — or it silently reintroduces the double-effect miscompile.
+#
+# CROSS-GRAPH MUT-READ-MEMO COLLISION (git-zhi 019fbe27, load-bearing): a
+# SECOND, independent id-keyed cache — $self->{_mut_read_memo}
+# (_reads_mutable_location's memo, Context.pm ~276-303) — has the exact same
+# cross-graph collision hazard as {cache} above, but is NOT covered by the
+# {cache} swap: it is a pure structural classification (does this node read a
+# mutable location), computed once and reused for the REST OF THIS LOWERING,
+# independent of any given cache generation. A callee PURE node (e.g. an Add
+# referenced twice) can collide, by id, with an unrelated CALLER
+# mutable-read node (PadAccess/Subscript/FieldAccess/StashAccess); whichever
+# is classified first wins the memo entry for that id. If the callee's node
+# is classified PURE first, the caller's same-id mutable-read node later
+# inherits that stale PURE answer, so lower_value's cache-bypass check
+# (Context.pm ~353) wrongly treats it as cacheable and serves a stale
+# pre-mutation value — the same stale-value miscompile class {cache}
+# isolation guards against, just via the OTHER id-keyed table. Unlike
+# {cache}, this hazard spans BOTH the effect-chain drive and the $value
+# lowering (a callee's pure subexpression can be looked up twice, and thus
+# memoized, in either), so the isolation must wrap the ENTIRE callee-node
+# lowering span here, not just the narrower effect-drive cache swap above.
 sub _lower_inlined_effects_then_value {
     my ($self, $effect_chain, $value) = @_;
+
+    local $self->{_mut_read_memo} = {};
 
     if ($effect_chain->@*) {
         local $self->{cache} = {};
