@@ -4329,6 +4329,23 @@ sub _lower_call_direct {
         && !(blessed($control_in) && $control_in->can('operation')
              && $control_in->operation eq 'Start');
 
+    # A trailing VOID statement-effect attaches on Return.inputs[1..] rather
+    # than control_in (see Chalk::IR::Serialize::JSON's _control_chain_nodes,
+    # JSON.pm:983-997, for the seed predicate this mirrors): a void method
+    # call is not the return value, so the loader keeps it as an extra Return
+    # input alongside the value. The control_in check above does not see it
+    # (that Return's own control_in can still be Start), and unguarded it
+    # would ALSO mis-select the trailing effect as the return value (inputs's
+    # LAST element, above). GAP loudly rather than drop or mis-select it.
+    my @inputs = $returns[0]->inputs->@*;
+    my @trailing_effects = grep {
+        blessed($_) && $_->can('control_in') && defined $_->control_in
+    } @inputs[ 1 .. $#inputs ];
+    die "GAP: direct call to '$name': callee has effect(s) carried as extra "
+      . "Return inputs (a trailing void statement-effect) that inlining "
+      . "does not yet thread in program order."
+        if @trailing_effects;
+
     my @args = $node->inputs->@*;
 
     # No-argument callee: inline the result subgraph directly.
