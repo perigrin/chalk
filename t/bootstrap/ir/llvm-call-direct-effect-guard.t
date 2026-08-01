@@ -100,8 +100,8 @@ subtest 'effectful callee via Return.inputs[1..] (defensive; no live producer) G
     my $ctx = mk_ctx();
     my $err = eval { $ctx->_lower_call_direct($call); 1 };
     ok(!$err, 'dies rather than silently dropping the effect or mis-selecting it as the return value');
-    like($@, qr/GAP: direct call to 'main::f': callee has effect/,
-        'the die names the effect GAP (inputs-carried variant)');
+    like($@, qr/carried as extra Return inputs/,
+        'the die names the inputs-carried variant specifically (not the control_in guard)');
 };
 
 done_testing;
