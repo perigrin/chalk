@@ -133,10 +133,10 @@ class Chalk::IR::Graph {
     method nodes() {
         # Returns a topologically-sorted list of nodes in this graph.
         #
-        # This is the cross-repo walk-order contract; the corpus gate enforces
-        # it. perl5-son's SoN::IR::Graph carries an independent implementation
-        # of the same rules — the two are kept honest by the gate, not by
-        # sharing this file.
+        # This is the cross-repo walk-order contract; the corpus gate enforces it.
+        # perl5-son's SoN::IR::Graph carries an independent implementation of the
+        # same rules — the two are kept honest by the gate, not by sharing this
+        # file.
         #
         # Two separate passes over two separate edge sets, deliberately not
         # conflated:

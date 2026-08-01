@@ -389,3 +389,7 @@ top blocker (21 units) when `_seed` was never a blocker at all. The triage list
 above is the first trustworthy one this project has had for the capstone.
 Largest real target is now `_remove_trivial_phi` (15 units), then `_seed` (10)
 and `to_string` (8).
+
+## Machine-readable result lines
+
+- post-divorce coverage (2026-08-01): files=8 own=47 lowered=0 coverage=0.00%
