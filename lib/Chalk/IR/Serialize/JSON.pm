@@ -124,6 +124,10 @@ sub _extract_fields ($node, $id_remap) {
 }
 
 # -----------------------------------------------------------------------
+# This is the cross-repo walk-order contract; the corpus gate enforces it.
+# perl5-son's SoN::Serialize::JSON carries a duplicated copy of this function
+# (deliberately — the repos are divorced); the gate keeps them honest.
+#
 # _all_nodes_topo($graph_or_nodes) — return all nodes in topological order.
 # Accepts either a Chalk::IR::Graph (calls ->nodes) or a plain arrayref of
 # already-reachable nodes (a caller that computed its own reachable set via

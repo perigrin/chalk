@@ -345,3 +345,45 @@ a follow-up issue: add TryCatch/Unwind cases to the corpus.
 ponytail asked whether it is the SMALLEST TRUE THING. Assess passed the doc and
 the conformance test without challenge — they survived the first lens and died to
 the second.
+
+## RESULT (2026-08-01, measured post-rename)
+
+**Coverage: 0.00% — UNCHANGED.** 47 own units, 0 lowered, 8 files. The plan said
+this would happen ("It does not make anything lower") and it happened. Recorded
+without spin.
+
+**What DID change: the blame is now REAL rather than an artifact.**
+
+GAP buckets, before -> after: `no Return in its graph` 6 -> 3;
+`body root ... NO repr` 2 -> 5. Three files (MOP/Method, Dominators, Optimizer)
+moved from the artifact bucket into genuine lowering gaps.
+
+Blamed-method histogram, before -> after:
+
+| before | after |
+|---|---|
+| 21 x `_seed` (no-Return — ARTIFACT, class never compiled) | 10 x `_seed` (NO repr — a REAL gap; it compiles now) |
+| 15 x `_remove_trivial_phi` (Bootstrap::Bindings) | 15 x `_remove_trivial_phi` (unchanged — never shadowed) |
+| 8 x `to_string` | 8 x `to_string` |
+| 3 x `alternative_count` | 3 x `alternative_count` |
+| — | **NEW** 7 x `_serialize_inputs` (Chalk::IR::Node) |
+| — | **NEW** 3 x `_collect_branch_into` |
+| — | **NEW** 1 x `_args_source` |
+
+The after-histogram sums to exactly 47 — every own unit accounted for by a
+named, real method. Three methods were previously HIDDEN behind the artifact.
+
+**The unblock proof reproduced exactly:** `lib/Chalk/IR/Graph.pm` compiles with
+no "Cannot reopen existing class"; 7 methods emitted; `_seed` 25 nodes / Return
+x1, `merge` 41 / Return x1, `unmerge` 27 / Return x1.
+
+**Corpus gate held at gate-green=156** (all three legs, worklist 0),
+coordinator-run on committed HEAD — the rename moved zero emitted bytes.
+perl5-son suite 84 files / 471 tests PASS on a clean build.
+
+**Honest assessment of value:** the milestone bought no coverage. It was worth
+doing because the OLD number was actively MISLEADING — it named `_seed` as the
+top blocker (21 units) when `_seed` was never a blocker at all. The triage list
+above is the first trustworthy one this project has had for the capstone.
+Largest real target is now `_remove_trivial_phi` (15 units), then `_seed` (10)
+and `to_string` (8).
