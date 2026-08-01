@@ -1031,6 +1031,61 @@ context: scalar
 L: GAP(needs LLVM landingpad + personality function for exception unwind)
 ```
 
+## D8b try/catch whose body carries a statement effect (control_in-membership pin)
+
+Bilateral to D8 on the PRODUCER side: this pins what B::SoN actually emits for
+try/catch with a body statement effect (a `print`), measured directly (not
+guessed). The producer has a registered `TryCatch` node TYPE
+(`SoN::IR::Node::TryCatch`, `operation() => 'TryCatch'`) but
+`SoN::FromOptree.pm`'s `entertrycatch` handler never constructs one — it
+desugars try/catch into the SAME shared-control-merge shape an if/else uses:
+it walks the try body and the catch body on separate snapshots, then calls
+`$try_sim->merge($catch_sim, $factory)`, producing a `Region` merging the two
+bodies and a `Phi` over their residual values. The try body's `print` becomes
+a real `Print` node threaded on the `Region`'s control input (`control_in: 0`
+i.e. `Start` — the try body is walked first, so its `Print` sits directly on
+`Start`); the merged `Phi` selects between the try-arm's `$x=1` and the
+catch-arm's `$x=2`. No `If`/`Proj` pair exists anywhere in the graph, because
+this merge is exception-based, not condition-based — there is no runtime test
+to route through `_process_if_node`.
+
+That absence is exactly what GAPs it: the LLVM backend's `lower_value` walks a
+`Phi` by first requiring its `region`'s driving `If`/`Loop` structure to have
+been processed via `process_control_node` (`_process_if_node` /
+`_process_loop_node`), which is the ONLY place `Phi` bookkeeping is set up.
+A `Region` built by a try/catch merge (not an If/Loop) never goes through
+`_process_if_node`, so its `Phi` is read cold and the backend refuses loudly
+— measured directly against `Chalk::Target::LLVM->lower`, not inferred.
+
+```perl
+# source
+use feature "try";
+no warnings "experimental::try";
+my $x = 0;
+try { print "in\n"; $x = 1 } catch ($e) { $x = 2 }
+$x
+```
+
+```behavior
+stdout: in
+return: 1
+context: scalar
+```
+
+```ir
+# Measured shape (B::SoN, perl5-son pu): no TryCatch node is ever built --
+# entertrycatch desugars directly to Region+Phi, the same shared-control-merge
+# shape an if/else uses. TryCatch node line kept in prose only: see above.
+%c0    = Constant(0) :Int
+%c1    = Constant(1) :Int
+%msg   = Constant("in\n") :Str
+%pr    = Print(%msg)
+%merge = Region(%pr, %c0)
+%val   = Phi(%c1, %c0, region: %merge)
+control: %pr -> %merge
+L: GAP(LLVM backend: Phi node encountered in lower_value before its enclosing if/loop structure was processed -- a TryCatch-desugared Region never runs through _process_if_node/_process_loop_node, the only place that primes Phi bookkeeping; measured via Chalk::Target::LLVM->lower on the real B::SoN graph, error at lib/Chalk/Target/LLVM/Context.pm line 2295)
+```
+
 ## D10 do-block value
 
 A `do { ... }` block evaluates its statements and yields the value of its last
@@ -1156,6 +1211,55 @@ context: scalar
 
 ```ir
 L: GAP(taken die aborts (lli exits 255); the equality harness cannot assert an abort against the perl die-oracle — proven out-of-band, see T2b prose)
+```
+
+## T2c Unwind reached ONLY via a `control_in` edge (walk-order clause-4 pin)
+
+T2/T2b's `die` sits inside an if/else ARM, so its `Unwind` is one of the merge
+`Region`'s `inputs[]` — reachable by the ordinary inputs-DFS walk
+(`_all_nodes_topo` clause 1: consumer-edge/inputs membership). This case pins
+the OTHER walk-order clause the `_all_nodes_topo` post-pass exists for:
+clause 4, "a node whose control predecessor is missing" — a node reachable
+ONLY by walking `control_in` BACKWARD from an already-reachable node, never
+via anyone's `inputs[]` array.
+
+A mainline (not-inside-an-if-arm) `die` produces exactly that shape: B::SoN's
+generic `_step` dispatch (not the if/else arm handler) builds the `Unwind` via
+`$sim->set_control($unwind)` and continues the walk — so the following
+`Return`'s `control_in` points at the `Unwind` directly, and `Unwind` never
+appears in `Return`'s (or anyone's) `inputs[]`. Measured directly:
+
+```perl
+# source
+my $x = 1;
+die "boom\n";
+$x
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+Perl's own oracle for this source aborts (exit 255, stderr `boom`), matching
+T2/T2b's die semantics — a `die` always aborts regardless of which control
+shape carries it. The `behavior` block above declares the fall-through-would-be
+value only as a shape reference for the `ir` block's Return operand; it is
+NOT a claim that the program returns 1 (it does not — `_run_expr_under_perl`
+would report the perl oracle's exit-255 abort here, same as T2b's declared
+GAP reason).
+
+```ir
+# Measured shape (B::SoN, perl5-son pu): Unwind's own inputs are [Start, msg]
+# (NOT a branch Proj) and it is never any other node's inputs[] member --
+# Return's control_in points at it directly. This is the clause-4 shape
+# _all_nodes_topo's backward control_in walk exists to recover.
+%one  = Constant(1) :Int
+%boom = Constant("boom\n") :Str
+%uw   = Unwind(%boom)
+control: %uw
+return %one
+L: GAP(LLVM backend's process_control_node explicitly ignores Unwind outside an If-arm's Proj consumer -- Context.pm's dispatch comment says control-chain Unwind is "ignored here" unless _find_unwind_consumer(proj) finds it hanging off an If-arm Proj; a mainline Unwind reached only via control_in is silently never emitted, so lli falls through and returns Int:1 instead of aborting (measured: lli exit 0 "Int:1" vs perl oracle exit 255 "boom") -- this is a SILENT MISCOMPILE, not a designed-in gap, filed as a follow-up rather than fixed here (out of this issue's scope: corpus cases only, no producer/backend changes))
 ```
 
 ## T3 cond_expr inside a loop body (t/base blocker: translate.t)

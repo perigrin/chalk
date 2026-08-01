@@ -308,6 +308,8 @@ a follow-up issue: add TryCatch/Unwind cases to the corpus.
 5. **Follow-up issue (written down so it is not drift):** add TryCatch/Unwind
    corpus cases.
 
+- TryCatch/Unwind corpus cases: LANDED (2026-08-01, cases D8b + T2c)
+
 ## Resolved by assessment (2026-08-01)
 
 1. **Is a pure rename sufficient?** YES. Full cross-reach inventory in Scope §2.
