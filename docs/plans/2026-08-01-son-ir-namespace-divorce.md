@@ -1,9 +1,9 @@
 # ABOUTME: Plan to re-divorce B::SoN's vendored Chalk IR classes into SoN::IR::*,
-# ABOUTME: replacing shared-class unification with a written contract + conformance test.
+# ABOUTME: so B::SoN can compile the chalk classes it currently loads and shadows.
 
 # SoN/Chalk IR namespace divorce — unblocking 55% of lib/ for the Phase-5 capstone
 
-**Status:** ASSESSED 2026-08-01 (crochet:assess, Fable adversarial). Verdict: SOUND ENOUGH TO REFINE — central proof reproduced independently to the digit, all cited line numbers verified. Four IMPORTANT findings folded in below (perl5-son t/ suite in scope; dead-file trim; rejected-alternatives recorded; filtered-vs-unfiltered wire precision). Ready for crochet:refinement.
+**Status:** DOUBLE-ASSESSED 2026-08-01 (crochet:assess Fable + ponytail). Verdict: SOUND, and SHRUNK -- assess reproduced the central proof to the digit and verified every citation; ponytail then cut the standalone contract doc and the cross-repo conformance test as drift insurance bought before any drift exists. Ready for crochet:refinement.
 
 All measurements taken 2026-08-01 on chalk `967ade11` / perl5-son `pu`, and
 independently re-verified by the assessor on the same commits.
@@ -64,9 +64,9 @@ necessary.
 
 ## Decision
 
-**Re-divorce the namespaces. B::SoN gets its own `SoN::IR::*` classes; the shared
-artifact becomes a written contract plus a conformance test, not shared `.pm`
-files.**
+**Re-divorce the namespaces. B::SoN gets its own `SoN::IR::*` classes. The shared
+artifact becomes the wire format and node taxonomy — a contract carried in the
+code comments and enforced by the corpus gate — not shared `.pm` files.**
 
 Unification was the correct FIRST step and is not being undone. You cannot
 extract a contract from two drifted implementations — you would codify the drift.
@@ -79,17 +79,31 @@ dependencies.
 
 **Precedent:** `lib/Chalk/IR/Graph.pm:162` describes the topo-sort as "exactly the
 pre-unification `SoN::IR::Graph::nodes()` shape." That namespace previously
-existed. This restores it *with the contract written down* instead of implicit.
+existed. This restores it — this time with the walk-order contract carried in the
+comments the rename copies, and the corpus gate enforcing it.
 
 ## The contract (what "single IR" means after the divorce)
 
 Single IR = **one wire format and one node taxonomy**, independently implemented.
-Two artifacts make it enforceable.
+The contract lives in the code comments; the corpus gate is the enforcement.
 
-### A. Walk-order contract (currently implicit in code comments)
+### A. Walk-order contract = THE CODE COMMENTS (no separate doc)
 
-Lift `Graph.pm:133-170` and `Serialize/JSON.pm:127-171` into a spec document.
-Four clauses:
+**DECIDED (perigrin, 2026-08-01, after ponytail review): the comment blocks ARE
+the contract. Do NOT lift them into a standalone doc.**
+
+The mechanical rename **copies them automatically** — `SoN::IR::Graph` inherits
+`Graph.pm:133-170` verbatim, and `SoN::Serialize::JSON` inherits
+`Serialize/JSON.pm:127-171` with the duplicated `_all_nodes_topo`. Both repos get
+the spec for free, co-located with the code it constrains, which is where prose
+is least likely to rot. A standalone doc in two copies would be a third and
+fourth copy of prose that is not the enforcement anyway.
+
+**Enforcement is the corpus gate + byte-compat goldens.** Add one line to each
+comment block on both sides: "This is the cross-repo walk-order contract; the
+corpus gate enforces it."
+
+The four clauses, for reference (they live in the comments, not here):
 
 1. **Membership** — bidirectional reachability over `inputs()` *and*
    `consumers()` from every cached node; consumers followed ONLY when already in
@@ -102,22 +116,33 @@ Four clauses:
 4. **Post-pass** (`_all_nodes_topo`) — add Phi `region`s and `control_in`-only
    nodes, fixpoint in both directions, guarantee Region precedes Phi.
 
-### B. Conformance test
+### B. Conformance test — CUT (ponytail review, 2026-08-01)
 
-Both repos run the same fixtures and assert identical node order and wire JSON.
-This is what replaces "the classes are the same file" as the anti-drift
-mechanism.
+**DECIDED: do NOT build a cross-repo conformance test. The corpus gate is the
+anti-drift mechanism.**
 
-**It must earn its place beyond the corpus gate.** Assess confirmed the 156
-corpus idioms DO exercise all four clauses at behavior level (backedge cut via
-D2d/D2e/T4d/D3a-e; control_in-only effect nodes via the I2/L5/D1 print family;
-consumer-edge membership via void prints with no data consumer; Region-before-Phi
-via the pinned merge-Phi loader-topo bug). What the gate structurally cannot
-catch: divergence between chalk's serializer and SoN's divorced copy on shapes
-**outside** the 156 (TryCatch/Unwind, rare Phi-region shapes), and it only tests
-the SoN→loader direction. So the conformance fixtures MUST cover non-corpus
-shapes or the test is redundant. Fixture design is real work, not a detail —
-resolve it before execution, not during.
+Rationale: measured drift today is **zero** (104 files byte-identical). Assess
+confirmed the 156 corpus idioms already exercise all four clauses at behavior
+level — backedge cut (D2d/D2e/T4d/D3a-e), control_in-only effect nodes (the
+I2/L5/D1 print family), consumer-edge membership (void prints with no data
+consumer), Region-before-Phi (the pinned merge-Phi loader-topo bug). The test's
+only residual value was shapes OUTSIDE the corpus, and the existing corpus
+absorbs those as 2-3 new cases at near-zero marginal cost, under the triple
+contract and floor discipline already in place.
+
+It also only ever justified the SoN→loader direction — the direction something
+actually consumes. The reverse (chalk's serializer matching SoN byte-for-byte)
+has no consumer today; that is conformance for a self-hosting stage that does
+not exist yet.
+
+**Cutting this deletes the entire fixture-provenance problem** — checksum-pinned
+duplicated fixtures, options (a)/(b)/(c), and the "resolve fixture design before
+execution" workstream all evaporate. That workstream existed only to serve
+machinery that should not be built.
+
+**Replacement (follow-up, not this plan):** file TryCatch/Unwind corpus cases as
+a small separate issue. Revisit a cross-repo conformance test only if the corpus
+gate ever catches real serializer drift. It has not.
 
 ## Considered and rejected (record these so they are not relitigated)
 
@@ -170,10 +195,15 @@ but it must not be mistaken for progress on the capstone.
    `SoN/Serialize/JSON.pm:158` reaches across repos into the *private*
    `Chalk::IR::Serialize::JSON::_all_nodes_topo` — exactly the coupling being
    severed. Copy it; do not import it.
-6. Write the walk-order contract doc (clauses above).
-7. Add the conformance test to both repos.
-8. Chalk side: **no production change expected** (verified: every `SoN` mention
+6. Add one line to each walk-order comment block (both repos, after the rename
+   copies them): "This is the cross-repo walk-order contract; the corpus gate
+   enforces it." No separate doc, no conformance test — see contract section.
+7. Chalk side: **no production change expected** (verified: every `SoN` mention
    in chalk `lib/` is a comment). Chalk keeps `Chalk::IR::*`.
+
+**Rename count: 104 vendored − 13 deleted = 91 renamed.** Renaming only the 90
+that collide would leave a mixed namespace and live shadowing paths — the trim
+plus full rename converges to the right number.
 
 ## Anti-drift guard (already exists — this is why the divorce is safe now)
 
@@ -214,8 +244,12 @@ coordinator on committed HEAD, never a subagent report.
    verify on a CLEAN build (stale `blib`/`site_perl` copies mask deletions —
    perl5-son needs `-Ilib -Iblib/lib`, run `-j1`).
 3. **Duplicated `_all_nodes_topo` can now drift.** That is the accepted cost of
-   divorce; the conformance test is the mitigation. Say so explicitly rather than
-   pretending duplication is free.
+   divorce — state it rather than pretending duplication is free. Mitigation is
+   the **corpus gate**: it runs B::SoN → chalk's loader end-to-end, so a
+   divergence between the two copies on any of the 156 covered shapes fails it.
+   Uncovered shapes (TryCatch/Unwind) are the residual exposure, and the
+   follow-up corpus cases close them. A cross-repo conformance test was
+   considered for this and cut as premature — drift measured today is zero.
 4. **Self-hosting recursion.** After the rename, B::SoN can compile
    `Chalk::IR::*`. It still cannot compile its own `SoN::IR::*` (same collision,
    new namespace). That is acceptable — those are not the capstone target — but
@@ -248,13 +282,31 @@ Expect harness runtime and emitted JSON size to grow correspondingly.
    Coordinator-verified on committed HEAD, never a subagent report.
 4. perl5-son suite green on a CLEAN build (`prove -Ilib -Iblib/lib -j1`) —
    including the 27 renamed `t/` files.
-5. Walk-order contract doc exists with all four clauses.
-6. Conformance test present in BOTH repos, asserting identical order + wire JSON,
-   with fixtures covering at least one NON-corpus shape (TryCatch or Unwind).
-7. Phase-5 coverage harness re-run and its NEW number recorded honestly — whatever
+5. Phase-5 coverage harness re-run and its NEW number recorded honestly — whatever
    it is, including if it is still 0%.
-8. No dangling `SoN::MOP` / `SoN::Scheduler::*` / `SoN::Target::*` references
+6. No dangling `SoN::MOP` / `SoN::Scheduler::*` / `SoN::Target::*` references
    remain (the dead-file trim landed).
+7. Each walk-order comment block (both repos) carries the one-line
+   "this is the cross-repo contract; the corpus gate enforces it" note.
+
+**Dropped from the ACs by the ponytail review:** the standalone contract doc and
+the cross-repo conformance test (with its checksum-pinned fixtures). Replaced by
+a follow-up issue: add TryCatch/Unwind cases to the corpus.
+
+## Execution sequence (smallest path to a real number)
+
+1. **perl5-son:** delete the 13 dead vendored files + strip the dead
+   `require Chalk::MOP` loader half. Suite green on a CLEAN build
+   (`prove -Ilib -Iblib/lib -j1`).
+2. **perl5-son:** mechanical rename of the remaining 91 `Chalk::` → `SoN::` —
+   use-lines, ~25 `isa()` literals, 2 string-built dispatch maps, copy
+   `_all_nodes_topo`, and the 27 `t/` files. **No cleanup while in there.**
+3. **Verify:** `%INC` shows 0 `Chalk::*` under `-MB::SoN`; corpus gate >= 156 /
+   worklist 0 (coordinator-run, committed HEAD); the `Graph.pm` 7-method proof
+   reproduces.
+4. **Chalk:** re-run the Phase-5 harness, record the number honestly.
+5. **Follow-up issue (written down so it is not drift):** add TryCatch/Unwind
+   corpus cases.
 
 ## Resolved by assessment (2026-08-01)
 
@@ -266,26 +318,30 @@ Expect harness runtime and emitted JSON size to grow correspondingly.
 5. **Cheaper alternative?** Both examined and rejected — see "Considered and
    rejected."
 
-3. **Contract doc location — DECIDED (perigrin, 2026-08-01): a copy in each
-   repo.** Consistent with the divorce principle: duplicate, do not share. No
-   cross-repo path dependency, each repo is self-contained and readable alone.
-   Accepted cost: the two copies can drift. That is tolerable **because the doc
-   is the human-readable spec, not the enforcement** — the conformance test is
-   the authority, and the corpus gate is the executable cross-repo check. If the
-   prose drifts but both tests pass, behavior is still correct; fix the prose.
+3. **Contract doc location — CLOSED. The doc is CUT.** An earlier decision (a
+   copy in each repo) was SUPERSEDED once the ponytail review observed that the
+   mechanical rename copies the comment blocks automatically. The comments ARE
+   the contract; the corpus gate is the enforcement. No standalone doc, in
+   either repo.
+4. **Conformance-test fixtures — CLOSED, moot.** The conformance test was cut, so
+   the fixture-provenance question (checksums / vendoring / provenance stamps)
+   disappears with it. That workstream existed only to serve machinery that
+   should not be built.
 
-4. **Conformance-test fixtures — the same "copy in each repo" answer does NOT
-   trivially work, and this must be settled during refinement.** If each repo
-   runs the conformance test against its OWN copy of the fixtures and those
-   copies drift, both sides pass against different inputs and the test is
-   worthless — the one failure mode it exists to prevent. The doc can drift
-   safely; the fixtures cannot. Options, to be chosen at refinement:
-   - (a) Duplicate the fixture files but pin a **checksum of the fixture set** in
-     each repo's test, so drift fails loudly rather than silently.
-   - (b) Keep fixtures in one repo and have the other vendor them with a
-     recorded provenance/version stamp.
-   - (c) Rely on the corpus gate as the only true cross-repo check and scope the
-     conformance test to within-repo invariants only — cheapest, but gives up
-     the non-corpus shape coverage that justified the test in the first place.
-   Recommendation: (a). It preserves the divorce (no shared path) while making
-   drift detectable, which is exactly the doc-vs-fixture distinction above.
+## Review history
+
+- **crochet:assess** (Fable, adversarial, 2026-08-01) — reproduced the central
+  proof independently to the digit, verified every cited line number, examined
+  and rejected both cheaper alternatives. Verdict: SOUND ENOUGH TO REFINE. Four
+  IMPORTANT findings folded in (perl5-son `t/` in scope; dead-file trim; rejected
+  alternatives recorded; filtered-vs-unfiltered wire precision).
+- **ponytail** (second lens, 2026-08-01) — "the core is right-sized; ~40% wrapped
+  around it is drift insurance bought before any drift exists." CUT the
+  conformance test and the contract doc; KEEP the rename, the trim, and the
+  `_all_nodes_topo` copy; SKIP the stopgap (its number is biased low because
+  Stage-3 `lower()` takes the whole shared MOP). Accepted in full by perigrin.
+
+**Why the double-lens mattered here:** assess validated that the plan is TRUE;
+ponytail asked whether it is the SMALLEST TRUE THING. Assess passed the doc and
+the conformance test without challenge — they survived the first lens and died to
+the second.
