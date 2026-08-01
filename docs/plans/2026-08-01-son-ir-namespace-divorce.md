@@ -266,9 +266,26 @@ Expect harness runtime and emitted JSON size to grow correspondingly.
 5. **Cheaper alternative?** Both examined and rejected — see "Considered and
    rejected."
 
-## Open questions remaining
+3. **Contract doc location — DECIDED (perigrin, 2026-08-01): a copy in each
+   repo.** Consistent with the divorce principle: duplicate, do not share. No
+   cross-repo path dependency, each repo is self-contained and readable alone.
+   Accepted cost: the two copies can drift. That is tolerable **because the doc
+   is the human-readable spec, not the enforcement** — the conformance test is
+   the authority, and the corpus gate is the executable cross-repo check. If the
+   prose drifts but both tests pass, behavior is still correct; fix the prose.
 
-3. Where does the contract doc live so BOTH repos treat it as authoritative?
-   (Chalk repo with a perl5-son pointer? A shared location? No obvious home.)
-4. Conformance-test fixtures: shared or duplicated, and where do they live?
-   Must cover non-corpus shapes to add value over the gate.
+4. **Conformance-test fixtures — the same "copy in each repo" answer does NOT
+   trivially work, and this must be settled during refinement.** If each repo
+   runs the conformance test against its OWN copy of the fixtures and those
+   copies drift, both sides pass against different inputs and the test is
+   worthless — the one failure mode it exists to prevent. The doc can drift
+   safely; the fixtures cannot. Options, to be chosen at refinement:
+   - (a) Duplicate the fixture files but pin a **checksum of the fixture set** in
+     each repo's test, so drift fails loudly rather than silently.
+   - (b) Keep fixtures in one repo and have the other vendor them with a
+     recorded provenance/version stamp.
+   - (c) Rely on the corpus gate as the only true cross-repo check and scope the
+     conformance test to within-repo invariants only — cheapest, but gives up
+     the non-corpus shape coverage that justified the test in the first place.
+   Recommendation: (a). It preserves the divorce (no shared path) while making
+   drift detectable, which is exactly the doc-vs-fixture distinction above.
