@@ -4433,6 +4433,23 @@ sub _collect_straight_line_effect_chain {
 # pattern). This also gives the correct TWO-CALL-SITE behavior for free: each
 # inline gets its own fresh cache, so a callee inlined twice re-lowers (and
 # re-emits) its effect both times rather than being served a stale cached ref.
+#
+# PRECONDITION for the parked Commit 2-loop-store slice (load-bearing): the
+# fresh cache is scoped to the effect drive only; $value is then lowered under
+# the RESTORED caller cache. So a value node ALSO referenced by an effect (e.g.
+# `sub f { print $x; $x }`) is lowered TWICE — once under the fresh cache, once
+# under the caller cache. This is safe ONLY because every value node the
+# Print-only chain admits is either (a) pure and idempotent to re-lower (a
+# double-lower recomputes byte-identical bytes; only the $value copy is wired
+# into the return — a redundant emit, e.g. Concat leaks one malloc, but NOT a
+# miscompile), or (b) a no-emit PadAccess. An EFFECTFUL or memory-reading value
+# node re-lowered here WOULD double-emit its effect (a real miscompile). Those
+# are excluded today by Call's per-call identity (never hash-consed,
+# NodeFactory.pm) and the Print-only guard in _collect_straight_line_effect_chain
+# (a store/nested-call on the chain GAPs). WIDENING that guard (the parked
+# loop-store slice: admitting a Region/store/nested Call) MUST re-establish this
+# invariant — scope the cache swap to cover $value too, or prove the shared node
+# stays pure — or it silently reintroduces the double-effect miscompile.
 sub _lower_inlined_effects_then_value {
     my ($self, $effect_chain, $value) = @_;
 
