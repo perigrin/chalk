@@ -30,7 +30,19 @@ my $bson_json = JSON::PP->new->encode({
                 { id => 1, op => 'Constant', inputs => [],
                   fields => { value => 3, const_type => 'integer' },
                   stamp  => 'Int' },
-                { id => 2, op => 'Return', cfg => JSON::PP::true, inputs => [0, 1] },
+                # CURRENT wire shape: B::SoN sets control_in at build time
+                # (perl5-son 344fc075), so control arrives on control_in and
+                # inputs carries only the value. This fixture previously used
+                # the pre-344fc075 flattened `inputs => [control, value]` and
+                # relied on the loader RESHAPING it; that reshape code no
+                # longer exists, so the fixture lowered Start as a value.
+                #
+                # The assertions below are therefore weaker than they read: they
+                # now guard that the loader PRESERVES the seam rather than
+                # reconstructs it. That is the contract worth holding — nothing
+                # emits the flattened form any more.
+                { id => 2, op => 'Return', cfg => JSON::PP::true,
+                  inputs => [1], control_in => 0 },
             ],
         },
     },

@@ -50,8 +50,19 @@ my $json = JSON::PP->new->encode({
                   fields => { index => 0 } },
                 { id => 11, op => 'Proj', cfg => JSON::PP::true, inputs => [1],
                   fields => { index => 1 } },
-                { id => 12, op => 'Region', cfg => JSON::PP::true, inputs => [11] },
-                { id => 13, op => 'Return', cfg => JSON::PP::true, inputs => [12, 6] },
+                # `head` is a produce-time wire key (Serialize/JSON.pm ~499
+                # calls set_region on it). The loader does NOT derive the head
+                # from the Proj inputs, so a fixture omitting it leaves
+                # Region.head undef. Node 1 is the Loop.
+                { id => 12, op => 'Region', cfg => JSON::PP::true,
+                  inputs => [11], head => 1 },
+                # Current wire shape: control on control_in, value in inputs.
+                # (Was the pre-perl5-son-344fc075 flattened
+                # `inputs => [control, value]`; the loader no longer reshapes
+                # that, so control_in came back undef and the assertions below
+                # — which were already written for the current shape — crashed.)
+                { id => 13, op => 'Return', cfg => JSON::PP::true,
+                  inputs => [6], control_in => 12 },
             ],
         },
     },

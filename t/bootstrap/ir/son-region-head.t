@@ -10,8 +10,11 @@ use Chalk::IR::Serialize::JSON ();
 
 # A control-flow body (and/or, if with a merge) loads as
 # If -> Proj,Proj -> Region -> Phi, and Return(Region, value). Two loader jobs:
-#  1. Return leading with a CFG control node (here Region, not just Start) has
-#     that control split into control_in, value kept as inputs[0].
+#  1. A Return whose control is a CFG node (here Region, not just Start) keeps
+#     that control on control_in and its value in inputs[0]. NOTE: the loader
+#     no longer RESHAPES a flattened Return -- the producer sets control_in at
+#     build time (perl5-son 344fc075) -- so this guards preservation, not
+#     reconstruction.
 #  2. Region.head is wired to the owning If (a Proj input's input), which the
 #     backend's control-chain walk needs to emit the enclosing structure.
 
@@ -31,11 +34,18 @@ my $json = JSON::PP->new->encode({
                   fields => { index => 0 } },
                 { id => 4, op => 'Proj',   cfg => JSON::PP::true, inputs => [2],
                   fields => { index => 1 } },
-                { id => 5, op => 'Region', cfg => JSON::PP::true, inputs => [3, 4] },
+                # `head` is a produce-time wire key (Serialize/JSON.pm ~499); the loader
+                # does not derive it from the Proj inputs. Node 2 is the owning If.
+                { id => 5, op => q{Region}, cfg => JSON::PP::true,
+                  inputs => [3, 4], head => 2 },
                 { id => 6, op => 'Constant', inputs => [], stamp => 'Int',
                   fields => { value => 7, const_type => 'integer' } },
                 { id => 7, op => 'Phi',    inputs => [6, 6], fields => { region => 5 } },
-                { id => 8, op => 'Return', cfg => JSON::PP::true, inputs => [5, 7] },
+                # CURRENT wire shape: control on control_in (perl5-son 344fc075 sets it
+                # at build time). The pre-344fc075 flattened `inputs => [control,
+                # value]` relied on a loader reshape that no longer exists.
+                { id => 8, op => q{Return}, cfg => JSON::PP::true,
+                  inputs => [7], control_in => 5 },
             ],
         },
     },
@@ -45,7 +55,7 @@ my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
 my $g = $graphs->{'main::f'};
 my $ret = $g->returns->[0];
 
-subtest 'Region-controlled Return splits control into control_in' => sub {
+subtest q{Region-controlled Return keeps control on control_in, value in inputs} => sub {
     is($ret->inputs->[0]->operation, 'Phi',
         'Return inputs[0] is the value (Phi), not the Region control');
     ok(defined $ret->control_in, 'Return control_in is set');

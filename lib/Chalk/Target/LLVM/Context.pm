@@ -1928,8 +1928,17 @@ sub _shortcircuit_phi_repr {
     if (defined $lhs_repr && defined $rhs_repr && $lhs_repr eq $rhs_repr) {
         return $lhs_repr;
     }
-    # Operands disagree: fall back to a concrete node repr if one exists.
-    return $node_repr if defined $node_repr && $node_repr ne 'Scalar';
+    # Operands disagree. A node repr does NOT rescue this: the phi's two arms are
+    # the operand SSA refs themselves, so they must already share a machine type
+    # (Int=i64, Bool=i1, Num=double, Str=ptr). Trusting $node_repr here emitted
+    # invalid IR — measured: And(Int, Num) produced
+    #   %t3 = fadd double 0.0, 2.5
+    #   %t4 = phi i64 [ %t1, %entry ], [ %t3, %and.rhs ]
+    # a double feeding an i64 phi. The RHS is NOT a branch condition (it is the
+    # expression's value when the LHS is truthy), so _shortcircuit_i1_cond never
+    # inspects it — this was the only place the mismatch could be caught, and the
+    # fallback below skipped it. GAP loudly instead, per this function's own
+    # stated contract.
     die "GAP: $op_tag ($sym) operands have mismatched reprs (LHS="
       . (defined $lhs_repr ? $lhs_repr : 'undef') . ", RHS="
       . (defined $rhs_repr ? $rhs_repr : 'undef') . "); a merge phi needs one shared "

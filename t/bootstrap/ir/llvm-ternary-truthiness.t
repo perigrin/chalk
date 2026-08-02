@@ -36,7 +36,13 @@ sub run_ternary ($cond_value) {
                     { id => 3, op => 'Constant', inputs => [], stamp => 'Int',
                       fields => { value => 9, const_type => 'integer' } },
                     { id => 4, op => 'TernaryExpr', inputs => [1, 2, 3], stamp => 'Int' },
-                    { id => 5, op => 'Return', cfg => JSON::PP::true, inputs => [0, 4] },
+                    # Current wire shape: control rides control_in, NOT inputs[0].
+                    # (Pre-perl5-son-344fc075 this was the flattened
+                    # `inputs => [control, value]`; the loader has no reshape
+                    # code for that any more, so a flattened fixture lowers
+                    # Start as a value and dies.)
+                    { id => 5, op => 'Return', cfg => JSON::PP::true,
+                      inputs => [4], control_in => 0 },
                 ],
             },
         },
