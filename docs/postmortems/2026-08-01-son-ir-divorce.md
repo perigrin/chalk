@@ -119,6 +119,24 @@ units, or may reveal the next layer.
 6. **When amending an AC, write the justification into the issue body.** An
    amended number without a reason is indistinguishable from moving the
    goalposts.
+7. **Ask, per issue: did the VERIFICATION land, or only the FIX?** (perigrin,
+   post-milestone: "did we add tests for the regression specifically?" — we had
+   not.) The i1 `classes`-branch regression was fixed and hand-verified with a
+   one-liner, then left. But that regression existed BECAUSE no test drove
+   `from_json` with a `classes` section; fixing it without adding a test left the
+   identical hole open, so the next edit could re-break it and still go green.
+   Closed by `t/from-json-classes-branch.t` (perl5-son `245f485`), proven
+   RED→GREEN by reintroducing the exact `die` (3 failures back, all pass
+   removed). **The test asserts the inference RAN, not merely that `from_json`
+   lives** — a no-die check would pass even if the branch were skipped entirely,
+   which is the failure mode being guarded. Audit of the other four issues found
+   their verification genuinely present (i2 verified by construction — a
+   half-renamed tree does not load; i3 is verification; i4 is recording; i5's
+   corpus cases ARE the tests).
+
+   Generalised: **"fixed" and "guarded against recurrence" are different states,
+   and a fix discovered by reading a diff is by definition in a place tests do
+   not reach.** That is exactly when the guard matters most.
 
 ## Postscript: the cheapest issue found the biggest bug
 
