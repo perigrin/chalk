@@ -1,7 +1,28 @@
 # Bare-file protocol: the top-level program root as the implicit entry
 
-**STATUS 2026-08-02: DEFERRED — motivation falsified by measurement. See
-"## ASSESSMENT 2026-08-02" at the end before acting on anything here.**
+**STATUS 2026-08-02: NOT DEFERRED — this is a PRODUCT REQUIREMENT.** An earlier
+banner here said "deferred, motivation falsified." That was wrong, and the error
+is instructive: the assessment (see the end of this file) tested this plan's
+*supporting arguments* — which ARE false and should be cut — and then ranked the
+work by how many `t/` ring files each gap unblocks. **That is a proxy metric.**
+
+The actual driver (perigrin, 2026-08-02): **Chalk is a compiler for generating
+executables.** A `.t` file must compile *as itself* into a real program that runs
+side-by-side against perl. Under that goal the assessment inverts:
+
+- "entry blocks zero ring files" -> **entry blocks 100% of executables**
+- "`subval.t` needs recursion, so this gap is low-value" -> **recursion is table
+  stakes**; inlining-only is a correctness ceiling on the language, not a gap
+- "the wrap blocks no measured file, keep it" -> a compiler that needs
+  **source-text rewriting to find its entry point** is not doing its job
+
+What the plan still gets wrong is PRICING, in the opposite direction from the
+old banner: true `define`+`call` (F3) is MANDATORY, not an unbudgeted rider,
+because without it recursion cannot compile at all.
+
+**Read "## ASSESSMENT 2026-08-02" for what was genuinely falsified (the
+supporting arguments), and "## WHAT AN EXECUTABLE ACTUALLY NEEDS" for the
+re-priced scope.**
 
 **Status:** DESIGN NOTE (2026-07-19, perigrin). No code yet. Orthogonal to the
 runtime-MOP design (`2026-07-19-runtime-mop-coerce-multimethod.md`); this is about
@@ -182,7 +203,7 @@ t/-drain convenience.
   regardless of textual order — but confirm the producer emits both and links
   them (the existing `resolved_graph` mechanism should extend).
 
-## ASSESSMENT 2026-08-02 — DEFERRED. Motivation falsified by measurement.
+## ASSESSMENT 2026-08-02 — supporting arguments falsified (NOT the driver)
 
 Double-assessed (crochet:assess adversarial + ponytail). Verdict: **NEEDS
 REWRITE / DEFER**. The MECHANISM is sound and the producer-side measurements
@@ -264,3 +285,54 @@ Currently PASSing: `cond.t`, `if.t`, `elsif.t`.
 blocker.** If revived, rewrite the motivation around what the protocol actually
 buys — closure-semantics correctness, line-number fidelity, real executables
 with exit status, deleting a preprocessor — and price item 3 as its own project.
+
+## WHAT AN EXECUTABLE ACTUALLY NEEDS (re-priced 2026-08-02)
+
+The goal is not drain-count. It is: **`chalk foo.t` produces a program whose
+stdout and exit status match `perl foo.t`.** Four things stand between here and
+that, and this plan prices roughly one and a half of them.
+
+**1. ENTRY — `main_root` -> `main::__PROGRAM__`.** This plan's items 1-2. The
+genuinely new producer piece is the exit variant: a CV body ends in `leavesub`,
+the main root ends in `leave`. Everything else (op vocabulary, control threading,
+implicit Return) is existing machinery. The backend is already agnostic: it takes
+any Return-rooted graph and emits `define i32 @main()`.
+
+**2. REAL SUBS AND CALLS — `define` + `call` (F3). THE BIG ONE, AND MANDATORY.**
+Today the ONLY call mechanism is inlining (`_lower_call_direct`). That means:
+- **recursion cannot compile, ever** — `subval.t`'s `sub fib` is the proof, and
+  inlining can never terminate on it. This is a correctness ceiling on the
+  LANGUAGE, not a missing optimisation.
+- multi-Return and branchy callees GAP (the inliner requires exactly one Return).
+- effectful callees GAP unless their control chain is straight-line Print
+  (Slice B); the loop/store shape is parked.
+Assessed as plausibly larger than the entry work, and larger than the Slice A+B
+arc combined. **Nothing else on this list matters until this exists**, because
+almost every real file calls a sub.
+
+**3. PROCESS CONTRACT — exit status.** `Mode1Runner` currently treats ANY nonzero
+lli exit as a lowering FAILURE, so exit-status comparison against the oracle does
+not exist. `exit(N)` as a builtin has no lowering. A mainline `die` DOES now
+abort correctly (chalk `8ed5dbdb`, 2026-08-02) — that half is done.
+
+**4. DROP THE TYPE-TAG EPILOGUE.** The `Int:`/`Str:` return-value tag is a
+harness COMPARISON ARTIFACT sitting where a real program's output belongs. A
+generated executable prints what the program prints and exits with the program's
+status. The tag has to become opt-in for the corpus, not baked into `@main`.
+
+### The missing gate
+
+Neither existing gate measures the product goal. The corpus gate (156 cases) and
+the ring worklist both ask *"does this lowered fragment produce the right
+value?"* Neither asks *"does this file become a program that runs?"* That gap is
+precisely why this plan was justified with — and assessed on — file-unblock
+counts. **A gate that compiles a whole file and diffs stdout + exit status
+against perl would measure the thing actually being built.**
+
+### Sequencing consequence
+
+The plan's order (entry first, calls as a rider) does not deliver a runnable file
+at any intermediate point: land items 1-2 and you still cannot execute anything
+that calls a sub. If the goal is executables, `define`+`call` is the gating
+prerequisite and should be priced and sequenced as its own project — with entry
+either alongside or after it.
