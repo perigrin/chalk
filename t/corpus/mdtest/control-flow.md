@@ -1259,7 +1259,7 @@ GAP reason).
 %uw   = Unwind(%boom)
 control: %uw
 return %one
-L: GAP(LLVM backend's process_control_node explicitly ignores Unwind outside an If-arm's Proj consumer -- Context.pm's dispatch comment says control-chain Unwind is "ignored here" unless _find_unwind_consumer(proj) finds it hanging off an If-arm Proj; a mainline Unwind reached only via control_in is silently never emitted, so lli falls through and returns Int:1 instead of aborting (measured: lli exit 0 "Int:1" vs perl oracle exit 255 "boom") -- this is a SILENT MISCOMPILE, not a designed-in gap, filed as a follow-up rather than fixed here (out of this issue's scope: corpus cases only, no producer/backend changes))
+L: GAP(harness limitation only -- the BACKEND IS CORRECT as of zhi 019fbf8d. A mainline die now aborts: process_control_node gained an Unwind arm, so an Unwind reached only via Return.control_in emits `call @exit(i32 255)` like the If-arm path (measured after the fix: lli exit 255 == perl oracle exit 255 "boom"; before it was a SILENT MISCOMPILE, lli exit 0 "Int:1"). This stays declared for exactly T2b's reason: the equality harness cannot assert a process abort against the perl die-oracle. The real regression lock lives in t/bootstrap/ir/llvm-mainline-die.t, which asserts the abort is emitted exactly once and is idempotent per Unwind node -- proven RED by disabling the Unwind arm)
 ```
 
 ## T3 cond_expr inside a loop body (t/base blocker: translate.t)

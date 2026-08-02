@@ -2345,8 +2345,24 @@ sub process_control_node {
         $self->_freeze_memory_reads($node)
             if $op eq 'Assign' || $self->_is_array_mutating_call($node);
     }
-    # Other ops in the control chain (Return, Unwind, Region, Proj, Phi, etc.)
-    # are either handled by their driving structure or ignored here.
+    elsif ($op eq 'Unwind') {
+        # A MAINLINE `die` — one not inside an if/else arm. Its Unwind sits
+        # directly on the Return's control chain (Return.control_in -> Unwind),
+        # so it arrives here rather than through _find_unwind_consumer, which
+        # only finds an Unwind hanging off an If-arm's Proj.
+        #
+        # Before this arm existed, a mainline die was SILENTLY DROPPED: the
+        # program fell through and returned a value where perl aborts (measured:
+        # lli exit 0 "Int:1" vs perl exit 255 "boom"). That was a
+        # GAP-not-miscompile invariant violation, pinned by corpus T2c.
+        #
+        # _emit_unwind_terminator is idempotent (see its emitted-set guard), so
+        # an Unwind that is somehow reachable BOTH here and via an If-arm Proj
+        # aborts once, not twice.
+        $self->_emit_unwind_terminator($node, 'mainline die (abort)');
+    }
+    # Other ops in the control chain (Return, Region, Proj, Phi, etc.) are
+    # either handled by their driving structure or ignored here.
 }
 
 # _has_branch_guarded_store — true if the graph is NOT straight-line for the
@@ -2825,6 +2841,15 @@ sub _find_unwind_consumer {
 # declares @exit.
 sub _emit_unwind_terminator {
     my ($self, $unwind, $why) = @_;
+    # IDEMPOTENT per Unwind node. Two independent paths can reach an Unwind: the
+    # If-arm path (_find_unwind_consumer on the arm's Proj) and the control-chain
+    # path (process_control_node, for a mainline die). They are disjoint for the
+    # shapes measured today — a die arm aborts and never rejoins the merge, so its
+    # Unwind is not on the Return's control chain — but emitting the abort twice
+    # would put two `call @exit` in one block, so guard rather than rely on that.
+    my $id = $unwind->can('id') ? $unwind->id : refaddr($unwind);
+    return if $self->{_unwind_emitted}{$id}++;
+
     $self->{_need_exit} = 1;
     $self->_emit("  call void \@exit(i32 255)  ; $why");
     $self->_set_terminator("  unreachable  ; $why");
