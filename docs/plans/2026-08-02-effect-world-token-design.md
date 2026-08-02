@@ -123,7 +123,17 @@ what makes this construction-correctness rather than a better convention.
 ## Scope
 
 **In:** the world value; node-class world arity; world Phis at merges; the arity
-validator; migrating `Unwind` and the other `inputs[0]` control users onto it.
+validator; migrating the **observable-transfer** nodes (`Unwind`, `Exit`) and the
+current `control_in` users (`Print`, stores, `Call`, `Return`) onto the world edge.
+
+`If`, `Loop`, `Region` and `Proj` keep their `inputs[0]` control edge and are **not**
+migrated — per "Control is not an effect" above, that edge expresses branch
+structure, not ordering. The `inputs[0]` convention is not the defect; using it for
+an *observable transfer* was.
+
+A `Call` demoted to pure under R1.0's allow-list changes shape from Effectful to
+Pure — it loses its world edge entirely and regains CSE. Purity demotion and world
+arity are the same decision.
 
 **Out:**
 
