@@ -48,6 +48,15 @@ Effectful nodes **cannot be constructed without one**.
 typed `IO a`, continuation never runs. The graph becomes `Print(w0) → w1`,
 `Unwind(w1)`, and the walk reaches `Print` through a **required typed input**.
 
+**`Unwind` must LOSE `inputs[0]`, not merely gain a world edge.** The audit
+(2026-08-02) found a second live miscompile that survives a gains-only migration —
+see Finding 2 below. Today the producer puts *control* in `Unwind.inputs[0]` while
+`Unwind.pm:14`'s `value()` returns `inputs->[0]` as the *exception args*, and
+`Unwind.pm:2`'s own ABOUTME asserts "control flows via control_in". Producer and
+node class disagree about what slot 0 means. The migration must move control to the
+world edge and leave `inputs[0]` as the exception args the class already claims it
+is; leaving both encodings live reproduces the bug in a new place.
+
 There is no "forgot to call `set_control_in`" state to be in, because there is only
 one place a predecessor can live. The two encodings collapse.
 
@@ -62,13 +71,24 @@ With the world as an ordinary input it enters `content_hash`. So `Print(w0,"a")`
 `Print(w1,"a")` have different hashes **for free**, and the identity registries that
 exist to defeat hash-consing stop being necessary rather than being maintained:
 
-- `control_in` → the world edge
-- memory-SSA / `MemStart` threading → the world edge
-- `%STATEMENT_EFFECT_OPS` (per-call identity for effect nodes) → falls out of hashing
-- `%ALLOC_OPS` (added after two `[1,2]` literals shared one malloc) → falls out of hashing
+- **M1** `control_in` → the world edge
+- **M2** control as `inputs[0]` on CFG nodes → *stays* for branch structure; only the
+  observable transfers move (see the `Unwind` note above)
+- **M3** `%STATEMENT_EFFECT_OPS` + `%ALLOC_OPS` → falls out of hashing. These are two
+  registration tables of **one** mechanism, consumed by a single disjunctive branch at
+  `NodeFactory.pm:305`, and they have two further registration sites the original
+  count missed: hardcoded `Phi`/`VarDecl`/`ListAssign` branches (`:201, :277, :289`)
+  and the wire `cfg` flag.
+- **M4** memory-SSA / `MemStart` threading → the world edge
+- **M5** `Return.inputs[1..]` as a trailing-void-effect carrier (`LLVM.pm:901-909`,
+  mirrored in `JSON.pm:967-997` and `Context.pm:4372-4378` — three hand-written
+  copies) → the world edge
+- **M6** the wire `cfg` boolean deciding hash-consed-vs-fresh at load
+  (`JSON.pm:17, 372, 475-480`) → falls out of hashing
 
-Four mechanisms become one. **This claim is the design's main quantitative promise
-and it is not yet measured — see Unverified below.**
+**Six become one, not four.** Corrected 2026-08-02 by measurement; the original
+count was reasoning and was wrong in both directions — M3 was double-counted, and M5
+and M6 were missed entirely.
 
 ### Control is not an effect
 
@@ -157,9 +177,15 @@ Java — which also explains why `%ALLOC_OPS` had to exist.
 
 ## Unverified — resolve before this becomes a plan
 
-1. **The mechanism inventory is reasoning, not measurement.** The audit that would
-   confirm what the world token actually replaces died on an account spend limit. The
-   "four become one" claim above is the design's main promise and is unmeasured.
+1. ~~The mechanism inventory is reasoning, not measurement.~~ **DISCHARGED
+   2026-08-02** by audit, with the count corrected 5 → 6 and the subsumption list
+   rewritten above. The audit also confirmed the harder half: **there is no graph
+   validator anywhere in `lib/Chalk/IR/`** (no `Validator.pm`, no `sub validate`).
+   `TypedInvariant.pm` checks representations only (`:19-40`) and contains zero
+   control/effect assertions. Of the 6 mechanisms, 5 have **no check at all**; the
+   sixth has a change-detector (`t/bootstrap/ir/statement-effect-identity.t:19-27`
+   re-states the op list and `is_deeply`s it), which fails when you edit the table and
+   says nothing about whether a new node type belongs in it.
 2. **Prior-art claims are single-extraction.** The research doc's verification pass
    never ran. The Graal memory-edge claims in particular come from a thesis
    extraction with the ACM paper paywalled.
@@ -171,6 +197,33 @@ Java — which also explains why `%ALLOC_OPS` had to exist.
 - **RED first:** `t/bootstrap/ir/llvm-mainline-die.t` already locks the die
   regression. The executable gate's `die-aborts` program is the product-level RED —
   it must go from DIFF to PASS, raising the gate floor off 0.
+- **Three more REDs, all measured 2026-08-02 and all currently miscompiling.** These
+  are better REDs than `die-aborts` because a plain equality harness can assert them
+  — both stdout *and* exit status differ, with no abort-vs-oracle complication:
+
+  | # | Program | perl | chalk |
+  |---|---|---|---|
+  | F2 | `my $x=1; if ($x>0) { print "t\n"; die "d\n"; } else { print "e\n"; } print "end\n";` | exit 255, `t\n` | exit 0, `t\nend\n` |
+  | F3 | `sub f { print "in f\n"; return 1; } my $r = f(); print "z\n";` | `in f\nz\n` | `z\nin f\n` |
+  | F4 | `sub f { print "in f\n"; return 1; } my $r = f(); my $z = 5;` | `in f\n` | *(empty)* |
+
+  **F2 is the bilateral partner the corpus never had.** `t/corpus/mdtest/control-flow.md`
+  T2 (`:1167`) and T2b (`:1204`) are both die-*first*-in-arm; no case puts an effect
+  before the die. Backend root cause: `Context.pm:2836-2845` `_find_unwind_consumer`
+  does a **one-hop** consumer scan of the arm's `Proj`, which only finds the Unwind at
+  depth 1 — its own comment at `:2833-2835` states that assumption. Change one
+  dimension (add a `print` before the `die`) and the abort vanishes from the emitted
+  IR entirely.
+
+  **F3/F4 are caller-side, and F4 refutes a written claim.**
+  `docs/plans/2026-07-23-slice-b-inliner-effect-ordering.md:259` asserts "the silent
+  effect-drop miscompile class is CLOSED". Commit 1's guard
+  (`Context.pm:4359-4378`) inspects only the **callee's** attachment paths. In F4 the
+  producer DCEs the unused `Call` as pure and Chalk never sees it, so no GAP is
+  possible — the effect is still silently dropped. The claim is true as scoped to the
+  callee and **false as stated about the class**; that line needs re-scoping.
+  F3/F4 are the demonstrated instances of the `effect_by_default_call_classification`
+  decision's motivating class.
 - **The arity validator is itself a test surface:** construct an effectful node
   without a world and assert it fails loudly. That is the assertion that the class of
   bug is closed, not just the instance.
