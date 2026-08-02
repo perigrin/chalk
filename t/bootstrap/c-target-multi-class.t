@@ -26,6 +26,27 @@ my @classes = (
     ['Chalk::Bootstrap::Earley',                    'lib/Chalk/Bootstrap/Earley.pm'],
 );
 
+# PREREQUISITE GUARD — must precede every assertion, or skip_all lands after a
+# test has already run and prove reports "Bad plan. You planned 0 tests but ran 1".
+#
+# chalk.h used to be checked in under c_src/. Commit 8952c473 ("refactor:
+# eliminate c_src/; move fixtures to t/fixtures/, generate chalk.h") deleted that
+# directory — the header is now EMITTED at codegen time by
+# Chalk::Bootstrap::BNF::Target::C. This test was never updated and still reads
+# the deleted path.
+#
+# This guard replaces a BAIL_OUT, which aborts the ENTIRE prove run: a full
+# `prove t/bootstrap/*.t` stopped here at file 51 of 222, so 171 unrelated files
+# never ran and the sweep reported a FAIL that said nothing about them. One
+# parked-axis test missing a prerequisite is not grounds to abort every other test.
+#
+# NOTE this test also exercises `generate_distribution_multi_class`, which
+# CLAUDE.md records as an explicitly ABANDONED approach — reviving it means
+# deciding whether the test should exist at all, not just fixing the path.
+plan skip_all => "chalk.h is generated at codegen time since 8952c473 removed "
+    . "c_src/; this parked-axis test still expects the deleted checked-in copy"
+    unless -f abs_path(dirname(__FILE__) . '/../..') . '/c_src/chalk.h';
+
 # === Phase 1: Set up grammar pipeline ===
 
 my $gen = eval { setup_xs_grammar('Chalk::Grammar::Perl::CTMulti') };
@@ -50,9 +71,9 @@ my $archlib  = $Config{archlib};
 my $repo_root = abs_path(dirname(__FILE__) . '/../..');
 my $c_src_dir = "$repo_root/c_src";
 
-# Copy chalk.h to temp directory (needed for all compilations)
+# Guarded at the top of the file — if we reach here the header exists.
 copy("$c_src_dir/chalk.h", "$tmpdir/chalk.h")
-    or BAIL_OUT("Cannot copy chalk.h: $!");
+    or die "copy chalk.h failed: $!";
 
 # Accumulate .o files for final link
 my @object_files;
