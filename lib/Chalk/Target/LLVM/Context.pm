@@ -2830,14 +2830,36 @@ sub _record_break_block {
     return;
 }
 
-# _find_unwind_consumer($proj) -> the Unwind node whose control is $proj, or
-# undef. A die arm's Unwind lists the arm's Proj as its control input, so it
-# appears as a consumer of the Proj.
+# _find_unwind_consumer($proj) -> the Unwind node reachable by walking the
+# arm's control chain forward from $proj, or undef.
+#
+# A die arm's Unwind has control_in set to whatever node was CURRENT CONTROL
+# at the point of the die (see the producer, FromOptree.pm: "$unwind->
+# set_control_in($sim->control)") -- the arm's Proj only when `die` is the
+# FIRST statement in the arm. When another effect (e.g. a Print) precedes the
+# die, that effect is Unwind's control_in instead, so Unwind is a consumer of
+# the effect, not of the Proj directly -- a one-hop scan from the Proj misses
+# it (zhi F2).
+#
+# Walk consumers transitively, following only nodes whose control_in is the
+# node just visited (i.e. staying on THIS arm's control chain, mirroring
+# _collect_body_recursive), and stop at a Region -- the arm's control chain
+# cannot pass through the merge without terminating first.
 sub _find_unwind_consumer {
     my ($node) = @_;
-    for my $c (($node->consumers // [])->@*) {
-        next unless defined $c && $c->can('operation');
-        return $c if $c->operation eq 'Unwind';
+    my %visited;
+    my @queue = ($node);
+    while (my $cur = shift @queue) {
+        my $id = $cur->id;
+        next if $visited{$id}++;
+        for my $c (($cur->consumers // [])->@*) {
+            next unless defined $c && $c->can('operation');
+            next unless $c->can('control_in') && defined $c->control_in
+                && $c->control_in->id eq $id;
+            return $c if $c->operation eq 'Unwind';
+            next if $c->operation eq 'Region';
+            push @queue, $c;
+        }
     }
     return undef;
 }
