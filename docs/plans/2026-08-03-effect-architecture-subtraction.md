@@ -1,252 +1,247 @@
-# Design: effect-architecture subtraction — 6 mechanisms to 4, 0 checks to 1
+# Design: effect-architecture subtraction — fix the bugs, add the check, delete two mechanisms
 
-**Status:** design, awaiting review. Not a plan; no implementation.
-**Supersedes (for now):** `2026-08-02-effect-world-token-design.md`, now DEFERRED —
-same four bugs, ~1/10th the cost, and it *removes* mechanisms instead of adding one.
+**Status:** design, v2 — reworked after `crochet:assess` (Fable) and an independent
+ponytail review. Not a plan; no implementation.
+**Defers:** `2026-08-02-effect-world-token-design.md` (DEFERRED, trigger = GCM design).
 **Prior art:** `docs/research/2026-08-02-effect-ordering-prior-art.md`.
 
-## The thesis
+## What changed in v2 — and why v1 was wrong
 
-Chalk's effect handling is **partly accretion, and the accreted parts are provably
-removable**. Two of six mechanisms are dead. One is a single rule expressed five
-times. One is a compatibility shim standing in for a migration that never happened.
-Two are load-bearing and correctly designed. There is no check anywhere.
+v1 proposed 8 steps ordered `1→8`. Both reviews rejected that ordering and three of
+the steps. **The single worst call: step 4 is the only step that fixes wrong output —
+three confirmed live miscompiles, two of them silent — and v1 sequenced it fourth,
+behind three cosmetic normalizations.** Abandon at 60% and you gain nothing plus a
+half-normalized `If`.
 
-The system needs **subtraction**. The previously-proposed world token was addition —
-a new mechanism, a new validator, and world Phis layered on top of a system where two
-of the six existing mechanisms were already dead code nothing was checking.
+**Cut: v1 steps 1, 3, 7.** Reasons measured, below.
+**Promoted: the invariant, from sixth to first, as a committed RED.**
 
-Every number below was measured in shadow copies with both real repos untouched.
-**Every step must be re-verified by the coordinator on committed HEAD** — shadow-copy
-numbers are evidence for planning, never acceptance.
+v1 numbers that were wrong, all re-derived on HEAD:
 
-## What the architecture would be if designed today
+| v1 claim | Measured |
+|---|---|
+| step 1 costs "6 chalk + 1 producer test file" | **120 positional `make('If'\|'Loop')` sites across 26 files** |
+| "12 stale ir-blocks" | **30** `= If(`/`= Loop(` spec lines (7 two-operand `If`, 16 one-operand `Loop`) |
+| `%CFG_OPS` duplicated 5× | 5 in lib, **plus a 6th** at `t/bootstrap/fixtures/mop-fence-base.pm:231,284` |
+| step 3 blocks "byte-identical, only comments differ" | different class-maps and die text; **`make_cfg` omits the `$cache{$id}` write** |
+| "F3/F4 are not equality REDs" | **F3 IS one.** `strip_epilogue` leaves `a\nb\nc\n` vs `a\nc\nb\n` — a plain FAIL, TDD-able today |
+| step 3 "test cost: none" | see the DCE hazard below |
+| net −56 lines | table sums to **−52**; reconcile at implementation |
 
-| # | Need | Realisation | Verdict |
-|---|---|---|---|
-| 1 | effect ordering | `control_in` (M1) | keep — correct |
-| 2 | memory-location ordering (the finer slice) | memory-SSA / `MemStart` (M4) | keep — correct |
-| 3 | branch structure | `inputs[0]` on `Proj`/`Region` (part of M2) | keep |
-| 4 | per-position identity | `%STATEMENT_EFFECT_OPS` + `%ALLOC_OPS` + 5 dispatch branches + wire `cfg` (M3+M6) | **one set, one branch** |
-| — | a check that #1 is total over the effectful set | *nothing* | **missing** |
+## The four bugs, re-verified on HEAD
 
-Four mechanisms and one check. Today: six mechanisms and zero checks.
+Baseline re-confirmed independently: corpus `178 ok / 0 not ok`,
+`gate-green=156 behavior=156 shape=156 invariant=156 worklist=0`. Exec gate 0/5.
 
-Worth noting against the deferred design: need #2 **already exists**. The world-token
-doc called memory slicing "future optimization" while `MemStart` was shipping it.
+- **F1 mainline die — LIVE.** `print "a\n"; die` → perl `a\n` exit 255; chalk **empty**
+  exit 255. `$sim->set_control($unwind)` puts the Unwind on the chain but
+  `Unwind.control_in` stays UNDEF, so the backward walk stops there.
+  Node dump: `Unwind#3 control_in=UNDEF inputs=[Print#2, Constant("boom\n")]`.
+  It also violates chalk's own contract: `Unwind.pm` declares
+  `method value() { return $self->inputs->[0] }` with the comment *"Control flows
+  through the control_in decoration … not through inputs"* — so every producer-built
+  Unwind returns its **control node** from `value()`.
+- **F2 die-after-effect-in-arm — LIVE.** `print "a\n"; if ($x) { print "t\n"; die }
+  print "z\n"` → perl `a\nt\n` exit 255; chalk `a\nt\nz\n` exit 0. Wrong output *and*
+  wrong exit, running code perl never reaches.
+- **F3 inlined effect reordered — LIVE, and an exact-equality RED.**
+  `sub f { print "c\n"; 2 } print "a\n"; my $r = f(); print "b\n"; $r;`
+  → perl `a\nc\nb\n`, chalk `a\nb\nc\n`.
+- **F4 inlined effect dropped — LIVE.** One review could not reproduce it; the other
+  did, with a cleaner shape: `sub f { print "x"; 2 } my $r = f(); 3` → perl prints
+  `x`; the loaded graph is `Start Constant Return` — **the Call vanished entirely**,
+  lli prints only `Int:3`, no GAP. Treat F4 as confirmed on that shape.
 
-## Mechanism archaeology
+## The work
 
-| Mech | Origin | Live problem? |
-|---|---|---|
-| M1 `control_in` | `3f745573` 2026-05-22 (promote to base Node) | **YES** — the ordering edge |
-| M2 control in `inputs[0]` | `f003f173` 2026-05-22 | **SPLIT** — `Proj`/`Region` structure: yes. `If`/`Loop` control: **shim** |
-| M3 identity tables | `4e0d7ba8` 2026-06-11 (hash-cons collapse) + `d1e94ad8` 2026-06-12 (alloc aliasing) | **YES as policy, NO as dispatch** |
-| M4 memory-SSA | 2026-07-05 | **YES** |
-| M5 `Return.inputs[1..]` | exists *because of* the producer's `if $void` guard | **RESIDUE** |
-| M6 wire `cfg` flag | `e75c8447` **2026-04-07** | **RESIDUE** |
+**Order: 6 → 4 → 5 → 2, with 8 filed.** Every prefix is a win; nothing is left
+half-migrated if work stops at any point.
 
-### M6 is the oldest artifact and it is dead
+### Step 6 (FIRST) — the missing check, committed RED
 
-`Serialize/JSON.pm:17` defines `%CFG_OPS`; `_is_cfg` at `:37` uses it for the *emit*
-side; then the loader at `:372` reads `$nd->{cfg}` **off the wire** instead of
-consulting the table 355 lines above it. The file asks the wire a question it can
-answer itself.
+`TypedInvariant.pm` is the corpus's third leg, runs on all 156 cases, and has
+**zero** control/effect assertions today. This is the highest value-per-line item in
+the document and v1 ranked it sixth.
 
-Its only readers anywhere are three assertions at `perl5-son/t/serialize-json.t:71-73`
-— a change-detector on a field nothing consumes. Origin 2026-04-07: older than the
-namespace divorce, older than `%STATEMENT_EFFECT_OPS`, older than `control_in` being
-on the base node. The op-set is duplicated **five** times: `Chalk/IR/NodeFactory.pm:117`,
-`Chalk/IR/Serialize/JSON.pm:17`, `SoN/IR/NodeFactory.pm:117`,
-`SoN/IR/Serialize/JSON.pm:17`, `SoN/Serialize/JSON.pm:16`.
+Evidence it is the right oracle: implemented as a probe and run over the six repro
+programs, it fired **6/6, and in every case the flagged node IS the miscompiling
+node** — including a case that currently reads PASS.
 
-### M3 is one rule written five times
+**REWORK REQUIRED — the v1 invariant is false as specified.** Measured over the
+corpus: `%STATEMENT_EFFECT_OPS ∪ {Return, Unwind}` having a defined `control_in` is
+violated on **36 of 156 gate-green cases**. Step 4 cures 27 (the Calls) and F1 cures
+T2's Unwind — but **9 are cured by nothing in this plan**: regex R1–R7 and host
+H1–H2, via *value-position* `RegexMatch`/`Match`/`RegexSubst`.
 
-`NodeFactory.pm:261-314` holds four byte-identical blocks — `%ROUTED_CFG`, `VarDecl`,
-`ListAssign`, `%STATEMENT_EFFECT_OPS ∪ %ALLOC_OPS` — each doing `$cfg_counter++`,
-`"${op}#${n}"`, `_register_consumers`, cache, return. `make_cfg` at `:352` is the
-fifth. **Only the comments differ**, each recording a different historical reason for
-the same rule.
+Those 9 are not bugs. `NodeFactory.pm:144-159` puts matches in
+`%STATEMENT_EFFECT_OPS` because a match writes capture state and needs per-call
+identity; the adjacent `%ALLOC_OPS` comment draws the line the invariant missed —
+allocations are *"value-producing and are NOT control-threaded by the Block fixup."*
+A value-position match is the same category.
 
-Corroborating evidence in the same region: six comments say *"Mirrors Bootstrap's…"*;
-`%INPUT_SPECS:138` carries `Return => ['value'], # though Actions uses inputs => [$ctrl, $val]`
-— a table entry documenting that it does not match its caller; `%CFG_CLASSES`' header
-states `Start`/`Return`/`Unwind` have two different identity policies depending on
-which factory method the caller happened to pick.
+**So narrow the op set to what the Block fixup actually threads in statement
+position**, not all of `%STATEMENT_EFFECT_OPS`. Name the exempt set explicitly and
+justify it in the code, so this stays a contract rather than a fudge.
 
-### The two-slot convention is a shim, by its own documentation
+Known weaker-than-the-prose caveat: the leg receives `$g->nodes` only, so an effect
+reachable *only* through control is invisible to it. Say so at the check site.
 
-`If.pm:19-25`: *"Override the reader so a walker that calls `$node->control_in()` gets
-a consistent answer regardless of whether the node is a CFG control-flow node or a
-statement-position data node."*
+### Step 4 — the four-bug fix
 
-Already normalized **at the reader**; the *storage* was never migrated. Same
-"literal moved, contract didn't" pattern CLAUDE.md flags for `compat_class`.
+**Cross-repo landing order is load-bearing and v1 omitted it. Measured: producer
+pin first ⇒ gate RED at 153**, three double-print REDs (`xx`,
+`callercalleecallee`, `yyyy`). Chalk memoize first ⇒ IR suite 58/58 against the HEAD
+producer. **Land chalk-side first.**
 
-`If` is also built two ways: chalk's frontend named (`make('If', control => …)`, 11
-sites), the producer positional (`make_cfg('If', inputs => [$ctrl, $cond])`, 6 sites).
-`%INPUT_SPECS` exists purely as the adapter between them.
+**F2 requires F1, also omitted by v1.** `set_control_in` calls `add_consumer`, so F1
+lands green alone. But F2's BFS ("consumers whose `control_in` is this node") finds
+nothing *before* F1, because producer Unwinds have `control_in=UNDEF` — land F2 first
+and you regress corpus T2/T2b.
 
-## The work, ordered by value per line
+Ordered sub-steps:
 
-Each step is independently gate-verifiable. Dependencies noted.
+1. **Memoize `_lower_call_direct`** — `Context.pm:4384`, `:4408`. Chalk-only. Without
+   it F3/F4's fix goes red at 153.
+2. **F1** — `SoN/FromOptree.pm:783-785`, `:3813-3815`: `inputs => [$args->@*]` +
+   `$unwind->set_control_in($sim->control)`. Mirrors `Actions.pm:1450-1457`; precedent
+   already in-file for `Print` (`:2091-2093`) and `Assign` (`:1716-1719`). Producer-only.
+3. **F2** — `Target/LLVM/Context.pm:2836-2843`: replace the one-hop
+   `_find_unwind_consumer` scan (assumption stated in its own comment at `:2833-2835`)
+   with a BFS over consumers-whose-`control_in`-is-this-node, stopping at `Region`.
+   Chalk-only. **Requires F1.**
+4. **F3/F4** — `SoN/FromOptree.pm:1156`, `:1189` (v1 cited these; one review reads
+   them as `:1155`/`:1188` — confirm at implementation). Drop the `if $void` guard;
+   pin unconditionally, push the value only when non-void. This *is* R1.0
+   effect-by-default (memory `effect_by_default_call_classification`).
+   `_place_call` (5 lines) becomes dead.
+5. **Add the missing bilateral corpus case** — effect-*before*-die-in-arm.
+   `control-flow.md` T2 (`:1167`) and T2b (`:1204`) are both die-first, which is why
+   F2 survived. CLAUDE.md's bilateral rule owes this regardless. **Part of step 4, not
+   after it.**
 
-| # | Change | Kind | Lines | Test cost |
-|---|---|---|---|---|
-| 1 | `If`/`Loop` control → `control_in`; delete both shims | normalize 2→1 | **−46** lib | 6 chalk + 1 producer test file; 12 stale ir-blocks |
-| 2 | Delete the wire `cfg` flag; loader derives from `%CFG_OPS` | **delete a mechanism** | ~−10 | 3 assertions, `perl5-son/t/serialize-json.t:71-73` |
-| 3 | Collapse the 5 identity branches into one `%FRESH_ID_OPS` | normalize 5→1 | **−30/repo** | none |
-| 4 | The four-bug fix (see below) | correctness | +20/−11 | 3 subtests, `from-optree-method-dispatch.t:92-102` |
-| 5 | Delete `LLVM.pm:909` (M5 seed) | **delete a mechanism** | −1 | none — **requires 4** |
-| 6 | Control-chain leg in `TypedInvariant.pm` | **add the missing check** | ~+20 | none |
-| 7 | Cross-repo drift detector | add | +6 | none |
-| 8 | File the shape-leg `If`-operand blind spot | file an issue | 0 | — |
+**Test cost:** 1 producer file, 3 subtests in `from-optree-method-dispatch.t` — but
+only test 4 is at `:92-102`; tests 6–7 are the Return-shape subtests at `:122-154`.
+They pin the *pre-R1.0* convention and are change-detectors for a deliberate policy
+inversion, not correctness oracles. `shift-pop.t:53` and `element-store-effect.t:66`
+stay green.
 
-**Net: 6 mechanisms → 4, 0 checks → 1, −56 lines** (−86 once #3 lands in both repos).
+### Step 5 — delete `Target/LLVM.pm:909`
 
-### Step 4 — the four-bug fix, itemised
+**v1 over-claimed this as "delete a mechanism, −1". It deletes one of three M5
+sites.** The others: `Chalk/IR/Serialize/JSON.pm:996-1002` (`_control_chain_nodes`
+seed — inside a **fenced** sub, so deleting it trips `mop-fence-audit.t`) and the
+`@trailing_effects` GAP guard at `Context.pm:4372-4375`.
 
-All four measured miscompiles, ~20 lines across two files in two repos:
+**The "requires 4" dependency is asserted, not shown.** Probe: **0 of 177** corpus
+graphs carry a multi-input `Return` on the HEAD producer, and
+`FromOptree.pm:893-898` now documents `inputs=[value]` always — so corpus-wise
+`:905-911` looks deletable today. The dependency may be protecting non-corpus inputs
+(whole t/base files). Keep the ordering conservative; do not promote it.
 
-- **F1 mainline die.** `SoN/FromOptree.pm:783-785` and `:3813-3815` emit
-  `inputs => [$sim->control, $args->@*]` and never call `set_control_in`. Change to
-  `inputs => [$args->@*]` + `$unwind->set_control_in($sim->control)`. Mirrors
-  `Bootstrap/Perl/Actions.pm:1450-1458`; the surrounding producer code already does
-  this for `Print` (`:2092`), `Assign` (`:1718,1769,1785,1807`), void `Call` (`:1189`).
-  `Unwind` is the only holdout. **+2/−2.** Executable gate 0 → 1.
-- **F2 die-after-effect-in-arm.** After F1 the IR is already correct; the defect is
-  `_find_unwind_consumer`'s one-hop consumer scan
-  (`Target/LLVM/Context.pm:2836-2843`, assumption stated in its own comment at
-  `:2833-2835`). Replace with a BFS over consumers-whose-`control_in`-is-this-node,
-  stopping at `Region`. **+11/−3.**
-- **F3/F4 inlined effect reordered / dropped.** `FromOptree.pm:1156` and `:1189`:
-  `$node->set_control_in($sim->control) if $void;` — a non-void `Call` gets no control
-  pin, so it is unreachable from `Return` and the producer's reachability walk drops
-  it. Pin unconditionally; push the value only when non-void. **This is the R1.0
-  effect-by-default decision** (memory `effect_by_default_call_classification`).
-  **+6/−4.** `_place_call` (5 lines) becomes dead.
-- **F3 residual.** Pinning exposes a latent backend bug: `_lower_call_direct` never
-  writes its result to `{cache}`, so the same `Call` inlines twice (measured: two
-  `printf` calls, two `@str_const` globals for one literal). Memoize at
-  `Context.pm:4384` and `:4408`. **2 lines edited.**
+Retitle honestly: *"delete the LLVM copy of the M5 seed"*, and file the other two.
 
-### Step 6 — the check, and why it goes in TypedInvariant
+### Step 2 — delete the wire `cfg` flag
 
-**Not** at construction: `set_control_in` is a late-binding setter by design
-(`Node.pm:117-131`) because `Actions.pm`'s Block control-chain fixup sets it after the
-fact — 13 of chalk's 19 call sites are in that one file.
+Genuinely dead. `Serialize/JSON.pm:17` defines `%CFG_OPS`, `:37` emits with it, then
+`:372` reads `$nd->{cfg}` **off the wire** instead of consulting the table 355 lines
+above; `:476` branches on it. All 5 lib copies are the identical 7-op list and
+`make_cfg`'s `%CFG_CLASSES` covers exactly those 7 — deriving from the op is provably
+equivalent. Origin `e75c8447`, **2026-04-07**: older than the namespace divorce, older
+than `%STATEMENT_EFFECT_OPS`, older than `control_in` being on the base node.
 
-At **graph completion** it works, and the chokepoint already exists and is already
-wired into the gate: `TypedInvariant.pm` is the corpus's third leg, runs on all 156
-cases, is 174 lines, and contains zero control/effect assertions today.
+Best abandon-safety in the document: **each half lands alone and stays green
+forever.** `2a` (chalk loader derives locally) reads old JSON fine; `2b` (producer
+stops emitting) produces JSON the new loader reads fine.
 
-Invariant: every op in `%STATEMENT_EFFECT_OPS ∪ {Return, Unwind}` has a defined
-`control_in`. ~20 lines, **zero ir-block rewrites** — it inspects `control_in`, which
-the ir-block format carries on its `control:` line and which is not part of any
-operand list.
+**Test cost — v1 disclosed only the producer's.** Also breaks
+`t/bootstrap/ir-serialize-json.t:39`
+(`like($json, qr/"cfg"\s*:\s*true/)`). Producer side:
+`perl5-son/t/serialize-json.t:71-73`. The embedded fixture at `:236` and
+`mop-fence-base.pm` are fine — the fixture JSON still loads once the loader ignores
+the key.
 
-It does not make the bad state unrepresentable. It makes it **un-shippable**. On this
-project that is the property that matters.
+### Step 8 — file the gate blind spot (widened)
 
-### Step 7 — drift detection, not a conformance test
-
-Measured: of 91 duplicated files between `lib/Chalk/IR/**` and `lib/SoN/IR/**`, **90
-are code-identical** with comments and namespace normalized away. One genuinely
-diverges (`Serialize/JSON.pm`, 70 lines — expected, the loader half is chalk-only).
-The four other "differing" files are **comment-only differences**.
-
-The 2026-08-01 divorce plan explicitly decided against a cross-repo conformance test
-on the grounds that measured drift was zero. **Two days later it is still zero
-executable lines — that cut stands.**
-
-But "no conformance test" is not "no detector". A ~6-line normalized `diff` (strip
-comments, normalize `Chalk::`/`SoN::`, allowlist `Serialize/JSON.pm`) asserts nothing
-about semantics; it just refuses to let 90 files silently stop being the same file.
-
-**The need was demonstrated in real time:** the reviewer applied step 3 to chalk's
-`NodeFactory.pm` and forgot the producer's copy. Full corpus gate and both suites
-stayed green. Nothing caught it.
-
-### Step 8 — a gate blind spot found in passing
-
-The shape leg does **not** check `If` operands. Probed directly: an ir-block with a
-deliberately **wrong** `If` condition **passes**.
+Not "the shape leg does not check `If` operands." Measured: `_rooted_match`
+(`MdtestCorpus.pm:1146-1159`) starts at `Return.inputs[0]` and descends **value
+operands only**, so any node reachable only through control gets a presence check and
+**never an operand check**. Probes:
 
 ```
-spec If(%vx, %cmp) vs real If(%cmp)+control_in  -> PASS
-spec If(%vx, %n)   [WRONG condition]            -> PASS
+identical       -> PASS
+WRONG If cond   -> PASS
+WRONG arm store -> PASS
 ```
 
-This is why step 1 costs zero corpus churn — the leg does not look there. The 12
-ir-blocks are still stale *documentation*; they are just not gate-enforced. File it;
-do not fix it inside this work.
+File as **"the shape leg does not check operands of control-reachable nodes."** This
+is the prerequisite for the cut step 1 ever being safe.
 
-## Ordering and dependencies
+## Cut, with reasons
 
-- **5 requires 4** (M5's seed exists because of the `if $void` guard).
-- **1, 2, 3 are independent** of each other and of 4.
-- **6 and 7 are independent** additions; 6 is most valuable *after* 4, when the
-  invariant it asserts is actually true everywhere.
-- Suggested sequence: 1 → 2 → 3 → 4 → 5 → 6 → 7, with 8 filed at any point.
+**v1 step 1 (`If`/`Loop` → `control_in`) — CUT.** Largest diff, smallest oracle: 120
+positional sites across 26 files, 30 ir-block lines, plus `Loop`'s `inputs[1]`
+backedge index shifting against 77 `backedge` references. And **nothing validates
+it** — the plan's own step 8 shows the gate is blind to exactly what this step
+changes, so 120 sites could keep passing while silently constructing malformed `If`s.
+The shim it deletes has zero measured runtime cost and is already correct at the
+reader (`If.pm:19-25`). **Blocked on step 8.**
+
+**v1 step 3 (collapse the 5 identity branches) — CUT.** Both reviews independently
+found the same hazard: `make_cfg` (`NodeFactory.pm:352-361`, both repos) **never
+writes `$cache{$id}`**, while `DCE.pm:47` iterates `all_node_ids()` and `:71` calls
+`remove_node`. Merging it into a caching helper puts `If`/`Proj`/`Region`/`Loop` into
+DCE's worklist **for the first time** — a silent-miscompile-shaped behavior change
+bought for ~25 code lines. The blocks also are not byte-identical (differing
+class-maps and die text), and their 13 comment lines each record a distinct
+historical miscompile that CLAUDE.md forbids deleting. It is also cross-repo: the v1
+reviewer applied it to chalk and forgot the producer, and **the full gate and both
+suites stayed green** — a step that half-lands undetectably, in a project with a
+documented half-landing habit.
+
+**v1 step 7 (cross-repo drift detector) — CUT, as a pair with step 3.** Measurement
+re-derived exactly: 91 shared files, **90 code-identical**, sole diff
+`Serialize/JSON.pm` (expected). That is the argument against it — **the measurement
+is the detector**, one shell loop with a `sed` normalize, no committed file and no
+allowlist to maintain. The 2026-08-01 divorce plan already cut a conformance test on
+this evidence; two days and zero drift later nothing has changed. The detector existed
+only to police the duplication step 3 would half-migrate; deleting both removes the
+hazard instead of instrumenting it.
+
+## Beyond scope, but found and worth filing
+
+**There is no exit-code oracle anywhere.** `Mode1Runner.pm:167` —
+`return (undef, "lli exited $exit: $out", $g) if $exit != 0;` — turns any nonzero lli
+exit into a skip and never compares `$?`. That is why F1's dropped `print` is
+invisible to the harness and why F2 reads PASS while returning `Int:1` where perl
+exits 255. Adding the comparison is small **but not free**: nobody has measured how
+many currently-green cases would flip. File it; do not fold it in here.
 
 ## Verification
 
 **The corpus gate is mandatory and coordinator-self-verified on committed HEAD after
-every step** — `t/bootstrap/corpus/son-corpus-wide.t`, floor pinned at 156, all three
-legs (behavior / shape / TypedInvariant), worklist 0. Never a subagent self-report.
-
-Shadow-copy composite measurement (bug fix + steps 1/2/3/5 layered), for planning
-confidence only:
-
-```
-corpus:    178 ok / 0 not ok   gate-green=156 behavior=156 shape=156 invariant=156
-exec gate: 1/5 (from 0/5)
-F1 MATCH   F2 MATCH   F3/F4 ordering correct (residual = the Int:N epilogue)
-chalk IR suite 52/58   producer suite 84/86
-net lib delta: -56 lines
-```
+every step** — floor 156, three legs, worklist 0. Never a subagent self-report.
+Shadow-copy numbers in this document are evidence for planning only.
 
 Cross-repo: chalk on `phase5-capstone`, perl5-son on `pu`; producer suites need
 `prove -Ilib -Iblib/lib -j1` on a **clean** build (stale blib masks deletions).
 
-### Known test costs, all legitimate
-
-- **`from-optree-method-dispatch.t:92-102`** (3 subtests) assert the *pre-R1.0*
-  convention — e.g. "a value-context method call is NOT a statement effect". They are
-  change-detectors for a policy being deliberately inverted, not correctness oracles.
-  Rewriting them is the honest cost of R1.0.
-- **6 chalk + 1 producer test file** hand-build `make('If', inputs => [$ctrl, $cond])`
-  positionally. Of 76 `make('If')` sites in `t/`, only these exercise the lowering path.
-- **3 assertions** in `perl5-son/t/serialize-json.t:71-73` pin the wire `cfg` field.
-
-The chalk IR suite reads 52/58 in the composite shadow state; the 6 are the
-positional-`If` files above. **The coordinator must confirm that attribution on
-committed HEAD** rather than accepting it — a red file with an assumed cause is
-exactly the pattern `red_tests_hide_real_bugs` warns about.
+Independently confirmed as green under step 4 (fix + memoize): 156/156/156/156,
+worklist 0; chalk IR suite 58/58 with memoize alone.
 
 ## Out of scope
 
-- **The world token.** Deferred with named triggers; see
-  `2026-08-02-effect-world-token-design.md`.
-- **Fixing the shape-leg `If` blind spot** (step 8 files it only).
-- **Unifying the two `NodeFactory.pm` copies into one definition.** Step 7 detects
-  drift; merging the definitions is a larger cross-repo question and the measured
-  drift is currently zero.
-- **The `Int:N` type-tag epilogue** (`Target/LLVM.pm:1006`), which is what actually
-  holds the executable gate at 1/5 — three of the five programs there fail for the
-  epilogue and one for unlowered `exit`, **none for effect ordering**. That is the
-  entry/epilogue protocol's work, not this.
+- **The world token** — DEFERRED with triggers in its own doc; revisit when GCM is
+  designed (`chalk-parse-perl-plan.md:763`, Phase 9).
+- **Fixing the shape-leg blind spot** (step 8 files it only).
+- **Unifying the two `NodeFactory.pm` copies** — measured drift is zero.
+- **The `Int:N` epilogue** (`Target/LLVM.pm:1006`) — independently confirmed as the
+  real exec-gate blocker (`hello` fails on the `Undef:` epilogue line, **not**
+  ordering). Entry/epilogue protocol's work.
 
-## Corrections this work carries
+## Correction this work carries
 
-- **`2026-07-23-slice-b-inliner-effect-ordering.md:259`** claims "the silent
-  effect-drop miscompile class is CLOSED". Commit 1's guard inspects only the
-  *callee's* attachment paths; F4 is a caller-side drop with no GAP possible. True as
-  scoped to the callee, **false as stated about the class** — re-scope that line.
-- **The F2 bilateral corpus case is missing.** `t/corpus/mdtest/control-flow.md` T2
-  (`:1167`) and T2b (`:1204`) are both die-*first*-in-arm. No case puts an effect
-  before the die — which is why F2 survived. Add it; per CLAUDE.md's bilateral
-  coverage rule this is owed regardless.
-- **F3/F4 are not equality REDs.** The unconditional `Int:N` epilogue defeats exact
-  comparison for both. **F2 is the good RED** — exact MATCH at exit 255 `"t\n"`,
-  because it aborts before the epilogue runs.
+`2026-07-23-slice-b-inliner-effect-ordering.md:259` claims "the silent effect-drop
+miscompile class is CLOSED". F4 is re-proven live on HEAD with no GAP — Commit 1's
+guard inspects only the *callee's* attachment paths, and the caller-side drop is
+unguarded. True as scoped to the callee, **false as stated about the class**.
+Re-scope that line.
