@@ -413,3 +413,39 @@ context: scalar
 ```ir
 L: GAP(direct call to 'g': callee has effect(s) on its control chain (print/store/...) that inlining does not yet thread in program order)
 ```
+
+## F13 unused-result call still threads its effect (perl5-son R1.0 effect-by-default)
+
+`sub f { print "x"; 2 } my $r = f(); 3` — like F9, but `$r` is never read: the
+call's VALUE is completely dead, only its EFFECT matters, and the trailing
+statement (`3`) is a different, unrelated value than the call's return. Before
+perl5-son's R1.0 fix, `FromOptree::_handle_entersub` only pinned a Call's
+`control_in` `if $void` — a non-void call (this one binds `$r`, so it is NOT
+OPf_WANT_VOID) got NO control pin at all. Unpinned, the Call was unreachable
+from Return, and the producer's reachability walk dropped it entirely: the
+loaded caller graph was literally Start / Constant / Return, with no Call node
+at all, and `print "x"` silently vanished (perl prints `x`; chalk printed
+nothing). The fix pins `control_in` unconditionally (void or not) and advances
+the sim's control to the Call before deciding whether to also push its value,
+so the call survives and orders correctly regardless of whether its result is
+used.
+
+```perl
+# source
+sub f { print "x"; 2 }
+my $r = f();
+3
+```
+
+```behavior
+stdout: x
+return: 3
+context: scalar
+```
+
+```ir
+%call = Call(dispatch_kind: "direct", name: "main::f") :Int
+%n    = Constant(3) :Int
+return %n
+L: GREEN
+```
