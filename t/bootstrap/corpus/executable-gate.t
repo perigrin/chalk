@@ -149,9 +149,12 @@ diag('  exactly: no source-text wrap, no epilogue strip, no exit-code');
 diag('  tolerance. Raise the floor below as programs start passing.');
 
 # The floor. It starts where the capability actually is, and may only rise.
-cmp_ok($passing, '>=', 0,
-    'executable-gate floor (0; nothing compiles as a standalone program yet. '
-  . 'The entry protocol (main_root -> __PROGRAM__) and true define+call are the '
-  . 'gating work. Raise this as programs pass.)');
+cmp_ok($passing, '>=', 1,
+    'executable-gate floor (1; die-aborts now compiles and runs as a standalone '
+  . 'program (F1 fixed: the producer Unwind now threads control via '
+  . 'control_in instead of stranding it as a flattened input operand, so the '
+  . 'preceding print survives the die). The remaining programs need the entry '
+  . 'protocol (main_root -> __PROGRAM__) and true define+call. Raise this as '
+  . 'more programs pass.)');
 
 done_testing();
