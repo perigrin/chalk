@@ -1,8 +1,10 @@
 # Design: the world token — effect ordering as a typed graph edge
 
 **Status: DEFERRED 2026-08-03.** Superseded for now by
-`2026-08-03-effect-architecture-subtraction.md`, which fixes the same four bugs and
-removes two mechanisms for ~1/10th the cost. Kept on disk because the design is
+`2026-08-03-effect-architecture-subtraction.md`, which fixes the same four bugs for a
+small fraction of the cost. (That doc originally claimed to remove "two mechanisms";
+corrected — it removes M6 in full plus one of three M5 sites, and is itself net
+line-positive. The deferral does not depend on that count.) Kept on disk because the design is
 coherent and may become right later — but do NOT build it without one of the
 revival triggers below.
 
