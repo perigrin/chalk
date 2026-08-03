@@ -1,6 +1,65 @@
 # Design: the world token — effect ordering as a typed graph edge
 
-**Status:** design, awaiting review. Not a plan; no implementation.
+**Status: DEFERRED 2026-08-03.** Superseded for now by
+`2026-08-03-effect-architecture-subtraction.md`, which fixes the same four bugs and
+removes two mechanisms for ~1/10th the cost. Kept on disk because the design is
+coherent and may become right later — but do NOT build it without one of the
+revival triggers below.
+
+**Why deferred — two independent reviews, converging from opposite directions:**
+
+- **Unsound as written.** The subsumption claim fails on sibling branch arms: `If`
+  and `Proj` are not world-carrying in this design, so both arms consume the *same*
+  incoming world and two identical `Print`s hash-cons to one node. Corpus case D1e
+  (`t/corpus/mdtest/control-flow.md:218`) is exactly that shape and is gate-green
+  today. Retiring `%STATEMENT_EFFECT_OPS` on the strength of the world input
+  reintroduces the miscompile it was written for (019eb6ff item 1).
+- **Does not close the bugs it was motivated by.** Measured: of the four live
+  miscompiles, the world token closes **one** (F1's slot ambiguity). F2's IR is
+  already correct once F1 is fixed — its defect is a one-hop consumer scan in the
+  backend, and a world edge does not change how far a walker walks. F3/F4 are the
+  producer classifying a node as non-effectful; under this design that `Call` is
+  Pure-shaped, arity satisfied, **validator green, bug identical**.
+- **Arity is not ordering.** `Print(w0)→w1; Unwind(w0)` has perfect world arity and
+  *is* the F1 miscompile. The validator cannot see it. If the edge made the bad state
+  unrepresentable the validator would be redundant; it is not, which shows the edge
+  does not. "Correctness by construction" held for slot-confusion and nothing else in
+  this bug set — and slot-confusion is closed far more cheaply by normalizing the
+  two-slot convention.
+- **Addition onto a system that needs subtraction.** Two of the six mechanisms this
+  design proposed to subsume (M5, M6) are dead code that nothing was checking.
+
+**Revival triggers — build this only when one is true:**
+
+1. **An effect-moving optimization pass is PLANNED — not built.** The monad laws are
+   a legality spec for *passes*; a typed edge a pass can reason about is this design's
+   distinctive value, and it has no consumer until then.
+
+   **This trigger is not hypothetical and it has a name: GCM.**
+   `docs/chalk-parse-perl-plan.md:763` schedules Global Code Motion in Phase 9 —
+   *"Hoist/sink loop-invariant computations"*. Hoisting and sinking across effects is
+   precisely the operation that needs an ordering legality spec.
+
+   **Fire this trigger when GCM is DESIGNED, not when it ships.** Retrofitting the IR
+   under a working optimizer is strictly more expensive than building the optimizer on
+   the right IR — so "wait until an effect-moving pass exists" would be waiting until
+   it is too late. The correct sequencing is: subtraction now → world token as part of
+   GCM's design → GCM built on it.
+
+   Concretely: **do not open a GCM plan without revisiting this document first.**
+2. **Over-serialization is measured as a real cost.** Until the backend reorders
+   effects at all, both the cost and its escape hatch are hypothetical.
+3. **A third independent effect-ordering miscompile that the TypedInvariant
+   control-chain leg does NOT catch.** Two would be noise; three means the check is at
+   the wrong layer and the representation change is earned.
+
+**What survives review and is worth keeping from this doc:** the problem statement,
+the F2 backend root cause, and the mechanism inventory. The reasoning about the
+*proposed* code does not survive.
+
+---
+
+**Original status line:** design, awaiting review. Not a plan; no implementation.
 **Prior art:** `docs/research/2026-08-02-effect-ordering-prior-art.md` (read its
 provenance section — the adversarial verification pass never ran).
 
