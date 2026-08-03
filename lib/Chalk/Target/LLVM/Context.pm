@@ -4380,9 +4380,16 @@ sub _lower_call_direct {
     my @args = $node->inputs->@*;
 
     # No-argument callee: thread its straight-line effect chain (if any), then
-    # inline the result subgraph.
-    return $self->_lower_inlined_effects_then_value(\@effect_chain, $value)
-        unless @args;
+    # inline the result subgraph. Memoize under the CALLER Call node's id
+    # (Context.pm ~353's cache-hit check) so a Call reached twice — once as a
+    # statement via process_control_node, once as the Return's value via
+    # lower_value, both the SAME node — inlines the callee once instead of
+    # re-running the effect chain and result subgraph a second time.
+    unless (@args) {
+        my $ref = $self->_lower_inlined_effects_then_value(\@effect_chain, $value);
+        $self->{cache}{ $node->id } = $ref;
+        return $ref;
+    }
 
     # Argument-passing callee: bind the callee's positional arg-reads to the
     # caller's argument values. Find the callee's `shift @_` reads first (this
@@ -4405,7 +4412,12 @@ sub _lower_call_direct {
     $self->{_arg_bind}{ refaddr($arg_reads[$_]) } = $arg_refs[$_]
         for 0 .. $#arg_reads;
 
-    return $self->_lower_inlined_effects_then_value(\@effect_chain, $value);
+    # Memoize under the caller Call node's id, same reasoning as the
+    # no-argument path above: this Call can be reached a second time as the
+    # Return's value after already running as a statement effect.
+    my $ref = $self->_lower_inlined_effects_then_value(\@effect_chain, $value);
+    $self->{cache}{ $node->id } = $ref;
+    return $ref;
 }
 
 # _collect_straight_line_effect_chain($control_in, $name) -> @chain (newest-first)
