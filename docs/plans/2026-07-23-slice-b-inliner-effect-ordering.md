@@ -256,9 +256,21 @@ milestone scope was deliberately narrower than this document's title
   Corpus: subs.md F9 (ordered print), F10 (cross-graph cache-collision proof --
   caller and callee Print ids DO collide in the real B::SoN graph, measured),
   F11 (two-call-site double-emission, GREEN not fenced). Gate 153 -> 156.
-- **The silent effect-drop miscompile class is CLOSED** (Commit 1): both
-  effect-attachment paths -- `Return.control_in` AND `Return.inputs[1..]` (the
-  trailing void statement-effect) -- now GAP loudly instead of dropping.
+- **The CALLEE-SIDE silent effect-drop miscompile class is CLOSED** (Commit 1):
+  both of the *callee's* effect-attachment paths -- `Return.control_in` AND
+  `Return.inputs[1..]` (the trailing void statement-effect) -- now GAP loudly
+  instead of dropping.
+  **[RE-SCOPED 2026-08-03. This originally read "the silent effect-drop
+  miscompile class is CLOSED", which was false as stated.** Commit 1's guard
+  inspects only the CALLEE's attachment paths; the CALLER-side path -- whether
+  the `Call` node is itself on the caller's control chain, and whether it still
+  exists -- was unguarded. F4 (`sub f { print "x"; 2 } my $r = f(); 3`)
+  reproduced live on HEAD with NO GAP: the producer pinned a Call's `control_in`
+  only `if $void`, so a non-void call was unreachable from Return and the
+  reachability walk dropped it entirely -- chalk printed nothing where perl
+  prints `x`. The caller side was closed later by perl5-son R1.0 (commit
+  40d8f8b, milestone `effect-chain-fix`), which pins every Call unconditionally.
+  See `docs/plans/2026-08-03-effect-chain-followups.md` Part C.]
 - **Two latent cross-graph collision hazards fixed**, both from the same root
   cause (id-keyed tables shared across graphs that number nodes from separate
   factories): `{cache}` (Commit 2-print) and `_mut_read_memo` (zhi 019fbe27, a
