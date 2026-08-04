@@ -270,7 +270,8 @@ milestone scope was deliberately narrower than this document's title
   reachability walk dropped it entirely -- chalk printed nothing where perl
   prints `x`. The caller side was closed later by perl5-son R1.0 (commit
   40d8f8b, milestone `effect-chain-fix`), which pins every Call unconditionally.
-  See `docs/plans/2026-08-03-effect-chain-followups.md` Part C.]
+  In one line: this closed the callee half of the effect-drop class, not the
+  class. See `docs/plans/2026-08-03-effect-chain-followups.md` Part C.]
 - **Two latent cross-graph collision hazards fixed**, both from the same root
   cause (id-keyed tables shared across graphs that number nodes from separate
   factories): `{cache}` (Commit 2-print) and `_mut_read_memo` (zhi 019fbe27, a
