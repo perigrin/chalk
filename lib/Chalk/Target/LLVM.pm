@@ -898,16 +898,12 @@ sub _process_control_chain {
 
     my @chain;
     my %seen;
-    # Seed the control chain from Return.control_in AND from any trailing void
-    # statement-effect Calls carried as extra Return inputs. A void method call
-    # (`$c->inc;`) is NOT the return value, so the loader keeps it as inputs[1..]
-    # (a data input) rather than demoting it to control_in; its own control_in
-    # chain threads the preceding effects. Without seeding here the effect is
-    # never scheduled and the mutation is lost (and it hits the NO-REPR guard).
-    my @seeds = grep { defined && blessed($_) } (
-        $return_node->control_in,
-        @{ $return_node->inputs }[ 1 .. $#{ $return_node->inputs } ],
-    );
+    # Seed the control chain from Return.control_in. The producer's R1.0
+    # Call-pin (perl5-son 40d8f8b) pins every Call's control_in unconditionally,
+    # void or not, so a trailing void statement-effect Call is never carried as
+    # an extra Return input — it rides Return.control_in's own chain like any
+    # other effect. A Return's inputs is always exactly [value].
+    my @seeds = grep { defined && blessed($_) } ($return_node->control_in);
     for my $ctrl (@seeds) {
         while (defined $ctrl && blessed($ctrl)) {
             last if $seen{ $ctrl->id }++;
