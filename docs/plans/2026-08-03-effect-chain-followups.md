@@ -26,7 +26,8 @@ spec with a WRONG branch-arm store    -> PASS   (should fail)
 ```
 
 Consequence: a corpus ir-block can encode the wrong condition or the wrong
-arm-store value and stay green. **This is the prerequisite for the `If`/`Loop`
+arm-store value and stay green. Stated precisely: the shape leg does not check
+the operands of control-reachable nodes, only their presence. **This is the prerequisite for the `If`/`Loop`
 control normalization**, which the milestone deliberately CUT precisely because
 nothing could validate it — ~120 positional construction sites across ~26 files
 would have been edited under a gate blind to the change.
