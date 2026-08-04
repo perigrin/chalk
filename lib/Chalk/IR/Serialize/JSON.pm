@@ -31,13 +31,6 @@ my %STAMP_TO_REPR = (
 );
 
 # -----------------------------------------------------------------------
-# _is_cfg($node) — true if the node is a CFG node
-# -----------------------------------------------------------------------
-sub _is_cfg ($node) {
-    return exists $CFG_OPS{ $node->operation };
-}
-
-# -----------------------------------------------------------------------
 # _extract_fields($node, \%id_remap) — returns a hashref of extra fields
 # for nodes that carry them, or undef if no extra fields.
 # id_remap is needed for Phi whose region field holds a node reference.
@@ -293,8 +286,7 @@ sub _serialize_graph ($graph) {
             op     => $node->operation,
             inputs => \@inputs,
         );
-        $entry{cfg}    = JSON::PP::true if _is_cfg($node);
-        $entry{fields} = $fields        if defined $fields;
+        $entry{fields} = $fields if defined $fields;
         # Produce-time control: emit the control_in edge as its own wire key
         # so from_json can decode it back onto control_in directly, instead
         # of the old convention of flattening control into inputs[0] plus a
@@ -369,7 +361,11 @@ sub _deserialize_graph ($method_data) {
     for my $nd (@node_data) {
         my $op     = $nd->{op};
         my $fields = $nd->{fields} // {};
-        my $is_cfg = $nd->{cfg}    // 0;
+        # Derived from the op name via %CFG_OPS -- the table that answers this
+        # is defined 355 lines above (and to_json's emit side reads the same
+        # table). The wire cfg:true key the emitter still writes is redundant
+        # with $op and is ignored here.
+        my $is_cfg = exists $CFG_OPS{$op};
 
         # Resolve inputs from already-created nodes. Nodes are built in array
         # order, so a valid input index is < the current node count; an index at

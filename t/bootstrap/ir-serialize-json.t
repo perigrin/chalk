@@ -36,7 +36,6 @@ sub make_simple_graph {
     like($json, qr/"Start"/, 'JSON contains Start node');
     like($json, qr/"Constant"/, 'JSON contains Constant node');
     like($json, qr/"Return"/, 'JSON contains Return node');
-    like($json, qr/"cfg"\s*:\s*true/, 'CFG nodes marked with cfg:true');
 }
 
 # =============================================================================
