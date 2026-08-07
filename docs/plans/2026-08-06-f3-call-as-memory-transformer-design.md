@@ -1,195 +1,190 @@
-# Design: F3 — `Call` as a memory transformer (true `define` + `call`)
+# Design: real `define` + `call` — reordered after review
 
-**Status:** design, awaiting review. Not a plan; no implementation.
-**Supersedes the framing in:** `docs/plans/2026-07-19-bare-file-protocol-toplevel-entry.md`
-§"REAL SUBS AND CALLS", which prices F3 but describes it as call *emission*.
+**Status:** design v2, awaiting review. Not a plan; no implementation.
 **Type-library work belongs to:** `docs/plans/2026-07-19-runtime-mop-coerce-multimethod.md`
-(milestone `runtime-mop-pilot`, 4 issues pending). This design does NOT build it.
+(milestone `runtime-mop-pilot`). This design does NOT build it.
 
-## The spine
+## What changed in v2, and why
 
-**An assignment is a call minus uncertainty.**
+v1 proposed one slice: give `Call` a memory contract with a kills-everything default,
+disable the inliner, and prove it with `fib(10) == 55`. Two independent reviews found
+the **insight** sound and the **ordering** wrong, and measurement refuted the
+motivation.
 
-An assignment is a state transition `(Memory, Location, Value) → Memory`. A call is
-`(Memory, Args…) → (Memory, Value)`. The general case is the call; assignment is the
-degenerate case where the callee is a known primitive and the memory effect is
-precisely known.
+**The motivation was a proxy metric — the second time in this project's record.** v1
+ranked F3 by GAP-site count inside one function. Measured against programs actually
+unblocked:
 
-That gives a **lattice on effect precision**, ordered by how much we know:
+| metric | F3 as scoped in v1 |
+|---|---|
+| ring files unblocked (t/base, t/cmd, t/opbasic, t/comp — 40 files) | **0** |
+| executable-gate programs unblocked (5) | **0** |
+
+Both call-shaped ring blockers are **producer-side callee-body GAPs** (`until` loop,
+non-lexical `foreach` iterator) — the producer never emits a graph, so a real `call`
+would target a `define` that never exists. See `feedback_proxy_metrics`.
+
+### v1 claims that measurement refuted
+
+| v1 claim | measured |
+|---|---|
+| "eight GAP sites, all from having no fallback" | **13**; no grouping yields 8. **6 of 13 are `@_`-modelling** and survive F3 verbatim — a real call frame still must answer "which param does this `shift @_` read?" |
+| "seed at bottom, converges in one round for `fib`" | **False.** The `Add` types to Int, but `TernaryExpr` never does: the loader's join bails when any input lacks a rank (`JSON.pm:1105`), and a ternary's inputs include the Bool condition. `fib`'s Return never types. |
+| "extends the existing fixpoint machinery" | **False.** Every stamp is write-once (`next if defined $node->representation`). "Widen to fixpoint" needs re-stamping plus cone invalidation — a structurally new pass. |
+| "identical to how `Assign` behaves today" | **False.** `Assign` takes **no** memory input (`inputs => [$target,$value]`); it only *becomes* the version, and only for element stores. The proposed contract matches **shift/pop** (`FromOptree.pm:2164`), not `Assign`. |
+| "ir-blocks spell `Call` by attributes, not operands" | **False** — 46 of 56 spell operands. The zero-churn *conclusion* holds, but via `MdtestCorpus.pm:1371-1373`: extra **trailing** inputs are ignored. **Position-conditional** — prepending memory fails the gate. |
+| "`t/base/subval.t` does not exist" | It is `~/dev/perl5/t/cmd/subval.t`. I got the directory wrong while correcting a directory error. Its first blocker is a ternary-with-element-store, not a call. |
+| "15 of 160 corpus cases declare a sub" | **178 cases, 14 sub-declaring.** |
+| symbol mangling needed | Unnecessary — `define i64 @"main::fib"` works (proven against lli-15). |
+| `define` emission must be built | **Already exists.** `_emit_class_registry_ir` (`LLVM.pm:625-895`) emits per-method `define`s with per-repr `ret`; `_lower_call_method` emits real `call`s. A direct call is the *simpler* case. |
+
+### The spine, corrected
+
+v1's spine — *an assignment is a call minus uncertainty*, giving a lattice on effect
+precision — is a good **description of a target**, but v1 presented it as a
+description of **what exists**. Measured:
+
+- Only **rvalue `Subscript`** is memory-versioned. `Length`, `FieldAccess`,
+  `StashAccess` take no memory input; `PostfixDeref`/`Slice` aren't producer-built.
+- There is **one undifferentiated memory chain with no location identity**, so the
+  code has **two** precision points, not four.
+- **The kill-set lattice has no consumer anywhere.** `lower_value`'s model is
+  `_reads_mutable_location` cache-bypass (`Context.pm:277-352`) plus
+  `_freeze_memory_reads` (`:2577`). Nothing reads a kill set.
+
+That is the world-token pattern again: an elegant typed structure whose consumer does
+not exist. **The lattice stays in this doc as a roadmap, explicitly labelled as one,
+and is built only when something consumes it.**
+
+What survives intact: **Graal's single-node contract is already Chalk's shape**, and
+a call is the general case of which a store is the specialised one. That framing is
+correct and still drives the design — it just does not justify building the lattice now.
+
+---
+
+## Ordering
+
+### Slice 0 — recursion guard (NOT F3; do it now)
+
+**On HEAD, the compiler HANGS on self-recursion the inliner accepts.** Measured, true
+exit **124**, never terminates:
 
 ```
-kills nothing         pure node — no memory edge, floats freely
-kills one location    a store (Assign)
-kills what X kills    a call to an analyzed callee
-kills everything      a call to an unknown callee        <- the honest default
+sub f { my $n = shift; $n <= 0 ? 0 : f($n-1) }
+  -> Deep recursion on _lower_inlined_effects_then_value (Context.pm:4440)
+  -> Deep recursion on _lower_ternary (Context.pm:391)
+  -> timeout, exit 124
 ```
 
-It is the structural twin of the value lattice Chalk already has
-(`Int <: Num <: Str <: Scalar`, precision decreasing upward). **`kills everything` is
-the `Scalar` of memory.**
+There is no recursion guard in `_lower_call_direct` (`Context.pm:4355-4443`). This is
+a **live GAP-not-miscompile violation** — worse than a miscompile for a build system,
+because it never returns. ~5 lines: a callee-name set, `local`-scoped like `_arg_bind`,
+GAPping loudly on re-entry.
 
-Two consequences that shape everything below:
+Independent of F3. Ship it first regardless of what happens to the rest.
 
-1. **Inlining is a precision-increasing move on this lattice** — replace *kills
-   everything* with the specific set the body kills. That makes the inliner an
-   optimization in the strict sense: it can improve precision, never change meaning.
-2. **The eight GAP sites exist because the only available precision was total.**
-   Each is "callee has an effect I cannot represent at the callsite." The callsite
-   never needed the callee's *specific* effects — it needed one conservative
-   statement, with refinement optional.
+### Slice 1 — `program_mode` epilogue suppression (NOT F3)
 
-## Why Graal's contract, not C2's
-
-Both are Sea of Nodes; their calling contracts differ, and the difference is
-load-bearing for cost.
-
-| | C2 | Graal |
-|---|---|---|
-| call outputs | tuple + `Proj(Control/I_O/Memory/Value)` | one node |
-| return value | a projection | the node itself (carries a `Stamp`) |
-| memory effect | a projection | declared by interface + killed-location |
-| control | a projection | node class (fixed) |
-
-Verified directly at source (`InvokeNode.java`), because the research doc's Graal
-claims were in the `[UNVERIFIED]` set:
-
-```java
-public final class InvokeNode extends AbstractMemoryCheckpoint
-    implements Invoke, LIRLowerable, SingleMemoryKill, UncheckedInterfaceProvider
-
-@Override
-public LocationIdentity getKilledLocationIdentity() {
-    return identity;   // defaults to LocationIdentity.any()
-}
-```
-
-**Chalk is already shaped like Graal.** Its `Call` is a single node that is its own
-value, with `control_in`. And Chalk's memory-SSA already uses Graal's exact
-convention — the store node *is* the memory version, and readers take it as their
-memory input (measured):
+The executable gate is 1/5, and **three of the four failures are the type-tag
+epilogue**, not effect ordering:
 
 ```
-13 Assign    ctrl=12 inputs=[6,1]      <- the store
-14 Subscript inputs=[4,5,13]           <- post-store read: memory input IS the store
+hello        perl "hi\n"   vs chalk "hi\nUndef:\n"
+two-prints   perl "a\nb\n" vs chalk "a\nb\nUndef:\n"
+arith-print  perl "5\n"    vs chalk "5\nInt:5\n"
 ```
 
-Chalk even does this for calls *already*, once: `FromOptree.pm:2170` calls
-`$sim->set_memory($call)` for `shift`/`pop`. The general rule exists, instantiated
-for the two builtins where the effect was obvious, never named.
+One branch at `LLVM.pm:1290` plus a `lower()` option, **default off**, measured in a
+shadow tree: **gate 1/5 → 4/5.** The gate's own header already names this
+(`executable-gate.t:33-35`).
 
-**Cost difference (measured):** C2's shape needs `Proj(Value)`, which changes what a
-`Return`'s value input is, which invalidates **57 ir-block references** across four
-corpus files (41 in `classes.md`). Graal's shape needs none of that.
+Must stay default-off: the corpus behavior leg reads the tag via `_expected_epilogue`.
 
-**Honest trade-off:** C2's `Proj(Value)` would make the return type a property of a
-separate node, dissolving the recursion repr-cycle described below. Graal's shape
-keeps the value on the `Call`, so that cycle must still be solved. We accept the
-cycle to avoid the ir-block churn.
+The fifth program, `explicit-exit`, is `dispatch_kind: "builtin", name: "exit"` — a
+builtin, which F3 does not touch.
 
-## The design
+**This is the largest verified movement of the product gate available, and it is
+smaller than any part of F3.**
 
-**`Call` gains the memory contract `Assign` already has, defaulting to
-kills-everything.**
+### Slice 2 — F3 proper: real `define` + `call` as a FALLBACK
 
-- A `Call` takes a **memory input** and **is** the new memory version — identical to
-  how `Assign` behaves today.
-- Default kill set is *everything*. Narrowing is a later optimization, not part of
-  this work.
-- No new node type, no projections, no change to `control_in`, no change to `Proj`.
-- `define` + `call` emission in the backend, with symbol mangling for `main::f`.
-- The inliner is **disabled** for this slice (decision: perigrin, 2026-08-06);
-  re-enabled later as an optimization that must prove it preserves semantics.
+**Scope:** a non-recursive, effect-free, single-argument callee, emitted as a real
+`define` + `call` **at the existing GAP sites**. The inliner stays on.
 
-### Why the memory contract must ship *with* the call mechanism
+- Reuse `_emit_class_registry_ir`'s body-lowering shape (`LLVM.pm:780-831`) with value
+  params instead of `(i8* %self)`, and a direct symbol instead of a vtable slot.
+- Quote symbols (`@"main::f"`), no mangling.
+- Reuse `_collect_straight_line_effect_chain` (`Context.pm:4459`) over the callee
+  graph to **GAP on any storing callee** — that guard already exists and already
+  fires, measured on two shapes.
+- Zero producer change. Zero cross-repo risk.
 
-`fib` has no memory effects, so `fib` alone would not exercise it. But the moment
-calls stop being inlined, a callee that stores has nothing forcing a later load to
-observe its writes — today that is masked because inlining threads the callee's
-stores into the caller. **Shipping call emission without the memory contract is a
-silent miscompile for any storing callee.**
+**Acceptance:** unit tests in `t/bootstrap/ir/` over a hand-built two-graph MOP
+asserting the emitted `.ll` contains `define`/`call` and `lli` prints the right value;
+plus `subs.md` **F12 flips GAP → GREEN**; corpus floor **157 → 158**.
 
-This is the effect-chain postmortem's lesson applied in advance: *a guard on one side
-of a boundary does not close a class.* The slice therefore requires a corpus case
-with a **storing callee**, not just `fib`.
+**Why fallback rather than disabling the inliner.** Disabling it strands ~320 lines
+that landed three weeks ago — `_lower_inlined_effects_then_value`, the `{cache}` /
+`_mut_read_memo` isolation (a hazard `cross_graph_id_keyed_cache_collisions` records
+as SYSTEMIC), `af92594b`'s memoization, and 230 lines of tests that test nothing else
+— and routes **9 already-green `subs` cases** through brand-new code. A fallback ships
+exercised by F12 plus the unit tests. Disabling is risk transfer, not coverage;
+it is a decision that should be *paid for by* evidence the call path is right, not the
+thing you do to get that evidence.
 
-### The recursion repr cycle
+### Slice 3 — recursion
 
-`fib` GAPs today at `Context.pm:687` — `GAP: Add node has no representation at
-lowering time` — for `fib($n-1) + fib($n-2)`. The `Add` has no repr because the
-recursive `Call` has no repr, which depends on the `Add`. A cycle.
+`fib(10) == 55`, isolated. The single new question is the repr cycle, and per v1's
+refutation it needs **both** a seed and a join-rule change (exclude the Bool condition
+from `TernaryExpr`'s join), plus a decision about write-once stamping. Failing loudly
+is guaranteed by Slice 0.
 
-Resolution: seed a recursive call's return repr at the lattice **bottom** and widen
-to fixpoint. `%_REPR_RANK` has height 3 and join is monotone, so it converges in ≤3
-rounds; for `fib` (`$n` Int, `Add(Int,Int)` Int) it converges in one. The existing
-`_seed_direct_call_arg_reprs` (`Serialize/JSON.pm:606`) already runs to a fixpoint at
-`:727` — this extends that machinery rather than adding a new pass.
+### Slice 4 — the memory contract, when something needs it
 
-**Scope discipline:** this is *not* the operation type library. The library is
-designed in `2026-07-19-runtime-mop-coerce-multimethod.md` (types reified in the MOP;
-`coerce` as a vtable on `(From,To)`); its fragments today are `%OP_REQUIRED_REPR`,
-`%OP_PER_POSITION_REPR`, `%_SEED_REPR`, `%STAMP_TO_REPR`, `%_REPR_RANK` and the
-join/same rules, scattered across two files. F3 needs *one* narrow capability from
-that future library and must not build the library.
+When a storing callee must actually lower. Priced honestly as cross-repo (13
+`set_memory` sites, all producer-side; zero in chalk `lib/Chalk/IR/`), and framed as
+**`_freeze_memory_reads($call)` mirroring `_is_array_mutating_call`** (`:2569-2575`),
+not as a lattice.
 
-## Slice 1 — acceptance
+The hazard is real and structurally confirmed — one `Subscript` node serves both the
+pre-call and post-call read, and no emission strategy gives one node two values. Note
+**`_lower_call_method` already emits real calls today**, so the direct-call path is
+not the only exposure; a guard on one side of a boundary does not close a class.
 
-**`fib(10)` compiles and prints `55`, matching perl on stdout and exit status**, plus
-a storing-callee case proving the memory contract.
+**If the memory input is added, it MUST be appended trailing** — measured: trailing
+passes the shape leg, prepending fails with "rooted wiring mismatch at return value."
+The producer's own comment at `FromOptree.pm:2154` says memory *leads*, while the code
+trails it. Pin the convention.
 
-Measured starting state:
-- perl: `fib(10)` = **55**
-- the producer **already emits a `main::fib` graph** — recursion is supported
-  producer-side; the ceiling is entirely in chalk
-- chalk today: `GAP: Add node has no representation at lowering time`
+### Slice 5 — retire the inliner
 
-Note: `docs/plans/2026-07-19-bare-file-protocol-toplevel-entry.md` cites *"subval.t's
-`sub fib`"* as the proof case. **`t/base/subval.t` does not exist in the tree.** The
-claim is true — reproduced with a local `fib` — but the citation is stale and should
-be corrected there.
+Its own step, with its own proof, once the call path carries the 9 green `subs` cases.
+
+---
+
+## What outranks all of this for programs-unblocked
+
+Recorded so this design is not read as the top priority it is not:
+
+- **multi-argument callees** — `is($a,$b)`; the corpus names it as the t/op blocker
+  (`subs.md:187`), and F3 as scoped leaves the one-argument ceiling in place
+- ring histogram top three: **loop without a lowerable condition** (5 files),
+  **producer emitted no `main::__main__`** (4 files), **`foreach` variants** (4 files)
 
 ## Verification
 
-- **Corpus gate**, floor 157, three legs, coordinator-self-verified on committed
-  HEAD. Never a subagent report.
-- **ir-block churn is expected to be ZERO, for two independently-verified reasons.**
-  (a) The shape leg reads the loaded IR graph (`son-corpus-wide.t:154` passes
-  `$g->returns->[0]`), not the emitted LLVM — so *disabling the inliner*, a backend
-  decision, cannot move it. (b) ir-blocks spell a `Call` by **attributes, not
-  operands** — `%call = Call(dispatch_kind: "direct", name: "main::foo") :Int` — so
-  *adding a memory input* does not invalidate them either. This matters because the
-  shape leg's subset semantics tolerate extra **nodes** but NOT extra **operands on a
-  matched node**; `Call` is immune only because its ir-block form is attribute-shaped.
-  **Verify this empirically at implementation time rather than trusting it** — it is
-  the assumption that makes this design cheap, and if it is wrong the cost returns.
-- **15 of 160 corpus cases declare a sub** — the behavioral blast radius of turning
-  off inlining.
-- Real calls become the **default** path, so the gate exercises them everywhere. The
-  alternative (calls only where the inliner declines) would ship F3 unexercised,
-  which is how F2 nearly shipped silently.
+- Corpus gate, floor 157, three legs, coordinator-self-verified on committed HEAD.
+  Never a subagent report.
+- ir-block churn is zero for gate mechanics — the shape leg reads the loaded IR graph
+  (`son-corpus-wide.t:154`), and `parse_l_verdict_from_ir` only distinguishes
+  GREEN from GAP. **Re-verify empirically at implementation time**; it is the
+  assumption that makes Slice 2 cheap.
+- Cross-repo work (Slice 4 only) must be serialized — no producer version pin
+  (`son-corpus-wide.t:17` resolves it as a live filesystem path).
 
 ## Out of scope
 
-- **The operation type library / MOP type reification** — `runtime-mop-pilot` owns
-  it, and its own pilot has a known blocker (the `ByteBuf` byte-write Level-0
-  primitive).
-- **Narrowing the kill set** below "everything" — a later optimization.
-- **Re-enabling the inliner** — a later slice, with its own proof that it preserves
-  semantics.
-- **Bool / aggregate / `Scalar` argument joins.** Their join exists (`Scalar`) but is
-  not *representable* — the backend explicitly refuses `repr=Scalar`. GAP, and the
-  reason is representational, not lattice-theoretic.
-- **A separate `I_O` chain.** C2 separates I/O from memory because I/O totally
-  serializes while memory can be sliced. Chalk does not reorder effects at all;
-  `control_in` already totally orders them. Splitting `I_O` out is additive if GCM
-  ever needs it.
-
-## Risks
-
-1. **Cross-repo, no producer version pin.** `son-corpus-wide.t:17` resolves the
-   producer as a live filesystem path. Execution must be serialized — one agent at a
-   time — and every commit records its paired SHA in prose.
-2. **The memory contract must land with, not after, call emission** (see above).
-3. **60 `Call` references in `Target/LLVM/Context.pm`** are the migration surface.
-   Construction is cheap (8 sites across both repos); consumption is not.
-4. **The repr fixpoint is the least-proven part.** Seed-at-bottom is standard, but no
-   Chalk pass does it today.
+The operation type library (`runtime-mop-pilot`); narrowing the kill set; `@_`
+modelling and multi-argument callees; Bool/aggregate/`Scalar` argument joins (their
+join is `Scalar`, which exists but is not *representable* — the backend refuses
+`repr=Scalar`); a separate `I_O` chain.
