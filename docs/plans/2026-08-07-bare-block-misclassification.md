@@ -1,122 +1,153 @@
-# Plan: a bare block is a lexical scope, not a loop
+# Plan: a back-edge-less `enterloop` is a lexical scope, not a loop
 
-**Status:** plan, awaiting assessment. No implementation.
-**Source:** `docs/2026-08-07-loop-condition-blocker-audit.md` (read-only characterisation).
-**Repos:** chalk `phase5-capstone` @ `48099a09`, perl5-son `pu` @ `f9273138`.
+**Status:** plan v2, double-assessed (`crochet:assess` + ponytail), ready to refine.
+**Source:** `docs/2026-08-07-loop-condition-blocker-audit.md` (provenance marked per claim).
+**Repos:** chalk `phase5-capstone`, perl5-son `pu` @ `f9273138`.
+
+## What this actually is — v1 framed it too small
+
+v1 called this "bare blocks." Measured, the misclassified shape is **every block-form
+`class` and `package` declaration**:
+
+```
+package Foo { ... }   ->  enterloop(next->5 last->5)     back-edge-less
+class Foo   { ... }   ->  enterloop(next->5 last->5)     back-edge-less
+while (...) { ... }   ->  enterloop(next->a last->f)     a real loop
+```
+
+**159 of chalk's 166 `lib/` files contain that shape**, and `CLAUDE.md` mandates
+`feature class`. This sits under the entire self-hosting path.
 
 ## The defect
 
-A bare block — `{ ... }` at statement level, one of Perl's most basic constructs — has
-**three** failure modes depending on its contents. All reproduced on committed HEAD:
+A back-edge-less `enterloop` is routed into `_translate_while_loop`
+(`SoN/FromOptree.pm:567`), producing three outcomes depending on contents:
 
 ```perl
-{ my $z = 5; print "b\n"; }
-  -> GAP: loop without a lowerable condition                    (acceptable)
-
-my $c = 0; { my $x = 0; $x = 1 if $c; print "after\n"; } print "end\n";
-  perl  -> "after\nend"
-  chalk -> "end"          NO GAP                                (SILENT MISCOMPILE)
-
-my $c = 1; { same block }
-  -> lli died on signal 11                                      (SEGFAULT)
+{ my $z = 5; print "b\n"; }                              -> GAP (acceptable)
+my $c=0; { print "first\n" if $c; print "after\n"; }     -> prints nothing, NO GAP   (SILENT MISCOMPILE)
+my $c=1; { same }                                        -> lli died on signal 11    (SEGFAULT)
 ```
 
-The middle case is a **GAP-not-miscompile invariant violation** — the same class as the
-four miscompiles `effect-chain-fix` just closed, and the reason this work is worth doing.
+The trigger is **any `and`/`or` inside the block followed by more statements** — v1 said
+"statement-modifier `if`", but a full `if () { }` block triggers it too. `_walk_loop_body`
+accepts the `and` as the loop's header condition (`:3249`, then `:3284` does
+`$op = $op->other`), making the true-arm the "body" and dropping everything after it.
 
-## Root cause
+**Live-hazard status, stated honestly:** across the 31-file ring, the current FAIL count
+is **0** — every affected file GAPs on a plain block before reaching a conditional one.
+The miscompile fires in constructed probes and in nothing yet measured. It is a loaded
+gun, not a fired one — but it is pointed at `class BLOCK`.
 
-Perl compiles `{ ... }` to `enterloop`/`leaveloop`. The producer routes **every**
-`enterloop` into `_translate_while_loop` (`~/dev/perl5-son/lib/SoN/FromOptree.pm:567-572`).
+## The fix — 6 lines, one classification site
 
-- `_walk_loop_body` assigns `$exit_proj` only at `:3131` or `:3274`. A bare block reaches
-  neither, terminates at `leaveloop` (`:3056`), and the GAP fires at `:2698`.
-- Worse: `_walk_loop_body:3249` accepts a statement-modifier `if` **as the loop's header
-  condition**. The remainder of the block then becomes loop body that never executes —
-  which is the silent drop, and on the true polarity a malformed graph that segfaults.
+A bare block ⟺ `enterloop->nextop == enterloop->lastop` (both `leaveloop`). A real
+`while`/`until`/C-style `for` has `nextop = unstack`; `foreach` never reaches the site
+(`enteriter`); `do {} while` goes through `enter`/`leave`.
 
-**The fix is a classification correction, not new machinery:** an `enterloop` with **no
-back-edge** is a lexical scope, not a loop. The correct handling already exists next
-door, in the `enter`/`leave` path at `:582-597`.
+At `FromOptree.pm:567`:
 
-## Honest payoff — read this before writing any AC
+```perl
+my $nx = $op->can('nextop') ? $op->nextop : undef;
+my $ls = $op->can('lastop') ? $op->lastop : undef;
+if (ref $nx && $$nx && ref $ls && $$ls && $$nx == $$ls) {
+    $op = $op->next;
+    next;
+}
+```
 
-**The payoff is CORRECTNESS and DIAGNOSTICS. It is NOT pass-count.**
+The body then walks inline and terminates on `leaveloop`, which the main walk **already
+handles** at `:665-668`. The same back-edge discriminator already exists 250 lines up the
+file in `_is_postfix_while` (`:2321`) — this is a precedented shape, not an invention.
 
-Measured under a bare-block-transparent producer probe:
+**Note the discriminator is `nextop == lastop`, NOT "no back-edge"** — a bare block does
+have `redoop` set. v1's wording would have sent an implementer to the wrong op field.
+
+### Why NOT "GAP loudly on all bare blocks" (the smaller candidate, rejected)
+
+Two lines cheaper, closes the same two bugs — and **wrong**, for two measured reasons:
+
+1. It would GAP on **159 of 166** of this project's own `lib/` files, blocking the
+   self-hosting path.
+2. It is **unpinnable**. `son-corpus-wide.t:133-139` `pass()`es a GAP-declared case
+   *without running its source*, so every corpus case written against it would be a
+   vacuous pass. Two lines is not a saving worth an unenforceable guard.
+
+## Corpus — four GREEN cases, all executing
+
+v1 proposed three cases and **two of them cannot work.** `$x = 1 if $c` hits a
+*pre-existing unrelated* blocker — `FromOptree.pm:463`, "void-context 'and' arm combines
+a void call with a scalar rebind" — which fires with no bare block present at all. Under
+the fix those shapes become GAP-declared, hence `pass()`ed without running, hence
+vacuous. v1 called them "the cases that prove the miscompile closed"; they would prove
+nothing.
+
+The deliverable set, all measured GREEN under the fix:
+
+| case | source | HEAD |
+|---|---|---|
+| 1 | `{ my $z = 5; print "b\n"; }` | GAP |
+| 2 | `package Foo { print "in\n" }` | GAP |
+| 3 | `my $c=0; { print "first\n" if $c; print "after\n"; }` | **FAIL — silent drop** |
+| 4 | `my $c=1; { same }` | **signal 11** |
+
+Cases 3/4 are the genuine bilateral pair: a **void print** in the modifier arm instead of
+a scalar rebind sidesteps `:463` entirely, and both polarities go GREEN.
+
+**This also resolves the segfault-expressibility problem.** v1 said the segfault needed an
+out-of-band check because `Mode1Runner.pm:167` turns nonzero lli exits into skips. True of
+v1's case — irrelevant here: after the fix case 4 exits 0 with correct stdout, so the gate
+compares it normally. **No exit-code oracle needed.**
+
+Floor **157 → 161**.
+
+## Honest payoff — no AC may claim files-unblocked
 
 | metric | before | after |
 |---|---|---|
+| corpus gate | 157/157/157/157 | **161** (4 new GREEN) |
 | ring files passing | 1 of 31 | **1 of 31** |
-| ring files whose blocker CHANGES | — | 7 (`cmp.t`, `opsubs.t`, `our.t`, `package.t`, `concat.t`, `fold.t`, `proto.t`) |
-| distinct symptom messages collapsed | 7 + a `StackSim` internal error | 1 correct path |
+| ring FAIL | 0 | 0 |
+| files whose blocker advances | — | 7 (`cmp.t`, `opsubs.t`, `our.t`, `package.t`, `concat.t`, `fold.t`, `proto.t`) |
 
-**Zero files are unblocked.** Every affected file advances exactly one step, with 5-8
-further distinct blockers visible per file (`package.t` ≥5, the others ≥3).
+**Zero files unblocked.** The 7 advance one step and reveal their next honest blocker;
+`RingWorklist`'s own ABOUTME says the ring exists to *be* the next-feature worklist, so
+that is the harness working as designed. Ship it as an observation, **never as an AC**.
 
-No AC may claim files-unblocked. Ranking work by that number is the proxy-metric error
-this project has now made three times — see memory `feedback_proxy_metrics`. The
-justification here is that a basic construct silently drops statements and segfaults,
-which is the north star itself (does the program produce the right answer), not a stand-in
-for it.
-
-## Scope
-
-**In:** the `enterloop` classification at `FromOptree.pm:567-572`, routing a
-back-edge-less `enterloop` to the existing lexical-scope path; corpus cases pinning the
-three shapes; whatever falls out of `_walk_loop_body` no longer being handed non-loops.
-
-**Out, and do NOT bundle:**
-
-- **Shape 2** — `t/cmd/for.t`, a headless loop whose only exit is a non-first-statement
-  `last if`. Genuinely independent: `:3113-3116` gates head-of-body hoisting on
-  `$stmt_count == 1`, and the mid-body handler (`:3162-3246`) builds an `If` and a
-  break-proj but never assigns `$exit_proj`. **It already has a ready-made RED** —
-  corpus **T4c** (`t/corpus/mdtest/control-flow.md:1412`), whose source is the exact
-  trigger.
-- **The corpus contract gap** — `son-corpus-wide.t:133-139` `pass()`es a GAP-declared
-  case **without running its source**, so neither GAP-message drift nor a GAP-declared
-  case that has silently started working is detectable. T4c's declared message ("last not
-  at the head of a loop body") already does not match what the producer emits ("loop
-  without a lowerable condition"). **File it; do not fix it here.**
-
-## Corpus reality
-
-There is **no existing mdtest case for a statement-level bare block** — grep over all 12
-files returns nothing. `D10` covers `do { }`, which is `enter`/`leave`, a different path,
-already GREEN.
-
-So this milestone must **add** its corpus cases. The three reproduced shapes are the
-natural bilateral set:
-
-1. plain bare block with a print (currently GAP) → GREEN
-2. bare block with a statement-modifier `if`, **false** polarity (currently silent drop)
-3. the same, **true** polarity (currently segfault)
-
-(2) and (3) are the bilateral pair the project's coverage rule requires — one on each
-side of the guard — and they are the cases that prove the miscompile closed rather than
-merely moved.
+**v1's diagnostics claim was backwards and is deleted.** v1 credited this fix with
+collapsing "7 messages plus a StackSim internal error" into one. Measured: baseline has
+**4** distinct messages across those files, **no `StackSim`/"Stack underflow" appears
+anywhere in the ring**, and the fix produces **7 distinct** messages (more, not fewer).
+Message-collapsing is the *rejected* GAP-loudly variant's property. v1 credited this fix
+with the alternative's benefit.
 
 ## Verification
 
-- Corpus gate floor **157**, three legs, **coordinator-self-verified on committed HEAD**.
-  Never a subagent report. Floor rises by however many GREEN cases this adds.
-- The silent-miscompile and segfault shapes must be verified **behaviorally against
-  perl** — stdout and exit status — not by inspecting emitted LLVM. The harness has no
-  exit-code oracle (`Mode1Runner.pm:167`), so the segfault case needs an out-of-band
-  check.
-- Executable gate must stay at **4/5**.
+- Corpus gate floor 157 → 161, three legs, **coordinator-self-verified on committed
+  HEAD**. Never a subagent report.
+- **Regression risk measured at zero**: the fix applied to a shadow producer gives
+  `gate-green=157 behavior=157 shape=157 invariant=157 gap-declared=21 worklist=0`,
+  per-topic breakdown byte-identical to baseline, zero `not ok`; ring `PASS=1 SKIP=30
+  FAIL=0`, no file regressed. All D2\*/D3\*/T4\* loop cases green.
+- A bare block *inside* a real loop still GAPs honestly (`_walk_loop_body:3097`,
+  untouched) — verified residual and loud.
+- Executable gate stays 4/5 (free — all five programs are one-liners with no blocks).
+
+## Out of scope — do not bundle
+
+- **Shape 2** — `t/cmd/for.t`, headless loop whose only exit is a non-first-statement
+  `last if`. It is a *real* loop (`nextop=unstack`), untouched by this fix; blocker
+  verified unchanged. Ready-made RED already exists: corpus **T4c**.
+- **The corpus contract gap** — `son-corpus-wide.t:133-139` `pass()`es GAP-declared cases
+  without running their source. It is the reason v1's cases 2/3 were unshippable. **File
+  it**; T4c's declared message already does not match what the producer emits.
 
 ## Risks
 
-1. **Cross-repo with no producer version pin.** `son-corpus-wide.t:17` resolves the
-   producer as a live filesystem path, so "chalk first" is wall-clock, not repo state.
-   **Serialize execution — one agent at a time** — and record the paired SHA in every
-   commit message.
-2. **The classification change is upstream of every loop.** `_translate_while_loop`
-   currently receives all `enterloop`s; narrowing its input set could change behaviour for
-   real loops, not just bare blocks. The corpus's existing loop cases (D2*, D3*, T4*) are
-   the regression surface.
-3. **`_walk_loop_body:3249` may be load-bearing for real loops.** Accepting a
-   statement-modifier `if` as a header condition is wrong for a bare block; verify it is
-   not the mechanism some real loop shape depends on before changing or bypassing it.
+1. **Cross-repo, no producer version pin** — and this one bit the reviewer: a concurrent
+   session wiped its shadow producer mid-run, producing 31 spurious "B::SoN produced no
+   JSON". **Serialize execution, one agent at a time**, paired SHA in every commit.
+2. ~~Upstream of every loop~~ — **measured non-risk**: zero regression across 157 corpus
+   cases and 31 ring files.
+3. ~~`_walk_loop_body:3249` load-bearing~~ — **answered**: the fix narrows the walker's
+   input set and does not touch the walker.
