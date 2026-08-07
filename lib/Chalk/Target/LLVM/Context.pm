@@ -4356,6 +4356,26 @@ sub _lower_call_direct {
     my ($self, $node) = @_;
 
     my $name  = $node->name;
+
+    # Inlining is the only direct-call mechanism, so a self- or mutually-
+    # recursive callee has no terminating lowering: we inline the body, which
+    # contains the same Call, which inlines again. Without this guard the
+    # compiler does not fail — it NEVER RETURNS (measured: `Deep recursion on
+    # _lower_inlined_effects_then_value`, then a hang). A non-terminating
+    # compiler violates GAP-not-miscompile more seriously than a wrong answer
+    # does, because no gate can catch it.
+    #
+    # The frame is local-scoped so it unwinds with the inline (same pattern as
+    # _arg_bind below), which keeps a sub called twice at DIFFERENT call sites
+    # legal — only re-entering a callee already on the inline stack is a cycle.
+    # Real `define`+`call` emission removes the need for this guard by giving
+    # recursion a terminating lowering; until then it GAPs loudly.
+    die "GAP: direct call to '$name' is recursive — inlining is the only "
+      . "direct-call mechanism and cannot terminate on a cycle. Real "
+      . "define+call emission is required to lower this."
+        if $self->{_inlining} && $self->{_inlining}{$name};
+    local $self->{_inlining} = { ($self->{_inlining} // {})->%*, $name => 1 };
+
     my $graph = $node->can('resolved_graph') ? $node->resolved_graph : undef;
     die "GAP: direct call to '$name' has no resolved callee graph — the loader "
       . "could not resolve the sub name to a graph (an unknown or builtin sub)."
