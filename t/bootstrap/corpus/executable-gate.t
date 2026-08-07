@@ -30,15 +30,17 @@ use Chalk::Target::LLVM ();
 #   - the `sub __main__` source-text wrap (Mode1Runner::_lower_wrapped). A file
 #     must compile AS ITSELF; rewriting the source to find an entry point is the
 #     thing we are trying to stop doing.
-#   - the `Int:`/`Str:` epilogue. Mode1Runner STRIPS it; a real program's stdout
-#     is what the program printed, full stop.
+#   - the `Int:`/`Str:` epilogue. Mode1Runner STRIPS it after the fact for the
+#     corpus's return-value oracle; this gate instead lowers with
+#     `program_mode => 1` so the epilogue is never EMITTED — a real program's
+#     stdout is what the program printed, full stop.
 #   - nonzero exit as "lowering failed". Mode1Runner treats any nonzero lli exit
 #     as an error (Mode1Runner.pm:167). Exit status is part of the CONTRACT:
 #     `die` must exit 255, `exit 3` must exit 3.
 #
-# EXPECT THIS TO REPORT 0 FOR A WHILE. That is the point — it is honest about a
-# capability that does not exist yet, and it names the first blocker per program
-# so the number becomes a roadmap. Raise the floor as programs start passing.
+# A program that cannot yet compile is reported BLOCKED with a named reason,
+# not silently skipped — the number below is an honest roadmap, not a vanity
+# metric. Raise the floor as more programs pass.
 # ---------------------------------------------------------------------------
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
@@ -94,7 +96,7 @@ sub run_chalk ($path) {
         or return (undef, undef, 'entry graph did not load');
     my $ret = $g->returns->[0] or return (undef, undef, 'entry graph has no Return');
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, (defined $mop ? (mop => $mop) : ())) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1, (defined $mop ? (mop => $mop) : ())) };
     return (undef, undef, "lower: $@") if $@;
 
     my ($lfh, $lltmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -149,12 +151,15 @@ diag('  exactly: no source-text wrap, no epilogue strip, no exit-code');
 diag('  tolerance. Raise the floor below as programs start passing.');
 
 # The floor. It starts where the capability actually is, and may only rise.
-cmp_ok($passing, '>=', 1,
-    'executable-gate floor (1; die-aborts now compiles and runs as a standalone '
-  . 'program (F1 fixed: the producer Unwind now threads control via '
-  . 'control_in instead of stranding it as a flattened input operand, so the '
-  . 'preceding print survives the die). The remaining programs need the entry '
-  . 'protocol (main_root -> __PROGRAM__) and true define+call. Raise this as '
-  . 'more programs pass.)');
+cmp_ok($passing, '>=', 4,
+    'executable-gate floor (4; hello/two-prints/arith-print/die-aborts now compile '
+  . 'and run as standalone programs. The Int/Str/Bool/Undef return-value type-tag '
+  . 'epilogue -- needed only so the corpus harness can read back a fragment\'s '
+  . 'return value -- is no longer being printed as if it were program output: '
+  . 'lower() takes program_mode => 1 to suppress it at emission time (defaults '
+  . 'off; the corpus reads the tag as its oracle). The remaining program, '
+  . 'explicit-exit, is blocked on dispatch_kind: "builtin" name: "exit" -- an '
+  . 'unlowered builtin Call, not an epilogue or entry-protocol issue. Raise this '
+  . 'as more programs pass.)');
 
 done_testing();
