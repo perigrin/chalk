@@ -1668,3 +1668,147 @@ context: scalar
 return %otern
 L: GREEN
 ```
+
+## T10 bare block as a lexical scope (no back-edge)
+
+Perl compiles a bare `{ ... }` block to `enterloop`/`leaveloop` — the SAME opcode
+pair a `while` loop uses — but a bare block's `nextop` and `lastop` both point at
+the same `leaveloop`, i.e. there is no back-edge. The producer previously routed
+every `enterloop` into the while-loop translator regardless of this, which could
+silently drop the block's trailing statements or, worse, build a malformed loop
+graph (see T12/T13). The fix discriminates on `nextop == lastop`: a back-edge-less
+`enterloop` is walked inline as a lexical scope, not a loop, so the block's
+contents thread straight onto the enclosing control chain exactly as if the
+braces were not there. The block's own value is the last statement's value —
+here `print "b\n"`'s own Bool return, matching perl's `do { ... }` semantics.
+
+```perl
+# source
+{ my $z = 5; print "b\n"; }
+```
+
+```behavior
+stdout: b\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%z  = Constant(5) :Int
+%sb = Constant("b\n") :Str
+%pb = Print(%sb) :Bool
+return %pb
+L: GREEN
+```
+
+## T11 block-form package declaration (same enterloop shape as T10)
+
+`package Foo { ... }` compiles to the identical back-edge-less `enterloop` shape
+as a bare block (T10) — `feature class`'s block-form `class Foo { ... }` compiles
+the same way, which is why 159 of this project's own 166 `lib/` files contain this
+opcode shape. Before the fix this could misclassify as a loop; after the fix it is
+recognized as a lexical scope and lowers on the same path as T10 rather than
+miscompiling. `t/corpus/mdtest/classes.md`'s block-form `class Foo { ... }` cases
+are unaffected by this fix (they compile per-package, never reaching the
+`__PROGRAM__` path this shape touches) — this case pins the top-level statement
+path directly.
+
+```perl
+# source
+package Foo { print "in\n" }
+```
+
+```behavior
+stdout: in\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%si = Constant("in\n") :Str
+%pi = Print(%si) :Bool
+return %pi
+L: GREEN
+```
+
+## T12 bilateral pair: guarded void print inside a bare block, guard FALSE (was silent drop)
+
+The load-bearing bilateral case. A bare block containing a statement-modifier
+`if` guarding a void `print`, followed by a second statement in the SAME block —
+`{ print "first\n" if $c; print "after\n"; }` — then a THIRD print after the
+block closes. Before the fix, `_walk_loop_body` accepted the modifier's `and` op
+as the loop HEADER CONDITION (since every `enterloop` was routed to the while-loop
+translator), so everything after it — including `print "after\n"` — became
+unreachable loop "body" that never ran: a SILENT DROP with no GAP raised. With
+`$c = 0` the guard is false, so perl's own output is just `after` then `end` (the
+guarded print never fires on this polarity either) — proving this case pins the
+"after" print's SURVIVAL through the block boundary, not the guard's polarity.
+See T13 for the guard-TRUE bilateral twin (which additionally proves the guarded
+print firing). The arm uses a void PRINT, not a scalar rebind, to sidestep an
+unrelated pre-existing blocker (`FromOptree.pm:463`, "void-context 'and' arm
+combines a void call with a scalar rebind") that fires with no bare block present
+at all.
+
+```perl
+# source
+my $c = 0;
+{ print "first\n" if $c; print "after\n"; }
+print "end\n";
+1
+```
+
+```behavior
+stdout: after\nend\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%c0 = Constant(0) :Int
+%sf = Constant("first\n") :Str
+%pf = Print(%sf) :Bool
+%sa = Constant("after\n") :Str
+%pa = Print(%sa) :Bool
+%se = Constant("end\n") :Str
+%pe = Print(%se) :Bool
+%c1 = Constant(1) :Int
+return %c1
+L: GREEN
+```
+
+## T13 bilateral pair: guarded void print inside a bare block, guard TRUE (was signal 11)
+
+The guard-TRUE twin of T12. With `$c = 1`, the SAME bare-block shape's guarded
+print now fires: perl's output is `first`, `after`, `end`. Before the fix this
+polarity did not silently drop output — it built a malformed loop graph from the
+misclassified `enterloop` and `lli` died on **signal 11**. Together T12/T13 are
+the genuine bilateral pair the fix requires: one polarity proves the silent-drop
+closed, the other proves the segfault closed, over the identical source shape
+with only the guard's value flipped.
+
+```perl
+# source
+my $c = 1;
+{ print "first\n" if $c; print "after\n"; }
+print "end\n";
+1
+```
+
+```behavior
+stdout: first\nafter\nend\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%c1a = Constant(1) :Int
+%sf  = Constant("first\n") :Str
+%pf  = Print(%sf) :Bool
+%sa  = Constant("after\n") :Str
+%pa  = Print(%sa) :Bool
+%se  = Constant("end\n") :Str
+%pe  = Print(%se) :Bool
+%c1  = Constant(1) :Int
+return %c1
+L: GREEN
+```
