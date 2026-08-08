@@ -6,9 +6,21 @@ measurement behind it. Nothing here was fixed by that milestone — these are
 filed so they are findable on their own rather than buried in a plan that will
 be closed out.
 
+Extended 2026-08-08 by the `bare-block-classification` milestone (Part A3, Part D).
+
 ---
 
 # Part A — gate and harness defects
+
+**THREE GATE BLIND SPOTS, found in two consecutive milestones.** Individually small,
+collectively load-bearing: the corpus gate's green number is weaker than it looks in
+three independent ways.
+
+| # | site | what it cannot see |
+|---|---|---|
+| A1 | `MdtestCorpus.pm:1146-1159` | operands of **control-reachable** nodes |
+| A2 | `Mode1Runner.pm:167` | **exit status** — any nonzero lli exit becomes a skip |
+| A3 | `son-corpus-wide.t:133-139` | GAP-declared cases — `pass()`ed **without running** |
 
 ## A1: the shape leg does not check operands of CONTROL-REACHABLE nodes
 
@@ -138,3 +150,48 @@ side.
 side of a boundary does not close a class. "CLOSED" in a plan should name the
 side it closes, or it will be read as the whole thing — including by the person
 who wrote it.
+
+---
+
+# Part D — from `bare-block-classification` (2026-08-08)
+
+## D1: GAP-declared corpus cases `pass()` WITHOUT running their source
+
+`t/bootstrap/corpus/son-corpus-wide.t:133-139`:
+
+```perl
+if ($verdict eq 'GAP') { $tally{gap_declared}++; pass("$label: corpus-declared GAP (skipped)"); next; }
+```
+
+This is blind spot **A3** above. Two live consequences:
+
+1. **GAP-message drift is undetectable.** Corpus **T4c**
+   (`t/corpus/mdtest/control-flow.md:1412`) declares
+   `"last not at the head of a loop body"` while the producer actually emits
+   `"loop without a lowerable condition"`. Measured. Nothing notices.
+2. **A GAP-declared case that has silently STARTED WORKING is undetectable.** It keeps
+   passing as a declared gap forever and `gap_declared` never falls.
+
+Consequence #2 is not hypothetical — it fired during this very milestone. Two cases
+were drafted as `L: GAP` from the plan's wording; measuring the real producer output
+showed they **already lowered and executed correctly**, and they were corrected to GREEN
+before commit. Had they shipped as GAP they would have pinned nothing, forever, while
+reading as coverage.
+
+**Fix shape (not done here):** run a GAP-declared case's source anyway; assert it still
+GAPs, and assert the message matches the declared one. That converts both silent
+failures into loud ones. Cost is one corpus-gate run per GAP case (21 today).
+
+## D2: shape 2 — headless loop whose only exit is a non-first-statement `last if`
+
+`t/cmd/for.t`. `_walk_loop_body:3113-3116` gates head-of-body hoisting on
+`$stmt_count == 1`; with a statement before the `last if`, the mid-body handler
+(`:3162-3246`) builds an `If` and a break-proj but **never assigns `$exit_proj`**, so
+the loop GAPs with "loop without a lowerable condition".
+
+Independent of the bare-block fix — it is a REAL loop (`nextop = unstack`), so the
+classification change does not touch it (verified: blocker unchanged before and after).
+
+**Ready-made RED already exists: corpus T4c.** Note the interaction with D1 — T4c is
+GAP-declared, so it is `pass()`ed without running. If shape 2 were fixed tomorrow,
+nothing would notice.
