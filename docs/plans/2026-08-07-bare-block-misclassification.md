@@ -25,7 +25,9 @@ A back-edge-less `enterloop` is routed into `_translate_while_loop`
 
 ```perl
 { my $z = 5; print "b\n"; }                              -> GAP (acceptable)
-my $c=0; { print "first\n" if $c; print "after\n"; }     -> prints nothing, NO GAP   (SILENT MISCOMPILE)
+my $c=0; { print "first\n" if $c; print "after\n"; } print "end\n";
+  perl  -> "after\nend"
+  chalk -> "end"   both block prints stranded, NO GAP        (SILENT MISCOMPILE)
 my $c=1; { same }                                        -> lli died on signal 11    (SEGFAULT)
 ```
 
@@ -100,6 +102,42 @@ v1's case — irrelevant here: after the fix case 4 exits 0 with correct stdout,
 compares it normally. **No exit-code oracle needed.**
 
 Floor **157 → 161**.
+
+## MEASURED OUTCOME (2026-08-08, post-fix, coordinator-run)
+
+Landed: perl5-son `2162f8e` (6-line classification) + chalk `f3377a7f` (four corpus
+cases, floor 157 → 161).
+
+- post-fix ring: pass=1/31 unblocked=0 blocker-changed=5
+- post-fix distinct blocker messages: 20 (measured by stripping the filename and any
+  trailing ` at FILE:LINE` from each SKIP line in `ring-worklist.t`, then `sort -u`)
+- StackSim/Stack underflow observed in the ring: no
+
+**The headline number: `"loop without a lowerable condition"` fell from 5 files to 1.**
+That is the fix working — the remaining one is `t/cmd/for.t`, which is shape 2 (a real
+loop, deliberately out of scope, filed as Part D2 of the followups).
+
+**Both of v1's diagnostics claims were wrong, in opposite directions.** v1 said the fix
+collapses "7 messages plus a StackSim internal error" into 1; a reviewer then measured
+baseline at 4 and predicted 7 after. Measured reality: **20 distinct messages remain**,
+because each newly-reachable file reveals its own next blocker. Message-collapsing was
+never this fix's property — v1 credited it with the *rejected* GAP-loudly variant's
+behaviour, on a number the original (empty) audit asserted and nothing backed.
+
+**`StackSim`/"Stack underflow" is observed 0 times in the ring.** The string does exist
+in the source (`SoN/FromOptree/StackSim.pm:25`) — so the correct statement is
+"not observed", not "does not exist". v1 said the fix eliminates it; there was nothing
+to eliminate.
+
+**Two further corrections to v1's framing:**
+
+- v1 described the miscompiling shape as emitting no output at all. Measured: one line
+  survives (`end`); the two block prints are stranded. Off by one line, corrected above.
+- v1's "159 of 166 lib files / sits under the entire self-hosting path" **overstates the
+  lib/ axis**. The GAP always lands on `main::__PROGRAM__`, never on a class or method
+  unit, and `Phase5LibCoverage.pm:94` does not count `__PROGRAM__` — so this fix buys
+  **zero Phase-5 lib coverage**. Where it IS load-bearing is `__PROGRAM__` itself: the
+  bare-file / executable path. That is the truer and stronger claim.
 
 ## Honest payoff — no AC may claim files-unblocked
 
