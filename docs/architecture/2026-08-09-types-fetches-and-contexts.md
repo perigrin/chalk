@@ -42,11 +42,15 @@ corrected:
 | the silent bail at `JSON.pm:1105` is safe, since GAP-not-miscompile holds | the engine hiding that it failed to trace the flow |
 | 3 corpus cases carry untyped nodes and run, so an assertion would redden the gate | missed narrowing — a stopped clock, not a constraint to preserve |
 | the checker would reject `my $x = pop @a`, which is routine Perl | it rejects **unnarrowed** `pop`, correctly, and points at `@a` |
+| parameterisation must land *before* the checker, or it rejects `pop`/`keys` corpus-wide | those rejections are the **deliverable** — a worklist of under-determined code (§7) |
 
 The pattern is treating a **correct refusal as a cost to engineer around**. Every guard
-in the cordon is that instinct made permanent. A reader extending this design should
-expect the same pull, and should read a new refusal as evidence of a missing capability
-rather than as an obstacle to the change in hand.
+in the cordon is that instinct made permanent.
+
+**It survives being documented.** The fourth row was written into §7 *in the same commit
+as the first three rows* — the table was already on the page. A reader extending this
+design should assume the pull applies to them too, and should read a new refusal as
+evidence of a missing capability rather than as an obstacle to the change in hand.
 
 **And the subsystem is largely already written, orphaned.**
 `lib/Chalk/Grammar/Perl/TypeLibrary.pm` **[CODE]** already contains:
@@ -329,7 +333,7 @@ Examples the library should carry: `$0 : Str`, `@ARGV : Array[Str]`, `%ENV : Has
 - **Four table families**, not one: binary ops, unary ops, builtins **[CODE: `push`,
   `pop`, `shift`, `splice`, `keys` carry `arg_types`/`return_type`]**, and known globals.
 
-### Parameterised types are a precondition for the checker
+### Parameterised types are where narrowing is recorded
 
 **[MEASURED]** The library's projections return the container's *top*, not its element
 type:
@@ -350,10 +354,32 @@ so that narrowing on the container reaches the projection.
 'Int'` then GAPs on anything but `Int` — a hardcoded guess standing in for a capability
 the library lacks. Another of the 47 guards.
 
-**Sequencing constraint:** parameterisation must land *before* the checker is turned on.
-Otherwise the checker's first act is to reject `pop`/`shift`/`keys`/`values` across the
-corpus, and the pressure will be to weaken the checker rather than fix the library —
-which is how the present situation arose.
+**[MODEL, perigrin] The degenerate answer is fine; the missing narrowing is the
+problem.** `pop : (Array) → Scalar` guaranteeing only an ephemeral type in the generic
+case is *correct*, provided flow analysis narrows in real contexts — `@a` assigned
+`(1,2,3)`, or only ever pushed `Int`s, is `Array[Int]`, and `pop @a` is `Int`.
+
+**And when narrowing fails, the error is the deliverable.** If there is not enough in the
+source to narrow `@a`, that is precisely what the developer needs to be told — a reader
+cannot tell what is in that array either. The checker's complaints are a worklist of
+genuinely under-determined code, not noise to suppress.
+
+So parameterisation is **not** a precondition for avoiding errors. It is **the vocabulary
+narrowing is recorded in**: without `Array[T]`, flow analysis has nowhere to put what it
+learned, and every case collapses to the degenerate one whether or not the information
+was available.
+
+This lands on the direction already recorded (2026-04-25): *flow-typing à la TypeScript —
+narrowing along control-flow edges*. Perl's narrowing sources include assignment, the
+values flowing in via `push`, `ref()`, `looks_like_number`, and explicit declarations
+(§7).
+
+**[NOTE — the pattern survived being documented.]** An earlier revision of this section
+called parameterisation a "sequencing constraint: it must land before the checker is
+turned on, otherwise the checker rejects `pop`/`shift`/`keys`/`values` corpus-wide." That
+was a **fourth** instance of the instinct catalogued in *How a cordon accumulates* — and
+it was committed in the same change as that table. Arranging the work so the compiler
+does not complain, rather than reading the complaint. Corrected by perigrin, 2026-08-09.
 
 **[MEASURED]** The IR already carries element types (`Target/LLVM/Context.pm`, both
 `Serialize/JSON.pm`); the corpus records *"the loader lifts the field type + element
