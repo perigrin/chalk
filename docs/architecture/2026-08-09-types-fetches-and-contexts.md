@@ -20,15 +20,25 @@ This note is written to be checkable.
 ## The problem this replaces
 
 The compiler has **47 places** that ask "did anyone work out this node's type?" and no
-one place whose job that is:
+one place whose job that is. They are **not all the same guard** — the count covers two
+distinct conditions, and conflating them was itself an error in an earlier draft:
 
-- 31 `_require_repr` call sites **[MEASURED]**
-- 15 `repr=Scalar` refusals in `Target/LLVM/Context.pm` **[MEASURED]** — guarding a
-  value that **nothing anywhere assigns** (0 hits for `set_representation('Scalar')` or
-  `representation => 'Scalar'` in either repo) **[MEASURED]**
-- 1 signature guard added 2026-08-09 (`_repr_to_llvm_type`, commit `1617a6a3`)
+| | count | condition | status |
+|---|---|---|---|
+| **absent** | 31 `_require_repr` call sites **[MEASURED]** | repr is `undef` | **live** — these fire |
+| **absent** | 1 signature guard, 2026-08-09 (`_repr_to_llvm_type`, commit `1617a6a3`) | repr is `undef` | **live** |
+| **present but unlowerable** | 15 `repr=Scalar` refusals in `Target/LLVM/Context.pm` **[MEASURED]** | repr is the string `Scalar` | **dormant** |
 
-That is a cordon around a missing subsystem, not a type system.
+The 15 are dormant because **nothing anywhere assigns that value** — 0 hits for
+`set_representation('Scalar')` or `representation => 'Scalar'` in either repo
+**[MEASURED]**. So they are currently *unreachable*, not a live cordon. They matter as
+**evidence of intent** (someone expected a type name to arrive in a representation field,
+which §6 says is the category error) and as a **hazard the moment §7's narrowing starts
+producing `Scalar`**, not as 15 firing checks today.
+
+The honest statement is: **32 live guards for an absent type, plus 15 dead guards written
+against a type that should never have been a representation.** Both are a cordon around a
+missing subsystem; only the first is currently load-bearing.
 
 ### How a cordon accumulates
 
@@ -66,17 +76,40 @@ plus `type_satisfies` (membership), `is_subtype`, `narrow_type`, `get_binary_op`
 `get_unary_op`. The only piece genuinely missing is a `join` **[MEASURED: 0 subs
 matching `join|lub|meet|unify`]** — and per §3 below, `join` is needed only at merges.
 
-The B::SoN path has never used it, and instead grew ~822 lines of ad-hoc stamping in
-`IR/Serialize/JSON.pm` **[MEASURED: 822 lines, 15 subs]** whose rules can state things
-Perl does not permit (§1).
+The B::SoN path has never used it, and instead grew an ad-hoc stamping engine inside
+`lib/Chalk/IR/Serialize/JSON.pm` whose rules can state things Perl does not permit (§1).
+
+**[MEASURED 2026-08-09, correcting an earlier "822 lines, 15 subs" in this note that
+labelled a *region* as the *file*]** — the file is **1446 lines, 23 subs**. The stamping
+machinery is **13 subs and 4 tables** spanning `:606`–`:1430`; that span is 825 lines, of
+which ~638 are stamping once the two non-stamping subs inside it (`from_json` `:667-756`,
+`_replay_classes` `:784-880`) are excluded. The producer's own copy
+(`~/dev/perl5-son/lib/SoN/IR/Serialize/JSON.pm`) is 1334 lines / 21 subs.
+
+The corrected number is *smaller* than the one it replaces and the argument is unchanged:
+a several-hundred-line hand-maintained stamping engine exists beside an orphaned type
+library.
 
 ---
 
-## 1. Operators are strongly typed on input and output
+## 1. Operators state REQUIREMENTS on their operands
 
-**[MODEL]** Perl's dynamism is in its *values*, not its *operators*. Each operator has a
-fixed signature; it coerces its operands to fit. `+` is `(Num, Num) → Num`. `.` is
-`(Str, Str) → Str`. **`Add` is never a `Str`.**
+> **[REVISED 2026-08-09 after adversarial review.]** This section first said "each
+> operator has a fixed signature; the result comes from the signature, not the operands."
+> That is **false for a large part of Perl's operator set** and was falsified by the very
+> table this note holds up as the answer — see *Where the fixed-signature claim breaks*
+> below. The surviving, load-bearing claim is about **requirements**, not results.
+
+**[MODEL]** Perl's dynamism is in its *values*, not in what its operators *demand*. Each
+operator states a **requirement on each operand**: `+` requires `(Num, Num)`; `.`
+requires `(Str, Str)`. **That requirement is fixed, knowable from a table, and
+independent of what actually flows in.**
+
+Result types are a separate question and are *not* uniformly fixed (below).
+
+**[MEASURED] The loader's rule violates the requirement side.** `%_COMPUTED_REPR` says
+`Add => 'join'`, which joins operand representations and can therefore stamp an `Add` as
+`Str`. `+` never yields a `Str`. Measured on `my $a = "3"; my $b = "4"; $a + $b`:
 
 **[MEASURED] The loader's rule violates this.** `%_COMPUTED_REPR` says `Add => 'join'`,
 which joins operand representations and can therefore stamp an `Add` as `Str`. Measured
@@ -109,6 +142,31 @@ The example that shows why this is membership and not conversion: `Int <: Num <:
 so `"3"` genuinely *is* a member of `Num` and `"3" + "4"` needs no type change.
 `"hello"` is a `Str` that is **not** a member of `Num`. Same static type, different
 answer.
+
+**[NOTE]** `type_satisfies` **[CODE: `TypeLibrary.pm:169`]** returns `true` when the
+actual type is `undef` — permissive by default. So membership alone does not catch an
+unstamped operand; that is what §3's unconditional coercion is for.
+
+### Where the fixed-signature claim breaks
+
+**[CODE]** `TypeLibrary.pm:272-294` — several operators are genuinely operand- or
+context-dependent, and the library already says so:
+
+| operator | library says | why |
+|---|---|---|
+| `&&` `\|\|` `//` `and` `or` `=` | `(Any, Any) → Any` | **returns one of its operands**; the result really does depend on them (`%_COMPUTED_REPR` agrees: `And => 'same'`) |
+| `x` | `(Str, Int) → Str` | context-dependent — `(0) x 3` is a **list** in list context |
+| `..` | `(Int, Int) → List` | context-dependent — the **flip-flop** operator in scalar context |
+| `&` `\|` `^` | `(Int, Int) → Int` | since 5.22 these are numeric **or string** bitwise, by operand |
+
+So "the result comes from the signature" holds for arithmetic and concatenation — the two
+we generalised from — and **fails** for the logical, repetition, range and bitwise
+families. Any table encoding results must mark which operators are context-sensitive
+rather than pretending a single row covers them.
+
+**The requirement side survives all four.** `&&` requiring `Any` is not a counterexample:
+its requirement genuinely *is* "anything." §3 depends only on requirements, so it is
+unaffected by this correction.
 
 ---
 
@@ -151,29 +209,79 @@ only options are "be right first time" or "decline."
 
 ---
 
-## 3. Insert `Coerce` at build time, not in a pass
+## 3. Insert `Coerce` UNCONDITIONALLY at build time, keyed only on the requirement
 
-**[MODEL, perigrin]** Do not write a separate `Coerce`-insertion pass. Insert the node
-**when the IR node is constructed and its params are wired**. At that moment the
-operator is known (hence its signature) and the operands are known (hence their reprs).
+> **[REVISED 2026-08-09 after adversarial review.]** This section first justified
+> build-time insertion by saying "the operands are known, hence their reprs." **That is
+> false** — operand types are largely assigned by a later fixpoint in the loader, so at
+> build time most operands are untyped. The review was right that the mechanism as stated
+> could not work. The repair is not to move the work into a pass; it is to stop needing
+> the operand's type at all.
 
-**[CODE] This is already proven — once, hardcoded.** Coercion Slice A, at
-`SoN/FromOptree.pm:2275-2281`:
+**[MODEL, perigrin]** Insert the coercion **when the node is constructed**, and key it
+**only on what the operator requires**. You never need to know the operand's type,
+because the requirement is enough:
 
-> *"must be coerced to Num before the Divide. Wrap each Int-stamped operand in a
-> `Coerce(Int->Num)` at **BUILD** time (no post-hoc graph rewire)"*
+- the operator's requirement is **knowable at build time**, from the table (§1)
+- the source type is **whatever the operand turns out to be**, resolved later by inference
+- an **identity** coercion (source already satisfies the requirement) folds away
+- an **impossible** one errors *at the coercion*, by which point both types are known and
+  the message can name both
 
-guarded by `if ($node_type eq 'Divide')`. Generalising it means replacing that
-conditional with a signature lookup. `Divide`'s `(Num,Num)→Num` stops being a special
-case and becomes one row in a table.
+So coercion placement becomes **syntactic** — driven by signatures — and inference merely
+*resolves* coercions rather than deciding where they go. That inverts the dependency the
+review correctly identified as circular.
+
+### The concrete defect: `Coerce` demands the unknowable half
+
+**[CODE]** `lib/Chalk/IR/Node/Coerce.pm:16,20`:
+
+```perl
+field $from_repr :param :reader;   # required — no default
+field $to_repr   :param :reader;
+```
+
+**`from_repr` is mandatory, and it is exactly what cannot be known at build time.** That
+single field forces every consequence the review found:
+
+**[CODE]** `SoN/FromOptree.pm:109-117` — Slice A must therefore inspect the stamp and
+give up when it is absent:
+
+```perl
+sub _coerce_int_to_num ($factory, $node) {
+    my $stamp = $node->stamp;
+    return $node unless defined $stamp && $stamp->type eq 'Int';
+```
+
+…so build-time coercion fires **only for pre-stamped operands** — and §4 establishes that
+pad reads, the most common operand, carry no stamp. An earlier revision of this note
+called that precedent "already proven." It is proven for a subset that excludes the hard
+case.
+
+**A coercion should carry only its target.** `Coerce(to => 'Num')`. The `from` is not
+input to the decision; it is an outcome of inference.
+
+**[CODE] One consequence to plan for, not to discover:** `from_repr` is part of
+`content_hash` (`Coerce.pm:26-27`, and the ABOUTME says so). Dropping it changes the
+hash-cons key, so two coercions to the same target on the same input become **one node**
+where today they are two. That is the correct behaviour — they *are* the same coercion —
+but it is a hash-consing change, and this codebase has already been bitten once by
+id-keyed cache collisions across graphs. Treat it as a named migration step with its own
+corpus evidence, not as a field deletion.
+
+**[MODEL, §8]** And the vocabulary is wrong in the same way: `from_repr`/`to_repr` are
+**representation** names on a **target-agnostic IR node**. Representation is the
+backend's business (§8). The node should carry a *type*; the backend maps it.
 
 ### What this collapses
 
-- **operator result reprs are known at construction** — from the signature. No
-  propagation, no fixpoint, no join. `Add => 'join'` is not fixed, it is *deleted*.
+- **coercion placement needs no type information** — only the operator's requirement.
 - **operands are coerced to fit, never joined.** The partial-join bail
-  (`JSON.pm:1105`) leaves the operator path entirely.
+  (`JSON.pm:1105`) leaves the operator path.
 - **`join` is needed only at `Phi`.**
+- the loader's fixpoint **is not deleted** — the review was right that it cannot be. Its
+  job *shrinks*: it types nodes, which is inference's actual work, instead of doubling as
+  a coercion-placement oracle.
 
 ---
 
@@ -209,6 +317,28 @@ array elements.
 **[CODE] The code already knows they are the same kind of thing:**
 `FromOptree.pm:3942` builds a `FieldAccess` and `:3949` a `PadAccess` — adjacent
 branches of one function.
+
+### "Inherit from the store" is not always one hop
+
+**[CORRECTION 2026-08-09]** An earlier draft of this section, and the migration note
+below, described a fetch as *inheriting* its type from its defining store — as though it
+were always a single lookup. **Loop-carried fetches are not.**
+
+A loop-header `Phi` is constructed **before its backedge input exists**
+**[MEASURED: `set_backedge` is called at 6 sites in `~/dev/perl5-son/lib/SoN/FromOptree.pm`
+— `:2485`, `:2742`, `:2887`, `:2891`, `:3002`, `:3006`; an earlier "3" in this note came
+from reading a `head -3`-truncated listing as a total]**. So a fetch whose defining store
+is a loop-carried `Phi` cannot be typed at construction: the value it inherits from is not
+yet wired.
+
+That is the honest boundary between §3 and §4:
+
+- **Coercion placement** needs no types and stays fully build-time (§3).
+- **Fetch typing** through a straight-line store is one hop.
+- **Fetch typing** across a backedge is **fixpoint-dependent**, and the fixpoint is
+  exactly what §3's clean-up leaves the loader still doing.
+
+The fixpoint does not disappear; it stops being asked questions it cannot answer.
 
 ---
 
@@ -300,8 +430,20 @@ catching a **type name that leaked into the representation field** — §2's con
 says so, `DualVar` being the example. So `DualVar` support and the boxed representation
 are the same unlock.
 
-**[CODE]** `None` ("never returns") is already in the lattice and unused. It is the type
-of `die`/`exit` — the type-level counterpart to `Unwind`.
+**[CODE]** `None` ("never returns") is already in the lattice — and, correcting an earlier
+claim in this note that it was **unused**, it is **already in use**:
+`TypeLibrary.pm:127` gives `die` the signature `(Any) → None`. It is the type-level
+counterpart to `Unwind`, and the library already says so.
+
+**An unresolved disagreement, recorded rather than smoothed over.** The lattice document
+places `None` as a **child of `Any`/`Unknown`** — i.e. near the top. `TypeLibrary`
+**[CODE: `:10`, `:86-87`, `:191-194`]** states three times that `None` is the **bottom**
+type, subtype of everything, with `$TYPE_BITSET{None} = 0` and `is_subtype` returning
+true for any `None` child. **The library's reading is the conventional one** (a
+never-returns type is bottom, so it composes with any expectation), but this note does
+not resolve it by fiat: two artefacts disagree, and whichever is wrong is wrong in the
+`is_subtype` direction, which is load-bearing for §1's membership check.
+**[OPEN]** — reconcile before the checker is wired.
 
 ---
 
@@ -465,15 +607,20 @@ something code can consult.
 
 ## What remains genuinely inference
 
-After §3 (operators become a table lookup) and §4 (fetches inherit through memory edges),
-the residue is small:
+After §3 (coercion placement becomes syntactic) and §4 (fetches inherit through memory
+edges rather than guessing), the residue is small — but it is **not zero, and it is not a
+one-hop walk**:
 
 - **`Phi`** — a real merge; the only place `join` is needed
+- **Loop-carried fetches** — a `Phi` typed after its backedge is wired (§4), so this is a
+  **fixpoint**, not a lookup. The loader keeps one; it just stops being the thing that
+  also decides where coercions go.
 - **`Call` return types** — interprocedural, including the recursion cycle that blocks
   `fib` **[MEASURED: `fib` dies at `Context.pm:687`, "Add node has no representation"]**
 
-Both are real problems. Neither is the sprawling type system this looked like before the
-operator and fetch cases were separated out.
+All three are real problems. None is the sprawling type system this looked like before the
+operator and fetch cases were separated out — and the middle one is the reason the
+existing fixpoint survives the redesign rather than being deleted by it.
 
 ---
 
@@ -517,10 +664,13 @@ Specific cautions:
 
 ## Resolved (was: open questions)
 
-- **Does the clone need `join`?** **Yes.** **[MEASURED]** `set_backedge` is called at 3
-  producer sites — a loop `Phi` is built *before* its backedge input exists, so it cannot
-  be typed at construction. Operators can be typed at wire-up; Phis force a deferred,
-  bounded step regardless. Bounded because the chain is short and join is monotone.
+- **Does the clone need `join`?** **Yes.** **[MEASURED 2026-08-09]** `set_backedge` is
+  called at **6** sites in `FromOptree.pm` (`:2485`, `:2742`, `:2887`, `:2891`, `:3002`,
+  `:3006`) — a loop `Phi` is built *before* its backedge input exists, so it cannot be
+  typed at construction. (This note previously said 3; that came from a truncated listing.
+  The correction strengthens the point rather than weakening it.) Operators can be typed
+  at wire-up; Phis force a deferred, bounded step regardless. Bounded because the chain is
+  short and join is monotone.
 - **What decides a fetch's repr when the store is unreachable?** §5's borrowing rules
   decide *whether it is knowable at all*: (1) stores visible by construction → inherit;
   (2) not visible but **specified** → the library (§7); (3) neither → `Unknown` → the
