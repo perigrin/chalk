@@ -2309,9 +2309,7 @@ sub _lower_phi {
 # ---------------------------------------------------------------------------
 # _repr_to_llvm_type($repr) -> LLVM type string
 # ---------------------------------------------------------------------------
-sub _repr_to_llvm_type {
-    my ($repr) = @_;
-    $repr //= 'Int';
+sub _repr_to_llvm_type ($repr //= die "GAP: node reached machine-type selection with NO representation (undef) — fix TypeInference so this node carries an explicit repr before lowering.") {
     return 'i64'    if $repr eq 'Int';
     return 'double' if $repr eq 'Num';
     return 'i1'     if $repr eq 'Bool';
