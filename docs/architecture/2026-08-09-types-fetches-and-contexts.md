@@ -170,42 +170,104 @@ unaffected by this correction.
 
 ---
 
-## 2. Representation is a separate question from type
+## 2. There is no representation layer — it is types, at two levels
 
-**[CODE]** The `representation` field already says this:
+> **[REPLACED 2026-08-09, perigrin.]** This section previously argued that "representation
+> is a separate question from type" and that membership and storage are orthogonal
+> concerns. **That framing is itself the muddle it was trying to describe.** perigrin's
+> correction: *it's just types — LLVM type vs Chalk type — and repr comes for free with
+> the LLVM type.* The measurements below support the correction, not the original claim.
 
-> *"representation is a **per-use lowering decision**, not a structural property of what
-> value the node IS … `Coerce` nodes bridge between representations on edges."*
-> — `IR/Node.pm:50-55`
+**[MODEL, perigrin]** There are **two type levels and one map**:
 
-**[MODEL]** So membership and storage are orthogonal. `"3"` is a member of `Num` (no
-type change needed) *and* may be stored as `{ptr,len}` while `+` needs `i64` (conversion
-needed). **Coercion is a representation-level operation.**
+```
+Chalk type  (Int, Num, Str, Bool, Undef, ArrayRef, …)     — what the IR node carries
+     │
+     └── per-target map (§8) ──▶  LLVM type (i64, double, i8*, i1, …)
+```
 
-**[MEASURED] The tables conflate the two vocabularies**, which is why they contradict:
+**"Representation" is not a third layer between them.** It is the *image* of a node's type
+under the target's map. Once the LLVM type is chosen, the representation **is** that — the
+bit layout comes with it. There is nothing left for a separate field to hold.
 
-| table | presents as | actually asks |
+### The measurement: `representation` is the type field under a second name
+
+**[MEASURED 2026-08-09]** `%STAMP_TO_REPR` (`IR/Serialize/JSON.pm`), the map from the
+producer's type stamp to `representation`, is **the identity map**:
+
+```perl
+my %STAMP_TO_REPR = (
+    Int => 'Int',  Num => 'Num',  Str => 'Str',
+    Boolean => 'Bool',            # the only non-identity entry: a rename
+    Undef => 'Undef',  Object => 'Object',
+);
+```
+
+Five of six entries are `X => 'X'`; the sixth respells `Boolean` as `Bool`. So the pipeline
+is **Chalk type → (rename) → "representation" → `_repr_to_llvm_type` → LLVM type**, and
+only the last arrow is a real map. The middle step converts nothing.
+
+**[MEASURED]** Instrumenting `set_representation` across all 161 corpus cases (gate green
+at 161 with the probe in place) records **2022 assignments over 13 distinct values**:
+
+| value | count | a Chalk lattice type? |
 |---|---|---|
-| `%OP_REQUIRED_REPR` — `Add => 'Int'` | a repr constraint | a **type** constraint |
-| `%_COMPUTED_REPR` — `Add => 'join'` | a repr rule | joins **reprs** to answer a **type** question |
-| `%_REPR_RANK` — `Int<Num<Str` | a repr ordering | the **type** lattice in repr clothing |
+| `Int` `Str` `Bool` `Undef` `ArrayRef` `Object` `Num` `HashRef` `Array` `Regex` `Hash` | **2013** | **yes — all 11** |
+| `Slot` | 6 | no — a tagging discipline for `Undef ∪ T` |
+| `Control` | 3 | **no — not a value type at all** |
 
-### Representation policy: most recent usage
+**99.6% of everything ever assigned to `representation` is a Chalk type name.** The field
+does not hold a distinct kind of information; it holds the type, spelled again.
 
-**[MODEL, perigrin]** Of the candidate policies — narrowest type's representation, most
-recent usage's, per-use with conversion at every boundary, or both faces retained
-(Perl's own SV, and the DualVar foundation) — **most recent usage is the natural fit for
-an SSA IR.**
+### The two exceptions prove the point rather than rescuing the field
 
-The reason is specific to SSA: a value is defined once and never mutated, so it can
-carry exactly **one** representation, with explicit `Coerce` on the edges that need
-another. There are no faces to keep in sync and nothing to invalidate. A mutable-slot
-model would need DualVar-shaped storage; SSA does not.
+Neither leftover is a *lower* layer:
 
-**This also retires "write-once stamping" as an obstacle.** Write-once is *correct*
-under SSA — you never re-stamp a definition, you insert a `Coerce`. The current engine's
-failure is not that it cannot re-stamp; it is that it has no `Coerce`-insertion, so its
-only options are "be right first time" or "decline."
+- **`Slot`** is `Undef ∪ T` — a type the lattice does not currently name. The answer is to
+  name it in the lattice, not to keep a parallel vocabulary for it.
+- **`Control`** is not a value type in any sense. It marks a node as control-flow, which
+  produces no value. **[CODE]** It enters through hand-written corpus spec annotations —
+  `%if = If(%c) :Control` (`t/corpus/mdtest/logical.md:720-724`) — where an author put a
+  *node classification* in the slot meant for a value's type and nothing objected.
+
+That a node classification can be stored in this field without complaint is the clearest
+evidence that it is not a typed layer at all.
+
+### What this changes downstream
+
+- **`%_REPR_RANK` — `Int < Num < Str` — is the type lattice**, not a representation
+  ordering. It is `Int <: Num <: Str` with the subtyping written as a rank.
+- **`%OP_REQUIRED_REPR` and `%_COMPUTED_REPR` are type tables** wearing repr names — which
+  is why they contradict each other (§1) and why §7's library subsumes both.
+- **`_repr_to_llvm_type` is the only genuine map**, and §8 already says it is per-target.
+  XS would map `Scalar → SV*` where LLVM cannot map it at all.
+- **`from_repr`/`to_repr` on `Coerce` should be types**, and the node should say
+  `Coerce(to => Num)` in the *Chalk* vocabulary. The backend decides what that costs.
+
+**The renaming is not cosmetic.** As long as a field called `representation` exists beside
+`stamp`, every pass has to decide which one it means, and the answer "they are the same
+thing" is not available while both exist.
+
+### One type per definition: most recent usage
+
+**[MODEL, perigrin]** Of the candidate policies — narrowest type's, most recent usage's,
+per-use with conversion at every boundary, or both faces retained (Perl's own SV, and the
+DualVar foundation) — **most recent usage is the natural fit for an SSA IR.**
+
+The reason is specific to SSA: a value is defined once and never mutated, so it can carry
+exactly **one type**, with explicit `Coerce` on the edges that need another. There are no
+faces to keep in sync and nothing to invalidate. A mutable-slot model would need
+DualVar-shaped storage; SSA does not.
+
+**This is why there is no room for a representation layer (§2).** A separate per-node
+representation would only earn its place if one definition could need two machine shapes
+at once. Under SSA it cannot: the edge that needs a different shape gets a `Coerce`, which
+is *another definition* with its own single type. The second field has nothing left to say.
+
+**It also retires "write-once stamping" as an obstacle.** Write-once is *correct* under
+SSA — you never re-stamp a definition, you insert a `Coerce`. The current engine's failure
+is not that it cannot re-stamp; it is that it has no `Coerce`-insertion, so its only
+options are "be right first time" or "decline."
 
 ---
 
@@ -548,9 +610,16 @@ That makes the join's answer honest as well as defined: `Bool ⊔ Int = Scalar` 
 succeeds; the **check** rejects the store. The failure lands where the impossibility
 actually is, rather than at whichever instruction first needed a machine type.
 
-So the 15 backend `repr=Scalar` guards **[MEASURED]** are right to refuse, but they are
-catching a **type name that leaked into the representation field** — §2's conflation.
-`Scalar` is a type; `representation` must never hold it.
+So the 15 backend `repr=Scalar` guards **[MEASURED]** are right to refuse — but **not for
+the reason an earlier draft gave.** That draft said they were catching "a type name that
+leaked into the representation field." Per §2 there is no separate field to leak into:
+**every** value in there is a type name, and `Scalar` is unremarkable company.
+
+What they are actually catching is `Scalar` **having no image under the LLVM map** — it is
+a type the LLVM target cannot lower, exactly as §8 describes. That is a per-target fact,
+not a category error: **XS could map `Scalar → SV*`.** The guards belong in the backend,
+which is where they are; what they should say is *"this target has no type for `Scalar`"*,
+not *"this value is malformed."*
 
 **[CODE]** Note `Scalar` is *inhabited*, not merely abstract — the practical doc at :235
 says so, `DualVar` being the example. So `DualVar` support and the boxed representation
@@ -814,8 +883,11 @@ Specific cautions:
   but the disagreement is `%OP_REQUIRED_REPR` vs `%_COMPUTED_REPR`, and *both are deleted*
   when the library becomes the single authority. Reconciliation is a side effect of §1
   and §3, not separate work.
-- **The `Scalar` collision** — resolved by §6. `Scalar` is a type; the representation
-  field must not hold type names; `Unknown` is what the absent case should have been.
+- **The `Scalar` collision** — **dissolved by §2, not resolved by §6.** There is no
+  "representation vocabulary" for a type name to collide with: 99.6% of everything ever
+  assigned to that field is a Chalk type name **[MEASURED]**. `Scalar` is simply a type
+  with **no image under the LLVM map** (§8) — a per-target absence, not a malformed value.
+  `Unknown` remains what the *absent* case should have been.
 - **Is `None` top or bottom?** **Bottom** (perigrin, 2026-08-09). `TypeLibrary` was right;
   the canonical lattice document was wrong and has been corrected. No code change. See §6.
 
