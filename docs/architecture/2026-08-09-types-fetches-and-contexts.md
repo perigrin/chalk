@@ -300,30 +300,92 @@ already hashes `inputs[0]`, and in SSA one node has one representation — so
 `from_repr` contributes **nothing** to the key that the input edge does not already
 contribute.
 
-### The staleness this creates — mechanism confirmed, firing NOT yet demonstrated
+### The staleness hazard — HYPOTHESISED, TESTED, FALSIFIED
 
-Representation is discovered by a **widening fixpoint**: `_seed_and_propagate_reprs` and
-`_propagate_computed_reprs` call `set_representation` at **15 sites** in
-`lib/Chalk/IR/Serialize/JSON.pm` **[MEASURED]**, including `$widest` at `:1107`. So an
-input's repr can legitimately move (say `Int` → `Str`) *after* a `Coerce` on it was built.
-In chalk the exposure is worse, because `Coerce` arrives **off the wire** (`:467`) carrying
-the *producer's* view of `from_repr`, and chalk then runs its **own** fixpoint over it.
+**[FALSIFIED 2026-08-09. This note previously claimed a staleness hazard here. I went
+looking for the RED and it does not exist. Recording the negative result, because a
+hazard I asserted and did not test would have sent the next reader hunting a bug that
+cannot happen.]**
 
-When that happens, `_lower_coerce` (`Target/LLVM/Context.pm:1022-1031`) dispatches on the
-**stale** pair and emits e.g. `sitofp i64` for a value that is now `i8*` — the exact
-failure shape §1 already measured from a different cause
-(`'%tmp_1' defined with type 'i8*' but expected 'i64'`).
+**The hypothesis was:** representation is discovered by a widening fixpoint
+(`set_representation` is called at **15 sites** in `lib/Chalk/IR/Serialize/JSON.pm`
+**[MEASURED]**, including `$widest` at `:1107`), so an input's repr could move after a
+`Coerce` on it was built, leaving `from_repr` stale and sending `_lower_coerce` down the
+wrong arm — `sitofp i64` on a value now `i8*`.
 
-**[NOT MEASURED]** I have **not** produced a program where this fires. The mechanism is
-present and the contract violation is real; whether any current corpus case exercises it is
-an open question and **must be answered with a RED, not asserted.** Recording it as a
-hazard, not as a bug.
+**It cannot happen.** Three facts make the two sets **provably disjoint**:
 
-### The fix is a deletion, and the reader is already in the right place
+1. **[CODE]** `_coerce_int_to_num` (`SoN/FromOptree.pm:109-117`) wraps **only** nodes the
+   producer has **already stamped `Int`**. An unstamped node passes through unwrapped.
+2. **[CODE]** That wire stamp is applied in `_deserialize_graph` (`:503`), which runs in
+   `from_json` **before every inference pass** — verified by reading the pass order.
+3. **[MEASURED]** Every chalk-side inference site is **write-once**: `:584`, `:658`,
+   `:952/:956`, `:1043`, `:1346`, `:1360`, `:1422` all guard with
+   `next if defined $node->representation` (or the `unless`/`!defined` equivalent). The
+   fixpoint at `:1039-1109` is a **filling** loop, not a widening one — `:1043` skips any
+   node that already has a repr.
 
-`_lower_coerce` reads `$node->from_repr` at `:1022` and then calls
-`lower_value($node->inputs->[0])` at `:1024`. **The input node is in hand, one line
-later, at the moment its repr is finally settled.** Deleting the field and reading
+So the nodes that receive a `Coerce` (producer-stamped) and the nodes that receive a
+late chalk-side repr (unstamped at produce time) **do not overlap**.
+
+**[MEASURED] Empirical confirmation.** I patched `set_representation` to warn whenever it
+was called a second time with a *different* value, and ran the full corpus:
+
+```
+RESTAMP count: 0
+not-ok count: 0
+# TOTAL: gate-green=161  behavior=161  shape=161  invariant=161  gap-declared=21  worklist=0
+```
+
+**The probe was smoke-tested in both directions** before the result was believed: a
+same-value re-stamp is silent, a differing re-stamp prints
+`RESTAMP: node id=1 op=Constant Int -> Str`. And the corpus genuinely exercises `Coerce` —
+`arithmetic.md:90-91,230-231` carry four `Coerce(Int -> Num)` nodes, `logical.md:394` one
+`Coerce(Int -> Bool)` — so the zero is coverage, not absence.
+
+### What that changes: the bail is what keeps `from_repr` honest
+
+**This is the interesting part, and it inverts the argument.** The guard this section
+called the defect —
+
+```perl
+return $node unless defined $stamp && $stamp->type eq 'Int';
+```
+
+— is **exactly what guarantees `from_repr` is never stale.** Conditional insertion and
+consistency are the *same property*. `from_repr` is redundant, but it is redundant and
+**correct**.
+
+So:
+
+- **The correctness argument for deleting `from_repr` collapses.** It is not a live
+  miscompile and must not be filed as one.
+- **The coupling argument survives and is sharpened:** you **cannot** make insertion
+  unconditional *while keeping* `from_repr`, because unconditional insertion is precisely
+  the case where the field would go stale — you would be wrapping unstamped nodes, whose
+  reprs chalk assigns later. The §3 redesign and the field deletion are **one change, not
+  two**, and doing them in the wrong order manufactures the very bug this section
+  hypothesised.
+
+That is a **design constraint discovered by failing to find a bug**, which is a better
+outcome than the bug would have been.
+
+**[MEASURED] Incidental finding from the probe programs.** A two-callsite polymorphic
+divide (`sub half { ... $n / 2 } half(10); half("20")`) does not reach the type question
+at all — it GAPs earlier, on `my ($n) = @_` list-assign arity binding
+(`Context.pm:4439`), and in its `shift`-based form on `Stringify from repr=Num`
+(`Context.pm:930`). The `:658` monomorphic-callee assumption is real and documented in
+its own ponytail comment, but nothing in reach today exercises it.
+
+### The change is a deletion — an ENABLER, not a bugfix
+
+**Sequenced with §3, never before it.** Nothing is broken today (above), so deleting
+`from_repr` on its own buys nothing; deleting it is what makes unconditional insertion
+*possible*, because with the field gone there is no early copy left to go stale.
+
+The reader is already in position: `_lower_coerce` reads `$node->from_repr` at `:1022`
+and calls `lower_value($node->inputs->[0])` at `:1024`. **The input node is in hand one
+line later, at the moment its repr is finally settled.** Reading
 `$node->inputs->[0]->representation` removes the copy without adding a lookup.
 
 **[CODE] One consequence to plan for, not to discover:** dropping `from_repr` from
