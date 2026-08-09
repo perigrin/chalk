@@ -212,15 +212,18 @@ only options are "be right first time" or "decline."
 ## 3. Insert `Coerce` UNCONDITIONALLY at build time, keyed only on the requirement
 
 > **[REVISED 2026-08-09 after adversarial review.]** This section first justified
-> build-time insertion by saying "the operands are known, hence their reprs." **That is
-> false** — operand types are largely assigned by a later fixpoint in the loader, so at
-> build time most operands are untyped. The review was right that the mechanism as stated
-> could not work. The repair is not to move the work into a pass; it is to stop needing
-> the operand's type at all.
+> build-time insertion by saying "the operands are known, **hence their reprs**." The
+> first half is right and the inference is wrong. We hold the operand *node* — we are
+> injecting the `Coerce` between a known producer and a known consumer. But a node's
+> **type** is assigned by a later widening fixpoint, so holding the node tells us nothing
+> about its repr yet.
+>
+> The repair is not to move the work into a pass. It is to stop *copying* the operand's
+> type at all, and read it from the input edge at the point of use.
 
-**[MODEL, perigrin]** Insert the coercion **when the node is constructed**, and key it
-**only on what the operator requires**. You never need to know the operand's type,
-because the requirement is enough:
+**[MODEL, perigrin]** Insert the coercion **when the node is constructed** — we are wiring
+the params, the input is right there — and key it **only on what the operator requires**.
+You never need to know the operand's *type*, because the requirement is enough:
 
 - the operator's requirement is **knowable at build time**, from the table (§1)
 - the source type is **whatever the operand turns out to be**, resolved later by inference
@@ -232,7 +235,17 @@ So coercion placement becomes **syntactic** — driven by signatures — and inf
 *resolves* coercions rather than deciding where they go. That inverts the dependency the
 review correctly identified as circular.
 
-### The concrete defect: `Coerce` demands the unknowable half
+### The concrete defect: `from_repr` is a denormalized copy, not a missing fact
+
+> **[SHARPENED 2026-08-09, perigrin.]** An earlier version of this subsection said
+> `from_repr` "cannot be known at build time." **That is imprecise and it obscures the
+> actual bug.** When we build a `Coerce` we are *injecting it between a known producer and
+> a known consumer* — we are holding the input node. The input is known.
+>
+> What is not known at that moment is the input's **type**. And `from_repr` is not an
+> independent fact: it is a **copy of `inputs[0]`'s representation**, taken at
+> construction. The defect is not a missing input. It is **denormalized state captured
+> before the value it copies has settled.**
 
 **[CODE]** `lib/Chalk/IR/Node/Coerce.pm:16,20`:
 
@@ -241,8 +254,8 @@ field $from_repr :param :reader;   # required — no default
 field $to_repr   :param :reader;
 ```
 
-**`from_repr` is mandatory, and it is exactly what cannot be known at build time.** That
-single field forces every consequence the review found:
+**`from_repr` duplicates information the node already carries on its input edge.** That
+duplication forces every consequence the review found:
 
 **[CODE]** `SoN/FromOptree.pm:109-117` — Slice A must therefore inspect the stamp and
 give up when it is absent:
@@ -258,16 +271,67 @@ pad reads, the most common operand, carry no stamp. An earlier revision of this 
 called that precedent "already proven." It is proven for a subset that excludes the hard
 case.
 
-**A coercion should carry only its target.** `Coerce(to => 'Num')`. The `from` is not
-input to the decision; it is an outcome of inference.
+**A coercion should carry only its target.** `Coerce(to => 'Num')`. The `from` is read
+from `inputs[0]` **at the point of use**, when it is settled.
 
-**[CODE] One consequence to plan for, not to discover:** `from_repr` is part of
-`content_hash` (`Coerce.pm:26-27`, and the ABOUTME says so). Dropping it changes the
-hash-cons key, so two coercions to the same target on the same input become **one node**
-where today they are two. That is the correct behaviour — they *are* the same coercion —
-but it is a hash-consing change, and this codebase has already been bitten once by
-id-keyed cache collisions across graphs. Treat it as a named migration step with its own
-corpus evidence, not as a field deletion.
+### The copy contradicts the IR's own stated contract
+
+**[CODE] `Chalk::IR::Node:133-139` says the opposite of what `Coerce` does:**
+
+```perl
+# Late-binding setter for the machine-level representation.
+# Called by the IR builder or a lowering pass after the node is
+# constructed. Does not affect content_hash or hash-consing identity.
+method set_representation($repr) { $representation = $repr; return; }
+```
+
+The framework's contract is explicit on both points: representation is **late-bound**, and
+it is **not part of identity**. `Coerce` violates both — for its *neighbour's*
+representation. It binds `inputs[0]`'s repr **early** (at construction) and makes it
+**identity-bearing** (`content_hash`, `Coerce.pm:24-29`).
+
+**The `content_hash` justification does not survive reading.** The comment argues:
+
+> *"`Coerce[Str->Num](x)` and `Coerce[Str->Int](x)` are distinct nodes."*
+
+Both examples have the **same** `from` and differ only in `to`. The whole argument is
+carried by `to_repr`. And `from` cannot vary independently of the input: `_serialize_inputs()`
+already hashes `inputs[0]`, and in SSA one node has one representation — so
+`from_repr` contributes **nothing** to the key that the input edge does not already
+contribute.
+
+### The staleness this creates — mechanism confirmed, firing NOT yet demonstrated
+
+Representation is discovered by a **widening fixpoint**: `_seed_and_propagate_reprs` and
+`_propagate_computed_reprs` call `set_representation` at **15 sites** in
+`lib/Chalk/IR/Serialize/JSON.pm` **[MEASURED]**, including `$widest` at `:1107`. So an
+input's repr can legitimately move (say `Int` → `Str`) *after* a `Coerce` on it was built.
+In chalk the exposure is worse, because `Coerce` arrives **off the wire** (`:467`) carrying
+the *producer's* view of `from_repr`, and chalk then runs its **own** fixpoint over it.
+
+When that happens, `_lower_coerce` (`Target/LLVM/Context.pm:1022-1031`) dispatches on the
+**stale** pair and emits e.g. `sitofp i64` for a value that is now `i8*` — the exact
+failure shape §1 already measured from a different cause
+(`'%tmp_1' defined with type 'i8*' but expected 'i64'`).
+
+**[NOT MEASURED]** I have **not** produced a program where this fires. The mechanism is
+present and the contract violation is real; whether any current corpus case exercises it is
+an open question and **must be answered with a RED, not asserted.** Recording it as a
+hazard, not as a bug.
+
+### The fix is a deletion, and the reader is already in the right place
+
+`_lower_coerce` reads `$node->from_repr` at `:1022` and then calls
+`lower_value($node->inputs->[0])` at `:1024`. **The input node is in hand, one line
+later, at the moment its repr is finally settled.** Deleting the field and reading
+`$node->inputs->[0]->representation` removes the copy without adding a lookup.
+
+**[CODE] One consequence to plan for, not to discover:** dropping `from_repr` from
+`content_hash` changes the hash-cons key, so two coercions to the same target on the same
+input become **one node** where today they are two. That is correct — they *are* the same
+coercion — but it is a hash-consing change, and this codebase has already been bitten by
+id-keyed cache collisions. Treat it as a named migration step with its own corpus
+evidence, not as a field deletion.
 
 **[MODEL, §8]** And the vocabulary is wrong in the same way: `from_repr`/`to_repr` are
 **representation** names on a **target-agnostic IR node**. Representation is the
