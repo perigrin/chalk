@@ -100,11 +100,29 @@ Any/Unknown (everything)
 │   ├── Array
 │   └── Hash
 ├── Code (subroutines)
-├── Glob (symbol table entries)
-└── None (never returns)
+└── Glob (symbol table entries)
+
+None (never returns) is the BOTTOM type: a subtype of every type above,
+sitting below all of them. It is not a branch of Any.
 
 * Bool is special - see note below
 ```
+
+**`None` is bottom, not a sibling branch.** An earlier revision of this tree drew it as a
+child of `Any/Unknown`, alongside `Scalar`/`List`/`Code`/`Glob`. That was wrong, and it
+disagreed with the implementation in three places: `TypeLibrary.pm:10` ("'None' is the
+bottom type (subtype of everything)"), `:86-87` (`$TYPE_BITSET{None} = 0`), and `:191-194`
+(`is_subtype` returns true whenever the child is `None`).
+
+The implementation is correct and is the conventional treatment. `None` is the type of an
+expression that never produces a value — `die`, `exit` — so it must satisfy *every*
+expectation, which is exactly what being bottom means. `TypeLibrary.pm:127` already
+depends on this: `die` has the signature `(Any) → None`, and that signature is only usable
+in an expression position because `None` is a subtype of whatever the position requires.
+
+Note the bitset encoding makes both directions come out right: `is_subtype('None', X)` is
+true by the explicit rule, and `is_subtype(X, 'None')` is false for any other `X`, because
+`(0 & X_bits) == X_bits` fails whenever `X_bits` is nonzero.
 
 ### Important Relationships
 

@@ -435,15 +435,22 @@ claim in this note that it was **unused**, it is **already in use**:
 `TypeLibrary.pm:127` gives `die` the signature `(Any) → None`. It is the type-level
 counterpart to `Unwind`, and the library already says so.
 
-**An unresolved disagreement, recorded rather than smoothed over.** The lattice document
-places `None` as a **child of `Any`/`Unknown`** — i.e. near the top. `TypeLibrary`
-**[CODE: `:10`, `:86-87`, `:191-194`]** states three times that `None` is the **bottom**
-type, subtype of everything, with `$TYPE_BITSET{None} = 0` and `is_subtype` returning
-true for any `None` child. **The library's reading is the conventional one** (a
-never-returns type is bottom, so it composes with any expectation), but this note does
-not resolve it by fiat: two artefacts disagree, and whichever is wrong is wrong in the
-`is_subtype` direction, which is load-bearing for §1's membership check.
-**[OPEN]** — reconcile before the checker is wired.
+**`None` is the BOTTOM type. [RESOLVED 2026-08-09, perigrin.]** A doc/code disagreement
+was surfaced here and has been settled in favour of the code.
+
+`TypeLibrary` **[CODE: `:10`, `:86-87`, `:191-194`]** says three times that `None` is
+bottom — subtype of everything, `$TYPE_BITSET{None} = 0`, and `is_subtype` returning true
+whenever the child is `None`. The canonical lattice document drew it as a **child of
+`Any`/`Unknown`**, a sibling of `Scalar`/`List`/`Code`/`Glob`. **The document was wrong**
+and has been corrected (`docs/architecture/perl-type-system-practical.md`).
+
+Bottom is also the reading the rest of this note needs. `die`'s signature `(Any) → None`
+**[CODE: `:127`]** is only usable in an expression position because `None` satisfies
+whatever that position requires — which is what being bottom means. And the encoding is
+right in both directions: `is_subtype('None', X)` is true by the explicit rule, while
+`is_subtype(X, 'None')` is false for every other `X`, since `(0 & X_bits) == X_bits`
+fails for nonzero `X_bits`. **No code change is required** — this was documentation drift,
+not a defect in `is_subtype`, and §1's membership check is unaffected.
 
 ---
 
@@ -683,6 +690,8 @@ Specific cautions:
   and §3, not separate work.
 - **The `Scalar` collision** — resolved by §6. `Scalar` is a type; the representation
   field must not hold type names; `Unknown` is what the absent case should have been.
+- **Is `None` top or bottom?** **Bottom** (perigrin, 2026-08-09). `TypeLibrary` was right;
+  the canonical lattice document was wrong and has been corrected. No code change. See §6.
 
 **[OPEN]** — none outstanding. Raku was considered as prior art for gradual typing in the
 Perl family and **dropped deliberately** (perigrin, 2026-08-09) as a distraction at this
