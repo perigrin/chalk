@@ -30,6 +30,24 @@ one place whose job that is:
 
 That is a cordon around a missing subsystem, not a type system.
 
+### How a cordon accumulates
+
+Each guard was written by someone treating *"we don't know the type here"* as a
+situation to **survive** rather than to **fix**. That instinct is easy to reproduce — I
+generated three fresh instances of it while this note was being written, and each was
+corrected:
+
+| I claimed | actually |
+|---|---|
+| the silent bail at `JSON.pm:1105` is safe, since GAP-not-miscompile holds | the engine hiding that it failed to trace the flow |
+| 3 corpus cases carry untyped nodes and run, so an assertion would redden the gate | missed narrowing — a stopped clock, not a constraint to preserve |
+| the checker would reject `my $x = pop @a`, which is routine Perl | it rejects **unnarrowed** `pop`, correctly, and points at `@a` |
+
+The pattern is treating a **correct refusal as a cost to engineer around**. Every guard
+in the cordon is that instinct made permanent. A reader extending this design should
+expect the same pull, and should read a new refusal as evidence of a missing capability
+rather than as an obstacle to the change in hand.
+
 **And the subsystem is largely already written, orphaned.**
 `lib/Chalk/Grammar/Perl/TypeLibrary.pm` **[CODE]** already contains:
 
@@ -235,6 +253,136 @@ write side. A fetch is a load minus uncertainty about *where*. `Call` kills `any
 
 ---
 
+## 6. Two tops: `Unknown` errors, `Any` permits
+
+**[CODE]** The canonical lattice (`docs/architecture/perl-type-system-practical.md:83`)
+writes the top as one node, `Any/Unknown`. **[MODEL, perigrin]** These are two distinct
+types and the split is what makes the rest work:
+
+| | role |
+|---|---|
+| **`Unknown`** | the **default** top. If it survives to the type check, that is an **error**. |
+| **`Any`** | an **explicitly permissive** top. Opted into; does not error. |
+
+**This is what makes inference total, and it relocates the loud failure correctly.**
+The bail at `JSON.pm:1105` should not `die` — it should **assign `Unknown`**. Then:
+
+- inference always assigns something and never declines; there is no "no rule matched,
+  skip" case and no `undef` in the representation field
+- the **checker** reports the failure, which is the component whose job that is, and it
+  reports *all* of them at once rather than whichever one lowering happened to reach
+- `Any` is the user's explicit opt-out
+
+`Unknown` — not `Scalar` — is also what makes the **join total**. `Bool ⊔ Int = Scalar`
+(their LCA, both being under it); `Str ⊔ List = Unknown`. Every pair has an answer, so
+there is no case to skip at. An earlier draft of this note proposed "make the join total
+by producing `Scalar` at the top"; that aimed at the wrong element.
+
+### `Scalar` and `List` are ephemeral
+
+**[MODEL, perigrin]** `Scalar` is a sibling of `List` **[CODE: the lattice tree]**, and
+both are **ephemeral types without representation**. **Storing one is an error.**
+
+That makes the join's answer honest as well as defined: `Bool ⊔ Int = Scalar` is correct
+*and* unstorable — you cannot store "either a Bool or an Int" without a box. The join
+succeeds; the **check** rejects the store. The failure lands where the impossibility
+actually is, rather than at whichever instruction first needed a machine type.
+
+So the 15 backend `repr=Scalar` guards **[MEASURED]** are right to refuse, but they are
+catching a **type name that leaked into the representation field** — §2's conflation.
+`Scalar` is a type; `representation` must never hold it.
+
+**[CODE]** Note `Scalar` is *inhabited*, not merely abstract — the practical doc at :235
+says so, `DualVar` being the example. So `DualVar` support and the boxed representation
+are the same unlock.
+
+**[CODE]** `None` ("never returns") is already in the lattice and unused. It is the type
+of `die`/`exit` — the type-level counterpart to `Unwind`.
+
+---
+
+## 7. Declarations compile into the library
+
+**[MODEL, perigrin]** Known globals go in the **default** type library — *and that is
+what a source-level declaration compiles to*. One mechanism, not two: built-ins are the
+pre-populated entries, user declarations extend the same structure.
+
+`+ : (Num,Num) → Num` and `$0 : Str` are the same kind of fact — statements about the
+language, not about the program. Neither is inferable; neither should be.
+
+**[CODE]** `runtime-free-boundary.md` already classifies these by implementation
+(*"`$!` = errno (Num face) + strerror (Str face)"*; *"`%ENV`, `@ARGV` = host process
+state … host-interface layer, NOT libperl"*) but nowhere are those facts written as
+**types** a compiler pass can consult.
+
+Examples the library should carry: `$0 : Str`, `@ARGV : Array[Str]`, `%ENV : Hash[Str]`,
+`$$ : Int`, `$! : DualVar`, `@_ : List`.
+
+**Consequences for the clone** — these change its shape, and matter before it is written:
+
+- **It cannot be a constant table.** Today `%BINARY_OP_SIGNATURES` is a `my` hash in a
+  lexical block. If declarations compile into the library it must be **instantiable and
+  extensible per compilation**.
+- **Entries need scope.** `my Int $x` is block-scoped; `$0 : Str` is global. A
+  declaration's scope *is* a context (§5), with the same borrowing and lifetime
+  properties.
+- **Four table families**, not one: binary ops, unary ops, builtins **[CODE: `push`,
+  `pop`, `shift`, `splice`, `keys` carry `arg_types`/`return_type`]**, and known globals.
+
+### Parameterised types are a precondition for the checker
+
+**[MEASURED]** The library's projections return the container's *top*, not its element
+type:
+
+```
+pop    : (Array) → Scalar        keys   : (Hash) → List
+shift  : (Array) → Scalar        values : (Hash) → List
+unshift: (Array, Any) → Int      <- correct; returns the new length
+```
+
+`pop : (Array) → Scalar` is the **right answer for an unnarrowed `Array`** — and it is
+unstorable, correctly. The defect is that the library cannot express the *narrowed* case,
+so every case degrades to the worst one. The signature must be `pop : (Array[T]) → T`,
+so that narrowing on the container reaches the projection.
+
+**[MEASURED] The backend has already hit this wall and worked around it.**
+`_lower_builtin_shift_pop` (`Context.pm:3871`) does `my $repr = $node->representation //
+'Int'` then GAPs on anything but `Int` — a hardcoded guess standing in for a capability
+the library lacks. Another of the 47 guards.
+
+**Sequencing constraint:** parameterisation must land *before* the checker is turned on.
+Otherwise the checker's first act is to reject `pop`/`shift`/`keys`/`values` across the
+corpus, and the pressure will be to weaken the checker rather than fix the library —
+which is how the present situation arose.
+
+**[MEASURED]** The IR already carries element types (`Target/LLVM/Context.pm`, both
+`Serialize/JSON.pm`); the corpus records *"the loader lifts the field type + element
+type"*. So the **IR is more expressive than the type library** — the gap is the library's
+alone.
+
+### `push` is not evidence of this gap
+
+**[MODEL, perigrin]** `push @a, LIST` genuinely takes an `Array` plus one-or-more
+elements of any type — `Scalar ∪ List`, effectively the top. `push : (Array, Any)` is
+**correct**, not a limitation. The gap is specifically in **projections**: operations
+returning something *drawn from* the container.
+
+---
+
+## What remains genuinely inference
+
+After §3 (operators become a table lookup) and §4 (fetches inherit through memory edges),
+the residue is small:
+
+- **`Phi`** — a real merge; the only place `join` is needed
+- **`Call` return types** — interprocedural, including the recursion cycle that blocks
+  `fib` **[MEASURED: `fib` dies at `Context.pm:687`, "Add node has no representation"]**
+
+Both are real problems. Neither is the sprawling type system this looked like before the
+operator and fetch cases were separated out.
+
+---
+
 ## Migration caution — coarse to fine
 
 **[MODEL]** The model above is the destination. The migration must not be.
@@ -273,31 +421,25 @@ Specific cautions:
 
 ---
 
-## What remains genuinely inference
+## Resolved (was: open questions)
 
-After §3 (operators become a table lookup) and §4 (fetches inherit through memory edges),
-the residue is small:
+- **Does the clone need `join`?** **Yes.** **[MEASURED]** `set_backedge` is called at 3
+  producer sites — a loop `Phi` is built *before* its backedge input exists, so it cannot
+  be typed at construction. Operators can be typed at wire-up; Phis force a deferred,
+  bounded step regardless. Bounded because the chain is short and join is monotone.
+- **What decides a fetch's repr when the store is unreachable?** §5's borrowing rules
+  decide *whether it is knowable at all*: (1) stores visible by construction → inherit;
+  (2) not visible but **specified** → the library (§7); (3) neither → `Unknown` → the
+  checker errors, unless `Any`. "Was a reference taken" is a local syntactic question
+  (`\$x` in scope), not a whole-program escape analysis.
+- **Where does the check run?** The blocker **dissolves**. It was "wiring `TypedInvariant`
+  in before reconciliation makes the compiler fail on a disagreement neither side owns" —
+  but the disagreement is `%OP_REQUIRED_REPR` vs `%_COMPUTED_REPR`, and *both are deleted*
+  when the library becomes the single authority. Reconciliation is a side effect of §1
+  and §3, not separate work.
+- **The `Scalar` collision** — resolved by §6. `Scalar` is a type; the representation
+  field must not hold type names; `Unknown` is what the absent case should have been.
 
-- **`Phi`** — a real merge; the only place `join` is needed
-- **`Call` return types** — interprocedural, including the recursion cycle that blocks
-  `fib` **[MEASURED: `fib` dies at `Context.pm:687`, "Add node has no representation"]**
-
-Both are real problems. Neither is the sprawling type system this looked like before the
-operator and fetch cases were separated out.
-
----
-
-## Open questions
-
-- **[OPEN]** Does the `SoN::TypeLibrary` clone stop at signatures + `type_satisfies`, or
-  also carry `join` for the `Phi` case?
-- **[OPEN]** What decides a fetch's repr when its defining store is not statically
-  reachable — a package variable written from another compilation unit, for instance?
-- **[OPEN]** Where does the type **check** run? `TypedInvariant` exists and has no `lib/`
-  consumer. Wiring it in before the vocabularies are reconciled would make the compiler
-  fail on a disagreement neither side owns (§1, §2).
-- **[OPEN]** `Scalar` currently means "unknown scalar" to the semiring and "GAP, cannot
-  lower" to the backend. That collision must be resolved before `Scalar` can ever be
-  *produced* rather than merely guarded against.
-- **[OPEN]** Raku was named as prior art for gradual typing over a dynamic language in
-  the Perl family and has not been investigated.
+**[OPEN]** — none outstanding. Raku was considered as prior art for gradual typing in the
+Perl family and **dropped deliberately** (perigrin, 2026-08-09) as a distraction at this
+stage.
