@@ -395,6 +395,74 @@ returning something *drawn from* the container.
 
 ---
 
+## 8. The type→target map is a coercion, and it is per-target
+
+**[MODEL, perigrin]** `_repr_to_llvm_type` is not a selector with a guard. **The LLVM
+type *is* the representation, for that backend** — so the function is
+`coerce(SoNType → LLVMType)`: a **map**, whose domain is exactly the types that target
+can represent.
+
+Lookup failure **is** the error, structurally. Ephemeral types are absent *by
+construction* rather than rejected by an added check.
+
+**[MEASURED] What that subsumes:**
+
+| today | under the map |
+|---|---|
+| the `//= die` signature guard (commit `1617a6a3`) | `undef` is not a key |
+| **15** separate `repr=Scalar` guards in `Context.pm` | `Scalar` is not a key |
+| part of the 31 `_require_repr` sites | absence of an entry already answers |
+
+Fifteen guards written one at a time, each catching the same thing at a different call
+site, all subsumed by not putting `Scalar` in the table.
+
+**[MODEL]** This is the same mechanism as §3 at a different scale — value coercions on
+edges, type coercions at the backend boundary. It is also what
+`2026-07-19-runtime-mop-coerce-multimethod.md` already asserts: the compiler's own passes
+*are* coercions, `coerce(SoNGraph, LLVMIR, $program)` being *"LITERALLY the same
+operation as `coerce(Int, Str, $v)`"*.
+
+### Three different reasons a type is absent from a map
+
+**[MODEL, perigrin]** "Ephemeral" is not one property:
+
+| | why absent | permanent? |
+|---|---|---|
+| `Unknown` | an **error state**, not a kind of value | never in any target's map |
+| `List` | no runtime object — a context that flattens | ephemeral everywhere |
+| `Scalar` | **this target** has no representation for it | **target-specific** |
+
+**[MODEL, perigrin] The map is per-target.** `Scalar`'s absence from the LLVM map is not
+a fact about `Scalar` — it is a fact about **runtime-free lowering**.
+`docs/architecture/runtime-free-boundary.md` is the constraint that says no libperl,
+therefore no `SV*`, therefore no box. An XS/C target built on `SV*` would map
+`Scalar → SV*` and those 15 guards would have nothing to guard.
+
+So **the map's domain is the expression of the runtime-free boundary**, not an incidental
+limitation.
+
+Two consequences:
+
+- **The map belongs with the target, not with the type library.** The library says what
+  types exist and how they relate; each backend says which it can represent. That keeps
+  `SoN::TypeLibrary` target-agnostic, which matters with two lowering axes (LLVM live,
+  C/XS parked **[CODE: `xs_target_evolution` — C plus thin per-class wrappers, no
+  `Target/XS.pm` by design]**).
+- **"Should we build the box" is not one question.** In LLVM it is real work *and* in
+  tension with the runtime-free premise. In XS it is free. So `DualVar`, `Any`, and
+  unnarrowed `Scalar` are cheap on one axis and expensive on the other — an argument for
+  the C/XS target beyond "another backend".
+
+**[MODEL]** It also reframes a failure mode: a program that fails to compile under LLVM
+for want of narrowing may compile under XS, because `SV*` absorbs what runtime-free
+cannot. That is the boundary working, visible as two domains for one map.
+
+**[OPEN]** Nothing in `lib/` currently knows which types are ephemeral — the distinction
+exists only in `perl-type-system-practical.md` and in this note. The split has to become
+something code can consult.
+
+---
+
 ## What remains genuinely inference
 
 After §3 (operators become a table lookup) and §4 (fetches inherit through memory edges),
