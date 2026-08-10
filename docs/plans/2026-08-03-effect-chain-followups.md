@@ -806,3 +806,88 @@ definition in that graph. It needs a parameter, or genuine storage. This work
 and F3 are coupled, and H7's deletion should not be read as "package scalars
 never need storage" — only as "they do not need a typed cell per representation
 in a single-region compile".
+
+## H9: the grouping was wrong — the axis is ESCAPE, not package-vs-lexical
+
+"Package scalar" is not the right category for any of this. A LEXICAL escapes
+just as readily — `sub { my $x = 5; \$x }`, or a closure capturing it — and an
+ANONYMOUS reference has no NAME whose later reads must observe writes, so it
+does not raise the demotion question at all. Where its storage lives is a
+separate, open question: an anonymous aggregate that never escapes need not be
+heap-allocated, and perl's heap-and-refcount model is evidence about perl, not
+a requirement on chalk.
+
+The axis is whether a variable's uses are all visible in the region being
+compiled. `our` vs `my` is irrelevant to it.
+
+Likewise, "chalk has no memory representation for scalars" (as H7 put it) is
+wrong. An EPHEMERAL scalar — an SSA value in the graph — needs none. A STORED
+one has a static Chalk type, which maps to an LLVM type, which IS its memory
+representation. The `@pkg_*` globals were already that; what made them wrong was
+being applied to every package scalar, typing the VARIABLE rather than its
+dataflow, so one variable could need several kinds. What is genuinely missing is
+narrower: the decision of which variables escape, and scalar load/store on the
+memory chain (which threads aggregate ELEMENTS today).
+
+Note the asymmetry that falls out: an SSA value carries its own type per
+definition, while a demoted variable is a CELL and therefore has ONE type — the
+join over its stores, with a coercion at each. The "join-typed slot" idea is
+wrong for an SSA variable and right for a genuinely stored one.
+
+**Recurring failure mode, second instance this session.** The first draft of
+this entry said an anonymous reference "needs heap allocation", which is an
+implementation choice asserted as a requirement — the same error as the
+"array-extending coercion mutates a heap object" claim recorded above, which was
+also retracted. Storage strategy is an L3 decision; perl's heap-and-refcount
+model is evidence about perl. Design notes should state what must be OBSERVABLE
+(a later read sees an earlier write) and leave where the bytes live open.
+
+## H10: MY REGRESSION, OPEN — a package variable defined in a sub is dropped
+
+    our $g = 5;  sub bump { $g = 9 }  bump();  print $g
+      perl: 9     chalk: 5      -- silent, no GAP
+
+Introduced by package-scalar SSA (38af599), verified by measurement against
+38af599~1, where it was a loud GAP. The old Assign(StashAccess) was an EFFECT on
+the callee's control chain and the inliner refused a callee with effects; a
+definition carries no node, so the callee now looks clean and the inliner
+accepts it while the definition vanishes.
+
+This also FALSIFIES H8. Inlining does not make package-scalar SSA sound: each
+sub is translated as its OWN graph, with its own binding map, BEFORE any
+inlining happens. Cross-graph visibility was never covered.
+
+**The fence is written and works** — `_translate_from` computes `is_program`
+(only `translate_root` passes `program_root`), and refusing a package-scalar
+definition when it is false turns the case back into a loud GAP. It is NOT
+switched on, for one reason:
+
+> the chalk corpus harness wraps every case in `sub corpus_case { ... }`, so a
+> fragment is indistinguishable from a real sub, and all 12 package-scalar cases
+> GAP (measured: gate-green 168 -> 156).
+
+So the corpus cannot currently represent a package-scalar case honestly: the
+wrapper decides whether the variable escapes. This is the same harness wrapper
+recorded at the end of the wrapped-contract removal — `son-corpus-wide.t:51`
+re-implements the `sub` wrap, and `:88` duplicates the exit-status defect.
+
+`is_program` is left computed-but-unused with a comment, so the fence is one
+line away once the harness question is settled.
+
+**Decision needed before this can close:** either the corpus compiles a case as
+a PROGRAM (matching what `executable-gate` already does for real files), or
+package-scalar cases move to a harness that does. Real programs are unaffected
+by the fence — `__PROGRAM__` is the entry — so this is purely a corpus-shape
+question.
+
+## H11: escape routes, audited
+
+    \$lexical, \$package        FENCED (address-taken, 1b34be6)
+    closure captures a lexical  GAPs on unresolved callee — NOT by an escape rule
+    named sub writes a package  **H10, MISCOMPILE**
+    named sub reads a package   GAPs (StashAccess with no representation)
+    anonymous ref               correctly unaffected — no name to observe
+
+Only the address-taken route is fenced by design. The closure routes are covered
+incidentally by the callee-resolution GAP, which is not an escape check and
+should not be relied on as one.
