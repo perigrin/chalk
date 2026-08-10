@@ -5,7 +5,8 @@ use utf8;
 use Test::More;
 
 use lib 'lib', 't/lib';
-use Chalk::CodeGen::Harness::Mode1Runner ();
+use File::Temp qw(tempfile);
+use Chalk::CodeGen::Harness::ProgramRunner ();
 
 # ---------------------------------------------------------------------------
 # The inliner is the only direct-call mechanism today, so a self-recursive sub
@@ -27,13 +28,18 @@ sub f { my $n = shift; $n <= 0 ? 0 : f($n-1) }
 f(3)
 PERL
 
-my ($out, $err);
+my ($fh, $path) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+binmode $fh, ':utf8';
+print $fh $RECURSIVE;
+close $fh;
+
+my $result;
 my $timed_out = 0;
 
 eval {
     local $SIG{ALRM} = sub { die "ALARM\n" };
     alarm 30;
-    ($out, $err) = Chalk::CodeGen::Harness::Mode1Runner::_lower_wrapped($RECURSIVE);
+    $result = Chalk::CodeGen::Harness::ProgramRunner->run_file($path);
     alarm 0;
     1;
 } or do {
@@ -47,12 +53,12 @@ ok(!$timed_out, 'lowering a self-recursive callee TERMINATES (does not hang)')
 SKIP: {
     skip 'lowering hung; the assertions below cannot run', 2 if $timed_out;
 
-    ok(!defined $out, 'a self-recursive callee does not lower to a value')
-        or diag("unexpectedly lowered to: $out");
+    is($result->{verdict}, 'SKIP', 'a self-recursive callee does not compile')
+        or diag("unexpectedly produced: " . ($result->{lli_stdout} // '(undef)'));
 
-    like($err, qr/GAP:/,
+    like($result->{skip_reason}, qr/GAP:/,
         'it GAPs loudly rather than failing silently or hanging')
-        or diag("error was: " . ($err // '(undef)'));
+        or diag("reason was: " . ($result->{skip_reason} // '(undef)'));
 }
 
 done_testing();

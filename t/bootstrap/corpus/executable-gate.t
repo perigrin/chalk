@@ -4,11 +4,9 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
-use JSON::PP;
 
 use lib 'lib', 't/lib';
-use Chalk::IR::Serialize::JSON ();
-use Chalk::Target::LLVM ();
+use Chalk::CodeGen::Harness::ProgramRunner;
 
 # ---------------------------------------------------------------------------
 # WHY THIS EXISTS
@@ -26,17 +24,11 @@ use Chalk::Target::LLVM ();
 #     chalk FILE -> (stdout, exit status)
 #     PASS iff both match EXACTLY.
 #
-# Deliberately NOT tolerated here, because each is a way of not being a compiler:
-#   - the `sub __main__` source-text wrap (Mode1Runner::_lower_wrapped). A file
-#     must compile AS ITSELF; rewriting the source to find an entry point is the
-#     thing we are trying to stop doing.
-#   - the `Int:`/`Str:` epilogue. Mode1Runner STRIPS it after the fact for the
-#     corpus's return-value oracle; this gate instead lowers with
-#     `program_mode => 1` so the epilogue is never EMITTED — a real program's
-#     stdout is what the program printed, full stop.
-#   - nonzero exit as "lowering failed". Mode1Runner treats any nonzero lli exit
-#     as an error (Mode1Runner.pm:167). Exit status is part of the CONTRACT:
-#     `die` must exit 255, `exit 3` must exit 3.
+# The comparison itself lives in ProgramRunner, which every file-scoring gate
+# shares; see its header for what the contract refuses and why. In short: no
+# source-text wrap (the entry point must be FOUND), no epilogue (suppressed at
+# emission by program_mode => 1, not stripped afterwards), and exit status is
+# part of the contract rather than a health check on the toolchain.
 #
 # A program that cannot yet compile is reported BLOCKED with a named reason,
 # not silently skipped — the number below is an honest roadmap, not a vanity
@@ -67,60 +59,12 @@ my @PROGRAMS = (
     { name => 'die-aborts',   src => qq{print "before\\n"; die "boom\\n";\n} },
     { name => 'explicit-exit',src => qq{print "bye\\n"; exit 3;\n} },
 
-    # Stock perl5 t/base files, compiled AS THEMSELVES. tbase-worklist.t also
-    # scores these, but on the WRAPPED contract (Mode1Runner wraps the body in
-    # `sub __main__`, strips the epilogue, and reads a nonzero exit as
-    # failure-to-lower). A PASS there is not evidence of a PASS here.
+    # Stock perl5 t/base files, compiled AS THEMSELVES. tbase-worklist.t scores
+    # the whole t/base ring on this same contract; these two are pinned here so
+    # the product gate names them directly.
     { name => 'tbase/cond.t', path => "$BASE/cond.t" },
     { name => 'tbase/if.t',   path => "$BASE/if.t"   },
 );
-
-# run_perl($path) -> (stdout, exit)
-sub run_perl ($path) {
-    my $out = qx($PERL $path 2>/dev/null);
-    return ($out // '', $? >> 8);
-}
-
-# run_chalk($path) -> (stdout, exit, undef) | (undef, undef, $blocker)
-# Compiles the file AS ITSELF — no wrap, no epilogue strip, no exit rewriting.
-sub run_chalk ($path) {
-    my ($efh, $etmp) = tempfile(SUFFIX => '.err', UNLINK => 1);
-    close $efh;
-    my $json = qx($PERL -I$SON -MO=SoN,json,package=main $path 2>$etmp);
-    my $perr = do { local (@ARGV, $/) = ($etmp); <> } // '';
-
-    return (undef, undef, 'producer emitted no JSON') unless $json =~ /\S/;
-    my $data = eval { JSON::PP->new->decode($json) }
-        or return (undef, undef, 'JSON decode failed');
-
-    # The entry point. A bare file's top level is main_root, which B::SoN does
-    # not walk today — so this is where the bare-file protocol shows up as a
-    # measured number rather than an argument.
-    my $entry = $data->{methods}{'main::__PROGRAM__'}
-             // $data->{methods}{'main::__main__'};
-    unless ($entry) {
-        my ($gap) = $perr =~ /GAP: ([^\n]+)/;
-        return (undef, undef, $gap
-            // 'no entry graph: a bare file produces no top-level graph (main_root is not walked)');
-    }
-
-    my ($graphs, $mop) = eval { Chalk::IR::Serialize::JSON::from_json($json) };
-    return (undef, undef, "from_json failed: $@") unless $graphs;
-    my $g = $graphs->{'main::__PROGRAM__'} // $graphs->{'main::__main__'}
-        or return (undef, undef, 'entry graph did not load');
-    my $ret = $g->returns->[0] or return (undef, undef, 'entry graph has no Return');
-
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1, (defined $mop ? (mop => $mop) : ())) };
-    return (undef, undef, "lower: $@") if $@;
-
-    my ($lfh, $lltmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-    binmode $lfh, ':utf8';
-    print $lfh $ll;
-    close $lfh;
-    my $out = qx($LLI $lltmp 2>/dev/null);
-    return (undef, undef, 'lli died on a signal') if $? & 127;
-    return ($out // '', $? >> 8, undef);
-}
 
 my ($passing, @report) = (0);
 
@@ -133,29 +77,20 @@ for my $p (@PROGRAMS) {
         close $fh;
     }
 
-    my ($p_out, $p_exit)          = run_perl($path);
-    my ($c_out, $c_exit, $blocker) = run_chalk($path);
+    my $r = Chalk::CodeGen::Harness::ProgramRunner->run_file($path);
 
-    if (defined $blocker) {
-        chomp $blocker;
+    if ($r->{verdict} eq 'SKIP') {
+        (my $blocker = $r->{skip_reason} // '(unnamed)') =~ s/\s+\z//;
         push @report, sprintf('  %-14s BLOCKED  %s', $p->{name}, $blocker);
         ok(1, "$p->{name}: blocked, reason named (no silent failure)");
         next;
     }
 
-    my $same = ($c_out eq $p_out) && ($c_exit == $p_exit);
-    $passing++ if $same;
-    push @report, $same
+    $passing++ if $r->{verdict} eq 'PASS';
+    push @report, $r->{verdict} eq 'PASS'
         ? sprintf('  %-14s PASS', $p->{name})
-        : sprintf('  %-14s DIFF     perl(exit=%d, %s) vs chalk(exit=%d, %s)',
-              $p->{name}, $p_exit, _show($p_out), $c_exit, _show($c_out));
+        : sprintf('  %-14s DIFF     %s', $p->{name}, $r->{skip_reason});
     ok(1, "$p->{name}: compared against the perl oracle");
-}
-
-sub _show ($s) {
-    $s //= '';
-    $s =~ s/\n/\\n/g;
-    return length($s) > 40 ? q{"} . substr($s, 0, 40) . q{..."} : qq{"$s"};
 }
 
 diag('');

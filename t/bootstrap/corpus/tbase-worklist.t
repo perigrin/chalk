@@ -52,9 +52,24 @@ is(scalar(keys $report->{files}->%*), $report->{total},
 # (I7/I8/... un-skip files later). It starts at the CURRENT measured stock pass
 # count. Under I1-I6 + I4 that is 0 (the 1 synthetic pass lives in I4's own
 # test, not here — this ring is stock files only).
-is($W->passing_floor, 0, 'monotonic floor is the current stock pass count (0)');
+is($W->passing_floor, 2, 'monotonic floor is the current stock pass count (2)');
 cmp_ok($report->{passed}, '>=', $W->passing_floor,
     "stock passing count ($report->{passed}) has not regressed below the floor (@{[$W->passing_floor]})");
+
+# --- Acceptance D: a blocker belongs to the ENTRY graph ----------------------
+# A file's first_blocker must be the blocker of the program itself, not of some
+# other sub the producer happened to GAP first. rs.t is the case that proves the
+# difference: `main::test_bad_setting` GAPs on an if/else arm and is reported
+# BEFORE `main::__PROGRAM__`'s own explicit-filehandle GAP, so a reader that
+# takes the first GAP in stderr attributes the wrong feature to the file and
+# sends the next build at a construct that is not in the way.
+subtest 'a first_blocker is the ENTRY graph blocker, not another sub\'s' => sub {
+    my $rs = $report->{files}{'rs.t'} or return fail('rs.t missing from the worklist');
+    like($rs->{first_blocker}, qr/explicit filehandle/,
+        'rs.t reports main::__PROGRAM__\'s own blocker');
+    unlike($rs->{first_blocker}, qr/if\/else arm/,
+        'rs.t does not report main::test_bad_setting\'s blocker');
+};
 
 # --- The construct-debt table (the real signal) -----------------------------
 diag('t/base construct-debt worklist:');

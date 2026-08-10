@@ -26,9 +26,11 @@ use Chalk::Target::LLVM;
 #     -> perl : exit 255, stdout "t\n"
 #     -> chalk (before fix): exit 0, stdout "t\nend\n"  WRONG
 #
-# No corpus case can catch this (Mode1Runner.pm:167 turns any nonzero lli
-# exit into a skip; the taken-die legs are GAP-declared). This unit test is
-# the only guard.
+# No corpus case can catch this: son-corpus-wide.t:88 turns any nonzero lli
+# exit into "lli exited N" — a lowering failure — so a case whose correct
+# behavior IS a nonzero exit cannot be pinned there, and the taken-die legs are
+# GAP-declared. This unit test is the only guard. (The same defect in the
+# file-scoring path has been removed; ProgramRunner compares exit status.)
 # ---------------------------------------------------------------------------
 
 subtest 'an if-arm die preceded by a Print still emits the abort' => sub {

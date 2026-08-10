@@ -988,12 +988,12 @@ sub lower_with_elaboration {
     my $result_ref  = $ctx->lower_value($value_node);
     my $result_repr = $value_node->representation;
 
-    # program_mode: this graph IS the whole program (executable-gate.t), not a
-    # value-under-test wrapped by the corpus harness. The type-tag epilogue
-    # below exists ONLY so the corpus's return-value oracle (Mode1Runner's
-    # _expected_epilogue / strip_epilogue) can read back what a fragment
-    # evaluated to; a standalone program must print exactly what it printed,
-    # full stop. Defaults OFF: the corpus depends on the tag being there.
+    # program_mode: this graph IS the whole program, not a value-under-test
+    # wrapped by the corpus harness. The type-tag epilogue below exists ONLY so
+    # the corpus's return-value oracle (son-corpus-wide.t) can read back what a
+    # fragment evaluated to; a standalone program must print exactly what it
+    # printed, full stop. Defaults OFF: the corpus depends on the tag being
+    # there. Every file-scoring gate sets it (t/lib/.../ProgramRunner.pm).
     my $program_mode = $opts{program_mode};
 
     my @lines;

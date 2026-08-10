@@ -1,22 +1,26 @@
-# ABOUTME: Mode-1 proving ground (I5): drives the I4 runner over the real perl5 t/base
-# ABOUTME: ring and produces a per-file construct-debt worklist + a monotonic passing floor.
+# ABOUTME: Compiles the real perl5 t/base ring as standalone executables and produces
+# ABOUTME: a per-file construct-debt worklist + a monotonic passing floor.
 use 5.42.0;
 use utf8;
 use feature 'class';
 no warnings 'experimental::class';
 
-use Chalk::CodeGen::Harness::Mode1Runner;
+use Chalk::CodeGen::Harness::ProgramRunner;
 
-# The t/base ring is a proving ground for Mode-1: each stock file's assertion
-# prints need MORE than the top-level-literal-print constructs I1-I4 support, so
-# under the current head every file is a LOUD COUNTED skip naming its first unmet
-# construct. This class does NOT try to make files pass — it produces the WORKLIST
-# (file -> first_blocker) that says WHICH construct to build next, and a monotonic
-# floor that locks the stock passing count so it can only rise as blockers land.
+# The t/base ring is the proving ground: each stock file is compiled AS ITSELF
+# and its stdout + exit status compared against perl (ProgramRunner). This class
+# does NOT try to make files pass — it produces the WORKLIST (file ->
+# first_blocker) that says WHICH construct to build next, and a monotonic floor
+# that locks the stock passing count so it can only rise as blockers land.
+#
+# The ring was previously scored on the WRAPPED contract, which supplied the
+# program an entry point it could not find for itself and discarded its exit
+# status. See ProgramRunner's header for why that measured the wrong thing and
+# what it cost — a blocker named for one file was a blocker of the wrapper.
 class Chalk::CodeGen::Harness::TbaseWorklist {
 
     # The stock perl5 t/base ring (blead, SHA pinned by HarvestPin). This is the
-    # fixed proving-ground corpus for Mode-1; the order is least-to-most complex
+    # fixed proving-ground corpus; the order is least-to-most complex
     # only for the diag table — verdicts are per-file and order-independent.
     my @FILES = qw(
         num.t translate.t while.t pat.t cond.t if.t lex.t rs.t term.t
@@ -33,24 +37,24 @@ class Chalk::CodeGen::Harness::TbaseWorklist {
     sub files ($class) { @FILES }
 
     # passing_floor() — the monotonic passing-count floor: the current stock pass
-    # count. Under I1-I6 + I4 no stock t/base file lowers to a PASS (each needs a
-    # not-yet-landed construct), so the floor is 0. It rises deliberately as
+    # count. Two files (cond.t, if.t) compile as standalone executables and match
+    # perl on stdout AND exit status, so the floor is 2. It rises deliberately as
     # blockers land and files un-skip; the test asserts passed >= floor so a
     # regression (a file that USED to pass now skipping/failing) is LOUD.
     # (Named passing_floor, not floor, to avoid the core `floor` builtin.)
-    sub passing_floor ($class) { 0 }
+    sub passing_floor ($class) { 2 }
 
-    # run() — drive Mode-1 over the whole ring and classify each result into the
+    # run() — compile the whole ring and classify each result into the
     # construct-debt worklist. Returns:
     #   {
     #     files   => { $file => { verdict, first_blocker } },  # per-file worklist
     #     passed  => N,   # stock files that lowered to a behavior-equal PASS
     #     skipped => N,   # counted skips (FAIL is folded in — see below)
     #     total   => N,   # scalar @FILES
-    #     histogram => { $reason => $count },   # reason -> count (from Mode1Runner)
+    #     histogram => { $reason => $count },   # reason -> count (from ProgramRunner)
     #   }
     #
-    # first_blocker for a SKIP is Mode1Runner's real skip_reason (the producer's
+    # first_blocker for a SKIP is ProgramRunner's real skip_reason (the ENTRY graph's
     # first-unsupported construct) — never a hard-coded guess. A FAIL (a real
     # miscompile) is surfaced with its mismatch reason as its first_blocker AND
     # counted in `skipped` for the passed+skipped==total accounting, so a
@@ -63,7 +67,7 @@ class Chalk::CodeGen::Harness::TbaseWorklist {
 
         for my $file (@FILES) {
             my $path   = "$base/$file";
-            my $result = Chalk::CodeGen::Harness::Mode1Runner
+            my $result = Chalk::CodeGen::Harness::ProgramRunner
                 ->run_file_into_histogram(\%hist, $path);
             my $verdict = $result->{verdict};
 

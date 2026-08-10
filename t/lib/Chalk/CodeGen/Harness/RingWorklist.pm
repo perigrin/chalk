@@ -1,17 +1,18 @@
-# ABOUTME: Mode-1 widening (I9): generalize the I5 t/base worklist to run any NAMED
-# ABOUTME: perl5 test ring (dir + framework-free filter) through the I4 runner.
+# ABOUTME: Generalizes the t/base worklist to run any NAMED perl5 test ring (dir +
+# ABOUTME: framework-free filter), compiling each file as a standalone executable.
 use 5.42.0;
 use utf8;
 use feature 'class';
 no warnings 'experimental::class';
 
-use Chalk::CodeGen::Harness::Mode1Runner;
+use Chalk::CodeGen::Harness::ProgramRunner;
 
-# The I5 TbaseWorklist pinned ONE ring (t/base) as the Mode-1 proving ground. I9
-# widens that to Perl's own ring order — t/cmd, t/opbasic, cherry-picked t/comp —
-# by parameterizing the ring: a directory + a framework-free file filter. Each
-# ring runs through the SAME I4 Mode1Runner and gets its OWN monotonic passing
-# floor, and the combined cross-ring skip histogram is the next-feature worklist.
+# TbaseWorklist pins ONE ring (t/base) as the proving ground. This widens that to
+# Perl's own ring order — t/cmd, t/opbasic, cherry-picked t/comp — by
+# parameterizing the ring: a directory + a framework-free file filter. Each ring
+# runs through the SAME ProgramRunner (each file compiled as itself, stdout AND
+# exit status compared against perl) and gets its OWN monotonic passing floor;
+# the combined cross-ring skip histogram is the next-feature worklist.
 #
 # Like TbaseWorklist this class does NOT try to make files pass: under the current
 # head essentially every file is a LOUD COUNTED skip naming its first unmet
@@ -83,14 +84,16 @@ class Chalk::CodeGen::Harness::RingWorklist {
     }
 
     # passing_floor($ring) — the monotonic passing-count floor for one ring: its
-    # current stock pass count. Under I1-I6 + I4 no stock file in any of these
-    # rings lowers to a PASS, so every floor is 0. It rises deliberately as
-    # blockers land and files un-skip; run()'s report asserts passed >= floor so a
-    # regression (a file that USED to pass now skipping/failing) is LOUD.
+    # current stock pass count, measured as a standalone executable. t/cmd's
+    # elsif.t compiles as itself and matches perl on stdout AND exit status; no
+    # opbasic or comp file does yet. Floors rise deliberately as blockers land
+    # and files un-skip; run()'s report asserts passed >= floor so a regression
+    # (a file that USED to pass now skipping/failing) is LOUD.
     # (Named passing_floor, not floor, to avoid the core `floor` builtin.)
+    my %FLOOR = (cmd => 1, opbasic => 0, comp => 0);
     sub passing_floor ($class, $ring) {
         die "unknown ring '$ring'" unless $RING{$ring};
-        return 0;
+        return $FLOOR{$ring};
     }
 
     # run($ring) — drive Mode-1 over one whole ring and classify each result into
@@ -102,11 +105,11 @@ class Chalk::CodeGen::Harness::RingWorklist {
     #     skipped   => N,   # counted skips (a FAIL miscompile is folded in)
     #     total     => N,   # framework-free file count for the ring
     #     floor     => N,   # this ring's monotonic passing floor
-    #     histogram => { $reason => $count },   # reason -> count (from Mode1Runner)
+    #     histogram => { $reason => $count },   # reason -> count (from ProgramRunner)
     #   }
     #
-    # first_blocker for a SKIP is Mode1Runner's real skip_reason (the producer's
-    # first-unsupported construct) — never a hard-coded guess. A FAIL (a real
+    # first_blocker for a SKIP is ProgramRunner's real skip_reason (the ENTRY
+    # graph's first-unsupported construct) — never a hard-coded guess. A FAIL (a real
     # miscompile) is surfaced with its mismatch reason as its first_blocker AND
     # counted in `skipped` for the passed+skipped==total accounting, so a
     # miscompile can never masquerade as a silent pass.
@@ -119,7 +122,7 @@ class Chalk::CodeGen::Harness::RingWorklist {
 
         for my $file (@files) {
             my $path   = "$dir/$file";
-            my $result = Chalk::CodeGen::Harness::Mode1Runner
+            my $result = Chalk::CodeGen::Harness::ProgramRunner
                 ->run_file_into_histogram(\%hist, $path);
             my $verdict = $result->{verdict};
 
