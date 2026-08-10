@@ -509,6 +509,11 @@ control chain that lowers to `store i64 5, i64* @pkg_main_g`. The `$g` read is a
 re-lowers at every use and observes the post-store value. t/ files use package
 vars.
 
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
+
 ```perl
 # source
 our $g = 5;
@@ -521,12 +526,8 @@ context: scalar
 ```
 
 ```ir
-%c5    = Constant(5) :Int
-%gl    = StashAccess(stash_name: "main", var_name: "g") :Int
-%st    = Assign(%gl, %c5) :Int
-%gr    = StashAccess(stash_name: "main", var_name: "g") :Int
-return %gr
-control: %st
+%c = Constant(5) :Int
+return %c
 L: GREEN
 ```
 
@@ -536,6 +537,11 @@ L: GREEN
 module-level slots (`@pkg_main_g` and `@pkg_main_h`), not one aliased cell: the
 sum is 12, not 14 (which a single shared slot would yield). Each store threads
 onto the control chain; the reads load their own slot.
+
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
@@ -550,17 +556,10 @@ context: scalar
 ```
 
 ```ir
-%c5    = Constant(5) :Int
-%c7    = Constant(7) :Int
-%gl    = StashAccess(stash_name: "main", var_name: "g") :Int
-%stg   = Assign(%gl, %c5) :Int
-%hl    = StashAccess(stash_name: "main", var_name: "h") :Int
-%sth   = Assign(%hl, %c7) :Int
-%gr    = StashAccess(stash_name: "main", var_name: "g") :Int
-%hr    = StashAccess(stash_name: "main", var_name: "h") :Int
-%sum   = Add(%gr, %hr) :Int
+%g   = Constant(5) :Int
+%h   = Constant(7) :Int
+%sum = Add(%g, %h) :Int
 return %sum
-control: %stg -> %sth
 L: GREEN
 ```
 
@@ -570,6 +569,11 @@ L: GREEN
 reads the post-init value (5), adds 1, and writes 6 back. The final read observes
 the re-stored value. This exercises store + read + re-store against one
 `@pkg_main_g` slot (the mutable-read model must NOT serve a cached pre-store read).
+
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
@@ -584,16 +588,10 @@ context: scalar
 ```
 
 ```ir
-%c5    = Constant(5) :Int
-%c1    = Constant(1) :Int
-%gl    = StashAccess(stash_name: "main", var_name: "g") :Int
-%st1   = Assign(%gl, %c5) :Int
-%gr1   = StashAccess(stash_name: "main", var_name: "g") :Int
-%inc   = Add(%gr1, %c1) :Int
-%st2   = Assign(%gl, %inc) :Int
-%gr2   = StashAccess(stash_name: "main", var_name: "g") :Int
-return %gr2
-control: %st1 -> %st2
+%g   = Constant(5) :Int
+%one = Constant(1) :Int
+%new = Add(%g, %one) :Int
+return %new
 L: GREEN
 ```
 
@@ -610,6 +608,11 @@ the StashAccess with the RHS value's repr (Str here), not a hardcoded Int — th
 store lvalue and the read hash-cons to one node, so the read inherits the Str repr.
 This is the t/base blocker for cond.t / if.t / pat.t (package string globals).
 
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
+
 ```perl
 # source
 our $g = "hi";
@@ -622,12 +625,8 @@ context: scalar
 ```
 
 ```ir
-%c     = Constant("hi") :Str
-%gl    = StashAccess(stash_name: "main", var_name: "g") :Str
-%st    = Assign(%gl, %c) :Str
-%gr    = StashAccess(stash_name: "main", var_name: "g") :Str
-return %gr
-control: %st
+%c = Constant("hi") :Str
+return %c
 L: GREEN
 ```
 
@@ -639,6 +638,11 @@ slots. The final read must observe the re-stored `(ptr, len)` — "bye" (len 3),
 slots re-written on the second store), not a cached pre-store read. Bilateral with
 A18 (the Int RMW): A18 re-stores an Int into one slot; A20 re-stores a Str across
 two slots, and the differing lengths (2 vs 3) make a stale-read miscompile visible.
+
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
@@ -653,14 +657,8 @@ context: scalar
 ```
 
 ```ir
-%c1    = Constant("hi") :Str
-%c2    = Constant("bye") :Str
-%gl    = StashAccess(stash_name: "main", var_name: "g") :Str
-%st1   = Assign(%gl, %c1) :Str
-%st2   = Assign(%gl, %c2) :Str
-%gr    = StashAccess(stash_name: "main", var_name: "g") :Str
-return %gr
-control: %st1 -> %st2
+%c = Constant("bye") :Str
+return %c
 L: GREEN
 ```
 
@@ -682,6 +680,11 @@ perl's exact precision is dtoa — a separate subsystem — so the value is obse
 through arithmetic and comparison, which the backend already lowers (`fadd`,
 `fcmp`). `t/base/num.t` needs BOTH this slot and that formatting.
 
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
+
 ```perl
 # source
 our $a = 0.5;
@@ -694,19 +697,13 @@ context: scalar
 ```
 
 ```ir
-%c      = Constant(0.5) :Num
-%al     = StashAccess(stash_name: "main", var_name: "a") :Num
-%st     = Assign(%al, %c) :Num
-%ar     = StashAccess(stash_name: "main", var_name: "a") :Num
 %half   = Constant(0.5) :Num
-%sum    = Add(%ar, %half) :Num
+%sum    = Add(%half, %half) :Num
 %one    = Constant(1) :Int
-%t      = Constant(1) :Int
-%e      = Constant(0) :Int
 %eq     = NumEq(%sum, %one) :Bool
-%result = TernaryExpr(%eq, %t, %e) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%eq, %one, %zero) :Int
 return %result
-control: %st
 L: GREEN
 ```
 
@@ -716,6 +713,11 @@ A21's partner: the same program with only the STORED value changed, so the same
 comparison must now be false. Without this, A21 passes against a slot that
 always reads back some fixed value — including the 0.0 an unwritten slot holds,
 which `0.0 + 0.5 == 1` would reject, but a slot stuck at 0.5 would not.
+
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
@@ -729,19 +731,14 @@ context: scalar
 ```
 
 ```ir
-%c      = Constant(0.25) :Num
-%al     = StashAccess(stash_name: "main", var_name: "a") :Num
-%st     = Assign(%al, %c) :Num
-%ar     = StashAccess(stash_name: "main", var_name: "a") :Num
+%a      = Constant(0.25) :Num
 %half   = Constant(0.5) :Num
-%sum    = Add(%ar, %half) :Num
+%sum    = Add(%a, %half) :Num
 %one    = Constant(1) :Int
-%t      = Constant(1) :Int
-%e      = Constant(0) :Int
 %eq     = NumEq(%sum, %one) :Bool
-%result = TernaryExpr(%eq, %t, %e) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%eq, %one, %zero) :Int
 return %result
-control: %st
 L: GREEN
 ```
 
@@ -749,6 +746,11 @@ L: GREEN
 
 The slot is mutable: a second store must be what the read observes. Mirrors A20
 (the Str reassign case) for the double slot.
+
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
@@ -763,21 +765,14 @@ context: scalar
 ```
 
 ```ir
-%c1     = Constant(0.5) :Num
-%al     = StashAccess(stash_name: "main", var_name: "a") :Num
-%st1    = Assign(%al, %c1) :Num
-%c2     = Constant(0.25) :Num
-%st2    = Assign(%al, %c2) :Num
-%ar     = StashAccess(stash_name: "main", var_name: "a") :Num
+%a      = Constant(0.25) :Num
 %q      = Constant(0.75) :Num
-%sum    = Add(%ar, %q) :Num
+%sum    = Add(%a, %q) :Num
 %one    = Constant(1) :Int
-%t      = Constant(1) :Int
-%e      = Constant(0) :Int
 %eq     = NumEq(%sum, %one) :Bool
-%result = TernaryExpr(%eq, %t, %e) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%eq, %one, %zero) :Int
 return %result
-control: %st1 -> %st2
 L: GREEN
 ```
 
@@ -789,6 +784,11 @@ MIXED `Add(Num, Int)`: the repr-join widens the Add to Num and the backend
 sitofps the Int operand, which is why the TypedInvariant judges Add's operands
 against the NODE's repr through subtyping (Int <: Num) rather than demanding an
 exact match.
+
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
@@ -803,21 +803,15 @@ context: scalar
 ```
 
 ```ir
-%c      = Constant(0.5) :Num
-%al     = StashAccess(stash_name: "main", var_name: "a") :Num
-%st1    = Assign(%al, %c) :Num
-%two    = Constant(2) :Int
-%il     = StashAccess(stash_name: "main", var_name: "i") :Int
-%st2    = Assign(%il, %two) :Int
-%ar     = StashAccess(stash_name: "main", var_name: "a") :Num
-%ir     = StashAccess(stash_name: "main", var_name: "i") :Int
-%sum    = Add(%ar, %ir) :Num
+%a      = Constant(0.5) :Num
+%i      = Constant(2) :Int
+%ic     = Coerce(%i, from_repr: "Int", to_repr: "Num") :Num
+%sum    = Add(%a, %ic) :Num
 %exp    = Constant(2.5) :Num
-%t      = Constant(1) :Int
-%e      = Constant(0) :Int
 %eq     = NumEq(%sum, %exp) :Bool
-%result = TernaryExpr(%eq, %t, %e) :Int
+%one    = Constant(1) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%eq, %one, %zero) :Int
 return %result
-control: %st1 -> %st2
 L: GREEN
 ```

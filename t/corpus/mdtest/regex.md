@@ -244,6 +244,11 @@ node, which is what makes the read observe the store (measured: one
 `StashAccess` with both the `Assign` and the `RegexMatch` as consumers) and what
 gives the read its Str repr, exactly as A19 describes for `our $g`.
 
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
+
 ```perl
 # source
 $_ = "test";
@@ -257,15 +262,11 @@ context: scalar
 
 ```ir
 %c      = Constant("test") :Str
-%ul     = StashAccess(stash_name: "main", var_name: "_") :Str
-%st     = Assign(%ul, %c) :Str
-%ur     = StashAccess(stash_name: "main", var_name: "_") :Str
-%m      = RegexMatch(%ur, pattern: "^test") :Bool
+%m      = RegexMatch(%c, pattern: "^test") :Bool
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
 return %result
-control: %st
 L: GREEN
 ```
 
@@ -277,6 +278,11 @@ same pattern must now fail. This is the case that discriminates a real read of
 `^test` either, so R8's polarity alone would pass against the bug. Only a pair
 that changes the stored value and sees the answer change proves the match is
 reading what the store wrote.
+
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
@@ -291,15 +297,11 @@ context: scalar
 
 ```ir
 %c      = Constant("nope") :Str
-%ul     = StashAccess(stash_name: "main", var_name: "_") :Str
-%st     = Assign(%ul, %c) :Str
-%ur     = StashAccess(stash_name: "main", var_name: "_") :Str
-%m      = RegexMatch(%ur, pattern: "^test") :Bool
+%m      = RegexMatch(%c, pattern: "^test") :Bool
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
 return %result
-control: %st
 L: GREEN
 ```
 
@@ -315,6 +317,11 @@ the stack and is a declared GAP: the pop order would have to be established
 before either could be taken safely, and guessing it is how a subject and a
 matcher get swapped silently.
 
+Under package-scalar SSA the variable itself does not appear in the graph: an
+assignment is a DEFINITION, so later reads resolve to the bound value and a
+constant-valued binding folds. The BEHAVIOR leg is what pins this case — the
+returned value is only correct if the binding was updated at each definition.
+
 ```perl
 # source
 our $g = "test";
@@ -328,14 +335,10 @@ context: scalar
 
 ```ir
 %c      = Constant("test") :Str
-%gl     = StashAccess(stash_name: "main", var_name: "g") :Str
-%st     = Assign(%gl, %c) :Str
-%gr     = StashAccess(stash_name: "main", var_name: "g") :Str
-%m      = RegexMatch(%gr, pattern: "^test") :Bool
+%m      = RegexMatch(%c, pattern: "^test") :Bool
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
 return %result
-control: %st
 L: GREEN
 ```
