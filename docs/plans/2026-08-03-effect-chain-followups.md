@@ -933,3 +933,96 @@ an unresolved-callee GAP that is not a reference check.
 So the demotion question to answer per variable is "is this variable
 referenced?", and only then "and does the reference outlive the region?", which
 decides placement. The second question is where escape analysis belongs.
+
+## H13: H10 diagnosed — the lookup never consults a PACKAGE scope
+
+H10 framed the cross-sub drop as "escape needs demotion". The proximate cause is
+narrower and is a SCOPING bug: inside `bump`, `$g` is not declared in the
+lexical scope, and the lookup has nowhere else to go. `%scope` is flat and
+per-graph; there is no package scope to fall through to.
+
+### The package is a scope, and its symbol table is that scope as a hash
+
+VALIDATED, not assumed (perl 5.42):
+
+| probe | result |
+|---|---|
+| `our $g = 5` creates a stash entry | yes, a glob |
+| a `my` variable appears in the stash | **no** |
+| writing THROUGH the stash entry changes `$g` | yes, 5 -> 99 |
+| replacing the glob replaces the variable | yes, 5 -> 42 |
+| a sub reaching an `our` variable compiles to | `gvsv`, not `padsv` |
+| fully-qualified access compiles to | `gvsv` |
+
+Rows 3 and 4 are the load-bearing ones: the stash entry IS the storage, not a
+view or an index — writing through it writes the variable, and replacing it
+replaces the variable. Row 2 confirms it holds package bindings specifically.
+
+Row 5 also disposes of a plausible objection: `our` does NOT turn a later use
+into a lexical access. It compiles to `gvsv` exactly like a fully-qualified one,
+so there is one access mechanism, not two.
+
+REFINEMENT the probe produced: what is exposed is a hash of GLOBS, and a glob is
+a multi-slot container — `$g`, `@g` and `%g` share ONE stash entry. So a name
+maps to a SLOT SET, not to a single binding. A Chalk Scope modelling this binds
+a name to per-sigil slots rather than to one value.
+
+The model this points at: a package is a SCOPE like any other, and its symbol
+table is that Scope object exposed as a hash. A name lookup walks the chain —
+lexical, then enclosing, then package — with no special case for globals. Chalk
+has the innermost link of that chain and nothing beyond it.
+
+Measured, `our $g = 5; sub bump { $g = 9 } bump(); print $g`:
+
+    main::bump          Start; Constant(9); Return(9)
+    main::__PROGRAM__   Constant(5) -> Stringify -> Concat -> Call(bump) -> Print
+
+`$g = 9` became a binding in `bump`'s own map. Nothing in `bump` reads it
+afterwards, so it survives only as the return value — that it wrote to `$g` is
+recorded NOWHERE. `__PROGRAM__`'s read resolves against its own map to 5, with
+no edge to the callee.
+
+### A shared package-scope map is NOT the fix
+
+Worth stating because it is the obvious next move and it is order-dependent:
+
+- translate `__PROGRAM__` first → its read sees 5; `bump` has not been walked
+- translate `bump` first → `__PROGRAM__`'s own `= 5` overwrites the 9
+
+Neither is execution order. Translation order is not program order, so a mutable
+map shared across graphs produces a different wrong answer rather than a right
+one.
+
+### The call is the definition site
+
+What makes it correct: a `Call` whose callee assigns `$g` PRODUCES a new
+definition of `$g` in the caller — the same shape as a call that writes memory
+producing a new memory value on the existing chain. The callee's graph has to
+carry which package names it defines, so the call site can bind them.
+
+This is where the scoping framing and the reference axis (H12) meet — and it
+also corrects H11, which listed "reached through the symbol table" as a distinct
+reference route.
+
+**The symbol table is not a separate mechanism. It is the package's Scope object
+exposed as a hash.** So a package lookup is the SAME lookup a lexical does, just
+terminating one scope further out; there is one mechanism (Scope), not two. What
+distinguishes the package scope is that it is SHARED BETWEEN GRAPHS.
+
+That sharing is what forces the H12 conclusion here: a name reachable from more
+than one graph cannot be pure value-SSA in either, for the same reason a
+referenced variable cannot be — something outside this dataflow can reach it.
+
+Exposing that Scope as a hash is an ADDITIONAL capability. When a program
+actually uses it (`*main::g`, a symbolic ref, `no strict 'refs'`), bindings
+become reachable dynamically, by a name computed at runtime — which is a
+strictly harder case than the static sharing above and is not what H10's
+`bump()` needs.
+
+### Consequence for the fence
+
+The `is_program` fence (H10) refuses a package definition inside any sub, which
+is broader than this diagnosis warrants — it would refuse a sub that assigns a
+package variable nothing else ever reads. It is the right STOPGAP because it
+restores the loud GAP the SSA change removed, but it is not the fix, and it
+should not be mistaken for one when the corpus-shape question is settled.
