@@ -200,12 +200,26 @@ nothing would notice.
 
 # Part E — from the types/fetches architecture note (2026-08-10)
 
-## E1: LIVE SILENT MISCOMPILE — a nested rvalue deref does not autovivify
+## E1: LIVE SILENT MISCOMPILE — a nested rvalue deref answers wrong with no GAP
 
 **Severity: violates GAP-not-miscompile.** Wrong answer, no GAP, no diagnostic, exit 0.
 
 Found while grounding a type-model discussion, not by a gate. Nothing in `docs/`,
 `lib/` or `t/` mentions autovivification, so this was undocumented.
+
+> **[REFRAMED 2026-08-10, perigrin.]** This entry was first titled *"...does not
+> autovivify"*, which encodes the wrong requirement. **Chalk is not a port of perl's
+> implementation.** It is a reimplementation of perl's *semantics where possible*, over a
+> **subset**, using modern compiler theory, targeting an optimized binary. So "perl
+> autovivifies at runtime, therefore chalk must" is not a valid inference, and neither is
+> "perl mutates in place, therefore chalk must."
+>
+> **The defect is the SILENT WRONG ANSWER, not the absence of autovivification.** Those
+> are different bugs, and separating them adds a resolution that was missing from every
+> earlier draft below: **declare autovivification out of subset and GAP loudly.** That is
+> cheap, honest, and satisfies the project invariant. Whether autoviv is *in* the subset
+> is a scope decision, not a correctness one — but a construct outside the subset must
+> refuse, not guess.
 
 ### Repro (measured 2026-08-10, stock perl 5.42.0, no pragmas)
 
@@ -342,7 +356,14 @@ my $v = $r->[5][0];
 print scalar(@$s), "\n";      # perl: 6   chalk: 2   FAIL
 ```
 
-**Three implementations satisfy it:**
+**Four resolutions, and the first is not on the implementation axis at all:**
+
+0. **Declare it out of subset and GAP.** Chalk compiles a *subset* of Perl. A construct
+   outside the subset must **refuse loudly**, which satisfies the invariant this entry is
+   filed under and costs one guard. Whether autovivification belongs in the subset is a
+   scope decision — but it is not answered by pointing at what perl does.
+
+If it IS in the subset, **three implementations satisfy the semantics:**
 
 1. **Static pre-sizing.** `_static_miss` **already proves** at compile time that index 5
    exceeds the 2-element literal, and the index here is constant-propagable. Allocate the
@@ -357,6 +378,11 @@ print scalar(@$s), "\n";      # perl: 6   chalk: 2   FAIL
 statically-decidable case — which is exactly the case `_static_miss` already detects, and
 the case in this repro. A genuinely dynamic index (from input or a parameter, not
 constant-propagable) is a separate tier and is where the choice actually has to be made.
+
+**Note (0) and (1) compose.** Static pre-sizing handles every case the compiler can
+decide; a GAP handles the residue. That combination is the one most consistent with a
+subset compiler targeting an optimized binary — it never emits a runtime extension, and it
+never guesses.
 
 **What IS established:** every `Coerce` today is pure — `sitofp`, `zext`, `icmp`
 (`_lower_coerce`, `Target/LLVM/Context.pm:1019+`) — and `Coerce` has no memory input
