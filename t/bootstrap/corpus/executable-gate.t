@@ -46,19 +46,33 @@ use Chalk::Target::LLVM ();
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI  = '/usr/lib/llvm-15/bin/lli';
+my $BASE = $ENV{PERL5_TBASE_DIR} // "$ENV{HOME}/dev/perl5/t/base";
 
 plan skip_all => "perl 5.42 not found at $PERL"      unless -x $PERL;
 plan skip_all => "perl5-son not found at $SON"       unless -f "$SON/B/SoN.pm";
 plan skip_all => "lli not found at $LLI"             unless -x $LLI;
+plan skip_all => "perl5 t/base not found at $BASE"   unless -d $BASE;
 
 # Programs whose ENTIRE observable contract is (stdout, exit status). Start
 # here: if a hello-world does not round-trip, nothing larger can.
+#
+# `src` is an inline program written to a tempfile; `path` is a REAL file
+# compiled where it lives, byte-for-byte, shebang included. The `path` entries
+# are the ones that matter — a synthetic one-liner can be shaped to fit the
+# compiler, a stock t/base file cannot.
 my @PROGRAMS = (
     { name => 'hello',        src => qq{print "hi\\n";\n} },
     { name => 'two-prints',   src => qq{print "a\\n"; print "b\\n";\n} },
     { name => 'arith-print',  src => qq{my \$x = 2 + 3; print "\$x\\n";\n} },
     { name => 'die-aborts',   src => qq{print "before\\n"; die "boom\\n";\n} },
     { name => 'explicit-exit',src => qq{print "bye\\n"; exit 3;\n} },
+
+    # Stock perl5 t/base files, compiled AS THEMSELVES. tbase-worklist.t also
+    # scores these, but on the WRAPPED contract (Mode1Runner wraps the body in
+    # `sub __main__`, strips the epilogue, and reads a nonzero exit as
+    # failure-to-lower). A PASS there is not evidence of a PASS here.
+    { name => 'tbase/cond.t', path => "$BASE/cond.t" },
+    { name => 'tbase/if.t',   path => "$BASE/if.t"   },
 );
 
 # run_perl($path) -> (stdout, exit)
@@ -111,10 +125,13 @@ sub run_chalk ($path) {
 my ($passing, @report) = (0);
 
 for my $p (@PROGRAMS) {
-    my ($fh, $path) = tempfile(SUFFIX => '.pl', UNLINK => 1);
-    binmode $fh, ':utf8';
-    print $fh $p->{src};
-    close $fh;
+    my $path = $p->{path};
+    unless (defined $path) {
+        (my $fh, $path) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+        binmode $fh, ':utf8';
+        print $fh $p->{src};
+        close $fh;
+    }
 
     my ($p_out, $p_exit)          = run_perl($path);
     my ($c_out, $c_exit, $blocker) = run_chalk($path);
@@ -151,15 +168,18 @@ diag('  exactly: no source-text wrap, no epilogue strip, no exit-code');
 diag('  tolerance. Raise the floor below as programs start passing.');
 
 # The floor. It starts where the capability actually is, and may only rise.
-cmp_ok($passing, '>=', 4,
-    'executable-gate floor (4; hello/two-prints/arith-print/die-aborts now compile '
-  . 'and run as standalone programs. The Int/Str/Bool/Undef return-value type-tag '
-  . 'epilogue -- needed only so the corpus harness can read back a fragment\'s '
-  . 'return value -- is no longer being printed as if it were program output: '
-  . 'lower() takes program_mode => 1 to suppress it at emission time (defaults '
-  . 'off; the corpus reads the tag as its oracle). The remaining program, '
-  . 'explicit-exit, is blocked on dispatch_kind: "builtin" name: "exit" -- an '
-  . 'unlowered builtin Call, not an epilogue or entry-protocol issue. Raise this '
-  . 'as more programs pass.)');
+cmp_ok($passing, '>=', 6,
+    'executable-gate floor (6; the four one-liners plus the first two STOCK FILES. '
+  . 'cond.t and if.t from perl5 t/base compile AS THEMSELVES -- shebang intact, no '
+  . '`sub __main__` wrap, no epilogue strip, exit status compared -- and match perl '
+  . 'byte-for-byte. This capability predates the assertion: it went unnoticed because '
+  . 'this gate only ever ran synthetic one-liners, and tbase-worklist.t scores the '
+  . 'same two files on the WRAPPED contract, where a PASS says nothing about this '
+  . 'one. The Int/Str/Bool/Undef return-value type-tag epilogue -- needed only so the '
+  . 'corpus harness can read back a fragment\'s return value -- is suppressed at '
+  . 'emission time by program_mode => 1 (defaults off; the corpus reads the tag as '
+  . 'its oracle). The one remaining one-liner, explicit-exit, is blocked in the '
+  . 'backend on an unlowered `exit` Call: "cannot lower op=Call (not in '
+  . 'literal-arithmetic slice)". Raise this as more programs pass.)');
 
 done_testing();
