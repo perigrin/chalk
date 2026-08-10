@@ -553,25 +553,36 @@ fires and the result is honestly `Maybe[Int]`.
 perl reports `scalar(@$s)` as `6` (chalk: `2`). Whatever chalk does must be observable
 through the alias.
 
-**At least three implementations satisfy that, and this note does not choose:**
+**[DECISION, perigrin 2026-08-10]** *"If we can replicate autovivification using SSA and
+coercion and provide tools to better analyze and optimize that behavior then we will do
+that … if we can't then we won't."* — a **feasibility** test, not a scope preference.
 
-1. **Static pre-sizing.** `_static_miss` **already proves** the index exceeds the literal's
-   extent at compile time, and here the index is constant-propagable. So allocate the
-   slots at the *construction* site. The coercion is resolved on the type, at the
-   declaration — no runtime extension, nothing on the access path.
-2. **Functional update through memory-SSA.** The coercion yields a *new* array value and
-   the memory chain threads it; whether that lowers to an in-place write is a backend
-   decision, not an IR property.
-3. **In-place heap mutation.** What perl does — one option, not the requirement.
+**Verdict: we can.** **[CODE]** The only thing it turns on is aliasing, and that is
+already solved: `docs/plans/2026-07-05-memory-ssa-element-reads.md:4` records the approved
+model as *"full memory-value + MemPhi, **one global memory**"*. A single global memory
+value orders every memory operation against every other, so an extension through `$r` is
+necessarily observed by a later read through `$s` — **sound on aliasing by construction,
+no alias analysis required.**
 
-Only (3) needs a storing `Coerce`. (1) needs nothing new at all and covers the
-statically-decidable case, which is the one `_static_miss` already detects. A genuinely
-dynamic index (from input or a parameter) is a separate tier and is where the choice
-actually bites.
+An earlier draft of this paragraph listed three "implementations" to choose between. They
+are not alternatives; they are three layers of one answer:
 
-**What IS established:** every `Coerce` today is pure (`sitofp`, `zext`, `icmp`), and
-`Coerce` has no memory input (`Coerce.pm`: `from_repr`, `to_repr`, `inputs`) while
-`Subscript` takes one. **What is NOT established:** that it needs one.
+| layer | |
+|---|---|
+| **model** | `Coerce` threaded on the global memory chain. The **same shape** `Assign`/element-store already has. |
+| **optimization** | **static pre-sizing** — when the index is statically known (which `_static_miss` already proves), fold the extension back to the allocation site. What the optimizer does *to* the coercion, not a rival to it. |
+| **lowering** | in-place write — a backend decision, invisible to the IR. |
+
+**And this is the half that justifies doing it at all.** Perl's autovivification is a
+runtime behaviour *invisible to any optimizer*; a `Coerce` node is not. Putting it in the
+IR buys DCE (drop it when the array is dead), escape analysis (drop it when no alias is
+live), ordinary CSE/hoisting, and the static fold above — with no new machinery. That is
+strictly more analyzable than what perl does.
+
+**Cost, honestly:** `Coerce` is pure today and has no memory input while `Subscript` and
+`Assign` have one. Giving it one is a real change, but an **extension of shipped machinery
+into an existing shape**. An earlier draft called it "a new thing in this IR"; that
+overstated it. Filed with the miscompile as **E1**.
 
 ### What this collapses
 

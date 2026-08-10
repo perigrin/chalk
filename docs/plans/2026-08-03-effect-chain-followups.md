@@ -356,33 +356,53 @@ my $v = $r->[5][0];
 print scalar(@$s), "\n";      # perl: 6   chalk: 2   FAIL
 ```
 
-**Four resolutions, and the first is not on the implementation axis at all:**
+### DECISION RULE and verdict
 
-0. **Declare it out of subset and GAP.** Chalk compiles a *subset* of Perl. A construct
-   outside the subset must **refuse loudly**, which satisfies the invariant this entry is
-   filed under and costs one guard. Whether autovivification belongs in the subset is a
-   scope decision — but it is not answered by pointing at what perl does.
+**[DECISION, perigrin 2026-08-10]** *"If we can replicate autovivification using SSA and
+coercion and provide tools to better analyze and optimize that behavior then we will do
+that … if we can't then we won't."*
 
-If it IS in the subset, **three implementations satisfy the semantics:**
+So this is a **feasibility** question, not a scope preference. **Verdict: we can.**
 
-1. **Static pre-sizing.** `_static_miss` **already proves** at compile time that index 5
-   exceeds the 2-element literal, and the index here is constant-propagable. Allocate the
-   slots at the **construction** site; the coercion is resolved on the type at the
-   declaration. Nothing on the access path, no new node behaviour, no mutation.
-2. **Functional update through memory-SSA.** The coercion yields a new array value; the
-   memory chain threads it. Whether that lowers to an in-place write is a *backend*
-   decision, not an IR property.
-3. **In-place heap mutation.** What perl does — one option, not the requirement.
+**[CODE] The one thing feasibility turns on is aliasing**, and it is already solved.
+`docs/plans/2026-07-05-memory-ssa-element-reads.md:4` — *"approved model: full
+memory-value + MemPhi, **one global memory**"*. With a single global memory value every
+memory operation is ordered against every other, so an extension through `$r` is
+**necessarily** observed by a later read through `$s`. Conservative on ordering precision,
+**sound on aliasing by construction, with no alias analysis required.**
 
-**Only (3) needs a storing `Coerce`.** (1) needs nothing new and covers the
-statically-decidable case — which is exactly the case `_static_miss` already detects, and
-the case in this repro. A genuinely dynamic index (from input or a parameter, not
-constant-propagable) is a separate tier and is where the choice actually has to be made.
+### One model, one optimization, one lowering — not three implementations
 
-**Note (0) and (1) compose.** Static pre-sizing handles every case the compiler can
-decide; a GAP handles the residue. That combination is the one most consistent with a
-subset compiler targeting an optimized binary — it never emits a runtime extension, and it
-never guesses.
+An earlier draft of this section listed three "implementations" to choose between. They
+are not alternatives; they are three layers of the same answer:
+
+| layer | what it is |
+|---|---|
+| **model** | `Coerce` threaded on the global memory chain — memory in, memory out. The **same shape** `Assign`/element-store already has. |
+| **optimization** | **static pre-sizing.** When the index is statically known — which `_static_miss` **already proves** — fold the extension back to the allocation site and the runtime extension disappears. This is what the optimizer does *to* the coercion, not a rival to it. |
+| **lowering** | in-place write. A backend decision, invisible to the IR. |
+
+### This is the "tools to analyze and optimize" half, and it is the point
+
+Perl's autovivification is a runtime behaviour **invisible to any optimizer**. A `Coerce`
+node is not. Putting it in the IR buys, with no new machinery:
+
+- **DCE** removes the extension when the array is dead
+- **escape analysis** — if no alias is live, the extension is unobservable and goes away
+- **CSE / hoisting / sinking** apply to it like any other node
+- **the static fold above**, which is just constant propagation reaching a coercion
+
+That is strictly more analyzable than what perl does, which is the bar this project sets.
+
+### Cost, stated honestly
+
+`Coerce` is pure today (`sitofp`, `zext`, `icmp`) and has no memory input, while
+`Subscript` and `Assign` do. Giving it one is a real change — but it is an **extension of
+shipped machinery into the same shape**, not a new mechanism. An earlier draft called this
+"a new thing in this IR"; that overstated it.
+
+**GAP-and-declare-out-of-subset is the fallback, and is not needed.** It stays recorded
+only as the answer had feasibility gone the other way.
 
 **What IS established:** every `Coerce` today is pure — `sitofp`, `zext`, `icmp`
 (`_lower_coerce`, `Target/LLVM/Context.pm:1019+`) — and `Coerce` has no memory input
