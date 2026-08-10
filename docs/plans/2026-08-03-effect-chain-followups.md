@@ -891,3 +891,45 @@ question.
 Only the address-taken route is fenced by design. The closure routes are covered
 incidentally by the callee-resolution GAP, which is not an escape check and
 should not be relied on as one.
+
+## H12: sharper still — the axis is REFERENCES, not escape
+
+H9 said the axis is escape. That is a symptom, not the trigger.
+
+    my $x = 5; my $r = \$x; $$r = 9; print $x;
+
+Nothing escapes: every use is inside the compiled region and visible to the
+dataflow. `$x` still cannot be a pure SSA value, because a write reaches it
+through an alias. An escape analysis would have called this case safe.
+
+**A variable that is REFERENCED cannot be a pure SSA value.** Escape is a
+separate question — it governs WHERE the storage lives and HOW LONG, not
+WHETHER storage is needed.
+
+This matches the prior art more exactly than "escape" did. LLVM's mem2reg
+promotes an alloca only when it is *used solely by loads and stores* — i.e. no
+pointer is taken. An address-taken-but-non-escaping alloca is still not
+promoted. GCC's split is the same: an aliased variable gets virtual operands
+regardless of whether it leaves the function.
+
+It also explains why the fence that landed (1b34be6) is correct: it triggers on
+the reference being TAKEN, not on any escape judgement, so the non-escaping case
+above is refused too. Had it been built as escape analysis it would have passed
+that case and miscompiled it.
+
+The routes in H11 unify under this reading — each is a way for something other
+than a named use in this dataflow to reach the variable:
+
+    \$x                     an explicit reference
+    closure capture         the closure reaches the variable, not a copy
+    package var from a sub  reached through the symbol table, not this dataflow
+    local                   saves and restores the referenced cell
+
+**Not asserted:** the exact mechanism perl uses for closure capture. It is
+recorded here as a route that must be handled, not as a claim about pads or
+globs — H11 already notes those routes are only covered incidentally today, by
+an unresolved-callee GAP that is not a reference check.
+
+So the demotion question to answer per variable is "is this variable
+referenced?", and only then "and does the reference outlive the region?", which
+decides placement. The second question is where escape analysis belongs.
