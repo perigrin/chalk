@@ -17,6 +17,40 @@ This note is written to be checkable.
 
 ---
 
+## Layer 0: what this note is FOR
+
+**[MODEL, perigrin 2026-08-10]** Three layers, and only one of them is Chalk:
+
+> *"Perl's Optree tells us **what IR to create** … Perl's semantics tell **how our IR
+> should behave** (within some reason) … none of that defines **how our IR implements**
+> that behavior."*
+>
+> *"Chalk **is** L3 … that's where Chalk lives, it's what defines Chalk. It's what we are
+> implementing."*
+
+| | source | who owns it |
+|---|---|---|
+| **L1 — what IR to create** | perl's **optree** | B::SoN. A foreign-function import boundary; misreading `OPpDEREF` / `multideref` aux / `OPf_MOD` is a **decoding bug**. |
+| **L2 — how it must behave** | perl's **semantics**, *within some reason* | the specification. "Within some reason" is the **subset** clause: out-of-scope behaviour must **GAP**, never guess. |
+| **L3 — how we implement it** | **nothing external** | **Chalk. This is the entire project.** |
+
+**Everything in this note is L3.** Types, coercions, fetches, contexts, the type→target
+map — all of it is *how Chalk chooses to implement* behaviour that L2 specifies and L1
+supplies the shape of.
+
+**This is the failure mode to watch for, and it is not a small one.** Repeatedly on
+2026-08-09/10 I let perl's *implementation* settle an L3 question — *"perl mutates the
+array in place, therefore `Coerce` needs a memory edge"* being the clearest case. That is
+not merely a reasoning slip: **if perl's implementation decides L3, there is no Chalk,
+only a port.** An L3 question is answered by what it buys the optimizer, not by what perl
+happens to do.
+
+The same trap has a second face: letting the *existing code* settle an L3 question, on the
+grounds that it is what is there. §2's "representation layer" was exactly that — a
+vocabulary inherited from the implementation rather than chosen.
+
+---
+
 ## The problem this replaces
 
 The compiler has **47 places** that ask "did anyone work out this node's type?" and no

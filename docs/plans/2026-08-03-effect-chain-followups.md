@@ -259,7 +259,12 @@ implementation is always correct."*
 |---|---|---|
 | **1. optree** | the **structure to build** | a foreign-function import boundary. `OPpDEREF`, `multideref`'s aux chain, `OPf_MOD` are facts; failing to read them is a **decoding bug**. |
 | **2. semantics** | the **behaviour to exhibit**, *within some reason* | observable output. "Within some reason" is the **subset** clause — some behaviour may be legitimately out of scope, but then it must GAP, not guess. |
-| **3. implementation** | **nothing** | entirely ours. Perl's runtime has no vote. |
+| **3. implementation** | **nothing** | **Chalk. This is the entire project.** |
+
+**[MODEL, perigrin]** *"Chalk **is** L3 … that's where Chalk lives, it's what defines
+Chalk. It's what we are implementing."* So importing perl's implementation into an L3
+decision is not a small reasoning slip — **if perl's implementation decides L3, there is
+no Chalk, only a port.**
 
 **Layer 3 is the one this investigation kept violating.** *"Perl mutates the array in
 place, therefore `Coerce` needs a memory edge"* imported perl's implementation as ours.
@@ -271,13 +276,18 @@ memory-SSA threading / in-place write is decided on **analyzability and optimiza
 grounds, not fidelity grounds. That is the same test recorded in the DECISION RULE below,
 and it only becomes available once layer 3 is recognised as free.
 
-**So the fix splits by layer.** Layer 1 — the producer must *report* that this access is
-in deref context. Layer 2 — the IR must behave as though the array were extended, or GAP.
-Layer 3 — how, is open, and is chosen for what it lets the optimizer do.
+**So the fix splits by layer.** L1 — the producer must *report* that this access is in
+deref context. L2 — the IR must behave as though the array were extended, or GAP. L3 —
+how, is open, and is chosen for what it lets the optimizer do.
 
-**Today chalk cannot decide anything at layer 3, because layer 1 never told it.** The
-outer `Subscript` arrives **pure**. The information is lost at the import boundary, not
-mishandled after it — which is why this is first a producer bug.
+**Today chalk cannot decide anything at L3, because L1 never told it.** The outer
+`Subscript` arrives **pure**. The information is lost at the import boundary, not
+mishandled after it.
+
+**But do not read that as "this is only a producer bug."** The L1 fix is the *enabler*;
+the deliverable is the L3 design — coercion, static pre-sizing, DCE, escape analysis —
+because **L3 is what Chalk is**. Fixing L1 and then reproducing perl's runtime at L3 would
+close the miscompile and build nothing.
 
 ### Mechanism (measured, not inferred)
 
