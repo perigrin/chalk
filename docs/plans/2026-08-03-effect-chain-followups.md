@@ -195,3 +195,129 @@ classification change does not touch it (verified: blocker unchanged before and 
 **Ready-made RED already exists: corpus T4c.** Note the interaction with D1 — T4c is
 GAP-declared, so it is `pass()`ed without running. If shape 2 were fixed tomorrow,
 nothing would notice.
+
+---
+
+# Part E — from the types/fetches architecture note (2026-08-10)
+
+## E1: LIVE SILENT MISCOMPILE — a nested rvalue deref does not autovivify
+
+**Severity: violates GAP-not-miscompile.** Wrong answer, no GAP, no diagnostic, exit 0.
+
+Found while grounding a type-model discussion, not by a gate. Nothing in `docs/`,
+`lib/` or `t/` mentions autovivification, so this was undocumented.
+
+### Repro (measured 2026-08-10, stock perl 5.42.0, no pragmas)
+
+```perl
+my $r = [10, 20];
+my $v = $r->[5][0];
+print scalar(@$r), "\n";
+```
+
+| case | perl | chalk (lli) | verdict |
+|---|---|---|---|
+| `$r->[5][0]` literal index | **6** | **2** | **FAIL** |
+| `$r->[$i][0]`, `$i = 5` dynamic index | **6** | **2** | **FAIL** |
+| `$r->[0][1]` over `[[1,2],[3,4]]` in-bounds | 2 | 2 | PASS |
+| flat `$r->[$i]` OOB, `defined()` consumer | undef | undef | PASS |
+
+Nested subscript itself works, and a flat OOB read works. The defect is specifically
+**fetch through a MISSING intermediate**.
+
+The hash form (`my $h = {a=>1}; my $v = $h->{zz}{qq}; print scalar(keys %$h)`) GAPs
+earlier on `keys` → "cannot lower op=Call", so it is **untested, not clean**.
+
+### Mechanism (measured, not inferred)
+
+Two earlier guesses were wrong and are recorded so nobody re-treads them: it is NOT the
+`padsv` OPpDEREF site (`FromOptree.pm:1420`), and multideref is NOT collapsed to a
+single Subscript despite `OpMap.pm:234` declaring arity 1. `B::Concise` shows one
+`multideref($r->[5][0])` op, and it decodes into TWO Subscripts correctly.
+
+The producer IR for the failing case:
+
+```
+3  ArrayRef  inputs=[1,2]        # [10,20]
+5  Subscript inputs=[3,4]        # $r->[5]  <-- PURE: no memory input, no store
+8  Subscript inputs=[5,6,7]      # ->[0]    (7 = MemStart)
+9  Length    inputs=[3]          # scalar(@$r) reads the ORIGINAL node 3
+```
+
+**Node 5 is a pure read.** Perl requires it to autovivify: allocate an arrayref, store it
+into `$r->[5]`, extending `@$r` to 6. That store is absent from the IR entirely, so
+`Length(3)` reads the unmodified aggregate and answers 2.
+
+Chalk has silently implemented `no autovivification` semantics. (That is a CPAN user
+pragma, never in core — `Module::CoreList->first_release('autovivification')` is undef —
+so it cannot be leaned on as an excuse; the miscompile is against DEFAULT perl.)
+
+### Why this is a type-model finding as well as a bug
+
+The same syntactic read has two types AND two effect classes, chosen by its CONSUMER:
+
+| context | type | effect |
+|---|---|---|
+| `my $v = $r->[5]` (rvalue leaf) | `Maybe[Int]` | none |
+| `$r->[5][0]` (intermediate in a deref chain) | `ArrayRef`, guaranteed — never Nothing | **a store** |
+
+So "is this fetch `Maybe[T]`?" cannot be answered at the fetch site. This is exactly the
+architecture note's §4 (fetches parameterised by context) and §5 (borrowing rules), and it
+adds a third axis to the `Maybe[T]` design: **does this fetch CREATE?** That is an effect
+classification, not a type parameter, and the producer currently emits neither.
+
+
+### The compiler ALREADY PROVES the miss and then discards the proof
+
+**[MEASURED 2026-08-10]** Loading the failing case through chalk's own loader:
+
+```
+ArrayRef#2                     repr=ArrayRef
+Subscript(ArrayRef#2, 5)       repr=Slot      <-- _static_miss FIRED
+Subscript(that, 0, MemStart)   repr=UNDEF
+```
+
+`_static_miss` (`JSON.pm:1192`) counts the literal's elements and **proves** index 5 is
+out of bounds. It then types the read `Slot` — which is correct for a *leaf* rvalue read
+and wrong for this one, because the consumer is another `Subscript`. In a deref chain
+"provably Nothing" means **"this read is a store"**: it autovivifies, and its result is
+guaranteed `ArrayRef`, never Nothing.
+
+**The proof is on the right node at the right time and the consumer ignores it.** This is
+not a missing analysis; it is an analysis whose result is used in exactly one context and
+dropped in the other.
+
+### Two defensible fixes — do not assume the first
+
+1. **Emit the autovivifying store.** Faithful to Perl. The deref-chain `Subscript` becomes
+   a fetch-or-create with a memory effect, and `Length` sees the extended aggregate.
+2. **Diagnose it.** `$r` is a literal `[10,20]` in scope; index 5 is provably out of
+   bounds; a checker could say *"index 5 is out of bounds for the 2-element array literal
+   declared at line 1 — this read will extend it to 6 elements."*
+
+**[MEASURED] Perl itself does NOT warn** — `perl -w -Mstrict` prints `6` silently. So
+chalk cannot *reject* this; it is legal Perl. But chalk holds the literal and perl does
+not, so a warning is available to chalk that is not available to perl.
+
+(2) does not remove the need for (1) — a warned program must still compile correctly — but
+it is the higher-value half for a self-hosting compiler, and it is the behaviour a real
+type checker would be expected to give.
+
+### The type-design catch: this needs a SIZED type
+
+`_static_miss` proves the miss by **counting the `ArrayRef` node's inputs** — a structural
+fact about the literal, not a type. The architecture note's §7 `Array[T]` **cannot express
+"length 2"**, so folding this special case into the type system needs *refinement* types
+(`Array[Int, 2]`), not merely parameterised ones.
+
+That is the note's thesis running in reverse: here the ad-hoc pass is **more** precise than
+the lattice. Any claim that the type library subsumes these passes must account for it, or
+explicitly scope it out.
+
+### Corpus note
+
+There is no slot for this today. A known-miscompiling case cannot be added GREEN (it
+fails) and must not be added GAP (it does not GAP — see D1: GAP-declared cases are
+`pass()`ed without running, so it would pin nothing while reading as coverage). Per the
+bare-block precedent, the RED cases land WITH the fix, in the same commit that turns them
+GREEN.

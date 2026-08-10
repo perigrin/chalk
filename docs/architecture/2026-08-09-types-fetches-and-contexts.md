@@ -223,8 +223,7 @@ does not hold a distinct kind of information; it holds the type, spelled again.
 
 Neither leftover is a *lower* layer:
 
-- **`Slot`** is `Undef ∪ T` — a type the lattice does not currently name. The answer is to
-  name it in the lattice, not to keep a parallel vocabulary for it.
+- **`Slot`** is the LLVM *struct name* for what should be a lattice type — see below.
 - **`Control`** is not a value type in any sense. It marks a node as control-flow, which
   produces no value. **[CODE]** It enters through hand-written corpus spec annotations —
   `%if = If(%c) :Control` (`t/corpus/mdtest/logical.md:720-724`) — where an author put a
@@ -232,6 +231,57 @@ Neither leftover is a *lower* layer:
 
 That a node classification can be stored in this field without complaint is the clearest
 evidence that it is not a typed layer at all.
+
+### `Slot` is not `Maybe[T]` — it is `Maybe[word]`, and the erasure is lossy
+
+**[MEASURED 2026-08-10]** `%Slot = { i1 defined, i64 payload }`
+(`Target/LLVM/Context.pm:3436`). The payload is a **fixed `i64`** with values punned into
+it — `ptrtoint i8* to i64` for `ArrayRef`/`HashRef`, direct for `Int`, and a **GAP** for
+everything else:
+
+> *"GAP: ArrayRef element[$i] repr=$elem_repr cannot be stored in an i64 Slot payload
+> (only Int/ArrayRef/HashRef are lowered)"* — `:3490`, and the same at `:1456`
+
+So `Num` and `Str` GAP. **There is no `T` in a `Slot`.** The payload is untagged —
+nothing in it records whether that `i64` was an integer or a pointer — and `T` is
+recovered *one level up*, from the container (`_element_repr`, `JSON.pm:1154`, reads the
+element type off the container's literal elements).
+
+**It does not "punt to `Scalar`"; it punts to something weaker.** `Scalar` is a boxed SV
+that carries its own tag. A `Slot` payload carries none, which is exactly why the
+lowerable set is the three `i64`-shaped types and everything else refuses.
+
+**[MEASURED] The runtime already has what the lattice lacks.** A dynamic out-of-bounds
+read lowers correctly — the backend emits the defined-bit phi (`:3819-3824`) and
+`my $r=[10,20]; my $i=5; defined($r->[$i])` matches perl. So `Maybe[Int]` **exists in the
+emitted LLVM**; the node is merely typed plain `Int` while the value is a tagged pair.
+`Slot` is that unnamed type's LLVM struct name leaking upward into the type field — the
+last instance of this section's muddle once `Control` is set aside.
+
+Note `Undef → i1` as well: the tag with no payload. `Undef` and `Slot` are one idea at two
+arities.
+
+**[OPEN] `Maybe[T]` as a constructor, or general union types?** `Maybe[T]` is `T ∪ Undef`.
+A narrow `Maybe[T]` constructor sits alongside §7's `Array[T]`/`Hash[T]` and maps
+per-instantiation (`Maybe[Int] → {i1,i64}`, `Maybe[Num] → {i1,double}`), which dissolves
+the GAPs because nothing must fit a fixed word. General unions are the more honest answer
+but change `join` everywhere: today `join(Bool,Int) = Scalar` (the LCA, §6's "correct and
+unstorable"); under unions it is `Bool ∪ Int`, which *is* storable. Not resolved here.
+
+**[MEASURED] And a third axis, which is not a type parameter at all.** Chasing this
+question turned up a **live silent miscompile**: a nested rvalue deref through a missing
+intermediate does not autovivify (`my $r=[10,20]; my $v=$r->[5][0]; print scalar(@$r)` —
+perl `6`, chalk `2`, no GAP). Filed as **E1** in
+`docs/plans/2026-08-03-effect-chain-followups.md`. It matters here because the same
+syntactic read has two types *and* two effect classes depending on its **consumer**:
+
+| context | type | effect |
+|---|---|---|
+| `my $v = $r->[5]` | `Maybe[Int]` | none |
+| `$r->[5][0]` | `ArrayRef`, guaranteed | **a store** |
+
+So "is this fetch `Maybe[T]`?" **cannot be answered at the fetch site** — §4 and §5 again.
+Any `Maybe[T]` design must carry a *does this fetch create?* classification beside it.
 
 ### What this changes downstream
 
