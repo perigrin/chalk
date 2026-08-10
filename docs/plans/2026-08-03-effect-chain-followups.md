@@ -737,3 +737,72 @@ parallel families, the SV union is still being maintained by hand.
 
 **Do not add a fourth slot kind.** A ref-valued or DualVar package scalar is not
 the next kind to add; it is more evidence for this entry.
+
+## H6: LANDED — perl5-son 38af599 + chalk e82dfce3
+
+Package scalars are bound in the same scope map as lexicals. All four
+miscompiles in H4 now produce CORRECT answers, not GAPs, and
+`our $x = "hello"; $x = 1; $x = 0.5` behaves exactly like the `my` form,
+including reads between definitions.
+
+`StackSim` needed no changes: `%scope` takes any key, so a qualified name works
+like a pad index and `merge()` builds Phis over it unchanged. Three routing
+sites moved — the gvsv/rv2sv read (mirroring padsv's OPf_MOD lvalue/rvalue
+split), the sassign store (mirroring the PadAccess branch), and the implicit
+`$_` match subject, which built a fresh StashAccess and so bypassed the binding.
+
+`StashAccess` keeps ONE role: the ENTRY DEFINITION, naming a variable's incoming
+value before any assignment in this unit.
+
+Corpus: 168 with all four legs agreeing. 12 ir blocks were transcribed to the
+new shape, each carrying a note — the package variable no longer appears in the
+graph at all, because a constant-valued binding folds. `our $g = 5; $g` is now
+`Constant(5) + Return`, constant propagation the slot model actively prevented
+by forcing the value through memory.
+
+## H7: the slot machinery is now DEAD CODE — deletion is the remaining cleanup
+
+Measured after H6, on committed HEAD:
+
+    our $g = 5; print $g          PASS   no @pkg_ slot emitted
+    our $g; $g = 5; ... read      PASS   no @pkg_ slot emitted
+    our $g; read before write     GAP    (never reaches the slot)
+    $main::nope read, no write    GAP    (never reaches the slot)
+
+No compiling case reaches `_lower_stash_access` or the `Assign(StashAccess-
+lvalue)` arm. Only an ENTRY DEFINITION would, and it GAPs earlier with "Add node
+has no representation" because nothing stamps an unassigned variable.
+
+So `_pkg_globals`, `_pkg_str_globals` and `_pkg_num_globals` — with their
+per-representation slot kinds, the SV union rebuilt by hand — are unreachable.
+
+**Two things to know before deleting them:**
+
+1. `StashAccess` nodes still EXIST in graphs and must not be removed as a node
+   type. `shift @_` is identified structurally by a Call whose operand is
+   `StashAccess(*, _)` (`Target/LLVM/Context.pm:4664`), and `@_` is built as
+   `StashAccess(main, _)` by the producer's `_args_source`. Deleting the slot
+   LOWERING is safe; deleting the node type is not.
+
+2. The entry definition needs an answer, not just a deletion. Its GAP message
+   currently blames the consumer ("Add node has no representation") rather than
+   naming the real cause, which is a package scalar read before any assignment.
+   Per the lowering rule — pick the Chalk type's LLVM type and add a coercion —
+   an unassigned package scalar at unit entry is `Undef`, and needs no slot at
+   all. That is correct for a whole-program compile, which is what chalk does
+   today; a separately-compiled sub would instead be reading the outside world's
+   value, and that is the same boundary F3 (real define+call) has to answer.
+
+## H8: package-scalar SSA is currently sound BECAUSE everything is inlined
+
+Worth stating before it is discovered the hard way. `_lower_call_direct` GAPs on
+recursion with "inlining is the only direct-call mechanism and cannot terminate
+on a cycle. Real define+call emission is required to lower this." With every
+call inlined, the whole program is ONE dataflow region, so a package variable's
+definitions and uses are all visible and SSA is sufficient.
+
+When F3 lands, a package variable read inside a real callee has no reaching
+definition in that graph. It needs a parameter, or genuine storage. This work
+and F3 are coupled, and H7's deletion should not be read as "package scalars
+never need storage" — only as "they do not need a typed cell per representation
+in a single-region compile".
