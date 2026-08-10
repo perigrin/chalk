@@ -323,14 +323,17 @@ Perl array is `Array[Maybe[T]]` — holes are legal Perl. Which makes
 `%Slot = { i1 defined, i64 payload }` **the correct representation of `Maybe[T]`**. The
 backend built the right thing; the lattice never named it.
 
-### The cost this model does carry: coercions that store
+### How the extension is realised — UNDECIDED, three candidates
 
-**Every `Coerce` today is pure** — `sitofp`, `zext`, `icmp` (`_lower_coerce`,
-`Target/LLVM/Context.pm:1019+`). An array-extending coercion **mutates a heap object
-visible through other references.**
+> **[CORRECTED 2026-08-10, perigrin.]** This section previously asserted that an
+> array-extending coercion "mutates a heap object" and concluded that `Coerce` must gain a
+> memory edge. **Neither followed from the evidence.** The measurement below is a fact
+> about *perl's observable behaviour*; it does not constrain chalk's IR structure, and
+> in-place mutation is not the only implementation. Recorded as the error it was: a
+> behavioural measurement used to force an IR design.
 
-**[MEASURED 2026-08-10]** Third FAIL variant, proving it is a real heap mutation and not
-an SSA value rewrite:
+**[MEASURED 2026-08-10]** The semantic requirement, which any implementation must meet —
+the extension is observable through an alias (third FAIL variant of this bug):
 
 ```perl
 my $r = [10, 20];
@@ -339,14 +342,26 @@ my $v = $r->[5][0];
 print scalar(@$s), "\n";      # perl: 6   chalk: 2   FAIL
 ```
 
-`Coerce` has **no memory input** today — `Coerce.pm` fields are `from_repr`, `to_repr`,
-`inputs`, and the emitted IR confirms `Coerce inputs=[node]` — while `Subscript` already
-takes a memory edge. So this model needs **memory-carrying coercions**: either `Coerce`
-splits into pure and memory-transforming kinds, or it gains an optional memory edge the
-way `Subscript` has one.
+**Three implementations satisfy it:**
 
-That is a smaller change than a new effect axis and it reuses machinery that exists, but
-**a coercion that stores is a new thing in this IR** and must be designed, not assumed.
+1. **Static pre-sizing.** `_static_miss` **already proves** at compile time that index 5
+   exceeds the 2-element literal, and the index here is constant-propagable. Allocate the
+   slots at the **construction** site; the coercion is resolved on the type at the
+   declaration. Nothing on the access path, no new node behaviour, no mutation.
+2. **Functional update through memory-SSA.** The coercion yields a new array value; the
+   memory chain threads it. Whether that lowers to an in-place write is a *backend*
+   decision, not an IR property.
+3. **In-place heap mutation.** What perl does — one option, not the requirement.
+
+**Only (3) needs a storing `Coerce`.** (1) needs nothing new and covers the
+statically-decidable case — which is exactly the case `_static_miss` already detects, and
+the case in this repro. A genuinely dynamic index (from input or a parameter, not
+constant-propagable) is a separate tier and is where the choice actually has to be made.
+
+**What IS established:** every `Coerce` today is pure — `sitofp`, `zext`, `icmp`
+(`_lower_coerce`, `Target/LLVM/Context.pm:1019+`) — and `Coerce` has no memory input
+(`Coerce.pm`: `from_repr`, `to_repr`, `inputs`; emitted IR confirms `Coerce inputs=[node]`)
+while `Subscript` takes one. **What is NOT established:** that it needs one.
 
 ### Diagnostics: still available, no longer the fix
 

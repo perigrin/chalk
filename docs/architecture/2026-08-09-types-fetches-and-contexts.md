@@ -540,14 +540,38 @@ pure and the requirement carries the work. The leaf-vs-chain difference is a dif
 **requirement**, not of node kind — `my $v = $r->[5]` requires nothing of `$r`, so nothing
 fires and the result is honestly `Maybe[Int]`.
 
-**[OPEN] The cost, which must be designed rather than assumed: coercions that store.**
-Every `Coerce` today is pure (`sitofp`, `zext`, `icmp`). An array-extending coercion
-mutates a heap object **visible through other references** — measured: adding
-`my $s = $r` and printing `scalar(@$s)` gives perl `6`, chalk `2`. `Coerce` has no memory
-input (`Coerce.pm`: `from_repr`, `to_repr`, `inputs`) while `Subscript` already takes one.
-So `Coerce` must either split into pure and memory-transforming kinds or gain an optional
-memory edge. Smaller than a new effect axis, and it reuses existing machinery — but **a
-coercion that stores is a new thing in this IR.**
+**[OPEN] How the extension is realised is UNDECIDED.**
+
+> **[CORRECTED 2026-08-10, perigrin.]** An earlier version of this paragraph asserted that
+> an array-extending coercion "mutates a heap object" and therefore that `Coerce` must
+> gain a memory edge. **Neither followed.** The alias measurement below establishes a fact
+> about *perl's observable behaviour*; it says nothing about chalk's IR structure. Using a
+> behavioural measurement to force an IR design is the same error this note flags
+> elsewhere.
+
+**[MEASURED]** The semantic requirement is real: with `my $s = $r`, after `$r->[5][0]`
+perl reports `scalar(@$s)` as `6` (chalk: `2`). Whatever chalk does must be observable
+through the alias.
+
+**At least three implementations satisfy that, and this note does not choose:**
+
+1. **Static pre-sizing.** `_static_miss` **already proves** the index exceeds the literal's
+   extent at compile time, and here the index is constant-propagable. So allocate the
+   slots at the *construction* site. The coercion is resolved on the type, at the
+   declaration — no runtime extension, nothing on the access path.
+2. **Functional update through memory-SSA.** The coercion yields a *new* array value and
+   the memory chain threads it; whether that lowers to an in-place write is a backend
+   decision, not an IR property.
+3. **In-place heap mutation.** What perl does — one option, not the requirement.
+
+Only (3) needs a storing `Coerce`. (1) needs nothing new at all and covers the
+statically-decidable case, which is the one `_static_miss` already detects. A genuinely
+dynamic index (from input or a parameter) is a separate tier and is where the choice
+actually bites.
+
+**What IS established:** every `Coerce` today is pure (`sitofp`, `zext`, `icmp`), and
+`Coerce` has no memory input (`Coerce.pm`: `from_repr`, `to_repr`, `inputs`) while
+`Subscript` takes one. **What is NOT established:** that it needs one.
 
 ### What this collapses
 
