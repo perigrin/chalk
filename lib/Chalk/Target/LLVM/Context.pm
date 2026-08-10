@@ -1419,6 +1419,40 @@ sub _lower_assign {
     if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'StashAccess') {
         my $rhs_repr = _require_repr($rhs, 'Assign(StashAccess-lvalue).rhs');
         my $var   = $lhs->var_name;
+
+        # A package scalar is modeled as a TYPED module-level slot, and its
+        # kind is chosen per-repr: i64 for Int, a (ptr,len) pair for Str, a
+        # double for Num. The lvalue node is hash-consed, so every store and
+        # every read of `$var` share ONE node carrying ONE repr — while each
+        # store carries its own. When they disagree, this store writes a
+        # different slot family than any read will load from, and the store is
+        # silently lost:
+        #
+        #   our $g = 1; $g = "hi"; print $g   perl: hi    chalk: 1
+        #
+        # Refuse loudly. A read cannot see a store that went somewhere else.
+        #
+        # This is a symptom, not the disease. A scalar does not HAVE one
+        # representation that its storage must be wide enough to hold — each
+        # STORE has a representation, a read takes the reaching definition's,
+        # and a coercion belongs wherever a USE needs a different one. So
+        # `$x = "hello"; $x = 1; $x = 0.5` is three stores with three
+        # representations, not one cell that must be typed to cover all three.
+        # (A genuine two-representations-at-once scalar is a DualVar, which is a
+        # value kind, not a storage question.)
+        #
+        # That is just SSA, which is why a LEXICAL already handles every case
+        # here correctly with no slot at all. Modeling a package scalar as a
+        # typed cell types the VARIABLE instead of its dataflow, and the
+        # per-repr kinds are perl's SV union rebuilt one type at a time.
+        # The fix is to stop treating the slot as the unit — filed as Part H.
+        my $slot_repr = $lhs->representation;
+        if (defined $slot_repr && $slot_repr ne $rhs_repr) {
+            die "GAP: package scalar \$$var is stored as $rhs_repr but its slot "
+              . "is $slot_repr — this store would be invisible to every read. "
+              . "A store's representation is its own; the slot is the wrong "
+              . "unit to carry it.";
+        }
         # A Str package scalar needs TWO mutable slots (an i8* ptr and an i64
         # len), since a Str value is a (ptr, len) pair. Store both; the read
         # loads both and re-registers the loaded ptr in the length table.

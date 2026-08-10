@@ -660,3 +660,80 @@ This is what `pack("d", 1)` actually hits: perl CONSTANT-FOLDS it before the
 producer sees anything, so there is no `pack` call in the graph at all — just a
 `Constant` holding the 8 raw bytes of the IEEE754 double, and a `Length` over
 it. Any fix belongs in Str constant handling, not in a `pack` builtin.
+
+---
+
+# Part H — package scalars are not in SSA form (2026-08-10)
+
+## H1: the defect
+
+A lexical assignment is a DEFINITION: `$x = 1` does not store into `$x`, it
+defines a new value that later uses of `$x` refer to. That is not a rule Chalk
+adopts, it is what SSA IS, and the producer already implements it for pads via
+the scope-binding map (`$sim->define` / `$sim->lookup`, Phis at merges).
+
+Package scalars are routed elsewhere — to a `StashAccess` node plus an `Assign`
+— and are therefore NOT in SSA form. Every consequence below is downstream of
+that single omission.
+
+## H2: measured, the same program passes as `my` and cannot compile as `our`
+
+    my  $x = "hello"; $x = 1; $x = 0.5;   ->  PASS  (and reads between each
+                                                store are correct: "hello 1 y")
+    our $x = "hello"; $x = 1; $x = 0.5;   ->  GAP
+
+Identical semantics in perl. The dataflow-modeled path handles three definitions
+with three representations; the cell-modeled path cannot express it.
+
+## H3: the slot kinds are perl's SV union, rebuilt one type at a time
+
+Because a package scalar is modeled as storage, the storage needs a type, and
+because a perl scalar can hold several, the backend grew one slot KIND per
+representation:
+
+    Int   one i64 module global          @pkg_<s>_<v>
+    Str   a (ptr, len) pair               @pkg_<s>_<v>_ptr / _len
+    Num   one double module global        @pkg_<s>_<v>_num   (added 04b7853e)
+
+That is the SV union being reassembled. A ref would want a fourth kind, a
+DualVar a fifth. A DualVar is in fact the ONLY case where one scalar genuinely
+carries two representations at once — and that is a property of the VALUE, not
+a question about storage.
+
+## H4: what it cost — four silent miscompiles, two of them mine
+
+The lvalue node is hash-consed, so every store and read of `$g` share ONE node
+carrying ONE representation, while each store carries its own. When they
+disagree the store writes a slot family no read loads from, and it is lost:
+
+    our $g = 1;     $g = "hi";  print $g    perl: hi   chalk: 1
+    our $g = "hi";  $g = 7;     print $g    perl: 7    chalk: hi
+    our $g = 1;     $g = 2.5;   ...         perl: y    chalk: n
+    our $g = 2.5;   $g = 1;     ...         perl: y    chalk: n
+
+The first two predate this work. **The last two are a regression I introduced in
+04b7853e**: before it they GAPped loudly ("only Int and Str package scalars are
+lowered"); adding the Num slot kind turned two honest refusals into two silent
+wrong answers. Adding a kind to this model does not extend it, it widens the
+window in which the model is wrong. All four now GAP
+(`Target/LLVM/Context.pm`, Assign(StashAccess-lvalue)).
+
+## H5: the fix
+
+Put package scalars in SSA form, like every other variable. They are not a
+different kind of thing — `our` and `my` differ in visibility and lifetime, not
+in typing — so they belong in the same binding map, with the same Phis at
+merges, and no slot at all in the common case.
+
+Storage remains only where a value must outlive the unit's dataflow: genuine
+cross-unit visibility, a reference taken, `local`, runtime symbol-table access.
+Those are memory effects and belong in memory-SSA, which already exists ("full
+memory-value + MemPhi, one global memory"). Even there the storage holds a
+VALUE; it does not need a per-representation kind.
+
+Deleting the slot kinds is the test of whether this landed. While
+`_pkg_globals` / `_pkg_str_globals` / `_pkg_num_globals` still exist as three
+parallel families, the SV union is still being maintained by hand.
+
+**Do not add a fourth slot kind.** A ref-valued or DualVar package scalar is not
+the next kind to add; it is more evidence for this entry.
