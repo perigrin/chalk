@@ -582,3 +582,81 @@ attempt. They go green only when the effect actually fires.
 **Ready-made RED for the next attempt:** the seven rows above. A fix that turns rows
 1-3 green while keeping 4-7 green is correct; one that only makes the GAP go away is
 the miscompile this entry exists to prevent.
+
+---
+
+# Part G — num.t / lex.t priced, and three miscompiles found doing it (2026-08-10)
+
+Pricing these two files per-construct through `ProgramRunner` turned up more
+live silent miscompiles than blockers. All measured against perl on committed
+HEAD.
+
+## G1: num.t and lex.t are both gated on SUBSYSTEMS, not lowering gaps
+
+**num.t is a float↔string exactness suite.** `$a = 0.1; $a eq "0.1"`,
+`1e34 eq "1e+34"`, denormal comparisons. Measured: every float case dies at
+`Assign(StashAccess-lvalue) rhs repr=Num; only Int and Str package scalars are
+lowered`. Behind that sits correct shortest-round-trip float formatting (dtoa)
+in a backend with no libc float printing. Also needs `pack` and `$^O`.
+Integer stringification, float arithmetic, and the `print C ? "ok\n" : "not
+ok\n"` idiom already PASS.
+
+**lex.t is a lexer suite whose second construct is `eval 'STRING'`** — runtime
+compilation, i.e. embedding the compiler in the emitted executable. Heredocs and
+`length()` already lower; `int()` GAPs (`cannot lower op=Call`).
+
+Neither is an iteration target. With term.t (Part F) that makes **every
+remaining t/base file gated on a subsystem decision**: process/file I/O, float
+formatting, or runtime eval. The t/base drain is finished as a source of
+incremental lowering work.
+
+## G2: FIXED — `$#x` on a package array answered `1` for every array
+
+See perl5-son 91b5097. `gv` pushes a global's NAME as a string Constant and
+nothing replaced it for an AGGREGATE, so `$#x` became `Length(Constant("x"))` —
+the length of the variable's NAME.
+
+    @x unset        perl -1    chalk 1
+    @x 1 element    perl  0    chalk 1
+    @x 2 elements   perl  1    chalk 1    <-- agrees, by coincidence
+
+The only agreeing case is a two-element array, which is exactly what term.t's
+`$#x` check uses. A test asserting one array length could not have caught this.
+
+Now a producer GAP. `@_` and `%ENV` stay exempt (they have real sources).
+Package ELEMENT reads already GAPped one layer later in the backend, verified
+before and after — the guard only moves that refusal earlier.
+
+## G3: OPEN — `print` TRUNCATES a string at an embedded NUL
+
+    print "a\0b"     perl: a\0b     chalk: a
+
+Silent data loss. `length("a\0b")` is correct (3), so the length table is right
+and the emission is wrong.
+
+`lib/Chalk/Target/LLVM/Context.pm:5875` documents the path as:
+
+    #   Str  -> printf("%.*s", (i32)len, ptr)  — exactly len bytes, embedded-NUL safe;
+
+**That comment is false.** C's `%s` conversion stops at the first NUL;
+precision is a MAXIMUM, not an exact count. The claim was written and never
+tested. The same construct backs the `Str:` epilogue (`:47`).
+
+The fix is not a one-liner, which is why it is filed rather than done:
+`fwrite`/`write` would emit exact bytes, but print currently shares `printf`'s
+buffering with the epilogue, and mixing buffered `printf` with unbuffered
+`write` can REORDER output. Whatever replaces it has to move both, together.
+
+## G4: OPEN — a Str constant containing a HIGH byte produces NO output at all
+
+    my $p = "\xf0\x3f"; print length($p), "\n";
+      perl: "2"     chalk: "" (nothing, exit 0)
+
+Not a truncation — the program runs to completion and prints nothing, including
+the trailing newline. NUL bytes alone are fine (`length("\0\0\0")` is 3), so the
+boundary is bytes >= 0x80, consistent with the producer being ASCII-only.
+
+This is what `pack("d", 1)` actually hits: perl CONSTANT-FOLDS it before the
+producer sees anything, so there is no `pack` call in the graph at all — just a
+`Constant` holding the 8 raw bytes of the IEEE754 double, and a `Length` over
+it. Any fix belongs in Str constant handling, not in a `pack` builtin.
