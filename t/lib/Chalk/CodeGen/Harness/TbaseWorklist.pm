@@ -37,12 +37,12 @@ class Chalk::CodeGen::Harness::TbaseWorklist {
     sub files ($class) { @FILES }
 
     # passing_floor() — the monotonic passing-count floor: the current stock pass
-    # count. Two files (cond.t, if.t) compile as standalone executables and match
-    # perl on stdout AND exit status, so the floor is 2. It rises deliberately as
+    # count. Three files (cond.t, if.t, pat.t) compile as standalone executables
+    # and match perl on stdout AND exit status, so the floor is 3. It rises as
     # blockers land and files un-skip; the test asserts passed >= floor so a
     # regression (a file that USED to pass now skipping/failing) is LOUD.
     # (Named passing_floor, not floor, to avoid the core `floor` builtin.)
-    sub passing_floor ($class) { 2 }
+    sub passing_floor ($class) { 3 }
 
     # run() — compile the whole ring and classify each result into the
     # construct-debt worklist. Returns:

@@ -52,7 +52,7 @@ is(scalar(keys $report->{files}->%*), $report->{total},
 # (I7/I8/... un-skip files later). It starts at the CURRENT measured stock pass
 # count. Under I1-I6 + I4 that is 0 (the 1 synthetic pass lives in I4's own
 # test, not here — this ring is stock files only).
-is($W->passing_floor, 2, 'monotonic floor is the current stock pass count (2)');
+is($W->passing_floor, 3, 'monotonic floor is the current stock pass count (3)');
 cmp_ok($report->{passed}, '>=', $W->passing_floor,
     "stock passing count ($report->{passed}) has not regressed below the floor (@{[$W->passing_floor]})");
 

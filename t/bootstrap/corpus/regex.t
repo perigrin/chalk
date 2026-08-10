@@ -67,15 +67,21 @@ my %EXPECTED_VERDICT = (
     'R4' => 'GREEN',   # anchored match (^) — G6 T1
     'R5' => 'GREEN',   # character class — G6 T2
     'R6' => 'GREEN',   # quantified identifier — G6 T3
+    'R7' => 'GREEN',   # negated match (!~) — Not over the existing matcher
+    'R8'  => 'GREEN',  # unbound match reads $_
+    'R8b' => 'GREEN',  # ... and its bilateral non-matching partner
+    'R9'  => 'GREEN',  # match bound to a package scalar (OPf_STACKED subject)
 );
-
-subtest 'per-case L verdicts (R1-R6 all GREEN via G6)' => sub {
+subtest 'per-case L verdicts (all GREEN via G6)' => sub {
     plan tests => scalar @$cases;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
         my $title   = $case->{title};
-        my ($key)   = $title =~ /\b(R\d+)\b/;
+        # A lettered variant (R8b) is its own key, not a synonym for its parent:
+        # `\b(R\d+)\b` cannot match "R8b" at all (no boundary between 8 and b),
+        # so an unlisted variant would silently fall through to the GAP default.
+        my ($key)   = $title =~ /\b(R\d+[a-z]?)\b/;
         my $want    = $EXPECTED_VERDICT{$key // ''} // 'GAP';
         is($decl, $want, "case '$title': declared L: $want");
     }

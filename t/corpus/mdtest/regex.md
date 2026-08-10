@@ -222,3 +222,120 @@ context: scalar
 return %result
 L: GREEN
 ```
+
+## R8 unbound match reads $_ (t/base/pat.t blocker)
+
+A match with no `=~` binding takes its subject from `$_`. In the optree that
+subject is not an operand at all: the op carries no pad target and pushes
+nothing (measured, perl 5.42: `targ=0 flags=0x02`), where a lexical subject is
+the pad target (`targ=1 flags=0x02`) and a package subject is pushed with
+OPf_STACKED (`targ=0 flags=0x46`).
+
+The producer read `$op->targ` unconditionally, so both targ-less forms got a
+fabricated read of pad slot 0 — emitted as `PadAccess(varname: "$?0")`, which
+names no variable. That reached the backend unstamped and GAPped there, and the
+GAP text blamed TypeInference ("fix TypeInference so this node carries an
+explicit repr"). Stamping it would have compiled a match against an
+uninitialized slot: a silent wrong answer in place of a loud refusal.
+
+`$_` is the package scalar `main::_`, so an unbound match now builds the SAME
+`StashAccess` node an explicit `$_ = ...` store builds. The two hash-cons to one
+node, which is what makes the read observe the store (measured: one
+`StashAccess` with both the `Assign` and the `RegexMatch` as consumers) and what
+gives the read its Str repr, exactly as A19 describes for `our $g`.
+
+```perl
+# source
+$_ = "test";
+/^test/ ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%c      = Constant("test") :Str
+%ul     = StashAccess(stash_name: "main", var_name: "_") :Str
+%st     = Assign(%ul, %c) :Str
+%ur     = StashAccess(stash_name: "main", var_name: "_") :Str
+%m      = RegexMatch(%ur, pattern: "^test") :Bool
+%one    = Constant(1) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%m, %one, %zero) :Int
+return %result
+control: %st
+L: GREEN
+```
+
+## R8b unbound match against a NON-matching $_ (bilateral)
+
+R8's partner: the identical program with only the STORED value changed, so the
+same pattern must now fail. This is the case that discriminates a real read of
+`$_` from the fabricated slot-0 read — an uninitialized slot does not match
+`^test` either, so R8's polarity alone would pass against the bug. Only a pair
+that changes the stored value and sees the answer change proves the match is
+reading what the store wrote.
+
+```perl
+# source
+$_ = "nope";
+/^test/ ? 1 : 0
+```
+
+```behavior
+return: 0
+context: scalar
+```
+
+```ir
+%c      = Constant("nope") :Str
+%ul     = StashAccess(stash_name: "main", var_name: "_") :Str
+%st     = Assign(%ul, %c) :Str
+%ur     = StashAccess(stash_name: "main", var_name: "_") :Str
+%m      = RegexMatch(%ur, pattern: "^test") :Bool
+%one    = Constant(1) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%m, %one, %zero) :Int
+return %result
+control: %st
+L: GREEN
+```
+
+## R9 match bound to a PACKAGE scalar (OPf_STACKED subject)
+
+The third subject form: `$g =~ /re/` where `$g` is a package scalar. The subject
+is pushed onto the stack by a preceding `gvsv` and the match op carries
+OPf_STACKED (`0x40`) with no pad target — so it hit the same fabricated slot-0
+read as R8 and GAPped identically. The subject is popped from the stack now.
+
+A RUNTIME pattern applied to a pushed subject (`$g =~ $re`) puts TWO values on
+the stack and is a declared GAP: the pop order would have to be established
+before either could be taken safely, and guessing it is how a subject and a
+matcher get swapped silently.
+
+```perl
+# source
+our $g = "test";
+$g =~ /^test/ ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%c      = Constant("test") :Str
+%gl     = StashAccess(stash_name: "main", var_name: "g") :Str
+%st     = Assign(%gl, %c) :Str
+%gr     = StashAccess(stash_name: "main", var_name: "g") :Str
+%m      = RegexMatch(%gr, pattern: "^test") :Bool
+%one    = Constant(1) :Int
+%zero   = Constant(0) :Int
+%result = TernaryExpr(%m, %one, %zero) :Int
+return %result
+control: %st
+L: GREEN
+```

@@ -60,10 +60,11 @@ my @PROGRAMS = (
     { name => 'explicit-exit',src => qq{print "bye\\n"; exit 3;\n} },
 
     # Stock perl5 t/base files, compiled AS THEMSELVES. tbase-worklist.t scores
-    # the whole t/base ring on this same contract; these two are pinned here so
-    # the product gate names them directly.
+    # the whole t/base ring on this same contract; the ones that pass are pinned
+    # here too so the product gate names them directly.
     { name => 'tbase/cond.t', path => "$BASE/cond.t" },
     { name => 'tbase/if.t',   path => "$BASE/if.t"   },
+    { name => 'tbase/pat.t',  path => "$BASE/pat.t"  },
 );
 
 my ($passing, @report) = (0);
@@ -103,14 +104,18 @@ diag('  exactly: no source-text wrap, no epilogue strip, no exit-code');
 diag('  tolerance. Raise the floor below as programs start passing.');
 
 # The floor. It starts where the capability actually is, and may only rise.
-cmp_ok($passing, '>=', 6,
-    'executable-gate floor (6; the four one-liners plus the first two STOCK FILES. '
-  . 'cond.t and if.t from perl5 t/base compile AS THEMSELVES -- shebang intact, no '
+cmp_ok($passing, '>=', 7,
+    'executable-gate floor (7; the four one-liners plus three STOCK FILES. '
+  . 'pat.t joined cond.t and if.t once a match stopped taking its subject from the '
+  . 'op\'s pad target unconditionally (perl5-son 12c1ed5): an unbound `/re/` has no '
+  . 'target and reads $_, which was being compiled as a read of pad slot 0. '
+  . 'cond.t, if.t and pat.t compile AS THEMSELVES -- shebang intact, no '
   . '`sub __main__` wrap, no epilogue strip, exit status compared -- and match perl '
-  . 'byte-for-byte. This capability predates the assertion: it went unnoticed because '
-  . 'this gate only ever ran synthetic one-liners, and tbase-worklist.t scores the '
-  . 'same two files on the WRAPPED contract, where a PASS says nothing about this '
-  . 'one. The Int/Str/Bool/Undef return-value type-tag epilogue -- needed only so the '
+  . 'byte-for-byte. cond.t and if.t had been passing this way for some time before '
+  . 'anything asserted it: this gate only ever ran synthetic one-liners, and the '
+  . 'worklist that did name real files scored them on a wrapped contract that has '
+  . 'since been deleted. Every file-scoring gate now shares one runner. '
+  . 'The Int/Str/Bool/Undef return-value type-tag epilogue -- needed only so the '
   . 'corpus harness can read back a fragment\'s return value -- is suppressed at '
   . 'emission time by program_mode => 1 (defaults off; the corpus reads the tag as '
   . 'its oracle). The one remaining one-liner, explicit-exit, is blocked in the '
