@@ -243,12 +243,45 @@ Nested subscript itself works, and a flat OOB read works. The defect is specific
 The hash form (`my $h = {a=>1}; my $v = $h->{zz}{qq}; print scalar(keys %$h)`) GAPs
 earlier on `keys` → "cannot lower op=Call", so it is **untested, not clean**.
 
+### WHERE the fix belongs: the import boundary vs downstream
+
+**[MODEL, perigrin 2026-08-10]** *"B::SoN is closer to Perl's implementation … you're
+definitely pushing in the wrong direction when you decide that Perl's current
+implementation is always correct."*
+
+Two different authorities, which earlier drafts of this entry collapsed:
+
+| | authority | why |
+|---|---|---|
+| **B::SoN** (the optree walk) | perl's implementation **is** the reference | it is a foreign-function **import boundary**. `OPpDEREF`, `multideref`'s aux chain and `OPf_MOD` are *facts about the optree*; decoding them wrong is a decoding bug. |
+| **chalk** (IR, passes, lowering) | only the observable **semantics**, over a **subset** | chalk reimplements, using whatever modern compiler theory realizes it best. Perl's runtime gets no vote. |
+
+**So the fix splits.** The producer's job is to *report faithfully* that this access is in
+deref context and autovivifies. Chalk's job is to decide the realization — coercion,
+static pre-sizing, DCE, escape analysis.
+
+**Today chalk cannot decide anything, because it was never told.** The outer `Subscript`
+arrives **pure**. The information is lost **at the import boundary**, not mishandled after
+it — which is why this is first a producer bug and only then a chalk design question.
+
 ### Mechanism (measured, not inferred)
 
 Two earlier guesses were wrong and are recorded so nobody re-treads them: it is NOT the
 `padsv` OPpDEREF site (`FromOptree.pm:1420`), and multideref is NOT collapsed to a
 single Subscript despite `OpMap.pm:234` declaring arity 1. `B::Concise` shows one
 `multideref($r->[5][0])` op, and it decodes into TWO Subscripts correctly.
+
+**[UNKNOWN — do not guess, and do not treat the above as a diagnosis]** *Where* that
+two-level decode happens is **not established**. There is no `multideref` decoder in the
+producer: no `aux_list` call for it (`aux_list` appears only for `multiconcat`,
+`FromOptree.pm:1883`), no expansion pass, and `OpMap.pm:234` declares it a single
+`Subscript`. The `Subscript` builder at `FromOptree.pm:1681` is on the `aelem`/`helem`
+path. Yet the emitted IR contains two correctly-nested Subscripts.
+
+**Find that path before proposing a producer fix.** Three mechanism guesses in this
+investigation were already wrong; the decode site is the fourth open question and must be
+*located*, not inferred. Everything above it — the repro, the reprs, the IR shape — is
+measured and stands on its own.
 
 The producer IR for the failing case:
 
