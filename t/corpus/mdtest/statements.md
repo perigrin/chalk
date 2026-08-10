@@ -370,3 +370,153 @@ context: scalar
 ```ir
 L: GAP(explicit filehandle: print STDOUT ... / print $fh ... sets OPf_STACKED; the runtime-free backend writes only to stdout, so an explicit handle is a loud producer GAP, never a silent misroute)
 ```
+
+## say a string literal to stdout
+
+`say` is `print` with a trailing newline. It is DESUGARED at the build site into
+the same `Print` node with a `"\n"` operand appended, rather than given a node of
+its own — so the control pin, the arm-effect predicates and the backend's
+`_lower_print` all see one operator and need no `say` case. `say`'s OpMap entry
+maps it to a generic `Call`, which the print branch pre-empts; before this it
+reached the backend as an unlowered Call.
+
+```perl
+# source
+use 5.42.0;
+say "hi"; 1
+```
+
+```behavior
+stdout: hi\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%s   = Constant("hi") :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%s, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
+
+## say appends exactly ONE newline to a list
+
+`say LIST` emits every argument and then a single newline — not one per
+argument. This is the case that would catch the newline being appended per
+operand rather than once to the list.
+
+```perl
+# source
+use 5.42.0;
+say "a", "b", "c"; 1
+```
+
+```behavior
+stdout: abc\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%a   = Constant("a") :Str
+%b   = Constant("b") :Str
+%c   = Constant("c") :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%a, %b, %c, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
+
+## say inside an if/else arm is guarded by the branch
+
+The desugaring must also reach the arm-effect predicate: a `say` in a branch arm
+is a statement effect exactly as a `print` is, so each arm's Print is
+control-pinned to its own Proj. Were `say` unrecognised there, both arms' output
+would land on the shared control and BOTH would fire — the same silent
+miscompile the `print` case exists to prevent. Bilateral with the case below.
+
+```perl
+# source
+use 5.42.0;
+my $c = 1;
+if ($c) { say "a" } else { say "b" }
+1
+```
+
+```behavior
+stdout: a\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%c    = Constant(1) :Int
+%if   = If(%c)
+%a    = Constant("a") :Str
+%nl   = Constant("\n") :Str
+%pa   = Print(%a, %nl)
+%b    = Constant("b") :Str
+%pb   = Print(%b, %nl)
+%one  = Constant(1) :Int
+return %one
+L: GREEN
+```
+
+## say inside an if/else arm, else polarity
+
+The partner of the case above, with only the guard's value changed. Only the
+else arm's output may appear; seeing both is the unguarded-effect miscompile.
+
+```perl
+# source
+use 5.42.0;
+my $c = 0;
+if ($c) { say "a" } else { say "b" }
+1
+```
+
+```behavior
+stdout: b\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%c    = Constant(0) :Int
+%if   = If(%c)
+%a    = Constant("a") :Str
+%nl   = Constant("\n") :Str
+%pa   = Print(%a, %nl)
+%b    = Constant("b") :Str
+%pb   = Print(%b, %nl)
+%one  = Constant(1) :Int
+return %one
+L: GREEN
+```
+
+## say to an explicit filehandle (STDOUT): GAP
+
+`say STDOUT ...` sets `OPf_STACKED` exactly as `print STDOUT ...` does, and gets
+the same loud producer GAP — the runtime-free backend writes only to stdout, so
+honouring a handle would misroute rather than fail.
+
+```perl
+# source
+use 5.42.0;
+say STDOUT "x"; 1
+```
+
+```behavior
+stdout: x\n
+return: Int:1
+context: scalar
+```
+
+```ir
+L: GAP(explicit filehandle: say STDOUT ... sets OPf_STACKED, the same refusal print gets; the runtime-free backend writes only to stdout)
+```
