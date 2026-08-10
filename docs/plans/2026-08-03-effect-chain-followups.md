@@ -496,3 +496,89 @@ fails) and must not be added GAP (it does not GAP — see D1: GAP-declared cases
 `pass()`ed without running, so it would pin nothing while reading as coverage). Per the
 bare-block precedent, the RED cases land WITH the fix, in the same commit that turns them
 GREEN.
+
+---
+
+# Part F — t/base term.t + translate.t, priced (2026-08-10)
+
+Both files reported the SAME first blocker, which read as one shared fix worth two
+files. Measured per-construct, they have almost nothing in common. All measurements
+below are through `ProgramRunner` (each snippet compiled as a standalone program,
+stdout AND exit status compared against perl).
+
+## F1: term.t is a TRUE ARCHITECTURE GAP — do not iterate on it
+
+Its first blocker is not what stands in its way. Behind it, measured:
+
+| construct | source | blocker |
+|---|---|---|
+| `` $x = `$^X -le "..."` `` | :20 | subprocess spawn (fork/exec) — lands as an untyped `Assign` |
+| `open(try, "/dev/null")` | :41, :51 | `cannot lower op=Call` — file I/O |
+| `<try>` | :43, :52 | `cannot lower op=Call` — readline |
+| `-c '/dev/null'` | :48 | `cannot lower op=Call` — stat |
+| `$#x` on a PACKAGE array | :27 | `Assign(Subscript-lvalue) container has repr=Str` — package arrays unmodeled |
+| `$x \| 1` | :37 | `cannot lower op=BitOr` |
+
+`BEGIN { chdir 't' if -d 't' }` and `chr(10)` already lower.
+
+That is process spawning and filesystem I/O in a backend with no libc file support —
+four separate subsystems, each a design decision about what the runtime IS, not a
+lowering gap. **term.t should not be picked up as an iteration target.** It is the
+wrong file to measure runtime-surface decisions against; when those subsystems are
+built for their own reasons, term.t follows for free.
+
+## F2: translate.t needs TWO unbuilt control-flow features, not one
+
+Everything else in it already lowers — `for my $i (0 .. 255)`, BOTH
+`utf8::native_to_unicode` and `utf8::unicode_to_native`, and
+`print $i + 1 . " - x"` all PASS standalone. What remains:
+
+1. **A void-effect statement modifier inside an if/else arm.** This is the blocker
+   both files reported. `FromOptree.pm:3902`.
+2. **A postfix modifier inside a foreach body.** `_body_has_modifier_andor`,
+   `FromOptree.pm:2896` / `:2951`, zhi 019f5a27. Only reachable AFTER (1), and
+   translate.t needs both — (1) alone does not unblock it.
+
+Measured: a trailing `elsif` with NO `else` compiles its guard to a void `and` op,
+where the identical code WITH an `else` stays a `cond_expr`. That is why (1) is
+reachable from an ordinary-looking elsif chain at all.
+
+## F3: ATTEMPTED AND REVERTED — routing (1) through the top-level If+Proj+merge
+
+The GAP comment at `:3884-3895` says the top-level `and`/`or` handler (`:307`,
+`$mem_branch`) already builds real control flow for exactly this shape, gated on the
+same `_arm_has_void_call` predicate — so the in-arm site appears to need only to
+reach it. **It is not sufficient. Measured, it silently drops the guarded effect.**
+
+Outer arm taken, modifier guard TRUE, so the effect MUST fire:
+
+| shape | result |
+|---|---|
+| `if(C){ print "hi" if G }` — modifier is the arm's ONLY statement | **FAIL, effect dropped** |
+| `if(C){ print "hi" unless G }` — same, unless polarity | **FAIL, effect dropped** |
+| `if(C){ print "hi" if G } else { $x=1 }` | **FAIL, effect dropped** |
+| `if(C){ print "hi" if G } else { print "z" }` | PASS |
+| `if(C){ print "A"; print "hi" if G }` | PASS |
+| `if(A){print} elsif(B){print}` (no else) | PASS |
+| `print "hi" if G` at top level (corpus L5) | PASS |
+
+The boundary is sharp: it fails when the arm contains NOTHING BUT the guarded
+effect. The mechanism is **[UNKNOWN — do not guess]**. A plausible story is that the
+outer merge takes the arm's pre-branch control rather than its final control, but
+three mechanism guesses were already wrong in this session's earlier work and this
+one is not measured.
+
+Separately, routing an ELEMENT STORE through the same path also miscompiles:
+`my @a=(1,2); if(...){ $a[0]=7 } elsif(...){ $a[0]=9 } print $a[0]` compiled and ran
+but printed NOTHING where perl printed `9`. Element stores need the memory-Phi the
+value merge does not build.
+
+Both reverted. The producer GAP stands, and the two producer tests that pin it —
+`t/from-optree-nested-if.t:138` ("a void-effect statement modifier inside an arm
+still GAPs loudly") and `t/from-optree-void-direct-call.t:63` ("a nested branch in
+the arm stays a loud GAP") — were RIGHT and must not be relaxed as part of a future
+attempt. They go green only when the effect actually fires.
+
+**Ready-made RED for the next attempt:** the seven rows above. A fix that turns rows
+1-3 green while keeping 4-7 green is correct; one that only makes the GAP go away is
+the miscompile this entry exists to prevent.
