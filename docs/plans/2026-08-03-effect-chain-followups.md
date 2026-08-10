@@ -219,6 +219,7 @@ print scalar(@$r), "\n";
 |---|---|---|---|
 | `$r->[5][0]` literal index | **6** | **2** | **FAIL** |
 | `$r->[$i][0]`, `$i = 5` dynamic index | **6** | **2** | **FAIL** |
+| same, observed through an alias `my $s = $r` | **6** | **2** | **FAIL** |
 | `$r->[0][1]` over `[[1,2],[3,4]]` in-bounds | 2 | 2 | PASS |
 | flat `$r->[$i]` OOB, `defined()` consumer | undef | undef | PASS |
 
@@ -262,9 +263,13 @@ The same syntactic read has two types AND two effect classes, chosen by its CONS
 | `$r->[5][0]` (intermediate in a deref chain) | `ArrayRef`, guaranteed — never Nothing | **a store** |
 
 So "is this fetch `Maybe[T]`?" cannot be answered at the fetch site. This is exactly the
-architecture note's §4 (fetches parameterised by context) and §5 (borrowing rules), and it
-adds a third axis to the `Maybe[T]` design: **does this fetch CREATE?** That is an effect
-classification, not a type parameter, and the producer currently emits neither.
+architecture note's §4 (fetches parameterised by context) and §5 (borrowing rules).
+
+> **[RETRACTED 2026-08-10.]** This section originally concluded that the finding "adds a
+> third axis to the `Maybe[T]` design: **does this fetch CREATE?** — an effect
+> classification, not a type parameter." **That is wrong.** The difference is one of
+> *requirement*, not of node kind, and the coercion rule already covers it. See **THE
+> MODEL** below. The table above is still accurate; only the conclusion drawn from it was.
 
 
 ### The compiler ALREADY PROVES the miss and then discards the proof
@@ -287,21 +292,72 @@ guaranteed `ArrayRef`, never Nothing.
 not a missing analysis; it is an analysis whose result is used in exactly one context and
 dropped in the other.
 
-### Two defensible fixes — do not assume the first
+### THE MODEL: autovivification IS a coercion
 
-1. **Emit the autovivifying store.** Faithful to Perl. The deref-chain `Subscript` becomes
-   a fetch-or-create with a memory effect, and `Length` sees the extended aggregate.
-2. **Diagnose it.** `$r` is a literal `[10,20]` in scope; index 5 is provably out of
-   bounds; a checker could say *"index 5 is out of bounds for the 2-element array literal
-   declared at line 1 — this read will extend it to 6 elements."*
+**[MODEL, perigrin 2026-08-10.]** This supersedes an earlier framing in this file that
+offered two fixes — "emit the autovivifying store" (as a special case) or "diagnose it".
+**Neither is the answer.** The coercion rule already covers this, and the store is its
+*lowering*.
+
+The access states a **requirement**; the operand does not satisfy it; a `Coerce` is
+inserted unconditionally, keyed only on the requirement. That is exactly §3 of
+`docs/architecture/2026-08-09-types-fetches-and-contexts.md`, with no new mechanism.
+
+`$r->[5][0]` is **two** coercions:
+
+| | operand | requirement | coercion |
+|---|---|---|---|
+| outer | `Array[Int,2]` | `Array[_, ≥6]` | extend the array |
+| inner | `Undef` (the new slot) | `ArrayRef` | allocate an empty arrayref |
+
+`Coerce(Undef → ArrayRef)` — "make an empty arrayref" — is precisely what perl does.
+
+**This dissolves the "does this fetch CREATE?" axis** proposed in the section above. There
+is no effect classification to add: the *fetch* stays pure, and the requirement-driven
+`Coerce` carries the work. The leaf-vs-chain split is then just a difference of
+**requirement**, not of node kind — `my $v = $r->[5]` requires nothing of `$r`, so no
+coercion fires and the result is honestly `Maybe[Int]`.
+
+**And `Maybe[T]` stops being special.** If arrays can be extended with holes then every
+Perl array is `Array[Maybe[T]]` — holes are legal Perl. Which makes
+`%Slot = { i1 defined, i64 payload }` **the correct representation of `Maybe[T]`**. The
+backend built the right thing; the lattice never named it.
+
+### The cost this model does carry: coercions that store
+
+**Every `Coerce` today is pure** — `sitofp`, `zext`, `icmp` (`_lower_coerce`,
+`Target/LLVM/Context.pm:1019+`). An array-extending coercion **mutates a heap object
+visible through other references.**
+
+**[MEASURED 2026-08-10]** Third FAIL variant, proving it is a real heap mutation and not
+an SSA value rewrite:
+
+```perl
+my $r = [10, 20];
+my $s = $r;
+my $v = $r->[5][0];
+print scalar(@$s), "\n";      # perl: 6   chalk: 2   FAIL
+```
+
+`Coerce` has **no memory input** today — `Coerce.pm` fields are `from_repr`, `to_repr`,
+`inputs`, and the emitted IR confirms `Coerce inputs=[node]` — while `Subscript` already
+takes a memory edge. So this model needs **memory-carrying coercions**: either `Coerce`
+splits into pure and memory-transforming kinds, or it gains an optional memory edge the
+way `Subscript` has one.
+
+That is a smaller change than a new effect axis and it reuses machinery that exists, but
+**a coercion that stores is a new thing in this IR** and must be designed, not assumed.
+
+### Diagnostics: still available, no longer the fix
 
 **[MEASURED] Perl itself does NOT warn** — `perl -w -Mstrict` prints `6` silently. So
-chalk cannot *reject* this; it is legal Perl. But chalk holds the literal and perl does
-not, so a warning is available to chalk that is not available to perl.
+chalk cannot *reject* this; it is legal Perl. chalk holds the literal and perl does not,
+so a warning is available to chalk that is not available to perl:
 
-(2) does not remove the need for (1) — a warned program must still compile correctly — but
-it is the higher-value half for a self-hosting compiler, and it is the behaviour a real
-type checker would be expected to give.
+> *"index 5 is out of bounds for the 2-element array literal declared at line 1 — this
+> read will extend it to 6 elements"*
+
+Worth having. **Not** a substitute for compiling it correctly.
 
 ### The type-design catch: this needs a SIZED type
 

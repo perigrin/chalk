@@ -268,20 +268,25 @@ the GAPs because nothing must fit a fixed word. General unions are the more hone
 but change `join` everywhere: today `join(Bool,Int) = Scalar` (the LCA, §6's "correct and
 unstorable"); under unions it is `Bool ∪ Int`, which *is* storable. Not resolved here.
 
-**[MEASURED] And a third axis, which is not a type parameter at all.** Chasing this
-question turned up a **live silent miscompile**: a nested rvalue deref through a missing
-intermediate does not autovivify (`my $r=[10,20]; my $v=$r->[5][0]; print scalar(@$r)` —
-perl `6`, chalk `2`, no GAP). Filed as **E1** in
-`docs/plans/2026-08-03-effect-chain-followups.md`. It matters here because the same
-syntactic read has two types *and* two effect classes depending on its **consumer**:
+**[MEASURED] Chasing this question turned up a live silent miscompile** — a nested rvalue
+deref through a missing intermediate does not autovivify
+(`my $r=[10,20]; my $v=$r->[5][0]; print scalar(@$r)` — perl `6`, chalk `2`, no GAP).
+Filed as **E1** in `docs/plans/2026-08-03-effect-chain-followups.md`.
 
-| context | type | effect |
-|---|---|---|
-| `my $v = $r->[5]` | `Maybe[Int]` | none |
-| `$r->[5][0]` | `ArrayRef`, guaranteed | **a store** |
+It matters here because the same syntactic read has two types depending on its
+**consumer**: `my $v = $r->[5]` is `Maybe[Int]`, while `$r->[5][0]` guarantees `ArrayRef`
+and never Nothing. So **"is this fetch `Maybe[T]`?" cannot be answered at the fetch site**
+— §4 and §5 again.
 
-So "is this fetch `Maybe[T]`?" **cannot be answered at the fetch site** — §4 and §5 again.
-Any `Maybe[T]` design must carry a *does this fetch create?* classification beside it.
+An earlier draft concluded from this that `Maybe[T]` needs a *"does this fetch CREATE?"*
+effect axis beside it. **That is wrong and is retracted** (perigrin, 2026-08-10): the
+difference is one of **requirement**, not of node kind, and §3 already handles it —
+autovivification is a *coercion*. See §3's "the rule reaches further than scalars". The
+fetch stays pure.
+
+That also settles `Maybe[T]`'s status here: if arrays can be extended with holes then
+**every Perl array is `Array[Maybe[T]]`**, holes being legal Perl — which makes
+`%Slot = {i1,i64}` the correct representation of `Maybe[T]` rather than an oddity.
 
 ### What this changes downstream
 
@@ -510,6 +515,39 @@ evidence, not as a field deletion.
 **[MODEL, §8]** And the vocabulary is wrong in the same way: `from_repr`/`to_repr` are
 **representation** names on a **target-agnostic IR node**. Representation is the
 backend's business (§8). The node should carry a *type*; the backend maps it.
+
+### The rule reaches further than scalars: autovivification is a coercion
+
+**[MODEL, perigrin 2026-08-10]** The requirement-driven rule is not limited to widening
+`Int` to `Num`. **Perl's autovivification is an instance of it.** Given
+`my $r = [10,20]; $r->[5][0]`:
+
+| | operand | requirement | coercion |
+|---|---|---|---|
+| outer | `Array[Int,2]` | `Array[_, ≥6]` | extend the array |
+| inner | `Undef` (the new slot) | `ArrayRef` | allocate an empty arrayref |
+
+Nothing new is needed: the access **states a requirement**, the operand does not satisfy
+it, a `Coerce` is inserted unconditionally. `Coerce(Undef → ArrayRef)` — "make an empty
+arrayref" — is exactly what perl does.
+
+**This is load-bearing for §4 and §5.** Chalk does not do it today: it is a **live silent
+miscompile**, filed as **E1** in `docs/plans/2026-08-03-effect-chain-followups.md`
+(`print scalar(@$r)` — perl `6`, chalk `2`, no GAP, in three variants including through an
+alias). Reading it as a coercion rather than as a side effect **removes** a "does this
+fetch CREATE?" effect axis that an earlier draft of that file proposed: the fetch stays
+pure and the requirement carries the work. The leaf-vs-chain difference is a difference of
+**requirement**, not of node kind — `my $v = $r->[5]` requires nothing of `$r`, so nothing
+fires and the result is honestly `Maybe[Int]`.
+
+**[OPEN] The cost, which must be designed rather than assumed: coercions that store.**
+Every `Coerce` today is pure (`sitofp`, `zext`, `icmp`). An array-extending coercion
+mutates a heap object **visible through other references** — measured: adding
+`my $s = $r` and printing `scalar(@$s)` gives perl `6`, chalk `2`. `Coerce` has no memory
+input (`Coerce.pm`: `from_repr`, `to_repr`, `inputs`) while `Subscript` already takes one.
+So `Coerce` must either split into pure and memory-transforming kinds or gain an optional
+memory edge. Smaller than a new effect axis, and it reuses existing machinery — but **a
+coercion that stores is a new thing in this IR.**
 
 ### What this collapses
 
