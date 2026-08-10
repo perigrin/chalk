@@ -249,20 +249,35 @@ earlier on `keys` → "cannot lower op=Call", so it is **untested, not clean**.
 definitely pushing in the wrong direction when you decide that Perl's current
 implementation is always correct."*
 
-Two different authorities, which earlier drafts of this entry collapsed:
+**[MODEL, perigrin 2026-08-10 — three layers, not two authorities]**
 
-| | authority | why |
+> *"Perl's Optree tells us **what IR to create** … Perl's semantics tell **how our IR
+> should behave** (within some reason) … none of that defines **how our IR implements**
+> that behavior."*
+
+| layer | what perl supplies | what it constrains |
 |---|---|---|
-| **B::SoN** (the optree walk) | perl's implementation **is** the reference | it is a foreign-function **import boundary**. `OPpDEREF`, `multideref`'s aux chain and `OPf_MOD` are *facts about the optree*; decoding them wrong is a decoding bug. |
-| **chalk** (IR, passes, lowering) | only the observable **semantics**, over a **subset** | chalk reimplements, using whatever modern compiler theory realizes it best. Perl's runtime gets no vote. |
+| **1. optree** | the **structure to build** | a foreign-function import boundary. `OPpDEREF`, `multideref`'s aux chain, `OPf_MOD` are facts; failing to read them is a **decoding bug**. |
+| **2. semantics** | the **behaviour to exhibit**, *within some reason* | observable output. "Within some reason" is the **subset** clause — some behaviour may be legitimately out of scope, but then it must GAP, not guess. |
+| **3. implementation** | **nothing** | entirely ours. Perl's runtime has no vote. |
 
-**So the fix splits.** The producer's job is to *report faithfully* that this access is in
-deref context and autovivifies. Chalk's job is to decide the realization — coercion,
-static pre-sizing, DCE, escape analysis.
+**Layer 3 is the one this investigation kept violating.** *"Perl mutates the array in
+place, therefore `Coerce` needs a memory edge"* imported perl's implementation as ours.
+So did the original title of this entry (*"does not autovivify"*), which promoted a
+mechanism to a requirement.
 
-**Today chalk cannot decide anything, because it was never told.** The outer `Subscript`
-arrives **pure**. The information is lost **at the import boundary**, not mishandled after
-it — which is why this is first a producer bug and only then a chalk design question.
+**The payoff of separating them:** the choice among coercion / static pre-sizing /
+memory-SSA threading / in-place write is decided on **analyzability and optimization**
+grounds, not fidelity grounds. That is the same test recorded in the DECISION RULE below,
+and it only becomes available once layer 3 is recognised as free.
+
+**So the fix splits by layer.** Layer 1 — the producer must *report* that this access is
+in deref context. Layer 2 — the IR must behave as though the array were extended, or GAP.
+Layer 3 — how, is open, and is chosen for what it lets the optimizer do.
+
+**Today chalk cannot decide anything at layer 3, because layer 1 never told it.** The
+outer `Subscript` arrives **pure**. The information is lost at the import boundary, not
+mishandled after it — which is why this is first a producer bug.
 
 ### Mechanism (measured, not inferred)
 
