@@ -1150,6 +1150,18 @@ sub lower_with_elaboration {
         }
     }
 
+    # Emit Num package-scalar globals (StashAccess with a Num repr): one mutable
+    # `double` slot per qualified name, zero-init — an unwritten Num package
+    # scalar reads as 0.0, the numeric undef the backend uses. Its own slot
+    # rather than the Int i64 one so the read knows which face the bits hold.
+    if (defined $ctx->{_pkg_num_globals} && %{ $ctx->{_pkg_num_globals} }) {
+        push @lines, '';
+        for my $qual (sort keys $ctx->{_pkg_num_globals}->%*) {
+            my $nname = $ctx->{_pkg_num_globals}{$qual};
+            push @lines, "$nname = internal global double 0.0, align 8  ; Num package scalar \$$qual";
+        }
+    }
+
     # Declare malloc/memcpy when Str concat or aggregate operations were emitted.
     # These are plain C host-interface functions — NOT libperl.
     if ($ctx->{_need_malloc_memcpy}) {

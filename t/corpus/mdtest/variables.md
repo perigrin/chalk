@@ -663,3 +663,161 @@ return %gr
 control: %st1 -> %st2
 L: GREEN
 ```
+
+## A21 package variable holding a float (our $g = 0.5)
+
+A package/global scalar can hold a Num, not just an Int or a Str. A Num value is
+a `double`, so a Num package scalar is one mutable module-level slot
+`@pkg_main_g_num` (`double`, zero-init) — the float analogue of the Int `i64`
+slot, and a THIRD slot kind alongside A19's two-slot Str pair. It needs its own
+global rather than reusing the Int `i64`: storing a double through an i64 slot
+would either truncate or force a bitcast at every access, and the read side
+would have no way to tell which face the bits currently hold.
+
+The producer stamps the StashAccess with the RHS repr (A19's rule), so the store
+lvalue and the read hash-cons to one node and the read inherits Num.
+
+This case deliberately avoids printing the float. Rendering a Num as a string to
+perl's exact precision is dtoa — a separate subsystem — so the value is observed
+through arithmetic and comparison, which the backend already lowers (`fadd`,
+`fcmp`). `t/base/num.t` needs BOTH this slot and that formatting.
+
+```perl
+# source
+our $a = 0.5;
+($a + 0.5) == 1 ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%c      = Constant(0.5) :Num
+%al     = StashAccess(stash_name: "main", var_name: "a") :Num
+%st     = Assign(%al, %c) :Num
+%ar     = StashAccess(stash_name: "main", var_name: "a") :Num
+%half   = Constant(0.5) :Num
+%sum    = Add(%ar, %half) :Num
+%one    = Constant(1) :Int
+%t      = Constant(1) :Int
+%e      = Constant(0) :Int
+%eq     = NumEq(%sum, %one) :Bool
+%result = TernaryExpr(%eq, %t, %e) :Int
+return %result
+control: %st
+L: GREEN
+```
+
+## A21b the Num package slot holds the value that was stored (bilateral)
+
+A21's partner: the same program with only the STORED value changed, so the same
+comparison must now be false. Without this, A21 passes against a slot that
+always reads back some fixed value — including the 0.0 an unwritten slot holds,
+which `0.0 + 0.5 == 1` would reject, but a slot stuck at 0.5 would not.
+
+```perl
+# source
+our $a = 0.25;
+($a + 0.5) == 1 ? 1 : 0
+```
+
+```behavior
+return: 0
+context: scalar
+```
+
+```ir
+%c      = Constant(0.25) :Num
+%al     = StashAccess(stash_name: "main", var_name: "a") :Num
+%st     = Assign(%al, %c) :Num
+%ar     = StashAccess(stash_name: "main", var_name: "a") :Num
+%half   = Constant(0.5) :Num
+%sum    = Add(%ar, %half) :Num
+%one    = Constant(1) :Int
+%t      = Constant(1) :Int
+%e      = Constant(0) :Int
+%eq     = NumEq(%sum, %one) :Bool
+%result = TernaryExpr(%eq, %t, %e) :Int
+return %result
+control: %st
+L: GREEN
+```
+
+## A21c a Num package scalar reassigned reads the NEW value
+
+The slot is mutable: a second store must be what the read observes. Mirrors A20
+(the Str reassign case) for the double slot.
+
+```perl
+# source
+our $a = 0.5;
+$a = 0.25;
+($a + 0.75) == 1 ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%c1     = Constant(0.5) :Num
+%al     = StashAccess(stash_name: "main", var_name: "a") :Num
+%st1    = Assign(%al, %c1) :Num
+%c2     = Constant(0.25) :Num
+%st2    = Assign(%al, %c2) :Num
+%ar     = StashAccess(stash_name: "main", var_name: "a") :Num
+%q      = Constant(0.75) :Num
+%sum    = Add(%ar, %q) :Num
+%one    = Constant(1) :Int
+%t      = Constant(1) :Int
+%e      = Constant(0) :Int
+%eq     = NumEq(%sum, %one) :Bool
+%result = TernaryExpr(%eq, %t, %e) :Int
+return %result
+control: %st1 -> %st2
+L: GREEN
+```
+
+## A21d a Num and an Int package scalar coexist (distinct slots)
+
+The Num slot is a separate global from the Int one, so both faces must be usable
+in the same program without either clobbering the other. This also exercises a
+MIXED `Add(Num, Int)`: the repr-join widens the Add to Num and the backend
+sitofps the Int operand, which is why the TypedInvariant judges Add's operands
+against the NODE's repr through subtyping (Int <: Num) rather than demanding an
+exact match.
+
+```perl
+# source
+our $a = 0.5;
+our $i = 2;
+($a + $i) == 2.5 ? 1 : 0
+```
+
+```behavior
+return: 1
+context: scalar
+```
+
+```ir
+%c      = Constant(0.5) :Num
+%al     = StashAccess(stash_name: "main", var_name: "a") :Num
+%st1    = Assign(%al, %c) :Num
+%two    = Constant(2) :Int
+%il     = StashAccess(stash_name: "main", var_name: "i") :Int
+%st2    = Assign(%il, %two) :Int
+%ar     = StashAccess(stash_name: "main", var_name: "a") :Num
+%ir     = StashAccess(stash_name: "main", var_name: "i") :Int
+%sum    = Add(%ar, %ir) :Num
+%exp    = Constant(2.5) :Num
+%t      = Constant(1) :Int
+%e      = Constant(0) :Int
+%eq     = NumEq(%sum, %exp) :Bool
+%result = TernaryExpr(%eq, %t, %e) :Int
+return %result
+control: %st1 -> %st2
+L: GREEN
+```

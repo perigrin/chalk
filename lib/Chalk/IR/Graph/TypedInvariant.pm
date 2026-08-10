@@ -5,6 +5,7 @@ use 5.42.0;
 use utf8;
 
 use Chalk::IR::Node::Coerce;
+use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: Int <: Num
 
 # Required-operand-representation for each operation.
 # Values may be a single string (all inputs must carry that repr) or an
@@ -16,14 +17,78 @@ use Chalk::IR::Node::Coerce;
 # are listed. Ops NOT listed here are unchecked (the invariant applies only to
 # operations with a declared requirement).
 my %OP_REQUIRED_REPR = (
-    Add      => 'Int',
-    Subtract => 'Int',
-    Multiply => 'Int',
+    # Add/Subtract/Multiply require Num, satisfied by Int through SUBTYPING
+    # (Int <: Num) rather than by enumerating [Int Num] -- the lattice already
+    # states the relationship, and a hand-kept list beside it is a second copy
+    # that drifts. See %SUBTYPE_PERMISSIVE below.
+    #
+    # Perl's `+` is an integer add over two integers and a float add when either
+    # side is a float. The repr-join widens the node to Num when any operand is
+    # Num, and the backend emits fadd/fsub/fmul, sitofp'ing an Int operand
+    # (Target::LLVM::Context::_lower_binop_int, _lower_as_double). These read
+    # 'Int' only because no Num operand could reach one before Num package
+    # scalars lowered; the requirement contradicted the backend's own documented
+    # contract the moment one could.
+    Add      => 'Num',
+    Subtract => 'Num',
+    Multiply => 'Num',
     Divide   => 'Num',  # Perl `/` is always float division; inputs must be Num
-    Modulo   => 'Int',
+    Modulo   => 'Int',  # perl's `%` is integer-valued
     Concat   => 'Str',  # String concatenation requires Str operands (G3)
     Length   => [qw(Array ArrayRef Hash HashRef Str)],  # scalar @arr (count), scalar %h (key count), or length($str); operand must be Array/ArrayRef, Hash/HashRef, or Str
 );
+
+# Ops whose requirement is satisfied by a SUBTYPE of the required repr, not only
+# by an exact match. Int <: Num, so an Int operand conforms to a Num requirement
+# and the backend bridges it with sitofp at lowering time.
+#
+# This is deliberately NOT global, because the lattice and the machine
+# representation are different things and only some ops can span the gap:
+#
+#   Concat => 'Str'   Int <: Num <: Str in the lattice, so a global subtype rule
+#                     would accept a raw Int operand -- and stop requiring the
+#                     explicit Stringify node the backend needs, since an i64 is
+#                     not the (ptr, len) pair a Str value is. Concat's constraint
+#                     is a REPRESENTATION constraint wearing a type's name.
+#
+#   Divide => 'Num'   stays exact. Perl's `/` is float division even over two
+#                     integers (3/2 is 1.5), and coercion Slice A makes the
+#                     producer insert an explicit Coerce(Int->Num) so the inputs
+#                     are uniformly Num. Admitting a bare Int here would let an
+#                     un-coerced integer divide through the leg that exists to
+#                     catch exactly that.
+my %SUBTYPE_PERMISSIVE = map { $_ => 1 } qw(Add Subtract Multiply);
+
+# _conforms($actual_repr, $op, \@allowed, $node_repr) -> bool
+#
+# Exact match against the allowed set, plus subtyping for the ops listed above.
+#
+# For a subtype-permissive op the operand is checked against the NODE'S OWN
+# representation, not the table entry. That is what makes the rule sound rather
+# than merely permissive:
+#
+#   Add:Num  over (Int, Num)   Int <: Num          -> conforms, sitofp bridges it
+#   Add:Int  over (Int, Num)   Num is NOT <: Int   -> VIOLATION
+#
+# The second is a real defect and must stay caught: an Add carrying a Num
+# operand cannot be stamped Int without dropping the fractional part, and the
+# repr-join is supposed to have widened it. Checking against the table's 'Num'
+# alone would have admitted it.
+sub _conforms {
+    my ($actual, $op, $allowed, $node_repr) = @_;
+
+    # A subtype-permissive op is judged ONLY against the node's own repr. Falling
+    # back to an exact match on the table first would re-admit the very case this
+    # is meant to catch: Add:Int over a Num operand matches the table's 'Num'
+    # exactly, so an exact-match-first rule calls it conformant.
+    if ($SUBTYPE_PERMISSIVE{$op}) {
+        my $want = $node_repr // $allowed->[0];
+        return Chalk::Grammar::Perl::TypeLibrary::is_subtype($actual, $want)
+            ? true : false;
+    }
+
+    return grep({ $actual eq $_ } $allowed->@*) ? true : false;
+}
 
 # Per-position required representation for ops with different constraints at each input.
 # Each entry maps op-name -> arrayref of per-position constraints, where each
@@ -208,7 +273,7 @@ sub check {
             # If the input IS a Coerce node, check its to_repr against allowed set
             if ($input->isa('Chalk::IR::Node::Coerce')) {
                 my $to = $input->to_repr();
-                unless (grep { $to eq $_ } @allowed) {
+                unless (_conforms($to, $op, \@allowed, $node->representation())) {
                     my $allowed_str = join(' or ', @allowed);
                     push @violations, {
                         node_id => $node->id(),
@@ -221,8 +286,9 @@ sub check {
                 next;
             }
 
-            # Plain node: representation must be one of the allowed set
-            unless (grep { $input_repr eq $_ } @allowed) {
+            # Plain node: representation must conform to the allowed set —
+            # exactly, or by subtyping for the ops that permit it.
+            unless (_conforms($input_repr, $op, \@allowed, $node->representation())) {
                 my $allowed_str = join(' or ', @allowed);
                 push @violations, {
                     node_id => $node->id(),

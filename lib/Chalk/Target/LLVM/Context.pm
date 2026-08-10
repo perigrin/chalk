@@ -58,6 +58,9 @@ sub new {
         # slots (an i8* ptr and an i64 len), deduped by qualified name.
         #   _pkg_str_globals => { "main::g" => ["\@pkg_main_g_ptr", "\@pkg_main_g_len"], ... }
         _pkg_str_globals      => {},
+        # Num package scalars: one `double` slot per qualified name.
+        #   _pkg_num_globals => { "main::g" => "\@pkg_main_g_num", ... }
+        _pkg_num_globals      => {},
         _str_len_table        => {},
         _need_malloc_memcpy   => 0,
         _need_str_to_num_helper => 0,
@@ -243,6 +246,30 @@ sub _pkg_str_global_names {
     my $lname = "\@${ident}_len";
     $self->{_pkg_str_globals}{$qual} = [ $pname, $lname ];
     return ($pname, $lname);
+}
+
+# _pkg_num_global_name($stash, $var) -> LLVM global name for a Num package slot.
+#
+# A Num package/global scalar (`our $g = 0.5`) is a single module-level `double`
+# slot named `@pkg_<stash>_<var>_num`. It needs its own slot rather than reusing
+# the Int i64 one because the value is a genuine double: storing it through an
+# i64 slot would either truncate or require a bitcast on every access, and the
+# read side would have no way to tell which face the bits currently hold.
+#
+# Registered once per qualified name in _pkg_num_globals so store and read
+# resolve the SAME slot and the preamble emits it exactly once as
+# `internal global double 0.0`. Same identifier rule as _pkg_global_name.
+sub _pkg_num_global_name {
+    my ($self, $stash, $var) = @_;
+    my $qual  = "${stash}::${var}";
+    my $ident = "pkg_${stash}_${var}";
+    die "GAP: package-global slot '\@$ident' (from $qual) is not a legal "
+      . "unquoted LLVM identifier (\\w+) — the stash or variable name likely "
+      . "contains '::' or other non-identifier characters"
+        unless $ident =~ /\A\w+\z/;
+    my $gname = "\@${ident}_num";
+    $self->{_pkg_num_globals}{$qual} = $gname;
+    return $gname;
 }
 
 # Ops that LOAD from a mutable memory location when lowered: a pad slot
@@ -1405,8 +1432,17 @@ sub _lower_assign {
             $self->{cache}{ $node->id } = $rhs_ref;
             return $rhs_ref;
         }
-        die "GAP: Assign(StashAccess-lvalue) rhs repr=$rhs_repr; only Int and "
-          . "Str package scalars are lowered runtime-free."
+        # A Num package scalar is a single `double` slot — the float analogue of
+        # the Int i64 slot, in its own global so the read knows which face the
+        # bits hold.
+        if ($rhs_repr eq 'Num') {
+            my $nname = $self->_pkg_num_global_name($lhs->stash_name, $var);
+            $self->_emit("  store double $rhs_ref, double* $nname  ; Assign(StashAccess-lvalue): store \$$var (Num package scalar)");
+            $self->{cache}{ $node->id } = $rhs_ref;
+            return $rhs_ref;
+        }
+        die "GAP: Assign(StashAccess-lvalue) rhs repr=$rhs_repr; only Int, Num "
+          . "and Str package scalars are lowered runtime-free."
             unless $rhs_repr eq 'Int';
         my $gname = $self->_pkg_global_name($lhs->stash_name, $var);
         $self->_emit("  store i64 $rhs_ref, i64* $gname  ; Assign(StashAccess-lvalue): store \$$var (package scalar)");
@@ -5679,7 +5715,15 @@ sub _lower_stash_access {
         $self->{cache}{ $node->id } = $ptr;
         return $ptr;
     }
-    die "GAP: StashAccess repr=$repr; only Int and Str package scalars are "
+    # A Num package scalar: load the `double` slot. Mirrors the Num store.
+    if ($repr eq 'Num') {
+        my $nname = $self->_pkg_num_global_name($node->stash_name, $var);
+        my $val   = $self->_fresh;
+        $self->_emit("  $val = load double, double* $nname  ; StashAccess: read \$$var (Num package scalar)");
+        $self->{cache}{ $node->id } = $val;
+        return $val;
+    }
+    die "GAP: StashAccess repr=$repr; only Int, Num and Str package scalars are "
       . "lowered runtime-free (a ref slot needs a differently-typed global)."
         unless $repr eq 'Int';
 
