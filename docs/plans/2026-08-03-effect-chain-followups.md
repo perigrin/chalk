@@ -1290,3 +1290,70 @@ The five remaining, and none is a transform defect:
 Two of the five are one capability (untyped merges), and D4 is a blocker already
 tracked for t/base. The migration is closer to parity than the raw number
 suggests, but it is still a net loss and must not land as one.
+
+---
+
+# Part L — the migration is 4 short, and 2 of those are a harness defect (2026-08-11)
+
+## L1: measured, after the inference fixes
+
+    gate-green=180  behavior=180  shape=182  invariant=183   floor 184
+
+Four short, down from six (Part I5) and then five (Part K5). `Coerce(Slot->Str)`,
+the `DefinedOr` join, the `Undef` declaration type and the lattice-derived join
+each bought exactly what they should. L3b is closed outright.
+
+| case | what it actually is |
+|---|---|
+| arithmetic OOB read | **harness defect** — see L2 |
+| references R9 | **harness defect** — see L2 |
+| L3c defined-or early-return | a Region Phi over an early-return merge is untyped |
+| D4 postfix if | the pre-existing 2b-3 mixed-effect GAP, the same blocker t/base/term.t and translate.t sit behind |
+
+So ONE capability gap (L3c) and one already-tracked blocker (D4) actually stand
+between the migration and parity.
+
+## L2: a FOURTH harness defect — the oracle captures perl's WARNINGS
+
+`son-corpus-wide.t:101` runs the perl oracle as `qx($PERL $tmp 2>&1)`, so
+anything perl writes to STDERR becomes part of the expected output. Chalk emits
+no warnings, so a case whose perl side warns can never match.
+
+Measured on R9 (`my @a = (1,2,3); say($a[9])`):
+
+    perl oracle : "Use of uninitialized value in say at ...\n\nBool:1"
+    chalk lli   : "\nBool:1"
+
+The LOWERING IS CORRECT. The graph is `Subscript :Slot -> Coerce :Str -> Print`,
+the out-of-bounds read prints the empty string, and the epilogue tags `Bool:1` —
+verified by loading the wrapped case and reading the reprs, and by running the
+emitted module directly. Only the warning text differs.
+
+This mattered only once the migration made these cases PRINT an undefined value.
+In the pre-migration form the undef never reached `say`, so perl never warned.
+
+That is the fourth defect in this harness, alongside the three already recorded:
+the `sub corpus_case` wrap (which supplies a value context, Part I1), the
+`Int:`/`Str:` epilogue, and `:88` reading any nonzero lli exit as
+failure-to-lower. The wrap and the epilogue are what the migration exists to
+remove; this one is independent and should be fixed on its own terms.
+
+**The fix is not simply dropping `2>&1`.** A GENUINE runtime error on the perl
+side must still be visible, or a case whose oracle dies would silently compare
+empty-to-empty. Capturing stderr separately and comparing only stdout, while
+failing loudly on a nonzero perl exit, is the shape — the same split
+`ProgramRunner` already uses.
+
+## L3: order to reach parity
+
+1. Fix the oracle's stderr capture (L2). Closes 2 of the 4 with no compiler
+   change, and removes a class of false failure the migration would otherwise
+   keep hitting.
+2. Type the early-return merge (L3c). One capability, the same family as the
+   `DefinedOr` join.
+3. D4 is the 2b-3 mixed-effect GAP. Already tracked, already has a ready-made
+   RED in Part F3, and blocks t/base files too — worth doing for its own sake
+   rather than for the migration.
+
+Only after those does the migration land at or above parity, at which point
+steps 3-4 of Part I6 (flip both harnesses, add the non-vacuity check) can run.
