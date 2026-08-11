@@ -619,11 +619,20 @@ control: %p
 L: GREEN
 ```
 
-## Stringify of a Num is a declared GAP (float formatting)
+## Stringify of a Num renders perl's own float format
 
-Printing a Num needs float-to-string formatting to perl's exact precision —
-the same dtoa subsystem `t/base/num.t` is blocked on. With `Print` reduced to
-one representation, this is now the ONLY place that has to learn it.
+Perl's float stringification IS `%.15g` — shortest 15 significant digits with
+trailing zeros stripped, exponent form outside a range. Verified against perl
+5.42 on the corpus floats AND on `t/base/num.t`'s cases (`0.1`, `1e+34`,
+`1.000001`, `10.01`, `123.456`, `0.0005`): `sprintf("%.15g")` reproduces perl
+exactly in every one. So this is not an approximation of a bespoke dtoa — it is
+the rule itself.
+
+`snprintf` renders it: once with a null buffer to learn the length, then into a
+buffer of exactly that size. The length is what the `(ptr, len)` Str pair needs,
+and computing it any other way would re-implement `%g`. It is the same
+host-interface class as the `printf` `Print` already emits — a plain C function,
+not libperl.
 
 ```perl
 # source
@@ -638,5 +647,78 @@ context: scalar
 ```
 
 ```ir
-L: GAP(Stringify from repr=Num: float-to-string formatting is unbuilt; the same subsystem t/base/num.t needs, and now the only place that has to learn it)
+%v   = Constant(0.75) :Num
+%sv  = Stringify(%v) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%sv, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
+
+## Stringify of a Num that is NOT exactly representable
+
+`0.1` is the case that separates real float formatting from a decimal shortcut:
+the stored double is 0.1000000000000000055511151231257827, and perl prints
+`0.1`. A renderer that emitted the stored value, or a fixed number of decimal
+places, would fail here while passing every case above.
+
+```perl
+# source
+use 5.42.0;
+say 0.1; 1
+```
+
+```behavior
+stdout: 0.1\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%v   = Constant(0.1) :Num
+%sv  = Stringify(%v) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%sv, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
+
+## A COMPUTED Num stringifies (not just a literal)
+
+The value must survive arithmetic and still print as perl prints it. `3 / 4` is
+float division over two Ints (each coerced to Num by Slice A's
+`Coerce(Int->Num)`), so this exercises the coercion chain into the renderer
+rather than a folded literal.
+
+```perl
+# source
+use 5.42.0;
+our $a = 3;
+our $b = 4;
+say $a / $b; 1
+```
+
+```behavior
+stdout: 0.75\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%a   = Constant(3) :Int
+%b   = Constant(4) :Int
+%ca  = Coerce(%a, from_repr: "Int", to_repr: "Num") :Num
+%cb  = Coerce(%b, from_repr: "Int", to_repr: "Num") :Num
+%d   = Divide(%ca, %cb) :Num
+%sd  = Stringify(%d) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%sd, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
 ```

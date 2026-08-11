@@ -974,10 +974,45 @@ sub _lower_stringify {
         return $ptr;
     }
 
+    # Num uses the format perl itself uses. Measured against perl 5.42 over the
+    # corpus floats AND t/base/num.t's hard cases -- 0.1, 1e+34, 1.000001,
+    # 10.01, 123.456, 0.0005 -- sprintf("%.15g") reproduces perl's own
+    # stringification exactly in every one. This is NOT an approximation of a
+    # bespoke dtoa: shortest-15-significant-digits with trailing zeros stripped
+    # and exponent form outside a range IS perl's rule.
+    #
+    # snprintf is the same host-interface class as the printf `Print` already
+    # emits (a plain C function, not libperl), so this adds no new dependency.
+    # Called twice: once with a null buffer to learn the length, then into a
+    # malloc'd buffer of exactly that size -- the length is what the (ptr, len)
+    # Str pair needs, and computing it any other way would re-implement %g.
+    if ($from eq 'Num') {
+        my $val = $self->lower_value($input);
+        $self->{_need_malloc_memcpy} = 1;   # for @malloc
+        $self->{_need_num_fmt}       = 1;   # for @fmt_num_g
+        $self->{_need_snprintf}      = 1;
+
+        my $fmt = $self->_fresh;
+        $self->_emit("  $fmt = getelementptr inbounds [6 x i8], [6 x i8]* \@fmt_num_g, i64 0, i64 0  ; Stringify(Num): %.15g fmt");
+        my $need = $self->_fresh;
+        $self->_emit("  $need = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* null, i64 0, i8* $fmt, double $val)  ; Stringify(Num): measure");
+        my $need64 = $self->_fresh;
+        $self->_emit("  $need64 = sext i32 $need to i64  ; Stringify(Num): length as i64");
+        my $size = $self->_fresh;
+        $self->_emit("  $size = add i64 $need64, 1  ; Stringify(Num): + NUL");
+        my $buf = $self->_fresh;
+        $self->_emit("  $buf = call i8* \@malloc(i64 $size)  ; Stringify(Num): buffer");
+        my $wrote = $self->_fresh;
+        $self->_emit("  $wrote = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* $buf, i64 $size, i8* $fmt, double $val)  ; Stringify(Num): render");
+
+        $self->{_str_len_table}{$buf} = $need64;
+        $self->{cache}{ $node->id } = $buf;
+        return $buf;
+    }
+
     if ($from ne 'Int') {
         die "GAP: Stringify from repr=$from is not lowered runtime-free yet "
-          . "(Int and Bool are wired; Num needs float-to-string formatting, the "
-          . "same subsystem t/base/num.t is blocked on).";
+          . "(Int, Bool and Num are wired; an aggregate has no stringification).";
     }
 
     my $val = $self->lower_value($input);

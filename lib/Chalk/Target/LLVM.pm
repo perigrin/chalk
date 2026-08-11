@@ -1107,8 +1107,19 @@ sub lower_with_elaboration {
         push @lines, '@fmt_print_int = private unnamed_addr constant [5 x i8] c"%lld\00", align 1';
     }
 
+    if ($ctx->{_need_num_fmt}) {
+        # "%.15g\0" = 6 bytes = [6 x i8]. This is perl's own float
+        # stringification rule, verified against perl 5.42 on the corpus floats
+        # and on t/base/num.t's cases (0.1, 1e+34, 1.000001, 0.0005).
+        push @lines, '@fmt_num_g = private unnamed_addr constant [6 x i8] c"%.15g\00", align 1';
+    }
+
     push @lines, '';
     push @lines, 'declare i32 @printf(i8* nocapture readonly, ...)';
+    # snprintf renders a Num to Str: measure with a null buffer, then render.
+    # Same host-interface class as printf -- a plain C function, not libperl.
+    push @lines, 'declare i32 @snprintf(i8* nocapture, i64, i8* nocapture readonly, ...)'
+        if $ctx->{_need_snprintf};
 
     # Emit string-constant globals collected during body lowering.
     # Each Constant(:Str) node emits a private global; the names are stashed in
