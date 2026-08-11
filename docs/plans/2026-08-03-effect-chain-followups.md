@@ -1115,3 +1115,100 @@ Maybe[word] pair — and could land independently.
 6. Delete the `Int:`/`Str:` epilogue's last consumer, and with it the
    `son-corpus-wide.t:88` exit-status defect (Part D / the wrapped-contract
    removal), which is the point of the exercise.
+
+---
+
+# Part J — operators inject coercions; Stringify IS Coerce(X->Str) (2026-08-11)
+
+## J1: the rule
+
+**Operators are rarely polymorphic. An operator states its operand types, and a
+non-conforming operand is bridged by an explicit coercion node — the operator
+does not learn a representation.**
+
+Three operators were fixed this way in one session, and each fix DELETED code:
+
+| operator | was | now |
+|---|---|---|
+| `Print` | lowered Str and Int itself, GAPped Bool/Num/Slot | `Print(Str...)`; producer injects `Stringify` |
+| `Add`/`Subtract`/`Multiply` | required exactly Int | `(Num,Num)->Num`; mixed application gets `Coerce(Int->Num)` |
+| `StrEq`/`StrNe` | called `_emit_int_to_str` itself | `(Str,Str)`; producer injects `Stringify` |
+
+The pattern each time: a per-type case in the operator turned out to be a
+coercion in disguise, and the same conversion existed in TWO places — so a new
+type had to be taught to both, and one of them was always behind. `eq` still
+declared Num "unbuilt" after `Stringify` could already render one.
+
+## J2: Stringify and Coerce are the same function with different name tags
+
+Measured overlap, not inferred: the backend implements `Coerce(Bool->Str)` at
+`Target/LLVM/Context.pm:1151` AND `Stringify(Bool)` at `:970`. The SAME edge,
+twice. `Stringify(X)` is exactly `Coerce(X -> Str)`.
+
+`Coerce`'s implemented pairs: Int->Num, Num->Int, Bool->Int, Bool->Num,
+Bool->Bool, Bool->Str, Str->Num, Str->Bool.
+`Stringify`'s: Bool->Str, Num->Str, Int->Str.
+
+Only `Stringify` has Num->Str and Int->Str; only `Coerce` has the numeric pairs;
+Bool->Str is in both.
+
+### A latent divergence the duplication already produced
+
+`Coerce(Bool->Str)` selects the POINTER only and records NO length in
+`_str_len_table`. `Stringify(Bool)` selects the pointer AND the length, because
+a false Bool is the empty string — zero bytes — and a Str value is a
+`(ptr, len)` pair.
+
+Measured: NOT currently reachable. Concat and interpolation route a Bool through
+`Stringify`, not `Coerce`, so all five probes (say/concat/interp over both
+polarities) pass. Latent, not live — recorded rather than fixed, because a fix
+with no failing case to justify it is a guess.
+
+That divergence is the argument for merging: two implementations of one edge
+drift, and this pair already has.
+
+## J3: doing the merge
+
+Blast radius, measured: 49 `Stringify` references in chalk lib/, 15 in the
+producer, 26 `ir`-block lines across three corpus files, plus
+`lib/Chalk/IR/Node/Stringify.pm`, a NodeFactory entry, and the wire format
+(`_extract_fields` emits Coerce's `from_repr`/`to_repr`; Stringify carries
+neither).
+
+Order that keeps the gate green throughout:
+
+1. Give `Stringify` `from_repr`/`to_repr` on the wire, defaulted to
+   `(<operand repr>, 'Str')` — no behaviour change, but the two node types now
+   carry the same fields.
+2. Fold `Stringify`'s three arms into `_lower_coerce` as the `X -> Str` cases,
+   taking `Stringify(Bool)`'s length-selecting version (it is the correct one).
+   Have `_lower_stringify` delegate.
+3. Switch the producer's injection sites (print/say args, StrEq/StrNe operands)
+   to build `Coerce(X->Str)`.
+4. Rewrite the 26 corpus `ir` lines, then delete `Stringify` and its node class.
+
+Step 2 is where the latent Bool defect closes, and it closes as a side effect of
+the merge rather than as a separate fix.
+
+## J4: what is NOT polymorphism
+
+Not every repr branch is an operator learning types. These are correct as they
+stand and must not be swept into the rule:
+
+- `Constant` (`:597`) — materializing a literal per representation IS its job.
+- `Coerce`/`Stringify` — dispatching on representation is the whole point.
+- `_method_fn_type` (`:17`) — an ABI signature, not an operand rule.
+
+The suspects are operators that inspect an operand and choose behaviour.
+`_lower_divide` still calls `_lower_as_double` on its operands, but measured,
+every Divide that REACHES the backend already carries a `Coerce` on each Int
+operand — `3/4`, `$a/$b` over Int package scalars, mixed Num/Int, and lexicals
+all show `Divide(Coerce, Coerce)` or `Divide(Constant/Num, Coerce)`. So that
+call is dead defence, not a live implicit coercion, and can go when the merge
+lands.
+
+The compound form `$x /= 2` shows an uncoerced `StashAccess` operand in the
+graph, but it does NOT reach Divide's operand handling: measured, it GAPs
+earlier with "StashAccess reached LLVM backend with NO representation". It is
+an unstamped-operand problem, not a coercion one — do not read the graph shape
+as evidence that `_lower_as_double` is load-bearing.
