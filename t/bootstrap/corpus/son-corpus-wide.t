@@ -80,12 +80,24 @@ sub run_through_bson ($source) {
 
     my ($lfh, $lltmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $lfh $ll; close $lfh;
-    my $out = qx($LLI $lltmp 2>&1);
+
+    # STDERR captured separately, matching the perl oracle. On the success path
+    # an lli diagnostic would otherwise be indistinguishable from the program's
+    # own output; on a failure path it is the useful part of the report, so the
+    # error branches below surface it rather than discarding it.
+    my ($elfh, $eltmp) = tempfile(SUFFIX => '.err', UNLINK => 1);
+    close $elfh;
+    my $out = qx($LLI $lltmp 2>$eltmp);
+    my $lli_err = sub {
+        my $e = do { local (@ARGV, $/) = ($eltmp); <> } // '';
+        $e =~ s/\s+\z//;
+        return $e;
+    };
     if (my $sig = $? & 127) {
-        return (undef, "lli died on signal $sig", $g);
+        return (undef, "lli died on signal $sig: " . $lli_err->(), $g);
     }
     my $exit = $? >> 8;
-    return (undef, "lli exited $exit", $g) if $exit != 0;
+    return (undef, "lli exited $exit: " . $lli_err->(), $g) if $exit != 0;
     chomp $out;
     return ($out, undef, $g);
 }
@@ -98,8 +110,28 @@ sub perl_oracle ($source) {
     my ($fh, $tmp) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     binmode $fh, ':utf8';
     print $fh $prog; close $fh;
-    my $out = qx($PERL $tmp 2>&1);
+
+    # STDERR is captured SEPARATELY, not folded into the comparison. Perl's
+    # warnings are not program output: `say $a[9]` on an out-of-bounds read
+    # prints an empty line AND warns "Use of uninitialized value in say". Chalk
+    # emits no warnings, so folding stderr in made any warning-producing case
+    # impossible to match, and reported it as a behaviour divergence when the
+    # lowering was correct.
+    #
+    # A genuine oracle FAILURE must still be loud, though: dropping stderr
+    # outright would let a case whose perl side dies compare empty-to-empty and
+    # read as a pass. So a nonzero exit returns the diagnostic as the result,
+    # which cannot match any lli output.
+    my ($efh, $etmp) = tempfile(SUFFIX => '.err', UNLINK => 1);
+    close $efh;
+    my $out  = qx($PERL $tmp 2>$etmp);
+    my $exit = $? >> 8;
     chomp $out;
+    if ($exit != 0) {
+        my $err = do { local (@ARGV, $/) = ($etmp); <> } // '';
+        $err =~ s/\s+\z//;
+        return "perl oracle exited $exit: $err";
+    }
     return $out;
 }
 
