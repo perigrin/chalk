@@ -616,9 +616,17 @@ sub _lower_constant {
         return $ref;
     }
     elsif ($repr eq 'Num') {
-        # Num constant -> double immediate
+        # Num constant -> double immediate.
+        #
+        # A float whose value is INTEGRAL arrives here as a bare integer literal
+        # (`1e3` and `2.0` both reach us as "1000" / "2"), and LLVM rejects an
+        # integer constant in a double operand: "integer constant must have
+        # integer type". Give it a fractional part so it is typed as a double.
+        # Measured: `say 1e3` emitted `fadd double 0.0, 1000` and lli refused
+        # to run the module at all.
+        my $dval = ($val =~ /\A-?\d+\z/) ? "$val.0" : $val;
         my $ref = $self->_fresh;
-        $self->_emit("  $ref = fadd double 0.0, $val    ; Constant($val, repr=Num -> double)");
+        $self->_emit("  $ref = fadd double 0.0, $dval    ; Constant($val, repr=Num -> double)");
         $self->{cache}{$node->id} = $ref;
         return $ref;
     }
@@ -1847,10 +1855,16 @@ sub _str_compare_operand {
     my $repr = $input->representation // '';
     my $ref  = $self->lower_value($input);
     return $ref if $repr eq 'Str';
-    return $self->_emit_int_to_str($ref) if $repr eq 'Int';
-    die "GAP: $op $side operand has repr=$repr; string comparison stringifies "
-      . "only Str (as-is) and Int (decimal) operands runtime-free. Num/aggregate "
-      . "stringification for `eq`/`ne` is unbuilt.";
+    # StrEq/StrNe's signature is (Str, Str). A non-Str operand arrives through
+    # an explicit Stringify inserted by the producer, exactly as Print's
+    # arguments do -- `eq` does not know how to render any representation.
+    #
+    # It used to call _emit_int_to_str itself, which put the int-to-decimal
+    # renderer in two places (here and Stringify) and left Num "unbuilt for
+    # eq/ne" even after Stringify could render one. One coercion, one renderer.
+    die "GAP: $op $side operand has repr=$repr; string comparison takes Str, so "
+      . "this needs a Stringify coercion (the producer inserts one for a "
+      . "stamped non-Str operand).";
 }
 
 sub _lower_str_compare {

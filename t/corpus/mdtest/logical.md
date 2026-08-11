@@ -726,3 +726,120 @@ context: scalar
 return %one
 L: GREEN
 ```
+
+## L6f `eq` coerces a NUM operand (t/base/num.t idiom)
+
+`eq` compares STRINGS: its signature is `(Str, Str)`, so a Num operand is
+coerced by an explicit `Stringify` inserted at the producer build site — the
+same treatment `Print`'s arguments get. `eq` does not learn a representation.
+
+This is `t/base/num.t`'s central idiom (`$a = 0.1; $a eq "0.1"`). It was
+previously a GAP reading "string comparison stringifies only Str and Int
+operands runtime-free; Num stringification for eq/ne is unbuilt" — because the
+backend carried its OWN int-to-decimal renderer inside the comparison, separate
+from `Stringify`'s. Routing the operand through the coercion made Num work with
+no new rendering code at all.
+
+```perl
+# source
+use 5.42.0;
+our $a = 0.1;
+say($a eq "0.1" ? "y" : "n"); 1
+```
+
+```behavior
+stdout: y\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%v   = Constant(0.1) :Num
+%sv  = Stringify(%v) :Str
+%lit = Constant("0.1") :Str
+%eq  = StrEq(%sv, %lit) :Bool
+%y   = Constant("y") :Str
+%n   = Constant("n") :Str
+%t   = TernaryExpr(%eq, %y, %n) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%t, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
+
+## L6g `eq` over a Num that does NOT match (bilateral)
+
+The partner of L6f. Without it, L6f passes against a comparison that always
+answers true — which is exactly what a dropped or misrendered operand would
+produce.
+
+```perl
+# source
+use 5.42.0;
+our $a = 0.1;
+say($a eq "0.2" ? "y" : "n"); 1
+```
+
+```behavior
+stdout: n\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%v   = Constant(0.1) :Num
+%sv  = Stringify(%v) :Str
+%lit = Constant("0.2") :Str
+%eq  = StrEq(%sv, %lit) :Bool
+%y   = Constant("y") :Str
+%n   = Constant("n") :Str
+%t   = TernaryExpr(%eq, %y, %n) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%t, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
+
+## L6h a Num whose value is INTEGRAL (1e3 stringifies as "1000")
+
+An integral float reaches the backend as a bare integer literal — `1e3` and
+`2.0` both arrive as "1000" / "2" — and LLVM rejects an integer constant in a
+double operand ("integer constant must have integer type"). The emitted module
+did not run AT ALL: `say 1e3` produced `fadd double 0.0, 1000` and lli refused
+it, exit 1 with no output.
+
+This case pins both halves: the constant is emitted as a double, and `%.15g`
+renders it as perl does — `1000`, not `1000.0` or `1e+03`.
+
+```perl
+# source
+use 5.42.0;
+our $a = 1e3;
+say($a eq "1000" ? "y" : "n"); 1
+```
+
+```behavior
+stdout: y\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%v   = Constant(1000) :Num
+%sv  = Stringify(%v) :Str
+%lit = Constant("1000") :Str
+%eq  = StrEq(%sv, %lit) :Bool
+%y   = Constant("y") :Str
+%n   = Constant("n") :Str
+%t   = TernaryExpr(%eq, %y, %n) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%t, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
