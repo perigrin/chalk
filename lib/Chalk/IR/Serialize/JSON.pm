@@ -12,6 +12,7 @@ our @EXPORT_OK = qw(to_json from_json);
 use JSON::PP ();
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
+use Chalk::IR::Node::Coerce;   # _insert_str_coercions builds these directly
 
 # CFG node operations — these carry control tokens and are never hash-consed.
 my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
@@ -742,10 +743,76 @@ sub from_json ($json_string) {
     # one final propagation so the now-stamped Calls flow into their consumers.
     _seed_and_propagate_reprs(\%graphs);
 
+    # Str-context coercions the PRODUCER could not insert. Print(Str...) and
+    # StrEq/StrNe(Str, Str) take Str, and the producer wraps a non-Str operand
+    # in a Coerce(X -> Str) at its build site -- but only when the operand
+    # carries a STAMP there. A method or direct call has no return type until
+    # the loader resolves the callee (`say($c->get)`), so the producer sees an
+    # unstamped operand, correctly declines to guess, and the operand arrives
+    # here typed Int with no coercion in front of it.
+    #
+    # Runs last, after every repr fixpoint above, because that is the first
+    # point the operand's representation is actually known.
+    _insert_str_coercions(\%graphs);
+
     # $mop is returned only in list context; scalar context stays \%graphs for
     # the existing single-return callers.
     return (\%graphs, $mop) if wantarray && defined $mop;
     return \%graphs;
+}
+
+# _insert_str_coercions(\%graphs) — wrap a non-Str operand of a Str-context
+# operator in a Coerce(X -> Str).
+#
+# Print(Str...) and StrEq/StrNe(Str, Str) take Str; a non-Str operand is bridged
+# by a coercion rather than the operator learning a representation. The producer
+# does this at its build site, but only for an operand that carries a STAMP
+# there. A call's return type is not known until the loader resolves the callee
+# (`say($c->get)`), so the producer sees an unstamped operand and correctly
+# declines to guess — leaving it to arrive here typed.
+#
+# Runs after every repr fixpoint, the first point the operand's representation
+# is known. Idempotent: an operand already produced by a Coerce is skipped, so a
+# graph loaded twice does not stack coercions.
+my %_STR_CONTEXT_OPS = map { $_ => 1 } qw(Print StrEq StrNe);
+
+sub _insert_str_coercions ($graphs) {
+    my $inserted = 0;
+    # Its own factory: _deserialize_graph's is per-graph and not retained, and a
+    # node's identity is its content hash, so nodes minted here are consistent
+    # with the ones already in the graph.
+    my $factory = Chalk::IR::NodeFactory->new();
+    for my $name (sort keys %$graphs) {
+        my $g = $graphs->{$name} or next;
+        for my $node (_all_graph_nodes($g)) {
+            next unless $node->can('operation')
+                     && $_STR_CONTEXT_OPS{ $node->operation };
+            my $inputs = $node->inputs // next;
+            for my $i (0 .. $inputs->$#*) {
+                my $in = $inputs->[$i];
+                next unless defined $in && ref $in && ref($in) ne 'ARRAY';
+                next unless $in->can('representation');
+                my $repr = $in->representation;
+                # undef repr: nothing established a type, so a coercion here
+                # would be the guess the producer already declined to make.
+                # The backend reports it against the operator, which names the
+                # node that actually needs a type.
+                next unless defined $repr;
+                next if $repr eq 'Str';
+                next if $in->isa('Chalk::IR::Node::Coerce');
+
+                my $c = $factory->make('Coerce',
+                    inputs    => [$in],
+                    from_repr => $repr,
+                    to_repr   => 'Str',
+                );
+                $c->set_representation('Str');
+                $inputs->[$i] = $c;
+                $inserted++;
+            }
+        }
+    }
+    return $inserted;
 }
 
 # _ctor_arg_reprs(\%graphs) -> ("class\0param_name" => repr, ...)

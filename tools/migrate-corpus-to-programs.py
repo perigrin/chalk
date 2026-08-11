@@ -19,13 +19,17 @@ def migrate_source(src):
     # so wrap only the trailing VALUE expression: scan back to the last
     # top-level `;` or `}` and take what follows. Wrapping the whole line
     # produces `say(my $c = 1; if ...)`, which is not valid perl.
+    # A statement boundary is `;` at depth 0, or a `}` that closes a BLOCK.
+    # Only `{` opens a block; a closing `)` or `]` ends a sub-expression and
+    # must NOT cut, or `($a eq $b) ? 1 : 0` becomes `($a eq $b) say(? 1 : 0)`
+    # -- the paren close was treated as the end of a statement.
     depth, cut = 0, 0
     for i, ch in enumerate(last):
         if ch in '{([':
             depth += 1
         elif ch in '})]':
             depth -= 1
-            if depth == 0:
+            if depth == 0 and ch == '}':
                 cut = i + 1
         elif ch == ';' and depth == 0:
             cut = i + 1

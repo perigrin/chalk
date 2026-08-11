@@ -726,3 +726,48 @@ context: scalar
 return %result
 L: GREEN
 ```
+
+## print a method-call result (the coercion the producer cannot insert)
+
+`Print` takes Str, and a non-Str argument is bridged by a `Coerce(X -> Str)`.
+The producer inserts that at its build site — but only for an argument that
+carries a STAMP there. A method call has no return type until the LOADER
+resolves the callee, so the producer sees an unstamped argument and correctly
+declines to guess.
+
+The coercion is therefore inserted by the loader instead, after every repr
+fixpoint has run — the first point at which the operand's representation is
+actually known. Without it a `print $obj->method` reached the backend as
+`Print(Call :Int)` and GAPped with "Print of a Int arg", even though the
+producer had done nothing wrong.
+
+```perl
+# source
+use experimental 'class';
+class Counter {
+    field $n :param = 5;
+    method get { $n }
+}
+my $c = Counter->new;
+print $c->get, "\n";
+1
+```
+
+```behavior
+stdout: 5\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%cls  = MOP::Class(name: "Counter")
+%new  = Call(dispatch_kind: "method", name: "new", class: "Counter") :Object
+%get  = Call(%new, dispatch_kind: "method", name: "get", class: "Counter") :Int
+%sg   = Coerce(%get, from_repr: "Int", to_repr: "Str") :Str
+%nl   = Constant("\n") :Str
+%p    = Print(%sg, %nl)
+%one  = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
