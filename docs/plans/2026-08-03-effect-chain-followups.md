@@ -1212,3 +1212,81 @@ graph, but it does NOT reach Divide's operand handling: measured, it GAPs
 earlier with "StashAccess reached LLVM backend with NO representation". It is
 an unstamped-operand problem, not a coercion one — do not read the graph shape
 as evidence that `_lower_as_double` is load-bearing.
+
+---
+
+# Part K — an aggregate element can only hold an Int (2026-08-11)
+
+## K1: the defect
+
+    %Slot      = type { i1, i64 }                 array elements, object fields
+    %Array     = type { i64, i64, %Slot* }
+    %HashEntry = type { i8*, i64, i32, i1, i64 }  key_ptr, key_len, key_enc,
+                                                  val_def, val_pay
+    %Hash      = type { i64, i64, %HashEntry* }
+
+One `i64` payload. Measured:
+
+    my @a = (10, 20);        print $a[1]   PASS
+    my @a = ("hi", "there"); print $a[1]   GAP: ArrayRef element repr=Str cannot be stored
+    my @a = (1.5, 2.5);      print $a[1]   GAP: ArrayRef element repr=Num cannot be stored
+    my %h = (k => "val");    print $h{k}   GAP: HashRef value repr=Str cannot be stored
+    my %h = (k => 7);        print $h{k}   PASS
+
+`my @a = ("hi", "there")` is unremarkable Perl and cannot be represented. A Str
+is a `(ptr, len)` pair and does not fit in one word; a Num is a double and would
+need a bitcast that is not emitted.
+
+## K2: the design is NOT wrong — fields already solve it
+
+An object field is declared `%Slot` too, and `field $s :param = "hi"` WORKS
+(measured). `_store_field_payload` (`Target/LLVM/Context.pm:4300`) boxes a Str
+into a heap `%StrPair { i8*, i64 }` and stores `ptrtoint %StrPair*` in the
+payload. The `i64` is a machine WORD: it carries an Int directly, or a pointer
+to anything wider.
+
+So the cell is adequate and arrays/hashes simply never learned the boxing that
+fields already do. Part J's pattern again — one idea, several implementations,
+and the ones that were not exercised fell behind.
+
+## K3: a third spelling of the same cell
+
+`%HashEntry` inlines `{ ..., i1 val_def, i64 val_pay }` rather than nesting a
+`%Slot`, presumably to keep an entry in one allocation. Structurally it IS a
+Slot. So the optional-value cell has three spellings: `%Slot` in arrays, `%Slot`
+in object fields, and an inlined pair in hashes.
+
+Consequence already observed: a hash value read does NOT carry the `Slot`
+REPRESENTATION, so `Coerce(Slot -> Str)` does not serve it. A missing key still
+prints empty correctly, by its own path (measured, both polarities) — so this is
+duplication, not a live defect.
+
+## K4: what closing it needs
+
+Reuse `_store_field_payload`'s boxing at the ArrayRef and HashRef construction
+sites, and the matching unbox on the read side. The read must know WHICH face
+the payload holds, so the element repr has to be carried on the container (an
+`Array[T]`-style element type) rather than inferred per access — which is the
+`_element_repr` question already in flight.
+
+Not attempted here. It is a capability gap, not a regression, and it is larger
+than the migration errand that surfaced it.
+
+## K5: where this leaves the corpus-as-programs migration
+
+Re-measured after `Coerce(Slot -> Str)` and the `DefinedOr` join landed
+(b0762b43): **177 green against a floor of 182**, worklist 5. Down from a
+6-case shortfall, so both fixes bought exactly what they should.
+
+The five remaining, and none is a transform defect:
+
+| case | needs |
+|---|---|
+| arithmetic OOB read, references R9 | the Slot-Int epilogue: these print a Slot whose value is an Int, and the migrated form disagrees with perl on the tag |
+| L3b defined-or undef-left | an `undef` LHS reaches the backend untyped — distinct from the DefinedOr join fixed in b0762b43 |
+| L3c defined-or early-return | a Region Phi over an early-return merge arrives untyped |
+| D4 postfix if | the pre-existing 2b-3 mixed-effect GAP (scalar rebind + void effect in one and-arm) — the same blocker t/base/term.t and translate.t sit behind |
+
+Two of the five are one capability (untyped merges), and D4 is a blocker already
+tracked for t/base. The migration is closer to parity than the raw number
+suggests, but it is still a net loss and must not land as one.
