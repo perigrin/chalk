@@ -959,7 +959,13 @@ my %_COMPUTED_REPR = (
     # same rule _make_ternary uses. An early-return merged into single-exit
     # (`return X if C`, `E // return X`) reaches the backend as a Region+Phi over
     # the exit values, which the backend cannot lower without an explicit repr.
-    Phi => 'join', TernaryExpr => 'join',
+    # DefinedOr (`$a // $b`) is the same kind of merge: it yields ONE of its two
+    # operands, so its repr is their join, exactly as a TernaryExpr's is. It was
+    # missing here, so `$a // $b` reached the backend with no representation --
+    # invisible while its only consumer was the return epilogue (which reads the
+    # repr from elsewhere), and surfacing the moment a Str context needed to
+    # coerce it: "Print of a representation-less arg".
+    Phi => 'join', TernaryExpr => 'join', DefinedOr => 'join',
     # And (&&) / Or (||) RETURN ONE OF THEIR OPERANDS (`$a && $b` is $a or $b, not a
     # fresh boolean), so the result repr is the operands' -- and both operands must
     # share a machine type for the backend's merge phi. The 'same' rule requires the

@@ -1002,8 +1002,35 @@ sub _emit_to_str {
         return $self->_emit_int_to_str($input_ref);
     }
 
-    die "GAP: $label is not lowered runtime-free (Int, Bool, Num and Str are "
-      . "wired; an aggregate has no stringification).";
+    # A Slot is Maybe[word]: its SSA ref IS the defined bit, with the payload
+    # carried in _slot_payload keyed by that ref. Perl prints an undefined value
+    # as the empty string, so render the payload as an Int and select it against
+    # "" on the defined bit -- pointer AND length together, since a Str is a
+    # (ptr, len) pair and an undef contributes zero bytes.
+    #
+    # The payload is rendered UNCONDITIONALLY (both arms of the select are
+    # evaluated). That is safe because _emit_int_to_str is pure -- a malloc and
+    # a digit loop over an i64 that is 0 when undefined -- so the undefined case
+    # renders "0" into a buffer nobody reads.
+    if ($from eq 'Slot') {
+        my $payload = $self->{_slot_payload}{$input_ref};
+        die "GAP: $label has no tracked payload — a Slot's SSA ref is its "
+          . "defined bit, and the payload is recorded alongside it."
+            unless defined $payload;
+
+        my $rendered = $self->_emit_int_to_str($payload);
+        my $rlen     = $self->_str_len_for($rendered);
+        my ($nil_g, undef, $nil_tot) = $self->_module_global_name('slot_str', '');
+        my ($nil_p, $ptr, $len) = ($self->_fresh, $self->_fresh, $self->_fresh);
+        $self->_emit_entry("  $nil_p = getelementptr inbounds [$nil_tot x i8], [$nil_tot x i8]* $nil_g, i64 0, i64 0  ; $label: \"\"");
+        $self->_emit("  $ptr = select i1 $input_ref, i8* $rendered, i8* $nil_p  ; $label -> ptr");
+        $self->_emit("  $len = select i1 $input_ref, i64 $rlen, i64 0  ; $label -> len");
+        $self->{_str_len_table}{$ptr} = $len;
+        return $ptr;
+    }
+
+    die "GAP: $label is not lowered runtime-free (Int, Bool, Num, Slot and Str "
+      . "are wired; an aggregate has no stringification).";
 }
 
 # _emit_int_to_str($val_ref) -> $ptr (an i8* to a runtime-rendered decimal string,
