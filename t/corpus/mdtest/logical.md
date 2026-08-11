@@ -843,3 +843,79 @@ return %one
 control: %p
 L: GREEN
 ```
+
+## L3d defined-or over an UNINITIALISED lexical
+
+`my $a;` declares a variable whose value is `undef` — perl is unambiguous, and
+`Undef` is a first-class representation. The producer used to bind a bare
+declaration to an unstamped `PadAccess`, so `$a // 9` reached the backend with
+an untyped `DefinedOr`.
+
+That looked like a defective merge, and it was not: a merge carries the JOIN of
+its arms, and the join of an unknown with an Int is unknown. The merge was
+computing the right answer from a wrong input — inference had simply never
+assigned the declaration a type.
+
+Two separate defects were stacked here, and fixing only the first left the
+symptom in place:
+
+1. a bare `my $a;` now binds an `Undef` constant, so the arm is typed
+2. the join could not combine `Undef` with `Int` at all — `Undef` is not on the
+   `Int <: Num <: Str` chain, so it was skipped as unrankable and the merge
+   stayed untyped even with both arms correct. `Undef` contributes no value to
+   widen, so it is dropped before the join and the defined arm's type wins.
+
+```perl
+# source
+use 5.42.0;
+my $a;
+say($a // 9); 1
+```
+
+```behavior
+stdout: 9\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%u   = Constant(undef) :Undef
+%d   = Constant(9) :Int
+%dor = DefinedOr(%u, %d) :Int
+%nl  = Constant("\n") :Str
+%p   = Print(%dor, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
+
+## L3e defined-or whose LHS IS defined (bilateral)
+
+L3d's partner. Without it, L3d passes against a `//` that always takes the
+right-hand arm — which is exactly what a dropped or mistyped LHS would produce.
+
+```perl
+# source
+use 5.42.0;
+my $a = 5;
+say($a // 9); 1
+```
+
+```behavior
+stdout: 5\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%a   = Constant(5) :Int
+%d   = Constant(9) :Int
+%dor = DefinedOr(%a, %d) :Int
+%nl  = Constant("\n") :Str
+%p   = Print(%dor, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```

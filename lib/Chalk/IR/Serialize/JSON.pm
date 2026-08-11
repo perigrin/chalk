@@ -13,6 +13,7 @@ use JSON::PP ();
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Coerce;   # _insert_str_coercions builds these directly
+use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: the join lattice
 
 # CFG node operations — these carry control tokens and are never hash-consed.
 my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
@@ -971,7 +972,8 @@ my %_COMPUTED_REPR = (
     # share a machine type for the backend's merge phi. The 'same' rule requires the
     # two operand reprs to agree and yields that repr. This types Bool && Bool -> Bool
     # (a comparison guard && a print, the cond.t idiom) as well as Int && Int -> Int
-    # -- unlike 'join', which cannot widen Bool (it has no _REPR_RANK).
+    # -- unlike the 'join' rule, which cannot widen Bool: Bool is a sibling of
+    # Str under Scalar, not a point on the Int <: Num <: Str chain.
     And => 'same', Or => 'same',
     Add => 'join', Subtract => 'join', Multiply => 'join', Negate => 'join',
     Divide => 'Num', Power => 'Num', Modulo => 'Int',
@@ -989,8 +991,31 @@ my %_COMPUTED_REPR = (
         Defined Not)),
     NumCmp => 'Int', StrCmp => 'Int',
 );
-# Widening order for the 'join' rule (Int < Num < Str).
-my %_REPR_RANK = (Int => 0, Num => 1, Str => 2);
+# _join_repr(@reprs) -> the widest, or undef when they do not share a chain.
+#
+# Derived from the TYPE LATTICE rather than a hand-kept widening order. This was
+# `%_REPR_RANK = (Int => 0, Num => 1, Str => 2)`, which is exactly the lattice's
+# Int <: Num <: Str chain re-encoded as integers -- a second copy of something
+# TypeLibrary already states, and the same duplication the Add requirement had.
+#
+# The lattice also EXPLAINS the two exclusions the rank table could only record
+# as absence: Undef and Bool are siblings under Scalar, not points on the
+# numeric-to-string chain, so neither widens into it. Verified against
+# is_subtype: Int <: Num <: Str all hold; Undef <: Str, Undef <: Num,
+# Bool <: Str and Bool <: Num all do not.
+#
+# Returns undef when no candidate is a supertype of every repr -- the caller
+# leaves the node untyped and the backend GAPs loudly, rather than guessing a
+# widened type the merge phi cannot express.
+sub _join_repr (@reprs) {
+    return undef unless @reprs;
+    for my $cand (@reprs) {
+        return $cand
+            if !grep { !Chalk::Grammar::Perl::TypeLibrary::is_subtype($_, $cand) }
+                     @reprs;
+    }
+    return undef;
+}
 
 # Aggregate/regex nodes whose OWN repr is fixed by their kind (RC1). An
 # ArrayRef/HashRef literal is a boxed aggregate pointer; a RegexMatch result is
@@ -1183,8 +1208,23 @@ sub _propagate_computed_reprs ($graphs) {
                     $changed = 1;
                     next;
                 }
-                next if grep { !exists $_REPR_RANK{$_} } @reprs;
-                my ($widest) = sort { $_REPR_RANK{$b} <=> $_REPR_RANK{$a} } @reprs;
+                # Undef is not RANKED -- it is not wider or narrower than Int,
+                # it is a different thing -- but it is not unknown either. A
+                # merge of Undef with T yields T on the arm that is taken, and
+                # the Undef arm contributes no value to widen: `my $a; $a // 9`
+                # is 9, and a ternary whose other arm is Undef yields the
+                # defined arm's type.
+                #
+                # Dropping the Undef arms BEFORE ranking is what lets that
+                # merge type at all; without it the grep below bails on the
+                # unranked Undef and the merge reaches the backend untyped --
+                # which reads as a defective merge when the real defect is that
+                # the lattice has no rule for the absence case.
+                my @ranked = grep { $_ ne 'Undef' } @reprs;
+                @reprs = @ranked if @ranked;
+
+                my $widest = _join_repr(@reprs);
+                next unless defined $widest;
                 $node->set_representation($widest);
                 $changed = 1;
             }
@@ -1259,9 +1299,7 @@ sub _element_repr ($container) {
     if (keys %uniq == 1 && ($reprs[0] eq 'ArrayRef' || $reprs[0] eq 'HashRef')) {
         return $reprs[0];
     }
-    return undef if grep { !exists $_REPR_RANK{$_} } @reprs;
-    my ($widest) = sort { $_REPR_RANK{$b} <=> $_REPR_RANK{$a} } @reprs;
-    return $widest;
+    return _join_repr(@reprs);
 }
 
 # _static_miss($container, $index) — true iff a Subscript read is a provable
