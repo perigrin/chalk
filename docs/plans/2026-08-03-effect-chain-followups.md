@@ -1026,3 +1026,92 @@ is broader than this diagnosis warrants — it would refuse a sub that assigns a
 package variable nothing else ever reads. It is the right STOPGAP because it
 restores the loud GAP the SSA change removed, but it is not the fix, and it
 should not be mistaken for one when the corpus-shape question is settled.
+
+---
+
+# Part I — corpus-as-programs migration: piloted, blocked, tool committed (2026-08-11)
+
+## I1: what the migration is
+
+A corpus case is wrapped by the harness in `sub corpus_case { ... }` and scored
+on its RETURN VALUE, read back through the `Int:`/`Str:` type-tag epilogue. The
+target shape is a real PROGRAM whose value is observable as stdout, scored on
+(stdout, exit) — the contract `ProgramRunner` and `executable-gate` already use.
+
+The wrapper is not just a name: it supplies a **value context**. A program's top
+level is void context, so perl discards a bare trailing expression before the
+producer sees it — `1 + 2` as a program compiles to `enter; nextstate; leave`,
+nothing at all (measured). That is why `say` had to land first (perl5-son
+96d2df6): it is the operator that makes a case's value observable.
+
+## I2: the migration is SAFE to do incrementally — sources first, harness last
+
+Measured, and this is the key enabler. Under the CURRENT harness,
+`sub corpus_case { say 1 + 2 }` prints `3\n` and returns say's Bool, so the perl
+oracle and lli BOTH produce `3\nBool:1` and the case still passes its behavior
+leg. Only the shape leg needs its ir block updated per case.
+
+So case sources can migrate one file at a time with the gate staying green, and
+the harness flips at the END. A big-bang harness flip would instead compare
+EMPTY stdout to EMPTY stdout on every unmigrated case — 194 vacuous passes,
+which is far worse than failures.
+
+## I3: the transform (committed: `tools/migrate-corpus-to-programs.py`)
+
+Per case: wrap the trailing value expression in `say(...)`; rewrite
+`return: X` to `stdout: X\n` + `return: Bool:1`; thread the ir block's returned
+value through `%nl = Constant("\n")` + `%p = Print(<value>, %nl)` and
+`return %p`.
+
+Two things it must get right, both learned by measurement:
+
+- The value is the last STATEMENT, not the last LINE. Sources routinely put
+  several statements on one line (`my $c = 1; if (...) {...} else {...} 1`), and
+  wrapping the line produces `say(my $c = 1; if ...)`, which is not valid perl.
+  The transform scans back to the last top-level `;` or `}` and wraps only what
+  follows. This single defect accounted for 16 of the failures.
+- A GAP-declared case is skipped: it is `pass()`ed without running, so its
+  source shape does not matter and rewriting it would only add noise.
+
+## I4: measured state of a full run — 172 -> 146, NOT landable yet
+
+    script migrated      164 of 194 cases
+    gate after           gate-green=146 (floor 172), worklist 26
+
+    19  no loaded graph        transform still mangles these sources
+     4  Print of a Bool arg is not lowered runtime-free
+     2  Print of a Num arg  is not lowered runtime-free
+     1  Region.Phi with no representation
+     1  foreach with a runtime high bound
+
+## I5: THE BLOCKER — only Str and Int can be printed
+
+`Print` lowers only Str and Int list args. Measured: `say 0.75` GAPs with
+"Print of a Num arg is not lowered runtime-free (only Str and Int list args are
+emitted)", and Bool and Slot GAP the same way.
+
+This is a hard dependency, not a nuisance: the harness cannot flip until EVERY
+case migrates, so six cases that cannot print their value block the whole
+migration. The type-tag epilogue hid this — it formatted a Num on the ORACLE
+side and printed the tag from a known repr on the lli side, so no runtime
+float-to-string ever ran.
+
+Printing a Num is the same dtoa subsystem recorded as t/base/num.t's blocker
+(Part G1). So the corpus migration and num.t are gated on one piece of work.
+Bool and Slot are much smaller — a Bool prints as "1" or "", a Slot is the
+Maybe[word] pair — and could land independently.
+
+## I6: remaining work, in order
+
+1. `Print` of Bool (4 cases), then Slot (1). Small, and unblocks most of I4.
+2. `Print` of Num — the dtoa subsystem, shared with num.t.
+3. Iterate the transform over the 19 sources it still mangles.
+4. Flip both harnesses: `son-corpus-wide.t`'s `run_through_bson`/`perl_oracle`
+   and `MdtestCorpus::_run_expr_under_perl`, to compile as a program and compare
+   (stdout, exit).
+5. Add a NON-VACUITY check at the same time: after the flip, a case whose oracle
+   stdout is empty must fail rather than pass, or an unmigrated case silently
+   reads as covered.
+6. Delete the `Int:`/`Str:` epilogue's last consumer, and with it the
+   `son-corpus-wide.t:88` exit-status defect (Part D / the wrapped-contract
+   removal), which is the point of the exercise.
