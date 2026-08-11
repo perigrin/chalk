@@ -953,9 +953,31 @@ sub _lower_stringify {
 
     my $input = $node->inputs->[0];
     my $from  = $input->representation // '';
+
+    # Bool stringifies to perl's own spelling: true is "1", false is the EMPTY
+    # string (not "0"). Both operands are module globals so the GEPs dominate
+    # every use, and the length is selected alongside the pointer — a Str value
+    # is a (ptr, len) pair, so selecting only the pointer would print one byte
+    # of the empty string.
+    if ($from eq 'Bool') {
+        my $val = $self->lower_value($input);
+        my ($one_g, $one_len, $one_tot) = $self->_module_global_name('bool_str', '1');
+        my ($nil_g, undef,    $nil_tot) = $self->_module_global_name('bool_str', '');
+        my ($one_p, $nil_p, $ptr, $len) =
+            ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+        $self->_emit_entry("  $one_p = getelementptr inbounds [$one_tot x i8], [$one_tot x i8]* $one_g, i64 0, i64 0  ; Stringify(Bool): \"1\"");
+        $self->_emit_entry("  $nil_p = getelementptr inbounds [$nil_tot x i8], [$nil_tot x i8]* $nil_g, i64 0, i64 0  ; Stringify(Bool): \"\"");
+        $self->_emit("  $ptr = select i1 $val, i8* $one_p, i8* $nil_p  ; Stringify(Bool) -> ptr");
+        $self->_emit("  $len = select i1 $val, i64 $one_len, i64 0  ; Stringify(Bool) -> len");
+        $self->{_str_len_table}{$ptr} = $len;
+        $self->{cache}{ $node->id } = $ptr;
+        return $ptr;
+    }
+
     if ($from ne 'Int') {
         die "GAP: Stringify from repr=$from is not lowered runtime-free yet "
-          . "(only Int->Str is wired; Num/aggregate stringification is unbuilt).";
+          . "(Int and Bool are wired; Num needs float-to-string formatting, the "
+          . "same subsystem t/base/num.t is blocked on).";
     }
 
     my $val = $self->lower_value($input);
@@ -5982,16 +6004,21 @@ sub _lower_print {
             $self->_emit("  $fp = getelementptr inbounds [5 x i8], [5 x i8]* \@fmt_print_str, i64 0, i64 0  ; Print: %.*s fmt");
             $self->_emit("  call i32 (i8*, ...) \@printf(i8* $fp, i32 $len32, i8* $ref)  ; Print: emit Str arg");
         }
-        elsif (!defined $repr || $repr eq 'Int') {
-            # Int payload is i64; printf %lld takes the full i64 (matches the Int epilogue).
-            $self->{_need_print_int_fmt} = 1;
-            my $fp = $self->_fresh;
-            $self->_emit("  $fp = getelementptr inbounds [5 x i8], [5 x i8]* \@fmt_print_int, i64 0, i64 0  ; Print: %lld fmt");
-            $self->_emit("  call i32 (i8*, ...) \@printf(i8* $fp, i64 $ref)  ; Print: emit Int arg");
-        }
         else {
-            die "GAP: Print of a $repr arg is not lowered runtime-free "
-              . "(only Str and Int list args are emitted).";
+            # Print's signature is Print(Str...). Anything else must arrive
+            # through an explicit coercion -- the producer wraps a non-Str
+            # argument in a Stringify -- rather than Print carrying a case per
+            # representation.
+            #
+            # It used to lower Int here as well, with printf %lld, while
+            # Stringify separately knew how to render an Int. Two places knew
+            # about the same conversion, so teaching Print a new type (Bool,
+            # Num, Slot) meant teaching both. Now only the coercion learns a
+            # type and this stays one operator over one representation.
+            die "GAP: Print of a "
+              . (defined $repr ? $repr : 'representation-less')
+              . " arg — Print takes Str, so this needs a Stringify coercion "
+              . "(the producer inserts one for a stamped non-Str argument).";
         }
     }
 

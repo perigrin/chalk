@@ -520,3 +520,123 @@ context: scalar
 ```ir
 L: GAP(explicit filehandle: say STDOUT ... sets OPf_STACKED, the same refusal print gets; the runtime-free backend writes only to stdout)
 ```
+
+## Print coerces a non-Str argument (Print takes Str)
+
+`Print`'s signature is `Print(Str...)`. A non-Str argument is coerced by an
+explicit `Stringify` inserted at the producer's build site, exactly as `Divide`'s
+Int operands are coerced to Num — rather than `Print` carrying a case per
+representation.
+
+That keeps the conversion in ONE place. `Print` previously lowered Str and Int
+itself while `Stringify` separately knew how to render an Int, so teaching a new
+type meant teaching both, and Bool/Num/Slot were GAPped in `Print` even though
+the coercion node was the natural home for them.
+
+```perl
+# source
+print "ok ", 1, "\n"; 1
+```
+
+```behavior
+stdout: ok 1\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%s1  = Constant("ok ") :Str
+%n   = Constant(1) :Int
+%sn  = Stringify(%n) :Str
+%s2  = Constant("\n") :Str
+%p   = Print(%s1, %sn, %s2)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
+
+## Stringify of a Bool prints perl's spelling: "1" and EMPTY
+
+A Bool stringifies to `1` when true and to the EMPTY STRING when false — not
+`0`. Both operands are module globals so their GEPs dominate every use, and the
+LENGTH is selected alongside the pointer: a Str value is a (ptr, len) pair, so
+selecting only the pointer would print one byte of the empty string. Bilateral
+with the case below, which is what catches that.
+
+```perl
+# source
+use 5.42.0;
+say(1 == 1); 1
+```
+
+```behavior
+stdout: 1\n
+return: Int:1
+context: scalar
+```
+
+```ir
+%a   = Constant(1) :Int
+%eq  = NumEq(%a, %a) :Bool
+%sb  = Stringify(%eq) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%sb, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
+
+## Stringify of a FALSE Bool is the empty string (bilateral)
+
+The partner of the case above. A false Bool contributes NO bytes, so the only
+output is the newline `say` appends. A pointer-only select would print `1`'s
+first byte here.
+
+```perl
+# source
+use 5.42.0;
+say(1 == 2); 1
+```
+
+```behavior
+stdout: \n
+return: Int:1
+context: scalar
+```
+
+```ir
+%a   = Constant(1) :Int
+%b   = Constant(2) :Int
+%eq  = NumEq(%a, %b) :Bool
+%sb  = Stringify(%eq) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%sb, %nl)
+%one = Constant(1) :Int
+return %one
+control: %p
+L: GREEN
+```
+
+## Stringify of a Num is a declared GAP (float formatting)
+
+Printing a Num needs float-to-string formatting to perl's exact precision —
+the same dtoa subsystem `t/base/num.t` is blocked on. With `Print` reduced to
+one representation, this is now the ONLY place that has to learn it.
+
+```perl
+# source
+use 5.42.0;
+say 0.75; 1
+```
+
+```behavior
+stdout: 0.75\n
+return: Int:1
+context: scalar
+```
+
+```ir
+L: GAP(Stringify from repr=Num: float-to-string formatting is unbuilt; the same subsystem t/base/num.t needs, and now the only place that has to learn it)
+```
