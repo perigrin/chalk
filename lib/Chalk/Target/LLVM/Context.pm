@@ -956,75 +956,81 @@ sub _lower_concat {
 # INT64_MIN's 20 digits + sign + NUL), write the digits from the end backward
 # (do-while so zero writes one '0'), prepend '-' for a negative value, and return
 # a pointer to the first written byte with the runtime length.
+# _emit_to_str($from_repr, $input_ref, $label) -> $ptr
+#
+# The X -> Str conversion, in ONE place. Stringify(X) and Coerce(X -> Str) are
+# the same edge -- Stringify is Coerce with a different name tag -- and they used
+# to be implemented separately. They had already DIVERGED: Coerce's Bool arm
+# selected the pointer only and recorded no length, while Stringify's selected
+# both. A false Bool is the EMPTY string, so a consumer slicing an unrecorded
+# length off that pointer would print a byte of "1". The length-recording
+# version below is the survivor.
+#
+# Every arm must register _str_len_table for the pointer it returns.
+sub _emit_to_str {
+    my ($self, $from, $input_ref, $label) = @_;
+
+    if ($from eq 'Str') {
+        return $input_ref;   # already a Str; the length is already tracked
+    }
+
+    if ($from eq 'Bool') {
+        my ($one_g, $one_len, $one_tot) = $self->_module_global_name('bool_str', '1');
+        my ($nil_g, undef,    $nil_tot) = $self->_module_global_name('bool_str', '');
+        my ($one_p, $nil_p, $ptr, $len) =
+            ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+        $self->_emit_entry("  $one_p = getelementptr inbounds [$one_tot x i8], [$one_tot x i8]* $one_g, i64 0, i64 0  ; $label: \"1\"");
+        $self->_emit_entry("  $nil_p = getelementptr inbounds [$nil_tot x i8], [$nil_tot x i8]* $nil_g, i64 0, i64 0  ; $label: \"\"");
+        $self->_emit("  $ptr = select i1 $input_ref, i8* $one_p, i8* $nil_p  ; $label -> ptr");
+        $self->_emit("  $len = select i1 $input_ref, i64 $one_len, i64 0  ; $label -> len");
+        $self->{_str_len_table}{$ptr} = $len;
+        return $ptr;
+    }
+
+    if ($from eq 'Num') {
+        # perl's float stringification IS %.15g (verified against perl 5.42 on
+        # 0.1, 1e+34, 1.000001, 0.0005 and the corpus floats). snprintf is
+        # called twice: once with a null buffer to learn the length, then into a
+        # buffer of exactly that size -- the length is what the (ptr,len) pair
+        # needs, and computing it another way would re-implement %g.
+        $self->{_need_malloc_memcpy} = 1;
+        $self->{_need_num_fmt}       = 1;
+        $self->{_need_snprintf}      = 1;
+
+        my $fmt = $self->_fresh;
+        $self->_emit("  $fmt = getelementptr inbounds [6 x i8], [6 x i8]* \@fmt_num_g, i64 0, i64 0  ; $label: %.15g fmt");
+        my $need = $self->_fresh;
+        $self->_emit("  $need = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* null, i64 0, i8* $fmt, double $input_ref)  ; $label: measure");
+        my $need64 = $self->_fresh;
+        $self->_emit("  $need64 = sext i32 $need to i64  ; $label: length as i64");
+        my $size = $self->_fresh;
+        $self->_emit("  $size = add i64 $need64, 1  ; $label: + NUL");
+        my $buf = $self->_fresh;
+        $self->_emit("  $buf = call i8* \@malloc(i64 $size)  ; $label: buffer");
+        my $wrote = $self->_fresh;
+        $self->_emit("  $wrote = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* $buf, i64 $size, i8* $fmt, double $input_ref)  ; $label: render");
+        $self->{_str_len_table}{$buf} = $need64;
+        return $buf;
+    }
+
+    if ($from eq 'Int') {
+        return $self->_emit_int_to_str($input_ref);
+    }
+
+    die "GAP: $label is not lowered runtime-free (Int, Bool, Num and Str are "
+      . "wired; an aggregate has no stringification).";
+}
+
 sub _lower_stringify {
     my ($self, $node) = @_;
 
     my $input = $node->inputs->[0];
     my $from  = $input->representation // '';
 
-    # Bool stringifies to perl's own spelling: true is "1", false is the EMPTY
-    # string (not "0"). Both operands are module globals so the GEPs dominate
-    # every use, and the length is selected alongside the pointer — a Str value
-    # is a (ptr, len) pair, so selecting only the pointer would print one byte
-    # of the empty string.
-    if ($from eq 'Bool') {
-        my $val = $self->lower_value($input);
-        my ($one_g, $one_len, $one_tot) = $self->_module_global_name('bool_str', '1');
-        my ($nil_g, undef,    $nil_tot) = $self->_module_global_name('bool_str', '');
-        my ($one_p, $nil_p, $ptr, $len) =
-            ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
-        $self->_emit_entry("  $one_p = getelementptr inbounds [$one_tot x i8], [$one_tot x i8]* $one_g, i64 0, i64 0  ; Stringify(Bool): \"1\"");
-        $self->_emit_entry("  $nil_p = getelementptr inbounds [$nil_tot x i8], [$nil_tot x i8]* $nil_g, i64 0, i64 0  ; Stringify(Bool): \"\"");
-        $self->_emit("  $ptr = select i1 $val, i8* $one_p, i8* $nil_p  ; Stringify(Bool) -> ptr");
-        $self->_emit("  $len = select i1 $val, i64 $one_len, i64 0  ; Stringify(Bool) -> len");
-        $self->{_str_len_table}{$ptr} = $len;
-        $self->{cache}{ $node->id } = $ptr;
-        return $ptr;
-    }
-
-    # Num uses the format perl itself uses. Measured against perl 5.42 over the
-    # corpus floats AND t/base/num.t's hard cases -- 0.1, 1e+34, 1.000001,
-    # 10.01, 123.456, 0.0005 -- sprintf("%.15g") reproduces perl's own
-    # stringification exactly in every one. This is NOT an approximation of a
-    # bespoke dtoa: shortest-15-significant-digits with trailing zeros stripped
-    # and exponent form outside a range IS perl's rule.
-    #
-    # snprintf is the same host-interface class as the printf `Print` already
-    # emits (a plain C function, not libperl), so this adds no new dependency.
-    # Called twice: once with a null buffer to learn the length, then into a
-    # malloc'd buffer of exactly that size -- the length is what the (ptr, len)
-    # Str pair needs, and computing it any other way would re-implement %g.
-    if ($from eq 'Num') {
-        my $val = $self->lower_value($input);
-        $self->{_need_malloc_memcpy} = 1;   # for @malloc
-        $self->{_need_num_fmt}       = 1;   # for @fmt_num_g
-        $self->{_need_snprintf}      = 1;
-
-        my $fmt = $self->_fresh;
-        $self->_emit("  $fmt = getelementptr inbounds [6 x i8], [6 x i8]* \@fmt_num_g, i64 0, i64 0  ; Stringify(Num): %.15g fmt");
-        my $need = $self->_fresh;
-        $self->_emit("  $need = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* null, i64 0, i8* $fmt, double $val)  ; Stringify(Num): measure");
-        my $need64 = $self->_fresh;
-        $self->_emit("  $need64 = sext i32 $need to i64  ; Stringify(Num): length as i64");
-        my $size = $self->_fresh;
-        $self->_emit("  $size = add i64 $need64, 1  ; Stringify(Num): + NUL");
-        my $buf = $self->_fresh;
-        $self->_emit("  $buf = call i8* \@malloc(i64 $size)  ; Stringify(Num): buffer");
-        my $wrote = $self->_fresh;
-        $self->_emit("  $wrote = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* $buf, i64 $size, i8* $fmt, double $val)  ; Stringify(Num): render");
-
-        $self->{_str_len_table}{$buf} = $need64;
-        $self->{cache}{ $node->id } = $buf;
-        return $buf;
-    }
-
-    if ($from ne 'Int') {
-        die "GAP: Stringify from repr=$from is not lowered runtime-free yet "
-          . "(Int, Bool and Num are wired; an aggregate has no stringification).";
-    }
-
-    my $val = $self->lower_value($input);
-    my $ptr = $self->_emit_int_to_str($val);
+    # Stringify(X) IS Coerce(X -> Str). The conversion lives in _emit_to_str;
+    # this node type is retained only until its remaining users move over.
+    my $ptr = $self->_emit_to_str($from, $self->lower_value($input),
+                                  "Stringify($from)");
     $self->{cache}{ $node->id } = $ptr;
     return $ptr;
 }
@@ -1148,19 +1154,14 @@ sub _lower_coerce {
     # The Str representation is not fully modelled yet (G3), but the Bool string-face
     # is only two constant strings and can be lowered as a select i1 between them.
     # Returns an i8* that points to the selected string constant.
-    elsif ($from eq 'Bool' && $to eq 'Str') {
-        # These globals will be emitted by the return-path epilogue when repr=Bool.
-        # For Coerce(Bool->Str) used internally (not at return), we re-emit locally.
-        my $true_g  = '@coerce_bool_str_true';
-        my $false_g = '@coerce_bool_str_false';
-        # The globals are declared at the module level by the emitter when needed.
-        # We flag that they're needed so the prologue includes them.
-        $self->{_need_bool_str_globals} = true;
-        my $tp  = $self->_fresh;
-        my $fp  = $self->_fresh;
-        $self->_emit("  $tp = getelementptr inbounds [2 x i8], [2 x i8]* $true_g,  i64 0, i64 0  ; Coerce[Bool->Str] true ptr");
-        $self->_emit("  $fp = getelementptr inbounds [1 x i8], [1 x i8]* $false_g, i64 0, i64 0  ; Coerce[Bool->Str] false ptr");
-        $self->_emit("  $ref = select i1 $input_ref, i8* $tp, i8* $fp  ; Coerce[Bool->Str] select");
+    # Coerce(X -> Str) — the edges Stringify used to own. A Str value is a
+    # (ptr, len) PAIR, so each of these records a length in _str_len_table
+    # alongside the pointer it returns; a consumer that slices `len` bytes off
+    # an unrecorded pointer would emit garbage.
+    elsif ($to eq 'Str') {
+        $self->{cache}{ $node->id } =
+            $self->_emit_to_str($from, $input_ref, "Coerce[$from->Str]");
+        return $self->{cache}{ $node->id };
     }
     # Coerce(Str->Num): perl leading-numeric rule.
     # "3abc"->3, "abc"->0, " 42"->42, "3.14x"->3.14, ""->0, ".5"->0.5,
