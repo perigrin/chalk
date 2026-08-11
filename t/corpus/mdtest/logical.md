@@ -755,7 +755,7 @@ context: scalar
 
 ```ir
 %v   = Constant(0.1) :Num
-%sv  = Stringify(%v) :Str
+%sv  = Coerce(%v, from_repr: "Num", to_repr: "Str") :Str
 %lit = Constant("0.1") :Str
 %eq  = StrEq(%sv, %lit) :Bool
 %y   = Constant("y") :Str
@@ -790,7 +790,7 @@ context: scalar
 
 ```ir
 %v   = Constant(0.1) :Num
-%sv  = Stringify(%v) :Str
+%sv  = Coerce(%v, from_repr: "Num", to_repr: "Str") :Str
 %lit = Constant("0.2") :Str
 %eq  = StrEq(%sv, %lit) :Bool
 %y   = Constant("y") :Str
@@ -830,7 +830,7 @@ context: scalar
 
 ```ir
 %v   = Constant(1000) :Num
-%sv  = Stringify(%v) :Str
+%sv  = Coerce(%v, from_repr: "Num", to_repr: "Str") :Str
 %lit = Constant("1000") :Str
 %eq  = StrEq(%sv, %lit) :Bool
 %y   = Constant("y") :Str

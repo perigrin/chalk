@@ -1,4 +1,4 @@
-# ABOUTME: Adversarial tests for Stringify(Int)->Str LLVM lowering (I6 coerce).
+# ABOUTME: Adversarial tests for Coerce(Int -> Str) LLVM lowering (I6 coerce).
 # ABOUTME: lli output must match the perl oracle for positive, negative, and zero ints.
 use 5.42.0;
 use utf8;
@@ -30,10 +30,14 @@ sub run_lli {
     return ($out, $exit);
 }
 
-# Build a graph: Constant(int :Int) -> Stringify :Str -> Return.
-# The producer emits Stringify for a non-Str operand of an interpolation Concat;
-# here we exercise the backend arm in isolation (the Stringify IS the return
-# value, so its Str face is what the epilogue prints via Str:%.*s).
+# Build a graph: Constant(int :Int) -> Coerce(Int -> Str) -> Return.
+# The producer emits this coercion for a non-Str operand of an interpolation
+# Concat, of a print/say argument, or of an `eq`; here we exercise the backend
+# arm in isolation (the coercion IS the return value, so its Str face is what
+# the epilogue prints via Str:%.*s).
+#
+# This was a distinct `Stringify` node until it was merged into Coerce — the two
+# implemented the same X->Str edge and had already diverged.
 sub make_stringify_int_graph {
     my ($int_val) = @_;
     my $f = Chalk::IR::NodeFactory->new;
@@ -41,7 +45,8 @@ sub make_stringify_int_graph {
     my $c = $f->make('Constant', value => $int_val, const_type => 'number');
     $c->set_representation('Int');
 
-    my $s = $f->make('Stringify', inputs => [$c]);
+    my $s = $f->make('Coerce', inputs => [$c],
+                     from_repr => 'Int', to_repr => 'Str');
     $s->set_representation('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$s]);
@@ -58,7 +63,7 @@ my @cases = (
     [1000,  "Str:1000",  "trailing zeros preserved"],
 );
 
-subtest 'Stringify(Int)->Str: lli == expected decimal face' => sub {
+subtest q{Coerce(Int -> Str): lli == expected decimal face} => sub {
     plan tests => scalar(@cases) * 3;
 
     for my $tc (@cases) {

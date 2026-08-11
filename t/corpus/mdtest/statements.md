@@ -547,7 +547,7 @@ context: scalar
 ```ir
 %s1  = Constant("ok ") :Str
 %n   = Constant(1) :Int
-%sn  = Stringify(%n) :Str
+%sn  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
 %s2  = Constant("\n") :Str
 %p   = Print(%s1, %sn, %s2)
 %one = Constant(1) :Int
@@ -579,7 +579,7 @@ context: scalar
 ```ir
 %a   = Constant(1) :Int
 %eq  = NumEq(%a, %a) :Bool
-%sb  = Stringify(%eq) :Str
+%sb  = Coerce(%eq, from_repr: "Bool", to_repr: "Str") :Str
 %nl  = Constant("\n") :Str
 %p   = Print(%sb, %nl)
 %one = Constant(1) :Int
@@ -610,7 +610,7 @@ context: scalar
 %a   = Constant(1) :Int
 %b   = Constant(2) :Int
 %eq  = NumEq(%a, %b) :Bool
-%sb  = Stringify(%eq) :Str
+%sb  = Coerce(%eq, from_repr: "Bool", to_repr: "Str") :Str
 %nl  = Constant("\n") :Str
 %p   = Print(%sb, %nl)
 %one = Constant(1) :Int
@@ -648,7 +648,7 @@ context: scalar
 
 ```ir
 %v   = Constant(0.75) :Num
-%sv  = Stringify(%v) :Str
+%sv  = Coerce(%v, from_repr: "Num", to_repr: "Str") :Str
 %nl  = Constant("\n") :Str
 %p   = Print(%sv, %nl)
 %one = Constant(1) :Int
@@ -678,7 +678,7 @@ context: scalar
 
 ```ir
 %v   = Constant(0.1) :Num
-%sv  = Stringify(%v) :Str
+%sv  = Coerce(%v, from_repr: "Num", to_repr: "Str") :Str
 %nl  = Constant("\n") :Str
 %p   = Print(%sv, %nl)
 %one = Constant(1) :Int
@@ -714,7 +714,7 @@ context: scalar
 %ca  = Coerce(%a, from_repr: "Int", to_repr: "Num") :Num
 %cb  = Coerce(%b, from_repr: "Int", to_repr: "Num") :Num
 %d   = Divide(%ca, %cb) :Num
-%sd  = Stringify(%d) :Str
+%sd  = Coerce(%d, from_repr: "Num", to_repr: "Str") :Str
 %nl  = Constant("\n") :Str
 %p   = Print(%sd, %nl)
 %one = Constant(1) :Int

@@ -464,8 +464,16 @@ sub _deserialize_graph ($method_data) {
             $args{scope} = $fields->{scope} // 'my';
         }
         elsif ($op eq 'Coerce') {
-            $args{from_repr} = $fields->{from_repr};
-            $args{to_repr}   = $fields->{to_repr};
+            # from_repr/to_repr are REPRESENTATIONS, but the producer names them
+            # with its STAMP vocabulary, which differs for two types: a stamp
+            # says 'Boolean' where a representation says 'Bool'. Map them
+            # through the same table a stamp goes through, or a
+            # Coerce(Boolean->Str) arrives with a repr name the backend's
+            # dispatch cannot match and GAPs as unlowerable.
+            $args{from_repr} = $STAMP_TO_REPR{ $fields->{from_repr} // '' }
+                            // $fields->{from_repr};
+            $args{to_repr}   = $STAMP_TO_REPR{ $fields->{to_repr} // '' }
+                            // $fields->{to_repr};
         }
 
         my $node;

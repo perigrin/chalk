@@ -236,7 +236,7 @@ context: scalar
 ```ir
 %s0  = Constant("ok ") :Str
 %n   = Constant(3) :Int
-%sf  = Stringify(%n) :Str
+%sf  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
 %cat = Concat(%s0, %sf) :Str
 return %cat
 L: GREEN
@@ -264,7 +264,7 @@ context: scalar
 ```ir
 %s0  = Constant("val ") :Str
 %n   = Constant(-5) :Int
-%sf  = Stringify(%n) :Str
+%sf  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
 %cat = Concat(%s0, %sf) :Str
 return %cat
 L: GREEN
@@ -292,7 +292,7 @@ context: scalar
 ```ir
 %s0  = Constant("val ") :Str
 %n   = Constant(0) :Int
-%sf  = Stringify(%n) :Str
+%sf  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
 %cat = Concat(%s0, %sf) :Str
 return %cat
 L: GREEN
@@ -320,7 +320,7 @@ context: scalar
 ```ir
 %s0  = Constant("ok ") :Str
 %n   = Constant(3) :Int
-%sf  = Stringify(%n) :Str
+%sf  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
 %c1  = Concat(%s0, %sf) :Str
 %nl  = Constant("\n") :Str
 %cat = Concat(%c1, %nl) :Str

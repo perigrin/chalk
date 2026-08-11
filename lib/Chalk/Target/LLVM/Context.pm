@@ -291,7 +291,7 @@ my %PURE_DESCEND_OPS = map { $_ => 1 } qw(
     StrEq StrNe StrLt StrGt StrLe StrGe StrCmp
     And Or DefinedOr Xor Not Negate Complement Defined UnaryPlus
     BitAnd BitOr BitXor LeftShift RightShift
-    Coerce Stringify Interpolate Length PostfixDeref Ref RefType TernaryExpr
+    Coerce Interpolate Length PostfixDeref Ref RefType TernaryExpr
     Repeat Range IsaOp Slice
 );
 
@@ -401,9 +401,6 @@ sub lower_value {
     }
     elsif ($op eq 'Coerce') {
         return $self->_lower_coerce($node);
-    }
-    elsif ($op eq 'Stringify') {
-        return $self->_lower_stringify($node);
     }
     elsif ($op eq 'VarDecl') {
         return $self->_lower_vardecl($node);
@@ -944,18 +941,6 @@ sub _lower_concat {
     return $buf;
 }
 
-# _lower_stringify($node) -> $llvm_ref (an i8*, runtime byte-length in _str_len_table)
-#
-# Stringify(value) is the value->Str coercion the producer emits for a non-Str
-# operand of an interpolation Concat ("ok $n"). For an Int operand it renders the
-# decimal digit string at runtime: the length (digit count, plus a sign) is a
-# RUNTIME value, recorded in _str_len_table so the consuming Concat / return
-# epilogue can slice exactly len bytes.
-#
-# Implementation: an int-to-decimal loop, no libc. malloc a 24-byte buffer (fits
-# INT64_MIN's 20 digits + sign + NUL), write the digits from the end backward
-# (do-while so zero writes one '0'), prepend '-' for a negative value, and return
-# a pointer to the first written byte with the runtime length.
 # _emit_to_str($from_repr, $input_ref, $label) -> $ptr
 #
 # The X -> Str conversion, in ONE place. Stringify(X) and Coerce(X -> Str) are
@@ -1019,20 +1004,6 @@ sub _emit_to_str {
 
     die "GAP: $label is not lowered runtime-free (Int, Bool, Num and Str are "
       . "wired; an aggregate has no stringification).";
-}
-
-sub _lower_stringify {
-    my ($self, $node) = @_;
-
-    my $input = $node->inputs->[0];
-    my $from  = $input->representation // '';
-
-    # Stringify(X) IS Coerce(X -> Str). The conversion lives in _emit_to_str;
-    # this node type is retained only until its remaining users move over.
-    my $ptr = $self->_emit_to_str($from, $self->lower_value($input),
-                                  "Stringify($from)");
-    $self->{cache}{ $node->id } = $ptr;
-    return $ptr;
 }
 
 # _emit_int_to_str($val_ref) -> $ptr (an i8* to a runtime-rendered decimal string,
@@ -1864,7 +1835,7 @@ sub _str_compare_operand {
     # renderer in two places (here and Stringify) and left Num "unbuilt for
     # eq/ne" even after Stringify could render one. One coercion, one renderer.
     die "GAP: $op $side operand has repr=$repr; string comparison takes Str, so "
-      . "this needs a Stringify coercion (the producer inserts one for a "
+      . "this needs a Coerce(X -> Str) (the producer inserts one for a "
       . "stamped non-Str operand).";
 }
 
@@ -6067,7 +6038,7 @@ sub _lower_print {
             # type and this stays one operator over one representation.
             die "GAP: Print of a "
               . (defined $repr ? $repr : 'representation-less')
-              . " arg — Print takes Str, so this needs a Stringify coercion "
+              . " arg — Print takes Str, so this needs a Coerce(X -> Str) "
               . "(the producer inserts one for a stamped non-Str argument).";
         }
     }

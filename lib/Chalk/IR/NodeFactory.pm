@@ -71,7 +71,6 @@ use Chalk::IR::Node::TryCatch;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::BacktickExpr;
-use Chalk::IR::Node::Stringify;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::ListAssign;
 use Chalk::IR::Node::TernaryExpr;
@@ -100,7 +99,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Call HashRef ArrayRef
     Interpolate AnonSub
     RegexMatch RegexSubst RegexCapture Print EnvRead TryCatch
-    PostfixDeref CompoundAssign BacktickExpr Stringify VarDecl ListAssign
+    PostfixDeref CompoundAssign BacktickExpr VarDecl ListAssign
     TernaryExpr StructRef StructFieldAccess
     ExpressionList
     Start MemStart Return Unwind
