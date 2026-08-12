@@ -2015,3 +2015,122 @@ context: scalar
 return %p
 L: GREEN
 ```
+
+## T14 exit inside a single-branch if (guard TAKEN)
+
+An arm that TERMINATES (`exit`, `die`) needs real control flow for the same
+reason a void-call arm does: the effect must be control-dependent on the guard.
+The void-branch gate keyed only on an element store or a void call, and an arm
+whose ONLY content is a terminator is neither -- so no `If` was built at all,
+the terminator was left off the control chain, and the statement AFTER the
+branch ran unconditionally.
+
+Measured before the fix: `"1\n2\n"` and exit 0, where perl gives `"1\n"` and
+exit 4. Wrong stdout AND wrong status, with no diagnostic. `die` in the same
+shape had the identical defect and predates `exit` lowering entirely; an
+if/ELSE with a die arm already worked (T2), which is what made it look covered.
+
+```perl
+# source
+use 5.42.0;
+my $c = 1;
+say 1;
+exit 4 if $c;
+say 2;
+```
+
+```behavior
+stdout: 1\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%c1  = Constant(1) :Int
+%co1 = Coerce(%c1 : Int -> Str) :Str
+%nl  = Constant("\n") :Str
+%p1  = Print(%co1, %nl)
+%if  = If(%p1, %c1)
+%pj1 = Proj(%if, index: 1)
+%c4  = Constant(4) :Int
+%ex  = Call(%c4, dispatch_kind: "builtin", name: "exit")
+%pj0 = Proj(%if, index: 0)
+%reg = Region(%pj0, %ex)
+%c2  = Constant(2) :Int
+%co2 = Coerce(%c2 : Int -> Str) :Str
+%p2  = Print(%co2, %nl)
+return %p2
+L: GREEN
+```
+
+## T14b the same shape with the guard NOT taken
+
+T14's partner, and not decoration: with the guard false the program must run to
+completion and exit 0, printing BOTH lines. The pre-fix compiler passed THIS
+polarity -- it dropped the guard and always fell through -- so a test of the
+untaken side alone reads green over the miscompile.
+
+```perl
+# source
+use 5.42.0;
+my $c = 0;
+say 1;
+exit 4 if $c;
+say 2;
+```
+
+```behavior
+stdout: 1\n2\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%c1  = Constant(1) :Int
+%co1 = Coerce(%c1 : Int -> Str) :Str
+%nl  = Constant("\n") :Str
+%p1  = Print(%co1, %nl)
+%c2  = Constant(2) :Int
+%co2 = Coerce(%c2 : Int -> Str) :Str
+%p2  = Print(%co2, %nl)
+return %p2
+L: GREEN
+```
+
+## T15 die inside a single-branch if (guard TAKEN)
+
+The `die` half of T14. Same defect, same fix: a terminating arm builds real
+control flow. Perl exits 255 and never reaches the following statement.
+
+```perl
+# source
+use 5.42.0;
+my $c = 1;
+say 1;
+die "boom\n" if $c;
+say 2;
+```
+
+```behavior
+stdout: 1\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%c1   = Constant(1) :Int
+%co1  = Coerce(%c1 : Int -> Str) :Str
+%nl   = Constant("\n") :Str
+%p1   = Print(%co1, %nl)
+%if   = If(%p1, %c1)
+%pj1  = Proj(%if, index: 1)
+%boom = Constant("boom\n") :Str
+%uw   = Unwind(%boom)
+%pj0  = Proj(%if, index: 0)
+%reg  = Region(%pj0, %uw)
+%c2   = Constant(2) :Int
+%co2  = Coerce(%c2 : Int -> Str) :Str
+%p2   = Print(%co2, %nl)
+return %p2
+L: GREEN
+```
