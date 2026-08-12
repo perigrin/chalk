@@ -38,13 +38,15 @@ structure that is not in the current lowering slice.
 
 ```perl
 # source
+use 5.42.0;
 my $a = 3;
 my $b = 7;
-$a && $b
+say($a && $b);
 ```
 
 ```behavior
-return: 7
+stdout: 7\n
+return: Bool:1
 context: scalar
 ```
 
@@ -52,7 +54,9 @@ context: scalar
 %ca = Constant(3) :Int
 %cb = Constant(7) :Int
 %r  = And(%ca, %cb) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -64,13 +68,15 @@ right operand when the left is falsy.  For `$a = 3`, `$b = 7`, the result is
 
 ```perl
 # source
+use 5.42.0;
 my $a = 3;
 my $b = 7;
-$a || $b
+say($a || $b);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -78,7 +84,9 @@ context: scalar
 %ca = Constant(3) :Int
 %cb = Constant(7) :Int
 %r  = Or(%ca, %cb) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -99,13 +107,15 @@ type-tagged output is `Int:3`.
 
 ```perl
 # source
+use 5.42.0;
 my $a = 3;
 my $b = 7;
-$a // $b
+say($a // $b);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -119,8 +129,9 @@ context: scalar
 %vdb = VarDecl(%cnb, %cb) :Int
 %pb  = PadAccess(%vdb, "$b") :Int
 %r   = DefinedOr(%pa, %pb) :Int
-return %r
-control: %vda -> %vdb
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -135,13 +146,15 @@ the RHS value on the undef path.
 
 ```perl
 # source
+use 5.42.0;
 my $a = undef;
 my $b = 7;
-$a // $b
+say($a // $b);
 ```
 
 ```behavior
-return: 7
+stdout: 7\n
+return: Bool:1
 context: scalar
 ```
 
@@ -155,8 +168,9 @@ context: scalar
 %vdb   = VarDecl(%cnb, %cb) :Int
 %pb    = PadAccess(%vdb, "$b") :Int
 %r     = DefinedOr(%pa, %pb) :Int
-return %r
-control: %vda -> %vdb
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -178,13 +192,15 @@ dropped and `$a // return 99` degenerated to `DefinedOr($a, $a)`); zhi
 
 ```perl
 # source
+use 5.42.0;
 my $a = 3;
 my $x = $a // return 99;
-$x + 1
+say($x + 1);
 ```
 
 ```behavior
-return: 4
+stdout: 4\n
+return: Bool:1
 context: scalar
 ```
 
@@ -199,8 +215,37 @@ context: scalar
 %add = Add(%a, %c1) :Int
 %reg = Region(%p1)
 %phi = Phi(%c99, %add) :Int
-return %phi
-L: GREEN
+%nl = Constant("\n") :Str
+%p  = Print(%phi, %nl)
+return %p
+L: GAP
+
+GAP as a PROGRAM (it was GREEN as a value fragment). The migration changed what
+this case asks, and the new question is one Chalk cannot yet answer.
+
+As a fragment the two exits were both Int -- the early `return 99` and the
+fall-through `$x + 1` -- so the merge Phi typed as Int. Wrapping the trailing
+value in `say(...)` makes the fall-through arm carry SAY'S return value (Bool)
+while the early exit still carries 99 (Int), so the Phi merges Int with Bool.
+Perl agrees the two exits differ, measured: `f(3)` returns 1, `f(undef)`
+returns 99.
+
+Chalk's Phi carries ONE representation, so it cannot express a merge whose arms
+differ. `_join_repr` correctly declines -- Bool is a sibling of the numeric
+chain under Scalar, not a point on it -- and the node reaches the backend
+untyped. Widening to `Scalar` is not the fix: `Scalar` has no LLVM type
+(`_repr_to_llvm_type` has no arm, and ~14 sites GAP on it), so it would trade
+one loud GAP for another.
+
+Closing it needs a Phi that carries PER-ARM representations with a coercion on
+each incoming edge -- the Part J operator rule applied to a merge. That is
+tracked, is independent of this migration, and is NOT the migration's blocker:
+`_shortcircuit_phi_repr` GAPs on the same root for `&&`/`||` with no wrapper
+involved, so the capability is needed regardless.
+
+Note also that `return` at a program's top level is a RUNTIME error
+(`perl -e 'return 99'` exits 255), so this program only runs at all because its
+guard is constant-false and the return is never reached.
 ```
 
 ## L5 void print in a true && arm
@@ -218,12 +263,13 @@ only when the arm is taken.
 
 ```perl
 # source
-my $x = 1; $x == $x && (print "y\n"); 1
+use 5.42.0;
+my $x = 1; $x == $x && (print "y\n"); say(1);
 ```
 
 ```behavior
-stdout: y\n
-return: Int:1
+stdout: y\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -231,7 +277,9 @@ context: scalar
 %s0 = Constant("y\n") :Str
 %p  = Print(%s0) :Bool
 %c  = Constant(1) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -244,11 +292,13 @@ control-dependent on the guard's TRUE Proj, so a false guard emits nothing.
 
 ```perl
 # source
-my $x = 1; $x != $x && (print "y\n"); 1
+use 5.42.0;
+my $x = 1; $x != $x && (print "y\n"); say(1);
 ```
 
 ```behavior
-return: Int:1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -256,7 +306,9 @@ context: scalar
 %s0 = Constant("y\n") :Str
 %p  = Print(%s0) :Bool
 %c  = Constant(1) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -271,12 +323,13 @@ being false.
 
 ```perl
 # source
-my $x = 1; $x != $x || (print "y\n"); 1
+use 5.42.0;
+my $x = 1; $x != $x || (print "y\n"); say(1);
 ```
 
 ```behavior
-stdout: y\n
-return: Int:1
+stdout: y\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -284,7 +337,9 @@ context: scalar
 %s0 = Constant("y\n") :Str
 %p  = Print(%s0) :Bool
 %c  = Constant(1) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -305,11 +360,12 @@ the truthy branch, and the i1 phi merges the two Bool operands. (t/base/cond.t.)
 
 ```perl
 # source
-my $x = "a"; $x eq $x && (print "y\n")
+use 5.42.0;
+my $x = "a"; say($x eq $x && (print "y\n"));
 ```
 
 ```behavior
-stdout: y\n
+stdout: y\n1\n
 return: Bool:1
 context: scalar
 ```
@@ -320,7 +376,9 @@ context: scalar
 %s0 = Constant("y\n") :Str
 %p  = Print(%s0) :Bool
 %r  = And(%eq, %p) :Bool
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -334,11 +392,12 @@ directly (i1 truthiness = identity) and merges an i1 phi.
 
 ```perl
 # source
-my $x = "a"; $x ne $x || (print "y\n")
+use 5.42.0;
+my $x = "a"; say($x ne $x || (print "y\n"));
 ```
 
 ```behavior
-stdout: y\n
+stdout: y\n1\n
 return: Bool:1
 context: scalar
 ```
@@ -349,7 +408,9 @@ context: scalar
 %s0 = Constant("y\n") :Str
 %p  = Print(%s0) :Bool
 %r  = Or(%ne, %p) :Bool
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -377,12 +438,14 @@ negating. The final return is :Bool, and the type-tagged output is `Bool:`.
 
 ```perl
 # source
+use 5.42.0;
 my $a = 5;
-!$a
+say(!$a);
 ```
 
 ```behavior
-return: Bool:
+stdout: \n
+return: Bool:1
 context: scalar
 ```
 
@@ -393,8 +456,9 @@ context: scalar
 %pa   = PadAccess(%vd, "$a") :Int
 %b    = Coerce(%pa : Int -> Bool) :Bool
 %nb   = Not(%b) :Bool
-return %nb
-control: %vd
+%nl = Constant("\n") :Str
+%p  = Print(%nb, %nl)
+return %p
 L: GREEN
 ```
 
@@ -410,13 +474,15 @@ are literal in the same op, which is why the pad form keeps the compare.
 
 ```perl
 # source
+use 5.42.0;
 my $a = "x";
 my $b = "x";
-($a eq $b) ? 1 : 0
+say(($a eq $b) ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -427,7 +493,9 @@ context: scalar
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -439,13 +507,15 @@ arm (0). This proves the memcmp leg is real, not a constant-true.
 
 ```perl
 # source
+use 5.42.0;
 my $a = "x";
 my $b = "y";
-($a eq $b) ? 1 : 0
+say(($a eq $b) ? 1 : 0);
 ```
 
 ```behavior
-return: 0
+stdout: 0\n
+return: Bool:1
 context: scalar
 ```
 
@@ -456,7 +526,9 @@ context: scalar
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -469,13 +541,15 @@ guard gates the memcmp.
 
 ```perl
 # source
+use 5.42.0;
 my $a = "ab";
 my $b = "abc";
-($a eq $b) ? 1 : 0
+say(($a eq $b) ? 1 : 0);
 ```
 
 ```behavior
-return: 0
+stdout: 0\n
+return: Bool:1
 context: scalar
 ```
 
@@ -486,7 +560,9 @@ context: scalar
 %t    = Constant(1) :Int
 %f    = Constant(0) :Int
 %r    = TernaryExpr(%eq, %t, %f) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -502,11 +578,13 @@ covers octal/hex/binary integer literals (`0x100 eq "256"`) since those are Ints
 
 ```perl
 # source
-my $a = 1; ($a eq "1") ? 1 : 0
+use 5.42.0;
+my $a = 1; say(($a eq "1") ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -517,7 +595,9 @@ context: scalar
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -531,11 +611,13 @@ check.
 
 ```perl
 # source
-my $a = 1; ($a eq "2") ? 1 : 0
+use 5.42.0;
+my $a = 1; say(($a eq "2") ? 1 : 0);
 ```
 
 ```behavior
-return: 0
+stdout: 0\n
+return: Bool:1
 context: scalar
 ```
 
@@ -546,7 +628,9 @@ context: scalar
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -558,13 +642,15 @@ of DIFFERENT strings (both true).
 
 ```perl
 # source
+use 5.42.0;
 my $a = "x";
 my $b = "y";
-($a ne $b) ? 1 : 0
+say(($a ne $b) ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -575,7 +661,9 @@ context: scalar
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%ne, %t, %f) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -587,13 +675,15 @@ real, not a constant-true.
 
 ```perl
 # source
+use 5.42.0;
 my $a = "x";
 my $b = "x";
-($a ne $b) ? 1 : 0
+say(($a ne $b) ? 1 : 0);
 ```
 
 ```behavior
-return: 0
+stdout: 0\n
+return: Bool:1
 context: scalar
 ```
 
@@ -604,7 +694,9 @@ context: scalar
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%ne, %t, %f) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -622,11 +714,13 @@ distinguishing case is L9b (`" 3"` vs `"3"` — numerically equal, byte-unequal)
 
 ```perl
 # source
-my $x = "0"; ($x == $x) ? 1 : 0
+use 5.42.0;
+my $x = "0"; say(($x == $x) ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -636,7 +730,9 @@ context: scalar
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -648,11 +744,13 @@ to 3), so `==` is TRUE. Proves the operands are numified, not memcmp'd.
 
 ```perl
 # source
-my $a = " 3"; my $b = "3"; ($a == $b) ? 1 : 0
+use 5.42.0;
+my $a = " 3"; my $b = "3"; say(($a == $b) ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -663,7 +761,9 @@ context: scalar
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -675,11 +775,13 @@ numifies to `0 != 1` = TRUE. `fcmp une` (unordered-or-not-equal) is the float
 
 ```perl
 # source
-my $x = "0"; my $y = "1"; ($x != $y) ? 1 : 0
+use 5.42.0;
+my $x = "0"; my $y = "1"; say(($x != $y) ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -690,7 +792,9 @@ context: scalar
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%ne, %t, %f) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -704,14 +808,15 @@ This case locks the working simple form.
 
 ```perl
 # source
+use 5.42.0;
 my $c = 1;
 $c and (print "y\n");
-1
+say(1);
 ```
 
 ```behavior
-stdout: y
-return: 1
+stdout: y1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -723,7 +828,9 @@ context: scalar
 %print  = Print(%pt, %msg) :Bool
 %region = Region(%if, %print) :Control
 %one    = Constant(1) :Int
-return %one
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -744,12 +851,12 @@ no new rendering code at all.
 # source
 use 5.42.0;
 our $a = 0.1;
-say($a eq "0.1" ? "y" : "n"); 1
+say($a eq "0.1" ? "y" : "n"); say(1);
 ```
 
 ```behavior
-stdout: y\n
-return: Int:1
+stdout: y\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -764,8 +871,9 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%t, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -779,12 +887,12 @@ produce.
 # source
 use 5.42.0;
 our $a = 0.1;
-say($a eq "0.2" ? "y" : "n"); 1
+say($a eq "0.2" ? "y" : "n"); say(1);
 ```
 
 ```behavior
-stdout: n\n
-return: Int:1
+stdout: n\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -799,8 +907,9 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%t, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -819,12 +928,12 @@ renders it as perl does — `1000`, not `1000.0` or `1e+03`.
 # source
 use 5.42.0;
 our $a = 1e3;
-say($a eq "1000" ? "y" : "n"); 1
+say($a eq "1000" ? "y" : "n"); say(1);
 ```
 
 ```behavior
-stdout: y\n
-return: Int:1
+stdout: y\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -839,8 +948,9 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%t, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -869,12 +979,12 @@ symptom in place:
 # source
 use 5.42.0;
 my $a;
-say($a // 9); 1
+say($a // 9); say(1);
 ```
 
 ```behavior
-stdout: 9\n
-return: Int:1
+stdout: 9\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -885,8 +995,9 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%dor, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -899,12 +1010,12 @@ right-hand arm — which is exactly what a dropped or mistyped LHS would produce
 # source
 use 5.42.0;
 my $a = 5;
-say($a // 9); 1
+say($a // 9); say(1);
 ```
 
 ```behavior
-stdout: 5\n
-return: Int:1
+stdout: 5\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -915,7 +1026,8 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%dor, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```

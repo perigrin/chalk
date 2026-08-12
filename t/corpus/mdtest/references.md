@@ -30,12 +30,14 @@ machine-level work; it is runtime-free.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1, 2, 3);
-scalar @a
+say(scalar @a);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -45,7 +47,9 @@ context: scalar
 %c3  = Constant(3) :Int
 %arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %r   = Length(%arr) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -59,13 +63,15 @@ and is left alone. The graph is identical to R1: the count is a pure load.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1, 2, 3);
 my $n = @a;
-$n
+say($n);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -75,7 +81,9 @@ context: scalar
 %c3  = Constant(3) :Int
 %arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %r   = Length(%arr) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -87,12 +95,14 @@ emitted; for a known-valid index the OOB branch is dead. The result is an Int.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1, 2, 3);
-$a[1]
+say($a[1]);
 ```
 
 ```behavior
-return: 2
+stdout: 2\n
+return: Bool:1
 context: scalar
 ```
 
@@ -103,7 +113,9 @@ context: scalar
 %arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %idx = Constant(1) :Int
 %r   = Subscript(%arr, %idx) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -115,12 +127,14 @@ Key hashing and bucket dispatch are ordinary machine-level work; no libperl.
 
 ```perl
 # source
+use 5.42.0;
 my %h = (a => 1, b => 2);
-$h{a}
+say($h{a});
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -132,7 +146,9 @@ context: scalar
 %hash = HashRef(%ka, %v1, %kb, %v2) :HashRef
 %lk   = Constant("a") :Str
 %r    = Subscript(%hash, %lk) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -145,13 +161,15 @@ array case), and the backend loads the `count` field of the `%Hash` struct
 
 ```perl
 # source
+use 5.42.0;
 my %h = (a => 1, b => 2);
 my $n = %h;
-$n
+say($n);
 ```
 
 ```behavior
-return: 2
+stdout: 2\n
+return: Bool:1
 context: scalar
 ```
 
@@ -162,7 +180,9 @@ context: scalar
 %v2   = Constant(2) :Int
 %hash = HashRef(%ka, %v1, %kb, %v2) :HashRef
 %r    = Length(%hash) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -175,12 +195,14 @@ an SV\*. The dereference `$r->[0]` is a load-through-pointer (bitcast back to
 
 ```perl
 # source
+use 5.42.0;
 my $r = [1, 2, 3];
-$r->[0]
+say($r->[0]);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -192,7 +214,9 @@ context: scalar
 %deref = PostfixDeref(%ref, sigil: "@") :Array
 %idx   = Constant(0) :Int
 %r     = Subscript(%deref, %idx) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -204,12 +228,14 @@ yields a pointer to it — not an HV\* wrapped in an SV\*. The dereference
 
 ```perl
 # source
+use 5.42.0;
 my $r = {a => 1, b => 2};
-$r->{a}
+say($r->{a});
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -222,7 +248,9 @@ context: scalar
 %deref = PostfixDeref(%ref, sigil: "%") :Hash
 %lk    = Constant("a") :Str
 %r     = Subscript(%deref, %lk) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -234,13 +262,15 @@ of the `{len, cap, Slot*}` vector: pure ops, no AV\* mutation. The read back
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1, 2, 3);
 $a[0] = 42;
-$a[0]
+say($a[0]);
 ```
 
 ```behavior
-return: 42
+stdout: 42\n
+return: Bool:1
 context: scalar
 ```
 
@@ -253,7 +283,9 @@ context: scalar
 %lval = Subscript(%arr, %idx) :Int
 %nv   = Constant(42) :Int
 %r    = Assign(%lval, %nv) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -265,13 +297,15 @@ The read back `$h{k}` is a key lookup on the same table.
 
 ```perl
 # source
+use 5.42.0;
 my %h = (k => 0);
 $h{k} = 99;
-$h{k}
+say($h{k});
 ```
 
 ```behavior
-return: 99
+stdout: 99\n
+return: Bool:1
 context: scalar
 ```
 
@@ -283,7 +317,9 @@ context: scalar
 %lval = Subscript(%hash, %wk) :Int
 %wv   = Constant(99) :Int
 %r    = Assign(%lval, %wv) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -296,12 +332,14 @@ value. Just repeated pure ops on `{len, cap, Slot*}` vectors plus pointer refs.
 
 ```perl
 # source
+use 5.42.0;
 my $r = [[1, 2], [3, 4]];
-$r->[1][0]
+say($r->[1][0]);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -319,7 +357,9 @@ context: scalar
 %inner_arr = PostfixDeref(%inner_ref, sigil: "@") :Array
 %idx0      = Constant(0) :Int
 %r         = Subscript(%inner_arr, %idx0) :Int
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -333,12 +373,14 @@ This is NEVER a segfault: bounds-checking is unconditional.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1, 2, 3);
-$a[9]
+say($a[9]);
 ```
 
 ```behavior
-return: Undef:
+stdout: \n
+return: Bool:1
 context: scalar
 ```
 
@@ -349,7 +391,9 @@ context: scalar
 %arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %idx = Constant(9) :Int
 %r   = Subscript(%arr, %idx) :Slot
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -361,12 +405,14 @@ The linear scan exhausts all entries without a match; the miss path yields a
 
 ```perl
 # source
+use 5.42.0;
 my %h = (a => 1, b => 2);
-$h{z}
+say($h{z});
 ```
 
 ```behavior
-return: Undef:
+stdout: \n
+return: Bool:1
 context: scalar
 ```
 
@@ -378,7 +424,9 @@ context: scalar
 %hash = HashRef(%ka, %v1, %kb, %v2) :HashRef
 %lk   = Constant("z") :Str
 %r    = Subscript(%hash, %lk) :Slot
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -425,14 +473,16 @@ Assign — memory-SSA phase 2a). No new alias analysis is needed: unwrapping the
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1, 2, 3);
 my $r = \@a;
 $r->[0] = 42;
-$a[0]
+say($a[0]);
 ```
 
 ```behavior
-return: 42
+stdout: 42\n
+return: Bool:1
 context: scalar
 ```
 
@@ -447,8 +497,9 @@ context: scalar
 %v42  = Constant(42) :Int
 %st   = Assign(%lval, %v42) :Int
 %rd   = Subscript(%arr, %i0) :Int
-return %rd
-control: %st
+%nl = Constant("\n") :Str
+%p  = Print(%rd, %nl)
+return %p
 L: GREEN
 ```
 
@@ -461,13 +512,15 @@ would return `42` here; a real memory load returns `2`.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1, 2, 3);
 $a[0] = 42;
-$a[1]
+say($a[1]);
 ```
 
 ```behavior
-return: 2
+stdout: 2\n
+return: Bool:1
 context: scalar
 ```
 
@@ -482,8 +535,9 @@ context: scalar
 %st   = Assign(%lval, %v42) :Int
 %i1   = Constant(1) :Int
 %rd   = Subscript(%arr, %i1) :Int
-return %rd
-control: %st
+%nl = Constant("\n") :Str
+%p  = Print(%rd, %nl)
+return %p
 L: GREEN
 ```
 
@@ -497,14 +551,16 @@ to the pre-store memory, not a pure data node the scheduler floats past the stor
 
 ```perl
 # source
+use 5.42.0;
 my @a = (5, 6, 7);
 my $x = $a[0];
 $a[0] = 99;
-$x
+say($x);
 ```
 
 ```behavior
-return: 5
+stdout: 5\n
+return: Bool:1
 context: scalar
 ```
 
@@ -518,8 +574,9 @@ context: scalar
 %v99  = Constant(99) :Int
 %lval = Subscript(%arr, %i0)
 %st   = Assign(%lval, %v99) :Int
-return %rd
-control: %st
+%nl = Constant("\n") :Str
+%p  = Print(%rd, %nl)
+return %p
 L: GREEN
 ```
 
@@ -532,15 +589,17 @@ final read `2` -- two distinct loads at distinct memory versions, so
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1, 2, 3);
 $a[0] = 1;
 my $x = $a[0];
 $a[0] = 2;
-$x + $a[0]
+say($x + $a[0]);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -553,7 +612,9 @@ context: scalar
 %rd1  = Subscript(%arr, %i0) :Int
 %rd2  = Subscript(%arr, %i0) :Int
 %sum  = Add(%rd1, %rd2) :Int
-return %sum
+%nl = Constant("\n") :Str
+%p  = Print(%sum, %nl)
+return %p
 L: GREEN
 ```
 
@@ -568,12 +629,14 @@ length, or `length()` on the element reads whatever was tracked last.
 
 ```perl
 # source
+use 5.42.0;
 my @a = ("hi", "there");
-$a[1]
+say($a[1]);
 ```
 
 ```behavior
-return: there
+stdout: there\n
+return: Bool:1
 context: scalar
 ```
 
@@ -583,7 +646,9 @@ context: scalar
 %arr  = ArrayRef(%s0, %s1) :ArrayRef
 %i1   = Constant(1) :Int
 %rd   = Subscript(%arr, %i1) :Str
-return %rd
+%nl = Constant("\n") :Str
+%p  = Print(%rd, %nl)
+return %p
 L: GREEN
 ```
 
@@ -595,12 +660,14 @@ is 5; a stale registration would silently yield the length of another string.
 
 ```perl
 # source
+use 5.42.0;
 my @a = ("hi", "there");
-length($a[1])
+say(length($a[1]));
 ```
 
 ```behavior
-return: 5
+stdout: 5\n
+return: Bool:1
 context: scalar
 ```
 
@@ -611,7 +678,9 @@ context: scalar
 %i1   = Constant(1) :Int
 %rd   = Subscript(%arr, %i1) :Str
 %len  = Length(%rd) :Int
-return %len
+%nl = Constant("\n") :Str
+%p  = Print(%len, %nl)
+return %p
 L: GREEN
 ```
 
@@ -624,12 +693,14 @@ silent-miscompile class as R16, in the other direction.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1.5, 2.5);
-$a[1]
+say($a[1]);
 ```
 
 ```behavior
-return: 2.5
+stdout: 2.5\n
+return: Bool:1
 context: scalar
 ```
 
@@ -639,7 +710,9 @@ context: scalar
 %arr  = ArrayRef(%n0, %n1) :ArrayRef
 %i1   = Constant(1) :Int
 %rd   = Subscript(%arr, %i1) :Num
-return %rd
+%nl = Constant("\n") :Str
+%p  = Print(%rd, %nl)
+return %p
 L: GREEN
 ```
 
@@ -652,12 +725,14 @@ strings was a GAP while an array of strings worked.
 
 ```perl
 # source
+use 5.42.0;
 my %h = (k => "val");
-$h{k}
+say($h{k});
 ```
 
 ```behavior
-return: val
+stdout: val\n
+return: Bool:1
 context: scalar
 ```
 
@@ -667,7 +742,9 @@ context: scalar
 %h    = HashRef(%k, %v) :HashRef
 %kk   = Constant("k") :Str
 %rd   = Subscript(%h, %kk) :Str
-return %rd
+%nl = Constant("\n") :Str
+%p  = Print(%rd, %nl)
+return %p
 L: GREEN
 ```
 
@@ -678,12 +755,14 @@ across both non-Int scalar reprs.
 
 ```perl
 # source
+use 5.42.0;
 my %h = (k => 1.5);
-$h{k}
+say($h{k});
 ```
 
 ```behavior
-return: 1.5
+stdout: 1.5\n
+return: Bool:1
 context: scalar
 ```
 
@@ -693,6 +772,8 @@ context: scalar
 %h    = HashRef(%k, %v) :HashRef
 %kk   = Constant("k") :Str
 %rd   = Subscript(%h, %kk) :Num
-return %rd
+%nl = Constant("\n") :Str
+%p  = Print(%rd, %nl)
+return %p
 L: GREEN
 ```

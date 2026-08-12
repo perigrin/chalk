@@ -9,11 +9,13 @@ Two integer literals add as native machine integers — no coercion, no SV.
 
 ```perl
 # source
-1 + 2
+use 5.42.0;
+say(1 + 2);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -21,7 +23,9 @@ context: scalar
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %add = Add(%c1, %c2) :Int
-return %add
+%nl = Constant("\n") :Str
+%p  = Print(%add, %nl)
+return %p
 L: GREEN
 ```
 
@@ -31,11 +35,13 @@ Five minus three — native i64 subtract, no coercion.
 
 ```perl
 # source
-5 - 3
+use 5.42.0;
+say(5 - 3);
 ```
 
 ```behavior
-return: 2
+stdout: 2\n
+return: Bool:1
 context: scalar
 ```
 
@@ -43,7 +49,9 @@ context: scalar
 %c5  = Constant(5) :Int
 %c3  = Constant(3) :Int
 %sub = Subtract(%c5, %c3) :Int
-return %sub
+%nl = Constant("\n") :Str
+%p  = Print(%sub, %nl)
+return %p
 L: GREEN
 ```
 
@@ -53,11 +61,13 @@ Three times four — native i64 multiply.
 
 ```perl
 # source
-3 * 4
+use 5.42.0;
+say(3 * 4);
 ```
 
 ```behavior
-return: 12
+stdout: 12\n
+return: Bool:1
 context: scalar
 ```
 
@@ -65,7 +75,9 @@ context: scalar
 %c3  = Constant(3) :Int
 %c4  = Constant(4) :Int
 %mul = Multiply(%c3, %c4) :Int
-return %mul
+%nl = Constant("\n") :Str
+%p  = Print(%mul, %nl)
+return %p
 L: GREEN
 ```
 
@@ -76,11 +88,13 @@ coerce both operands to Num and divide as a double.
 
 ```perl
 # source
-3 / 4
+use 5.42.0;
+say(3 / 4);
 ```
 
 ```behavior
-return: 0.75
+stdout: 0.75\n
+return: Bool:1
 context: scalar
 ```
 
@@ -90,7 +104,9 @@ context: scalar
 %d3  = Coerce(%c3 : Int -> Num) :Num
 %d4  = Coerce(%c4 : Int -> Num) :Num
 %div = Divide(%d3, %d4) :Num
-return %div
+%nl = Constant("\n") :Str
+%p  = Print(%div, %nl)
+return %p
 L: GREEN
 ```
 
@@ -101,11 +117,13 @@ gives -1). The IR lowers with sign-correction.
 
 ```perl
 # source
--7 % 3
+use 5.42.0;
+say(-7 % 3);
 ```
 
 ```behavior
-return: 2
+stdout: 2\n
+return: Bool:1
 context: scalar
 ```
 
@@ -113,7 +131,9 @@ context: scalar
 %cn7 = Constant(-7) :Int
 %c3  = Constant(3) :Int
 %mod = Modulo(%cn7, %c3) :Int
-return %mod
+%nl = Constant("\n") :Str
+%p  = Print(%mod, %nl)
+return %p
 L: GREEN
 ```
 
@@ -128,17 +148,21 @@ the return-epilogue path, so it prints `Int:0` (the low 32 bits of
 
 ```perl
 # source
-4294967296
+use 5.42.0;
+say(4294967296);
 ```
 
 ```behavior
-return: 4294967296
+stdout: 4294967296\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %c = Constant(4294967296) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -153,17 +177,21 @@ this boundary value, printing `Int:0` instead of the correct
 
 ```perl
 # source
--9223372036854775808
+use 5.42.0;
+say(-9223372036854775808);
 ```
 
 ```behavior
-return: -9223372036854775808
+stdout: -9223372036854775808\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %c = Constant(-9223372036854775808) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -179,11 +207,13 @@ worklist case.
 
 ```perl
 # source
-my @a=(1,2); $a[5]
+use 5.42.0;
+my @a=(1,2); say($a[5]);
 ```
 
 ```behavior
-return: Undef:
+stdout: \n
+return: Bool:1
 context: scalar
 ```
 
@@ -193,7 +223,9 @@ context: scalar
 %arr = ArrayRef(%c1, %c2) :ArrayRef
 %idx = Constant(5) :Int
 %r   = Subscript(%arr, %idx) :Slot
-return %r
+%nl = Constant("\n") :Str
+%p  = Print(%r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -210,11 +242,13 @@ rather than a wrong-value miscompile.
 
 ```perl
 # source
-my $x=3; my $y=4; $x/$y
+use 5.42.0;
+my $x=3; my $y=4; say($x/$y);
 ```
 
 ```behavior
-return: 0.75
+stdout: 0.75\n
+return: Bool:1
 context: scalar
 ```
 
@@ -230,7 +264,8 @@ context: scalar
 %dx   = Coerce(%rx : Int -> Num) :Num
 %dy   = Coerce(%ry : Int -> Num) :Num
 %div  = Divide(%dx, %dy) :Num
-return %div
-control: %vx -> %vy
+%nl = Constant("\n") :Str
+%p  = Print(%div, %nl)
+return %p
 L: GREEN
 ```

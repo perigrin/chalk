@@ -21,12 +21,14 @@ constant lowers to a private global, len = byte count, enc = 0.
 
 ```perl
 # source
+use 5.42.0;
 my $s = 'hello';
-$s
+say($s);
 ```
 
 ```behavior
-return: hello
+stdout: hello\n
+return: Bool:1
 context: scalar
 ```
 
@@ -36,7 +38,9 @@ context: scalar
 %vd  = VarDecl(%nc, %val) :Str
 %pa  = PadAccess(%vd, "s") :Str
 control: %vd
-return %pa
+%nl = Constant("\n") :Str
+%p  = Print(%pa, %nl)
+return %p
 L: GREEN
 ```
 
@@ -47,12 +51,14 @@ identical to a single-quoted literal at the IR level.
 
 ```perl
 # source
+use 5.42.0;
 my $s = "hello world";
-$s
+say($s);
 ```
 
 ```behavior
-return: hello world
+stdout: hello world\n
+return: Bool:1
 context: scalar
 ```
 
@@ -62,7 +68,9 @@ context: scalar
 %vd  = VarDecl(%nc, %val) :Str
 %pa  = PadAccess(%vd, "s") :Str
 control: %vd
-return %pa
+%nl = Constant("\n") :Str
+%p  = Print(%pa, %nl)
+return %p
 L: GREEN
 ```
 
@@ -74,11 +82,13 @@ lowers to malloc+memcpy over `{ptr,len,enc}` buffers.
 
 ```perl
 # source
-"hello" . " world"
+use 5.42.0;
+say("hello" . " world");
 ```
 
 ```behavior
-return: hello world
+stdout: hello world\n
+return: Bool:1
 context: scalar
 ```
 
@@ -86,7 +96,9 @@ context: scalar
 %lhs = Constant("hello") :Str
 %rhs = Constant(" world") :Str
 %cat = Concat(%lhs, %rhs) :Str
-return %cat
+%nl = Constant("\n") :Str
+%p  = Print(%cat, %nl)
+return %p
 L: GREEN
 ```
 
@@ -98,13 +110,15 @@ Str representation. The PadAccess after `.=` sees the post-concat SSA value.
 
 ```perl
 # source
+use 5.42.0;
 my $s = "a";
 $s .= "b";
-$s
+say($s);
 ```
 
 ```behavior
-return: ab
+stdout: ab\n
+return: Bool:1
 context: scalar
 ```
 
@@ -118,7 +132,9 @@ context: scalar
 %asgn = Assign(%pa1, %cat) :Str
 %pa2  = PadAccess(%vd, "s") :Str
 control: %vd -> %asgn
-return %pa2
+%nl = Constant("\n") :Str
+%p  = Print(%pa2, %nl)
+return %p
 L: GREEN
 ```
 
@@ -133,14 +149,16 @@ nargs=0 form of the same op.)
 
 ```perl
 # source
+use 5.42.0;
 my $s = "a";
 my $t = "b";
 $s .= $t;
-$s
+say($s);
 ```
 
 ```behavior
-return: ab
+stdout: ab\n
+return: Bool:1
 context: scalar
 ```
 
@@ -148,7 +166,9 @@ context: scalar
 %va   = Constant("a") :Str
 %vb   = Constant("b") :Str
 %cat  = Concat(%va, %vb) :Str
-return %cat
+%nl = Constant("\n") :Str
+%p  = Print(%cat, %nl)
+return %p
 L: GREEN
 ```
 
@@ -160,14 +180,16 @@ The decoder folds `$a . $b` into a Concat and binds it to the new lexical `$c`.
 
 ```perl
 # source
+use 5.42.0;
 my $a = "x";
 my $b = "y";
 my $c = "$a$b";
-$c
+say($c);
 ```
 
 ```behavior
-return: xy
+stdout: xy\n
+return: Bool:1
 context: scalar
 ```
 
@@ -175,7 +197,9 @@ context: scalar
 %va   = Constant("x") :Str
 %vb   = Constant("y") :Str
 %cat  = Concat(%va, %vb) :Str
-return %cat
+%nl = Constant("\n") :Str
+%p  = Print(%cat, %nl)
+return %p
 L: GREEN
 ```
 
@@ -188,14 +212,16 @@ operands: `"p-" . $a . "-m-" . $b . "-q"`, a left-folded Concat chain.
 
 ```perl
 # source
+use 5.42.0;
 my $a = "x";
 my $b = "y";
 my $c = "p-$a-m-$b-q";
-$c
+say($c);
 ```
 
 ```behavior
-return: p-x-m-y-q
+stdout: p-x-m-y-q\n
+return: Bool:1
 context: scalar
 ```
 
@@ -209,7 +235,9 @@ context: scalar
 %c3   = Concat(%c2, %vb) :Str
 %q    = Constant("-q") :Str
 %c4   = Concat(%c3, %q) :Str
-return %c4
+%nl = Constant("\n") :Str
+%p  = Print(%c4, %nl)
+return %p
 L: GREEN
 ```
 
@@ -224,12 +252,14 @@ Concat can slice exactly `len` bytes. The result is `Str:ok 3`.
 
 ```perl
 # source
+use 5.42.0;
 my $n = 3;
-"ok $n"
+say("ok $n");
 ```
 
 ```behavior
-return: ok 3
+stdout: ok 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -238,7 +268,9 @@ context: scalar
 %n   = Constant(3) :Int
 %sf  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
 %cat = Concat(%s0, %sf) :Str
-return %cat
+%nl = Constant("\n") :Str
+%p  = Print(%cat, %nl)
+return %p
 L: GREEN
 ```
 
@@ -252,12 +284,14 @@ oracle tags Int); the result is `Str:val -5`.
 
 ```perl
 # source
+use 5.42.0;
 my $n = -5;
-"val $n"
+say("val $n");
 ```
 
 ```behavior
-return: val -5
+stdout: val -5\n
+return: Bool:1
 context: scalar
 ```
 
@@ -266,7 +300,9 @@ context: scalar
 %n   = Constant(-5) :Int
 %sf  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
 %cat = Concat(%s0, %sf) :Str
-return %cat
+%nl = Constant("\n") :Str
+%p  = Print(%cat, %nl)
+return %p
 L: GREEN
 ```
 
@@ -280,12 +316,14 @@ Str (a lone `"$n"` degenerates to the number in perl, tagged Int); the result is
 
 ```perl
 # source
+use 5.42.0;
 my $n = 0;
-"val $n"
+say("val $n");
 ```
 
 ```behavior
-return: val 0
+stdout: val 0\n
+return: Bool:1
 context: scalar
 ```
 
@@ -294,7 +332,9 @@ context: scalar
 %n   = Constant(0) :Int
 %sf  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
 %cat = Concat(%s0, %sf) :Str
-return %cat
+%nl = Constant("\n") :Str
+%p  = Print(%cat, %nl)
+return %p
 L: GREEN
 ```
 
@@ -307,13 +347,14 @@ and the block yields the trailing `Int:1`. The stdout is `ok 3\n`.
 
 ```perl
 # source
+use 5.42.0;
 my $n = 3;
-print "ok $n\n"; 1
+print "ok $n\n"; say(1);
 ```
 
 ```behavior
-stdout: ok 3\n
-return: Int:1
+stdout: ok 3\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -326,8 +367,9 @@ context: scalar
 %cat = Concat(%c1, %nl) :Str
 %p   = Print(%cat) :Bool
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 

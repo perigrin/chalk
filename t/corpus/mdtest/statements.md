@@ -17,17 +17,21 @@ runtime-free case.
 
 ```perl
 # source
-5
+use 5.42.0;
+say(5);
 ```
 
 ```behavior
-return: 5
+stdout: 5\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %c = Constant(5) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -40,11 +44,13 @@ the A1 pattern from the spec.
 
 ```perl
 # source
-my $x = 1; my $y = 2; $x + $y
+use 5.42.0;
+my $x = 1; my $y = 2; say($x + $y);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -58,8 +64,9 @@ context: scalar
 %rx   = PadAccess(%vx, "$x") :Int
 %ry   = PadAccess(%vy, "$y") :Int
 %sum  = Add(%rx, %ry) :Int
-return %sum
-control: %vx -> %vy
+%nl = Constant("\n") :Str
+%p  = Print(%sum, %nl)
+return %p
 L: GREEN
 ```
 
@@ -85,11 +92,13 @@ runtime-free gap — not a string dependency).
 
 ```perl
 # source
-1 < 2 ? 1 : 0
+use 5.42.0;
+say(1 < 2 ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -100,7 +109,9 @@ context: scalar
 %t    = Constant(1) :Int
 %f    = Constant(0) :Int
 %tern = TernaryExpr(%cmp, %t, %f) :Int
-return %tern
+%nl = Constant("\n") :Str
+%p  = Print(%tern, %nl)
+return %p
 L: GREEN
 ```
 
@@ -114,10 +125,12 @@ Bilateral coverage for the false case is the next case (2 < 1 => `Bool:`).
 
 ```perl
 # source
-1 < 2
+use 5.42.0;
+say(1 < 2);
 ```
 
 ```behavior
+stdout: 1\n
 return: Bool:1
 context: scalar
 ```
@@ -126,7 +139,9 @@ context: scalar
 %one  = Constant(1) :Int
 %two  = Constant(2) :Int
 %cmp  = NumLt(%one, %two) :Bool
-return %cmp
+%nl = Constant("\n") :Str
+%p  = Print(%cmp, %nl)
+return %p
 L: GREEN
 ```
 
@@ -140,11 +155,13 @@ guard made concrete: the false Bool must be `Bool:`, not `Str:` or `Int:0`.
 
 ```perl
 # source
-2 < 1
+use 5.42.0;
+say(2 < 1);
 ```
 
 ```behavior
-return: Bool:
+stdout: \n
+return: Bool:1
 context: scalar
 ```
 
@@ -152,7 +169,9 @@ context: scalar
 %two  = Constant(2) :Int
 %one  = Constant(1) :Int
 %cmp  = NumLt(%two, %one) :Bool
-return %cmp
+%nl = Constant("\n") :Str
+%p  = Print(%cmp, %nl)
+return %p
 L: GREEN
 ```
 
@@ -216,12 +235,13 @@ so the stdout is `hi\n`; the block value is the trailing `Int:1`.
 
 ```perl
 # source
-print "hi\n"; 1
+use 5.42.0;
+print "hi\n"; say(1);
 ```
 
 ```behavior
-stdout: hi\n
-return: Int:1
+stdout: hi\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -229,8 +249,9 @@ context: scalar
 %s0   = Constant("hi\n") :Str
 %p    = Print(%s0) :Bool
 %c    = Constant(1) :Int
-return %c
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -243,12 +264,13 @@ L: GREEN
 
 ```perl
 # source
-print "ok ", 1, "\n"; 1
+use 5.42.0;
+print "ok ", 1, "\n"; say(1);
 ```
 
 ```behavior
-stdout: ok 1\n
-return: Int:1
+stdout: ok 1\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -258,8 +280,9 @@ context: scalar
 %s2   = Constant("\n") :Str
 %p    = Print(%s0, %i1, %s2) :Bool
 %c    = Constant(1) :Int
-return %c
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -272,12 +295,13 @@ order. The block value is the trailing `Int:1`.
 
 ```perl
 # source
-print "a\n"; print "b\n"; 1
+use 5.42.0;
+print "a\n"; print "b\n"; say(1);
 ```
 
 ```behavior
-stdout: a\nb\n
-return: Int:1
+stdout: a\nb\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -287,8 +311,9 @@ context: scalar
 %s1   = Constant("b\n") :Str
 %p1   = Print(%s1) :Bool
 %c    = Constant(1) :Int
-return %c
-control: %p0 -> %p1
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -301,11 +326,12 @@ stdout is `x\n`; the block value is the Print's boolean `1`.
 
 ```perl
 # source
-my $ok = print "x\n"; $ok
+use 5.42.0;
+my $ok = print "x\n"; say($ok);
 ```
 
 ```behavior
-stdout: x\n
+stdout: x\n1\n
 return: Bool:1
 context: scalar
 ```
@@ -313,8 +339,9 @@ context: scalar
 ```ir
 %s0   = Constant("x\n") :Str
 %p    = Print(%s0) :Bool
+%nl = Constant("\n") :Str
+%p  = Print(%p, %nl)
 return %p
-control: %p
 L: GREEN
 ```
 
@@ -330,12 +357,13 @@ only the printed digits are wrong.
 
 ```perl
 # source
-print 4294967296, "\n"; 1
+use 5.42.0;
+print 4294967296, "\n"; say(1);
 ```
 
 ```behavior
-stdout: 4294967296\n
-return: Int:1
+stdout: 4294967296\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -343,8 +371,9 @@ context: scalar
 %s0   = Constant(4294967296) :Int
 %p    = Print(%s0) :Bool
 %c    = Constant(1) :Int
-return %c
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -383,12 +412,12 @@ reached the backend as an unlowered Call.
 ```perl
 # source
 use 5.42.0;
-say "hi"; 1
+say "hi"; say(1);
 ```
 
 ```behavior
-stdout: hi\n
-return: Int:1
+stdout: hi\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -397,8 +426,9 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%s, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -411,12 +441,12 @@ operand rather than once to the list.
 ```perl
 # source
 use 5.42.0;
-say "a", "b", "c"; 1
+say "a", "b", "c"; say(1);
 ```
 
 ```behavior
-stdout: abc\n
-return: Int:1
+stdout: abc\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -427,8 +457,9 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%a, %b, %c, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -445,12 +476,12 @@ miscompile the `print` case exists to prevent. Bilateral with the case below.
 use 5.42.0;
 my $c = 1;
 if ($c) { say "a" } else { say "b" }
-1
+say(1);
 ```
 
 ```behavior
-stdout: a\n
-return: Int:1
+stdout: a\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -463,7 +494,9 @@ context: scalar
 %b    = Constant("b") :Str
 %pb   = Print(%b, %nl)
 %one  = Constant(1) :Int
-return %one
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -477,12 +510,12 @@ else arm's output may appear; seeing both is the unguarded-effect miscompile.
 use 5.42.0;
 my $c = 0;
 if ($c) { say "a" } else { say "b" }
-1
+say(1);
 ```
 
 ```behavior
-stdout: b\n
-return: Int:1
+stdout: b\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -495,7 +528,9 @@ context: scalar
 %b    = Constant("b") :Str
 %pb   = Print(%b, %nl)
 %one  = Constant(1) :Int
-return %one
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -535,12 +570,13 @@ the coercion node was the natural home for them.
 
 ```perl
 # source
-print "ok ", 1, "\n"; 1
+use 5.42.0;
+print "ok ", 1, "\n"; say(1);
 ```
 
 ```behavior
-stdout: ok 1\n
-return: Int:1
+stdout: ok 1\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -551,8 +587,9 @@ context: scalar
 %s2  = Constant("\n") :Str
 %p   = Print(%s1, %sn, %s2)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -567,12 +604,12 @@ with the case below, which is what catches that.
 ```perl
 # source
 use 5.42.0;
-say(1 == 1); 1
+say(1 == 1); say(1);
 ```
 
 ```behavior
-stdout: 1\n
-return: Int:1
+stdout: 1\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -583,8 +620,9 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%sb, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -597,12 +635,12 @@ first byte here.
 ```perl
 # source
 use 5.42.0;
-say(1 == 2); 1
+say(1 == 2); say(1);
 ```
 
 ```behavior
-stdout: \n
-return: Int:1
+stdout: \n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -614,8 +652,9 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%sb, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -637,12 +676,12 @@ not libperl.
 ```perl
 # source
 use 5.42.0;
-say 0.75; 1
+say 0.75; say(1);
 ```
 
 ```behavior
-stdout: 0.75\n
-return: Int:1
+stdout: 0.75\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -652,8 +691,9 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%sv, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -667,12 +707,12 @@ places, would fail here while passing every case above.
 ```perl
 # source
 use 5.42.0;
-say 0.1; 1
+say 0.1; say(1);
 ```
 
 ```behavior
-stdout: 0.1\n
-return: Int:1
+stdout: 0.1\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -682,8 +722,9 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%sv, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -699,12 +740,12 @@ rather than a folded literal.
 use 5.42.0;
 our $a = 3;
 our $b = 4;
-say $a / $b; 1
+say $a / $b; say(1);
 ```
 
 ```behavior
-stdout: 0.75\n
-return: Int:1
+stdout: 0.75\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -718,7 +759,8 @@ context: scalar
 %nl  = Constant("\n") :Str
 %p   = Print(%sd, %nl)
 %one = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```

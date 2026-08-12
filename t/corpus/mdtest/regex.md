@@ -28,12 +28,14 @@ Source: `archive/pu-2026-03-24:t/corpus/ir/regex-match.chalk`
 
 ```perl
 # source
+use 5.42.0;
 my $s = "foobar";
-$s =~ /foo/ ? 1 : 0
+say($s =~ /foo/ ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -43,7 +45,9 @@ context: scalar
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -59,13 +63,15 @@ Source: `archive/pu-2026-03-24:t/corpus/ir/regex-qr.chalk`
 
 ```perl
 # source
+use 5.42.0;
 my $re = qr/foo/;
 my $s = "foobar";
-$s =~ $re ? 1 : 0
+say($s =~ $re ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -76,7 +82,9 @@ context: scalar
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -88,20 +96,24 @@ runtime-free, no libperl/regex-engine dependency.
 
 ```perl
 # source
+use 5.42.0;
 my $s = "foobar";
 $s =~ s/foo/baz/;
-$s
+say($s);
 ```
 
 ```behavior
-return: bazbar
+stdout: bazbar\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %s      = Constant("foobar") :Str
 %result = RegexSubst(%s, pattern: "foo", replacement: "baz") :Str
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -114,12 +126,14 @@ there, rather than sliding. Runtime-free, libperl-free.
 
 ```perl
 # source
+use 5.42.0;
 my $s = "foobar";
-$s =~ /^foo/ ? 1 : 0
+say($s =~ /^foo/ ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -129,7 +143,9 @@ context: scalar
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -142,12 +158,14 @@ predicate over the loaded byte — runtime-free, libperl-free.
 
 ```perl
 # source
+use 5.42.0;
 my $s = "a9z";
-$s =~ /[0-9]/ ? 1 : 0
+say($s =~ /[0-9]/ ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -157,7 +175,9 @@ context: scalar
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -172,12 +192,14 @@ quantified class (a Perl identifier check).
 
 ```perl
 # source
+use 5.42.0;
 my $s = "foo_1";
-$s =~ /^[A-Za-z_][A-Za-z0-9_]*$/ ? 1 : 0
+say($s =~ /^[A-Za-z_][A-Za-z0-9_]*$/ ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -187,7 +209,9 @@ context: scalar
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -203,12 +227,14 @@ ternary takes the else arm) — a bilateral check against R1's matching `=~`.
 
 ```perl
 # source
+use 5.42.0;
 my $s = "hello";
-$s !~ /ell/ ? 111 : 222
+say($s !~ /ell/ ? 111 : 222);
 ```
 
 ```behavior
-return: 222
+stdout: 222\n
+return: Bool:1
 context: scalar
 ```
 
@@ -219,7 +245,9 @@ context: scalar
 %t      = Constant(111) :Int
 %e      = Constant(222) :Int
 %result = TernaryExpr(%nm, %t, %e) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -251,12 +279,14 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 $_ = "test";
-/^test/ ? 1 : 0
+say(/^test/ ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -266,7 +296,9 @@ context: scalar
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -286,12 +318,14 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 $_ = "nope";
-/^test/ ? 1 : 0
+say(/^test/ ? 1 : 0);
 ```
 
 ```behavior
-return: 0
+stdout: 0\n
+return: Bool:1
 context: scalar
 ```
 
@@ -301,7 +335,9 @@ context: scalar
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -324,12 +360,14 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 our $g = "test";
-$g =~ /^test/ ? 1 : 0
+say($g =~ /^test/ ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -339,6 +377,8 @@ context: scalar
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```

@@ -22,13 +22,15 @@ lowers this to `select i1 %cmp, i64 1, i64 2`.
 
 ```perl
 # source
+use 5.42.0;
 my $n = 5;
 my $x = $n > 0 ? 1 : 2;
-$x
+say($x);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -42,8 +44,9 @@ context: scalar
 %xn   = Constant("$x") :Str
 %vx   = VarDecl(%xn, %tern) :Int
 %rx   = PadAccess(%vx, "$x") :Int
-return %rx
-control: %vx
+%nl = Constant("\n") :Str
+%p  = Print(%rx, %nl)
+return %p
 L: GREEN
 ```
 
@@ -55,14 +58,16 @@ literal-arithmetic lowering slice.
 
 ```perl
 # source
+use 5.42.0;
 my $n = 5;
 my $x;
 if ($n > 0) { $x = 1 } else { $x = 2 }
-$x
+say($x);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -83,8 +88,9 @@ context: scalar
 %proj1 = Proj(%if, index: 1)
 %region = Region(%proj0, %proj1)
 %rx    = PadAccess(%vx, "$x") :Int
-return %rx
-control: %vx -> %if
+%nl = Constant("\n") :Str
+%p  = Print(%rx, %nl)
+return %p
 branch_control: %proj0 -> %as1
 branch_control: %proj1 -> %as2
 L: GREEN
@@ -105,12 +111,13 @@ returns `Int:1`.
 
 ```perl
 # source
-my $c = 1; if ($c) { print "a\n" } else { print "b\n" } 1
+use 5.42.0;
+my $c = 1; if ($c) { print "a\n" } else { print "b\n" } say(1);
 ```
 
 ```behavior
-stdout: a\n
-return: Int:1
+stdout: a\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -120,7 +127,9 @@ context: scalar
 %sb = Constant("b\n") :Str
 %pb = Print(%sb) :Bool
 %c  = Constant(1) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -134,12 +143,13 @@ proving the merge is genuine control flow and not a straight-line both-arms walk
 
 ```perl
 # source
-my $c = 0; if ($c) { print "a\n" } else { print "b\n" } 1
+use 5.42.0;
+my $c = 0; if ($c) { print "a\n" } else { print "b\n" } say(1);
 ```
 
 ```behavior
-stdout: b\n
-return: Int:1
+stdout: b\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -149,7 +159,9 @@ context: scalar
 %sb = Constant("b\n") :Str
 %pb = Print(%sb) :Bool
 %c  = Constant(1) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -166,12 +178,13 @@ first real Perl core test file to pass end-to-end through Chalk.
 
 ```perl
 # source
-my $x = "t"; if ($x eq $x) { print "ok 1\n" } else { print "not ok 1\n" } 1
+use 5.42.0;
+my $x = "t"; if ($x eq $x) { print "ok 1\n" } else { print "not ok 1\n" } say(1);
 ```
 
 ```behavior
-stdout: ok 1\n
-return: Int:1
+stdout: ok 1\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -181,7 +194,9 @@ context: scalar
 %sn = Constant("not ok 1\n") :Str
 %pn = Print(%sn) :Bool
 %c  = Constant(1) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -196,12 +211,13 @@ regression visible in stdout. The trailing `1` keeps it void.
 
 ```perl
 # source
-my $x = "t"; if ($x ne $x) { print "not ok 2\n" } else { print "ok 2\n" } 1
+use 5.42.0;
+my $x = "t"; if ($x ne $x) { print "not ok 2\n" } else { print "ok 2\n" } say(1);
 ```
 
 ```behavior
-stdout: ok 2\n
-return: Int:1
+stdout: ok 2\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -211,7 +227,9 @@ context: scalar
 %se = Constant("ok 2\n") :Str
 %pe = Print(%se) :Bool
 %c  = Constant(1) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -228,12 +246,13 @@ arms share substrings that hash-cons to shared Str constants across branches).
 
 ```perl
 # source
-my $x = 1; if ($x == 1) { print "same\n" } else { print "same\n" } 1
+use 5.42.0;
+my $x = 1; if ($x == 1) { print "same\n" } else { print "same\n" } say(1);
 ```
 
 ```behavior
-stdout: same\n
-return: Int:1
+stdout: same\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -242,7 +261,9 @@ context: scalar
 %pt = Print(%s) :Bool
 %pe = Print(%s) :Bool
 %c  = Constant(1) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -257,12 +278,13 @@ loop-body effect path stays green alongside the if/else fix.)
 
 ```perl
 # source
-for my $i (1..2) { print "x\n" } 1
+use 5.42.0;
+for my $i (1..2) { print "x\n" } say(1);
 ```
 
 ```behavior
-stdout: x\nx\n
-return: Int:1
+stdout: x\nx\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -270,7 +292,9 @@ context: scalar
 %sx = Constant("x\n") :Str
 %px = Print(%sx) :Bool
 %c  = Constant(1) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -282,14 +306,16 @@ each iteration. None of these are in the current lowering slice.
 
 ```perl
 # source
+use 5.42.0;
 my $n = 3;
 my $s = 0;
 while ($n > 0) { $s += $n; $n-- }
-$s
+say($s);
 ```
 
 ```behavior
-return: 6
+stdout: 6\n
+return: Bool:1
 context: scalar
 ```
 
@@ -313,8 +339,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
-control: %vn -> %vs -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %n_phi -> %n_new
 loop_backedge: %s_phi -> %s_new
 branch_control: %lp0 -> %n_new
@@ -333,14 +360,16 @@ producer wires the header condition's control edge to the Loop
 
 ```perl
 # source
+use 5.42.0;
 my $n = 3;
 my $s = 0;
 while ($n > 0) { my $c = $n > -5; $s += $n; $n-- }
-$s
+say($s);
 ```
 
 ```behavior
-return: 6
+stdout: 6\n
+return: Bool:1
 context: scalar
 ```
 
@@ -364,8 +393,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
-control: %vn -> %vs -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %n_phi -> %n_new
 loop_backedge: %s_phi -> %s_new
 branch_control: %loop -> %cmp
@@ -386,14 +416,16 @@ miscompile, e.g. `while ($n){ my $c=$n>2; ... }` returned 2 not 4).
 
 ```perl
 # source
+use 5.42.0;
 my $n = 3;
 my $s = 0;
 while ($n) { $s += $n; $n-- }
-$s
+say($s);
 ```
 
 ```behavior
-return: 6
+stdout: 6\n
+return: Bool:1
 context: scalar
 ```
 
@@ -417,8 +449,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
-control: %vn -> %vs -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %n_phi -> %n_new
 loop_backedge: %s_phi -> %s_new
 branch_control: %loop -> %cmp
@@ -441,13 +474,15 @@ dominates the exit) so the post-loop use is well-formed. Was a producer GAP
 
 ```perl
 # source
+use 5.42.0;
 my $i = 3;
 while ($i-- > 0) { }
-$i
+say($i);
 ```
 
 ```behavior
-return: -1
+stdout: -1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -465,8 +500,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %i_new
-control: %vi -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%i_new, %nl)
+return %p
 loop_backedge: %i_phi -> %i_new
 branch_control: %loop -> %cmp
 L: GREEN
@@ -485,14 +521,16 @@ Was a producer GAP; now lowers to Int:3.
 
 ```perl
 # source
+use 5.42.0;
 my $n = 3;
 my $t = 0;
 $t = $t + $n while $n-- > 0;
-$t
+say($t);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -516,8 +554,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %t_phi
-control: %vn -> %vt -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%t_phi, %nl)
+return %p
 loop_backedge: %n_phi -> %n_new
 loop_backedge: %t_phi -> %t_new
 branch_control: %loop -> %cmp
@@ -533,13 +572,15 @@ the current straight-line arithmetic slice.
 
 ```perl
 # source
+use 5.42.0;
 my $s = 0;
 foreach my $i (1..3) { $s += $i }
-$s
+say($s);
 ```
 
 ```behavior
-return: 6
+stdout: 6\n
+return: Bool:1
 context: scalar
 ```
 
@@ -559,8 +600,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
-control: %vs -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
 branch_control: %lp0 -> %s_new
@@ -579,14 +621,16 @@ bound (`for my $i ($lo..$hi)`) still GAPs (loop-carried-stamp fixpoint). zhi
 
 ```perl
 # source
+use 5.42.0;
 my $n = 3;
 my $s = 0;
 for my $i (0..$n) { $s += $i }
-$s
+say($s);
 ```
 
 ```behavior
-return: 6
+stdout: 6\n
+return: Bool:1
 context: scalar
 ```
 
@@ -604,7 +648,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
 L: GREEN
@@ -619,12 +665,14 @@ Subtract(Length, 1). zhi 019f5da9.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (10, 20, 30);
-$#a
+say($#a);
 ```
 
 ```behavior
-return: 2
+stdout: 2\n
+return: Bool:1
 context: scalar
 ```
 
@@ -636,7 +684,9 @@ context: scalar
 %len   = Length(%arr) :Int
 %c1    = Constant(1) :Int
 %last  = Subtract(%len, %c1) :Int
-return %last
+%nl = Constant("\n") :Str
+%p  = Print(%last, %nl)
+return %p
 L: GREEN
 ```
 
@@ -655,14 +705,16 @@ zhi 019f5da9, 019f6198.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (10, 20, 30);
 my $s = 0;
 for my $i (0..$#a) { $s += $a[$i] }
-$s
+say($s);
 ```
 
 ```behavior
-return: 60
+stdout: 60\n
+return: Bool:1
 context: scalar
 ```
 
@@ -686,7 +738,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
 L: GREEN
@@ -704,14 +758,16 @@ reads element[i] each pass. This is the iteration primitive real lib/ methods us
 
 ```perl
 # source
+use 5.42.0;
 my @a = (10, 20, 30);
 my $s = 0;
 for my $x (@a) { $s += $x }
-$s
+say($s);
 ```
 
 ```behavior
-return: 60
+stdout: 60\n
+return: Bool:1
 context: scalar
 ```
 
@@ -733,7 +789,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
 L: GREEN
@@ -753,14 +811,16 @@ zhi 019f5da9.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (2, 4, 6);
 my $s = 0;
 for my $x (@a) { $s += $x }
-scalar @a
+say(scalar @a);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -770,7 +830,9 @@ context: scalar
 %c6    = Constant(6) :Int
 %arr   = ArrayRef(%c2, %c4, %c6) :ArrayRef
 %len   = Length(%arr) :Int
-return %len
+%nl = Constant("\n") :Str
+%p  = Print(%len, %nl)
+return %p
 L: GREEN
 ```
 
@@ -810,14 +872,16 @@ branch and a merge block with a phi for the variable being written.
 
 ```perl
 # source
+use 5.42.0;
 my $n = 5;
 my $x = 0;
 $x = 1 if $n > 0;
-$x
+say($x);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -836,8 +900,9 @@ context: scalar
 %proj1 = Proj(%if, index: 1)
 %region = Region(%proj0, %proj1)
 %rx    = PadAccess(%vx, "$x") :Int
-return %rx
-control: %vx -> %if
+%nl = Constant("\n") :Str
+%p  = Print(%rx, %nl)
+return %p
 branch_control: %proj0 -> %as
 L: GREEN
 ```
@@ -852,14 +917,16 @@ confirming the pre-test semantics. A true do-while is only `do{...}while(COND)`.
 
 ```perl
 # source
+use 5.42.0;
 my $n = 3;
 my $s = 0;
 $s += $n-- while $n > 0;
-$s
+say($s);
 ```
 
 ```behavior
-return: 6
+stdout: 6\n
+return: Bool:1
 context: scalar
 ```
 
@@ -883,8 +950,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
-control: %vn -> %vs -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %n_phi -> %n_new
 loop_backedge: %s_phi -> %s_new
 branch_control: %lp0 -> %n_new
@@ -900,14 +968,16 @@ number of blocks required.
 
 ```perl
 # source
+use 5.42.0;
 my $n = 5;
 my $x;
 if ($n > 0) { if ($n > 3) { $x = 3 } else { $x = 1 } } else { $x = 0 }
-$x
+say($x);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -937,8 +1007,9 @@ context: scalar
 %outer_p1    = Proj(%outer_if, index: 1)
 %outer_reg   = Region(%outer_p0, %outer_p1)
 %rx          = PadAccess(%vx, "$x") :Int
-return %rx
-control: %vx -> %outer_if
+%nl = Constant("\n") :Str
+%p  = Print(%rx, %nl)
+return %p
 branch_control: %outer_p0 -> %inner_if
 branch_control: %inner_p0 -> %as3
 branch_control: %inner_p1 -> %as1
@@ -959,14 +1030,16 @@ true and letting lli constant-fold the wrong phi arm away).
 
 ```perl
 # source
+use 5.42.0;
 my $n = 2;
 my $x = 0;
 if ($n > 0) { if ($n > 3) { $x = 3 } else { $x = 1 } } else { $x = 0 }
-$x
+say($x);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -999,8 +1072,9 @@ context: scalar
 %outer_p1  = Proj(%outer_if, index: 1)
 %outer_reg = Region(%outer_p0, %outer_p1)
 %rx   = PadAccess(%vx, "$x") :Int
-return %rx
-control: %vn -> %vx -> %outer_if
+%nl = Constant("\n") :Str
+%p  = Print(%rx, %nl)
+return %p
 branch_control: %outer_p0 -> %inner_if
 branch_control: %inner_p0 -> %as3
 branch_control: %inner_p1 -> %as1
@@ -1097,12 +1171,14 @@ grammar plan; the B::SoN optree walker supersedes it — do-blocks lower directl
 
 ```perl
 # source
+use 5.42.0;
 my $x = do { my $t = 5; $t + 1 };
-$x
+say($x);
 ```
 
 ```behavior
-return: 6
+stdout: 6\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1110,7 +1186,9 @@ context: scalar
 %five = Constant(5) :Int
 %one  = Constant(1) :Int
 %sum  = Add(%five, %one) :Int
-return %sum
+%nl = Constant("\n") :Str
+%p  = Print(%sum, %nl)
+return %p
 L: GREEN
 ```
 
@@ -1125,14 +1203,15 @@ list-context ternary whose arm produces a genuine multi-element list
 
 ```perl
 # source
+use 5.42.0;
 my $c = 1;
 print $c ? "y\n" : "n\n";
-1
+say(1);
 ```
 
 ```behavior
-stdout: y
-return: 1
+stdout: y1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1143,8 +1222,9 @@ context: scalar
 %tern = TernaryExpr(%c, %y, %n) :Str
 %p    = Print(%tern) :Bool
 %one  = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -1161,14 +1241,20 @@ real control flow a void-print arm uses (`If` + `Proj` + `Region`), building the
 + `unreachable`, so the merge's die predecessor is dead and the live value
 dominates.
 
+Migrated by hand: the transform declines this shape, correctly — the last line
+ends with a `}` closing a real BLOCK, so there is no trailing value expression
+to wrap. The value lives inside the else arm, so the `say` goes there.
+
 ```perl
 # source
+use 5.42.0;
 my $c = 0;
-if ($c) { die "boom\n" } else { 1 }
+if ($c) { die "boom\n" } else { say(1) }
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1176,7 +1262,9 @@ context: scalar
 %boom = Constant("boom\n") :Str
 %uw   = Unwind(%boom)
 %one  = Constant(1) :Int
-return %one
+%nl   = Constant("\n") :Str
+%p    = Print(%one, %nl)
+return %p
 L: GREEN
 ```
 
@@ -1272,14 +1360,16 @@ back-edge Add. Sums `10 + 1 + 1 = 12` over the three passes ($i = 0, 1, 2).
 
 ```perl
 # source
+use 5.42.0;
 my $i = 0;
 my $s = 0;
 while ($i < 3) { $s += ($i > 1 ? 10 : 1); $i++ }
-$s
+say($s);
 ```
 
 ```behavior
-return: 12
+stdout: 12\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1307,8 +1397,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
-control: %vi -> %vs -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
 branch_control: %loop -> %cmp
@@ -1330,14 +1421,16 @@ lowers — no new multi-exit loop model. Loop runs `$i` = 0,1,2 accumulating `$s
 
 ```perl
 # source
+use 5.42.0;
 my $i = 0;
 my $s = 0;
 while (1) { last if $i >= 3; $s += $i; $i++ }
-$s
+say($s);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1355,8 +1448,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
-control: %start -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
 branch_control: %loop -> %cmp
@@ -1376,14 +1470,16 @@ where the exit fires) would give a different sum, so the value pins that the
 
 ```perl
 # source
+use 5.42.0;
 my $i = 0;
 my $s = 0;
 while (1) { last if $i == 4; $s += $i; $i++ }
-$s
+say($s);
 ```
 
 ```behavior
-return: 6
+stdout: 6\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1401,8 +1497,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
-control: %start -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
 branch_control: %loop -> %cmp
@@ -1455,11 +1552,13 @@ Bilateral coverage note: the SAME loop shape with the break NOT taken (`while
 
 ```perl
 # source
-my $x = 0; while ($x < 100) { $x = $x + 1; last if $x == 3; } $x
+use 5.42.0;
+my $x = 0; while ($x < 100) { $x = $x + 1; last if $x == 3; } say($x);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1480,8 +1579,9 @@ context: scalar
 %brk   = Proj(%if, index: 0)
 %xexit = Phi(%x_phi, %x_new, region: %loop) :Int
 %lreg  = Region(%lp1, %brk)
-return %xexit
-control: %start -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%xexit, %nl)
+return %p
 loop_backedge: %x_phi -> %x_new
 branch_control: %loop -> %hcond
 L: GREEN
@@ -1496,19 +1596,23 @@ which still GAPs. This case locks the working simple form.
 
 ```perl
 # source
+use 5.42.0;
 sub helper { 42 }
 my $x = helper();
-$x
+say($x);
 ```
 
 ```behavior
-return: 42
+stdout: 42\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %call   = Call(dispatch_kind: "direct", name: "main::helper") :Int
-return %call
+%nl = Constant("\n") :Str
+%p  = Print(%call, %nl)
+return %p
 L: GREEN
 ```
 
@@ -1528,14 +1632,16 @@ YES → exit before `$s += 3`), so `$s` = 3.
 
 ```perl
 # source
+use 5.42.0;
 my $i = 0;
 my $s = 0;
 while ($i < 5) { $i++; last if $i == 3; $s += $i }
-$s
+say($s);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1556,8 +1662,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
-control: %start -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
 branch_control: %loop -> %cmp
@@ -1577,13 +1684,15 @@ edge is needed — a `next` is a guard on the remainder, not a control transfer.
 
 ```perl
 # source
+use 5.42.0;
 my $s = 0;
 for my $i (1..3) { next if $i == 2; $s += $i }
-$s
+say($s);
 ```
 
 ```behavior
-return: 4
+stdout: 4\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1604,8 +1713,9 @@ context: scalar
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
-return %s_phi
-control: %start -> %loop
+%nl = Constant("\n") :Str
+%p  = Print(%s_phi, %nl)
+return %p
 loop_backedge: %i_phi -> %i_new
 branch_control: %loop -> %cont
 L: GREEN
@@ -1646,14 +1756,16 @@ if/else. With `$c = 1` the true arm runs and `$x < 10` holds, so `$x = 5`.
 
 ```perl
 # source
+use 5.42.0;
 my $c = 1;
 my $x = 0;
 if ($c) { $x = 5 if $x < 10 } else { $x = 1 }
-$x
+say($x);
 ```
 
 ```behavior
-return: 5
+stdout: 5\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1665,7 +1777,9 @@ context: scalar
 %c5    = Constant(5) :Int
 %mtern = TernaryExpr(%lt, %c5, %x0) :Int
 %otern = TernaryExpr(%c1, %mtern, %c1) :Int
-return %otern
+%nl = Constant("\n") :Str
+%p  = Print(%otern, %nl)
+return %p
 L: GREEN
 ```
 
@@ -1751,15 +1865,16 @@ at all.
 
 ```perl
 # source
+use 5.42.0;
 my $c = 0;
 { print "first\n" if $c; print "after\n"; }
 print "end\n";
-1
+say(1);
 ```
 
 ```behavior
-stdout: after\nend\n
-return: Int:1
+stdout: after\nend\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1772,7 +1887,9 @@ context: scalar
 %se = Constant("end\n") :Str
 %pe = Print(%se) :Bool
 %c1 = Constant(1) :Int
-return %c1
+%nl = Constant("\n") :Str
+%p  = Print(%c1, %nl)
+return %p
 L: GREEN
 ```
 
@@ -1788,15 +1905,16 @@ with only the guard's value flipped.
 
 ```perl
 # source
+use 5.42.0;
 my $c = 1;
 { print "first\n" if $c; print "after\n"; }
 print "end\n";
-1
+say(1);
 ```
 
 ```behavior
-stdout: first\nafter\nend\n
-return: Int:1
+stdout: first\nafter\nend\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1809,7 +1927,9 @@ context: scalar
 %se  = Constant("end\n") :Str
 %pe  = Print(%se) :Bool
 %c1  = Constant(1) :Int
-return %c1
+%nl = Constant("\n") :Str
+%p  = Print(%c1, %nl)
+return %p
 L: GREEN
 ```
 
@@ -1831,16 +1951,17 @@ the wrong form.
 
 ```perl
 # source
+use 5.42.0;
 my $n = 5;
 my $x = 0;
 $x = 1 if $n > 0;
 print $x;
-$x
+say($x);
 ```
 
 ```behavior
-stdout: 1
-return: 1
+stdout: 11\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1852,7 +1973,9 @@ context: scalar
 %sel  = TernaryExpr(%cmp, %c1, %c0) :Int
 %co   = Coerce(%sel : Int -> Str) :Str
 %p    = Print(%co) :Bool
-return %sel
+%nl = Constant("\n") :Str
+%p  = Print(%sel, %nl)
+return %p
 L: GREEN
 ```
 
@@ -1865,16 +1988,17 @@ stdout and exit status.
 
 ```perl
 # source
+use 5.42.0;
 my $n = -5;
 my $x = 0;
 $x = 1 if $n > 0;
 print $x;
-$x
+say($x);
 ```
 
 ```behavior
-stdout: 0
-return: 0
+stdout: 00\n
+return: Bool:1
 context: scalar
 ```
 
@@ -1886,6 +2010,8 @@ context: scalar
 %sel  = TernaryExpr(%cmp, %c1, %c0) :Int
 %co   = Coerce(%sel : Int -> Str) :Str
 %p    = Print(%co) :Bool
-return %sel
+%nl = Constant("\n") :Str
+%p  = Print(%sel, %nl)
+return %p
 L: GREEN
 ```

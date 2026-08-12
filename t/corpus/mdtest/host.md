@@ -23,13 +23,15 @@ NUL-terminated; no `%MatchResult` struct is materialized).
 
 ```perl
 # source
+use 5.42.0;
 my $s = "ab-cd";
 $s =~ /(\w+)-(\w+)/;
-$1
+say($1);
 ```
 
 ```behavior
-return: Str:ab
+stdout: ab\n
+return: Bool:1
 context: scalar
 ```
 
@@ -37,7 +39,9 @@ context: scalar
 %s      = Constant("ab-cd") :Str
 %m      = RegexMatch(%s, pattern: "(\w+)-(\w+)") :Bool
 %result = RegexCapture(%m, n: 1) :Str
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -49,12 +53,14 @@ the matched path; the ternary face here is Int (`length($1)`).
 
 ```perl
 # source
+use 5.42.0;
 my $s = "foo";
-$s =~ /(o+)/ ? length($1) : 0
+say($s =~ /(o+)/ ? length($1) : 0);
 ```
 
 ```behavior
-return: 2
+stdout: 2\n
+return: Bool:1
 context: scalar
 ```
 
@@ -65,7 +71,9 @@ context: scalar
 %len    = Length(%cap) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %len, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -78,16 +86,20 @@ the declared return is exact under the runner.
 
 ```perl
 # source
-$ENV{CHALK_G7_TEST}
+use 5.42.0;
+say($ENV{CHALK_G7_TEST});
 ```
 
 ```behavior
-return: Str:hostval
+stdout: hostval\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %result = EnvRead(key: "CHALK_G7_TEST") :Str
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```

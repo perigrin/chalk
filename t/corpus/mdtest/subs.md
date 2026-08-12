@@ -33,18 +33,22 @@ Archive source: `sub helper($x) { return $x + 1; }` (sub-simple.chalk).
 
 ```perl
 # source
+use 5.42.0;
 sub foo { return 1 }
-foo()
+say(foo());
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %call = Call(dispatch_kind: "direct", name: "main::foo") :Int
-return %call
+%nl = Constant("\n") :Str
+%p  = Print(%call, %nl)
+return %p
 L: GREEN
 ```
 
@@ -61,21 +65,25 @@ the Return. This is RF: a direct call to a statically-known target.
 
 ```perl
 # source
+use 5.42.0;
 sub side { 42 }
 my $n = 7;
 side();
-$n
+say($n);
 ```
 
 ```behavior
-return: 7
+stdout: 7\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %call = Call(dispatch_kind: "direct", name: "main::side")
 %n = Constant(7) :Int
-return %n
+%nl = Constant("\n") :Str
+%p  = Print(%n, %nl)
+return %p
 L: GREEN
 ```
 
@@ -191,19 +199,23 @@ hash-cons to one node and lose their order) GAPs loudly — see F6/F7.
 
 ```perl
 # source
+use 5.42.0;
 sub f { my $x = shift; $x + 1 }
 my $r = f(10);
-$r
+say($r);
 ```
 
 ```behavior
-return: 11
+stdout: 11\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %call = Call(dispatch_kind: "direct", name: "main::f") :Int
-return %call
+%nl = Constant("\n") :Str
+%p  = Print(%call, %nl)
+return %p
 L: GREEN
 ```
 
@@ -216,18 +228,22 @@ bilateral counterpart to F5 (F5 computes over the arg; F6 returns it verbatim).
 
 ```perl
 # source
+use 5.42.0;
 sub id { shift }
-id(99)
+say(id(99));
 ```
 
 ```behavior
-return: 99
+stdout: 99\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %call = Call(dispatch_kind: "direct", name: "main::id") :Int
-return %call
+%nl = Constant("\n") :Str
+%p  = Print(%call, %nl)
+return %p
 L: GREEN
 ```
 
@@ -271,18 +287,22 @@ multi-positional shape that still GAPs (like multiple `shift`s).
 
 ```perl
 # source
+use 5.42.0;
 sub f { $_[0] + 1 }
-f(10)
+say(f(10));
 ```
 
 ```behavior
-return: 11
+stdout: 11\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %call = Call(dispatch_kind: "direct", name: "main::f") :Int
-return %call
+%nl = Constant("\n") :Str
+%p  = Print(%call, %nl)
+return %p
 L: GREEN
 ```
 
@@ -305,20 +325,23 @@ still GAPs; see F12.
 
 ```perl
 # source
+use 5.42.0;
 sub f { print "x"; 2 }
 my $r = f();
-$r
+say($r);
 ```
 
 ```behavior
-stdout: x
-return: 2
+stdout: x2\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %call = Call(dispatch_kind: "direct", name: "main::f") :Int
-return %call
+%nl = Constant("\n") :Str
+%p  = Print(%call, %nl)
+return %p
 L: GREEN
 ```
 
@@ -337,21 +360,24 @@ node.
 
 ```perl
 # source
+use 5.42.0;
 sub f { print "callee"; 2 }
 print "caller";
 my $r = f();
-$r
+say($r);
 ```
 
 ```behavior
-stdout: callercallee
-return: 2
+stdout: callercallee2\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %call = Call(dispatch_kind: "direct", name: "main::f") :Int
-return %call
+%nl = Constant("\n") :Str
+%p  = Print(%call, %nl)
+return %p
 L: GREEN
 ```
 
@@ -367,15 +393,16 @@ print independently — matching perl, which runs the sub body twice.
 
 ```perl
 # source
+use 5.42.0;
 sub f { print "y"; 2 }
 my $a = f();
 my $b = f();
-$a + $b
+say($a + $b);
 ```
 
 ```behavior
-stdout: yy
-return: 4
+stdout: yy4\n
+return: Bool:1
 context: scalar
 ```
 
@@ -383,7 +410,9 @@ context: scalar
 %call1 = Call(dispatch_kind: "direct", name: "main::f") :Int
 %call2 = Call(dispatch_kind: "direct", name: "main::f") :Int
 %sum   = Add(%call1, %call2) :Int
-return %sum
+%nl = Constant("\n") :Str
+%p  = Print(%sum, %nl)
+return %p
 L: GREEN
 ```
 
@@ -432,20 +461,23 @@ used.
 
 ```perl
 # source
+use 5.42.0;
 sub f { print "x"; 2 }
 my $r = f();
-3
+say(3);
 ```
 
 ```behavior
-stdout: x
-return: 3
+stdout: x3\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %call = Call(dispatch_kind: "direct", name: "main::f") :Int
 %n    = Constant(3) :Int
-return %n
+%nl = Constant("\n") :Str
+%p  = Print(%n, %nl)
+return %p
 L: GREEN
 ```

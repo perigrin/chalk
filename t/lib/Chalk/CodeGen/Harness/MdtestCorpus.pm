@@ -1148,6 +1148,27 @@ sub _rooted_match {
     my $spec_val = _return_value($spec_return);
     my $real_val = _return_value($real_return);
     return true unless defined $spec_val;   # nothing to enforce
+
+    # A PROGRAM has no return value: its Return's value operand is the Undef
+    # constant (perl compiles a program's trailing statement in void context,
+    # and the last value never reaches the exit status). Its observable
+    # contract is the EFFECT CHAIN, and the Return's control_in is the last
+    # effect — measured, that is the Print for every program shape.
+    #
+    # Rooting at control_in there is not a relaxation: without it, matching a
+    # spec `return %p` against an Undef value operand fails every program case,
+    # and simply DROPPING the return line from the ir block is worse — the
+    # `return true unless defined $spec_val` above would skip this leg
+    # entirely, so 168 cases would go green while checking strictly less. The
+    # wiring coverage that the value walk gave a fragment is what the control
+    # walk gives a program.
+    if (_is_valueless_return($real_val)) {
+        my $real_effect = $real_return->can('control_in')
+            ? $real_return->control_in : undef;
+        return false unless defined $real_effect && blessed($real_effect);
+        $real_val = $real_effect;
+    }
+
     return false unless defined $real_val;
 
     my $ctx = {
@@ -1163,6 +1184,20 @@ sub _return_value {
     my ($n) = @_;
     return undef unless blessed($n) && $n->can('inputs') && $n->inputs->@*;
     return $n->inputs->[0];
+}
+
+# _is_valueless_return($value_node) -> true when the Return carries no value.
+#
+# The producer gives a PROGRAM's Return the Undef constant it falls back to when
+# nothing is on the stack (perl5-son a3f66e9). That is the marker: an Undef
+# CONSTANT in the return position means "this unit produced no value", as
+# opposed to a computed node that happens to be undef-typed.
+sub _is_valueless_return {
+    my ($v) = @_;
+    return false unless blessed($v) && $v->can('operation');
+    return false unless $v->operation eq 'Constant';
+    return false unless $v->can('representation');
+    return (($v->representation // '') eq 'Undef') ? true : false;
 }
 
 # _pad_multi_assigned($spec_return) -> { vardecl_id => 1 }

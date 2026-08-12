@@ -16,15 +16,17 @@ the object is a static `{class*, fields}` struct — runtime-free.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Empty { }
 my $e = Empty->new;
-ref($e)
+say(ref($e));
 ```
 
 ```behavior
-return: Str:Empty
+stdout: Empty\n
+return: Bool:1
 context: scalar
 ```
 
@@ -32,7 +34,9 @@ context: scalar
 %cls    = MOP::Class(name: "Empty")
 %new_e  = Call(dispatch_kind: "method", name: "new", class: "Empty") :Object
 %result = RefType(%new_e) :Str
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -45,6 +49,7 @@ runtime-free.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Animal {
@@ -52,11 +57,12 @@ class Animal {
     method name { return $name }
 }
 my $a = Animal->new(name => 'cat');
-$a->name
+say($a->name);
 ```
 
 ```behavior
-return: Str:cat
+stdout: cat\n
+return: Bool:1
 context: scalar
 ```
 
@@ -68,7 +74,9 @@ context: scalar
 %nval   = Constant("cat") :Str
 %new_a  = Call(%nval, dispatch_kind: "method", name: "new", class: "Animal", param_names: "name") :Object
 %result = Call(%new_a, dispatch_kind: "method", name: "name", class: "Animal") :Str
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -81,6 +89,7 @@ only Int defaults lowered and a Str default GAPped (019f4512).
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Greeter {
@@ -88,11 +97,12 @@ class Greeter {
     method hello { return $msg }
 }
 my $g = Greeter->new;
-$g->hello
+say($g->hello);
 ```
 
 ```behavior
-return: Str:hi
+stdout: hi\n
+return: Bool:1
 context: scalar
 ```
 
@@ -103,7 +113,9 @@ context: scalar
 %mi     = MOP::Method(class: %cls, name: "hello", body: %fa, return_repr: "Str")
 %new_g  = Call(dispatch_kind: "method", name: "new", class: "Greeter") :Object
 %result = Call(%new_g, dispatch_kind: "method", name: "hello", class: "Greeter") :Str
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -116,6 +128,7 @@ offset load, statically resolved. Runtime-free.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Pair {
@@ -123,11 +136,12 @@ class Pair {
     field $right :param :reader;
 }
 my $p = Pair->new(left => 10, right => 20);
-$p->left + $p->right
+say($p->left + $p->right);
 ```
 
 ```behavior
-return: Int:30
+stdout: 30\n
+return: Bool:1
 context: scalar
 ```
 
@@ -141,7 +155,9 @@ context: scalar
 %lr     = Call(%new_p, dispatch_kind: "method", name: "left", class: "Pair")  :Int
 %rr     = Call(%new_p, dispatch_kind: "method", name: "right", class: "Pair") :Int
 %result = Add(%lr, %rr) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -158,6 +174,7 @@ the bug.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Pair {
@@ -165,11 +182,12 @@ class Pair {
     field $right :param(beta)  :reader;
 }
 my $p = Pair->new(alpha => 10, beta => 20);
-$p->left - $p->right
+say($p->left - $p->right);
 ```
 
 ```behavior
-return: Int:-10
+stdout: -10\n
+return: Bool:1
 context: scalar
 ```
 
@@ -183,7 +201,9 @@ context: scalar
 %lr     = Call(%new_p, dispatch_kind: "method", name: "left", class: "Pair")  :Int
 %rr     = Call(%new_p, dispatch_kind: "method", name: "right", class: "Pair") :Int
 %result = Subtract(%lr, %rr) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -195,17 +215,19 @@ call (static, no runtime `@ISA` mutation), so it is runtime-free.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Greeter {
     method greet { return 42 }
 }
 my $g = Greeter->new;
-$g->greet
+say($g->greet);
 ```
 
 ```behavior
-return: Int:42
+stdout: 42\n
+return: Bool:1
 context: scalar
 ```
 
@@ -215,7 +237,9 @@ context: scalar
 %mi     = MOP::Method(class: %cls, name: "greet", body: %body, return_repr: "Int")
 %new_g  = Call(dispatch_kind: "method", name: "new", class: "Greeter") :Object
 %result = Call(%new_g, dispatch_kind: "method", name: "greet", class: "Greeter") :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -228,6 +252,7 @@ typed struct fields, not Scalar SV* slots. Both are runtime-free.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Counter {
@@ -237,11 +262,12 @@ class Counter {
 }
 my $c = Counter->new(n => 10);
 $c->inc;
-$c->val
+say($c->val);
 ```
 
 ```behavior
-return: Int:11
+stdout: 11\n
+return: Bool:1
 context: scalar
 ```
 
@@ -261,7 +287,9 @@ context: scalar
 %inc_call  = Call(%new_c, dispatch_kind: "method", name: "inc", class: "Counter") :Int
 %result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
 control: %inc_call -> %result
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -275,6 +303,7 @@ without ordering both it and the field mutation would be lost (zhi 019f2dee).
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Counter {
@@ -285,11 +314,12 @@ class Counter {
 my $c = Counter->new(n => 10);
 $c->inc;
 $c->inc;
-$c->val
+say($c->val);
 ```
 
 ```behavior
-return: Int:12
+stdout: 12\n
+return: Bool:1
 context: scalar
 ```
 
@@ -302,7 +332,9 @@ context: scalar
 %inc2      = Call(%new_c, dispatch_kind: "method", name: "inc", class: "Counter") :Int
 %result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
 control: %inc1 -> %inc2 -> %result
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -315,16 +347,18 @@ is runtime-free.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Base { method kind { return 'base' } }
 class Child :isa(Base) { }
 my $c = Child->new;
-$c->kind
+say($c->kind);
 ```
 
 ```behavior
-return: Str:base
+stdout: base\n
+return: Bool:1
 context: scalar
 ```
 
@@ -335,7 +369,9 @@ context: scalar
 %child_cls = MOP::Class(name: "Child", parent: "Base")
 %new_c     = Call(dispatch_kind: "method", name: "new", class: "Child") :Object
 %result    = Call(%new_c, dispatch_kind: "method", name: "kind", class: "Child") :Str
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -348,6 +384,7 @@ slots — so it is runtime-free.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Box {
@@ -357,11 +394,12 @@ class Box {
     method double { return $double }
 }
 my $b = Box->new(val => 7);
-$b->double
+say($b->double);
 ```
 
 ```behavior
-return: Int:14
+stdout: 14\n
+return: Bool:1
 context: scalar
 ```
 
@@ -380,7 +418,9 @@ context: scalar
 %seven     = Constant(7) :Int
 %new_b     = Call(%seven, dispatch_kind: "method", name: "new", class: "Box", param_names: "val") :Object
 %result    = Call(%new_b, dispatch_kind: "method", name: "double", class: "Box") :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -398,6 +438,7 @@ pre-branch block.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Counter {
@@ -408,11 +449,12 @@ class Counter {
 my $c = Counter->new(n => 10);
 my $x = 5;
 $c->inc if $x > 3;
-$c->val
+say($c->val);
 ```
 
 ```behavior
-return: Int:11
+stdout: 11\n
+return: Bool:1
 context: scalar
 ```
 
@@ -428,7 +470,9 @@ context: scalar
 %inc       = Call(%new_c, dispatch_kind: "method", name: "inc", class: "Counter") :Int
 %region    = Region(%proj1, %inc)
 %result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 branch_control: %proj0 -> %inc
 L: GREEN
 ```
@@ -446,6 +490,7 @@ stores, leaving the field unmutated (zhi 019f5368: `bump; val` returned 10, not
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Counter {
@@ -455,11 +500,12 @@ class Counter {
 }
 my $c = Counter->new(n => 10);
 $c->bump;
-$c->val
+say($c->val);
 ```
 
 ```behavior
-return: Int:15
+stdout: 15\n
+return: Bool:1
 context: scalar
 ```
 
@@ -490,7 +536,9 @@ context: scalar
 %result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
 control: %bump_call -> %result
 branch_control: %proj0 -> %store_t
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -505,6 +553,7 @@ without it.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Counter {
@@ -514,11 +563,12 @@ class Counter {
 }
 my $c = Counter->new(n => 200);
 $c->bump;
-$c->val
+say($c->val);
 ```
 
 ```behavior
-return: Int:201
+stdout: 201\n
+return: Bool:1
 context: scalar
 ```
 
@@ -549,7 +599,9 @@ context: scalar
 %result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
 control: %bump_call -> %result
 branch_control: %proj1 -> %store_f
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -564,17 +616,19 @@ dispatches it, and the self receiver lowers to the method's %self object pointer
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Widget {
     method flag { 1 }
     method pick { $self->flag() ? 10 : 20 }
 }
-Widget->new->pick
+say(Widget->new->pick);
 ```
 
 ```behavior
-return: Int:10
+stdout: 10\n
+return: Bool:1
 context: scalar
 ```
 
@@ -582,7 +636,9 @@ context: scalar
 %cls    = MOP::Class(name: "Widget")
 %new_w  = Call(dispatch_kind: "method", name: "new", class: "Widget") :Object
 %result = Call(%new_w, dispatch_kind: "method", name: "pick", class: "Widget") :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -598,17 +654,19 @@ This arith-over-call pattern is pervasive in real lib/ methods.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Adder {
     method base { 5 }
     method plus_one { $self->base() + 1 }
 }
-Adder->new->plus_one
+say(Adder->new->plus_one);
 ```
 
 ```behavior
-return: Int:6
+stdout: 6\n
+return: Bool:1
 context: scalar
 ```
 
@@ -616,7 +674,9 @@ context: scalar
 %cls    = MOP::Class(name: "Adder")
 %new_a  = Call(dispatch_kind: "method", name: "new", class: "Adder") :Object
 %result = Call(%new_a, dispatch_kind: "method", name: "plus_one", class: "Adder") :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -670,17 +730,19 @@ GAPs on the loop-carried element stamp -- a follow-up). zhi 019f61ad.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Bag {
     field $items = [10, 20, 30];
     method first { $items->[0] }
 }
-Bag->new->first
+say(Bag->new->first);
 ```
 
 ```behavior
-return: Int:10
+stdout: 10\n
+return: Bool:1
 context: scalar
 ```
 
@@ -688,7 +750,9 @@ context: scalar
 %cls    = MOP::Class(name: "Bag")
 %new_b  = Call(dispatch_kind: "method", name: "new", class: "Bag") :Object
 %result = Call(%new_b, dispatch_kind: "method", name: "first", class: "Bag") :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -705,17 +769,19 @@ fixpoint no-op), and the loader types the element read. zhi 019f6198, 019f61ad.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class Bag {
     field $items = [10, 20, 30];
     method total { my $s = 0; for my $x ($items->@*) { $s = $s + $x } $s }
 }
-Bag->new->total
+say(Bag->new->total);
 ```
 
 ```behavior
-return: Int:60
+stdout: 60\n
+return: Bool:1
 context: scalar
 ```
 
@@ -723,7 +789,9 @@ context: scalar
 %cls    = MOP::Class(name: "Bag")
 %new_b  = Call(dispatch_kind: "method", name: "new", class: "Bag") :Object
 %result = Call(%new_b, dispatch_kind: "method", name: "total", class: "Bag") :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -743,6 +811,7 @@ producer had done nothing wrong.
 
 ```perl
 # source
+use 5.42.0;
 use experimental 'class';
 class Counter {
     field $n :param = 5;
@@ -750,12 +819,12 @@ class Counter {
 }
 my $c = Counter->new;
 print $c->get, "\n";
-1
+say(1);
 ```
 
 ```behavior
-stdout: 5\n
-return: Int:1
+stdout: 5\n1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -767,7 +836,8 @@ context: scalar
 %nl   = Constant("\n") :Str
 %p    = Print(%sg, %nl)
 %one  = Constant(1) :Int
-return %one
-control: %p
+%nl = Constant("\n") :Str
+%p  = Print(%one, %nl)
+return %p
 L: GREEN
 ```

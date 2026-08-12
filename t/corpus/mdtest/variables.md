@@ -27,11 +27,13 @@ read.
 
 ```perl
 # source
-my $x = 1; $x
+use 5.42.0;
+my $x = 1; say($x);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -40,8 +42,9 @@ context: scalar
 %xn   = Constant("$x") :Str
 %vx   = VarDecl(%xn, %one) :Int
 %rx   = PadAccess(%vx, "$x") :Int
-return %rx
-control: %vx
+%nl = Constant("\n") :Str
+%p  = Print(%rx, %nl)
+return %p
 L: GREEN
 ```
 
@@ -61,11 +64,13 @@ served correctly.
 
 ```perl
 # source
-my $x; $x = 1; $x
+use 5.42.0;
+my $x; $x = 1; say($x);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -76,8 +81,9 @@ context: scalar
 %lhs  = PadAccess(%vx, "$x") :Int
 %as   = Assign(%lhs, %one) :Int
 %rx   = PadAccess(%vx, "$x") :Int
-return %rx
-control: %vx -> %as
+%nl = Constant("\n") :Str
+%p  = Print(%rx, %nl)
+return %p
 L: GREEN
 ```
 
@@ -91,14 +97,16 @@ object-struct + field-offset lowering (campaign group G5) models exactly this.
 
 ```perl
 # source
+use 5.42.0;
 use feature 'class';
 no warnings 'experimental::class';
 class _A5Tmp { field $x :param; method val { $x } }
-_A5Tmp->new(x => 42)->val
+say(_A5Tmp->new(x => 42)->val);
 ```
 
 ```behavior
-return: 42
+stdout: 42\n
+return: Bool:1
 context: scalar
 ```
 
@@ -110,7 +118,9 @@ context: scalar
 %v42    = Constant(42) :Int
 %new    = Call(%v42, dispatch_kind: "method", name: "new", class: "_A5Tmp", param_names: "x") :Object
 %result = Call(%new, dispatch_kind: "method", name: "val", class: "_A5Tmp") :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -134,17 +144,21 @@ never read.)
 
 ```perl
 # source
-my $x = 1; $x = 2; $x
+use 5.42.0;
+my $x = 1; $x = 2; say($x);
 ```
 
 ```behavior
-return: 2
+stdout: 2\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %two  = Constant(2) :Int
-return %two
+%nl = Constant("\n") :Str
+%p  = Print(%two, %nl)
+return %p
 L: GREEN
 ```
 
@@ -166,11 +180,13 @@ accurate node for `$x += 2`. The `op` keyword arg distinguishes it from plain
 
 ```perl
 # source
-my $x = 1; $x += 2; $x
+use 5.42.0;
+my $x = 1; $x += 2; say($x);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -184,8 +200,9 @@ context: scalar
 %lhs   = PadAccess(%vx, "$x_l") :Int
 %ca    = CompoundAssign(%lhs, %sum, op: "+=") :Int
 %rx    = PadAccess(%vx, "$x") :Int
-return %rx
-control: %vx -> %ca
+%nl = Constant("\n") :Str
+%p  = Print(%rx, %nl)
+return %p
 L: GREEN
 ```
 
@@ -202,12 +219,14 @@ type.
 
 ```perl
 # source
+use 5.42.0;
 my @q = (1, 2, 3);
-shift @q
+say(shift @q);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -218,8 +237,9 @@ context: scalar
 %arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %mem   = MemStart()
 %sh    = Call(%arr, %mem, dispatch_kind: "builtin", name: "shift") :Int
-return %sh
-control: %sh
+%nl = Constant("\n") :Str
+%p  = Print(%sh, %nl)
+return %p
 L: GREEN
 ```
 
@@ -230,12 +250,14 @@ the array's length. Like `shift`, it is a stamped memory statement effect.
 
 ```perl
 # source
+use 5.42.0;
 my @q = (5, 6);
-pop @q
+say(pop @q);
 ```
 
 ```behavior
-return: 6
+stdout: 6\n
+return: Bool:1
 context: scalar
 ```
 
@@ -245,8 +267,9 @@ context: scalar
 %arr   = ArrayRef(%c5, %c6) :ArrayRef
 %mem   = MemStart()
 %pp    = Call(%arr, %mem, dispatch_kind: "builtin", name: "pop") :Int
-return %pp
-control: %pp
+%nl = Constant("\n") :Str
+%p  = Print(%pp, %nl)
+return %p
 L: GREEN
 ```
 
@@ -260,12 +283,14 @@ counts all four.
 
 ```perl
 # source
+use 5.42.0;
 my @q = (1..4);
-scalar @q
+say(scalar @q);
 ```
 
 ```behavior
-return: 4
+stdout: 4\n
+return: Bool:1
 context: scalar
 ```
 
@@ -276,7 +301,9 @@ context: scalar
 %c4    = Constant(4) :Int
 %arr   = ArrayRef(%c1, %c2, %c3, %c4) :ArrayRef
 %len   = Length(%arr) :Int
-return %len
+%nl = Constant("\n") :Str
+%p  = Print(%len, %nl)
+return %p
 L: GREEN
 ```
 
@@ -291,13 +318,15 @@ flattens to its elements.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1, 2, 3);
 my @b = @a;
-scalar @b
+say(scalar @b);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -307,7 +336,9 @@ context: scalar
 %c3    = Constant(3) :Int
 %arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %len   = Length(%arr) :Int
-return %len
+%nl = Constant("\n") :Str
+%p  = Print(%len, %nl)
+return %p
 L: GREEN
 ```
 
@@ -320,13 +351,15 @@ applied to an array embedded in a list literal.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1, 2, 3);
 my @b = (@a, 4);
-scalar @b
+say(scalar @b);
 ```
 
 ```behavior
-return: 4
+stdout: 4\n
+return: Bool:1
 context: scalar
 ```
 
@@ -337,7 +370,9 @@ context: scalar
 %c4    = Constant(4) :Int
 %arr   = ArrayRef(%c1, %c2, %c3, %c4) :ArrayRef
 %len   = Length(%arr) :Int
-return %len
+%nl = Constant("\n") :Str
+%p  = Print(%len, %nl)
+return %p
 L: GREEN
 ```
 
@@ -349,14 +384,16 @@ returns 2). Multi-array flatten is the general form of A9/A10.
 
 ```perl
 # source
+use 5.42.0;
 my @a = (1, 2);
 my @b = (3, 4);
 my @c = (@a, @b);
-scalar @c
+say(scalar @c);
 ```
 
 ```behavior
-return: 4
+stdout: 4\n
+return: Bool:1
 context: scalar
 ```
 
@@ -367,7 +404,9 @@ context: scalar
 %c4    = Constant(4) :Int
 %arr   = ArrayRef(%c1, %c2, %c3, %c4) :ArrayRef
 %len   = Length(%arr) :Int
-return %len
+%nl = Constant("\n") :Str
+%p  = Print(%len, %nl)
+return %p
 L: GREEN
 ```
 
@@ -383,13 +422,15 @@ literal ArrayRef node) stays a loud producer GAP. zhi 019f5e42.
 
 ```perl
 # source
+use 5.42.0;
 my $r = [1, 2, 3];
 my @b = @$r;
-scalar @b
+say(scalar @b);
 ```
 
 ```behavior
-return: 3
+stdout: 3\n
+return: Bool:1
 context: scalar
 ```
 
@@ -399,7 +440,9 @@ context: scalar
 %c3    = Constant(3) :Int
 %arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %len   = Length(%arr) :Int
-return %len
+%nl = Constant("\n") :Str
+%p  = Print(%len, %nl)
+return %p
 L: GREEN
 ```
 
@@ -516,18 +559,22 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 our $g = 5;
-$g
+say($g);
 ```
 
 ```behavior
-return: 5
+stdout: 5\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %c = Constant(5) :Int
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -545,13 +592,15 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 our $g = 5;
 our $h = 7;
-$g + $h
+say($g + $h);
 ```
 
 ```behavior
-return: 12
+stdout: 12\n
+return: Bool:1
 context: scalar
 ```
 
@@ -559,7 +608,9 @@ context: scalar
 %g   = Constant(5) :Int
 %h   = Constant(7) :Int
 %sum = Add(%g, %h) :Int
-return %sum
+%nl = Constant("\n") :Str
+%p  = Print(%sum, %nl)
+return %p
 L: GREEN
 ```
 
@@ -577,13 +628,15 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 our $g = 5;
 $g = $g + 1;
-$g
+say($g);
 ```
 
 ```behavior
-return: 6
+stdout: 6\n
+return: Bool:1
 context: scalar
 ```
 
@@ -591,7 +644,9 @@ context: scalar
 %g   = Constant(5) :Int
 %one = Constant(1) :Int
 %new = Add(%g, %one) :Int
-return %new
+%nl = Constant("\n") :Str
+%p  = Print(%new, %nl)
+return %p
 L: GREEN
 ```
 
@@ -615,18 +670,22 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 our $g = "hi";
-$g
+say($g);
 ```
 
 ```behavior
-return: hi
+stdout: hi\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %c = Constant("hi") :Str
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -646,19 +705,23 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 our $g = "hi";
 $g = "bye";
-$g
+say($g);
 ```
 
 ```behavior
-return: bye
+stdout: bye\n
+return: Bool:1
 context: scalar
 ```
 
 ```ir
 %c = Constant("bye") :Str
-return %c
+%nl = Constant("\n") :Str
+%p  = Print(%c, %nl)
+return %p
 L: GREEN
 ```
 
@@ -687,12 +750,14 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 our $a = 0.5;
-($a + 0.5) == 1 ? 1 : 0
+say(($a + 0.5) == 1 ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -703,7 +768,9 @@ context: scalar
 %eq     = NumEq(%sum, %one) :Bool
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%eq, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -721,12 +788,14 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 our $a = 0.25;
-($a + 0.5) == 1 ? 1 : 0
+say(($a + 0.5) == 1 ? 1 : 0);
 ```
 
 ```behavior
-return: 0
+stdout: 0\n
+return: Bool:1
 context: scalar
 ```
 
@@ -738,7 +807,9 @@ context: scalar
 %eq     = NumEq(%sum, %one) :Bool
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%eq, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -754,13 +825,15 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 our $a = 0.5;
 $a = 0.25;
-($a + 0.75) == 1 ? 1 : 0
+say(($a + 0.75) == 1 ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -772,7 +845,9 @@ context: scalar
 %eq     = NumEq(%sum, %one) :Bool
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%eq, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```
 
@@ -792,13 +867,15 @@ returned value is only correct if the binding was updated at each definition.
 
 ```perl
 # source
+use 5.42.0;
 our $a = 0.5;
 our $i = 2;
-($a + $i) == 2.5 ? 1 : 0
+say(($a + $i) == 2.5 ? 1 : 0);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -812,6 +889,8 @@ context: scalar
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%eq, %one, %zero) :Int
-return %result
+%nl = Constant("\n") :Str
+%p  = Print(%result, %nl)
+return %p
 L: GREEN
 ```

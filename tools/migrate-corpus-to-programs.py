@@ -2,6 +2,55 @@
 # ABOUTME: observable via say(): rewrites the source, behavior and ir blocks.
 import re, sys
 
+def _subscript_open(text, i):
+    """True when the `{` at text[i] opens a hash SUBSCRIPT, not a block.
+
+    A subscript brace follows a variable, an arrow, or another closing
+    bracket: `$h{a}`, `$r->{a}`, `$x{a}{b}`, `$a[0]{k}`. A block brace
+    follows a keyword, an operator, or nothing.
+    """
+    j = i - 1
+    while j >= 0 and text[j].isspace():
+        j -= 1
+    if j < 0:
+        return False
+    # `$x[0]{k}` / `$x{a}{b}` — chained subscripts. NOT `)`: a paren before a
+    # brace is a CONDITION (`if (1) { 2 }`, `while (1) { ... }`), never a
+    # subscript chain.
+    if text[j] in '}]':
+        return True
+    # `$r->{a}` — an arrow deref.
+    if j >= 1 and text[j - 1:j + 1] == '->':
+        return True
+    # An identifier directly before `{` is a subscript ONLY when that
+    # identifier is a VARIABLE, i.e. it starts with a sigil: `$h{a}` is a
+    # subscript, `sub f { ... }` and `if (1) { ... }` are not. Walk back over
+    # the identifier and check what introduces it.
+    if not (text[j].isalnum() or text[j] == '_'):
+        return False
+    k = j
+    while k >= 0 and (text[k].isalnum() or text[k] == '_'):
+        k -= 1
+    return k >= 0 and text[k] in '$@%'
+
+
+def _closes_block(text):
+    """True when the trailing `}` of TEXT closes a block rather than a subscript."""
+    stack = []
+    for i, ch in enumerate(text):
+        if ch == '{':
+            stack.append('subscript' if _subscript_open(text, i) else 'block')
+        elif ch in '([':
+            stack.append('paren')
+        elif ch in '})]':
+            if stack:
+                kind = stack.pop()
+                # The trailing brace: report what it actually closed.
+                if ch == '}' and i == len(text) - 1:
+                    return kind == 'block'
+    return False
+
+
 def migrate_source(src):
     """Wrap the final bare expression in say(). Returns (new_src, ok)."""
     body = re.sub(r'^#[^\n]*\n', '', src, count=1)   # drop the "# source" marker
@@ -11,8 +60,18 @@ def migrate_source(src):
     if not lines:
         return None, False
     last = lines[-1].strip()
-    # Only the uniform shape: a bare final expression (no trailing ; or }).
-    if last.endswith(';') or last.endswith('}'):
+    # Only the uniform shape: a bare final expression. A trailing `;` means the
+    # line is a statement with no value to observe.
+    #
+    # A trailing `}` is NOT automatically a block close: `$h{a}` and `$r->{a}`
+    # end with the brace that closes a SUBSCRIPT, and rejecting them here
+    # skipped six hash cases (R3, R5, R7, R10, R19, R20) — they stayed
+    # value-fragments, produced no output as programs, and then read as
+    # "behaviour divergence, both sides empty". Only a brace whose matching
+    # `{` opened a BLOCK ends a statement.
+    if last.endswith(';'):
+        return None, False
+    if last.endswith('}') and _closes_block(last):
         return None, False
     # A source line often holds SEVERAL statements
     #   my $c = 1; if ($c) { print "a" } else { print "b" } 1
@@ -23,13 +82,21 @@ def migrate_source(src):
     # Only `{` opens a block; a closing `)` or `]` ends a sub-expression and
     # must NOT cut, or `($a eq $b) ? 1 : 0` becomes `($a eq $b) say(? 1 : 0)`
     # -- the paren close was treated as the end of a statement.
-    depth, cut = 0, 0
+    # A `}` only ends a statement when it closes a BLOCK — the same rule
+    # _closes_block uses. Cutting on a subscript's brace would split
+    # `$h{a} + 1` into `$h{a}` and `say(+ 1)`.
+    depth, cut, kinds = 0, 0, []
     for i, ch in enumerate(last):
-        if ch in '{([':
+        if ch == '{':
+            kinds.append('subscript' if _subscript_open(last, i) else 'block')
+            depth += 1
+        elif ch in '([':
+            kinds.append('paren')
             depth += 1
         elif ch in '})]':
             depth -= 1
-            if depth == 0 and ch == '}':
+            kind = kinds.pop() if kinds else 'paren'
+            if depth == 0 and ch == '}' and kind == 'block':
                 cut = i + 1
         elif ch == ';' and depth == 0:
             cut = i + 1

@@ -22,11 +22,13 @@ back, and the subsequent `return $i` sees the incremented value.
 
 ```perl
 # source
-my $i = 0; ++$i; $i
+use 5.42.0;
+my $i = 0; ++$i; say($i);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -40,8 +42,9 @@ context: scalar
 %lhs   = PadAccess(%vd, "$i_l") :Int    # lhs slot for write-back — distinct from read nodes
 %ca    = CompoundAssign(%lhs, %add, op: "+=") :Int   # write-back: ++$i is a += 1
 %ret_r = PadAccess(%vd, "$i") :Int      # final return read — distinct from RMW read
-return %ret_r
-control: %vd -> %ca
+%nl = Constant("\n") :Str
+%p  = Print(%ret_r, %nl)
+return %p
 L: GREEN
 ```
 
@@ -54,11 +57,13 @@ the return statement reads `$i` after the increment completes in both cases.
 
 ```perl
 # source
-my $i = 0; $i++; $i
+use 5.42.0;
+my $i = 0; $i++; say($i);
 ```
 
 ```behavior
-return: 1
+stdout: 1\n
+return: Bool:1
 context: scalar
 ```
 
@@ -72,7 +77,8 @@ context: scalar
 %lhs   = PadAccess(%vd, "$i_l") :Int    # lhs slot for write-back
 %ca    = CompoundAssign(%lhs, %add, op: "+=") :Int   # write-back: $i++ side-effect is += 1
 %ret_r = PadAccess(%vd, "$i") :Int      # final return read — distinct from RMW read
-return %ret_r
-control: %vd -> %ca
+%nl = Constant("\n") :Str
+%p  = Print(%ret_r, %nl)
+return %p
 L: GREEN
 ```
