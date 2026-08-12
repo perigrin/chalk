@@ -104,8 +104,21 @@ diag('  exactly: no source-text wrap, no epilogue strip, no exit-code');
 diag('  tolerance. Raise the floor below as programs start passing.');
 
 # The floor. It starts where the capability actually is, and may only rise.
-cmp_ok($passing, '>=', 7,
-    'executable-gate floor (7; the four one-liners plus three STOCK FILES. '
+cmp_ok($passing, '>=', 8,
+    'executable-gate floor (8; ALL of them -- `exit N` lowers, which was the last '
+  . 'one. A program has no return value: its observable contract is stdout plus '
+  . 'exit status, and `exit` is how a perl program sets a nonzero status short of '
+  . 'dying. Measured against perl: a trailing expression NEVER reaches the status '
+  . '(`perl -e \'my $x = 5; $x\'` exits 0, as does a trailing 0), and a program '
+  . 'ends on `leave` with its last statement compiled in VOID context -- there is '
+  . 'no implicit exit() of a value. So exit lowers as a TERMINATOR, not a '
+  . 'value-producing call: `call void @exit(i32 N)` then `unreachable`, the same '
+  . 'shape `die` already used with a hardcoded 255. The unreachable is load-bearing '
+  . 'and is pinned by its own case: without it a statement after `exit` still emits '
+  . 'and runs, which matches on exit status while printing too much. Bilateral on '
+  . 'the status (exit 7 AND exit 0 AND a program with no exit at all) -- a lowering '
+  . 'that hardcodes any single constant passes one of those three and fails the '
+  . 'others. Prior: the four one-liners plus three STOCK FILES. '
   . 'pat.t joined cond.t and if.t once a match stopped taking its subject from the '
   . 'op\'s pad target unconditionally (perl5-son 12c1ed5): an unbound `/re/` has no '
   . 'target and reads $_, which was being compiled as a read of pad slot 0. '
@@ -118,8 +131,7 @@ cmp_ok($passing, '>=', 7,
   . 'The Int/Str/Bool/Undef return-value type-tag epilogue -- needed only so the '
   . 'corpus harness can read back a fragment\'s return value -- is suppressed at '
   . 'emission time by program_mode => 1 (defaults off; the corpus reads the tag as '
-  . 'its oracle). The one remaining one-liner, explicit-exit, is blocked in the '
-  . 'backend on an unlowered `exit` Call: "cannot lower op=Call (not in '
-  . 'literal-arithmetic slice)". Raise this as more programs pass.)');
+  . 'its oracle). Every program in this gate now passes; ADD programs to raise it '
+  . 'further rather than waiting for one to unblock.)');
 
 done_testing();

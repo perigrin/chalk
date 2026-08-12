@@ -503,6 +503,15 @@ sub lower_value {
             && defined $node->name && ($node->name eq 'shift' || $node->name eq 'pop')) {
         return $self->_lower_builtin_shift_pop($node);
     }
+    # Call(builtin, exit): set the process exit status and abort. A program has
+    # no return value — its observable contract is stdout plus exit status — so
+    # `exit` is not a value-producing call at all; it terminates the block, the
+    # same shape `die` uses (see _emit_unwind_terminator, which is this with a
+    # hardcoded 255).
+    elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
+            && defined $node->name && $node->name eq 'exit') {
+        return $self->_lower_builtin_exit($node);
+    }
     # RegexMatch: lower a literal pattern to a runtime-free matcher (G6).
     # inputs[0] = subject (Str, i8* + tracked len); pattern is a compile-time
     # literal attr. Produces an i1 matched? (Bool repr).
@@ -3030,6 +3039,45 @@ sub _emit_unwind_terminator {
     $self->_emit("  call void \@exit(i32 255)  ; $why");
     $self->_set_terminator("  unreachable  ; $why");
     return;
+}
+
+# _lower_builtin_exit($node) -> undef (it produces no value)
+#
+# `exit N` sets the process exit status and does not return. It is the same
+# terminator shape as a `die` (_emit_unwind_terminator above) with the status
+# taken from the operand rather than hardcoded to 255.
+#
+# Returns undef because exit HAS no value: perl's `exit` never returns, so any
+# consumer of its "result" is unreachable code. Statements after it are not
+# emitted — the `unreachable` terminator is what makes that true in the IR
+# rather than merely true at runtime.
+sub _lower_builtin_exit {
+    my ($self, $node) = @_;
+
+    my $inputs = $node->inputs // [];
+    # Bare `exit;` is exit(0) in perl. An explicit operand must be an Int: the
+    # status is an i32, and perl truncates anything else to an integer — which
+    # is a coercion the operand should already carry (Part J: the operator
+    # states its operand type). Refuse rather than guess a conversion here.
+    my $status_ref = '0';
+    if (@$inputs) {
+        my $operand = $inputs->[0];
+        my $repr    = _require_repr($operand, 'Call(builtin,exit).status');
+        die "GAP: exit status has repr=$repr; only Int is lowered (perl "
+          . "truncates a non-integer status, which belongs in an explicit "
+          . "Coerce on the operand, not a guess here)."
+            unless $repr eq 'Int';
+        my $i64 = $self->lower_value($operand);
+        # The status is an i32 at the C boundary; an i64 operand truncates.
+        $status_ref = $self->_fresh;
+        $self->_emit("  $status_ref = trunc i64 $i64 to i32  ; exit: status -> i32");
+    }
+
+    $self->{_need_exit} = 1;
+    $self->_emit("  call void \@exit(i32 $status_ref)  ; exit(N)");
+    $self->_set_terminator("  unreachable  ; exit does not return");
+    $self->{cache}{ $node->id } = undef;
+    return undef;
 }
 
 # _process_loop_node: lower a Loop node (while/foreach/postfix-while).
