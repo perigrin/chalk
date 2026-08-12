@@ -1812,3 +1812,80 @@ context: scalar
 return %c1
 L: GREEN
 ```
+
+## D11 postfix if followed by a statement effect
+
+The D4 shape with a `print` AFTER the modifier. The arm is still a pure scalar
+rebind -- the print belongs to the NEXT statement, not to the guarded arm -- so
+this lowers as a value select exactly like D4 does, and the print runs
+unconditionally.
+
+The arm scans (`_arm_has_void_call`, `_arm_has_element_store`) bound their walk
+by op ADDRESS, but every caller passed a B::OP OBJECT; a ref numifies to its SV
+address, which never equals an op address, so the bound never fired and the
+scan ran to the end of the sub. It then found this trailing `print` and reported
+it as an in-arm void call, which routed a plain scalar rebind down the
+memory-SSA branch path and hit the 2b-3 "void call combined with a scalar
+rebind" GAP. The bound is now normalised inside the scans so no caller can pass
+the wrong form.
+
+```perl
+# source
+my $n = 5;
+my $x = 0;
+$x = 1 if $n > 0;
+print $x;
+$x
+```
+
+```behavior
+stdout: 1
+return: 1
+context: scalar
+```
+
+```ir
+%n5   = Constant(5) :Int
+%c0   = Constant(0) :Int
+%cmp  = NumGt(%n5, %c0) :Bool
+%c1   = Constant(1) :Int
+%sel  = TernaryExpr(%cmp, %c1, %c0) :Int
+%co   = Coerce(%sel : Int -> Str) :Str
+%p    = Print(%co) :Bool
+return %sel
+L: GREEN
+```
+
+## D11b the same shape on the FALSE polarity
+
+D11's partner. Without it D11 passes against a modifier that is taken
+unconditionally: with `$n = -5` the guard must NOT fire and `$x` stays 0, while
+the trailing print still runs. Both polarities were verified against perl on
+stdout and exit status.
+
+```perl
+# source
+my $n = -5;
+my $x = 0;
+$x = 1 if $n > 0;
+print $x;
+$x
+```
+
+```behavior
+stdout: 0
+return: 0
+context: scalar
+```
+
+```ir
+%n5   = Constant(-5) :Int
+%c0   = Constant(0) :Int
+%cmp  = NumGt(%n5, %c0) :Bool
+%c1   = Constant(1) :Int
+%sel  = TernaryExpr(%cmp, %c1, %c0) :Int
+%co   = Coerce(%sel : Int -> Str) :Str
+%p    = Print(%co) :Bool
+return %sel
+L: GREEN
+```

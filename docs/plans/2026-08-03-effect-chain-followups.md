@@ -1401,3 +1401,124 @@ failing loudly on a nonzero perl exit, is the shape — the same split
 
 Only after those does the migration land at or above parity, at which point
 steps 3-4 of Part I6 (flip both harnesses, add the non-vacuity check) can run.
+
+---
+
+# Part M — the migration is 2 short, and L3c is not what L1 said it was (2026-08-12)
+
+## M1: re-measured after Part K
+
+The whole corpus migrated with `tools/migrate-corpus-to-programs.py`, then the
+gate run against it:
+
+    gate-green=187  behavior=187  shape=187  invariant=188   floor 189
+    worklist 2
+
+Two short, down from four (Part L1) and six (Part I5). Nothing in Part K was
+aimed at the migration; the movement came from cases whose element reprs it
+typed. The two remaining are named:
+
+| case | reported blocker |
+|---|---|
+| logical L3c | `ElaboratedContext.Region.Phi` reached the backend with NO representation |
+| control-flow D4 | no `main::corpus_case` method (the 2b-3 mixed-effect GAP) |
+
+## M2: L3c is NOT an untyped-merge capability gap
+
+L1 recorded L3c as "a Region Phi over an early-return merge arrives untyped"
+and L3 scheduled it as "one capability, the same family as the DefinedOr join."
+That is the symptom, and the cause is different — measured both ways:
+
+    PRE-migration   sub { my $a=3; my $x = $a // return 99; $x + 1 }
+                    Phi(Constant(99) :Int, Add :Int)      -> Phi :Int    TYPED
+
+    POST-migration  sub { my $a=3; my $x = $a // return 99; say($x+1); }
+                    Phi(Constant(99) :Int, Print :Bool)   -> Phi :undef  UNTYPED
+
+The merge did not become harder to type. `say` changed one arm's TYPE. The early
+exit still returns `99` (Int); the fall-through now returns say's value (Bool)
+instead of `$x + 1` (Int). Perl agrees, measured:
+
+    f(3)     returns 1     # say's return value
+    f(undef) returns 99
+
+So the two exits genuinely have different types and a single-repr Phi cannot
+express that. It is a REPRESENTATION gap, not an inference one.
+
+## M3: widening the join is not the fix — checked before changing anything
+
+The obvious move is to make `_join_repr` a true least-upper-bound: `Int` and
+`Bool` are siblings under `Scalar`, the lattice knows it (`Int <: Scalar` and
+`Bool <: Scalar` both hold), and today's join only tries candidates that are
+themselves ARMS, so it never reaches `Scalar` and returns undef.
+
+That fix is real but buys nothing here. `Scalar` has NO LLVM type —
+`_repr_to_llvm_type` has no arm for it, and there are ~15 explicit
+`GAP: ... repr=Scalar reached LLVM backend` guards. Widening would trade one
+loud GAP for another loud GAP at a different line. The existing comment on
+`_join_repr` already says this: it returns undef "rather than guessing a widened
+type the merge phi cannot express."
+
+A RED was written for the LUB behaviour and DELETED rather than committed: it
+asserted a change that is defensible in isolation but does not lower, and
+landing it would have read as progress while moving nothing.
+
+## M4: what L3c actually needs
+
+Either a Phi that can carry per-arm reprs with a coercion on each incoming edge
+(the Part J rule applied to a merge: the merge states its type and each arm is
+bridged), or a `Scalar` representation the backend can hold — a tagged cell, the
+same {defined, payload} shape `%Slot` already is.
+
+The second is the same question `%Slot` answered for aggregate elements, so it
+is not new machinery so much as an unfinished generalisation. Neither is
+scheduled here; this entry exists so the next reader does not re-run the L3
+plan's "one capability, same family as the DefinedOr join" and find it wrong.
+
+## M5: revised order to parity
+
+1. ~~stderr capture~~ — done.
+2. ~~L3c type the early-return merge~~ — NOT a capability gap; see M2. The case
+   needs a merge that can hold two arm types (M4), which is larger than the
+   migration and should not gate it.
+3. ~~D4, the 2b-3 mixed-effect GAP~~ — CLOSED, and it was not 2b-3 either. See M6.
+
+## M6: D4 was a bounds bug in the arm scan, not a mixed-effect capability gap
+
+D4 was tracked for a long time as the 2b-3 mixed effect — "a void-context arm
+combines a void call with a scalar rebind" — and cited as the shared blocker
+behind `t/base/term.t` and `translate.t`. That is what the GAP message said. It
+was not what the code was doing.
+
+`_arm_has_void_call`, `_arm_has_element_store`, `_arm_has_die` and
+`_arm_has_field_store` bound their walk with `$$op != $stop`, so `$stop` must be
+an op ADDRESS. All eleven call sites passed a B::OP OBJECT. A ref numifies to
+its SV address, which never equals an op address, so the bound never fired and
+every scan ran from the arm to the END OF THE SUB. Measured on
+`$x = 1 if $n > 0; say($x);` the scan visited const, padsv, sassign, null,
+nextstate, pushmark, padsv, say — and returned true on that trailing `say`,
+which belongs to the next statement.
+
+So a pure scalar rebind was classified as a branch with a void-call arm, routed
+down the memory-SSA path, and GAPped as a mixed effect it never had. The GAP
+message was accurate about what the code believed and wrong about the program.
+
+Fixed by normalising the bound INSIDE the predicates (`_op_addr` takes either
+form) rather than at eleven call sites: it is one bug written eleven times, and
+a call-site fix leaves the next caller free to repeat it. The genuine 2b-3 case
+— a void call actually inside the arm — still GAPs, pinned by a bilateral
+subtest so the fix cannot pass by simply disabling the detection.
+
+Result: gate 189 → 191 (new bilateral cases D11/D11b), migration 2 short → 1,
+t/base unchanged at 3/9 (translate.t moves to a different blocker rather than
+passing), executable gate unchanged at 7/8. perl5-son 77a0f32.
+
+The lesson worth keeping is that the GAP message named a CAPABILITY and the
+cause was a two-character bounds error. A GAP that has been quoted across
+several plan documents earns a re-derivation before it is scheduled as work.
+
+## M7: where the migration stands
+
+One case short: L3c, the Int-vs-Bool merge of M2/M4 — a representation limit,
+not a regression. The migration can land at 190 with L3c GAP-declared, or wait
+for a merge that carries per-arm reprs. Not decided here.
