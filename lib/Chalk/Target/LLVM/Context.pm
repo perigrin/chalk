@@ -1127,6 +1127,24 @@ sub _lower_coerce {
     my $from = $node->from_repr;
     my $to   = $node->to_repr;
     my $input_ref = $self->lower_value($node->inputs->[0]);
+    my $ref = $self->_emit_coercion($input_ref, $from, $to, 'Coerce');
+    $self->{cache}{$node->id} = $ref;
+    return $ref;
+}
+
+# _emit_coercion($input_ref, $from, $to, $what) -> the converted SSA ref
+#
+# The conversion itself, independent of any Coerce NODE. A merge
+# (TernaryExpr, &&/||, a Region Phi) needs to bridge an ARM whose repr differs
+# from the merge's own — perl's merges yield one of their OPERANDS, so
+# `$c ? 42 : "hi"` really is an Int on one path and a Str on the other — and
+# there is no Coerce node on that edge to lower. Same rule, same conversions,
+# reached without a node.
+sub _emit_coercion {
+    my ($self, $input_ref, $from, $to, $what) = @_;
+
+    return $input_ref if $from eq $to;   # nothing to bridge
+
     my $ref = $self->_fresh;
 
     if ($from eq 'Int' && $to eq 'Num') {
@@ -1145,8 +1163,8 @@ sub _lower_coerce {
         $self->_emit("  $ref = fcmp une double $input_ref, 0.0  ; Coerce[Num->Bool] truthiness");
     }
     elsif ($to eq 'Bool' && $from eq 'Bool') {
-        # Identity coercion — just pass through.
-        $self->{cache}{$node->id} = $input_ref;
+        # Identity coercion — just pass through. (Also caught by the
+        # $from eq $to guard above; kept so the arm list stays exhaustive.)
         return $input_ref;
     }
     # Coerce(Bool->Num) = 0 (false) or 1 (true): zero-extend i1 to i64.
@@ -1157,6 +1175,17 @@ sub _lower_coerce {
     elsif ($from eq 'Bool' && $to eq 'Int') {
         $self->_emit("  $ref = zext i1 $input_ref to i64  ; Coerce[Bool->Int] 0/1");
     }
+    # Coerce(Undef->Int/Num) = 0. Perl is unambiguous: undef in numeric context
+    # is 0 (`my $u; $u + 0` is 0). An Undef value's SSA ref is its defined bit
+    # (always i1 false), so the numeric face is the constant, not a conversion
+    # of that bit -- zext'ing the bit would also give 0 here, but only by
+    # coincidence, and would be wrong the moment Undef is represented otherwise.
+    elsif ($from eq 'Undef' && ($to eq 'Int' || $to eq 'Num')) {
+        my $zero = $to eq 'Int' ? '0' : '0.0';
+        my $ty   = $to eq 'Int' ? 'i64' : 'double';
+        my $op   = $to eq 'Int' ? 'add' : 'fadd';
+        $self->_emit("  $ref = $op $ty $zero, $zero  ; $what\[Undef->$to] = 0");
+    }
     # Coerce(Bool->Str) = select between "" and "1" string-face constants.
     # The Str representation is not fully modelled yet (G3), but the Bool string-face
     # is only two constant strings and can be lowered as a select i1 between them.
@@ -1166,9 +1195,7 @@ sub _lower_coerce {
     # alongside the pointer it returns; a consumer that slices `len` bytes off
     # an unrecorded pointer would emit garbage.
     elsif ($to eq 'Str') {
-        $self->{cache}{ $node->id } =
-            $self->_emit_to_str($from, $input_ref, "Coerce[$from->Str]");
-        return $self->{cache}{ $node->id };
+        return $self->_emit_to_str($from, $input_ref, "$what\[$from->Str]");
     }
     # Coerce(Str->Num): perl leading-numeric rule.
     # "3abc"->3, "abc"->0, " 42"->42, "3.14x"->3.14, ""->0, ".5"->0.5,
@@ -1231,10 +1258,9 @@ sub _lower_coerce {
         die "GAP: Coerce involving Scalar reached LLVM backend — cannot lower runtime-free.";
     }
     else {
-        die "LLVM backend: cannot lower Coerce[$from->$to]";
+        die "LLVM backend: cannot lower $what\[$from->$to]";
     }
 
-    $self->{cache}{$node->id} = $ref;
     return $ref;
 }
 
@@ -1973,6 +1999,21 @@ sub _lower_ternary {
     my $true_repr = _require_repr($true_node, 'TernaryExpr.true_branch');
     my $fals_repr = _require_repr($fals_node, 'TernaryExpr.false_branch');
 
+    # A merge yields one of its ARMS, so `$c ? 42 : "hi"` really is an Int on
+    # one path and a Str on the other. The select is ONE instruction and needs
+    # ONE machine type, so a non-conforming arm is bridged by a coercion to the
+    # node's own repr -- which the loader already set to the JOIN of the arms.
+    # This is the operator rule (Part J) applied to a merge: the merge states
+    # its type, the arms conform. NOT a wider repr on the node; the arms are
+    # what disagree, and widening the node would leave the select ill-typed.
+    if (defined $repr && $true_repr ne $fals_repr) {
+        $true_ref  = $self->_emit_coercion($true_ref, $true_repr, $repr,
+                                           'TernaryExpr.true_branch');
+        $fals_ref  = $self->_emit_coercion($fals_ref, $fals_repr, $repr,
+                                           'TernaryExpr.false_branch');
+        ($true_repr, $fals_repr) = ($repr, $repr);
+    }
+
     # Both arms statically Undef (a discarded if/else field-mutation residual):
     # the result is Undef regardless of the guard. The Undef repr is the i1
     # defined-bit (always false), so short-circuit to a constant 0 -- no select.
@@ -2120,10 +2161,31 @@ sub _lower_and {
     my $lhs_repr = $lhs_node->representation;
     my $rhs_repr = $rhs_node->representation;
 
+    # `&&` yields one of its OPERANDS, not a boolean -- measured:
+    # `my $a=5; my $b="hi"; $a && $b` is "hi", and with $a=0 it is 0. So the two
+    # arms genuinely differ in type, and the merge phi (ONE instruction, ONE
+    # machine type) needs them bridged. The merge repr is the node's own when it
+    # has one; otherwise the arms must already agree and
+    # _shortcircuit_phi_repr GAPs.
+    #
+    # The bridge must be emitted where each value is LIVE: the LHS in the entry
+    # block, the RHS in the rhs block. Coercing both after _new_block($end) --
+    # the obvious place, next to the phi -- would reference the LHS in a block
+    # it never flowed to, which is invalid IR rather than a wrong answer.
+    my $merge_repr = (defined $repr && defined $lhs_repr && defined $rhs_repr
+                        && $lhs_repr ne $rhs_repr) ? $repr : undef;
+
     # Lower the LHS in the current block, then test its truthiness.
     my $lhs_ref    = $self->lower_value($lhs_node);
-    my $entry_label = $self->_current_block_label;
     my $cond = $self->_shortcircuit_i1_cond($lhs_ref, $lhs_repr, 'And', 'LHS');
+    if (defined $merge_repr) {
+        $lhs_ref = $self->_emit_coercion($lhs_ref, $lhs_repr, $merge_repr,
+                                         'And.LHS');
+    }
+    # AFTER the coercion: its instructions land in this block, and a Str
+    # conversion opens continuation blocks, so the phi's incoming label must be
+    # whatever block the value actually ends up in.
+    my $entry_label = $self->_current_block_label;
 
     # Allocate block labels.
     my $rhs_label = $self->_fresh_label('and.rhs.');
@@ -2136,6 +2198,10 @@ sub _lower_and {
     # side-effect-only RHS (a print) is still checked against the phi type below.
     $self->_new_block($rhs_label);
     my $rhs_ref       = $self->lower_value($rhs_node);
+    if (defined $merge_repr) {
+        $rhs_ref = $self->_emit_coercion($rhs_ref, $rhs_repr, $merge_repr,
+                                         'And.RHS');
+    }
     my $rhs_end_label = $self->_current_block_label;   # may differ if rhs has its own blocks
     $self->_set_terminator("  br label %$end_label  ; And: rhs falls through to end");
 
@@ -2144,11 +2210,11 @@ sub _lower_and {
     # short-circuit form, so derive it from the operands. Int && Int -> i64, Bool &&
     # Bool -> i1. Mixed operand reprs (Int LHS, Bool RHS) would need a phi over two
     # machine types, which is invalid LLVM: GAP loudly rather than emit a bad phi.
-    my $phi_repr = $self->_shortcircuit_phi_repr($repr, $lhs_repr, $rhs_repr, 'And');
+    my $phi_repr = defined $merge_repr ? $merge_repr
+        : $self->_shortcircuit_phi_repr($repr, $lhs_repr, $rhs_repr, 'And');
     $self->_new_block($end_label);
-    my $result = $self->_fresh;
-    my $llvm_type = _repr_to_llvm_type($phi_repr);
-    $self->_emit("  $result = phi $llvm_type [ $lhs_ref, %$entry_label ], [ $rhs_ref, %$rhs_end_label ]  ; And: phi");
+    my $result = $self->_emit_shortcircuit_phi($phi_repr, $lhs_ref, $entry_label,
+                                               $rhs_ref, $rhs_end_label, 'And');
 
     $self->{cache}{$node->id} = $result;
     return $result;
@@ -2172,10 +2238,20 @@ sub _lower_or {
     my $lhs_repr = $lhs_node->representation;
     my $rhs_repr = $rhs_node->representation;
 
+    # `||` yields one of its OPERANDS, so its arms can differ in type. Same rule
+    # and same block-placement constraint as _lower_and: the bridge is emitted
+    # where each value is LIVE, not next to the phi.
+    my $merge_repr = (defined $repr && defined $lhs_repr && defined $rhs_repr
+                        && $lhs_repr ne $rhs_repr) ? $repr : undef;
+
     # Lower the LHS in the current block, then test its truthiness.
     my $lhs_ref    = $self->lower_value($lhs_node);
-    my $entry_label = $self->_current_block_label;
     my $cond = $self->_shortcircuit_i1_cond($lhs_ref, $lhs_repr, 'Or', 'LHS');
+    if (defined $merge_repr) {
+        $lhs_ref = $self->_emit_coercion($lhs_ref, $lhs_repr, $merge_repr,
+                                         'Or.LHS');
+    }
+    my $entry_label = $self->_current_block_label;
 
     # Allocate block labels.
     my $rhs_label = $self->_fresh_label('or.rhs.');
@@ -2187,19 +2263,55 @@ sub _lower_or {
     # RHS block: evaluate the RHS, then jump to end.
     $self->_new_block($rhs_label);
     my $rhs_ref       = $self->lower_value($rhs_node);
+    if (defined $merge_repr) {
+        $rhs_ref = $self->_emit_coercion($rhs_ref, $rhs_repr, $merge_repr,
+                                         'Or.RHS');
+    }
     my $rhs_end_label = $self->_current_block_label;
     $self->_set_terminator("  br label %$end_label  ; Or: rhs falls through to end");
 
     # End block: phi merges lhs (truthy path) and rhs (falsy path). Same phi-type
     # rule as _lower_and: the operands' common repr, or a concrete node repr; a
     # mismatch GAPs loudly.
-    my $phi_repr = $self->_shortcircuit_phi_repr($repr, $lhs_repr, $rhs_repr, 'Or');
+    my $phi_repr = defined $merge_repr ? $merge_repr
+        : $self->_shortcircuit_phi_repr($repr, $lhs_repr, $rhs_repr, 'Or');
     $self->_new_block($end_label);
-    my $result = $self->_fresh;
-    my $llvm_type = _repr_to_llvm_type($phi_repr);
-    $self->_emit("  $result = phi $llvm_type [ $lhs_ref, %$entry_label ], [ $rhs_ref, %$rhs_end_label ]  ; Or: phi");
+    my $result = $self->_emit_shortcircuit_phi($phi_repr, $lhs_ref, $entry_label,
+                                               $rhs_ref, $rhs_end_label, 'Or');
 
     $self->{cache}{$node->id} = $result;
+    return $result;
+}
+
+# _emit_shortcircuit_phi($repr, $lhs, $lhs_lbl, $rhs, $rhs_lbl, $tag) -> ref
+#
+# The merge phi for a short-circuit (&&/||). Shared by _lower_and and
+# _lower_or, which differ only in which arm is the short-circuit path.
+#
+# A Str is a (ptr, len) PAIR, so merging two strings needs TWO phis: one over
+# the pointers and one over the lengths. Without the length phi the result
+# pointer has no tracked length and the first consumer GAPs ("Print of a Str
+# arg whose length is not tracked") -- which is how this surfaced, since a
+# same-repr Str && Str never reached here before the mixed-arm coercion made
+# Str a possible merge type.
+sub _emit_shortcircuit_phi {
+    my ($self, $repr, $lhs_ref, $lhs_label, $rhs_ref, $rhs_label, $tag) = @_;
+
+    my $result    = $self->_fresh;
+    my $llvm_type = _repr_to_llvm_type($repr);
+    $self->_emit("  $result = phi $llvm_type [ $lhs_ref, \%$lhs_label ], [ $rhs_ref, \%$rhs_label ]  ; $tag: phi");
+
+    if ($repr eq 'Str') {
+        my $lhs_len = $self->{_str_len_table}{$lhs_ref};
+        my $rhs_len = $self->{_str_len_table}{$rhs_ref};
+        die "GAP: $tag merges Str arms but an arm's length is not tracked in "
+          . "_str_len_table — a Str is a (ptr,len) pair and the merge needs both."
+            unless defined $lhs_len && defined $rhs_len;
+        my $len = $self->_fresh;
+        $self->_emit("  $len = phi i64 [ $lhs_len, \%$lhs_label ], [ $rhs_len, \%$rhs_label ]  ; $tag: phi len");
+        $self->{_str_len_table}{$result} = $len;
+    }
+
     return $result;
 }
 

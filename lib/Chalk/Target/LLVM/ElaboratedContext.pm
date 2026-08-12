@@ -226,11 +226,28 @@ sub _wire_region_phis_with_preblock {
               . "is undef (variable bound in one branch only) — cannot lower "
               . "a one-sided merge value runtime-free.";
         }
+        # A merge yields one of its ARMS, so the arms can differ in machine
+        # type: an early-return `return 99` (Int) merging with a fall-through
+        # whose value is a print's Bool produces
+        #   phi i64 [ %int, ... ], [ %i1, ... ]
+        # which lli rejects outright. The arms are bridged to the Phi's own
+        # repr — the operator rule (Part J) applied to a merge, the same fix
+        # _lower_ternary and _lower_and/_lower_or use.
+        #
+        # The coercion must land in the ARM's block, where its value is live,
+        # which is exactly where _lower_arm_in_tail leaves the emitter. Doing
+        # it in pass 2 (next to the phi) would reference each arm from the
+        # merge block, which is invalid IR rather than a wrong answer.
+        my $phi_repr = $phi_node->representation;
         my ($then_val, $else_val);
         ($then_val, $then_label) =
             $self->_lower_arm_in_tail($inputs->[0], $then_label, $then_vars);
+        $then_val = $self->_coerce_arm($inputs->[0], $then_val, $phi_repr,
+                                       $then_label, 'Region.Phi.then');
         ($else_val, $else_label) =
             $self->_lower_arm_in_tail($inputs->[1], $else_label, $else_vars);
+        $else_val = $self->_coerce_arm($inputs->[1], $else_val, $phi_repr,
+                                       $else_label, 'Region.Phi.else');
         push @wired, [$phi_node, $then_val, $else_val];
     }
 
@@ -245,6 +262,29 @@ sub _wire_region_phis_with_preblock {
         $self->{cache}{ $phi_node->id } = $result;
     }
     return ($then_label, $else_label);
+}
+
+# _coerce_arm($arm_node, $arm_val, $phi_repr, $arm_label, $what) -> $val
+#
+# Bridge one merge arm to the Phi's repr, emitting into the ARM's block. A
+# no-op when the arm already conforms, when the Phi has no repr (that stays
+# _require_repr's loud GAP in pass 2), or when the arm's own repr is unknown.
+sub _coerce_arm {
+    my ($self, $arm_node, $arm_val, $phi_repr, $arm_label, $what) = @_;
+
+    return $arm_val unless defined $phi_repr && defined $arm_val;
+    return $arm_val unless ref($arm_node) && $arm_node->can('representation');
+    my $arm_repr = $arm_node->representation;
+    return $arm_val unless defined $arm_repr && $arm_repr ne $phi_repr;
+
+    my $idx = $self->_find_block_idx($arm_label);
+    return $arm_val unless defined $idx;
+    my $saved = $self->{current_idx};
+    $self->{current_idx} = $idx;
+    my $ref = Chalk::Target::LLVM::Context::_emit_coercion(
+        $self, $arm_val, $arm_repr, $phi_repr, $what);
+    $self->{current_idx} = $saved;
+    return $ref;
 }
 
 # _lower_arm_in_tail($arm_node, $tail_label, $var_snapshot) -> ($val, $end_label)

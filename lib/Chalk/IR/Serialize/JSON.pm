@@ -967,14 +967,23 @@ my %_COMPUTED_REPR = (
     # repr from elsewhere), and surfacing the moment a Str context needed to
     # coerce it: "Print of a representation-less arg".
     Phi => 'join', TernaryExpr => 'join', DefinedOr => 'join',
-    # And (&&) / Or (||) RETURN ONE OF THEIR OPERANDS (`$a && $b` is $a or $b, not a
-    # fresh boolean), so the result repr is the operands' -- and both operands must
-    # share a machine type for the backend's merge phi. The 'same' rule requires the
-    # two operand reprs to agree and yields that repr. This types Bool && Bool -> Bool
-    # (a comparison guard && a print, the cond.t idiom) as well as Int && Int -> Int
-    # -- unlike the 'join' rule, which cannot widen Bool: Bool is a sibling of
-    # Str under Scalar, not a point on the Int <: Num <: Str chain.
-    And => 'same', Or => 'same',
+    # And (&&) / Or (||) RETURN ONE OF THEIR OPERANDS (`$a && $b` is $a or $b, not
+    # a fresh boolean), so the result repr is the JOIN of the operands -- the same
+    # rule Phi and TernaryExpr use, because all three are merges of operands.
+    #
+    # This was 'same' (require the two reprs to agree, yield that repr) because
+    # the backend's merge phi is ONE instruction needing ONE machine type, and a
+    # mismatched pair could not be lowered at all. It can now: the backend
+    # bridges a non-conforming ARM with a coercion to the node's repr, so the
+    # join is what tells it WHICH type to bridge to. Measured, 'join' is a strict
+    # superset of 'same' here -- it types Bool&&Bool -> Bool and Int&&Int -> Int
+    # exactly as before, and additionally types Int&&Str -> Str and
+    # Int&&Num -> Num, which 'same' left untyped.
+    #
+    # Bool mixed with a chain member (Int&&Bool, Bool&&Str) still joins to undef
+    # -- Bool is a sibling of the Int <: Num <: Str chain under Scalar, not a
+    # point on it -- and stays a loud GAP, as it did under 'same'.
+    And => 'join', Or => 'join',
     Add => 'join', Subtract => 'join', Multiply => 'join', Negate => 'join',
     Divide => 'Num', Power => 'Num', Modulo => 'Int',
     BitAnd => 'Int', BitOr => 'Int', BitXor => 'Int',

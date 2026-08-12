@@ -85,24 +85,47 @@ for my $op (qw(And Or)) {
             'the merge phi is i1, not a zero-extended i64');
     };
 
-    # The real-bug guards: each of these emitted invalid IR before the
-    # phi-type fallback was removed.
-    for my $rhs_repr (qw(Bool Num Str)) {
-        subtest "$op(Int, $rhs_repr) GAPs: phi cannot span two machine types" => sub {
+    # Mismatched operand reprs used to GAP unconditionally: the merge phi is one
+    # instruction needing one machine type, and nothing bridged the arms. They
+    # are now COERCED to the node's repr, so the rule is no longer "a mismatch
+    # GAPs" but "a mismatch the node's repr can bridge lowers; one it cannot
+    # still GAPs".
+    #
+    # The node repr is what the LOADER computes -- the JOIN of the operands --
+    # so these pass the join here rather than a hand-picked value. Setting a
+    # repr the join would never produce (e.g. Int for an Int/Bool pair) tests an
+    # input the pipeline cannot present, and it was that hand-set value, not the
+    # coercion, which made the old fallback emit `phi i64 [ ..., double ]`.
+    for my $case (['Num', 'Num'], ['Str', 'Str']) {
+        my ($rhs_repr, $join) = @$case;
+        subtest "$op(Int, $rhs_repr) lowers: the arms coerce to the join ($join)" => sub {
             my $f   = Chalk::IR::NodeFactory->new;
-            my $rhs = $rhs_repr eq 'Bool'
-                ? make_bool_node($f, 1)
-                : make_const($f, $rhs_repr, $rhs_repr eq 'Num' ? 2.5 : 'x');
-            # node_repr is deliberately set: it must NOT rescue a real mismatch.
+            my $rhs = make_const($f, $rhs_repr, $rhs_repr eq 'Num' ? 2.5 : 'x');
             my ($ll, $err) = lower_binop($f, $op,
-                make_const($f, 'Int', 1), $rhs, 'Int');
-            ok(defined $err && length $err,
-                "$op(Int,$rhs_repr) dies rather than emitting a mismatched phi")
-                or diag('no error; ir: ' . substr($ll // '', 0, 200));
-            like($err // '', qr/mismatched reprs/,
-                'the GAP names the repr mismatch');
+                make_const($f, 'Int', 1), $rhs, $join);
+            ok(!defined $err || !length $err,
+                "$op(Int,$rhs_repr) lowers with the joined repr")
+                or diag("error: $err");
+            my $ty = $join eq 'Num' ? 'double' : 'i8\*';
+            like($ll // '', qr/phi $ty /,
+                "the merge phi is $ty -- both arms bridged to the join");
         };
     }
+
+    # Bool is a SIBLING of the Int <: Num <: Str chain, not a point on it, so an
+    # Int/Bool pair has NO join and the loader leaves the node untyped. With no
+    # repr to bridge to, this still GAPs -- verified end-to-end, not just here:
+    # `my $c = scalar(@a); my $v = $c && (2 < 1);` GAPs as a whole program.
+    subtest "$op(Int, Bool) GAPs: no join, so no repr to bridge to" => sub {
+        my $f = Chalk::IR::NodeFactory->new;
+        my ($ll, $err) = lower_binop($f, $op,
+            make_const($f, 'Int', 1), make_bool_node($f, 1), undef);
+        ok(defined $err && length $err,
+            "$op(Int,Bool) dies rather than emitting a mismatched phi")
+            or diag('no error; ir: ' . substr($ll // '', 0, 200));
+        like($err // '', qr/mismatched reprs/,
+            'the GAP names the repr mismatch');
+    };
 
     subtest "$op(Num, Num) GAPs: Num is not an i1 branch condition" => sub {
         my $f = Chalk::IR::NodeFactory->new;

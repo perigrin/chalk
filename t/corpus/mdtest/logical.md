@@ -190,6 +190,15 @@ into the single-exit Return. Was a silent miscompile (the fallback return was
 dropped and `$a // return 99` degenerated to `DefinedOr($a, $a)`); zhi
 019f26a5.
 
+As a PROGRAM the single-exit merge joins the early `return 99` with the
+fall-through, and those arms have different machine types. The Region Phi
+bridges each arm to the Phi's own repr with a coercion emitted in that ARM'S
+block — the operator rule (Part J) applied to a merge, shared with TernaryExpr
+and `&&`/`||`. Note that `return` at a program's top level is a RUNTIME error
+(`perl -e 'return 99'` exits 255), so this program runs at all only because its
+guard is constant-false and the return is never reached; the merge is still
+built and still has to lower.
+
 ```perl
 # source
 use 5.42.0;
@@ -213,39 +222,14 @@ context: scalar
 %c99 = Constant(99) :Int
 %c1  = Constant(1) :Int
 %add = Add(%a, %c1) :Int
-%reg = Region(%p1)
-%phi = Phi(%c99, %add) :Int
-%nl = Constant("\n") :Str
-%p  = Print(%phi, %nl)
-return %p
-L: GAP
-
-GAP as a PROGRAM (it was GREEN as a value fragment). The migration changed what
-this case asks, and the new question is one Chalk cannot yet answer.
-
-As a fragment the two exits were both Int -- the early `return 99` and the
-fall-through `$x + 1` -- so the merge Phi typed as Int. Wrapping the trailing
-value in `say(...)` makes the fall-through arm carry SAY'S return value (Bool)
-while the early exit still carries 99 (Int), so the Phi merges Int with Bool.
-Perl agrees the two exits differ, measured: `f(3)` returns 1, `f(undef)`
-returns 99.
-
-Chalk's Phi carries ONE representation, so it cannot express a merge whose arms
-differ. `_join_repr` correctly declines -- Bool is a sibling of the numeric
-chain under Scalar, not a point on it -- and the node reaches the backend
-untyped. Widening to `Scalar` is not the fix: `Scalar` has no LLVM type
-(`_repr_to_llvm_type` has no arm, and ~14 sites GAP on it), so it would trade
-one loud GAP for another.
-
-Closing it needs a Phi that carries PER-ARM representations with a coercion on
-each incoming edge -- the Part J operator rule applied to a merge. That is
-tracked, is independent of this migration, and is NOT the migration's blocker:
-`_shortcircuit_phi_repr` GAPs on the same root for `&&`/`||` with no wrapper
-involved, so the capability is needed regardless.
-
-Note also that `return` at a program's top level is a RUNTIME error
-(`perl -e 'return 99'` exits 255), so this program only runs at all because its
-guard is constant-false and the return is never reached.
+%co  = Coerce(%add : Int -> Str) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%co, %nl)
+%reg = Region(%p)
+%und = Constant(undef) :Undef
+%phi = Phi(%c99, %und) :Int
+return %phi
+L: GREEN
 ```
 
 ## L5 void print in a true && arm
