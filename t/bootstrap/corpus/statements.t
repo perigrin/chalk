@@ -255,8 +255,13 @@ subtest 'constructive proof: bare bool false (2<1) builds and lowers to Bool:' =
 
 subtest 'adversarial guard: Bool lowered as raw Int FAILS oracle compare' => sub {
     use File::Temp qw(tempfile);
-    # Source: `!5` => Bool:false. If we return a plain Int 0 instead of Bool, we get
-    # Int:0 from lli but Bool: from perl — tag mismatch => FAIL.
+    # Source: `say(!5)` => the empty string, so stdout is a bare newline. If the
+    # graph returns a plain Int 0 instead, lli prints "0" — a stdout mismatch.
+    #
+    # Migrated to the PROGRAM contract along with the corpus: a case states its
+    # own output with say/print. In its old fragment form (`!$a` bare, asserted
+    # via `return: Bool:`) it printed nothing as a program and the guard went
+    # vacuous.
     my $bad_md = <<'END_MD';
 # Adversarial
 
@@ -264,19 +269,23 @@ subtest 'adversarial guard: Bool lowered as raw Int FAILS oracle compare' => sub
 
 ```perl
 # source
+use 5.42.0;
 my $a = 5;
-!$a
+say(!$a);
 ```
 
 ```behavior
-return: Bool:
+stdout: \n
 context: scalar
 ```
 
 ```ir
 %c5   = Constant(5) :Int
 %zero = Constant(0) :Int
-return %zero
+%co   = Coerce(%zero : Int -> Str) :Str
+%nl   = Constant("\n") :Str
+%p    = Print(%co, %nl)
+return %p
 L: GREEN
 ```
 END_MD

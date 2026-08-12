@@ -26,7 +26,6 @@ use Chalk::MOP;
 
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::BehaviorRecord;
-use Chalk::CodeGen::Harness::TypeTag;
 
 # The Perl 5.42.0 binary used as the oracle.
 my $PERL_BIN = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
@@ -815,7 +814,8 @@ sub _run_behavior_check {
 
     # Non-empty: parse and assert
     my $declared = _parse_behavior_block($behavior_text);
-    my ($match, $reason) = _behavior_matches($actual_val, $declared);
+    my $is_gap   = __PACKAGE__->parse_l_verdict_from_ir($case->{ir} // '') eq 'GAP';
+    my ($match, $reason) = _behavior_matches($actual_val, $declared, $is_gap);
     if ($match) {
         return { verdict => 'PASS', actual => $actual_val, declared => $declared };
     } else {
@@ -827,11 +827,20 @@ sub _run_behavior_check {
     }
 }
 
-# _run_expr_under_perl($source) -> ($value_string, $error_or_undef)
+# _run_expr_under_perl($source) -> ($stdout, $error_or_undef, $exit)
 #
-# Wraps the source snippet in a minimal program that evaluates it in scalar
-# context and prints the result.  Returns (result_string, undef) on success,
-# or (undef, error_message) on failure.
+# Runs the case AS A PROGRAM and returns what it printed. A case states its own
+# output with say/print; there is no wrapper and no type-tag epilogue.
+#
+# This used to wrap the source in `my $_result = do { ... }` plus a tagging
+# fragment, which gave the snippet a VALUE CONTEXT that a program's top level
+# does not have -- perl discards a bare trailing expression in void context --
+# so this harness measured a contract no executable has. son-corpus-wide.t was
+# flipped first; this is the same flip for the per-topic runners.
+#
+# STDERR is captured SEPARATELY rather than folded in with 2>&1: perl's warnings
+# are not program output, and chalk emits none, so folding made any
+# warning-producing case impossible to match.
 sub _run_expr_under_perl {
     my ($source) = @_;
 
@@ -839,35 +848,21 @@ sub _run_expr_under_perl {
     (my $clean_source = $source) =~ s/^\s*#[^\n]*\n//gm;
     $clean_source =~ s/^\s+|\s+$//g;
 
-    # The oracle emits a TYPE-TAGGED canonical string so Bool is distinguishable
-    # from its Str coercion (is_bool discriminates). Tags: Bool:1/Bool: Int:N
-    # Num:%g Str:<val> Undef: -- lli must print the same tag from its known repr.
-    # The tagging logic is the canonical rule from Chalk::CodeGen::Harness::TypeTag.
-    my $tag_fragment = Chalk::CodeGen::Harness::TypeTag::oracle_perl_fragment();
-    my $program = <<"END_PROGRAM";
-use 5.42.0;
-use utf8;
-
-my \$_result = do { $clean_source };
-
-$tag_fragment
-END_PROGRAM
-
     my ($fh, $tmpfile) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     binmode $fh, ':utf8';
-    print $fh $program;
+    print $fh $clean_source, "\n";
     close $fh;
 
-    my $stdout = qx($PERL_BIN $tmpfile 2>&1);
+    my ($efh, $etmp) = tempfile(SUFFIX => '.err', UNLINK => 1);
+    close $efh;
+    my $stdout = qx($PERL_BIN $tmpfile 2>$etmp);
     my $exit   = $? >> 8;
-
-    if ($exit != 0) {
-        chomp $stdout;
-        return (undef, "exit $exit: $stdout");
-    }
-
     chomp $stdout;
-    return ($stdout, undef);
+
+    # A nonzero exit is a RESULT (`exit 4`, `die`), not a harness failure -- the
+    # same rule son-corpus-wide.t now uses. It is returned for comparison; only
+    # a failure to RUN is an error.
+    return ($stdout, undef, $exit);
 }
 
 # _parse_behavior_block($text) -> \%declared
@@ -897,53 +892,54 @@ sub _parse_behavior_block {
 #     heuristic as the oracle (without is_bool, so plain numbers become Int:/Num:,
 #     and plain strings become Str:). This keeps existing behavior blocks green.
 sub _behavior_matches {
-    my ($actual, $declared) = @_;
+    my ($actual, $declared, $is_gap) = @_;
 
-    my $declared_return = $declared->{return};
-    unless (defined $declared_return) {
-        return (true, '');  # no return assertion
-    }
-
-    # Compute a tag for the declared return value if it is not already tagged.
-    my $decl_tagged = _infer_tag($declared_return);
-
-    # stdout: prefix — a print statement writes to stdout BEFORE the oracle
-    # fragment prints the return tag, so the actual output is <stdout><tag>. When
-    # a behavior block declares a stdout: line, the expected actual is the cooked
-    # declared stdout followed by the return tag. (Escapes are cooked so `stdout:
-    # hi\n` matches the real newline; the oracle chomps a single trailing newline,
-    # so we chomp the expected the same way.)
+    # A case is a PROGRAM: what it OUTPUTS is the assertion. The `return:` key
+    # is vestigial -- it described a fragment's value, which a program does not
+    # have (perl compiles a program's trailing statement in void context, and
+    # the last value never reaches the exit status). 183 of the migrated cases
+    # declare `return: Bool:1`, which is only "say returned true".
+    #
+    # So stdout: is authoritative when present. A case with neither key asserts
+    # nothing, which _run_behavior_check's caller already treats as a pass.
     if (defined $declared->{stdout}) {
-        my $expected = _cook_dq_escapes($declared->{stdout}) . $decl_tagged;
+        my $expected = _cook_dq_escapes($declared->{stdout});
         $expected =~ s/\n\z//;   # match _run_expr_under_perl's single chomp
         return $actual eq $expected
             ? (true, '')
-            : (false, "stdout+tag mismatch: got '$actual', expected '$expected'");
+            : (false, "stdout mismatch: got '$actual', expected '$expected'");
     }
 
-    # Compare tags exactly.
-    if ($actual eq $decl_tagged) {
-        return (true, '');
+    # No stdout: declared, but a return: is. That is an UNMIGRATED case: its
+    # source still ends in a bare value expression, which a program discards,
+    # so it prints nothing and there is nothing to assert against. Say so
+    # rather than passing silently -- a quiet fall-through here is the same
+    # vacuity trap son-corpus-wide.t's non-vacuity check exists to stop.
+    #
+    # A GAP-DECLARED case is exempt: the migration transform deliberately skips
+    # those (they are never lowered or run, so their source shape does not
+    # matter), and demanding output from a case that documents an unsupported
+    # construct would be this check inventing work rather than finding it.
+    if (defined $declared->{return} && !$is_gap) {
+        return (false,
+            "unmigrated case: the behavior block declares `return:` but no "
+          . "`stdout:`, and a program has no return value -- it printed "
+          . "'$actual'. Migrate the source to say/print its value.");
     }
-    return (false, "tag mismatch: got '$actual', expected '$decl_tagged' (declared: '$declared_return')");
+
+    return (true, '');   # nothing declared, nothing asserted
 }
 
-# _infer_tag($declared_str) -> tagged string
-#
-# Delegates to Chalk::CodeGen::Harness::TypeTag::infer_tag — the single
-# source of truth for the declared-value tag rule. See TypeTag for the full
-# rule specification.
-sub _infer_tag {
-    my ($val) = @_;
-    return Chalk::CodeGen::Harness::TypeTag::infer_tag($val);
-}
-
+# Capture mode fills an empty behavior block from the oracle. Under the program
+# contract the oracle's result IS what the case printed, so it is recorded as
+# STDOUT -- recording it as a return value would write back the fragment shape
+# this migration removed.
 sub _make_behavior_record {
     my ($val) = @_;
     return Chalk::CodeGen::Harness::BehaviorRecord->new(
-        return_values     => [defined $val ? $val : ()],
+        return_values     => [],
         wantarray_context => 'scalar',
-        stdout            => '',
+        stdout            => (defined $val ? $val : ''),
         stderr            => '',
         object_state      => {},
     );
