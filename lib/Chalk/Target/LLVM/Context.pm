@@ -1575,21 +1575,28 @@ sub _lower_assign {
             $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 0  ; Assign(Array-lvalue): slot def ptr");
             $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 1  ; Assign(Array-lvalue): slot pay ptr");
             $self->_emit("  store i1 true, i1* $slot_def  ; Assign(Array-lvalue): defined=true");
-            # If the rhs is a pointer-repr value (ArrayRef/HashRef), ptrtoint before
-            # storing into the i64 payload slot — mirrors _lower_array_ref 3164-3172.
+            # The rhs is boxed into the Slot's one-word payload — see
+            # _box_payload for the per-repr rule.
+            #
+            # Str and Num are DELIBERATELY excluded here even though
+            # _box_payload can box them. A container's element repr is inferred
+            # from its literal initializers alone (_element_repr in
+            # Serialize/JSON.pm), so a store that CHANGES the element type
+            # leaves every read still stamped with the old repr: boxing a Str
+            # into an array of Ints emits a correct store and an Int read of a
+            # pointer, printing the raw address. Until the element-type
+            # inference joins stores as well as literals, this must stay a GAP.
             my $rhs_repr = $rhs->representation // '';
             my $rhs_i64;
-            if ($rhs_repr eq 'ArrayRef' || $rhs_repr eq 'HashRef') {
-                $rhs_i64 = $self->_fresh;
-                $self->_emit("  $rhs_i64 = ptrtoint i8* $rhs_ref to i64  ; Assign(Array-lvalue): ptr rhs -> i64");
-            }
-            elsif ($rhs_repr eq 'Int') {
-                $rhs_i64 = $rhs_ref;
+            if ($rhs_repr =~ /\A(?:Int|ArrayRef|HashRef|CodeRef|Object)\z/) {
+                $rhs_i64 = $self->_box_payload($rhs_ref, $rhs_repr,
+                                               'Assign(Array-lvalue) rhs');
             }
             else {
                 die "GAP: Assign(Array-lvalue) rhs repr=$rhs_repr cannot be stored "
-                  . "in an i64 Slot payload (only Int/ArrayRef/HashRef are lowered) "
-                  . "— refusing to emit invalid IR.";
+                  . "in an i64 Slot payload — the container's element repr is "
+                  . "inferred from its literal initializers only, so a "
+                  . "type-changing store would read back at the old repr.";
             }
             $self->_emit("  store i64 $rhs_i64, i64* $slot_pay  ; Assign(Array-lvalue): store value");
 
@@ -1662,23 +1669,23 @@ sub _lower_assign {
             $self->_set_terminator("  br i1 $wis_match, label \%$lbl_wupd, label \%$lbl_wnxt");
 
             $self->_new_block($lbl_wupd);
-            # If the rhs is a pointer-repr value (ArrayRef/HashRef), ptrtoint before
-            # storing into the i64 payload slot — mirrors the array-lvalue branch
-            # above (and _lower_array_ref). Without this guard a ref value emits
-            # `store i64 i8*`, which is invalid IR.
+            # The rhs is boxed into the entry's one-word payload — see
+            # _box_payload for the per-repr rule. Without it a ref value would
+            # emit `store i64 i8*`, which is invalid IR. Str and Num are
+            # excluded for the same reason as the array-lvalue branch above: a
+            # type-changing store is invisible to the element-type inference,
+            # so the read would still load at the literal-derived repr.
             my $wrhs_repr = $rhs->representation // '';
             my $wrhs_i64;
-            if ($wrhs_repr eq 'ArrayRef' || $wrhs_repr eq 'HashRef') {
-                $wrhs_i64 = $self->_fresh;
-                $self->_emit("  $wrhs_i64 = ptrtoint i8* $rhs_ref to i64  ; Assign(Hash-lvalue): ptr rhs -> i64");
-            }
-            elsif ($wrhs_repr eq 'Int') {
-                $wrhs_i64 = $rhs_ref;
+            if ($wrhs_repr =~ /\A(?:Int|ArrayRef|HashRef|CodeRef|Object)\z/) {
+                $wrhs_i64 = $self->_box_payload($rhs_ref, $wrhs_repr,
+                                                'Assign(Hash-lvalue) rhs');
             }
             else {
                 die "GAP: Assign(Hash-lvalue) rhs repr=$wrhs_repr cannot be stored "
-                  . "in an i64 Slot payload (only Int/ArrayRef/HashRef are lowered) "
-                  . "— refusing to emit invalid IR.";
+                  . "in an i64 Slot payload — the container's element repr is "
+                  . "inferred from its literal initializers only, so a "
+                  . "type-changing store would read back at the old repr.";
             }
             $self->_emit("  store i64 $wrhs_i64, i64* $went_vpp  ; Assign(Hash-lvalue): update val_payload");
             $self->_set_terminator("  br label \%$lbl_wend");
@@ -3617,20 +3624,9 @@ sub _lower_array_ref {
         $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 0  ; ArrayRef: slot[$i] defined ptr");
         $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 1  ; ArrayRef: slot[$i] payload ptr");
         $self->_emit("  store i1 true, i1* $slot_def  ; ArrayRef: slot[$i] defined=true");
-        my $elem_i64;
         my $elem_repr = $inputs->[$i]->representation // '';
-        if ($elem_repr eq 'ArrayRef' || $elem_repr eq 'HashRef') {
-            $elem_i64 = $self->_fresh;
-            $self->_emit("  $elem_i64 = ptrtoint i8* $elem_ref to i64  ; ArrayRef: ptr elem[$i] -> i64");
-        }
-        elsif ($elem_repr eq 'Int') {
-            $elem_i64 = $elem_ref;
-        }
-        else {
-            die "GAP: ArrayRef element[$i] repr=$elem_repr cannot be stored in an "
-              . "i64 Slot payload (only Int/ArrayRef/HashRef are lowered) — "
-              . "refusing to emit invalid IR.";
-        }
+        my $elem_i64  = $self->_box_payload($elem_ref, $elem_repr,
+                                            "ArrayRef elem[$i]");
         $self->_emit("  store i64 $elem_i64, i64* $slot_pay  ; ArrayRef: slot[$i] payload=$elem_i64");
     }
 
@@ -3700,23 +3696,12 @@ sub _lower_hash_ref {
         $self->_emit("  store i64 $key_len, i64* $e_kl  ; HashRef: key len=$key_len");
         $self->_emit("  store i32 0, i32* $e_ke          ; HashRef: enc=0 (ASCII)");
         $self->_emit("  store i1 true, i1* $e_vd         ; HashRef: defined=true");
-        # If the value is a pointer-repr (ArrayRef/HashRef), ptrtoint before
-        # storing into the i64 payload slot — mirrors _lower_array_ref 3164-3172.
-        my $val_node  = $inputs->[ $i * 2 + 1 ];
-        my $val_repr  = $val_node->representation // '';
-        my $val_i64;
-        if ($val_repr eq 'ArrayRef' || $val_repr eq 'HashRef') {
-            $val_i64 = $self->_fresh;
-            $self->_emit("  $val_i64 = ptrtoint i8* $val_ref to i64  ; HashRef: ptr value[$i] -> i64");
-        }
-        elsif ($val_repr eq 'Int') {
-            $val_i64 = $val_ref;
-        }
-        else {
-            die "GAP: HashRef value[$i] repr=$val_repr cannot be stored in an "
-              . "i64 Slot payload (only Int/ArrayRef/HashRef are lowered) — "
-              . "refusing to emit invalid IR.";
-        }
+        # A %HashEntry's value is the same {defined, i64 payload} cell a %Slot
+        # is, so the value is boxed by the same rule — see _box_payload.
+        my $val_node = $inputs->[ $i * 2 + 1 ];
+        my $val_repr = $val_node->representation // '';
+        my $val_i64  = $self->_box_payload($val_ref, $val_repr,
+                                           "HashRef value[$i]");
         $self->_emit("  store i64 $val_i64, i64* $e_vp   ; HashRef: value");
     }
 
@@ -3952,6 +3937,36 @@ sub _lower_array_read {
         $self->_emit("  $raw_pay = phi i64 [ $pay_val, \%$lbl_inb ], [ 0, \%$lbl_oob ]  ; ArrayRead :$repr raw ptr payload");
         my $ptr = $self->_fresh;
         $self->_emit("  $ptr = inttoptr i64 $raw_pay to i8*  ; ArrayRead :$repr ptr");
+        $self->{cache}{ $node->id } = $ptr;
+        return $ptr;
+    }
+    elsif ($repr eq 'Str' || $repr eq 'Num') {
+        # The symmetric unbox of _box_payload. A Str payload is a %StrPair*
+        # (a Str is a (ptr,len) pair and does not fit in one word); a Num
+        # payload is the double's bits. Without these arms both fell through to
+        # the Slot branch below and were read back as a defined-bit, which is
+        # why an array could only really hold an Int.
+        my $raw_pay = $self->_fresh;
+        $self->_emit("  $raw_pay = phi i64 [ $pay_val, \%$lbl_inb ], [ 0, \%$lbl_oob ]  ; ArrayRead :$repr raw payload");
+
+        if ($repr eq 'Num') {
+            my $d = $self->_fresh;
+            $self->_emit("  $d = bitcast i64 $raw_pay to double  ; ArrayRead :Num payload -> double");
+            $self->{cache}{ $node->id } = $d;
+            return $d;
+        }
+
+        $self->{_need_strpair} = 1;
+        my ($pair, $pp, $pl, $ptr, $len) =
+            ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+        $self->_emit("  $pair = inttoptr i64 $raw_pay to %StrPair*  ; ArrayRead :Str payload -> StrPair*");
+        $self->_emit("  $pp = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 0  ; StrPair.ptr");
+        $self->_emit("  $pl = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 1  ; StrPair.len");
+        $self->_emit("  $ptr = load i8*, i8** $pp  ; ArrayRead :Str ptr");
+        $self->_emit("  $len = load i64, i64* $pl  ; ArrayRead :Str len");
+        # Re-register the length: a Str value is only usable by print/concat/
+        # return if its byte length is tracked against the pointer.
+        $self->{_str_len_table}{$ptr} = $len;
         $self->{cache}{ $node->id } = $ptr;
         return $ptr;
     }
@@ -4213,6 +4228,32 @@ sub _lower_hash_read {
         $self->{cache}{ $node->id } = $ptr;
         return $ptr;
     }
+    elsif ($repr eq 'Str' || $repr eq 'Num') {
+        # The symmetric unbox of _box_payload, mirroring _lower_array_read: a
+        # Str payload is a %StrPair* (a Str is a (ptr,len) pair, too wide for
+        # one word), a Num payload is the double's bits.
+        my $raw_pay = $self->_fresh;
+        $self->_emit("  $raw_pay = phi i64 [ $vp_val, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; HashRead :$repr raw payload");
+
+        if ($repr eq 'Num') {
+            my $d = $self->_fresh;
+            $self->_emit("  $d = bitcast i64 $raw_pay to double  ; HashRead :Num payload -> double");
+            $self->{cache}{ $node->id } = $d;
+            return $d;
+        }
+
+        $self->{_need_strpair} = 1;
+        my ($pair, $pp, $pl, $sptr, $slen) =
+            ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+        $self->_emit("  $pair = inttoptr i64 $raw_pay to %StrPair*  ; HashRead :Str payload -> StrPair*");
+        $self->_emit("  $pp = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 0  ; StrPair.ptr");
+        $self->_emit("  $pl = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 1  ; StrPair.len");
+        $self->_emit("  $sptr = load i8*, i8** $pp  ; HashRead :Str ptr");
+        $self->_emit("  $slen = load i64, i64* $pl  ; HashRead :Str len");
+        $self->{_str_len_table}{$sptr} = $slen;
+        $self->{cache}{ $node->id } = $sptr;
+        return $sptr;
+    }
     else {
         # Slot repr: phi-select defined-bit and payload. Track payload for epilogue.
         my $def_phi = $self->_fresh;
@@ -4294,6 +4335,73 @@ sub _lower_hash_deref {
 # the original i8* string ref for Str, or the boxed i64 payload for everything
 # else. Callers that use the assign expression as a value (FieldAccess-lvalue)
 # cache this; the :param / default callers ignore it.
+# _box_payload($val_ref, $repr, $what) -> $i64_ref
+#
+# The one rule for putting a value into a %Slot's i64 payload. The i64 is a
+# machine WORD: it carries an Int directly, a Bool zero-extended, a Num
+# bitcast, and anything wider as a POINTER to a heap box.
+#
+# Every optional-value cell in the backend is this shape -- an array element,
+# an object field, and a hash entry's inlined (val_def, val_pay) pair -- so
+# they share this rule rather than each deciding for themselves. They used to
+# decide separately, and the ones that were not exercised fell behind: a field
+# could hold a Str (boxed into a %StrPair) while an array element could not,
+# so `my @a = ("hi")` -- unremarkable Perl -- could not be represented.
+#
+# $what labels the emitted IR ("field 'n'", "ArrayRef elem[0]").
+sub _box_payload {
+    my ($self, $val_ref, $repr, $what) = @_;
+
+    my $ref = $self->_fresh;
+    if ($repr eq 'Str') {
+        # A Str is a (ptr, len) PAIR and does not fit in one word, so box it
+        # into a heap %StrPair and carry the pointer. The length must come from
+        # the length table; strlen would be wrong for a string with an embedded
+        # NUL and is only a fallback for an untracked pointer.
+        my $len_ref  = $self->{_str_len_table}{$val_ref};
+        my $pair_raw = $self->_fresh;
+        my $pair_ptr = $self->_fresh;
+        $self->_emit("  $pair_raw = call i8* \@malloc(i64 16)  ; alloc StrPair for $what");
+        $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
+        my $pp_gep = $self->_fresh;
+        $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
+        $self->_emit("  store i8* $val_ref, i8** $pp_gep  ; store str ptr");
+        my $pl_gep = $self->_fresh;
+        $self->_emit("  $pl_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
+        my $len_val = $len_ref;
+        unless (defined $len_val) {
+            $len_val = $self->_fresh;
+            $self->_emit("  $len_val = call i64 \@strlen(i8* $val_ref)  ; strlen for $what");
+        }
+        $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
+        $self->_emit("  $ref = ptrtoint %StrPair* $pair_ptr to i64  ; StrPair* -> i64 payload for $what");
+        $self->{_need_strpair} = 1;
+        $self->{_need_malloc_memcpy} = 1;
+        return $ref;
+    }
+    if ($repr eq 'Num') {
+        # A double is exactly one word: reinterpret its bits rather than boxing.
+        # The read side bitcasts back, so no precision is lost.
+        $self->_emit("  $ref = bitcast double $val_ref to i64  ; Num -> i64 payload for $what");
+        return $ref;
+    }
+    if ($repr eq 'Bool') {
+        $self->_emit("  $ref = zext i1 $val_ref to i64  ; Bool -> i64 payload for $what");
+        return $ref;
+    }
+    if ($repr eq 'ArrayRef' || $repr eq 'HashRef' || $repr eq 'CodeRef'
+            || $repr eq 'Object') {
+        $self->_emit("  $ref = ptrtoint i8* $val_ref to i64  ; $repr ptr -> i64 payload for $what");
+        return $ref;
+    }
+    # An Int IS the payload word — no conversion, and no instruction.
+    return $val_ref if $repr eq 'Int';
+
+    die "GAP: $what has repr=$repr, which has no i64 payload encoding "
+      . "(Int, Bool, Num, Str and ref types are boxed) — refusing to emit "
+      . "invalid IR.";
+}
+
 sub _store_field_payload {
     my ($self, $val_ref, $repr, $pay_gep, $pname) = @_;
 

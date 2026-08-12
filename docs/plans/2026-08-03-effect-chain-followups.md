@@ -1291,6 +1291,50 @@ Two of the five are one capability (untyped merges), and D4 is a blocker already
 tracked for t/base. The migration is closer to parity than the raw number
 suggests, but it is still a net loss and must not land as one.
 
+
+## K6: DONE for literals; element STORES are a separate, narrower gap (2026-08-12)
+
+Built. One rule, `_box_payload($val, $repr, $what)` in `Target/LLVM/Context.pm`,
+replaces the per-site repr dispatch at every aggregate construction site: Str
+allocates a heap `%StrPair` and stores its ADDRESS in the payload word, Num
+bitcasts, Bool zero-extends, refs `ptrtoint`, Int passes through. The read side
+is the exact inverse, added to both `_lower_array_read` and `_lower_hash_read`;
+the Str arm also re-registers `_str_len_table`, without which `length()` on an
+element reads whatever length was tracked last.
+
+The unbox is not optional polish. Boxing WITHOUT it is strictly worse than the
+GAP it replaces: the store is correct, the read loads the address as an Int, and
+the program prints a heap pointer. Measured mid-build, `$a[1]` of `("hi","there")`
+printed `94799381086576`. That is the GAP-to-miscompile inversion, self-inflicted;
+it is why both halves land in one commit.
+
+K4 predicted the read "must know WHICH face the payload holds, so the element
+repr has to be carried on the container rather than inferred per access." Half
+right, and the half that is wrong is the useful half. For a LITERAL aggregate
+`_element_repr` already computes exactly that — it joins the initializers, and
+the read is stamped with the result — so literals needed no new mechanism at all.
+
+Element STORES are where the prediction bites, and they stay a GAP:
+
+    my @a = (1,2); $a[0] = "zz"; print $a[0];   # GAP, deliberately
+
+`_element_repr` reads the container's literal INITIALIZERS only. A store that
+changes the element type is invisible to it, so the read is still stamped `Int`
+while the payload now holds a `%StrPair*`. Both sides are individually correct
+and together they are a miscompile. The store sites therefore admit only
+Int/ArrayRef/HashRef/CodeRef/Object — the reprs whose face cannot change what
+the read expects — and refuse Str and Num with a GAP naming the reason.
+
+Closing THAT needs inference, not codegen: the element repr must be the join
+over the literal elements AND every value stored into the container, with a
+coercion bridging any element that does not conform — the Part J operator rule
+applied to a container. It is the same shape as the package-scalar work: a store
+is a definition, and the container's element type is the join over all of them.
+
+Measured: gate-green 184 → 189, all four legs, worklist 0. Five new GREEN cases,
+references R16-R20, covering both containers across Str and Num plus `length()`.
+Executable gate unchanged at 7/8.
+
 ---
 
 # Part L — the migration is 4 short, and 2 of those are a harness defect (2026-08-11)

@@ -556,3 +556,143 @@ context: scalar
 return %sum
 L: GREEN
 ```
+
+## R16 a Str array element round-trips through the Slot payload
+
+An aggregate element is one machine word (`%Slot` = {i1 defined, i64 payload}),
+but a Str is a (ptr,len) PAIR -- too wide. Storing one boxes it into a heap
+`%StrPair` and keeps the ADDRESS in the payload; reading unboxes it back into
+ptr+len. Without both halves the read yields the raw address, which prints as a
+number: a silent miscompile, not a GAP. The read side must also re-register the
+length, or `length()` on the element reads whatever was tracked last.
+
+```perl
+# source
+my @a = ("hi", "there");
+$a[1]
+```
+
+```behavior
+return: there
+context: scalar
+```
+
+```ir
+%s0   = Constant("hi") :Str
+%s1   = Constant("there") :Str
+%arr  = ArrayRef(%s0, %s1) :ArrayRef
+%i1   = Constant(1) :Int
+%rd   = Subscript(%arr, %i1) :Str
+return %rd
+L: GREEN
+```
+
+## R17 length() of a Str array element
+
+The companion to R16: proves the READ side re-registers the string's length
+rather than leaving it to whatever the length table last held. `length(there)`
+is 5; a stale registration would silently yield the length of another string.
+
+```perl
+# source
+my @a = ("hi", "there");
+length($a[1])
+```
+
+```behavior
+return: 5
+context: scalar
+```
+
+```ir
+%s0   = Constant("hi") :Str
+%s1   = Constant("there") :Str
+%arr  = ArrayRef(%s0, %s1) :ArrayRef
+%i1   = Constant(1) :Int
+%rd   = Subscript(%arr, %i1) :Str
+%len  = Length(%rd) :Int
+return %len
+L: GREEN
+```
+
+## R18 a Num array element round-trips through the Slot payload
+
+A Num is one word wide but is NOT an integer: putting it in the i64 payload is a
+`bitcast`, and reading it back is the inverse. Reading a Num payload as an Int
+prints the double's bit pattern (2.5 reads as 4612811918334230528) -- the same
+silent-miscompile class as R16, in the other direction.
+
+```perl
+# source
+my @a = (1.5, 2.5);
+$a[1]
+```
+
+```behavior
+return: 2.5
+context: scalar
+```
+
+```ir
+%n0   = Constant(1.5) :Num
+%n1   = Constant(2.5) :Num
+%arr  = ArrayRef(%n0, %n1) :ArrayRef
+%i1   = Constant(1) :Int
+%rd   = Subscript(%arr, %i1) :Num
+return %rd
+L: GREEN
+```
+
+## R19 a Str hash VALUE round-trips through the entry payload
+
+`%HashEntry` inlines the same {defined, payload} pair as `%Slot`, so a hash
+value is boxed and unboxed by the SAME rule as an array element (R16). This case
+pins that the two spellings share one rule rather than diverging -- a hash of
+strings was a GAP while an array of strings worked.
+
+```perl
+# source
+my %h = (k => "val");
+$h{k}
+```
+
+```behavior
+return: val
+context: scalar
+```
+
+```ir
+%k    = Constant("k") :Str
+%v    = Constant("val") :Str
+%h    = HashRef(%k, %v) :HashRef
+%kk   = Constant("k") :Str
+%rd   = Subscript(%h, %kk) :Str
+return %rd
+L: GREEN
+```
+
+## R20 a Num hash value round-trips through the entry payload
+
+The Num half of R19, mirroring R18. Together R16-R20 cover both containers
+across both non-Int scalar reprs.
+
+```perl
+# source
+my %h = (k => 1.5);
+$h{k}
+```
+
+```behavior
+return: 1.5
+context: scalar
+```
+
+```ir
+%k    = Constant("k") :Str
+%v    = Constant(1.5) :Num
+%h    = HashRef(%k, %v) :HashRef
+%kk   = Constant("k") :Str
+%rd   = Subscript(%h, %kk) :Num
+return %rd
+L: GREEN
+```
