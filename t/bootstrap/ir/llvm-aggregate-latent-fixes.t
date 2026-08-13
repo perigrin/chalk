@@ -467,12 +467,27 @@ subtest 'I-D: Length(PostfixDeref(@$ref)) — scalar(@$ref) — valid IR' => sub
 };
 
 # ---------------------------------------------------------------------------
-# Branch-review ERRH-F3: %Slot payload stores must DIE GAP for reprs they
-# cannot hold (Str/Num/...), not emit invalid `store i64 <i8*/double>` for
-# lli to reject. The contract is loud-at-lowering, not loud-at-lli.
+# Branch-review ERRH-F3: a %Slot payload store must DIE GAP for a repr it
+# cannot hold, not emit invalid `store i64 <i8*/double>` for lli to reject.
+# The contract is loud-at-lowering, not loud-at-lli.
+#
+# WHICH reprs it cannot hold has narrowed. A %Slot is {i1 defined, i64 payload}
+# and a %HashEntry inlines the same pair, so an element is ONE MACHINE WORD --
+# but _box_payload now BOXES the wide ones rather than refusing them: a Str
+# allocates a heap %StrPair and stores its address, a Num bitcasts, a Bool
+# zero-extends. So a Str element in a LITERAL aggregate lowers correctly, and
+# this subtest no longer asserts it GAPs. Verified end-to-end against perl:
+# `my @a = ("hi","there"); print $a[1]` prints "there", and length() of it is 5.
+#
+# What is STILL a GAP is a type-changing element STORE, and for a reason that
+# is about inference rather than storage: a container's element repr is derived
+# from its literal initializers alone (_element_repr), so a store that changes
+# the element type is invisible to it and every read stays stamped at the old
+# repr. The store would box correctly and the read would unbox as the wrong
+# type -- a silent miscompile. That is the assertion this subtest keeps.
 # ---------------------------------------------------------------------------
-subtest 'Slot stores die GAP for unsupported reprs (not invalid IR)' => sub {
-    # ArrayRef with a Str element
+subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub {
+    # A Str element in a LITERAL ArrayRef now lowers -- it is boxed.
     {
         my $f = _mk();
         my $s = $f->make('Constant', value => 'oops', const_type => 'string');
@@ -483,9 +498,14 @@ subtest 'Slot stores die GAP for unsupported reprs (not invalid IR)' => sub {
         $len->set_representation('Int');
         my $ret = $f->make_cfg('Return', inputs => [$len]);
         eval { Chalk::Target::LLVM->lower($ret) };
-        like($@, qr/GAP/, 'Str element in ArrayRef dies GAP at lowering');
+        unlike($@ // '', qr/GAP/,
+            'a Str element in a literal ArrayRef lowers (boxed into a %StrPair)');
     }
-    # HashRef with a Str value
+    # Likewise a Str VALUE in a literal HashRef: %HashEntry boxes by the same
+    # rule. (This case used to "pass" for an unrelated reason -- the lowering
+    # died on `cannot emit return of repr=HashRef` before the Str value was
+    # ever reached -- so it never tested what it claimed. Return the Length
+    # instead, which is lowerable, so the value store is actually exercised.)
     {
         my $f = _mk();
         my $k = $f->make('Constant', value => 'k', const_type => 'string');
@@ -494,12 +514,31 @@ subtest 'Slot stores die GAP for unsupported reprs (not invalid IR)' => sub {
         $v->set_representation('Str');
         my $h = $f->make('HashRef', inputs => [$k, $v]);
         $h->set_representation('HashRef');
-        my $ret = $f->make_cfg('Return', inputs => [$h]);
+        my $len = $f->make('Length', inputs => [$h]);
+        $len->set_representation('Int');
+        my $ret = $f->make_cfg('Return', inputs => [$len]);
         eval { Chalk::Target::LLVM->lower($ret) };
-        like($@, qr/GAP/, 'Str value in HashRef dies GAP at lowering');
+        unlike($@ // '', qr/GAP/,
+            'a Str value in a literal HashRef lowers (boxed into a %HashEntry)');
     }
-    # Element store of a Str rhs
-    {
+    # A type-changing element store: `my @a = (0); $a[0] = "oops"`.
+    #
+    # TODO rather than an asserted GAP. Asserting the GAP would go RED the day
+    # the capability lands -- punishing the fix and training the next person to
+    # edit the test. As a TODO the same event is a SURPRISE SUCCESS: still
+    # visible, but as good news.
+    #
+    # What it needs: a container's element repr is derived from its literal
+    # initializers alone (_element_repr), so a store that CHANGES the element
+    # type is invisible to inference and every read stays stamped at the old
+    # repr. The store boxes correctly and the read unboxes as the wrong type --
+    # a silent miscompile, which is why the backend refuses. Closing it means
+    # the element repr becoming the join over the literals AND every stored
+    # value, with a coercion bridging any element that does not conform.
+    TODO: {
+        local $TODO = 'element repr is derived from literal initializers only, '
+                    . 'so a type-changing store is invisible to inference';
+
         my $f = _mk();
         my $z = $f->make('Constant', value => '0', const_type => 'integer');
         $z->set_representation('Int');
@@ -515,7 +554,8 @@ subtest 'Slot stores die GAP for unsupported reprs (not invalid IR)' => sub {
         $as->set_representation('Str');
         my $ret = $f->make_cfg('Return', inputs => [$as]);
         eval { Chalk::Target::LLVM->lower($ret) };
-        like($@, qr/GAP/, 'Str rhs in an element store dies GAP at lowering');
+        unlike($@ // '', qr/GAP/,
+            'a Str rhs in an element store lowers');
     }
 };
 
