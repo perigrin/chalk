@@ -8,5 +8,8 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::Match :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'Match' }
+
+    # FIXED: sets the capture state a later $N read depends on
+    method is_fixed() { return true }
     method op_str()    { '=~' }
 }

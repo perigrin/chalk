@@ -8,4 +8,7 @@ use Chalk::IR::Node::Regex;
 
 class Chalk::IR::Node::RegexMatch :isa(Chalk::IR::Node::Regex) {
     method operation() { 'RegexMatch' }
+
+    # FIXED: sets the capture state a later $N read depends on
+    method is_fixed() { return true }
 }

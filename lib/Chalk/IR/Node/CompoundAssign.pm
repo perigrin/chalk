@@ -11,6 +11,9 @@ class Chalk::IR::Node::CompoundAssign :isa(Chalk::IR::Node) {
 
     method operation() { 'CompoundAssign' }
 
+    # FIXED: a read-modify-write store
+    method is_fixed() { return true }
+
     method content_hash() {
         return join('|', 'CompoundAssign', "op=$op", $self->_serialize_inputs());
     }

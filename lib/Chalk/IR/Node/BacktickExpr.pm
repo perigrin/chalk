@@ -8,4 +8,7 @@ use Chalk::IR::Node;
 
 class Chalk::IR::Node::BacktickExpr :isa(Chalk::IR::Node) {
     method operation() { 'BacktickExpr' }
+
+    # FIXED: qx// runs a command: a host-process effect
+    method is_fixed() { return true }
 }

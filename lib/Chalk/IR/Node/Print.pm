@@ -7,6 +7,9 @@ use experimental 'class';
 class Chalk::IR::Node::Print :isa(Chalk::IR::Node) {
     method operation() { 'Print' }
 
+    # FIXED: writes to stdout -- a statement effect in ANY context
+    method is_fixed() { return true }
+
     method content_hash() {
         return join('|', 'Print', $self->_serialize_inputs());
     }

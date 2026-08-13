@@ -11,6 +11,9 @@ class Chalk::IR::Node::RegexSubst :isa(Chalk::IR::Node::Regex) {
 
     method operation() { 'RegexSubst' }
 
+    # FIXED: s/// mutates its subject
+    method is_fixed() { return true }
+
     method content_hash() {
         return join('|', 'RegexSubst', "pattern=" . $self->pattern,
             "replacement=$replacement", "flags=" . $self->flags,

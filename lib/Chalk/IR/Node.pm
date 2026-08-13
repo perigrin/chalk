@@ -71,6 +71,31 @@ class Chalk::IR::Node {
         die ref($self) . " must implement operation()";
     }
 
+    # Is this node FIXED — does it have an effect that pins it to a point in the
+    # control chain, rather than being a pure value free to float?
+    #
+    # A PROPERTY OF THE TYPE, deliberately. The same question is answered today
+    # by %STATEMENT_EFFECT_OPS, a list of ten op NAMES held beside the classes,
+    # consulted by string comparison (96 such comparisons over 19 ops across
+    # lib/). That registry is already incomplete: `Unwind` — a `die`, which
+    # ABORTS — is absent from it, and the backend compensates with hand-written
+    # `eq 'Unwind'` special cases.
+    #
+    # The prior-art survey (docs/research/2026-08-13-branch-merge-prior-art.md)
+    # found that production Sea-of-Nodes compilers make this a type property.
+    # In Graal an effectful node IS a FixedNode, which is why its
+    # diamond-collapse test degenerates to "is the arm empty?" — the
+    # side-effect question is subsumed structurally and never asked. Chalk
+    # cannot take that shortcut while the answer lives in a name list a
+    # consumer must remember to consult.
+    #
+    # Default FALSE: a node is pure unless its class says otherwise. That is the
+    # safe default for the registry's PURPOSE (control-chain threading, which
+    # only ever needs to include more) but NOT for a collapse pass, which needs
+    # the answer to be complete — which is why the accompanying test pins every
+    # registry entry against this method rather than trusting either alone.
+    method is_fixed() { return false }
+
     method class() {
         return $compat_class if defined $compat_class;
         return $self->operation();

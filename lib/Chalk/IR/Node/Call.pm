@@ -57,6 +57,9 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
 
     method operation() { 'Call' }
 
+    # FIXED: may do anything, including I/O and aborting
+    method is_fixed() { return true }
+
     method content_hash() {
         return join('|', 'Call',
             "dispatch_kind=$dispatch_kind",
