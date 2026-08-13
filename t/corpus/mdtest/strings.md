@@ -368,7 +368,8 @@ context: scalar
 %p   = Print(%cat) :Bool
 %one = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%one, %nl)
+%co_p  = Coerce(%one : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```

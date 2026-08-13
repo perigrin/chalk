@@ -72,7 +72,8 @@ context: scalar
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %len, %zero) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```

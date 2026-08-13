@@ -138,8 +138,28 @@ def migrate_ir(ir):
         return None
     ctrl_i = next((i for i, l in enumerate(lines) if l.startswith('control:')), None)
     new = lines[:ret_i]
+
+    # Print TAKES Str. A non-Str argument is bridged by an explicit
+    # Coerce(X -> Str) -- the producer inserts one for a stamped non-Str
+    # argument, so an ir block that omits it does not describe the graph the
+    # producer builds. son-corpus-wide.t hides this (it runs the real producer,
+    # which supplies the Coerce), but every test that BUILDS FROM THE BLOCK gets
+    # `GAP: Print of a Int arg` -- which is what most of the red set in
+    # t/bootstrap/corpus was.
+    #
+    # The value's repr is the `:Repr` suffix on its defining line.
+    src_repr = None
+    for l in lines[:ret_i]:
+        m = re.match(r'\s*' + re.escape(val) + r'\s*=.*?:(\w+)\s*$', l)
+        if m:
+            src_repr = m.group(1)
+    printed = val
+    if src_repr and src_repr != 'Str':
+        printed = '%co_p'
+        new.append('%%co_p = Coerce(%s : %s -> Str) :Str' % (val, src_repr))
+
     new.append('%nl = Constant("\\n") :Str')
-    new.append('%%p  = Print(%s, %%nl)' % val)
+    new.append('%%p  = Print(%s, %%nl)' % printed)
     new.append('return %p')
     for l in lines[ret_i + 1:]:
         if l.startswith('control:'):

@@ -24,7 +24,8 @@ context: scalar
 %c2  = Constant(2) :Int
 %add = Add(%c1, %c2) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%add, %nl)
+%co_p  = Coerce(%add : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -50,7 +51,8 @@ context: scalar
 %c3  = Constant(3) :Int
 %sub = Subtract(%c5, %c3) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%sub, %nl)
+%co_p  = Coerce(%sub : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -76,7 +78,8 @@ context: scalar
 %c4  = Constant(4) :Int
 %mul = Multiply(%c3, %c4) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%mul, %nl)
+%co_p  = Coerce(%mul : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -105,7 +108,8 @@ context: scalar
 %d4  = Coerce(%c4 : Int -> Num) :Num
 %div = Divide(%d3, %d4) :Num
 %nl = Constant("\n") :Str
-%p  = Print(%div, %nl)
+%co_p  = Coerce(%div : Num -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -132,7 +136,8 @@ context: scalar
 %c3  = Constant(3) :Int
 %mod = Modulo(%cn7, %c3) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%mod, %nl)
+%co_p  = Coerce(%mod : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -161,7 +166,8 @@ context: scalar
 ```ir
 %c = Constant(4294967296) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c, %nl)
+%co_p  = Coerce(%c : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -190,7 +196,8 @@ context: scalar
 ```ir
 %c = Constant(-9223372036854775808) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c, %nl)
+%co_p  = Coerce(%c : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -224,7 +231,8 @@ context: scalar
 %idx = Constant(5) :Int
 %r   = Subscript(%arr, %idx) :Slot
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Slot -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -265,7 +273,8 @@ context: scalar
 %dy   = Coerce(%ry : Int -> Num) :Num
 %div  = Divide(%dx, %dy) :Num
 %nl = Constant("\n") :Str
-%p  = Print(%div, %nl)
+%co_p  = Coerce(%div : Num -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```

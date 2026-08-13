@@ -51,9 +51,21 @@ sub run {
     # ---- Step 2: attempt lowering ----
     # Class structure reaches the backend as a sealed MOP via $opts->{mop}
     # (019eb42a MOP-direct contract) — never as graph metadata.
+    # program_mode is UNCONDITIONAL: every graph this driver runs is a program
+    # that prints its own output, so the Int:/Str: return-value epilogue must
+    # not be emitted. After the corpus-as-programs migration such a graph
+    # returns its Print's Bool, and the epilogue printf'd that i1 through an
+    # i64 format -- which lli rejects outright ("'%tmp_30' defined with type
+    # 'i1' but expected 'i64'").
+    #
+    # No per-caller flag and no sniffing the graph: the last fragment-shaped ir
+    # blocks reaching lli (mdtest-constructive-builder's inline blocks) were
+    # migrated rather than accommodated. A discriminator here would have been
+    # scaffolding around an unfinished migration instead of the end of one.
     my ( $ll_text, $lower_error );
     eval {
         $ll_text = Chalk::Target::LLVM->lower($return_node,
+            program_mode => 1,
             (defined $opts->{mop} ? (mop => $opts->{mop}) : ()));
     };
     if ($@) {

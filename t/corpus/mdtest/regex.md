@@ -46,7 +46,8 @@ context: scalar
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -83,7 +84,8 @@ context: scalar
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -144,7 +146,8 @@ context: scalar
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -176,7 +179,8 @@ context: scalar
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -210,7 +214,8 @@ context: scalar
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -246,7 +251,8 @@ context: scalar
 %e      = Constant(222) :Int
 %result = TernaryExpr(%nm, %t, %e) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -297,7 +303,8 @@ context: scalar
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -336,7 +343,8 @@ context: scalar
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -378,7 +386,8 @@ context: scalar
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```

@@ -156,7 +156,8 @@ context: scalar
 %rr     = Call(%new_p, dispatch_kind: "method", name: "right", class: "Pair") :Int
 %result = Add(%lr, %rr) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -202,7 +203,8 @@ context: scalar
 %rr     = Call(%new_p, dispatch_kind: "method", name: "right", class: "Pair") :Int
 %result = Subtract(%lr, %rr) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -238,7 +240,8 @@ context: scalar
 %new_g  = Call(dispatch_kind: "method", name: "new", class: "Greeter") :Object
 %result = Call(%new_g, dispatch_kind: "method", name: "greet", class: "Greeter") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -288,7 +291,8 @@ context: scalar
 %result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
 control: %inc_call -> %result
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -333,7 +337,8 @@ context: scalar
 %result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
 control: %inc1 -> %inc2 -> %result
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -419,7 +424,8 @@ context: scalar
 %new_b     = Call(%seven, dispatch_kind: "method", name: "new", class: "Box", param_names: "val") :Object
 %result    = Call(%new_b, dispatch_kind: "method", name: "double", class: "Box") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -471,7 +477,8 @@ context: scalar
 %region    = Region(%proj1, %inc)
 %result    = Call(%new_c, dispatch_kind: "method", name: "val", class: "Counter") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 branch_control: %proj0 -> %inc
 L: GREEN
@@ -537,7 +544,8 @@ context: scalar
 control: %bump_call -> %result
 branch_control: %proj0 -> %store_t
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -600,7 +608,8 @@ context: scalar
 control: %bump_call -> %result
 branch_control: %proj1 -> %store_f
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -637,7 +646,8 @@ context: scalar
 %new_w  = Call(dispatch_kind: "method", name: "new", class: "Widget") :Object
 %result = Call(%new_w, dispatch_kind: "method", name: "pick", class: "Widget") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -675,7 +685,8 @@ context: scalar
 %new_a  = Call(dispatch_kind: "method", name: "new", class: "Adder") :Object
 %result = Call(%new_a, dispatch_kind: "method", name: "plus_one", class: "Adder") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -751,7 +762,8 @@ context: scalar
 %new_b  = Call(dispatch_kind: "method", name: "new", class: "Bag") :Object
 %result = Call(%new_b, dispatch_kind: "method", name: "first", class: "Bag") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -790,7 +802,8 @@ context: scalar
 %new_b  = Call(dispatch_kind: "method", name: "new", class: "Bag") :Object
 %result = Call(%new_b, dispatch_kind: "method", name: "total", class: "Bag") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%co_p  = Coerce(%result : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -837,7 +850,8 @@ context: scalar
 %p    = Print(%sg, %nl)
 %one  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%one, %nl)
+%co_p  = Coerce(%one : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```

@@ -105,8 +105,8 @@ subtest 'L1 constructive proof: And builds and lowers to 7 via lli' => sub {
         unlike($ll, qr/\bSV\b/, 'L1 .ll: no SV type symbols');
 
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, 'Int:7', "L1 lli output is Int:7 (3&&7 == 7, type-tagged)");
-        is($lli_out, $l1_case->{_perl_actual} // 'Int:7',
+        is($lli_out, '7', "L1 lli prints 7 (3&&7 == 7)");
+        is($lli_out, $l1_case->{_perl_actual} // '7',
             "L1 lli output matches perl oracle");
     }
 };
@@ -136,8 +136,8 @@ subtest 'L2 constructive proof: Or builds and lowers to 3 via lli' => sub {
         unlike($ll, qr/\bSV\b/, 'L2 .ll: no SV type symbols');
 
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, 'Int:3', "L2 lli output is Int:3 (3||7 == 3, type-tagged)");
-        is($lli_out, $l2_case->{_perl_actual} // 'Int:3',
+        is($lli_out, '3', "L2 lli prints 3 (3||7 == 3)");
+        is($lli_out, $l2_case->{_perl_actual} // '3',
             "L2 lli output matches perl oracle");
     }
 };
@@ -211,8 +211,8 @@ subtest 'L3 constructive proof: DefinedOr(Int,Int) builds and lowers to 3 via ll
         unlike($ll, qr/libperl/,'L3 .ll: no libperl reference');
 
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, 'Int:3', "L3 lli output is Int:3 (3//7 == 3, left is defined)");
-        is($lli_out, $l3_case->{_perl_actual} // 'Int:3',
+        is($lli_out, '3', "L3 lli prints 3 (3//7 == 3, left is defined)");
+        is($lli_out, $l3_case->{_perl_actual} // '3',
             "L3 lli output matches perl oracle");
 
         # Structural sanity: .ll contains the definedness branch.
@@ -248,8 +248,8 @@ subtest 'L3b constructive proof: DefinedOr(Undef,Int) builds and lowers to 7 via
         unlike($ll, qr/libperl/,'L3b .ll: no libperl reference');
 
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, 'Int:7', "L3b lli output is Int:7 (undef//7 == 7, right operand)");
-        is($lli_out, $l3b_case->{_perl_actual} // 'Int:7',
+        is($lli_out, '7', "L3b lli prints 7 (undef//7 == 7, right operand)");
+        is($lli_out, $l3b_case->{_perl_actual} // '7',
             "L3b lli output matches perl oracle");
 
         # Runtime-undef guard: .ll must use alloca+store+load for the defined bit.
@@ -300,8 +300,8 @@ subtest 'L4 constructive proof: Not builds and lowers to Bool: (false) via lli' 
 
         # Bool: (false) — type-tagged. NOT "Int:0" (wrong type) or "Str:" (wrong identity).
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, 'Bool:', "L4 lli output is Bool: (false, type-tagged)");
-        is($lli_out, $l4_case->{_perl_actual} // 'Bool:',
+        is($lli_out, '', "L4 lli prints the empty string for false (false)");
+        is($lli_out, $l4_case->{_perl_actual} // '',
             "L4 lli output matches perl oracle");
 
         # Structural sanity: .ll contains xor i1 (Not instruction).

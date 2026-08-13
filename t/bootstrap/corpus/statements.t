@@ -28,8 +28,8 @@ unless (-f $STATEMENTS_MD) {
 # - Return integer literal: GREEN (Constant -> Return, simplest runtime-free)
 # - Multiple statements: GREEN (two VarDecls + Add, straight-line SSA)
 # - Comparison as condition (1<2?1:0): GREEN (TernaryExpr/select -> Int; bool internal)
-# - Bare bool return true (1 < 2): GREEN (NumLt -> Bool:1, type-tagged)
-# - Bare bool return false (2 < 1): GREEN (NumLt -> Bool:, type-tagged)
+# - Bare bool return true (1 < 2): GREEN (NumLt -> Bool:1)
+# - Bare bool return false (2 < 1): GREEN (NumLt -> Bool:)
 # - Pragma (use strict): GAP (compile-time directive, no SoN IR node)
 # - Pragma with import (use Module qw(...)): GAP (compile-time import)
 #
@@ -130,8 +130,8 @@ subtest 'constructive proof: return integer literal builds and lowers to 5' => s
         ok(!$meta->{marked_unsupported},
             'return-integer graph is truly GREEN (not marked_unsupported)');
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, 'Int:5', 'return-integer lli output is Int:5 (type-tagged)');
-        is($lli_out, $case->{_perl_actual} // 'Int:5',
+        is($lli_out, '5', 'return-integer lli prints 5 (printed)');
+        is($lli_out, $case->{_perl_actual} // '5',
             'return-integer lli output matches perl oracle');
     }
 };
@@ -158,8 +158,8 @@ subtest 'constructive proof: multiple-statements builds and lowers to 3' => sub 
         ok(!$meta->{marked_unsupported},
             'multiple-statements graph is truly GREEN (not marked_unsupported)');
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, 'Int:3', 'multiple-statements lli output is Int:3 (type-tagged)');
-        is($lli_out, $case->{_perl_actual} // 'Int:3',
+        is($lli_out, '3', 'multiple-statements lli prints 3 (printed)');
+        is($lli_out, $case->{_perl_actual} // '3',
             'multiple-statements lli output matches perl oracle');
     }
 };
@@ -200,8 +200,8 @@ subtest 'constructive proof: bare bool true (1<2) builds and lowers to Bool:1' =
         unlike($ll, qr/libperl/, 'bare-bool-true .ll: no libperl reference');
 
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, 'Bool:1', 'bare-bool-true lli output is Bool:1 (type-tagged)');
-        is($lli_out, $case->{_perl_actual} // 'Bool:1',
+        is($lli_out, '1', 'bare-bool-true lli prints 1 (printed)');
+        is($lli_out, $case->{_perl_actual} // '1',
             'bare-bool-true lli output matches perl oracle');
     }
 };
@@ -235,8 +235,8 @@ subtest 'constructive proof: bare bool false (2<1) builds and lowers to Bool:' =
 
         my $lli_out = $L->return_values->[0] // '';
         # Bool: (false, empty string-face) — NOT Int:0 or Str: (wrong type identity).
-        is($lli_out, 'Bool:', 'bare-bool-false lli output is Bool: (type-tagged, NOT Int:0 or Str:)');
-        is($lli_out, $case->{_perl_actual} // 'Bool:',
+        is($lli_out, '', 'bare-bool-false lli prints the empty string for false (NOT Int:0 or Str:)');
+        is($lli_out, $case->{_perl_actual} // '',
             'bare-bool-false lli output matches perl oracle');
     }
 };

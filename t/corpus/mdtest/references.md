@@ -48,7 +48,8 @@ context: scalar
 %arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %r   = Length(%arr) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -82,7 +83,8 @@ context: scalar
 %arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %r   = Length(%arr) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -114,7 +116,8 @@ context: scalar
 %idx = Constant(1) :Int
 %r   = Subscript(%arr, %idx) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -147,7 +150,8 @@ context: scalar
 %lk   = Constant("a") :Str
 %r    = Subscript(%hash, %lk) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -181,7 +185,8 @@ context: scalar
 %hash = HashRef(%ka, %v1, %kb, %v2) :HashRef
 %r    = Length(%hash) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -215,7 +220,8 @@ context: scalar
 %idx   = Constant(0) :Int
 %r     = Subscript(%deref, %idx) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -249,7 +255,8 @@ context: scalar
 %lk    = Constant("a") :Str
 %r     = Subscript(%deref, %lk) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -284,7 +291,8 @@ context: scalar
 %nv   = Constant(42) :Int
 %r    = Assign(%lval, %nv) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -318,7 +326,8 @@ context: scalar
 %wv   = Constant(99) :Int
 %r    = Assign(%lval, %wv) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -358,7 +367,8 @@ context: scalar
 %idx0      = Constant(0) :Int
 %r         = Subscript(%inner_arr, %idx0) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -392,7 +402,8 @@ context: scalar
 %idx = Constant(9) :Int
 %r   = Subscript(%arr, %idx) :Slot
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Slot -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -425,7 +436,8 @@ context: scalar
 %lk   = Constant("z") :Str
 %r    = Subscript(%hash, %lk) :Slot
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Slot -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -498,7 +510,8 @@ context: scalar
 %st   = Assign(%lval, %v42) :Int
 %rd   = Subscript(%arr, %i0) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%rd, %nl)
+%co_p  = Coerce(%rd : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -536,7 +549,8 @@ context: scalar
 %i1   = Constant(1) :Int
 %rd   = Subscript(%arr, %i1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%rd, %nl)
+%co_p  = Coerce(%rd : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -575,7 +589,8 @@ context: scalar
 %lval = Subscript(%arr, %i0)
 %st   = Assign(%lval, %v99) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%rd, %nl)
+%co_p  = Coerce(%rd : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -613,7 +628,8 @@ context: scalar
 %rd2  = Subscript(%arr, %i0) :Int
 %sum  = Add(%rd1, %rd2) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%sum, %nl)
+%co_p  = Coerce(%sum : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -679,7 +695,8 @@ context: scalar
 %rd   = Subscript(%arr, %i1) :Str
 %len  = Length(%rd) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%len, %nl)
+%co_p  = Coerce(%len : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -711,7 +728,8 @@ context: scalar
 %i1   = Constant(1) :Int
 %rd   = Subscript(%arr, %i1) :Num
 %nl = Constant("\n") :Str
-%p  = Print(%rd, %nl)
+%co_p  = Coerce(%rd : Num -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -773,7 +791,8 @@ context: scalar
 %kk   = Constant("k") :Str
 %rd   = Subscript(%h, %kk) :Num
 %nl = Constant("\n") :Str
-%p  = Print(%rd, %nl)
+%co_p  = Coerce(%rd : Num -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```

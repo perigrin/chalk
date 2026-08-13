@@ -107,11 +107,20 @@ END_IR
 
 # Test 5: arith-add graph lowers via LLVMDriver and produces 3
 {
+    # A PROGRAM: the graph prints its own result, so what lli emits is stdout,
+    # not a type-tagged return value. The corpus-as-programs migration moved
+    # every case to this shape; these inline blocks were the last fragments
+    # still reaching lli, and keeping them would have meant teaching the driver
+    # to tell the two contracts apart -- scaffolding around an unfinished
+    # migration rather than the end of one.
     my $ir_block = <<'END_IR';
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %add = Add(%c1, %c2) :Int
-return %add
+%co  = Coerce(%add : Int -> Str) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%co, %nl)
+return %p
 L: GREEN
 END_IR
 
@@ -120,7 +129,7 @@ END_IR
 
     ok(!$meta->{marked_unsupported}, 'arith-add (built from block) is not marked_unsupported');
     my $lli_out = $L->return_values->[0] // '';
-    is($lli_out, 'Int:3', 'arith-add built-from-block -> lli -> Int:3 (type-tagged, matches perl)');
+    is($lli_out, '3', 'arith-add built-from-block -> lli prints 3 (matches perl)');
 }
 
 # Test 6: arith-div graph (built from block) lowers via lli and produces 0.75
@@ -131,7 +140,10 @@ END_IR
 %d3  = Coerce(%c3 : Int -> Num) :Num
 %d4  = Coerce(%c4 : Int -> Num) :Num
 %div = Divide(%d3, %d4) :Num
-return %div
+%co  = Coerce(%div : Num -> Str) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%co, %nl)
+return %p
 L: GREEN
 END_IR
 
@@ -140,8 +152,8 @@ END_IR
 
     ok(!$meta->{marked_unsupported}, 'arith-div (built from block) is not marked_unsupported');
     my $lli_out = $L->return_values->[0] // '';
-    # Type-tagged: Num:0.75 — exact string compare (the %g format is consistent).
-    is($lli_out, 'Num:0.75', "arith-div built-from-block -> lli -> Num:0.75 (type-tagged, got '$lli_out')");
+    # Printed, not tagged: perl's Num stringification is sprintf("%.15g").
+    is($lli_out, '0.75', "arith-div built-from-block -> lli prints 0.75 (got '$lli_out')");
 }
 
 # Test 7: ill-typed block (Int Add fed with Num without Coerce) fails TypedInvariant
@@ -262,7 +274,10 @@ END_IR
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %tern = TernaryExpr(%cmp, %c1, %c2) :Int
-return %tern
+%co   = Coerce(%tern : Int -> Str) :Str
+%nl   = Constant("\n") :Str
+%p    = Print(%co, %nl)
+return %p
 L: GREEN
 END_IR
 
@@ -274,8 +289,8 @@ END_IR
         ok(!$meta->{marked_unsupported},
             'TernaryExpr (built from block) is not marked_unsupported');
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, 'Int:1',
-            'TernaryExpr(5>0, 1, 2) -> lli -> Int:1 (cond true, select then-branch, type-tagged)');
+        is($lli_out, '1',
+            'TernaryExpr(5>0, 1, 2) -> lli prints 1 (cond true, select then-branch)');
     }
 }
 
@@ -292,7 +307,10 @@ END_IR
 %lhs  = PadAccess(%vx, "$x_l") :Int
 %ca   = CompoundAssign(%lhs, %sum, op: "+=") :Int
 %rx   = PadAccess(%vx, "$x") :Int
-return %rx
+%co   = Coerce(%rx : Int -> Str) :Str
+%nl   = Constant("\n") :Str
+%p    = Print(%co, %nl)
+return %p
 control: %vx -> %ca
 L: GREEN
 END_IR
@@ -305,7 +323,7 @@ END_IR
         ok(!$meta->{marked_unsupported},
             'CompoundAssign kwarg (built from block) is not marked_unsupported');
         my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, 'Int:3',
+        is($lli_out, '3',
             'CompoundAssign kwarg ($x=1; $x+=2) -> lli -> Int:3 (type-tagged)');
     }
 }

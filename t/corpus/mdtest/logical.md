@@ -55,7 +55,8 @@ context: scalar
 %cb = Constant(7) :Int
 %r  = And(%ca, %cb) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -85,7 +86,8 @@ context: scalar
 %cb = Constant(7) :Int
 %r  = Or(%ca, %cb) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -130,7 +132,8 @@ context: scalar
 %pb  = PadAccess(%vdb, "$b") :Int
 %r   = DefinedOr(%pa, %pb) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -169,7 +172,8 @@ context: scalar
 %pb    = PadAccess(%vdb, "$b") :Int
 %r     = DefinedOr(%pa, %pb) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -262,7 +266,8 @@ context: scalar
 %p  = Print(%s0) :Bool
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c, %nl)
+%co_p  = Coerce(%c : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -291,7 +296,8 @@ context: scalar
 %p  = Print(%s0) :Bool
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c, %nl)
+%co_p  = Coerce(%c : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -322,7 +328,8 @@ context: scalar
 %p  = Print(%s0) :Bool
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c, %nl)
+%co_p  = Coerce(%c : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -361,7 +368,8 @@ context: scalar
 %p  = Print(%s0) :Bool
 %r  = And(%eq, %p) :Bool
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Bool -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -393,7 +401,8 @@ context: scalar
 %p  = Print(%s0) :Bool
 %r  = Or(%ne, %p) :Bool
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Bool -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -441,7 +450,8 @@ context: scalar
 %b    = Coerce(%pa : Int -> Bool) :Bool
 %nb   = Not(%b) :Bool
 %nl = Constant("\n") :Str
-%p  = Print(%nb, %nl)
+%co_p  = Coerce(%nb : Bool -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -478,7 +488,8 @@ context: scalar
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -511,7 +522,8 @@ context: scalar
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -545,7 +557,8 @@ context: scalar
 %f    = Constant(0) :Int
 %r    = TernaryExpr(%eq, %t, %f) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -580,7 +593,8 @@ context: scalar
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -613,7 +627,8 @@ context: scalar
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -646,7 +661,8 @@ context: scalar
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%ne, %t, %f) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -679,7 +695,8 @@ context: scalar
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%ne, %t, %f) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -715,7 +732,8 @@ context: scalar
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -746,7 +764,8 @@ context: scalar
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -777,7 +796,8 @@ context: scalar
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%ne, %t, %f) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%r, %nl)
+%co_p  = Coerce(%r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -813,7 +833,8 @@ context: scalar
 %region = Region(%if, %print) :Control
 %one    = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%one, %nl)
+%co_p  = Coerce(%one : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -856,7 +877,8 @@ context: scalar
 %p   = Print(%t, %nl)
 %one = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%one, %nl)
+%co_p  = Coerce(%one : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -892,7 +914,8 @@ context: scalar
 %p   = Print(%t, %nl)
 %one = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%one, %nl)
+%co_p  = Coerce(%one : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -933,7 +956,8 @@ context: scalar
 %p   = Print(%t, %nl)
 %one = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%one, %nl)
+%co_p  = Coerce(%one : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -977,10 +1001,12 @@ context: scalar
 %d   = Constant(9) :Int
 %dor = DefinedOr(%u, %d) :Int
 %nl  = Constant("\n") :Str
-%p   = Print(%dor, %nl)
+%co_p   = Coerce(%dor : Int -> Str) :Str
+%p   = Print(%co_p, %nl)
 %one = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%one, %nl)
+%co_p  = Coerce(%one : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -1008,10 +1034,12 @@ context: scalar
 %d   = Constant(9) :Int
 %dor = DefinedOr(%a, %d) :Int
 %nl  = Constant("\n") :Str
-%p   = Print(%dor, %nl)
+%co_p   = Coerce(%dor : Int -> Str) :Str
+%p   = Print(%co_p, %nl)
 %one = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%one, %nl)
+%co_p  = Coerce(%one : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```

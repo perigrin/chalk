@@ -45,7 +45,8 @@ context: scalar
 %vx   = VarDecl(%xn, %tern) :Int
 %rx   = PadAccess(%vx, "$x") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%rx, %nl)
+%co_p  = Coerce(%rx : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -89,7 +90,8 @@ context: scalar
 %region = Region(%proj0, %proj1)
 %rx    = PadAccess(%vx, "$x") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%rx, %nl)
+%co_p  = Coerce(%rx : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 branch_control: %proj0 -> %as1
 branch_control: %proj1 -> %as2
@@ -128,7 +130,8 @@ context: scalar
 %pb = Print(%sb) :Bool
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c, %nl)
+%co_p  = Coerce(%c : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -160,7 +163,8 @@ context: scalar
 %pb = Print(%sb) :Bool
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c, %nl)
+%co_p  = Coerce(%c : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -195,7 +199,8 @@ context: scalar
 %pn = Print(%sn) :Bool
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c, %nl)
+%co_p  = Coerce(%c : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -228,7 +233,8 @@ context: scalar
 %pe = Print(%se) :Bool
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c, %nl)
+%co_p  = Coerce(%c : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -262,7 +268,8 @@ context: scalar
 %pe = Print(%s) :Bool
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c, %nl)
+%co_p  = Coerce(%c : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -293,7 +300,8 @@ context: scalar
 %px = Print(%sx) :Bool
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c, %nl)
+%co_p  = Coerce(%c : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -340,7 +348,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %n_phi -> %n_new
 loop_backedge: %s_phi -> %s_new
@@ -394,7 +403,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %n_phi -> %n_new
 loop_backedge: %s_phi -> %s_new
@@ -450,7 +460,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %n_phi -> %n_new
 loop_backedge: %s_phi -> %s_new
@@ -501,7 +512,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%i_new, %nl)
+%co_p  = Coerce(%i_new : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %i_phi -> %i_new
 branch_control: %loop -> %cmp
@@ -555,7 +567,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%t_phi, %nl)
+%co_p  = Coerce(%t_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %n_phi -> %n_new
 loop_backedge: %t_phi -> %t_new
@@ -601,7 +614,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
@@ -649,7 +663,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
@@ -685,7 +700,8 @@ context: scalar
 %c1    = Constant(1) :Int
 %last  = Subtract(%len, %c1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%last, %nl)
+%co_p  = Coerce(%last : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -739,7 +755,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
@@ -790,7 +807,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
@@ -831,7 +849,8 @@ context: scalar
 %arr   = ArrayRef(%c2, %c4, %c6) :ArrayRef
 %len   = Length(%arr) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%len, %nl)
+%co_p  = Coerce(%len : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -901,7 +920,8 @@ context: scalar
 %region = Region(%proj0, %proj1)
 %rx    = PadAccess(%vx, "$x") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%rx, %nl)
+%co_p  = Coerce(%rx : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 branch_control: %proj0 -> %as
 L: GREEN
@@ -951,7 +971,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %n_phi -> %n_new
 loop_backedge: %s_phi -> %s_new
@@ -1008,7 +1029,8 @@ context: scalar
 %outer_reg   = Region(%outer_p0, %outer_p1)
 %rx          = PadAccess(%vx, "$x") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%rx, %nl)
+%co_p  = Coerce(%rx : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 branch_control: %outer_p0 -> %inner_if
 branch_control: %inner_p0 -> %as3
@@ -1073,7 +1095,8 @@ context: scalar
 %outer_reg = Region(%outer_p0, %outer_p1)
 %rx   = PadAccess(%vx, "$x") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%rx, %nl)
+%co_p  = Coerce(%rx : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 branch_control: %outer_p0 -> %inner_if
 branch_control: %inner_p0 -> %as3
@@ -1187,7 +1210,8 @@ context: scalar
 %one  = Constant(1) :Int
 %sum  = Add(%five, %one) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%sum, %nl)
+%co_p  = Coerce(%sum : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -1223,7 +1247,8 @@ context: scalar
 %p    = Print(%tern) :Bool
 %one  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%one, %nl)
+%co_p  = Coerce(%one : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -1263,7 +1288,8 @@ context: scalar
 %uw   = Unwind(%boom)
 %one  = Constant(1) :Int
 %nl   = Constant("\n") :Str
-%p    = Print(%one, %nl)
+%co_p    = Coerce(%one : Int -> Str) :Str
+%p    = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -1398,7 +1424,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
@@ -1449,7 +1476,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
@@ -1498,7 +1526,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
@@ -1580,7 +1609,8 @@ context: scalar
 %xexit = Phi(%x_phi, %x_new, region: %loop) :Int
 %lreg  = Region(%lp1, %brk)
 %nl = Constant("\n") :Str
-%p  = Print(%xexit, %nl)
+%co_p  = Coerce(%xexit : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %x_phi -> %x_new
 branch_control: %loop -> %hcond
@@ -1611,7 +1641,8 @@ context: scalar
 ```ir
 %call   = Call(dispatch_kind: "direct", name: "main::helper") :Int
 %nl = Constant("\n") :Str
-%p  = Print(%call, %nl)
+%co_p  = Coerce(%call : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -1663,7 +1694,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %i_phi -> %i_new
 loop_backedge: %s_phi -> %s_new
@@ -1714,7 +1746,8 @@ context: scalar
 %lp1   = Proj(%loop, index: 1)
 %lreg  = Region(%lp1)
 %nl = Constant("\n") :Str
-%p  = Print(%s_phi, %nl)
+%co_p  = Coerce(%s_phi : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 loop_backedge: %i_phi -> %i_new
 branch_control: %loop -> %cont
@@ -1778,7 +1811,8 @@ context: scalar
 %mtern = TernaryExpr(%lt, %c5, %x0) :Int
 %otern = TernaryExpr(%c1, %mtern, %c1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%otern, %nl)
+%co_p  = Coerce(%otern : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -1888,7 +1922,8 @@ context: scalar
 %pe = Print(%se) :Bool
 %c1 = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c1, %nl)
+%co_p  = Coerce(%c1 : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -1928,7 +1963,8 @@ context: scalar
 %pe  = Print(%se) :Bool
 %c1  = Constant(1) :Int
 %nl = Constant("\n") :Str
-%p  = Print(%c1, %nl)
+%co_p  = Coerce(%c1 : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -1974,7 +2010,8 @@ context: scalar
 %co   = Coerce(%sel : Int -> Str) :Str
 %p    = Print(%co) :Bool
 %nl = Constant("\n") :Str
-%p  = Print(%sel, %nl)
+%co_p  = Coerce(%sel : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
@@ -2011,7 +2048,8 @@ context: scalar
 %co   = Coerce(%sel : Int -> Str) :Str
 %p    = Print(%co) :Bool
 %nl = Constant("\n") :Str
-%p  = Print(%sel, %nl)
+%co_p  = Coerce(%sel : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
 L: GREEN
 ```
