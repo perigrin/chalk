@@ -335,4 +335,142 @@ class Chalk::Grammar::Perl::TypeLibrary {
     sub get_unary_op($op) {
         return $UNARY_OP_SIGNATURES{$op};
     }
+
+    # ------------------------------------------------------------------
+    # Operand types for the IR
+    # ------------------------------------------------------------------
+    #
+    # THERE IS NO REAL OPERATOR/BUILTIN DISTINCTION. Measured against perl's
+    # own optree: `length` is `<1> length`, `ord` is `<1> ord`, `x` is
+    # `<2> repeat`, `.` is `<+> multiconcat`. The `<1>`/`<2>` markers are
+    # ARITY, not category -- a "builtin" and an "operator" are the same kind of
+    # thing, and `length` differs from `x` only in taking one argument instead
+    # of two. Perl's own documentation of the split (perlop vs perlfunc) is a
+    # SPELLING distinction: named-word operators are listed as functions and
+    # punctuation ones as operators, but `x` and `repeat` are one op.
+    #
+    # This library keeps three tables only because they were populated by
+    # three different parse paths and their entries have different SHAPES
+    # (arg_types arrayref vs left/right vs operand). They are one signature
+    # space, and the lookup below treats them as one: a position index over
+    # whatever the entry calls its operands. Merging the tables outright is the
+    # obvious follow-on and is deliberately NOT done here -- their readers
+    # (get_builtin/get_binary_op/get_unary_op) are consumed by the parse layer,
+    # and changing their shape is a separate change from giving the IR an
+    # answer it currently lacks.
+    #
+    # IR op name -> the source-level name whose signature governs it. The
+    # signature tables are keyed by SOURCE vocabulary (`length`, `eq`) because
+    # that is what the parser sees; the IR is keyed by NODE vocabulary
+    # (`Length`, `StrEq`). This is the one map between them, and it is the only
+    # new fact needed to let the IR ask the same tables the parser asks --
+    # rather than each IR-side consumer re-deriving the answer as its own
+    # hand-kept op-name list.
+    #
+    # Deliberately PARTIAL. An op absent here yields undef and the caller
+    # leaves the operand alone, so a missing entry is a MISSED coercion (a loud
+    # GAP downstream) and never a wrong one.
+    #
+    # NOT the inverse of Actions.pm's %BINOP_MAP, which is many-to-one
+    # (`&&`/`and` -> And, `&`/`&.` -> BitAnd) and so not invertible in general.
+    my %IR_OP_SOURCE_NAME = (
+        # One-argument ops.
+        Length => 'length',
+        Ord    => 'ord',
+        Chr    => 'chr',
+
+        # Two-argument ops. String comparison is (Str, Str) -> Bool for every
+        # member; Concat is (Str, Str) -> Str.
+        StrEq  => 'eq',  StrNe  => 'ne',  StrLt => 'lt',
+        StrGt  => 'gt',  StrLe  => 'le',  StrGe => 'ge',
+        StrCmp => 'cmp',
+        Concat => '.',
+
+        # DELIBERATELY ABSENT -- BitAnd/BitOr/BitXor. Numeric `&` is
+        # (Int, Int) -> Int while string-bitwise `&.` is a Str operator, and
+        # BOTH lower to the same node type, so the NODE does not determine its
+        # operand types and no single answer here is correct. Splitting the
+        # node types is the fix; until then these decline, costing a coercion
+        # opportunity rather than risking a wrong coercion.
+        #
+        # ALSO ABSENT -- Print. `print` is variadic with arg_types ['Any'] BY
+        # DESIGN, because perl flattens a LIST into it (`print @a`,
+        # `print undef`, `print $ref` are all legal). The Print NODE's Str-only
+        # contract is a different claim about a different thing; conflating them
+        # would reject legal programs at parse time. See the `print @a` case in
+        # t/corpus/mdtest/statements.md.
+    );
+
+    # IR ops whose operand position ACCEPTS A SET, not a single type. An
+    # operand already in the set needs no conversion; one outside it is coerced
+    # toward the signature's type as usual.
+    #
+    # There is exactly one entry, and it is a BRIDGE OVER A PRODUCER
+    # CONFLATION rather than a fact about perl. Measured, perl's `length` is
+    # STRICTLY Str -- `length(@a)` on a 3-element array is 1, not 3, because
+    # @a goes to scalar context (3) and `length("3")` is 1. And `scalar(@a)`
+    # is not an operator at all: its optree is a bare `<0> padav[@a] s`, the
+    # array in scalar context, with no op of its own.
+    #
+    # Chalk's producer nonetheless mints a `Length` node for BOTH -- genuine
+    # `length($str)` and @a-in-scalar-context (FromOptree.pm:1362, "scalar
+    # context and yields the element count (a Length)"). So the IR node stands
+    # for two unrelated source constructs, and its operand set looks
+    # polymorphic ([Array ArrayRef Hash HashRef Str], which is what
+    # TypedInvariant records) only because of that merge. TypeLibrary is RIGHT
+    # that `length => ['Str']`; the node is what is overloaded.
+    #
+    # Without this bridge the element-count use reads as a Str position holding
+    # an ArrayRef and gets stringified -- measured, that un-lowered eight
+    # corpus cases while the Str arm of the same node kept working, so only the
+    # aggregate half showed it.
+    #
+    # THE REAL FIX is to split the node: an element-count `Length` is a
+    # different operator from a byte-length `Length`, exactly as `$#a` was
+    # already split out for being Length-1 rather than Length. That is a
+    # producer change. Until then this entry keeps the conflated node honest
+    # instead of letting a signature answer for a construct it does not
+    # describe.
+    #
+    # Note the parse-time table could not express a set anyway: type_satisfies
+    # takes ONE required type, so widening arg_types would change every reader.
+    my %IR_OP_ACCEPTED_REPRS = (
+        Length => { map { $_ => 1 } qw(Array ArrayRef Hash HashRef Str) },
+    );
+
+    # accepts_operand_repr($ir_op, $repr) -> true when the op takes this repr
+    # as-is at any position, so no coercion is wanted.
+    sub accepts_operand_repr($ir_op, $repr) {
+        return false unless defined $repr;
+        my $set = $IR_OP_ACCEPTED_REPRS{$ir_op} or return false;
+        return $set->{$repr} ? true : false;
+    }
+
+    # operand_repr_for_ir_op($ir_op, $position) -> required repr, or undef.
+    #
+    # The coercion TARGET for one operand position of an IR node, read from the
+    # same signature tables the parser uses. Returns undef when the op is not
+    # mapped, its signature is unknown, or the position is unconstrained --
+    # each of which means "no opinion", not "Any". A coercion to Any is not a
+    # coercion, so 'Any' reads as undef.
+    #
+    # A trailing 'Any' in arg_types is variadic and covers all later positions,
+    # matching how the parse-time checker reads the same table.
+    sub operand_repr_for_ir_op($ir_op, $position) {
+        my $name = $IR_OP_SOURCE_NAME{$ir_op} // return undef;
+
+        my $want;
+        if (my $sig = $BUILTIN_SIGNATURES{$name}) {
+            my $args = $sig->{arg_types} // return undef;
+            $want = $args->[$position] // $args->[-1];
+        }
+        elsif (my $bin = $BINARY_OP_SIGNATURES{$name}) {
+            $want = $position == 0 ? $bin->{left} : $bin->{right};
+        }
+        elsif (my $un = $UNARY_OP_SIGNATURES{$name}) {
+            $want = $un->{operand};
+        }
+
+        return (defined $want && $want ne 'Any') ? $want : undef;
+    }
 }

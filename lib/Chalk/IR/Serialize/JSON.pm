@@ -783,7 +783,54 @@ sub from_json ($json_string) {
 # Runs after every repr fixpoint, the first point the operand's representation
 # is known. Idempotent: an operand already produced by a Coerce is skipped, so a
 # graph loaded twice does not stack coercions.
-my %_STR_CONTEXT_OPS = map { $_ => 1 } qw(Print StrEq StrNe);
+# Nodes whose OWN contract fixes an operand repr, independent of any source
+# signature. `Print(Str...)` is the standing example: the IR node lowers ONE
+# representation and every argument position is Str, while the source builtin
+# `print` is variadic over `Any` because perl flattens a LIST into it. Those are
+# two different claims about two different things -- see the `print @a` case in
+# t/corpus/mdtest/statements.md -- so the node contract is stated HERE, on the
+# node, and is not sought in TypeLibrary's builtin table.
+#
+# Everything else asks the signature. This hash exists for genuine node-level
+# contracts only; an entry that merely restates a source signature belongs in
+# TypeLibrary instead.
+my %_NODE_OPERAND_REPR = (Print => 'Str');
+
+# The scalar representations a value can be CONVERTED to, keyed by source repr.
+# Mirrors the arms _lower_coerce implements (Context.pm) -- this pass must not
+# mint a Coerce the backend cannot lower, which would turn a clear type error
+# into a confusing "not lowered runtime-free" GAP one layer too late.
+#
+# Aggregates (Array/Hash/ArrayRef/HashRef/CodeRef) are deliberately ABSENT: no
+# conversion from an aggregate to a scalar repr is defined, so an aggregate in a
+# scalar position is a type error to REPORT, not a coercion to invent. Slot is
+# absent as a SOURCE for the same reason it is present as a target elsewhere --
+# it is a backend cell, unwrapped at its use site rather than converted here.
+my %_COERCIBLE_TO = (
+    Int   => { Num => 1, Str => 1, Bool => 1 },
+    Num   => { Int => 1, Str => 1, Bool => 1 },
+    Str   => { Num => 1, Bool => 1 },
+    Bool  => { Int => 1, Num => 1, Str => 1 },
+    Undef => { Int => 1, Num => 1, Str => 1, Bool => 1 },
+    Slot  => { Str => 1 },
+);
+
+# _coercion_exists($from, $to) -> bool. Is this conversion defined at all?
+sub _coercion_exists ($from, $to) {
+    return false if !defined $from || !defined $to;
+    return ($_COERCIBLE_TO{$from} && $_COERCIBLE_TO{$from}{$to}) ? true : false;
+}
+
+# _required_operand_repr($op, $position) -> repr, or undef for "no opinion".
+#
+# The node's own contract first, then the source signature. A position with no
+# answer is left alone: a missed coercion GAPs loudly downstream, whereas a
+# guessed one is a silent wrong answer.
+sub _required_operand_repr ($op, $position) {
+    return $_NODE_OPERAND_REPR{$op}
+        if exists $_NODE_OPERAND_REPR{$op};
+    return Chalk::Grammar::Perl::TypeLibrary::operand_repr_for_ir_op($op, $position);
+}
 
 sub _insert_str_coercions ($graphs) {
     my $inserted = 0;
@@ -794,10 +841,15 @@ sub _insert_str_coercions ($graphs) {
     for my $name (sort keys %$graphs) {
         my $g = $graphs->{$name} or next;
         for my $node (_all_graph_nodes($g)) {
-            next unless $node->can('operation')
-                     && $_STR_CONTEXT_OPS{ $node->operation };
+            next unless $node->can('operation');
+            my $op = $node->operation;
             my $inputs = $node->inputs // next;
             for my $i (0 .. $inputs->$#*) {
+                # Asked PER POSITION, because signatures are per position --
+                # `substr(Str, Num, Num)` wants different types at different
+                # operands, which a whole-node flag cannot express.
+                my $want = _required_operand_repr($op, $i) // next;
+
                 my $in = $inputs->[$i];
                 next unless defined $in && ref $in && ref($in) ne 'ARRAY';
                 next unless $in->can('representation');
@@ -807,15 +859,40 @@ sub _insert_str_coercions ($graphs) {
                 # The backend reports it against the operator, which names the
                 # node that actually needs a type.
                 next unless defined $repr;
-                next if $repr eq 'Str';
+                next if $repr eq $want;
                 next if $in->isa('Chalk::IR::Node::Coerce');
+
+                # A position that accepts a SET takes this repr as-is.
+                next if Chalk::Grammar::Perl::TypeLibrary::accepts_operand_repr($op, $repr);
+
+                # A COERCION IS A CONVERSION, NOT A SUBSUMPTION. Whether one
+                # exists is a question about the PAIR -- is this conversion
+                # defined? -- and NOT a question about the lattice. Int->Str is
+                # legitimate because stringification is defined for an Int, not
+                # because Int <: Str; Bool->Str is equally legitimate even
+                # though Bool is a SIBLING of Str under Scalar and no subtype
+                # relation holds in either direction.
+                #
+                # Keying this on subtyping was wrong twice over, both measured:
+                # requiring `is_subtype($repr, $want)` un-lowered six cases
+                # whose Bool/Slot operands print perfectly well, and exempting
+                # Str wholesale then un-lowered eight more by stringifying the
+                # ArrayRef operand of `scalar @a`.
+                #
+                # The defined pairs are the ones _lower_coerce implements
+                # (Context.pm _lower_coerce): Int<->Num, anything->Bool,
+                # Bool->Num/Int, Undef->Int/Num, scalars->Str, Str->Num/Bool.
+                # Aggregates appear in NONE of them -- an ArrayRef reaching a
+                # scalar position is a type error to report, not a missing
+                # conversion to invent.
+                next unless _coercion_exists($repr, $want);
 
                 my $c = $factory->make('Coerce',
                     inputs    => [$in],
                     from_repr => $repr,
-                    to_repr   => 'Str',
+                    to_repr   => $want,
                 );
-                $c->set_representation('Str');
+                $c->set_representation($want);
                 $inputs->[$i] = $c;
                 $inserted++;
             }

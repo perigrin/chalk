@@ -690,4 +690,68 @@ subtest 'Unknown is DISTINCT from Scalar (the bug this exists to prevent)' => su
         'Scalar IS an Unknown (Unknown is top)');
 };
 
+# ---------------------------------------------------------------------------
+# operand_repr_for_ir_op: the IR asks the same signature tables the parser asks.
+# ---------------------------------------------------------------------------
+
+subtest 'operand_repr_for_ir_op reads the signature, per position' => sub {
+    my $f = \&Chalk::Grammar::Perl::TypeLibrary::operand_repr_for_ir_op;
+
+    is($f->('Ord', 0),    'Str', 'Ord position 0 wants Str (ord => arg_types [Str])');
+    is($f->('Chr', 0),    'Int', 'Chr position 0 wants Int -- NOT everything is Str');
+
+    # Binary ops answer per position from left/right.
+    is($f->('Concat', 0), 'Str', 'Concat position 0 wants Str');
+    is($f->('Concat', 1), 'Str', 'Concat position 1 wants Str');
+
+    # The five string comparisons the old hand-written list omitted. These are
+    # the ops %_STR_CONTEXT_OPS never had, and no code change was needed to
+    # cover them -- the signature already said so.
+    for my $op (qw(StrLt StrGt StrLe StrGe StrCmp)) {
+        is($f->($op, 0), 'Str', "$op position 0 wants Str (was absent from the old list)");
+        is($f->($op, 1), 'Str', "$op position 1 wants Str");
+    }
+};
+
+subtest 'operand_repr_for_ir_op DECLINES rather than guessing' => sub {
+    my $f = \&Chalk::Grammar::Perl::TypeLibrary::operand_repr_for_ir_op;
+
+    # Unmapped op: no opinion, so the caller leaves the operand alone.
+    is($f->('Add', 0), undef, 'Add is unmapped -- no opinion, not a guess');
+    is($f->('NoSuchOpXYZ', 0), undef, 'an unknown op declines');
+
+    # The bitwise family is deliberately absent: `&` is (Int,Int)->Int while
+    # `&.` is a Str operator and BOTH lower to BitAnd, so the node does not
+    # determine its operand types and no single answer is correct.
+    for my $op (qw(BitAnd BitOr BitXor)) {
+        is($f->($op, 0), undef,
+            "$op declines -- numeric `&` and string `&.` share this node type");
+    }
+
+    # Print is absent BY DESIGN. The builtin is variadic over Any because perl
+    # flattens a LIST into it; the NODE's Str-only contract is a different
+    # claim, stated on the node in Serialize/JSON.pm. Conflating them would
+    # reject `print @a`, which is a legal program.
+    is($f->('Print', 0), undef,
+        'Print declines -- the builtin is variadic Any, the node contract is separate');
+};
+
+subtest 'accepts_operand_repr covers the conflated Length node' => sub {
+    my $f = \&Chalk::Grammar::Perl::TypeLibrary::accepts_operand_repr;
+
+    # Chalk's Length node serves BOTH `length($str)` and @a-in-scalar-context,
+    # so it accepts aggregates as-is. Perl's own `length` does NOT: measured,
+    # `length(@a)` on a 3-element array is 1 (the array goes to scalar context,
+    # then length("3")), so this set is a bridge over a producer conflation,
+    # not a fact about perl.
+    for my $repr (qw(Array ArrayRef Hash HashRef Str)) {
+        ok($f->('Length', $repr), "Length accepts $repr as-is (no coercion)");
+    }
+    ok(!$f->('Length', 'Int'),
+        'Length does NOT accept Int -- an Int operand still coerces to Str, which is S13');
+
+    ok(!$f->('Concat', 'ArrayRef'), 'Concat accepts no set -- it has a plain signature');
+    ok(!$f->('Length', undef),      'an undef repr is never accepted');
+};
+
 done_testing;

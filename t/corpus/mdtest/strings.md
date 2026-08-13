@@ -284,6 +284,61 @@ control: %start -> %p
 L: GREEN
 ```
 
+## S13 length() of an Int coerces its operand (the SIGNATURE says Str)
+
+`length` takes Str. Its operand's coercion target is not a new fact to discover —
+it is already written down, per position, in `TypeLibrary`'s builtin signature
+table: `length => { arg_types => ['Str'] }`. Perl agrees: `length(12345)` is 5,
+the digit COUNT, because the Int is stringified first.
+
+Nothing asked. Coercion insertion keyed off `%_STR_CONTEXT_OPS`, a three-name
+hand-written list (`Print StrEq StrNe`) that is position-blind and had no
+`Length` entry, so `length($n)` on an Int reached the backend uncoerced and GAPped
+at `Context.pm:3968` ("only Array and Str are lowered runtime-free") while the
+answer sat unread one file over. The coercion machinery it needed already
+existed and was already proven: the `Coerce(Int->Str)` node, `_lower_stringify`'s
+int-to-decimal renderer, and the `_str_len_table` length tracking are the same
+ones S9 above and the `print @a` case in statements.md exercise.
+
+This is the demonstration case for signature-driven coercion: the operand is now
+wrapped by asking `TypeLibrary` what position 0 of `length` requires, rather than
+by adding `Length` to another hand-kept list. `%_STR_CONTEXT_OPS` was a
+degenerate, incomplete re-derivation of `arg_types` — the same relationship
+`%_REPR_RANK` had to the type lattice before it was deleted for being "a second
+copy of something TypeLibrary already states".
+
+The length is the RUNTIME digit count, so it is `_str_len_table`-tracked rather
+than a compile-time literal: `12345` renders to five bytes and `length` reads
+that tracked length back.
+
+```perl
+# source
+use 5.42.0;
+my $n = 12345;
+print length($n);
+print "\n";
+```
+
+```behavior
+stdout: 5\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%nl  = Constant("\n") :Str
+%n   = Constant(12345) :Int
+%cs  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
+%len = Length(%cs) :Int
+%cl  = Coerce(%len, from_repr: "Int", to_repr: "Str") :Str
+%p1  = Print(%cl)
+%p2  = Print(%nl)
+return %p2
+control: %start -> %p1 -> %p2
+L: GREEN
+```
+
 ## S10 interpolation of a negative integer (sign in the digit-count length)
 
 The digit-count length the Stringify records must include the sign: `-5` is two
