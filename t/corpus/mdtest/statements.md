@@ -28,11 +28,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c = Constant(5) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -56,6 +58,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c1   = Constant(1) :Int
 %xn   = Constant("$x") :Str
 %vx   = VarDecl(%xn, %c1) :Int
@@ -69,6 +72,7 @@ context: scalar
 %co_p  = Coerce(%sum : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -105,6 +109,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %one  = Constant(1) :Int
 %two  = Constant(2) :Int
 %cmp  = NumLt(%one, %two) :Bool
@@ -115,6 +120,7 @@ context: scalar
 %co_p  = Coerce(%tern : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -139,6 +145,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %one  = Constant(1) :Int
 %two  = Constant(2) :Int
 %cmp  = NumLt(%one, %two) :Bool
@@ -146,6 +153,7 @@ context: scalar
 %co_p  = Coerce(%cmp : Bool -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -170,6 +178,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %two  = Constant(2) :Int
 %one  = Constant(1) :Int
 %cmp  = NumLt(%two, %one) :Bool
@@ -177,6 +186,7 @@ context: scalar
 %co_p  = Coerce(%cmp : Bool -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -251,6 +261,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s0   = Constant("hi\n") :Str
 %p    = Print(%s0) :Bool
 %c    = Constant(1) :Int
@@ -258,6 +269,7 @@ context: scalar
 %co_p  = Coerce(%c : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -281,6 +293,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s0   = Constant("ok ") :Str
 %i1   = Constant(1) :Int
 %s2   = Constant("\n") :Str
@@ -290,6 +303,7 @@ context: scalar
 %co_p  = Coerce(%c : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -313,6 +327,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s0   = Constant("a\n") :Str
 %p0   = Print(%s0) :Bool
 %s1   = Constant("b\n") :Str
@@ -322,6 +337,7 @@ context: scalar
 %co_p  = Coerce(%c : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -345,12 +361,14 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s0   = Constant("x\n") :Str
 %p    = Print(%s0) :Bool
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%p : Bool -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -377,6 +395,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s0   = Constant(4294967296) :Int
 %p    = Print(%s0) :Bool
 %c    = Constant(1) :Int
@@ -384,6 +403,7 @@ context: scalar
 %co_p  = Coerce(%c : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -432,6 +452,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s   = Constant("hi") :Str
 %nl  = Constant("\n") :Str
 %p   = Print(%s, %nl)
@@ -440,6 +461,7 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -462,6 +484,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %a   = Constant("a") :Str
 %b   = Constant("b") :Str
 %c   = Constant("c") :Str
@@ -472,6 +495,7 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -498,6 +522,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c    = Constant(1) :Int
 %if   = If(%c)
 %a    = Constant("a") :Str
@@ -510,6 +535,7 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -533,6 +559,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c    = Constant(0) :Int
 %if   = If(%c)
 %a    = Constant("a") :Str
@@ -545,6 +572,7 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -595,6 +623,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s1  = Constant("ok ") :Str
 %n   = Constant(1) :Int
 %sn  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
@@ -605,6 +634,7 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -629,6 +659,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %a   = Constant(1) :Int
 %eq  = NumEq(%a, %a) :Bool
 %sb  = Coerce(%eq, from_repr: "Bool", to_repr: "Str") :Str
@@ -639,6 +670,7 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -661,6 +693,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %a   = Constant(1) :Int
 %b   = Constant(2) :Int
 %eq  = NumEq(%a, %b) :Bool
@@ -672,6 +705,7 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -703,6 +737,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %v   = Constant(0.75) :Num
 %sv  = Coerce(%v, from_repr: "Num", to_repr: "Str") :Str
 %nl  = Constant("\n") :Str
@@ -712,6 +747,7 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -735,6 +771,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %v   = Constant(0.1) :Num
 %sv  = Coerce(%v, from_repr: "Num", to_repr: "Str") :Str
 %nl  = Constant("\n") :Str
@@ -744,6 +781,7 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -769,6 +807,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %a   = Constant(3) :Int
 %b   = Constant(4) :Int
 %ca  = Coerce(%a, from_repr: "Int", to_repr: "Num") :Num
@@ -782,5 +821,6 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```

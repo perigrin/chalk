@@ -36,12 +36,14 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s      = Constant("ab-cd") :Str
 %m      = RegexMatch(%s, pattern: "(\w+)-(\w+)") :Bool
 %result = RegexCapture(%m, n: 1) :Str
 %nl = Constant("\n") :Str
 %p  = Print(%result, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -65,6 +67,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s      = Constant("foo") :Str
 %m      = RegexMatch(%s, pattern: "(o+)") :Bool
 %cap    = RegexCapture(%m, n: 1) :Str
@@ -75,6 +78,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -98,9 +102,11 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %result = EnvRead(key: "CHALK_G7_TEST") :Str
 %nl = Constant("\n") :Str
 %p  = Print(%result, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```

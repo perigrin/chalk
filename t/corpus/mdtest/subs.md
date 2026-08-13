@@ -45,11 +45,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %call = Call(dispatch_kind: "direct", name: "main::foo") :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%call : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -80,12 +82,14 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %call = Call(dispatch_kind: "direct", name: "main::side")
 %n = Constant(7) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%n : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -214,11 +218,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %call = Call(dispatch_kind: "direct", name: "main::f") :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%call : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -243,11 +249,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %call = Call(dispatch_kind: "direct", name: "main::id") :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%call : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -303,11 +311,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %call = Call(dispatch_kind: "direct", name: "main::f") :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%call : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -343,11 +353,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %call = Call(dispatch_kind: "direct", name: "main::f") :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%call : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -380,11 +392,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %call = Call(dispatch_kind: "direct", name: "main::f") :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%call : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -414,6 +428,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %call1 = Call(dispatch_kind: "direct", name: "main::f") :Int
 %call2 = Call(dispatch_kind: "direct", name: "main::f") :Int
 %sum   = Add(%call1, %call2) :Int
@@ -421,6 +436,7 @@ context: scalar
 %co_p  = Coerce(%sum : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -482,11 +498,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %call = Call(dispatch_kind: "direct", name: "main::f") :Int
 %n    = Constant(3) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%n : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```

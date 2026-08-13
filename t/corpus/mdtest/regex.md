@@ -40,6 +40,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s      = Constant("foobar") :Str
 %m      = RegexMatch(%s, pattern: "foo") :Bool
 %one    = Constant(1) :Int
@@ -49,6 +50,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -77,6 +79,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %qr     = Constant("foo", const_type: "regex") :Regex
 %s      = Constant("foobar") :Str
 %m      = Match(%s, %qr) :Bool
@@ -87,6 +90,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -111,11 +115,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s      = Constant("foobar") :Str
 %result = RegexSubst(%s, pattern: "foo", replacement: "baz") :Str
 %nl = Constant("\n") :Str
 %p  = Print(%result, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -140,6 +146,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s      = Constant("foobar") :Str
 %m      = RegexMatch(%s, pattern: "^foo") :Bool
 %one    = Constant(1) :Int
@@ -149,6 +156,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -173,6 +181,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s      = Constant("a9z") :Str
 %m      = RegexMatch(%s, pattern: "[0-9]") :Bool
 %one    = Constant(1) :Int
@@ -182,6 +191,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -208,6 +218,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s      = Constant("foo_1") :Str
 %m      = RegexMatch(%s, pattern: "^[A-Za-z_][A-Za-z0-9_]*$") :Bool
 %one    = Constant(1) :Int
@@ -217,6 +228,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -244,6 +256,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s      = Constant("hello") :Str
 %m      = RegexMatch(%s, pattern: "ell") :Bool
 %nm     = Not(%m) :Bool
@@ -254,6 +267,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -297,6 +311,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c      = Constant("test") :Str
 %m      = RegexMatch(%c, pattern: "^test") :Bool
 %one    = Constant(1) :Int
@@ -306,6 +321,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -337,6 +353,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c      = Constant("nope") :Str
 %m      = RegexMatch(%c, pattern: "^test") :Bool
 %one    = Constant(1) :Int
@@ -346,6 +363,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -380,6 +398,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c      = Constant("test") :Str
 %m      = RegexMatch(%c, pattern: "^test") :Bool
 %one    = Constant(1) :Int
@@ -389,5 +408,6 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```

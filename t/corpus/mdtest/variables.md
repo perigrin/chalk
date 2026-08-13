@@ -38,6 +38,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %one  = Constant(1) :Int
 %xn   = Constant("$x") :Str
 %vx   = VarDecl(%xn, %one) :Int
@@ -46,6 +47,7 @@ context: scalar
 %co_p  = Coerce(%rx : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -76,6 +78,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %xn   = Constant("$x") :Str
 %vx   = VarDecl(%xn) :Int
 %one  = Constant(1) :Int
@@ -86,6 +89,7 @@ context: scalar
 %co_p  = Coerce(%rx : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -113,6 +117,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls    = MOP::Class(name: "_A5Tmp")
 %mf     = MOP::Field(class: %cls, name: "x", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
 %fa     = FieldAccess(field_index: 0, field_stash: "_A5Tmp") :Int
@@ -124,6 +129,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -158,11 +164,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %two  = Constant(2) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%two : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -195,6 +203,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %one   = Constant(1) :Int
 %xname = Constant("$x") :Str
 %vx    = VarDecl(%xname, %one) :Int
@@ -208,6 +217,7 @@ context: scalar
 %co_p  = Coerce(%rx : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -236,6 +246,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
@@ -246,6 +257,7 @@ context: scalar
 %co_p  = Coerce(%sh : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -268,6 +280,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c5    = Constant(5) :Int
 %c6    = Constant(6) :Int
 %arr   = ArrayRef(%c5, %c6) :ArrayRef
@@ -277,6 +290,7 @@ context: scalar
 %co_p  = Coerce(%pp : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -302,6 +316,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
@@ -312,6 +327,7 @@ context: scalar
 %co_p  = Coerce(%len : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -339,6 +355,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
@@ -348,6 +365,7 @@ context: scalar
 %co_p  = Coerce(%len : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -373,6 +391,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
@@ -383,6 +402,7 @@ context: scalar
 %co_p  = Coerce(%len : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -408,6 +428,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
@@ -418,6 +439,7 @@ context: scalar
 %co_p  = Coerce(%len : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -446,6 +468,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
@@ -455,6 +478,7 @@ context: scalar
 %co_p  = Coerce(%len : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -583,11 +607,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c = Constant(5) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -618,6 +644,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %g   = Constant(5) :Int
 %h   = Constant(7) :Int
 %sum = Add(%g, %h) :Int
@@ -625,6 +652,7 @@ context: scalar
 %co_p  = Coerce(%sum : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -655,6 +683,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %g   = Constant(5) :Int
 %one = Constant(1) :Int
 %new = Add(%g, %one) :Int
@@ -662,6 +691,7 @@ context: scalar
 %co_p  = Coerce(%new : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -697,10 +727,12 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c = Constant("hi") :Str
 %nl = Constant("\n") :Str
 %p  = Print(%c, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -733,10 +765,12 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c = Constant("bye") :Str
 %nl = Constant("\n") :Str
 %p  = Print(%c, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -777,6 +811,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %half   = Constant(0.5) :Num
 %sum    = Add(%half, %half) :Num
 %one    = Constant(1) :Int
@@ -787,6 +822,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -816,6 +852,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %a      = Constant(0.25) :Num
 %half   = Constant(0.5) :Num
 %sum    = Add(%a, %half) :Num
@@ -827,6 +864,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -855,6 +893,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %a      = Constant(0.25) :Num
 %q      = Constant(0.75) :Num
 %sum    = Add(%a, %q) :Num
@@ -866,6 +905,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -898,6 +938,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %a      = Constant(0.5) :Num
 %i      = Constant(2) :Int
 %ic     = Coerce(%i, from_repr: "Int", to_repr: "Num") :Num
@@ -911,5 +952,6 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```

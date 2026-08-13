@@ -948,12 +948,21 @@ sub _make_behavior_record {
 sub _serialize_behavior {
     my ($record) = @_;
     my @lines;
-    my $vals = $record->return_values;
-    if (@$vals) {
-        push @lines, "return: $vals->[0]";
-    } else {
-        push @lines, "return: undef";
-    }
+
+    # A case is a PROGRAM: what it PRINTS is the assertion, so capture writes a
+    # `stdout:` line. It used to write `return:`, which described a fragment's
+    # value -- a program has none -- so a captured block was immediately
+    # rejected by _behavior_matches as unmigrated.
+    #
+    # Escapes are written back in their source form (\n, \t) so the round trip
+    # is stable: _cook_dq_escapes reads them on the way in, and a captured
+    # block that re-cooked its own literal newline would grow a line each pass.
+    my $out = $record->stdout // '';
+    $out =~ s/\\/\\\\/g;
+    $out =~ s/\n/\\n/g;
+    $out =~ s/\t/\\t/g;
+    push @lines, "stdout: $out";
+
     push @lines, "context: " . ($record->wantarray_context // 'scalar');
     return @lines;
 }

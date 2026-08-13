@@ -93,12 +93,14 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %lhs = Constant("hello") :Str
 %rhs = Constant(" world") :Str
 %cat = Concat(%lhs, %rhs) :Str
 %nl = Constant("\n") :Str
 %p  = Print(%cat, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -163,12 +165,14 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %va   = Constant("a") :Str
 %vb   = Constant("b") :Str
 %cat  = Concat(%va, %vb) :Str
 %nl = Constant("\n") :Str
 %p  = Print(%cat, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -194,12 +198,14 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %va   = Constant("x") :Str
 %vb   = Constant("y") :Str
 %cat  = Concat(%va, %vb) :Str
 %nl = Constant("\n") :Str
 %p  = Print(%cat, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -226,6 +232,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %p    = Constant("p-") :Str
 %va   = Constant("x") :Str
 %c1   = Concat(%p, %va) :Str
@@ -238,6 +245,7 @@ context: scalar
 %nl = Constant("\n") :Str
 %p  = Print(%c4, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -264,6 +272,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s0  = Constant("ok ") :Str
 %n   = Constant(3) :Int
 %sf  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
@@ -271,6 +280,7 @@ context: scalar
 %nl = Constant("\n") :Str
 %p  = Print(%cat, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -296,6 +306,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s0  = Constant("val ") :Str
 %n   = Constant(-5) :Int
 %sf  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
@@ -303,6 +314,7 @@ context: scalar
 %nl = Constant("\n") :Str
 %p  = Print(%cat, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -328,6 +340,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s0  = Constant("val ") :Str
 %n   = Constant(0) :Int
 %sf  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
@@ -335,6 +348,7 @@ context: scalar
 %nl = Constant("\n") :Str
 %p  = Print(%cat, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -359,6 +373,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %s0  = Constant("ok ") :Str
 %n   = Constant(3) :Int
 %sf  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
@@ -371,6 +386,7 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 

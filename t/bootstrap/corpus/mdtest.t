@@ -122,17 +122,23 @@ subtest 'capture mode: empty behavior block gets filled from perl oracle' => sub
 
 ```perl
 # source
-1 + 2
+use 5.42.0;
+say(1 + 2);
 ```
 
 ```behavior
 ```
 
 ```ir
+%start = Start()
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %add = Add(%c1, %c2) :Int
-return %add
+%co  = Coerce(%add : Int -> Str) :Str
+%nl  = Constant("\n") :Str
+%p   = Print(%co, %nl)
+return %p
+control: %start -> %p
 L: GREEN
 ```
 END_MD
@@ -153,8 +159,11 @@ END_MD
     });
 
     is($result->{behavior}{verdict}, 'CAPTURED', 'behavior verdict is CAPTURED');
-    # The oracle now emits a type-tagged value: Int:3 for the integer 1+2.
-    is($result->{behavior}{actual}, 'Int:3', 'captured value is Int:3 from perl oracle (type-tagged)');
+    # A case is a PROGRAM: the oracle's result is what it PRINTED, so capture
+    # records stdout. It used to record a type-tagged return VALUE (Int:3),
+    # which described a fragment -- a program has no return value, and a block
+    # captured that way was immediately rejected as unmigrated on the re-run.
+    is($result->{behavior}{actual}, '3', 'captured value is the printed 3');
     is($result->{overall}, 'CAPTURED', 'overall verdict is CAPTURED');
 
     # Re-read the file: the behavior block should now be filled
@@ -162,7 +171,7 @@ END_MD
     my $new_content = do { local $/; <$rfh> };
     close $rfh;
 
-    like($new_content, qr/return: Int:3/, 'rewritten file contains "return: Int:3" (type-tagged)');
+    like($new_content, qr/stdout: 3/, 'rewritten file contains "stdout: 3"');
     unlike($new_content, qr/^```behavior\s*```/m, 'behavior block is no longer empty');
 
     # Run again on the rewritten file — now it should PASS (not CAPTURED)

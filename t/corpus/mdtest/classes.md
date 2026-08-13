@@ -31,12 +31,14 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls    = MOP::Class(name: "Empty")
 %new_e  = Call(dispatch_kind: "method", name: "new", class: "Empty") :Object
 %result = RefType(%new_e) :Str
 %nl = Constant("\n") :Str
 %p  = Print(%result, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -67,6 +69,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls    = MOP::Class(name: "Animal")
 %mf     = MOP::Field(class: %cls, name: "name", fieldix: 0, param: true, reader: false, has_default: false, type: "Str")
 %fa     = FieldAccess(field_index: 0, field_stash: "Animal") :Str
@@ -77,6 +80,7 @@ context: scalar
 %nl = Constant("\n") :Str
 %p  = Print(%result, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -107,6 +111,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls    = MOP::Class(name: "Greeter")
 %mf     = MOP::Field(class: %cls, name: "msg", fieldix: 0, param: true, reader: false, has_default: true, type: "Str")
 %fa     = FieldAccess(field_index: 0, field_stash: "Greeter") :Str
@@ -116,6 +121,7 @@ context: scalar
 %nl = Constant("\n") :Str
 %p  = Print(%result, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -146,6 +152,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls    = MOP::Class(name: "Pair")
 %mf_l   = MOP::Field(class: %cls, name: "left",  fieldix: 0, param: true, reader: true, has_default: false, type: "Int")
 %mf_r   = MOP::Field(class: %cls, name: "right", fieldix: 1, param: true, reader: true, has_default: false, type: "Int")
@@ -159,6 +166,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -193,6 +201,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls    = MOP::Class(name: "Pair")
 %mf_l   = MOP::Field(class: %cls, name: "left",  fieldix: 0, param: true, reader: true, has_default: false, type: "Int")
 %mf_r   = MOP::Field(class: %cls, name: "right", fieldix: 1, param: true, reader: true, has_default: false, type: "Int")
@@ -206,6 +215,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -234,6 +244,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls    = MOP::Class(name: "Greeter")
 %body   = Constant(42) :Int
 %mi     = MOP::Method(class: %cls, name: "greet", body: %body, return_repr: "Int")
@@ -243,6 +254,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -368,6 +380,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %base_cls  = MOP::Class(name: "Base")
 %kind_body = Constant("base") :Str
 %mi_kind   = MOP::Method(class: %base_cls, name: "kind", body: %kind_body, return_repr: "Str")
@@ -377,6 +390,7 @@ context: scalar
 %nl = Constant("\n") :Str
 %p  = Print(%result, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -409,6 +423,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls       = MOP::Class(name: "Box")
 %mf_val    = MOP::Field(class: %cls, name: "val",    fieldix: 0, param: true,  reader: false, has_default: false, type: "Int")
 %mf_dbl    = MOP::Field(class: %cls, name: "double", fieldix: 1, param: false, reader: false, has_default: false, type: "Int")
@@ -427,6 +442,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -465,6 +481,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %ten       = Constant(10) :Int
 %new_c     = Call(%ten, dispatch_kind: "method", name: "new", class: "Counter", param_names: "n") :Object
 %five      = Constant(5) :Int
@@ -481,6 +498,7 @@ context: scalar
 %p  = Print(%co_p, %nl)
 return %p
 branch_control: %proj0 -> %inc
+control: %start -> %p
 L: GREEN
 ```
 
@@ -642,6 +660,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls    = MOP::Class(name: "Widget")
 %new_w  = Call(dispatch_kind: "method", name: "new", class: "Widget") :Object
 %result = Call(%new_w, dispatch_kind: "method", name: "pick", class: "Widget") :Int
@@ -649,6 +668,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -681,6 +701,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls    = MOP::Class(name: "Adder")
 %new_a  = Call(dispatch_kind: "method", name: "new", class: "Adder") :Object
 %result = Call(%new_a, dispatch_kind: "method", name: "plus_one", class: "Adder") :Int
@@ -688,6 +709,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -758,6 +780,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls    = MOP::Class(name: "Bag")
 %new_b  = Call(dispatch_kind: "method", name: "new", class: "Bag") :Object
 %result = Call(%new_b, dispatch_kind: "method", name: "first", class: "Bag") :Int
@@ -765,6 +788,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -798,6 +822,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls    = MOP::Class(name: "Bag")
 %new_b  = Call(dispatch_kind: "method", name: "new", class: "Bag") :Object
 %result = Call(%new_b, dispatch_kind: "method", name: "total", class: "Bag") :Int
@@ -805,6 +830,7 @@ context: scalar
 %co_p  = Coerce(%result : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -842,6 +868,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cls  = MOP::Class(name: "Counter")
 %new  = Call(dispatch_kind: "method", name: "new", class: "Counter") :Object
 %get  = Call(%new, dispatch_kind: "method", name: "get", class: "Counter") :Int
@@ -853,5 +880,6 @@ context: scalar
 %co_p  = Coerce(%one : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```

@@ -20,6 +20,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %add = Add(%c1, %c2) :Int
@@ -27,6 +28,7 @@ context: scalar
 %co_p  = Coerce(%add : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -47,6 +49,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c5  = Constant(5) :Int
 %c3  = Constant(3) :Int
 %sub = Subtract(%c5, %c3) :Int
@@ -54,6 +57,7 @@ context: scalar
 %co_p  = Coerce(%sub : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -74,6 +78,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c3  = Constant(3) :Int
 %c4  = Constant(4) :Int
 %mul = Multiply(%c3, %c4) :Int
@@ -81,6 +86,7 @@ context: scalar
 %co_p  = Coerce(%mul : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -102,6 +108,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c3  = Constant(3) :Int
 %c4  = Constant(4) :Int
 %d3  = Coerce(%c3 : Int -> Num) :Num
@@ -111,6 +118,7 @@ context: scalar
 %co_p  = Coerce(%div : Num -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -132,6 +140,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %cn7 = Constant(-7) :Int
 %c3  = Constant(3) :Int
 %mod = Modulo(%cn7, %c3) :Int
@@ -139,6 +148,7 @@ context: scalar
 %co_p  = Coerce(%mod : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -164,11 +174,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c = Constant(4294967296) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -194,11 +206,13 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c = Constant(-9223372036854775808) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -225,6 +239,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %arr = ArrayRef(%c1, %c2) :ArrayRef
@@ -234,6 +249,7 @@ context: scalar
 %co_p  = Coerce(%r : Slot -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
 
@@ -261,6 +277,7 @@ context: scalar
 ```
 
 ```ir
+%start = Start()
 %c3   = Constant(3) :Int
 %xn   = Constant("$x") :Str
 %vx   = VarDecl(%xn, %c3) :Int
@@ -276,5 +293,6 @@ context: scalar
 %co_p  = Coerce(%div : Num -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
+control: %start -> %p
 L: GREEN
 ```
