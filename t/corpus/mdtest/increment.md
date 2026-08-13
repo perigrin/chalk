@@ -43,8 +43,10 @@ context: scalar
 %ca    = CompoundAssign(%lhs, %add, op: "+=") :Int   # write-back: ++$i is a += 1
 %ret_r = PadAccess(%vd, "$i") :Int      # final return read — distinct from RMW read
 %nl = Constant("\n") :Str
-%p  = Print(%ret_r, %nl)
+%co_p = Coerce(%ret_r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
+control: %vd -> %ca -> %p
 L: GREEN
 ```
 
@@ -78,7 +80,9 @@ context: scalar
 %ca    = CompoundAssign(%lhs, %add, op: "+=") :Int   # write-back: $i++ side-effect is += 1
 %ret_r = PadAccess(%vd, "$i") :Int      # final return read — distinct from RMW read
 %nl = Constant("\n") :Str
-%p  = Print(%ret_r, %nl)
+%co_p = Coerce(%ret_r : Int -> Str) :Str
+%p  = Print(%co_p, %nl)
 return %p
+control: %vd -> %ca -> %p
 L: GREEN
 ```

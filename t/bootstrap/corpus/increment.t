@@ -84,8 +84,8 @@ subtest 'distinct PadAccess varnames prevent B1 stale-read GAP' => sub {
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
         ok(!$meta->{marked_unsupported},
             'K1 graph lowers without triggering B1 stale-read GAP');
-        is($L->return_values->[0], 'Int:1',
-            'K1 lli output is Int:1 (B1 guard did not fire; no stale-read GAP, type-tagged)');
+        is($L->return_values->[0], '1',
+            'K1 lli prints 1 (B1 guard did not fire; no stale-read GAP)');
     }
 };
 

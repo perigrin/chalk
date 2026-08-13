@@ -148,9 +148,13 @@ def migrate_ir(ir):
     # t/bootstrap/corpus was.
     #
     # The value's repr is the `:Repr` suffix on its defining line.
+    # The repr may be followed by a trailing `# comment`, so strip that before
+    # anchoring at end-of-line -- two increment.md blocks were missed by a
+    # pattern that did not.
     src_repr = None
     for l in lines[:ret_i]:
-        m = re.match(r'\s*' + re.escape(val) + r'\s*=.*?:(\w+)\s*$', l)
+        stripped = re.sub(r'\s*#.*$', '', l)
+        m = re.match(r'\s*' + re.escape(val) + r'\s*=.*?:(\w+)\s*$', stripped)
         if m:
             src_repr = m.group(1)
     printed = val

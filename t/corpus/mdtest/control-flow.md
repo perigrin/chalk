@@ -95,6 +95,7 @@ context: scalar
 return %p
 branch_control: %proj0 -> %as1
 branch_control: %proj1 -> %as2
+control: %region -> %p
 L: GREEN
 ```
 

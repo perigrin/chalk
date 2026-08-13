@@ -798,25 +798,35 @@ END_IR
         or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
 };
 
-subtest 'a Coerce NOT feeding a truthiness op stays required (teeth)' => sub {
-    # A Coerce whose consumer is not a truthiness op (e.g. it feeds an Add) is
-    # a real representation change the producer must carry; do not absorb it.
+subtest 'a Coerce feeding a NON-absorbing consumer stays required (teeth)' => sub {
+    # A Coerce is absorbed only when its sole consumer does the coercion
+    # itself: Coerce(->Bool) into a truthiness op, or Coerce(->Num) into a
+    # NUMIFYING arithmetic op (%_NUMIFYING_OP). Any other consumer means the
+    # Coerce is a real representation change the producer must carry.
+    #
+    # This used `Coerce(Int -> Num)` feeding an `Add`, which WAS a valid teeth
+    # case until 0b0f6eda (2026-07-21) widened absorption to numifying ops --
+    # Add is one, so the example became legitimately absorbable and this test
+    # has asserted the older, narrower rule ever since. The intent is unchanged;
+    # the example now uses a consumer that genuinely does not numify.
+    #
+    # Concat takes Str: a Coerce(Int -> Str) into it is a real repr change.
     my $spec = <<'END_IR';
 %five = Constant(5) :Int
-%n    = Coerce(%five : Int -> Num) :Num
-%one  = Constant(1) :Num
-%sum  = Add(%n, %one) :Num
-return %sum
+%s    = Coerce(%five : Int -> Str) :Str
+%tail = Constant("x") :Str
+%cat  = Concat(%s, %tail) :Str
+return %cat
 END_IR
     my $real = $C->build_graph_from_ir(<<'END_IR');
 %five = Constant(5) :Int
-%one  = Constant(1) :Num
-%sum  = Add(%five, %one) :Num
-return %sum
+%tail = Constant("x") :Str
+%cat  = Concat(%five, %tail) :Str
+return %cat
 END_IR
     my $res = $C->shape_subset_check($spec, $real);
     is($res->{verdict}, 'FAIL',
-        'a non-Bool Coerce feeding an Add stays required');
+        'a Coerce(Int -> Str) feeding a Concat stays required');
 };
 
 # ---------------------------------------------------------------------------
