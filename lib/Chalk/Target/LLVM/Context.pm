@@ -4,6 +4,32 @@ package Chalk::Target::LLVM::Context;
 use 5.42.0;
 use utf8;
 
+# DIAGNOSTIC CONVENTION -- `GAP:` means ONE thing.
+#
+#   GAP:  perl does this and Chalk does not YET. A hole in coverage, destined
+#         for the worklist, closed by building the feature. The worklists
+#         (tbase-worklist.t, ring-worklist.t, son-corpus-wide.t) all match on
+#         the literal `GAP:`, so this prefix is what puts a construct on the
+#         list of things to work on.
+#
+#   Everything else dies WITHOUT the prefix:
+#
+#   - An INVARIANT VIOLATION -- a node reaching here with no representation, a
+#     Str whose length was never tracked, a repr=Scalar that inference should
+#     have narrowed. There is no future Chalk where these are correct: they are
+#     bugs in an EARLIER pass, and if one fires it gets fixed, not filed.
+#     Labelling them GAP put live bugs into the backlog reading as unbuilt
+#     features, where nobody triaged them because they were already categorised
+#     as future work.
+#
+#   - A GUARD -- a refusal whose alternative is a silent miscompile (a regex
+#     flag that would otherwise be ignored, a capture index with no group).
+#     These are asserted by their own tests; they are not work, and closing one
+#     means implementing it CORRECTLY, not removing the check.
+#
+# Keep `GAP:` honest: if the message would not make sense as an entry on a
+# list of features to implement, it is not a GAP.
+
 use Chalk::IR::NodeFactory;   # is_statement_node() classifier used by the value/effect collectors
 
 # Re-export helpers from the main package so unqualified calls in this
@@ -574,7 +600,7 @@ sub lower_value {
     }
     else {
         if (defined $node->representation && $node->representation eq 'Scalar') {
-            die "GAP: node op=$op repr=Scalar reached LLVM backend — cannot lower runtime-free. "
+            die "node op=$op repr=Scalar reached LLVM backend — cannot lower runtime-free. "
               . "This value requires libperl; it is a GAP on the L corner.";
         }
         die "LLVM backend: cannot lower op=$op (not in literal-arithmetic slice)";
@@ -592,12 +618,12 @@ sub _lower_constant {
         # Die loudly instead of silently defaulting to Int — this masks upstream
         # TypeInference bugs as plausible integer output (F7 fix / G.6).
         # Consistent with _ensure_i1 which already dies on undef-repr inputs.
-        die "GAP: Constant node has no representation at lowering time "
+        die "Constant node has no representation at lowering time "
           . "(value=${\(defined $val ? $val : 'undef')}). "
           . "Fix TypeInference to annotate this node, or set the representation explicitly.";
     }
     if ($repr eq 'Scalar') {
-        die "GAP: Constant node with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "Constant node with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
     if ($repr eq 'Int') {
@@ -725,10 +751,10 @@ sub _lower_binop_int {
     my $repr = $node->representation;
     my $op   = $node->operation;
     unless (defined $repr) {
-        die "GAP: $op node has no representation at lowering time. "
+        die "$op node has no representation at lowering time. "
           . "Fix TypeInference to annotate this node (G.6/F7).";
     }
-    die "GAP: $op with repr=Scalar reached LLVM backend" if $repr eq 'Scalar';
+    die "$op with repr=Scalar reached LLVM backend" if $repr eq 'Scalar';
 
     my $inputs  = $node->inputs;
 
@@ -789,7 +815,7 @@ sub _lower_divide {
           . "Set Divide representation to 'Num' and Coerce Int operands to Num.";
     }
     if ($repr eq 'Scalar') {
-        die "GAP: Divide with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "Divide with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
     # Num representation: fdiv double. Each operand is promoted to double via
@@ -814,7 +840,7 @@ sub _lower_modulo {
     my $op   = $node->operation;
 
     if (defined $repr && $repr eq 'Scalar') {
-        die "GAP: Modulo with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "Modulo with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
     if (defined $repr && $repr eq 'Num') {
         die "LLVM backend: Modulo with repr=Num not supported (fmod semantics differ from perl %)";
@@ -895,7 +921,7 @@ sub _lower_concat {
     my $len_a = $self->_str_len_for($lhs_ref);
     my $len_b = $self->_str_len_for($rhs_ref);
     unless (defined $len_a && defined $len_b) {
-        die "GAP: Concat cannot lower — one or both operand lengths not tracked in _str_len_table. "
+        die "Concat cannot lower — one or both operand lengths not tracked in _str_len_table. "
           . "Only Str values produced by Constant(:Str) or Concat(:Str) have tracked lengths.";
     }
 
@@ -1255,7 +1281,7 @@ sub _emit_coercion {
         $self->_emit("  $ref = xor i1 $is_false, true  ; Coerce[Str->Bool]: invert -> Bool");
     }
     elsif ($from eq 'Scalar' || $to eq 'Scalar') {
-        die "GAP: Coerce involving Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "Coerce involving Scalar reached LLVM backend — cannot lower runtime-free.";
     }
     else {
         die "LLVM backend: cannot lower $what\[$from->$to]";
@@ -1343,7 +1369,7 @@ sub _lower_vardecl {
 
     my $repr = _require_repr($node, 'VarDecl');
     if ($repr eq 'Scalar') {
-        die "GAP: VarDecl with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "VarDecl with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
     my $init_node = $node->inputs->[1];    # inputs[1] = init value (or undef)
@@ -1411,7 +1437,7 @@ sub _lower_padaccess {
 
     my $repr = _require_repr($node, 'PadAccess');
     if ($repr eq 'Scalar') {
-        die "GAP: PadAccess with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "PadAccess with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
     # Locate the VarDecl via inputs->[0].
@@ -1469,7 +1495,7 @@ sub _lower_assign {
 
     my $repr = _require_repr($node, 'Assign');
     if ($repr eq 'Scalar') {
-        die "GAP: Assign with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "Assign with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
     my $lhs = $node->inputs->[0];
@@ -1831,7 +1857,7 @@ sub _lower_icmp_int {
     my $op   = $node->operation;
 
     if (defined $repr && $repr eq 'Scalar') {
-        die "GAP: $op with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "$op with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
     my $inputs  = $node->inputs;
@@ -1914,7 +1940,7 @@ sub _lower_str_compare {
     my $op = $node->operation;
     my $repr = $node->representation;
     if (defined $repr && $repr eq 'Scalar') {
-        die "GAP: $op with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "$op with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
     my $inputs  = $node->inputs;
@@ -1928,10 +1954,10 @@ sub _lower_str_compare {
     # be compared byte-exact (an untracked length would make the len guard and
     # the memcmp size guesses). GAP loudly rather than emit a wrong-size memcmp.
     my $len_a = $self->_str_len_for($lhs_ref)
-        // die "GAP: $op cannot lower — lhs operand length not tracked in "
+        // die "$op cannot lower — lhs operand length not tracked in "
              . "_str_len_table (ptr=$lhs_ref). String compare needs both {ptr,len}.";
     my $len_b = $self->_str_len_for($rhs_ref)
-        // die "GAP: $op cannot lower — rhs operand length not tracked in "
+        // die "$op cannot lower — rhs operand length not tracked in "
              . "_str_len_table (ptr=$rhs_ref). String compare needs both {ptr,len}.";
 
     $self->{_need_memcmp} = 1;
@@ -1976,7 +2002,7 @@ sub _lower_ternary {
     my $op   = $node->operation;
 
     if (defined $repr && $repr eq 'Scalar') {
-        die "GAP: TernaryExpr with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "TernaryExpr with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
     my $inputs    = $node->inputs;
@@ -2093,7 +2119,7 @@ sub _shortcircuit_i1_cond {
     my ($self, $ref, $repr, $op_tag, $side) = @_;
     my $sym = $op_tag eq 'And' ? '&&' : '||';
     unless (defined $repr) {
-        die "GAP: $op_tag ($sym) $side operand has no representation at lowering time (G.7/F8). "
+        die "$op_tag ($sym) $side operand has no representation at lowering time (G.7/F8). "
           . "Fix TypeInference to annotate the operand.";
     }
     if ($repr eq 'Int') {
@@ -2147,7 +2173,7 @@ sub _lower_and {
 
     my $repr = $node->representation;
     if (defined $repr && $repr eq 'Scalar') {
-        die "GAP: And with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "And with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
     my $inputs = $node->inputs;
@@ -2225,7 +2251,7 @@ sub _lower_or {
 
     my $repr = $node->representation;
     if (defined $repr && $repr eq 'Scalar') {
-        die "GAP: Or with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "Or with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
     my $inputs = $node->inputs;
@@ -2304,7 +2330,7 @@ sub _emit_shortcircuit_phi {
     if ($repr eq 'Str') {
         my $lhs_len = $self->{_str_len_table}{$lhs_ref};
         my $rhs_len = $self->{_str_len_table}{$rhs_ref};
-        die "GAP: $tag merges Str arms but an arm's length is not tracked in "
+        die "$tag merges Str arms but an arm's length is not tracked in "
           . "_str_len_table — a Str is a (ptr,len) pair and the merge needs both."
             unless defined $lhs_len && defined $rhs_len;
         my $len = $self->_fresh;
@@ -2352,7 +2378,7 @@ sub _lower_defined_or {
 
     my $repr = $node->representation;
     if (defined $repr && $repr eq 'Scalar') {
-        die "GAP: DefinedOr with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+        die "DefinedOr with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
     my $inputs   = $node->inputs;
@@ -2577,7 +2603,7 @@ sub _lower_phi {
 # ---------------------------------------------------------------------------
 # _repr_to_llvm_type($repr) -> LLVM type string
 # ---------------------------------------------------------------------------
-sub _repr_to_llvm_type ($repr //= die "GAP: node reached machine-type selection with NO representation (undef) — fix TypeInference so this node carries an explicit repr before lowering.") {
+sub _repr_to_llvm_type ($repr //= die "node reached machine-type selection with NO representation (undef) — fix TypeInference so this node carries an explicit repr before lowering.") {
     return 'i64'    if $repr eq 'Int';
     return 'double' if $repr eq 'Num';
     return 'i1'     if $repr eq 'Bool';
@@ -3930,7 +3956,7 @@ sub _lower_length {
         my $str_ref = $self->lower_value($operand);
         my $byte_len = $self->_str_len_for($str_ref);
         unless (defined $byte_len) {
-            die "GAP: Length(Str) — byte length not tracked for operand SSA ref $str_ref. "
+            die "Length(Str) — byte length not tracked for operand SSA ref $str_ref. "
               . "Only compile-time-known Str lengths are supported.";
         }
         my $len = $self->_fresh;
@@ -5255,7 +5281,7 @@ sub _regex_escape_byte {
     }
     if ($e eq 'x') {
         my $hex = join '', grep { defined } @{$chars}[ $idx + 1, $idx + 2 ];
-        die "GAP: malformed \\x escape in regex pattern '$pattern' "
+        die "malformed \\x escape in regex pattern '$pattern' "
           . "(need two hex digits)" unless $hex =~ /^[0-9A-Fa-f]{2}$/;
         return (hex($hex), 3);
     }
@@ -5308,7 +5334,7 @@ sub _compile_regex_pattern {
         if ($c eq '\\') {
             # Escape: shorthand class, byte escape, or literal punctuation.
             my $e = $chars[ $i + 1 ]
-                // die "GAP: regex pattern '$pattern' ends with a bare backslash";
+                // die "regex pattern '$pattern' ends with a bare backslash";
             if ($e =~ /^[dwsDWS]$/) {
                 push @atoms, {
                     kind   => 'class',
@@ -5338,7 +5364,7 @@ sub _compile_regex_pattern {
                 # Shorthand expansion inside the class: [\d_] etc.
                 if ($cc eq '\\') {
                     my $e = $chars[ $j + 1 ]
-                        // die "GAP: regex class in '$pattern' ends with a bare backslash";
+                        // die "regex class in '$pattern' ends with a bare backslash";
                     if ($e =~ /^[dwsDWS]$/) {
                         die "GAP: regex class shorthand \\$e inside [...] not yet supported "
                           . "in pattern '$pattern'" if $e =~ /[DWS]/;
@@ -5369,7 +5395,7 @@ sub _compile_regex_pattern {
                     }
                     # Perl rejects a descending range at compile time; matching
                     # nothing silently would be a miscompile.
-                    die "GAP: invalid [] range (lo > hi) in regex pattern '$pattern'"
+                    die "invalid [] range (lo > hi) in regex pattern '$pattern'"
                         if $lo > $hi;
                     push @ranges, [ $lo, $hi ];
                     $j = $k + 1 + $hi_used;
@@ -5378,7 +5404,7 @@ sub _compile_regex_pattern {
                 push @ranges, [ $lo, $lo ];
                 $j = $k;
             }
-            die "GAP: unterminated character class in regex pattern '$pattern'"
+            die "unterminated character class in regex pattern '$pattern'"
                 unless ($chars[$j] // '') eq ']';
             push @atoms, { kind => 'class', neg => $neg, ranges => \@ranges };
             $i = $j + 1;
@@ -5414,7 +5440,7 @@ sub _compile_regex_pattern {
             next;
         }
         if ($c eq ')') {
-            die "GAP: unbalanced ')' in regex pattern '$pattern'"
+            die "unbalanced ')' in regex pattern '$pattern'"
                 unless @paren_stack;
             my $cap = pop @paren_stack;
             push @atoms, { kind => 'gclose', cap => $cap };
@@ -5425,7 +5451,7 @@ sub _compile_regex_pattern {
         # Quantifiers (T3): attach {min,max} to the PRECEDING atom. max undef
         # = unbounded. A quantifier with no preceding atom is malformed.
         if ($c =~ /[*+?{]/) {
-            die "GAP: regex quantifier '$c' with no preceding atom in pattern '$pattern'"
+            die "regex quantifier '$c' with no preceding atom in pattern '$pattern'"
                 unless @atoms;
             my $atom = $atoms[-1];
             die "GAP: quantified group (...)$c in pattern '$pattern' not yet "
@@ -5445,12 +5471,12 @@ sub _compile_regex_pattern {
                 my ($n, $has_comma, $m) = ($1, defined $2, $3);
                 $atom->{min} = 0 + $n;
                 $atom->{max} = $has_comma ? (length($m // '') ? 0 + $m : undef) : 0 + $n;
-                die "GAP: regex {n,m} with m < n in pattern '$pattern'"
+                die "regex {n,m} with m < n in pattern '$pattern'"
                     if defined $atom->{max} && $atom->{max} < $atom->{min};
                 $i += length($&);
                 next;
             }
-            die "GAP: malformed regex counted quantifier near '"
+            die "malformed regex counted quantifier near '"
               . substr($rest, 0, 8) . "' in pattern '$pattern'";
         }
 
@@ -5468,7 +5494,7 @@ sub _compile_regex_pattern {
         $i++;
     }
 
-    die "GAP: unbalanced '(' in regex pattern '$pattern'" if @paren_stack;
+    die "unbalanced '(' in regex pattern '$pattern'" if @paren_stack;
 
     return {
         atoms          => \@atoms,
@@ -5991,7 +6017,7 @@ sub _lower_regex_capture {
     unless (defined $s_ref && defined $e_ref) {
         my $have = $#{ $rec->{cap_s} };
         $have = 0 if $have < 0;
-        die "GAP: RegexCapture \$$n out of range — the pattern has $have capture "
+        die "RegexCapture \$$n out of range — the pattern has $have capture "
           . "group(s) (\$& / group 0 is a tracked follow-up).";
     }
 
@@ -6305,7 +6331,7 @@ sub _lower_print {
 
         if (defined $repr && $repr eq 'Str') {
             my $len = $self->_str_len_for($ref);
-            die "GAP: Print of a Str arg whose length is not tracked in "
+            die "Print of a Str arg whose length is not tracked in "
               . "_str_len_table — cannot emit exactly-len bytes."
                 unless defined $len;
             # printf's %.*s precision arg is i32. A literal length passes through;

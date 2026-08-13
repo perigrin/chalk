@@ -53,12 +53,25 @@ ok(!$timed_out, 'lowering a self-recursive callee TERMINATES (does not hang)')
 SKIP: {
     skip 'lowering hung; the assertions below cannot run', 2 if $timed_out;
 
-    is($result->{verdict}, 'SKIP', 'a self-recursive callee does not compile')
-        or diag("unexpectedly produced: " . ($result->{lli_stdout} // '(undef)'));
+    # Recursion is a GAP, not a guard: `sub fib` is ordinary Perl and MUST
+    # compile eventually. It cannot today because inlining is the only call
+    # mechanism, and a self-recursive callee cannot be inlined at any finite
+    # depth -- which makes this a CORRECTNESS CEILING ON THE LANGUAGE, closed
+    # by real `define` + `call` emission (F3), not a refusal to be preserved.
+    #
+    # TODO rather than an asserted GAP: asserting "does not compile" would go
+    # RED the day recursion works, punishing the fix and training the next
+    # reader to edit the test. As a TODO it reports a surprise success.
+    #
+    # The termination assertion above is NOT part of this and stays as-is: a
+    # compiler that hangs is wrong however recursion is eventually handled.
+    TODO: {
+        local $TODO = 'recursion needs real define+call emission (F3); '
+                    . 'inlining alone cannot express a self-recursive callee';
 
-    like($result->{skip_reason}, qr/GAP:/,
-        'it GAPs loudly rather than failing silently or hanging')
-        or diag("reason was: " . ($result->{skip_reason} // '(undef)'));
+        is($result->{verdict}, 'PASS', 'a self-recursive callee compiles')
+            or diag("skip reason was: " . ($result->{skip_reason} // '(undef)'));
+    }
 }
 
 done_testing();

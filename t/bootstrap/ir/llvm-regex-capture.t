@@ -93,12 +93,20 @@ subtest 'capture via qr-applied Match also works' => sub {
     is($out, 'Str:42', '$1 through a qr-applied Match');
 };
 
-subtest 'guards: out-of-range n and a non-match input die GAP' => sub {
+# These are GUARDS, not GAPs. `$3` against a 2-group pattern and a capture read
+# from something that never matched have no right answer to produce -- refusing
+# is the correct behaviour permanently, not a feature awaiting implementation.
+# So they assert the DIE and what it names, not the `GAP:` prefix: that prefix
+# means "perl does this, Chalk does not yet", and it is what puts a construct on
+# the worklist. A guard on the worklist reads as unbuilt work that nobody will
+# ever build.
+subtest 'guards: out-of-range n and a non-match input die loudly' => sub {
     my $f = _mk();
     my (undef, $cap) = capture_graph($f, 'ab-cd', '(\\w+)-(\\w+)', 3);
     my $ret = $f->make_cfg('Return', inputs => [$cap]);
     eval { Chalk::Target::LLVM->lower($ret) };
-    like($@, qr/GAP/, '$3 with a 2-group pattern dies GAP');
+    like($@, qr/out of range/,
+        '$3 with a 2-group pattern dies, naming the range');
 
     my $f2 = _mk();
     my $c = $f2->make('Constant', value => 'x', const_type => 'string');
@@ -107,7 +115,8 @@ subtest 'guards: out-of-range n and a non-match input die GAP' => sub {
     $cap2->set_representation('Str');
     my $ret2 = $f2->make_cfg('Return', inputs => [$cap2]);
     eval { Chalk::Target::LLVM->lower($ret2) };
-    like($@, qr/GAP/, 'RegexCapture on a non-match input dies GAP');
+    like($@, qr/not a regex match node/,
+        'RegexCapture on a non-match input dies, naming the input');
 };
 
 # ---------------------------------------------------------------------------

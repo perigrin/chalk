@@ -88,9 +88,26 @@ subtest 'effectful callee via Return.control_in (Assign, not Start/Print) still 
 
     my $ctx = mk_ctx();
     my $err = eval { $ctx->_lower_call_direct($call); 1 };
+
+    # The GUARD half: refusing is correct as long as the effect cannot be
+    # carried. Silently dropping it would be a miscompile, so this assertion
+    # holds regardless of whether the capability ever lands.
     ok(!$err, 'dies rather than silently dropping the effect');
-    like($@, qr/GAP: direct call to 'main::f': callee has effect/,
-        'the die names the control-chain-effect GAP');
+
+    # The GAP half. An effect-carrying callee IS meant to compile one day --
+    # real `define` + `call` emission (F3) closes it, at which point the
+    # inliner's declination becomes a choice rather than a wall.
+    #
+    # TODO rather than an asserted GAP: asserting the refusal would go RED the
+    # day F3 lands, punishing the fix. As a TODO the same event is a surprise
+    # success.
+    TODO: {
+        local $TODO = 'an effect-carrying callee needs real define+call '
+                    . 'emission (F3); the inliner is the only call mechanism';
+        my $ctx2 = mk_ctx();
+        my $ok = eval { $ctx2->_lower_call_direct($call); 1 };
+        ok($ok, 'a direct call to an effect-carrying callee lowers');
+    }
 };
 
 # The inputs[1..] void-statement-effect shape (a trailing void Call carried as
