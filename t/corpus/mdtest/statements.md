@@ -638,6 +638,62 @@ control: %start -> %p
 L: GREEN
 ```
 
+## Print an ARRAY flattens it and coerces each element
+
+`print @a` is where the two senses of "print takes Str" have to be told apart,
+and the corpus had no case for it until now.
+
+`Print`'s IR signature is `Print(Str...)` — one operator over one representation.
+The Perl BUILTIN `print` takes a LIST and flattens it, which is why
+`TypeLibrary.pm` types its argument `Any`, in the same breath and for the same
+reason as the `die`/`warn` entries three lines above it ("variadic: accept
+scalars and arrays via flattening"). Those two statements are about DIFFERENT
+LAYERS — `%_STR_CONTEXT_OPS` is keyed by IR op, `%BUILTIN_SIGNATURES` by source
+builtin, and TypeLibrary never names an IR node — so they do not contradict each
+other. Tightening the builtin's `arg_types` to `Str` on the strength of the IR
+contract would REJECT this program at parse time: `TypeInference.pm:391` returns
+undef on a signature mismatch, and `Array` is on the collection branch
+(`Array -> List -> Any`), disjoint from `Str`.
+
+Nothing pinned that. Every existing print case passes a scalar, so the whole
+family stayed green while `print @a` broke — the reason this case exists.
+
+The flattening happens at the producer's build site: the array is expanded to its
+elements and each Int element gets its own `Coerce`, so `Print` receives three Str
+operands and never sees an aggregate. The `ArrayRef` node is built but is NOT on
+the control chain and is not an input to the `Print` — a real read would consume
+it; here it is dead.
+
+```perl
+# source
+use 5.42.0;
+my @a = (1, 2, 3);
+print @a;
+print "\n";
+```
+
+```behavior
+stdout: 123\n
+return: Undef
+context: scalar
+```
+
+```ir
+%start = Start()
+%nl  = Constant("\n") :Str
+%n1  = Constant(1) :Int
+%c1  = Coerce(%n1, from_repr: "Int", to_repr: "Str") :Str
+%n2  = Constant(2) :Int
+%c2  = Coerce(%n2, from_repr: "Int", to_repr: "Str") :Str
+%n3  = Constant(3) :Int
+%c3  = Coerce(%n3, from_repr: "Int", to_repr: "Str") :Str
+%p1  = Print(%c1, %c2, %c3)
+%p2  = Print(%nl)
+return %p2
+control: %start -> %p1 -> %p2
+L: GREEN
+```
+
 ## Stringify of a Bool prints perl's spelling: "1" and EMPTY
 
 A Bool stringifies to `1` when true and to the EMPTY STRING when false — not
