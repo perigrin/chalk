@@ -644,4 +644,50 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
         'is_subtype still works with bitsets: None <: Hash');
 }
 
+# ---------------------------------------------------------------------------
+# Unknown: the PESSIMISTIC top type.
+#
+# Unknown and Any occupy the same position in the lattice -- both are top, both
+# hold any value -- but they carry different obligations, exactly as TypeScript's
+# `unknown` and `any` do:
+#
+#   Any     opts OUT of checking. A legitimate static answer: `push`'s second
+#           argument accepts anything, and that is a fact about push.
+#   Unknown is SOUND top. It means inference has not determined the type, and
+#           NOTHING may be done with the value until it is narrowed.
+#
+# Collapsing them loses the distinction that matters here: `Any` reaching the
+# backend is a design fact, `Unknown` reaching the backend is a BUG. The producer
+# used to write 'Scalar' for an unstamped operand -- a real type standing in for
+# "I don't know" -- which is why the backend's Scalar GAP could not tell "this
+# scalar type is not lowered yet" from "nothing ever typed this".
+# ---------------------------------------------------------------------------
+
+subtest 'Unknown is top: every type is a subtype of it' => sub {
+    for my $t (qw(Int Num Str Bool Undef Scalar ArrayRef HashRef CodeRef
+                  Object Array Hash Code Glob List Ref None Any)) {
+        ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype($t, 'Unknown'),
+            "$t <: Unknown");
+    }
+};
+
+subtest 'Unknown is not a subtype of anything below top' => sub {
+    for my $t (qw(Scalar Str Num Int Bool Ref List Code)) {
+        ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Unknown', $t),
+            "Unknown NOT <: $t");
+    }
+    # The two tops are mutually assignable -- same position, same value set.
+    ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Unknown', 'Any'),
+        'Unknown <: Any (both are top)');
+    ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Any', 'Unknown'),
+        'Any <: Unknown (both are top)');
+};
+
+subtest 'Unknown is DISTINCT from Scalar (the bug this exists to prevent)' => sub {
+    ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Unknown', 'Scalar'),
+        'Unknown is NOT a Scalar -- an untyped value is not "some scalar"');
+    ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Scalar', 'Unknown'),
+        'Scalar IS an Unknown (Unknown is top)');
+};
+
 done_testing;

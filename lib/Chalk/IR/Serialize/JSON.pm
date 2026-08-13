@@ -756,6 +756,14 @@ sub from_json ($json_string) {
     # point the operand's representation is actually known.
     _insert_str_coercions(\%graphs);
 
+    # NARROW the Unknowns. The producer writes from_repr 'Unknown' for a Coerce
+    # whose operand it could not type -- honestly, since a direct call's result
+    # is not typable until the callee's graph exists. By here every repr
+    # fixpoint has run and the operand usually IS typed, so the Coerce can be
+    # rebuilt against the narrowed type. Runs last, after _insert_str_coercions,
+    # so a coercion inserted there is narrowed too.
+    _narrow_unknown_coercions(\%graphs);
+
     # $mop is returned only in list context; scalar context stays \%graphs for
     # the existing single-return callers.
     return (\%graphs, $mop) if wantarray && defined $mop;
@@ -814,6 +822,81 @@ sub _insert_str_coercions ($graphs) {
         }
     }
     return $inserted;
+}
+
+# _narrow_unknown_coercions(\%graphs) -> count of Coerce nodes narrowed.
+#
+# A Coerce carrying from_repr 'Unknown' is a coercion whose SOURCE type was not
+# determined when the node was built. 'Unknown' is the pessimistic top type
+# (TypeScript's `unknown`, not its `any`): it holds any value but obliges the
+# holder to NARROW it before use. This is that narrowing.
+#
+# The producer writes it for an unstamped operand, which is honest at its stage
+# -- a direct call's result cannot be typed while the callee's graph may not
+# exist yet. By the time this runs every repr fixpoint has completed and the
+# operand usually carries a concrete repr, so the Coerce is REBUILT against it.
+#
+# Rebuilt, not mutated: from_repr is part of Coerce's content_hash (per
+# typed-ir-representation.md, Coerce[Str->Num](x) and Coerce[Int->Num](x) are
+# distinct nodes), so narrowing changes the node's IDENTITY. Mutating in place
+# would leave a node whose hash no longer matches its contents, which breaks
+# hash-consing. The consumer's input slot is repointed and the old Coerce is
+# removed from its operand's consumer list, so no orphan is left listed as a
+# reader of a node it no longer reads.
+#
+# An Unknown that CANNOT be narrowed is left alone deliberately: the backend
+# then reports it as an inference failure naming the operand, which is the
+# whole point of distinguishing Unknown from Scalar. A Scalar GAP means "this
+# scalar type is not lowered"; an Unknown GAP means "nothing ever typed this".
+sub _narrow_unknown_coercions ($graphs) {
+    my $narrowed = 0;
+    my $factory  = Chalk::IR::NodeFactory->new();
+
+    for my $name (sort keys %$graphs) {
+        my $g = $graphs->{$name} or next;
+        for my $node (_all_graph_nodes($g)) {
+            my $inputs = ($node->can('inputs') ? $node->inputs : undef) or next;
+
+            for my $i (0 .. $inputs->$#*) {
+                my $c = $inputs->[$i];
+                next unless blessed($c)
+                         && $c->isa('Chalk::IR::Node::Coerce')
+                         && ($c->from_repr // '') eq 'Unknown';
+
+                my $operand = ($c->inputs // [])->[0];
+                next unless blessed($operand) && $operand->can('representation');
+                my $repr = $operand->representation;
+
+                # Still untyped: leave the Unknown in place so the backend can
+                # report it. Narrowing to a guess here would recreate exactly
+                # the bug this replaced.
+                next unless defined $repr && $repr ne 'Unknown';
+
+                # The operand is ALREADY the target type: the coercion is an
+                # identity edge and the consumer can read the operand directly.
+                if ($repr eq $c->to_repr) {
+                    $inputs->[$i] = $operand;
+                    $c->remove_consumer($node) if $c->can('remove_consumer');
+                    $operand->remove_consumer($c) if $operand->can('remove_consumer');
+                    $narrowed++;
+                    next;
+                }
+
+                my $new = $factory->make('Coerce',
+                    inputs    => [$operand],
+                    from_repr => $repr,
+                    to_repr   => $c->to_repr,
+                );
+                $new->set_representation($c->to_repr);
+
+                $inputs->[$i] = $new;
+                # The old Coerce no longer reads the operand.
+                $operand->remove_consumer($c) if $operand->can('remove_consumer');
+                $narrowed++;
+            }
+        }
+    }
+    return $narrowed;
 }
 
 # _ctor_arg_reprs(\%graphs) -> ("class\0param_name" => repr, ...)

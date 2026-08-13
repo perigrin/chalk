@@ -83,6 +83,28 @@ class Chalk::Grammar::Perl::TypeLibrary {
             $TYPE_BITSET{Any} |= $TYPE_BITSET{$type};
         }
 
+        # Unknown is the PESSIMISTIC top: the same position as Any and the same
+        # value set, but a different obligation — exactly TypeScript's
+        # `unknown` vs `any`.
+        #
+        #   Any     opts OUT of checking. A legitimate static answer (`push`'s
+        #           second argument accepts anything, and that is a fact).
+        #   Unknown is SOUND top: inference has not determined the type, and
+        #           nothing may be done with the value until it is NARROWED.
+        #
+        # They are mutually assignable (both top, same values), so Unknown
+        # carries Any's bits and Any gains Unknown's — is_subtype is true in
+        # both directions. What differs is what each MEANS to a consumer: an
+        # `Any` reaching the backend is a design fact, an `Unknown` reaching it
+        # is an inference failure.
+        #
+        # This distinction is the point. 'Scalar' used to double as the "I do
+        # not know" placeholder (the producer wrote it for an unstamped
+        # operand), so the backend's Scalar GAP could not tell "this scalar type
+        # is not lowered yet" from "nothing ever typed this".
+        $TYPE_BITSET{Unknown} = $TYPE_BITSET{Any};
+        $TYPE_BITSET{Any}    |= $TYPE_BITSET{Unknown};
+
         # None is the bottom type — 0 (subtype of everything by convention)
         $TYPE_BITSET{None} = 0;
     }
