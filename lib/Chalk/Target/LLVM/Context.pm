@@ -2602,14 +2602,108 @@ sub _lower_phi {
 
 # ---------------------------------------------------------------------------
 # _repr_to_llvm_type($repr) -> LLVM type string
+#
+# THIS TARGET'S `type_for`: the map from a Chalk representation to the machine
+# type that holds it. It is TOTAL over every representation Chalk can construct
+# — every input gets a defined answer, and where that answer is a refusal the
+# refusal names WHICH upstream bug fired.
+#
+# The shapes below are the ones docs/architecture/typed-ir-representation.md
+# records in its "Realized representation lattice" table and the ones
+# Target/LLVM.pm:1210-1213 emits. They are not invented here.
+#
+# WHY THE REFUSALS ARE SEPARATE. Four different bugs used to share one
+# `no LLVM type for '$repr'` fallthrough, which said only that a lookup missed —
+# merging "narrowing did not run", "inference did not run", "signature
+# vocabulary leaked into the value pipeline" and "this never reaches runtime"
+# into one undiagnosable report. That is exactly the merge the Unknown/Scalar
+# split was created to undo (TypeLibrary.pm:101-104), and re-creating it one
+# layer down would waste that fix.
+#
+# NOTE the layer this function does NOT answer. Whether a coercion is needed is
+# TWO questions: `is_subtype(A,B)` (semantics, target-independent) AND
+# `type_for(A) eq type_for(B)` (encoding, this function). Machine-type equality
+# alone is NECESSARY BUT NOT SUFFICIENT — Bool and Undef are both `i1` yet a
+# Bool is not an Undef, and conflating them would license a silent
+# bit-reinterpretation. See
+# docs/plans/2026-08-14-representation-is-the-targets-type-system.md.
 # ---------------------------------------------------------------------------
+
+# The concrete representations: those with a machine type.
+#
+# Undef is HERE, not among the refusals. It is a UNIT TYPE — one value carrying
+# no information — so the target may pick whatever constant suits it, and this
+# one picks the defined-bit it already uses. (The backend proves the point in
+# DefinedOr's fallback at :2445-2453, which synthesizes a type-appropriate zero
+# from nothing when no payload was recorded.)
+my %_REPR_LLVM_TYPE = (
+    Int      => 'i64',
+    Num      => 'double',
+    Bool     => 'i1',
+    # A Str VALUE is a (ptr,len) pair; the SSA value carries only the pointer,
+    # with the length in _str_len_table. Returning the %Str struct instead is a
+    # filed follow-up — it retires that side table and the parallel-phi pattern
+    # at :2337 — and is deliberately NOT bundled with making this map total.
+    Str      => 'i8*',
+    Undef    => 'i1',
+    Slot     => '%Slot',      # { i1, i64 }: the uniform field/element cell
+    Array    => '%Array*',    # { i64, i64, %Slot* }
+    Hash     => '%Hash*',     # { i64, i64, %HashEntry* }
+    ArrayRef => 'i8*',        # boxed pointer to an %Array
+    HashRef  => 'i8*',        # boxed pointer to a %Hash
+    CodeRef  => 'i8*',
+    Object   => 'i8*',        # pointer to { %Cls.vt*, %Slot, ... }
+);
+
+# The representations with NO machine type, each mapped to its own diagnosis.
+# Keep these messages distinct: the whole point is that the reader learns which
+# bug to go fix without reading the backend.
+my %_REPR_NO_MACHINE_TYPE = (
+    # Arity 1: denotes a SINGLE value whose concrete type was never determined.
+    # It COULD acquire a representation once narrowed, so this is "not yet".
+    Scalar  => "'Scalar' is an abstract type with no machine representation: it "
+             . "denotes one value whose concrete type was never NARROWED. Fix the "
+             . "narrowing that should have resolved it, or GAP at the operation "
+             . "that needs a concrete type. (NOT the same as Unknown: Scalar is a "
+             . "legitimate static answer, Unknown is an inference failure.)",
+
+    # Arity 0+: does not denote one value at all, so it can never have a layout.
+    # Any and List are SYNONYMS as required types (TypeLibrary::type_satisfies
+    # accepts everything for both), so they share a diagnosis.
+    Any     => "'Any' is signature vocabulary, not a value type — it answers "
+             . "'what does this parameter position accept?' and no value is ever "
+             . "'an Any'. Reaching machine-type selection means signature "
+             . "vocabulary leaked into the value pipeline: a LAYER VIOLATION.",
+    List    => "'List' is signature vocabulary, not a value type — it is a "
+             . "synonym of Any as a required type, and denotes a SEQUENCE rather "
+             . "than one value, so no single-value layout exists. Reaching "
+             . "machine-type selection is a LAYER VIOLATION.",
+
+    # Inference never ran. Distinct from Scalar by design.
+    Unknown => "'Unknown' is the pessimistic top: INFERENCE never determined a "
+             . "type for this value. Nothing may be done with it until it is "
+             . "narrowed. Fix the inference that should have typed it.",
+
+    # A legitimate, fully-known type that exists only at compile time.
+    Regex   => "'Regex' is resolved STATICALLY and never reaches runtime: a qr// "
+             . "literal is compiled by _compile_regex_pattern at compile time and "
+             . "the pattern is never an SSA value. Reaching machine-type "
+             . "selection means something treated a pattern as a RUNTIME value — "
+             . "the unbuilt qr//-as-function case (see :5752).",
+);
+
 sub _repr_to_llvm_type ($repr //= die "node reached machine-type selection with NO representation (undef) — fix TypeInference so this node carries an explicit repr before lowering.") {
-    return 'i64'    if $repr eq 'Int';
-    return 'double' if $repr eq 'Num';
-    return 'i1'     if $repr eq 'Bool';
-    return 'i8*'    if $repr eq 'Str';
-    return 'i1'     if $repr eq 'Undef';   # Undef is represented as its defined-bit (i1 false)
-    die "LLVM backend: no LLVM type for representation '$repr'";
+    return $_REPR_LLVM_TYPE{$repr} if exists $_REPR_LLVM_TYPE{$repr};
+
+    die "LLVM backend: $_REPR_NO_MACHINE_TYPE{$repr}\n"
+        if exists $_REPR_NO_MACHINE_TYPE{$repr};
+
+    # Not a representation this compiler knows at all — as opposed to one that
+    # knowingly has no machine type. A new repr reaching here needs a decision,
+    # not a default.
+    die "LLVM backend: no LLVM type for representation '$repr' — this is not a "
+      . "known representation. Add it to %_REPR_LLVM_TYPE with its machine type, "
+      . "or to %_REPR_NO_MACHINE_TYPE with the reason it has none.";
 }
 
 # ---------------------------------------------------------------------------
