@@ -274,14 +274,93 @@ load-bearing in `Chalk::Target::LLVM`:
 | `Int` | `i64`. |
 | `Num` | `double`. |
 | `Str` | `{ptr, len, encoding}` where `encoding` is a tagged enum (UTF-8/UTF-16/ShiftJIS/EBCDIC), not a bool flag. ASCII slice implemented; non-ASCII is a tracked GAP. |
-| `Undef` | tagged scalar `{defined: i1, payload: i64}` (the niche-encoding alternative was rejected). |
-| `Slot` | `{defined: i1, payload: i64}` — the uniform field/element cell reused by `Array`, `Hash`, and class fields. |
+| `Undef` | `i1`, a defined-bit that is constantly `false`. **A UNIT TYPE: one value, no data.** It has NO payload — see below. |
+| `Slot` | `{defined: i1, payload: i64}` — the uniform field/element cell reused by `Array`, `Hash`, and class fields. The payload is a one-word UNION, not a pointer — see below. |
 | `Array` | `{len, cap, %Slot*}`. |
 | `Hash` | linear-scan table of `%HashEntry {key_ptr, key_len, key_enc, val_def, val_pay}`. |
 | `ArrayRef` / `HashRef` | `i8*` to the boxed `%Array`/`%Hash`. |
 | `Object` | `i8*` to `{%Cls.vt*, %Slot, ...}` (vtable ptr header + one `%Slot` per field). |
 
 These reprs are **representation tags + LLVM types**, NOT IR nodes.
+
+### `Undef` has NO payload (corrected 2026-08-14)
+
+This table previously gave `Undef` the shape `{defined: i1, payload: i64}`,
+identical to `Slot`. That was wrong, and the implementation already says so.
+`Context.pm:713-718`:
+
+> "The 'payload' (what the variable holds when it is defined) **is not needed**
+> for a `Constant(undef)`: the defined bit is always false, so the payload is
+> **never read**."
+
+The emitted instruction is commented as dead on its face:
+
+    %payload = add i64 0, 0    ; Constant(undef): payload i64 0 (never used)
+
+The payload exists for ONE structural reason, stated at `Context.pm:716-718`:
+`DefinedOr` (`$a // $b`) emits a `phi` that needs a value from BOTH incoming
+edges, so the undef edge must supply something even though control never carries
+a defined value along it — "the optimizer will eliminate the dead path but the
+IR must be well-formed".
+
+That is **phi-shaped scaffolding for one operation's lowering**, not part of what
+`Undef` IS. `Undef` is a UNIT TYPE: exactly one value, carrying no information.
+Its `i1` is a compile-time-constant `false`.
+
+This matters beyond tidiness. `Bool` and `Undef` both lower to `i1`, and it is
+tempting to treat them as two encodings of one machine type. They are not: a
+`Bool`'s `i1` carries one bit of REAL information, while an `Undef`'s carries
+NONE. That is the underlying reason `Coerce[Bool->Undef]` and
+`Coerce[Undef->Bool]` are both refused (`Context.pm:1287`) rather than being
+no-ops, and it is why the coercion rule needs its semantic leg — see
+`docs/plans/2026-08-14-representation-is-the-targets-type-system.md`.
+
+**Open**: whether `Undef` should have a representation at all, or refuse like the
+abstract types. A unit type arguably has nothing to represent, and the `i1` is an
+artifact of how `DefinedOr` is lowered.
+
+### `Slot` vs a reference: what the payload actually is
+
+The `Slot` payload is **NOT a pointer**. It is a ONE-WORD (i64) UNION whose
+interpretation is fixed by the container's inferred element repr, and
+`_box_payload` (`Context.pm`) enumerates the cases:
+
+| element repr | what the i64 holds | how |
+|---|---|---|
+| `Int` | the value itself | passes through |
+| `Num` | the value itself | `bitcast double -> i64` (one word, no precision lost) |
+| `Bool` | the value itself | `zext i1 -> i64` |
+| `Str` | a POINTER | heap-allocated `%StrPair`, `ptrtoint` — a Str is a (ptr,len) pair and does not fit in one word |
+| `ArrayRef` / `HashRef` / `CodeRef` / `Object` | a POINTER | `ptrtoint i8* -> i64` |
+
+So a payload is a pointer only when the value does not fit in a word. Int, Num
+and Bool are stored INLINE. "The payload is a pointer to another data structure"
+is true for exactly the boxed half of that table.
+
+**Functionally, then, what distinguishes a Slot from a reference?**
+
+- A **reference** is a first-class VALUE with its own repr (`ArrayRef`,
+  `HashRef`, `CodeRef`, `Object`), and it is always a pointer. `\@a` and `@a`
+  share backing storage; a reference can be copied, returned, stored, and
+  compared as a value in its own right.
+- A **Slot** is a STORAGE CELL, not a value. It is the uniform cell an `Array`
+  element, a `Hash` value, or a class field lives in. It is never itself a Perl
+  value: it is always read THROUGH (unboxed at the use site) or written INTO.
+  Its defining feature is the `defined` bit — a Slot can be EMPTY, which no
+  reference can be.
+
+The overlap that makes them look alike is that both are one machine word, and
+for the boxed reprs a Slot's payload is bit-identical to the reference it holds.
+But the direction of the relationship differs: a reference POINTS AT an
+aggregate; a Slot IS A CELL WITHIN one. And a Slot additionally answers "is
+anything here?" — a question a bare pointer cannot express.
+
+The `defined` bit is structural, not speculative: `%HashEntry` is
+`{i8*, i64, i32, i1, i64}` (`Target/LLVM.pm:1212`) — key ptr, key len, key
+encoding, **val_def i1**, val payload — so the emptiness bit is carried per
+entry in the realized layout. NOT VERIFIED: whether `exists`/`delete` and array
+holes are currently WIRED to that bit; I found no code connecting them, so the
+bit's availability is confirmed while its consumption is not.
 
 ## Coerce (resolved)
 
