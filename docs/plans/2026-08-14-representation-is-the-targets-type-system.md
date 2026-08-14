@@ -286,6 +286,61 @@ producer serialization), then the split, then 4-5.
    Closing them TARGET-side instead is rejected: it would need the removal pass
    to drop a `Coerce` where `type_for` genuinely DIFFERS, a special case that
    violates the design's own rule.
+### What "total" means: three refusal classes, distinguished by ARITY
+
+Total does NOT mean "returns a machine type for every input." It means every
+input gets a DEFINED answer, and for the types that have no representation the
+defined answer is a SPECIFIC refusal naming which upstream bug fired. Today all
+of these hit one generic fallthrough, which merges three different bugs into one
+undiagnosable message -- the same merge the `Unknown` split was created to undo.
+
+| repr | arity | `type_for` | the upstream bug |
+|---|---|---|---|
+| `Any` / `List` | 0+ | die: NOT A VALUE TYPE | signature vocabulary leaked into the value pipeline |
+| `Scalar` | **1** | die: NOT YET NARROWED | narrowing did not run |
+| `Unknown` | — | die: INFERENCE FAILURE | inference did not run |
+
+**`Any` and `List` are synonyms as REQUIRED types, and this is verified in the
+code, not assumed.** `type_satisfies` (`TypeLibrary.pm:189-202`) has two blanket
+accepts that are functionally identical: `return true if $required_type eq
+'Any'` at :190 and `return true if $required_type eq 'List'` at :201. Every
+concrete type satisfies both; the only difference is where the short-circuit
+sits, which is unobservable. They differ only as ACTUAL types, where `List` is a
+mid-lattice node with real subtypes (`Array -> List -> Any`) and `Any` is the
+root. An earlier draft of this section claimed `sort` takes "a list qua list"
+while `print` takes flattened scalars -- that is a story about INTENT the code
+does not implement, and it is recorded here as a caught error.
+
+**ARITY is what makes `Scalar` genuinely distinct**, and it is why its refusal
+differs from `Any`/`List`'s. `Scalar` is exactly 1 everywhere it appears in a
+signature (`delete`, `exists`, `defined`, `ref` -- all `min_arity => 1`, never
+in a variadic position). Denoting a SINGLE value, it COULD acquire a
+representation once narrowed: its refusal is "not yet." `Any`/`List` at 0+ never
+can, because a representation describes one value's layout and these do not
+denote one value: their refusal is "never."
+
+**`Scalar` is NOT `Unknown` in disguise.** `TypeLibrary.pm:101-104` records that
+`Scalar` USED to double as the "I do not know" placeholder, and that `Unknown`
+was introduced precisely to separate them -- "so the backend's Scalar GAP could
+not tell 'this scalar type is not lowered yet' from 'nothing ever typed this'".
+Merging them again would undo that fix. `Scalar` is a legitimate static answer
+about a value; `Unknown` is an inference failure.
+
+**`Any` should be UNREACHABLE.** Measured: it has 0 backend repr branches, is
+never a stamp, is never passed to `set_representation`, and all 43 of its
+mentions are inside TypeLibrary. It is answering "what does this parameter
+position accept?" -- a fact about a SIGNATURE, never about a value.
+`operand_repr_for_ir_op` already returns undef for it ("a coercion to Any is not
+a coercion"), so it is filtered out before `type_for` is consulted. That guard
+is load-bearing, not incidental: it is what keeps signature vocabulary out of
+the value pipeline. If this refusal ever fires, the bug is a LAYER VIOLATION,
+not a missing narrowing.
+
+Note the two-check rule handles all of this correctly without special-casing:
+`is_subtype(Int, Scalar)` stays true and useful on the SEMANTIC leg, because the
+lattice reasons about abstract types perfectly well. Only `type_for` must refuse
+them. Another instance of the layer split doing real work.
+
 2. **Make `type_for` TOTAL.** Measured coverage TODAY is 5 of 14 reprs:
 
        MAPPED  Int Num Bool Str Undef
