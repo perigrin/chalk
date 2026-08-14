@@ -61,10 +61,16 @@ partial conversion relation.
 
 ## The rule
 
-    Coerce(A -> B)  unless  type_for(A) == type_for(B)
+    skip the Coerce  iff  is_subtype(A, B)              # SEMANTICS (IR-level)
+                     AND  type_for(A) == type_for(B)    # ENCODING  (target-level)
 
-`type_for` is the map from representation to the target's machine type. It
-already exists: `_repr_to_llvm_type`, `Target/LLVM/Context.pm:2606`.
+Both halves already exist: `TypeLibrary::is_subtype`, and `type_for` as
+`_repr_to_llvm_type` at `Target/LLVM/Context.pm:2606`.
+
+The doc first proposed only the second half. That is NECESSARY BUT NOT
+SUFFICIENT and the counterexample is below; the two-check form is the corrected
+rule, and the rest of this section works through why neither leg subsumes the
+other.
 
 Checked against every case that broke the two failed attempts:
 
@@ -95,11 +101,54 @@ relying on that coincidence as wrong in its own words: "zext'ing the bit would
 also give 0 here, but only by coincidence, and would be wrong the moment Undef
 is represented otherwise."
 
-**So `type_for(A) == type_for(B)` is NECESSARY but NOT SUFFICIENT.** A
-representation is (machine type + VALUE ENCODING), and the rule must be:
+**So `type_for(A) == type_for(B)` is NECESSARY but NOT SUFFICIENT.** THE RULE
+NEEDS TWO INDEPENDENT CHECKS, one per layer:
 
-    Coerce(A -> B) unless type_for(A) == type_for(B)
-                          AND encoding_of(A) == encoding_of(B)
+    skip the Coerce  iff  is_subtype(A, B)              # SEMANTICS: is an A already a B?
+                     AND  type_for(A) == type_for(B)    # ENCODING:  same machine bits?
+
+    otherwise Coerce(A -> B).
+
+An earlier draft of this doc invented a third function, `encoding_of()`, to
+patch the single-check rule. That was wrong: it would have needed its own
+hand-maintained table, which is the exact pattern this whole line of work
+exists to remove. Both legs above already exist —
+`TypeLibrary::is_subtype` and `_repr_to_llvm_type`. Nothing new to maintain.
+
+Measured, the two legs are INDEPENDENT and neither subsumes the other:
+
+| from -> to | is_subtype | type_for | result | why |
+|---|---|---|---|---|
+| Bool -> Undef | **NO** | `i1` == `i1` | COERCE | semantics catches it |
+| Undef -> Bool | **NO** | `i1` == `i1` | COERCE | semantics catches it |
+| Int -> Num | yes | `i64` != `double` | COERCE | encoding catches it (the `sitofp`) |
+| Int -> Str | yes | `i64` != `i8*` | COERCE | encoding catches it |
+| Bool -> Str | NO | `i1` != `i8*` | COERCE | both catch it |
+| Str -> Str | yes | `i8*` == `i8*` | skip | |
+| Int -> Int | yes | `i64` == `i64` | skip | |
+
+`Bool`/`Undef` is caught on the SEMANTIC leg, and that is the honest reason: it
+is not that their bits differ (they do not), it is that **a Bool is not an
+Undef** — they are siblings under `Scalar`, so `is_subtype` is false in both
+directions. The `encoding_of` patch was reaching for the machine layer to
+express a fact the type lattice already states.
+
+`Int -> Num` is the mirror case: semantically fine, machine different, so the
+encoding leg is what preserves the `sitofp` that makes `3/2` be `1.5`. One check
+alone drops one of these two; that is why every single-check formulation failed.
+
+### The ownership this assigns, and the safety property it buys
+
+`is_subtype` is IR-level and TARGET-INDEPENDENT. `type_for` is TARGET-SPECIFIC.
+The generic target's `type_for` is the identity, so nothing is ever
+machine-equal and every difference coerces — maximal insertion. Each real target
+then supplies its own `type_for` and removes what its machine types make
+redundant.
+
+Crucially, a target **can never remove a semantically-required coercion**,
+because the subtype leg is target-independent and always applies. So a buggy or
+over-eager `type_for` can only fail to OPTIMISE — it cannot MISCOMPILE. The
+single-check rule had no such guarantee.
 
 Currently unreachable, which is why no measurement caught it: the only node
 contract is `%_NODE_OPERAND_REPR = (Print => 'Str')` (`JSON.pm:797`), and no
@@ -298,6 +347,11 @@ Findings ACCEPTED and folded in:
   corrected rule above. `type_for` equality is NECESSARY, not SUFFICIENT.
   Independently re-verified: no such arm exists in `_emit_coercion`; both
   directions die at `Context.pm:1287`.
+  **RESOLVED by the two-check rule**, and the resolution is better than the
+  `encoding_of()` patch this doc first proposed: the case is caught on the
+  SEMANTIC leg (`is_subtype(Bool, Undef)` is false — they are siblings under
+  `Scalar`), so no third function and no new table is needed. The patch was
+  reaching for the machine layer to express a fact the lattice already states.
 - **The central claim is wrong as stated.** Representation is a third thing,
   `(machine type, value encoding)`. Title corrected in place.
 - **Sequencing.** "Blocks everything else" was false; steps 2-3 are chalk-local
