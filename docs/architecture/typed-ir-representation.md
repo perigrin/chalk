@@ -274,7 +274,7 @@ load-bearing in `Chalk::Target::LLVM`:
 | `Int` | `i64`. |
 | `Num` | `double`. |
 | `Str` | `{ptr, len, encoding}` where `encoding` is a tagged enum (UTF-8/UTF-16/ShiftJIS/EBCDIC), not a bool flag. ASCII slice implemented; non-ASCII is a tracked GAP. |
-| `Undef` | `i1`, a defined-bit that is constantly `false`. **A UNIT TYPE: one value, no data.** It has NO payload — see below. |
+| `Undef` | **A UNIT TYPE: one value, no data — so the TARGET picks whatever constant suits it** (today an `i1` defined-bit that is constantly `false`). NO payload; see below. |
 | `Slot` | `{defined: i1, payload: i64}` — the uniform field/element cell reused by `Array`, `Hash`, and class fields. The payload is a one-word UNION, not a pointer — see below. |
 | `Array` | `{len, cap, %Slot*}`. |
 | `Hash` | linear-scan table of `%HashEntry {key_ptr, key_len, key_enc, val_def, val_pay}`. |
@@ -315,9 +315,39 @@ NONE. That is the underlying reason `Coerce[Bool->Undef]` and
 no-ops, and it is why the coercion rule needs its semantic leg — see
 `docs/plans/2026-08-14-representation-is-the-targets-type-system.md`.
 
-**Open**: whether `Undef` should have a representation at all, or refuse like the
-abstract types. A unit type arguably has nothing to represent, and the `i1` is an
-artifact of how `DefinedOr` is lowered.
+**RESOLVED (2026-08-14): `Undef` needs no representation. The TARGET picks
+whatever constant suits it.**
+
+`Undef` is NOT a fourth refusal class alongside `Scalar` / `Any` / `Unknown`.
+Those refuse because something upstream FAILED — narrowing did not run,
+inference did not run — and a refusal names a bug to go fix. `Undef` is a
+legitimate, fully-known type that simply carries no data. There is nothing to
+represent, so there is nothing to refuse.
+
+The backend already implements this, in the fallback `DefinedOr` takes when the
+side table has no entry (`Context.pm:2445-2453`):
+
+    # Fallback: emit a zero of the result type if no payload was recorded.
+    if ($llvm_type eq 'double') { emit "fadd double 0.0, 0.0" }
+    else                        { emit "add $llvm_type 0, 0"   }
+
+That is "whatever constant makes the target happiest" — a type-appropriate zero
+synthesized on demand, needing no recorded value at all. (LLVM also has a
+literal `undef` value available for this.)
+
+So **`_undef_payload` is redundant with its own fallback**: `Context.pm:730`
+records `add i64 0, 0`, `:2444` looks it up, and `:2447` synthesizes the
+identical constant when the lookup misses. The table buys nothing.
+
+The contrast with `Slot` twelve lines further down (`:2456`) is the proof:
+
+    $self->{_slot_payload}{ $lhs_ref }
+        // die "DefinedOr Slot LHS missing payload in _slot_payload table";
+
+A `Slot` payload is REAL DATA that must be carried, so losing it is a bug and
+the code dies. An `Undef` payload is a placeholder any target can mint from
+nothing, so the code shrugs and emits a zero. Benign fallback vs `die` is the
+implementation already distinguishing "has data" from "is a unit type".
 
 ### `Slot` vs a reference: what the payload actually is
 
