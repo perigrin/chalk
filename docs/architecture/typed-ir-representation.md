@@ -414,12 +414,62 @@ dereference identically, so `ScalarRef` covers the mechanism; what is missing is
 only the `ref()` STRING, which matters if a program branches on it. Low priority,
 recorded rather than fixed.
 
-**`LVALUE` and `IO` are real gaps and are NOT low priority long-term.**
-`\substr($s,0,1)` yields an `LVALUE` ref, and `\*STDIN{IO}` an IO handle — and
-the producer mentions `lvalue` 70 times and `io` 330 times in
-`FromOptree.pm`, so both are reachable from real Perl. Neither has a lattice
-member, so neither can be stamped, and a value that cannot be stamped cannot be
-lowered. Filed here; not in scope for the `type_for` work.
+**`LVALUE` and `IO`: SETTLED — neither is a lattice gap.** An earlier draft
+called these "real gaps, not low priority", citing "lvalue 70 times and io 330
+times" in `FromOptree.pm`. **Both numbers were substring noise and the
+conclusion was wrong.** Re-measured with word-boundary patterns:
+
+- **`io` -> 330 was garbage.** The matches were `condition`, `region`,
+  `function`, `representation`, `iteration` — every word containing "io".
+  Genuine IO-handle references (`\bIO\b|GvIO|IoIFP|filehandle|STDIN|STDOUT|
+  STDERR`): **10**, and reading them, ALL TEN are about `print`'s stdout effect
+  or the existing GAP for an explicit filehandle (`FromOptree.pm:2482-2485`:
+  "GAP: $name to an explicit filehandle ... writes only to stdout; honoring a
+  handle would misroute"). There is no IO-handle VALUE anywhere — the explicit
+  filehandle form is already a loud, deliberate refusal. `IO` is not a type the
+  producer can currently emit, so it needs no lattice member until filehandles
+  are built.
+
+- **`lvalue` -> 54 genuine matches, but they are the WRONG SENSE.** Every one is
+  about `OPf_MOD` context — a padsv/gvsv being an ASSIGNMENT TARGET
+  (`FromOptree.pm:1153`, `:1641`, `:1788`). That is lvalue CONTEXT, a property of
+  how an op is used, not the `LVALUE` REF TYPE that `\substr($s,0,1)` produces.
+  Searching for actual LVALUE-ref handling (`\substr`, refgen-over-substr) finds
+  **nothing**. The producer cannot emit an `LVALUE` ref at all.
+
+So both are correctly absent from the PRODUCER. Checked independently against
+the Perl SOURCE that Chalk must actually compile — `lib/`, `t/`, and the
+producer's own `lib/` — since "the producer cannot emit it" and "no input needs
+it" are different claims:
+
+| | `lib/` | `t/` | perl5-son `lib/` |
+|---|---|---|---|
+| LVALUE refs (`\substr`, `\pos`, `:lvalue`) | 0 | 1 file | 0 |
+| IO handle VALUES (`*STDIN{IO}`, `IO::Handle`, `fileno`) | 1 file | 0 | 1 file |
+| filehandles at all (`open`/`close`/`<$fh>`) | 0 | — | — |
+
+Every hit is a false positive, read individually:
+
+- `t/bootstrap/perl-recognize-phase3.t:113-117` uses `:lvalue` as ATTRIBUTE
+  SYNTAX in a grammar-recognition test (`method name :lvalue() { }`) — parsing
+  only, no lvalue-ref value is ever constructed.
+- `lib/Chalk/Grammar/Perl/PrecedenceTable.pm:62` and
+  `perl5-son/lib/SoN/FromOptree/OpMap.pm:283` are the NAME `fileno` appearing in
+  a keyword list and an opcode table respectively — operator metadata, not an IO
+  value.
+
+And `lib/` contains **zero** `open`/`close`/`readline` — Chalk's self-hosting
+source does no file I/O at all. So neither type is reachable from the producer
+NOR needed by any input on the self-hosting path.
+
+The lesson is the one this project keeps relearning — a raw `grep -c` of a short
+token measures nothing. `io` as a substring appears in a third of the English
+words in a compiler.
+
+Revised status: of the five absent ref types, **NONE is a gap that blocks
+anything**. `VSTRING` is a `Str`, `FORMAT` is dead, `REF` is a `ref()`-string
+nicety, and `LVALUE`/`IO` are unreachable from the producer. The lattice is
+COMPLETE for every value Chalk can currently construct.
 
 ### `Slot` vs a reference: what the payload actually is
 
