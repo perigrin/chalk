@@ -349,6 +349,78 @@ the code dies. An `Undef` payload is a placeholder any target can mint from
 nothing, so the code shrugs and emits a zero. Benign fallback vs `die` is the
 implementation already distinguishing "has data" from "is a unit type".
 
+### `Regex` is COMPILE-TIME ONLY (audited 2026-08-14)
+
+`Regex` IS already in the lattice — `Regex => 'Scalar'` (`TypeLibrary.pm:16`), a
+leaf type (`:52`) — and it appears in signatures (`split => ['Regex', 'Str',
+'Num']`, `'=~' => { right => 'Regex' }`). What it does NOT have is a machine
+type, and it never will in the current design.
+
+Measured: `Regex` has **zero** repr branches in the backend. (An earlier count of
+"3 branches" was wrong — those matched the OP NAMES `RegexMatch` / `RegexSubst`
+/ `RegexCapture`, not repr checks.) A `qr//` literal is a `Constant` with
+`const_type => 'regex'`, stamped `Regex` by the loader at `JSON.pm:1227`, whose
+comment states the rule: "the matcher value the backend resolves **statically**".
+`_lower_regex_match` reads the pattern from the NODE FIELD `$node->pattern` and
+hands it to `_compile_regex_pattern` at COMPILE TIME, emitting a bespoke matcher.
+The pattern is never an SSA value: never loaded, never phi'd, never passed.
+
+So `Regex` is a FOURTH category, distinct from every other case in this doc:
+
+| category | examples | `type_for` |
+|---|---|---|
+| real machine types | `Int`, `Str`, `Array` | a machine type |
+| unit type | `Undef` | target picks any constant |
+| no representation yet / wrong vocabulary | `Scalar`, `Any`, `List`, `Unknown` | refuse — names an upstream bug |
+| **compile-time only** | **`Regex`** | **refuse — never reaches runtime** |
+
+Its refusal message must differ from the others: not "narrowing failed", not
+"wrong vocabulary", but "this value is resolved statically and never reaches
+runtime". If it fires, the bug is that something tried to treat a pattern as a
+RUNTIME value — which is the unbuilt `qr//`-as-function case the G6 scope
+decision explicitly deferred (`Context.pm:5752`).
+
+### Audit: every Perl ref type against the lattice (2026-08-14)
+
+Enumerated by probing perl 5.42 with `ref()` on one instance of each kind, not
+by reading documentation:
+
+| `ref()` | Chalk type | status |
+|---|---|---|
+| `SCALAR` | `ScalarRef` | in lattice |
+| `ARRAY` | `ArrayRef` | in lattice |
+| `HASH` | `HashRef` | in lattice |
+| `CODE` | `CodeRef` | in lattice |
+| `GLOB` | `GlobRef` | in lattice |
+| *(blessed)* | `Object` | in lattice |
+| `Regexp` | `Regex` | in lattice, compile-time only (above) |
+| `REF` | — | **ABSENT** |
+| `VSTRING` | — | ABSENT, and correctly so |
+| `LVALUE` | — | **ABSENT** |
+| `IO` | — | ABSENT |
+| `FORMAT` | — | ABSENT |
+
+**`VSTRING` is NOT a gap.** Measured: `v65.66.67 eq "ABC"` is TRUE and its
+`length` is 3 — a vstring IS a `Str` value. The `VSTRING` magic only preserves
+the original literal so `sprintf("%vd")` can recover it. It needs no lattice
+member; it needs `%vd` support if that idiom ever appears.
+
+**`FORMAT` is NOT a gap.** Perl's formats are effectively dead; `\*FOO{FORMAT}`
+does not even yield a `FORMAT` ref (measured: it gives `SCALAR`). Out of scope.
+
+**`REF` IS a real gap, and a small one.** `ref(\$x)` is `SCALAR` but `ref(\\$x)`
+is `REF` — perl distinguishes a ref-to-scalar from a ref-to-REF. Measured, they
+dereference identically, so `ScalarRef` covers the mechanism; what is missing is
+only the `ref()` STRING, which matters if a program branches on it. Low priority,
+recorded rather than fixed.
+
+**`LVALUE` and `IO` are real gaps and are NOT low priority long-term.**
+`\substr($s,0,1)` yields an `LVALUE` ref, and `\*STDIN{IO}` an IO handle — and
+the producer mentions `lvalue` 70 times and `io` 330 times in
+`FromOptree.pm`, so both are reachable from real Perl. Neither has a lattice
+member, so neither can be stamped, and a value that cannot be stamped cannot be
+lowered. Filed here; not in scope for the `type_for` work.
+
 ### `Slot` vs a reference: what the payload actually is
 
 The `Slot` payload is **NOT a pointer**. It is a ONE-WORD (i64) UNION whose
