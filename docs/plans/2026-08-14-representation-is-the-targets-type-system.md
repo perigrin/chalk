@@ -10,9 +10,20 @@ branch (`measure-always-coerce`, deleted) and is reproducible in ~15 minutes.
 
 ## The thesis
 
-Chalk has TWO type systems that share a namespace, and conflating them has now
-produced three separate wrong designs in a single session -- two of them mine,
-each caught only by measurement.
+**Title correction (assessment, 2026-08-14): representation is NOT the target's
+type system.** It is a THIRD thing — a representation is `(machine type, value
+encoding)`. The machine type is the target's; the encoding is Chalk's own, and
+it lives in SIDE TABLES: `_str_len_table` (45 uses in `Context.pm`),
+`_undef_defined_bit` / `_undef_payload`, `_slot_payload`. If a representation
+were merely the target's type, none of those tables would need to exist. The
+title's slogan is kept as the section heading because the DIRECTION is right —
+representation questions must not be asked of the type lattice — but the
+identification is too strong, and taking it literally produced the `Bool->Undef`
+error below.
+
+With that correction: Chalk has TWO type systems that share a namespace, and
+conflating them has now produced three separate wrong designs in a single
+session -- two of them mine, each caught only by measurement.
 
 | | type lattice | representation |
 |---|---|---|
@@ -65,10 +76,37 @@ Checked against every case that broke the two failed attempts:
 | Str -> Str | `i8*` == `i8*` | no | |
 | Bool -> Undef | `i1` == `i1` | **no** | both are `i1` |
 
-The rule gets all of them right, including the two that killed the earlier
-designs. `Bool -> Undef` is the interesting row: two DISTINCT types needing NO
-conversion because they share a representation. Subtyping could never derive
-that -- they are siblings under `Scalar` -- and only `type_for` sees it.
+The rule gets right the two cases that killed the earlier designs.
+
+**The `Bool -> Undef` row is WRONG, and it is the assessment's BLOCKING
+finding.** The doc originally presented it as the showcase: "two DISTINCT types
+needing NO conversion because they share a representation." That is backwards.
+Verified by reading `_emit_coercion` (`Context.pm:1169-1291`): there is NO
+`Bool->Undef` arm and NO `Undef->Bool` arm. Both fall through to
+`die "LLVM backend: cannot lower $what[$from->$to]"` at `Context.pm:1287`. The
+backend REFUSES this pair today.
+
+And it is right to refuse. The two `i1`s encode different things: a Bool's `i1`
+is its TRUTH VALUE, while an Undef's SSA ref IS ITS DEFINED BIT (always `i1`
+false), with the payload in `_undef_defined_bit` / `_undef_payload`
+(`Context.pm:726,730`). Passing a truth-bit where a defined-bit is expected is a
+semantic REINTERPRETATION, not a no-op. `Context.pm:1204-1208` already brands
+relying on that coincidence as wrong in its own words: "zext'ing the bit would
+also give 0 here, but only by coincidence, and would be wrong the moment Undef
+is represented otherwise."
+
+**So `type_for(A) == type_for(B)` is NECESSARY but NOT SUFFICIENT.** A
+representation is (machine type + VALUE ENCODING), and the rule must be:
+
+    Coerce(A -> B) unless type_for(A) == type_for(B)
+                          AND encoding_of(A) == encoding_of(B)
+
+Currently unreachable, which is why no measurement caught it: the only node
+contract is `%_NODE_OPERAND_REPR = (Print => 'Str')` (`JSON.pm:797`), and no
+entry in `%IR_OP_SOURCE_NAME` or `%BUILTIN_SIGNATURES` requests `Bool` or
+`Undef` at any position. So the pair cannot be requested today. It is a latent
+trap in the RULE, not a live bug -- but the rule as first written would license
+a silent bit-reinterpretation the moment a signature asks for `Undef`.
 
 ### Three questions, three authorities
 
@@ -188,8 +226,17 @@ dispatching on its own calling context. `length` is not that.
 
 ## Sequencing
 
-1. **Split `Length` / `Count` in the producer.** Blocks everything else; the 13
+**Ordering corrected by the assessment.** "Blocks everything else" was FALSE:
+the producer split blocks only steps 4-5. Steps 2-3 are chalk-local and
+independently landable, and the status-quo bridge already holds the floor at
+196, so nothing forces the cross-repo change first. Do 2-3 first (lower risk, no
+producer serialization), then the split, then 4-5.
+
+1. **Split `Length` / `Count` in the producer.** Blocks steps 4-5 only. The 13
    GAPs are all this. Corpus cases exist already and will flip GREEN.
+   Closing them TARGET-side instead is rejected: it would need the removal pass
+   to drop a `Coerce` where `type_for` genuinely DIFFERS, a special case that
+   violates the design's own rule.
 2. **Make `type_for` TOTAL.** Measured coverage TODAY is 5 of 14 reprs:
 
        MAPPED  Int Num Bool Str Undef
@@ -242,6 +289,59 @@ representation-conformance table with a genuinely different job, and
 `%MUTABLE_READ_OPS` / `%PURE_DESCEND_OPS` are neither -- they encode EDGE KIND
 (control vs data), a third question again, and they are what block
 `docs/plans/2026-08-13-post-merge-statement-ownership.md`.
+
+## Assessment (2026-08-14, adversarial, Fable): NEEDS REWORK -> reworked above
+
+Findings ACCEPTED and folded in:
+
+- **BLOCKING: `Bool -> Undef` is a counterexample, not a showcase.** See the
+  corrected rule above. `type_for` equality is NECESSARY, not SUFFICIENT.
+  Independently re-verified: no such arm exists in `_emit_coercion`; both
+  directions die at `Context.pm:1287`.
+- **The central claim is wrong as stated.** Representation is a third thing,
+  `(machine type, value encoding)`. Title corrected in place.
+- **Sequencing.** "Blocks everything else" was false; steps 2-3 are chalk-local
+  and should land first.
+- **The removal pass is NOT purely an optimization for every target.** The
+  measurement supporting that claim was run on the LLVM target only, where
+  `_lower_coerce` returns its input when `$from eq $to` (`Context.pm:1172`).
+  That guard is REPR equality, strictly narrower than the proposed `type_for`
+  equality; the pairs where they differ are exactly the ones the backend dies
+  on. And `ag "Coerce"` in `Target/C.pm` and `Target/Perl.pm` finds NOTHING, so
+  for those targets a removal pass would be a correctness PREREQUISITE, not an
+  optimization. Latent (only the LLVM path consumes loader graphs today).
+- **`%_COERCIBLE_TO` has ALREADY drifted from `_lower_coerce`** — it claims
+  `Undef => Bool` (`JSON.pm:814`) which the backend cannot lower. This is the
+  strongest evidence for the doc's own hand-copy-drifts thesis, and the doc
+  missed it.
+- **`%OP_REQUIRED_REPR`: right kill, overstated reason.** Keeping `eq` is
+  correct, but "each acceptance is a miscompile" is wrong for Divide:
+  `_lower_divide` auto-promotes Int operands via `sitofp`
+  (`Context.pm:821-828`), so an uncoerced Int operand still compiles to 1.5.
+  Concat and Length die loudly. So the acceptances either compile correctly or
+  GAP — none silently miscompile. The kill stands on defense-in-depth.
+- **LLVM call boundaries are UNCHECKED under opaque pointers** — mismatched
+  signatures assemble cleanly. So "no subtyping" survives, but at call
+  boundaries the relation is WEAKER than equality (UB, not rejection), which
+  weakens "the backend will reject a wrong type" as a safety net.
+- **463/2/1 understates the asymmetry**: the 2 and 1 are English prose in
+  comments (`C.pm:1685,1738`, `Perl.pm:1397`). Code-level repr sensitivity is
+  463 vs 0 vs 0.
+- **One unfiled id-keyed hazard**: `DefinedOr` reads
+  `$self->{_undef_payload}{$lhs_node->id}` (`Context.pm:2443`); an interposed
+  Coerce would blind it. Same latency class as the 8 `Constant` sites,
+  unreachable today, not previously inventoried.
+
+Finding REJECTED, with evidence:
+
+- **"`%StrPair` does not exist anywhere in lib/" is FALSE.** It exists 37 times
+  in `Context.pm` and 25 in `LLVM.pm`, including the exact emitted text the doc
+  cited: `%StrPair = type { i8*, i64 }` at `LLVM.pm:640` and `LLVM.pm:1313`.
+  The assessment reported "`ag "StrPair" lib/` -> zero matches (rc=1)"; re-run,
+  `ag -c "StrPair" lib/Chalk/Target/LLVM.pm` returns 27. The zero was a bad
+  invocation, not a tool limitation — the same class of self-inflicted
+  measurement error this doc's own error log is about, and a reminder that an
+  adversarial report is evidence to check, not a verdict to accept.
 
 ## Error log (the pattern, not the incidents)
 
