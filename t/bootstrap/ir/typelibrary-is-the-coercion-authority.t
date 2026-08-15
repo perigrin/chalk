@@ -22,20 +22,24 @@ sub want ($op, $pos) {
 # The signature answers, per LOGICAL operand position
 # ---------------------------------------------------------------------------
 #
-# "Logical position" means the operand's index in the SIGNATURE (left is 0,
-# right is 1), not its index in the node's inputs array. Those differ: a BinOp
-# carries a leading control slot, so its left operand sits at inputs[1].
-# Keeping the distinction explicit is the point of this file -- every op
-# currently mapped has a symmetric (Str, Str) signature, which would mask an
-# off-by-one for as long as no asymmetric op is added.
+# Position is the operand's index in BOTH the signature and the node's inputs
+# array, because those agree: control is carried on its own control_in wire
+# key, NOT flattened into inputs[0]. Serialize/JSON.pm:292-299 calls that
+# flattening "the old convention", and the producer emits `Concat(%lhs, %rhs)`
+# -- two operands, no control slot (t/corpus/mdtest/strings.md:99).
+#
+# Worth stating because a hand-written test CAN build a node the other way
+# (`inputs => [undef, $a, $b]`, as graph-bidirectional-traversal.t does), and
+# reading that convention as the producer's is a mistake this file exists to
+# not repeat. The last subtest pins that such a node is still handled safely.
 
-subtest 'string comparison operands are Str at both logical positions' => sub {
+subtest 'string comparison operands are Str at both positions' => sub {
     for my $op (qw(StrEq StrNe StrLt StrGt StrLe StrGe StrCmp)) {
-        is want($op, 0), 'Str', "$op logical position 0 wants Str";
-        is want($op, 1), 'Str', "$op logical position 1 wants Str";
+        is want($op, 0), 'Str', "$op position 0 wants Str";
+        is want($op, 1), 'Str', "$op position 1 wants Str";
     }
-    is want('Concat', 0), 'Str', 'Concat logical position 0 wants Str';
-    is want('Concat', 1), 'Str', 'Concat logical position 1 wants Str';
+    is want('Concat', 0), 'Str', 'Concat position 0 wants Str';
+    is want('Concat', 1), 'Str', 'Concat position 1 wants Str';
 };
 
 subtest 'a non-Str operand of StrLt gets a coercion' => sub {
@@ -49,9 +53,9 @@ subtest 'a non-Str operand of StrLt gets a coercion' => sub {
     my $rhs = $f->make('Constant', const_type => 'string', value => 'x');
     $rhs->set_representation('Str');
 
-    # A BinOp's inputs are [control, left, right].
+    # Producer shape: operands at 0 and 1, control on its own edge.
     my $cmp = $f->make('StrLt',
-        inputs => [undef, $lhs, $rhs],
+        inputs => [$lhs, $rhs],
         left   => $lhs,
         right  => $rhs,
     );
@@ -62,14 +66,40 @@ subtest 'a non-Str operand of StrLt gets a coercion' => sub {
     my $n = Chalk::IR::Serialize::JSON::_insert_str_coercions({ main => $graph });
     is $n, 1, 'exactly one coercion inserted';
 
-    my $coerced = $cmp->inputs->[1];
+    my $coerced = $cmp->inputs->[0];
     isa_ok $coerced, 'Chalk::IR::Node::Coerce', 'the Int operand';
     is $coerced->from_repr, 'Int', 'coerces from Int';
     is $coerced->to_repr,   'Str', 'coerces to Str';
     is $coerced->inputs->[0]->id, $lhs->id, 'wraps the original operand';
 
-    is $cmp->inputs->[2]->id, $rhs->id, 'the already-Str operand is untouched';
-    ok !defined $cmp->inputs->[0], 'the control slot is left alone';
+    is $cmp->inputs->[1]->id, $rhs->id, 'the already-Str operand is untouched';
+};
+
+subtest 'an undef input slot is skipped, not coerced' => sub {
+    # A hand-written node may carry a leading undef where the producer carries
+    # nothing. The pass must skip it rather than treat it as an operand -- and
+    # must not shift the positions of the operands that follow.
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $lhs = $f->make('Constant', const_type => 'integer', value => 7);
+    $lhs->set_representation('Int');
+    my $rhs = $f->make('Constant', const_type => 'string', value => 'x');
+    $rhs->set_representation('Str');
+
+    my $cmp = $f->make('StrLt',
+        inputs => [undef, $lhs, $rhs],
+        left   => $lhs,
+        right  => $rhs,
+    );
+
+    my $graph = Chalk::IR::Graph->new;
+    $graph->merge($cmp);
+
+    Chalk::IR::Serialize::JSON::_insert_str_coercions({ main => $graph });
+
+    ok !defined $cmp->inputs->[0], 'the undef slot is left alone';
+    isa_ok $cmp->inputs->[1], 'Chalk::IR::Node::Coerce', 'the Int operand';
+    is $cmp->inputs->[2]->id, $rhs->id, 'the Str operand is untouched';
 };
 
 # ---------------------------------------------------------------------------
