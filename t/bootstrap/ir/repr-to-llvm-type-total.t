@@ -21,7 +21,9 @@ subtest 'concrete representations map to their documented machine type' => sub {
         Int      => 'i64',
         Num      => 'double',
         Bool     => 'i1',
-        Str      => 'i8*',        # (ptr,len) pair; %Str struct is a filed follow-up
+        # A Str VALUE is the first-class aggregate, so a phi/select over Str
+        # values is typed %Str and the length cannot desynchronize from the ptr.
+        Str      => '%Str',
         Slot     => '%Slot',      # { i1, i64 } -- the uniform field/element cell
         Array    => '%Array*',    # { i64, i64, %Slot* }
         Hash     => '%Hash*',     # { i64, i64, %HashEntry* }

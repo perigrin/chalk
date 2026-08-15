@@ -106,8 +106,13 @@ for my $op (qw(And Or)) {
             ok(!defined $err || !length $err,
                 "$op(Int,$rhs_repr) lowers with the joined repr")
                 or diag("error: $err");
-            my $ty = $join eq 'Num' ? 'double' : 'i8\*';
-            like($ll // '', qr/phi $ty /,
+            # A Str merge phis the AGGREGATE, not a bare pointer: a Str value is
+            # `%Str = { ptr, len, enc }`, so the length rides through the merge
+            # with its pointer and the two cannot desynchronize. This used to
+            # read `phi i8*` alongside a second, parallel `phi i64` for the
+            # length — the arrangement that could lose one and not the other.
+            my $ty = $join eq 'Num' ? 'double' : '%Str';
+            like($ll // '', qr/phi \Q$ty\E /,
                 "the merge phi is $ty -- both arms bridged to the join");
         };
     }

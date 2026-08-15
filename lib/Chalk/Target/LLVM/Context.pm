@@ -282,9 +282,24 @@ sub _str_len_for {
 # globals, malloc and alloca inconsistently, and only a constructor that does
 # the allocation can make "Str bytes are never alloca" true by construction.
 sub _set_str_len {
-    my ($self, $ptr_ref, $len) = @_;
+    my ($self, $ptr_ref, $len, %opt) = @_;
     $self->{_str_len_table}{$ptr_ref} = $len;
-    return $ptr_ref;
+
+    # THE PRODUCER SEAM, now building the aggregate. Every producer reaches here
+    # with a pointer in hand and a length computed, then caches and returns the
+    # SAME ref — so wrapping the value HERE converts all of them at once rather
+    # than editing seventeen call sites.
+    #
+    # The side-table write above is kept: consumers reached through a path that
+    # still passes a bare pointer (the method-return ABI in LLVM.pm, for one)
+    # look the length up by pointer, and _str_parts falls back to that lookup
+    # for any ref not registered as an aggregate.
+    my $strv = $self->_str_value($ptr_ref, len => $len, %opt);
+    # Register the aggregate's length under its own ref too, so a consumer that
+    # asks _str_len_for about the AGGREGATE (rather than destructuring it) still
+    # gets an answer during the transition.
+    $self->{_str_len_table}{$strv} = $len;
+    return $strv;
 }
 
 # _str_value($ptr_ref) -> an SSA ref holding a `%Str` aggregate.
@@ -313,13 +328,27 @@ sub _str_value {
 
     my $enc = $opt{enc} // 0;   # 0 = ASCII/UTF-8 default
 
+    # A Str CONSTANT's GEP is hoisted to the entry block so it dominates every
+    # use — two if/else arms may share one hash-consed Str constant, and a
+    # branch-local definition would not dominate the sibling arm ("Instruction
+    # does not dominate all uses"). The aggregate built from it must be hoisted
+    # for exactly the same reason: it is a pure value over a module global, so
+    # the entry block is always a legal place for it.
+    my $emit = $opt{entry} ? sub { $self->_emit_entry($_[0]) }
+                           : sub { $self->_emit($_[0]) };
+
     my $s0 = $self->_fresh;
     my $s1 = $self->_fresh;
     my $s2 = $self->_fresh;
-    $self->_emit("  $s0 = insertvalue %Str undef, i8* $ptr_ref, "  . _str_idx('ptr') . "  ; %Str.ptr");
-    $self->_emit("  $s1 = insertvalue %Str $s0, i64 $len, "        . _str_idx('len') . "  ; %Str.len");
-    $self->_emit("  $s2 = insertvalue %Str $s1, i32 $enc, "        . _str_idx('enc') . "  ; %Str.enc");
+    $emit->("  $s0 = insertvalue %Str undef, i8* $ptr_ref, "  . _str_idx('ptr') . "  ; %Str.ptr");
+    $emit->("  $s1 = insertvalue %Str $s0, i64 $len, "        . _str_idx('len') . "  ; %Str.len");
+    $emit->("  $s2 = insertvalue %Str $s1, i32 $enc, "        . _str_idx('enc') . "  ; %Str.enc");
     $self->{_need_str_type} = 1;
+    # Mark this ref as an aggregate so _str_parts destructures it rather than
+    # passing it through. During the flip both forms are live, and the
+    # difference must be a recorded FACT about the value, not inferred from how
+    # the ref is spelled.
+    $self->{_str_aggregates}{$s2} = 1;
     return $s2;
 }
 
@@ -355,7 +384,25 @@ sub _str_value {
 # embedded NUL.
 sub _str_parts {
     my ($self, $str_ref) = @_;
-    return ($str_ref, $self->_str_len_for($str_ref));
+
+    # EVERY Str value is the %Str aggregate, so destructure unconditionally.
+    #
+    # An earlier version consulted a `_str_aggregates` registry to decide, which
+    # was needed only while some producers had been converted and others had
+    # not. That registry is now both obsolete and WRONG: it records refs minted
+    # by _str_value, and a PHI is never minted there — the merge code emits
+    # `phi %Str [...]` directly. So a merged Str is an aggregate the registry
+    # has never heard of, and keying on it sent phi results down the bare-pointer
+    # path, where the length lookup missed and Print died with "length is not
+    # tracked".
+    #
+    # Asking a side registry what a value IS, when the type already says so, is
+    # the exact mistake this migration exists to remove. The repr is the answer.
+    my $p = $self->_fresh;
+    my $l = $self->_fresh;
+    $self->_emit("  $p = extractvalue %Str $str_ref, " . _str_idx('ptr') . "  ; %Str.ptr");
+    $self->_emit("  $l = extractvalue %Str $str_ref, " . _str_idx('len') . "  ; %Str.len");
+    return ($p, $l);
 }
 
 # blocks() -> arrayref of { label, insts, terminator }
@@ -931,10 +978,18 @@ sub _lower_constant {
         $self->_emit_entry("  $ref = getelementptr inbounds [$total x i8], [$total x i8]* $gname, i64 0, i64 0  ; Constant(\"$val_cmt\", Str) -> i8* ptr");
 
         # Record the byte-length as a compile-time literal for the output epilogue.
-        $self->_set_str_len($ref, $byte_len);
+        # PILOT of the %Str flip: this producer now returns the AGGREGATE rather
+        # than the bare pointer. _set_str_len still records the length so the
+        # side table stays consistent for producers not yet converted; the value
+        # handed to consumers is the struct, and _str_parts destructures it.
+        # entry => 1: a Str constant's GEP is hoisted to the entry block so it
+        # dominates every use (two if/else arms may share one hash-consed Str
+        # constant), and the aggregate built from it must be hoisted for the
+        # same reason.
+        my $strv = $self->_set_str_len($ref, $byte_len, entry => 1);
 
-        $self->{cache}{$node->id} = $ref;
-        return $ref;
+        $self->{cache}{$node->id} = $strv;
+        return $strv;
     }
     elsif ($repr eq 'Undef') {
         # Undef constant -> an i1 defined-bit of false (0).
@@ -1206,7 +1261,7 @@ sub _lower_concat {
     $self->_emit("  store i8 0, i8* $nul_ptr  ; Concat: NUL-terminate");
 
     # Track the result length and mark that malloc/memcpy declarations are needed.
-    $self->_set_str_len($buf, $len_sum);
+    $buf = $self->_set_str_len($buf, $len_sum);
     $self->{_need_malloc_memcpy}  = 1;
 
     $self->{cache}{$node->id} = $buf;
@@ -1240,7 +1295,7 @@ sub _emit_to_str {
         $self->_emit_entry("  $nil_p = getelementptr inbounds [$nil_tot x i8], [$nil_tot x i8]* $nil_g, i64 0, i64 0  ; $label: \"\"");
         $self->_emit("  $ptr = select i1 $input_ref, i8* $one_p, i8* $nil_p  ; $label -> ptr");
         $self->_emit("  $len = select i1 $input_ref, i64 $one_len, i64 0  ; $label -> len");
-        $self->_set_str_len($ptr, $len);
+        $ptr = $self->_set_str_len($ptr, $len);
         return $ptr;
     }
 
@@ -1266,7 +1321,7 @@ sub _emit_to_str {
         $self->_emit("  $buf = call i8* \@malloc(i64 $size)  ; $label: buffer");
         my $wrote = $self->_fresh;
         $self->_emit("  $wrote = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* $buf, i64 $size, i8* $fmt, double $input_ref)  ; $label: render");
-        $self->_set_str_len($buf, $need64);
+        $buf = $self->_set_str_len($buf, $need64);
         return $buf;
     }
 
@@ -1290,14 +1345,13 @@ sub _emit_to_str {
           . "defined bit, and the payload is recorded alongside it."
             unless defined $payload;
 
-        my $rendered = $self->_emit_int_to_str($payload);
-        my $rlen     = $self->_str_len_for($rendered);
+        my ($rendered, $rlen) = $self->_str_parts($self->_emit_int_to_str($payload));
         my ($nil_g, undef, $nil_tot) = $self->_module_global_name('slot_str', '');
         my ($nil_p, $ptr, $len) = ($self->_fresh, $self->_fresh, $self->_fresh);
         $self->_emit_entry("  $nil_p = getelementptr inbounds [$nil_tot x i8], [$nil_tot x i8]* $nil_g, i64 0, i64 0  ; $label: \"\"");
         $self->_emit("  $ptr = select i1 $input_ref, i8* $rendered, i8* $nil_p  ; $label -> ptr");
         $self->_emit("  $len = select i1 $input_ref, i64 $rlen, i64 0  ; $label -> len");
-        $self->_set_str_len($ptr, $len);
+        $ptr = $self->_set_str_len($ptr, $len);
         return $ptr;
     }
 
@@ -1380,7 +1434,7 @@ sub _emit_int_to_str {
     my $len = $self->_fresh;
     $self->_emit("  $len = sub i64 23, $start_idx  ; Stringify[Int]: result byte length");
 
-    $self->_set_str_len($ptr, $len);
+    $ptr = $self->_set_str_len($ptr, $len);
     return $ptr;
 }
 
@@ -1913,8 +1967,10 @@ sub _lower_assign {
             my $wkey_ref = $self->lower_value($key_idx);
             # See HashRead: a 0-length key makes the memcmp match any entry.
             # Die loudly on an untracked length rather than default to 0.
-            my $wkey_len = $self->_str_len_for($wkey_ref)
-                // die "GAP: Assign(Hash-lvalue) key (ref=$wkey_ref) has no tracked "
+            my ($wkey_ptr, $wkey_len) = $self->_str_parts($wkey_ref);
+            $wkey_ref = $wkey_ptr;
+            defined $wkey_len
+                or die "GAP: Assign(Hash-lvalue) key (ref=$wkey_ref) has no tracked "
                      . "length — would emit a 0-length memcmp matching any entry.";
 
             my $cnt_ptr = $self->_fresh;
@@ -2077,7 +2133,9 @@ sub _coerce_ref_to_num {
         return $d;
     }
     if ($repr eq 'Str') {
-        my $len_ref = $self->_str_len_for($ref) // 0;
+        my ($str_ptr, $tracked) = $self->_str_parts($ref);
+        $ref = $str_ptr;
+        my $len_ref = $tracked // 0;
         $self->{_need_str_to_num_helper} = 1;
         my $d = $self->_fresh;
         $self->_emit("  $d = call double \@chalk_str_to_num(i8* $ref, i64 $len_ref)  ; $op: Str operand -> double (leading-numeric)");
@@ -2191,10 +2249,13 @@ sub _lower_str_compare {
     # Both operand lengths must be tracked; a Str with no recorded length can't
     # be compared byte-exact (an untracked length would make the len guard and
     # the memcmp size guesses). GAP loudly rather than emit a wrong-size memcmp.
-    my $len_a = $self->_str_len_for($lhs_ref)
+    my ($lhs_ptr, $lhs_len) = $self->_str_parts($lhs_ref);
+    my ($rhs_ptr, $rhs_len) = $self->_str_parts($rhs_ref);
+    ($lhs_ref, $rhs_ref) = ($lhs_ptr, $rhs_ptr);
+    my $len_a = $lhs_len
         // die "$op cannot lower — lhs operand length not tracked in "
              . "_str_len_table (ptr=$lhs_ref). String compare needs both {ptr,len}.";
-    my $len_b = $self->_str_len_for($rhs_ref)
+    my $len_b = $rhs_len
         // die "$op cannot lower — rhs operand length not tracked in "
              . "_str_len_table (ptr=$rhs_ref). String compare needs both {ptr,len}.";
 
@@ -2291,9 +2352,12 @@ sub _lower_ternary {
     # chosen arm's byte count (a downstream print/concat slices exactly len
     # bytes). Both arms must be Str; a length must be tracked for each.
     if ($true_repr eq 'Str' && $fals_repr eq 'Str') {
-        my $true_len = $self->_str_len_for($true_ref)
+        my ($true_ptr, $true_len_t) = $self->_str_parts($true_ref);
+        my ($fals_ptr, $fals_len_t) = $self->_str_parts($fals_ref);
+        ($true_ref, $fals_ref) = ($true_ptr, $fals_ptr);
+        my $true_len = $true_len_t
             // die "LLVM backend: TernaryExpr Str true-branch (ref=$true_ref) has no tracked length";
-        my $fals_len = $self->_str_len_for($fals_ref)
+        my $fals_len = $fals_len_t
             // die "LLVM backend: TernaryExpr Str false-branch (ref=$fals_ref) has no tracked length";
         my $ptr = $self->_fresh;
         $self->_emit("  $ptr = select i1 $cond_ref, i8* $true_ref, i8* $fals_ref"
@@ -2301,7 +2365,7 @@ sub _lower_ternary {
         my $len = $self->_fresh;
         $self->_emit("  $len = select i1 $cond_ref, i64 $true_len, i64 $fals_len"
             . "  ; TernaryExpr(Str) -> select len");
-        $self->_set_str_len($ptr, $len);
+        $ptr = $self->_set_str_len($ptr, $len);
         $self->{cache}{$node->id} = $ptr;
         return $ptr;
     }
@@ -2565,16 +2629,17 @@ sub _emit_shortcircuit_phi {
     my $llvm_type = _repr_to_llvm_type($repr);
     $self->_emit("  $result = phi $llvm_type [ $lhs_ref, \%$lhs_label ], [ $rhs_ref, \%$rhs_label ]  ; $tag: phi");
 
-    if ($repr eq 'Str') {
-        my (undef, $lhs_len) = $self->_str_parts($lhs_ref);
-        my (undef, $rhs_len) = $self->_str_parts($rhs_ref);
-        die "$tag merges Str arms but an arm's length is not tracked in "
-          . "_str_len_table — a Str is a (ptr,len) pair and the merge needs both."
-            unless defined $lhs_len && defined $rhs_len;
-        my $len = $self->_fresh;
-        $self->_emit("  $len = phi i64 [ $lhs_len, \%$lhs_label ], [ $rhs_len, \%$rhs_label ]  ; $tag: phi len");
-        $self->_set_str_len($result, $len);
-    }
+    # NOTHING TO DO FOR Str — and that is the point of the %Str migration.
+    #
+    # This used to emit a SECOND, PARALLEL `phi i64` for the length beside the
+    # pointer phi, and to die with "an arm's length is not tracked" when the
+    # side table had lost one. A merge was exactly where the two could
+    # desynchronize: the pointer phi'd and the length did not.
+    #
+    # The phi above is typed `%Str`, so the pointer, the length and the encoding
+    # travel through the merge as ONE VALUE. They cannot disagree, so the guard
+    # has nothing left to guard and the parallel phi has nothing left to carry.
+    # The failure class is deleted BY CONSTRUCTION rather than by discipline.
 
     return $result;
 }
@@ -2878,11 +2943,10 @@ my %_REPR_LLVM_TYPE = (
     Int      => 'i64',
     Num      => 'double',
     Bool     => 'i1',
-    # A Str VALUE is a (ptr,len) pair; the SSA value carries only the pointer,
-    # with the length in _str_len_table. Returning the %Str struct instead is a
-    # filed follow-up — it retires that side table and the parallel-phi pattern
-    # at :2337 — and is deliberately NOT bundled with making this map total.
-    Str      => 'i8*',
+    # A Str VALUE is the first-class aggregate { ptr, len, enc }. This is what
+    # a phi or select over Str values must be typed as: the pointer and the
+    # length travel together, so a merge cannot desynchronize them.
+    Str      => '%Str',
     Undef    => 'i1',
     Slot     => '%Slot',      # { i1, i64 }: the uniform field/element cell
     Array    => '%Array*',    # { i64, i64, %Slot* }
@@ -4196,8 +4260,10 @@ sub _lower_hash_ref {
         # The stored key length is later memcmp'd at read/update time; a 0-length
         # key would make every lookup match this entry. Die loudly on an untracked
         # length rather than default to 0 (matches the I-C loud-GAP contract).
-        my $key_len = $self->_str_len_for($key_ref)
-            // die "GAP: HashRef key (ref=$key_ref) has no tracked length — "
+        my ($key_ptr, $key_len) = $self->_str_parts($key_ref);
+        $key_ref = $key_ptr;
+        defined $key_len
+            or die "GAP: HashRef key (ref=$key_ref) has no tracked length — "
                  . "stored key length 0 would make any lookup match this entry.";
 
         my $e_kp = $self->_fresh;
@@ -4285,8 +4351,7 @@ sub _lower_length {
         # The length is tracked separately in _str_len_table, keyed by the i8* SSA ref.
         # Emit a compile-time literal via add i64 0, <len>.
         # If the length is not tracked (e.g., a Coerce(Bool->Str) result), die loudly.
-        my $str_ref = $self->lower_value($operand);
-        my $byte_len = $self->_str_len_for($str_ref);
+        my ($str_ref, $byte_len) = $self->_str_parts($self->lower_value($operand));
         unless (defined $byte_len) {
             die "Length(Str) — byte length not tracked for operand SSA ref $str_ref. "
               . "Only compile-time-known Str lengths are supported.";
@@ -4484,7 +4549,7 @@ sub _lower_array_read {
         $self->_emit("  $len = load i64, i64* $pl  ; ArrayRead :Str len");
         # Re-register the length: a Str value is only usable by print/concat/
         # return if its byte length is tracked against the pointer.
-        $self->_set_str_len($ptr, $len);
+        $ptr = $self->_set_str_len($ptr, $len);
         $self->{cache}{ $node->id } = $ptr;
         return $ptr;
     }
@@ -4641,8 +4706,10 @@ sub _lower_hash_read {
     # zero-length memcmp match ANY entry (spurious key match). If the key length
     # is untracked it is a TypeInference/length-tracking gap — die loudly (matches
     # the I-C loud-GAP contract), do NOT default to 0.
-    my $lkey_len = $self->_str_len_for($lkey_ref)
-        // die "GAP: HashRead key (ref=$lkey_ref) has no tracked length — "
+    my ($lkey_ptr, $lkey_len) = $self->_str_parts($lkey_ref);
+    $lkey_ref = $lkey_ptr;
+    defined $lkey_len
+        or die "GAP: HashRead key (ref=$lkey_ref) has no tracked length — "
              . "would emit a 0-length memcmp matching any entry. Fix length tracking.";
     my $repr     = _require_repr($node, 'HashRead');
 
@@ -4768,7 +4835,7 @@ sub _lower_hash_read {
         $self->_emit("  $pl = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 1  ; StrPair.len");
         $self->_emit("  $sptr = load i8*, i8** $pp  ; HashRead :Str ptr");
         $self->_emit("  $slen = load i64, i64* $pl  ; HashRead :Str len");
-        $self->_set_str_len($sptr, $slen);
+        $sptr = $self->_set_str_len($sptr, $slen);
         $self->{cache}{ $node->id } = $sptr;
         return $sptr;
     }
@@ -5513,7 +5580,7 @@ sub _lower_call_method {
         my $str_len = $self->_fresh;
         $self->_emit("  $str_ptr = extractvalue %StrPair $result, 0  ; Call(method) $method_name result ptr");
         $self->_emit("  $str_len = extractvalue %StrPair $result, 1  ; Call(method) $method_name result len");
-        $self->_set_str_len($str_ptr, $str_len);
+        $str_ptr = $self->_set_str_len($str_ptr, $str_len);
         $self->{cache}{ $node->id } = $str_ptr;
         return $str_ptr;
     }
@@ -5559,7 +5626,7 @@ sub _lower_ref_of_object {
     $self->_emit("  $cn_ptr = load i8*, i8** $cn_gep  ; load class-name ptr");
 
     # Track the compile-time-known length for the Str output epilogue
-    $self->_set_str_len($cn_ptr, $name_len);
+    $cn_ptr = $self->_set_str_len($cn_ptr, $name_len);
     $self->{cache}{ $node->id } = $cn_ptr;
     return $cn_ptr;
 }
@@ -6370,7 +6437,7 @@ sub _lower_regex_capture {
     $self->_emit("  $nul = getelementptr inbounds i8, i8* $buf, i64 $len  ; RegexCapture: NUL slot");
     $self->_emit("  store i8 0, i8* $nul  ; RegexCapture: NUL-terminate");
 
-    $self->_set_str_len($buf, $len);
+    $buf = $self->_set_str_len($buf, $len);
     $self->{cache}{ $node->id } = $buf;
     return $buf;
 }
@@ -6415,7 +6482,7 @@ sub _lower_env_read {
     my $len = $self->_fresh;
     $self->_emit("  $len = call i64 \@strlen(i8* $val)  ; EnvRead: value length");
 
-    $self->_set_str_len($val, $len);
+    $val = $self->_set_str_len($val, $len);
     $self->{cache}{ $node->id } = $val;
     return $val;
 }
@@ -6443,7 +6510,7 @@ sub _lower_stash_access {
         my $len = $self->_fresh;
         $self->_emit("  $ptr = load i8*, i8** $pname  ; StashAccess: read \$$var ptr (Str package scalar)");
         $self->_emit("  $len = load i64, i64* $lname  ; StashAccess: read \$$var len (Str package scalar)");
-        $self->_set_str_len($ptr, $len);
+        $ptr = $self->_set_str_len($ptr, $len);
         $self->{cache}{ $node->id } = $ptr;
         return $ptr;
     }
@@ -6637,7 +6704,7 @@ sub _lower_regex_subst {
     my $res_len = $self->_fresh;
     $self->_emit("  $res_len = phi i64 [ $new_len, \%$lbl_do ], [ $subj_len, \%$lbl_pre ]  ; RegexSubst: result length");
 
-    $self->_set_str_len($res, $res_len);
+    $res = $self->_set_str_len($res, $res_len);
     $self->{cache}{ $node->id } = $res;
     return $res;
 }
@@ -6664,7 +6731,8 @@ sub _lower_print {
         my $ref  = $self->lower_value($arg);
 
         if (defined $repr && $repr eq 'Str') {
-            my $len = $self->_str_len_for($ref);
+            my ($str_ptr, $len) = $self->_str_parts($ref);
+            $ref = $str_ptr;
             die "Print of a Str arg whose length is not tracked in "
               . "_str_len_table — cannot emit exactly-len bytes."
                 unless defined $len;
@@ -6745,7 +6813,7 @@ sub _lower_field_access_in_method {
         $self->_emit("  $lp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
         my $sl = $self->_fresh;
         $self->_emit("  $sl = load i64, i64* $lp_gep  ; load str len");
-        $self->_set_str_len($sp, $sl);
+        $sp = $self->_set_str_len($sp, $sl);
         $self->{cache}{ $node->id } = $sp;
         return $sp;
     }

@@ -635,6 +635,18 @@ sub _emit_class_registry_ir {
         }
     }
 
+    # %Str is declared UNCONDITIONALLY here, unlike %StrPair. This prologue runs
+    # BEFORE any method body is lowered, so a pre-scan cannot know whether a body
+    # will build one — and %Str is needed by any Str VALUE at all, not merely by
+    # a Str-RETURNING method, so the scan above (which keys on return_repr) would
+    # miss most uses. An unused type declaration is inert; a missing one makes
+    # lli reject the module with "invalid indices for insertvalue".
+    unless ($ctx->{_str_type_emitted}) {
+        push @lines, '; Str VALUE type (layout: Context::_str_fields)';
+        push @lines, Chalk::Target::LLVM::Context::_str_type_decl();
+        $ctx->{_str_type_emitted} = 1;
+    }
+
     if ($need_strpair) {
         push @lines, '; StrPair for Str method return values (layout: Context::_strpair_fields)';
         push @lines, Chalk::Target::LLVM::Context::_strpair_type_decl();
@@ -785,6 +797,16 @@ sub _emit_class_registry_ir {
             # Lower the body value node into the method body context
             my $body_val = $body_ctx->lower_value($body_node);
 
+            # Propagate need-flags BACK UP. A method body is lowered in its own
+            # Context, so a flag set during that lowering is invisible to the
+            # parent $ctx that emits the type declarations — and %Str is
+            # declared from $ctx. Without this the body emits insertvalue over
+            # an undeclared %Str and lli rejects the module with "invalid
+            # indices for insertvalue". (%StrPair avoids this only by having a
+            # pre-scan over return_repr; %Str has none, because it is needed by
+            # any Str VALUE rather than only by a Str-returning method.)
+            $ctx->{_need_str_type} ||= $body_ctx->{_need_str_type};
+
             push @lines, "define internal $fn_ret $fn_name(i8* %self) {  ; method body for ${cname}::${mname}";
             push @lines, 'entry:';
 
@@ -798,15 +820,29 @@ sub _emit_class_registry_ir {
                 # reach-in outside Context.pm, which is what makes a side
                 # channel spread: every new consumer copies the last one.
                 my $len_ref = $body_ctx->_str_len_for($body_val);
+
+                # The body may hand back either a %Str aggregate (a converted
+                # producer) or a bare i8* (one not yet converted). Destructure
+                # the former inline: this block pushes onto @lines directly
+                # rather than through the context, so _str_parts — which emits
+                # into the context's current block — cannot be used here.
+                my $ptr_val = $body_val;
+                if ($body_ctx->{_str_aggregates}{$body_val}) {
+                    push @lines, "  %ret_sp = extractvalue %Str $body_val, 0";
+                    push @lines, "  %ret_sl = extractvalue %Str $body_val, 1";
+                    $ptr_val = '%ret_sp';
+                    $len_ref = '%ret_sl';
+                }
+
                 if (defined $len_ref) {
-                    push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* $body_val, 0";
+                    push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* $ptr_val, 0";
                     push @lines, "  %ret_r1 = insertvalue %StrPair %ret_r0, i64 $len_ref, 1";
                     push @lines, '  ret %StrPair %ret_r1';
                 }
                 else {
                     # Compute strlen at runtime
-                    push @lines, "  %ret_len = call i64 \@strlen(i8* $body_val)";
-                    push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* $body_val, 0";
+                    push @lines, "  %ret_len = call i64 \@strlen(i8* $ptr_val)";
+                    push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* $ptr_val, 0";
                     push @lines, "  %ret_r1 = insertvalue %StrPair %ret_r0, i64 %ret_len, 1";
                     push @lines, '  ret %StrPair %ret_r1';
                 }
@@ -853,6 +889,10 @@ sub _emit_class_registry_ir {
             $adj_ctx->{_need_strpair}       = $ctx->{_need_strpair} // 0;
 
             $adj_ctx->lower_value($_) for @adjust_stmts;
+            # Same back-propagation as the method-body path above: an ADJUST
+            # block is lowered in its own Context, so a %Str built there is
+            # invisible to the $ctx that declares the type.
+            $ctx->{_need_str_type} ||= $adj_ctx->{_need_str_type};
 
             push @lines, "define internal void \@${cname}__ADJUST(i8* %self) {  ; ADJUST blocks for $cname";
             push @lines, 'entry:';
@@ -1216,6 +1256,18 @@ sub lower_with_elaboration {
         push @lines, '%Hash       = type { i64, i64, %HashEntry* }';
     }
 
+    # %Str, the first-class Str VALUE type. Emitted here rather than in the
+    # class-registry prologue because _need_str_type is set DURING lowering (by
+    # _str_value), and this block runs after it — the same ordering the
+    # _need_aggregate_types flag above relies on. Declaring it in the earlier
+    # prologue would need a pre-scan, which is the trap the _need_strpair "I3"
+    # re-emit below exists to patch around.
+    if ($ctx->{_need_str_type} && !$ctx->{_str_type_emitted}) {
+        push @lines, '; Str VALUE type (layout: Context::_str_fields)';
+        push @lines, Chalk::Target::LLVM::Context::_str_type_decl();
+        $ctx->{_str_type_emitted} = 1;
+    }
+
     # Emit @chalk_str_to_num helper + strtod declaration when Coerce(Str->Num) is used.
     #
     # The helper implements perl's leading-numeric rule: skip whitespace, then parse
@@ -1375,6 +1427,27 @@ sub lower_with_elaboration {
         # Path B: NUL-terminated only (from Coerce(Bool->Str) or unknown-length).
         #   Use printf("Str:%s\n", ptr) — correct for NUL-terminated ASCII.
         my $len_ref = $ctx->_str_len_for($result_ref);
+
+        # A Str VALUE is the %Str aggregate, so the epilogue must destructure it
+        # before handing a pointer to printf. Emitted inline because this block
+        # pushes onto @lines directly rather than through the context, so
+        # _str_parts (which emits into the context's current block) cannot be
+        # used here — the same constraint the method-return ABI has.
+        #
+        # Keyed on the REPR, not on the _str_aggregates registry. The registry
+        # records refs minted by _str_value, and a PHI is never minted there —
+        # it is emitted as `phi %Str [...]` by the merge code and so is an
+        # aggregate that the registry has never heard of. Since we are already
+        # inside `$result_repr eq 'Str'` and every Str value is now an
+        # aggregate, the repr IS the answer, and asking a side registry instead
+        # is the same mistake this migration exists to remove.
+        {
+            push @lines, "  %result_str_p = extractvalue %Str $result_ref, 0  ; epilogue: %Str.ptr";
+            push @lines, "  %result_str_l = extractvalue %Str $result_ref, 1  ; epilogue: %Str.len";
+            $result_ref = '%result_str_p';
+            $len_ref    = '%result_str_l';
+        }
+
         if (defined $len_ref) {
             # Path A: length-tracked
             my $len32 = '%result_str_len32';
