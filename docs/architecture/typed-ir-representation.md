@@ -528,6 +528,46 @@ that migration is already a flag day across ~27 consumer sites, and bundling a
 lifetime change would make it unreviewable. Recorded so it cannot be quietly
 skipped — **the `%Str` work is not complete until this is answered.**
 
+#### Would interning (one global string block + COW) help?
+
+Measured before answering, and the answer is **mostly already done, by two
+mechanisms, and the remainder is an optimization that presupposes the ownership
+answer above.**
+
+**Constants are already deduplicated, twice over.** Three identical
+`print "hello"` statements emit ONE global — that is IR-level HASH-CONSING (the
+three `Constant` nodes dedupe to one node), not a string table. And the globals
+are emitted `private unnamed_addr constant`, and `unnamed_addr` is precisely the
+flag that tells LLVM *the address is not significant*, which lets the LINKER
+merge identical constants across the module. That IS the "single block of
+strings" behaviour, implemented by the toolchain at zero cost to Chalk. Adding a
+Chalk-side constant table would duplicate it.
+
+**Where dedup does NOT happen:** `"hello"` and `"hello" . ""` emit THREE
+distinct globals (measured) — different IR nodes, so no hash-cons, and the
+concat is a runtime `malloc`. Interning would catch that; hash-consing cannot.
+
+So the real question is interning RUNTIME-created strings, and that is a
+different feature with a different trade: every `Concat` currently mallocs, and
+interning replaces that allocation with a HASH-TABLE LOOKUP on every string
+creation. That is a win only when duplication is high, and it is a performance
+change, not a correctness one.
+
+**COW needs a refcount**, which means a fourth field or a header before the
+bytes — a larger representation change than `{ptr, len, enc}`, and it collides
+directly with the ownership question above.
+
+**The honest blocker: interning presupposes an ownership answer.** An interned
+string is NEVER freed and NEVER mutated in place; that is a strong ownership
+claim, and Chalk's storage classes are currently inconsistent (global vs malloc
+vs alloca). Deciding interning first would build on the thing that is not yet
+settled.
+
+**The payoff that is NOT about memory:** if strings are interned, EQUALITY
+BECOMES POINTER COMPARISON — `StrEq` collapses from a length check plus `memcmp`
+to a single `icmp`. That is the classic interning win and it is
+correctness-neutral. Worth revisiting once ownership is settled; not before.
+
 #### Can LLVM run a destructor when a string's lifetime ends?
 
 **No. LLVM has no objects, no lifetimes, no scopes and no RAII** — it is
