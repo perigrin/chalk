@@ -747,8 +747,29 @@ Measured across the backend's side tables:
 | `_slot_payload` | 4 / 2 | a Slot's payload (SSA ref is only the def-bit) | **same disease** |
 | `_undef_defined_bit` | 5 / 3 | a def-bit | **same disease** |
 | `_undef_payload` | 6 / 3 | dead scaffolding | **DELETE, do not seam** |
-| `_regex_captures` | 3 / 2 | match offsets + subject ptr | **same disease** |
+| `_regex_captures` | 3 / 2 | match offsets + subject ptr | **NOT the same — see below** |
 | `_arr_table`, `_hash_table` | 0 / 0 | memoized bitcasts | **cache — leave alone** |
+
+**Each verdict above is TESTED, not assumed.** An earlier draft of this table
+claimed all four "carry a half the SSA ref cannot express" — a capability claim
+made after testing exactly ONE of them. Verified against `lli` 15 since:
+
+- **`%Slot` genuinely works as an SSA aggregate.** `{i1, i64}` returned from a
+  function, `phi`'d across blocks, both fields extracted: `def=1 v=42`. So
+  `_slot_payload` and `_undef_defined_bit` really are the same disease, and the
+  fix really is available.
+- **`_regex_captures` is NOT.** It holds a Perl hashref of `matched`, `m0s`,
+  `m0e`, `subj_ptr` and `cap_s`/`cap_e` — ARRAYREFS of per-group offsets. Two
+  disqualifiers: the number of capture groups VARIES PER REGEX, so there is no
+  fixed struct shape (LLVM structs are fixed-size), and some entries are
+  compile-time Perl values rather than SSA refs at all (`cap_s => []` at
+  :6145). It is a COMPILER-SIDE RECORD ABOUT a match, not a runtime value with
+  halves — closer to the cache category than to the Str one.
+
+The correction matters beyond bookkeeping: the failure mode was reasoning from
+what the CURRENT CODE does and mistaking it for what the TARGET PERMITS. That is
+the same error as the earlier "a Str cannot be an SSA value" — false, and
+disproved in ten lines of IR.
 
 `_arr_table` / `_hash_table` are pure memoization: discard them and the emitted
 IR is identical. They are not this problem.
