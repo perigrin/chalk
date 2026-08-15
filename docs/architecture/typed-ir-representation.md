@@ -553,9 +553,40 @@ interning replaces that allocation with a HASH-TABLE LOOKUP on every string
 creation. That is a win only when duplication is high, and it is a performance
 change, not a correctness one.
 
-**COW needs a refcount**, which means a fourth field or a header before the
-bytes — a larger representation change than `{ptr, len, enc}`, and it collides
-directly with the ownership question above.
+**COW needs SHARING INFORMATION — not necessarily a refcount.** An earlier draft
+of this section said "COW needs a refcount"; that is too strong, and the
+correction matters because it changes which question COW is actually waiting on.
+
+On write, COW must decide *copy first, or mutate in place?* Mutating a buffer
+someone else points at corrupts their value, so the requirement is an answer to
+"is this shared?". Three ways to get one:
+
+| mechanism | runtime cost | precision |
+|---|---|---|
+| refcount | a field, plus inc/dec | exact, handles arbitrary sharing |
+| a single "shared" bit | one bit | one-way — once shared, copies forever (roughly what perl's `SvIsCOW` does) |
+| **static escape analysis** | **none** | exact where provable — and a COMPILER can prove it |
+
+The third is the one Chalk has access to and a runtime does not: a string proven
+not to escape can be mutated in place with no field and no check.
+
+**But the load-bearing fact is that Chalk's strings are IMMUTABLE today, so COW
+has nothing to optimize.** Measured: ZERO stores into a pre-existing string
+buffer. Every `store i8` writes into memory the same function just allocated —
+`Concat` NUL-terminating its own malloc (:1185), `Stringify` writing its own
+digits (:1302, :1337, :1353), `RegexCapture` its own (:6349). Every operation
+returns a fresh buffer.
+
+COW answers "I am about to mutate something that might be shared". That
+situation does not exist here. Copy-on-write with nothing that writes is just
+copy.
+
+So COW is NOT blocked on the ownership question — it is blocked on there being
+any MUTATION at all. The order is: (1) strings are immutable, COW is meaningless;
+(2) in-place mutation arrives (lvalue `substr`, in-place `s///`, an optimized
+`.=`); (3) only then does refcount-vs-bit-vs-escape-analysis have a right
+answer, and escape analysis may moot it. That is a much later concern than the
+ownership question above, which is live NOW.
 
 **The honest blocker: interning presupposes an ownership answer.** An interned
 string is NEVER freed and NEVER mutated in place; that is a strong ownership
