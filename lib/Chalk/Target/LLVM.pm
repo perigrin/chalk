@@ -817,22 +817,19 @@ sub _emit_class_registry_ir {
             # Emit return instruction
             if ($ret_repr eq 'Str') {
                 # Through the seam, not into the table. This was the one direct
-                # reach-in outside Context.pm, which is what makes a side
-                # channel spread: every new consumer copies the last one.
-                my $len_ref = $body_ctx->_str_len_for($body_val);
-
-                # The body may hand back either a %Str aggregate (a converted
-                # producer) or a bare i8* (one not yet converted). Destructure
-                # the former inline: this block pushes onto @lines directly
-                # rather than through the context, so _str_parts — which emits
-                # into the context's current block — cannot be used here.
-                my $ptr_val = $body_val;
-                if ($body_ctx->{_str_aggregates}{$body_val}) {
-                    push @lines, "  %ret_sp = extractvalue %Str $body_val, 0";
-                    push @lines, "  %ret_sl = extractvalue %Str $body_val, 1";
-                    $ptr_val = '%ret_sp';
-                    $len_ref = '%ret_sl';
-                }
+                # A Str-returning body hands back a %Str aggregate, so
+                # destructure it for the %StrPair return ABI. Emitted inline
+                # because this block pushes onto @lines directly rather than
+                # through the context, so _str_parts — which emits into the
+                # context's current block — cannot be used here.
+                #
+                # Keyed on the repr (we are inside `$ret_repr eq 'Str'`), not on
+                # a side registry: every Str value is an aggregate, and a phi
+                # result is one the registry would never have recorded.
+                push @lines, "  %ret_sp = extractvalue %Str $body_val, 0";
+                push @lines, "  %ret_sl = extractvalue %Str $body_val, 1";
+                my $ptr_val = '%ret_sp';
+                my $len_ref = '%ret_sl';
 
                 if (defined $len_ref) {
                     push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* $ptr_val, 0";
@@ -1426,8 +1423,6 @@ sub lower_with_elaboration {
         #   Use printf("Str:%.*s\n", (i32)len, ptr) — correct for exactly len bytes.
         # Path B: NUL-terminated only (from Coerce(Bool->Str) or unknown-length).
         #   Use printf("Str:%s\n", ptr) — correct for NUL-terminated ASCII.
-        my $len_ref = $ctx->_str_len_for($result_ref);
-
         # A Str VALUE is the %Str aggregate, so the epilogue must destructure it
         # before handing a pointer to printf. Emitted inline because this block
         # pushes onto @lines directly rather than through the context, so
@@ -1441,12 +1436,10 @@ sub lower_with_elaboration {
         # inside `$result_repr eq 'Str'` and every Str value is now an
         # aggregate, the repr IS the answer, and asking a side registry instead
         # is the same mistake this migration exists to remove.
-        {
-            push @lines, "  %result_str_p = extractvalue %Str $result_ref, 0  ; epilogue: %Str.ptr";
-            push @lines, "  %result_str_l = extractvalue %Str $result_ref, 1  ; epilogue: %Str.len";
-            $result_ref = '%result_str_p';
-            $len_ref    = '%result_str_l';
-        }
+        push @lines, "  %result_str_p = extractvalue %Str $result_ref, 0  ; epilogue: %Str.ptr";
+        push @lines, "  %result_str_l = extractvalue %Str $result_ref, 1  ; epilogue: %Str.len";
+        $result_ref = '%result_str_p';
+        my $len_ref = '%result_str_l';
 
         if (defined $len_ref) {
             # Path A: length-tracked

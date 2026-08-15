@@ -68,9 +68,9 @@ sub new {
         # Str representation tracking (G3):
         #   _str_globals    => [ [$global_name, $content, $byte_len], ... ]
         #     String constant globals to emit in the module prologue.
-        #   _str_len_table  => { $ssa_ptr_ref => $len_ssa_ref_or_literal }
-        #     Maps each Str SSA ptr ref to its length (i64). Used by the output
-        #     epilogue to emit printf("Str:%.*s\n", len, ptr) for exactly len bytes.
+        #   (_str_len_table is GONE: a Str VALUE is `%Str = { ptr, len, enc }`,
+        #    so the length is a field of the value rather than a side channel
+        #    keyed by pointer. Ask _str_parts for both halves.)
         #   _need_malloc_memcpy => bool
         #     Set when a Concat node is lowered; triggers malloc/memcpy declarations.
         _str_globals          => [],
@@ -87,7 +87,6 @@ sub new {
         # Num package scalars: one `double` slot per qualified name.
         #   _pkg_num_globals => { "main::g" => "\@pkg_main_g_num", ... }
         _pkg_num_globals      => {},
-        _str_len_table        => {},
         _need_malloc_memcpy   => 0,
         _need_str_to_num_helper => 0,
         # G4 Array/Hash aggregate tracking:
@@ -251,14 +250,19 @@ sub _struct_size_bytes {
 # what made this a 46-site change instead of a 2-site one.
 # ---------------------------------------------------------------------------
 
-# _str_len_for($ptr_ref) -> $len_ref_or_undef
-# The tracked byte length for a Str SSA ref, or undef when it is not tracked
-# (e.g. a Coerce(Bool->Str) result). Callers MUST handle undef: an untracked
-# length is the failure this seam exists to make visible, not a zero.
-sub _str_len_for {
-    my ($self, $ptr_ref) = @_;
-    return $self->{_str_len_table}{$ptr_ref};
-}
+# _str_len_for is DELETED, along with the _str_len_table it read.
+#
+# It answered "what is this pointer's length?" — a question that only existed
+# because a Str SSA value was a bare i8* with its length in a side channel. A
+# Str value is now `%Str = { ptr, len, enc }`, so the length is a FIELD: ask
+# _str_parts, which returns the pointer and the length together and cannot
+# return one without the other.
+#
+# The table's disappearance is the migration's honesty check. It was introduced
+# in the same commit as the pointer it compensated for (e602f231, "a Str via
+# printf(\"%.*s\", len, ptr) from the tracked _str_len_table ... embedded-NUL
+# safe") — born because the pointer alone is not a string. With the pair made
+# into one value there is nothing left for it to hold.
 
 # _set_str_len($ptr_ref, $len) -> $ptr_ref
 # Record the byte length for a Str SSA ref. Returns the ref so a producer can
@@ -283,23 +287,15 @@ sub _str_len_for {
 # the allocation can make "Str bytes are never alloca" true by construction.
 sub _set_str_len {
     my ($self, $ptr_ref, $len, %opt) = @_;
-    $self->{_str_len_table}{$ptr_ref} = $len;
 
-    # THE PRODUCER SEAM, now building the aggregate. Every producer reaches here
-    # with a pointer in hand and a length computed, then caches and returns the
-    # SAME ref — so wrapping the value HERE converts all of them at once rather
-    # than editing seventeen call sites.
+    # THE PRODUCER SEAM. Every producer reaches here with a pointer in hand and
+    # a length computed, then caches and returns the result — so building the
+    # aggregate HERE converted all seventeen at once rather than editing each.
     #
-    # The side-table write above is kept: consumers reached through a path that
-    # still passes a bare pointer (the method-return ABI in LLVM.pm, for one)
-    # look the length up by pointer, and _str_parts falls back to that lookup
-    # for any ref not registered as an aggregate.
-    my $strv = $self->_str_value($ptr_ref, len => $len, %opt);
-    # Register the aggregate's length under its own ref too, so a consumer that
-    # asks _str_len_for about the AGGREGATE (rather than destructuring it) still
-    # gets an answer during the transition.
-    $self->{_str_len_table}{$strv} = $len;
-    return $strv;
+    # The side table is GONE. It existed to carry the length beside a bare i8*;
+    # the length now rides IN the value, so there is nothing to carry and
+    # nothing that can fall out of sync with the pointer.
+    return $self->_str_value($ptr_ref, len => $len, %opt);
 }
 
 # _str_value($ptr_ref) -> an SSA ref holding a `%Str` aggregate.
@@ -319,7 +315,7 @@ sub _set_str_len {
 sub _str_value {
     my ($self, $ptr_ref, %opt) = @_;
 
-    my $len = $opt{len} // $self->_str_len_for($ptr_ref);
+    my $len = $opt{len};
     defined $len or die
         "LLVM backend: cannot build a %Str from '$ptr_ref' — its byte length is "
       . "not tracked. A Str is (ptr, len, enc); strlen is NOT a valid fallback "
@@ -348,7 +344,6 @@ sub _str_value {
     # passing it through. During the flip both forms are live, and the
     # difference must be a recorded FACT about the value, not inferred from how
     # the ref is spelled.
-    $self->{_str_aggregates}{$s2} = 1;
     return $s2;
 }
 
