@@ -512,6 +512,43 @@ way, and "Str bytes are never `alloca`" becomes true by construction instead of
 by review. It also gives the encoding field one place to be set, and a future
 free/refcount one place to hook.
 
+**INVERTED DEFAULT (raised 2026-08-15): `alloca` for everything EXCEPT strings
+that escape.** The current rule is backwards. Today the reasoning is "use
+`malloc` because a string MIGHT escape" — a conservative guess made per-producer,
+which is why the producers disagree. The better rule is "use `alloca` because it
+does NOT escape, unless analysis proves otherwise" — a decision made per-value
+from evidence.
+
+That is strictly better on both axes. FASTER: stack allocation is a pointer bump
+and the memory is reclaimed automatically, where today Chalk leaks every string
+deliberately. SAFER: the present inconsistency is `alloca` used WITHOUT an escape
+proof (stringify does exactly this); the inverted rule only uses `alloca` WITH
+one.
+
+**Immutability plus SSA is what makes the analysis tractable**, which is the
+whole reason this is reachable here and not in perl. Escape analysis is hard when
+values can be mutated through aliases, because every write through every pointer
+must be tracked. With immutable strings there are NO writes to track: a string
+escapes only if it is RETURNED, STORED into an aggregate or global, or PASSED to
+an opaque call. That is a reachability question over SSA edges — close to the
+easiest analysis there is.
+
+**This does NOT make the single constructor moot; it is what makes the analysis
+DEPLOYABLE.** The constructor becomes the one place the analysis result is
+applied:
+
+    _str_alloc($len, escapes => $bool)    # alloca or malloc, ONE decision point
+
+Without it every producer needs its own escape query and its own branch — five
+places to get right, which is how they came to disagree in the first place. With
+it, the analysis has exactly one consumer.
+
+**Trap to design around: `alloca` in a LOOP.** LLVM's `alloca` allocates
+per-EXECUTION, not per-static-site, so an `alloca` inside a loop body grows the
+frame every iteration — an unbounded stack leak. The rule therefore needs a third
+condition: non-escaping AND not in a loop, or hoisted to the entry block.
+`llvm.lifetime.start`/`end` (noted below) exist partly to make that safe.
+
 Three candidate resolutions, smallest first:
 
 1. **Invariant, no new field.** Str bytes are ALWAYS heap-or-global, never
