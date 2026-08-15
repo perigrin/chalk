@@ -646,6 +646,43 @@ concat-and-rebind, so this is a performance ceiling NOT YET HIT rather than a
 correctness problem. Recorded as the thing most likely to force the mutation
 decision.
 
+#### DECISION: mutation is an OPTIMIZER concern, not a representation concern
+
+The four mutating operations are a KNOWN, CLOSED SET — `.=`, `s///` without
+`/r`, lvalue/4-arg `substr`, and `chomp`/`chop`. That is what makes this a
+tractable optimizer problem rather than a language-design one.
+
+The usual reasoning runs backwards: "Perl mutates strings, therefore the string
+representation must be mutable", which imposes sharing state, refcounts or COW
+on EVERY string to serve four operations. Inverted: keep the value semantics
+honest — a Str is an immutable `{ptr, len, enc}` — and let an optimizer
+recognize the specific situations where in-place update is PROVABLY safe.
+
+That is exactly the shape of a peephole/escape-analysis pass:
+
+| operation | when in-place is safe | pass |
+|---|---|---|
+| `.=` in a loop | the accumulator does not escape and has one reader | escape analysis + append-buffer growth |
+| `s///` | the subject is dead after the substitution | dead-value forwarding |
+| lvalue `substr` | the target does not escape | escape analysis |
+| `chomp`/`chop` | same | escape analysis |
+
+Each is a LOCAL, PROVABLE condition on one value, not a global property of the
+type. When the proof fails the compiler emits the copy — correct, just slower —
+so a missing or incomplete optimization is a performance miss and never a
+miscompile. That is the same GAP-not-miscompile discipline the rest of this
+project uses.
+
+It also puts the work where the leverage is. `.=`-in-a-loop is the ONE
+asymptotic case, so a single pass recognizing that one pattern captures most of
+the available win; the other three are constant-factor.
+
+CONSEQUENCE FOR THE REPRESENTATION: `{ptr, len, enc}` needs NO sharing field, NO
+refcount and NO COW bit. Those were being considered to support mutation that
+the optimizer will handle instead. This is why the ownership question above is
+about STORAGE CLASS (global vs malloc vs alloca — a soundness question, live
+now) and not about sharing (a performance question, deferred to a pass).
+
 So COW is NOT blocked on the ownership question — it is blocked on there being
 any MUTATION at all. The order is: (1) strings are immutable, COW is meaningless;
 (2) in-place mutation arrives (lvalue `substr`, in-place `s///`, an optimized
