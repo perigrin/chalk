@@ -115,6 +115,58 @@ sub new {
 }
 
 # ---------------------------------------------------------------------------
+# The %StrPair layout: ONE definition, everything else derived from it.
+#
+# This was written as a literal `%StrPair = type { i8*, i64 }` at LLVM.pm:640
+# and again at :1313, with its byte size hardcoded a THIRD time as
+# `malloc(i64 16)` at two sites here — four places that had to agree, with
+# nothing enforcing it.
+#
+# That is a live trap for the `{ptr, len, enc}` widening this file already
+# specifies at :897. Adding an i32 makes the struct 24 bytes with padding, so
+# both hardcoded 16s would UNDER-ALLOCATE and corrupt the heap — and no corpus
+# case would catch it, because every corpus string is ASCII, so `enc` is always
+# 0 and a short write need not visibly break anything. A silent heap bug whose
+# failure mode the test set cannot see is the worst outcome this project has a
+# name for.
+#
+# The size is DERIVED from the field list rather than restated, so widening the
+# struct moves the declaration and every allocation together.
+my @_STRPAIR_FIELDS = (
+    { name => 'ptr', llvm => 'i8*', bytes => 8 },
+    { name => 'len', llvm => 'i64', bytes => 8 },
+    # The third field, `enc: i32`, is NOT here yet. Adding it is the point of
+    # this seam: when it lands, the declaration and both allocation sites
+    # follow automatically.
+);
+
+# _strpair_fields() -> the field list (for size computation and tests).
+sub _strpair_fields { return @_STRPAIR_FIELDS }
+
+# _strpair_type_decl() -> the LLVM type declaration line.
+sub _strpair_type_decl {
+    return '%StrPair = type { '
+         . join(', ', map { $_->{llvm} } @_STRPAIR_FIELDS)
+         . ' }';
+}
+
+# _strpair_size_bytes() -> the allocation size, per LLVM's struct layout rules:
+# each field is aligned to its own size, and the struct is padded to the
+# alignment of its largest member.
+sub _strpair_size_bytes {
+    my $size = 0;
+    my $max  = 0;
+    for my $f (@_STRPAIR_FIELDS) {
+        my $w = $f->{bytes};
+        $size = int(($size + $w - 1) / $w) * $w;   # align this field
+        $size += $w;
+        $max = $w if $w > $max;
+    }
+    $size = int(($size + $max - 1) / $max) * $max if $max;   # tail padding
+    return $size;
+}
+
+# ---------------------------------------------------------------------------
 # The Str seam.
 #
 # A Str VALUE is `{ ptr: i8*, len: i64, enc: i32 }` — this file has said so at
@@ -4681,7 +4733,8 @@ sub _box_payload {
         my $len_ref  = $self->{_str_len_table}{$val_ref};
         my $pair_raw = $self->_fresh;
         my $pair_ptr = $self->_fresh;
-        $self->_emit("  $pair_raw = call i8* \@malloc(i64 16)  ; alloc StrPair for $what");
+        my $pair_bytes = _strpair_size_bytes();
+        $self->_emit("  $pair_raw = call i8* \@malloc(i64 $pair_bytes)  ; alloc StrPair ($pair_bytes bytes) for $what");
         $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
         my $pp_gep = $self->_fresh;
         $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
@@ -4729,7 +4782,8 @@ sub _store_field_payload {
         my $len_ref  = $self->{_str_len_table}{$val_ref};
         my $pair_raw = $self->_fresh;
         my $pair_ptr = $self->_fresh;
-        $self->_emit("  $pair_raw = call i8* \@malloc(i64 16)  ; alloc StrPair for field '$pname'");
+        my $pair_bytes = _strpair_size_bytes();
+        $self->_emit("  $pair_raw = call i8* \@malloc(i64 $pair_bytes)  ; alloc StrPair ($pair_bytes bytes) for field '$pname'");
         $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
         my $pp_gep = $self->_fresh;
         $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");

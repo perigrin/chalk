@@ -636,8 +636,8 @@ sub _emit_class_registry_ir {
     }
 
     if ($need_strpair) {
-        push @lines, '; StrPair: {i8* ptr, i64 len} for Str method return values';
-        push @lines, '%StrPair = type { i8*, i64 }';
+        push @lines, '; StrPair for Str method return values (layout: Context::_strpair_fields)';
+        push @lines, Chalk::Target::LLVM::Context::_strpair_type_decl();
         $ctx->{_need_strpair} = 1;
         $ctx->{_strpair_emitted} = 1;  # I3: track emission to prevent double-declare in post-class re-emit
     }
@@ -1309,8 +1309,8 @@ sub lower_with_elaboration {
     # references without %StrPair being declared — lli rejects. The _strpair_emitted flag
     # (set at the existing line-376 emit site) prevents double-declare.
     if ($ctx->{_need_strpair} && !$ctx->{_strpair_emitted}) {
-        push @lines, '; StrPair: {i8* ptr, i64 len} for Str values (post-class re-emit, I3)';
-        push @lines, '%StrPair = type { i8*, i64 }';
+        push @lines, '; StrPair for Str values (post-class re-emit, I3; layout: Context::_strpair_fields)';
+        push @lines, Chalk::Target::LLVM::Context::_strpair_type_decl();
         $ctx->{_strpair_emitted} = 1;
     }
 
