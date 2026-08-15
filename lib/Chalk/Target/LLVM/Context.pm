@@ -114,12 +114,52 @@ sub new {
     }, $class;
 }
 
+# ---------------------------------------------------------------------------
+# The Str seam.
+#
+# A Str VALUE is `{ ptr: i8*, len: i64, enc: i32 }` — this file has said so at
+# :897 and `%HashEntry` already stores all three fields for a hash key. But a
+# Str SSA VALUE is still a bare `i8*`, with the length in the `_str_len_table`
+# side channel and the encoding NOWHERE. The type is three fields in one place
+# and one field in another.
+#
+# That side channel is not merely untidy, it is a live correctness hazard:
+#   - `_emit_shortcircuit_phi` DIES with "an arm's length is not tracked"
+#     when a merge loses it, and merges are exactly where it goes missing;
+#   - `_box_payload` falls back to `strlen`, which is WRONG for any string
+#     containing an embedded NUL (its own comment says so);
+#   - the encoding field cannot be carried at all, which is why non-ASCII is
+#     a tracked GAP rather than a supported case.
+#
+# EVERY read and write of the length now goes through this pair, so the table
+# has exactly two access points. That is what makes the migration to a real
+# `%Str` struct incremental: producers and consumers move independently, the
+# table becomes an implementation detail of these two subs, and when the last
+# producer emits a struct these two are deleted together with it.
+#
+# DO NOT add a third access point. Reaching into `_str_len_table` directly is
+# what made this a 46-site change instead of a 2-site one.
+# ---------------------------------------------------------------------------
+
 # _str_len_for($ptr_ref) -> $len_ref_or_undef
-# Returns the tracked length SSA ref/literal for a Str SSA ptr reference,
-# or undef if the length is not tracked (e.g. for Coerce(Bool->Str) values).
+# The tracked byte length for a Str SSA ref, or undef when it is not tracked
+# (e.g. a Coerce(Bool->Str) result). Callers MUST handle undef: an untracked
+# length is the failure this seam exists to make visible, not a zero.
 sub _str_len_for {
     my ($self, $ptr_ref) = @_;
     return $self->{_str_len_table}{$ptr_ref};
+}
+
+# _set_str_len($ptr_ref, $len) -> $ptr_ref
+# Record the byte length for a Str SSA ref. Returns the ref so a producer can
+# tail-call it: `return $self->_set_str_len($ptr, $len);`
+#
+# $len may be a literal integer or an SSA ref — both are legal, and callers
+# already branch on which they have (see _lower_concat's literal-sum fast path).
+sub _set_str_len {
+    my ($self, $ptr_ref, $len) = @_;
+    $self->{_str_len_table}{$ptr_ref} = $len;
+    return $ptr_ref;
 }
 
 # blocks() -> arrayref of { label, insts, terminator }
@@ -695,7 +735,7 @@ sub _lower_constant {
         $self->_emit_entry("  $ref = getelementptr inbounds [$total x i8], [$total x i8]* $gname, i64 0, i64 0  ; Constant(\"$val_cmt\", Str) -> i8* ptr");
 
         # Record the byte-length as a compile-time literal for the output epilogue.
-        $self->{_str_len_table}{$ref} = $byte_len;
+        $self->_set_str_len($ref, $byte_len);
 
         $self->{cache}{$node->id} = $ref;
         return $ref;
@@ -969,7 +1009,7 @@ sub _lower_concat {
     $self->_emit("  store i8 0, i8* $nul_ptr  ; Concat: NUL-terminate");
 
     # Track the result length and mark that malloc/memcpy declarations are needed.
-    $self->{_str_len_table}{$buf} = $len_sum;
+    $self->_set_str_len($buf, $len_sum);
     $self->{_need_malloc_memcpy}  = 1;
 
     $self->{cache}{$node->id} = $buf;
@@ -1003,7 +1043,7 @@ sub _emit_to_str {
         $self->_emit_entry("  $nil_p = getelementptr inbounds [$nil_tot x i8], [$nil_tot x i8]* $nil_g, i64 0, i64 0  ; $label: \"\"");
         $self->_emit("  $ptr = select i1 $input_ref, i8* $one_p, i8* $nil_p  ; $label -> ptr");
         $self->_emit("  $len = select i1 $input_ref, i64 $one_len, i64 0  ; $label -> len");
-        $self->{_str_len_table}{$ptr} = $len;
+        $self->_set_str_len($ptr, $len);
         return $ptr;
     }
 
@@ -1029,7 +1069,7 @@ sub _emit_to_str {
         $self->_emit("  $buf = call i8* \@malloc(i64 $size)  ; $label: buffer");
         my $wrote = $self->_fresh;
         $self->_emit("  $wrote = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* $buf, i64 $size, i8* $fmt, double $input_ref)  ; $label: render");
-        $self->{_str_len_table}{$buf} = $need64;
+        $self->_set_str_len($buf, $need64);
         return $buf;
     }
 
@@ -1060,7 +1100,7 @@ sub _emit_to_str {
         $self->_emit_entry("  $nil_p = getelementptr inbounds [$nil_tot x i8], [$nil_tot x i8]* $nil_g, i64 0, i64 0  ; $label: \"\"");
         $self->_emit("  $ptr = select i1 $input_ref, i8* $rendered, i8* $nil_p  ; $label -> ptr");
         $self->_emit("  $len = select i1 $input_ref, i64 $rlen, i64 0  ; $label -> len");
-        $self->{_str_len_table}{$ptr} = $len;
+        $self->_set_str_len($ptr, $len);
         return $ptr;
     }
 
@@ -1143,7 +1183,7 @@ sub _emit_int_to_str {
     my $len = $self->_fresh;
     $self->_emit("  $len = sub i64 23, $start_idx  ; Stringify[Int]: result byte length");
 
-    $self->{_str_len_table}{$ptr} = $len;
+    $self->_set_str_len($ptr, $len);
     return $ptr;
 }
 
@@ -2063,7 +2103,7 @@ sub _lower_ternary {
         my $len = $self->_fresh;
         $self->_emit("  $len = select i1 $cond_ref, i64 $true_len, i64 $fals_len"
             . "  ; TernaryExpr(Str) -> select len");
-        $self->{_str_len_table}{$ptr} = $len;
+        $self->_set_str_len($ptr, $len);
         $self->{cache}{$node->id} = $ptr;
         return $ptr;
     }
@@ -2335,7 +2375,7 @@ sub _emit_shortcircuit_phi {
             unless defined $lhs_len && defined $rhs_len;
         my $len = $self->_fresh;
         $self->_emit("  $len = phi i64 [ $lhs_len, \%$lhs_label ], [ $rhs_len, \%$rhs_label ]  ; $tag: phi len");
-        $self->{_str_len_table}{$result} = $len;
+        $self->_set_str_len($result, $len);
     }
 
     return $result;
@@ -4246,7 +4286,7 @@ sub _lower_array_read {
         $self->_emit("  $len = load i64, i64* $pl  ; ArrayRead :Str len");
         # Re-register the length: a Str value is only usable by print/concat/
         # return if its byte length is tracked against the pointer.
-        $self->{_str_len_table}{$ptr} = $len;
+        $self->_set_str_len($ptr, $len);
         $self->{cache}{ $node->id } = $ptr;
         return $ptr;
     }
@@ -4530,7 +4570,7 @@ sub _lower_hash_read {
         $self->_emit("  $pl = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 1  ; StrPair.len");
         $self->_emit("  $sptr = load i8*, i8** $pp  ; HashRead :Str ptr");
         $self->_emit("  $slen = load i64, i64* $pl  ; HashRead :Str len");
-        $self->{_str_len_table}{$sptr} = $slen;
+        $self->_set_str_len($sptr, $slen);
         $self->{cache}{ $node->id } = $sptr;
         return $sptr;
     }
@@ -5273,7 +5313,7 @@ sub _lower_call_method {
         my $str_len = $self->_fresh;
         $self->_emit("  $str_ptr = extractvalue %StrPair $result, 0  ; Call(method) $method_name result ptr");
         $self->_emit("  $str_len = extractvalue %StrPair $result, 1  ; Call(method) $method_name result len");
-        $self->{_str_len_table}{$str_ptr} = $str_len;
+        $self->_set_str_len($str_ptr, $str_len);
         $self->{cache}{ $node->id } = $str_ptr;
         return $str_ptr;
     }
@@ -5319,7 +5359,7 @@ sub _lower_ref_of_object {
     $self->_emit("  $cn_ptr = load i8*, i8** $cn_gep  ; load class-name ptr");
 
     # Track the compile-time-known length for the Str output epilogue
-    $self->{_str_len_table}{$cn_ptr} = $name_len;
+    $self->_set_str_len($cn_ptr, $name_len);
     $self->{cache}{ $node->id } = $cn_ptr;
     return $cn_ptr;
 }
@@ -6130,7 +6170,7 @@ sub _lower_regex_capture {
     $self->_emit("  $nul = getelementptr inbounds i8, i8* $buf, i64 $len  ; RegexCapture: NUL slot");
     $self->_emit("  store i8 0, i8* $nul  ; RegexCapture: NUL-terminate");
 
-    $self->{_str_len_table}{$buf} = $len;
+    $self->_set_str_len($buf, $len);
     $self->{cache}{ $node->id } = $buf;
     return $buf;
 }
@@ -6175,7 +6215,7 @@ sub _lower_env_read {
     my $len = $self->_fresh;
     $self->_emit("  $len = call i64 \@strlen(i8* $val)  ; EnvRead: value length");
 
-    $self->{_str_len_table}{$val} = $len;
+    $self->_set_str_len($val, $len);
     $self->{cache}{ $node->id } = $val;
     return $val;
 }
@@ -6203,7 +6243,7 @@ sub _lower_stash_access {
         my $len = $self->_fresh;
         $self->_emit("  $ptr = load i8*, i8** $pname  ; StashAccess: read \$$var ptr (Str package scalar)");
         $self->_emit("  $len = load i64, i64* $lname  ; StashAccess: read \$$var len (Str package scalar)");
-        $self->{_str_len_table}{$ptr} = $len;
+        $self->_set_str_len($ptr, $len);
         $self->{cache}{ $node->id } = $ptr;
         return $ptr;
     }
@@ -6397,7 +6437,7 @@ sub _lower_regex_subst {
     my $res_len = $self->_fresh;
     $self->_emit("  $res_len = phi i64 [ $new_len, \%$lbl_do ], [ $subj_len, \%$lbl_pre ]  ; RegexSubst: result length");
 
-    $self->{_str_len_table}{$res} = $res_len;
+    $self->_set_str_len($res, $res_len);
     $self->{cache}{ $node->id } = $res;
     return $res;
 }
@@ -6505,7 +6545,7 @@ sub _lower_field_access_in_method {
         $self->_emit("  $lp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
         my $sl = $self->_fresh;
         $self->_emit("  $sl = load i64, i64* $lp_gep  ; load str len");
-        $self->{_str_len_table}{$sp} = $sl;
+        $self->_set_str_len($sp, $sl);
         $self->{cache}{ $node->id } = $sp;
         return $sp;
     }
