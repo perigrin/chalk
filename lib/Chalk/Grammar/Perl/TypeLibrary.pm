@@ -371,13 +371,17 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # leaves the operand alone, so a missing entry is a MISSED coercion (a loud
     # GAP downstream) and never a wrong one.
     #
+    # Every entry must name a node type the factory can actually build --
+    # asserted by t/bootstrap/ir/typelibrary-is-the-coercion-authority.t. An
+    # entry for a nonexistent node type reads as coverage while being
+    # unreachable; `Ord` and `Chr` were exactly that, mapped here while no such
+    # node type existed, until the test measured it.
+    #
     # NOT the inverse of Actions.pm's %BINOP_MAP, which is many-to-one
     # (`&&`/`and` -> And, `&`/`&.` -> BitAnd) and so not invertible in general.
     my %IR_OP_SOURCE_NAME = (
         # One-argument ops.
         Length => 'length',
-        Ord    => 'ord',
-        Chr    => 'chr',
 
         # Two-argument ops. String comparison is (Str, Str) -> Bool for every
         # member; Concat is (Str, Str) -> Str.
@@ -454,23 +458,123 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # each of which means "no opinion", not "Any". A coercion to Any is not a
     # coercion, so 'Any' reads as undef.
     #
+    # $position is the operand's index in the SIGNATURE -- left is 0, right is
+    # 1 -- and NOT its index in a node's inputs array. Those differ: a BinOp
+    # node carries a leading control slot, so its left operand sits at
+    # inputs[1]. Callers walking an inputs array must convert.
+    #
     # A trailing 'Any' in arg_types is variadic and covers all later positions,
-    # matching how the parse-time checker reads the same table.
+    # matching how the parse-time checker reads the same table. That rule
+    # applies ONLY to signatures that are actually variadic: `length` is
+    # arg_types => ['Str'], one entry and not variadic, so it has no opinion
+    # about a second operand it does not take. Extending the last entry
+    # unconditionally would make this answer for positions the operator does
+    # not have -- and an answer where there is no authority is exactly what
+    # this accessor exists to avoid.
     sub operand_repr_for_ir_op($ir_op, $position) {
         my $name = $IR_OP_SOURCE_NAME{$ir_op} // return undef;
 
         my $want;
         if (my $sig = $BUILTIN_SIGNATURES{$name}) {
             my $args = $sig->{arg_types} // return undef;
-            $want = $args->[$position] // $args->[-1];
+            $want = $position <= $args->$#*  ? $args->[$position]
+                  : _is_variadic($args)      ? $args->[-1]
+                  :                            undef;
         }
         elsif (my $bin = $BINARY_OP_SIGNATURES{$name}) {
             $want = $position == 0 ? $bin->{left} : $bin->{right};
         }
         elsif (my $un = $UNARY_OP_SIGNATURES{$name}) {
-            $want = $un->{operand};
+            $want = $position == 0 ? $un->{operand} : undef;
         }
 
         return (defined $want && $want ne 'Any') ? $want : undef;
+    }
+
+    # A builtin is variadic when its last argument slot is 'Any' -- the
+    # convention %BUILTIN_SIGNATURES already uses for the positions perl
+    # flattens a list into (`print`, `join`, `sprintf`, `push`).
+    sub _is_variadic($args) {
+        return @$args && $args->[-1] eq 'Any';
+    }
+
+    # The IR ops this library can answer for. Exposed so a test can assert
+    # every entry names a node type that actually exists: an entry for a
+    # nonexistent node is dead weight that reads as coverage, because no such
+    # node is ever built and the entry can never be consulted.
+    sub ir_ops_with_signatures() {
+        return sort keys %IR_OP_SOURCE_NAME;
+    }
+
+    # ------------------------------------------------------------------
+    # The collision guard
+    # ------------------------------------------------------------------
+    #
+    # A source name can legitimately appear in more than one table: `-` is both
+    # binary subtraction and unary negation. That is ARITY OVERLOADING, and the
+    # tables agree about the operand type, so the lookup order does not matter.
+    #
+    # A CONFLICT is when they disagree -- the same name carrying different
+    # operand types in two tables. Then whichever table `operand_repr_for_ir_op`
+    # happens to consult first silently decides, and the answer is arbitrary.
+    # The accessor's whole contract is that it answers only where it has
+    # authority, so an arbitrary answer is worse than none.
+    #
+    # This does not fire today. It exists because the shape that would cause it
+    # is one edit away: the plan for this accessor originally proposed deriving
+    # the IR map by inverting Actions.pm's %BINOP_MAP, which is many-to-one
+    # (`&`/`&.` both -> BitAnd), and that inversion is what would pair
+    # conflicting signatures under one name.
+
+    # Operand types of a signature entry, whatever shape it is stored in.
+    sub _operand_types($sig) {
+        return $sig->{arg_types}->@* if $sig->{arg_types};
+        return ($sig->{left}, $sig->{right}) if exists $sig->{left};
+        return ($sig->{operand}) if exists $sig->{operand};
+        return ();
+    }
+
+    # Two signatures conflict when they disagree about a shared operand
+    # position. A position present in one and absent from the other is arity
+    # overloading, not disagreement.
+    sub _signatures_conflict($a, $b) {
+        my @a = _operand_types($a);
+        my @b = _operand_types($b);
+        my $shared = @a < @b ? @a : @b;
+        for my $i (0 .. $shared - 1) {
+            next unless defined $a[$i] && defined $b[$i];
+            return true if $a[$i] ne $b[$i];
+        }
+        return false;
+    }
+
+    # _signature_conflict_for($name) -> a description of the conflict, or undef.
+    sub _signature_conflict_for($name) {
+        my @found = grep { defined $_->[1] } (
+            [ builtin => $BUILTIN_SIGNATURES{$name}    ],
+            [ binary  => $BINARY_OP_SIGNATURES{$name}  ],
+            [ unary   => $UNARY_OP_SIGNATURES{$name}   ],
+        );
+        return undef if @found < 2;
+
+        for my $i (0 .. $#found - 1) {
+            for my $j ($i + 1 .. $#found) {
+                next unless _signatures_conflict($found[$i][1], $found[$j][1]);
+                return "$name: $found[$i][0] and $found[$j][0] tables disagree";
+            }
+        }
+        return undef;
+    }
+
+    # Every conflict among the source names the IR map actually routes through.
+    # Empty is the invariant; a non-empty result is a defect to fix at the
+    # table, not to work around at the call site.
+    sub signature_conflicts() {
+        my @out;
+        for my $ir_op (sort keys %IR_OP_SOURCE_NAME) {
+            my $err = _signature_conflict_for($IR_OP_SOURCE_NAME{$ir_op});
+            push @out, $err if defined $err;
+        }
+        return @out;
     }
 }

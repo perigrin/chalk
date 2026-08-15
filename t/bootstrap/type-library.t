@@ -697,8 +697,16 @@ subtest 'Unknown is DISTINCT from Scalar (the bug this exists to prevent)' => su
 subtest 'operand_repr_for_ir_op reads the signature, per position' => sub {
     my $f = \&Chalk::Grammar::Perl::TypeLibrary::operand_repr_for_ir_op;
 
-    is($f->('Ord', 0),    'Str', 'Ord position 0 wants Str (ord => arg_types [Str])');
-    is($f->('Chr', 0),    'Int', 'Chr position 0 wants Int -- NOT everything is Str');
+    # Ord and Chr USED to be asserted here. They were removed: no such node
+    # types exist, so those entries could never be consulted and these
+    # assertions pinned nothing while reading as coverage. The map is now
+    # checked against the factory in
+    # t/bootstrap/ir/typelibrary-is-the-coercion-authority.t.
+    is($f->('Length', 0), 'Str', 'Length position 0 wants Str (length => arg_types [Str])');
+
+    # ...and NOT beyond its arity. `length` is not variadic, so it has no
+    # opinion about a second operand it does not take.
+    is($f->('Length', 1), undef, 'Length position 1 declines -- length is not variadic');
 
     # Binary ops answer per position from left/right.
     is($f->('Concat', 0), 'Str', 'Concat position 0 wants Str');
