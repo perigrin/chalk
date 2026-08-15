@@ -581,6 +581,71 @@ COW answers "I am about to mutate something that might be shared". That
 situation does not exist here. Copy-on-write with nothing that writes is just
 copy.
 
+#### How bad is immutability for a text-manipulation language?
+
+Worth asking directly, since Perl's reputation is text munging. The answer is
+**bad for performance in ONE pattern, not for correctness — and Perl's value
+semantics are more immutable than the reputation suggests.**
+
+Perl VARIABLES are mutable; Perl string VALUES mostly are not. `$a = $b` copies,
+`$a . $b` builds a new string, `uc($s)` returns a new one. Nearly every string
+operation is already functional: it consumes strings and produces a fresh one.
+The genuinely in-place operations are a short list — `.=`, `s///` without `/r`,
+lvalue/4-arg `substr`, `chomp`/`chop`, and `tr///`.
+
+Of those, exactly ONE is asymptotically bad under immutability:
+
+    my $out = '';
+    $out .= $_ for @lines;     # O(n) with append, O(n^2) with copy-per-append
+
+That is the idiomatic Perl text-building loop, and it is the case immutability
+genuinely punishes. The rest cost a constant-factor extra copy, and mostly the
+copy is proportional to work already being done — `s///` scans the string
+anyway, so allocating the result is the same order.
+
+How other implementations answer this is instructive, because none of them
+answers "make strings mutable":
+
+- **Java** kept `String` immutable and supplied `StringBuilder` for the loop.
+- **Python** kept `str` immutable; CPython special-cases in-place `+=` when the
+  refcount is 1.
+- **Perl** uses mutable buffers with `SvGROW` amortized growth.
+
+So the standard fix is to make APPEND not-quadratic, via a builder or by proving
+single ownership — not to abandon immutable values.
+
+**Which lands on escape analysis again.** A compiler that proves `$out` is not
+aliased can mutate it in place with no runtime check, which is the option a
+runtime like perl does not have. That is the same mechanism described for COW
+above, and `.=`-in-a-loop is its real motivating case — a stronger forcing
+function than COW itself.
+
+**The signature table measures this directly.** Counting Str-PRODUCING
+operations in `TypeLibrary.pm`: eight — `chop`, `chr`, `join`, `sprintf`,
+`substr`, `ref` as builtins, plus `.` and `x` as operators. Of those, exactly
+ONE (`chop`) mutates its input. The other seven are PURE FUNCTIONS that cannot
+mutate in place: `join`, `sprintf`, `substr`, `.` and `x` build something new by
+construction.
+
+So 7 of 8 Str-producing operations are ALREADY FUNCTIONAL. Immutability is not a
+constraint being imposed on Perl here; it is a description of what these
+operations already do.
+
+Note also that `substr`'s entry is `arg_types => ['Str','Num','Num'],
+return_type => 'Str'` — modelled as a PURE function. The mutating 4-arg/lvalue
+form is not in the type system at all, which matches the ref-type audit above
+finding that `LVALUE` has no lattice member and the producer cannot emit one.
+
+Three independent measurements agree: the ref-type audit (no `LVALUE`), the
+signature table (7 of 8 pure), and the backend (zero in-place stores into an
+existing string buffer). **Perl's string-mutation surface is far narrower than
+the reputation suggests, and Chalk models none of it today.**
+
+For Chalk today the exposure is therefore low: `.=` already lowers as
+concat-and-rebind, so this is a performance ceiling NOT YET HIT rather than a
+correctness problem. Recorded as the thing most likely to force the mutation
+decision.
+
 So COW is NOT blocked on the ownership question — it is blocked on there being
 any MUTATION at all. The order is: (1) strings are immutable, COW is meaningless;
 (2) in-place mutation arrives (lvalue `substr`, in-place `s///`, an optimized

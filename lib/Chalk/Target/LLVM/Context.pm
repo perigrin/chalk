@@ -323,19 +323,39 @@ sub _str_value {
     return $s2;
 }
 
-# _str_parts($str_ref) -> ($ptr_ref, $len_ref)
+# _str_parts($str_ref) -> ($ptr_ref, $len_ref_or_undef)
 #
-# The inverse of _str_value: pull the pointer and length back out of a `%Str`.
-# Consumers need both — printf("%.*s"), memcmp, memcpy and chalk_str_to_num all
-# take (ptr, len) — so this returns them together rather than making a caller
-# extract one and look the other up.
+# THE CONSUMER SEAM. Every site that needs a Str's bytes asks HERE, and gets the
+# pointer and length TOGETHER — which is what consumers actually want, since
+# printf("%.*s"), memcmp, memcpy and chalk_str_to_num all take the pair.
+#
+# TRANSITIONAL. A Str SSA value is still a bare `i8*` today, so this returns the
+# ref unchanged plus its side-table length. When `lower_value` starts returning
+# a real `%Str` aggregate, ONLY THIS FUNCTION changes — to the extractvalue pair
+# below — and all 15 consumer call sites are already correct.
+#
+# That is the whole point of routing them through here first: the pointer half
+# of the migration is otherwise a 15-site atomic flip verified by a single
+# green/red corpus signal, which is the shape that has produced silent
+# regressions in this work twice. Converting the call sites while the
+# representation is UNCHANGED is a no-op refactor that can be verified on its
+# own; only then does the representation flip, and it touches one function.
+#
+# The post-flip body is:
+#
+#     my $p = $self->_fresh;
+#     my $l = $self->_fresh;
+#     $self->_emit("  $p = extractvalue %Str $str_ref, " . _str_idx('ptr'));
+#     $self->_emit("  $l = extractvalue %Str $str_ref, " . _str_idx('len'));
+#     return ($p, $l);
+#
+# $len may be undef when the producer never recorded one. Callers MUST handle
+# that — an untracked length is the failure the seam exists to expose, and
+# `strlen` is NOT a valid substitute because a perl string may contain an
+# embedded NUL.
 sub _str_parts {
     my ($self, $str_ref) = @_;
-    my $p = $self->_fresh;
-    my $l = $self->_fresh;
-    $self->_emit("  $p = extractvalue %Str $str_ref, " . _str_idx('ptr') . "  ; %Str.ptr");
-    $self->_emit("  $l = extractvalue %Str $str_ref, " . _str_idx('len') . "  ; %Str.len");
-    return ($p, $l);
+    return ($str_ref, $self->_str_len_for($str_ref));
 }
 
 # blocks() -> arrayref of { label, insts, terminator }
@@ -1130,12 +1150,13 @@ sub _lower_concat {
     }
 
     my $inputs  = $node->inputs;
-    my $lhs_ref = $self->lower_value($inputs->[0]);
-    my $rhs_ref = $self->lower_value($inputs->[1]);
+    my $lhs_val = $self->lower_value($inputs->[0]);
+    my $rhs_val = $self->lower_value($inputs->[1]);
 
-    # Look up the lengths of both operands.
-    my $len_a = $self->_str_len_for($lhs_ref);
-    my $len_b = $self->_str_len_for($rhs_ref);
+    # Through the consumer seam: a Str's pointer and length arrive TOGETHER, so
+    # they cannot be sourced from two places that disagree.
+    my ($lhs_ref, $len_a) = $self->_str_parts($lhs_val);
+    my ($rhs_ref, $len_b) = $self->_str_parts($rhs_val);
     unless (defined $len_a && defined $len_b) {
         die "Concat cannot lower — one or both operand lengths not tracked in _str_len_table. "
           . "Only Str values produced by Constant(:Str) or Concat(:Str) have tracked lengths.";
@@ -1449,8 +1470,8 @@ sub _emit_coercion {
     # divergence between strtod and perl's rule). strtod matches perl for all other
     # leading-numeric forms. See G3 implementation notes.
     elsif ($from eq 'Str' && $to eq 'Num') {
-        my $ptr_ref = $input_ref;
-        my $len_ref = $self->_str_len_for($ptr_ref) // 0;
+        my ($ptr_ref, $tracked_len) = $self->_str_parts($input_ref);
+        my $len_ref = $tracked_len // 0;
         # Flag that the str-to-num helper + strtod declaration are needed.
         $self->{_need_str_to_num_helper} = 1;
         $self->_emit("  $ref = call double \@chalk_str_to_num(i8* $ptr_ref, i64 $len_ref)  ; Coerce[Str->Num] leading-numeric");
@@ -1468,8 +1489,8 @@ sub _emit_coercion {
     #   is_false = (is_empty OR is_single_zero)
     #   result = NOT is_false  (true iff not false)
     elsif ($from eq 'Str' && $to eq 'Bool') {
-        my $ptr_ref = $input_ref;
-        my $len_ref = $self->_str_len_for($ptr_ref) // 0;
+        my ($ptr_ref, $tracked_len) = $self->_str_parts($input_ref);
+        my $len_ref = $tracked_len // 0;
         # is_empty = (len == 0)
         my $is_empty = $self->_fresh;
         $self->_emit("  $is_empty = icmp eq i64 $len_ref, 0  ; Coerce[Str->Bool]: len==0 check");
