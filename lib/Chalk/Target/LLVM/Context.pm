@@ -1820,10 +1820,11 @@ sub _lower_assign {
         # loads both and re-registers the loaded ptr in the length table.
         if ($rhs_repr eq 'Str') {
             my ($pname, $lname) = $self->_pkg_str_global_names($lhs->stash_name, $var);
-            my $len_ref = $self->_str_len_for($rhs_ref)
+            my ($str_ptr, $tracked_len) = $self->_str_parts($rhs_ref);
+            my $len_ref = $tracked_len
                 // die "GAP: Assign(StashAccess-lvalue) Str rhs has no tracked "
                      . "length (\$$var); only length-tracked Str values lower.";
-            $self->_emit("  store i8* $rhs_ref, i8** $pname  ; Assign(StashAccess-lvalue): store \$$var ptr (Str package scalar)");
+            $self->_emit("  store i8* $str_ptr, i8** $pname  ; Assign(StashAccess-lvalue): store \$$var ptr (Str package scalar)");
             $self->_emit("  store i64 $len_ref, i64* $lname  ; Assign(StashAccess-lvalue): store \$$var len (Str package scalar)");
             $self->{cache}{ $node->id } = $rhs_ref;
             return $rhs_ref;
@@ -6251,8 +6252,8 @@ sub _lower_regex_match {
     my $repr      = _require_repr($node, 'RegexMatch');
 
     # Lower the subject to its i8* pointer and obtain its byte length.
-    my $subj_ptr  = $self->lower_value($subj_node);
-    my $subj_len  = $self->_str_len_for($subj_ptr)
+    my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($self->lower_value($subj_node));
+    my $subj_len  = $subj_len_tracked
         // die "GAP: RegexMatch subject (ref=$subj_ptr) has no tracked length — "
              . "the matcher needs the subject's byte length.";
 
@@ -6298,8 +6299,8 @@ sub _lower_match_apply {
     }
     my $pattern = $qr_node->value;
 
-    my $subj_ptr = $self->lower_value($subj_node);
-    my $subj_len = $self->_str_len_for($subj_ptr)
+    my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($self->lower_value($subj_node));
+    my $subj_len = $subj_len_tracked
         // die "GAP: Match subject (ref=$subj_ptr) has no tracked length — "
              . "the matcher needs the subject's byte length.";
 
@@ -6539,8 +6540,8 @@ sub _lower_regex_subst {
     die "GAP: s///$flags flags not yet supported by the G6 sub-compiler "
       . "(/g is a tracked follow-up)" if length $flags;
 
-    my $subj_ptr  = $self->lower_value($subj_node);
-    my $subj_len  = $self->_str_len_for($subj_ptr)
+    my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($self->lower_value($subj_node));
+    my $subj_len  = $subj_len_tracked
         // die "GAP: RegexSubst subject (ref=$subj_ptr) has no tracked length — "
              . "the matcher needs the subject's byte length.";
 
