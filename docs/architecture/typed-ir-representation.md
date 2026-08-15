@@ -528,6 +528,37 @@ that migration is already a flag day across ~27 consumer sites, and bundling a
 lifetime change would make it unreviewable. Recorded so it cannot be quietly
 skipped — **the `%Str` work is not complete until this is answered.**
 
+#### Can LLVM run a destructor when a string's lifetime ends?
+
+**No. LLVM has no objects, no lifetimes, no scopes and no RAII** — it is
+deliberately below that level. A `call @free` is just a call; nothing invokes it
+for you. Destructors are a FRONTEND concept: C++ and Rust both emit the calls
+explicitly and LLVM only sees the calls. So any destructor here has to be
+CHALK's, which is a further argument for the single constructor: if every string
+is minted in one place, that is the only place that could ever pair allocation
+with release.
+
+Three adjacent mechanisms exist and are worth knowing before designing one:
+
+- **`llvm.lifetime.start` / `llvm.lifetime.end`** — intrinsics marking when an
+  `alloca`'s memory is live. OPTIMIZER HINTS, not deallocation: they enable
+  stack-slot reuse and use-after-scope detection. They call nothing, and apply
+  only to `alloca`, not `malloc`.
+- **`invoke` / `landingpad` / `cleanup`** — how C++ destructors actually run
+  during unwinding. The frontend emits cleanup blocks and LLVM routes control
+  there as an exception propagates. Real machinery, but it is for UNWINDING, and
+  Chalk's `Unwind` is currently a hard `exit` rather than a stack unwind.
+- **GC intrinsics (`gcroot`, statepoints)** — LLVM does support precise GC by
+  letting a frontend mark which SSA values are heap references so a collector
+  can find roots. The closest thing to "the system knows this value owns
+  memory".
+
+Scope note: Chalk currently LEAKS every string deliberately. `_lower_concat`'s
+comment says the malloc leak "is acceptable for main()-returns-then-process-
+exits patterns". Freeing at all is a larger question than this migration, and it
+interacts with the `Slot` payload — a boxed `%StrPair*` in an array element has
+the same ownership question as a bare Str.
+
 ### `Slot` vs a reference: what the payload actually is
 
 The `Slot` payload is **NOT a pointer**. It is a ONE-WORD (i64) UNION whose
