@@ -266,10 +266,76 @@ sub _str_len_for {
 #
 # $len may be a literal integer or an SSA ref — both are legal, and callers
 # already branch on which they have (see _lower_concat's literal-sum fast path).
+#
+# THIS IS THE STRING CONSTRUCTOR, in all but name. Measured, every one of the 17
+# producer sites reaches it with the same shape — a pointer already in hand and
+# a length already computed — which is why the migration to a real `%Str` value
+# does not need 17 separate rewrites: they all mint their Str HERE.
+#
+# It records into a side table today rather than building an aggregate. Making
+# it emit `insertvalue` is what turns the side channel into a value, and this
+# comment marks the seam so that change lands in one place.
+#
+# NOT YET a constructor in the ownership sense: it takes a pointer its caller
+# already allocated, so it cannot enforce WHERE the bytes live. That is the open
+# question filed in docs/architecture/typed-ir-representation.md — producers use
+# globals, malloc and alloca inconsistently, and only a constructor that does
+# the allocation can make "Str bytes are never alloca" true by construction.
 sub _set_str_len {
     my ($self, $ptr_ref, $len) = @_;
     $self->{_str_len_table}{$ptr_ref} = $len;
     return $ptr_ref;
+}
+
+# _str_value($ptr_ref) -> an SSA ref holding a `%Str` aggregate.
+#
+# Builds the first-class aggregate from a pointer whose length this context has
+# tracked, so a consumer can take ONE value instead of asking two sources that
+# can disagree. Emits:
+#
+#   %s0 = insertvalue %Str undef, i8* PTR, 0
+#   %s1 = insertvalue %Str %s0,   i64 LEN, 1
+#   %s2 = insertvalue %Str %s1,   i32 ENC, 2
+#
+# Dies when the length is untracked rather than falling back to `strlen`: the
+# fallback is wrong for any string containing an embedded NUL (perl strings are
+# counted, not terminated), and a loud refusal here names the producer that
+# failed to record a length instead of silently truncating at the first NUL.
+sub _str_value {
+    my ($self, $ptr_ref, %opt) = @_;
+
+    my $len = $opt{len} // $self->_str_len_for($ptr_ref);
+    defined $len or die
+        "LLVM backend: cannot build a %Str from '$ptr_ref' — its byte length is "
+      . "not tracked. A Str is (ptr, len, enc); strlen is NOT a valid fallback "
+      . "because a perl string may contain an embedded NUL. Fix the producer to "
+      . "record the length when it mints the pointer.";
+
+    my $enc = $opt{enc} // 0;   # 0 = ASCII/UTF-8 default
+
+    my $s0 = $self->_fresh;
+    my $s1 = $self->_fresh;
+    my $s2 = $self->_fresh;
+    $self->_emit("  $s0 = insertvalue %Str undef, i8* $ptr_ref, "  . _str_idx('ptr') . "  ; %Str.ptr");
+    $self->_emit("  $s1 = insertvalue %Str $s0, i64 $len, "        . _str_idx('len') . "  ; %Str.len");
+    $self->_emit("  $s2 = insertvalue %Str $s1, i32 $enc, "        . _str_idx('enc') . "  ; %Str.enc");
+    $self->{_need_str_type} = 1;
+    return $s2;
+}
+
+# _str_parts($str_ref) -> ($ptr_ref, $len_ref)
+#
+# The inverse of _str_value: pull the pointer and length back out of a `%Str`.
+# Consumers need both — printf("%.*s"), memcmp, memcpy and chalk_str_to_num all
+# take (ptr, len) — so this returns them together rather than making a caller
+# extract one and look the other up.
+sub _str_parts {
+    my ($self, $str_ref) = @_;
+    my $p = $self->_fresh;
+    my $l = $self->_fresh;
+    $self->_emit("  $p = extractvalue %Str $str_ref, " . _str_idx('ptr') . "  ; %Str.ptr");
+    $self->_emit("  $l = extractvalue %Str $str_ref, " . _str_idx('len') . "  ; %Str.len");
+    return ($p, $l);
 }
 
 # blocks() -> arrayref of { label, insts, terminator }
