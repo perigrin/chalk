@@ -747,7 +747,7 @@ Measured across the backend's side tables:
 | `_slot_payload` | 4 / 2 | a Slot's payload (SSA ref is only the def-bit) | **same disease** |
 | `_undef_defined_bit` | 5 / 3 | a def-bit | **same disease** |
 | `_undef_payload` | 6 / 3 | dead scaffolding | **DELETE, do not seam** |
-| `_regex_captures` | 3 / 2 | match offsets + subject ptr | **NOT the same — see below** |
+| `_regex_captures` | 3 / 2 | match offsets + subject ptr | **same disease** (per-regex fixed shape) |
 | `_arr_table`, `_hash_table` | 0 / 0 | memoized bitcasts | **cache — leave alone** |
 
 **Each verdict above is TESTED, not assumed.** An earlier draft of this table
@@ -758,18 +758,31 @@ made after testing exactly ONE of them. Verified against `lli` 15 since:
   function, `phi`'d across blocks, both fields extracted: `def=1 v=42`. So
   `_slot_payload` and `_undef_defined_bit` really are the same disease, and the
   fix really is available.
-- **`_regex_captures` is NOT.** It holds a Perl hashref of `matched`, `m0s`,
-  `m0e`, `subj_ptr` and `cap_s`/`cap_e` — ARRAYREFS of per-group offsets. Two
-  disqualifiers: the number of capture groups VARIES PER REGEX, so there is no
-  fixed struct shape (LLVM structs are fixed-size), and some entries are
-  compile-time Perl values rather than SSA refs at all (`cap_s => []` at
-  :6145). It is a COMPILER-SIDE RECORD ABOUT a match, not a runtime value with
-  halves — closer to the cache category than to the Str one.
+- **`_regex_captures` IS the same disease too** — a first draft of this entry
+  said it was not, on two disqualifiers that are both FALSE:
+  - *"the capture count varies per regex, so there is no fixed struct shape"* —
+    varies ACROSS regexes, but is a KNOWN CONSTANT for each one. Chalk compiles
+    the pattern itself and counts groups during that parse (`$cap = ++$ngroups`
+    at :5768, stored at :5836), so at emit time `$ngroups` is a literal. Each
+    regex simply gets its own type, `%Match_2 = type { i1, i64, i64, [2 x i64],
+    [2 x i64] }` — the same per-shape type generation Chalk already does for
+    every class's `%Cls.vt` and object struct.
+  - *"some entries are compile-time Perl values, not SSA refs"* — `cap_s[$g]`
+    is `$sp`, a real SSA ref from a `phi i64` at :6234. The `cap_s => []` cited
+    as evidence is the ZERO-GROUP case, where an empty array is the correct
+    shape rather than a compile-time value.
 
-The correction matters beyond bookkeeping: the failure mode was reasoning from
-what the CURRENT CODE does and mistaking it for what the TARGET PERMITS. That is
-the same error as the earlier "a Str cannot be an SSA value" — false, and
-disproved in ten lines of IR.
+  So it is a fixed-shape-per-callsite record of SSA refs, and it could be a
+  `%Match_N` aggregate phi'd across the hit/miss merge — which is exactly where
+  its halves can currently desynchronize.
+
+**The correction matters more than the bookkeeping.** THREE times in this work I
+asserted a capability limit without probing it: "a Str cannot be an SSA value",
+"`%Slot` cannot be an aggregate", and "regex captures have no fixed shape". All
+three were false and each took under ten minutes to disprove with a scratch
+`.ll` file. The tell is identical every time — describing what the CURRENT CODE
+does and inferring what the TARGET PERMITS. Probe before concluding; these
+experiments are cheap and they overturn architectural decisions.
 
 `_arr_table` / `_hash_table` are pure memoization: discard them and the emitted
 IR is identical. They are not this problem.
