@@ -732,6 +732,55 @@ exits patterns". Freeing at all is a larger question than this migration, and it
 interacts with the `Slot` payload — a boxed `%StrPair*` in an array element has
 the same ownership question as a bare Str.
 
+### PATTERN: a value's halves belong in an aggregate, not a side table
+
+The `%Str` work generalizes. Whenever an SSA ref carries only PART of a value
+and the rest lives in a compiler-side hash keyed by that ref, the two can
+desynchronize — and every consumer must remember to consult both.
+
+**The discriminator is whether the table holds part of a VALUE or is a CACHE.**
+Measured across the backend's side tables:
+
+| side table | reads / writes | holds | verdict |
+|---|---|---|---|
+| `_str_len_table` | 2 / 1 | a Str's length | **SEAMED** — being migrated to `%Str` |
+| `_slot_payload` | 4 / 2 | a Slot's payload (SSA ref is only the def-bit) | **same disease** |
+| `_undef_defined_bit` | 5 / 3 | a def-bit | **same disease** |
+| `_undef_payload` | 6 / 3 | dead scaffolding | **DELETE, do not seam** |
+| `_regex_captures` | 3 / 2 | match offsets + subject ptr | **same disease** |
+| `_arr_table`, `_hash_table` | 0 / 0 | memoized bitcasts | **cache — leave alone** |
+
+`_arr_table` / `_hash_table` are pure memoization: discard them and the emitted
+IR is identical. They are not this problem.
+
+`Slot` is the closest parallel to Str. It is `{i1 defined, i64 payload}` and the
+SSA ref is ONLY THE DEFINED BIT, with the payload in `_slot_payload` — a
+two-field value smeared across an SSA ref and a hash, structurally identical to
+a Str being an `i8*` with its length aside. LLVM first-class aggregates fix it
+the same way: `%Slot` as a struct value with `insertvalue`/`extractvalue`, and a
+`phi %Slot` in which the def-bit and payload CANNOT desynchronize.
+
+**The migration recipe, in the order that made `%Str` tractable:**
+
+1. Give the table exactly TWO access points, a reader and a writer. Everything
+   else routes through them.
+2. Convert consumers to ask the reader for ALL the halves together, while the
+   representation is UNCHANGED. This is a no-op refactor, individually
+   verifiable.
+3. Only then flip the representation — which now touches those two functions
+   rather than every call site.
+4. Delete the table. If it cannot be deleted, the migration did not finish.
+
+Step 2 is the one worth insisting on. Without it the flip is an atomic N-site
+change verified by a single green/red gate signal, which is the shape that
+produced two silent regressions in this work.
+
+**Not every table should be seamed — some should be deleted.** `_undef_payload`
+is the example: `Undef` is a unit type and that payload is dead scaffolding for
+`DefinedOr`'s phi (see above), so seaming it would preserve something that ought
+to disappear. Judge per table: seam a real value half, delete dead scaffolding,
+leave caches alone.
+
 ### `Slot` vs a reference: what the payload actually is
 
 The `Slot` payload is **NOT a pointer**. It is a ONE-WORD (i64) UNION whose
