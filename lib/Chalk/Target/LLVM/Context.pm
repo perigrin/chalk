@@ -2565,8 +2565,8 @@ sub _emit_shortcircuit_phi {
     $self->_emit("  $result = phi $llvm_type [ $lhs_ref, \%$lhs_label ], [ $rhs_ref, \%$rhs_label ]  ; $tag: phi");
 
     if ($repr eq 'Str') {
-        my $lhs_len = $self->{_str_len_table}{$lhs_ref};
-        my $rhs_len = $self->{_str_len_table}{$rhs_ref};
+        my (undef, $lhs_len) = $self->_str_parts($lhs_ref);
+        my (undef, $rhs_len) = $self->_str_parts($rhs_ref);
         die "$tag merges Str arms but an arm's length is not tracked in "
           . "_str_len_table — a Str is a (ptr,len) pair and the merge needs both."
             unless defined $lhs_len && defined $rhs_len;
@@ -4875,7 +4875,7 @@ sub _box_payload {
         # into a heap %StrPair and carry the pointer. The length must come from
         # the length table; strlen would be wrong for a string with an embedded
         # NUL and is only a fallback for an untracked pointer.
-        my $len_ref  = $self->{_str_len_table}{$val_ref};
+        my ($str_ptr, $len_ref) = $self->_str_parts($val_ref);
         my $pair_raw = $self->_fresh;
         my $pair_ptr = $self->_fresh;
         my $pair_bytes = _strpair_size_bytes();
@@ -4883,13 +4883,13 @@ sub _box_payload {
         $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
         my $pp_gep = $self->_fresh;
         $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
-        $self->_emit("  store i8* $val_ref, i8** $pp_gep  ; store str ptr");
+        $self->_emit("  store i8* $str_ptr, i8** $pp_gep  ; store str ptr");
         my $pl_gep = $self->_fresh;
         $self->_emit("  $pl_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
         my $len_val = $len_ref;
         unless (defined $len_val) {
             $len_val = $self->_fresh;
-            $self->_emit("  $len_val = call i64 \@strlen(i8* $val_ref)  ; strlen for $what");
+            $self->_emit("  $len_val = call i64 \@strlen(i8* $str_ptr)  ; strlen for $what");
         }
         $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
         $self->_emit("  $ref = ptrtoint %StrPair* $pair_ptr to i64  ; StrPair* -> i64 payload for $what");
@@ -4924,7 +4924,7 @@ sub _store_field_payload {
     my ($self, $val_ref, $repr, $pay_gep, $pname) = @_;
 
     if ($repr eq 'Str') {
-        my $len_ref  = $self->{_str_len_table}{$val_ref};
+        my ($str_ptr, $len_ref) = $self->_str_parts($val_ref);
         my $pair_raw = $self->_fresh;
         my $pair_ptr = $self->_fresh;
         my $pair_bytes = _strpair_size_bytes();
@@ -4932,13 +4932,13 @@ sub _store_field_payload {
         $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
         my $pp_gep = $self->_fresh;
         $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
-        $self->_emit("  store i8* $val_ref, i8** $pp_gep  ; store str ptr");
+        $self->_emit("  store i8* $str_ptr, i8** $pp_gep  ; store str ptr");
         my $pl_gep = $self->_fresh;
         $self->_emit("  $pl_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
         my $len_val = defined $len_ref ? $len_ref : 'zeroinitializer';
         if ($len_val eq 'zeroinitializer') {
             $len_val = $self->_fresh;
-            $self->_emit("  $len_val = call i64 \@strlen(i8* $val_ref)  ; strlen for Str field '$pname'");
+            $self->_emit("  $len_val = call i64 \@strlen(i8* $str_ptr)  ; strlen for Str field '$pname'");
         }
         $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
         my $pair_as_i64 = $self->_fresh;
