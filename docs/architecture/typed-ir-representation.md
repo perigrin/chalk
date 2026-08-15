@@ -471,6 +471,63 @@ anything**. `VSTRING` is a `Str`, `FORMAT` is dead, `REF` is a `ref()`-string
 nicety, and `LVALUE`/`IO` are unreachable from the producer. The lattice is
 COMPLETE for every value Chalk can currently construct.
 
+### OPEN: who owns a Str's bytes? (raised 2026-08-15, must be answered before
+### the `%Str` migration can be called complete)
+
+`{ptr, len, enc}` says what a string IS. It does not say where its bytes LIVE,
+and measured, Chalk's Str producers use three different storage classes:
+
+| producer | bytes live in | lifetime |
+|---|---|---|
+| `_lower_constant` | a private global (`getelementptr [N x i8]* @.str`) | whole program |
+| `_lower_concat` | `malloc` heap | until freed (never — leaked, deliberately) |
+| `_emit_int_to_str` / stringify | **`alloca` stack** | **until the frame exits** |
+| `_box_payload` | `malloc`'d `%StrPair` | escapes the frame |
+
+**`alloca` vs `malloc` is a lifetime distinction, not a performance one.**
+`alloca` allocates in the CURRENT STACK FRAME and is reclaimed automatically
+when the function returns, so any pointer to it DANGLES once the frame exits.
+`malloc` allocates on the heap and survives the frame. So a Str that can outlive
+the function that built it MUST be heap or global; a stack one is a
+use-after-free waiting for a consumer that outlives the frame.
+
+`_lower_concat` already states the rule in its own comment:
+
+> "The allocation is malloc (not alloca) — SOUND for G4 aggregates where Str
+> values escape function frames. alloca would be unsound once a Str escapes its
+> defining frame."
+
+…and stringify uses `alloca` regardless. The soundness argument is therefore
+PER-PRODUCER and enforced by comment, with nothing in the type or the code
+saying which kind of pointer a given `%Str` holds. The corpus cannot catch the
+difference: `main` does not return before the process exits, so a dangling
+stack Str is indistinguishable from a live one there.
+
+**The likely answer is a SINGLE STRING CONSTRUCTOR.** Today each producer
+open-codes its own allocation, which is exactly why they disagree — the same
+shape as the four-places-must-agree layout bug fixed in 180546fe, and as the
+repr registries this whole line of work is collapsing. One constructor makes the
+storage rule an INVARIANT rather than a convention: every `%Str` is built one
+way, and "Str bytes are never `alloca`" becomes true by construction instead of
+by review. It also gives the encoding field one place to be set, and a future
+free/refcount one place to hook.
+
+Three candidate resolutions, smallest first:
+
+1. **Invariant, no new field.** Str bytes are ALWAYS heap-or-global, never
+   `alloca`. Stringify's `alloca` becomes a bug to fix. The type stays
+   `{ptr, len, enc}`. Matches what `_lower_concat` already argues.
+2. **Ownership tag as a fourth field.** A `%Str` records static/heap/stack.
+   Honest, but GC-adjacent and much larger than this migration.
+3. **Status quo.** Works only while everything leaks or lives in globals, and
+   silently breaks the first time a Str must be freed or a frame must be reused.
+
+(1) is the smallest correct answer and is what the single constructor would
+enforce. NOT resolved here, and NOT folded into the `{ptr, len, enc}` migration:
+that migration is already a flag day across ~27 consumer sites, and bundling a
+lifetime change would make it unreviewable. Recorded so it cannot be quietly
+skipped — **the `%Str` work is not complete until this is answered.**
+
 ### `Slot` vs a reference: what the payload actually is
 
 The `Slot` payload is **NOT a pointer**. It is a ONE-WORD (i64) UNION whose

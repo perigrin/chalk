@@ -794,7 +794,10 @@ sub _emit_class_registry_ir {
 
             # Emit return instruction
             if ($ret_repr eq 'Str') {
-                my $len_ref = $body_ctx->{_str_len_table}{$body_val};
+                # Through the seam, not into the table. This was the one direct
+                # reach-in outside Context.pm, which is what makes a side
+                # channel spread: every new consumer copies the last one.
+                my $len_ref = $body_ctx->_str_len_for($body_val);
                 if (defined $len_ref) {
                     push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* $body_val, 0";
                     push @lines, "  %ret_r1 = insertvalue %StrPair %ret_r0, i64 $len_ref, 1";
