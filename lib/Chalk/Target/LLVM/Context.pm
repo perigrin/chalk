@@ -135,10 +135,63 @@ sub new {
 my @_STRPAIR_FIELDS = (
     { name => 'ptr', llvm => 'i8*', bytes => 8 },
     { name => 'len', llvm => 'i64', bytes => 8 },
-    # The third field, `enc: i32`, is NOT here yet. Adding it is the point of
-    # this seam: when it lands, the declaration and both allocation sites
-    # follow automatically.
+    # NOTE: this is the BOXED HEAP CELL, deliberately still two fields. The
+    # THREE-field %Str below is the VALUE type. They are being reconciled; see
+    # the %Str block for why the value type moved first.
 );
+
+# ---------------------------------------------------------------------------
+# %Str: the Str VALUE type — a first-class aggregate { ptr, len, enc }.
+#
+# A Str SSA value was a bare `i8*` with its byte length in the `_str_len_table`
+# side channel. That was never a design. It is C's `char*` habit, where a
+# "string" is a pointer plus an out-of-band agreement about where it ends —
+# and Perl's strings are COUNTED, not terminated, so the convention does not
+# survive contact with the language.
+#
+# This codebase knew from the first commit that introduced it. e602f231's own
+# message: "a Str via printf(\"%.*s\", len, ptr) from the tracked
+# _str_len_table ... embedded-NUL safe". The table was born in the SAME BREATH
+# as the pointer, precisely because the pointer alone is not a string.
+#
+# The tell is that NOT ONE consumer uses the pointer alone — printf("%.*s"),
+# memcmp, memcpy and chalk_str_to_num all take (ptr, len). When every use site
+# needs two things, those two things are ONE VALUE.
+#
+# LLVM supports this directly: structs are FIRST-CLASS AGGREGATES, so a %Str
+# can be an SSA value, returned from a function, phi'd across blocks, and read
+# with extractvalue. Verified against lli 15. The side table was standing in
+# for a struct the target supported all along.
+#
+# What this buys beyond tidiness: the length CANNOT DESYNCHRONIZE from the
+# pointer, because they are one value. `_emit_shortcircuit_phi` dies today with
+# "an arm's length is not tracked" exactly when a merge phi'd the pointer but
+# lost the length. With `phi %Str` that failure class is deleted BY
+# CONSTRUCTION rather than by discipline.
+#
+# The encoding field is here from the start rather than added later: it is what
+# `%HashEntry` already stores for a hash key (key_ptr, key_len, key_enc) and
+# what Context.pm:897 already specifies, and leaving it out would mean touching
+# every one of these sites twice.
+my @_STR_FIELDS = (
+    { name => 'ptr', llvm => 'i8*', bytes => 8 },
+    { name => 'len', llvm => 'i64', bytes => 8 },
+    { name => 'enc', llvm => 'i32', bytes => 4 },   # 0 = ASCII/UTF-8 default
+);
+
+# Field INDEX by name, so emitters say _str_idx('len') rather than a bare 1.
+# extractvalue/getelementptr take positional indices, and a literal index is
+# how a field reordering becomes a silent miscompile.
+my %_STR_IDX = do { my $i = 0; map { $_->{name} => $i++ } @_STR_FIELDS };
+sub _str_idx { return $_STR_IDX{ $_[0] } // die "no %Str field named '$_[0]'" }
+
+sub _str_fields { return @_STR_FIELDS }
+
+sub _str_type_decl {
+    return '%Str = type { ' . join(', ', map { $_->{llvm} } @_STR_FIELDS) . ' }';
+}
+
+sub _str_size_bytes { return _struct_size_bytes(@_STR_FIELDS) }
 
 # _strpair_fields() -> the field list (for size computation and tests).
 sub _strpair_fields { return @_STRPAIR_FIELDS }
@@ -150,13 +203,18 @@ sub _strpair_type_decl {
          . ' }';
 }
 
-# _strpair_size_bytes() -> the allocation size, per LLVM's struct layout rules:
-# each field is aligned to its own size, and the struct is padded to the
-# alignment of its largest member.
-sub _strpair_size_bytes {
+# _strpair_size_bytes() -> the allocation size for the boxed heap cell.
+sub _strpair_size_bytes { return _struct_size_bytes(@_STRPAIR_FIELDS) }
+
+# _struct_size_bytes(@fields) -> size per LLVM's struct layout rules: each
+# field is aligned to its own width, and the struct is padded to the alignment
+# of its largest member. Shared by both layouts so neither can drift into its
+# own arithmetic.
+sub _struct_size_bytes {
+    my @fields = @_;
     my $size = 0;
     my $max  = 0;
-    for my $f (@_STRPAIR_FIELDS) {
+    for my $f (@fields) {
         my $w = $f->{bytes};
         $size = int(($size + $w - 1) / $w) * $w;   # align this field
         $size += $w;
