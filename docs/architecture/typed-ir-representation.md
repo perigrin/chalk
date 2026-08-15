@@ -477,12 +477,36 @@ COMPLETE for every value Chalk can currently construct.
 `{ptr, len, enc}` says what a string IS. It does not say where its bytes LIVE,
 and measured, Chalk's Str producers use three different storage classes:
 
+**CORRECTION (2026-08-15): the premise below was FALSE. The producers do NOT
+disagree.** Measured: there are **ZERO `alloca` sites in the entire LLVM
+backend**; all 12 allocation sites are `malloc`. `_emit_int_to_str` uses
+`malloc` at `Context.pm:1369`, not `alloca` as an earlier draft of this section
+claimed.
+
+The actual rule is already uniform and already sound: **a private global for a
+compile-time constant, `malloc` for anything created at runtime.** Nothing
+dangles, because nothing is stack-allocated.
+
+How the error happened is worth recording, since it is the same shape as three
+others in this work: I read `_lower_concat`'s comment saying "alloca would be
+unsound once a Str escapes its defining frame", inferred that some producer must
+therefore BE using `alloca`, and wrote the inference up as a measurement. The
+comment was explaining a DESIGN DECISION — why this site chose malloc — not
+reporting a violation elsewhere.
+
+The corrected table:
+
 | producer | bytes live in | lifetime |
 |---|---|---|
 | `_lower_constant` | a private global (`getelementptr [N x i8]* @.str`) | whole program |
 | `_lower_concat` | `malloc` heap | until freed (never — leaked, deliberately) |
-| `_emit_int_to_str` / stringify | **`alloca` stack** | **until the frame exits** |
-| `_box_payload` | `malloc`'d `%StrPair` | escapes the frame |
+| `_emit_int_to_str` / stringify | `malloc` heap | same |
+| `_box_payload` | `malloc`'d `%StrPair` | same |
+
+What remains TRUE and open is narrower: every runtime Str is **leaked**, by
+design ("acceptable for main()-returns-then-process-exits patterns"). That is a
+memory-growth question, not a soundness one, and the inverted default below is
+therefore an OPTIMISATION rather than a correctness fix.
 
 **`alloca` vs `malloc` is a lifetime distinction, not a performance one.**
 `alloca` allocates in the CURRENT STACK FRAME and is reclaimed automatically
@@ -513,17 +537,17 @@ by review. It also gives the encoding field one place to be set, and a future
 free/refcount one place to hook.
 
 **INVERTED DEFAULT (raised 2026-08-15): `alloca` for everything EXCEPT strings
-that escape.** The current rule is backwards. Today the reasoning is "use
-`malloc` because a string MIGHT escape" — a conservative guess made per-producer,
-which is why the producers disagree. The better rule is "use `alloca` because it
-does NOT escape, unless analysis proves otherwise" — a decision made per-value
-from evidence.
+that escape.** Today every runtime Str is `malloc`'d and never freed, on the
+reasoning "use `malloc` because a string MIGHT escape" — a conservative choice
+applied uniformly. The better rule is "use `alloca` because it does NOT escape,
+unless analysis proves otherwise" — a decision made per-value from evidence.
 
-That is strictly better on both axes. FASTER: stack allocation is a pointer bump
-and the memory is reclaimed automatically, where today Chalk leaks every string
-deliberately. SAFER: the present inconsistency is `alloca` used WITHOUT an escape
-proof (stringify does exactly this); the inverted rule only uses `alloca` WITH
-one.
+The gain is real but it is PERFORMANCE, not correctness: stack allocation is a
+pointer bump and is reclaimed automatically, where the status quo leaks every
+runtime string. (An earlier draft claimed the status quo was also UNSAFE because
+stringify used `alloca` without an escape proof. That was false — see the
+correction above — so this is an optimisation, and the "safer" half of the
+original argument is withdrawn.)
 
 **Immutability plus SSA is what makes the analysis tractable**, which is the
 whole reason this is reachable here and not in perl. Escape analysis is hard when
