@@ -66,10 +66,45 @@ polarity passed. Those two tests were right, and they caught it.
 
 Reverted. The loud GAP is restored and both tests are green again.
 
+## CORRECTION, same day: the void-call case is NOT blocked — my code was wrong
+
+perigrin pushed back on the revert: "if unconditional construction is necessary
+but not sufficient, why revert? The goal is correctness not ease of
+implementation." The revert itself was right — my change turned a loud GAP into
+a silent miscompile, and that trade is forbidden regardless of effort. But the
+CONCLUSION I drew from it was too broad, and one measurement shows it.
+
+The PARKED branch (`modifier-effect-in-arm-parked`, `98d7d24`) was built and
+measured against the same cases:
+
+| case | parked branch |
+|---|---|
+| `if ($x>3) { print "helper\n" if $y>3 }` guard TAKEN | **PASS** — perl `helper\nend\n`, chalk `helper\nend\n` |
+| same, guard NOT taken | **PASS** |
+| `mod-print-c0` / `c1` | PASS |
+| `mod-elem-c0` / `c1` | PASS |
+| `nested-if-store-d0` / `d1` | **FAIL, lli exit 1 — malformed IR** |
+| `postmerge-read` | **FAIL, lli exit 1 — malformed IR** |
+
+So the void-CALL case is SOLVABLE, and something in the parked implementation
+gets it right that mine did not. Point 3 below ("a void CALL needs more than
+control flow") is WITHDRAWN as a statement about the problem; it was a
+statement about my code.
+
+What survives, now confirmed from a THIRD independent direction: the
+nested-STORE cases fail with malformed IR on the parked branch too — same
+`exit=1`, same wall as attempts 2, 4 and 5. That half is a real backend
+blocker.
+
+The blocker is therefore NARROWER than this document originally claimed:
+**nested merge-Phi placement**, not "unconditional construction in general".
+The void-call half can proceed independently, and the parked branch is the
+starting point for it rather than a dead end.
+
 ## What this establishes
 
-**Unconditional construction is necessary but NOT sufficient**, and the
-blocker is in the backend, not the producer:
+**Unconditional construction is necessary but NOT sufficient for the
+nested-store shape**, and that half's blocker is in the backend:
 
 1. A nested merge needs the ENCLOSING branch to have built control flow too,
    or its memory-Phi is stranded. Fixing one nesting level at a time cannot
@@ -77,27 +112,38 @@ blocker is in the backend, not the producer:
 2. Making every void branch build control flow exposes that **the backend
    cannot place a Phi whose incoming value is itself a merge**. That is the
    wall attempts 2, 4 and now 5 all hit, from three different directions.
-3. A void CALL in a modifier body needs more than control flow: the call must
-   also be pinned so it is emitted on its arm. Building the If is not enough
-   if nothing places the effect.
+3. ~~A void CALL in a modifier body needs more than control flow.~~
+   **WITHDRAWN — see the correction above.** The parked branch handles the
+   void-call case correctly on both polarities. That was a defect in my
+   implementation, not a property of the problem.
 
 So the prior art's recommendation stands and its ORDER is now measured: the
 collapse pass is not the only missing piece. **Nested merge-Phi placement in
-the backend is a prerequisite for unconditional construction**, not a
-consequence of it.
+the backend is a prerequisite for the nested-STORE half**, not a consequence
+of it.
 
-## What the next attempt needs, before touching the producer again
+## What the next attempt needs
 
-1. **Backend: place a Phi whose incoming value is a nested merge.** Build the
-   RED at the IR level (hand-built graph, no producer), since the producer
-   currently refuses to emit the shape. This is the actual blocker.
-2. **Then** unconditional construction at both sites, together — they are
-   coupled and cannot be staged.
-3. **Then** the collapse pass, to remove the redundant diamonds unconditional
-   construction creates.
+The work SPLITS, and only one half is blocked:
 
-Do NOT attempt the producer half again before (1). Three attempts have now
-produced malformed IR at exactly that point.
+**Half A — the void-call / void-effect shapes. NOT blocked.** The parked branch
+(`modifier-effect-in-arm-parked`, `98d7d24`) already passes these bilaterally.
+It cannot be merged as-is — its gate is still the `_arm_has_*` disjunction the
+prior art rejects, and its predicates were EXTENDED to descend into nested
+branches, which is the fifth-scan trap. But its CONSTRUCTION code is correct
+where mine was not, and diffing the two is the cheapest way to find what I got
+wrong. Start there.
+
+**Half B — the nested-store shapes. Blocked on the backend.**
+
+1. **Place a Phi whose incoming value is itself a merge.** Build the RED at the
+   IR level (hand-built graph, no producer), since the producer refuses to emit
+   the shape. Attempts 2, 4, 5 AND the parked branch all produce malformed IR
+   at exactly this point — four independent directions, same wall.
+2. **Then** unconditional construction at both producer sites, together.
+3. **Then** the collapse pass, to remove the redundant diamonds.
+
+Do NOT attempt half B's producer side before (1).
 
 ## What survives
 
