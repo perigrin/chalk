@@ -3322,6 +3322,34 @@ sub _prelower_branch_store_operands {
         push @bodies, @nodes;
         $branch_body{ $_->id } = 1 for @nodes;
     }
+
+    # Descend into NESTED branches. _collect_branch_body stops at an If/Loop
+    # (their bodies are discovered from their own Projs by _process_if_node),
+    # so a store one level down -- `if ($c) { if ($d) { $a[0] = 9 } }` -- is
+    # invisible here and its operands are never pre-lowered.
+    #
+    # The consequence is a dominance failure, not a missed optimisation. The
+    # array literal is a PRE-BRANCH value; lowered lazily it lands in the
+    # innermost block that happens to reach it first, and a post-merge read
+    # then uses a value its own block is not dominated by. Measured on the
+    # parked producer branch: `%tmp_14` defined in `if.then.1`, used in
+    # `if.merge.3` -- "Instruction does not dominate all uses", lli exit 1.
+    #
+    # Nested Ifs reached this way are appended to the SAME work list, so the
+    # descent is transitive: a store three levels down is pre-lowered too.
+    my %seen_if = ($if_node->id => 1);
+    for (my $i = 0; $i < @bodies; $i++) {
+        my $node = $bodies[$i];
+        next unless $node->operation eq 'If' || $node->operation eq 'Loop';
+        next if $seen_if{ $node->id }++;
+        for my $proj (grep { blessed($_) && $_->operation eq 'Proj' }
+                           ($node->consumers // [])->@*) {
+            for my $n (_collect_branch_body($proj)) {
+                next if $branch_body{ $n->id }++;
+                push @bodies, $n;
+            }
+        }
+    }
     for my $node (@bodies) {
         if ($node->operation eq 'Assign') {
             # An element store: inputs = [target, value] with target a Subscript
