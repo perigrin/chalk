@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::LeftShift :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'LeftShift' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { '<<' }
 }

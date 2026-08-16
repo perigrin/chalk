@@ -8,6 +8,7 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::Assign :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'Assign' }
+    method staleness_kind() { 'opaque' }
 
     # FIXED: a store: it writes, so it is pinned to a point in the chain
     method is_fixed() { return true }

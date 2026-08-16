@@ -12,6 +12,7 @@ class Chalk::IR::Node::RegexCapture :isa(Chalk::IR::Node) {
     field $n :param :reader;
 
     method operation() { 'RegexCapture' }
+    method staleness_kind() { 'opaque' }
 
     method content_hash() {
         return join('|', 'RegexCapture', "n=$n", $self->_serialize_inputs());

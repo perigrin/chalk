@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::Range :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'Range' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { '..' }
 }

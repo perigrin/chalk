@@ -8,4 +8,5 @@ use Chalk::IR::Node;
 
 class Chalk::IR::Node::Start :isa(Chalk::IR::Node) {
     method operation() { 'Start' }
+    method staleness_kind() { 'opaque' }
 }

@@ -14,6 +14,7 @@ class Chalk::IR::Node::If :isa(Chalk::IR::Node) {
     field $region :reader = undef;
 
     method operation() { 'If' }
+    method staleness_kind() { 'opaque' }
 
     # CFG nodes carry their control input in inputs[0] (convention),
     # not in the base $control_in field. Override the reader so a

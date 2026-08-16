@@ -10,6 +10,7 @@ class Chalk::IR::Node::CompoundAssign :isa(Chalk::IR::Node) {
     field $op :param :reader;
 
     method operation() { 'CompoundAssign' }
+    method staleness_kind() { 'opaque' }
 
     # FIXED: a read-modify-write store
     method is_fixed() { return true }

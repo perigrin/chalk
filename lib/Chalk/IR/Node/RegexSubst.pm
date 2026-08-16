@@ -10,6 +10,7 @@ class Chalk::IR::Node::RegexSubst :isa(Chalk::IR::Node::Regex) {
     field $replacement :param :reader = '';
 
     method operation() { 'RegexSubst' }
+    method staleness_kind() { 'opaque' }
 
     # FIXED: s/// mutates its subject
     method is_fixed() { return true }

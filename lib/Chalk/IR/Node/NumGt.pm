@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::NumGt :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'NumGt' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { '>' }
 }

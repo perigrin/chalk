@@ -20,6 +20,7 @@ class Chalk::IR::Node::Coerce :isa(Chalk::IR::Node) {
     field $to_repr :param :reader;
 
     method operation() { 'Coerce' }
+    method staleness_kind() { 'transparent' }
 
     method content_hash() {
         return join('|', 'Coerce',

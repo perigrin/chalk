@@ -8,5 +8,6 @@ use Chalk::IR::Node::UnaryOp;
 
 class Chalk::IR::Node::Negate :isa(Chalk::IR::Node::UnaryOp) {
     method operation() { 'Negate' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { '-' }
 }

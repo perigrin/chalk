@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::Add :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'Add' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { '+' }
 }

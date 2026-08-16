@@ -8,6 +8,7 @@ use Chalk::IR::Node;
 
 class Chalk::IR::Node::TryCatch :isa(Chalk::IR::Node) {
     method operation() { 'TryCatch' }
+    method staleness_kind() { 'opaque' }
 
     # FIXED: carries a handler; the guarded body may do anything
     method is_fixed() { return true }

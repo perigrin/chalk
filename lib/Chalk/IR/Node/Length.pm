@@ -8,5 +8,6 @@ use Chalk::IR::Node::UnaryOp;
 
 class Chalk::IR::Node::Length :isa(Chalk::IR::Node::UnaryOp) {
     method operation() { 'Length' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { 'length' }
 }

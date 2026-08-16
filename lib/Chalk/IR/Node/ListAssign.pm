@@ -10,6 +10,7 @@ class Chalk::IR::Node::ListAssign :isa(Chalk::IR::Node) {
     field $scope :param :reader = 'my';
 
     method operation() { 'ListAssign' }
+    method staleness_kind() { 'opaque' }
 
     # ListAssign has per-position (counter) identity, like VarDecl:
     # two textually-identical list declarations in different control

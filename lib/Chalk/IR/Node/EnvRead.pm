@@ -13,6 +13,7 @@ class Chalk::IR::Node::EnvRead :isa(Chalk::IR::Node) {
     field $key :param :reader;
 
     method operation() { 'EnvRead' }
+    method staleness_kind() { 'opaque' }
 
     method content_hash() {
         return join('|', 'EnvRead', "key=$key", $self->_serialize_inputs());

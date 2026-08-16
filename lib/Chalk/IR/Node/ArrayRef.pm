@@ -8,4 +8,5 @@ use Chalk::IR::Node::Aggregate;
 
 class Chalk::IR::Node::ArrayRef :isa(Chalk::IR::Node::Aggregate) {
     method operation() { 'ArrayRef' }
+    method staleness_kind() { 'opaque' }
 }

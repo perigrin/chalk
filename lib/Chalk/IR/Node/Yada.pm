@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::Yada :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'Yada' }
+    method staleness_kind() { 'opaque' }
     method op_str()    { '...' }
 }

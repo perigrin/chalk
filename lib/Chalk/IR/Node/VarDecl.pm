@@ -10,6 +10,7 @@ class Chalk::IR::Node::VarDecl :isa(Chalk::IR::Node) {
     field $scope :param :reader = 'my';
 
     method operation() { 'VarDecl' }
+    method staleness_kind() { 'opaque' }
 
     # VarDecl has per-position (counter) identity, not content-hash
     # identity: two textually-identical declarations in different control

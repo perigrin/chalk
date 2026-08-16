@@ -8,5 +8,6 @@ use Chalk::IR::Node::UnaryOp;
 
 class Chalk::IR::Node::Defined :isa(Chalk::IR::Node::UnaryOp) {
     method operation() { 'Defined' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { 'defined' }
 }

@@ -8,5 +8,6 @@ use Chalk::IR::Node::UnaryOp;
 
 class Chalk::IR::Node::RefType :isa(Chalk::IR::Node::UnaryOp) {
     method operation() { 'RefType' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { 'ref' }
 }

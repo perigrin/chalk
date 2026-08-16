@@ -8,5 +8,6 @@ use Chalk::IR::Node::UnaryOp;
 
 class Chalk::IR::Node::UnaryPlus :isa(Chalk::IR::Node::UnaryOp) {
     method operation() { 'UnaryPlus' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { '+' }
 }

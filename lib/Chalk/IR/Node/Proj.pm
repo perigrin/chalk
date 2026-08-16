@@ -10,6 +10,7 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node) {
     field $index :param :reader;
 
     method operation() { 'Proj' }
+    method staleness_kind() { 'opaque' }
 
     method content_hash() {
         return join('|', 'Proj', "index=$index", $self->_serialize_inputs());

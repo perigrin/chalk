@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::NumNe :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'NumNe' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { '!=' }
 }

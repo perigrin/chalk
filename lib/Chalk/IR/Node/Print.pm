@@ -6,6 +6,7 @@ use experimental 'class';
 
 class Chalk::IR::Node::Print :isa(Chalk::IR::Node) {
     method operation() { 'Print' }
+    method staleness_kind() { 'opaque' }
 
     # FIXED: writes to stdout -- a statement effect in ANY context
     method is_fixed() { return true }

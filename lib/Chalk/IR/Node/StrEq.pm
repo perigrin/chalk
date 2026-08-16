@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::StrEq :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'StrEq' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { 'eq' }
 }

@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::StrNe :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'StrNe' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { 'ne' }
 }

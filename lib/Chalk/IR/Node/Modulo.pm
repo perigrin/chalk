@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::Modulo :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'Modulo' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { '%' }
 }

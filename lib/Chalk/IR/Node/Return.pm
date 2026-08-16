@@ -14,6 +14,7 @@ class Chalk::IR::Node::Return :isa(Chalk::IR::Node) {
     field $synthetic :param :reader = false;
 
     method operation() { 'Return' }
+    method staleness_kind() { 'opaque' }
 
     # The returned value. Control flows through the control_in decoration
     # (set via set_control_in), not through an inputs slot.

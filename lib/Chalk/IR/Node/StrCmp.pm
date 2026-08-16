@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::StrCmp :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'StrCmp' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { 'cmp' }
 }

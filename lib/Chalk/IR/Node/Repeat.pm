@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::Repeat :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'Repeat' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { 'x' }
 }

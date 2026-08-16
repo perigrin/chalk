@@ -8,4 +8,5 @@ use Chalk::IR::Node;
 
 class Chalk::IR::Node::MemStart :isa(Chalk::IR::Node) {
     method operation() { 'MemStart' }
+    method staleness_kind() { 'opaque' }
 }

@@ -11,6 +11,7 @@ class Chalk::IR::Node::Constant :isa(Chalk::IR::Node) {
     field $const_type :param :reader = 'string';
 
     method operation() { 'Constant' }
+    method staleness_kind() { 'opaque' }
 
     method content_hash() {
         return join('|', 'Constant',

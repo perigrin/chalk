@@ -18,6 +18,7 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node) {
     field $head :reader = undef;
 
     method operation() { 'Region' }
+    method staleness_kind() { 'opaque' }
 
     method set_head($node) {
         $head = $node;

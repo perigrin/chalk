@@ -56,6 +56,7 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
     field $resolved_graph :param :reader = undef;
 
     method operation() { 'Call' }
+    method staleness_kind() { 'opaque' }
 
     # FIXED: may do anything, including I/O and aborting
     method is_fixed() { return true }

@@ -599,6 +599,16 @@ my %PURE_DESCEND_OPS = map { $_ => 1 } qw(
     Repeat Range IsaOp Slice
 );
 
+# The two tables above are being replaced by Chalk::IR::Node::staleness_kind,
+# following the pattern step 1 used for is_fixed: the property lands on the
+# type, the registry stays until a test pins that the two AGREE on every op the
+# registry names, and only then is the registry deleted. These accessors exist
+# so t/bootstrap/ir/node-staleness-kind.t can read the registries (which are
+# my-scoped) to assert that agreement. They have no production consumer and go
+# with the tables.
+sub _mutable_read_ops { return sort keys %MUTABLE_READ_OPS }
+sub _pure_descend_ops { return sort keys %PURE_DESCEND_OPS }
+
 # _reads_mutable_location($node) -> bool
 # True when lowering $node (or any pure node it transitively feeds on)
 # performs a mutable-location load — i.e. when a cached SSA ref for it can

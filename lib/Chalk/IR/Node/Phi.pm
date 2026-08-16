@@ -10,6 +10,7 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node) {
     field $region :param :reader;
 
     method operation() { 'Phi' }
+    method staleness_kind() { 'opaque' }
 
     method content_hash() {
         return join('|', 'Phi', "region=" . $region->id(), $self->_serialize_inputs());

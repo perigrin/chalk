@@ -8,4 +8,5 @@ use Chalk::IR::Node::Aggregate;
 
 class Chalk::IR::Node::Slice :isa(Chalk::IR::Node::Aggregate) {
     method operation() { 'Slice' }
+    method staleness_kind() { 'transparent' }
 }

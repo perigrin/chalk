@@ -16,6 +16,7 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node) {
     field $region :reader = undef;
 
     method operation() { 'Loop' }
+    method staleness_kind() { 'opaque' }
 
     # CFG nodes carry their control input in inputs[0] (entry_ctrl
     # for Loop), not in the base $control_in field. Override the

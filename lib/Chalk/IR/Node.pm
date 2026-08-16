@@ -96,6 +96,40 @@ class Chalk::IR::Node {
     # registry entry against this method rather than trusting either alone.
     method is_fixed() { return false }
 
+    # May a cached SSA ref for this node go STALE across a store?
+    #
+    # A PROPERTY OF THE TYPE, for the same reason is_fixed is. The same
+    # question is answered today by %MUTABLE_READ_OPS and %PURE_DESCEND_OPS in
+    # Target/LLVM/Context.pm — two op-name lists whose `if/elsif` leaves a
+    # THIRD bucket implicit, so an op in neither list answers "no" by falling
+    # off the end.
+    #
+    #   mutable_read — reads a mutable location (a pad slot, an aggregate
+    #                  element, an object field, a stash entry). Its lowered
+    #                  value is program-point-dependent: a later store changes
+    #                  what an identical load returns. Answer YES, stop.
+    #   transparent  — my value is stale exactly when an input's is, so the
+    #                  answer comes from my inputs. Descend.
+    #   opaque       — a fixed SSA value at a single program point. Either an
+    #                  effect that executes once at its control position, or a
+    #                  value with no mutable provenance. Answer NO, stop.
+    #
+    # NOTE the middle bucket is TRANSPARENCY, not purity. Coerce, Interpolate
+    # and TernaryExpr are all in it and none is pure in any ordinary sense.
+    # What they share is that staleness passes THROUGH them.
+    #
+    # DEFAULT mutable_read, and the direction is the whole point. Under the
+    # registry pair the implicit default was "opaque" — a new op silently
+    # answered "no, this cannot go stale", and a wrong NO serves a stale SSA
+    # ref across a store (the whole-branch review C1/C2 miscompile class). A
+    # wrong `mutable_read` only re-lowers a node that did not need it. The
+    # unsafe direction must cost performance, not correctness.
+    #
+    # is_fixed defaults FALSE for the opposite reason and that is not an
+    # inconsistency: its registry's purpose only ever needs to include more,
+    # while this one's needs to be complete.
+    method staleness_kind() { return 'mutable_read' }
+
     method class() {
         return $compat_class if defined $compat_class;
         return $self->operation();

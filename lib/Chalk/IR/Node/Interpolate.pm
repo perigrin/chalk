@@ -8,4 +8,5 @@ use Chalk::IR::Node::Aggregate;
 
 class Chalk::IR::Node::Interpolate :isa(Chalk::IR::Node::Aggregate) {
     method operation() { 'Interpolate' }
+    method staleness_kind() { 'transparent' }
 }

@@ -18,6 +18,7 @@ class Chalk::IR::Node::AnonSub :isa(Chalk::IR::Node) {
     }
 
     method operation() { 'AnonSub' }
+    method staleness_kind() { 'opaque' }
 
     # Each anonymous sub is semantically unique (different closure body),
     # so include a sequential counter to prevent incorrect deduplication.

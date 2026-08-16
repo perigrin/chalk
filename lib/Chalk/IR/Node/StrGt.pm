@@ -8,5 +8,6 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::StrGt :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'StrGt' }
+    method staleness_kind() { 'transparent' }
     method op_str()    { 'gt' }
 }
