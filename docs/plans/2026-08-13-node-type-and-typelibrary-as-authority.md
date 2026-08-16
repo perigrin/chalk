@@ -10,6 +10,14 @@ backend after four attempts (`docs/plans/2026-08-13-post-merge-statement-ownersh
 
 **Next action: step 4a** (`staleness_kind`) — the only registry measured to
 silently miscompile, and the only one with no completeness test.
+
+**Two corrections landed 2026-08-16, both reversing claims made on 08-15:**
+(1) `%DATA_CLASSES` is NOT a trust boundary and does NOT survive — 81
+compile-time `use` lines mean Perl already refuses an unknown op, so 4c folds
+into 4b as a deletion. (2) NO substep of step 4 gates step 5 — step 5's code
+consults step 3's registry, not step 4's. Step 5's real missing primitive is a
+CONTROL-vs-DATA edge kind, which is not a node-type property and is not in this
+plan.
 **Evidence:** `docs/research/2026-08-13-arm-content-inspection-measured.md` (measurement),
 `docs/research/2026-08-13-branch-merge-prior-art.md` (107-agent survey, verified)
 **Assessment:** v1 was adversarially assessed and came back with two BLOCKING
@@ -28,13 +36,25 @@ op NAMES, when two of them are properties the code already owns:
 | what OPERAND TYPES does this operator take? | `%_STR_CONTEXT_OPS` (3 names) | `TypeLibrary`, LANDED |
 | may a cached value for this node go STALE? | `%MUTABLE_READ_OPS` + `%PURE_DESCEND_OPS`, third bucket implicit | the node TYPE — `staleness_kind`, step 4a |
 | is this node hash-consed or per-call? | 4 tables + 2 constructors + 3 hardcoded ops | the node TYPE — `identity_kind`, step 4b |
-| may this WIRE STRING become a class? | `%DATA_CLASSES` | stays a table — it is a trust boundary, step 4c |
+| may this WIRE STRING become a class? | `%DATA_CLASSES` | **nobody — the question is void.** 81 compile-time `use` lines mean Perl already refuses an unknown op. Deleted with 4b; see 4c |
 | does the PRODUCER pin this op to the chain? | `%CONTROL_CHAIN_OP` | stays a table — it is perl5-son's policy, step 4d |
+| is this consumer edge CONTROL or DATA? | **nothing — `add_consumer` is one undifferentiated list** | the EDGE, not the node type. NOT part of step 4; see the note below |
 
 The first two rows are done. The rest are step 4, and the pattern is the one
 step 1 proved: **a question about a node's nature belongs on the node class.**
-The two "stays a table" rows are the genuine exceptions, and each is an
-exception for a specific measured reason rather than by default.
+
+`%CONTROL_CHAIN_OP` is the one genuine exception — it describes another
+repository's build sites, not a node's nature.
+
+**The last row is a WARNING, not a step-4 item.** `Chalk::IR::Node::add_consumer`
+(`Node.pm:59`) appends to a single list with no edge kind, so the graph cannot
+answer "is this consumer a control successor or a data consumer?".
+`_collect_body_recursive` (`Context.pm:4136`) has a comment claiming it recurses
+into "consumers that have this node as a control predecessor" while the code
+recurses into EVERY consumer — a query the data model cannot express. That is
+the root of the four failed attempts at step 5, and it is an EDGE property.
+Step 4 puts properties on node TYPES, which is the wrong surface for it. Do not
+try to solve it here.
 
 Measured, and independently reproduced: **39 uppercase-hash registries in
 `lib/`** (the count needs `%_?[A-Z]` — a plain `%[A-Z]` regex gives 34 and
@@ -370,32 +390,53 @@ cannot be called on a class name.** That is `NodeFactory.pm:304`. The step-1
 pattern already handles it — the registry survives until the property is
 established — but a design that assumes it can ask the node first is wrong.
 
-#### 4c. `%DATA_CLASSES` is NOT a node property — it is a trust boundary
+#### 4c. `%DATA_CLASSES` — DELETE it; the "trust boundary" argument was WRONG
 
-v2 called it "load-bearing for deserialization. Keeper in some form," which is
-right for a reason it did not state, and the reason changes what may be done to
-it.
+This step said, on 2026-08-15, that `%DATA_CLASSES` must survive as a renamed
+`%KNOWN_OPS` because it is "the allowlist deciding which wire strings may
+become classes" and deleting it would mean "arbitrary class loading from
+untrusted input."
 
-Measured: **55 of its ~70 entries are constructed nowhere in `lib/` by a
-literal name.** Every arithmetic op, every comparison, `Print`, `Assign`,
-`PadAccess` — no static `make('Add')` call exists. They are reachable ONLY
-through the dynamic loader at `Serialize/JSON.pm:486`, where `$op` is a string
-decoded off the JSON wire.
+**That is false, and it was corrected the next day by measurement.** Chalk does
+NOT load node classes dynamically. `NodeFactory.pm` carries **81 compile-time
+`use Chalk::IR::Node::*` statements** — every node class is already loaded
+before `make()` ever runs. `$class->new(...)` is a method call on a package
+that is already in memory, not a class load.
 
-So `%DATA_CLASSES` is not describing nodes. It is the allowlist deciding which
-wire strings may become classes, and a miss `die`s ("Unknown data node
-operation") — the GAP-not-miscompile invariant working as intended. A node
-cannot carry it: it is consulted BEFORE there is a node.
+So an unknown op name does not "become a class". Measured directly:
 
-It also has zero drift, verified against the filesystem: no phantom entries,
-and the 9 unlisted `.pm` files are 6 abstract bases (`Node`, `BinOp`,
-`UnaryOp`, `Access`, `Aggregate`, `Regex`) plus the 4 CFG classes.
+    Chalk::IR::Node::TotallyBogus->new(id => 'x')
+    => Can't locate object method "new" via package "Chalk::IR::Node::TotallyBogus"
+       (perhaps you forgot to load "Chalk::IR::Node::TotallyBogus"?)
 
-ACTION: rename to `%KNOWN_OPS` (or similar) and document it as the wire
-boundary. Do NOT delete it, and do NOT replace it with autoloading
-`Chalk::IR::Node::$op` — that trades an allowlist for arbitrary class loading
-from untrusted input. Its routing role, which is the part that IS an artifact,
-is what 4b removes.
+Perl's own method resolution already refuses, loudly, with a message that names
+the actual problem. Nothing is loaded and nothing is constructed. The registry
+lookup is a SECOND guard in front of a guard that already exists — and the
+error it produces ("Unknown data node operation: Foo") is no more informative
+than the one Perl gives for free.
+
+The other half of the 2026-08-15 argument was that 55 of ~70 entries are
+reachable only via `Serialize/JSON.pm:486`, where `$op` is a wire string. That
+measurement is correct but proves less than claimed: it shows the table is
+consulted mostly on the deserialization path, not that it is what makes that
+path safe.
+
+What remains after the allowlist role is subtracted is the ROUTING role — which
+`make()` uses to decide hash-consed vs per-call vs CFG — and that is exactly
+what 4b replaces with `identity_kind`. So this is not an independent step:
+
+ACTION: fold into 4b. Once `identity_kind` answers the routing question,
+`%DATA_CLASSES` has no remaining job and is deleted outright, along with
+`%CFG_CLASSES`'s overlapping half. Keep the 81 `use` lines — those are the real
+declaration of what a node class is, and they are what makes the deletion safe.
+
+**The lesson, recorded because it repeated three times in one session:** I
+asserted a capability claim ("this is what stops arbitrary class loading")
+without testing it, and built a KEEP recommendation on top. The test was one
+line. The same shape produced the `alloca` claim (5dd833ed) and the BinOp
+control-slot claim (5f1573c7) in the same week — each time, describing what the
+current code does and inferring what would happen without it, instead of
+measuring.
 
 #### 4d. `%CONTROL_CHAIN_OP` stays a table — the genuine exception
 
@@ -412,10 +453,30 @@ table, in the repo that checks the invariant.
 
 #### The end state
 
-One allowlist at the wire boundary (4c), three type properties on the nodes
-(`is_fixed` from step 1, `staleness_kind` from 4a, `identity_kind` from 4b),
-and one producer-policy table (4d). That replaces 7 tables and the
-two-constructor split.
+Three type properties on the nodes (`is_fixed` from step 1, `staleness_kind`
+from 4a, `identity_kind` from 4b) and one producer-policy table (4d). That
+replaces 7 tables, the two-constructor split, AND `%DATA_CLASSES` — the 81
+compile-time `use` lines are the only declaration of the node vocabulary that
+is needed.
+
+#### None of 4a-4d gates step 5
+
+Measured 2026-08-16, correcting a claim made the day before. Step 5's code path
+(`_collect_branch_body` -> `_collect_body_recursive`, `Context.pm:4098-4142`)
+consults exactly ONE registry mechanism: `is_statement_node` at `:4131`, which
+is STEP 3's table, not any part of step 4.
+
+`_reads_mutable_location` — the consumer of the two registries 4a replaces — is
+a DIFFERENT function with a different caller. The post-merge plan's observation
+that the two walks hold contradictory beliefs about Phi is true and worth
+recording, but it is an ANALOGY between two traversals, not a dependency:
+changing how `_reads_mutable_location` classifies Phi does not change what
+`_collect_body_recursive` does at a Phi. That plan flags this itself ("a
+MOTIVATION, not a proven dependency") and the caveat should be honored.
+
+So step 4 is independently valuable cleanup and should NOT be positioned as a
+step-5 prerequisite. 4a's own justification stands on its own: it is the only
+registry measured to answer silently and wrongly.
 
 The three `OP_*_REPR` tables are NOT part of this step. They are a repr
 question, and `docs/plans/2026-08-14-representation-is-the-targets-type-system.md`
