@@ -4137,9 +4137,29 @@ sub _collect_body_recursive {
     # statement-effect table) and control flow (If/Loop) go into the body.
     # If/Loop branch bodies are discovered from their own Proj consumers by
     # _process_if_node, so we do not recurse through them here.
+    #
+    # OWNERSHIP: a statement belongs to this arm only if its own control_in
+    # says so. The Region stop above catches a post-merge effect reached
+    # THROUGH the Region, but the walk below follows DATA edges too, and a
+    # data path can leave the arm without touching a Region:
+    #
+    #   Assign(a[0],9) -> Phi(mem) -> Subscript(a[0]) -> Print
+    #
+    # The Print's control_in is the merge Region, yet it is reachable from the
+    # arm's Assign through the memory Phi. Collected into the arm, it is
+    # emitted inside `if.then` and never runs when the guard is false --
+    # measured as a SILENT miscompile (perl "1\n" vs chalk "", both exit 0;
+    # docs/plans/2026-08-16-postmerge-baseline-remeasured.md).
+    #
+    # The outer control chain ALREADY reaches it: _process_control_chain walks
+    # back from Return.control_in and finds exactly this node. Dropping it here
+    # therefore does not lose it -- it lets the node be emitted where its
+    # control_in says it lives. That is the half attempt 4 was missing: it cut
+    # the data edge but had no rule for who owns the result, so nothing emitted
+    # the Print at all.
     if ($op eq 'If' || $op eq 'Loop'
         || Chalk::IR::NodeFactory::is_statement_node($op)) {
-        push @$body, $node;
+        push @$body, $node if _owned_by_arm($node, $visited);
         return if $op eq 'If' || $op eq 'Loop';
     }
 
@@ -4149,6 +4169,35 @@ sub _collect_body_recursive {
         next unless defined $c;
         _collect_body_recursive($c, $visited, $body);
     }
+}
+
+# _owned_by_arm($node, $visited) -> bool
+#
+# Does this statement belong to the arm currently being collected?
+#
+# YES when its control_in is a node already reached on this walk -- the arm's
+# Proj, or another statement inside the arm. That is what "in this arm" means:
+# the control chain from the arm's Proj passes through it.
+#
+# NO when its control_in is a Region (the merge: it is post-branch, owned by
+# the outer control chain).
+#
+# A node with NO control_in keeps the historical behaviour and is collected.
+# Statement nodes are normally pinned by the producer, but the hand-written
+# frontend and hand-built test graphs do not always set it, and treating
+# "unpinned" as "not mine" would silently drop those. Unpinned means unknown,
+# and the safe answer for an unknown is the one that emits.
+sub _owned_by_arm {
+    my ($node, $visited) = @_;
+    return 1 unless $node->can('control_in');
+    my $ctrl = $node->control_in;
+    return 1 unless defined $ctrl && blessed($ctrl);
+
+    my $cop = $ctrl->can('operation') ? $ctrl->operation : '';
+    return 0 if $cop eq 'Region';
+
+    # Reached on this walk => the arm's control chain runs through it.
+    return $visited->{ $ctrl->id } ? 1 : 0;
 }
 
 # _find_block_idx($label) -> index in $self->{blocks} for the given label.
