@@ -9,6 +9,6 @@ use Chalk::IR::Node::UnaryOp;
 class Chalk::IR::Node::Length :isa(Chalk::IR::Node::UnaryOp) {
     method operation() { 'Length' }
     method staleness_kind() { 'transparent' }
-    method identity_kind() { 'hash_consed' }
+    sub identity_kind { 'hash_consed' }
     method op_str()    { 'length' }
 }

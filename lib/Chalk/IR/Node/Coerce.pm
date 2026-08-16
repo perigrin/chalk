@@ -21,7 +21,7 @@ class Chalk::IR::Node::Coerce :isa(Chalk::IR::Node) {
 
     method operation() { 'Coerce' }
     method staleness_kind() { 'transparent' }
-    method identity_kind() { 'hash_consed' }
+    sub identity_kind { 'hash_consed' }
 
     method content_hash() {
         return join('|', 'Coerce',

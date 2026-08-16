@@ -11,7 +11,7 @@ class Chalk::IR::Node::FieldAccess :isa(Chalk::IR::Node::Access) {
     field $field_stash :param :reader;
 
     method operation() { 'FieldAccess' }
-    method identity_kind() { q(hash_consed) }
+    sub identity_kind { q(hash_consed) }
 
     method content_hash() {
         return join('|', 'FieldAccess', "field_index=$field_index", "field_stash=$field_stash", $self->_serialize_inputs());

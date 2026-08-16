@@ -25,7 +25,7 @@ class Chalk::IR::Node::AnonSub :isa(Chalk::IR::Node) {
     # the dedup from inside, by baking $anon_id into content_hash. The observed
     # behaviour is per-call, so that is what this reports — identity_kind
     # describes what make() DOES, not which branch it took.
-    method identity_kind() { 'per_call' }
+    sub identity_kind { 'per_call' }
 
     # Each anonymous sub is semantically unique (different closure body),
     # so include a sequential counter to prevent incorrect deduplication.

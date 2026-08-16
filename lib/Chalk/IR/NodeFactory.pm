@@ -116,12 +116,12 @@ my %CFG_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Start Return Unwind If Proj Region Loop
 );
 
-# Ops that have CFG semantics (per-position identity, never hash-consed
-# by content) but are constructed via make() rather than make_cfg().
-# Mirrors Bootstrap::IR::NodeFactory's %CFG_OPS. Start/Return/Unwind are
-# NOT in this set — they go through the hash-cons path in make() to
-# match Bootstrap's permissive-make-of-Start behavior.
-my %ROUTED_CFG = map { $_ => 1 } qw(If Proj Region Phi Loop);
+# %ROUTED_CFG is DELETED. It listed the ops with "CFG semantics (per-position
+# identity, never hash-consed by content) but constructed via make() rather
+# than make_cfg()" — a restatement of per-call identity for If/Proj/Region/
+# Phi/Loop, each of which now declares `sub identity_kind { 'per_call' }` on
+# its own class. make() asks the type once instead of consulting a table that
+# had to be kept in step with those classes by hand.
 
 # Per-op input-keyword mapping. Mirrors Bootstrap's %INPUT_SPECS:
 # Actions.pm passes named params (control => ..., condition => ...,
@@ -148,23 +148,31 @@ class Chalk::IR::NodeFactory {
     # excluded from the content hash, so hash-consing these would collapse
     # two textually-identical effects into one node and silently drop or
     # stale-serve the second (whole-branch review C3; 019eb6ff item 1).
-    # This table is a SHARED contract: make() gives these ops per-call
-    # identity, the Block control-chain fixup in Actions.pm threads exactly
-    # this set via set_control_in, and the LLVM backend's chain/branch
-    # collectors read it. Keep it the single source.
+    # This table NO LONGER decides identity. make() asks the type
+    # (Chalk::IR::Node::identity_kind); every op named here declares
+    # `per_call` on its own class, and t/bootstrap/ir/node-identity-kind.t
+    # pins that make()'s observed behaviour matches what the types say.
+    #
+    # What it still answers is a DIFFERENT question — which ops the Block
+    # control-chain fixup in Actions.pm threads via set_control_in, and which
+    # the LLVM backend's chain/branch collectors treat as statement-position
+    # body members (via is_statement_node below, which is this set plus
+    # VarDecl). That question is step 3's, and it is not the same as identity:
+    # VarDecl is a statement node but not in this table, and Unwind is fixed
+    # and effectful yet deliberately absent. See Chalk::IR::Node::is_fixed.
     our %STATEMENT_EFFECT_OPS = map { $_ => 1 } qw(
         Assign CompoundAssign RegexSubst TryCatch Call
         RegexMatch Match NotMatch BacktickExpr Print
     );
 
-    # Allocation ops: aggregate literal constructors. Each occurrence
-    # ALLOCATES (the Call(new) precedent) — `[1,2]` and `[1,2]` are two
-    # distinct arrays, so hash-consing them to one node made one malloc
-    # that the two "distinct" refs silently aliased (019eb6ff item 4).
-    # Per-call identity like the statement effects, but NOT in
+    # %ALLOC_OPS is DELETED. It named ArrayRef/HashRef as per-call because each
+    # occurrence ALLOCATES — `[1,2]` and `[1,2]` are two distinct arrays, and
+    # hash-consing them to one node made one malloc that the two "distinct"
+    # refs silently aliased (019eb6ff item 4). Both classes now declare
+    # `sub identity_kind { 'per_call' }` themselves, which keeps the reason
+    # next to the class it constrains. They remain OUTSIDE
     # %STATEMENT_EFFECT_OPS: allocations are value-producing and are not
-    # control-threaded by the Block fixup.
-    our %ALLOC_OPS = map { $_ => 1 } qw(ArrayRef HashRef);
+    # control-threaded by the Block fixup, which is a different question.
 
     field %cache;
     field $cfg_counter = 0;
@@ -257,53 +265,31 @@ class Chalk::IR::NodeFactory {
             $args{inputs} = \@inputs;
         }
 
-        if (exists $ROUTED_CFG{$op_name}) {
-            my $class = $CFG_CLASSES{$op_name}
-                or die "Unknown CFG node operation: $op_name";
-            $cfg_counter++;
-            my $id = "${op_name}#${cfg_counter}";
-            my $node = $class->new( id => $id, %args );
-            $self->_register_consumers($node, %args);
-            $cache{$id} = $node;
-            return $node;
-        }
+        # The former %ROUTED_CFG, VarDecl and ListAssign branches are GONE.
+        # Each was a hand-maintained restatement of "this op gets per-call
+        # identity", and each of those classes now declares it itself
+        # (If/Proj/Region/Loop/Phi/VarDecl/ListAssign all report per_call).
+        # What the ROUTED_CFG branch uniquely supplied was the CLASS LOOKUP —
+        # If/Proj/Region/Loop live in %CFG_CLASSES and not %DATA_CLASSES — so
+        # the lookup below consults both maps and the identity decision is made
+        # once, from the type.
 
-        # VarDecl is a statement-position side-effect node with per-position
-        # (counter) identity, like Return/Unwind: two textually-identical
-        # declarations in different control positions are distinct nodes,
-        # each carrying its own control_in decoration. Allocate a fresh id
-        # per call; never hash-cons by content.
-        if ($op_name eq 'VarDecl') {
-            my $class = $DATA_CLASSES{VarDecl};
-            $cfg_counter++;
-            my $id = "VarDecl#${cfg_counter}";
-            my $node = $class->new( id => $id, %args );
-            $self->_register_consumers($node, %args);
-            $cache{$id} = $node;
-            return $node;
-        }
-
-        # ListAssign has the same per-position identity semantics as VarDecl:
-        # each list declaration occupies a distinct control position.
-        if ($op_name eq 'ListAssign') {
-            my $class = $DATA_CLASSES{ListAssign};
-            $cfg_counter++;
-            my $id = "ListAssign#${cfg_counter}";
-            my $node = $class->new( id => $id, %args );
-            $self->_register_consumers($node, %args);
-            $cache{$id} = $node;
-            return $node;
-        }
-
-        # Statement-effect ops (see %STATEMENT_EFFECT_OPS above) get per-call
-        # identity: every Assign (scalar rebind, element store, field store),
+        # Everything else asks the TYPE. identity_kind is a class method (a
+        # plain `sub` in the class block) precisely so it can be consulted
+        # HERE — before any node exists, because a node's id is fixed at new().
+        #
+        # This replaces the former %STATEMENT_EFFECT_OPS / %ALLOC_OPS branch:
+        # every Assign (scalar rebind, element store, field store),
         # CompoundAssign, RegexSubst, TryCatch, and Call — any dispatch kind —
-        # is a distinct side effect at its own control position. This subsumes
-        # the earlier narrower carve-outs (Assign-over-lvalue, Call-method) and
-        # the deleted ArrayWrite/HashWrite/FieldWrite per-call semantics.
-        if (exists $STATEMENT_EFFECT_OPS{$op_name} || exists $ALLOC_OPS{$op_name}) {
-            my $class = $DATA_CLASSES{$op_name}
-                or die "Unknown node operation: $op_name";
+        # is a distinct side effect at its own control position, and each of
+        # those classes now says so itself. Allocations (ArrayRef/HashRef) are
+        # per-call for a different reason that lands in the same place: `[1,2]`
+        # and `[1,2]` are two distinct arrays, so hash-consing them made one
+        # malloc that two "distinct" refs silently aliased (019eb6ff item 4).
+        my $class = $DATA_CLASSES{$op_name} // $CFG_CLASSES{$op_name}
+            or die "Unknown data node operation: $op_name";
+
+        if ($class->identity_kind eq 'per_call') {
             $cfg_counter++;
             my $id = "${op_name}#${cfg_counter}";
             my $node = $class->new( id => $id, %args );
@@ -311,9 +297,6 @@ class Chalk::IR::NodeFactory {
             $cache{$id} = $node;
             return $node;
         }
-
-        my $class = $DATA_CLASSES{$op_name}
-            or die "Unknown data node operation: $op_name";
 
         # Create a temp node to compute content_hash
         my $tmp = $class->new( id => '_tmp', %args );

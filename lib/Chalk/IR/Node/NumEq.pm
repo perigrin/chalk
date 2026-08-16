@@ -9,6 +9,6 @@ use Chalk::IR::Node::BinOp;
 class Chalk::IR::Node::NumEq :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'NumEq' }
     method staleness_kind() { 'transparent' }
-    method identity_kind() { 'hash_consed' }
+    sub identity_kind { 'hash_consed' }
     method op_str()    { '==' }
 }

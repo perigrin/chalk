@@ -12,7 +12,7 @@ class Chalk::IR::Node::Constant :isa(Chalk::IR::Node) {
 
     method operation() { 'Constant' }
     method staleness_kind() { 'opaque' }
-    method identity_kind() { 'hash_consed' }
+    sub identity_kind { 'hash_consed' }
 
     method content_hash() {
         return join('|', 'Constant',

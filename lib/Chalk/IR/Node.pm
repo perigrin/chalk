@@ -155,12 +155,21 @@ class Chalk::IR::Node {
     # LIMIT, measured and deliberate: for Start/Return/Unwind identity depends
     # on the ENTRY POINT, not on the type — make() hash-conses them while
     # make_cfg() allocates fresh (NodeFactory.pm:110-115 documents this as
-    # intent). This method describes make(). make_cfg() is a separate
-    # constructor whose contract is "always fresh" for every op it accepts, and
-    # a node built through it is per-call whatever its type says. That
-    # exception is pinned by t/bootstrap/ir/node-identity-kind.t so a later
-    # unification has to preserve it or change it on purpose.
-    method identity_kind() { return 'per_call' }
+    # intent). This describes make(). make_cfg() is a separate constructor
+    # whose contract is "always fresh" for every op it accepts, and a node
+    # built through it is per-call whatever its type says. That exception is
+    # pinned by t/bootstrap/ir/node-identity-kind.t so a later unification has
+    # to preserve it or change it on purpose.
+    #
+    # A `sub`, NOT a `method`, and that is load-bearing: make() must know the
+    # answer BEFORE it constructs anything, because a node's id is fixed at
+    # new() and there is no set_id. A `method` cannot be called on a class name
+    # ("Cannot invoke method ... on a non-instance") and a feature-class
+    # instance cannot be faked to stand in for one ("Attempt to bless into a
+    # class"), so an instance method could not be consulted at the point that
+    # needs it. A plain sub in a class block is a class method, inherits
+    # through :isa like any other, and is findable via can().
+    sub identity_kind { return 'per_call' }
 
     method class() {
         return $compat_class if defined $compat_class;

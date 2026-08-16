@@ -11,7 +11,7 @@ class Chalk::IR::Node::StashAccess :isa(Chalk::IR::Node::Access) {
     field $var_name   :param :reader = '';
 
     method operation() { 'StashAccess' }
-    method identity_kind() { q(hash_consed) }
+    sub identity_kind { q(hash_consed) }
 
     method content_hash() {
         return join('|', 'StashAccess', "stash_name=$stash_name",

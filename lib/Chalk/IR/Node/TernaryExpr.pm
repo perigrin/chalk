@@ -10,5 +10,5 @@ use Chalk::IR::Node;
 class Chalk::IR::Node::TernaryExpr :isa(Chalk::IR::Node) {
     method operation() { 'TernaryExpr' }
     method staleness_kind() { 'transparent' }
-    method identity_kind() { 'hash_consed' }
+    sub identity_kind { 'hash_consed' }
 }

@@ -10,5 +10,5 @@ use Chalk::IR::Node;
 class Chalk::IR::Node::StructRef :isa(Chalk::IR::Node) {
     method operation() { 'StructRef' }
     method staleness_kind() { 'opaque' }
-    method identity_kind() { 'hash_consed' }
+    sub identity_kind { 'hash_consed' }
 }

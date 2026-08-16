@@ -9,6 +9,6 @@ use Chalk::IR::Node::BinOp;
 class Chalk::IR::Node::NumLe :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'NumLe' }
     method staleness_kind() { 'transparent' }
-    method identity_kind() { 'hash_consed' }
+    sub identity_kind { 'hash_consed' }
     method op_str()    { '<=' }
 }
