@@ -8,8 +8,19 @@ Step 4 is the live work and was REWRITTEN: v2 drafted it as a cleanup sweep
 and never named the mechanism step 1 had just proved. Step 5 is BLOCKED in the
 backend after four attempts (`docs/plans/2026-08-13-post-merge-statement-ownership.md`).
 
-**Next action: step 4a** (`staleness_kind`) — the only registry measured to
-silently miscompile, and the only one with no completeness test.
+**STEP 4 IS COMPLETE.** 4a landed (`d89b1485`), 4b landed (`8caf49d9` +
+`beb6989d`, net-negative: five identity branches collapsed to one, `%ROUTED_CFG`
+and `%ALLOC_OPS` deleted), 4c resolved (the allowlist role was void; the
+class-lookup role survives), 4d WITHDRAWN — its conclusion was wrong and the
+replacement finding is `docs/research/2026-08-16-pinning-is-not-effectfulness.md`.
+
+**Next action: NOT in this plan.** What remains here is step 3 (marked
+DO-NOT-RETRY-AS-WRITTEN) and step 5 (blocked in the backend after four
+attempts). Both are blocked on the same missing primitive, which this plan
+cannot supply because it is not a node-type property: Chalk cannot say what
+KIND an edge is. `add_consumer` keeps one undifferentiated consumer list, so
+edge facts get encoded as op-name lists — which is what step 5's four failures
+and 4d's withdrawn ruling both turned out to be.
 
 **Two corrections landed 2026-08-16, both reversing claims made on 08-15:**
 (1) `%DATA_CLASSES` is NOT a trust boundary and does NOT survive — 81
@@ -438,7 +449,38 @@ control-slot claim (5f1573c7) in the same week — each time, describing what th
 current code does and inferring what would happen without it, instead of
 measuring.
 
-#### 4d. `%CONTROL_CHAIN_OP` stays a table — the genuine exception
+#### 4d. WITHDRAWN 2026-08-16 — see `docs/research/2026-08-16-pinning-is-not-effectfulness.md`
+
+**This ruling was reached badly and its conclusion does not hold.** It cited
+`TypedInvariant.pm`'s own comment as evidence for the design that comment
+describes, and then said "producer policy" — which names WHERE the decision
+lives without saying whether it is CORRECT.
+
+Put to the prior art instead: in HotSpot C2, GraalVM and V8 TurboFan, "must be
+pinned to the control chain" is NOT the same predicate as "is effectful", and
+no production system uses a hand-maintained op-name list. C2's discriminator is
+TRAPPING (and a control pin can be DISCHARGED by a range proof, `divnode.cpp:624`
+— something a side-effect pin could never be); Graal splits the question across
+three orthogonal axes; TurboFan makes the effect chain total.
+
+And the rationale Chalk states for its seven exemptions — "value-ordered
+through its RegexCapture/Assign data edges" — is the name of a real technique
+(Graal's `FloatingReadPhase`) applied to a case that does not implement it.
+Verified by hand: `Match :isa BinOp` with inputs `[subject, pattern]`, and
+`RegexCapture` points BACK at its own match, so **there is no edge from one
+Match to another**. Two matches both writing `$1` are mutually unordered.
+Of the seven exemptions, ZERO have a data-edge ordering carrier.
+
+The finding doc records the direction (adopt Graal's three axes as three class
+methods, not its class hierarchy) and what is still missing (the ordering edge
+itself). It is a FINDING, not a scheduled step — do not fold it back into step
+4, which is otherwise complete.
+
+The original text follows, retained because its factual claims about the
+table's CONTENTS are still accurate; only the "stays a table" conclusion is
+withdrawn.
+
+#### 4d (ORIGINAL, conclusion withdrawn). `%CONTROL_CHAIN_OP` stays a table
 
 Confirmed keeper, and worth stating why in the terms of this step: it is NOT a
 property of Chalk's node type. It is a property of **perl5-son's build sites**,
