@@ -1,20 +1,34 @@
 # Consumer edges have a KIND, and the graph currently forgets it
 
 **Date:** 2026-08-16
-**Status:** PLAN, v1, and its own central premise is ALREADY FALSIFIED — see
-open question 5, answered during the first pass. Retained because the defect it
-describes is real and the measurements are worth keeping, but this is NOT a
-blocker for anything and must not be scheduled as one.
+**Status:** PLAN, v3. NOT started, NOT a blocker for anything, and NOT the
+step-5 unblock. What it is: a real duplication in how control is represented,
+plus a statement of what the right fix looks like when someone does need it.
 **Motivating findings:**
 `docs/research/2026-08-16-pinning-is-not-effectfulness.md` (the four op-name
 lists are edge facts in node-name clothing),
 `docs/plans/2026-08-13-post-merge-statement-ownership.md`.
 
-> **READ Q5 FIRST.** This plan was drafted on the belief that step 5's four
-> failed attempts each "substituted a node-kind proxy for an edge property",
-> making edge kind the missing primitive. That is false for attempt 2, which
-> performed the exact query directly via `control_in` and still produced
-> malformed IR. Edge kind is an ergonomic improvement, not an unblock.
+> **Iteration history. Three passes, two of my own claims falsified — both by
+> measurements available before I wrote them.**
+>
+> **v1** was drafted on the belief that step 5's four failed attempts each
+> "substituted a node-kind proxy for an edge property", making edge kind the
+> missing primitive. FALSIFIED by the attempt table in the document I was
+> citing: attempt 2 ran the query directly via `control_in` and still produced
+> malformed IR (Q5). Demoted to optional ergonomics.
+>
+> **v2** claimed a second defect that would have un-done that demotion —
+> control is STORED two ways (`control_in` field vs `inputs[0]` on If/Loop), so
+> attempt 2's query "silently excludes every If and Loop". FALSIFIED by one
+> script: If and Loop also override the READER, and their own comments say
+> that is why. A built graph returns the correct control predecessor for If,
+> Loop and Print alike. The storage split is real; the consequence I drew from
+> it was not.
+>
+> **v3** keeps v2's one durable contribution — the statement of what the
+> CORRECT outcome is, as opposed to the smallest diff — and restores v1's
+> conclusion, which measurement has now survived twice.
 
 ## Relationship to the other open work — this REPLACES nothing
 
@@ -108,17 +122,98 @@ So "readers must be audited" partly overstates the cost: several are already
 expressing "the control ones" in a longer, weaker way, and would become
 shorter. Others genuinely want all consumers and need no change.
 
-## The change
+## A second defect — CLAIMED in iteration 2, then RETRACTED by measurement
 
-Additive, and `consumers()` keeps its current meaning so no reader breaks.
+Iteration 2 found that control is STORED two ways and concluded the query was
+therefore broken for two node classes. The storage claim is true; the
+conclusion drawn from it was false, and the measurement that killed it took one
+script.
 
-1. `add_consumer($node, $kind = 'data')`. Four call sites pass `'control'`.
-2. `consumers()` — unchanged, returns every consumer. All 35 readers keep
-   working with no edit.
-3. `control_consumers()` / `data_consumers()` — new filtered accessors.
-4. `remove_consumer` must drop the kind alongside the node.
+Storage does differ by class:
 
-Then `_collect_body_recursive` can do what its comment says.
+| class | where its control predecessor is STORED |
+|---|---|
+| `Chalk::IR::Node` (base) | the `control_in` FIELD (`Node.pm:31`, set at `:222`) |
+| `Chalk::IR::Node::If` | `inputs->[0]` — `set_control_in` OVERRIDDEN (`If.pm:44-50`) |
+| `Chalk::IR::Node::Loop` | `inputs->[0]`, backedge at `inputs->[1]` (`Loop.pm:30-55`) |
+
+But `If` and `Loop` **also override the `control_in` READER**, with comments
+that say exactly why: "CFG nodes carry their control input in inputs[0]
+(convention), not in the base $control_in field. Override the reader so a
+walker that calls `$node->control_in()` gets a consistent answer."
+
+Measured on a built graph — `$start` wired as control to an `If`, a `Loop` and
+a `Print`, then queried attempt-2 style:
+
+    If->control_in:    Start   YES
+    Loop->control_in:  Start   YES
+    Print->control_in: Start   YES
+
+**The query is uniform. Attempt 2 was not silently excluding If/Loop.** The
+dual storage is an internal inconsistency — two homes, one reader papering over
+it — not a correctness hole in the query, and NOT an explanation for attempt 2.
+
+So Q5's v1 answer STANDS unqualified: attempt 2 asked the right question,
+correctly, and still produced malformed IR. The failure is the
+collection/emission contract, exactly as the post-merge plan says.
+
+What survives of the v2 finding: `If`/`Loop` maintain a second storage location
+and a compensating reader override, which is real duplication worth removing —
+but on its own merits, not as a step-5 unblock.
+
+## The correct outcome — not the smallest change
+
+The first draft of this section proposed adding a `$kind` argument, keeping
+`consumers()` unchanged so no reader breaks, and adding two filtered accessors.
+That is the smallest diff. It is not the right answer, and the Graal work says
+why.
+
+`docs/research/2026-08-16-pinning-is-not-effectfulness.md` established that
+production Sea-of-Nodes compilers do not answer structural questions with
+hand-maintained lists — they make the answer a property with **nowhere to put
+the wrong answer**. The same standard applies here. A `$kind` parameter that
+defaults to `'data'` and is passed correctly at four call sites is a
+hand-maintained list with extra steps: every future `add_consumer` caller can
+silently get it wrong, and nothing detects that.
+
+What Graal actually does is worth copying at the level of PRINCIPLE, not
+mechanism:
+
+- **an edge's kind is derivable from WHERE IT IS ANCHORED, not from a label
+  passed alongside it.** Graal's `@Input` vs `@Successor` annotations are
+  declarations on the field, and the node's edge set is walked positionally.
+  There is no per-call kind argument to get wrong.
+- **one relation, one home.** A Graal node's control successors live in
+  `@Successor` fields; there is no second unrelated place a control edge can
+  hide.
+
+Chalk violates the second point today, and the first point is what the `$kind`
+proposal would violate tomorrow.
+
+So the target is:
+
+1. **One home for control.** Either `control_in` for every class (If/Loop stop
+   overriding, their `inputs[0]` control slot is removed), or `inputs[0]` for
+   every class (the base `control_in` field is deleted). Pick ONE. The choice is
+   open (see Q7) but the ambiguity is not.
+2. **`control_consumers()` / `data_consumers()` derived from that home**, not
+   from a label recorded at add time. If control has one home, kind is a
+   FUNCTION of the graph and cannot drift from it — the `$kind` argument is
+   unnecessary and the failure mode it introduces does not exist.
+3. **`consumers()` keeps returning the union**, because 35 readers depend on it
+   and most legitimately want all consumers.
+4. **An invariant test** asserting the two views partition `consumers()` exactly
+   — every consumer is in exactly one, for every node in every corpus graph.
+   That is the "nowhere to put the wrong answer" property.
+
+Under this target `_collect_body_recursive` does what its comment says, AND the
+If/Loop hole closes, AND no caller can introduce a mislabelled edge because
+there is no label.
+
+The cost is higher than the additive version: it touches `If`, `Loop`, and
+every reader that reaches `inputs[0]` on an If or Loop expecting control there.
+That cost is the point — the additive version leaves the second defect in place
+and adds a new way to be wrong.
 
 ## Verification, and the honest problem with it
 
@@ -204,60 +299,116 @@ this arc keeps hitting.
    is that the OTHER walk does not then pick up what the first correctly drops
    — the collection/emission contract, exactly as that plan states.
 
-   **Consequence for this plan: it is demoted from "the primitive step 5 needs"
-   to "an ergonomic and honesty improvement".** The earlier framing —
-   repeated by me in two commit messages and one plan edit — that step 5's four
-   attempts "each substituted a node-kind proxy for an edge property" is WRONG
-   for attempt 2, which used the edge property directly. That claim should not
-   be carried forward.
+   **v1's consequence: demoted to "an ergonomic and honesty improvement".** The
+   earlier framing — repeated by me in two commit messages and one plan edit —
+   that step 5's four attempts "each substituted a node-kind proxy for an edge
+   property" is WRONG for attempt 2, which used the edge property directly.
+   That claim should not be carried forward.
 
-   What survives as justification: `_collect_body_recursive`'s comment still
-   contradicts its code, several readers still reconstruct "the control ones"
-   by op-name filtering, and a graph that cannot name its own edge kinds is
-   harder to reason about. Those are real but they are NOT correctness
-   blockers, and they do not unblock anything.
+   **v2 tried to qualify this and was wrong; v3 restores it unqualified.** The
+   v2 argument was that attempt 2's query reads `$c->control_in`, which is
+   undef for If and Loop because they store control in `inputs[0]`. Measured:
+   they override the READER as well, their comments say that is deliberate, and
+   a built graph returns the correct predecessor for all three node kinds. The
+   query was uniform. See "A second defect — CLAIMED then RETRACTED".
+
+   So: attempt 2 asked the right question, correctly, and still scored 3
+   against a baseline of 5. Edge kind is not what step 5 is missing.
 
 6. **Ordering.** Does `consumers()` need to preserve insertion order across the
    split? At least one existing behaviour depends on graph walk order
    elsewhere in the project; assume yes until measured.
 
-## Sequencing — REVISED after Q5
+7. **NEW in v2 — which home for control wins?** The two candidates are not
+   equivalent and the choice has consequences beyond tidiness:
 
-Step 0 was "determine whether attempt 2's failure was expressibility or
-contract, and if the latter, this plan drops in priority sharply." It was
-answered on the first pass, from that plan's own table: **contract**. So this
-plan drops in priority sharply, as specified.
+   - **`control_in` field for everyone** (If/Loop drop their overrides).
+     Control stops occupying an `inputs` slot, so `inputs` becomes purely
+     data — which makes `inputs`-based walks correct by construction and is
+     closer to what `_register_consumers` already assumes. Cost: every reader
+     that reaches `If->inputs->[0]` for control must change, and `Loop`'s
+     backedge at `inputs[1]` needs a home too (a second field, or a
+     `backedge_in`).
+   - **`inputs[0]` for everyone** (the base `control_in` field is deleted).
+     One list, positional, closest to C2/Graal where control is just an edge.
+     Cost: much larger — every `set_control_in`/`control_in` reader across the
+     codebase changes, and `content_hash` deliberately EXCLUDES `control_in`
+     today (`Node.pm:25-31`: "side-effect vs pure-data uses of the same content
+     should still hash-cons to the same node"), which moving control into
+     `inputs` would break unless the hash explicitly skips position 0.
 
-It is now optional cleanup, correctly ordered AFTER the thing it was drafted to
-unblock:
+   That last clause is decisive-looking and must be checked rather than
+   trusted: if control lives in `inputs`, does `_serialize_inputs` include it,
+   and would two identical Prints at different control positions stop
+   hash-consing? For per-call ops it does not matter (they never hash-cons),
+   but for anything hash-consed it would be a behaviour change. **Measure
+   before choosing.**
 
-- **Not now:** step 5's real prerequisite is its ownership CONTRACT, written as
-  a testable invariant before either walk is edited, with collection and
-  emission changed in one commit. Nothing in this plan is needed for that.
-- **Whenever:** if the contract work ends up wanting a cleaner way to say
-  "control successors", land the primitive then, informed by what that work
-  actually needs — rather than guessing the shape now from Q1-Q4.
-- **Standalone value, small:** fix `_collect_body_recursive`'s comment so it
-  stops describing a walk the code does not perform. That is a one-line honesty
-  fix available today and independent of everything above.
+8. **NEW in v2 — is the If/Loop split load-bearing anywhere else?** It was
+   found by reading `set_control_in`. Nothing has yet checked whether other
+   walks silently mis-answer for If/Loop the way attempt 2's query did.
+   `grep` for `->control_in` and classify each site by whether an If or Loop
+   can reach it.
 
-Q1-Q4 remain unanswered and should stay that way until there is a consumer with
-a stated need. Designing the taxonomy first is how the four op-name lists
-happened.
+## Sequencing — v3
+
+This plan unblocks nothing. Two attempts to argue otherwise were falsified by
+measurement. So it is scheduled behind the work it was drafted to serve, and
+the only thing available today is honesty:
+
+- **Available now, one line:** fix `_collect_body_recursive`'s comment
+  (`Context.pm:4147`) so it stops claiming a control-edge walk the code does
+  not perform. Independent of everything else here.
+- **File separately:** the If/Loop dual storage plus compensating reader
+  override. It is real duplication and it is NOT an explanation for anything —
+  file it on its own merits so it does not get re-derived as a theory of
+  step 5 a third time.
+- **Step 5's actual prerequisite** is its ownership CONTRACT, written as a
+  testable invariant before either walk is edited, with collection and emission
+  changed in one commit. Nothing in this plan is needed for it.
+
+**When something does need this**, build the version in "The correct outcome"
+— control gets one home, the two views are DERIVED from it, and a partition
+invariant makes a wrong answer unrepresentable. Do not build the additive
+`$kind` version; it is the smallest diff and the wrong shape, for the reason
+the Graal research established.
+
+Q1-Q4 stay unanswered until a consumer states a need. Designing the taxonomy
+first is how the four op-name lists happened. The derived design also makes
+Q1/Q2 much less pressing: if kind is a FUNCTION of where control is anchored
+rather than a label passed per-edge, adding a third kind later changes one
+derivation instead of migrating every call site.
 
 ## What this episode is evidence of
 
-Recorded because it is the third instance in this arc of the same error.
+This document falsified two of its OWN central claims across three passes, and
+both measurements were available before the claim was written.
 
-The plan was drafted from a claim I had already written into two commit
-messages and a plan edit — "step 5's four attempts each substituted a node-kind
-proxy for an edge property" — without checking it against the attempt table in
-the very document I was citing. The table says attempt 2 used `control_in`
-directly. One `grep` falsified the premise, and it was a `grep` of a file
-already open in this session.
+**v1's premise:** "step 5's four attempts each substituted a node-kind proxy for
+an edge property." I had already written that into two commit messages and a
+plan edit. The attempt table in the very document I was citing says attempt 2
+used `control_in` directly. One `grep` of a file already open in this session.
 
-Same shape as the `alloca` claim (`5dd833ed`), the BinOp control-slot claim
-(`5f1573c7`), and the "%DATA_CLASSES is a trust boundary" claim (`52e8146d`):
-a plausible mechanism asserted from adjacent reading, then built upon, then
-falsified by a one-line measurement. The measurement is always cheap and always
-available BEFORE the writing.
+**v2's premise:** "If/Loop store control in `inputs[0]`, so attempt 2's query
+silently excludes them." I read `set_control_in`'s override, inferred the reader
+must therefore disagree, and did not read the next twenty lines — where both
+classes override the reader too, with a comment saying precisely why. One
+script on a built graph.
+
+Both are the same shape as the `alloca` claim (`5dd833ed`), the BinOp
+control-slot claim (`5f1573c7`), and "%DATA_CLASSES is a trust boundary"
+(`52e8146d`): read part of a mechanism, infer the rest, write the inference as
+a finding, build on it. Five instances now.
+
+The specific tell, common to all five: **each inference was about what some
+OTHER code must be doing, based on what the code in front of me was doing.**
+The alloca claim inferred a producer from a comment about a choice. The BinOp
+claim inferred the producer's shape from a test's construction convention. v2
+inferred a reader from a writer. In every case the other code was one file
+open away.
+
+Worth noting what DID work, twice: the corrections came from writing the claim
+down in a form specific enough to test. "Attempt 2 silently excludes If/Loop" is
+falsifiable in a way that "the graph forgets edge kinds" is not. The discipline
+that pays is not "measure more" in the abstract — it is stating the claim
+sharply enough that the measurement is obvious.
