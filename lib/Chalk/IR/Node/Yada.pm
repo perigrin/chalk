@@ -9,5 +9,6 @@ use Chalk::IR::Node::BinOp;
 class Chalk::IR::Node::Yada :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'Yada' }
     method staleness_kind() { 'opaque' }
+    method identity_kind() { 'hash_consed' }
     method op_str()    { '...' }
 }

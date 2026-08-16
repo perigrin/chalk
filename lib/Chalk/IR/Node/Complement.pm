@@ -9,5 +9,6 @@ use Chalk::IR::Node::UnaryOp;
 class Chalk::IR::Node::Complement :isa(Chalk::IR::Node::UnaryOp) {
     method operation() { 'Complement' }
     method staleness_kind() { 'transparent' }
+    method identity_kind() { 'hash_consed' }
     method op_str()    { '~' }
 }

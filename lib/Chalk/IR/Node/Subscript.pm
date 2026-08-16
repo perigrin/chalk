@@ -8,4 +8,5 @@ use Chalk::IR::Node::Access;
 
 class Chalk::IR::Node::Subscript :isa(Chalk::IR::Node::Access) {
     method operation() { 'Subscript' }
+    method identity_kind() { q(hash_consed) }
 }

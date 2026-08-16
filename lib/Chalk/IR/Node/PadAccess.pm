@@ -11,6 +11,7 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
     field $varname :param :reader;
 
     method operation() { 'PadAccess' }
+    method identity_kind() { q(hash_consed) }
 
     method content_hash() {
         # Identity is the variable name plus inputs. `targ` (the pad-slot index)

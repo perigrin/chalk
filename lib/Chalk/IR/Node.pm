@@ -130,6 +130,38 @@ class Chalk::IR::Node {
     # while this one's needs to be complete.
     method staleness_kind() { return 'mutable_read' }
 
+    # Does each occurrence of this op get its OWN node, or do textually
+    # identical occurrences share one?
+    #
+    #   per_call    — every make() allocates a fresh node with a counter id.
+    #                 A distinct side effect, allocation, or control position:
+    #                 two identical Prints at different program points are two
+    #                 effects, and hash-consing them drops one (019eb6ff #1).
+    #   hash_consed — identical content IS the identical node. A pure value.
+    #
+    # A PROPERTY OF THE TYPE, like is_fixed and staleness_kind. make() answers
+    # it today in five structurally identical branches, from four tables
+    # (%ROUTED_CFG, %STATEMENT_EFFECT_OPS, %ALLOC_OPS, and membership in
+    # %DATA_CLASSES) plus three ops hardcoded ahead of all of them (Phi,
+    # VarDecl, ListAssign). Measured: 62 hash_consed, 19 per_call.
+    #
+    # DEFAULT per_call — the conservative direction, on the same principle as
+    # staleness_kind. A class that declares nothing gets its own node per
+    # occurrence: that costs a missed dedup. The opposite default would share
+    # one node between two occurrences of an op nobody classified, which
+    # silently drops the second effect. Losing an optimisation beats losing a
+    # statement.
+    #
+    # LIMIT, measured and deliberate: for Start/Return/Unwind identity depends
+    # on the ENTRY POINT, not on the type — make() hash-conses them while
+    # make_cfg() allocates fresh (NodeFactory.pm:110-115 documents this as
+    # intent). This method describes make(). make_cfg() is a separate
+    # constructor whose contract is "always fresh" for every op it accepts, and
+    # a node built through it is per-call whatever its type says. That
+    # exception is pinned by t/bootstrap/ir/node-identity-kind.t so a later
+    # unification has to preserve it or change it on purpose.
+    method identity_kind() { return 'per_call' }
+
     method class() {
         return $compat_class if defined $compat_class;
         return $self->operation();

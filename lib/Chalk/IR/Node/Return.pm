@@ -15,6 +15,7 @@ class Chalk::IR::Node::Return :isa(Chalk::IR::Node) {
 
     method operation() { 'Return' }
     method staleness_kind() { 'opaque' }
+    method identity_kind() { 'hash_consed' }
 
     # The returned value. Control flows through the control_in decoration
     # (set via set_control_in), not through an inputs slot.

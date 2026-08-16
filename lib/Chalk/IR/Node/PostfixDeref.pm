@@ -11,6 +11,7 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Node) {
 
     method operation() { 'PostfixDeref' }
     method staleness_kind() { 'transparent' }
+    method identity_kind() { 'hash_consed' }
 
     method content_hash() {
         return join('|', 'PostfixDeref', "sigil=$sigil", $self->_serialize_inputs());

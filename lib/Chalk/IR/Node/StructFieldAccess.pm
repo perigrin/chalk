@@ -10,4 +10,5 @@ use Chalk::IR::Node;
 class Chalk::IR::Node::StructFieldAccess :isa(Chalk::IR::Node) {
     method operation() { 'StructFieldAccess' }
     method staleness_kind() { 'opaque' }
+    method identity_kind() { 'hash_consed' }
 }

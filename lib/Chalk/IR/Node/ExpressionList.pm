@@ -9,6 +9,7 @@ use Chalk::IR::Node;
 class Chalk::IR::Node::ExpressionList :isa(Chalk::IR::Node) {
     method operation() { 'ExpressionList' }
     method staleness_kind() { 'opaque' }
+    method identity_kind() { 'hash_consed' }
 
     # Items are stored as a single arrayref in inputs->[0].
     # Empty list is permitted: ExpressionList(inputs => [[]]).

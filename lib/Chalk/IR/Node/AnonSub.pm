@@ -20,6 +20,13 @@ class Chalk::IR::Node::AnonSub :isa(Chalk::IR::Node) {
     method operation() { 'AnonSub' }
     method staleness_kind() { 'opaque' }
 
+    # per_call, achieved by a THIRD mechanism: this class routes down make()'s
+    # hash-consing branch (it is in none of the per-call tables) but defeats
+    # the dedup from inside, by baking $anon_id into content_hash. The observed
+    # behaviour is per-call, so that is what this reports — identity_kind
+    # describes what make() DOES, not which branch it took.
+    method identity_kind() { 'per_call' }
+
     # Each anonymous sub is semantically unique (different closure body),
     # so include a sequential counter to prevent incorrect deduplication.
     method content_hash() {

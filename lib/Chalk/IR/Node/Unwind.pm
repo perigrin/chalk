@@ -9,6 +9,7 @@ use Chalk::IR::Node;
 class Chalk::IR::Node::Unwind :isa(Chalk::IR::Node) {
     method operation() { 'Unwind' }
     method staleness_kind() { 'opaque' }
+    method identity_kind() { 'hash_consed' }
 
     # FIXED: a die ABORTS. Absent from %STATEMENT_EFFECT_OPS, which is the gap this method exists to close -- a collapse pass consulting the registry would judge a die-only arm effect-free and fold it into a select
     method is_fixed() { return true }
