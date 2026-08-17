@@ -2903,9 +2903,56 @@ sub _lower_phi {
         return $self->{cache}{ $node->id };
     }
 
+    # PHI-BEFORE-REGION. The phi is being READ before the control structure
+    # that defines it has been emitted.
+    #
+    # This used to be an unconditional die telling the ir-block author to
+    # reorder the control chain. That is the right advice when the Region IS on
+    # the control chain and simply appears too late — but it is not always the
+    # author's mistake. A Region reaches the control chain today only when a
+    # memory-Phi pins it there, which happens when an arm stores to an element.
+    # An arm that only REBINDS A SCOPE SLOT advances no memory chain, so its
+    # Region is control-path-invisible and its value-Phi was unreachable by
+    # construction: the producer's own 2b-3 refusal
+    # (perl5-son FromOptree.pm:495-502) exists solely to avoid emitting one,
+    # and names this site as the reason —
+    #
+    #     "with no element store advancing the memory chain the backend has no
+    #      Region/If in the Return's control path to place that Phi against
+    #      (Phi-before-Region)"
+    #
+    # So: drive the structure from the phi. A Phi knows its Region, and a
+    # Region knows the If/Loop that owns it (`head`, wired by set_region), so
+    # the enclosing structure is reachable from here without any control-chain
+    # walk. Process it, then return the phi the emission just cached.
+    #
+    # The recursion guard matters: _process_if_node lowers the arms, which can
+    # read this same phi again. Marking it in-progress turns that into the
+    # honest die below rather than an infinite descent.
+    my $region = $node->can('region') ? $node->region : undef;
+    my $head   = (defined $region && blessed($region) && $region->can('head'))
+        ? $region->head : undef;
+
+    if (defined $head && blessed($head) && !$self->{_phi_forcing}{ $node->id }++) {
+        my $op = $head->can('operation') ? $head->operation : '';
+        if ($op eq 'If' || $op eq 'Loop') {
+            $self->process_control_node($head);
+            delete $self->{_phi_forcing}{ $node->id };
+            return $self->{cache}{ $node->id }
+                if exists $self->{cache}{ $node->id };
+        }
+        else {
+            delete $self->{_phi_forcing}{ $node->id };
+        }
+    }
+
     die "LLVM backend: Phi node encountered in lower_value before its enclosing "
-      . "if/loop structure was processed; author the ir-block so Region/If/Loop "
-      . "appear in the control chain before Phi values are read";
+      . "if/loop structure was processed, and forcing that structure did not "
+      . "define it (region="
+      . (defined $region ? $region->id : 'undef')
+      . ", head=" . (defined $head ? $head->id : 'undef') . "); author the "
+      . "ir-block so Region/If/Loop appear in the control chain before Phi "
+      . "values are read";
 }
 
 # ---------------------------------------------------------------------------
