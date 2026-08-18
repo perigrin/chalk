@@ -367,11 +367,43 @@ sub _phi_slot_for_proj {
         if @controls == 1 && ref $controls[0] eq 'ARRAY';
 
     for my $slot (0, 1) {
-        my $c = $controls[$slot];
-        next unless defined $c && Scalar::Util::blessed($c);
-        next unless $c->can('operation') && $c->operation eq 'Proj';
-        next unless $c->can('index');
-        return $slot if $c->index == $want_index;
+        my $idx = _proj_index_of_control($controls[$slot]);
+        return $slot if defined $idx && $idx == $want_index;
     }
     return 0;
+}
+
+# _proj_index_of_control($node) -> the index of the Proj this control input
+# descends from, or undef.
+#
+# A Region's control input is NOT always the arm's Proj. It is the LAST control
+# node in that arm, which is the Proj only when the arm is empty of effects.
+# An arm carrying a void call or a print ends on that effect instead:
+#
+#     %10 = Region(%7, %9)     # %7 = Proj(index 1), %9 = Print
+#
+# Matching only a direct Proj therefore failed to classify slot 1 above, fell
+# back to 0, and wired the Phi arms BACKWARDS -- measured on
+# `if ($x > 3) { print "call\n"; $n = 5 }` as n=0 where perl says 5, and n=5
+# where perl says 0, i.e. inverted in BOTH polarities.
+#
+# So walk back along control_in until a Proj is reached. The walk is bounded by
+# a seen-set: a control chain is acyclic within an arm, but a loop back-edge
+# elsewhere in the graph must not turn a misclassification into a hang -- the
+# same failure that made an earlier producer-side descent recurse forever.
+sub _proj_index_of_control {
+    my ($node) = @_;
+    my %seen;
+    while (defined $node && Scalar::Util::blessed($node)) {
+        last if $seen{ $node->id }++;
+        my $op = $node->can('operation') ? $node->operation : '';
+        if ($op eq 'Proj') {
+            return $node->can('index') ? $node->index : undef;
+        }
+        # Stop at another merge: its own arms are a different question, and
+        # descending past it would attribute this slot to the wrong branch.
+        last if $op eq 'Region';
+        $node = $node->can('control_in') ? $node->control_in : undef;
+    }
+    return undef;
 }
