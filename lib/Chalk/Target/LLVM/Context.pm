@@ -3607,7 +3607,11 @@ sub _wire_region_phis_with_preblock {
         # perl prints 1, chalk printed 0 -- the rebind silently did not take
         # effect. Well-formed IR, wrong value, which is why no verifier caught
         # it (docs/plans/2026-08-17-step4-measured-2b3-is-load-bearing.md).
-        my $then_slot = _phi_slot_for_proj($region, 0);
+        # Prefer the Phi's own record. When the producer supplied
+        # `predecessors`, arm identity is a FIELD READ; the Region search below
+        # is the fallback for graphs built before that existed.
+        my $then_slot = _phi_slot_from_predecessors($phi_node, 0)
+                     // _phi_slot_for_proj($region, 0);
         my $else_slot = 1 - $then_slot;
 
         my ($then_val, $else_val);
@@ -3703,6 +3707,34 @@ sub _lower_arm_in_tail {
 #
 # Defaults to 0 when the Region's inputs cannot be read or no Proj matches,
 # preserving the previous behaviour for any shape this cannot classify.
+
+# _phi_slot_from_predecessors($phi, $want_index) -> slot, or undef
+#
+# The LOOKUP the search below approximates. A Phi that records its
+# predecessors pairs inputs[i] with predecessors[i], so "which slot is the arm
+# whose Proj has index N" is a scan of two stored nodes with no graph walk and
+# no control_in traversal at all.
+#
+# Returns undef when the Phi did not record them -- a graph from a producer
+# that has not been migrated, or a loop Phi, which pairs with entry/backedge
+# rather than a predecessor list. The caller falls back to the search.
+sub _phi_slot_from_predecessors {
+    my ($phi, $want_index) = @_;
+    return undef unless defined $phi && $phi->can('predecessors');
+
+    my $preds = $phi->predecessors;
+    return undef unless defined $preds && ref $preds eq 'ARRAY' && @$preds;
+
+    for my $slot (0 .. $#$preds) {
+        my $p = $preds->[$slot];
+        next unless defined $p && blessed($p);
+        next unless $p->can('operation') && $p->operation eq 'Proj';
+        next unless $p->can('index');
+        return $slot if $p->index == $want_index;
+    }
+    return undef;
+}
+
 sub _phi_slot_for_proj {
     my ($region, $want_index) = @_;
     return 0 unless defined $region && $region->can('inputs');
