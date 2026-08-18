@@ -4,6 +4,8 @@ package Chalk::IR::Graph::TypedInvariant;
 use 5.42.0;
 use utf8;
 
+use Scalar::Util qw(blessed);
+
 use Chalk::IR::Node::Coerce;
 use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: Int <: Num
 
@@ -201,6 +203,67 @@ sub check {
                         $op
                     ),
                 };
+            }
+        }
+
+        # PHI/REGION ARITY. A Phi's incoming values pair POSITIONALLY with its
+        # Region's control inputs -- slot i comes from the predecessor at
+        # Region input i -- so the two lists must have the same length.
+        #
+        # Nothing checked this. Chalk had THREE phi-pairing miscompiles in one
+        # arc (44d1fa8c, 9ce43cdd) and no assertion would have caught any of
+        # them. Every production Sea-of-Nodes IR has this check: C2's "broken
+        # Phi/Region subgraph", Graal's
+        # `phiPredecessorCount() == valueCount()`, TurboFan's
+        # `CHECK_EQ(value_count, control->op()->ControlInputCount())`.
+        #
+        # HONEST LIMIT: arity does not catch a SWAPPED pairing of equal length,
+        # which is what all three of those defects actually were. This is the
+        # half checkable from the graph alone; it turns a length divergence
+        # from silent into loud. The pairing half needs the structural change
+        # in docs/research/2026-08-18-phi-pairing-should-not-be-a-search.md
+        # (store the Proj per value, or add an end-of-arm carrier).
+        if ($op eq 'Phi' && $node->can('region')) {
+            my $region = $node->region;
+            if (defined $region && blessed($region)
+                    && $region->can('inputs') && defined $region->inputs) {
+                # Region inputs may be a flat list or one arrayref of controls.
+                my @controls = $region->inputs->@*;
+                @controls = $controls[0]->@*
+                    if @controls == 1 && ref $controls[0] eq 'ARRAY';
+
+                my $values = $node->inputs // [];
+
+                # LOOP PHIS ARE EXEMPT, and the reason is structural rather
+                # than a carve-out. A merge Phi pairs against a Region whose
+                # control inputs are the arms. A LOOP Phi's `region` is the
+                # Loop node ITSELF, and its two values are [init, backedge] --
+                # which pair with the loop's ENTRY and BACK edges, not with a
+                # list of merge predecessors. Measured: every one of the 16
+                # corpus cases this leg first flagged was `Region Loop#2 has 1
+                # control input`, i.e. exactly this shape, across D2/D2b/D2c/
+                # D2d/D2e/D3 and friends. The backedge is also wired later via
+                # Phi::set_backedge, so the counts legitimately disagree
+                # mid-construction.
+                #
+                # Check the node the Phi points AT, not that node's head: for a
+                # loop the Phi points at the Loop directly, so a head-based test
+                # never fires.
+                my $rop = $region->can('operation') ? $region->operation : '';
+                my $head = $region->can('head') ? $region->head : undef;
+                my $is_loop = $rop eq 'Loop'
+                    || (defined $head && blessed($head)
+                        && $head->can('operation') && $head->operation eq 'Loop');
+
+                if (!$is_loop && @controls && scalar($values->@*) != scalar(@controls)) {
+                    push @violations, {
+                        node_id => $node->id(),
+                        message => sprintf(
+                            'Phi has %d incoming value(s) but its Region %s has %d control input(s); they pair by position, so the lengths must match',
+                            scalar($values->@*), $region->id(), scalar(@controls)
+                        ),
+                    };
+                }
             }
         }
 
