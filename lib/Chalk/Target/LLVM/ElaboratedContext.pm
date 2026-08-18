@@ -11,6 +11,8 @@ use utf8;
 
 use parent -norequire, 'Chalk::Target::LLVM::Context';
 
+use Scalar::Util ();   # blessed(), for reading Region control inputs
+
 sub new {
     my ($class, %args) = @_;
     my $elab           = delete $args{elab};
@@ -239,14 +241,34 @@ sub _wire_region_phis_with_preblock {
         # it in pass 2 (next to the phi) would reference each arm from the
         # merge block, which is invalid IR rather than a wrong answer.
         my $phi_repr = $phi_node->representation;
+
+        # WHICH PHI SLOT IS THE THEN ARM? Read it off the Region, do not
+        # assume slot 0.
+        #
+        # A Phi's incoming values are positionally paired with its Region's
+        # CONTROL inputs -- slot i comes from the predecessor at Region input
+        # i. That pairing is a fact the graph records, and it is not always
+        # (then, else): perl5-son's StackSim::merge builds
+        # `Region(inputs => [$control, $other->control])` with $control the
+        # CONTINUING path and $other the ARM, so for an `if` in void context
+        # the Region reads (false-Proj, true-Proj) and slot 0 is the ELSE arm.
+        #
+        # Assuming slot 0 == then wired the base binding to the taken branch.
+        # Measured on `my $n=5; my $x=0; $x = 1 if $n > 0; print $x`:
+        # perl prints 1, chalk printed 0 -- the rebind silently did not take
+        # effect. Well-formed IR, wrong value, which is why no verifier caught
+        # it (docs/plans/2026-08-17-step4-measured-2b3-is-load-bearing.md).
+        my $then_slot = _phi_slot_for_proj($region, 0);
+        my $else_slot = 1 - $then_slot;
+
         my ($then_val, $else_val);
         ($then_val, $then_label) =
-            $self->_lower_arm_in_tail($inputs->[0], $then_label, $then_vars);
-        $then_val = $self->_coerce_arm($inputs->[0], $then_val, $phi_repr,
+            $self->_lower_arm_in_tail($inputs->[$then_slot], $then_label, $then_vars);
+        $then_val = $self->_coerce_arm($inputs->[$then_slot], $then_val, $phi_repr,
                                        $then_label, 'Region.Phi.then');
         ($else_val, $else_label) =
-            $self->_lower_arm_in_tail($inputs->[1], $else_label, $else_vars);
-        $else_val = $self->_coerce_arm($inputs->[1], $else_val, $phi_repr,
+            $self->_lower_arm_in_tail($inputs->[$else_slot], $else_label, $else_vars);
+        $else_val = $self->_coerce_arm($inputs->[$else_slot], $else_val, $phi_repr,
                                        $else_label, 'Region.Phi.else');
         push @wired, [$phi_node, $then_val, $else_val];
     }
@@ -316,4 +338,40 @@ sub _lower_arm_in_tail {
         $self->_set_terminator($saved_term);
     }
     return ($val, $end_label);
+}
+
+# _phi_slot_for_proj($region, $want_index) -> 0 or 1
+#
+# Which Phi incoming slot corresponds to the If arm whose Proj carries
+# $want_index (0 = then/taken, 1 = else)?
+#
+# A Phi's values are positionally paired with its Region's CONTROL inputs, so
+# the answer is the position of that Proj among them. Read from the graph
+# rather than assumed, because the order is a producer build-site choice and
+# not a convention: perl5-son's StackSim::merge emits
+# `Region(inputs => [$control, $other->control])` -- continuing path first, arm
+# second -- which puts the ELSE arm in slot 0 for a void `if`.
+#
+# Defaults to 0 when the Region's inputs cannot be read or no Proj matches,
+# preserving the previous behaviour for any shape this cannot classify.
+sub _phi_slot_for_proj {
+    my ($region, $want_index) = @_;
+    return 0 unless defined $region && $region->can('inputs');
+
+    my $inputs = $region->inputs;
+    return 0 unless defined $inputs;
+
+    # Region inputs may be a flat list or a single arrayref of controls.
+    my @controls = @$inputs;
+    @controls = @{ $controls[0] }
+        if @controls == 1 && ref $controls[0] eq 'ARRAY';
+
+    for my $slot (0, 1) {
+        my $c = $controls[$slot];
+        next unless defined $c && Scalar::Util::blessed($c);
+        next unless $c->can('operation') && $c->operation eq 'Proj';
+        next unless $c->can('index');
+        return $slot if $c->index == $want_index;
+    }
+    return 0;
 }
