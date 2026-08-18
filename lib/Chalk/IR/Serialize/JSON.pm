@@ -413,6 +413,21 @@ sub _deserialize_graph ($method_data) {
         }
         elsif ($op eq 'Phi') {
             $args{region} = $nodes[ $fields->{region} ];
+
+            # predecessors[i] is the Proj that inputs[i] arrives along, carried
+            # as node indices. It makes arm identity a field read instead of a
+            # backward control-chain search -- see
+            # docs/research/2026-08-18-phi-pairing-should-not-be-a-search.md.
+            #
+            # Optional on the wire (a loop Phi records none), and dropped
+            # wholesale if any index fails to resolve: the consumer pairs by
+            # POSITION, so a partial list would silently mis-pair, which is the
+            # exact failure this field exists to remove.
+            if (my $pred_ix = $fields->{predecessors}) {
+                my @preds = map { $nodes[$_] } @$pred_ix;
+                $args{predecessors} = \@preds
+                    unless grep { !defined } @preds;
+            }
             # A loop Phi's backedge input (inputs[1]) may reference a node
             # LATER in the array -- the Phi<->backedge data cycle forces one
             # forward edge in any serialization order, and a forward index
