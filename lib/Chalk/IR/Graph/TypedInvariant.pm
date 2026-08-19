@@ -63,6 +63,32 @@ sub _conforms {
     return grep({ $actual eq $_ } $allowed->@*) ? true : false;
 }
 
+# _arm_proj_of($control) -> the Proj this arm hangs off, or undef.
+#
+# A Region input is the arm's LAST control node, not its Proj, so recovering
+# arm IDENTITY means walking control_in back to the branch. Stops at another
+# Region: its arms are a different question, and descending past it would
+# attribute this arm to the wrong branch.
+#
+# Bounded by a seen-set. An arm's control chain is acyclic, but a loop
+# back-edge elsewhere in the graph must not turn an unclassifiable shape into
+# a hang -- the failure mode that made an earlier producer-side descent
+# recurse forever. Mirrors SoN::FromOptree::StackSim::arm_proj, which is the
+# producer's copy of the same walk.
+sub _arm_proj_of {
+    my ($node) = @_;
+    my %seen;
+    while (defined $node && blessed($node)) {
+        my $id = $node->can('id') ? $node->id : undef;
+        last if defined $id && $seen{$id}++;
+        my $op = $node->can('operation') ? $node->operation : '';
+        return $node if $op eq 'Proj';
+        last if $op eq 'Region';
+        $node = $node->can('control_in') ? $node->control_in : undef;
+    }
+    return undef;
+}
+
 # Per-position required representation for ops with different constraints at each input.
 # Each entry maps op-name -> arrayref of per-position constraints, where each
 # constraint is either undef (unchecked) or an arrayref of allowed repr strings.
@@ -261,6 +287,37 @@ sub check {
                         message => sprintf(
                             'Phi has %d incoming value(s) but its Region %s has %d control input(s); they pair by position, so the lengths must match',
                             scalar($values->@*), $region->id(), scalar(@controls)
+                        ),
+                    };
+                }
+
+                # PHI/REGION PAIRING -- the half arity cannot check. A swapped
+                # pairing of equal length passes the arity check above, and that
+                # is precisely what all three miscompiles were. The Phi must
+                # RECORD which arm each value arrives from rather than leave the
+                # consumer to search for it.
+                #
+                # THE TRIGGER IS NARROW, ON PURPOSE: required only when the
+                # Region's control inputs RESOLVE TO PROJS, i.e. there are
+                # genuinely named arms to point at. A Region input is the arm's
+                # LAST control node, so the Proj is reached by walking control_in
+                # back -- the same walk the producer does once at construction
+                # (SoN::FromOptree::StackSim::arm_proj).
+                #
+                # Measured across chalk's 32 merge-Phi construction sites: 20
+                # have Proj arms, 12 build a branchless Region to unit-test
+                # something else (scope-trivial-phi.t on `Region(controls=>[])`).
+                # Demanding predecessors of the latter would mean inventing an
+                # If/Proj skeleton those tests do not care about. The exemption
+                # is structural -- there is nothing to name -- not a carve-out.
+                if (!$is_loop && @controls
+                        && !defined $node->predecessors
+                        && (grep { _arm_proj_of($_) } @controls) == @controls) {
+                    push @violations, {
+                        node_id => $node->id(),
+                        message => sprintf(
+                            'Phi records no predecessors, but every control input of its Region %s resolves to a Proj; a merge over named arms must say which value comes from which arm',
+                            $region->id()
                         ),
                     };
                 }

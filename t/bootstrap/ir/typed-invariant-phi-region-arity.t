@@ -65,7 +65,11 @@ sub build_graph ($phi_value_count) {
 
     # The variable: 1 value for a deliberately-broken graph, 2 for a sound one.
     my @values = $phi_value_count == 1 ? ($one) : ($one, $zero);
-    my $phi = $f->make('Phi', region => $region, values => \@values);
+    # Record the arms. This graph is a real branch merge, so the pairing
+    # invariant (typed-invariant-phi-predecessors-required.t) demands it; the
+    # ARITY defect under test here is independent of whether arms are recorded.
+    my $phi = $f->make('Phi', region => $region, values => \@values,
+                       predecessors => [$then, $else]);
     $phi->set_representation('Int');
 
     my $ret = $f->make('Return', inputs => [$phi]);
