@@ -1030,3 +1030,182 @@ branch_control: %proj0 -> %st
 control: %region -> %rd
 L: GREEN
 ```
+
+## R25 a NESTED branch whose inner arms store an element and rebind
+
+Every other mixed-effect case here is one branch deep. This one nests: the outer
+`if`'s arm contains another `if`, and the inner arms each store an element AND
+rebind a scalar. So the OUTER merge's arm is itself a merge.
+
+That is what made it fail. A Phi records `predecessors` — which Proj each value
+arrives from — and the producer's arm walk stopped at a Region, because
+descending into another merge's arms would attribute the slot to the wrong
+branch. Correct for a flat branch; for a nested one the outer arm IS the inner
+Region, so the walk returned nothing and the all-or-nothing guard dropped
+predecessors for the outer Phis entirely. The backend then fell back to searching
+the Region and paired the arms backwards, emitting
+
+    %tmp_39 = phi i64 [ %tmp_22, %if.merge.6 ], [ %tmp_38, %if.else.2 ]
+
+which names `%tmp_38` — defined *in* `if.merge.6` — as arriving from
+`if.else.2`. lli rejects it: *Instruction does not dominate all uses!*
+
+The fix steps THROUGH a nested Region to `Region.head`'s `control_in`, which is
+the outer Proj. Note the outer Phis below carry `[%oproj1, %oproj0]` while the
+inner carry `[%iproj0, %iproj1]` — the two merges have different arm orders, and
+recording each rather than deriving it is the whole point.
+
+```perl
+# source
+use 5.42.0;
+my @a=(1,2,3); my $x = 1; my $y = 1; my $n = 0;
+if ($x) { if ($y) { $a[0]=9; $n=1 } else { $a[0]=8; $n=2 } }
+print "a0=$a[0] n=$n\n";
+```
+
+```behavior
+stdout: a0=9 n=1\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%c3   = Constant(3) :Int
+%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%i0   = Constant(0) :Int
+%mem  = MemStart()
+%lval = Subscript(%arr, %i0) :Int
+%v9   = Constant(9) :Int
+%v8   = Constant(8) :Int
+%oif  = If(%start, %c1)
+%oproj0 = Proj(%oif, index: 0)
+%oproj1 = Proj(%oif, index: 1)
+%iif  = If(%oproj0, %c1)
+%iproj0 = Proj(%iif, index: 0)
+%iproj1 = Proj(%iif, index: 1)
+%st9  = Assign(%lval, %v9) :Int
+%st8  = Assign(%lval, %v8) :Int
+%iregion = Region(%st9, %st8)
+%imphi = Phi(%st9, %st8, region: %iregion, predecessors: [%iproj0, %iproj1])
+%oregion = Region(%oproj1, %iregion)
+%omphi = Phi(%mem, %imphi, region: %oregion, predecessors: [%oproj1, %oproj0])
+%rd   = Subscript(%arr, %i0, %omphi) :Int
+%inphi = Phi(%c1, %c2, region: %iregion, predecessors: [%iproj0, %iproj1]) :Int
+%onphi = Phi(%i0, %inphi, region: %oregion, predecessors: [%oproj1, %oproj0]) :Int
+return %rd
+branch_control: %iproj0 -> %st9
+branch_control: %iproj1 -> %st8
+control: %oregion -> %rd
+L: GREEN
+```
+
+## R26 the nested mixed-effect branch, inner guard FALSE (bilateral)
+
+R25 with the inner guard failing, so the ELSE arm's store runs. This is the half
+that catches an inverted INNER pairing while the outer stays correct — the two
+merges are paired independently, and a fix that got only one right would pass
+R25 alone.
+
+```perl
+# source
+use 5.42.0;
+my @a=(1,2,3); my $x = 1; my $y = 0; my $n = 0;
+if ($x) { if ($y) { $a[0]=9; $n=1 } else { $a[0]=8; $n=2 } }
+print "a0=$a[0] n=$n\n";
+```
+
+```behavior
+stdout: a0=8 n=2\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c0   = Constant(0) :Int
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%c3   = Constant(3) :Int
+%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%mem  = MemStart()
+%lval = Subscript(%arr, %c0) :Int
+%v9   = Constant(9) :Int
+%v8   = Constant(8) :Int
+%oif  = If(%start, %c1)
+%oproj0 = Proj(%oif, index: 0)
+%oproj1 = Proj(%oif, index: 1)
+%iif  = If(%oproj0, %c0)
+%iproj0 = Proj(%iif, index: 0)
+%iproj1 = Proj(%iif, index: 1)
+%st9  = Assign(%lval, %v9) :Int
+%st8  = Assign(%lval, %v8) :Int
+%iregion = Region(%st9, %st8)
+%imphi = Phi(%st9, %st8, region: %iregion, predecessors: [%iproj0, %iproj1])
+%oregion = Region(%oproj1, %iregion)
+%omphi = Phi(%mem, %imphi, region: %oregion, predecessors: [%oproj1, %oproj0])
+%rd   = Subscript(%arr, %c0, %omphi) :Int
+%inphi = Phi(%c1, %c2, region: %iregion, predecessors: [%iproj0, %iproj1]) :Int
+%onphi = Phi(%c0, %inphi, region: %oregion, predecessors: [%oproj1, %oproj0]) :Int
+return %rd
+branch_control: %iproj0 -> %st9
+branch_control: %iproj1 -> %st8
+control: %oregion -> %rd
+L: GREEN
+```
+
+## R27 the nested mixed-effect branch, OUTER guard false (bilateral)
+
+The third polarity: the outer guard fails, so neither inner arm runs and the
+post-merge read sees the untouched element. Pins that the outer merge selects its
+own arm correctly when the inner branch never executes — the case where a
+backwards outer pairing would read a value that was never computed.
+
+```perl
+# source
+use 5.42.0;
+my @a=(1,2,3); my $x = 0; my $y = 1; my $n = 0;
+if ($x) { if ($y) { $a[0]=9; $n=1 } else { $a[0]=8; $n=2 } }
+print "a0=$a[0] n=$n\n";
+```
+
+```behavior
+stdout: a0=1 n=0\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c0   = Constant(0) :Int
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%c3   = Constant(3) :Int
+%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%mem  = MemStart()
+%lval = Subscript(%arr, %c0) :Int
+%v9   = Constant(9) :Int
+%v8   = Constant(8) :Int
+%oif  = If(%start, %c0)
+%oproj0 = Proj(%oif, index: 0)
+%oproj1 = Proj(%oif, index: 1)
+%iif  = If(%oproj0, %c1)
+%iproj0 = Proj(%iif, index: 0)
+%iproj1 = Proj(%iif, index: 1)
+%st9  = Assign(%lval, %v9) :Int
+%st8  = Assign(%lval, %v8) :Int
+%iregion = Region(%st9, %st8)
+%imphi = Phi(%st9, %st8, region: %iregion, predecessors: [%iproj0, %iproj1])
+%oregion = Region(%oproj1, %iregion)
+%omphi = Phi(%mem, %imphi, region: %oregion, predecessors: [%oproj1, %oproj0])
+%rd   = Subscript(%arr, %c0, %omphi) :Int
+%inphi = Phi(%c1, %c2, region: %iregion, predecessors: [%iproj0, %iproj1]) :Int
+%onphi = Phi(%c0, %inphi, region: %oregion, predecessors: [%oproj1, %oproj0]) :Int
+return %rd
+branch_control: %iproj0 -> %st9
+branch_control: %iproj1 -> %st8
+control: %oregion -> %rd
+L: GREEN
+```
