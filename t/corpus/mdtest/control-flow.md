@@ -2571,3 +2571,193 @@ return %p2
 control: %start -> %p2
 L: GREEN
 ```
+
+## T16 nested ONE-ARMED if carrying a void effect (guard TAKEN)
+
+Perl compiles a one-armed `if` and a statement modifier to the SAME `and` op,
+so this plain nested block reached the modifier path -- which merges via
+`TernaryExpr`, a pure value select with no control flow, and therefore had
+nowhere to pin a void effect. It refused.
+
+Depth is NOT the discriminator: a four-deep nest where every level is two-armed
+lowers, while this two-deep one-armed nest did not. The discriminator is
+one-armed-ness plus a void effect.
+
+Both guards must survive as real branches. The outer merge selects between the
+pre-branch value and the INNER merge's result, so the Phi is nested.
+
+```perl
+# source
+use 5.42.0;
+my $x = 1; my $n = 0;
+if ($x) { if ($x) { print "in\n"; $n = 7 } }
+print "n=$n\n";
+```
+
+```behavior
+stdout: in\nn=7\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c1   = Constant(1) :Int
+%if1  = If(%start, %c1)
+%pj1t = Proj(%if1, index: 0)
+%if2  = If(%pj1t, %c1)
+%pj2t = Proj(%if2, index: 0)
+%in   = Constant("in\n") :Str
+%p1   = Print(%in)
+%reg2 = Region(%pj2t, %p1)
+%pj1f = Proj(%if1, index: 1)
+%reg1 = Region(%pj1f, %reg2)
+%c0   = Constant(0) :Int
+%c7   = Constant(7) :Int
+%phi2 = Phi(%c0, %c7)
+%phi1 = Phi(%c0, %phi2)
+return %phi1
+L: GREEN
+```
+
+## T17 nested ONE-ARMED if whose inner guard is FALSE (bilateral pair for T16)
+
+The other polarity. The inner guard is false, so the effect must NOT fire and
+the rebind must NOT be observed -- `$n` keeps its pre-branch value through two
+levels of merge. A fix that built control flow but paired the merge arms
+backwards passes T16 and fails here.
+
+```perl
+# source
+use 5.42.0;
+my $x = 1; my $y = 0; my $n = 0;
+if ($x) { if ($y) { print "in\n"; $n = 7 } }
+print "n=$n\n";
+```
+
+```behavior
+stdout: n=0\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c1   = Constant(1) :Int
+%if1  = If(%start, %c1)
+%c0   = Constant(0) :Int
+%if2  = If(%if1, %c0)
+%in   = Constant("in\n") :Str
+%p1   = Print(%in)
+%pre  = Constant("n=") :Str
+%co   = Coerce(%c0 : Int -> Str) :Str
+%cat  = Concat(%pre, %co)
+%p2   = Print(%cat)
+return %p2
+L: GREEN
+```
+
+## T18 elsif whose arm carries a void effect
+
+The spelling that matters most: `elsif` is ordinary code, not a modifier idiom,
+and its else-position branch lowers to the same one-armed `and`. Named as a
+blocker by `t/cmd/elsif.t` in two other corpus cases.
+
+```perl
+# source
+use 5.42.0;
+my $x = 2; my $n = 0;
+if ($x == 1) { $n = 1 }
+elsif ($x == 2) { print "two\n"; $n = 7 }
+print "n=$n\n";
+```
+
+```behavior
+stdout: two\nn=7\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%two  = Constant("two\n") :Str
+%p1   = Print(%two)
+%c7   = Constant(7) :Int
+%p2   = Print(%c7)
+return %p2
+L: GREEN
+```
+
+## T19 nested ONE-ARMED if containing a die (guard TAKEN)
+
+The terminating leg of the same refusal. A `die` under a nested branch has to
+be seen THROUGH that branch by the arm scan -- otherwise the outer branch takes
+the value-merge path and the die escapes its guard, running unconditionally.
+Perl exits 255 and never reaches the following statement.
+
+```perl
+# source
+use 5.42.0;
+my $x = 1;
+print "before\n";
+if ($x) { if ($x) { die "boom\n" } }
+print "after\n";
+```
+
+```behavior
+stdout: before\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%bef  = Constant("before\n") :Str
+%p1   = Print(%bef)
+%c1   = Constant(1) :Int
+%if1  = If(%p1, %c1)
+%pj1f = Proj(%if1, index: 1)
+%pj1t = Proj(%if1, index: 0)
+%if2  = If(%pj1t, %c1)
+%pj2f = Proj(%if2, index: 1)
+%boom = Constant("boom\n") :Str
+%uw   = Unwind(%boom)
+%reg2 = Region(%pj2f, %uw)
+%reg1 = Region(%pj1f, %reg2)
+%aft  = Constant("after\n") :Str
+%p2   = Print(%aft)
+return %p2
+L: GREEN
+```
+
+## T20 a rebind-only nested body keeps the VALUE merge (regression guard)
+
+The negative direction, and the reason T16-T19 cannot be satisfied by simply
+routing every arm through control flow. A body that only rebinds a pad slot has
+no effect to pin, so it must stay on the cheaper value merge -- no `If` is built
+at all. A change that made control flow unconditional would pass every case
+above and regress this one.
+
+```perl
+# source
+use 5.42.0;
+my $x = 1; my $n = 0;
+if ($x) { if ($x) { $n = 7 } }
+print "n=$n\n";
+```
+
+```behavior
+stdout: n=7\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c0   = Constant(0) :Int
+%c7   = Constant(7) :Int
+%c1   = Constant(1) :Int
+%t1   = TernaryExpr(%c1, %c7, %c0)
+return %t1
+L: GREEN
+```
