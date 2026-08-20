@@ -1,7 +1,9 @@
 # Slice 2, re-scoped: the missing piece is a sub METADATA channel, not a node type
 
 **Date:** 2026-08-20
-**Status:** scoped, not started. Supersedes the ordering in
+**Status:** step 1 (1a-1d) LANDED 2026-08-20. Steps 2-6 open. See "Outcome" at
+the end for what was delivered and what was NOT.
+Supersedes the ordering in
 `docs/plans/2026-08-06-f3-call-as-memory-transformer-design.md` Slice 2.
 **Measured on:** chalk `ddb54c62`, perl5-son `3047f35`.
 
@@ -363,3 +365,66 @@ version pin (`son-corpus-wide.t:17` resolves it as a live filesystem path).
 `_pkg_num_globals` are dead code. Deleting them proves the SV-union model is
 gone. Re-run H7's four probes on today's HEAD first — that claim was measured
 2026-08-10 and this week has expired three premises.
+
+
+---
+
+# Outcome of step 1 (2026-08-20)
+
+All four sub-steps landed. chalk `58c38b46`, perl5-son `a914edb`. Corpus gate
+held at 214/214/214/214, zero not-ok, at every step.
+
+| step | what | commits |
+|---|---|---|
+| 1a | producer emits per-sub metadata | perl5-son `a44ae7c`, `babc86b` |
+| 1b | loader replays it into `MOP::Sub` | perl5-son `5abe9cc`, chalk `9edf9c46` |
+| 1c | backend registry reads `$cls->subs` | chalk `dac0b42d`, `98a0961d` |
+| 1d | a Call carries its callee metaobject | chalk `d2099b5d`, `0b85025a`, `c208671c`, `58c38b46` |
+
+**Acceptance criteria, honestly scored:**
+
+- ✅ a file-level `sub f { }` produces a `MOP::Sub` reachable from the sealed MOP
+- ✅ `params` / `uses_args` populated from the wire, not derived by scanning
+- ✅ `grep -rn resolved_graph lib/` returns 0
+- ✅ gate holds with all four legs agreeing, coordinator-self-verified
+- ✅ the nine green `subs` cases stay green (no regression; NOT proof of the call path)
+
+## What step 1 did NOT deliver, and must not be described as delivering
+
+**The scans are still there.** The plan's headline is "consumers stop RECOVERING
+sub-level facts by scanning". Measured on HEAD, both named scans still run:
+
+- `_seed_direct_call_arg_reprs` still pattern-matches the callee graph for
+  `shift @_` / `$_[0]`
+- `_collect_positional_arg_reads` (backend) still walks the callee graph
+
+`uses_args` is the ONE fact with a production consumer, and that landed in 1c.
+`MOP::Sub::params` has no reader in the LLVM backend.
+
+**Why the obvious fix does not work** (proposed by review, checked and declined):
+replacing the arity check with `scalar @{$target->params}` breaks argument
+binding. `_collect_positional_arg_reads` does not merely COUNT -- it returns the
+arg-read NODES that `_arg_bind` keys by `refaddr`, and `params` is `[]` for every
+signature-less sub, which is all of them today. Retiring that scan requires the
+params-by-default convention, i.e. **step 3**.
+
+So: step 1 wired the metaobject CHANNEL. Step 3 is what claims the payoff.
+
+## Corrections to this document's own reasoning
+
+- **1c's premise was wrong.** It claimed class subs are not inlined, so a define
+  was safe for them. `_lower_call_direct` dispatches on `dispatch_kind eq
+  'direct'` alone -- class subs are inlined identically. Emitting defines
+  duplicated bodies; sub-define emission is gated off behind
+  `CHALK_EMIT_SUB_DEFINES` until step 5 retires the inliner.
+- **1d's phase-ordering claim was wrong.** `resolved_graph` was kept on the
+  grounds that the repr fixpoint precedes the sealed MOP. Measured: the MOP is
+  sealed ~30 lines BEFORE that fixpoint. The field is now deleted.
+
+## Filed, not fixed
+
+`t/bootstrap/mop-fence-audit.t` fails 2 of 42 (`_replay_classes`,
+`_propagate_computed_reprs` no longer byte-identical to their milestone base).
+Verified pre-existing against `9edf9c46~1`. But `_replay_classes` is a FENCED sub
+that 1b and later commits modified, so the fence has been overtaken: it should be
+re-baselined or retired, not left red. A red fence trains people to ignore it.
