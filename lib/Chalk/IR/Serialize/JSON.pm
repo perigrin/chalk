@@ -78,6 +78,7 @@ sub _extract_fields ($node, $id_remap) {
     if ($op eq 'StashAccess') {
         return {
             stash_name => $node->stash_name,
+            sigil      => $node->sigil,
             var_name   => $node->var_name,
         };
     }
@@ -461,6 +462,10 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'StashAccess') {
             $args{stash_name} = $fields->{stash_name} // '';
             $args{var_name}   = $fields->{var_name}   // '';
+            # Part of the identity -- see the node. Defaulting to '$' keeps a
+            # pre-sigil wire loading with its old identity rather than merging
+            # differently-sigilled variables.
+            $args{sigil}      = $fields->{sigil}      // '$';
         }
         elsif ($op eq 'RegexMatch') {
             $args{pattern} = $fields->{pattern} // '';
