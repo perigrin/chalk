@@ -1049,6 +1049,72 @@ sub _run_ir_shape_check {
 # both the multiset _sig_match and the rooted _pair_match.
 my %_OPERAND_RETURNING = (And => 1, Or => 1, DefinedOr => 1);
 
+# spec_invariant_check($ir_text) -> { verdict => PASS|FAIL|SKIP, reason => ... }
+#
+# Run the IR invariants over the graph the ir BLOCK describes, not the one the
+# producer emitted. Those are different graphs and only the producer's was ever
+# checked (son-corpus-wide.t runs TypedInvariant on `$g`), so a spec could
+# assert a shape the IR forbids and stay green on all three legs.
+#
+# Measured on D1f: deleting its `predecessors:` line left every leg green, and
+# so did SWAPPING it to [%proj1, %proj0] -- an inverted arm pairing, the exact
+# defect class of 44d1fa8c and 9ce43cdd. The ir block is the half of a corpus
+# case a human reads; a spec that teaches the wrong shape is worse than no spec.
+#
+# SKIP rather than FAIL when the block cannot be built: unbuildability is the
+# shape leg's finding to report, and double-reporting it here would make one
+# defect look like two.
+sub spec_invariant_check {
+    my ($class, $ir_text) = @_;
+
+    return { verdict => 'SKIP', reason => 'no ir block' }
+        unless defined $ir_text && $ir_text =~ /\S/;
+
+    # A declared-GAP block has no nodes to check. It is not a spec failure, and
+    # it is not a passing shape either -- there is nothing to have an opinion on.
+    return { verdict => 'SKIP', reason => 'pure-GAP block; no graph to check' }
+        if _is_pure_gap_block($ir_text);
+
+    my $spec_return;
+    eval { $spec_return = __PACKAGE__->build_graph_from_ir($ir_text) };
+    return { verdict => 'SKIP', reason => 'spec block unbuildable: ' . ($@ || 'builder returned undef') }
+        if $@ || !defined $spec_return;
+
+    # Reuse the collector _run_ir_shape_check already uses. That path built the
+    # same check years ago but is now reachable only from run_case, which the
+    # per-topic suites stopped driving when the corpus gate superseded them --
+    # so the check existed and ran on nothing real.
+    my @nodes = eval { _collect_all_nodes($spec_return) };
+    return { verdict => 'SKIP', reason => "spec graph unwalkable: $@" } if $@;
+
+    my $inv = eval { Chalk::IR::Graph::TypedInvariant->check(\@nodes) }
+        // { ok => 0, violations => [{ message => "died: $@" }] };
+
+    # A SPEC IS A SUBSET, so not every invariant applies to it. The shape leg
+    # is a subset match by design -- a case names the nodes it is ABOUT and
+    # omits the rest -- and the control-chain invariant reads that omission as
+    # a broken effect chain.
+    #
+    # Measured: 49 of 199 cases with Print/Call nodes leave at least one of
+    # them off their `control:` line, across every topic (class-simple,
+    # field-basic, method-simple, ...). Applying the chain check to spec blocks
+    # failed 36 cases on the FIRST run -- all of them this one message, none of
+    # them a real defect. That is the convention, not a backlog.
+    #
+    # The invariants that DO apply are the ones about a node's own consistency
+    # with what the spec wrote down: Phi/Region arity, Phi predecessors,
+    # per-position reprs. Those are statements the spec makes, so the spec owns
+    # them.
+    my @violations = grep { ($_->{message} // '') !~ /broken effect chain/ }
+                     ($inv->{violations} // [])->@*;
+
+    return { verdict => 'PASS', reason => '' } unless @violations;
+    return {
+        verdict => 'FAIL',
+        reason  => join('; ', map { $_->{message} } @violations),
+    };
+}
+
 sub shape_subset_check {
     my ($class, $ir_text, $return_node) = @_;
 

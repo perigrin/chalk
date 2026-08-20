@@ -242,6 +242,29 @@ for my $md (@topics) {
             $inv_ok  = $inv->{ok} ? 1 : 0;
             $inv_why = $inv->{ok} ? ''
                 : join('; ', map { $_->{message} } $inv->{violations}->@*);
+
+            # The invariant above checks the PRODUCER's graph. The ir block
+            # describes a DIFFERENT graph, and nothing checked that one -- so a
+            # spec could assert a shape the IR forbids and stay green. Measured
+            # on D1f: deleting its `predecessors:` line kept all three legs
+            # green, and so did swapping it to [%proj1, %proj0], an inverted arm
+            # pairing (the defect class of 44d1fa8c / 9ce43cdd).
+            #
+            # Folded into the invariant leg rather than added as a fourth: both
+            # ask "is this a legal graph", and a case is not gate-green if
+            # either the code it compiles to or the shape it documents is
+            # illegal. SKIP (GAP block, unbuildable) leaves the verdict alone --
+            # unbuildability is the shape leg's finding to report.
+            if ($inv_ok) {
+                my $spec_inv = eval {
+                    Chalk::CodeGen::Harness::MdtestCorpus
+                        ->spec_invariant_check($case->{ir});
+                } // { verdict => 'FAIL', reason => "died: $@" };
+                if ($spec_inv->{verdict} eq 'FAIL') {
+                    $inv_ok  = 0;
+                    $inv_why = 'ir block: ' . ($spec_inv->{reason} // '');
+                }
+            }
         }
 
         $tally{green}++,      $by_topic{$topic}{green}++      if $behavior_ok;
