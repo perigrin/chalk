@@ -91,8 +91,15 @@ subtest 'the callee graph is the same object either way' => sub {
 # reads `target`.
 subtest 'resolved_graph is loader-internal only' => sub {
     my @offenders;
-    for my $dir (qw(lib)) {
-        my @files = split /\n/, qx{find $dir -name '*.pm'};
+    for my $root (qw(lib)) {
+        my @files = split /\n/, qx{find $root -name '*.pm'};
+        # A 0-file scan is indistinguishable from a clean one, so the fence
+        # would PASS from any cwd where lib/ does not exist -- verified: run
+        # from /tmp it reported "nothing consumes resolved_graph" having read
+        # nothing at all. Assert the scan happened before trusting its result.
+        cmp_ok scalar @files, '>', 100,
+            "the scan actually read lib/*.pm (found ${\ scalar @files })"
+            or return;
         for my $f (@files) {
             next if $f =~ m{IR/Serialize/JSON\.pm$};   # the loader itself
             next if $f =~ m{IR/Node/Call\.pm$};        # the declaration
@@ -107,6 +114,39 @@ subtest 'resolved_graph is loader-internal only' => sub {
     is_deeply \@offenders, [],
         'nothing outside the loader consumes resolved_graph'
         or diag "offenders: @offenders";
+};
+
+# A CALLEE WITH A GRAPH BUT NO METAOBJECT is a disagreement between the two
+# halves of the wire, and it is reachable: the producer writes the graph
+# UNCONDITIONALLY and only then calls _record_sub, which returns early for a
+# `method` CV and for a `:reader` accessor. Measured -- `Widget::go($w)` on a
+# class method gives resolved_graph=SET, target=UNDEF.
+#
+# The backend now resolves THROUGH the metaobject, so without this the failure
+# surfaced there as "an unknown or builtin sub" -- actively wrong, since the sub
+# is neither. The loader has both facts in hand and says what is really true.
+subtest 'a graph without a metaobject is a loud disagreement' => sub {
+    my $src = <<'PERL';
+use feature 'class';
+no warnings 'experimental::class';
+class Widget { field $n :param = 0; method go { 9 } }
+my $w = Widget->new(n => 5);
+print Widget::go($w), "\n";
+PERL
+    my $file = "$dir/mcall.pl";
+    open my $fh, '>', $file or die $!;
+    print {$fh} "use 5.42.0;\n$src\n";
+    close $fh;
+    # No package filter: the class must be emitted for its graph to exist.
+    my $json = qx{$PERL -I$SON -MO=SoN,json $file 2>$dir/mcall.err};
+    ok length $json, 'producer emitted JSON' or return;
+
+    my $err = '';
+    eval { Chalk::IR::Serialize::JSON::from_json($json); 1 } or $err = $@ // '';
+    like $err, qr/^GAP:/, 'refuses loudly rather than mislabelling the callee';
+    like $err, qr/graph set and its class sub records disagree/,
+        'and names the real cause'
+        or diag $err;
 };
 
 done_testing;

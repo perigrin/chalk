@@ -846,7 +846,7 @@ sub lower_value {
         return $self->_lower_call_method($node);
     }
     # Call(dispatch_kind='direct'): a direct named-sub call. The callee graph
-    # was resolved by the loader (resolved_graph). F1 handles the no-argument
+    # was resolved by the loader (target, a MOP::Sub). F1 handles the no-argument
     # form: inline the callee's result subgraph at this call site.
     # ponytail: inline no-arg callee; a real LLVM `define`+`call` and argument
     # binding land when F3 (arg-passing direct calls) is implemented.
@@ -5740,7 +5740,7 @@ sub _lower_call_new {
 # _lower_call_direct($node) -> $llvm_ref
 #
 # Lower a direct named-sub call (dispatch_kind='direct'). The loader resolved
-# the callee to its graph (resolved_graph). The callee is inlined at the call
+# the callee to its metaobject (target). The callee is inlined at the call
 # site: the caller's Call inputs are its arguments, and the callee's single
 # Return value subgraph is lowered in the current context.
 #

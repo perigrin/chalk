@@ -599,7 +599,6 @@ sub _all_graph_nodes ($g) {
 # Keyed by the callee's fully-qualified name (`main::f`), which is how the
 # producer names the graph and how declare_sub records the metaobject.
 sub _attach_call_targets ($graphs, $mop) {
-    my $attached = 0;
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
             next unless $node->operation eq 'Call'
@@ -608,17 +607,42 @@ sub _attach_call_targets ($graphs, $mop) {
                 && $node->can('set_target')
                 && !defined $node->target;
 
-            my ($cls_name, $sub_name) = ($node->name // '') =~ /^(.*)::([^:]+)$/
-                or next;
-            my $cls = $mop->for_class($cls_name) or next;
-            my ($sub) = grep { $_->name eq $sub_name } $cls->subs;
-            next unless $sub;
+            my ($cls_name, $sub_name) = ($node->name // '') =~ /^(.*)::([^:]+)$/;
+            my $cls = defined $cls_name ? $mop->for_class($cls_name) : undef;
+            my ($sub) = $cls
+                ? (grep { $_->name eq $sub_name } $cls->subs)
+                : ();
 
-            $node->set_target($sub);
-            $attached++;
+            if ($sub) {
+                $node->set_target($sub);
+                next;
+            }
+
+            # NO METAOBJECT. That is fine for a genuinely unresolvable callee (a
+            # builtin, or a package outside the emission filter) -- those have no
+            # graph either, and the backend's own GAP names them.
+            #
+            # But a callee with a resolved GRAPH and no metaobject is a
+            # DISAGREEMENT between the two halves of the wire, and it is
+            # reachable: the producer writes $graphs->{$full_name}
+            # UNCONDITIONALLY and only then calls _record_sub, which returns
+            # early for a `method` CV and for a `:reader` accessor. Measured --
+            # `Widget::go($w)` on a class method gives rg=SET, target=UNDEF.
+            #
+            # The backend now resolves THROUGH the metaobject, so this would
+            # surface there as "an unknown or builtin sub" -- actively wrong,
+            # since the sub is neither. Say what is really true, here, where both
+            # facts are in hand.
+            die "GAP: direct call to '" . ($node->name // '?') . "' resolved to a "
+              . "callee GRAPH but no metaobject -- the wire's graph set and its "
+              . "class sub records disagree. A `method` or `:reader` CV is "
+              . "emitted as a graph but deliberately not recorded as a sub "
+              . "(B::SoN::_record_sub's early returns), so it cannot be called "
+              . "in sub form."
+                if $node->can('resolved_graph') && $node->resolved_graph;
         }
     }
-    return $attached;
+    return;
 }
 
 sub _resolve_direct_calls ($graphs) {
