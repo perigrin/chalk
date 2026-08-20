@@ -124,19 +124,90 @@ Two corrections folded in:
   every call site conforms. (Return CONTEXT is per-call-site — a different axis,
   see below.)
 
+## The MOP is a deliberate divergence from classic Sea of Nodes
+
+perigrin: the MOP is one of the places Chalk differs from other SoN
+implementations. Classic SoN (C2) is one flat graph per unit — declarations
+dissolve into it, and per-sub facts live outside the IR in the VM. Chalk keeps a
+MOP alongside the graph, which is why `Call.pm` can say codegen should "read the
+callee's graph/params/return-type directly without going through the symbol
+table at emit time."
+
+That reframes every scan hit in this session. `_seed_direct_call_arg_reprs`, the
+backend's arity check, the proposed `@_` scan, the three-spelling `@_`
+vocabulary — **all are the flat-graph model asserting itself where the MOP
+should have answered.** The B::SoN frontend skips the MOP layer entirely (the
+loader builds a bare `$graphs{name}` hash of `Chalk::IR::Graph`), so facts that
+should be metadata get recovered by pattern-matching the graph.
+
+### Everything is a CLASS
+
+perigrin's design call: rather than "everything is a package", everything is a
+class. Packages and classes are synonymous in Perl, so the lean is free —
+`sub f` at file scope genuinely lands in `main::`, and `class` in 5.38+ builds
+on the same namespace machinery.
+
+This is load-bearing here, not stylistic. It means **`main` is a class**, a
+file-level sub is a sub of class `main`, and `MOP::Sub`'s REQUIRED `class` field
+is already correct — nothing needs to become optional, and no second "unit"
+metaobject is invented. The model stays total: there is no "top-level sub"
+category.
+
+### What `Call` actually carries (corrected by reading, not memory)
+
+Two fields, deliberately split:
+
+| field | holds | used for |
+|---|---|---|
+| `target` | "a MOP::Method/Sub handle" | method dispatch |
+| `resolved_graph` | "the callee `Chalk::IR::Graph`" | direct sub calls |
+
+`resolved_graph`'s own comment states the reason: *"a top-level sub is not a MOP
+class method, so it rides here."* It is a **documented flat-graph fallback**,
+adopted because a file-level sub had no metaobject to point at — not an
+accident.
+
+**Under everything-is-a-class that premise is simply false.** The field is not a
+fallback to tolerate until something better exists; it is a fallback for a case
+that does not exist in the model. Same root as the `class`-field problem and the
+scans: one missing piece — a metaobject for file-level subs — with three
+symptoms.
+
 ## Ordering
 
-### 1. Sub metadata on the wire
+### 1. A metaobject for file-level subs, and `target` replaces `resolved_graph`
 
-Producer records what its CV walk knows; loader populates the three empty
-fields. First occupants: `uses_args`, arity/params. Producer-side, single-repo.
+`MOP::Class` for `main`, so `MOP::Sub` works unmodified. The B::SoN loader
+builds MOP objects instead of a bare graph hash, and the Call carries `target`.
+`resolved_graph` is then deleted and `Call.pm`'s two-field split collapses to
+one.
 
-### 2. `@_` off `StashAccess`
+Scope: 12 `resolved_graph` sites across 3 files (`Target/LLVM/Context.pm`,
+`IR/Node/Call.pm`, `IR/Serialize/JSON.pm`), plus loader construction.
+
+**This is a convergence onto an existing proven contract, not a new channel** —
+`target` already works for method dispatch. It must come FIRST: `resolved_graph`
+cannot be eliminated until file-level subs have a metaobject to BE the target.
+
+### 2. Sub metadata on the wire
+
+With (1) landed, `MOP::Sub::params` / `return_type` are reachable and the
+producer can populate them. First new occupant: `uses_args`. Producer-side.
+
+### 2b. Retire `Chalk::IR::SubInfo` in favour of `Chalk::MOP::Sub`
+
+perigrin's call, and already the declared direction — the Info structs are
+transitional and the standing note is "do not build new permanent consumers on
+[them]". 15 files, ALL on the self-hosted parser path (`Bootstrap/Perl/`,
+including the parked `Target/C.pm`); none on the B::SoN path, so this is
+separable from (1) and (2).
+
+### 3. `@_` off `StashAccess`
 
 Its own source node, gated by `uses_args`. Removes the `$_`/`@_` collision and
 leaves `StashAccess` with one role.
 
-### 3. Rename `StashAccess` -> `EntryDef`, plus the sigil decision
+### 4. Rename `StashAccess` -> `EntryDef`, plus the sigil decision
 
 Only after (2), when it means one thing — renaming a node with two contradictory
 roles just relabels the confusion. ~45 chalk sites plus the producer.
@@ -150,7 +221,7 @@ H6's prose already says "ENTRY DEFINITION", so code and doc converge.
 both `$_` and `@_`; even after `@_` moves off, `$g`/`@g`/`%g` are three
 variables with one key. Add the field or consciously decide not to.
 
-### 4. `define` + `call`, inliner OFF
+### 5. `define` + `call`, inliner OFF
 
 Not a fallback at the GAP sites. Per "already working" above, leaving the
 inliner on leaves the real path unexercised.
@@ -164,7 +235,7 @@ Caveat, unpriced: `_emit_class_registry_ir` is ~270 lines coupled to
 `(i8* %self)`, vtables, and the class registry. **Measure what is genuinely
 reusable before estimating.**
 
-### 5. Return context — `wantarray` is return-type polymorphism
+### 6. Return context — `wantarray` is return-type polymorphism
 
 perigrin's framing: the same mechanism Haskell resolves via typeclass instance
 selection on the return type (`read`, `mempty`, `pure`, `minBound`) and Rust via
@@ -201,7 +272,7 @@ Corpus gate floor 214, four legs, **coordinator-self-verified on committed
 HEAD** — never a subagent report. Cross-repo work serialised: no producer
 version pin (`son-corpus-wide.t:17` resolves it as a live filesystem path).
 
-**Completion test for 1-3:** H7 says `_pkg_globals` / `_pkg_str_globals` /
+**Completion test for the MOP work:** H7 says `_pkg_globals` / `_pkg_str_globals` /
 `_pkg_num_globals` are dead code. Deleting them proves the SV-union model is
 gone. Re-run H7's four probes on today's HEAD first — that claim was measured
 2026-08-10 and this week has expired three premises.
