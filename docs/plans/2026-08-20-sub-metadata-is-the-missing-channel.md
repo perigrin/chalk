@@ -234,6 +234,27 @@ each sub's already-loaded graph to a `MOP::Sub` and populating `params` /
 `uses_args`. Note `MOP::Sub` requires `class` — under everything-is-a-class that
 is satisfied by `main`, unmodified.
 
+**Folded in (found during 1a's review): the method/sub classification.**
+`_extract_class` (`B/SoN.pm`) puts EVERY non-`:reader` CV of a class package
+into `{methods}`, so a plain `sub helper` inside a `class` block is recorded as
+a method. Measured: `class Widget { method get {...} sub helper {...} }` yields
+`methods = [get, helper]`.
+
+The discriminator is already computed one line above and used only for `:reader`
+detection:
+
+    my $is_method = $cv->CvFLAGS & 0x1;    # CVf_METHOD
+
+perigrin: that flag is exactly the right shape for choosing `MOP::Method` vs
+`MOP::Sub`. It belongs in 1b rather than 1a because that is where the
+distinction acquires a consumer — the MOP replay is the first thing that must
+know which callables carry an implicit invocant.
+
+1a pins the CURRENT behaviour in `t/wire-sub-metadata.t` as observed-not-endorsed,
+so this change surfaces as that test flipping rather than as a silent semantic
+shift. Blast radius is real: it alters what the replay receives for every
+existing class, and the corpus gate is the thing that would catch a mistake.
+
 **1c — backend: stop skipping `main` for subs.** `_build_registry_from_mop`
 keeps skipping `main` for INSTANTIATION (still never `new`'d) but must emit its
 subs. The narrow change is separating "is this class instantiable" from "does
