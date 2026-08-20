@@ -113,3 +113,51 @@ covers any of the failing shapes today, which is how it stayed invisible.
 - The `die` and element-store legs of the same refusal were not separated from
   the void-call leg; all three share one message and only void-call was varied
   across spellings.
+
+---
+
+## RESOLVED 2026-08-20 (perl5-son 3047f35, chalk 89896216)
+
+Built, not lifted. The refusal was sound; the path is now constructed.
+
+**What was actually needed** — neither of the two options recorded above. The
+If/Proj/Region construction did not have to be extracted from
+`_handle_cond_expr`, because an equivalent construction already existed in the
+MAIN WALK's `&&`/`||` handler (`:378-397`, `:494-534`) for the same op in the
+same context, 3900 lines above the refusal. The nested handler mirrors it.
+
+The extraction described in "What the fix would take" was therefore the wrong
+plan. Reading both handlers before choosing is what surfaced the third one.
+
+**A second defect, only visible once the first was fixed.** The arm scans
+(`_arm_has_void_call`, `_arm_has_die`) bail at a nested branch — correct for
+attributing an effect to an arm, wrong for the question "does this arm need
+control flow?", which is arm-independent. The outer branch saw no effect and
+took the value-merge path while the inner built control flow beneath it, so the
+inner guard was swallowed: ONE `If` for two source-level `if`s.
+
+    if ($x) { if ($x) { print "in\n" } }    printed NOTHING
+    if ($x) { if ($x) { die "boom\n" } }    exited 0, perl exits 255
+
+Both are silent miscompiles — strictly worse than the GAP they replaced. The
+scans now descend for the needs-control-flow question only, sharing ONE seen-set
+(a per-call set recursed forever on branchy real code: "Deep recursion on
+_arm_has_die", then a Killed process, caught by `t/b-son-backend.t`).
+
+**Two shapes stay refused, deliberately.** Both were found by existing tests
+asserting a GAP that had stopped firing, and each was verified behaviourally
+before the assertion was touched:
+
+| shape | why it still refuses | measured |
+|---|---|---|
+| element store | needs the memory-Phi merge this handler does not build | `if($c){if($d){$a[0]=9}} $a[0]` printed 1, perl prints 9 — and BOTH polarities printed the same |
+| void call | a Call is both a value and an effect; emitted on both paths | `helper()` printed twice where perl printed once |
+
+**Corrections to this document's own measurements.** The blast-radius table
+above lists `EXPR or (...)` and `unless` as GAP; both now lower. The table's
+claim that no corpus case covered any failing shape was correct and is now
+closed by T16–T20.
+
+**Outcome:** corpus gate 209 → 214, all four legs agreeing, worklist 0.
+Producer suite 97 files / 523 tests PASS on a clean build. Twenty bilateral
+shapes match perl on stdout and exit status.
