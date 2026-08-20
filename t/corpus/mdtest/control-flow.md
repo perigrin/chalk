@@ -412,6 +412,200 @@ control: %region -> %p
 L: GREEN
 ```
 
+## D1h a ONE-ARMED if whose arm both prints and rebinds (2b-3, refusal lifted)
+
+D1f/D1g have two arms. This is the one-armed form: only the true arm exists, it
+carries a `print` AND a rebind, and the false path falls straight through to the
+merge. That combination — a void effect plus a value merge in the same arm — is
+what the producer called "2b-3 mixed effect" and refused outright.
+
+The refusal is lifted here. It was raised because the backend could not PLACE the
+value-Phi: the arm's control chain ends on the **Print**, not on the Proj, so a
+consumer looking for the arm's identity found an effect node instead. `f2971b5f`
+placed the Phi and `9ce43cdd` taught the lookup to walk the control chain back to
+the Proj — which is exactly this shape. Re-measured across 14 bilateral shapes
+before lifting; all matched perl on stdout and exit status
+(`docs/plans/2026-08-20-2b3-measured-defect-3-is-closed.md`).
+
+Read the Region inputs: `%proj1` (the FALSE arm, a bare Proj — nothing happens on
+it) and `%pr` (the TRUE arm's Print). One input is a Proj and the other is an
+effect, in the same Region. That asymmetry is the whole difficulty, and it is why
+arm identity has to be recorded rather than pattern-matched.
+
+```perl
+# source
+use 5.42.0;
+my $x = 5; my $n = 0;
+if ($x > 3) { print "call\n"; $n = 5 }
+print "n=$n\n";
+```
+
+```behavior
+stdout: call\nn=5\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c0    = Constant(0) :Int
+%c5    = Constant(5) :Int
+%c3    = Constant(3) :Int
+%cmp   = NumGt(%c5, %c3) :Bool
+%if    = If(%start, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%scall = Constant("call\n") :Str
+%pr    = Print(%scall)
+%region = Region(%proj1, %pr)
+%phi   = Phi(%c0, %c5, region: %region, predecessors: [%proj1, %proj0]) :Int
+%pfx   = Constant("n=") :Str
+%co    = Coerce(%phi : Int -> Str) :Str
+%cat1  = Concat(%pfx, %co) :Str
+%nl    = Constant("\n") :Str
+%cat2  = Concat(%cat1, %nl) :Str
+%p     = Print(%cat2)
+return %p
+branch_control: %proj0 -> %pr
+control: %region -> %p
+L: GREEN
+```
+
+## D1i the same one-armed shape with the guard FALSE (bilateral)
+
+D1h with the guard failing: the arm does not run, so nothing prints from it and
+the merge selects the pre-branch value. The bilateral half is not optional here —
+the defect this case pins was an INVERTED pairing, which produces plausible
+output on one polarity and is only visible by running both. Both of Chalk's
+earlier Phi-pairing miscompiles hid exactly that way.
+
+```perl
+# source
+use 5.42.0;
+my $x = 1; my $n = 0;
+if ($x > 3) { print "call\n"; $n = 5 }
+print "n=$n\n";
+```
+
+```behavior
+stdout: n=0\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c0    = Constant(0) :Int
+%c1    = Constant(1) :Int
+%c5    = Constant(5) :Int
+%c3    = Constant(3) :Int
+%cmp   = NumGt(%c1, %c3) :Bool
+%if    = If(%start, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%scall = Constant("call\n") :Str
+%pr    = Print(%scall)
+%region = Region(%proj1, %pr)
+%phi   = Phi(%c0, %c5, region: %region, predecessors: [%proj1, %proj0]) :Int
+%pfx   = Constant("n=") :Str
+%co    = Coerce(%phi : Int -> Str) :Str
+%cat1  = Concat(%pfx, %co) :Str
+%nl    = Constant("\n") :Str
+%cat2  = Concat(%cat1, %nl) :Str
+%p     = Print(%cat2)
+return %p
+branch_control: %proj0 -> %pr
+control: %region -> %p
+L: GREEN
+```
+
+## D1j a STRING rebind in a print-and-rebind arm (bilateral, true)
+
+D1h merges an Int. This merges a Str, so the Phi and its coercion sit at a
+different point in the repr lattice. Worth pinning separately: the arm shape is
+identical but the merged representation is not, and a pairing bug that shows up
+only for one repr would otherwise slip through.
+
+```perl
+# source
+use 5.42.0;
+my $x = 5; my $s = "no";
+if ($x > 3) { print "call\n"; $s = "yes" }
+print "s=$s\n";
+```
+
+```behavior
+stdout: call\ns=yes\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%sno   = Constant("no") :Str
+%syes  = Constant("yes") :Str
+%c5    = Constant(5) :Int
+%c3    = Constant(3) :Int
+%cmp   = NumGt(%c5, %c3) :Bool
+%if    = If(%start, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%scall = Constant("call\n") :Str
+%pr    = Print(%scall)
+%region = Region(%proj1, %pr)
+%phi   = Phi(%sno, %syes, region: %region, predecessors: [%proj1, %proj0]) :Str
+%pfx   = Constant("s=") :Str
+%cat1  = Concat(%pfx, %phi) :Str
+%nl    = Constant("\n") :Str
+%cat2  = Concat(%cat1, %nl) :Str
+%p     = Print(%cat2)
+return %p
+branch_control: %proj0 -> %pr
+control: %region -> %p
+L: GREEN
+```
+
+## D1k the Str rebind with the guard FALSE (bilateral)
+
+```perl
+# source
+use 5.42.0;
+my $x = 1; my $s = "no";
+if ($x > 3) { print "call\n"; $s = "yes" }
+print "s=$s\n";
+```
+
+```behavior
+stdout: s=no\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%sno   = Constant("no") :Str
+%syes  = Constant("yes") :Str
+%c1    = Constant(1) :Int
+%c3    = Constant(3) :Int
+%cmp   = NumGt(%c1, %c3) :Bool
+%if    = If(%start, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%scall = Constant("call\n") :Str
+%pr    = Print(%scall)
+%region = Region(%proj1, %pr)
+%phi   = Phi(%sno, %syes, region: %region, predecessors: [%proj1, %proj0]) :Str
+%pfx   = Constant("s=") :Str
+%cat1  = Concat(%pfx, %phi) :Str
+%nl    = Constant("\n") :Str
+%cat2  = Concat(%cat1, %nl) :Str
+%p     = Print(%cat2)
+return %p
+branch_control: %proj0 -> %pr
+control: %region -> %p
+L: GREEN
+```
+
 ## D3f void print inside a loop body
 
 A `print` as the sole statement of a `foreach` body is a per-iteration void
