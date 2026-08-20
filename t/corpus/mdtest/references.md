@@ -838,3 +838,195 @@ return %p
 control: %start -> %p
 L: GREEN
 ```
+
+## R21 a branch arm that BOTH stores an element and rebinds a scalar
+
+The "2b-3 mixed effect": one arm mutates the heap (`$a[0]=9`) AND rebinds a
+lexical (`$n=5`), so a MEMORY-Phi and a VALUE-Phi merge on the same Region. The
+backend refused this outright, on the stated grounds that the value-Phi's arm
+order "is not yet reconciled with the element store".
+
+That reason was a PAIRING problem, and pairing is no longer a search: the
+value-Phi carries `predecessors` naming the Proj each value arrives from, so the
+arm is a field read. The memory-Phi is skipped (it merges memory versions, not
+values) and the post-merge `$a[0]` re-loads from the aggregate at its own program
+point. Re-measured across 14 bilateral shapes before lifting.
+
+Both Phis hang off the same Region with the SAME predecessors — `[%proj1,
+%proj0]`, the false arm first, because the producer builds Region inputs
+continuing-path-first. One of them is memory and one is a value, and telling them
+apart is what makes this lowerable.
+
+```perl
+# source
+use 5.42.0;
+my @a=(1,2,3); my $n=0;
+if ($n==0) { $a[0]=9; $n=5 }
+print "a0=$a[0] n=$n\n";
+```
+
+```behavior
+stdout: a0=9 n=5\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%c3   = Constant(3) :Int
+%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%i0   = Constant(0) :Int
+%mem  = MemStart()
+%lval = Subscript(%arr, %i0) :Int
+%v9   = Constant(9) :Int
+%cmp  = NumEq(%i0, %i0) :Bool
+%if   = If(%start, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%st   = Assign(%lval, %v9) :Int
+%region = Region(%proj1, %st)
+%mphi = Phi(%mem, %st, region: %region, predecessors: [%proj1, %proj0])
+%rd   = Subscript(%arr, %i0, %mphi) :Int
+%v5   = Constant(5) :Int
+%nphi = Phi(%i0, %v5, region: %region, predecessors: [%proj1, %proj0]) :Int
+return %rd
+branch_control: %proj0 -> %st
+control: %region -> %rd
+L: GREEN
+```
+
+## R22 the same mixed-effect arm on the FALSE polarity (bilateral)
+
+R21 with the guard failing: no store, no rebind, so the post-merge read sees the
+initial element and the scalar keeps its base value. Bilateral because the defect
+class the lifted refusal guarded against was a WRONG ARM — which reads plausible
+on one polarity and is only visible by running both.
+
+```perl
+# source
+use 5.42.0;
+my @a=(1,2,3); my $n=1;
+if ($n==0) { $a[0]=9; $n=5 }
+print "a0=$a[0] n=$n\n";
+```
+
+```behavior
+stdout: a0=1 n=1\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c1   = Constant(1) :Int
+%c2   = Constant(2) :Int
+%c3   = Constant(3) :Int
+%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%i0   = Constant(0) :Int
+%mem  = MemStart()
+%lval = Subscript(%arr, %i0) :Int
+%v9   = Constant(9) :Int
+%cmp  = NumEq(%c1, %i0) :Bool
+%if   = If(%start, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%st   = Assign(%lval, %v9) :Int
+%region = Region(%proj1, %st)
+%mphi = Phi(%mem, %st, region: %region, predecessors: [%proj1, %proj0])
+%rd   = Subscript(%arr, %i0, %mphi) :Int
+%v5   = Constant(5) :Int
+%nphi = Phi(%c1, %v5, region: %region, predecessors: [%proj1, %proj0]) :Int
+return %rd
+branch_control: %proj0 -> %st
+control: %region -> %rd
+L: GREEN
+```
+
+## R23 a HASH element store beside a scalar rebind (bilateral, true)
+
+R21 stores into an array. A hash entry takes a different lowering path (entry
+payload rather than slot payload), so the mixed-effect merge is worth pinning on
+both aggregate kinds — a memory-Phi that is correct for one and not the other
+would otherwise pass.
+
+```perl
+# source
+use 5.42.0;
+my %h=(k=>1); my $n=0;
+if ($n==0) { $h{k}=9; $n=5 }
+print "k=$h{k} n=$n\n";
+```
+
+```behavior
+stdout: k=9 n=5\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%kk   = Constant("k") :Str
+%c1   = Constant(1) :Int
+%h    = HashRef(%kk, %c1) :HashRef
+%i0   = Constant(0) :Int
+%mem  = MemStart()
+%lval = Subscript(%h, %kk) :Int
+%v9   = Constant(9) :Int
+%cmp  = NumEq(%i0, %i0) :Bool
+%if   = If(%start, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%st   = Assign(%lval, %v9) :Int
+%region = Region(%proj1, %st)
+%mphi = Phi(%mem, %st, region: %region, predecessors: [%proj1, %proj0])
+%rd   = Subscript(%h, %kk, %mphi) :Int
+%v5   = Constant(5) :Int
+%nphi = Phi(%i0, %v5, region: %region, predecessors: [%proj1, %proj0]) :Int
+return %rd
+branch_control: %proj0 -> %st
+control: %region -> %rd
+L: GREEN
+```
+
+## R24 the hash mixed-effect arm on the FALSE polarity (bilateral)
+
+```perl
+# source
+use 5.42.0;
+my %h=(k=>1); my $n=1;
+if ($n==0) { $h{k}=9; $n=5 }
+print "k=$h{k} n=$n\n";
+```
+
+```behavior
+stdout: k=1 n=1\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%kk   = Constant("k") :Str
+%c1   = Constant(1) :Int
+%h    = HashRef(%kk, %c1) :HashRef
+%i0   = Constant(0) :Int
+%mem  = MemStart()
+%lval = Subscript(%h, %kk) :Int
+%v9   = Constant(9) :Int
+%cmp  = NumEq(%c1, %i0) :Bool
+%if   = If(%start, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%st   = Assign(%lval, %v9) :Int
+%region = Region(%proj1, %st)
+%mphi = Phi(%mem, %st, region: %region, predecessors: [%proj1, %proj0])
+%rd   = Subscript(%h, %kk, %mphi) :Int
+%v5   = Constant(5) :Int
+%nphi = Phi(%c1, %v5, region: %region, predecessors: [%proj1, %proj0]) :Int
+return %rd
+branch_control: %proj0 -> %st
+control: %region -> %rd
+L: GREEN
+```

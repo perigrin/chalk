@@ -3532,22 +3532,22 @@ sub _wire_region_phis_with_preblock {
     # the branch, and the post-merge read re-loads from the aggregate at its own
     # program point, so it needs no value phi line (lowering its arms as values
     # would hit MemStart/Assign, which are not values). Wire only the value phis.
-    my (@mem_phis, @phis);
-    for my $p (@all_phis) {
-        if (Chalk::Target::LLVM::Context::_is_memory_phi($p)) { push @mem_phis, $p }
-        else                                                  { push @phis,     $p }
-    }
+    my @phis = grep { !Chalk::Target::LLVM::Context::_is_memory_phi($_) } @all_phis;
 
-    # 2b-3 mixed effect: an arm that BOTH rebinds a scalar (a value-Phi) AND
-    # stores an element (a memory-Phi) merges on the same Region. The value-Phi's
-    # arm order for this shape is not yet reconciled with the element store, and
-    # wiring it produces a wrong value (the scalar reads the wrong arm). This was
-    # a loud GAP before memory-Phis were skipped; keep it loud rather than
-    # silently miscompiling.
-    if (@mem_phis && @phis) {
-        die "GAP: a branch arm that both rebinds a scalar and stores an element "
-          . "(2b-3 mixed effect) is not yet lowered — refusing to mislower.";
-    }
+    # 2b-3 mixed effect (an arm that BOTH rebinds a scalar and stores an element,
+    # so a value-Phi and a memory-Phi merge on the same Region) USED to refuse
+    # here. Its stated reason was that "the value-Phi's arm order for this shape
+    # is not yet reconciled with the element store", i.e. a PAIRING problem --
+    # and pairing is no longer a search. The value-Phi's arm is read from the
+    # Phi's own `predecessors` field just below (_phi_slot_from_predecessors),
+    # which the producer populates for exactly this shape; the memory-Phi is
+    # skipped as before and the post-merge read re-loads from the aggregate.
+    #
+    # Re-measured 2026-08-20 across 14 bilateral shapes: store-then-rebind and
+    # rebind-then-store, a print ahead of both, a Str rebind, two stores in one
+    # arm, an if/ELSE where both arms store and rebind, and a HASH element store
+    # -- all 14 match perl on stdout and exit status. See
+    # docs/plans/2026-08-20-mixed-effect-refusal-lifted.md.
 
     return ($then_label, $else_label) unless @phis;
 
