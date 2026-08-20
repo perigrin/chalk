@@ -173,28 +173,94 @@ that does not exist in the model. Same root as the `class`-field problem and the
 scans: one missing piece — a metaobject for file-level subs — with three
 symptoms.
 
+Note `target` itself has NO backend consumer today (measured in step 1 below).
+That is a consequence of the inliner, not a reason to distrust the field.
+
 ## Ordering
 
-### 1. A metaobject for file-level subs, and `target` replaces `resolved_graph`
+### 1. B::SoN emits sub metadata; the loader replays it into the MOP
 
-`MOP::Class` for `main`, so `MOP::Sub` works unmodified. The B::SoN loader
-builds MOP objects instead of a bare graph hash, and the Call carries `target`.
-`resolved_graph` is then deleted and `Call.pm`'s two-field split collapses to
-one.
+**Correction to an earlier claim in this doc.** I wrote that step 1 was "a
+convergence onto an existing proven contract — `target` already works for method
+dispatch." Measured, it does not:
 
-Scope: 12 `resolved_graph` sites across 3 files (`Target/LLVM/Context.pm`,
-`IR/Node/Call.pm`, `IR/Serialize/JSON.pm`), plus loader construction.
+| | count |
+|---|---|
+| `target` setters | **1** (`Bootstrap/Perl/Actions.pm:845`, self-hosted parser only) |
+| `target` readers | **2**, both in that same file (a `next if defined` guard and a comment) |
+| `target` reads anywhere in `lib/Chalk/Target/` | **0** |
 
-**This is a convergence onto an existing proven contract, not a new channel** —
-`target` already works for method dispatch. It must come FIRST: `resolved_graph`
-cannot be eliminated until file-level subs have a metaobject to BE the target.
+perigrin's explanation, and it is the right one: **the backend still inlines, so
+a resolved-callee handle has no consumer** — and `MOP::Sub` has no readers
+because the B::SoN path bypasses the MOP entirely. Confirmed by contrast:
+`MOP::Method` IS read by the backend (2 sites) because methods go through the
+registry, while `MOP::Sub` is 0.
 
-### 2. Sub metadata on the wire
+So `target` is not a dead field to be wary of reviving. It is a field **whose
+consumer was never built because the inliner made one unnecessary** — the same
+category as `MOP::Sub::params`. Waiting on the call path, not evidence against
+it.
 
-With (1) landed, `MOP::Sub::params` / `return_type` are reachable and the
-producer can populate them. First new occupant: `uses_args`. Producer-side.
+#### What already exists (measured — the gap is narrower than it looks)
 
-### 2b. Retire `Chalk::IR::SubInfo` in favour of `Chalk::MOP::Sub`
+- **`Chalk::MOP`'s ADJUST already seeds an implicit `main` class**, with the
+  comment *"all code belongs to a class"* — perigrin's design principle already
+  in the code. No new container is needed.
+- **The loader already replays a MOP.** `_replay_classes` (`JSON.pm:1039`)
+  builds a `Chalk::MOP`, declares each class in parent order, declares fields,
+  and seals it.
+- **The wire already has the slot.** `to_json($named_graphs, $classes)` accepts a
+  classes section; `from_json` replays it when present.
+- **The backend already reads the MOP for classes.**
+  `_build_registry_from_mop` (`LLVM.pm:320`) takes structure from a SEALED
+  `MOP::Class`/`MOP::Method`/`MOP::Field`.
+
+**What is missing is subs, at every one of those points.** The producer emits no
+sub metadata; `_replay_classes` declares fields and methods but never calls
+`declare_sub`; and `_build_registry_from_mop` **deliberately skips `main`** —
+*"never instantiated via `Call(new)`"*. That skip is correct for instantiation
+and wrong for subs: `main` is never `new`'d, but its subs still need emitting.
+
+#### The work
+
+**1a — producer: emit a sub record.** For each named CV, `to_json`'s `$classes`
+section gains a `subs` list under its owning class (`main` for a file-level
+sub). Recorded from the CV walk, which already knows: `name`, arity/`params`,
+and `uses_args` (whether the body touches `@_`). This is the metadata channel;
+it is what removes the reason for every scan.
+
+**1b — loader: `declare_sub`.** `_replay_classes` gains the sub arm, attaching
+each sub's already-loaded graph to a `MOP::Sub` and populating `params` /
+`uses_args`. Note `MOP::Sub` requires `class` — under everything-is-a-class that
+is satisfied by `main`, unmodified.
+
+**1c — backend: stop skipping `main` for subs.** `_build_registry_from_mop`
+keeps skipping `main` for INSTANTIATION (still never `new`'d) but must emit its
+subs. The narrow change is separating "is this class instantiable" from "does
+this class have callables to emit."
+
+**1d — `target` replaces `resolved_graph`.** Once a `MOP::Sub` exists per sub,
+the Call carries the metaobject rather than a bare graph, and `Call.pm`'s
+two-field split collapses to one. 12 `resolved_graph` sites across 3 files
+(`Target/LLVM/Context.pm`, `IR/Node/Call.pm`, `IR/Serialize/JSON.pm`).
+
+**Ordering within step 1 is strict:** 1d cannot land before 1a-1c, because
+`resolved_graph` cannot be eliminated until there is a metaobject to BE the
+target.
+
+#### Acceptance
+
+- A file-level `sub f { }` produces a `MOP::Sub` on the B::SoN path, reachable
+  from the sealed MOP as a sub of class `main`.
+- `MOP::Sub::params` and the new `uses_args` are populated from the wire, not
+  derived by scanning any graph.
+- `resolved_graph` is deleted; `grep -rn resolved_graph lib/` returns 0.
+- Corpus gate holds at its floor with all four legs agreeing, coordinator-
+  self-verified on committed HEAD.
+- The nine green `subs` cases stay green — but note they do NOT prove the call
+  path (see "already working is coincidence"); they only prove no regression.
+
+### 2. Retire `Chalk::IR::SubInfo` in favour of `Chalk::MOP::Sub`
 
 perigrin's call, and already the declared direction — the Info structs are
 transitional and the standing note is "do not build new permanent consumers on
