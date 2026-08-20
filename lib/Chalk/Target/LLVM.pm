@@ -333,7 +333,32 @@ sub _build_registry_from_mop {
 
     my %registry;
     for my $cls (sort { $a->name cmp $b->name } $mop->classes) {
-        next if $cls->name eq 'main';
+        # `main` is never INSTANTIATED -- no Call(new), so no vtable and no
+        # object layout. That is why it was skipped outright. But it does own
+        # CALLABLES: every file-level `sub` is a sub of class main under
+        # everything-is-a-class, and skipping the class skipped those too, so
+        # their defines were never emitted.
+        #
+        # The two questions are separate: "is this class instantiable" and
+        # "does it have callables to emit". Populate main for its SUBS only.
+        if ($cls->name eq 'main') {
+            # DELIBERATELY NOT POPULATED YET. main's subs are reachable in the
+            # MOP (1b) and the registry could carry them, but the INLINER still
+            # owns every direct call — `_lower_call_direct` substitutes the
+            # callee body at the call site. Emitting a define as well does not
+            # add a call path, it DUPLICATES the body: measured, corpus F9/F10/
+            # F11/F13 each printed their callee's output twice (once in
+            # `@main__f`, once inlined into `@main`), taking the gate 214 -> 207.
+            #
+            # The define becomes load-bearing when the inliner is retired (plan
+            # step 5), which is also the step that gives it a caller. Until
+            # then a define with no call site is dead code that changes
+            # behaviour — the worse of both.
+            #
+            # Class subs are different and ARE emitted below: nothing inlines
+            # them today, so their define is the only way to reach them.
+            next;
+        }
         _populate_registry_from_mop_class(\%registry, $cls);
     }
     _flatten_inheritance(\%registry);
@@ -452,6 +477,41 @@ sub _phaser_body_in_control_order {
     return \@ordered;
 }
 
+# _populate_main_subs(\%registry, $main_class) -> void
+#
+# `main`'s CALLABLES without its class machinery. A file-level sub belongs to
+# class main, but main is never instantiated, so it gets no fields, no methods,
+# no vtable and no object layout -- emitting those would produce a %main.obj and
+# a %main.vt for a class nothing ever constructs.
+#
+# Registers nothing at all when main has no subs, so a program without
+# file-level subs emits exactly what it did before.
+sub _populate_main_subs {
+    my ($registry, $cls) = @_;
+    my @subs = $cls->subs or return;
+
+    # NOT instantiable: no Call(new) ever names main, so it needs no vtable,
+    # no object struct and no class-name global. The emission loop reads this
+    # rather than testing the name, so "is this class instantiable" stays one
+    # question asked in one place.
+    $registry->{main} //= { methods => [], subs => [], fields => [], adjusts => [],
+                            parent => undef, instantiable => 0 };
+    for my $s (@subs) {
+        my $sname = $s->name;
+        next if grep { ($_->{name} // '') eq $sname } @{ $registry->{main}{subs} };
+        my $body_node = _method_body_root($s);
+        push @{ $registry->{main}{subs} }, {
+            name        => $sname,
+            body_node   => $body_node,
+            body_return => _method_body_return($s),
+            return_repr => ($s->return_type
+                // _require_repr($body_node, "MOP::Sub 'main::$sname' body root")),
+            uses_args   => ($s->can('uses_args') ? $s->uses_args : false),
+        };
+    }
+    return;
+}
+
 # _populate_registry_from_mop_class(\%registry, $mop_class) -> void
 #
 # The MOP-direct sibling of _populate_registry_from_classinfo: produces the
@@ -460,8 +520,29 @@ sub _phaser_body_in_control_order {
 sub _populate_registry_from_mop_class {
     my ($registry, $cls) = @_;
     my $cname = $cls->name;
-    $registry->{$cname} //= { methods => [], fields => [], adjusts => [], parent => undef };
+    $registry->{$cname} //= { methods => [], subs => [], fields => [], adjusts => [], parent => undef };
+    $registry->{$cname}{subs} //= [];
     $registry->{$cname}{parent} //= $cls->parent_name;
+
+    # SUBS ARE NOT METHODS, and they are kept in their own list rather than
+    # appended to {methods}. A sub takes no implicit invocant and is not
+    # dispatched, so it needs a `define` but NOT a vtable slot -- appending it
+    # to {methods} would emit the define AND silently widen every vtable, and
+    # would be inherited by subclasses through _flatten_inheritance, which is
+    # wrong for a callable that was never dispatched in the first place.
+    for my $s ($cls->subs) {
+        my $sname = $s->name;
+        next if grep { ($_->{name} // '') eq $sname } @{ $registry->{$cname}{subs} };
+        my $body_node = _method_body_root($s);
+        push @{ $registry->{$cname}{subs} }, {
+            name        => $sname,
+            body_node   => $body_node,
+            body_return => _method_body_return($s),
+            return_repr => ($s->return_type
+                // _require_repr($body_node, "MOP::Sub '$sname' body root")),
+            uses_args   => ($s->can('uses_args') ? $s->uses_args : false),
+        };
+    }
 
     my $mslot = scalar @{ $registry->{$cname}{methods} };
 
@@ -630,7 +711,10 @@ sub _emit_class_registry_ir {
     my $need_strpair = 0;
     for my $cname (sort keys %$registry) {
         my $reg = $registry->{$cname};
-        for my $m (@{ $reg->{methods} }) {
+        # Subs share the %StrPair return ABI, so they must be in this pre-scan
+        # too -- a Str-returning SUB in a class whose methods all return Int
+        # would otherwise emit insertvalue over an undeclared %StrPair.
+        for my $m (@{ $reg->{methods} }, @{ $reg->{subs} // [] }) {
             $need_strpair = 1 if ($m->{return_repr} // '') eq 'Str';
         }
     }
@@ -667,6 +751,12 @@ sub _emit_class_registry_ir {
         my $methods = $reg->{methods} // [];
         my $fields  = $reg->{fields}  // [];
 
+        # A non-instantiable class (main) owns callables but has no objects, so
+        # it gets its sub defines below and none of the class machinery here.
+        my $instantiable = $reg->{instantiable} // 1;
+
+        next unless $instantiable;
+
         # Vtable type: { i8* class-name, i8* slot0, i8* slot1, ... }
         my $vt_type = '%' . $cname . '.vt';
         my @vt_elems = ('i8*');  # slot 0 = class-name ptr
@@ -691,11 +781,15 @@ sub _emit_class_registry_ir {
         my $vt_type  = '%' . $cname . '.vt';
         my $obj_type = '%' . $cname . '.obj';
 
-        # Class-name string constant
+        my $instantiable = $reg->{instantiable} // 1;
+
+        # Class-name string constant (instantiable classes only -- it exists to
+        # sit in slot 0 of a vtable, and a non-instantiable class has none).
         my $cn_name_global = '@' . $cname . '__class_name';
         my $cn_bytes = length($cname) + 1;  # +1 for NUL
         my $cn_enc   = _encode_c_string($cname);
-        push @lines, "$cn_name_global = private unnamed_addr constant [$cn_bytes x i8] c\"$cn_enc\\00\", align 1";
+        push @lines, "$cn_name_global = private unnamed_addr constant [$cn_bytes x i8] c\"$cn_enc\\00\", align 1"
+            if $instantiable;
 
         # Method body functions (one define per method)
         for my $minfo (@$methods) {
@@ -867,6 +961,67 @@ sub _emit_class_registry_ir {
             push @lines, _render_str_globals($body_ctx);
         }
 
+        # 4a-2. SUB body functions (one define per plain `sub` in the class).
+        #
+        # The same body-lowering shape as a method, minus the two things a sub
+        # does not have: no `i8* %self` parameter (no implicit invocant) and no
+        # vtable slot (never dispatched). Without this a MOP::Sub replayed by
+        # the loader was INERT -- the metadata arrived and nothing emitted it,
+        # so a call to a class-level sub named a symbol that did not exist.
+        #
+        # Parameters are deliberately absent: a callee reads its arguments via
+        # @_ today, and the params-by-default convention is a later step. A sub
+        # that READS @_ therefore cannot be called through this define yet, and
+        # its `uses_args` flag is carried on the registry record so that step
+        # can gate on it rather than re-deriving it.
+        for my $sinfo (@{ $reg->{subs} // [] }) {
+            my $sname    = $sinfo->{name};
+            my $fn_name  = '@' . $cname . '__' . $sname;
+            my $ret_repr = $sinfo->{return_repr} // 'Int';
+            my $fn_ret   = _method_fn_llvm_ret_type($ret_repr);
+
+            my $body_return = $sinfo->{body_return};
+            my $body_node   = $sinfo->{body_node};
+            my $body_dom    = Chalk::IR::Schedule::Dominators->from_return_node($body_return);
+            my $body_elab   = Chalk::IR::Schedule::Elaborate->from_return_node($body_return, $body_dom);
+            my $body_ctx    = Chalk::Target::LLVM::ElaboratedContext->new(
+                elab           => $body_elab,
+                class_registry => $registry,
+            );
+            # NOT _in_method_body: there is no $self to resolve a FieldAccess
+            # against. A sub touching a field is a compile error in perl, so a
+            # FieldAccess here would be a producer bug and should fail loudly
+            # rather than silently bind to a nonexistent invocant.
+            $body_ctx->{_method_class_name} = $cname;
+            $body_ctx->{_method_name}       = $sname;
+            $body_ctx->{_need_strpair}      = $ctx->{_need_strpair} // 0;
+
+            _process_control_chain($body_ctx, $body_return);
+            my $body_val = $body_ctx->lower_value($body_node);
+            $ctx->{_need_str_type} ||= $body_ctx->{_need_str_type};
+
+            push @lines, "define internal $fn_ret $fn_name() {  ; sub body for ${cname}::${sname}";
+            push @lines, 'entry:';
+            push @lines, _render_context_blocks($body_ctx, 1);
+
+            if ($ret_repr eq 'Str') {
+                push @lines, "  %ret_sp = extractvalue %Str $body_val, 0";
+                push @lines, "  %ret_sl = extractvalue %Str $body_val, 1";
+                push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* %ret_sp, 0";
+                push @lines, "  %ret_r1 = insertvalue %StrPair %ret_r0, i64 %ret_sl, 1";
+                push @lines, '  ret %StrPair %ret_r1';
+            }
+            elsif ($ret_repr eq 'Num')  { push @lines, "  ret double $body_val" }
+            elsif ($ret_repr eq 'Bool'
+                || $ret_repr eq 'Undef'){ push @lines, "  ret i1 $body_val" }
+            else                        { push @lines, "  ret i64 $body_val" }
+            push @lines, '}';
+            push @lines, '';
+
+            _propagate_need_flags($ctx, $body_ctx);
+            push @lines, _render_str_globals($body_ctx);
+        }
+
         # 4b. ADJUST function: one @Cls__ADJUST(i8* %self) per class with
         # ADJUST blocks, lowered ONCE in a fresh context exactly like a
         # method body. Call(new) calls it after :param/default binding.
@@ -914,7 +1069,8 @@ sub _emit_class_registry_ir {
             my $fn_type_str = _method_fn_type($ret_repr);
             push @vt_init, "i8* bitcast ($fn_type_str* $fn_name to i8*)";
         }
-        push @lines, "$vt_global = private unnamed_addr constant $vt_type { " . join(', ', @vt_init) . " }  ; vtable for $cname";
+        push @lines, "$vt_global = private unnamed_addr constant $vt_type { " . join(', ', @vt_init) . " }  ; vtable for $cname"
+            if $instantiable;
         push @lines, '';
     }
 
