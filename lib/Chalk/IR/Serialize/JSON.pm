@@ -588,6 +588,39 @@ sub _all_graph_nodes ($g) {
     return @out;
 }
 
+# _attach_call_targets(\%graphs, $mop) — give each resolved direct Call its
+# callee METAOBJECT.
+#
+# The MOP is Chalk's deliberate divergence from classic Sea of Nodes: a flat
+# graph dissolves declarations into itself, while Chalk keeps metaobjects
+# alongside so a consumer can ASK rather than pattern-match. Every sub-level
+# scan in this file exists because the B::SoN path skipped that layer.
+#
+# Keyed by the callee's fully-qualified name (`main::f`), which is how the
+# producer names the graph and how declare_sub records the metaobject.
+sub _attach_call_targets ($graphs, $mop) {
+    my $attached = 0;
+    for my $gname (sort keys $graphs->%*) {
+        for my $node (_all_graph_nodes($graphs->{$gname})) {
+            next unless $node->operation eq 'Call'
+                && $node->can('dispatch_kind')
+                && ($node->dispatch_kind // '') eq 'direct'
+                && $node->can('set_target')
+                && !defined $node->target;
+
+            my ($cls_name, $sub_name) = ($node->name // '') =~ /^(.*)::([^:]+)$/
+                or next;
+            my $cls = $mop->for_class($cls_name) or next;
+            my ($sub) = grep { $_->name eq $sub_name } $cls->subs;
+            next unless $sub;
+
+            $node->set_target($sub);
+            $attached++;
+        }
+    }
+    return $attached;
+}
+
 sub _resolve_direct_calls ($graphs) {
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
@@ -758,6 +791,24 @@ sub from_json ($json_string) {
     # result (an `$x = foo(5)` Assign) is still untyped when the loop exits. Run
     # one final propagation so the now-stamped Calls flow into their consumers.
     _seed_and_propagate_reprs(\%graphs);
+
+    # 1d: attach the callee METAOBJECT to each resolved direct Call.
+    #
+    # Call.pm documents `target` as "a MOP::Method/Sub handle ... so codegen can
+    # read the callee's graph/params/return-type directly without going through
+    # the symbol table at emit time". That is the MOP-shaped contract, and the
+    # B::SoN path did not meet it: it set `resolved_graph`, a bare
+    # Chalk::IR::Graph, whose own comment explains why -- "a top-level sub is not
+    # a MOP class method, so it rides here."
+    #
+    # Under everything-is-a-class that premise is gone: a file-level sub is a sub
+    # of class `main`, and 1a/1b give it a real MOP::Sub. So the callee handle is
+    # now available and the flat-graph fallback is no longer the only option.
+    #
+    # Runs HERE, after _replay_classes has sealed the MOP -- the earlier
+    # _resolve_direct_calls passes are part of the repr fixpoint and run before
+    # any metaobject exists.
+    _attach_call_targets(\%graphs, $mop) if defined $mop;
 
     # Str-context coercions the PRODUCER could not insert. Print(Str...) and
     # StrEq/StrNe(Str, Str) take Str, and the producer wraps a non-Str operand

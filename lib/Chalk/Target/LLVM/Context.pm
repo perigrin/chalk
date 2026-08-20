@@ -5780,9 +5780,14 @@ sub _lower_call_direct {
         if $self->{_inlining} && $self->{_inlining}{$name};
     local $self->{_inlining} = { ($self->{_inlining} // {})->%*, $name => 1 };
 
-    my $graph = $node->can('resolved_graph') ? $node->resolved_graph : undef;
-    die "GAP: direct call to '$name' has no resolved callee graph — the loader "
-      . "could not resolve the sub name to a graph (an unknown or builtin sub)."
+    # Through the METAOBJECT, not a bare graph. `target` is a MOP::Sub handle,
+    # so the callee's graph AND its metadata (params, uses_args, return type)
+    # are reachable from one place -- which is the whole point of Chalk keeping
+    # a MOP alongside the graph rather than dissolving declarations into it.
+    my $target = $node->can('target') ? $node->target : undef;
+    my $graph  = $target && $target->can('graph') ? $target->graph : undef;
+    die "GAP: direct call to '$name' has no resolved callee — the loader could "
+      . "not resolve the sub name to a metaobject (an unknown or builtin sub)."
         unless defined $graph;
 
     my @returns = grep {
