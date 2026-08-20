@@ -75,9 +75,15 @@ my @UNARYOP_FAMILY = qw(
 # field survey — no :param declarations beyond the base Node/BinOp/UnaryOp/
 # Aggregate/Access ancestor fields). Round-tripping checks only that the op
 # name and input wiring survive (covered generically below).
+# NO Stringify: the node was deleted in 73ab9720 -- Stringify(X) IS
+# Coerce(X -> Str), two node types implementing one edge, and Coerce is now the
+# only spelling. Coerce has its own %SPEC entry (it carries from_repr/to_repr,
+# so it is not structural-only). This list is hand-maintained, so a deleted op
+# leaves a name behind that dies at `make`; audited 2026-08-20 and Stringify was
+# the only such name.
 my @STRUCTURAL_ONLY = qw(
     ArrayRef HashRef Slice Interpolate
-    Print Stringify TryCatch BacktickExpr
+    Print TryCatch BacktickExpr
     StructRef StructFieldAccess TernaryExpr ExpressionList
     Start MemStart Unwind Subscript
 );
