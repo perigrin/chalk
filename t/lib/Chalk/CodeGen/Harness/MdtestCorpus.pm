@@ -487,6 +487,20 @@ sub _build_node_from_rhs {
         # (already resolved above). Remap to the Phi-specific call shape.
         if ($op eq 'Phi') {
             my $region = delete $attrs{region};
+
+            # predecessors: [%proj0, %proj1] -- WHICH ARM each value arrives
+            # from. A list-valued attr, so it needs the bracket form: the
+            # general kwarg grammar is one value per key, and a bare
+            # `predecessors: %a, %b` silently binds %a and leaves %b to be
+            # swallowed as a positional INPUT (measured: it produced a 3-value
+            # Phi over a 2-input Region, and predecessors held a lone Proj).
+            if (defined(my $preds = $attrs{predecessors})) {
+                croak "build_graph_from_ir: Phi predecessors must be a bracketed "
+                    . "list, e.g. predecessors: [%proj0, %proj1], at $name"
+                    unless ref $preds eq 'ARRAY';
+                $attrs{predecessors} = $preds;
+            }
+
             return $factory->make('Phi', region => $region, values => \@inputs, %attrs);
         }
 

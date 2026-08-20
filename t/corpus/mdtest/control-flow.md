@@ -287,6 +287,131 @@ control: %start -> %p
 L: GREEN
 ```
 
+## D1f if/else with EFFECTFUL arms merging a value (the merge Phi records its arms)
+
+Every other if/else case in this corpus either merges a value with pure arms —
+which the producer collapses to a `TernaryExpr`, no Phi at all (measured: `my $x
+= $n > 0 ? 1 : 2` and a bare `if ($n > 0) { $x = 1 }` both emit `TernaryExpr`) —
+or has arms that only `print` and merge nothing (D1a/D1b). Neither shape builds a
+branch-merge `Phi`.
+
+This case is the shape that does: each arm carries a `print` AND rebinds `$x`, so
+the arms cannot collapse to a select and the merge is a real `Phi` over a
+`Region`.
+
+That matters beyond coverage. A `Phi`'s incoming values pair POSITIONALLY with
+its arms, and Chalk had three miscompiles from getting that pairing wrong
+(44d1fa8c, 9ce43cdd). The Phi now RECORDS which arm each value arrives from
+(`predecessors`) instead of leaving the backend to search for it; the producer
+emits it here (measured: `predecessors: [8, 11]`, the two Projs).
+
+WHAT THIS CASE PINS, precisely: the behavior leg runs the source under perl and
+lli and compares stdout, so the arms firing in the right order and the merge
+selecting the right value ARE enforced, bilaterally with D1g. What it does NOT
+pin is the `predecessors:` line itself — measured by mutation, both DELETING it
+and SWAPPING it to `[%proj1, %proj0]` leave all three legs green. The invariant
+leg runs TypedInvariant on the PRODUCER's graph, not on this spec block, and the
+shape leg is a subset match that does not compare the field. So the line here is
+documentation of the producer's real output, not an independently checked
+contract. Verifying a spec-block Phi's pairing needs the invariant run over the
+spec graph too, which is filed rather than assumed.
+
+Note what the Region inputs are: `%pr_pos` and `%pr_neg`, the arms' PRINTS, not
+the Projs. A Region input is the arm's LAST control node — the control-chain link
+— so arm IDENTITY is a separate fact, which is exactly why `predecessors` has to
+be recorded rather than derived by inspection.
+
+```perl
+# source
+use 5.42.0;
+my $n = 5;
+my $x = 0;
+if ($n > 0) { print "pos\n"; $x = 1 } else { print "neg\n"; $x = 2 }
+print "$x\n";
+```
+
+```behavior
+stdout: pos\n1\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%n     = Constant(5) :Int
+%zero  = Constant(0) :Int
+%cmp   = NumGt(%n, %zero) :Bool
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%spos  = Constant("pos\n") :Str
+%sneg  = Constant("neg\n") :Str
+%if    = If(%start, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%pr_pos = Print(%spos)
+%pr_neg = Print(%sneg)
+%region = Region(%pr_pos, %pr_neg)
+%phi   = Phi(%c1, %c2, region: %region, predecessors: [%proj0, %proj1]) :Int
+%co    = Coerce(%phi : Int -> Str) :Str
+%nl    = Constant("\n") :Str
+%cat   = Concat(%co, %nl) :Str
+%p     = Print(%cat)
+return %p
+branch_control: %proj0 -> %pr_pos
+branch_control: %proj1 -> %pr_neg
+control: %region -> %p
+L: GREEN
+```
+
+## D1g the same shape on the FALSE polarity (bilateral)
+
+D1f with the guard failing, so the ELSE arm's print fires and the merge selects
+the else value. The bilateral half matters here more than usual: a Phi wired to
+the wrong arm produces plausible output on ONE polarity and is only detectable by
+running both. That is precisely how 44d1fa8c and 9ce43cdd hid — each inverted the
+arms, and each looked correct in one direction.
+
+```perl
+# source
+use 5.42.0;
+my $n = 0;
+my $x = 0;
+if ($n > 0) { print "pos\n"; $x = 1 } else { print "neg\n"; $x = 2 }
+print "$x\n";
+```
+
+```behavior
+stdout: neg\n2\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%zero  = Constant(0) :Int
+%cmp   = NumGt(%zero, %zero) :Bool
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%spos  = Constant("pos\n") :Str
+%sneg  = Constant("neg\n") :Str
+%if    = If(%start, %cmp)
+%proj0 = Proj(%if, index: 0)
+%proj1 = Proj(%if, index: 1)
+%pr_pos = Print(%spos)
+%pr_neg = Print(%sneg)
+%region = Region(%pr_pos, %pr_neg)
+%phi   = Phi(%c1, %c2, region: %region, predecessors: [%proj0, %proj1]) :Int
+%co    = Coerce(%phi : Int -> Str) :Str
+%nl    = Constant("\n") :Str
+%cat   = Concat(%co, %nl) :Str
+%p     = Print(%cat)
+return %p
+branch_control: %proj0 -> %pr_pos
+branch_control: %proj1 -> %pr_neg
+control: %region -> %p
+L: GREEN
+```
+
 ## D3f void print inside a loop body
 
 A `print` as the sole statement of a `foreach` body is a per-iteration void
