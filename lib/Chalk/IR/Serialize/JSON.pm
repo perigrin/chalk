@@ -1105,6 +1105,25 @@ sub _replay_classes ($classes, $graphs) {
             );
         }
 
+        # Subs (1b): a `sub` is not a `method` -- it carries no implicit
+        # invocant -- so it replays into a MOP::Sub rather than a MOP::Method.
+        # The wire distinguishes them at the producer (CvFLAGS & CVf_METHOD).
+        #
+        # This is the metadata channel that lets consumers STOP recovering
+        # sub-level facts by scanning the graph: uses_args in particular cannot
+        # be derived reliably, since `@_` has three IR spellings and vanishes
+        # entirely for `my ($a,$b) = @_`.
+        my $subs = $cd->{subs} // {};
+        for my $sname (sort keys %$subs) {
+            my $sd    = $subs->{$sname};
+            my $graph = $graphs->{ $sd->{graph} // '' };
+            $cls->declare_sub($sname,
+                (defined $graph ? (graph => $graph) : ()),
+                params    => ($sd->{params} // []),
+                uses_args => ($sd->{uses_args} ? true : false),
+            );
+        }
+
         # ADJUST blocks (4c-1b): each rides as a graph-ref; replay via
         # declare_adjust with the loaded graph.
         for my $aref (($cd->{adjusts} // [])->@*) {
