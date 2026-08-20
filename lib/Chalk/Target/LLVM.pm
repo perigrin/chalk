@@ -334,31 +334,22 @@ sub _build_registry_from_mop {
     my %registry;
     for my $cls (sort { $a->name cmp $b->name } $mop->classes) {
         # `main` is never INSTANTIATED -- no Call(new), so no vtable and no
-        # object layout. That is why it was skipped outright. But it does own
-        # CALLABLES: every file-level `sub` is a sub of class main under
-        # everything-is-a-class, and skipping the class skipped those too, so
-        # their defines were never emitted.
+        # object layout -- and it is skipped outright for that reason.
         #
-        # The two questions are separate: "is this class instantiable" and
-        # "does it have callables to emit". Populate main for its SUBS only.
-        if ($cls->name eq 'main') {
-            # DELIBERATELY NOT POPULATED YET. main's subs are reachable in the
-            # MOP (1b) and the registry could carry them, but the INLINER still
-            # owns every direct call — `_lower_call_direct` substitutes the
-            # callee body at the call site. Emitting a define as well does not
-            # add a call path, it DUPLICATES the body: measured, corpus F9/F10/
-            # F11/F13 each printed their callee's output twice (once in
-            # `@main__f`, once inlined into `@main`), taking the gate 214 -> 207.
-            #
-            # The define becomes load-bearing when the inliner is retired (plan
-            # step 5), which is also the step that gives it a caller. Until
-            # then a define with no call site is dead code that changes
-            # behaviour — the worse of both.
-            #
-            # Class subs are different and ARE emitted below: nothing inlines
-            # them today, so their define is the only way to reach them.
-            next;
-        }
+        # It DOES own callables: every file-level `sub` is a sub of class main
+        # under everything-is-a-class. They are deliberately not registered
+        # here, because registering them would only feed an emission path that
+        # is itself gated off (see CHALK_EMIT_SUB_DEFINES in the emission loop):
+        # the INLINER still substitutes every direct-call body at its call site,
+        # so a define duplicates rather than enables. Measured -- corpus
+        # F9/F10/F11/F13 each printed their callee's output twice, gate
+        # 214 -> 207.
+        #
+        # Step 5 (retire the inliner) is what makes main's subs worth
+        # registering, and it is the same step that gives their defines a
+        # caller. Skipping main entirely until then keeps ONE reason in ONE
+        # place rather than a flag that no longer has a writer.
+        next if $cls->name eq 'main';
         _populate_registry_from_mop_class(\%registry, $cls);
     }
     _flatten_inheritance(\%registry);
@@ -477,46 +468,11 @@ sub _phaser_body_in_control_order {
     return \@ordered;
 }
 
-# _populate_main_subs(\%registry, $main_class) -> void
-#
-# `main`'s CALLABLES without its class machinery. A file-level sub belongs to
-# class main, but main is never instantiated, so it gets no fields, no methods,
-# no vtable and no object layout -- emitting those would produce a %main.obj and
-# a %main.vt for a class nothing ever constructs.
-#
-# Registers nothing at all when main has no subs, so a program without
-# file-level subs emits exactly what it did before.
-sub _populate_main_subs {
-    my ($registry, $cls) = @_;
-    my @subs = $cls->subs or return;
-
-    # NOT instantiable: no Call(new) ever names main, so it needs no vtable,
-    # no object struct and no class-name global. The emission loop reads this
-    # rather than testing the name, so "is this class instantiable" stays one
-    # question asked in one place.
-    $registry->{main} //= { methods => [], subs => [], fields => [], adjusts => [],
-                            parent => undef, instantiable => 0 };
-    for my $s (@subs) {
-        my $sname = $s->name;
-        next if grep { ($_->{name} // '') eq $sname } @{ $registry->{main}{subs} };
-        my $body_node = _method_body_root($s);
-        push @{ $registry->{main}{subs} }, {
-            name        => $sname,
-            body_node   => $body_node,
-            body_return => _method_body_return($s),
-            return_repr => ($s->return_type
-                // _require_repr($body_node, "MOP::Sub 'main::$sname' body root")),
-            uses_args   => ($s->can('uses_args') ? $s->uses_args : false),
-        };
-    }
-    return;
-}
-
 # _populate_registry_from_mop_class(\%registry, $mop_class) -> void
 #
-# The MOP-direct sibling of _populate_registry_from_classinfo: produces the
-# same registry record shape from a sealed MOP::Class so downstream emission
-# (_emit_class_registry_ir) is unchanged.
+# Produces the registry record shape from a sealed MOP::Class so downstream
+# emission (_emit_class_registry_ir) is unchanged. (Its former ClassInfo sibling
+# was deleted in 183a5973.)
 sub _populate_registry_from_mop_class {
     my ($registry, $cls) = @_;
     my $cname = $cls->name;
@@ -530,17 +486,39 @@ sub _populate_registry_from_mop_class {
     # to {methods} would emit the define AND silently widen every vtable, and
     # would be inherited by subclasses through _flatten_inheritance, which is
     # wrong for a callable that was never dispatched in the first place.
+    #
+    # Recording them here is the point of this step: the registry is the
+    # backend's read surface for the MOP, and sub metadata now reaches it
+    # instead of being recovered by scanning. EMITTING a define from it is
+    # gated separately (see the emission loop) because the inliner still owns
+    # every direct call.
     for my $s ($cls->subs) {
         my $sname = $s->name;
         next if grep { ($_->{name} // '') eq $sname } @{ $registry->{$cname}{subs} };
+
+        # A callee that reads @_ has no bound arguments OUTSIDE an inline, so
+        # its body root carries no repr and _require_repr below would refuse
+        # the WHOLE PROGRAM -- even when the sub is never called. Measured:
+        # `class W { ... sub twice { my $x = shift; $x * 2 } }` compiled and
+        # ran before this step and afterwards GAPped with "MOP::Sub 'twice'
+        # body root ... NO representation", blaming TypeInference for what is
+        # really an unbound argument.
+        #
+        # `uses_args` is exactly the signal for that, which is why the producer
+        # records it. Registration resumes for these when arguments are bound
+        # at a real call boundary (params-by-default, plan steps 3+5).
+        next if $s->uses_args;
+
         my $body_node = _method_body_root($s);
         push @{ $registry->{$cname}{subs} }, {
             name        => $sname,
             body_node   => $body_node,
             body_return => _method_body_return($s),
+            # Qualified: an unqualified name made the GAP ambiguous across
+            # classes declaring the same sub name.
             return_repr => ($s->return_type
-                // _require_repr($body_node, "MOP::Sub '$sname' body root")),
-            uses_args   => ($s->can('uses_args') ? $s->uses_args : false),
+                // _require_repr($body_node, "MOP::Sub '${cname}::${sname}' body root")),
+            uses_args   => $s->uses_args,
         };
     }
 
@@ -751,12 +729,6 @@ sub _emit_class_registry_ir {
         my $methods = $reg->{methods} // [];
         my $fields  = $reg->{fields}  // [];
 
-        # A non-instantiable class (main) owns callables but has no objects, so
-        # it gets its sub defines below and none of the class machinery here.
-        my $instantiable = $reg->{instantiable} // 1;
-
-        next unless $instantiable;
-
         # Vtable type: { i8* class-name, i8* slot0, i8* slot1, ... }
         my $vt_type = '%' . $cname . '.vt';
         my @vt_elems = ('i8*');  # slot 0 = class-name ptr
@@ -781,15 +753,11 @@ sub _emit_class_registry_ir {
         my $vt_type  = '%' . $cname . '.vt';
         my $obj_type = '%' . $cname . '.obj';
 
-        my $instantiable = $reg->{instantiable} // 1;
-
-        # Class-name string constant (instantiable classes only -- it exists to
-        # sit in slot 0 of a vtable, and a non-instantiable class has none).
+        # Class-name string constant
         my $cn_name_global = '@' . $cname . '__class_name';
         my $cn_bytes = length($cname) + 1;  # +1 for NUL
         my $cn_enc   = _encode_c_string($cname);
-        push @lines, "$cn_name_global = private unnamed_addr constant [$cn_bytes x i8] c\"$cn_enc\\00\", align 1"
-            if $instantiable;
+        push @lines, "$cn_name_global = private unnamed_addr constant [$cn_bytes x i8] c\"$cn_enc\\00\", align 1";
 
         # Method body functions (one define per method)
         for my $minfo (@$methods) {
@@ -965,16 +933,29 @@ sub _emit_class_registry_ir {
         #
         # The same body-lowering shape as a method, minus the two things a sub
         # does not have: no `i8* %self` parameter (no implicit invocant) and no
-        # vtable slot (never dispatched). Without this a MOP::Sub replayed by
-        # the loader was INERT -- the metadata arrived and nothing emitted it,
-        # so a call to a class-level sub named a symbol that did not exist.
+        # vtable slot (never dispatched).
         #
-        # Parameters are deliberately absent: a callee reads its arguments via
-        # @_ today, and the params-by-default convention is a later step. A sub
-        # that READS @_ therefore cannot be called through this define yet, and
-        # its `uses_args` flag is carried on the registry record so that step
-        # can gate on it rather than re-deriving it.
-        for my $sinfo (@{ $reg->{subs} // [] }) {
+        # GATED OFF, and this is the honest state of the work rather than a
+        # missing feature. The INLINER (_lower_call_direct) still substitutes
+        # every direct-call callee body at its call site -- class subs included,
+        # which I had assumed were exempt and measured otherwise. So a define
+        # here does not give a sub a call path, it DUPLICATES a body that is
+        # already inlined:
+        #
+        #   pure sub          harmless but dead (measured: correct answer, an
+        #                     unreferenced define)
+        #   sub with a Str    lli REJECTS the module -- "redefinition of global
+        #                     '@str_const_0'", because both copies render the
+        #                     same string globals
+        #   sub with a print  the effect fires twice
+        #
+        # The same shape took corpus F9-F13 from 214 to 207 for main's subs.
+        # This becomes live in the step that retires the inliner (plan step 5),
+        # which is also the step that gives these defines a caller. Until then
+        # the REGISTRY carries the metadata -- which is what 1c is for -- and
+        # emission stays off.
+        my $emit_sub_defines = $ENV{CHALK_EMIT_SUB_DEFINES} ? 1 : 0;
+        for my $sinfo ($emit_sub_defines ? @{ $reg->{subs} // [] } : ()) {
             my $sname    = $sinfo->{name};
             my $fn_name  = '@' . $cname . '__' . $sname;
             my $ret_repr = $sinfo->{return_repr} // 'Int';
@@ -1069,8 +1050,7 @@ sub _emit_class_registry_ir {
             my $fn_type_str = _method_fn_type($ret_repr);
             push @vt_init, "i8* bitcast ($fn_type_str* $fn_name to i8*)";
         }
-        push @lines, "$vt_global = private unnamed_addr constant $vt_type { " . join(', ', @vt_init) . " }  ; vtable for $cname"
-            if $instantiable;
+        push @lines, "$vt_global = private unnamed_addr constant $vt_type { " . join(', ', @vt_init) . " }  ; vtable for $cname";
         push @lines, '';
     }
 

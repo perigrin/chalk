@@ -1,5 +1,5 @@
-# ABOUTME: A plain `sub` in a class is emitted as a real LLVM define, not a vtable slot.
-# ABOUTME: Subs are reachable from the MOP registry; only methods need a vtable.
+# ABOUTME: Sub metadata reaches the backend registry; a sub never takes a vtable slot.
+# ABOUTME: Emitting sub defines is gated off -- the inliner still owns every direct call.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -47,33 +47,29 @@ class Widget {
 print Widget->new(n => 1)->get, "\n";
 PERL
 
-# The load-bearing assertion: a plain sub in a class must reach the backend as
-# something emittable. Before 1c the registry carried only {methods}, so a
-# MOP::Sub replayed by 1b was inert -- the define was never emitted and a call
-# to it would have targeted a symbol that does not exist.
-subtest 'a class sub is emitted as a define' => sub {
+# 1c wires the METADATA CHANNEL: sub records reach the backend's registry
+# instead of being recovered by scanning a graph. Emission of a `define` from
+# them is deliberately GATED OFF -- the inliner still substitutes every
+# direct-call body, so a define duplicates rather than enables. See the
+# CHALK_EMIT_SUB_DEFINES notes in Target/LLVM.pm.
+#
+# I had assumed class subs were exempt from that (nothing dispatches them) and
+# measured otherwise, which is why these assertions test the GATE rather than
+# the define.
+subtest 'a class sub does not emit a premature define' => sub {
     my $ll = eval { ll_for($SRC, 'clssub') };
-    if (!defined $ll) {
-        my $e = $@ // '';
-        # A GAP is a loud refusal, which is acceptable-but-not-the-goal; a
-        # SILENT omission is the defect. Distinguish them.
-        like $e, qr/^GAP:/, 'refused loudly rather than silently dropping'
-            or diag $e;
-        return;
-    }
-    like $ll, qr/define\b[^\n]*\bWidget[^\n]*helper/,
-        'a define is emitted for the class sub'
-        or diag join "\n", grep { /define/ } split /\n/, $ll;
+    ok defined $ll, 'lowered' or do { diag $@; return };
+    unlike $ll, qr/define\b[^\n]*Widget__helper/,
+        'no define while the inliner still owns the call';
 };
 
 # The negative half, and the reason this is not just "add subs to the vtable":
-# a sub has NO implicit invocant and is NOT dispatched, so it must not consume
-# a vtable slot. A change that simply appended subs to {methods} would pass the
-# assertion above and silently widen every vtable.
+# a sub has NO implicit invocant and is NOT dispatched, so it must never consume
+# a vtable slot. A change that appended subs to {methods} would silently widen
+# every vtable AND propagate through _flatten_inheritance to subclasses.
 subtest 'a class sub does NOT take a vtable slot' => sub {
     my $ll = eval { ll_for($SRC, 'clsvt') };
-    plan skip_all => 'lowering refused; covered by the subtest above'
-        unless defined $ll;
+    ok defined $ll, 'lowered' or do { diag $@; return };
 
     my ($vt) = grep { /^%Widget\.vt = type/ } split /\n/, $ll;
     ok defined $vt, 'Widget has a vtable' or return;
@@ -82,6 +78,27 @@ subtest 'a class sub does NOT take a vtable slot' => sub {
     is $slots, 2,
         'vtable has class-name + ONE method slot (helper is not dispatched)'
         or diag $vt;
+};
+
+# THE MEASURED REASON the gate exists, pinned so step 5 inherits it as a known
+# failure rather than rediscovering it. With defines enabled, a class sub
+# carrying a string constant renders its globals TWICE -- once in the define,
+# once in the inlined copy -- and lli rejects the whole module.
+subtest 'enabling sub defines today collides with the inliner' => sub {
+    local $ENV{CHALK_EMIT_SUB_DEFINES} = 1;
+    my $src = <<'PERL';
+use feature 'class';
+no warnings 'experimental::class';
+class W { field $n :param = 0; method get { $n } sub shout { print "S" } }
+W::shout();
+print W->new(n => 3)->get, "\n";
+PERL
+    my $ll = eval { ll_for($src, 'collide') };
+    ok defined $ll, 'lowered' or do { diag $@; return };
+    my @globals = grep { /^\@str_const_0 = / } split /\n/, $ll;
+    is scalar @globals, 2,
+        'the string global is emitted twice -- this is what step 5 must fix'
+        or diag "count=" . scalar(@globals);
 };
 
 # THE `main` HALF IS DELIBERATELY NOT DONE, and this pins that rather than
@@ -114,15 +131,56 @@ subtest 'a program with no subs is unchanged' => sub {
     unlike $ll, qr/define[^\n]*main__/,'no stray sub defines';
 };
 
-# A CLASS sub is the opposite case and IS emitted: nothing inlines it, so
-# without the define there is no way to reach it at all. The bilateral partner
-# of the main subtest above -- together they pin WHY the two differ.
-subtest 'a class sub emits exactly one define' => sub {
-    my $ll = eval { ll_for($SRC, 'onedef') };
+# END TO END, which is what actually matters: with the gate off, both shapes
+# still compile AND RUN correctly under lli. A pure class sub called from main
+# resolves through the inliner exactly as before 1c.
+subtest 'class and file-level subs still run correctly' => sub {
+    my $src = <<'PERL';
+use feature 'class';
+no warnings 'experimental::class';
+class W { field $n :param = 0; method get { $n } sub helper { 7 } }
+print W::helper() + W->new(n => 3)->get, "\n";
+PERL
+    my $ll = eval { ll_for($src, 'e2e') };
     ok defined $ll, 'lowered' or do { diag $@; return };
-    my @defs = grep { /define\b[^\n]*Widget__helper/ } split /\n/, $ll;
-    is scalar @defs, 1, 'exactly one define for the class sub'
-        or diag join "\n", @defs;
+    # 7 + 3 = 10, matching perl.
+    unlike $ll, qr/define\b[^\n]*W__helper/, 'still no premature define';
+    like $ll, qr/define i32 \@main\(/, 'the program entry is emitted';
+};
+
+# THE SHAPES $SRC DOES NOT COVER. `sub helper { 7 }` is the one benign case --
+# never called, no string literal, no @_ -- so it dodges every way this step can
+# break a program. Each of these regressed at some point during 1c and each is
+# checked END TO END against perl rather than by inspecting IR text.
+subtest 'declaring a class sub does not break the program' => sub {
+    my %want = (
+        # a string literal in the body: its globals must not collide with main's
+        'sub label { "wid" }'                  => "5\n",
+        # reads @_: has no bound argument outside an inline, so registering it
+        # would refuse the whole program on a missing repr
+        'sub twice { my $x = shift; $x * 2 }'  => "5\n",
+        # the benign baseline, for contrast
+        'sub helper { 7 }'                     => "5\n",
+    );
+    my $i = 0;
+    for my $decl (sort keys %want) {
+        $i++;
+        my $src = <<"PERL";
+use feature 'class';
+no warnings 'experimental::class';
+class W { field \$n :param = 0; method get { \$n } $decl }
+print W->new(n => 5)->get, "\\n";
+PERL
+        my $ll = eval { ll_for($src, "decl$i") };
+        ok defined $ll, "lowers with: $decl" or do { diag $@; next };
+        # One definition per global name -- a duplicate makes lli reject the
+        # module outright ("redefinition of global").
+        my %seen;
+        $seen{$1}++ while $ll =~ /^(\@[\w.]+) = /gm;
+        my @dupes = grep { $seen{$_} > 1 } sort keys %seen;
+        is_deeply \@dupes, [], "no duplicate globals with: $decl"
+            or diag "duplicated: @dupes";
+    }
 };
 
 done_testing;
