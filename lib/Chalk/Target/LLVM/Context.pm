@@ -5789,6 +5789,15 @@ sub _lower_call_direct {
     die "GAP: direct call to '$name' has no resolved callee — the loader could "
       . "not resolve the sub name to a metaobject (an unknown or builtin sub)."
         unless defined $graph;
+    # `defined` is NOT enough on its own: MOP::Sub's `graph` field defaults to a
+    # fresh EMPTY graph rather than undef, so a metaobject declared without a
+    # body yields a defined-but-empty graph here. Inlining that emits nothing
+    # and returns whatever happens to be on hand — a silent wrong answer where
+    # a refusal belongs. The loader now refuses to build such a metaobject; this
+    # is the consumer-side half of that invariant.
+    die "GAP: direct call to '$name': the callee metaobject carries an EMPTY "
+      . "graph (no Return) — it was declared without a body."
+        unless $graph->returns && $graph->returns->@*;
 
     my @returns = grep {
         blessed($_) && $_->can('operation') && $_->operation eq 'Return'

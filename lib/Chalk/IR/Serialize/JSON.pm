@@ -1166,10 +1166,20 @@ sub _replay_classes ($classes, $graphs) {
         # entirely for `my ($a,$b) = @_`.
         my $subs = $cd->{subs} // {};
         for my $sname (sort keys %$subs) {
-            my $sd    = $subs->{$sname};
-            my $graph = $graphs->{ $sd->{graph} // '' };
+            my $sd  = $subs->{$sname};
+            my $key = $sd->{graph} // '';
+            # REFUSE a record whose graph is missing rather than declaring a
+            # graph-less MOP::Sub. MOP::Sub's `graph` field defaults to a fresh
+            # EMPTY Chalk::IR::Graph, not undef, so a consumer's `defined`
+            # check cannot tell "no body" from "a body" -- it would inline
+            # nothing and silently produce a wrong answer. The producer records
+            # a sub only after its translate() succeeds, so a missing graph
+            # means the wire and the graph set disagree; say so loudly.
+            my $graph = $graphs->{$key}
+                or die "GAP: class '$name' declares sub '$sname' with graph key "
+                     . "'$key', which is not in the loaded graph set.";
             $cls->declare_sub($sname,
-                (defined $graph ? (graph => $graph) : ()),
+                graph     => $graph,
                 params    => ($sd->{params} // []),
                 uses_args => ($sd->{uses_args} ? true : false),
             );
