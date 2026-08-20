@@ -79,40 +79,34 @@ subtest 'the callee graph is the same object either way' => sub {
         'target->graph IS the loaded callee graph, not a copy';
 };
 
-# THE SCOPE FENCE. `resolved_graph` is not deleted, and this pins WHY rather
-# than leaving it to look like unfinished work.
+# THE ACCEPTANCE CRITERION, now actually met: `resolved_graph` is GONE.
 #
-# The loader's repr fixpoint (_resolve_direct_calls / _seed_direct_call_arg_reprs)
-# runs BEFORE _replay_classes seals the MOP, so during those passes no
-# metaobject exists to point at. The field is loader-internal working state for
-# that window. Retiring it is a loader-ORDERING change, not a call-lowering one.
+# It was kept at first on the belief that the loader's repr fixpoint runs before
+# the MOP is sealed, so no metaobject would exist for it to read. Measured
+# wrong -- _replay_classes seals the MOP ~30 lines BEFORE that fixpoint. Moving
+# the target attachment up let the fixpoint read `target` too, and the field had
+# no consumers left.
 #
-# What this guards: no consumer OUTSIDE the loader may read it. The backend
-# reads `target`.
-subtest 'resolved_graph is loader-internal only' => sub {
+# This fence keeps it deleted: the flat-graph fallback should not come back.
+subtest 'resolved_graph is gone from lib/' => sub {
     my @offenders;
     for my $root (qw(lib)) {
         my @files = split /\n/, qx{find $root -name '*.pm'};
-        # A 0-file scan is indistinguishable from a clean one, so the fence
+        # A 0-file scan is indistinguishable from a clean one, so this fence
         # would PASS from any cwd where lib/ does not exist -- verified: run
-        # from /tmp it reported "nothing consumes resolved_graph" having read
-        # nothing at all. Assert the scan happened before trusting its result.
+        # from /tmp it reported success having read nothing at all.
         cmp_ok scalar @files, '>', 100,
             "the scan actually read lib/*.pm (found ${\ scalar @files })"
             or return;
         for my $f (@files) {
-            next if $f =~ m{IR/Serialize/JSON\.pm$};   # the loader itself
-            next if $f =~ m{IR/Node/Call\.pm$};        # the declaration
             open my $fh, '<', $f or next;
             my $src = do { local $/; <$fh> };
             close $fh;
-            # strip comments so the prose above does not self-trip
-            $src =~ s/^\s*#.*$//mg;
             push @offenders, $f if $src =~ /resolved_graph/;
         }
     }
     is_deeply \@offenders, [],
-        'nothing outside the loader consumes resolved_graph'
+        'the flat-graph fallback is deleted, comments included'
         or diag "offenders: @offenders";
 };
 
@@ -144,8 +138,8 @@ PERL
     my $err = '';
     eval { Chalk::IR::Serialize::JSON::from_json($json); 1 } or $err = $@ // '';
     like $err, qr/^GAP:/, 'refuses loudly rather than mislabelling the callee';
-    like $err, qr/graph set and its class sub records disagree/,
-        'and names the real cause'
+    like $err, qr/which IS in the MOP, but no sub/,
+        'and names the real cause -- the class is known, the sub is not'
         or diag $err;
 };
 

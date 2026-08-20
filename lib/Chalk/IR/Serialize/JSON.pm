@@ -571,7 +571,7 @@ sub _deserialize_graph ($method_data) {
 # _resolve_direct_calls(\%graphs) — attach each direct sub call's callee graph.
 # A Call with dispatch_kind='direct' names its callee (fully-qualified, e.g.
 # main::foo); resolve that name against the loaded graph set and stash the graph
-# on the Call via set_resolved_graph so the backend can lower the call. Calls
+# so the Call's repr can be stamped from the callee's Return value. Calls
 # whose name has no matching graph (builtins, unresolved) are left as-is.
 # _all_graph_nodes($g) -> ($g->nodes PLUS control-chain nodes), deduped by id.
 # $g->nodes walks inputs from the returns' value only, so a Call embedded in an
@@ -633,13 +633,26 @@ sub _attach_call_targets ($graphs, $mop) {
             # surface there as "an unknown or builtin sub" -- actively wrong,
             # since the sub is neither. Say what is really true, here, where both
             # facts are in hand.
-            die "GAP: direct call to '" . ($node->name // '?') . "' resolved to a "
-              . "callee GRAPH but no metaobject -- the wire's graph set and its "
-              . "class sub records disagree. A `method` or `:reader` CV is "
-              . "emitted as a graph but deliberately not recorded as a sub "
+            # NO METAOBJECT. Quiet for a callee that is not the program's own
+            # code -- a builtin, or an ambient module sub perl loaded along the
+            # way (Carp::ret_summary and friends have a graph but deliberately
+            # no sub record: B::SoN keys that on CV->FILE eq $0). Those simply
+            # are not callable here, and the backend's own GAP says so.
+            #
+            # LOUD when the class IS in the MOP but the sub is not: that is a
+            # genuine disagreement between the two halves of the wire, and it is
+            # reachable -- the producer writes the graph unconditionally, then
+            # _record_sub returns early for a `method` CV and for a `:reader`
+            # accessor. Measured: `Widget::go($w)` on a class method gives a
+            # graph with no metaobject. Resolving through the metaobject would
+            # otherwise report "an unknown or builtin sub", which is wrong.
+            die "GAP: direct call to '" . ($node->name // '?') . "' names class "
+              . "'$cls_name', which IS in the MOP, but no sub '$sub_name' is "
+              . "recorded on it. A `method` or `:reader` CV is emitted as a "
+              . "graph but deliberately not recorded as a sub "
               . "(B::SoN::_record_sub's early returns), so it cannot be called "
               . "in sub form."
-                if $node->can('resolved_graph') && $node->resolved_graph;
+                if $cls && exists $graphs->{ $node->name // '' };
         }
     }
     return;
@@ -652,7 +665,6 @@ sub _resolve_direct_calls ($graphs) {
                 && $node->can('dispatch_kind')
                 && ($node->dispatch_kind // '') eq 'direct';
             my $callee = $graphs->{ $node->name } or next;
-            $node->set_resolved_graph($callee);
 
             # Stamp the Call's repr from the callee's Return value, so the
             # backend and the shape contract see the call result's type. The
@@ -692,7 +704,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
             next unless $node->operation eq 'Call'
                 && $node->can('dispatch_kind')
                 && ($node->dispatch_kind // '') eq 'direct'
-                && $node->can('resolved_graph') && $node->resolved_graph;
+                && $node->can('target') && $node->target;
             my @args = grep { blessed($_) } $node->inputs->@*;
             next unless @args;
 
@@ -700,7 +712,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
             # `shift @_` (Call builtin shift over StashAccess(_)) or a `$_[0]`
             # subscript (Subscript over Constant("_") at index 0). Both bind the
             # first argument; stamp whichever the callee uses.
-            my $callee = $node->resolved_graph;
+            my $callee = $node->target->graph;
             my @reads = grep {
                 my $n = $_;
                 blessed($n) && $n->operation eq 'Call'
@@ -756,7 +768,7 @@ sub from_json ($json_string) {
     # Resolve each direct sub call (dispatch_kind='direct') to its callee graph
     # by name, so the backend can lower the call to the callee's result. A
     # top-level named sub is its own graph (keyed by fully-qualified name), not a
-    # MOP class method; the Call carries the graph on resolved_graph.
+    # MOP class method; the Call carries its callee metaobject on `target`.
     _resolve_direct_calls(\%graphs);
 
     # 4c: a `classes` section (from B::SoN) is replayed into a sealed MOP. Field
@@ -780,6 +792,13 @@ sub from_json ($json_string) {
         }
 
         $mop = _replay_classes($classes, \%graphs);
+
+        # Attach each resolved direct Call's callee METAOBJECT as soon as the
+        # MOP exists. This used to run at the very end of from_json, on the
+        # belief that the repr fixpoint below needed to precede it -- measured
+        # wrong: _replay_classes seals the MOP ~30 lines BEFORE the direct-call
+        # fixpoint, so the metaobject is available to it.
+        _attach_call_targets(\%graphs, $mop);
     }
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
@@ -821,7 +840,7 @@ sub from_json ($json_string) {
     # Call.pm documents `target` as "a MOP::Method/Sub handle ... so codegen can
     # read the callee's graph/params/return-type directly without going through
     # the symbol table at emit time". That is the MOP-shaped contract, and the
-    # B::SoN path did not meet it: it set `resolved_graph`, a bare
+    # B::SoN path did not meet it: it set a bare
     # Chalk::IR::Graph, whose own comment explains why -- "a top-level sub is not
     # a MOP class method, so it rides here."
     #
@@ -832,7 +851,6 @@ sub from_json ($json_string) {
     # Runs HERE, after _replay_classes has sealed the MOP -- the earlier
     # _resolve_direct_calls passes are part of the repr fixpoint and run before
     # any metaobject exists.
-    _attach_call_targets(\%graphs, $mop) if defined $mop;
 
     # Str-context coercions the PRODUCER could not insert. Print(Str...) and
     # StrEq/StrNe(Str, Str) take Str, and the producer wraps a non-Str operand

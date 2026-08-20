@@ -47,28 +47,6 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
     # builtins/subs and for calls whose class is not statically known.
     field $class_name :param :reader = undef;
 
-    # resolved_graph: the callee Chalk::IR::Graph for a direct call, resolved by
-    # name against the loaded graph set.
-    #
-    # LOADER-INTERNAL. It is NOT the callee handle any more -- `target` above is,
-    # and the backend reads that. This field survives only because the loader's
-    # repr fixpoint (_resolve_direct_calls / _seed_direct_call_arg_reprs) runs
-    # BEFORE _replay_classes seals the MOP, so during those passes there is no
-    # metaobject in existence to point at. It is working state for that window.
-    #
-    # Its old comment justified it as "a top-level sub is not a MOP class
-    # method, so it rides here". That premise is retired: under
-    # everything-is-a-class a file-level sub is a sub of class `main` and has a
-    # real MOP::Sub. The field is a phase-ordering artifact now, not a
-    # flat-graph fallback.
-    #
-    # It goes away when the repr fixpoint can run against a MOP -- which is a
-    # loader-ordering change, not a call-lowering one, and does not belong in
-    # this step. Do not add new CONSUMERS: read `target`.
-    #
-    # Not part of content_hash (a late decoration, like $target).
-    field $resolved_graph :param :reader = undef;
-
     method operation() { 'Call' }
     method staleness_kind() { 'opaque' }
 
@@ -91,10 +69,4 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
         return;
     }
 
-    # Late-binding setter for a direct call's resolved callee graph. Applied by
-    # the JSON loader once every graph is deserialized.
-    method set_resolved_graph($graph) {
-        $resolved_graph = $graph;
-        return;
-    }
 }
