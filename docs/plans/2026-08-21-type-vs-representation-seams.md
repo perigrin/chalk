@@ -76,16 +76,35 @@ The corpus pins `-9223372036854775808` (arithmetic.md:189-210) -- the NEGATIVE
 limit. The positive UV range is unpinned, which is how a bare-literal miscompile
 survived.
 
-**Layer.** A TYPING bug in the producer, not a lowering one: `Int` is the wrong
-type for a value that does not fit `Int`. It does NOT need the value-facts
-machinery 0b wants. I filed it under "the table cannot express value facts",
-which made a one-boundary classification bug look like it needed backend
-infrastructure.
+**Layer -- CORRECTED AGAIN.** I called this "a TYPING bug in the producer:
+`Int` is the wrong type for a value that does not fit `Int`". Wrong, and wrong
+in the same direction as twice before.
 
-**Two of my claims retracted here:** "Add ONLY, and the difference between it
-and its two siblings is where the fix starts" (the siblings differ by folding
-luck, not by handling), and 0a/0b "share a root cause" (they do not -- 0a is
-typing, 0b is lowering).
+perigrin: `Int` is correct ... what `Int` LOWERS TO should be optimized ... this
+is the same seam as `Num` lowering to `double`.
+
+`18446744073709551615` IS an integer, so `Int` is the right Chalk type and
+`const_type=integer` is the right classification. What is wrong is the lowering
+choice `Int => 'i64'` (SIGNED), hardcoded in `%_REPR_LLVM_TYPE`. So 0a and 0b
+ARE the same seam after all: one Chalk type, one hardcoded machine type, no
+channel for the value's properties.
+
+**`u64` is not a fix.** It would lower `18446744073709551615` correctly and
+break every negative integer (`-1` becomes `18446744073709551615`). No single
+signedness is right for a type spanning both, which is the same argument as
+`Num => double` vs `Num => i64`: the selection needs value facts, not a better
+default.
+
+**Retracted from the previous version of this section:** "Add ONLY, and the
+difference between it and its two siblings is where the fix starts" (they
+differ by constant-folding luck, not by handling) and "0a is typing, 0b is
+lowering" (both are lowering). What SURVIVES is the measurement: perl folds
+`Add` to a UV and its siblings to NVs, the UV range `[2^63, 2^64-1]` lowers
+wrong, and the minimal repro needs no arithmetic.
+
+perigrin's fix-now/fix-later split still holds and is what matters for
+sequencing -- 0a produces wrong OUTPUT, 0b produces correct-but-slow output.
+They just share a mechanism.
 
 ---
 
@@ -188,6 +207,46 @@ the `'join'` rule and their inputs are arms-only already -- do NOT apply this
 to the whole rule. Input order `(cond, then, else)` verified on this case only.
 
 ## 2. `Add => 'join'` derives what a signature should state
+
+**THE DEFECT IS IN TWO TABLES, IN TWO REPOS.** Fixing one leaves the other:
+
+    chalk     %_COMPUTED_REPR   Add => 'join'   next to Divide => 'Num'   Serialize/JSON.pm:1285
+    producer  %RESULT_STAMP     Add => 'join'   next to Divide => 'Num'   FromOptree.pm:36
+
+Both tables mix SIGNATURE entries (`Divide => 'Num'`, `Modulo => 'Int'`,
+`Concat => 'Str'`, `Length => 'Int'`) with DERIVATION entries (`Add`,
+`Subtract`, `Multiply`, `Negate` => `'join'`) under one key space, so the two
+philosophies are indistinguishable by reading the table.
+
+perigrin: `'join'` is the wrong choice there since we KNOW the expected type
+signature for the operators.
+
+Note this is NOT what caused 0a -- 0a fires on a bare literal with no
+arithmetic node present at all. The two are independent.
+
+**MEASURED: `'join'` mistypes `Int + Str`, and it does not merely look wrong.**
+
+    my $s = "5"; print 2 + $s, "\n";     ->  Add stamp=Str      perl says 7
+
+The join widened `Int` and `Str` to `Str`, but perl's `+` is NUMERIC regardless
+of how its operands are spelled -- the result is a number, never a string. A
+signature (`(Num,Num) -> Num`) gets this right by construction; the join cannot,
+because widening is the wrong operation for an operator that COERCES its
+operands.
+
+Downstream this emits malformed IR rather than wrong output -- lli rejects it:
+
+    %tmp_6 = add i64 %tmp_1, %tmp_5   ; Add(repr=Int) -> i64 add
+    error: '%tmp_5' defined with type '%Str' but expected 'i64'
+
+Three shapes measured, all the same: `2 + $s`, `$s + $s`, `$s * 2`. NOT silent
+miscompiles -- the LLVM verifier catches them -- but they are programs perl runs
+and Chalk cannot compile, and the cause is the derivation rule.
+
+(My probe script labelled these "MISCOMPILE" on a naive string compare of perl's
+output against lli's stderr. They are lowering failures, not wrong answers. The
+distinction matters: GAP-not-miscompile is the project invariant and it HELD.)
+
 
 perigrin:
 
