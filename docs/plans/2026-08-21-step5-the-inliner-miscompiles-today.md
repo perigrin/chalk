@@ -224,3 +224,50 @@ The inliner is not premature in the ordinary sense of correct-but-early. It
 So the fix is structural rather than a re-labelling. A real `call` restores
 `opaque`'s premise by construction -- arguments become parameters, the callee
 lowers once, and nothing needs a new bucket.
+
+---
+
+# It is not inlining the GRAPH -- only the effects (2026-08-21)
+
+perigrin, reading the sweep: "it doesn't sound like we are actually inlining the
+graph ... we're just inlining the return value after having cached it once."
+
+Correct, and sharper than the framing above. Measured on `f(1)` then `f(2)`:
+
+    mul emitted: 1
+
+**One `mul` for two calls.** The callee's body is not substituted twice. It is
+lowered once and the resulting SSA ref handed to the second site.
+
+The effectful variant splits the mechanism cleanly. For
+`sub f { my $n=shift; print "c"; $n*2 }` called twice:
+
+    mul emitted: 1   print emitted: 3   (2 callee prints + 1 caller print)
+
+So the two halves take DIFFERENT paths, and only one of them is per-site:
+
+- the **effect chain** is re-driven at each call site -- correct, both prints fire
+- the **value** is lowered through the shared `{cache}` -- wrong, computed once
+
+`_lower_call_direct` (`Context.pm:5871-5879`) localises `_arg_bind` per site and
+drives the effect chain per site, then calls
+`_lower_inlined_effects_then_value(\@effect_chain, $value)`. That last call
+lowers `$value` through `$self->{cache}`, so the callee's `Multiply` node is
+cached on the first site and served on the second -- with the first site's
+argument baked in.
+
+## Why this matters for the fix
+
+"Inlining is wrong here" and "inlining is not what is happening" are different
+claims, and the second is the true one. The pass does not duplicate a body; it
+memoises a computation across contexts that disagree about what its inputs are.
+
+That is why the effect chain looks healthy while the value is wrong, why an
+effectful callee passes the naive sweep (its visible output comes from the
+effects, which ARE per-site), and why `f(3)+f(3)` passes -- with equal arguments
+the single cached computation happens to be the right answer for both.
+
+It also means "turn the inliner off" is not removing a duplication pass. There
+is no duplication to remove. What is there is a value cache doing cross-context
+memoisation, and a real `call` replaces it with a call instruction rather than
+undoing a substitution.
