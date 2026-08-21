@@ -167,9 +167,13 @@ $SPEC{FieldAccess} = sub ($f) {
 };
 
 $SPEC{StashAccess} = sub ($f) {
+    # sigil is deliberately '@', NOT the '$' default: a spec using the default
+    # value passes even when the field is dropped entirely, which is exactly
+    # the pass-by-omission this file exists to prevent. `sigil` was added and
+    # this spec did not notice.
     my $node = $f->make('StashAccess',
-        stash_name => 'main', var_name => 'g', inputs => []);
-    return ($node, { stash_name => 'main', var_name => 'g' });
+        stash_name => 'main', sigil => '@', var_name => 'g', inputs => []);
+    return ($node, { stash_name => 'main', sigil => '@', var_name => 'g' });
 };
 
 $SPEC{CompoundAssign} = sub ($f) {
