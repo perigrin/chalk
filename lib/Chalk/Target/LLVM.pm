@@ -516,8 +516,16 @@ sub _populate_registry_from_mop_class {
             body_return => _method_body_return($s),
             # Qualified: an unqualified name made the GAP ambiguous across
             # classes declaring the same sub name.
-            return_repr => ($s->return_type
-                // _require_repr($body_node, "MOP::Sub '${cname}::${sname}' body root")),
+            # `return_repr` is a FORCING point: it names a type in the emitted
+            # signature, so it must be a real representation. The producer's
+            # declaration is authoritative when it determined one; `Unknown`
+            # means inference did NOT, and there is no encoding of `Unknown` --
+            # so fall through to the body root rather than emit it as a type.
+            return_repr => (
+                ( ( $s->return_type // 'Unknown' ) ne 'Unknown' )
+                ? $s->return_type
+                : _require_repr($body_node, "MOP::Sub '${cname}::${sname}' body root")
+            ),
             uses_args   => $s->uses_args,
         };
     }

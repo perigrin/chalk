@@ -1232,10 +1232,17 @@ sub _replay_classes ($classes, $graphs) {
             my $graph = $graphs->{$key}
                 or die "GAP: class '$name' declares sub '$sname' with graph key "
                      . "'$key', which is not in the loaded graph set.";
+            # The producer DECLARES the return type; the loader CARRIES it. A
+            # wire without the field predates the declaration and arrives as
+            # `Unknown` -- the lattice top -- never as undef. `Unknown` is a
+            # real type meaning "inference has not determined this"; undef is
+            # an ABSENCE, and an absence forces every downstream consumer to
+            # invent its own meaning for it.
             $cls->declare_sub($sname,
-                graph     => $graph,
-                params    => ($sd->{params} // []),
-                uses_args => ($sd->{uses_args} ? true : false),
+                graph       => $graph,
+                params      => ($sd->{params} // []),
+                uses_args   => ($sd->{uses_args} ? true : false),
+                return_type => ($sd->{return_type} // 'Unknown'),
             );
         }
 
