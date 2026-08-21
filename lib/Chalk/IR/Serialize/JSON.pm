@@ -1535,6 +1535,24 @@ sub _propagate_computed_reprs ($graphs) {
                     next;
                 }
                 my @in = grep { defined && blessed($_) } $node->inputs->@*;
+
+                # A TernaryExpr's inputs are (cond, then, else), but `$c ? $a :
+                # $b` NEVER evaluates to `$c` -- the condition is not a value
+                # the expression can yield, so it must not enter the join.
+                # Including it poisons the result: a Bool condition is off the
+                # Int<:Num<:Str chain, so no candidate dominates and the node
+                # goes untyped even when both arms agree.
+                #
+                # The PRODUCER already joins arms-only (FromOptree.pm:4145,
+                # Stamp::join($true_val->stamp, $false_val->stamp)); this side
+                # disagreed with it. Order is documented there: inputs[1]=true,
+                # inputs[2]=false.
+                #
+                # TernaryExpr ONLY. Phi's inputs are its arms, and DefinedOr is
+                # a BinOp whose two operands are both results -- neither has a
+                # condition among its inputs to drop.
+                @in = @in[ 1 .. $#in ] if $op eq 'TernaryExpr' && @in > 1;
+
                 my @reprs = map { $_->representation } @in;
                 next if grep { !defined } @reprs;          # an input still untyped
                 if ($rule eq 'same') {
