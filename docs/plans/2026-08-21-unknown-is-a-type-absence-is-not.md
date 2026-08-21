@@ -142,9 +142,47 @@ need real iteration to a fixpoint.
 
 ## What this does NOT establish
 
-- Not measured: whether dropping `Unknown` from the join is safe for every
-  current caller of `_join_repr` (Phi, TernaryExpr, DefinedOr, and the binop
-  join all share it). A Phi over a genuinely unknown arm may want to stay
-  unknown rather than adopt the other arm's type.
 - Not established: that `fib` compiles once both are fixed. Call emission is
   still required for the recursion itself; this is only the typing half.
+
+---
+
+# `Unknown` is useful in INFERENCE and useless as a REPRESENTATION
+
+perigrin: it is useful in inference, it is useless for building a program with
+correct value representation.
+
+That is the rule, and it resolves the caveat this doc left open.
+
+`Unknown` is a good inference value: a real lattice point, it composes, it is
+the sound top, and it lets a fixpoint say "not yet" without lying.
+
+A REPRESENTATION is a machine-level commitment -- how many bits, which register
+class, what a `phi` and its coercions must agree on. **There is no encoding of
+`Unknown`.** `%x = phi Unknown` is not a thing. So an `Unknown` reaching codegen
+means inference did not finish, and the compiler must refuse rather than pick.
+
+## This answers the open question above
+
+I recorded "a Phi over a genuinely unknown arm may want to stay unknown rather
+than adopt the other arm's type" as unmeasured. It is not a real option: a Phi
+arm still `Unknown` at codegen time is **not a type to preserve, it is a failure
+to report**. Staying `Unknown` is not conservative -- it defers a refusal to a
+layer that cannot make one.
+
+## The shape
+
+    inference   MAY hold Unknown, join over it, iterate to a fixpoint
+    the boundary into codegen  MUST narrow every Unknown, or GAP
+    codegen     must NEVER see one, and must say so if it does
+
+The field is called `representation` but currently holds an INFERENCE RESULT.
+Those coincide exactly when inference succeeds, and diverge exactly when it does
+not -- which is the case that matters, and today shows up as an absent field
+that 24 sites each answer for themselves.
+
+`_require_repr` is groping toward this boundary already. Its message ("fix
+TypeInference to annotate this node") names a subsystem that is not on this path
+and describes an absent field rather than an undischarged obligation. The
+boundary check is the right idea; the message and the representation of "not
+known" are both wrong.
