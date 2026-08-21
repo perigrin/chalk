@@ -462,10 +462,15 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'StashAccess') {
             $args{stash_name} = $fields->{stash_name} // '';
             $args{var_name}   = $fields->{var_name}   // '';
-            # Part of the identity -- see the node. Defaulting to '$' keeps a
-            # pre-sigil wire loading with its old identity rather than merging
-            # differently-sigilled variables.
-            $args{sigil}      = $fields->{sigil}      // '$';
+            # REQUIRED, not defaulted. `_` alone names three different things
+            # ($_, @_, and the `-f _` filetest handle), so a wire without a
+            # sigil does not identify a variable -- defaulting one here would
+            # invent an identity and re-merge what the producer kept apart.
+            die "GAP: StashAccess '" . ($fields->{var_name} // '?')
+              . "' arrived with no sigil -- the wire predates sigil-qualified "
+              . "stash identity, or the producer failed to stamp it."
+                unless defined $fields->{sigil};
+            $args{sigil}      = $fields->{sigil};
         }
         elsif ($op eq 'RegexMatch') {
             $args{pattern} = $fields->{pattern} // '';

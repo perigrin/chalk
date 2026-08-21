@@ -50,7 +50,9 @@ is($fa->operation(), 'FieldAccess', 'FieldAccess operation');
 is($fa->field_index(), 0, 'FieldAccess field_index');
 is($fa->field_stash(), 'MyClass', 'FieldAccess field_stash');
 
-my $sa = Chalk::IR::Node::StashAccess->new(id => 'sa_0');
+# sigil is REQUIRED:  alone names $_, @_ and the  filetest handle,
+# so a sigil-less stash variable is not expressible.
+my $sa = Chalk::IR::Node::StashAccess->new(id => 'sa_0', sigil => '$');
 isa_ok($sa, 'Chalk::IR::Node::Access', 'StashAccess isa Access');
 is($sa->operation(), 'StashAccess', 'StashAccess operation');
 
