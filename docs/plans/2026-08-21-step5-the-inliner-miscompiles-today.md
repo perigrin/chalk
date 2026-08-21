@@ -271,3 +271,38 @@ It also means "turn the inliner off" is not removing a duplication pass. There
 is no duplication to remove. What is there is a value cache doing cross-context
 memoisation, and a real `call` replaces it with a call instruction rather than
 undoing a substitution.
+
+---
+
+# CORRECTION: fib's cycle is a fixpoint that bails, not a missing subsystem
+
+perigrin: we added type-lattice lookups recently and were working toward a fully
+typed IR -- check that. Right, and I had overstated the gap.
+
+**What I said above is too broad.** "TypeInference does not run on this path" is
+true only of the Earley semiring class `Chalk::Grammar::Perl::TypeInference`.
+The type LATTICE is very much on the B::SoN path: `Serialize/JSON.pm:16` imports
+`TypeLibrary`, and uses it at four sites -- `_join_repr` (merge widening,
+derived from the lattice rather than the old `%_REPR_RANK` table),
+`operand_repr_for_ir_op`, `accepts_operand_repr`, and `is_subtype`.
+
+**And fib is closer than I scoped it.** Measured on its Return value:
+
+    TernaryExpr  repr=UNDEF
+      arm NumLt  repr=Bool     <- the condition
+      arm Call   repr=Int      <- the BASE CASE, already typed
+      arm Add    repr=UNDEF    <- the recursive arm
+
+One arm is already `Int`, stamped from the argument. The cycle is breakable with
+the machinery that exists: join over the arms that ARE known and `Int` falls out.
+The fixpoint gives up when any input is UNDEF instead of joining over the rest.
+
+So the correct filing is NOT "the loader needs a type-inference subsystem it
+lacks". It is: **`_join_repr`'s callers bail on an UNDEF input rather than
+joining the known ones.** That is a much smaller change, in one function's
+callers, and it is still independent of call emission.
+
+Kept out of step 5 anyway, for the reason already stated: it is a loader-fixpoint
+change with its own verification, and bundling it means neither half gets proven
+on its own. But the estimate was wrong and the wrong estimate is what would have
+made it look unaffordable later.
