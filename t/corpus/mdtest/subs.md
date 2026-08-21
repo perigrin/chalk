@@ -508,3 +508,105 @@ return %p
 control: %start -> %p
 L: GREEN
 ```
+
+## F14 two calls to one sub with DIFFERENT arguments
+
+The value miscompile the memoisation path produces, and the reason F11 does not
+catch it: F11's callee PRINTS, so its visible output comes from the effect
+chain, which IS re-driven per call site. The VALUE is lowered once through the
+shared `{cache}` and served to the second site with the first site's argument
+baked in.
+
+Measured before the fix: `f(1)+f(2)` gave 4 where perl gives 6, and the emitted
+LLVM contained exactly ONE `mul` for two calls.
+
+Arguments must DIFFER. `f(3)+f(3)` passes today by coincidence -- the single
+cached computation happens to be the right answer for both.
+
+```perl
+# source
+use 5.42.0;
+sub f { my $n = shift; $n * 2 }
+print f(1) + f(2), "\n";
+```
+
+```behavior
+stdout: 6\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c6   = Constant(6) :Int
+%co   = Coerce(%c6 : Int -> Str) :Str
+%nl   = Constant("\n") :Str
+%cat  = Concat(%co, %nl)
+%p    = Print(%cat)
+return %p
+L: GREEN
+```
+
+## F15 the same call nested in its own argument
+
+`f(f(1))` -- the same defect reached differently. The inner call's value is
+cached, then the outer call reads that cache entry rather than computing over
+the inner result. Worth its own case: an argument-binding fix could plausibly
+close F14 and not this.
+
+Measured before the fix: 2 where perl gives 4.
+
+```perl
+# source
+use 5.42.0;
+sub f { my $n = shift; $n * 2 }
+print f(f(1)), "\n";
+```
+
+```behavior
+stdout: 4\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c4   = Constant(4) :Int
+%co   = Coerce(%c4 : Int -> Str) :Str
+%nl   = Constant("\n") :Str
+%cat  = Concat(%co, %nl)
+%p    = Print(%cat)
+return %p
+L: GREEN
+```
+
+## F16 two calls in separate statements
+
+The same defect outside a single expression, so a fix scoped to one expression
+tree does not close it. Measured before the fix: `2 2` where perl gives `2 4`.
+
+```perl
+# source
+use 5.42.0;
+sub f { my $n = shift; $n * 2 }
+my $a = f(1);
+my $b = f(2);
+print "$a $b\n";
+```
+
+```behavior
+stdout: 2 4\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%c2   = Constant(2) :Int
+%c4   = Constant(4) :Int
+%sp   = Constant(" ") :Str
+%nl   = Constant("\n") :Str
+%p    = Print(%nl)
+return %p
+L: GREEN
+```
