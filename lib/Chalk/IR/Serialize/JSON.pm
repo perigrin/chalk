@@ -697,7 +697,7 @@ sub _resolve_direct_calls ($graphs) {
 # _seed_direct_call_arg_reprs(\%graphs) -> count of nodes newly stamped.
 #
 # A callee compiled in isolation reads its Nth positional argument via a
-# `shift @_` (Call(builtin,shift) over StashAccess(*,_)), which has no type on
+# `shift @_` (Call(builtin,shift) over ArgsSource), which has no type on
 # its own -- so an expression over it (`shift + 1`) stays untyped and the
 # backend's NO-REPR guard would fire. The type is known at the CALL site: it is
 # the argument's repr. Stamp the callee's single `shift @_` read with the
@@ -719,7 +719,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
             next unless @args;
 
             # Find the callee's single positional argument read: either a
-            # `shift @_` (Call builtin shift over StashAccess(_)) or a `$_[0]`
+            # `shift @_` (Call builtin shift over ArgsSource) or a `$_[0]`
             # subscript (Subscript over Constant("_") at index 0). Both bind the
             # first argument; stamp whichever the callee uses.
             my $callee = $node->target->graph;
@@ -731,18 +731,20 @@ sub _seed_direct_call_arg_reprs ($graphs) {
                     && defined $n->name && $n->name eq 'shift'
                     && do {
                         my ($op) = grep { blessed($_) } $n->inputs->@*;
-                        $op && $op->operation eq 'StashAccess'
-                            && $op->can('var_name') && ($op->var_name // '') eq '_';
+                        $op && $op->operation eq 'ArgsSource';
                     };
             } $callee->nodes->@*;
             unless (@reads) {
-                # `$_[0]`: Subscript(Constant("_"), Constant(0), Mem).
+                # `$_[0]`: Subscript(ArgsSource, Constant(0), Mem).
+                #
+                # The container used to be a string Constant("_") -- the array
+                # spelled as its own NAME -- so this had to match a literal.
+                # With @_ as a node kind the container is simply that node.
                 @reads = grep {
                     my $n = $_;
                     blessed($n) && $n->operation eq 'Subscript' && do {
                         my ($c, $i) = grep { blessed($_) } $n->inputs->@*;
-                        $c && $c->operation eq 'Constant' && $c->can('value')
-                            && ($c->value // '') eq '_'
+                        $c && $c->operation eq 'ArgsSource'
                             && $i && $i->operation eq 'Constant' && $i->can('value')
                             && defined $i->value && $i->value eq '0';
                     };

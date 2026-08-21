@@ -5993,20 +5993,15 @@ sub _lower_inlined_effects_then_value {
 #
 # Is this StashAccess the ARGUMENT ARRAY `@_`, as opposed to the scalar `$_`?
 #
-# NAME IS NOT ENOUGH: `$_` and `@_` are different variables sharing the glob
-# name `_`. Matching on var_name alone sent a `$_` node into the @_ handling
-# below, which then reported it as "a list assignment `my (...) = @_`" on a
-# source containing no list assignment -- a correct refusal with a wrong
-# diagnosis, because the shape it named was not the shape present.
-#
-# The sigil is on the node (producer daaaf7a/95ebe79). A pre-sigil graph
-# defaults to '$', so an @_ node without an explicit sigil reads as a scalar
-# and simply does not match here -- it fails to bind rather than mis-binding.
+# `@_` has its OWN NODE KIND now, so this is one operation check. It was a
+# name test (`var_name eq '_'`), which could not tell `@_` from the scalar `$_`
+# -- a `$_` node walked into the @_ handling and was reported as "a list
+# assignment `my (...) = @_`" on a source containing none: a correct refusal
+# with a wrong diagnosis. A sigil check fixed that; a separate node kind means
+# the two cannot be confused even in principle.
 sub _is_args_array {
     my ($node) = @_;
-    return 0 unless $node->can('var_name') && ($node->var_name // '') eq '_';
-    return 0 unless $node->can('sigil');
-    return ($node->sigil // '$') eq '@';
+    return $node->operation eq 'ArgsSource';
 }
 
 # _collect_positional_arg_reads($graph, $name) -> @shift_nodes
@@ -6030,43 +6025,50 @@ sub _collect_positional_arg_reads {
                 && ($n->dispatch_kind // '') eq 'builtin'
                 && defined $n->name && ($n->name eq 'shift' || $n->name eq 'pop')) {
             my ($operand) = grep { blessed($_) } $n->inputs->@*;
-            next unless defined $operand
-                && $operand->operation eq 'StashAccess'
-                && _is_args_array($operand);
+            next unless defined $operand && _is_args_array($operand);
             die "GAP: direct call to '$name': callee reads \@_ via `pop` — only "
               . "positional `shift \@_` argument binding is inlined (`pop \@_` "
               . "reads from the end, which inlining does not model)."
                 if $n->name eq 'pop';
             push @shifts, $n;
         }
-        # `$_[N]`: a positional subscript on @_. The producer emits
-        # `Subscript(Constant("_"), Constant(N), Mem)` — the @_ array by NAME (a
-        # Constant, not a StashAccess) at a literal index. This IS bindable: the
-        # caller's Nth argument substitutes for the whole Subscript node during
-        # inlining (keyed by refaddr, like a `shift @_`). Collect them keyed by
-        # index so a single `$_[0]` reader binds arg 0.
+        # `$_[N]`: a positional subscript on @_, i.e. Subscript(ArgsSource,
+        # Constant(N), Mem). Bindable: the caller's Nth argument substitutes for
+        # the whole Subscript node during inlining (keyed by refaddr, like a
+        # `shift @_`). Collected by index so a single `$_[0]` reader binds arg 0.
+        #
+        # The container used to be a string Constant("_") -- the array spelled
+        # as its own NAME, which is why this test read a literal.
         elsif ($op eq 'Subscript') {
             my @in = grep { blessed($_) } $n->inputs->@*;
             my ($container, $index) = @in;
-            next unless defined $container && $container->operation eq 'Constant'
-                && $container->can('value') && ($container->value // '') eq '_';
+            next unless defined $container
+                && $container->operation eq 'ArgsSource';
             next unless defined $index && $index->operation eq 'Constant'
                 && $index->can('value') && defined $index->value
                 && $index->value =~ /^\d+$/;
             $subscripts{ $index->value } = $n;
         }
-        # `my (...) = @_`: @_ accessed as an aggregate via a StashAccess. The
-        # producer does not connect the list-assign to the caller's args in the
-        # graph, so inlining cannot bind it — GAP loudly rather than miscompile.
-        elsif ($op eq 'StashAccess' && _is_args_array($n)) {
-            # A `shift @_` consumes its StashAccess(_) operand; that consumer is
-            # handled above. Any OTHER consumer (list-assign, deref) is an @_
-            # shape inlining cannot bind.
+        # `my (...) = @_`: @_ accessed as an aggregate. The producer does not
+        # connect the list-assign to the caller's args in the graph, so inlining
+        # cannot bind it — GAP loudly rather than miscompile.
+        elsif ($op eq 'ArgsSource') {
+            # Two consumers ARE bindable and are handled above: a `shift @_`
+            # Call, and a `$_[N]` Subscript. Anything else (a list-assign, a
+            # deref) is an @_ shape inlining cannot bind.
+            #
+            # The Subscript exemption is new with the ArgsSource node: `$_[0]`
+            # used to reach @_ through a string Constant("_") container, so it
+            # never arrived here at all. Now that every spelling of @_ names the
+            # same node, this guard sees them all -- and must not refuse the one
+            # the arg binder already knows how to handle.
             my @other = grep {
-                blessed($_) && !( $_->operation eq 'Call'
-                    && $_->can('dispatch_kind')
-                    && ($_->dispatch_kind // '') eq 'builtin'
-                    && defined $_->name && $_->name eq 'shift' )
+                blessed($_)
+                    && !( $_->operation eq 'Call'
+                        && $_->can('dispatch_kind')
+                        && ($_->dispatch_kind // '') eq 'builtin'
+                        && defined $_->name && $_->name eq 'shift' )
+                    && $_->operation ne 'Subscript'
             } $n->consumers->@*;
             die "GAP: direct call to '$name': callee accesses \@_ as an aggregate "
               . "(a list assignment `my (...) = \@_`) — inlining only binds "
