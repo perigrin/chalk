@@ -76,3 +76,75 @@ the same defect seen from two ends.
 Independent of step 5's call emission. Worth doing before or alongside the
 recursion work, since the recursion cycle is the first place the distinction
 becomes load-bearing rather than hygienic.
+
+---
+
+# TWO bugs in the ternary's typing, and the second survives fixing the first
+
+perigrin: there are at least two bugs -- one is that it is not typing things
+`Unknown`; the second, once that is fixed, is that it types things `Unknown`
+rather than a type that can coerce to a target type.
+
+Both confirmed by measurement.
+
+## Bug 1: absence, not `Unknown`
+
+The recursive `Call` is left unstamped -- Perl `undef`, not a lattice point --
+so `_join_repr` cannot run over it at all. This is the finding above.
+
+## Bug 2: `Unknown` swallows the join
+
+Measured directly against `TypeLibrary`:
+
+    join(Int, Int)      = Int
+    join(Int, Unknown)  = Unknown        <- the known type is DISCARDED
+    join(Int, Str)      = Str
+
+    is_subtype(Int, Unknown) = 1
+    is_subtype(Unknown, Int) = 0
+
+`Unknown` is TOP, so everything is a subtype of it and it wins every join. Fix
+bug 1 alone and `fib`'s ternary types `Unknown` -- the base case's `Int` is
+taken and thrown away.
+
+The join is not malfunctioning. Least-upper-bound is the right operation for a
+MERGE of two known types and the wrong operation for "one arm is known and the
+other has not been inferred yet".
+
+## The fix: `Unknown` must not participate in a join
+
+It contributes no constraint. Drop `Unknown` arms, join the rest, and `fib`'s
+ternary types `Int` from its base case alone.
+
+**There is precedent in this exact file.** `_join_repr`'s callers already drop
+`Undef` for the `//` case: "Undef contributes no value to widen, so it is
+dropped before the join and the defined arm's type wins."
+
+The justifications differ and both are worth keeping straight:
+
+- `Undef` is dropped for a SEMANTIC reason -- `$a // $b` never yields undef when
+  `$a` is defined, so undef is not a possible result.
+- `Unknown` must be dropped for an EPISTEMIC one -- it is not a claim about the
+  value at all, it is an admission that inference has not finished.
+
+## The deeper shape
+
+perigrin's phrasing -- "a type that can coerce to a target type" -- points past
+the immediate fix. What a recursive callee needs is not a widening but a
+HYPOTHESIS: assume the return type is the join of the arms that ARE known, then
+check the recursive arm is consistent with it. That is ordinary fixpoint
+inference over a recursive definition, and it is exactly why a base case exists.
+
+Dropping `Unknown` from the join is the first iteration of that hypothesis. It
+is sufficient for `fib` (one typed arm, one recursive) and it is NOT a general
+solution -- mutual recursion where no arm is typed on the first pass would still
+need real iteration to a fixpoint.
+
+## What this does NOT establish
+
+- Not measured: whether dropping `Unknown` from the join is safe for every
+  current caller of `_join_repr` (Phi, TernaryExpr, DefinedOr, and the binop
+  join all share it). A Phi over a genuinely unknown arm may want to stay
+  unknown rather than adopt the other arm's type.
+- Not established: that `fib` compiles once both are fixed. Call emission is
+  still required for the recursion itself; this is only the typing half.
