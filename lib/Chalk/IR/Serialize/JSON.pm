@@ -1334,6 +1334,20 @@ my %_COMPUTED_REPR = (
 # widened type the merge phi cannot express.
 sub _join_repr (@reprs) {
     return undef unless @reprs;
+
+    # `Unknown` is the SOUND TOP, so it is a supertype of everything and wins
+    # every join -- discarding the arm that inference DID determine. But it is
+    # not a claim about the value at all; it is an admission that inference has
+    # not finished, so it contributes no constraint and must not narrow the
+    # result. Drop it and join the rest.
+    #
+    # Guarded like the `Undef` drop below (:1548): if EVERY arm is Unknown
+    # there is nothing known, and the join must stay Unknown rather than empty
+    # the list and return a vacuous answer. The two drops differ in kind --
+    # `Undef` is dropped for a SEMANTIC reason, `Unknown` for an EPISTEMIC one.
+    my @known = grep { $_ ne 'Unknown' } @reprs;
+    @reprs = @known if @known;
+
     for my $cand (@reprs) {
         return $cand
             if !grep { !Chalk::Grammar::Perl::TypeLibrary::is_subtype($_, $cand) }
