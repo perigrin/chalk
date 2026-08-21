@@ -431,6 +431,34 @@ giving one node two representations.
 So the model is: per-node representation, edge coercions for mismatches. Exactly
 `Node(Int) -> Node(i64)`.
 
+**Evidence 3 -- and it subsumes the other two: SSA FORBIDS THE ALTERNATIVE.**
+perigrin, on "if one node can need two machine types in one program": *this
+shouldn't be possible with SSA.*
+
+Correct, and by construction rather than by measurement. A node IS a single
+definition: one def, one value, one type. Two uses needing different machine
+types would need different VALUES -- which in SSA means different DEFS, i.e. a
+conversion node between them. The cache key and the edge coercions are
+CONSEQUENCES of that, not independent design choices, so "per-node or per-use?"
+was a question SSA had already answered and I should not have posed it
+empirically.
+
+This also re-describes the merge coercions correctly: `_emit_coercion` is not
+"the mechanism for per-use differences" -- **the coercion IS A NEW DEF**.
+`Coerce(Int -> Str)` produces a distinct SSA value with its own type. There is
+no per-use variation anywhere; there are just more defs.
+
+The invariant: **every value has exactly one type, in whichever vocabulary is
+current.** The rewrite carries all defs from Chalk types to machine types
+together and CANNOT produce a conflict, because a conflict would require one def
+with two types.
+
+**One consequence, and it is where the rewrite stops being mechanical.** If
+`Int` may lower to `i64` OR `u64`, two defs both typed `Int` in Chalk can become
+different machine types, and an operation joining them needs a conversion def
+inserted. So the pass is not pure relabeling -- it must be able to MINT DEFS,
+not just rewrite fields. Same edge-coercion mechanism, one vocabulary down.
+
 **What this corrects.** My "per-use, never stored" framing was wrong. I leaned
 on `Node.pm:50` ("representation is a per-use lowering decision, not a
 structural property") -- but that comment exists to justify EXCLUDING repr from
