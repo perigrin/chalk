@@ -274,11 +274,41 @@ name so the signature tables can be reached. The map covers string ops and
 `operand_repr_for_ir_op` exists, there is no result-type accessor, even though
 `%BUILTIN_SIGNATURES` entries carry `return_type`.
 
-So this is a design call, not a table entry:
+**THE PATTERN ALREADY WORKS ONE ROW OVER.** perigrin: `2 + $s` should have
+produced a `Coerce($s -> Int)`. It should, and the machinery to do it is built,
+shipped, and firing today -- for `Concat`, which IS mapped:
 
-- what is `+`'s result type in Chalk's lattice? (`Num` always, or `Int` when
-  the operands are `Int`?)
-- add a result-type accessor alongside the operand one?
+    my $n = 5; print "x" . $n, "\n";
+
+    Constant  Str  value=x
+    Constant  Int  value=5
+    Coerce    Str  from_repr=Int to_repr=Str    <- signature says Str, so coerce
+    Concat    Str                               <- result STATED, not joined
+
+`_required_operand_repr($op,$position)` + `_insert_str_coercions`
+(Serialize/JSON.pm:971-986) do exactly this: look up the required operand type,
+compare, insert a `Coerce` on mismatch. `Concat => '.'` is in
+`%IR_OP_SOURCE_NAME` and `Concat => 'Str'` is in the result table, so both
+halves work.
+
+`Add` reaches neither -- it is absent from the map, so `operand_repr_for_ir_op`
+returns undef ("no opinion") and no coercion is considered; and its result comes
+from `'join'` instead of a signature.
+
+So this is NOT a design call. It is wiring an existing mechanism to four more
+operators. The only genuinely open question is narrow:
+
+- `+`'s signature. Perl's `+` is numeric, and the table already commits to
+  `Divide => 'Num'` and `Modulo => 'Int'`, so `(Num,Num) -> Num` is the
+  consistent answer.
+- whether `Int + Int -> Int` survives as a narrowing. Given 0a/0b, that is a
+  LOWERING question (which machine type for a Num known to be integral), not a
+  lattice one -- so it should not block the signature change.
+
+A result-type accessor is still missing (`%BUILTIN_SIGNATURES` entries carry
+`return_type`; nothing reads it for IR ops), but both tables already hold
+literal result types for the fixed-result ops, so the signature change does not
+depend on building one.
 
 Keep `double` OUT of this decision -- see the frame above. That was my error and
 it is what turned a lattice question into a backend-cost argument.
