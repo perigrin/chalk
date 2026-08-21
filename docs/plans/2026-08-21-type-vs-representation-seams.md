@@ -397,6 +397,72 @@ a Chalk representation choice.
 
 ---
 
+## THE ARCHITECTURAL FINDING: representation is the TYPE FIELD AFTER A REWRITE
+
+perigrin, after I argued representation is "per-use, decided at lowering, never
+stored on the shared node":
+
+> I think this is possibly wrong too. Representation is really just changing the
+> type from a Chalk type to a Backend (LLVM) type ... so Node(Int) becomes
+> Node(i64) or Node(u64) or whatever the LLVM lowering algorithm decides.
+
+Right, and MEASURED. This is not a second attribute alongside the type -- it is
+THE SAME SLOT, after a transformation. One type field, two vocabularies,
+lowering is the rewrite between them.
+
+**Evidence 1 -- the field already holds Chalk types.** Its vocabulary is 11/12
+lattice members:
+
+    repr values:   Int Num Bool Str Undef Slot Array Hash ArrayRef HashRef CodeRef Object
+    Chalk lattice: Int Num Bool Str Undef ---- Array Hash ArrayRef HashRef CodeRef Object
+
+`Slot` is the only machine-only name, and in `lib/Chalk/IR` it appears TWICE,
+BOTH IN COMMENTS. `Ptr`/`Struct` (named in Node.pm's docstring as "older
+fallback") appear once each, same comment, and nowhere in `lib/Chalk/Target`.
+The machine vocabulary has no real presence in the IR layer.
+
+**Evidence 2 -- the backend already assumes ONE representation per node.** The
+lowering cache is keyed by node id alone (`$self->{cache}{$node->id} = $ref`);
+there is no `(node, type)` key anywhere. Per-use differences are handled by
+inserting a conversion ON THE EDGE at the use -- `_emit_coercion` called with no
+Coerce node at all for merge arms (Context.pm:2382, 2557, 2626) -- never by
+giving one node two representations.
+
+So the model is: per-node representation, edge coercions for mismatches. Exactly
+`Node(Int) -> Node(i64)`.
+
+**What this corrects.** My "per-use, never stored" framing was wrong. I leaned
+on `Node.pm:50` ("representation is a per-use lowering decision, not a
+structural property") -- but that comment exists to justify EXCLUDING repr from
+`content_hash` so two identical literals still hash-cons. It is a statement
+about hash-consing that overreached into an architectural claim, and the backend
+contradicts it one file over by caching per node.
+
+**Node.pm:41-56 is the layering violation at its source.** The field is
+documented as "Machine-level representation" with an LLVM map inline --
+`'Int' (i64)`, `'Num' (double/f64)`, `'Str' ({ptr,len,encoding})`. That map is
+`%_REPR_LLVM_TYPE`'s job, in the backend. The IR node carries a machine-layer
+name and docstring over a field that holds Chalk types.
+
+**THE ACTUAL GAP.** There is no rewrite PHASE. `_repr_to_llvm_type` is consulted
+ad hoc during emission, so the transformation exists but is smeared across the
+emitter rather than being a pass with a before and an after. That is precisely
+why it cannot consider value facts: a per-node table lookup at emission time has
+no view of the graph.
+
+This gives 0a/0b a real home. The rewrite is where `Int` becomes `i64` OR `u64`,
+and where a provably-integral `Num` becomes `i64` instead of `double` -- with the
+whole graph in view. My earlier "the value's properties need a channel" was
+groping for this and never named it.
+
+**Sequencing.** The rename (`representation` -> `type`, ~220 sites) is the right
+end state but is a large mechanical diff over code that findings 0a and 2 are
+about to change. Fix the concrete bugs first, rename once, rather than renaming
+and immediately editing the renamed code. Fixing the Node.pm comment is
+zero-risk and can happen now.
+
+---
+
 ## Retractions
 
 **"Closures are not represented anywhere."** Wrong frame. Lexicals are already
