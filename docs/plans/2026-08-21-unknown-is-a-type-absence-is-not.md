@@ -239,3 +239,73 @@ identical. Some are forcing points that should GAP with a specific message
 naming the operation; others are pass-throughs that should propagate `Unknown`
 unchanged. Testing `defined` at all of them erases the distinction, which is
 why it is currently invisible.
+
+---
+
+# The forcing list COLLAPSES: it is all `Coerce`, and `Phi`/`Call` are transparent
+
+perigrin: Phi and Call could probably safely return Unknowns. Store needs to
+Coerce to a target type and that forces narrowing -- so Store, arithmetic and
+coercion are all literally the same thing, Coerce, and it needs a type narrow
+enough to coerce FROM.
+
+Right, and it collapses my five-item list to one.
+
+## One forcing operation
+
+`Store`, arithmetic, and an explicit coercion are not three obligations. Each
+has a TARGET representation and must get the value there:
+
+- `Store` -- the location's type
+- arithmetic -- its operand type (this is already why `Divide` coerces `Int`
+  operands to `Num`)
+- `Coerce` -- the target stated directly
+- `Return` -- the signature's type (measured: `_require_repr` guards the
+  function's `ret` at `LLVM.pm:520`, because a `define` names it)
+
+The commitment is not "have a type". It is **be coercible to THIS type**.
+
+## The requirement falls out of a table that already exists
+
+`%_COERCIBLE_TO` (`Serialize/JSON.pm:929`) is keyed BY SOURCE:
+
+    Int Num Str Bool Undef Slot
+
+`Unknown` is not a key. So `_coercion_exists(Unknown, Str)` is false **not by a
+special case but because there is nothing to convert from** -- exactly
+perigrin's "narrow enough to coerce from". The narrowing requirement is the
+table's shape, not a separate rule.
+
+That also gives the error message both ends: "no coercion from Unknown to Str"
+names a source and a target, where the current
+"reached LLVM backend with NO representation -- fix TypeInference" names neither
+and blames a subsystem that is not on this path.
+
+## `Phi` and `Call` are TRANSPARENT
+
+I had `Phi` on the forcing list because an emitted `phi` names a type. That is
+about EMISSION: a `Phi` whose value is never forced need not be emitted at all.
+Forcing propagates from the consumers inward and `Phi` passes it along -- which
+is `staleness_kind`'s `transparent` bucket exactly ("the answer comes from my
+inputs"), now recognised on the other axis too.
+
+`Call` likewise, and it is the one that matters for recursion.
+
+## What this predicts for `fib`
+
+    recursive Call   Unknown        (transparent -- no commitment here)
+    Add              Unknown        (its operands force each other, not this)
+    TernaryExpr      Unknown        (transparent)
+    Return           FORCES Int     <- the only commitment
+
+The narrowing happens once, at the commitment, and `Int` is satisfiable from the
+base case. No early guess, no join swallowing the known arm.
+
+## What this does NOT establish
+
+- Arithmetic is listed as forcing on the strength of `Divide`'s existing
+  Int->Num coercion. Not every arithmetic op was checked for a declared operand
+  repr; some may have "no opinion" (`_required_operand_repr` returns undef) and
+  would then be transparent too.
+- Whether `Phi` can be left unemitted in practice is not verified -- it assumes
+  the scheduler drops a value with no forced consumer, which is untested here.
