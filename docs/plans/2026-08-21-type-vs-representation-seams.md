@@ -310,6 +310,46 @@ A result-type accessor is still missing (`%BUILTIN_SIGNATURES` entries carry
 literal result types for the fixed-result ops, so the signature change does not
 depend on building one.
 
+### What a `Coerce` node IS -- and why `+`'s signature must be `Num`
+
+perigrin: semantically `Coerce(Str -> Int)` is a no-op, but it is a way to
+signal to the backend that we need to maybe check some optimizations and target
+representations.
+
+That is the right reading and the backend already matches it structurally.
+`Coerce` is not a conversion INSTRUCTION -- `2 + "5"` simply IS `7`, perl
+transforms nothing. The node MARKS THE POINT WHERE A REPRESENTATION OBLIGATION
+ARISES: here is a value the target must present as T, and here is what it was.
+What that costs is the backend's decision -- a parse, nothing at all, or a
+compile-time fold.
+
+Evidence it is already built this way:
+
+  - `_emit_coercion` returns its input unchanged when `from eq to`
+    (Context.pm:1510). That is the NORMAL case, not a degenerate one.
+  - the conversion logic is deliberately separable from the node --
+    `_emit_coercion` is called both from `_lower_coerce` and from
+    merge-bridging where NO Coerce node exists (Context.pm:1501-1506).
+
+**This is also the missing channel for 0a/0b.** I kept writing "the value's
+properties never reach the lowering table". A `Coerce` is exactly where a value
+and a target representation meet -- a PER-VALUE site, not a per-type one.
+`Num -> Int` on a provably-integral value is a Coerce with nothing to do;
+`Int -> i64` on a value exceeding signed range is a Coerce with a real decision.
+The selection I said had no home has one.
+
+**And it settles the signature.** MEASURED: `_emit_coercion` has a `Str -> Num`
+arm (libc `strtod`, with a documented pre-check for perl's rule) and NO
+`Str -> Int` arm. So:
+
+  - signature `Int` would demand `Coerce(Str -> Int)` -> unimplemented pair.
+  - signature `Num` routes through the existing `Str -> Num` and needs nothing new.
+
+`Num` is also what perl actually does -- `+` is a numeric operator, not an
+integer one. So the marker for `2 + $s` is `Coerce(Str -> Num)`, and `Int`
+enters only as a LOWERING choice when the Num is known integral, which is 0b.
+(My own phrasing "Coerce($s -> Int)" above was loose on this point.)
+
 Keep `double` OUT of this decision -- see the frame above. That was my error and
 it is what turned a lattice question into a backend-cost argument.
 
