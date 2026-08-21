@@ -1711,7 +1711,7 @@ sub _pair_match {
     }
 
     # Other leaf-identifying attrs (the H1 leaf-attr-swap class): an EnvRead read
-    # the wrong env key, a RegexCapture the wrong group, a StashAccess the wrong
+    # the wrong env key, a RegexCapture the wrong group, a EntryDef the wrong
     # stash var. Each must agree when the spec names it (a lax spec leaves it
     # undef, unchecked). These are LEAF nodes with no nested wiring, so the check
     # is unambiguous. A Call's callee (name/dispatch_kind) swap is the same class
@@ -1723,7 +1723,7 @@ sub _pair_match {
     if ($sk eq 'RegexCapture') {
         return false unless _leaf_eq($spec, $real, 'n');
     }
-    if ($sk eq 'StashAccess') {
+    if ($sk eq 'EntryDef') {
         return false unless _leaf_eq($spec, $real, 'stash_name');
         return false unless _leaf_eq($spec, $real, 'var_name');
     }

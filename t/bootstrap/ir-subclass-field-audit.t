@@ -166,12 +166,12 @@ $SPEC{FieldAccess} = sub ($f) {
     return ($node, { field_index => 2, field_stash => 'My::Class' });
 };
 
-$SPEC{StashAccess} = sub ($f) {
+$SPEC{EntryDef} = sub ($f) {
     # sigil is deliberately '@', NOT the '$' default: a spec using the default
     # value passes even when the field is dropped entirely, which is exactly
     # the pass-by-omission this file exists to prevent. `sigil` was added and
     # this spec did not notice.
-    my $node = $f->make('StashAccess',
+    my $node = $f->make('EntryDef',
         stash_name => 'main', sigil => '@', var_name => 'g', inputs => []);
     return ($node, { stash_name => 'main', sigil => '@', var_name => 'g' });
 };

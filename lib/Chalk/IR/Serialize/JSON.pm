@@ -75,7 +75,7 @@ sub _extract_fields ($node, $id_remap) {
     if ($op eq 'FieldAccess') {
         return { field_index => $node->field_index, field_stash => $node->field_stash };
     }
-    if ($op eq 'StashAccess') {
+    if ($op eq 'EntryDef') {
         return {
             stash_name => $node->stash_name,
             sigil      => $node->sigil,
@@ -352,7 +352,7 @@ sub to_json ($named_graphs) {
 # _deserialize_graph($method_data) — rebuild a Chalk::IR::Graph from data.
 # Handles the full SoN schema. Fields that Chalk nodes don't support
 # (e.g., pattern/replacement on RegexMatch/RegexSubst, scope on VarDecl,
-# stash_name/var_name on StashAccess) are silently dropped.
+# stash_name/var_name on EntryDef) are silently dropped.
 # -----------------------------------------------------------------------
 sub _deserialize_graph ($method_data) {
     my $factory   = Chalk::IR::NodeFactory->new();
@@ -459,14 +459,14 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'PostfixDeref') {
             $args{sigil} = $fields->{sigil};
         }
-        elsif ($op eq 'StashAccess') {
+        elsif ($op eq 'EntryDef') {
             $args{stash_name} = $fields->{stash_name} // '';
             $args{var_name}   = $fields->{var_name}   // '';
             # REQUIRED, not defaulted. `_` alone names three different things
             # ($_, @_, and the `-f _` filetest handle), so a wire without a
             # sigil does not identify a variable -- defaulting one here would
             # invent an identity and re-merge what the producer kept apart.
-            die "GAP: StashAccess '" . ($fields->{var_name} // '?')
+            die "GAP: EntryDef '" . ($fields->{var_name} // '?')
               . "' arrived with no sigil -- the wire predates sigil-qualified "
               . "stash identity, or the producer failed to stamp it."
                 unless defined $fields->{sigil};

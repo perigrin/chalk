@@ -145,7 +145,7 @@ my @test_cases = (
     ['lib/Chalk/IR/Node/Call.pm',           'Chalk::IR::Node::Call'],
     ['lib/Chalk/IR/Node/FieldAccess.pm',    'Chalk::IR::Node::FieldAccess'],
     ['lib/Chalk/IR/Node/PadAccess.pm',      'Chalk::IR::Node::PadAccess'],
-    ['lib/Chalk/IR/Node/StashAccess.pm',    'Chalk::IR::Node::StashAccess'],
+    ['lib/Chalk/IR/Node/EntryDef.pm',    'Chalk::IR::Node::EntryDef'],
     ['lib/Chalk/IR/Node/Loop.pm',           'Chalk::IR::Node::Loop'],
     ['lib/Chalk/IR/Node/Phi.pm',            'Chalk::IR::Node::Phi'],
     ['lib/Chalk/IR/Node/AnonSub.pm',        'Chalk::IR::Node::AnonSub'],

@@ -6,7 +6,7 @@ use experimental 'class';
 
 use Chalk::IR::Node::Access;
 
-class Chalk::IR::Node::StashAccess :isa(Chalk::IR::Node::Access) {
+class Chalk::IR::Node::EntryDef :isa(Chalk::IR::Node::Access) {
     field $stash_name :param :reader = '';
     field $var_name   :param :reader = '';
 
@@ -16,7 +16,7 @@ class Chalk::IR::Node::StashAccess :isa(Chalk::IR::Node::Access) {
     # `_` alone names THREE different things in perl: the scalar `$_`, the
     # argument array `@_`, and the bareword `_` filetest handle (`-f _`, which
     # reuses the last stat buffer). A name-only identity hash-consed the first
-    # two into ONE node -- measured, a single StashAccess(_) fed both a
+    # two into ONE node -- measured, a single EntryDef(_) fed both a
     # `shift @_` Call and a RegexMatch subject. The same applies to any stash
     # holding one name under two sigils: `$g` and `@g` are unrelated variables.
     #
@@ -25,11 +25,11 @@ class Chalk::IR::Node::StashAccess :isa(Chalk::IR::Node::Access) {
     # sigil-less variable lookup should be impossible to express.
     field $sigil      :param :reader;
 
-    method operation() { 'StashAccess' }
+    method operation() { 'EntryDef' }
     sub identity_kind { q(hash_consed) }
 
     method content_hash() {
-        return join('|', 'StashAccess', "stash_name=$stash_name",
+        return join('|', 'EntryDef', "stash_name=$stash_name",
             "sigil=$sigil", "var_name=$var_name", $self->_serialize_inputs());
     }
 }

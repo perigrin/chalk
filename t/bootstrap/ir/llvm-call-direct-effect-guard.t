@@ -10,6 +10,16 @@ use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
 use Chalk::Target::LLVM::Context;
 
+# A direct Call carries its callee METAOBJECT (step 1d), not a bare graph --
+# the backend reads target->graph. Wrap a hand-built graph in the smallest
+# MOP::Sub that satisfies that contract.
+sub mk_target {
+    my ($graph) = @_;
+    require Chalk::MOP;
+    my $mop = Chalk::MOP->new;
+    return $mop->for_class('main')->declare_sub('f', graph => $graph);
+}
+
 sub mk_ctx { Chalk::Target::LLVM::Context->new }
 
 subtest 'pure callee (Return.control_in = Start, inputs = [value]) still inlines' => sub {
@@ -24,7 +34,7 @@ subtest 'pure callee (Return.control_in = Start, inputs = [value]) still inlines
     my $call = $f->make('Call',
         dispatch_kind  => 'direct',
         name           => 'main::f',
-        resolved_graph => $graph,
+        target         => mk_target($graph),
     );
 
     my $ctx = mk_ctx();
@@ -54,7 +64,7 @@ subtest 'effectful callee via Return.control_in (straight-line Print, not Start)
     my $call = $f->make('Call',
         dispatch_kind  => 'direct',
         name           => 'main::f',
-        resolved_graph => $graph,
+        target         => mk_target($graph),
     );
 
     my $ctx = mk_ctx();
@@ -83,7 +93,7 @@ subtest 'effectful callee via Return.control_in (Assign, not Start/Print) still 
     my $call = $f->make('Call',
         dispatch_kind  => 'direct',
         name           => 'main::f',
-        resolved_graph => $graph,
+        target         => mk_target($graph),
     );
 
     my $ctx = mk_ctx();
@@ -147,7 +157,7 @@ subtest 'effectful callee via Return.inputs[1..] (defensive; no live producer) G
     my $call = $f->make('Call',
         dispatch_kind  => 'direct',
         name           => 'main::f',
-        resolved_graph => $graph,
+        target         => mk_target($graph),
     );
 
     my $ctx = mk_ctx();

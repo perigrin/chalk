@@ -307,7 +307,7 @@ sub _load_named_methods {
         And Or BitAnd BitOr BitXor LeftShift RightShift
         Assign Repeat Match NotMatch DefinedOr Xor Range Yada IsaOp
         Not Negate Complement Defined UnaryPlus Ref RefType Length Slice
-        PadAccess FieldAccess StashAccess Subscript
+        PadAccess FieldAccess EntryDef Subscript
         Call HashRef ArrayRef Interpolate AnonSub
         RegexMatch RegexSubst TryCatch
         PostfixDeref CompoundAssign BacktickExpr Stringify VarDecl

@@ -25,6 +25,15 @@ unless (-x $LLI) {
     plan skip_all => "lli not found at $LLI";
 }
 
+# A direct Call carries its callee METAOBJECT (step 1d), not a bare graph --
+# the backend reads target->graph.
+sub mk_target {
+    my ($graph) = @_;
+    require Chalk::MOP;
+    my $mop = Chalk::MOP->new;
+    return $mop->for_class('main')->declare_sub('f', graph => $graph);
+}
+
 sub run_lli {
     my ($ll) = @_;
     my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -126,7 +135,7 @@ subtest 'callee pure node id-collides with caller mutable-read: memo must not le
     my $call = $f->make('Call',
         dispatch_kind  => 'direct',
         name           => 'main::f',
-        resolved_graph => $callee_graph,
+        target         => mk_target($callee_graph),
     );
     $call->set_control_in($vx);
 

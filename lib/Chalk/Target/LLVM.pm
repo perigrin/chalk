@@ -1312,7 +1312,7 @@ sub lower_with_elaboration {
         }
     }
 
-    # Emit package-scalar globals (StashAccess): one mutable i64 slot per
+    # Emit package-scalar globals (EntryDef): one mutable i64 slot per
     # package/global scalar (`our $g`), keyed by qualified name in _pkg_globals so
     # each is emitted exactly once and store/read resolve the same slot. Zero-init:
     # an unwritten package scalar reads as 0 (the numeric undef the backend uses).
@@ -1324,7 +1324,7 @@ sub lower_with_elaboration {
         }
     }
 
-    # Emit Str package-scalar globals (StashAccess with a Str repr): a PAIR of
+    # Emit Str package-scalar globals (EntryDef with a Str repr): a PAIR of
     # mutable slots per qualified name — an i8* ptr (null-init) and an i64 len
     # (zero-init). An unwritten Str package scalar reads as (null, 0), an empty
     # string. Emitted once each via the _pkg_str_globals dedupe map.
@@ -1337,7 +1337,7 @@ sub lower_with_elaboration {
         }
     }
 
-    # Emit Num package-scalar globals (StashAccess with a Num repr): one mutable
+    # Emit Num package-scalar globals (EntryDef with a Num repr): one mutable
     # `double` slot per qualified name, zero-init — an unwritten Num package
     # scalar reads as 0.0, the numeric undef the backend uses. Its own slot
     # rather than the Int i64 one so the read knows which face the bits hold.

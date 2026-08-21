@@ -148,7 +148,7 @@ BEGIN {
         Coerce         => { from_repr => 'Int', to_repr => 'Str' },
         PostfixDeref   => { sigil => '@' },
         Proj           => { index => 0 },
-        StashAccess    => { stash_name => 'main', var_name => 'x' },
+        EntryDef    => { stash_name => 'main', var_name => 'x' },
         Call           => { dispatch_kind => 'direct', name => 'f' },
         CompoundAssign => { op => '+=' },
         EnvRead        => { key => 'PATH' },

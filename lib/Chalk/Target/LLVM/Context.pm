@@ -97,7 +97,7 @@ sub new {
         #   _need_malloc_memcpy => bool
         #     Set when a Concat node is lowered; triggers malloc/memcpy declarations.
         _str_globals          => [],
-        # Package-scalar globals (StashAccess): each package/global scalar (`our
+        # Package-scalar globals (EntryDef): each package/global scalar (`our
         # $g`) is one module-level i64 slot `@pkg_<stash>_<var>` initialized to 0.
         #   _pkg_globals => { "main::g" => "\@pkg_main_g", ... }
         # Deduped by qualified name so store and read resolve the SAME slot and
@@ -553,7 +553,7 @@ sub _module_global_name {
 
 # _pkg_global_name($stash, $var) -> LLVM global name for a package-scalar slot.
 #
-# A package/global scalar (`our $g`, a StashAccess node) is modeled as a single
+# A package/global scalar (`our $g`, a EntryDef node) is modeled as a single
 # module-level i64 slot named `@pkg_<stash>_<var>`. Registered once per qualified
 # name in _pkg_globals so the store and the read resolve the SAME slot and the
 # module preamble (Target/LLVM.pm) emits each `@pkg_...` global exactly once as
@@ -623,7 +623,7 @@ sub _pkg_num_global_name {
 # field (FieldAccess). Their lowered value is program-point-dependent — a
 # later store changes what an identical load returns — so they must re-lower
 # at every consumption point, never serve from the value cache.
-my %MUTABLE_READ_OPS = map { $_ => 1 } qw(PadAccess Subscript FieldAccess StashAccess);
+my %MUTABLE_READ_OPS = map { $_ => 1 } qw(PadAccess Subscript FieldAccess EntryDef);
 
 # Pure value ops the staleness predicate descends THROUGH: a pure node over a
 # mutable-location read is itself program-point-dependent (Add(PadAccess, 10)
@@ -899,10 +899,10 @@ sub lower_value {
     elsif ($op eq 'EnvRead') {
         return $self->_lower_env_read($node);
     }
-    # StashAccess (`our $g`): a package/global scalar read — load the module-level
+    # EntryDef (`our $g`): a package/global scalar read — load the module-level
     # i64 slot. A mutable-location read (in %MUTABLE_READ_OPS), so it re-lowers at
     # every use and observes the post-store value.
-    elsif ($op eq 'StashAccess') {
+    elsif ($op eq 'EntryDef') {
         return $self->_lower_stash_access($node);
     }
     # Statement-effect ops that carry per-call identity (they are in
@@ -1874,13 +1874,13 @@ sub _lower_assign {
         return $stored;
     }
 
-    # Mode (sa): StashAccess-lvalue — package/global scalar store (`our $g = 5`).
+    # Mode (sa): EntryDef-lvalue — package/global scalar store (`our $g = 5`).
     # Store the rhs into the module-level i64 slot @pkg_<stash>_<var> (the same
-    # slot the StashAccess READ loads). A statement effect threaded onto the
+    # slot the EntryDef READ loads). A statement effect threaded onto the
     # control chain; the stored value is the Assign's result. Only Int is lowered
     # runtime-free (the slot is i64), matching the read side.
-    if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'StashAccess') {
-        my $rhs_repr = _require_repr($rhs, 'Assign(StashAccess-lvalue).rhs');
+    if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'EntryDef') {
+        my $rhs_repr = _require_repr($rhs, 'Assign(EntryDef-lvalue).rhs');
         my $var   = $lhs->var_name;
 
         # A package scalar is modeled as a TYPED module-level slot, and its
@@ -1923,10 +1923,10 @@ sub _lower_assign {
             my ($pname, $lname) = $self->_pkg_str_global_names($lhs->stash_name, $var);
             my ($str_ptr, $tracked_len) = $self->_str_parts($rhs_ref);
             my $len_ref = $tracked_len
-                // die "GAP: Assign(StashAccess-lvalue) Str rhs has no tracked "
+                // die "GAP: Assign(EntryDef-lvalue) Str rhs has no tracked "
                      . "length (\$$var); only length-tracked Str values lower.";
-            $self->_emit("  store i8* $str_ptr, i8** $pname  ; Assign(StashAccess-lvalue): store \$$var ptr (Str package scalar)");
-            $self->_emit("  store i64 $len_ref, i64* $lname  ; Assign(StashAccess-lvalue): store \$$var len (Str package scalar)");
+            $self->_emit("  store i8* $str_ptr, i8** $pname  ; Assign(EntryDef-lvalue): store \$$var ptr (Str package scalar)");
+            $self->_emit("  store i64 $len_ref, i64* $lname  ; Assign(EntryDef-lvalue): store \$$var len (Str package scalar)");
             $self->{cache}{ $node->id } = $rhs_ref;
             return $rhs_ref;
         }
@@ -1935,15 +1935,15 @@ sub _lower_assign {
         # bits hold.
         if ($rhs_repr eq 'Num') {
             my $nname = $self->_pkg_num_global_name($lhs->stash_name, $var);
-            $self->_emit("  store double $rhs_ref, double* $nname  ; Assign(StashAccess-lvalue): store \$$var (Num package scalar)");
+            $self->_emit("  store double $rhs_ref, double* $nname  ; Assign(EntryDef-lvalue): store \$$var (Num package scalar)");
             $self->{cache}{ $node->id } = $rhs_ref;
             return $rhs_ref;
         }
-        die "GAP: Assign(StashAccess-lvalue) rhs repr=$rhs_repr; only Int, Num "
+        die "GAP: Assign(EntryDef-lvalue) rhs repr=$rhs_repr; only Int, Num "
           . "and Str package scalars are lowered runtime-free."
             unless $rhs_repr eq 'Int';
         my $gname = $self->_pkg_global_name($lhs->stash_name, $var);
-        $self->_emit("  store i64 $rhs_ref, i64* $gname  ; Assign(StashAccess-lvalue): store \$$var (package scalar)");
+        $self->_emit("  store i64 $rhs_ref, i64* $gname  ; Assign(EntryDef-lvalue): store \$$var (package scalar)");
         $self->{cache}{ $node->id } = $rhs_ref;
         return $rhs_ref;
     }
@@ -5749,7 +5749,7 @@ sub _lower_call_new {
 #
 # Argument-passing callee (F5): the caller's Call inputs are the arguments, and
 # the callee reads its Nth positional argument via a `shift @_` (a
-# Call(builtin,shift) over StashAccess(*,_)). Since the callee is INLINED (not
+# Call(builtin,shift) over EntryDef(*,_)). Since the callee is INLINED (not
 # a real call frame), each such arg-read is bound by SSA substitution to the
 # caller's already-lowered argument ref — this is runtime-free inlining, not a
 # call ABI. Only the single-positional-`shift` shape is sound: two `shift`s
@@ -5965,7 +5965,7 @@ sub _collect_straight_line_effect_chain {
 # mutable location), computed once and reused for the REST OF THIS LOWERING,
 # independent of any given cache generation. A callee PURE node (e.g. an Add
 # referenced twice) can collide, by id, with an unrelated CALLER
-# mutable-read node (PadAccess/Subscript/FieldAccess/StashAccess); whichever
+# mutable-read node (PadAccess/Subscript/FieldAccess/EntryDef); whichever
 # is classified first wins the memo entry for that id. If the callee's node
 # is classified PURE first, the caller's same-id mutable-read node later
 # inherits that stale PURE answer, so lower_value's cache-bypass check
@@ -5991,7 +5991,7 @@ sub _lower_inlined_effects_then_value {
 
 # _is_args_array($node) -> bool
 #
-# Is this StashAccess the ARGUMENT ARRAY `@_`, as opposed to the scalar `$_`?
+# Is this EntryDef the ARGUMENT ARRAY `@_`, as opposed to the scalar `$_`?
 #
 # `@_` has its OWN NODE KIND now, so this is one operation check. It was a
 # name test (`var_name eq '_'`), which could not tell `@_` from the scalar `$_`
@@ -6007,7 +6007,7 @@ sub _is_args_array {
 # _collect_positional_arg_reads($graph, $name) -> @shift_nodes
 #
 # Find the callee graph's positional argument reads: Call(builtin, shift) nodes
-# whose operand is StashAccess(*, _) (i.e. `shift @_`). Returns them in graph
+# whose operand is EntryDef(*, _) (i.e. `shift @_`). Returns them in graph
 # order. Dies (loud GAP) on any OTHER access to @_ that inlining cannot bind:
 # a `pop @_`, a list assignment `my (...) = @_`, or a `$_[N]` subscript — those
 # shapes do not carry the positional binding the caller's args need.
@@ -7097,7 +7097,7 @@ sub _lower_env_read {
 #
 # A package/global scalar read (`our $g`): load the module-level i64 slot
 # `@pkg_<stash>_<var>`. The slot is registered (and emitted once) via
-# _pkg_global_name. A mutable-location read (StashAccess is in %MUTABLE_READ_OPS),
+# _pkg_global_name. A mutable-location read (EntryDef is in %MUTABLE_READ_OPS),
 # so lower_value bypasses the value cache and this re-lowers at every use — a load
 # after a store observes the post-store value. Only Int-repr package scalars are
 # lowered runtime-free; any other repr is an honest GAP (a Str/ref package scalar
@@ -7105,7 +7105,7 @@ sub _lower_env_read {
 sub _lower_stash_access {
     my ($self, $node) = @_;
 
-    my $repr = _require_repr($node, 'StashAccess');
+    my $repr = _require_repr($node, 'EntryDef');
     my $var  = $node->var_name;
     # A Str package scalar: load BOTH slots (ptr + len) and re-register the
     # loaded ptr's length so a downstream print/concat/return slices exactly
@@ -7114,8 +7114,8 @@ sub _lower_stash_access {
         my ($pname, $lname) = $self->_pkg_str_global_names($node->stash_name, $var);
         my $ptr = $self->_fresh;
         my $len = $self->_fresh;
-        $self->_emit("  $ptr = load i8*, i8** $pname  ; StashAccess: read \$$var ptr (Str package scalar)");
-        $self->_emit("  $len = load i64, i64* $lname  ; StashAccess: read \$$var len (Str package scalar)");
+        $self->_emit("  $ptr = load i8*, i8** $pname  ; EntryDef: read \$$var ptr (Str package scalar)");
+        $self->_emit("  $len = load i64, i64* $lname  ; EntryDef: read \$$var len (Str package scalar)");
         $ptr = $self->_set_str_len($ptr, $len);
         $self->{cache}{ $node->id } = $ptr;
         return $ptr;
@@ -7124,17 +7124,17 @@ sub _lower_stash_access {
     if ($repr eq 'Num') {
         my $nname = $self->_pkg_num_global_name($node->stash_name, $var);
         my $val   = $self->_fresh;
-        $self->_emit("  $val = load double, double* $nname  ; StashAccess: read \$$var (Num package scalar)");
+        $self->_emit("  $val = load double, double* $nname  ; EntryDef: read \$$var (Num package scalar)");
         $self->{cache}{ $node->id } = $val;
         return $val;
     }
-    die "GAP: StashAccess repr=$repr; only Int, Num and Str package scalars are "
+    die "GAP: EntryDef repr=$repr; only Int, Num and Str package scalars are "
       . "lowered runtime-free (a ref slot needs a differently-typed global)."
         unless $repr eq 'Int';
 
     my $gname = $self->_pkg_global_name($node->stash_name, $var);
     my $val   = $self->_fresh;
-    $self->_emit("  $val = load i64, i64* $gname  ; StashAccess: read \$$var (package scalar)");
+    $self->_emit("  $val = load i64, i64* $gname  ; EntryDef: read \$$var (package scalar)");
     $self->{cache}{ $node->id } = $val;
     return $val;
 }

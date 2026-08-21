@@ -1,5 +1,5 @@
 # ABOUTME: IR node for `@_`, the argument list a caller passes to a sub.
-# ABOUTME: Distinct from StashAccess: an argument list, not a name defined outside.
+# ABOUTME: Distinct from EntryDef: an argument list, not a name defined outside.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -10,7 +10,7 @@ use Chalk::IR::Node::Access;
 # innermost enclosing sub call.
 #
 # It rode on StashAccess(main, '_') because `@_` is reachable as the package
-# array *main::_ -- true, and useless. StashAccess's job after the package-scalar
+# array *main::_ -- true, and useless. EntryDef's job after the package-scalar
 # SSA migration is the ENTRY DEFINITION: naming a value defined outside this unit
 # and carrying no value of its own. An argument list is not that.
 #

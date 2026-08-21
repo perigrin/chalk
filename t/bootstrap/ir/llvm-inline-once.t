@@ -22,6 +22,15 @@ use Chalk::Target::LLVM;
 # separate string-constant globals for the one "x\n" literal.
 # ---------------------------------------------------------------------------
 
+# A direct Call carries its callee METAOBJECT (step 1d), not a bare graph --
+# the backend reads target->graph.
+sub mk_target {
+    my ($graph) = @_;
+    require Chalk::MOP;
+    my $mop = Chalk::MOP->new;
+    return $mop->for_class('main')->declare_sub('f', graph => $graph);
+}
+
 subtest 'an inlined effectful callee used as both a statement and a value lowers once' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
@@ -45,7 +54,7 @@ subtest 'an inlined effectful callee used as both a statement and a value lowers
     my $call = $f->make('Call',
         dispatch_kind  => 'direct',
         name           => 'main::f',
-        resolved_graph => $callee_graph,
+        target         => mk_target($callee_graph),
     );
     $call->set_representation('Int');
     $call->set_control_in($start);

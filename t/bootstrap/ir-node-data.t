@@ -1,5 +1,5 @@
 # ABOUTME: Tests for Chalk::IR data and access node classes.
-# ABOUTME: Verifies Constant, Phi, PadAccess, FieldAccess, StashAccess, Subscript.
+# ABOUTME: Verifies Constant, Phi, PadAccess, FieldAccess, EntryDef, Subscript.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -11,7 +11,7 @@ use Chalk::IR::Node::Phi;
 use Chalk::IR::Node::Access;
 use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::FieldAccess;
-use Chalk::IR::Node::StashAccess;
+use Chalk::IR::Node::EntryDef;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::Region;
 
@@ -52,9 +52,9 @@ is($fa->field_stash(), 'MyClass', 'FieldAccess field_stash');
 
 # sigil is REQUIRED:  alone names $_, @_ and the  filetest handle,
 # so a sigil-less stash variable is not expressible.
-my $sa = Chalk::IR::Node::StashAccess->new(id => 'sa_0', sigil => '$');
-isa_ok($sa, 'Chalk::IR::Node::Access', 'StashAccess isa Access');
-is($sa->operation(), 'StashAccess', 'StashAccess operation');
+my $sa = Chalk::IR::Node::EntryDef->new(id => 'sa_0', sigil => '$');
+isa_ok($sa, 'Chalk::IR::Node::Access', 'EntryDef isa Access');
+is($sa->operation(), 'EntryDef', 'EntryDef operation');
 
 my $target = Chalk::IR::Node->new(id => 'tgt_0');
 my $index  = Chalk::IR::Node->new(id => 'idx_0');

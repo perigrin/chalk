@@ -832,7 +832,7 @@ END_IR
 # ---------------------------------------------------------------------------
 # H1 Call-callee-swap (zhi 019f51a0): a RETURN-POSITION Call whose callee
 # (name / dispatch_kind) differs from the spec must FAIL the shape leg — the
-# same leaf-attr-swap class as FieldAccess/EnvRead/StashAccess. The check is
+# same leaf-attr-swap class as FieldAccess/EnvRead/EntryDef. The check is
 # pinned to the return position so legitimate nested-receiver wiring still
 # passes (covered by the method-call corpus case).
 # ---------------------------------------------------------------------------
