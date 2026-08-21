@@ -168,3 +168,59 @@ against the `$_[0]` form.
 - `2 calls, variable args` GAPs rather than miscompiling, so the family is
   partly masked by an unrelated refusal. If that GAP is lifted first, the
   miscompile surface grows.
+
+---
+
+# Why the fix is NOT a staleness-bucket change (2026-08-21)
+
+Recorded because it is the first thing to reach for, and I reached for it.
+
+perigrin's framing: the inlining/cacheability decision rests on several factors,
+and opaque/transparent and pure/effectful are two of them. Correct -- I had
+flattened them into one axis.
+
+`Chalk::IR::Node` already separates three type properties:
+
+| property | question | what lives there |
+|---|---|---|
+| `is_fixed` | must this execute at its control position? | **effects** |
+| `staleness_kind` | can a cached value go stale? | **values** |
+| `identity_kind` | own node per occurrence, or shared? | `per_call` / `hash_consed` |
+
+`Call` answers `is_fixed = true` and `staleness_kind = opaque`. **Both are
+correct.** `opaque` means "a fixed SSA value at a single program point", which is
+exactly what a call is.
+
+## `transparent` is not the answer for an effectful sub
+
+The middle bucket is TRANSPARENCY, not purity -- the doc on
+`staleness_kind` says so, and its membership confirms it: `Divide`, `And`,
+`NumEq`, `Length`, `Defined`, all pure functions of their inputs. It means "my
+value is stale exactly when an input's is -- ask my inputs", not "I have
+effects".
+
+For `sub f { print "x"; 7 }` the return value's staleness has no relationship to
+its arguments' staleness. The print is a control-position question, which
+`is_fixed` already answers. Marking that Call `transparent` would ask the wrong
+question AND still cache wrongly across call sites with equal arguments.
+
+## The missing dimension is not a node property
+
+Cacheability needs one more input, and no bucket can express it: **which
+arguments were bound when the cached value was computed.** That is
+per-CALL-SITE context.
+
+The cache key is `$node->id`. For a real call that suffices -- argument binding
+lives in the call instruction and the callee is lowered once. Under inlining the
+same node id spans multiple bindings, so the key is missing a dimension the node
+model has no way to supply.
+
+## Consequence
+
+The inliner is not premature in the ordinary sense of correct-but-early. It
+**falsifies a premise the IR states as a type property**, silently: `Call` says
+"one program point", inlining re-lowers it at many.
+
+So the fix is structural rather than a re-labelling. A real `call` restores
+`opaque`'s premise by construction -- arguments become parameters, the callee
+lowers once, and nothing needs a new bucket.
