@@ -35,7 +35,61 @@ The layering that holds:
 
 ---
 
-## 0a. `Add` wraps at i64 where perl promotes to NV -- LIVE MISCOMPILE
+## 0a. CORRECTED: it is not `Add`. UV literals are stamped `Int` and wrap.
+
+**The section below is superseded by this one.** perigrin split the 0-cluster by
+whether the program is WRONG (fix now) or merely SLOW (later), which is the
+axis that decides what gets fixed -- and chasing 0a under that split found the
+actual cause, which is neither `Add` nor a lowering-table shape problem.
+
+There is NO `Add` node in any of the three test cases. Perl's peephole
+constant-folded all of them before B::SoN ran. The difference is what perl
+folded TO:
+
+    9223372036854775807 + 1    -> Constant value=9223372036854775808  const_type=integer -> Int
+    -9223372036854775807 - 2   -> Constant value=-9.22337203685478e+18 const_type=number -> Num
+    4611686018427387904 * 4    -> Constant value=1.84467440737096e+19  const_type=number -> Num
+
+So `Subtract`/`Multiply` did not "handle overflow correctly" -- they happened to
+fold to NVs. `Add` folded to a UV. All three share `=> 'join'` in
+`%RESULT_STAMP` (FromOptree.pm:36-39) and the rule was never consulted.
+
+**The real bug, pinned to one boundary.** The producer classifies perl integer
+constants as `const_type=integer` -> `Int` across the WHOLE UV RANGE, but
+Chalk's `Int` lowers to SIGNED i64:
+
+    9223372036854775807    integer -> Int    IV_MAX, fine
+    9223372036854775808    integer -> Int    *** exceeds i64 ***
+    18446744073709551615   integer -> Int    *** UV_MAX ***
+    18446744073709551616   number  -> Num    perl switches to NV here
+
+Everything in `[2^63, 2^64-1]` is stamped `Int` and wraps negative.
+
+**Minimal repro needs no arithmetic at all:**
+
+    print 9223372036854775808   perl=9223372036854775808  chalk=-9223372036854775808
+    print 18446744073709551615  perl=18446744073709551615 chalk=-1
+
+`print 18446744073709551615` prints `-1`.
+
+The corpus pins `-9223372036854775808` (arithmetic.md:189-210) -- the NEGATIVE
+limit. The positive UV range is unpinned, which is how a bare-literal miscompile
+survived.
+
+**Layer.** A TYPING bug in the producer, not a lowering one: `Int` is the wrong
+type for a value that does not fit `Int`. It does NOT need the value-facts
+machinery 0b wants. I filed it under "the table cannot express value facts",
+which made a one-boundary classification bug look like it needed backend
+infrastructure.
+
+**Two of my claims retracted here:** "Add ONLY, and the difference between it
+and its two siblings is where the fix starts" (the siblings differ by folding
+luck, not by handling), and 0a/0b "share a root cause" (they do not -- 0a is
+typing, 0b is lowering).
+
+---
+
+## SUPERSEDED: `Add` wraps at i64 where perl promotes to NV
 
     my $x = 9223372036854775807;
     print $x + 1, "\n";
