@@ -105,3 +105,66 @@ separate piece of work from call emission. Do not bundle them; do not claim
   `_lower_call_direct` does memoize — but I have not confirmed which cache.
 - Only ONE miscompiling shape is measured. There may be more in the same family
   (same sub, same args, different effects; nested calls) and they are not swept.
+
+---
+
+# The sweep (2026-08-21)
+
+Eleven shapes, varying one dimension at a time. **4 MISCOMPILE, 6 ok, 1 GAP.**
+
+| shape | result |
+|---|---|
+| 1 call | ok |
+| **2 calls, different args** | **MISCOMPILE** `6` -> `4` |
+| **3 calls, different args** | **MISCOMPILE** `12` -> `6` |
+| 2 calls, SAME arg | ok |
+| 2 calls, no-arg callee | ok |
+| 2 calls via `$_[0]` | ok |
+| 2 calls, variable args | GAP |
+| 2 calls, effectful callee | ok (`c1c2`) |
+| **2 calls, separate statements** | **MISCOMPILE** `2 4` -> `2 2` |
+| `f(1) + g(2)` (two callees) | ok |
+| **`f(f(1))` nested** | **MISCOMPILE** `4` -> `2` |
+
+## The shape of the bug
+
+It needs **two or more calls to the SAME callee with DIFFERENT arguments**.
+Not expression-vs-statement (both miscompile), not effects (an effectful callee
+is fine), not call count beyond two. Two different callees are fine. Nesting a
+call in its own argument is the same bug reached differently.
+
+`f(3)+f(3)` is "ok" only because the answer coincides — the second call still
+reuses the first's value, which happens to be right when the arguments match.
+That is a shape whose CORRECT answer hides the defect, and it is why a corpus
+case must use different arguments.
+
+## Mechanism: the value cache, confirmed by construction
+
+Not what I first predicted. My hypothesis was an ID collision — the callee's
+`shift` node is `Call#2` and a caller Call is also `Call#2`, and the memo
+`$self->{cache}{$node->id}` is keyed by STRING id across graphs. Measured: the
+`$_[0]` form collides identically (`collidingCalleeIds=[3]`) and does NOT
+miscompile, so the collision alone is not sufficient.
+
+The discriminator is `%MUTABLE_READ_OPS` (`Context.pm:626`). `Subscript` is in
+it and therefore **bypasses the value cache**, re-lowering at every consumption.
+`Call` is not, so it serves a stale cached value from the other call site.
+
+Confirmed by probe: adding `Call` to `%MUTABLE_READ_OPS` yields `2 4 6`,
+matching perl.
+
+**That probe is a diagnosis, not the fix** — it would disable legitimate CSE for
+every Call. The real fix is that a real `call` has no shared cache to collide
+in, which is what step 5 does. Recorded because it explains why `$_[0]` survives
+(accident of node kind, not correctness) and why a fix must not be validated
+against the `$_[0]` form.
+
+## Consequences for the ordering
+
+- The corpus case MUST use two calls with DIFFERENT arguments. `f(3)+f(3)` and
+  the `$_[0]` form both pass today and would pin nothing.
+- The nested `f(f(1))` shape is worth its own case: same root, different reach,
+  and an argument-binding fix could plausibly close one and not the other.
+- `2 calls, variable args` GAPs rather than miscompiling, so the family is
+  partly masked by an unrelated refusal. If that GAP is lifted first, the
+  miscompile surface grows.
