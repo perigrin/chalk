@@ -459,6 +459,33 @@ different machine types, and an operation joining them needs a conversion def
 inserted. So the pass is not pure relabeling -- it must be able to MINT DEFS,
 not just rewrite fields. Same edge-coercion mechanism, one vocabulary down.
 
+perigrin: yes, and *that should be ok* and a safe transformation.
+
+**Why it is safe, precisely:** the rewrite only ever ADDS defs. Insert
+`Coerce(u64 -> i64)` between a def and a use, repoint that use. No existing
+value changes type, no def disappears, and dominance is preserved (the coerce
+sits between two points already in dominance order). The pass is monotone, and
+its post-condition is checkable by construction: **every use's type equals its
+def's type, or there is a coerce def between them.** That is the "re-validates
+that it still makes sense" half, and it is a linear walk, not a solver.
+
+**TWO THINGS THAT MUST BE NAILED DOWN, because this is where "safe" can quietly
+stop being safe:**
+
+1. **Machine-vocabulary coercions are not all lossless.** `Coerce(u64 -> i64)`
+   on a value above `2^63-1` IS the 0a miscompile, relabeled. So the pass must
+   distinguish a representation coercion it may insert freely (`i64 -> double`
+   widening) from one that needs a guard or a refusal. `%_COERCIBLE_TO` cannot
+   answer this -- it is keyed by CHALK types and says nothing about machine
+   ranges. A second, machine-level coercion table is needed, and its entries
+   carry a lossiness verdict rather than a boolean.
+
+2. **Choosing representations and inserting conversions are ONE decision.** If
+   the rewrite picks `u64` for a def AND owns the coercions, it can decline to
+   pick `u64` where a lossy conversion would follow. Splitting those across two
+   passes -- select, then repair -- is exactly what reintroduces 0a, because the
+   repair pass would face a lossy edge it has no authority to undo.
+
 **What this corrects.** My "per-use, never stored" framing was wrong. I leaned
 on `Node.pm:50` ("representation is a per-use lowering decision, not a
 structural property") -- but that comment exists to justify EXCLUDING repr from
