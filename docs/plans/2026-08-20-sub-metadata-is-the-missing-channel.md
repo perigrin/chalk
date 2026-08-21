@@ -428,3 +428,58 @@ So: step 1 wired the metaobject CHANNEL. Step 3 is what claims the payoff.
 Verified pre-existing against `9edf9c46~1`. But `_replay_classes` is a FENCED sub
 that 1b and later commits modified, so the fence has been overtaken: it should be
 re-baselined or retired, not left red. A red fence trains people to ignore it.
+
+
+---
+
+# Step 3, PARTIAL (2026-08-21)
+
+perl5-son `daaaf7a` + chalk `7ee9d959`. Gate 214/214/214/214, zero not-ok.
+Producer suite 99 files / 534 tests PASS on a clean build.
+
+## What shipped: the COLLISION half
+
+`$_` and `@_` are different variables sharing the glob name `_`. `StashAccess`
+hashed on `(stash_name, var_name)` with no sigil and the scope map keyed both as
+`main::_`, so a sub using BOTH hash-consed them into ONE node:
+
+    sub f { my $n = shift; my $m = /x/ ? 1 : 0; $n + $m }
+      id=1 StashAccess(_)
+      id=2 Call(shift)  inputs=[1]   <- @_
+      id=3 RegexMatch   inputs=[1]   <- $_   SAME NODE
+
+Fixed by making the sigil part of the identity: a `sigil` field on `StashAccess`
+(content_hash + wire + loader) and **five** sigil-qualified scope-key sites --
+the gvsv read, the aggregate read, the match subject, the list-assign define,
+and `sassign`'s define. I found them one at a time by breaking things; the count
+is worth recording, because a name-only key at any one of them silently binds or
+reads the wrong slot.
+
+Verified: `our $g` and `our @g` in one program now coexist (7 == perl), `%ENV`
+still resolves, and lowering is byte-identical across three runs.
+
+**A latent bug this exposed**, pre-existing and fixed: four
+`sort { $a <=> $b }` over the scope map, which holds MIXED keys (integer pad
+slots and qualified names). Numeric sort over a name warns and orders
+arbitrarily -- and codegen must be deterministic. Now `_scope_key_order`.
+
+## What did NOT ship: `@_`'s own node kind
+
+The plan's step 3 also says "`@_` off `StashAccess`. Its own source node, gated
+by `uses_args`." That is not done. `@_` still rides `StashAccess`, and
+`StashAccess` therefore still has two roles.
+
+Honest status: **the HAZARD is closed, the CLEANUP is not.** The collision was
+the part that produced a wrong graph; the node-kind split is what lets step 4
+rename `StashAccess` -> `EntryDef` and leaves it with one meaning. Do not treat
+step 3 as done -- and note the risk that fixing the identity removes the
+pressure to finish, which is exactly the 80%-migration pattern this repo warns
+about.
+
+## Still open, and reachable
+
+The `@_`-in-a-sub-with-`$_` shape still GAPs, with a message naming the wrong
+cause: "callee accesses @_ as an aggregate (a list assignment `my (...) = @_`)"
+on a source containing no list assignment. The refusal is correct; the diagnosis
+is not. That message keys off "a non-`shift` consumer of the @_ node" and should
+key off the actual shape now that the nodes are distinguishable.
