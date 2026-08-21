@@ -186,3 +186,56 @@ TypeInference to annotate this node") names a subsystem that is not on this path
 and describes an absent field rather than an undischarged obligation. The
 boundary check is the right idea; the message and the representation of "not
 known" are both wrong.
+
+---
+
+# CORRECTION: the obligation is at the FORCING OPERATION, not a phase boundary
+
+perigrin: it is an option until we need a representation -- like a Store (as an
+SSA operation).
+
+I stated this rule two different wrong ways before this. First "a Phi over a
+genuinely unknown arm may want to stay unknown" (too permissive, filed as an
+open question). Then "an arm still Unknown at codegen is a failure to report"
+(too strict -- it treats codegen as one moment). Neither is right.
+
+## The rule
+
+**`Unknown` is legal until an operation must ENCODE it.**
+
+A representation is a machine-level commitment -- width, register class, what a
+`phi` and its coercions must agree on. The demand for one arrives at the
+operation that has to emit something, not at the edge of a compilation phase.
+
+FORCING operations -- must have a concrete representation, must GAP without one:
+
+- `Store` -- writes a value to a location; both sides need a width
+- `Phi` -- reconciles values across control edges into one register class
+- a `call` -- the ABI names types
+- arithmetic -- must choose int vs float
+- a coercion -- its target IS a representation
+
+NON-forcing: a pure computation with no consumer yet demanding a width may carry
+`Unknown` indefinitely, and it costs nothing.
+
+`Store` and `Phi` are the same family: the ops that RECONCILE values are the ops
+that force them to agree.
+
+## Why `_require_repr` feels misplaced
+
+It fires at LOWERING -- "reached LLVM backend with NO representation" -- which is
+a phase, not a commitment. That is why its message cannot name a real cause: it
+asks "why is this untyped?" at a point where the honest question is "which
+operation needed a type and did not get one?"
+
+## Two consequences
+
+**For `fib`:** the ternary must narrow because its value flows into a `Return`
+and into arithmetic, both forcing. So dropping `Unknown` from the join is
+narrowing exactly when required -- not an early guess.
+
+**For the 24 hand-check sites:** they are NOT all the same, and today they look
+identical. Some are forcing points that should GAP with a specific message
+naming the operation; others are pass-throughs that should propagate `Unknown`
+unchanged. Testing `defined` at all of them erases the distinction, which is
+why it is currently invisible.
