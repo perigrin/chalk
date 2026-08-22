@@ -4,9 +4,9 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Chalk::IR::Node;
+use Chalk::IR::Value;
 
-class Chalk::IR::Node::EnvRead :isa(Chalk::IR::Node) {
+class Chalk::IR::Node::EnvRead :isa(Chalk::IR::Value) {
     # Environment variable name (compile-time literal). Env writes are not
     # modelled, so the read is constant per process and hash-consing two
     # reads of the same key to one node is sound.

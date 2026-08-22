@@ -4,9 +4,9 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Chalk::IR::Node;
+use Chalk::IR::Value;
 
-class Chalk::IR::Node::RegexCapture :isa(Chalk::IR::Node) {
+class Chalk::IR::Node::RegexCapture :isa(Chalk::IR::Value) {
     # Capture group number (1-based, $1..$9). The whole-match bounds (group 0)
     # are not exposed through this node ($& is a tracked follow-up).
     field $n :param :reader;

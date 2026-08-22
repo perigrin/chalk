@@ -77,12 +77,44 @@ StructFieldAccess, StructRef, RegexCapture, EnvRead, BacktickExpr, AnonSub,
 ListAssign, CompoundAssign
 plus the five base classes, which carry 56 subclasses with them.
 
-**OPEN -- perigrin's call, do not guess:**
+**RESOLVED by measurement -- the assigns are BOTH:**
 
-- `CompoundAssign` / `ListAssign` -- perl's `$x = $y = 5` yields a value. Are
-  these statements in Chalk, or values whose result is usually discarded?
+`Assign` and `CompoundAssign` are both in `%STATEMENT_EFFECT_OPS`
+(NodeFactory.pm:164-167) AND `Assign` already inherits `BinOp`, a value class.
+`Serialize/JSON.pm:1517`: *"An Assign's result IS the stored value, so its repr
+is the..."*. So they are effectful AND value-producing -- perl's `$x = $y = 5`.
+
+This is exactly the Fixed/Floating vs Value/Control orthogonality: `is_fixed`
+answers the effect question, `isa Value` answers the value question, and they
+are independent. No conflict. `CompoundAssign` and `ListAssign` are VALUES that
+are also statements.
+
+The same file already states the axes are separate (:175): *"allocations are
+value-producing and are not control-threaded by the Block fixup, which is a
+different question."*
+
+**STILL OPEN -- perigrin's call, do not guess:**
+
 - `Unwind` (`die`) -- never returns, so `None` (the bottom type) is the
   principled answer. But it may be cleaner as control.
+
+## Enforcement: the loader THROWS on an untyped Value node
+
+perigrin: update the loader to throw if it encounters an untyped Value node.
+
+That is what makes "fully typed" an INVARIANT rather than a convention. Without
+it the split is documentation.
+
+**Sequencing matters:** the loader cannot throw until the producer emits full
+types, or every program dies. So this lands AFTER the producer step, or behind
+a transitional flag. The ~35 corpus gaps are precisely the programs that would
+throw, which makes them the work queue.
+
+The throw belongs at the END of `from_json`, after all propagation passes have
+run -- that is the point where remaining `undef` means inference genuinely
+failed rather than "not yet reached". Message must name the NODE and the
+OPERATION, not a phase: the seams doc records `_require_repr` blaming
+TypeInference for a scoping bug three levels away, and this must not repeat it.
 
 ## Sizing -- MEASURED, and much smaller than it first looked
 

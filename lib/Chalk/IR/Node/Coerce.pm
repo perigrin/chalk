@@ -5,9 +5,9 @@ use utf8;
 use experimental 'class';
 no warnings 'experimental::class';
 
-use Chalk::IR::Node;
+use Chalk::IR::Value;
 
-class Chalk::IR::Node::Coerce :isa(Chalk::IR::Node) {
+class Chalk::IR::Node::Coerce :isa(Chalk::IR::Value) {
 
     # Source representation of the input value (e.g. 'Str', 'Int', 'Num', 'Scalar').
     # Part of content_hash: Coerce[Str->Num](x) and Coerce[Str->Int](x) are distinct

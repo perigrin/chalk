@@ -5,9 +5,9 @@ use utf8;
 use experimental 'class';
 no warnings 'experimental::class';
 
-use Chalk::IR::Node;
+use Chalk::IR::Value;
 
-class Chalk::IR::Node::StructFieldAccess :isa(Chalk::IR::Node) {
+class Chalk::IR::Node::StructFieldAccess :isa(Chalk::IR::Value) {
     method operation() { 'StructFieldAccess' }
     method staleness_kind() { 'opaque' }
     sub identity_kind { 'hash_consed' }

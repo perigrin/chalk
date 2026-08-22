@@ -4,9 +4,9 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Chalk::IR::Node;
+use Chalk::IR::Value;
 
-class Chalk::IR::Node::BinOp :isa(Chalk::IR::Node) {
+class Chalk::IR::Node::BinOp :isa(Chalk::IR::Value) {
     field $left  :param :reader = undef;
     field $right :param :reader = undef;
 

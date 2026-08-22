@@ -4,9 +4,9 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Chalk::IR::Node;
+use Chalk::IR::Value;
 
-class Chalk::IR::Node::ExpressionList :isa(Chalk::IR::Node) {
+class Chalk::IR::Node::ExpressionList :isa(Chalk::IR::Value) {
     method operation() { 'ExpressionList' }
     method staleness_kind() { 'opaque' }
     sub identity_kind { 'hash_consed' }
