@@ -741,6 +741,36 @@ sub _seed_direct_call_arg_reprs ($graphs) {
             # subscript (Subscript over Constant("_") at index 0). Both bind the
             # first argument; stamp whichever the callee uses.
             my $callee = $node->target->graph;
+
+            # A DECLARED SIGNATURE stamps by INDEX, and is not capped at one
+            # argument the way the `shift @_` / `$_[0]` recovery paths below
+            # are. Those cap at one because multiple shifts hash-cons to a
+            # single node and lose their order; a Parameter carries its index,
+            # so parameter N pairs with argument N by construction.
+            my %params;
+            for my $n ($callee->nodes->@*) {
+                next unless blessed($n) && $n->operation eq 'Parameter';
+                $params{ $n->index } = $n;
+            }
+            if (%params) {
+                for my $i ( sort { $a <=> $b } keys %params ) {
+                    # A parameter with no matching argument is an arity
+                    # mismatch; leave it untyped and let the backend GAP
+                    # against the operation that needed a type, rather than
+                    # guessing here.
+                    my $arg = $args[$i] or next;
+                    my $repr = $arg->representation // next;
+                    # Same monomorphic-callee assumption as the shift path
+                    # below: first caller wins, and a second caller with a
+                    # different repr lowers through the first one's ops, which
+                    # lli rejects loudly rather than miscompiling silently.
+                    next if defined $params{$i}->representation;
+                    $params{$i}->set_representation($repr);
+                    $stamped++;
+                }
+                next;
+            }
+
             my @reads = grep {
                 my $n = $_;
                 blessed($n) && $n->operation eq 'Call'

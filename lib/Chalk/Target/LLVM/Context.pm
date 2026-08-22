@@ -6016,9 +6016,21 @@ sub _collect_positional_arg_reads {
 
     my @shifts;
     my %subscripts;   # index => the $_[index] Subscript node
+    my %params;       # index => the Parameter node (a DECLARED signature)
     for my $n ($graph->nodes->@*) {
         next unless blessed($n);
         my $op = $n->operation;
+
+        # A DECLARED PARAMETER. Its index IS its position, so this needs no
+        # recovery at all -- which is the point. `shift @_` and `$_[N]` both
+        # cap at ONE argument here, for reasons that do not apply: multiple
+        # shifts hash-cons to a single node and lose their order, and the
+        # subscript path was written for the single-arg case. A Parameter
+        # carries its own index, so N of them order themselves.
+        if ($op eq 'Parameter') {
+            $params{ $n->index } = $n;
+            next;
+        }
 
         # `shift @_` / `pop @_`: the arg-read we can bind (shift only).
         if ($op eq 'Call' && $n->can('dispatch_kind')
@@ -6076,6 +6088,26 @@ sub _collect_positional_arg_reads {
               . "connect to the caller's arguments in the graph."
                 if @other;
         }
+    }
+
+    # A DECLARED SIGNATURE WINS, and it is not capped at one argument. The
+    # parameters are returned in index order, so the caller's positional
+    # binding (arg_reads[$i] <- arg_refs[$i]) lines up by construction.
+    if (%params) {
+        die "GAP: direct call to '$name': callee mixes declared signature "
+          . "parameters with `shift \@_` / `\$_[N]` positional reads."
+            if @shifts || %subscripts;
+
+        my @idx = sort { $a <=> $b } keys %params;
+        # The indices must be DENSE from 0: a hole means a parameter the
+        # producer did not emit, and binding positionally past a hole would
+        # silently shift every later argument by one.
+        die "GAP: direct call to '$name': declared parameter indices are not "
+          . "dense from 0 (got " . join( ',', @idx ) . ") — cannot bind "
+          . "positionally without silently shifting later arguments."
+            if $idx[0] != 0 || $idx[-1] != $#idx;
+
+        return map { $params{$_} } @idx;
     }
 
     # A callee reads its positional args via EITHER `shift @_` OR `$_[N]`
