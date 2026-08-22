@@ -1,58 +1,116 @@
-# The producer and Chalk have DIFFERENT type lattices, bridged by a name table
+# One IR, one type lattice — the producer and Chalk currently have two
 
 **Date:** 2026-08-22
-**Status:** MEASURED, not fixed. Raised by perigrin during the Parameter-node
-work: *the producer should have the exact same type lattice as Chalk.*
+**Status:** MEASURED, not fixed. perigrin: *the producer lattice should be the
+same as the Chalk lattice — they're talking about the same IR.*
+**Blocks:** slice 4 of `2026-08-22-parameter-node-design.md` (a slurpy
+`Parameter` needs an `Array`/`Hash` type the producer cannot express).
 
-## The divergence, measured
+---
 
-    CHALK only:     Bool  GlobRef  Array  Hash  Code
-    PRODUCER only:  Boolean  Glob  Void  None  Unknown
-    SHARED:         Scalar Undef Regex Str Num Int DualVar Ref
-                    ScalarRef ArrayRef HashRef CodeRef Object List
+## The two lattices, verbatim
 
-Sources: `lib/Chalk/Grammar/Perl/TypeLibrary.pm` (%PARENT) and
-`~/dev/perl5-son/lib/SoN/IR/Stamp.pm` (%PARENTS).
+`lib/Chalk/Grammar/Perl/TypeLibrary.pm` (%PARENT — single parent):
 
-Two kinds of difference, and the first is worse:
+    Scalar=>Any   Undef=>Scalar  Bool=>Scalar   Regex=>Scalar
+    Str=>Scalar   Num=>Str       Int=>Num       DualVar=>Scalar
+    Ref=>Scalar   ScalarRef=>Ref ArrayRef=>Ref  HashRef=>Ref
+    CodeRef=>Ref  GlobRef=>Ref   Object=>Ref
+    List=>Any     Array=>List    Hash=>List     Code=>Any      Glob=>Any
 
-**1. THE SAME TYPE UNDER TWO SPELLINGS.** `Bool` (chalk) and `Boolean`
-(producer) are one type. This is already known and PAPERED OVER by a
-translation table in the loader -- `Serialize/JSON.pm:30`, `Boolean => 'Bool'`,
-with the comment at :514: *"says 'Boolean' where a representation says 'Bool'.
-Map them ... Coerce(Boolean->Str) arrives with a repr name the backend's ...
-"*. Same for `Glob`/`GlobRef`.
+`~/dev/perl5-son/lib/SoN/IR/Stamp.pm` (%PARENTS — a DAG, multiple parents):
 
-**2. GENUINELY ABSENT MEMBERS.** The producer has no `Array`/`Hash` -- it
-carries `ArrayRef`/`HashRef` (which are REFERENCES, a different thing) plus
-`List`. Chalk has no `Void`/`None`/`Unknown`.
+    None=>[Int Boolean Undef ScalarRef ArrayRef HashRef CodeRef Object DualVar Regex Glob]
+    Int=>[Num]    Num=>[Str]     Str=>[Scalar]  Boolean=>[Scalar]
+    Undef=>[Scalar] DualVar=>[Scalar] Ref=>[Scalar]
+    ScalarRef=>[Ref] ArrayRef=>[Ref] HashRef=>[Ref] CodeRef=>[Ref]
+    Object=>[Ref]  Regex=>[Ref]   Glob=>[Ref]
+    Scalar=>[Unknown] Void=>[Unknown] List=>[Unknown] Unknown=>[]
+
+## Four kinds of divergence, in increasing order of difficulty
+
+### 1. Pure renames — one consumer, mechanical
+
+`Bool` (chalk) is `Boolean` (producer). Measured: `Boolean` appears in chalk
+exactly ONCE, in the rename table itself (`Serialize/JSON.pm:26-30`,
+`%STAMP_TO_REPR`), read at :518, :520 and :555. Its own comment at :514 admits
+the situation: *"says 'Boolean' where a representation says 'Bool'. Map them"*.
+
+That table IS the defect perigrin is naming: a translation layer standing in
+for an agreement.
+
+### 2. Members present on one side only
+
+    chalk only:     Array  Hash  Code  GlobRef  (root: Any)
+    producer only:  Void   None  Unknown
+
+Both sides need the other's. Chalk's `Array`/`Hash` are real aggregate types
+the backend lowers (`%Array*`, `%Hash*`); the producer has only REFERENCES to
+them, which is a different type. The producer's `Unknown`/`None` are the
+epistemic points this session made load-bearing — `Unknown` as sound top for
+undetermined inference, `None` as the bottom that makes joins work
+(`join(Int, None) = Int`). Chalk has neither, which is exactly why `Unknown` is
+never produced chalk-side: there is nowhere for it to live.
+
+Those two findings are the same defect from opposite ends.
+
+### 3. DIFFERENT PARENTS — this changes subtype answers
+
+    Regex:  chalk Scalar   producer Ref
+    Glob:   chalk Any      producer Ref
+    List:   chalk Any (with Array/Hash beneath)   producer Unknown (childless)
+
+This is not naming. `is_subtype(Regex, Ref)` answers differently on each side,
+so any code that migrated across would silently change behavior.
+
+### 4. DIFFERENT ROOTS, and they are not synonyms
+
+Chalk's root is `Any`; the producer's is `Unknown`. This session established
+those are DIFFERENT (TypeLibrary.pm:86-106): `Any` opts OUT of checking — a
+legitimate static answer; `Unknown` is SOUND TOP — inference has not
+determined the type and nothing may be done until it is narrowed. An `Any`
+reaching the backend is a design fact; an `Unknown` reaching it is an inference
+failure.
+
+Chalk's lattice has `Any` as root and `Unknown` bolted on beside it with equal
+bits. The producer has `Unknown` as the root and no `Any` at all. Merging the
+roots is the hard part and needs a decision, not a mapping.
+
+Also structural: chalk's is a TREE (one parent per member); the producer's is a
+DAG (`None` lists eleven parents). A merge has to pick one shape.
 
 ## How it bit, concretely
 
 Stamping a slurpy `Parameter` as `Array` in the producer dies "Unknown stamp
-type: Array" -- and the translator MASKS that as a silent skip, so the entire
-sub vanishes from the wire with only a stderr line. I worked around it by not
-stamping and letting the loader type from the sigil.
+type: Array" — and `B::SoN` MASKS that as a silent skip, so the entire sub
+vanishes from the wire with only a stderr line. Measured during slice 2.
 
-That workaround is the wrong shape and is recorded as such: it routes around a
-mismatch that should not exist. Per the memory note, "single IR" is a CONTRACT
-enforced by the gate, not shared .pm files -- but a contract with a rename table
-in the middle is not being enforced, it is being translated.
+I worked around it by not stamping and letting the loader type from the sigil.
+That workaround is recorded as a workaround: it routes around a mismatch that
+should not exist.
 
-## What this does NOT establish
+## Sequencing
 
-- Which direction to unify. Chalk's lattice is richer (Array/Hash/Code) and
-  is what the backend needs; the producer's has the epistemic points
-  (Unknown/None/Void) that this session's work made load-bearing. A merge
-  probably needs both.
-- Whether the `Boolean`/`Bool` table has other consumers that would break.
-- Whether `List` and `Array` are meant to be the same thing.
+Unifying is NOT a prerequisite for finishing the `Parameter` work, and should
+not be smuggled into it:
 
-## Why it matters beyond tidiness
+- **Slice 4** needs a slurpy parameter to carry `Array`/`Hash`. The loader can
+  type it from the SIGIL (which the node already carries) without the producer
+  stamping anything. That is a legitimate split — the producer declares what it
+  knows, the loader types what it can — and it unblocks slice 4 today.
+- **The merge** is its own piece of work. Difficulty ladder above: (1) is
+  mechanical with one consumer, (2) is additive, (3) changes subtype answers
+  and needs per-member justification, (4) is a design decision about `Any` vs
+  `Unknown` and tree-vs-DAG.
 
-`Unknown` and `None` exist ONLY producer-side, and this session established
-that both are load-bearing: `Unknown` as the sound top for undetermined
-inference, `None` as the bottom that makes joins work
-(`join(Int, None) = Int`). Chalk's lattice has neither, which is part of why
-`Unknown` is never produced on the chalk side -- there is nowhere for it to
-live. The two findings are the same defect seen from opposite ends.
+Doing (1) and (2) first would already delete the rename table and let the
+producer express aggregates, which is most of the practical benefit.
+
+## Not established
+
+- Whether `List` (producer) and `Array` (chalk) are meant to be the same
+  thing, or genuinely differ (perl's list CONTEXT vs an array VALUE).
+- Whether anything depends on `Regex`/`Glob` sitting under `Scalar` rather than
+  `Ref` on the chalk side.
+- Whether the producer's DAG shape (multi-parent `None`) is load-bearing or an
+  artifact of expressing a bottom type.

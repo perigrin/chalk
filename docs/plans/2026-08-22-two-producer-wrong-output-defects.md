@@ -24,6 +24,19 @@ print $v, "\n";        # perl prints "AB"
 The wire carries `Constant const_type=integer value='0' :Int`. Chalk emits a
 zero where the program prints `AB`.
 
+**Why `AB` and not `65.66`** — this reads wrong at first glance. A v-string IS
+the string of `chr(N)` for each component; the version-number spelling is
+SYNTAX, and `sprintf "%vd"` is the display convention that renders the
+ordinals back. Measured:
+
+    v65.66   ords 65,66   length 2   printed "AB"    sprintf %vd -> 65.66
+    v1.2.3   ords 1,2,3   length 3   (unprintable)   sprintf %vd -> 1.2.3
+
+So `v1.2.3` is `"\x01\x02\x03"`. This is exactly why the lattice places
+`VString <: Str`: it is a string, carrying `V` magic so tools can recover the
+version rendering. The defect is that the CONTENT is lost, not that a version
+number was formatted wrongly.
+
 **Mechanism, verified at the SV level:**
 
     B::class(v1.2.3)  = PVMG
