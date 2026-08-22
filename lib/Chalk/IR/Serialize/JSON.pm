@@ -75,6 +75,17 @@ sub _extract_fields ($node, $id_remap) {
     if ($op eq 'FieldAccess') {
         return { field_index => $node->field_index, field_stash => $node->field_stash };
     }
+    if ($op eq 'Parameter') {
+        return {
+            # The INDEX is the identity: a parameter is a value identified by
+            # POSITION, and two reads of parameter 0 are one node. The name is
+            # debug information; the sigil is what types it, and a slurpy is
+            # NOT always an array -- `sub f(%h)` is a hash.
+            index => $node->index,
+            name  => $node->name,
+            sigil => $node->sigil,
+        };
+    }
     if ($op eq 'EntryDef') {
         return {
             stash_name => $node->stash_name,
@@ -448,6 +459,13 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'PadAccess') {
             $args{targ}    = $fields->{targ};
             $args{varname} = $fields->{varname};
+        }
+        elsif ($op eq 'Parameter') {
+            # index is REQUIRED -- it is the node's identity. A missing one is a
+            # producer/loader disagreement, not something to default away.
+            $args{index} = $fields->{index};
+            $args{name}  = $fields->{name};
+            $args{sigil} = $fields->{sigil} // '$';
         }
         elsif ($op eq 'FieldAccess') {
             $args{field_index} = $fields->{field_index};

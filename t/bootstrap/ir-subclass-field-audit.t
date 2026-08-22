@@ -176,6 +176,24 @@ $SPEC{EntryDef} = sub ($f) {
     return ($node, { stash_name => 'main', sigil => '@', var_name => 'g' });
 };
 
+$SPEC{ArgsSource} = sub ($f) {
+    # NO FIELDS by design: there is exactly one `@_` per sub invocation, so the
+    # node needs no name, stash or sigil to distinguish it. A fieldless class
+    # still has to round-trip, which is what this pins.
+    my $node = $f->make('ArgsSource', inputs => []);
+    return ($node, {});
+};
+
+$SPEC{Parameter} = sub ($f) {
+    # index 3 and sigil '%' are deliberately NOT the defaults: a spec using a
+    # default value passes even when the field is dropped entirely -- the
+    # pass-by-omission this file exists to prevent, which is exactly how
+    # EntryDef's `sigil` slipped through.
+    my $node = $f->make('Parameter',
+        index => 3, name => '%opts', sigil => '%', inputs => []);
+    return ($node, { index => 3, name => '%opts', sigil => '%' });
+};
+
 $SPEC{CompoundAssign} = sub ($f) {
     my $l = _const($f, '1');
     my $r = _const($f, '2');
