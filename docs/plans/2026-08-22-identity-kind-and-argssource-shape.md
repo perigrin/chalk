@@ -177,3 +177,91 @@ and it decides how big this is. Check before designing.
 
 Nothing in this document is fixed. The `Chalk::IR::Value` split is separate and
 lands independently; these are two shape questions it surfaced.
+
+---
+
+## MEASURED 2026-08-22: Chalk has NO parameter representation, it has TWO ACCIDENTS
+
+perigrin asked whether Chalk projects parameters off `Start` like TurboFan/C2.
+It does not -- and the measurement is worse than the question assumed.
+
+Two subs, two completely different encodings of "a parameter", neither of which
+names the concept:
+
+    sub f { my ($a,$b) = @_; $a + $b }
+      Start       inputs=[]
+      PadAccess   inputs=[] targ=1 varname=$a     <- untyped
+      PadAccess   inputs=[] targ=2 varname=$b     <- untyped
+      Add         inputs=[PadAccess,PadAccess]
+      Assign      inputs=[PadAccess,PadAccess]    <- disconnected
+
+    sub g { $_[0] * 2 }
+      Start       inputs=[]
+      ArgsSource  inputs=[]
+      Subscript   inputs=[ArgsSource,Constant(0),MemStart]   <- untyped, MEMORY input
+      Multiply    inputs=[Subscript,Constant(2)]
+
+### Three defects visible in one measurement
+
+1. **`my ($a,$b) = @_` produces NO parameter nodes.** It produces `PadAccess`
+   -- the same perl-implementation leak as the cross-sub lexical case (seams
+   doc finding 3). `@_` has vanished from the graph entirely. This is the MOST
+   COMMON parameter idiom in Perl, and it does not go through `ArgsSource` at
+   all.
+
+2. **`$_[0]` is a MEMORY READ.** The `Subscript` takes `MemStart` as an input,
+   so reading a parameter is ordered against memory operations. Both V8
+   pipelines make a parameter PURE -- TurboFan `Operator::kPure`, Turboshaft
+   `OpEffects()`. A pure parameter can float, CSE, and hoist; Chalk's cannot,
+   for no semantic reason.
+
+3. **Both encodings are untyped.** These are the `~35 corpus gaps` at their
+   source.
+
+### Nothing hangs off `Start`
+
+    TurboFan   Parameter    value_in=1 -> Start        Operator::kPure
+    C2         ParmNode     ProjNode off StartNode     typed via TypeTuple
+    Turboshaft ParameterOp  arity 0 (no input)         OpEffects() (pure)
+    Chalk      -- nothing --
+
+Chalk's `Start` is a bare control token with no value projections. Two of the
+three verified systems project parameters off Start; the third makes them
+zero-input. Chalk does neither because it has no parameter node to place.
+
+### This RESCOPES the ArgsSource finding
+
+The `ArgsSource` critique above is correct but addresses the RARER path.
+Fixing `ArgsSource` alone leaves `my ($a,$b) = @_` -- the common case -- still
+emitting `PadAccess`. The real finding is:
+
+**Chalk has no parameter representation. It has two accidental encodings that
+share nothing: a pad slot and a memory-read subscript.**
+
+A positional `Parameter` node would unify them: `my ($a,$b) = @_` binds
+parameters 0 and 1; `$_[0]` reads parameter 0. Same nodes, one concept, pure,
+individually typed -- and `uses_args` becomes "did anything need the aggregate",
+which is the analysis question rather than a producer flag.
+
+### Verified TurboFan detail worth copying
+
+`common-operator.cc`, verbatim:
+
+    IrOpcode::kParameter, Operator::kPure,     // opcode
+    "Parameter",                               // name
+    1, 0, 0, 1, 0, 0,                          // counts
+    ParameterInfo(index, debug_name));         // parameter info
+
+`hash_value(ParameterInfo p) { return p.index(); }` -- parameters hash-cons by
+index, so two reads of parameter 0 are ONE node. Correct: a parameter is a
+single incoming value, not an event.
+
+`kMinIndex = Linkage::kJSCallClosureParamIndex` -- indices may be NEGATIVE,
+reserving slots below zero for closure/context/receiver. That is the answer to
+the invocant question: `$self` is a parameter at a reserved index, not a
+special case.
+
+NOTE the TurboFan/Turboshaft divergence: TurboFan's Parameter has
+`value_in = 1` (projects off Start); Turboshaft's is arity 0 with the explicit
+comment "On the callee side a parameter doesn't have an input." Do not
+generalize one to the other.
