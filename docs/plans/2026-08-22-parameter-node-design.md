@@ -173,3 +173,52 @@ real blast radius -- run the corpus gate before and after, not just a unit test.
    structurally distinct from a mandatory one, not merely a count. Whether the
    default expression becomes part of the `Parameter` node or a separate
    guarded def is undecided.
+
+---
+
+## RESOLVED: open question 1 (invocant index) -- no reserved index is needed
+
+perigrin, on `Parameter(-1)`: *I'm not sure that will work with Perl semantics
+that expect `$self` as the first element in `@_`.*
+
+Correct, and it kills the TurboFan convention for Chalk. In perl `$self` IS
+`$_[0]` -- `my $self = shift` works precisely because the invocant occupies
+slot 0 of the argument list. TurboFan's negative indices work because JS's
+receiver is OUTSIDE the arguments array (`arguments[0]` is the first real
+argument, not `this`). Different language, different fact.
+
+But measuring the optree shows the question dissolves rather than needing C2's
+convention either:
+
+    method m($k)   methstart() v          <- invocant: its OWN OP
+                   argcheck(1,0) v        <- counts ONE param, not two
+                   argelem(0)[$k] v/SV    <- $k is index 0
+
+    sub oldstyle   shift                  <- no methstart, NO argcheck
+
+**Perl already separates the invocant from the parameter list for
+`feature class` methods.** `methstart` handles the invocant, `argcheck` counts
+only the declared parameters, and the first user parameter is `argelem(0)`.
+
+So the answer splits along a line that already exists in the optree:
+
+| | invocant | user parameters |
+|---|---|---|
+| `method m($k)` | `methstart` -- a separate op, NOT in the arg list | `Parameter(0)` = `$k` |
+| `sub m { my $self = shift }` | **is** `$_[0]`, element 0 of the slurpy | none declared |
+
+**No reserved index, positive or negative.** The invocant gets its own node
+mirroring `methstart` for class methods; for an old-style sub it is simply the
+first element of the slurpy parameter, with no special casing -- because perl
+is not special-casing it either.
+
+This is better than both prior-art conventions, and for a reason specific to
+each: TurboFan reserves negative indices because JS's receiver sits outside
+`arguments`; C2 reserves low slots because its domain tuple also carries
+Control/I_O/Memory/FramePtr/ReturnAdr. Chalk needs neither, because perl hands
+us the distinction structurally.
+
+CONSEQUENCE for slice 3: it is no longer "invocant at a reserved index". It is
+"mint an invocant node from `methstart`", and old-style subs need nothing at
+all -- `my $self = shift` is already a read of slurpy element 0 under the
+one-rule model.
