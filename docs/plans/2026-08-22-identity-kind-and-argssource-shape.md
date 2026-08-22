@@ -39,6 +39,18 @@ reason `%ALLOC_OPS` was deleted.
 
 ### How the others do it -- both DERIVE the answer
 
+> **VERIFICATION STATUS (2026-08-22).** The Graal and C2 mechanism claims below
+> were written from memory and are **UNVERIFIED**. A research pass
+> (`docs/research/2026-08-22-parameters-identity-valueness-prior-art.md`) could
+> NOT confirm Graal's `NodeClass.valueNumberable()`, the `ValueNumberable`
+> interface name, or C2's `Node::hash`/`NodeHash`/memory-edge argument.
+>
+> What IS verified, verbatim from V8 source: **Turboshaft has NO per-operation
+> value-numberable boolean.** It computes the answer from an effects-lattice
+> subset test plus a class-level opcode filter -- WITH named per-opcode
+> exceptions in both directions. That supports deriving, and warns that a pure
+> derivation may need an explicit exception list rather than being total.
+
 - **C2:** hash-consing runs through a global value-number table (`NodeHash`).
   What stops a store being CSE'd is not a flag -- stores carry a MEMORY EDGE, so
   two stores have different memory inputs and cannot be structurally equal.
@@ -92,6 +104,22 @@ same IR semantics.*
 
 ### How the others do it -- parameters are DEFS, not a container
 
+> **VERIFICATION STATUS (2026-08-22).** VERIFIED for Turboshaft and C2 from
+> verbatim source; **UNVERIFIED for LLVM and Graal**. Turboshaft's `ParameterOp`
+> is zero-input, pure, positionally indexed, with ONE output -- so no instance
+> can stand for a list. C2's `ParmNode` is a `ProjNode` off `StartNode`, typed
+> by `TypeTuple` field rather than carrying a type itself. The universal "NONE
+> of them" is only two-thirds supported, and deopt metadata is a live
+> counterexample risk: V8 keeps `ArgumentsElementsState` as a deopt literal
+> after eliding the real allocation.
+>
+> **The load-bearing verified finding: LENGTH IS DECOUPLED FROM
+> MATERIALIZATION.** `ArgumentsLengthOp` is zero-input, pure, and does NOT take
+> the aggregate as an operand -- so asking for the length structurally cannot
+> force allocation. Only `NewArgumentsElementsOp` allocates, marked
+> `.CanAllocate().CanDependOnChecks()` because the array has observable
+> identity.
+
 - **LLVM:** arguments are `Argument` values in the function signature (`%0`,
   `%1`), each independently typed.
 - **C2:** `ParmNode`s projected off `StartNode`, one per parameter, each with
@@ -115,7 +143,21 @@ Perl's actual semantics are that **parameters ALIAS the caller's arguments** --
 an aliasing relationship between N caller values and N callee names. That is not
 a container; the container is how perl implements it.
 
-### It also subsumes `uses_args`
+### It also subsumes `uses_args` -- but the real answer is SPLIT
+
+> **VERIFIED (2026-08-22):** the decision is split two ways. The KIND of
+> aggregate is a frontend flag (V8's `CreateArgumentsType`, chosen in
+> `Scope::GetArgumentsType()` from strictness + simple-parameter-list alone).
+> WHETHER to materialize is decided by ANALYSIS over use edges
+> (`EscapeAnalysisReducer::Finalize` computes an `escaping_use` boolean).
+>
+> Chalk's `uses_args` is doing the SECOND job, which makes it a **stopgap** --
+> but the analysis that would replace it is escape/demand analysis Chalk does
+> not have. Keep it, and record that it stands in for an analysis.
+>
+> **SCOPE HAZARD:** the escape-analysis half is **TurboFan**, not Turboshaft.
+> Whether Turboshaft retains any arguments-elision mechanism is COULD NOT
+> CONFIRM.
 
 `uses_args` exists because materialising a real `@_` array is expensive and
 usually unnecessary (the NoSnails direction in perl core). Under the ParmNode
