@@ -86,31 +86,103 @@ site because `leavewrite` roots the format's separate CV.
 ## STRING EVAL IS NOT COMPILABLE IN PRINCIPLE, AND THAT IS THE POINT
 
 This is the first construct measured in this project that is not merely
-unbuilt but **structurally impossible** for a runtime-free target:
+unbuilt but **structurally impossible from where B::SoN stands** — and that
+holds for BOTH operand forms, not just the variable one.
 
-- `enterwrite` — the format body is a separate CV. It EXISTS and is compiled;
-  walking it is work, not a barrier.
+**B::SoN runs at CHECK time, on an already-compiled optree.** The `entereval`
+op is there; the eval'd code is not. Perl compiles that string only when the op
+EXECUTES, so at the moment B::SoN walks the tree there is no optree for the
+body to walk — the walk is looking at the program before it has run.
+
+That kills the constant case too. `eval q{1+2}` looks compilable because the
+string is known, but making it so would require B::SoN to invoke the perl
+compiler on that string mid-walk and splice the resulting optree into the
+graph. That is running the compiler, at compile time, over data the optree
+merely POINTS AT. It is a different tool, not a missing feature here.
+
+Compare the rest of the family, which are all genuinely buildable:
+
+- `enterwrite` — the format body is a separate CV that EXISTS and is already
+  compiled. Walking it is work, not a barrier.
 - `goto` — needs real control flow. Buildable.
-- `entereval` with a CONSTANT operand — the string is known at compile time and
-  could in principle be compiled then. Buildable, if anyone wants it.
-- `entereval` with a VARIABLE operand — the code does not exist until runtime.
-  Compiling it requires shipping the compiler as the runtime, which is exactly
-  what "runtime-free" excludes.
+- `entereval`, either operand form — the body has never been compiled, and
+  B::SoN's whole position is downstream of compilation.
 
-So the correct end state is a permanent, well-worded GAP for the variable form,
-not a TODO. The constant form is a separate question nobody needs yet.
+So the correct end state is a permanent, well-worded GAP for string eval as a
+whole. Not a TODO, and not "constant form later".
 
-## The fix
+(An earlier revision of this document called the constant form "buildable if
+anyone wants it". That was wrong: it reasoned from whether the STRING is known
+rather than from whether an OPTREE exists, which is the question B::SoN's
+position actually poses.)
 
-Add `entereval` to `%UNBUILT_OP_GAP` (`lib/SoN/FromOptree.pm`) alongside
-`enterwrite`/`leavewrite`, with a message that says string eval is not compiled
-and why, so the refusal stops naming `SoN::IR::Node::Constant`. Two lines, the
-same shape as the `goto` fix.
+### The subprocess design, and the hole that kills it
 
-That does NOT unblock `lex.t`: measured, its ring blocker is reported as
-something else entirely, and closing this changes which message it reports, not
-whether it passes. File this as correctness-of-diagnosis, not as ring progress.
+perigrin raised the obvious escape: shell out to a SUBPROCESS that compiles the
+string into a graph, then splice that graph in where the IR node would go. That
+does dissolve the "different tool" objection — a subprocess is exactly how you
+get an optree for a string without B::SoN becoming a compiler itself.
 
-The `hintseval` descent is worth a second look independently — an op the walk
-treats as a value when it is compiler metadata is the kind of thing that will
-recur, and `null` is in the same op list.
+Two of its holes are closeable with effort: replaying `hintseval`'s pragma
+state into the subprocess, and the per-site process cost.
+
+**One is not, and it fails SILENTLY. Measured:**
+
+    perl -e 'my $x = 5; my $r = eval q{$x + 1}; print $r'    # 6
+    perl -e '         my $r = eval q{$x + 1}; print $r'      # 1
+
+Same string, two answers. String eval's body closes over the ENCLOSING PAD, so
+`$x` is the lexical 5 in the first case. A subprocess compiling `$x + 1`
+standalone has no such pad: `$x` resolves to an undefined global and `undef + 1`
+is 1. **No error, no warning.** A spliced-in graph built that way would emit 1
+where perl emits 6 — a silent miscompile, which is the one failure class this
+project does not accept.
+
+Closing that would mean handing the subprocess the enclosing pad's shape AND
+binding the resulting graph's free variables back to the caller's SSA
+values — i.e. reimplementing perl's pad resolution across a process boundary,
+for code whose text may vary per execution.
+
+Two further walls stand behind it, both structural:
+
+- `eval $c` — the string is not known at compile time at all.
+- An eval in a loop over a varying string is a DIFFERENT program each
+  iteration; inlining one graph presumes one body.
+
+The design is therefore recorded as considered-and-rejected rather than
+deferred. Anyone revisiting it should start from the pad-capture measurement
+above, because that is the case that produces a wrong answer rather than a
+refusal.
+
+## The fix — LANDED, and it took three edits, not one
+
+The first two were necessary but insufficient, which is worth recording because
+each looked like the whole answer:
+
+1. **`entereval` added to `%UNBUILT_OP_GAP`** (`lib/SoN/FromOptree.pm`),
+   alongside `enterwrite`/`leavewrite`. Did nothing on its own.
+2. **`entereval`'s BRANCH flag cleared** (`OpMap.pm:381`). The generic walk
+   skips `is_branch` ops, so the new refusal was unreachable. Still nothing.
+3. **`hintseval` changed from `Constant` to `SKIP`** (`OpMap.pm:513`) — THE
+   ACTUAL TRIGGER. It was registered as a value-producing constant, so the walk
+   built a Constant from a hints SV before `entereval` was ever dispatched, and
+   died in the constructor.
+
+`SKIP` with no push keeps the stack balanced: exec order is `const`,
+`entereval`, `hintseval`, so the `const` supplies `entereval`'s single popped
+operand and `hintseval` had been pushing a spurious extra.
+
+Edits 1 and 2 are kept: the refusal must exist and must be reachable, or the
+next person to touch this hits the same wall in a different order.
+
+**NOT ring progress**, and stated so deliberately: `lex.t`'s reported blocker is
+something else, so this changes which message it prints, not whether it passes.
+Filed as correctness-of-diagnosis.
+
+## The general lesson
+
+`hintseval` is an op the walk treated as a VALUE when it is compiler METADATA.
+That class will recur — `null` sits in the same op list, and the `dispatch_kind`
+and `package=main` findings this same day were both "the machinery answered a
+question it should not have been asked". Worth a sweep of the OpMap for other
+entries whose `node_type` claims a value for an op that carries none.
