@@ -22,15 +22,31 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # Two deliberate divergences from the paper remain, both filed rather than
     # fixed here because each is a rename sweep with its own blast radius:
     #
-    #   Boolean is the paper's Boolean. Same type, same two members. The paper
-    #        settled on Boolean in both documents specifically to kill chalk's
-    #        on-the-wire rename table, so this SHOULD converge — but 1100+ sites
-    #        across chalk and the producer say Boolean today.
-    #   Any  should be deleted outright per the unification decision. It appears
-    #        nowhere outside this file, but the "13 of 13 uses are variadic
-    #        tails" measurement behind that decision is now stale: several uses
-    #        are return types, binary-op results, and unary operands, plus a
-    #        fast path in type_satisfies.
+    # The lattice-unification decision also called for deleting Any outright,
+    # on the grounds that it appeared nowhere outside this file and that all 13
+    # of its uses were variadic tails. BOTH PREMISES ARE NOW FALSE, measured:
+    #
+    #   - 25 uses here, in five distinct roles: variadic tails (6), a SOLE
+    #     argument that is not a tail (8, including print/say/die/warn/scalar),
+    #     a return type (`return`), binary and unary operand/result slots (5),
+    #     and the variadic-detection machinery itself.
+    #   - six other lib files read it: TypeInferenceActions and TypeInference
+    #     both map a result or return_type of 'Any' to undef, Actions defaults
+    #     to it, Target::C writes it, and Target::LLVM::Context carries a
+    #     dedicated GAP message calling it "signature vocabulary, not a value
+    #     type". type-library.t asserts on it 69 times.
+    #
+    # _is_variadic DEFINES variadic as "last arg slot is Any", so the name is
+    # the marker that makes a signature variadic rather than merely a type used
+    # by variadic signatures. And operand_repr_for_ir_op maps 'Any' to undef
+    # ("no opinion") because a coercion to Any is not a coercion — a role
+    # Unknown cannot take over, since narrowing IS its obligation.
+    #
+    # Measured, swapping Any -> Unknown in type_satisfies alone changes nothing
+    # (every type is already a subtype of both, so the fast path is redundant
+    # with is_subtype). The blocker is the other two roles. Deleting Any is
+    # therefore a redesign of the signature vocabulary, not a rename, and it
+    # needs a replacement marker for "opt out of checking" before it can start.
     my %PARENT = (
         # Scalar branch (arity 1)
         Scalar    => 'List',        # {1} is a subset of {0,1,2,...}
