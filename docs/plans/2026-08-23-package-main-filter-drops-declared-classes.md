@@ -1,7 +1,21 @@
 # `package=main` silently drops classes a real program declares
 
 **Date:** 2026-08-23
-**Status:** FILED, COORDINATOR-VERIFIED. Not fixed.
+**Status:** FIXED — perl5-son `9c48f2a` (the `not_package=` filter) and chalk
+`5998db7a` (ProgramRunner uses it). Coordinator-verified.
+
+**Outcome, stated plainly: no file moved.** The ring is unchanged at PASS=4
+SKIP=10 FAIL=0 across `t/base` + `t/cmd`. What the fix bought is HONEST
+BLOCKERS — `t/base/lex.t` and `t/cmd/subval.t`, the two files that declare
+packages, now both report "value-context ternary with a branch-guarded element
+store not yet lowered" instead of a typing GAP misattributed from their
+vanished packages. Two files that were failing for a harness artifact now name
+the same real unbuilt feature, which makes it a legible next target.
+
+`Mode2Adapter` deliberately KEEPS `package=main`: it CONSTRUCTS its input
+(`package main;` plus one sub), so its package set is known exactly and
+inclusion is the tighter filter. The two harnesses differ because their inputs
+differ.
 **Found by:** perigrin, after the same mistake surfaced twice in one session in
 throwaway probes — "I don't think we should filter by package main, that's a
 couple times now you've had similar issues."
