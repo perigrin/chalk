@@ -468,3 +468,43 @@ context: scalar
 ```ir
 L: GAP(non-ASCII Str with enc!=0 not yet lowered: char-len 4 != byte-len 5; a future UTF-8 encoding issue closes this path)
 ```
+
+## S7 a v-string constant keeps its bytes (PVMG decode)
+
+`v65.66` IS the two-character string "AB" -- chr(65), chr(66). The
+version-number spelling is syntax, and `sprintf "%vd"` is the display
+convention that renders the ordinals back; the VALUE is the bytes.
+
+This pins a producer defect CLASS rather than one literal. B's SV classes nest
+(PVMG isa PV, isa NV, isa IV), so a decode chain that asks `isa('B::IV')` first
+claims a POK-only PVMG and returns its empty integer slot -- the program
+printed `0` where perl prints `AB`, with no GAP. Any PVMG constant took that
+path. The decode is now driven by FLAGS, with IOK/NOK asked before POK so that
+a stringified number is still a number and POK-ALONE means Str.
+
+NOTE ON TEST DESIGN: this case must print the CONTENT. `print length(v1.2.3)`
+passes even against the defect, because perl constant-folds it to `const[IV 3]`
+before B::SoN sees an SV at all -- a case written that way would report VString
+GREEN while the bug is live.
+
+```perl
+# source
+my $v = v65.66;
+print $v, "\n";
+```
+
+```behavior
+stdout: AB\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+%start = Start()
+%v  = Constant("AB") :Str
+%nl = Constant("\n") :Str
+%p  = Print(%v, %nl) :Boolean
+return %p
+control: %start -> %p
+L: GREEN
+```
