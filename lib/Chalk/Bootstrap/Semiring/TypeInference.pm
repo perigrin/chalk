@@ -406,9 +406,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     # honest answer -- it yields the empty list. Do NOT suppress
                     # a List return_type generally: keys, values, each, map and
                     # `..` all genuinely return lists, and blanking those loses
-                    # real information. (This suppression existed when the
-                    # signature said 'Any', a no-opinion marker rather than a
-                    # type; List is a type.)
+                    # real information.
                     if ($call_sym eq 'return') {
                         my $arg_types = $self->_get_item_types($value);
                         $return_type = $arg_types->[0] if $arg_types && $arg_types->@*;

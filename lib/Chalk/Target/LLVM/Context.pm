@@ -3064,9 +3064,9 @@ my %_REPR_NO_MACHINE_TYPE = (
              . "legitimate static answer, Unknown is an inference failure.)",
 
     # Arity 0+: does not denote one value at all, so it can never have a layout.
-    # This is also the vocabulary a variadic signature position uses (it was
-    # spelled 'Any' until that second top was deleted), so it answers 'what does
-    # this parameter position accept?' and no value is ever 'a List'.
+    # This is also the vocabulary a variadic signature position uses, so it
+    # answers 'what does this parameter position accept?' and no value is ever
+    # 'a List'.
     List    => "'List' is signature vocabulary, not a value type — it answers "
              . "'what does this parameter position accept?', and denotes a "
              . "SEQUENCE rather than one value, so no single-value layout "

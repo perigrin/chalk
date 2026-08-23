@@ -424,7 +424,7 @@ ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies(undef, 'Scalar'),
 ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies(undef, 'Unknown'),
     'type_satisfies(undef, List) returns true (permissive)');
 
-# Any required type always passes
+# A List required type always passes -- perl flattens into list context
 ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Int', 'Unknown'),
     'type_satisfies(Int, List) returns true');
 ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Array', 'Unknown'),
@@ -592,7 +592,7 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
     is(($str_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Str');
     # Int is subtype of Scalar: (Scalar & Int) == Int
     is(($scalar_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Scalar');
-    # Int is subtype of Unknown: (Any & Int) == Int
+    # Int is subtype of Unknown: (Unknown & Int) == Int
     is(($any_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Unknown');
 
     # Num is NOT subtype of Int: (Int & Num) != Num
@@ -635,7 +635,7 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
 # (These duplicate existing tests but confirm the new implementation path)
 {
     ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Int', 'Unknown'),
-        'is_subtype still works with bitsets: Int <: Any');
+        'is_subtype still works with bitsets: Int <: List');
     ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('ArrayRef', 'Scalar'),
         'is_subtype still works with bitsets: ArrayRef <: Scalar');
     ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Code', 'Scalar'),
@@ -645,22 +645,13 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
 }
 
 # ---------------------------------------------------------------------------
-# Unknown: the PESSIMISTIC top type.
+# Unknown: the PESSIMISTIC top type, and the only top.
 #
-# Unknown and Any occupy the same position in the lattice -- both are top, both
-# hold any value -- but they carry different obligations, exactly as TypeScript's
-# `unknown` and `any` do:
-#
-#   Any     opts OUT of checking. A legitimate static answer: `push`'s second
-#           argument accepts anything, and that is a fact about push.
-#   Unknown is SOUND top. It means inference has not determined the type, and
-#           NOTHING may be done with the value until it is narrowed.
-#
-# Collapsing them loses the distinction that matters here: `Any` reaching the
-# backend is a design fact, `Unknown` reaching the backend is a BUG. The producer
-# used to write 'Scalar' for an unstamped operand -- a real type standing in for
-# "I don't know" -- which is why the backend's Scalar GAP could not tell "this
-# scalar type is not lowered yet" from "nothing ever typed this".
+# It means inference has not determined the type, and NOTHING may be done with
+# the value until it is narrowed -- so Unknown reaching the backend is a BUG.
+# Distinct from Scalar, a legitimate static answer naming one value whose
+# concrete type was never narrowed: the backend's Scalar GAP must be able to
+# tell "this scalar type is not lowered yet" from "nothing ever typed this".
 # ---------------------------------------------------------------------------
 
 subtest 'Unknown is top: every type is a subtype of it' => sub {
@@ -677,11 +668,9 @@ subtest 'Unknown is not a subtype of anything below top' => sub {
         ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Unknown', $t),
             "Unknown NOT <: $t");
     }
-    # There is no second top. 'Any' was one -- same value set, no inference
-    # obligation -- and was deleted: signature positions say List, and the
-    # "could not classify" sites say Unknown.
+    # Unknown is the ONLY top: a second one would make join ambiguous.
     ok(!defined Chalk::Grammar::Perl::TypeLibrary::type_bitset('Any'),
-        'Any is gone from the lattice entirely');
+        'Any is not a type');
 };
 
 subtest 'Unknown is DISTINCT from Scalar (the bug this exists to prevent)' => sub {
@@ -737,12 +726,12 @@ subtest 'operand_repr_for_ir_op DECLINES rather than guessing' => sub {
             "$op declines -- numeric `&` and string `&.` share this node type");
     }
 
-    # Print is absent BY DESIGN. The builtin is variadic over Any because perl
+    # Print is absent BY DESIGN. The builtin is variadic over List because perl
     # flattens a LIST into it; the NODE's Str-only contract is a different
     # claim, stated on the node in Serialize/JSON.pm. Conflating them would
     # reject `print @a`, which is a legal program.
     is($f->('Print', 0), undef,
-        'Print declines -- the builtin is variadic Any, the node contract is separate');
+        'Print declines -- the builtin is variadic List, the node contract is separate');
 };
 
 subtest 'accepts_operand_repr covers the conflated Length node' => sub {

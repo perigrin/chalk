@@ -13,10 +13,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # 729 ordered pairs by types-paper/appendix-a/lattice-check.pl. B::SoN's
     # SoN::IR::Stamp mirrors this table; the two must not drift.
     #
-    # Unknown is the sole root, matching the paper's tree. There is no 'Any':
-    # the lattice-unification decision deleted it, and the signature tables now
-    # say List everywhere they used to say Any. See the bitset block below for
-    # why List is the right replacement rather than merely an adequate one.
+    # Unknown is the sole root, matching the paper's tree.
     my %PARENT = (
         # Scalar branch (arity 1)
         Scalar    => 'List',        # {1} is a subset of {0,1,2,...}
@@ -43,7 +40,15 @@ class Chalk::Grammar::Perl::TypeLibrary {
         Array     => 'List',
         Hash      => 'List',
 
-        # Non-value branches
+        # Named entities rather than expression results. Each is reachable only
+        # by naming it or through a glob, so none has a bare literal form that
+        # could appear in a list: `f` is a call site rather than the sub, IO is
+        # reached as *FH{IO} (and arrives blessed into IO::File), and `format`
+        # is a declaration with no value form at all -- *STDOUT{FORMAT} does not
+        # exist. Glob is the loose one: *STDOUT does contribute one element to a
+        # list and does survive assignment to a scalar; it sits here because a
+        # symbol-table entry is a name, not because it fails to behave like a
+        # value.
         Code      => 'Unknown',     # subroutines
         Glob      => 'Unknown',     # symbol table entries, distinct from GlobRef
         IO        => 'Unknown',     # filehandles/directory handles (*STDOUT{IO})
@@ -99,28 +104,14 @@ class Chalk::Grammar::Perl::TypeLibrary {
             $TYPE_BITSET{Unknown} |= $TYPE_BITSET{$type};
         }
 
-        # Unknown is the ONLY top. There is no 'Any'.
+        # Unknown is the only top: inference has not determined the type, and
+        # nothing may be done with the value until it is NARROWED. It is a claim
+        # about our knowledge, not a licence to skip checking.
         #
-        # Any was a second top with the same value set and no inference
-        # obligation — TypeScript's `any`, which is to say a switch that turns
-        # checking off. Every signature position that used it now says List,
-        # and that is strictly better: List accepts every value type (perl
-        # really does flatten scalars, arrays and hashes into list context, and
-        # type_satisfies encodes exactly that), but it does NOT accept Code,
-        # Glob, IO or Format, because those are not values and cannot flatten.
-        # Measured, the swap is identical across all 27 types for acceptance
-        # while correctly rejecting those four. Any accepted them because Any
-        # accepted everything.
-        #
-        # Unknown keeps its own meaning: inference has not determined the type,
-        # and nothing may be done with the value until it is NARROWED. That is
-        # a claim about our knowledge, not a licence to skip checking, which is
-        # why it could not have absorbed Any's roles either.
-        #
-        # This distinction is the point. 'Scalar' used to double as the "I do
-        # not know" placeholder (the producer wrote it for an unstamped
-        # operand), so the backend's Scalar GAP could not tell "this scalar type
-        # is not lowered yet" from "nothing ever typed this".
+        # Distinct from Scalar, which is a legitimate static answer — one value
+        # whose concrete type was never narrowed. A backend GAP must be able to
+        # tell "this scalar type is not lowered yet" from "nothing ever typed
+        # this".
 
         # None is the bottom type — 0 (subtype of everything by convention)
         $TYPE_BITSET{None} = 0;
