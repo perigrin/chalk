@@ -70,17 +70,45 @@ Mirroring that split (`SoN::IR::Value :isa(SoN::IR::Node)`) would collapse
 `undef node_type` to one meaning and make `isa` the uniform predicate across the
 wire, which is what "single IR, two implementations" is supposed to mean.
 
-**Open design question, to settle before building:** does the producer mirror
-chalk's class hierarchy, or does the WIRE carry the value/control distinction?
-Those give different answers about whether `SoN::IR::Value` should exist as a
-class at all.
+**RESOLVED, and BUILT — perl5-son `a9393a0`.** The producer mirrors chalk's
+class hierarchy; the wire is unchanged.
 
-**Scope caveat:** the Value split makes `undef` honest but does NOT by itself
-catch this defect. `goto` builds no value AND no control, and only the second
-is the bug. Value-ness and control-reachability are different axes — the same
-orthogonality `Chalk::IR::Value`'s comment notes between value-ness and effects.
-So the explicit refusal list is still needed after the split, or a third
-mechanism is.
+The design question was: mirror the hierarchy, or put the value/control
+distinction on the WIRE? Measurement settled it. The serialized form carries
+`op` (`lib/SoN/IR/Serialize/JSON.pm:39`), and both sides already map that name
+to a class independently — so value-ness is DERIVED identically at both ends
+from data already present. A wire field would add a second source of truth for
+a fact neither side has to be told, and would turn a producer/consumer
+disagreement from a loud class-structure mismatch into a silent data mismatch.
+
+The mirror was exactly determined rather than re-derived: both repos declare
+the **same 88 node classes** with **identical intermediate parents** (`BinOp`,
+`UnaryOp`, `Access`, `Aggregate`, `Regex`), and their 31 direct-parent classes
+correspond one-to-one. So chalk's roster transfers verbatim — 19 intermediates
+reparent and carry the other 57 leaves with them. Final split: 76 value, 12
+control (`If ListAssign Loop MemStart Print Proj Region Return Start TryCatch
+Unwind VarDecl`).
+
+Additive only, verified before the edit: every `isa()` in producer `lib/` tests
+a LEAF class, and no `ref() eq` tests a node class at all (only `'ARRAY'` and
+`'B::SPECIAL'`), so inserting a base above the leaves changes no existing
+dispatch. Producer suite 107 files / 570 tests PASS on a clean build; corpus
+gate unchanged at `gate-green=215 behavior=215 shape=216 invariant=218
+worklist=3`, exit 0, self-verified on committed HEAD.
+
+**Scope caveat, and it HELD:** the Value split makes `undef` honest but does
+NOT by itself catch this defect, and shipping it did not close `goto`. `goto`
+builds no value AND no control, and only the second is the bug. Value-ness and
+control-reachability are different axes — the same orthogonality
+`Chalk::IR::Value`'s comment notes between value-ness and effects. The explicit
+`%UNBUILT_OP_GAP` refusal list remains load-bearing after the split; a third
+mechanism would be needed to make control-reachability structural the way
+value-ness now is.
+
+That the corpus gate did not move (215/215/216/218 before and after) is the
+evidence: this was a structural change that bought no coverage, which is
+exactly what was predicted. It makes a class of future bug expressible-and-
+caught rather than fixing a present one.
 
 ## Unverified members of the same shape
 
