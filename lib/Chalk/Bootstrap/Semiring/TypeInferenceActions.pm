@@ -143,10 +143,13 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         my $result_type;
         if (defined $op) {
             my $sig = Chalk::Grammar::Perl::TypeLibrary::get_binary_op($op);
-            if ($sig && $sig->{result} ne 'Any') {
+            # A List result is a real answer -- `..` builds a list -- so take
+            # it. An Unknown result is not: the short-circuit operators return
+            # one of their operands, so the signature cannot name the type and
+            # leaving it undef lets a later pass narrow it.
+            if ($sig && $sig->{result} ne 'Unknown') {
                 $result_type = $sig->{result};
             }
-            # result 'Any' → leave type undef (unknown)
         } else {
             # No op_text: preserve child type (intermediate completion)
             $result_type = _get_rightmost_type($ctx);

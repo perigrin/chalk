@@ -947,7 +947,7 @@ sub from_json ($json_string) {
 # Nodes whose OWN contract fixes an operand repr, independent of any source
 # signature. `Print(Str...)` is the standing example: the IR node lowers ONE
 # representation and every argument position is Str, while the source builtin
-# `print` is variadic over `Any` because perl flattens a LIST into it. Those are
+# `print` is variadic over `List` because perl flattens a LIST into it. Those are
 # two different claims about two different things -- see the `print @a` case in
 # t/corpus/mdtest/statements.md -- so the node contract is stated HERE, on the
 # node, and is not sought in TypeLibrary's builtin table.

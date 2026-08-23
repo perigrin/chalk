@@ -209,14 +209,14 @@ class Chalk::Bootstrap::Perl::Actions {
 
     # Helper: classify an IR value node into a Chalk type name for Block's
     # exit-type-union computation. Maps Constant.const_type for literals;
-    # everything else defaults to 'Any'.
+    # everything else defaults to 'Unknown'.
     #
     # Note: NumericLiteral currently produces Constants with const_type
     # 'string' (the literal text is preserved). Inspect the value to
     # distinguish numeric literals from quoted strings until NumericLiteral
     # is updated to tag them as 'integer'/'float'.
     my sub _classify_value_type($node) {
-        return 'Any' unless defined $node && blessed($node);
+        return 'Unknown' unless defined $node && blessed($node);
         if ($node isa Chalk::IR::Node::Constant) {
             my $ct = $node->const_type();
             return 'Int'   if $ct eq 'integer' || $ct eq 'number';
@@ -231,9 +231,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 return 'Str';
             }
-            return 'Any';
+            return 'Unknown';
         }
-        return 'Any';
+        return 'Unknown';
     }
 
     # Helper: get the lexical bindings from a Context.

@@ -24,40 +24,40 @@ ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Num', 'Str'),
     'Num is subtype of Str');
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Str', 'Scalar'),
     'Str is subtype of Scalar');
-ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Scalar', 'Any'),
-    'Scalar is subtype of Any');
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Scalar', 'Unknown'),
+    'Scalar is subtype of Unknown');
 
 # Transitive relationships
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Int', 'Scalar'),
     'Int is subtype of Scalar (transitive)');
-ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Int', 'Any'),
-    'Int is subtype of Any (transitive)');
-ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Num', 'Any'),
-    'Num is subtype of Any (transitive)');
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Int', 'Unknown'),
+    'Int is subtype of Unknown (transitive)');
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Num', 'Unknown'),
+    'Num is subtype of Unknown (transitive)');
 
 # Self is subtype of self
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Int', 'Int'),
     'Int is subtype of Int (reflexive)');
-ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Any', 'Any'),
-    'Any is subtype of Any (reflexive)');
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Unknown', 'Unknown'),
+    'Unknown is subtype of Unknown (reflexive)');
 
 # Not subtypes
 ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Num', 'Int'),
     'Num is NOT subtype of Int');
 ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Scalar', 'Str'),
     'Scalar is NOT subtype of Str');
-ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Any', 'Scalar'),
-    'Any is NOT subtype of Scalar');
+ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Unknown', 'Scalar'),
+    'Unknown is NOT subtype of Scalar');
 
 # Collection types
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Array', 'List'),
     'Array is subtype of List');
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Hash', 'List'),
     'Hash is subtype of List');
-ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('List', 'Any'),
-    'List is subtype of Any');
-ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Array', 'Any'),
-    'Array is subtype of Any (transitive)');
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('List', 'Unknown'),
+    'List is subtype of Unknown');
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Array', 'Unknown'),
+    'Array is subtype of Unknown (transitive)');
 
 # Ref hierarchy
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Ref', 'Scalar'),
@@ -76,8 +76,8 @@ ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('GlobRef', 'Ref'),
     'GlobRef is subtype of Ref');
 
 # None is subtype of everything
-ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('None', 'Any'),
-    'None is subtype of Any');
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('None', 'Unknown'),
+    'None is subtype of Unknown');
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('None', 'Scalar'),
     'None is subtype of Scalar');
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('None', 'Int'),
@@ -94,8 +94,8 @@ ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Regex', 'Scalar'),
     'Regex is subtype of Scalar');
 
 # Code
-ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Code', 'Any'),
-    'Code is subtype of Any');
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Code', 'Unknown'),
+    'Code is subtype of Unknown');
 ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Code', 'Scalar'),
     'Code is NOT subtype of Scalar');
 
@@ -108,8 +108,8 @@ ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Hash', 'Scalar'),
 # DualVar: sits in Scalar but outside Str/Num branches
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('DualVar', 'Scalar'),
     'DualVar is subtype of Scalar');
-ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('DualVar', 'Any'),
-    'DualVar is subtype of Any (transitive)');
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('DualVar', 'Unknown'),
+    'DualVar is subtype of Unknown (transitive)');
 ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('DualVar', 'Str'),
     'DualVar is NOT subtype of Str');
 ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('DualVar', 'Num'),
@@ -118,8 +118,8 @@ ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Str', 'DualVar'),
     'Str is NOT subtype of DualVar');
 
 # Glob: top-level type, distinct from GlobRef
-ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Glob', 'Any'),
-    'Glob is subtype of Any');
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Glob', 'Unknown'),
+    'Glob is subtype of Unknown');
 ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Glob', 'Scalar'),
     'Glob is NOT subtype of Scalar');
 ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('GlobRef', 'Glob'),
@@ -178,7 +178,7 @@ for my $name (qw(foo bar class if my)) {
     my $die_sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('die');
     ok(defined $die_sig, 'get_builtin(die) returns defined value');
     is($die_sig->{min_arity}, 0, 'die min_arity is 0');
-    is($die_sig->{arg_types}[0], 'Any', 'die arg type is Any (variadic)');
+    is($die_sig->{arg_types}[0], 'List', 'die arg type is List (variadic)');
     is($die_sig->{return_type}, 'None', 'die return type is None');
 }
 
@@ -217,23 +217,23 @@ for my $name (qw(foo bar class if my)) {
     is($sort_sig->{return_type}, 'List', 'sort return type is List');
 }
 
-# Tightened builtin signatures: specific types where possible, Any for variadic (Perl list flattening)
-# push/unshift: variadic args are Any (Perl flattening: accepts scalars AND arrays)
+# Tightened builtin signatures: specific types where possible, List for variadic (Perl list flattening)
+# push/unshift: variadic args are List (Perl flattening: accepts scalars AND arrays)
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('push');
-    is($sig->{arg_types}[1], 'Any', 'push variadic arg type is Any (Perl list flattening)');
+    is($sig->{arg_types}[1], 'List', 'push variadic arg type is List (Perl list flattening)');
 }
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('unshift');
-    is($sig->{arg_types}[1], 'Any', 'unshift variadic arg type is Any (Perl list flattening)');
+    is($sig->{arg_types}[1], 'List', 'unshift variadic arg type is List (Perl list flattening)');
 }
 
-# splice: offset and length are Int, rest is Any (Perl list flattening)
+# splice: offset and length are Int, rest is List (Perl list flattening)
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('splice');
     is($sig->{arg_types}[1], 'Num', 'splice offset arg is Num');
     is($sig->{arg_types}[2], 'Num', 'splice length arg is Num');
-    is($sig->{arg_types}[3], 'Any', 'splice replacement args are Any (Perl list flattening)');
+    is($sig->{arg_types}[3], 'List', 'splice replacement args are List (Perl list flattening)');
 }
 
 # length: operates on Str
@@ -242,11 +242,11 @@ for my $name (qw(foo bar class if my)) {
     is($sig->{arg_types}[0], 'Str', 'length arg type is Str');
 }
 
-# join: separator is Str, rest is Any (Perl list flattening)
+# join: separator is Str, rest is List (Perl list flattening)
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('join');
     is($sig->{arg_types}[0], 'Str', 'join separator arg is Str');
-    is($sig->{arg_types}[1], 'Any', 'join rest args are Any (Perl list flattening)');
+    is($sig->{arg_types}[1], 'List', 'join rest args are List (Perl list flattening)');
 }
 
 # split: pattern, string, limit
@@ -274,17 +274,17 @@ for my $name (qw(defined ref exists delete)) {
     is($sig->{arg_types}[0], 'Scalar', "$name arg type is Scalar");
 }
 
-# Variadic builtins: die, warn, print, say, chomp, chop, return, scalar stay Any
+# Variadic builtins: die, warn, print, say, chomp, chop, return, scalar stay List
 # (Perl list flattening: these accept both scalars and arrays)
 for my $name (qw(die warn print say chomp chop return scalar)) {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin($name);
-    is($sig->{arg_types}[0], 'Any', "$name arg type is Any (variadic, Perl list flattening)");
+    is($sig->{arg_types}[0], 'List', "$name arg type is List (variadic, Perl list flattening)");
 }
 
-# sprintf: format args are Any (variadic, Perl list flattening)
+# sprintf: format args are List (variadic, Perl list flattening)
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('sprintf');
-    is($sig->{arg_types}[1], 'Any', 'sprintf variadic arg type is Any (Perl list flattening)');
+    is($sig->{arg_types}[1], 'List', 'sprintf variadic arg type is List (Perl list flattening)');
 }
 
 # get_builtin returns undef for unknown names
@@ -331,8 +331,8 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_builtin('foo'), undef,
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_binary_op('&&');
     ok(defined $sig, 'get_binary_op(&&) returns defined value');
-    is($sig->{left}, 'Any', '&& left operand is Any');
-    is($sig->{result}, 'Any', '&& result is Any');
+    is($sig->{left}, 'List', '&& left operand is List');
+    is($sig->{result}, 'Unknown', '&& result is Unknown (it returns an operand)');
 }
 
 # Regex binding
@@ -363,8 +363,8 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_builtin('foo'), undef,
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_binary_op('=');
     ok(defined $sig, 'get_binary_op(=) returns defined value');
-    is($sig->{left}, 'Any', '= left operand is Any');
-    is($sig->{result}, 'Any', '= result is Any');
+    is($sig->{left}, 'List', '= left operand is List');
+    is($sig->{result}, 'Unknown', '= result is Unknown (it yields the assigned value)');
 }
 
 # Unknown operator
@@ -385,14 +385,14 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_binary_op('???'), undef,
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op('!');
     ok(defined $sig, 'get_unary_op(!) returns defined value');
-    is($sig->{operand}, 'Any', 'unary ! operand is Any');
+    is($sig->{operand}, 'List', 'unary ! operand is List');
     is($sig->{result}, 'Boolean', 'unary ! result is Boolean');
 }
 
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op('\\');
     ok(defined $sig, 'get_unary_op(\\) returns defined value');
-    is($sig->{operand}, 'Any', 'unary \\ operand is Any');
+    is($sig->{operand}, 'List', 'unary \\ operand is List');
     is($sig->{result}, 'Ref', 'unary \\ result is Ref');
 }
 
@@ -421,16 +421,16 @@ ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies(undef, 'Array'),
     'type_satisfies(undef, Array) returns true (permissive)');
 ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies(undef, 'Scalar'),
     'type_satisfies(undef, Scalar) returns true (permissive)');
-ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies(undef, 'Any'),
-    'type_satisfies(undef, Any) returns true (permissive)');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies(undef, 'Unknown'),
+    'type_satisfies(undef, List) returns true (permissive)');
 
 # Any required type always passes
-ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Int', 'Any'),
-    'type_satisfies(Int, Any) returns true');
-ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Array', 'Any'),
-    'type_satisfies(Array, Any) returns true');
-ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Code', 'Any'),
-    'type_satisfies(Code, Any) returns true');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Int', 'Unknown'),
+    'type_satisfies(Int, List) returns true');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Array', 'Unknown'),
+    'type_satisfies(Array, List) returns true');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Code', 'Unknown'),
+    'type_satisfies(Code, List) returns true');
 
 # Subtype relationships
 ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Int', 'Scalar'),
@@ -479,8 +479,8 @@ ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('DualVar', 'Num'),
     'type_satisfies(DualVar, Num) returns false (not polymorphic)');
 
 # Glob type_satisfies
-ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Glob', 'Any'),
-    'type_satisfies(Glob, Any) returns true');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Glob', 'Unknown'),
+    'type_satisfies(Glob, List) returns true');
 ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Glob', 'Scalar'),
     'type_satisfies(Glob, Scalar) returns false');
 
@@ -489,8 +489,8 @@ ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Glob', 'Scalar'),
     my $return_sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('return');
     ok(defined $return_sig, 'get_builtin(return) returns defined value');
     is($return_sig->{min_arity}, 0, 'return min_arity is 0');
-    is($return_sig->{arg_types}[0], 'Any', 'return first arg type is Any (variadic)');
-    is($return_sig->{return_type}, 'Any', 'return return_type is Any');
+    is($return_sig->{arg_types}[0], 'List', 'return first arg type is List (variadic)');
+    is($return_sig->{return_type}, 'List', 'return return_type is List');
 }
 
 # ========================================================================
@@ -584,7 +584,7 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
     my $num_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Num');
     my $str_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Str');
     my $scalar_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Scalar');
-    my $any_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Any');
+    my $any_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('List');
 
     # Int is subtype of Num: (Num & Int) == Int
     is(($num_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Num');
@@ -592,8 +592,8 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
     is(($str_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Str');
     # Int is subtype of Scalar: (Scalar & Int) == Int
     is(($scalar_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Scalar');
-    # Int is subtype of Any: (Any & Int) == Int
-    is(($any_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Any');
+    # Int is subtype of Unknown: (Any & Int) == Int
+    is(($any_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Unknown');
 
     # Num is NOT subtype of Int: (Int & Num) != Num
     isnt(($int_bits & $num_bits), $num_bits, 'bitwise: Num is NOT subtype of Int');
@@ -634,7 +634,7 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
 # is_subtype uses bitwise ops internally — verify it still works
 # (These duplicate existing tests but confirm the new implementation path)
 {
-    ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Int', 'Any'),
+    ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Int', 'Unknown'),
         'is_subtype still works with bitsets: Int <: Any');
     ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('ArrayRef', 'Scalar'),
         'is_subtype still works with bitsets: ArrayRef <: Scalar');
@@ -665,7 +665,8 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
 
 subtest 'Unknown is top: every type is a subtype of it' => sub {
     for my $t (qw(Int Num Str Boolean Undef Scalar ArrayRef HashRef CodeRef
-                  Object Array Hash Code Glob List Ref None Any)) {
+                  Object Array Hash Code Glob List Ref None
+                  VString LValueRef GlobRef Regex Void DualVar IO Format)) {
         ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype($t, 'Unknown'),
             "$t <: Unknown");
     }
@@ -676,11 +677,11 @@ subtest 'Unknown is not a subtype of anything below top' => sub {
         ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Unknown', $t),
             "Unknown NOT <: $t");
     }
-    # The two tops are mutually assignable -- same position, same value set.
-    ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Unknown', 'Any'),
-        'Unknown <: Any (both are top)');
-    ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Any', 'Unknown'),
-        'Any <: Unknown (both are top)');
+    # There is no second top. 'Any' was one -- same value set, no inference
+    # obligation -- and was deleted: signature positions say List, and the
+    # "could not classify" sites say Unknown.
+    ok(!defined Chalk::Grammar::Perl::TypeLibrary::type_bitset('Any'),
+        'Any is gone from the lattice entirely');
 };
 
 subtest 'Unknown is DISTINCT from Scalar (the bug this exists to prevent)' => sub {

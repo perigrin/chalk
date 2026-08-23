@@ -1316,7 +1316,7 @@ TODO: {
     my $val = make_ctx(op_text => '&&');
     my $result = $ti->multiply($val, $make_complete->($val, 'BinaryExpression', 0, 10, 0));
     is(get_tags($result)->{type}, undef,
-        'BinaryExpression "&&" tags type => undef (Any means unknown)');
+        'BinaryExpression "&&" tags type => undef (result is one of the operands)');
 }
 
 # BinaryExpression with op_text '=~' → type => 'Boolean'

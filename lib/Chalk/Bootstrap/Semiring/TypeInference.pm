@@ -399,15 +399,22 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                         return undef;
                     }
                     # For 'return', propagate the argument's type instead of
-                    # the signature's return_type ('Any'). This lets the enclosing
+                    # the signature's return_type. This lets the enclosing
                     # method know what type is actually being returned.
+                    #
+                    # A bare `return;` keeps the signature's List, which is the
+                    # honest answer -- it yields the empty list. Do NOT suppress
+                    # a List return_type generally: keys, values, each, map and
+                    # `..` all genuinely return lists, and blanking those loses
+                    # real information. (This suppression existed when the
+                    # signature said 'Any', a no-opinion marker rather than a
+                    # type; List is a type.)
                     if ($call_sym eq 'return') {
                         my $arg_types = $self->_get_item_types($value);
                         $return_type = $arg_types->[0] if $arg_types && $arg_types->@*;
                     } else {
                         $return_type = $sig->{return_type};
                     }
-                    $return_type = undef if defined $return_type && $return_type eq 'Any';
                 }
             }
             my $new_focus = { valid => true };

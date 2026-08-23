@@ -416,7 +416,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         if (defined $ir_return_type && $ir_return_type eq 'Void'
                 && ($last_is_return || $body_has_returns)) {
             $has_return = true;
-            $ir_return_type = 'Any';
+            $ir_return_type = 'Unknown';
         } elsif (defined $ir_return_type) {
             $has_return = $ir_return_type ne 'Void';
         } else {

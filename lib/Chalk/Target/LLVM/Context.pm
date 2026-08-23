@@ -3064,16 +3064,14 @@ my %_REPR_NO_MACHINE_TYPE = (
              . "legitimate static answer, Unknown is an inference failure.)",
 
     # Arity 0+: does not denote one value at all, so it can never have a layout.
-    # Any and List are SYNONYMS as required types (TypeLibrary::type_satisfies
-    # accepts everything for both), so they share a diagnosis.
-    Any     => "'Any' is signature vocabulary, not a value type — it answers "
-             . "'what does this parameter position accept?' and no value is ever "
-             . "'an Any'. Reaching machine-type selection means signature "
+    # This is also the vocabulary a variadic signature position uses (it was
+    # spelled 'Any' until that second top was deleted), so it answers 'what does
+    # this parameter position accept?' and no value is ever 'a List'.
+    List    => "'List' is signature vocabulary, not a value type — it answers "
+             . "'what does this parameter position accept?', and denotes a "
+             . "SEQUENCE rather than one value, so no single-value layout "
+             . "exists. Reaching machine-type selection means signature "
              . "vocabulary leaked into the value pipeline: a LAYER VIOLATION.",
-    List    => "'List' is signature vocabulary, not a value type — it is a "
-             . "synonym of Any as a required type, and denotes a SEQUENCE rather "
-             . "than one value, so no single-value layout exists. Reaching "
-             . "machine-type selection is a LAYER VIOLATION.",
 
     # Inference never ran. Distinct from Scalar by design.
     Unknown => "'Unknown' is the pessimistic top: INFERENCE never determined a "

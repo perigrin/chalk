@@ -13,40 +13,10 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # 729 ordered pairs by types-paper/appendix-a/lattice-check.pl. B::SoN's
     # SoN::IR::Stamp mirrors this table; the two must not drift.
     #
-    # Unknown is the sole STRUCTURAL root, matching the paper's tree. The paper
-    # drew the root as `Unknown / Any` until the lattice was unified, which
-    # deleted Any from the hierarchy on the grounds that no Perl syntax can name
-    # it. Any survives HERE only as a signature-table pragma (see below); it is
-    # not a parent in this table, so join never has to choose between two tops.
-    #
-    # Two deliberate divergences from the paper remain, both filed rather than
-    # fixed here because each is a rename sweep with its own blast radius:
-    #
-    # The lattice-unification decision also called for deleting Any outright,
-    # on the grounds that it appeared nowhere outside this file and that all 13
-    # of its uses were variadic tails. BOTH PREMISES ARE NOW FALSE, measured:
-    #
-    #   - 25 uses here, in five distinct roles: variadic tails (6), a SOLE
-    #     argument that is not a tail (8, including print/say/die/warn/scalar),
-    #     a return type (`return`), binary and unary operand/result slots (5),
-    #     and the variadic-detection machinery itself.
-    #   - six other lib files read it: TypeInferenceActions and TypeInference
-    #     both map a result or return_type of 'Any' to undef, Actions defaults
-    #     to it, Target::C writes it, and Target::LLVM::Context carries a
-    #     dedicated GAP message calling it "signature vocabulary, not a value
-    #     type". type-library.t asserts on it 69 times.
-    #
-    # _is_variadic DEFINES variadic as "last arg slot is Any", so the name is
-    # the marker that makes a signature variadic rather than merely a type used
-    # by variadic signatures. And operand_repr_for_ir_op maps 'Any' to undef
-    # ("no opinion") because a coercion to Any is not a coercion — a role
-    # Unknown cannot take over, since narrowing IS its obligation.
-    #
-    # Measured, swapping Any -> Unknown in type_satisfies alone changes nothing
-    # (every type is already a subtype of both, so the fast path is redundant
-    # with is_subtype). The blocker is the other two roles. Deleting Any is
-    # therefore a redesign of the signature vocabulary, not a rename, and it
-    # needs a replacement marker for "opt out of checking" before it can start.
+    # Unknown is the sole root, matching the paper's tree. There is no 'Any':
+    # the lattice-unification decision deleted it, and the signature tables now
+    # say List everywhere they used to say Any. See the bitset block below for
+    # why List is the right replacement rather than merely an adequate one.
     my %PARENT = (
         # Scalar branch (arity 1)
         Scalar    => 'List',        # {1} is a subset of {0,1,2,...}
@@ -55,7 +25,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
         Str       => 'Scalar',
         Num       => 'Str',
         Int       => 'Num',
-        Boolean      => 'Str',         # true/false: Str carrying boolean marking
+        Boolean   => 'Str',         # true/false: Str carrying boolean marking
         VString   => 'Str',         # v-strings: Str carrying 'V' magic
         DualVar   => 'Scalar',      # in Scalar but in neither Str nor Num
         Ref       => 'Scalar',
@@ -129,31 +99,28 @@ class Chalk::Grammar::Perl::TypeLibrary {
             $TYPE_BITSET{Unknown} |= $TYPE_BITSET{$type};
         }
 
-        # Any is the PERMISSIVE top: the same position as Unknown and the same
-        # value set, but a different obligation — exactly TypeScript's
-        # `unknown` vs `any`. The paper states this directly (Top Types):
-        # `Unknown := V` and `Any := V`, two pragma types over one value set.
+        # Unknown is the ONLY top. There is no 'Any'.
         #
-        #   Any     opts OUT of checking. A legitimate static answer (`push`'s
-        #           second argument accepts anything, and that is a fact).
-        #   Unknown is SOUND top: inference has not determined the type, and
-        #           nothing may be done with the value until it is NARROWED.
+        # Any was a second top with the same value set and no inference
+        # obligation — TypeScript's `any`, which is to say a switch that turns
+        # checking off. Every signature position that used it now says List,
+        # and that is strictly better: List accepts every value type (perl
+        # really does flatten scalars, arrays and hashes into list context, and
+        # type_satisfies encodes exactly that), but it does NOT accept Code,
+        # Glob, IO or Format, because those are not values and cannot flatten.
+        # Measured, the swap is identical across all 27 types for acceptance
+        # while correctly rejecting those four. Any accepted them because Any
+        # accepted everything.
         #
-        # They are mutually assignable (both top, same values), so Any carries
-        # Unknown's bits and Unknown gains Any's — is_subtype is true in both
-        # directions. What differs is what each MEANS to a consumer: an `Any`
-        # reaching the backend is a design fact, an `Unknown` reaching it is an
-        # inference failure.
-        #
-        # Only Unknown is a parent in %PARENT. Any is a pragma, not a branch of
-        # the tree, so join never has to choose between two structural roots.
+        # Unknown keeps its own meaning: inference has not determined the type,
+        # and nothing may be done with the value until it is NARROWED. That is
+        # a claim about our knowledge, not a licence to skip checking, which is
+        # why it could not have absorbed Any's roles either.
         #
         # This distinction is the point. 'Scalar' used to double as the "I do
         # not know" placeholder (the producer wrote it for an unstamped
         # operand), so the backend's Scalar GAP could not tell "this scalar type
         # is not lowered yet" from "nothing ever typed this".
-        $TYPE_BITSET{Any}      = $TYPE_BITSET{Unknown};
-        $TYPE_BITSET{Unknown} |= $TYPE_BITSET{Any};
 
         # None is the bottom type — 0 (subtype of everything by convention)
         $TYPE_BITSET{None} = 0;
@@ -163,12 +130,12 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # Last entry in arg_types applies to all remaining positions (variadic).
     my %BUILTIN_SIGNATURES = (
         # Array operations
-        # Variadic positions use Any (Perl flattening: accepts scalars AND arrays)
-        push    => { min_arity => 2, arg_types => ['Array', 'Any'],              return_type => 'Int' },
+        # Variadic positions use List (Perl flattening: accepts scalars AND arrays)
+        push    => { min_arity => 2, arg_types => ['Array', 'List'],              return_type => 'Int' },
         pop     => { min_arity => 1, arg_types => ['Array'],                     return_type => 'Scalar' },
         shift   => { min_arity => 1, arg_types => ['Array'],                     return_type => 'Scalar' },
-        unshift => { min_arity => 2, arg_types => ['Array', 'Any'],              return_type => 'Int' },
-        splice  => { min_arity => 1, arg_types => ['Array', 'Num', 'Num', 'Any'], return_type => 'List' },
+        unshift => { min_arity => 2, arg_types => ['Array', 'List'],              return_type => 'Int' },
+        splice  => { min_arity => 1, arg_types => ['Array', 'Num', 'Num', 'List'], return_type => 'List' },
 
         # Hash operations
         keys    => { min_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
@@ -179,13 +146,13 @@ class Chalk::Grammar::Perl::TypeLibrary {
 
         # String operations
         length  => { min_arity => 0, arg_types => ['Str'],                       return_type => 'Int' },
-        chomp   => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Int' },
-        chop    => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Str' },
+        chomp   => { min_arity => 0, arg_types => ['List'],                       return_type => 'Int' },
+        chop    => { min_arity => 0, arg_types => ['List'],                       return_type => 'Str' },
         chr     => { min_arity => 1, arg_types => ['Int'],                       return_type => 'Str' },
         ord     => { min_arity => 0, arg_types => ['Str'],                       return_type => 'Int' },
-        join    => { min_arity => 2, arg_types => ['Str', 'Any'],                return_type => 'Str' },
+        join    => { min_arity => 2, arg_types => ['Str', 'List'],                return_type => 'Str' },
         split   => { min_arity => 1, arg_types => ['Regex', 'Str', 'Num'],       return_type => 'List' },
-        sprintf => { min_arity => 1, arg_types => ['Str', 'Any'],                return_type => 'Str' },
+        sprintf => { min_arity => 1, arg_types => ['Str', 'List'],                return_type => 'Str' },
         substr  => { min_arity => 2, arg_types => ['Str', 'Num', 'Num'],         return_type => 'Str' },
 
         # Type test
@@ -193,21 +160,21 @@ class Chalk::Grammar::Perl::TypeLibrary {
         ref     => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Str' },
 
         # Context
-        scalar  => { min_arity => 1, arg_types => ['Any'],                       return_type => 'Scalar' },
+        scalar  => { min_arity => 1, arg_types => ['List'],                       return_type => 'Scalar' },
 
         # Control (variadic: accept scalars and arrays via flattening)
-        die     => { min_arity => 0, arg_types => ['Any'],                       return_type => 'None' },
-        warn    => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Boolean' },
+        die     => { min_arity => 0, arg_types => ['List'],                       return_type => 'None' },
+        warn    => { min_arity => 0, arg_types => ['List'],                       return_type => 'Boolean' },
 
         # OO
         bless   => { min_arity => 1, arg_types => ['Ref', 'Str'],               return_type => 'Object' },
 
         # I/O (variadic)
-        print   => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Boolean' },
-        say     => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Boolean' },
+        print   => { min_arity => 0, arg_types => ['List'],                       return_type => 'Boolean' },
+        say     => { min_arity => 0, arg_types => ['List'],                       return_type => 'Boolean' },
 
         # Flow control (variadic: return LIST)
-        return  => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Any' },
+        return  => { min_arity => 0, arg_types => ['List'],                       return_type => 'List' },
 
         # Block-first builtins (parse via CallExpression alt 2/3)
         map     => { min_arity => 2, arg_types => ['Code', 'List'],              return_type => 'List' },
@@ -228,16 +195,15 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # Types that represent polymorphic containers at parse time — a variable
     # typed as Scalar could hold Str, Int, Num, etc. at runtime. These pass
     # permissively against any subtype requirement within their branch.
-    my %POLYMORPHIC_TYPES = map { $_ => true } qw(Scalar Any List);
+    my %POLYMORPHIC_TYPES = map { $_ => true } qw(Scalar List);
 
     # Returns true if $actual_type satisfies $required_type.
     # undef actual passes permissively (unknown type at parse time).
-    # 'Any' required always passes.
-    # For polymorphic types (Scalar, Any, List — assigned to variables),
+    # A 'List' requirement always passes -- see the flattening rule below.
+    # For polymorphic types (Scalar, List — assigned to variables),
     # also pass when the required type is a subtype of actual, since the
     # variable could hold any value within its type at runtime.
     sub type_satisfies($actual_type, $required_type) {
-        return true if $required_type eq 'Any';
         return true if !defined $actual_type;
         # Subtype: Int satisfies Num (child → parent)
         return true if is_subtype($actual_type, $required_type);
@@ -393,8 +359,13 @@ class Chalk::Grammar::Perl::TypeLibrary {
         my $num_num_bool = { left => 'Num',    right => 'Num',   result => 'Boolean' };
         my $str_str_str  = { left => 'Str',    right => 'Str',   result => 'Str' };
         my $str_str_bool = { left => 'Str',    right => 'Str',   result => 'Boolean' };
-        my $any_any_any  = { left => 'Any',    right => 'Any',   result => 'Any' };
-        my $any_any_bool = { left => 'Any',    right => 'Any',   result => 'Boolean' };
+        # Operators that accept anything and whose RESULT is one of the operands
+        # rather than a type of their own: `&&` yields whichever side it
+        # short-circuited on, `=` yields the value assigned. The result is
+        # genuinely undetermined at signature level -- Unknown, not List, since
+        # these produce a single value and not a sequence.
+        my $any_any_any  = { left => 'List',    right => 'List',   result => 'Unknown' };
+        my $any_any_bool = { left => 'List',    right => 'List',   result => 'Boolean' };
         my $int_int_int  = { left => 'Int',    right => 'Int',   result => 'Int' };
 
         # Arithmetic
@@ -451,10 +422,10 @@ class Chalk::Grammar::Perl::TypeLibrary {
     my %UNARY_OP_SIGNATURES = (
         '-'   => { operand => 'Num', result => 'Num' },
         '+'   => { operand => 'Num', result => 'Num' },
-        '!'   => { operand => 'Any', result => 'Boolean' },
-        'not' => { operand => 'Any', result => 'Boolean' },
+        '!'   => { operand => 'List', result => 'Boolean' },
+        'not' => { operand => 'List', result => 'Boolean' },
         '~'   => { operand => 'Int', result => 'Int' },
-        '\\'  => { operand => 'Any', result => 'Ref' },
+        '\\'  => { operand => 'List', result => 'Ref' },
     );
 
     # Returns the signature hash for a unary operator, or undef if unknown.
@@ -523,7 +494,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # node types is the fix; until then these decline, costing a coercion
         # opportunity rather than risking a wrong coercion.
         #
-        # ALSO ABSENT -- Print. `print` is variadic with arg_types ['Any'] BY
+        # ALSO ABSENT -- Print. `print` is variadic with arg_types ['List'] BY
         # DESIGN, because perl flattens a LIST into it (`print @a`,
         # `print undef`, `print $ref` are all legal). The Print NODE's Str-only
         # contract is a different claim about a different thing; conflating them
@@ -581,15 +552,15 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # The coercion TARGET for one operand position of an IR node, read from the
     # same signature tables the parser uses. Returns undef when the op is not
     # mapped, its signature is unknown, or the position is unconstrained --
-    # each of which means "no opinion", not "Any". A coercion to Any is not a
-    # coercion, so 'Any' reads as undef.
+    # each of which means "no opinion", not "List". A coercion to List is not a
+    # coercion, so 'List' reads as undef.
     #
     # $position is the operand's index in the SIGNATURE -- left is 0, right is
     # 1 -- and NOT its index in a node's inputs array. Those differ: a BinOp
     # node carries a leading control slot, so its left operand sits at
     # inputs[1]. Callers walking an inputs array must convert.
     #
-    # A trailing 'Any' in arg_types is variadic and covers all later positions,
+    # A trailing 'List' in arg_types is variadic and covers all later positions,
     # matching how the parse-time checker reads the same table. That rule
     # applies ONLY to signatures that are actually variadic: `length` is
     # arg_types => ['Str'], one entry and not variadic, so it has no opinion
@@ -614,14 +585,14 @@ class Chalk::Grammar::Perl::TypeLibrary {
             $want = $position == 0 ? $un->{operand} : undef;
         }
 
-        return (defined $want && $want ne 'Any') ? $want : undef;
+        return (defined $want && $want ne 'List') ? $want : undef;
     }
 
-    # A builtin is variadic when its last argument slot is 'Any' -- the
+    # A builtin is variadic when its last argument slot is 'List' -- the
     # convention %BUILTIN_SIGNATURES already uses for the positions perl
     # flattens a list into (`print`, `join`, `sprintf`, `push`).
     sub _is_variadic($args) {
-        return @$args && $args->[-1] eq 'Any';
+        return @$args && $args->[-1] eq 'List';
     }
 
     # The IR ops this library can answer for. Exposed so a test can assert
