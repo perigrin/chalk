@@ -17,7 +17,7 @@ class Chalk::IR::MethodInfo {
     field $body_node   :param :reader = undef;
 
     # return_repr: the LLVM representation of the method's return value
-    # (e.g. 'Int', 'Str', 'Bool'). Defaults to undef; set from ir-block return_repr attr.
+    # (e.g. 'Int', 'Str', 'Boolean'). Defaults to undef; set from ir-block return_repr attr.
     field $return_repr :param :reader = undef;
 
     # Content-based ID for use in NodeFactory hash-cons keys.

@@ -23,7 +23,7 @@ unless (-x $LLI) {
 # When a method body is lowered in a fresh $body_ctx, only _need_malloc_memcpy
 # and _need_strpair were propagated to $ctx.  The prologue (which runs BEFORE
 # method bodies lower) reads _need_bool_str_globals/_need_str_to_num_helper/
-# _need_memcmp from $ctx only.  So a method body doing Coerce(Bool->Str) would
+# _need_memcmp from $ctx only.  So a method body doing Coerce(Boolean->Str) would
 # set _need_bool_str_globals on $body_ctx, but the prologue would never see it,
 # producing .ll that references @coerce_bool_str_true/@coerce_bool_str_false
 # without declaring them — lli rejects it.
@@ -64,32 +64,32 @@ sub lli_run {
 }
 
 # ---------------------------------------------------------------------------
-# Test 1: method body with Coerce(Bool->Str) — must produce valid .ll
+# Test 1: method body with Coerce(Boolean->Str) — must produce valid .ll
 #
 # Before G.5: .ll references @coerce_bool_str_true but never declares it.
 #   lli rejects: "use of undefined value @coerce_bool_str_true"
 # After G.5: _need_bool_str_globals propagated from body_ctx to ctx,
 #   prologue emits the globals, lli accepts the .ll.
 # ---------------------------------------------------------------------------
-subtest 'method body Coerce(Bool->Str) emits no undeclared globals' => sub {
+subtest 'method body Coerce(Boolean->Str) emits no undeclared globals' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    # Method body: an Int constant coerced to Bool, then Bool coerced to Str.
-    # Bool constants are not directly lowerable — Bool comes from Coerce(Int->Bool).
-    # Body: Constant(5 :Int) -> Coerce(Int->Bool) :Bool -> Coerce(Bool->Str) :Str
+    # Method body: an Int constant coerced to Boolean, then Boolean coerced to Str.
+    # Boolean constants are not directly lowerable — Boolean comes from Coerce(Int->Boolean).
+    # Body: Constant(5 :Int) -> Coerce(Int->Boolean) :Boolean -> Coerce(Boolean->Str) :Str
     my $int_val = $f->make('Constant', value => 5, const_type => 'integer');
     $int_val->set_representation('Int');
 
     my $coerce_ib = $f->make('Coerce',
         inputs    => [$int_val],
         from_repr => 'Int',
-        to_repr   => 'Bool',
+        to_repr   => 'Boolean',
     );
-    $coerce_ib->set_representation('Bool');
+    $coerce_ib->set_representation('Boolean');
 
     my $coerce_bs = $f->make('Coerce',
         inputs    => [$coerce_ib],
-        from_repr => 'Bool',
+        from_repr => 'Boolean',
         to_repr   => 'Str',
     );
     $coerce_bs->set_representation('Str');

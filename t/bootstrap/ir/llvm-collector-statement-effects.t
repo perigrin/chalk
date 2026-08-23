@@ -82,7 +82,7 @@ subtest 'a method Call in an if-branch is collected and lowered' => sub {
     # if (1) { $c->bump }
     my $cond = int_const($f, 1);
     my $cond_b = $f->make('NumGt', inputs => [$cond, int_const($f, 0)]);
-    $cond_b->set_representation('Bool');
+    $cond_b->set_representation('Boolean');
     my $if_node = $f->make('If', inputs => [$vc, $cond_b]);
     my $proj0 = $f->make('Proj', inputs => [$if_node], index => 0);
     my $proj1 = $f->make('Proj', inputs => [$if_node], index => 1);

@@ -893,7 +893,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         # TypeInference is the sole authority for method return types.
-        # TI's body analysis produces rich types (Int, Str, Bool, etc.)
+        # TI's body analysis produces rich types (Int, Str, Boolean, etc.)
         # via TypeInferenceActions::MethodDefinition which sets
         # method_return_type in the TI focus hash.
         my $method_name_str = defined $method_name ? $method_name->value() : '<unknown>';

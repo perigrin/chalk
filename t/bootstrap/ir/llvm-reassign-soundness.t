@@ -237,7 +237,7 @@ for my $pair ([5, 6], [-1, 2]) {
     my $c0  = int_const($f, 0);
     my $rn  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
     $rn->set_representation('Int');
-    my $cmp = $f->make('NumGt', inputs => [$rn, $c0]); $cmp->set_representation('Bool');
+    my $cmp = $f->make('NumGt', inputs => [$rn, $c0]); $cmp->set_representation('Boolean');
 
     # If / Proj / Region
     my $if_node = $f->make('If',     inputs => [$vy, $cmp]);
@@ -323,7 +323,7 @@ for my $pair ([5, 6], [-1, 2]) {
     my $x_phi  = $f->make('Phi', region => $loop, values => [$rx0]); $x_phi->set_representation('Int');
     my $s_phi  = $f->make('Phi', region => $loop, values => [$rs0]); $s_phi->set_representation('Int');
 
-    my $cmp   = $f->make('NumLt', inputs => [$i_phi, $c3]); $cmp->set_representation('Bool');
+    my $cmp   = $f->make('NumLt', inputs => [$i_phi, $c3]); $cmp->set_representation('Boolean');
     my $x_new = $f->make('Add', inputs => [$x_phi, $c1]); $x_new->set_representation('Int');
     my $s_new = $f->make('Add', inputs => [$s_phi, $x_new]); $s_new->set_representation('Int');
     my $i_new = $f->make('Add', inputs => [$i_phi, $c1]); $i_new->set_representation('Int');

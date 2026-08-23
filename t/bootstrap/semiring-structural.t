@@ -681,7 +681,7 @@ for my $preserve_rule (qw(Program StatementList)) {
 
 # ========================================================================
 # Phase 4: Integration with full Earley parser
-# Uses Bool+Structural only to isolate the Structural semiring's behavior
+# Uses Boolean+Structural only to isolate the Structural semiring's behavior
 # from pre-existing nondeterminism in Precedence/TypeInference add().
 # ========================================================================
 use TestPipeline qw(perl_pipeline);
@@ -717,7 +717,7 @@ SKIP: {
     }
     my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar(\@reordered);
 
-    # 2-ary composite: Bool + Structural (no Prec/TypeInf/Semantic)
+    # 2-ary composite: Boolean + Structural (no Prec/TypeInf/Semantic)
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
 

@@ -77,7 +77,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
     $c2->set_representation('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
@@ -161,7 +161,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
     $c1->set_representation('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn, $c0]);
@@ -240,7 +240,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $c0  = $f->make('Constant', value => '0', const_type => 'integer');
     $c0->set_representation('Int');
     my $cmp = $f->make('NumGt', inputs => [$c5, $c0]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $xn  = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx  = $f->make('VarDecl', inputs => [$xn]);
@@ -318,11 +318,11 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
 
     # Outer condition: $n > 0  (true for n=2)
     my $cmp_out = $f->make('NumGt', inputs => [$rn, $c0]);
-    $cmp_out->set_representation('Bool');
+    $cmp_out->set_representation('Boolean');
 
     # Inner condition: $n > 3  (false for n=2)
     my $cmp_in = $f->make('NumGt', inputs => [$rn, $c3]);
-    $cmp_in->set_representation('Bool');
+    $cmp_in->set_representation('Boolean');
 
     # Assignments
     my $lhs3 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
@@ -450,7 +450,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
 
     # Outer condition: $n > 0 (static: 3>0 = true)
     my $cmp_out = $f->make('NumGt', inputs => [$rn0, $c0b]);
-    $cmp_out->set_representation('Bool');
+    $cmp_out->set_representation('Boolean');
 
     # Loop (lives inside the outer-if then-branch)
     my $loop  = $f->make('Loop', inputs => [$vs, undef]);
@@ -463,7 +463,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
 
     # Loop condition: n_phi > 0
     my $loop_cmp = $f->make('NumGt', inputs => [$n_phi, $c0c]);
-    $loop_cmp->set_representation('Bool');
+    $loop_cmp->set_representation('Boolean');
     $loop_cmp->set_control_in($loop);
 
     # Loop body: s_new = s_phi + n_phi; n_new = n_phi - 1
@@ -551,7 +551,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
     $c2->set_representation('Int');
     my $cmp  = $f->make('NumGt', inputs => [$c5, $c0]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
@@ -620,7 +620,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
     $c2->set_representation('Int');
     my $cmp  = $f->make('NumGt', inputs => [$c5, $c0]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
@@ -725,11 +725,11 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]); $s_phi->set_representation('Int');
 
     # Loop condition: n_phi > 0
-    my $loop_cmp = $f->make('NumGt', inputs => [$n_phi, $c0c]); $loop_cmp->set_representation('Bool');
+    my $loop_cmp = $f->make('NumGt', inputs => [$n_phi, $c0c]); $loop_cmp->set_representation('Boolean');
     $loop_cmp->set_control_in($loop);
 
     # Inner condition: n_phi > 1
-    my $inner_cmp = $f->make('NumGt', inputs => [$n_phi, $c1]); $inner_cmp->set_representation('Bool');
+    my $inner_cmp = $f->make('NumGt', inputs => [$n_phi, $c1]); $inner_cmp->set_representation('Boolean');
 
     # Inner if branches
     my $body_proj = $f->make('Proj', inputs => [$loop], index => 0);

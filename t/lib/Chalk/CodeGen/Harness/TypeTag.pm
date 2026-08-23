@@ -158,7 +158,7 @@ sub llvm_prefixes {
             perl_tag_prefix => 'Num:',
             llvm_fmt_c      => 'Num:%g\0A\00',
         },
-        Bool => {
+        Boolean => {
             perl_tag_prefix_true  => 'Bool:1',
             perl_tag_prefix_false => 'Bool:',
             llvm_true_c           => 'Bool:1\0A\00',

@@ -29,7 +29,7 @@ subtest 'NotMatch dies with a GAP message, naming the op' => sub {
     my $qr = $f->make('Constant', value => 'b', const_type => 'regex');
     $qr->set_representation('Regex');
     my $nm = $f->make('NotMatch', inputs => [$s, $qr]);
-    $nm->set_representation('Bool');
+    $nm->set_representation('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$nm]);
     $ret->set_control_in($nm);
 

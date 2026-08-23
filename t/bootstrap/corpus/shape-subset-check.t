@@ -234,29 +234,29 @@ END_IR
         'a nested Add is not fold-satisfied by a single folded Constant');
 };
 
-subtest 'literal comparison folds to a Bool Constant (statements 1<2)' => sub {
+subtest 'literal comparison folds to a Boolean Constant (statements 1<2)' => sub {
     # perl folds `1 < 2` to a boolean in op.c; B::SoN emits Constant(1):Boolean
     # for true and Constant():Boolean (empty string) for false.
     my $true_spec = <<'END_IR';
 %one = Constant(1) :Int
 %two = Constant(2) :Int
-%cmp = NumLt(%one, %two) :Bool
+%cmp = NumLt(%one, %two) :Boolean
 return %cmp
 END_IR
-    my $rt = $C->shape_subset_check($true_spec, folded_real(1, 'Bool'));
-    is($rt->{verdict}, 'PASS', 'NumLt(1,2):Bool satisfied by Constant(1):Bool')
+    my $rt = $C->shape_subset_check($true_spec, folded_real(1, 'Boolean'));
+    is($rt->{verdict}, 'PASS', 'NumLt(1,2):Boolean satisfied by Constant(1):Boolean')
         or diag('missing: ' . join('; ', ($rt->{missing} // [])->@*));
 
     my $false_spec = <<'END_IR';
 %two = Constant(2) :Int
 %one = Constant(1) :Int
-%cmp = NumLt(%two, %one) :Bool
+%cmp = NumLt(%two, %one) :Boolean
 return %cmp
 END_IR
-    # false folds to the empty-string Bool constant.
-    my $real_false = $C->build_graph_from_ir("%r = Constant() :Bool\nreturn %r\n");
+    # false folds to the empty-string Boolean constant.
+    my $real_false = $C->build_graph_from_ir("%r = Constant() :Boolean\nreturn %r\n");
     my $rf = $C->shape_subset_check($false_spec, $real_false);
-    is($rf->{verdict}, 'PASS', 'NumLt(2,1):Bool satisfied by Constant():Bool')
+    is($rf->{verdict}, 'PASS', 'NumLt(2,1):Boolean satisfied by Constant():Boolean')
         or diag('missing: ' . join('; ', ($rf->{missing} // [])->@*));
 };
 
@@ -356,7 +356,7 @@ subtest 'a propagated pad over a computed select (D6 ternary) matches the value 
     my $spec = <<'END_IR';
 %n    = Constant(5) :Int
 %zero = Constant(0) :Int
-%cmp  = NumGt(%n, %zero) :Bool
+%cmp  = NumGt(%n, %zero) :Boolean
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %tern = TernaryExpr(%cmp, %c1, %c2) :Int
@@ -369,7 +369,7 @@ END_IR
     my $real = $C->build_graph_from_ir(<<'END_IR');
 %n    = Constant(5) :Int
 %zero = Constant(0) :Int
-%cmp  = NumGt(%n, %zero) :Bool
+%cmp  = NumGt(%n, %zero) :Boolean
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %tern = TernaryExpr(%cmp, %c1, %c2) :Int
@@ -512,7 +512,7 @@ subtest 'an if/else with pure-value arms is subsumed by a real TernaryExpr (D1)'
     my $spec = <<'END_IR';
 %n     = Constant(5) :Int
 %zero  = Constant(0) :Int
-%cmp   = NumGt(%n, %zero) :Bool
+%cmp   = NumGt(%n, %zero) :Boolean
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %if    = If(%n, %cmp)
@@ -525,7 +525,7 @@ END_IR
     my $real = $C->build_graph_from_ir(<<'END_IR');
 %n    = Constant(5) :Int
 %zero = Constant(0) :Int
-%cmp  = NumGt(%n, %zero) :Bool
+%cmp  = NumGt(%n, %zero) :Boolean
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %sel  = TernaryExpr(%cmp, %c1, %c2) :Int
@@ -567,7 +567,7 @@ subtest 'a genuine If (no real select) is NOT subsumed (teeth)' => sub {
     my $spec = <<'END_IR';
 %n     = Constant(5) :Int
 %zero  = Constant(0) :Int
-%cmp   = NumGt(%n, %zero) :Bool
+%cmp   = NumGt(%n, %zero) :Boolean
 %xn    = Constant("$x") :Str
 %vx    = VarDecl(%xn) :Int
 %if    = If(%vx, %cmp)
@@ -580,7 +580,7 @@ END_IR
     my $real = $C->build_graph_from_ir(<<'END_IR');
 %n    = Constant(5) :Int
 %zero = Constant(0) :Int
-%cmp  = NumGt(%n, %zero) :Bool
+%cmp  = NumGt(%n, %zero) :Boolean
 %c1   = Constant(1) :Int
 return %c1
 END_IR
@@ -622,7 +622,7 @@ subtest 'a dropped branch is NOT masked by one unrelated select (count gate, tee
     my $spec = <<'END_IR';
 %n     = Constant(5) :Int
 %zero  = Constant(0) :Int
-%cmp   = NumGt(%n, %zero) :Bool
+%cmp   = NumGt(%n, %zero) :Boolean
 %c1    = Constant(1) :Int
 %if1   = If(%n, %cmp)
 %if2   = If(%n, %cmp)
@@ -633,7 +633,7 @@ END_IR
     my $real = $C->build_graph_from_ir(<<'END_IR');
 %n    = Constant(5) :Int
 %zero = Constant(0) :Int
-%cmp  = NumGt(%n, %zero) :Bool
+%cmp  = NumGt(%n, %zero) :Boolean
 %c1   = Constant(1) :Int
 %sel  = TernaryExpr(%cmp, %c1, %c1) :Int
 return %sel
@@ -650,7 +650,7 @@ subtest 'a ternary over a folded comparison collapses to its arm (statements Com
     my $spec = <<'END_IR';
 %one  = Constant(1) :Int
 %two  = Constant(2) :Int
-%cmp  = NumLt(%one, %two) :Bool
+%cmp  = NumLt(%one, %two) :Boolean
 %t    = Constant(1) :Int
 %f    = Constant(0) :Int
 %tern = TernaryExpr(%cmp, %t, %f) :Int
@@ -705,7 +705,7 @@ subtest 'a ternary whose folded arm is ABSENT from the real graph still FAILs (t
     my $spec = <<'END_IR';
 %one  = Constant(1) :Int
 %two  = Constant(2) :Int
-%cmp  = NumLt(%one, %two) :Bool
+%cmp  = NumLt(%one, %two) :Boolean
 %t    = Constant(1) :Int
 %f    = Constant(0) :Int
 %tern = TernaryExpr(%cmp, %t, %f) :Int
@@ -778,29 +778,29 @@ END_IR
         'a real graph that keeps the PostfixDeref matches the spec deref');
 };
 
-subtest 'a Coerce(->Bool) feeding a Not is absorbed by the real Not (L4)' => sub {
+subtest 'a Coerce(->Boolean) feeding a Not is absorbed by the real Not (L4)' => sub {
     # perl's ! does its own truthiness coercion, so B::SoN emits Not(operand)
-    # directly -- no explicit Coerce(Int->Bool). The corpus keeps the explicit
+    # directly -- no explicit Coerce(Int->Boolean). The corpus keeps the explicit
     # Coerce; subsume it when it feeds a Not and the real graph has none.
     my $spec = <<'END_IR';
 %five = Constant(5) :Int
-%b    = Coerce(%five : Int -> Bool) :Bool
-%nb   = Not(%b) :Bool
+%b    = Coerce(%five : Int -> Boolean) :Boolean
+%nb   = Not(%b) :Boolean
 return %nb
 END_IR
     my $real = $C->build_graph_from_ir(<<'END_IR');
 %five = Constant(5) :Int
-%nb   = Not(%five) :Bool
+%nb   = Not(%five) :Boolean
 return %nb
 END_IR
     my $res = $C->shape_subset_check($spec, $real);
-    is($res->{verdict}, 'PASS', 'the Not-feeding Coerce(->Bool) is absorbed')
+    is($res->{verdict}, 'PASS', 'the Not-feeding Coerce(->Boolean) is absorbed')
         or diag('missing: ' . join('; ', ($res->{missing} // [])->@*));
 };
 
 subtest 'a Coerce feeding a NON-absorbing consumer stays required (teeth)' => sub {
     # A Coerce is absorbed only when its sole consumer does the coercion
-    # itself: Coerce(->Bool) into a truthiness op, or Coerce(->Num) into a
+    # itself: Coerce(->Boolean) into a truthiness op, or Coerce(->Num) into a
     # NUMIFYING arithmetic op (%_NUMIFYING_OP). Any other consumer means the
     # Coerce is a real representation change the producer must carry.
     #

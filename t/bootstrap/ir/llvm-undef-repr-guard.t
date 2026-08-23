@@ -179,8 +179,8 @@ subtest 'undef-repr Assign dies loudly instead of silently lowering as Int' => s
 };
 
 # Test 7: undef-repr TernaryExpr branch dies loudly (sites: lines ~1963/1964)
-# CG3 fix: prior version used Constant(:Bool) as cond, which dies at constant-lowering
-# ("cannot lower Constant with repr=Bool"), BEFORE the TernaryExpr guard fires.
+# CG3 fix: prior version used Constant(:Boolean) as cond, which dies at constant-lowering
+# ("cannot lower Constant with repr=Boolean"), BEFORE the TernaryExpr guard fires.
 # Fixed: use Constant(:Int) as cond so the TernaryExpr guard is the actual die site.
 subtest 'undef-repr TernaryExpr true-branch dies loudly' => sub {
     my $f = Chalk::IR::NodeFactory->new;
@@ -206,10 +206,10 @@ subtest 'undef-repr TernaryExpr true-branch dies loudly' => sub {
         like($err, qr/representation|repr|GAP/i,
             'TernaryExpr error message mentions representation or GAP')
             or diag("error: $err");
-        # The error must come from the TernaryExpr guard, not the Constant :Bool path.
-        unlike($err, qr/cannot lower Constant with repr=Bool/i,
-            'TernaryExpr error is NOT the old Constant-repr=Bool die (CG3: guard fires correctly)')
-            or diag("Error came from wrong guard: Constant repr=Bool die, not TernaryExpr guard\nerror: $err");
+        # The error must come from the TernaryExpr guard, not the Constant :Boolean path.
+        unlike($err, qr/cannot lower Constant with repr=Boolean/i,
+            'TernaryExpr error is NOT the old Constant-repr=Boolean die (CG3: guard fires correctly)')
+            or diag("Error came from wrong guard: Constant repr=Boolean die, not TernaryExpr guard\nerror: $err");
     }
 };
 
@@ -227,8 +227,8 @@ subtest 'undef-repr Phi at Region merge (lower_with_elaboration path) dies loudl
     # Build minimal if/else: if ($cond) { ... } else { ... }; return Int constant
     my $c_cond = $f->make('Constant', value => 1, const_type => 'integer');
     $c_cond->set_representation('Int');
-    my $cmp = $f->make('Coerce', inputs => [$c_cond], from_repr => 'Int', to_repr => 'Bool');
-    $cmp->set_representation('Bool');
+    my $cmp = $f->make('Coerce', inputs => [$c_cond], from_repr => 'Int', to_repr => 'Boolean');
+    $cmp->set_representation('Boolean');
 
     my $c1 = $f->make('Constant', value => 1, const_type => 'integer');
     $c1->set_representation('Int');

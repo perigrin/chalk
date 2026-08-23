@@ -54,7 +54,7 @@ sub build_graph ($phi_value_count) {
     $two->set_representation('Int');
 
     my $cond = $f->make('NumGt', inputs => [$two, $one]);
-    $cond->set_representation('Bool');
+    $cond->set_representation('Boolean');
 
     my $if   = $f->make('If',   inputs => [$start, $cond]);
     my $then = $f->make('Proj', index => 0, inputs => [$if]);

@@ -881,7 +881,7 @@ context: scalar
 %mem  = MemStart()
 %lval = Subscript(%arr, %i0) :Int
 %v9   = Constant(9) :Int
-%cmp  = NumEq(%i0, %i0) :Bool
+%cmp  = NumEq(%i0, %i0) :Boolean
 %if   = If(%start, %cmp)
 %proj0 = Proj(%if, index: 0)
 %proj1 = Proj(%if, index: 1)
@@ -928,7 +928,7 @@ context: scalar
 %mem  = MemStart()
 %lval = Subscript(%arr, %i0) :Int
 %v9   = Constant(9) :Int
-%cmp  = NumEq(%c1, %i0) :Bool
+%cmp  = NumEq(%c1, %i0) :Boolean
 %if   = If(%start, %cmp)
 %proj0 = Proj(%if, index: 0)
 %proj1 = Proj(%if, index: 1)
@@ -974,7 +974,7 @@ context: scalar
 %mem  = MemStart()
 %lval = Subscript(%h, %kk) :Int
 %v9   = Constant(9) :Int
-%cmp  = NumEq(%i0, %i0) :Bool
+%cmp  = NumEq(%i0, %i0) :Boolean
 %if   = If(%start, %cmp)
 %proj0 = Proj(%if, index: 0)
 %proj1 = Proj(%if, index: 1)
@@ -1015,7 +1015,7 @@ context: scalar
 %mem  = MemStart()
 %lval = Subscript(%h, %kk) :Int
 %v9   = Constant(9) :Int
-%cmp  = NumEq(%c1, %i0) :Bool
+%cmp  = NumEq(%c1, %i0) :Boolean
 %if   = If(%start, %cmp)
 %proj0 = Proj(%if, index: 0)
 %proj1 = Proj(%if, index: 1)

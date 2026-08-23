@@ -359,7 +359,7 @@ sub num_const {
     my $c5   = int_const($f, 5);
     my $c3   = int_const($f, 3);
     my $cmp  = $f->make('NumGt', inputs => [$c5, $c3]);
-    $cmp->set_representation('Bool');   # comparison result = i1
+    $cmp->set_representation('Boolean');   # comparison result = i1
 
     # Wrap in a TernaryExpr to make it returnable as an Int
     my $c1   = int_const($f, 1);
@@ -391,7 +391,7 @@ sub num_const {
     my $c1c  = int_const($f, 1);
     my $c3   = int_const($f, 3);
     my $cmp  = $f->make('NumGt', inputs => [$c1c, $c3]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $c1   = int_const($f, 1);
     my $c0   = int_const($f, 0);
@@ -419,7 +419,7 @@ sub num_const {
     my $n    = int_const($f, 5);    # $n = 5 (an Int constant representing the parameter)
     my $zero = int_const($f, 0);
     my $cmp  = $f->make('NumGt', inputs => [$n, $zero]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $c1   = int_const($f, 1);
     my $c2   = int_const($f, 2);

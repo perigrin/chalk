@@ -815,7 +815,7 @@ context: scalar
 %half   = Constant(0.5) :Num
 %sum    = Add(%half, %half) :Num
 %one    = Constant(1) :Int
-%eq     = NumEq(%sum, %one) :Bool
+%eq     = NumEq(%sum, %one) :Boolean
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%eq, %one, %zero) :Int
 %nl = Constant("\n") :Str
@@ -857,7 +857,7 @@ context: scalar
 %half   = Constant(0.5) :Num
 %sum    = Add(%a, %half) :Num
 %one    = Constant(1) :Int
-%eq     = NumEq(%sum, %one) :Bool
+%eq     = NumEq(%sum, %one) :Boolean
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%eq, %one, %zero) :Int
 %nl = Constant("\n") :Str
@@ -898,7 +898,7 @@ context: scalar
 %q      = Constant(0.75) :Num
 %sum    = Add(%a, %q) :Num
 %one    = Constant(1) :Int
-%eq     = NumEq(%sum, %one) :Bool
+%eq     = NumEq(%sum, %one) :Boolean
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%eq, %one, %zero) :Int
 %nl = Constant("\n") :Str
@@ -944,7 +944,7 @@ context: scalar
 %ic     = Coerce(%i, from_repr: "Int", to_repr: "Num") :Num
 %sum    = Add(%a, %ic) :Num
 %exp    = Constant(2.5) :Num
-%eq     = NumEq(%sum, %exp) :Bool
+%eq     = NumEq(%sum, %exp) :Boolean
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%eq, %one, %zero) :Int

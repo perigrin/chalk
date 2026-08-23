@@ -77,10 +77,10 @@ subtest 'match re-tested after subject reassign sees the new value' => sub {
     my $rs1 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     $rs1->set_representation('Str');
     my $m1 = $f->make('RegexMatch', pattern => 'b', flags => '', inputs => [$rs1]);
-    $m1->set_representation('Bool');
+    $m1->set_representation('Boolean');
     my $ny = $f->make('Constant', value => '$y', const_type => 'string');
     my $vy = $f->make('VarDecl', inputs => [$ny, $m1]);
-    $vy->set_representation('Bool');
+    $vy->set_representation('Boolean');
 
     my $rsL = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     my $asg = $f->make('Assign', inputs => [$rsL, str_const($f, 'x')]);
@@ -88,14 +88,14 @@ subtest 'match re-tested after subject reassign sees the new value' => sub {
 
     my $rs2 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     my $m2 = $f->make('RegexMatch', pattern => 'b', flags => '', inputs => [$rs2]);
-    $m2->set_representation('Bool');
+    $m2->set_representation('Boolean');
     isnt($m2->id, $m1->id, 'precondition: the two matches are distinct nodes');
     my $nz = $f->make('Constant', value => '$z', const_type => 'string');
     my $vz = $f->make('VarDecl', inputs => [$nz, $m2]);
-    $vz->set_representation('Bool');
+    $vz->set_representation('Boolean');
 
     my $rzF = $f->make('PadAccess', targ => 0, varname => '$z', inputs => [$vz]);
-    $rzF->set_representation('Bool');
+    $rzF->set_representation('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$rzF]);
     $ret->set_control_in($vz);
     $vz->set_control_in($asg);
@@ -120,7 +120,7 @@ subtest 'capture records are per program point' => sub {
     my $rs1 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     $rs1->set_representation('Str');
     my $m1 = $f->make('RegexMatch', pattern => '(a+)', flags => '', inputs => [$rs1]);
-    $m1->set_representation('Bool');
+    $m1->set_representation('Boolean');
     my $cap1 = $f->make('RegexCapture', n => 1, inputs => [$m1]);
     $cap1->set_representation('Str');
     my $np = $f->make('Constant', value => '$p', const_type => 'string');
@@ -133,7 +133,7 @@ subtest 'capture records are per program point' => sub {
 
     my $rs2 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     my $m2 = $f->make('RegexMatch', pattern => '(a+)', flags => '', inputs => [$rs2]);
-    $m2->set_representation('Bool');
+    $m2->set_representation('Boolean');
     my $cap2 = $f->make('RegexCapture', n => 1, inputs => [$m2]);
     $cap2->set_representation('Str');
     my $nq = $f->make('Constant', value => '$q', const_type => 'string');
@@ -177,10 +177,10 @@ subtest 'qr-apply (Match) re-applied after subject reassign sees the new value' 
     my $rs1 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     $rs1->set_representation('Str');
     my $m1 = $f->make('Match', inputs => [$rs1, $qr]);
-    $m1->set_representation('Bool');
+    $m1->set_representation('Boolean');
     my $ny = $f->make('Constant', value => '$y', const_type => 'string');
     my $vy = $f->make('VarDecl', inputs => [$ny, $m1]);
-    $vy->set_representation('Bool');
+    $vy->set_representation('Boolean');
 
     my $rsL = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     my $asg = $f->make('Assign', inputs => [$rsL, str_const($f, 'x')]);
@@ -188,14 +188,14 @@ subtest 'qr-apply (Match) re-applied after subject reassign sees the new value' 
 
     my $rs2 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     my $m2 = $f->make('Match', inputs => [$rs2, $qr]);
-    $m2->set_representation('Bool');
+    $m2->set_representation('Boolean');
     isnt($m2->id, $m1->id, 'precondition: the two qr-applies are distinct nodes');
     my $nz = $f->make('Constant', value => '$z', const_type => 'string');
     my $vz = $f->make('VarDecl', inputs => [$nz, $m2]);
-    $vz->set_representation('Bool');
+    $vz->set_representation('Boolean');
 
     my $rzF = $f->make('PadAccess', targ => 0, varname => '$z', inputs => [$vz]);
-    $rzF->set_representation('Bool');
+    $rzF->set_representation('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$rzF]);
     $ret->set_control_in($vz);
     $vz->set_control_in($asg);

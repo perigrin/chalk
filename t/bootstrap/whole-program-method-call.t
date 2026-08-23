@@ -165,7 +165,7 @@ PL
 # invalid/type-mismatched LLVM IR or crash lli. Bringing the class MOP across
 # under package=main exposed backend shapes that were previously masked by the
 # no-MOP GAP; emitting broken IR is strictly worse than the clean GAP it replaced.
-subtest 'a Bool-returning method lowers correctly or GAPs, never broken IR' => sub {
+subtest 'a Boolean-returning method lowers correctly or GAPs, never broken IR' => sub {
     my $prog = <<'PL' . qq{sub corpus_case { my \$w = Widget->new(n => 5); \$w->big }\n};
 use feature 'class';
 no warnings 'experimental::class';
@@ -181,10 +181,10 @@ PL
         # backend lowers the i1 return correctly or it must GAP -- but the lli
         # output must NOT be an LLVM verify error / crash.
         unlike( $out, qr/\berror\b|Stack dump|Segmentation|expected 'i64/i,
-            "Bool method did not produce invalid IR / crash lli (got: $out)" );
+            "Boolean method did not produce invalid IR / crash lli (got: $out)" );
     }
     else {
-        isnt( $kind, 'value', "Bool method GAPs cleanly instead of broken IR (got $kind)" );
+        isnt( $kind, 'value', "Boolean method GAPs cleanly instead of broken IR (got $kind)" );
     }
 };
 

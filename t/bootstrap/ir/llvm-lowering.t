@@ -334,7 +334,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $zero = $f->make('Constant', value => '0',  const_type => 'integer');
     $zero->set_representation('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     # my $x; (no init)
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
@@ -456,7 +456,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     # Condition: n_phi > 0
     my $zero = $c0;  # re-use c0
     my $cmp  = $f->make('NumGt', inputs => [$n_phi, $zero]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     # Body: s_new = s_phi + n_phi; n_new = n_phi - 1
     my $s_new = $f->make('Add', inputs => [$s_phi, $n_phi]);
@@ -543,7 +543,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
     $c1->set_representation('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     # my $x = 0
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
@@ -623,7 +623,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $zero = $f->make('Constant', value => '0',   const_type => 'integer');
     $zero->set_representation('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     # my $x = 0.0 (Num)
     my $xn   = $f->make('Constant', value => '$x',  const_type => 'string');
@@ -720,7 +720,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $c0   = $f->make('Constant', value => '0', const_type => 'integer');
     $c0->set_representation('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     # my $x = 0 (pre-branch)
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
@@ -852,13 +852,13 @@ ok(Chalk::Target::LLVM->can('lower'),
     # The fix must use structural selection (the icmp wired via control_in to
     # the Loop node) to avoid this ambiguity.
     my $inner_cmp = $f->make('NumGt', inputs => [$n_phi, $c1]);
-    $inner_cmp->set_representation('Bool');
+    $inner_cmp->set_representation('Boolean');
     my $branch_val = $f->make('TernaryExpr', inputs => [$inner_cmp, $c10, $c1]);
     $branch_val->set_representation('Int');
 
     # Condition: n_phi > 0  (this feeds the header branch — structural, created second)
     my $loop_cmp = $f->make('NumGt', inputs => [$n_phi, $c0b]);
-    $loop_cmp->set_representation('Bool');
+    $loop_cmp->set_representation('Boolean');
 
     # s_new = s_phi + branch_val; n_new = n_phi - 1
     my $s_new = $f->make('Add', inputs => [$s_phi, $branch_val]);

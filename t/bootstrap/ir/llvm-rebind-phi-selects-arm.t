@@ -69,7 +69,7 @@ sub build_rebind_diamond ($guard_value) {
     my $g = $f->make('Constant', value => $guard_value, const_type => 'integer');
     $g->set_representation('Int');
     my $cond = $f->make('NumGt', inputs => [$g, $zero]);
-    $cond->set_representation('Bool');
+    $cond->set_representation('Boolean');
 
     my $if   = $f->make('If',   inputs => [$base, $cond]);
     my $then = $f->make('Proj', index => 0, inputs => [$if]);

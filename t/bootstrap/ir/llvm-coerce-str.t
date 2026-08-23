@@ -1,4 +1,4 @@
-# ABOUTME: Adversarial tests for Coerce(Str->Num) and Coerce(Str->Bool) LLVM lowering (G3).
+# ABOUTME: Adversarial tests for Coerce(Str->Num) and Coerce(Str->Boolean) LLVM lowering (G3).
 # ABOUTME: Verifies lli output matches perl oracle exactly for all edge cases.
 use 5.42.0;
 use utf8;
@@ -82,7 +82,7 @@ sub make_str_to_num_graph {
     return $ret;
 }
 
-# Build a graph: Constant(str :Str) -> Coerce(Str->Bool) :Bool -> Return
+# Build a graph: Constant(str :Str) -> Coerce(Str->Boolean) :Boolean -> Return
 sub make_str_to_bool_graph {
     my ($str_val) = @_;
     my $f = Chalk::IR::NodeFactory->new;
@@ -92,10 +92,10 @@ sub make_str_to_bool_graph {
 
     my $coerce = $f->make('Coerce',
         from_repr => 'Str',
-        to_repr   => 'Bool',
+        to_repr   => 'Boolean',
         inputs    => [$c],
     );
-    $coerce->set_representation('Bool');
+    $coerce->set_representation('Boolean');
 
     my $ret = $f->make_cfg('Return', inputs => [$coerce]);
     return $ret;
@@ -174,7 +174,7 @@ subtest 'Coerce(Str->Num) adversarial cases: lli == perl oracle' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# Coerce(Str->Bool) edge cases
+# Coerce(Str->Boolean) edge cases
 #
 # Perl's truthiness rule for strings:
 #   false: empty string "" or literal "0"
@@ -191,7 +191,7 @@ my @str_to_bool_cases = (
     ["abc",  "Bool:1",  "non-numeric non-empty -> true"],
 );
 
-subtest 'Coerce(Str->Bool) edge cases: lli == perl oracle' => sub {
+subtest 'Coerce(Str->Boolean) edge cases: lli == perl oracle' => sub {
     plan tests => scalar(@str_to_bool_cases) * 3;
 
     for my $tc (@str_to_bool_cases) {

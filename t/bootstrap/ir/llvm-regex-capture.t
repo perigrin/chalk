@@ -35,7 +35,7 @@ sub capture_graph {
     my $subj = $f->make('Constant', value => $subject, const_type => 'string');
     $subj->set_representation('Str');
     my $m = $f->make('RegexMatch', pattern => $pattern, flags => '', inputs => [$subj]);
-    $m->set_representation('Bool');
+    $m->set_representation('Boolean');
     my $cap = $f->make('RegexCapture', n => $n, inputs => [$m]);
     $cap->set_representation('Str');
     return ($m, $cap);
@@ -84,7 +84,7 @@ subtest 'capture via qr-applied Match also works' => sub {
     my $qr = $f->make('Constant', value => '(\\d+)', const_type => 'regex');
     $qr->set_representation('Regex');
     my $m = $f->make('Match', inputs => [$subj, $qr]);
-    $m->set_representation('Bool');
+    $m->set_representation('Boolean');
     my $cap = $f->make('RegexCapture', n => 1, inputs => [$m]);
     $cap->set_representation('Str');
     my $ret = $f->make_cfg('Return', inputs => [$cap]);
@@ -139,7 +139,7 @@ subtest 'capture crossing a Str phi merge prints exactly the capture' => sub {
     my $rs = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     $rs->set_representation('Str');
     my $m = $f->make('RegexMatch', pattern => 'x(ab)y', flags => '', inputs => [$rs]);
-    $m->set_representation('Bool');
+    $m->set_representation('Boolean');
     my $cap = $f->make('RegexCapture', n => 1, inputs => [$m]);
     $cap->set_representation('Str');
 
@@ -155,7 +155,7 @@ subtest 'capture crossing a Str phi merge prints exactly the capture' => sub {
     my $c0 = $f->make('Constant', value => '0', const_type => 'integer');
     $c0->set_representation('Int');
     my $cmp = $f->make('NumGt', inputs => [$c1, $c0]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $lhs1 = $f->make('PadAccess', targ => 1, varname => '$x', inputs => [$vx]);
     $lhs1->set_representation('Str');

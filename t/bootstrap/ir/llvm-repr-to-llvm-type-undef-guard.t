@@ -43,7 +43,7 @@ subtest 'no-argument call dies loudly instead of defaulting to i64' => sub {
 subtest 'defined reprs still map correctly' => sub {
     is(Chalk::Target::LLVM::Context::_repr_to_llvm_type('Int'),  'i64',    'Int -> i64');
     is(Chalk::Target::LLVM::Context::_repr_to_llvm_type('Num'),  'double', 'Num -> double');
-    is(Chalk::Target::LLVM::Context::_repr_to_llvm_type('Bool'), 'i1',     'Bool -> i1');
+    is(Chalk::Target::LLVM::Context::_repr_to_llvm_type('Boolean'), 'i1',     'Boolean -> i1');
     # A Str VALUE is the first-class aggregate { ptr, len, enc }, not a bare
     # pointer: the length travels IN the value so a merge cannot lose it.
     is(Chalk::Target::LLVM::Context::_repr_to_llvm_type('Str'),  '%Str',   'Str -> %Str');

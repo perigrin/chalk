@@ -54,7 +54,7 @@ sub run {
     # program_mode is UNCONDITIONAL: every graph this driver runs is a program
     # that prints its own output, so the Int:/Str: return-value epilogue must
     # not be emitted. After the corpus-as-programs migration such a graph
-    # returns its Print's Bool, and the epilogue printf'd that i1 through an
+    # returns its Print's Boolean, and the epilogue printf'd that i1 through an
     # i64 format -- which lli rejects outright ("'%tmp_30' defined with type
     # 'i1' but expected 'i64'").
     #

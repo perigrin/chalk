@@ -1,4 +1,4 @@
-# ABOUTME: Tests TernaryExpr lowers a non-Bool condition via truthiness coercion
+# ABOUTME: Tests TernaryExpr lowers a non-Boolean condition via truthiness coercion
 # ABOUTME: (icmp ne for Int), so bare-scalar guards ($x = 7 if $c) are lowerable.
 use 5.42.0;
 use utf8;

@@ -1097,18 +1097,18 @@ TODO: {
         'Literal "undef" tags type => Undef');
 }
 
-# Literal: true → type => 'Bool'
+# Literal: true → type => 'Boolean'
 {
     my $result = $ti->multiply($ti->one(), make_scan_ctx('Literal', 'true'));
-    is(get_tags($result)->{type}, 'Bool',
-        'Literal "true" tags type => Bool');
+    is(get_tags($result)->{type}, 'Boolean',
+        'Literal "true" tags type => Boolean');
 }
 
-# Literal: false → type => 'Bool'
+# Literal: false → type => 'Boolean'
 {
     my $result = $ti->multiply($ti->one(), make_scan_ctx('Literal', 'false'));
-    is(get_tags($result)->{type}, 'Bool',
-        'Literal "false" tags type => Bool');
+    is(get_tags($result)->{type}, 'Boolean',
+        'Literal "false" tags type => Boolean');
 }
 
 # Atom: __SUB__ → type => 'CodeRef'
@@ -1295,12 +1295,12 @@ TODO: {
         'BinaryExpression consumes op_text');
 }
 
-# BinaryExpression with op_text '==' → type => 'Bool'
+# BinaryExpression with op_text '==' → type => 'Boolean'
 {
     my $val = make_ctx(op_text => '==');
     my $result = $ti->multiply($val, $make_complete->($val, 'BinaryExpression', 0, 10, 0));
-    is(get_tags($result)->{type}, 'Bool',
-        'BinaryExpression "==" tags type => Bool');
+    is(get_tags($result)->{type}, 'Boolean',
+        'BinaryExpression "==" tags type => Boolean');
 }
 
 # BinaryExpression with op_text '.' → type => 'Str'
@@ -1319,12 +1319,12 @@ TODO: {
         'BinaryExpression "&&" tags type => undef (Any means unknown)');
 }
 
-# BinaryExpression with op_text '=~' → type => 'Bool'
+# BinaryExpression with op_text '=~' → type => 'Boolean'
 {
     my $val = make_ctx(op_text => '=~');
     my $result = $ti->multiply($val, $make_complete->($val, 'BinaryExpression', 0, 10, 0));
-    is(get_tags($result)->{type}, 'Bool',
-        'BinaryExpression "=~" tags type => Bool');
+    is(get_tags($result)->{type}, 'Boolean',
+        'BinaryExpression "=~" tags type => Boolean');
 }
 
 # BinaryExpression with op_text '..' → type => 'List'
@@ -1343,13 +1343,13 @@ TODO: {
         'BinaryExpression without op_text preserves child type');
 }
 
-# UnaryExpression with op_text '!' → type => 'Bool' (consumes op_text)
+# UnaryExpression with op_text '!' → type => 'Boolean' (consumes op_text)
 {
     my $val = make_ctx(op_text => '!');
     my $result = $ti->multiply($val, $make_complete->($val, 'UnaryExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'UnaryExpression "!" is valid');
-    is(get_tags($result)->{type}, 'Bool',
-        'UnaryExpression "!" tags type => Bool');
+    is(get_tags($result)->{type}, 'Boolean',
+        'UnaryExpression "!" tags type => Boolean');
     ok(!get_tags($result)->{op_text},
         'UnaryExpression consumes op_text');
 }
@@ -1648,8 +1648,8 @@ TODO: {
     );
     my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 0, 10, 0));
     ok(!$ti->is_zero($result), 'per-position: defined(Scalar) → valid');
-    is(get_tags($result)->{type}, 'Bool',
-        'per-position: defined return type => Bool');
+    is(get_tags($result)->{type}, 'Boolean',
+        'per-position: defined return type => Boolean');
 }
 
 # Non-builtin CallExpression with item_types → passes (no validation)

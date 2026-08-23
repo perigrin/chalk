@@ -56,7 +56,7 @@ subtest 'if-merge explicit Phi with a multi-block then-arm (I5)' => sub {
     my $rn = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
     $rn->set_representation('Int');
     my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $aref = $f->make('ArrayRef', inputs => [int_const($f, 42)]);
     $aref->set_representation('ArrayRef');
@@ -100,7 +100,7 @@ subtest 'two explicit Phis on one Region, later arm multi-block (review C1)' => 
     my $rn = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
     $rn->set_representation('Int');
     my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $if_node = $f->make('If', inputs => [$vn, $cmp]);
     my $proj0 = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -160,7 +160,7 @@ subtest 'loop phi with a multi-block init value (I5)' => sub {
     $s_phi->set_representation('Int');
 
     my $cmp = $f->make('NumGt', inputs => [$n_phi, int_const($f, 0)]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $s_new = $f->make('Add', inputs => [$s_phi, $n_phi]);
     $s_new->set_representation('Int');
@@ -212,7 +212,7 @@ subtest 'loop phi with a multi-block backedge value (I5)' => sub {
     $s_phi->set_representation('Int');
 
     my $cmp = $f->make('NumGt', inputs => [$n_phi, int_const($f, 0)]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $s_new = $f->make('Subscript', inputs => [$aref, $n_phi]);
     $s_new->set_representation('Int');
@@ -261,7 +261,7 @@ subtest 'elab phi labels + branch-snapshot arm reads (review gaps 2+3)' => sub {
     my $rn = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
     $rn->set_representation('Int');
     my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $if_node = $f->make('If', inputs => [$vt, $cmp]);
     my $proj0 = $f->make('Proj', inputs => [$if_node], index => 0);

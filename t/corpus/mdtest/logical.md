@@ -4,7 +4,7 @@ Perl's logical operators `&&`, `||`, `//`, and `!` are all runtime-free (RF)
 per docs/architecture/runtime-free-boundary.md — they are GAPs only because the
 current literal-arithmetic lowering slice lacks the control flow / representations
 they need, NOT because they require libperl. Each closes RF once its prerequisite
-lands (cfg-blocks-phi for the operand-returning operators, a Bool/Undef
+lands (cfg-blocks-phi for the operand-returning operators, a Boolean/Undef
 representation for `!` and `//`).
 
 `&&` and `||` are SHORT-CIRCUIT OPERAND-RETURNING operators: they return one
@@ -22,9 +22,9 @@ definedness predicate are not yet modelled, not because it needs the interpreter
 
 `!` (logical not) returns a genuine primitive BOOLEAN: `!5` is `false`, `!0` is
 `true` (`is_bool` verified). A boolean *coerces* to `""`/`"1"` in string context
-and `0`/`1` in numeric context, but its identity is Bool, not Str. `!` is RF: a
-Bool representation (i1) + UnaryNot(Bool)->Bool + `Coerce(Bool->*)` edges — a GAP
-only until the Bool representation is modelled, not a Str/libperl dependency.
+and `0`/`1` in numeric context, but its identity is Boolean, not Str. `!` is RF: a
+Boolean representation (i1) + UnaryNot(Boolean)->Boolean + `Coerce(Boolean->*)` edges — a GAP
+only until the Boolean representation is modelled, not a Str/libperl dependency.
 
 All four idioms are honest GAPs.  The behavior is still perl-specified and
 the GAP reason is documented for each case.
@@ -228,8 +228,8 @@ context: scalar
 ```ir
 %start = Start()
 %a   = Constant(3) :Int
-%def = Defined(%a) :Bool
-%nd  = Not(%def) :Bool
+%def = Defined(%a) :Boolean
+%nd  = Not(%def) :Boolean
 %if  = If(%nd)
 %p1  = Proj(%if, index: 1)
 %c99 = Constant(99) :Int
@@ -274,7 +274,7 @@ context: scalar
 ```ir
 %start = Start()
 %s0 = Constant("y\n") :Str
-%p  = Print(%s0) :Bool
+%p  = Print(%s0) :Boolean
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -306,7 +306,7 @@ context: scalar
 ```ir
 %start = Start()
 %s0 = Constant("y\n") :Str
-%p  = Print(%s0) :Bool
+%p  = Print(%s0) :Boolean
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -340,7 +340,7 @@ context: scalar
 ```ir
 %start = Start()
 %s0 = Constant("y\n") :Str
-%p  = Print(%s0) :Bool
+%p  = Print(%s0) :Boolean
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -350,20 +350,20 @@ control: %start -> %p
 L: GREEN
 ```
 
-## L5d last-statement `&&` with a print arm (Bool operands, WANT=0)
+## L5d last-statement `&&` with a print arm (Boolean operands, WANT=0)
 
 The cond.t idiom: `EXPR && (print ...)` as the LAST statement of the block, so its
 value is the block's RETURN (OPf_WANT=0, NOT OPf_WANT_VOID). Unlike L5 (which has a
 trailing `1`, making the `&&` a mid-body VOID statement that the producer lowers to
 control flow), the last-statement form is lowered as a value-returning `And` node
-whose operands are BOTH Bool (the `StrEq` guard and the `Print`, which returns a
+whose operands are BOTH Boolean (the `StrEq` guard and the `Print`, which returns a
 `builtin::is_bool` boolean).
 
 `$x eq $x` is always true, so the `&&` reaches the print arm: stdout is `y\n`. Perl
-`A && B` returns B when A is truthy, so the block returns the print's Bool `1`. The
-backend expands `And` into short-circuit br+phi: the Bool LHS is already the i1 branch
+`A && B` returns B when A is truthy, so the block returns the print's Boolean `1`. The
+backend expands `And` into short-circuit br+phi: the Boolean LHS is already the i1 branch
 condition (its truthiness is the identity, no `icmp ne i64`), the print fires only on
-the truthy branch, and the i1 phi merges the two Bool operands. (t/base/cond.t.)
+the truthy branch, and the i1 phi merges the two Boolean operands. (t/base/cond.t.)
 
 ```perl
 # source
@@ -380,24 +380,24 @@ context: scalar
 ```ir
 %start = Start()
 %xa = Constant("a") :Str
-%eq = StrEq(%xa, %xa) :Bool
+%eq = StrEq(%xa, %xa) :Boolean
 %s0 = Constant("y\n") :Str
-%p  = Print(%s0) :Bool
-%r  = And(%eq, %p) :Bool
+%p  = Print(%s0) :Boolean
+%r  = And(%eq, %p) :Boolean
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%r : Bool -> Str) :Str
+%co_p  = Coerce(%r : Boolean -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
 L: GREEN
 ```
 
-## L5e last-statement `||` with a print arm (Bool operands, WANT=0)
+## L5e last-statement `||` with a print arm (Boolean operands, WANT=0)
 
 Bilateral `||` polarity of L5d, matching cond.t's actual last line (`$x != $x ||
 (print ...)`). `$x ne $x` is always FALSE, so `||` short-circuits to the RIGHT arm and
 the print fires: stdout is `y\n`. Perl `A || B` returns B when A is falsy, so the
-block returns the print's Bool `1`. The backend `Or` br+phi tests the Bool LHS
+block returns the print's Boolean `1`. The backend `Or` br+phi tests the Boolean LHS
 directly (i1 truthiness = identity) and merges an i1 phi.
 
 ```perl
@@ -415,12 +415,12 @@ context: scalar
 ```ir
 %start = Start()
 %xa = Constant("a") :Str
-%ne = StrNe(%xa, %xa) :Bool
+%ne = StrNe(%xa, %xa) :Boolean
 %s0 = Constant("y\n") :Str
-%p  = Print(%s0) :Bool
-%r  = Or(%ne, %p) :Bool
+%p  = Print(%s0) :Boolean
+%r  = Or(%ne, %p) :Boolean
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%r : Bool -> Str) :Str
+%co_p  = Coerce(%r : Boolean -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
@@ -432,22 +432,22 @@ L: GREEN
 Perl `!` returns a genuine BOOLEAN: `!5` is `false`, `!0` is `true`. These are
 primitive booleans (`is_bool(!5)`=1, `is_bool(!0)`=1 — verified), NOT strings.
 A boolean *coerces* to `""`/`"1"` in string context and `0`/`1` in numeric
-context, but its identity is Bool, not Str (a literal `""` has `is_bool`=0).
+context, but its identity is Boolean, not Str (a literal `""` has `is_bool`=0).
 
-G2 GREEN: `!` lowers runtime-free via the Bool representation (i1) + UnaryNot
-(xor i1 %cond, true) + Coerce(Int->Bool) truthiness (icmp ne). The return value
-is :Bool (i1), and the type-tagged epilogue selects between `@bool_true_str`
-("Bool:1\n") and `@bool_false_str` ("Bool:\n") directly — no Coerce(Bool->Str)
-node is in the return path. Coerce(Bool->Str) is the edge for internal string-context
-use (e.g., a Bool in string interpolation), exercised separately; its string-face
+G2 GREEN: `!` lowers runtime-free via the Boolean representation (i1) + UnaryNot
+(xor i1 %cond, true) + Coerce(Int->Boolean) truthiness (icmp ne). The return value
+is :Boolean (i1), and the type-tagged epilogue selects between `@bool_true_str`
+("Bool:1\n") and `@bool_false_str` ("Bool:\n") directly — no Coerce(Boolean->Str)
+node is in the return path. Coerce(Boolean->Str) is the edge for internal string-context
+use (e.g., a Boolean in string interpolation), exercised separately; its string-face
 globals ("1\0" and "\0") are distinct from the tagged epilogue constants ("Bool:1\n"
 and "Bool:\n"). The type-tagged oracle (`Bool:` for false, `Bool:1` for true)
-distinguishes a Bool result from its Str coercion (which would be `Str:`) — so
+distinguishes a Boolean result from its Str coercion (which would be `Str:`) — so
 Int-as-0 or Str-as-empty miscompiles are caught at the oracle layer.
 
 Source: `my $a = 5; !$a` — $a is 5 (truthy), so !$a is false. The ir-block
-models the Not over a PadAccess(:Int), coercing Int to Bool via truthiness, then
-negating. The final return is :Bool, and the type-tagged output is `Bool:`.
+models the Not over a PadAccess(:Int), coercing Int to Boolean via truthiness, then
+negating. The final return is :Boolean, and the type-tagged output is `Bool:`.
 
 ```perl
 # source
@@ -468,10 +468,10 @@ context: scalar
 %c5   = Constant(5) :Int
 %vd   = VarDecl(%cn, %c5) :Int
 %pa   = PadAccess(%vd, "$a") :Int
-%b    = Coerce(%pa : Int -> Bool) :Bool
-%nb   = Not(%b) :Bool
+%b    = Coerce(%pa : Int -> Boolean) :Boolean
+%nb   = Not(%b) :Boolean
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%nb : Bool -> Str) :Str
+%co_p  = Coerce(%nb : Boolean -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
@@ -482,7 +482,7 @@ L: GREEN
 
 The `eq` string-comparison operator lowers to a `StrEq` op: a byte-compare of the
 two Str {ptr,len} buffers. Equality = same length AND memcmp==0. StrEq yields a
-Bool (i1) that the ternary condition selects on. The if.t/num.t assertions compare
+Boolean (i1) that the ternary condition selects on. The if.t/num.t assertions compare
 strings; this is the blocker they hit. The `my $a=..; my $b=..` operands
 propagate to Str constants (perl folds the pad reads), leaving a genuine StrEq
 node on distinct constants — perl folds `"x" eq "x"` outright only when BOTH sides
@@ -506,7 +506,7 @@ context: scalar
 %start = Start()
 %ax = Constant("x") :Str
 %bx = Constant("x") :Str
-%eq = StrEq(%ax, %bx) :Bool
+%eq = StrEq(%ax, %bx) :Boolean
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
@@ -542,7 +542,7 @@ context: scalar
 %start = Start()
 %ax = Constant("x") :Str
 %by = Constant("y") :Str
-%eq = StrEq(%ax, %by) :Bool
+%eq = StrEq(%ax, %by) :Boolean
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
@@ -579,7 +579,7 @@ context: scalar
 %start = Start()
 %aab  = Constant("ab") :Str
 %babc = Constant("abc") :Str
-%eq   = StrEq(%aab, %babc) :Bool
+%eq   = StrEq(%aab, %babc) :Boolean
 %t    = Constant(1) :Int
 %f    = Constant(0) :Int
 %r    = TernaryExpr(%eq, %t, %f) :Int
@@ -617,7 +617,7 @@ context: scalar
 %start = Start()
 %a  = Constant(1) :Int
 %s1 = Constant("1") :Str
-%eq = StrEq(%a, %s1) :Bool
+%eq = StrEq(%a, %s1) :Boolean
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
@@ -653,7 +653,7 @@ context: scalar
 %start = Start()
 %a  = Constant(1) :Int
 %s2 = Constant("2") :Str
-%eq = StrEq(%a, %s2) :Bool
+%eq = StrEq(%a, %s2) :Boolean
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
@@ -689,7 +689,7 @@ context: scalar
 %start = Start()
 %ax = Constant("x") :Str
 %by = Constant("y") :Str
-%ne = StrNe(%ax, %by) :Bool
+%ne = StrNe(%ax, %by) :Boolean
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%ne, %t, %f) :Int
@@ -725,7 +725,7 @@ context: scalar
 %start = Start()
 %ax = Constant("x") :Str
 %bx = Constant("x") :Str
-%ne = StrNe(%ax, %bx) :Bool
+%ne = StrNe(%ax, %bx) :Boolean
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%ne, %t, %f) :Int
@@ -764,7 +764,7 @@ context: scalar
 ```ir
 %start = Start()
 %x0 = Constant("0") :Str
-%eq = NumEq(%x0, %x0) :Bool
+%eq = NumEq(%x0, %x0) :Boolean
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
@@ -798,7 +798,7 @@ context: scalar
 %start = Start()
 %a = Constant(" 3") :Str
 %b = Constant("3") :Str
-%eq = NumEq(%a, %b) :Bool
+%eq = NumEq(%a, %b) :Boolean
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%eq, %t, %f) :Int
@@ -832,7 +832,7 @@ context: scalar
 %start = Start()
 %x = Constant("0") :Str
 %y = Constant("1") :Str
-%ne = NumNe(%x, %y) :Bool
+%ne = NumNe(%x, %y) :Boolean
 %t  = Constant(1) :Int
 %f  = Constant(0) :Int
 %r  = TernaryExpr(%ne, %t, %f) :Int
@@ -872,7 +872,7 @@ context: scalar
 %if     = If(%c) :Control
 %pt     = Proj(%if, index: 0) :Control
 %msg    = Constant("y\n") :Str
-%print  = Print(%pt, %msg) :Bool
+%print  = Print(%pt, %msg) :Boolean
 %region = Region(%if, %print) :Control
 %one    = Constant(1) :Int
 %nl = Constant("\n") :Str
@@ -914,7 +914,7 @@ context: scalar
 %v   = Constant(0.1) :Num
 %sv  = Coerce(%v, from_repr: "Num", to_repr: "Str") :Str
 %lit = Constant("0.1") :Str
-%eq  = StrEq(%sv, %lit) :Bool
+%eq  = StrEq(%sv, %lit) :Boolean
 %y   = Constant("y") :Str
 %n   = Constant("n") :Str
 %t   = TernaryExpr(%eq, %y, %n) :Str
@@ -953,7 +953,7 @@ context: scalar
 %v   = Constant(0.1) :Num
 %sv  = Coerce(%v, from_repr: "Num", to_repr: "Str") :Str
 %lit = Constant("0.2") :Str
-%eq  = StrEq(%sv, %lit) :Bool
+%eq  = StrEq(%sv, %lit) :Boolean
 %y   = Constant("y") :Str
 %n   = Constant("n") :Str
 %t   = TernaryExpr(%eq, %y, %n) :Str
@@ -997,7 +997,7 @@ context: scalar
 %v   = Constant(1000) :Num
 %sv  = Coerce(%v, from_repr: "Num", to_repr: "Str") :Str
 %lit = Constant("1000") :Str
-%eq  = StrEq(%sv, %lit) :Bool
+%eq  = StrEq(%sv, %lit) :Boolean
 %y   = Constant("y") :Str
 %n   = Constant("n") :Str
 %t   = TernaryExpr(%eq, %y, %n) :Str

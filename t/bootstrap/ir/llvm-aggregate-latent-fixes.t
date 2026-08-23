@@ -474,7 +474,7 @@ subtest 'I-D: Length(PostfixDeref(@$ref)) — scalar(@$ref) — valid IR' => sub
 # WHICH reprs it cannot hold has narrowed. A %Slot is {i1 defined, i64 payload}
 # and a %HashEntry inlines the same pair, so an element is ONE MACHINE WORD --
 # but _box_payload now BOXES the wide ones rather than refusing them: a Str
-# allocates a heap %StrPair and stores its address, a Num bitcasts, a Bool
+# allocates a heap %StrPair and stores its address, a Num bitcasts, a Boolean
 # zero-extends. So a Str element in a LITERAL aggregate lowers correctly, and
 # this subtest no longer asserts it GAPs. Verified end-to-end against perl:
 # `my @a = ("hi","there"); print $a[1]` prints "there", and length() of it is 5.

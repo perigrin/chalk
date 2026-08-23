@@ -18,19 +18,16 @@ use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: the join lattice
 # CFG node operations — these carry control tokens and are never hash-consed.
 my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
 
-# Map a B::SoN stamp lattice type to a Chalk representation. B::SoN carries type
-# info as a `stamp` (SoN::IR::Stamp lattice: Int < Num < Str < Scalar, plus
-# Boolean/Undef/refs); Chalk's backend requires an explicit `representation`.
-# Only the concrete, lowerable types map; anything else is left unset (the
-# backend's _require_repr then reports an honest GAP rather than mislowering).
-my %STAMP_TO_REPR = (
-    Int     => 'Int',
-    Num     => 'Num',
-    Str     => 'Str',
-    Boolean => 'Bool',
-    Undef   => 'Undef',
-    Object  => 'Object',
-);
+# B::SoN carries type info as a `stamp` drawn from the shared lattice (see
+# Chalk::Grammar::Perl::TypeLibrary, which is canonical); Chalk's backend
+# requires an explicit `representation`. The names agree, so the only question
+# at this boundary is which stamps the backend can lower.
+# The stamp names that are also representation names. This is a WHITELIST, not
+# a translation: the two vocabularies agree name-for-name, and what this set
+# carries is which stamps the backend can actually lower. A stamp outside it
+# (Scalar, List, DualVar, a ref type) leaves the representation unset so
+# _require_repr reports an honest GAP instead of mislowering.
+my %LOWERABLE_STAMP = map { $_ => 1 } qw(Int Num Str Boolean Undef Object);
 
 # -----------------------------------------------------------------------
 # _extract_fields($node, \%id_remap) — returns a hashref of extra fields
@@ -509,16 +506,12 @@ sub _deserialize_graph ($method_data) {
             $args{scope} = $fields->{scope} // 'my';
         }
         elsif ($op eq 'Coerce') {
-            # from_repr/to_repr are REPRESENTATIONS, but the producer names them
-            # with its STAMP vocabulary, which differs for two types: a stamp
-            # says 'Boolean' where a representation says 'Bool'. Map them
-            # through the same table a stamp goes through, or a
-            # Coerce(Boolean->Str) arrives with a repr name the backend's
-            # dispatch cannot match and GAPs as unlowerable.
-            $args{from_repr} = $STAMP_TO_REPR{ $fields->{from_repr} // '' }
-                            // $fields->{from_repr};
-            $args{to_repr}   = $STAMP_TO_REPR{ $fields->{to_repr} // '' }
-                            // $fields->{to_repr};
+            # from_repr/to_repr are REPRESENTATIONS named in the producer's stamp
+            # vocabulary. The two vocabularies now agree name-for-name, so these
+            # pass straight through; the reconciliation that used to happen here
+            # existed only for Boolean, which chalk spelled 'Bool'.
+            $args{from_repr} = $fields->{from_repr};
+            $args{to_repr}   = $fields->{to_repr};
         }
 
         my $node;
@@ -552,16 +545,16 @@ sub _deserialize_graph ($method_data) {
         # Map a B::SoN stamp to a Chalk representation so the backend can lower
         # the node runtime-free. Chalk's own serializer emits no stamp, so this
         # only fires for B::SoN-produced JSON.
-        if (defined $nd->{stamp} && exists $STAMP_TO_REPR{ $nd->{stamp} }) {
-            $node->set_representation($STAMP_TO_REPR{ $nd->{stamp} });
+        if (defined $nd->{stamp} && $LOWERABLE_STAMP{ $nd->{stamp} }) {
+            $node->set_representation($nd->{stamp});
         }
 
         # A Print carries no stamp (the producer leaves it unstamped), but perl's
         # print returns a genuine boolean (builtin::is_bool true), so a
-        # value-context `my $ok = print ...` reads Bool:1. Seed the repr as Bool
+        # value-context `my $ok = print ...` reads Bool:1. Seed the repr as Boolean
         # so the return epilogue tags it correctly.
         if ($op eq 'Print') {
-            $node->set_representation('Bool');
+            $node->set_representation('Boolean');
         }
 
         push @nodes, $node;
@@ -975,11 +968,11 @@ my %_NODE_OPERAND_REPR = (Print => 'Str');
 # absent as a SOURCE for the same reason it is present as a target elsewhere --
 # it is a backend cell, unwrapped at its use site rather than converted here.
 my %_COERCIBLE_TO = (
-    Int   => { Num => 1, Str => 1, Bool => 1 },
-    Num   => { Int => 1, Str => 1, Bool => 1 },
-    Str   => { Num => 1, Bool => 1 },
-    Bool  => { Int => 1, Num => 1, Str => 1 },
-    Undef => { Int => 1, Num => 1, Str => 1, Bool => 1 },
+    Int   => { Num => 1, Str => 1, Boolean => 1 },
+    Num   => { Int => 1, Str => 1, Boolean => 1 },
+    Str   => { Num => 1, Boolean => 1 },
+    Boolean  => { Int => 1, Num => 1, Str => 1 },
+    Undef => { Int => 1, Num => 1, Str => 1, Boolean => 1 },
     Slot  => { Str => 1 },
 );
 
@@ -1037,19 +1030,19 @@ sub _insert_str_coercions ($graphs) {
                 # exists is a question about the PAIR -- is this conversion
                 # defined? -- and NOT a question about the lattice. Int->Str is
                 # legitimate because stringification is defined for an Int, not
-                # because Int <: Str; Bool->Str is equally legitimate even
-                # though Bool is a SIBLING of Str under Scalar and no subtype
+                # because Int <: Str; Boolean->Str is equally legitimate even
+                # though Boolean is a SIBLING of Str under Scalar and no subtype
                 # relation holds in either direction.
                 #
                 # Keying this on subtyping was wrong twice over, both measured:
                 # requiring `is_subtype($repr, $want)` un-lowered six cases
-                # whose Bool/Slot operands print perfectly well, and exempting
+                # whose Boolean/Slot operands print perfectly well, and exempting
                 # Str wholesale then un-lowered eight more by stringifying the
                 # ArrayRef operand of `scalar @a`.
                 #
                 # The defined pairs are the ones _lower_coerce implements
-                # (Context.pm _lower_coerce): Int<->Num, anything->Bool,
-                # Bool->Num/Int, Undef->Int/Num, scalars->Str, Str->Num/Bool.
+                # (Context.pm _lower_coerce): Int<->Num, anything->Boolean,
+                # Boolean->Num/Int, Undef->Int/Num, scalars->Str, Str->Num/Boolean.
                 # Aggregates appear in NONE of them -- an ArrayRef reaching a
                 # scalar position is a type error to report, not a missing
                 # conversion to invent.
@@ -1340,12 +1333,12 @@ my %_COMPUTED_REPR = (
     # mismatched pair could not be lowered at all. It can now: the backend
     # bridges a non-conforming ARM with a coercion to the node's repr, so the
     # join is what tells it WHICH type to bridge to. Measured, 'join' is a strict
-    # superset of 'same' here -- it types Bool&&Bool -> Bool and Int&&Int -> Int
+    # superset of 'same' here -- it types Boolean&&Boolean -> Boolean and Int&&Int -> Int
     # exactly as before, and additionally types Int&&Str -> Str and
     # Int&&Num -> Num, which 'same' left untyped.
     #
-    # Bool mixed with a chain member (Int&&Bool, Bool&&Str) still joins to undef
-    # -- Bool is a sibling of the Int <: Num <: Str chain under Scalar, not a
+    # Boolean mixed with a chain member (Int&&Boolean, Boolean&&Str) still joins to undef
+    # -- Boolean is a sibling of the Int <: Num <: Str chain under Scalar, not a
     # point on it -- and stays a loud GAP, as it did under 'same'.
     And => 'join', Or => 'join',
     Add => 'join', Subtract => 'join', Multiply => 'join', Negate => 'join',
@@ -1358,8 +1351,8 @@ my %_COMPUTED_REPR = (
     RefType => 'Str',
     # Predicates are always Boolean. Defined/Not gate an early-return guard
     # (`E // return X` lowers to If(Not(Defined(E)))); the backend needs an
-    # explicit Bool repr on the If condition to emit an i1 branch.
-    (map { $_ => 'Bool' } qw(
+    # explicit Boolean repr on the If condition to emit an i1 branch.
+    (map { $_ => 'Boolean' } qw(
         NumEq NumLt NumGt NumLe NumGe NumNe StrEq StrLt StrGt StrLe StrGe StrNe
         Defined Not)),
     NumCmp => 'Int', StrCmp => 'Int',
@@ -1372,10 +1365,10 @@ my %_COMPUTED_REPR = (
 # TypeLibrary already states, and the same duplication the Add requirement had.
 #
 # The lattice also EXPLAINS the two exclusions the rank table could only record
-# as absence: Undef and Bool are siblings under Scalar, not points on the
+# as absence: Undef and Boolean are siblings under Scalar, not points on the
 # numeric-to-string chain, so neither widens into it. Verified against
 # is_subtype: Int <: Num <: Str all hold; Undef <: Str, Undef <: Num,
-# Bool <: Str and Bool <: Num all do not.
+# Boolean <: Str and Boolean <: Num all do not.
 #
 # Returns undef when no candidate is a supertype of every repr -- the caller
 # leaves the node untyped and the backend GAPs loudly, rather than guessing a
@@ -1410,7 +1403,7 @@ sub _join_repr (@reprs) {
 my %_SEED_REPR = (
     ArrayRef   => 'ArrayRef',
     HashRef    => 'HashRef',
-    RegexMatch => 'Bool',
+    RegexMatch => 'Boolean',
 );
 
 # _seed_and_propagate_reprs(\%graphs) — the universal repr pass (runs for EVERY
@@ -1587,7 +1580,7 @@ sub _propagate_computed_reprs ($graphs) {
                 # A TernaryExpr's inputs are (cond, then, else), but `$c ? $a :
                 # $b` NEVER evaluates to `$c` -- the condition is not a value
                 # the expression can yield, so it must not enter the join.
-                # Including it poisons the result: a Bool condition is off the
+                # Including it poisons the result: a Boolean condition is off the
                 # Int<:Num<:Str chain, so no candidate dominates and the node
                 # goes untyped even when both arms agree.
                 #

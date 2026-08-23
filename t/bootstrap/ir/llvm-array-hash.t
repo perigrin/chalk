@@ -193,7 +193,7 @@ subtest 'A3d: Defined(Subscript OOB, Slot) -> Bool: (false)' => sub {
     $elem->set_representation('Slot');
 
     my $def = $f->make('Defined', inputs => [$elem]);
-    $def->set_representation('Bool');
+    $def->set_representation('Boolean');
 
     my $ret = $f->make_cfg('Return', inputs => [$def]);
 
@@ -238,7 +238,7 @@ subtest 'A3e: Defined(Subscript in-bounds, Int) -> Bool:1 (true)' => sub {
     $elem->set_representation('Int');
 
     my $def = $f->make('Defined', inputs => [$elem]);
-    $def->set_representation('Bool');
+    $def->set_representation('Boolean');
 
     my $ret = $f->make_cfg('Return', inputs => [$def]);
 

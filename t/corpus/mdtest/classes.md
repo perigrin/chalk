@@ -486,7 +486,7 @@ context: scalar
 %new_c     = Call(%ten, dispatch_kind: "method", name: "new", class: "Counter", param_names: "n") :Object
 %five      = Constant(5) :Int
 %three     = Constant(3) :Int
-%cmp       = NumGt(%five, %three) :Bool
+%cmp       = NumGt(%five, %three) :Boolean
 %if        = If(%cmp)
 %proj0     = Proj(%if, index: 0)
 %proj1     = Proj(%if, index: 1)
@@ -539,7 +539,7 @@ context: scalar
 %mf_n      = MOP::Field(class: %cls, name: "n", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
 %fa_rd     = FieldAccess(field_index: 0, field_stash: "Counter") :Int
 %hundred   = Constant(100) :Int
-%cmp       = NumLt(%fa_rd, %hundred) :Bool
+%cmp       = NumLt(%fa_rd, %hundred) :Boolean
 %if        = If(%cmp)
 %proj0     = Proj(%if, index: 0)
 %proj1     = Proj(%if, index: 1)
@@ -603,7 +603,7 @@ context: scalar
 %mf_n      = MOP::Field(class: %cls, name: "n", fieldix: 0, param: true, reader: false, has_default: false, type: "Int")
 %fa_rd     = FieldAccess(field_index: 0, field_stash: "Counter") :Int
 %hundred   = Constant(100) :Int
-%cmp       = NumLt(%fa_rd, %hundred) :Bool
+%cmp       = NumLt(%fa_rd, %hundred) :Boolean
 %if        = If(%cmp)
 %proj0     = Proj(%if, index: 0)
 %proj1     = Proj(%if, index: 1)

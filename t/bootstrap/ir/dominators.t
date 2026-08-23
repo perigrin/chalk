@@ -88,7 +88,7 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
     $c2->set_representation('Int');
     my $cmp  = $f->make('NumGt', inputs => [$c5, $c0]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
@@ -214,7 +214,7 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     $s_phi->set_representation('Int');
 
     my $cmp  = $f->make('NumGt', inputs => [$n_phi, $c0b]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
     $cmp->set_control_in($loop);   # structural: header condition
 
     my $s_new = $f->make('Add', inputs => [$s_phi, $n_phi]);
@@ -307,9 +307,9 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     $vx->set_representation('Int');
 
     my $cmp_out = $f->make('NumGt', inputs => [$n, $zero]);
-    $cmp_out->set_representation('Bool');
+    $cmp_out->set_representation('Boolean');
     my $cmp_in  = $f->make('NumGt', inputs => [$n, $three]);
-    $cmp_in->set_representation('Bool');
+    $cmp_in->set_representation('Boolean');
 
     my $lhs3 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
     $lhs3->set_representation('Int');
@@ -410,7 +410,7 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $c0  = $f->make('Constant', value => '0', const_type => 'integer');
     $c0->set_representation('Int');
     my $cmp = $f->make('NumGt', inputs => [$c5, $c0]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);

@@ -37,7 +37,7 @@ sub spec_block ($preds) {
         %start = Start()
         %n     = Constant(5) :Int
         %zero  = Constant(0) :Int
-        %cmp   = NumGt(%n, %zero) :Bool
+        %cmp   = NumGt(%n, %zero) :Boolean
         %c1    = Constant(1) :Int
         %c2    = Constant(2) :Int
         %spos  = Constant("pos\\n") :Str
@@ -115,7 +115,7 @@ subtest 'the effect-chain exemption did NOT gut the other checks' => sub {
         %start = Start()
         %n     = Constant(5) :Int
         %zero  = Constant(0) :Int
-        %cmp   = NumGt(%n, %zero) :Bool
+        %cmp   = NumGt(%n, %zero) :Boolean
         %c1    = Constant(1) :Int
         %spos  = Constant("pos\n") :Str
         %sneg  = Constant("neg\n") :Str

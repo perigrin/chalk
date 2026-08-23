@@ -25,7 +25,7 @@ my %STAMP_TO_REPR = (
     Int     => 'Int',
     Num     => 'Num',
     Str     => 'Str',
-    Boolean => 'Bool',
+    Boolean => 'Boolean',
     Undef   => 'Undef',
     Object  => 'Object',
 );
@@ -455,10 +455,10 @@ sub _deserialize_graph ($method_data) {
 
         # A Print carries no stamp (the producer leaves it unstamped), but perl's
         # print returns a genuine boolean (builtin::is_bool true), so a
-        # value-context `my $ok = print ...` reads Bool:1. Seed the repr as Bool
+        # value-context `my $ok = print ...` reads Bool:1. Seed the repr as Boolean
         # so the return epilogue tags it correctly.
         if ($op eq 'Print') {
-            $node->set_representation('Bool');
+            $node->set_representation('Boolean');
         }
 
         # A loop-header condition carries a control edge to its Loop. Demote it
@@ -891,9 +891,9 @@ my %_COMPUTED_REPR = (
     # And (&&) / Or (||) RETURN ONE OF THEIR OPERANDS (`$a && $b` is $a or $b, not a
     # fresh boolean), so the result repr is the operands' -- and both operands must
     # share a machine type for the backend's merge phi. The 'same' rule requires the
-    # two operand reprs to agree and yields that repr. This types Bool && Bool -> Bool
+    # two operand reprs to agree and yields that repr. This types Boolean && Boolean -> Boolean
     # (a comparison guard && a print, the cond.t idiom) as well as Int && Int -> Int
-    # -- unlike 'join', which cannot widen Bool (it has no _REPR_RANK).
+    # -- unlike 'join', which cannot widen Boolean (it has no _REPR_RANK).
     And => 'same', Or => 'same',
     Add => 'join', Subtract => 'join', Multiply => 'join', Negate => 'join',
     Divide => 'Num', Power => 'Num', Modulo => 'Int',
@@ -905,8 +905,8 @@ my %_COMPUTED_REPR = (
     RefType => 'Str',
     # Predicates are always Boolean. Defined/Not gate an early-return guard
     # (`E // return X` lowers to If(Not(Defined(E)))); the backend needs an
-    # explicit Bool repr on the If condition to emit an i1 branch.
-    (map { $_ => 'Bool' } qw(
+    # explicit Boolean repr on the If condition to emit an i1 branch.
+    (map { $_ => 'Boolean' } qw(
         NumEq NumLt NumGt NumLe NumGe NumNe StrEq StrLt StrGt StrLe StrGe StrNe
         Defined Not)),
     NumCmp => 'Int', StrCmp => 'Int',
@@ -920,7 +920,7 @@ my %_REPR_RANK = (Int => 0, Num => 1, Str => 2);
 my %_SEED_REPR = (
     ArrayRef   => 'ArrayRef',
     HashRef    => 'HashRef',
-    RegexMatch => 'Bool',
+    RegexMatch => 'Boolean',
 );
 
 # _seed_and_propagate_reprs(\%graphs) — the universal repr pass (runs for EVERY

@@ -39,7 +39,7 @@ subtest 'an exit-Region phi consumer dies with a diagnostic' => sub {
     my $i_phi = $f->make('Phi', region => $loop, values => [$ri0]);
     $i_phi->set_representation('Int');
     my $cmp = $f->make('NumLt', inputs => [$i_phi, int_const($f, 3)]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
     my $i_new = $f->make('Add', inputs => [$i_phi, int_const($f, 1)]);
     $i_new->set_representation('Int');
     $i_phi->set_backedge($i_new);

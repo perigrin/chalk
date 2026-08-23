@@ -22,10 +22,10 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # Two deliberate divergences from the paper remain, both filed rather than
     # fixed here because each is a rename sweep with its own blast radius:
     #
-    #   Bool is the paper's Boolean. Same type, same two members. The paper
+    #   Boolean is the paper's Boolean. Same type, same two members. The paper
     #        settled on Boolean in both documents specifically to kill chalk's
     #        on-the-wire rename table, so this SHOULD converge — but 1100+ sites
-    #        across chalk and the producer say Bool today.
+    #        across chalk and the producer say Boolean today.
     #   Any  should be deleted outright per the unification decision. It appears
     #        nowhere outside this file, but the "13 of 13 uses are variadic
     #        tails" measurement behind that decision is now stale: several uses
@@ -39,7 +39,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
         Str       => 'Scalar',
         Num       => 'Str',
         Int       => 'Num',
-        Bool      => 'Str',         # true/false: Str carrying boolean marking
+        Boolean      => 'Str',         # true/false: Str carrying boolean marking
         VString   => 'Str',         # v-strings: Str carrying 'V' magic
         DualVar   => 'Scalar',      # in Scalar but in neither Str nor Num
         Ref       => 'Scalar',
@@ -75,7 +75,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # Assign a unique bit position to each leaf type.
         my $bit = 0;
         my @leaf_types = qw(
-            Undef Bool VString Regex Int DualVar Void
+            Undef Boolean VString Regex Int DualVar Void
             LValueRef ArrayRef HashRef CodeRef GlobRef
             Array Hash Code Glob IO Format
         );
@@ -158,7 +158,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
         keys    => { min_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
         values  => { min_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
         delete  => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Scalar' },
-        exists  => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Bool' },
+        exists  => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Boolean' },
         each    => { min_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
 
         # String operations
@@ -173,7 +173,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
         substr  => { min_arity => 2, arg_types => ['Str', 'Num', 'Num'],         return_type => 'Str' },
 
         # Type test
-        defined => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Bool' },
+        defined => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Boolean' },
         ref     => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Str' },
 
         # Context
@@ -181,14 +181,14 @@ class Chalk::Grammar::Perl::TypeLibrary {
 
         # Control (variadic: accept scalars and arrays via flattening)
         die     => { min_arity => 0, arg_types => ['Any'],                       return_type => 'None' },
-        warn    => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Bool' },
+        warn    => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Boolean' },
 
         # OO
         bless   => { min_arity => 1, arg_types => ['Ref', 'Str'],               return_type => 'Object' },
 
         # I/O (variadic)
-        print   => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Bool' },
-        say     => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Bool' },
+        print   => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Boolean' },
+        say     => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Boolean' },
 
         # Flow control (variadic: return LIST)
         return  => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Any' },
@@ -360,8 +360,8 @@ class Chalk::Grammar::Perl::TypeLibrary {
             return 'Scalar' if $type eq 'List';
             return $type;  # already scalar-ish
         }
-        if ($context eq 'Bool') {
-            return 'Bool';
+        if ($context eq 'Boolean') {
+            return 'Boolean';
         }
         if ($context eq 'Void') {
             return undef;  # discard type info
@@ -374,11 +374,11 @@ class Chalk::Grammar::Perl::TypeLibrary {
     my %BINARY_OP_SIGNATURES;
     {
         my $num_num_num  = { left => 'Num',    right => 'Num',   result => 'Num' };
-        my $num_num_bool = { left => 'Num',    right => 'Num',   result => 'Bool' };
+        my $num_num_bool = { left => 'Num',    right => 'Num',   result => 'Boolean' };
         my $str_str_str  = { left => 'Str',    right => 'Str',   result => 'Str' };
-        my $str_str_bool = { left => 'Str',    right => 'Str',   result => 'Bool' };
+        my $str_str_bool = { left => 'Str',    right => 'Str',   result => 'Boolean' };
         my $any_any_any  = { left => 'Any',    right => 'Any',   result => 'Any' };
-        my $any_any_bool = { left => 'Any',    right => 'Any',   result => 'Bool' };
+        my $any_any_bool = { left => 'Any',    right => 'Any',   result => 'Boolean' };
         my $int_int_int  = { left => 'Int',    right => 'Int',   result => 'Int' };
 
         # Arithmetic
@@ -412,11 +412,11 @@ class Chalk::Grammar::Perl::TypeLibrary {
         }
 
         # Type test
-        $BINARY_OP_SIGNATURES{'isa'} = { left => 'Scalar', right => 'Str', result => 'Bool' };
+        $BINARY_OP_SIGNATURES{'isa'} = { left => 'Scalar', right => 'Str', result => 'Boolean' };
 
         # Regex binding
-        $BINARY_OP_SIGNATURES{'=~'} = { left => 'Str', right => 'Regex', result => 'Bool' };
-        $BINARY_OP_SIGNATURES{'!~'} = { left => 'Str', right => 'Regex', result => 'Bool' };
+        $BINARY_OP_SIGNATURES{'=~'} = { left => 'Str', right => 'Regex', result => 'Boolean' };
+        $BINARY_OP_SIGNATURES{'!~'} = { left => 'Str', right => 'Regex', result => 'Boolean' };
 
         # Range
         $BINARY_OP_SIGNATURES{'..'} = { left => 'Int', right => 'Int', result => 'List' };
@@ -435,8 +435,8 @@ class Chalk::Grammar::Perl::TypeLibrary {
     my %UNARY_OP_SIGNATURES = (
         '-'   => { operand => 'Num', result => 'Num' },
         '+'   => { operand => 'Num', result => 'Num' },
-        '!'   => { operand => 'Any', result => 'Bool' },
-        'not' => { operand => 'Any', result => 'Bool' },
+        '!'   => { operand => 'Any', result => 'Boolean' },
+        'not' => { operand => 'Any', result => 'Boolean' },
         '~'   => { operand => 'Int', result => 'Int' },
         '\\'  => { operand => 'Any', result => 'Ref' },
     );
@@ -493,7 +493,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # One-argument ops.
         Length => 'length',
 
-        # Two-argument ops. String comparison is (Str, Str) -> Bool for every
+        # Two-argument ops. String comparison is (Str, Str) -> Boolean for every
         # member; Concat is (Str, Str) -> Str.
         StrEq  => 'eq',  StrNe  => 'ne',  StrLt => 'lt',
         StrGt  => 'gt',  StrLe  => 'le',  StrGe => 'ge',

@@ -42,7 +42,7 @@ context: scalar
 ```ir
 %start = Start()
 %s      = Constant("foobar") :Str
-%m      = RegexMatch(%s, pattern: "foo") :Bool
+%m      = RegexMatch(%s, pattern: "foo") :Boolean
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
@@ -82,7 +82,7 @@ context: scalar
 %start = Start()
 %qr     = Constant("foo", const_type: "regex") :Regex
 %s      = Constant("foobar") :Str
-%m      = Match(%s, %qr) :Bool
+%m      = Match(%s, %qr) :Boolean
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
@@ -148,7 +148,7 @@ context: scalar
 ```ir
 %start = Start()
 %s      = Constant("foobar") :Str
-%m      = RegexMatch(%s, pattern: "^foo") :Bool
+%m      = RegexMatch(%s, pattern: "^foo") :Boolean
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
@@ -183,7 +183,7 @@ context: scalar
 ```ir
 %start = Start()
 %s      = Constant("a9z") :Str
-%m      = RegexMatch(%s, pattern: "[0-9]") :Bool
+%m      = RegexMatch(%s, pattern: "[0-9]") :Boolean
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
@@ -220,7 +220,7 @@ context: scalar
 ```ir
 %start = Start()
 %s      = Constant("foo_1") :Str
-%m      = RegexMatch(%s, pattern: "^[A-Za-z_][A-Za-z0-9_]*$") :Bool
+%m      = RegexMatch(%s, pattern: "^[A-Za-z_][A-Za-z0-9_]*$") :Boolean
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
@@ -258,8 +258,8 @@ context: scalar
 ```ir
 %start = Start()
 %s      = Constant("hello") :Str
-%m      = RegexMatch(%s, pattern: "ell") :Bool
-%nm     = Not(%m) :Bool
+%m      = RegexMatch(%s, pattern: "ell") :Boolean
+%nm     = Not(%m) :Boolean
 %t      = Constant(111) :Int
 %e      = Constant(222) :Int
 %result = TernaryExpr(%nm, %t, %e) :Int
@@ -313,7 +313,7 @@ context: scalar
 ```ir
 %start = Start()
 %c      = Constant("test") :Str
-%m      = RegexMatch(%c, pattern: "^test") :Bool
+%m      = RegexMatch(%c, pattern: "^test") :Boolean
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
@@ -355,7 +355,7 @@ context: scalar
 ```ir
 %start = Start()
 %c      = Constant("nope") :Str
-%m      = RegexMatch(%c, pattern: "^test") :Bool
+%m      = RegexMatch(%c, pattern: "^test") :Boolean
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int
@@ -400,7 +400,7 @@ context: scalar
 ```ir
 %start = Start()
 %c      = Constant("test") :Str
-%m      = RegexMatch(%c, pattern: "^test") :Bool
+%m      = RegexMatch(%c, pattern: "^test") :Boolean
 %one    = Constant(1) :Int
 %zero   = Constant(0) :Int
 %result = TernaryExpr(%m, %one, %zero) :Int

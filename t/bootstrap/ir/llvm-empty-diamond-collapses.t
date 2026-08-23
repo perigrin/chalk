@@ -53,7 +53,7 @@ sub build_pure_diamond () {
 
     my $cond = $f->make('NumGt', inputs => [$two, $one],
                         left => $two, right => $one);
-    $cond->set_representation('Bool');
+    $cond->set_representation('Boolean');
 
     my $if   = $f->make('If',   inputs => [$start, $cond]);
     my $then = $f->make('Proj', index => 0, inputs => [$if]);
@@ -100,7 +100,7 @@ sub build_effectful_diamond () {
 
     my $cond = $f->make('NumGt', inputs => [$two, $one],
                         left => $two, right => $one);
-    $cond->set_representation('Bool');
+    $cond->set_representation('Boolean');
 
     my $if   = $f->make('If',   inputs => [$start, $cond]);
     my $then = $f->make('Proj', index => 0, inputs => [$if]);

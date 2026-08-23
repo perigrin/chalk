@@ -39,7 +39,7 @@ class Chalk::IR::Node {
     field $schedule_data :reader = undef;
 
     # Machine-level representation of the value produced by this node.
-    # Realized lattice (see typed-ir-representation.md): 'Bool' (i1),
+    # Realized lattice (see typed-ir-representation.md): 'Boolean' (i1),
     # 'Int' (i64), 'Num' (double/f64), 'Str' ({ptr,len,encoding}),
     # 'Undef'/'Slot' ({defined,payload}), 'Array' ({len,cap,Slot*}),
     # 'Hash' (linear-scan table), 'ArrayRef'/'HashRef' (i8* to the boxed

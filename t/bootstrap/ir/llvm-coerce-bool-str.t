@@ -1,4 +1,4 @@
-# ABOUTME: Tests for Coerce(Bool->Str) LLVM lowering — bool string-face globals (G2 reopen-1).
+# ABOUTME: Tests for Coerce(Boolean->Str) LLVM lowering — bool string-face globals (G2 reopen-1).
 # ABOUTME: Verifies lli compiles/runs, output matches perl oracle, and .ll is libperl-free.
 use 5.42.0;
 use utf8;
@@ -18,15 +18,15 @@ unless (-x $LLI) {
     plan skip_all => "lli not found at $LLI";
 }
 
-# Helper: build a graph where Not(Int) -> Coerce(Bool->Str) -> Return(:Str).
+# Helper: build a graph where Not(Int) -> Coerce(Boolean->Str) -> Return(:Str).
 # Not(nonzero) = false -> Coerce -> "" -> oracle Str:
 # Not(0)       = true  -> Coerce -> "1" -> oracle Str:1
 #
-# We use an integer constant as input to Not, so Bool comes from a real
-# truthiness operation (not a synthetic Bool constant).
+# We use an integer constant as input to Not, so Boolean comes from a real
+# truthiness operation (not a synthetic Boolean constant).
 #
-#   Constant(val :Int) -> Coerce(Int->Bool) :Bool -> Not :Bool
-#                         -> Coerce(Bool->Str) :Str -> Return
+#   Constant(val :Int) -> Coerce(Int->Boolean) :Boolean -> Not :Boolean
+#                         -> Coerce(Boolean->Str) :Str -> Return
 
 sub make_not_bool_str_graph {
     my ($int_val) = @_;   # 0 = falsy (Not -> true -> "1"), nonzero = truthy (Not -> false -> "")
@@ -35,21 +35,21 @@ sub make_not_bool_str_graph {
     my $cval = $f->make('Constant', value => $int_val, const_type => 'integer');
     $cval->set_representation('Int');
 
-    # Coerce Int->Bool (truthiness)
+    # Coerce Int->Boolean (truthiness)
     my $coerce_ib = $f->make('Coerce',
         from_repr => 'Int',
-        to_repr   => 'Bool',
+        to_repr   => 'Boolean',
         inputs    => [$cval],
     );
-    $coerce_ib->set_representation('Bool');
+    $coerce_ib->set_representation('Boolean');
 
     # Not: logical negation
     my $not_node = $f->make('Not', inputs => [$coerce_ib]);
-    $not_node->set_representation('Bool');
+    $not_node->set_representation('Boolean');
 
-    # Coerce Bool->Str: string-face "" or "1"
+    # Coerce Boolean->Str: string-face "" or "1"
     my $coerce_bs = $f->make('Coerce',
-        from_repr => 'Bool',
+        from_repr => 'Boolean',
         to_repr   => 'Str',
         inputs    => [$not_node],
     );
@@ -72,7 +72,7 @@ sub run_ll {
 }
 
 # ---------------------------------------------------------------------------
-# CBS1: Coerce(Bool->Str) with truthy input (5): Not(5) = false, Str face = "".
+# CBS1: Coerce(Boolean->Str) with truthy input (5): Not(5) = false, Str face = "".
 # Oracle: Str:  (type-tagged empty string)
 # Lowers without dying.
 # ---------------------------------------------------------------------------
@@ -80,12 +80,12 @@ sub run_ll {
     my $ret = make_not_bool_str_graph(5);
     my $ll;
     eval { $ll = Chalk::Target::LLVM->lower($ret) };
-    ok(!$@, "CBS1: Coerce(Bool->Str) truthy-input lowers without dying (err: $@)");
+    ok(!$@, "CBS1: Coerce(Boolean->Str) truthy-input lowers without dying (err: $@)");
     ok(defined $ll, 'CBS1: lower() returns defined text');
 }
 
 # ---------------------------------------------------------------------------
-# CBS2: Coerce(Bool->Str) with falsy input (0): Not(0) = true, Str face = "1".
+# CBS2: Coerce(Boolean->Str) with falsy input (0): Not(0) = true, Str face = "1".
 # Oracle: Str:1  (type-tagged "1")
 # Lowers without dying.
 # ---------------------------------------------------------------------------
@@ -93,12 +93,12 @@ sub run_ll {
     my $ret = make_not_bool_str_graph(0);
     my $ll;
     eval { $ll = Chalk::Target::LLVM->lower($ret) };
-    ok(!$@, "CBS2: Coerce(Bool->Str) falsy-input lowers without dying (err: $@)");
+    ok(!$@, "CBS2: Coerce(Boolean->Str) falsy-input lowers without dying (err: $@)");
     ok(defined $ll, 'CBS2: lower() returns defined text');
 }
 
 # ---------------------------------------------------------------------------
-# CBS3: Coerce(Bool->Str) truthy input — lli compiles without "undefined value".
+# CBS3: Coerce(Boolean->Str) truthy input — lli compiles without "undefined value".
 # This is the key defect: the prior stub set _need_bool_str_globals but never
 # emitted the globals, causing lli to reject with "use of undefined value".
 # ---------------------------------------------------------------------------
@@ -109,12 +109,12 @@ sub run_ll {
     my ($exit, $out) = run_ll($ll);
 
     unlike($out, qr/undefined value/i,
-        'CBS3: lli does NOT report "undefined value" for false-face Bool->Str');
-    is($exit, 0, 'CBS3: lli exits 0 for false-face Bool->Str');
+        'CBS3: lli does NOT report "undefined value" for false-face Boolean->Str');
+    is($exit, 0, 'CBS3: lli exits 0 for false-face Boolean->Str');
 }
 
 # ---------------------------------------------------------------------------
-# CBS4: Coerce(Bool->Str) falsy input — lli compiles without "undefined value".
+# CBS4: Coerce(Boolean->Str) falsy input — lli compiles without "undefined value".
 # The false-face ("") is the tricky one: [1 x i8] c"\00" (NUL only, empty string).
 # ---------------------------------------------------------------------------
 {
@@ -124,8 +124,8 @@ sub run_ll {
     my ($exit, $out) = run_ll($ll);
 
     unlike($out, qr/undefined value/i,
-        'CBS4: lli does NOT report "undefined value" for true-face Bool->Str');
-    is($exit, 0, 'CBS4: lli exits 0 for true-face Bool->Str');
+        'CBS4: lli does NOT report "undefined value" for true-face Boolean->Str');
+    is($exit, 0, 'CBS4: lli exits 0 for true-face Boolean->Str');
 }
 
 # ---------------------------------------------------------------------------
@@ -165,9 +165,9 @@ sub run_ll {
     my $ret = make_not_bool_str_graph(5);
     my $ll  = Chalk::Target::LLVM->lower($ret);
 
-    unlike($ll, qr/Perl_/,    'CBS7: false-face Bool->Str .ll: no Perl_ C-API');
-    unlike($ll, qr/\bSV\b/,   'CBS7: false-face Bool->Str .ll: no SV type');
-    unlike($ll, qr/libperl/,  'CBS7: false-face Bool->Str .ll: no libperl');
+    unlike($ll, qr/Perl_/,    'CBS7: false-face Boolean->Str .ll: no Perl_ C-API');
+    unlike($ll, qr/\bSV\b/,   'CBS7: false-face Boolean->Str .ll: no SV type');
+    unlike($ll, qr/libperl/,  'CBS7: false-face Boolean->Str .ll: no libperl');
 }
 
 # ---------------------------------------------------------------------------
@@ -177,9 +177,9 @@ sub run_ll {
     my $ret = make_not_bool_str_graph(0);
     my $ll  = Chalk::Target::LLVM->lower($ret);
 
-    unlike($ll, qr/Perl_/,    'CBS8: true-face Bool->Str .ll: no Perl_ C-API');
-    unlike($ll, qr/\bSV\b/,   'CBS8: true-face Bool->Str .ll: no SV type');
-    unlike($ll, qr/libperl/,  'CBS8: true-face Bool->Str .ll: no libperl');
+    unlike($ll, qr/Perl_/,    'CBS8: true-face Boolean->Str .ll: no Perl_ C-API');
+    unlike($ll, qr/\bSV\b/,   'CBS8: true-face Boolean->Str .ll: no SV type');
+    unlike($ll, qr/libperl/,  'CBS8: true-face Boolean->Str .ll: no libperl');
 }
 
 # ---------------------------------------------------------------------------
@@ -207,12 +207,12 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 # Finding 3 regression tests: _lower_not / _ensure_i1 repr-undef guard.
 #
-# F3A: Not with an explicit :Bool operand lowers correctly (Bool -> Bool).
+# F3A: Not with an explicit :Boolean operand lowers correctly (Boolean -> Boolean).
 #      This is the normal case the guard must not break.
 # F3B: Not with an undef-repr operand must die loudly (not silently mismatch).
 # ---------------------------------------------------------------------------
 
-# F3A: Not over a Bool-repr Coerce(Int->Bool) lowers correctly — no type mismatch.
+# F3A: Not over a Boolean-repr Coerce(Int->Boolean) lowers correctly — no type mismatch.
 {
     use Chalk::IR::Node::Not;
 
@@ -221,18 +221,18 @@ sub run_ll {
     my $c5 = $f->make('Constant', value => 5, const_type => 'integer');
     $c5->set_representation('Int');
 
-    my $coerce = $f->make('Coerce', from_repr => 'Int', to_repr => 'Bool', inputs => [$c5]);
-    $coerce->set_representation('Bool');
+    my $coerce = $f->make('Coerce', from_repr => 'Int', to_repr => 'Boolean', inputs => [$c5]);
+    $coerce->set_representation('Boolean');
 
-    # Not over an explicit :Bool operand — _ensure_i1 must pass through as i1.
+    # Not over an explicit :Boolean operand — _ensure_i1 must pass through as i1.
     my $not_node = $f->make('Not', inputs => [$coerce]);
-    $not_node->set_representation('Bool');
+    $not_node->set_representation('Boolean');
 
     my $ret = $f->make_cfg('Return', inputs => [$not_node]);
 
     my $ll;
     eval { $ll = Chalk::Target::LLVM->lower($ret) };
-    ok(!$@, "F3A: Not(Bool) lowers without dying (err: $@)");
+    ok(!$@, "F3A: Not(Boolean) lowers without dying (err: $@)");
 
     SKIP: {
         skip 'F3A lowering failed', 3 unless defined $ll;
@@ -248,7 +248,7 @@ sub run_ll {
         my $exit = $? >> 8;
         chomp $out;
 
-        is($exit, 0,        'F3A: lli exits 0 for Not(Bool) graph');
+        is($exit, 0,        'F3A: lli exits 0 for Not(Boolean) graph');
         is($out, 'Bool:',   'F3A: Not(5) gives false = Bool: (type-tagged)');
     }
 }
@@ -262,10 +262,10 @@ sub run_ll {
 
     my $c5 = $f->make('Constant', value => 5, const_type => 'integer');
     # Intentionally leave representation unset — simulates a programming error
-    # where a Bool-typed value has lost its repr annotation.
+    # where a Boolean-typed value has lost its repr annotation.
 
     my $not_node = $f->make('Not', inputs => [$c5]);
-    $not_node->set_representation('Bool');
+    $not_node->set_representation('Boolean');
 
     my $ret = $f->make_cfg('Return', inputs => [$not_node]);
 

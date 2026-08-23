@@ -204,11 +204,11 @@ sub _method_fn_type {
     my ($result_repr) = @_;
     return 'i64 (i8*)' if !defined $result_repr || $result_repr eq 'Int';
     return '%StrPair (i8*)' if $result_repr eq 'Str';
-    return 'i1 (i8*)'   if $result_repr eq 'Bool';
+    return 'i1 (i8*)'   if $result_repr eq 'Boolean';
     return 'double (i8*)' if $result_repr eq 'Num';
     # Undef return: a method whose body value is statically undef (e.g. an
     # if/else field-mutation whose discarded residual is the assignment value).
-    # Undef lowers to the i1 defined-bit (always false), same shape as Bool.
+    # Undef lowers to the i1 defined-bit (always false), same shape as Boolean.
     return 'i1 (i8*)'   if $result_repr eq 'Undef';
     die "LLVM MOP: unsupported method return repr '$result_repr'";
 }
@@ -218,7 +218,7 @@ sub _method_fn_llvm_ret_type {
     my ($repr) = @_;
     return 'i64'      if !defined $repr || $repr eq 'Int';
     return '%StrPair' if $repr eq 'Str';
-    return 'i1'       if $repr eq 'Bool';
+    return 'i1'       if $repr eq 'Boolean';
     return 'double'   if $repr eq 'Num';
     return 'i1'       if $repr eq 'Undef';   # defined-bit, always false
     die "LLVM MOP: unsupported method return repr '$repr' for fn return type";
@@ -788,7 +788,7 @@ sub _emit_class_registry_ir {
                     push @lines, "  %r = call double $parent_fn(i8* %self)";
                     push @lines, '  ret double %r';
                 }
-                elsif ($ret_repr eq 'Bool') {
+                elsif ($ret_repr eq 'Boolean') {
                     push @lines, "  %r = call i1 $parent_fn(i8* %self)";
                     push @lines, '  ret i1 %r';
                 }
@@ -917,7 +917,7 @@ sub _emit_class_registry_ir {
             elsif ($ret_repr eq 'Num') {
                 push @lines, "  ret double $body_val";
             }
-            elsif ($ret_repr eq 'Bool') {
+            elsif ($ret_repr eq 'Boolean') {
                 push @lines, "  ret i1 $body_val";
             }
             elsif ($ret_repr eq 'Undef') {
@@ -1001,7 +1001,7 @@ sub _emit_class_registry_ir {
                 push @lines, '  ret %StrPair %ret_r1';
             }
             elsif ($ret_repr eq 'Num')  { push @lines, "  ret double $body_val" }
-            elsif ($ret_repr eq 'Bool'
+            elsif ($ret_repr eq 'Boolean'
                 || $ret_repr eq 'Undef'){ push @lines, "  ret i1 $body_val" }
             else                        { push @lines, "  ret i64 $body_val" }
             push @lines, '}';
@@ -1185,7 +1185,7 @@ sub lower_with_elaboration {
     push @lines, '';
 
     # Type-tagged output: both sides (perl oracle and lli) emit a canonical tag
-    # so Bool is distinguishable from its Str coercion. Tags: Int:<n> Num:<g> Bool:1/Bool:
+    # so Boolean is distinguishable from its Str coercion. Tags: Int:<n> Num:<g> Bool:1/Bool:
     # Format strings and string constants are per-representation, libperl-free.
     if ($program_mode) {
         # No epilogue globals — program_mode suppresses the whole type-tag print.
@@ -1210,8 +1210,8 @@ sub lower_with_elaboration {
         push @lines, '@num_nan_str  = private unnamed_addr constant [9 x i8]  c"Num:NaN\0A\00",  align 1';
         push @lines, '@fmt_num_s    = private unnamed_addr constant [3 x i8]  c"%s\00",           align 1';
     }
-    elsif ($result_repr eq 'Bool') {
-        # Bool prints either "Bool:1\n" (true) or "Bool:\n" (false).
+    elsif ($result_repr eq 'Boolean') {
+        # Boolean prints either "Bool:1\n" (true) or "Bool:\n" (false).
         # We use two string constants and a select instruction.
         # "Bool:1\n\0" = 8 bytes = [8 x i8]
         # "Bool:\n\0"  = 7 bytes = [7 x i8]
@@ -1230,15 +1230,15 @@ sub lower_with_elaboration {
         #   Format: "Str:%.*s\n\0" = S,t,r,:,%,.,*,s,\n,\0 = 10 bytes = [10 x i8]
         #   This is correct for any byte content (including embedded NULs in theory).
         #
-        # Path B (NUL-terminated only, from Coerce(Bool->Str) or unknown-length):
+        # Path B (NUL-terminated only, from Coerce(Boolean->Str) or unknown-length):
         #   printf("Str:%s\n", ptr)
         #   Format: "Str:%s\n\0" = 8 bytes = [8 x i8]
-        #   Both Bool-face strings are NUL-terminated globals — correct for ASCII.
+        #   Both Boolean-face strings are NUL-terminated globals — correct for ASCII.
         #
         # We emit both format globals; the epilogue selects at lower_with_elaboration
         # time based on whether the context has a tracked length for the result.
         #
-        # Bool string-face globals for Coerce(Bool->Str):
+        # Boolean string-face globals for Coerce(Boolean->Str):
         # "1\0" = [2 x i8]; "\0" = [1 x i8] (NUL only = empty string)
         push @lines, '@coerce_bool_str_true  = private unnamed_addr constant [2 x i8] c"1\00", align 1';
         push @lines, '@coerce_bool_str_false = private unnamed_addr constant [1 x i8] c"\00",   align 1';
@@ -1266,10 +1266,10 @@ sub lower_with_elaboration {
         die "LLVM backend (elaboration): cannot emit return of repr=$result_repr";
     }
 
-    # When body lowering set _need_bool_str_globals (Coerce(Bool->Str) used
+    # When body lowering set _need_bool_str_globals (Coerce(Boolean->Str) used
     # internally in a non-Str-return graph), emit those globals now. They are
     # always emitted for a Str result repr (above); this branch handles the
-    # case where the return is not Str but the body contains a Coerce(Bool->Str)
+    # case where the return is not Str but the body contains a Coerce(Boolean->Str)
     # in the MAIN graph (not a method body — method bodies are handled post-class).
     if ($ctx->{_need_bool_str_globals} && $result_repr ne 'Str') {
         push @lines, '@coerce_bool_str_true  = private unnamed_addr constant [2 x i8] c"1\00", align 1';
@@ -1553,7 +1553,7 @@ sub lower_with_elaboration {
         push @lines, '';
         push @lines, 'print_done:';
     }
-    elsif ($result_repr eq 'Bool') {
+    elsif ($result_repr eq 'Boolean') {
         # Select between "Bool:1\n" and "Bool:\n" based on the i1 result.
         push @lines, "  %bool_true_ptr  = getelementptr inbounds [8 x i8], [8 x i8]* \@bool_true_str,  i64 0, i64 0";
         push @lines, "  %bool_false_ptr = getelementptr inbounds [7 x i8], [7 x i8]* \@bool_false_str, i64 0, i64 0";
@@ -1565,7 +1565,7 @@ sub lower_with_elaboration {
         # Print as "Str:<value>\n" using the type-tag format.
         # Path A: length-tracked (from Constant/Concat/VarDecl Str nodes).
         #   Use printf("Str:%.*s\n", (i32)len, ptr) — correct for exactly len bytes.
-        # Path B: NUL-terminated only (from Coerce(Bool->Str) or unknown-length).
+        # Path B: NUL-terminated only (from Coerce(Boolean->Str) or unknown-length).
         #   Use printf("Str:%s\n", ptr) — correct for NUL-terminated ASCII.
         # A Str VALUE is the %Str aggregate, so the epilogue must destructure it
         # before handing a pointer to printf. Emitted inline because this block
@@ -1593,7 +1593,7 @@ sub lower_with_elaboration {
             push @lines, "  call i32 (i8*, ...) \@printf(i8* %fmt_str_len_ptr, i32 $len32, i8* $result_ref)";
         }
         else {
-            # Path B: NUL-terminated fallback (Coerce(Bool->Str) etc.)
+            # Path B: NUL-terminated fallback (Coerce(Boolean->Str) etc.)
             push @lines, '  %fmt_str_ptr = getelementptr inbounds [8 x i8], [8 x i8]* @fmt_str, i64 0, i64 0';
             push @lines, "  call i32 (i8*, ...) \@printf(i8* %fmt_str_ptr, i8* $result_ref)";
         }

@@ -30,7 +30,7 @@ sub lli_run {
 
 sub _mk { Chalk::IR::NodeFactory->new }
 
-# Build RegexMatch($subject_str =~ /$pattern/) -> Bool (matched?).
+# Build RegexMatch($subject_str =~ /$pattern/) -> Boolean (matched?).
 # The pattern is a compile-time literal attr (NOT a graph input) — that is what
 # makes the match runtime-free.
 sub match_node {
@@ -38,7 +38,7 @@ sub match_node {
     my $subj = $f->make('Constant', value => $subject, const_type => 'string');
     $subj->set_representation('Str');
     my $m = $f->make('RegexMatch', pattern => $pattern, flags => '', inputs => [$subj]);
-    $m->set_representation('Bool');
+    $m->set_representation('Boolean');
     return $m;
 }
 
@@ -410,7 +410,7 @@ subtest 'guards: flags and mid-pattern anchors die GAP' => sub {
     my $subj = $f->make('Constant', value => 'FOO', const_type => 'string');
     $subj->set_representation('Str');
     my $m = $f->make('RegexMatch', pattern => 'foo', flags => 'i', inputs => [$subj]);
-    $m->set_representation('Bool');
+    $m->set_representation('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$m]);
     eval { Chalk::Target::LLVM->lower($ret) };
     like($@, qr/GAP/, 'RegexMatch with /i flags dies GAP (not silently case-sensitive)');
@@ -440,7 +440,7 @@ subtest 'qr//: Constant(regex) + Match — "foobar" =~ qr/foo/ => Bool:1' => sub
     my $qr = $f->make('Constant', value => 'foo', const_type => 'regex');
     $qr->set_representation('Regex');
     my $m = $f->make('Match', inputs => [$subj, $qr]);
-    $m->set_representation('Bool');
+    $m->set_representation('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$m]);
 
     my ($out, $ll);
@@ -458,7 +458,7 @@ subtest 'qr// non-match: "xyz" =~ qr/foo/ => Bool:' => sub {
     my $qr = $f->make('Constant', value => 'foo', const_type => 'regex');
     $qr->set_representation('Regex');
     my $m = $f->make('Match', inputs => [$subj, $qr]);
-    $m->set_representation('Bool');
+    $m->set_representation('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$m]);
 
     my ($out) = eval { lli_run($ret) };

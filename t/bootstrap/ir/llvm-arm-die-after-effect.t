@@ -51,7 +51,7 @@ subtest 'an if-arm die preceded by a Print still emits the abort' => sub {
     my $zero = $f->make('Constant', value => 0, const_type => 'integer');
     $zero->set_representation('Int');
     my $cmp = $f->make('NumGt', inputs => [$rx, $zero]);
-    $cmp->set_representation('Bool');
+    $cmp->set_representation('Boolean');
 
     my $if_node = $f->make('If', inputs => [$vx, $cmp]);
     my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);

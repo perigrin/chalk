@@ -84,7 +84,7 @@ subtest 'BinaryExpression type from operator' => sub {
     $op_ctx = mock_ctx({ op_text => '==' });
     $ctx = mul_ctx($op_ctx);
     $result = $actions->BinaryExpression($ctx);
-    is($result, { valid => true, type => 'Bool' }, 'BinaryExpression == returns Bool');
+    is($result, { valid => true, type => 'Boolean' }, 'BinaryExpression == returns Boolean');
 
     # Logical operator → Any → no type tag
     $op_ctx = mock_ctx({ op_text => '&&' });
@@ -108,11 +108,11 @@ subtest 'UnaryExpression type from operator' => sub {
     my $result = $actions->UnaryExpression($ctx);
     is($result, { valid => true, type => 'Num' }, 'UnaryExpression - returns Num');
 
-    # Logical not → Bool
+    # Logical not → Boolean
     $op_ctx = mock_ctx({ op_text => '!' });
     $ctx = mul_ctx($op_ctx);
     $result = $actions->UnaryExpression($ctx);
-    is($result, { valid => true, type => 'Bool' }, 'UnaryExpression ! returns Bool');
+    is($result, { valid => true, type => 'Boolean' }, 'UnaryExpression ! returns Boolean');
 
     # Bitwise not → Int
     $op_ctx = mock_ctx({ op_text => '~' });

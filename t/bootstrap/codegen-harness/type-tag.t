@@ -1,5 +1,5 @@
 # ABOUTME: Pins the canonical type-tag contract and verifies all four tag-emitting sites agree.
-# ABOUTME: Round-trip test: perl-oracle tag == lli-emit tag for Bool/Int/Num/Str; LLVM prefix pinning.
+# ABOUTME: Round-trip test: perl-oracle tag == lli-emit tag for Boolean/Int/Num/Str; LLVM prefix pinning.
 use 5.42.0;
 use utf8;
 
@@ -88,12 +88,12 @@ subtest 'infer_tag: plain string -> Str:' => sub {
 # then Str fallback.
 # ---------------------------------------------------------------------------
 
-subtest 'tag_live_value: Bool true -> Bool:1' => sub {
+subtest 'tag_live_value: Boolean true -> Bool:1' => sub {
     my $true_val = 1 == 1;    # bool-typed true
     is( Chalk::CodeGen::Harness::TypeTag::tag_live_value($true_val), 'Bool:1', 'bool-true gives Bool:1' );
 };
 
-subtest 'tag_live_value: Bool false -> Bool:' => sub {
+subtest 'tag_live_value: Boolean false -> Bool:' => sub {
     my $false_val = 1 == 2;    # bool-typed false
     is( Chalk::CodeGen::Harness::TypeTag::tag_live_value($false_val), 'Bool:', 'bool-false gives Bool:' );
 };
@@ -168,12 +168,12 @@ subtest 'LLVM prefix table: Num repr matches LLVM.pm constant' => sub {
     is( $prefixes->{Num}{llvm_fmt_c},      'Num:%g\0A\00',  'Num llvm_fmt_c matches LLVM.pm constant' );
 };
 
-subtest 'LLVM prefix table: Bool repr matches LLVM.pm constants' => sub {
+subtest 'LLVM prefix table: Boolean repr matches LLVM.pm constants' => sub {
     my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
-    is( $prefixes->{Bool}{perl_tag_prefix_true},  'Bool:1',         'Bool true prefix is "Bool:1"' );
-    is( $prefixes->{Bool}{perl_tag_prefix_false}, 'Bool:',          'Bool false prefix is "Bool:"' );
-    is( $prefixes->{Bool}{llvm_true_c},           'Bool:1\0A\00',   'Bool true llvm_true_c matches LLVM.pm' );
-    is( $prefixes->{Bool}{llvm_false_c},          'Bool:\0A\00',    'Bool false llvm_false_c matches LLVM.pm' );
+    is( $prefixes->{Boolean}{perl_tag_prefix_true},  'Bool:1',         'Boolean true prefix is "Bool:1"' );
+    is( $prefixes->{Boolean}{perl_tag_prefix_false}, 'Bool:',          'Boolean false prefix is "Bool:"' );
+    is( $prefixes->{Boolean}{llvm_true_c},           'Bool:1\0A\00',   'Boolean true llvm_true_c matches LLVM.pm' );
+    is( $prefixes->{Boolean}{llvm_false_c},          'Bool:\0A\00',    'Boolean false llvm_false_c matches LLVM.pm' );
 };
 
 subtest 'LLVM prefix table: Str repr matches LLVM.pm constant' => sub {
@@ -186,7 +186,7 @@ subtest 'LLVM prefix table: Str repr matches LLVM.pm constant' => sub {
 # SECTION 4 -- round-trip agreement (perl-oracle == lli-emit), requires lli
 # ---------------------------------------------------------------------------
 #
-# For each representation (Bool/Int/Num), build a minimal SoN Return graph,
+# For each representation (Boolean/Int/Num), build a minimal SoN Return graph,
 # lower it to LLVM IR, run through lli, and assert the output tag prefix matches
 # what TypeTag says the perl oracle would emit.
 # ---------------------------------------------------------------------------
@@ -268,7 +268,7 @@ subtest 'round-trip: Num repr (1.5) lli tag == TypeTag prefix' => sub {
     is( $lli_prefix, $perl_prefix, 'lli prefix matches perl-oracle prefix for Num' );
 };
 
-subtest 'round-trip: Bool repr true (1 == 1) lli tag == TypeTag prefix' => sub {
+subtest 'round-trip: Boolean repr true (1 == 1) lli tag == TypeTag prefix' => sub {
     unless ($HAS_LLI) {
         plan skip_all => 'lli not found';
         return;
@@ -279,22 +279,22 @@ subtest 'round-trip: Bool repr true (1 == 1) lli tag == TypeTag prefix' => sub {
     my $c2 = $f->make( 'Constant', value => '1', const_type => 'integer' );
     $c2->set_representation('Int');
     my $eq = $f->make( 'NumEq', inputs => [ $c1, $c2 ] );
-    $eq->set_representation('Bool');
+    $eq->set_representation('Boolean');
     my $ret = $f->make_cfg( 'Return', inputs => [$eq] );
 
     my $ll           = Chalk::Target::LLVM->lower($ret);
     my ($out, $exit) = _run_lli($ll);
 
-    is( $exit, 0, 'lli exits 0 for Bool-true graph' );
+    is( $exit, 0, 'lli exits 0 for Boolean-true graph' );
     my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
-    is( $out, $prefixes->{Bool}{perl_tag_prefix_true}, 'lli output is Bool:1 (canonical Bool-true tag)' );
+    is( $out, $prefixes->{Boolean}{perl_tag_prefix_true}, 'lli output is Bool:1 (canonical Boolean-true tag)' );
 
     my $perl_tag = Chalk::CodeGen::Harness::TypeTag::tag_live_value( 1 == 1 );
     is( $perl_tag, 'Bool:1',  'perl oracle tags bool-true as Bool:1' );
-    is( $out,      $perl_tag, 'lli tag == perl-oracle tag for Bool true' );
+    is( $out,      $perl_tag, 'lli tag == perl-oracle tag for Boolean true' );
 };
 
-subtest 'round-trip: Bool repr false (1 == 2) lli tag == TypeTag prefix' => sub {
+subtest 'round-trip: Boolean repr false (1 == 2) lli tag == TypeTag prefix' => sub {
     unless ($HAS_LLI) {
         plan skip_all => 'lli not found';
         return;
@@ -305,19 +305,19 @@ subtest 'round-trip: Bool repr false (1 == 2) lli tag == TypeTag prefix' => sub 
     my $c2 = $f->make( 'Constant', value => '2', const_type => 'integer' );
     $c2->set_representation('Int');
     my $eq = $f->make( 'NumEq', inputs => [ $c1, $c2 ] );
-    $eq->set_representation('Bool');
+    $eq->set_representation('Boolean');
     my $ret = $f->make_cfg( 'Return', inputs => [$eq] );
 
     my $ll           = Chalk::Target::LLVM->lower($ret);
     my ($out, $exit) = _run_lli($ll);
 
-    is( $exit, 0, 'lli exits 0 for Bool-false graph' );
+    is( $exit, 0, 'lli exits 0 for Boolean-false graph' );
     my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
-    is( $out, $prefixes->{Bool}{perl_tag_prefix_false}, 'lli output is Bool: (canonical Bool-false tag)' );
+    is( $out, $prefixes->{Boolean}{perl_tag_prefix_false}, 'lli output is Bool: (canonical Boolean-false tag)' );
 
     my $perl_tag = Chalk::CodeGen::Harness::TypeTag::tag_live_value( 1 == 2 );
     is( $perl_tag, 'Bool:',   'perl oracle tags bool-false as Bool:' );
-    is( $out,      $perl_tag, 'lli tag == perl-oracle tag for Bool false' );
+    is( $out,      $perl_tag, 'lli tag == perl-oracle tag for Boolean false' );
 };
 
 # ---------------------------------------------------------------------------

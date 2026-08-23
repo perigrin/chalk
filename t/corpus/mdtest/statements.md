@@ -5,7 +5,7 @@ sequences, numeric comparison results, and pragma declarations.
 
 Return and multi-statement idioms are runtime-free (GREEN) — they lower via
 the same typed-arithmetic slice as arithmetic.md and variables.md. Comparison
-results (Bool/i1) cannot be returned directly in the current LLVM backend, so
+results (Boolean/i1) cannot be returned directly in the current LLVM backend, so
 the raw-comparison case is a GAP. Pragmas (use strict, use Module qw(...))
 are compile-time declarations with no runtime-free IR representation.
 
@@ -82,18 +82,18 @@ This case lowers the comparison through a ternary into an Int — the GREEN D6
 `select i1` pattern: the NumLt is the i1 condition, the returned value is a plain
 Int. It is the simplest faithful runtime-free comparison idiom and lowers today.
 
-CORRECTED FINDING (2026-06-07): Bool is its OWN representation, not "the empty
+CORRECTED FINDING (2026-06-07): Boolean is its OWN representation, not "the empty
 string." Perl 5.36+ has primitive `true`/`false` distinguishable by
 `builtin::is_bool()`: `(2 < 1)` is a genuine boolean (`is_bool`=1) that
 *coerces* to `""` in string context and `0` in numeric context — but a literal
 `""` is NOT a boolean (`is_bool("")`=0). So bool is an `i1`-representable
-runtime-free value with explicit `Coerce(Bool->Num)` (-> 0/1) and
-`Coerce(Bool->Str)` (-> ""/"1") edges, exactly like `Coerce(Int->Num)`.
+runtime-free value with explicit `Coerce(Boolean->Num)` (-> 0/1) and
+`Coerce(Boolean->Str)` (-> ""/"1") edges, exactly like `Coerce(Int->Num)`.
 Therefore bool-return is NOT blocked on Str/group-C: a bare `1 < 2` is closeable
-by modelling the Bool representation + its coercion edges (a small runtime-free
+by modelling the Boolean representation + its coercion edges (a small runtime-free
 capability). The earlier "needs Str" claim was wrong. We use the ternary form
 here as the simplest GREEN case; a bare-bool-return case can be added once the
-Bool representation + Coerce(Bool->*) edges are modelled (a separate, clean,
+Boolean representation + Coerce(Boolean->*) edges are modelled (a separate, clean,
 runtime-free gap — not a string dependency).
 
 ```perl
@@ -112,7 +112,7 @@ context: scalar
 %start = Start()
 %one  = Constant(1) :Int
 %two  = Constant(2) :Int
-%cmp  = NumLt(%one, %two) :Bool
+%cmp  = NumLt(%one, %two) :Boolean
 %t    = Constant(1) :Int
 %f    = Constant(0) :Int
 %tern = TernaryExpr(%cmp, %t, %f) :Int
@@ -126,9 +126,9 @@ L: GREEN
 
 ## Bare bool return true (1 < 2)
 
-A bare numeric comparison used as the final expression returns a genuine Bool
+A bare numeric comparison used as the final expression returns a genuine Boolean
 (`is_bool`=1). `1 < 2` is true: `Bool:1` in the type-tagged oracle. The ir-block
-returns the NumLt node directly with repr :Bool, and the emitter prints the
+returns the NumLt node directly with repr :Boolean, and the emitter prints the
 `Bool:` + string-face tag via a `select i1` between two string-constant globals.
 Bilateral coverage for the false case is the next case (2 < 1 => `Bool:`).
 
@@ -148,9 +148,9 @@ context: scalar
 %start = Start()
 %one  = Constant(1) :Int
 %two  = Constant(2) :Int
-%cmp  = NumLt(%one, %two) :Bool
+%cmp  = NumLt(%one, %two) :Boolean
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%cmp : Bool -> Str) :Str
+%co_p  = Coerce(%cmp : Boolean -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
@@ -161,9 +161,9 @@ L: GREEN
 
 The bilateral counterpart to the true case above: `2 < 1` is false, so the result
 is `Bool:` (empty string-face) in the type-tagged oracle. A lowering that modelled
-Bool as an integer 0 would emit `Int:0`, which differs from `Bool:` — the
+Boolean as an integer 0 would emit `Int:0`, which differs from `Bool:` — the
 type-discriminating oracle catches this miscompile. This case is the adversarial
-guard made concrete: the false Bool must be `Bool:`, not `Str:` or `Int:0`.
+guard made concrete: the false Boolean must be `Bool:`, not `Str:` or `Int:0`.
 
 ```perl
 # source
@@ -181,9 +181,9 @@ context: scalar
 %start = Start()
 %two  = Constant(2) :Int
 %one  = Constant(1) :Int
-%cmp  = NumLt(%two, %one) :Bool
+%cmp  = NumLt(%two, %one) :Boolean
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%cmp : Bool -> Str) :Str
+%co_p  = Coerce(%cmp : Boolean -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
@@ -263,7 +263,7 @@ context: scalar
 ```ir
 %start = Start()
 %s0   = Constant("hi\n") :Str
-%p    = Print(%s0) :Bool
+%p    = Print(%s0) :Boolean
 %c    = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -297,7 +297,7 @@ context: scalar
 %s0   = Constant("ok ") :Str
 %i1   = Constant(1) :Int
 %s2   = Constant("\n") :Str
-%p    = Print(%s0, %i1, %s2) :Bool
+%p    = Print(%s0, %i1, %s2) :Boolean
 %c    = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -329,9 +329,9 @@ context: scalar
 ```ir
 %start = Start()
 %s0   = Constant("a\n") :Str
-%p0   = Print(%s0) :Bool
+%p0   = Print(%s0) :Boolean
 %s1   = Constant("b\n") :Str
-%p1   = Print(%s1) :Bool
+%p1   = Print(%s1) :Boolean
 %c    = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -345,7 +345,7 @@ L: GREEN
 
 `print` returns a genuine boolean (`builtin::is_bool` true) — `1` on success.
 Reading its return value (`my $ok = print "x\n"; $ok`) yields `Bool:1` in the
-type-tagged oracle, NOT `Int:1`: the Print node's representation is Bool. The
+type-tagged oracle, NOT `Int:1`: the Print node's representation is Boolean. The
 stdout is `x\n`; the block value is the Print's boolean `1`.
 
 ```perl
@@ -363,9 +363,9 @@ context: scalar
 ```ir
 %start = Start()
 %s0   = Constant("x\n") :Str
-%p    = Print(%s0) :Bool
+%p    = Print(%s0) :Boolean
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%p : Bool -> Str) :Str
+%co_p  = Coerce(%p : Boolean -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
@@ -397,7 +397,7 @@ context: scalar
 ```ir
 %start = Start()
 %s0   = Constant(4294967296) :Int
-%p    = Print(%s0) :Bool
+%p    = Print(%s0) :Boolean
 %c    = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -607,7 +607,7 @@ representation.
 
 That keeps the conversion in ONE place. `Print` previously lowered Str and Int
 itself while `Stringify` separately knew how to render an Int, so teaching a new
-type meant teaching both, and Bool/Num/Slot were GAPped in `Print` even though
+type meant teaching both, and Boolean/Num/Slot were GAPped in `Print` even though
 the coercion node was the natural home for them.
 
 ```perl
@@ -694,9 +694,9 @@ control: %start -> %p1 -> %p2
 L: GREEN
 ```
 
-## Stringify of a Bool prints perl's spelling: "1" and EMPTY
+## Stringify of a Boolean prints perl's spelling: "1" and EMPTY
 
-A Bool stringifies to `1` when true and to the EMPTY STRING when false — not
+A Boolean stringifies to `1` when true and to the EMPTY STRING when false — not
 `0`. Both operands are module globals so their GEPs dominate every use, and the
 LENGTH is selected alongside the pointer: a Str value is a (ptr, len) pair, so
 selecting only the pointer would print one byte of the empty string. Bilateral
@@ -717,8 +717,8 @@ context: scalar
 ```ir
 %start = Start()
 %a   = Constant(1) :Int
-%eq  = NumEq(%a, %a) :Bool
-%sb  = Coerce(%eq, from_repr: "Bool", to_repr: "Str") :Str
+%eq  = NumEq(%a, %a) :Boolean
+%sb  = Coerce(%eq, from_repr: "Boolean", to_repr: "Str") :Str
 %nl  = Constant("\n") :Str
 %p   = Print(%sb, %nl)
 %one = Constant(1) :Int
@@ -730,9 +730,9 @@ control: %start -> %p
 L: GREEN
 ```
 
-## Stringify of a FALSE Bool is the empty string (bilateral)
+## Stringify of a FALSE Boolean is the empty string (bilateral)
 
-The partner of the case above. A false Bool contributes NO bytes, so the only
+The partner of the case above. A false Boolean contributes NO bytes, so the only
 output is the newline `say` appends. A pointer-only select would print `1`'s
 first byte here.
 
@@ -752,8 +752,8 @@ context: scalar
 %start = Start()
 %a   = Constant(1) :Int
 %b   = Constant(2) :Int
-%eq  = NumEq(%a, %b) :Bool
-%sb  = Coerce(%eq, from_repr: "Bool", to_repr: "Str") :Str
+%eq  = NumEq(%a, %b) :Boolean
+%sb  = Coerce(%eq, from_repr: "Boolean", to_repr: "Str") :Str
 %nl  = Constant("\n") :Str
 %p   = Print(%sb, %nl)
 %one = Constant(1) :Int

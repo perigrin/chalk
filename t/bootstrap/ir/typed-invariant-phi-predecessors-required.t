@@ -52,7 +52,7 @@ sub branch_graph ($with_preds) {
     $two->set_representation('Int');
 
     my $cond = $f->make('NumGt', inputs => [$two, $one]);
-    $cond->set_representation('Bool');
+    $cond->set_representation('Boolean');
 
     my $if   = $f->make('If',   inputs => [$start, $cond]);
     my $then = $f->make('Proj', index => 0, inputs => [$if]);

@@ -11,12 +11,12 @@ slice.
 
 ## D6 ternary (n>0 ? 1 : 2)
 
-The ternary `$n > 0 ? 1 : 2` compiles to a NumGt comparison (producing a Bool/i1)
+The ternary `$n > 0 ? 1 : 2` compiles to a NumGt comparison (producing a Boolean/i1)
 fed into a TernaryExpr (LLVM `select i1`). No branches, no phi — the only
 runtime-free control-flow idiom in this topic.
 
 The named-SSA builder uses the 3-input form `TernaryExpr(%cond, %then, %else)`
-to build the graph: `%cmp` is the NumGt (Bool repr), `%c1`/`%c2` are the Int
+to build the graph: `%cmp` is the NumGt (Boolean repr), `%c1`/`%c2` are the Int
 branch constants, and `%tern` is the TernaryExpr (Int repr). The LLVM backend
 lowers this to `select i1 %cmp, i64 1, i64 2`.
 
@@ -38,7 +38,7 @@ context: scalar
 %start = Start()
 %n    = Constant(5) :Int
 %zero = Constant(0) :Int
-%cmp  = NumGt(%n, %zero) :Bool
+%cmp  = NumGt(%n, %zero) :Boolean
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %tern = TernaryExpr(%cmp, %c1, %c2) :Int
@@ -77,7 +77,7 @@ context: scalar
 ```ir
 %n     = Constant(5) :Int
 %zero  = Constant(0) :Int
-%cmp   = NumGt(%n, %zero) :Bool
+%cmp   = NumGt(%n, %zero) :Boolean
 %xn    = Constant("$x") :Str
 %vx    = VarDecl(%xn) :Int
 %c1    = Constant(1) :Int
@@ -129,9 +129,9 @@ context: scalar
 ```ir
 %start = Start()
 %sa = Constant("a\n") :Str
-%pa = Print(%sa) :Bool
+%pa = Print(%sa) :Boolean
 %sb = Constant("b\n") :Str
-%pb = Print(%sb) :Bool
+%pb = Print(%sb) :Boolean
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -164,9 +164,9 @@ context: scalar
 ```ir
 %start = Start()
 %sa = Constant("a\n") :Str
-%pa = Print(%sa) :Bool
+%pa = Print(%sa) :Boolean
 %sb = Constant("b\n") :Str
-%pb = Print(%sb) :Bool
+%pb = Print(%sb) :Boolean
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -202,9 +202,9 @@ context: scalar
 ```ir
 %start = Start()
 %so = Constant("ok 1\n") :Str
-%po = Print(%so) :Bool
+%po = Print(%so) :Boolean
 %sn = Constant("not ok 1\n") :Str
-%pn = Print(%sn) :Bool
+%pn = Print(%sn) :Boolean
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -238,9 +238,9 @@ context: scalar
 ```ir
 %start = Start()
 %st = Constant("not ok 2\n") :Str
-%pt = Print(%st) :Bool
+%pt = Print(%st) :Boolean
 %se = Constant("ok 2\n") :Str
-%pe = Print(%se) :Bool
+%pe = Print(%se) :Boolean
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -257,7 +257,7 @@ it to ONE Str Constant node. If the backend emitted its GEP branch-locally (in t
 first arm it lowers), the sibling arm's use would not be dominated by that
 definition — lli rejects with "Instruction does not dominate all uses". The Str
 constant GEP is a pure pointer to a module global, so it is emitted in the ENTRY
-block (which dominates every block), the same placement rule the Int/Bool constant
+block (which dominates every block), the same placement rule the Int/Boolean constant
 cases use. This is a t/cmd/elsif.t blocker (its four `print "not ok N '$x'\n"` else
 arms share substrings that hash-cons to shared Str constants across branches).
 
@@ -276,8 +276,8 @@ context: scalar
 ```ir
 %start = Start()
 %s  = Constant("same\n") :Str
-%pt = Print(%s) :Bool
-%pe = Print(%s) :Bool
+%pt = Print(%s) :Boolean
+%pe = Print(%s) :Boolean
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -340,7 +340,7 @@ context: scalar
 %start = Start()
 %n     = Constant(5) :Int
 %zero  = Constant(0) :Int
-%cmp   = NumGt(%n, %zero) :Bool
+%cmp   = NumGt(%n, %zero) :Boolean
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %spos  = Constant("pos\n") :Str
@@ -389,7 +389,7 @@ context: scalar
 ```ir
 %start = Start()
 %zero  = Constant(0) :Int
-%cmp   = NumGt(%zero, %zero) :Bool
+%cmp   = NumGt(%zero, %zero) :Boolean
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %spos  = Constant("pos\n") :Str
@@ -451,7 +451,7 @@ context: scalar
 %c0    = Constant(0) :Int
 %c5    = Constant(5) :Int
 %c3    = Constant(3) :Int
-%cmp   = NumGt(%c5, %c3) :Bool
+%cmp   = NumGt(%c5, %c3) :Boolean
 %if    = If(%start, %cmp)
 %proj0 = Proj(%if, index: 0)
 %proj1 = Proj(%if, index: 1)
@@ -499,7 +499,7 @@ context: scalar
 %c1    = Constant(1) :Int
 %c5    = Constant(5) :Int
 %c3    = Constant(3) :Int
-%cmp   = NumGt(%c1, %c3) :Bool
+%cmp   = NumGt(%c1, %c3) :Boolean
 %if    = If(%start, %cmp)
 %proj0 = Proj(%if, index: 0)
 %proj1 = Proj(%if, index: 1)
@@ -546,7 +546,7 @@ context: scalar
 %syes  = Constant("yes") :Str
 %c5    = Constant(5) :Int
 %c3    = Constant(3) :Int
-%cmp   = NumGt(%c5, %c3) :Bool
+%cmp   = NumGt(%c5, %c3) :Boolean
 %if    = If(%start, %cmp)
 %proj0 = Proj(%if, index: 0)
 %proj1 = Proj(%if, index: 1)
@@ -587,7 +587,7 @@ context: scalar
 %syes  = Constant("yes") :Str
 %c1    = Constant(1) :Int
 %c3    = Constant(3) :Int
-%cmp   = NumGt(%c1, %c3) :Bool
+%cmp   = NumGt(%c1, %c3) :Boolean
 %if    = If(%start, %cmp)
 %proj0 = Proj(%if, index: 0)
 %proj1 = Proj(%if, index: 1)
@@ -630,7 +630,7 @@ context: scalar
 ```ir
 %start = Start()
 %sx = Constant("x\n") :Str
-%px = Print(%sx) :Bool
+%px = Print(%sx) :Boolean
 %c  = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c : Int -> Str) :Str
@@ -676,7 +676,7 @@ context: scalar
 %loop  = Loop(%vs)
 %n_phi = Phi(%rn0, region: %loop) :Int
 %s_phi = Phi(%rs0, region: %loop) :Int
-%cmp   = NumGt(%n_phi, %c0b) :Bool
+%cmp   = NumGt(%n_phi, %c0b) :Boolean
 %s_new = Add(%s_phi, %n_phi) :Int
 %n_new = Subtract(%n_phi, %one) :Int
 %lp0   = Proj(%loop, index: 0)
@@ -733,7 +733,7 @@ context: scalar
 %loop  = Loop(%vs)
 %n_phi = Phi(%rn0, region: %loop) :Int
 %s_phi = Phi(%rs0, region: %loop) :Int
-%cmp   = NumGt(%n_phi, %c0b) :Bool
+%cmp   = NumGt(%n_phi, %c0b) :Boolean
 %s_new = Add(%s_phi, %n_phi) :Int
 %n_new = Subtract(%n_phi, %one) :Int
 %lp0   = Proj(%loop, index: 0)
@@ -792,7 +792,7 @@ context: scalar
 %loop  = Loop(%vs)
 %n_phi = Phi(%rn0, region: %loop) :Int
 %s_phi = Phi(%rs0, region: %loop) :Int
-%cmp   = NumNe(%n_phi, %zero) :Bool
+%cmp   = NumNe(%n_phi, %zero) :Boolean
 %s_new = Add(%s_phi, %n_phi) :Int
 %n_new = Subtract(%n_phi, %one) :Int
 %lp0   = Proj(%loop, index: 0)
@@ -847,7 +847,7 @@ context: scalar
 %ri0   = PadAccess(%vi, "$i") :Int
 %loop  = Loop(%vi)
 %i_phi = Phi(%ri0, region: %loop) :Int
-%cmp   = NumGt(%i_phi, %zero) :Bool
+%cmp   = NumGt(%i_phi, %zero) :Boolean
 %i_new = Subtract(%i_phi, %one) :Int
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
@@ -903,7 +903,7 @@ context: scalar
 %loop  = Loop(%vt)
 %n_phi = Phi(%rn0, region: %loop) :Int
 %t_phi = Phi(%rt0, region: %loop) :Int
-%cmp   = NumGt(%n_phi, %zero) :Bool
+%cmp   = NumGt(%n_phi, %zero) :Boolean
 %t_new = Add(%t_phi, %n_phi) :Int
 %n_new = Subtract(%n_phi, %one) :Int
 %lp0   = Proj(%loop, index: 0)
@@ -952,7 +952,7 @@ context: scalar
 %loop  = Loop(%vs)
 %i_phi = Phi(%c1, region: %loop) :Int
 %s_phi = Phi(%rs0, region: %loop) :Int
-%cmp   = NumGt(%c4, %i_phi) :Bool
+%cmp   = NumGt(%c4, %i_phi) :Boolean
 %s_new = Add(%s_phi, %i_phi) :Int
 %i_new = Add(%i_phi, %c1) :Int
 %lp0   = Proj(%loop, index: 0)
@@ -1003,7 +1003,7 @@ context: scalar
 %loop  = Loop(%c0)
 %i_phi = Phi(%c0, region: %loop) :Int
 %s_phi = Phi(%c0, region: %loop) :Int
-%cmp   = NumGt(%bound, %i_phi) :Bool
+%cmp   = NumGt(%bound, %i_phi) :Boolean
 %s_new = Add(%s_phi, %i_phi) :Int
 %i_new = Add(%i_phi, %c1) :Int
 %lp0   = Proj(%loop, index: 0)
@@ -1098,7 +1098,7 @@ context: scalar
 %loop  = Loop(%c0)
 %i_phi = Phi(%c0, region: %loop) :Int
 %s_phi = Phi(%c0, region: %loop) :Int
-%cmp   = NumGt(%bound, %i_phi) :Bool
+%cmp   = NumGt(%bound, %i_phi) :Boolean
 %elem  = Subscript(%arr, %i_phi) :Int
 %s_new = Add(%s_phi, %elem) :Int
 %i_new = Add(%i_phi, %c1) :Int
@@ -1152,7 +1152,7 @@ context: scalar
 %loop  = Loop(%c0)
 %i_phi = Phi(%c0, region: %loop) :Int
 %s_phi = Phi(%c0, region: %loop) :Int
-%cmp   = NumGt(%len, %i_phi) :Bool
+%cmp   = NumGt(%len, %i_phi) :Boolean
 %elem  = Subscript(%arr, %i_phi) :Int
 %s_new = Add(%s_phi, %elem) :Int
 %i_new = Add(%i_phi, %c1) :Int
@@ -1268,7 +1268,7 @@ context: scalar
 %c1    = Constant(1) :Int
 %xn    = Constant("$x") :Str
 %vx    = VarDecl(%xn, %c0) :Int
-%cmp   = NumGt(%n, %zero) :Bool
+%cmp   = NumGt(%n, %zero) :Boolean
 %lhs   = PadAccess(%vx, "$x") :Int
 %as    = Assign(%lhs, %c1) :Int
 %if    = If(%vx, %cmp)
@@ -1323,7 +1323,7 @@ context: scalar
 %loop  = Loop(%vs)
 %n_phi = Phi(%rn0, region: %loop) :Int
 %s_phi = Phi(%rs0, region: %loop) :Int
-%cmp   = NumGt(%n_phi, %c0b) :Bool
+%cmp   = NumGt(%n_phi, %c0b) :Boolean
 %s_new = Add(%s_phi, %n_phi) :Int
 %n_new = Subtract(%n_phi, %one) :Int
 %lp0   = Proj(%loop, index: 0)
@@ -1372,8 +1372,8 @@ context: scalar
 %c0val    = Constant(0) :Int
 %xn       = Constant("$x") :Str
 %vx       = VarDecl(%xn) :Int
-%cmp_out  = NumGt(%n, %zero) :Bool
-%cmp_in   = NumGt(%n, %three) :Bool
+%cmp_out  = NumGt(%n, %zero) :Boolean
+%cmp_in   = NumGt(%n, %three) :Boolean
 %lhs3     = PadAccess(%vx, "$x") :Int
 %as3      = Assign(%lhs3, %c3val) :Int
 %lhs1     = PadAccess(%vx, "$x") :Int
@@ -1440,8 +1440,8 @@ context: scalar
 %rn   = PadAccess(%vn, "$n") :Int
 %xn   = Constant("$x") :Str
 %vx   = VarDecl(%xn, %c0) :Int
-%cmp_out = NumGt(%rn, %zero) :Bool
-%cmp_in  = NumGt(%rn, %c3) :Bool
+%cmp_out = NumGt(%rn, %zero) :Boolean
+%cmp_in  = NumGt(%rn, %c3) :Boolean
 %lhs3 = PadAccess(%vx, "$x") :Int
 %as3  = Assign(%lhs3, %c3v) :Int
 %lhs1 = PadAccess(%vx, "$x") :Int
@@ -1611,7 +1611,7 @@ context: scalar
 %y    = Constant("y\n") :Str
 %n    = Constant("n\n") :Str
 %tern = TernaryExpr(%c, %y, %n) :Str
-%p    = Print(%tern) :Bool
+%p    = Print(%tern) :Boolean
 %one  = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%one : Int -> Str) :Str
@@ -1786,8 +1786,8 @@ context: scalar
 %loop  = Loop(%vs)
 %i_phi = Phi(%ri0, region: %loop) :Int
 %s_phi = Phi(%rs0, region: %loop) :Int
-%cmp   = NumLt(%i_phi, %c3) :Bool
-%gt    = NumGt(%i_phi, %c1) :Bool
+%cmp   = NumLt(%i_phi, %c3) :Boolean
+%gt    = NumGt(%i_phi, %c1) :Boolean
 %tern  = TernaryExpr(%gt, %c10, %one) :Int
 %s_new = Add(%s_phi, %tern) :Int
 %i_new = Add(%i_phi, %one) :Int
@@ -1841,7 +1841,7 @@ context: scalar
 %loop  = Loop(%start)
 %s_phi = Phi(%c0, region: %loop) :Int
 %i_phi = Phi(%c0, region: %loop) :Int
-%cmp   = NumLt(%i_phi, %c3) :Bool
+%cmp   = NumLt(%i_phi, %c3) :Boolean
 %s_new = Add(%s_phi, %i_phi) :Int
 %i_new = Add(%i_phi, %c1) :Int
 %lp0   = Proj(%loop, index: 0)
@@ -1892,7 +1892,7 @@ context: scalar
 %loop  = Loop(%start)
 %s_phi = Phi(%c0, region: %loop) :Int
 %i_phi = Phi(%c0, region: %loop) :Int
-%cmp   = NumNe(%i_phi, %c4) :Bool
+%cmp   = NumNe(%i_phi, %c4) :Boolean
 %s_new = Add(%s_phi, %i_phi) :Int
 %i_new = Add(%i_phi, %c1) :Int
 %lp0   = Proj(%loop, index: 0)
@@ -1973,9 +1973,9 @@ context: scalar
 %c100  = Constant(100) :Int
 %loop  = Loop(%start)
 %x_phi = Phi(%c0, region: %loop) :Int
-%hcond = NumLt(%x_phi, %c100) :Bool
+%hcond = NumLt(%x_phi, %c100) :Boolean
 %x_new = Add(%x_phi, %c1) :Int
-%bcond = NumEq(%x_new, %c3) :Bool
+%bcond = NumEq(%x_new, %c3) :Boolean
 %lp0   = Proj(%loop, index: 0)
 %lp1   = Proj(%loop, index: 1)
 %if    = If(%lp0, %bcond)
@@ -2062,9 +2062,9 @@ context: scalar
 %loop  = Loop(%start)
 %i_phi = Phi(%c0, region: %loop) :Int
 %s_phi = Phi(%c0, region: %loop) :Int
-%cmp   = NumLt(%i_phi, %c5) :Bool
+%cmp   = NumLt(%i_phi, %c5) :Boolean
 %i_new = Add(%i_phi, %c1) :Int
-%brk   = NumEq(%i_new, %c3) :Bool
+%brk   = NumEq(%i_new, %c3) :Boolean
 %if    = If(%brk)
 %s_new = Add(%s_phi, %i_new) :Int
 %lp0   = Proj(%loop, index: 0)
@@ -2115,8 +2115,8 @@ context: scalar
 %loop  = Loop(%start)
 %i_phi = Phi(%c1, region: %loop) :Int
 %s_phi = Phi(%c0, region: %loop) :Int
-%cont  = NumGt(%c4, %i_phi) :Bool
-%skip  = NumEq(%i_phi, %c2) :Bool
+%cont  = NumGt(%c4, %i_phi) :Boolean
+%skip  = NumEq(%i_phi, %c2) :Boolean
 %if    = If(%skip)
 %s_add = Add(%s_phi, %i_phi) :Int
 %i_new = Add(%i_phi, %c1) :Int
@@ -2186,7 +2186,7 @@ context: scalar
 %c1    = Constant(1) :Int
 %x0    = Constant(0) :Int
 %c10   = Constant(10) :Int
-%lt    = NumLt(%x0, %c10) :Bool
+%lt    = NumLt(%x0, %c10) :Boolean
 %c5    = Constant(5) :Int
 %mtern = TernaryExpr(%lt, %c5, %x0) :Int
 %otern = TernaryExpr(%c1, %mtern, %c1) :Int
@@ -2209,7 +2209,7 @@ graph (see T12/T13). The fix discriminates on `nextop == lastop`: a back-edge-le
 `enterloop` is walked inline as a lexical scope, not a loop, so the block's
 contents thread straight onto the enclosing control chain exactly as if the
 braces were not there. The block's own value is the last statement's value —
-here `print "b\n"`'s own Bool return, matching perl's `do { ... }` semantics.
+here `print "b\n"`'s own Boolean return, matching perl's `do { ... }` semantics.
 
 ```perl
 # source
@@ -2226,7 +2226,7 @@ context: scalar
 %start = Start()
 %z  = Constant(5) :Int
 %sb = Constant("b\n") :Str
-%pb = Print(%sb) :Bool
+%pb = Print(%sb) :Boolean
 return %pb
 control: %start -> %pb
 L: GREEN
@@ -2258,7 +2258,7 @@ context: scalar
 ```ir
 %start = Start()
 %si = Constant("in\n") :Str
-%pi = Print(%si) :Bool
+%pi = Print(%si) :Boolean
 return %pi
 control: %start -> %pi
 L: GREEN
@@ -2301,11 +2301,11 @@ context: scalar
 %start = Start()
 %c0 = Constant(0) :Int
 %sf = Constant("first\n") :Str
-%pf = Print(%sf) :Bool
+%pf = Print(%sf) :Boolean
 %sa = Constant("after\n") :Str
-%pa = Print(%sa) :Bool
+%pa = Print(%sa) :Boolean
 %se = Constant("end\n") :Str
-%pe = Print(%se) :Bool
+%pe = Print(%se) :Boolean
 %c1 = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c1 : Int -> Str) :Str
@@ -2344,11 +2344,11 @@ context: scalar
 %start = Start()
 %c1a = Constant(1) :Int
 %sf  = Constant("first\n") :Str
-%pf  = Print(%sf) :Bool
+%pf  = Print(%sf) :Boolean
 %sa  = Constant("after\n") :Str
-%pa  = Print(%sa) :Bool
+%pa  = Print(%sa) :Boolean
 %se  = Constant("end\n") :Str
-%pe  = Print(%se) :Bool
+%pe  = Print(%se) :Boolean
 %c1  = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%c1 : Int -> Str) :Str
@@ -2394,11 +2394,11 @@ context: scalar
 %start = Start()
 %n5   = Constant(5) :Int
 %c0   = Constant(0) :Int
-%cmp  = NumGt(%n5, %c0) :Bool
+%cmp  = NumGt(%n5, %c0) :Boolean
 %c1   = Constant(1) :Int
 %sel  = TernaryExpr(%cmp, %c1, %c0) :Int
 %co   = Coerce(%sel : Int -> Str) :Str
-%p    = Print(%co) :Bool
+%p    = Print(%co) :Boolean
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%sel : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
@@ -2434,11 +2434,11 @@ context: scalar
 %start = Start()
 %n5   = Constant(-5) :Int
 %c0   = Constant(0) :Int
-%cmp  = NumGt(%n5, %c0) :Bool
+%cmp  = NumGt(%n5, %c0) :Boolean
 %c1   = Constant(1) :Int
 %sel  = TernaryExpr(%cmp, %c1, %c0) :Int
 %co   = Coerce(%sel : Int -> Str) :Str
-%p    = Print(%co) :Bool
+%p    = Print(%co) :Boolean
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%sel : Int -> Str) :Str
 %p  = Print(%co_p, %nl)

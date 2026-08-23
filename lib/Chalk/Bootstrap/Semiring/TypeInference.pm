@@ -218,7 +218,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         $_scan_num     //= $self->_scan_ctx_type('Num');
         $_scan_int     //= $self->_scan_ctx_type('Int');
         $_scan_undef   //= $self->_scan_ctx_type('Undef');
-        $_scan_bool    //= $self->_scan_ctx_type('Bool');
+        $_scan_bool    //= $self->_scan_ctx_type('Boolean');
     }
 
     # Build a scan Context with a dynamic tag hash.

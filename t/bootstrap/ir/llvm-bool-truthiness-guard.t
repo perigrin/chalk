@@ -1,4 +1,4 @@
-# ABOUTME: And/Or truthiness contract: Int and Bool operands lower; operands whose
+# ABOUTME: And/Or truthiness contract: Int and Boolean operands lower; operands whose
 # ABOUTME: reprs disagree GAP loudly, because the merge phi needs one machine type.
 use 5.42.0;
 use utf8;
@@ -14,16 +14,16 @@ use Chalk::Target::LLVM;
 # constraints fall out of that shape, and this file pins both:
 #
 #   1. The LHS must be usable as an i1 branch condition. Int (icmp ne i64) and
-#      Bool (already an i1) qualify; Num/Str do not. Guarded by
+#      Boolean (already an i1) qualify; Num/Str do not. Guarded by
 #      _shortcircuit_i1_cond.
 #
 #   2. The phi's arms ARE the two operand SSA refs, so both operands must share
-#      a machine type (Int=i64, Bool=i1, Num=double, Str=ptr). Guarded by
+#      a machine type (Int=i64, Boolean=i1, Num=double, Str=ptr). Guarded by
 #      _shortcircuit_phi_repr.
 #
-# HISTORY -- this file used to assert that a Bool operand GAPs ("G.7
+# HISTORY -- this file used to assert that a Boolean operand GAPs ("G.7
 # gate-hardening"). That contract was DELIBERATELY REVERSED by the L5d/L5e work:
-# `$x eq $x && (print ...)` is Bool && Bool (a comparison guard and a print's
+# `$x eq $x && (print ...)` is Boolean && Boolean (a comparison guard and a print's
 # builtin::is_bool return), the cond.t idiom, and an i1 IS the branch condition.
 # Those subtests were left red rather than updated.
 #
@@ -40,13 +40,13 @@ use Chalk::Target::LLVM;
 # the mismatch could be caught. Int/Str had the same hole and no test at all.
 # ---------------------------------------------------------------------------
 
-# A Bool-valued node: Constant(N :Int) -> Coerce(Int->Bool) :Bool
+# A Boolean-valued node: Constant(N :Int) -> Coerce(Int->Boolean) :Boolean
 sub make_bool_node ($f, $val) {
     my $c = $f->make('Constant', value => $val, const_type => 'integer');
     $c->set_representation('Int');
     my $coerce = $f->make('Coerce', inputs => [$c],
-        from_repr => 'Int', to_repr => 'Bool');
-    $coerce->set_representation('Bool');
+        from_repr => 'Int', to_repr => 'Boolean');
+    $coerce->set_representation('Boolean');
     return $coerce;
 }
 
@@ -76,11 +76,11 @@ for my $op (qw(And Or)) {
         like($ll // '', qr/icmp ne i64/, 'LHS truthiness is an icmp ne i64');
     };
 
-    subtest "$op(Bool, Bool) lowers (L5d/L5e: an i1 IS the condition)" => sub {
+    subtest "$op(Boolean, Boolean) lowers (L5d/L5e: an i1 IS the condition)" => sub {
         my $f = Chalk::IR::NodeFactory->new;
         my ($ll, $err) = lower_binop($f, $op,
-            make_bool_node($f, 1), make_bool_node($f, 0), 'Bool');
-        ok(!$err, "$op(Bool,Bool) lowers without a GAP") or diag $err;
+            make_bool_node($f, 1), make_bool_node($f, 0), 'Boolean');
+        ok(!$err, "$op(Boolean,Boolean) lowers without a GAP") or diag $err;
         like($ll // '', qr/phi i1/,
             'the merge phi is i1, not a zero-extended i64');
     };
@@ -93,7 +93,7 @@ for my $op (qw(And Or)) {
     #
     # The node repr is what the LOADER computes -- the JOIN of the operands --
     # so these pass the join here rather than a hand-picked value. Setting a
-    # repr the join would never produce (e.g. Int for an Int/Bool pair) tests an
+    # repr the join would never produce (e.g. Int for an Int/Boolean pair) tests an
     # input the pipeline cannot present, and it was that hand-set value, not the
     # coercion, which made the old fallback emit `phi i64 [ ..., double ]`.
     for my $case (['Num', 'Num'], ['Str', 'Str']) {
@@ -117,16 +117,16 @@ for my $op (qw(And Or)) {
         };
     }
 
-    # Bool is a SIBLING of the Int <: Num <: Str chain, not a point on it, so an
-    # Int/Bool pair has NO join and the loader leaves the node untyped. With no
+    # Boolean is a SIBLING of the Int <: Num <: Str chain, not a point on it, so an
+    # Int/Boolean pair has NO join and the loader leaves the node untyped. With no
     # repr to bridge to, this still GAPs -- verified end-to-end, not just here:
     # `my $c = scalar(@a); my $v = $c && (2 < 1);` GAPs as a whole program.
-    subtest "$op(Int, Bool) GAPs: no join, so no repr to bridge to" => sub {
+    subtest "$op(Int, Boolean) GAPs: no join, so no repr to bridge to" => sub {
         my $f = Chalk::IR::NodeFactory->new;
         my ($ll, $err) = lower_binop($f, $op,
             make_const($f, 'Int', 1), make_bool_node($f, 1), undef);
         ok(defined $err && length $err,
-            "$op(Int,Bool) dies rather than emitting a mismatched phi")
+            "$op(Int,Boolean) dies rather than emitting a mismatched phi")
             or diag('no error; ir: ' . substr($ll // '', 0, 200));
         like($err // '', qr/mismatched reprs/,
             'the GAP names the repr mismatch');
@@ -138,7 +138,7 @@ for my $op (qw(And Or)) {
             make_const($f, 'Num', 1.5), make_const($f, 'Num', 2.5), 'Num');
         ok(defined $err && length $err, "$op(Num,Num) dies loudly")
             or diag('no error; ir: ' . substr($ll // '', 0, 200));
-        like($err // '', qr/only Int and Bool truthiness/,
+        like($err // '', qr/only Int and Boolean truthiness/,
             'the GAP names the truthiness restriction');
     };
 }

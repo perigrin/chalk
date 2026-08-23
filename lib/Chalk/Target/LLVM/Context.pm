@@ -42,7 +42,7 @@ sub _method_fn_type {
     my ($result_repr) = @_;
     return 'i64 (i8*)' if !defined $result_repr || $result_repr eq 'Int';
     return '%StrPair (i8*)' if $result_repr eq 'Str';
-    return 'i1 (i8*)'   if $result_repr eq 'Bool';
+    return 'i1 (i8*)'   if $result_repr eq 'Boolean';
     return 'double (i8*)' if $result_repr eq 'Num';
     return 'i1 (i8*)'   if $result_repr eq 'Undef';   # defined-bit, always false
     die "LLVM MOP: unsupported method return repr '$result_repr'";
@@ -870,7 +870,7 @@ sub lower_value {
     }
     # RegexMatch: lower a literal pattern to a runtime-free matcher (G6).
     # inputs[0] = subject (Str, i8* + tracked len); pattern is a compile-time
-    # literal attr. Produces an i1 matched? (Bool repr).
+    # literal attr. Produces an i1 matched? (Boolean repr).
     elsif ($op eq 'RegexMatch') {
         return $self->_lower_regex_match($node);
     }
@@ -967,13 +967,13 @@ sub _lower_constant {
         $self->{cache}{$node->id} = $ref;
         return $ref;
     }
-    elsif ($repr eq 'Bool') {
-        # Bool constant -> i1 immediate. A folded comparison (1 < 2) reaches
+    elsif ($repr eq 'Boolean') {
+        # Boolean constant -> i1 immediate. A folded comparison (1 < 2) reaches
         # here as a Boolean Constant; Perl's true is 1, false is the empty
         # string, so any truthy value lowers to i1 1 and a falsy one to i1 0.
         my $bit = (defined $val && $val ne '' && $val ne '0') ? 1 : 0;
         my $ref = $self->_fresh;
-        $self->_emit("  $ref = add i1 0, $bit            ; Constant(repr=Bool -> i1)");
+        $self->_emit("  $ref = add i1 0, $bit            ; Constant(repr=Boolean -> i1)");
         $self->{cache}{$node->id} = $ref;
         return $ref;
     }
@@ -1016,7 +1016,7 @@ sub _lower_constant {
         # shared across blocks (the SAME literal in both arms of an if/else, e.g.
         # `if(C){print "x"}else{print "x"}`) would, if emitted branch-locally, not
         # dominate the sibling arm's use (lli: "Instruction does not dominate all
-        # uses"). Entry placement dominates every use. Same rule as the Int/Bool
+        # uses"). Entry placement dominates every use. Same rule as the Int/Boolean
         # constant cases above.
         my $ref = $self->_fresh;
         # Sanitize the comment text: a control byte (e.g. a newline in the
@@ -1319,9 +1319,9 @@ sub _lower_concat {
 #
 # The X -> Str conversion, in ONE place. Stringify(X) and Coerce(X -> Str) are
 # the same edge -- Stringify is Coerce with a different name tag -- and they used
-# to be implemented separately. They had already DIVERGED: Coerce's Bool arm
+# to be implemented separately. They had already DIVERGED: Coerce's Boolean arm
 # selected the pointer only and recorded no length, while Stringify's selected
-# both. A false Bool is the EMPTY string, so a consumer slicing an unrecorded
+# both. A false Boolean is the EMPTY string, so a consumer slicing an unrecorded
 # length off that pointer would print a byte of "1". The length-recording
 # version below is the survivor.
 #
@@ -1333,7 +1333,7 @@ sub _emit_to_str {
         return $input_ref;   # already a Str; the length is already tracked
     }
 
-    if ($from eq 'Bool') {
+    if ($from eq 'Boolean') {
         my ($one_g, $one_len, $one_tot) = $self->_module_global_name('bool_str', '1');
         my ($nil_g, undef,    $nil_tot) = $self->_module_global_name('bool_str', '');
         my ($one_p, $nil_p, $ptr, $len) =
@@ -1402,7 +1402,7 @@ sub _emit_to_str {
         return $ptr;
     }
 
-    die "GAP: $label is not lowered runtime-free (Int, Bool, Num, Slot and Str "
+    die "GAP: $label is not lowered runtime-free (Int, Boolean, Num, Slot and Str "
       . "are wired; an aggregate has no stringification).";
 }
 
@@ -1517,27 +1517,27 @@ sub _emit_coercion {
     elsif ($from eq 'Num' && $to eq 'Int') {
         $self->_emit("  $ref = fptosi double $input_ref to i64  ; Coerce[Num->Int]");
     }
-    # Coerce(*->Bool) = truthiness: produce i1 from the input's machine type.
-    elsif ($to eq 'Bool' && $from eq 'Int') {
+    # Coerce(*->Boolean) = truthiness: produce i1 from the input's machine type.
+    elsif ($to eq 'Boolean' && $from eq 'Int') {
         # Int truthiness: nonzero -> true (1), zero -> false (0).
-        $self->_emit("  $ref = icmp ne i64 $input_ref, 0  ; Coerce[Int->Bool] truthiness");
+        $self->_emit("  $ref = icmp ne i64 $input_ref, 0  ; Coerce[Int->Boolean] truthiness");
     }
-    elsif ($to eq 'Bool' && $from eq 'Num') {
+    elsif ($to eq 'Boolean' && $from eq 'Num') {
         # Num truthiness: nonzero -> true, zero (including -0.0) -> false.
-        $self->_emit("  $ref = fcmp une double $input_ref, 0.0  ; Coerce[Num->Bool] truthiness");
+        $self->_emit("  $ref = fcmp une double $input_ref, 0.0  ; Coerce[Num->Boolean] truthiness");
     }
-    elsif ($to eq 'Bool' && $from eq 'Bool') {
+    elsif ($to eq 'Boolean' && $from eq 'Boolean') {
         # Identity coercion — just pass through. (Also caught by the
         # $from eq $to guard above; kept so the arm list stays exhaustive.)
         return $input_ref;
     }
-    # Coerce(Bool->Num) = 0 (false) or 1 (true): zero-extend i1 to i64.
-    elsif ($from eq 'Bool' && $to eq 'Num') {
-        $self->_emit("  $ref = zext i1 $input_ref to i64  ; Coerce[Bool->Num] 0/1");
+    # Coerce(Boolean->Num) = 0 (false) or 1 (true): zero-extend i1 to i64.
+    elsif ($from eq 'Boolean' && $to eq 'Num') {
+        $self->_emit("  $ref = zext i1 $input_ref to i64  ; Coerce[Boolean->Num] 0/1");
     }
-    # Coerce(Bool->Int) = 0/1: zero-extend i1 to i64 (same as Bool->Num for integers).
-    elsif ($from eq 'Bool' && $to eq 'Int') {
-        $self->_emit("  $ref = zext i1 $input_ref to i64  ; Coerce[Bool->Int] 0/1");
+    # Coerce(Boolean->Int) = 0/1: zero-extend i1 to i64 (same as Boolean->Num for integers).
+    elsif ($from eq 'Boolean' && $to eq 'Int') {
+        $self->_emit("  $ref = zext i1 $input_ref to i64  ; Coerce[Boolean->Int] 0/1");
     }
     # Coerce(Undef->Int/Num) = 0. Perl is unambiguous: undef in numeric context
     # is 0 (`my $u; $u + 0` is 0). An Undef value's SSA ref is its defined bit
@@ -1550,8 +1550,8 @@ sub _emit_coercion {
         my $op   = $to eq 'Int' ? 'add' : 'fadd';
         $self->_emit("  $ref = $op $ty $zero, $zero  ; $what\[Undef->$to] = 0");
     }
-    # Coerce(Bool->Str) = select between "" and "1" string-face constants.
-    # The Str representation is not fully modelled yet (G3), but the Bool string-face
+    # Coerce(Boolean->Str) = select between "" and "1" string-face constants.
+    # The Str representation is not fully modelled yet (G3), but the Boolean string-face
     # is only two constant strings and can be lowered as a select i1 between them.
     # Returns an i8* that points to the selected string constant.
     # Coerce(X -> Str) — the edges Stringify used to own. A Str value is a
@@ -1577,7 +1577,7 @@ sub _emit_coercion {
         $self->{_need_str_to_num_helper} = 1;
         $self->_emit("  $ref = call double \@chalk_str_to_num(i8* $ptr_ref, i64 $len_ref)  ; Coerce[Str->Num] leading-numeric");
     }
-    # Coerce(Str->Bool): perl's string truthiness rule.
+    # Coerce(Str->Boolean): perl's string truthiness rule.
     # false iff the string is "" (empty) or exactly "0".
     # "0.0","00","0 " etc. are all TRUE (only exact "0" and "" are false).
     #
@@ -1589,34 +1589,34 @@ sub _emit_coercion {
     #   is_single_zero = (is_single_char AND is_zero_char)
     #   is_false = (is_empty OR is_single_zero)
     #   result = NOT is_false  (true iff not false)
-    elsif ($from eq 'Str' && $to eq 'Bool') {
+    elsif ($from eq 'Str' && $to eq 'Boolean') {
         my ($ptr_ref, $tracked_len) = $self->_str_parts($input_ref);
         my $len_ref = $tracked_len // 0;
         # is_empty = (len == 0)
         my $is_empty = $self->_fresh;
-        $self->_emit("  $is_empty = icmp eq i64 $len_ref, 0  ; Coerce[Str->Bool]: len==0 check");
+        $self->_emit("  $is_empty = icmp eq i64 $len_ref, 0  ; Coerce[Str->Boolean]: len==0 check");
         # Load the first byte conditionally: use select to get '0' when empty
         # (the byte doesn't matter when empty; we AND with is_single_zero anyway).
         # Safe approach: GEP ptr (valid even at length 0 for constant globals),
         # load the byte, then mask out the result with is_single_zero.
         my $first_byte_ptr = $self->_fresh;
-        $self->_emit("  $first_byte_ptr = getelementptr inbounds i8, i8* $ptr_ref, i64 0  ; Coerce[Str->Bool]: ptr to first byte");
+        $self->_emit("  $first_byte_ptr = getelementptr inbounds i8, i8* $ptr_ref, i64 0  ; Coerce[Str->Boolean]: ptr to first byte");
         my $first_byte = $self->_fresh;
-        $self->_emit("  $first_byte = load i8, i8* $first_byte_ptr  ; Coerce[Str->Bool]: load first byte");
+        $self->_emit("  $first_byte = load i8, i8* $first_byte_ptr  ; Coerce[Str->Boolean]: load first byte");
         # is_zero_char = (first_byte == '0' = 48)
         my $is_zero_char = $self->_fresh;
-        $self->_emit("  $is_zero_char = icmp eq i8 $first_byte, 48  ; Coerce[Str->Bool]: first byte == '0'");
+        $self->_emit("  $is_zero_char = icmp eq i8 $first_byte, 48  ; Coerce[Str->Boolean]: first byte == '0'");
         # is_single_char = (len == 1)
         my $is_single = $self->_fresh;
-        $self->_emit("  $is_single = icmp eq i64 $len_ref, 1  ; Coerce[Str->Bool]: len==1 check");
+        $self->_emit("  $is_single = icmp eq i64 $len_ref, 1  ; Coerce[Str->Boolean]: len==1 check");
         # is_single_zero = is_single AND is_zero_char
         my $is_single_zero = $self->_fresh;
-        $self->_emit("  $is_single_zero = and i1 $is_single, $is_zero_char  ; Coerce[Str->Bool]: single-zero check");
+        $self->_emit("  $is_single_zero = and i1 $is_single, $is_zero_char  ; Coerce[Str->Boolean]: single-zero check");
         # is_false = is_empty OR is_single_zero
         my $is_false = $self->_fresh;
-        $self->_emit("  $is_false = or i1 $is_empty, $is_single_zero  ; Coerce[Str->Bool]: is false?");
+        $self->_emit("  $is_false = or i1 $is_empty, $is_single_zero  ; Coerce[Str->Boolean]: is false?");
         # result = NOT is_false -> true iff non-empty and not "0"
-        $self->_emit("  $ref = xor i1 $is_false, true  ; Coerce[Str->Bool]: invert -> Bool");
+        $self->_emit("  $ref = xor i1 $is_false, true  ; Coerce[Str->Boolean]: invert -> Boolean");
     }
     elsif ($from eq 'Scalar' || $to eq 'Scalar') {
         die "Coerce involving Scalar reached LLVM backend — cannot lower runtime-free.";
@@ -1628,17 +1628,17 @@ sub _emit_coercion {
     return $ref;
 }
 
-# _lower_not: emit UnaryNot(Bool)->Bool.
+# _lower_not: emit UnaryNot(Boolean)->Boolean.
 #
 # Perl `!` takes the TRUTHINESS of its operand (regardless of the operand's
-# representation) and returns a genuine Bool (is_bool=1).
+# representation) and returns a genuine Boolean (is_bool=1).
 #
 # Implementation:
-#   1. Lower the operand. Produce an i1 via _ensure_i1 (coerces Int to Bool
+#   1. Lower the operand. Produce an i1 via _ensure_i1 (coerces Int to Boolean
 #      if needed: icmp ne i64 %x, 0).
 #   2. Emit: %result = xor i1 %cond, true   ; logical negation
 #
-# The result is i1 (Bool representation), which is then returned or used as
+# The result is i1 (Boolean representation), which is then returned or used as
 # a condition in the enclosing expression.
 sub _lower_not {
     my ($self, $node) = @_;
@@ -1652,27 +1652,27 @@ sub _lower_not {
     die "LLVM backend: Not operand has no representation set — cannot determine i1 vs i64"
         unless defined $op_repr;
 
-    # Convert operand to i1 (truthiness) if it is not already Bool.
+    # Convert operand to i1 (truthiness) if it is not already Boolean.
     my $cond_ref = $self->_ensure_i1($op_ref, $op_repr);
 
     my $ref = $self->_fresh;
-    $self->_emit("  $ref = xor i1 $cond_ref, true  ; Not: logical negation -> Bool(i1)");
+    $self->_emit("  $ref = xor i1 $cond_ref, true  ; Not: logical negation -> Boolean(i1)");
     $self->{cache}{$node->id} = $ref;
     return $ref;
 }
 
 # _ensure_i1($ref, $repr) -> $i1_ref
 #
-# If $repr is 'Bool', the value is already i1 — return $ref unchanged.
+# If $repr is 'Boolean', the value is already i1 — return $ref unchanged.
 # If $repr is 'Int', emit an icmp ne i64 %ref, 0 to produce a truthiness i1.
 # If $repr is 'Num', emit an fcmp une double %ref, 0.0.
-# This is Coerce(*->Bool) = truthiness, used inline by _lower_not.
+# This is Coerce(*->Boolean) = truthiness, used inline by _lower_not.
 sub _ensure_i1 {
     my ($self, $ref, $repr) = @_;
     die "LLVM backend: _ensure_i1 called with undef repr — operand must have a representation set"
         unless defined $repr;
 
-    return $ref if $repr eq 'Bool';
+    return $ref if $repr eq 'Boolean';
 
     my $cond = $self->_fresh;
     if ($repr eq 'Int') {
@@ -1861,7 +1861,7 @@ sub _lower_assign {
         my $def_gep = $self->_fresh;
         $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 0  ; FieldAccess-lvalue[$field_index] defined");
         $self->_emit("  store i1 true, i1* $def_gep  ; FieldAccess-lvalue[$field_index] defined=true");
-        # Store payload — the repr-dispatched boxing (Str StrPair, Bool zext,
+        # Store payload — the repr-dispatched boxing (Str StrPair, Boolean zext,
         # ref ptrtoint, Int identity) is owned by _store_field_payload, shared
         # with the :param binding and default-value paths so every field write
         # boxes a given repr identically. The Assign expression's value is what
@@ -2126,7 +2126,7 @@ sub _lower_assign {
 # Comparison operators and TernaryExpr (Phase 3c — D6 ternary/select path)
 #
 # Numeric comparisons lower to LLVM icmp instructions (signed for i64),
-# producing i1 results (Bool representation). These are used as conditions
+# producing i1 results (Boolean representation). These are used as conditions
 # for select (TernaryExpr) and eventually for branch instructions.
 #
 # LLVM icmp predicate mapping (signed integers):
@@ -2138,7 +2138,7 @@ sub _lower_assign {
 #   NumNe -> ne  (inequality, sign-independent)
 #
 # TernaryExpr ($cond ? $true : $false) lowers to `select` when:
-#   - condition has Bool representation (i1, from icmp)
+#   - condition has Boolean representation (i1, from icmp)
 #   - both branches have Int representation (i64)
 # This covers D6 from the gap-map without needing Phi or basic blocks.
 # ---------------------------------------------------------------------------
@@ -2169,7 +2169,7 @@ my %FCMP_PREDICATE = (
 # by its representation. Int -> sitofp; Num -> passthrough; Str -> the perl
 # leading-numeric rule via @chalk_str_to_num (same emit as Coerce[Str->Num]).
 # Used by numeric comparison over non-Int operands (`"0" == "0"`, the cond.t
-# blocker). A Bool/aggregate operand is a loud GAP (numeric compare over a
+# blocker). A Boolean/aggregate operand is a loud GAP (numeric compare over a
 # boolean is not a shape we lower runtime-free).
 sub _coerce_ref_to_num {
     my ($self, $ref, $repr, $op) = @_;
@@ -2221,7 +2221,7 @@ sub _lower_icmp_int {
         my $pred = $ICMP_PREDICATE{$op}
             or die "LLVM backend: unknown comparison op=$op";
         my $ref = $self->_fresh;
-        $self->_emit("  $ref = icmp $pred i64 $lhs_ref, $rhs_ref  ; $op(Bool) -> i1 icmp $pred");
+        $self->_emit("  $ref = icmp $pred i64 $lhs_ref, $rhs_ref  ; $op(Boolean) -> i1 icmp $pred");
         $self->{cache}{$node->id} = $ref;
         return $ref;
     }
@@ -2231,7 +2231,7 @@ sub _lower_icmp_int {
     my $lhs_d = $self->_coerce_ref_to_num($lhs_ref, $lhs_repr, $op);
     my $rhs_d = $self->_coerce_ref_to_num($rhs_ref, $rhs_repr, $op);
     my $ref = $self->_fresh;
-    $self->_emit("  $ref = fcmp $fpred double $lhs_d, $rhs_d  ; $op(Bool) -> i1 fcmp $fpred (numified operands)");
+    $self->_emit("  $ref = fcmp $fpred double $lhs_d, $rhs_d  ; $op(Boolean) -> i1 fcmp $fpred (numified operands)");
     $self->{cache}{$node->id} = $ref;
     return $ref;
 }
@@ -2254,7 +2254,7 @@ sub _lower_icmp_int {
 #   end:        equal = phi i1 [ false, %entry ], [ bytes_eq, %cmp ]
 #
 # StrEq returns `equal`; StrNe returns `xor i1 equal, true` (the negation).
-# Both yield an i1 (Bool repr), consumed by the ternary condition / return.
+# Both yield an i1 (Boolean repr), consumed by the ternary condition / return.
 # ---------------------------------------------------------------------------
 # _str_compare_operand($input, $op, $side) -> an i8* Str ref (with a tracked
 # length) for a StrEq/StrNe operand. A Str operand lowers as-is; an Int operand
@@ -2357,7 +2357,7 @@ sub _lower_ternary {
     my $fals_node = $inputs->[2];
 
     # Lower the condition. Any scalar is a valid Perl guard (`$x = 7 if $c`,
-    # `$c ? 7 : 9`), so coerce to i1 via truthiness: Bool passes through,
+    # `$c ? 7 : 9`), so coerce to i1 via truthiness: Boolean passes through,
     # Int -> icmp ne, Num -> fcmp une (the same rule _lower_not applies).
     my $cond_ref  = $self->lower_value($cond_node);
     my $cond_repr = _require_repr($cond_node, 'TernaryExpr.condition');
@@ -2459,7 +2459,7 @@ sub _lower_ternary {
 # _shortcircuit_i1_cond: emit the i1 branch condition for an And/Or LHS given
 # its representation, and validate the operand repr for the short-circuit path.
 #
-# Int truthiness is `icmp ne i64 %v, 0`. Bool is already an i1 (a comparison
+# Int truthiness is `icmp ne i64 %v, 0`. Boolean is already an i1 (a comparison
 # result, a `!`, or a print's builtin::is_bool return) — its truthiness is the
 # identity, so we branch on the value directly with no extra instruction. Any
 # other repr (Num, Str, ...) is a loud GAP: reinterpreting a double/i8* as i64
@@ -2476,12 +2476,12 @@ sub _shortcircuit_i1_cond {
         $self->_emit("  $cond = icmp ne i64 $ref, 0  ; $op_tag: test $side truthiness (Int)");
         return $cond;
     }
-    if ($repr eq 'Bool') {
+    if ($repr eq 'Boolean') {
         # Already an i1 — the value IS the branch condition.
         return $ref;
     }
-    die "GAP: $op_tag ($sym) $side operand has repr=$repr; only Int and Bool truthiness are "
-      . "lowered runtime-free (G.7/F8). Insert an explicit Coerce(*->Bool) node before the "
+    die "GAP: $op_tag ($sym) $side operand has repr=$repr; only Int and Boolean truthiness are "
+      . "lowered runtime-free (G.7/F8). Insert an explicit Coerce(*->Boolean) node before the "
       . "$op_tag, or fix TypeInference.";
 }
 
@@ -2492,7 +2492,7 @@ sub _shortcircuit_i1_cond {
 # The And/Or node's own repr is often unannotated for the short-circuit form
 # (`$x eq $x && print ...`), so we derive the phi type from the operands: if both
 # operands share a repr, use it; if the node itself carries a concrete repr, trust
-# it. A genuine mismatch (Int LHS, Bool RHS) can't phi over two machine types —
+# it. A genuine mismatch (Int LHS, Boolean RHS) can't phi over two machine types —
 # GAP loudly rather than emit invalid IR.
 sub _shortcircuit_phi_repr {
     my ($self, $node_repr, $lhs_repr, $rhs_repr, $op_tag) = @_;
@@ -2502,7 +2502,7 @@ sub _shortcircuit_phi_repr {
     }
     # Operands disagree. A node repr does NOT rescue this: the phi's two arms are
     # the operand SSA refs themselves, so they must already share a machine type
-    # (Int=i64, Bool=i1, Num=double, Str=ptr). Trusting $node_repr here emitted
+    # (Int=i64, Boolean=i1, Num=double, Str=ptr). Trusting $node_repr here emitted
     # invalid IR — measured: And(Int, Num) produced
     #   %t3 = fadd double 0.0, 2.5
     #   %t4 = phi i64 [ %t1, %entry ], [ %t3, %and.rhs ]
@@ -2529,8 +2529,8 @@ sub _lower_and {
     my $lhs_node = $inputs->[0];
     my $rhs_node = $inputs->[1];
 
-    # Validate operand reprs: Int (icmp ne i64) and Bool (already i1) both lower
-    # runtime-free. `$x eq $y && (print ...)` is Bool && Bool (a comparison guard
+    # Validate operand reprs: Int (icmp ne i64) and Boolean (already i1) both lower
+    # runtime-free. `$x eq $y && (print ...)` is Boolean && Boolean (a comparison guard
     # and a print's builtin::is_bool return) — the cond.t idiom. Any other repr is
     # a loud GAP (see _shortcircuit_i1_cond).
     my $lhs_repr = $lhs_node->representation;
@@ -2582,8 +2582,8 @@ sub _lower_and {
 
     # End block: phi merges lhs (falsy path) and rhs (truthy path). The phi type is
     # the operands' common repr — the And node's own repr is often unannotated for the
-    # short-circuit form, so derive it from the operands. Int && Int -> i64, Bool &&
-    # Bool -> i1. Mixed operand reprs (Int LHS, Bool RHS) would need a phi over two
+    # short-circuit form, so derive it from the operands. Int && Int -> i64, Boolean &&
+    # Boolean -> i1. Mixed operand reprs (Int LHS, Boolean RHS) would need a phi over two
     # machine types, which is invalid LLVM: GAP loudly rather than emit a bad phi.
     my $phi_repr = defined $merge_repr ? $merge_repr
         : $self->_shortcircuit_phi_repr($repr, $lhs_repr, $rhs_repr, 'And');
@@ -2607,8 +2607,8 @@ sub _lower_or {
     my $lhs_node = $inputs->[0];
     my $rhs_node = $inputs->[1];
 
-    # Validate operand reprs: Int (icmp ne i64) and Bool (already i1) both lower
-    # runtime-free. `$x ne $y || (print ...)` is Bool || Bool — the cond.t idiom.
+    # Validate operand reprs: Int (icmp ne i64) and Boolean (already i1) both lower
+    # runtime-free. `$x ne $y || (print ...)` is Boolean || Boolean — the cond.t idiom.
     # Any other repr is a loud GAP (see _shortcircuit_i1_cond).
     my $lhs_repr = $lhs_node->representation;
     my $rhs_repr = $rhs_node->representation;
@@ -2709,7 +2709,7 @@ sub _emit_shortcircuit_phi {
 #     the optimizer is FREE to eliminate the dead defined path — but the IR
 #     must be well-formed (both phi arms present) for lli to accept it.
 #
-#   LHS repr = Int / Num / Str / Bool (always defined, static):
+#   LHS repr = Int / Num / Str / Boolean (always defined, static):
 #     A non-Undef typed value is always defined. The definedness check is a
 #     static i1 true. We still emit the branch+phi structure for structural
 #     uniformity, but the branch on i1 true always takes the defined path.
@@ -2738,7 +2738,7 @@ sub _lower_defined_or {
     my $lhs_repr = _require_repr($lhs_node, 'DefinedOr.lhs');
 
     # Lower the LHS. For Undef-typed LHS, this produces the defined bit (i1).
-    # For Int/Num/Str/Bool-typed LHS, this produces the payload value.
+    # For Int/Num/Str/Boolean-typed LHS, this produces the payload value.
     my $lhs_ref    = $self->lower_value($lhs_node);
     my $entry_label = $self->_current_block_label;
 
@@ -2830,7 +2830,7 @@ sub _lower_defined_or {
 #               (or provably-OOB) element read can MISS at runtime, so defined()
 #               must consult that bit -- folding to true silently miscompiles
 #               defined($a[$i]) on an out-of-bounds index (019f61ab).
-#   Other repr: always true (Int/Num/Str/Bool are always defined). Returns i1 1.
+#   Other repr: always true (Int/Num/Str/Boolean are always defined). Returns i1 1.
 sub _lower_defined {
     my ($self, $node) = @_;
 
@@ -2873,7 +2873,7 @@ sub _lower_defined {
 # Called during process_control_node for the control chain.
 #
 # inputs[0] = control predecessor (already lowered or unused here)
-# inputs[1] = condition (a Bool/i1 value)
+# inputs[1] = condition (a Boolean/i1 value)
 #
 # After _lower_if emits the branch, the caller (_lower_if_region_pair or
 # process_control_node) must set up the then/else/merge blocks.
@@ -3020,8 +3020,8 @@ sub _lower_phi {
 # NOTE the layer this function does NOT answer. Whether a coercion is needed is
 # TWO questions: `is_subtype(A,B)` (semantics, target-independent) AND
 # `type_for(A) eq type_for(B)` (encoding, this function). Machine-type equality
-# alone is NECESSARY BUT NOT SUFFICIENT — Bool and Undef are both `i1` yet a
-# Bool is not an Undef, and conflating them would license a silent
+# alone is NECESSARY BUT NOT SUFFICIENT — Boolean and Undef are both `i1` yet a
+# Boolean is not an Undef, and conflating them would license a silent
 # bit-reinterpretation. See
 # docs/plans/2026-08-14-representation-is-the-targets-type-system.md.
 # ---------------------------------------------------------------------------
@@ -3036,7 +3036,7 @@ sub _lower_phi {
 my %_REPR_LLVM_TYPE = (
     Int      => 'i64',
     Num      => 'double',
-    Bool     => 'i1',
+    Boolean     => 'i1',
     # A Str VALUE is the first-class aggregate { ptr, len, enc }. This is what
     # a phi or select over Str values must be typed as: the pointer and the
     # length travel together, so a merge cannot desynchronize them.
@@ -3394,7 +3394,7 @@ sub _process_if_node {
 
     my $cond_ref = $self->lower_value($cond_input);
 
-    my $cond_repr = $cond_input->representation // 'Bool';
+    my $cond_repr = $cond_input->representation // 'Boolean';
     if ($cond_repr eq 'Int') {
         my $bool_ref = $self->_fresh;
         $self->_emit("  $bool_ref = icmp ne i64 $cond_ref, 0  ; If (elab): coerce Int to i1");
@@ -3579,7 +3579,7 @@ sub _wire_region_phis_with_preblock {
         }
         # A merge yields one of its ARMS, so the arms can differ in machine
         # type: an early-return `return 99` (Int) merging with a fall-through
-        # whose value is a print's Bool produces
+        # whose value is a print's Boolean produces
         #   phi i64 [ %int, ... ], [ %i1, ... ]
         # which lli rejects outright. The arms are bridged to the Phi's own
         # repr — the operator rule (Part J) applied to a merge, the same fix
@@ -4921,7 +4921,7 @@ sub _lower_length {
         # lower_value for Str returns i8* (ptr to NUL-terminated bytes).
         # The length is tracked separately in _str_len_table, keyed by the i8* SSA ref.
         # Emit a compile-time literal via add i64 0, <len>.
-        # If the length is not tracked (e.g., a Coerce(Bool->Str) result), die loudly.
+        # If the length is not tracked (e.g., a Coerce(Boolean->Str) result), die loudly.
         my ($str_ref, $byte_len) = $self->_str_parts($self->lower_value($operand));
         unless (defined $byte_len) {
             die "Length(Str) — byte length not tracked for operand SSA ref $str_ref. "
@@ -5481,7 +5481,7 @@ sub _lower_hash_deref {
 # The single owner of the slot-payload store dispatch, shared across the :param
 # binding path, the default-value path, and the FieldAccess-lvalue assign path so
 # every write boxes a given repr identically (019f4512): Str -> malloc a %StrPair,
-# store ptr+len, ptrtoint to i64; Bool -> zext i1 to i64; ArrayRef/HashRef ->
+# store ptr+len, ptrtoint to i64; Boolean -> zext i1 to i64; ArrayRef/HashRef ->
 # ptrtoint i8* to i64; Int -> identity. The Str length is read from
 # _str_len_table (keyed by the value's SSA ref), falling back to a runtime strlen
 # when the length is not compile-time tracked. Caller has already emitted the
@@ -5494,7 +5494,7 @@ sub _lower_hash_deref {
 # _box_payload($val_ref, $repr, $what) -> $i64_ref
 #
 # The one rule for putting a value into a %Slot's i64 payload. The i64 is a
-# machine WORD: it carries an Int directly, a Bool zero-extended, a Num
+# machine WORD: it carries an Int directly, a Boolean zero-extended, a Num
 # bitcast, and anything wider as a POINTER to a heap box.
 #
 # Every optional-value cell in the backend is this shape -- an array element,
@@ -5542,8 +5542,8 @@ sub _box_payload {
         $self->_emit("  $ref = bitcast double $val_ref to i64  ; Num -> i64 payload for $what");
         return $ref;
     }
-    if ($repr eq 'Bool') {
-        $self->_emit("  $ref = zext i1 $val_ref to i64  ; Bool -> i64 payload for $what");
+    if ($repr eq 'Boolean') {
+        $self->_emit("  $ref = zext i1 $val_ref to i64  ; Boolean -> i64 payload for $what");
         return $ref;
     }
     if ($repr eq 'ArrayRef' || $repr eq 'HashRef' || $repr eq 'CodeRef'
@@ -5555,7 +5555,7 @@ sub _box_payload {
     return $val_ref if $repr eq 'Int';
 
     die "GAP: $what has repr=$repr, which has no i64 payload encoding "
-      . "(Int, Bool, Num, Str and ref types are boxed) — refusing to emit "
+      . "(Int, Boolean, Num, Str and ref types are boxed) — refusing to emit "
       . "invalid IR.";
 }
 
@@ -5588,8 +5588,8 @@ sub _store_field_payload {
     }
 
     my $pay_i64 = $self->_fresh;
-    if ($repr eq 'Bool') {
-        $self->_emit("  $pay_i64 = zext i1 $val_ref to i64  ; Bool->i64 for field '$pname'");
+    if ($repr eq 'Boolean') {
+        $self->_emit("  $pay_i64 = zext i1 $val_ref to i64  ; Boolean->i64 for field '$pname'");
     } elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
         # Pointer-repr value: ptrtoint before storing into the i64 payload,
         # mirroring the array/hash element-store branches. A bare
@@ -5599,7 +5599,7 @@ sub _store_field_payload {
         $self->_emit("  $pay_i64 = add i64 0, $val_ref  ; identity: Int->i64 for field '$pname'");
     } else {
         die "GAP: field '$pname' value repr=$repr cannot be stored in an i64 "
-          . "payload (only Int/Bool/Str/ArrayRef/HashRef are lowered) — "
+          . "payload (only Int/Boolean/Str/ArrayRef/HashRef are lowered) — "
           . "refusing to emit invalid IR.";
     }
     $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; field '$pname' payload");
@@ -5701,7 +5701,7 @@ sub _lower_call_new {
             my $pay_gep = $self->_fresh;
             $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; default field[$fidx] payload");
             # Box the default the same way a :param value is (Str -> StrPair,
-            # Bool -> zext, else identity) via the shared payload-store helper.
+            # Boolean -> zext, else identity) via the shared payload-store helper.
             $self->_store_field_payload($def_ref, $def_repr, $pay_gep, $pname);
         } else {
             my $def_gep = $self->_fresh;
@@ -7347,17 +7347,17 @@ sub _lower_regex_subst {
     return $res;
 }
 
-# _lower_print($node) -> $llvm_ref (an i1 1, Bool repr)
+# _lower_print($node) -> $llvm_ref (an i1 1, Boolean repr)
 #
 # A control-pinned statement effect: emit each list argument to stdout in order,
-# then yield print's boolean 1 (perl's print returns a genuine Bool). The loader
+# then yield print's boolean 1 (perl's print returns a genuine Boolean). The loader
 # already split the leading control token off inputs, so inputs are exactly the
 # printed values. Each argument is emitted by its representation:
 #   Str  -> printf("%.*s", (i32)len, ptr)  — exactly len bytes, embedded-NUL safe;
 #           the length comes from the compile-time/runtime _str_len_table.
 #   Int  -> printf("%d", (i32)val)         — the i64 value truncated to i32,
 #           mirroring the Int return epilogue.
-# Any other repr is an honest GAP (Num/Bool/aggregate print is not wired). The
+# Any other repr is an honest GAP (Num/Boolean/aggregate print is not wired). The
 # output is emitted BEFORE the return-value epilogue because it lands in @main's
 # control-chain instructions, which precede the epilogue printf.
 sub _lower_print {
@@ -7394,7 +7394,7 @@ sub _lower_print {
             #
             # It used to lower Int here as well, with printf %lld, while
             # Stringify separately knew how to render an Int. Two places knew
-            # about the same conversion, so teaching Print a new type (Bool,
+            # about the same conversion, so teaching Print a new type (Boolean,
             # Num, Slot) meant teaching both. Now only the coercion learns a
             # type and this stays one operator over one representation.
             die "GAP: Print of a "
@@ -7406,7 +7406,7 @@ sub _lower_print {
 
     # print returns a genuine boolean 1. Materialize an i1 1 runtime-opaquely so
     # the value-context read (`my $ok = print ...`) tags Bool:1. alloca/store/load
-    # keeps it opaque to the optimizer, matching the Undef/Bool constant pattern.
+    # keeps it opaque to the optimizer, matching the Undef/Boolean constant pattern.
     my $slot = $self->_fresh;
     $self->_emit("  $slot = alloca i1  ; Print: return-value slot");
     $self->_emit("  store i1 1, i1* $slot  ; Print: yields boolean 1");

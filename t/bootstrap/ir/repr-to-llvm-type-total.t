@@ -20,7 +20,7 @@ subtest 'concrete representations map to their documented machine type' => sub {
     my %EXPECT = (
         Int      => 'i64',
         Num      => 'double',
-        Bool     => 'i1',
+        Boolean     => 'i1',
         # A Str VALUE is the first-class aggregate, so a phi/select over Str
         # values is typed %Str and the length cannot desynchronize from the ptr.
         Str      => '%Str',

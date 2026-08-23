@@ -223,7 +223,7 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
 #
 # The field-store payload path must build a %StrPair for a Str rhs (matching the
 # field READ path, which reads a Str field via inttoptr i64 -> %StrPair*). A bare
-# `add i64 0, <i8*>` (the Bool/Int path) is invalid IR for a pointer rhs and would
+# `add i64 0, <i8*>` (the Boolean/Int path) is invalid IR for a pointer rhs and would
 # be read back as a corrupt StrPair. Round-trip: set a Str field, then read it.
 #
 #   class Tag { field $s; method set { $s = "hi" } method get { return $s } }

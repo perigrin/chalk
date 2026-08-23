@@ -1176,9 +1176,9 @@ sub shape_subset_check {
     # that KEEPS the deref must match it (a real PostfixDeref stays required).
     _mark_deref_scaffolding($spec_return, $return_node, \%satisfied);
 
-    # Coerce-to-Bool absorption (zhi L4): perl's ! (and other truthiness ops)
+    # Coerce-to-Boolean absorption (zhi L4): perl's ! (and other truthiness ops)
     # coerce their operand internally, so B::SoN emits Not(operand) directly
-    # with no explicit Coerce(X -> Bool). The corpus keeps the explicit Coerce;
+    # with no explicit Coerce(X -> Boolean). The corpus keeps the explicit Coerce;
     # subsume it when its sole consumer is a truthiness op and the real graph
     # carries no such Coerce.
     _mark_coerce_absorption($spec_return, $return_node, \%satisfied);
@@ -2084,7 +2084,7 @@ sub _mark_deref_scaffolding {
 }
 
 # Truthiness ops that coerce their operand to a boolean internally, so an
-# explicit Coerce(X -> Bool) feeding one is redundant in the producer's graph.
+# explicit Coerce(X -> Boolean) feeding one is redundant in the producer's graph.
 my %_TRUTHINESS_OP = (Not => 1);
 
 # Numeric arithmetic ops that numify their operands internally (perl's `/`,
@@ -2095,7 +2095,7 @@ my %_TRUTHINESS_OP = (Not => 1);
 my %_NUMIFYING_OP = map { $_ => 1 } keys %_FOLD_OP;
 
 # _mark_coerce_absorption($spec_return, $real_return, \%satisfied) — subsume a
-# spec Coerce(X -> Bool) whose SOLE consumer is a truthiness op (Not), or a
+# spec Coerce(X -> Boolean) whose SOLE consumer is a truthiness op (Not), or a
 # spec Coerce(X -> Num) whose SOLE consumer is a numifying arithmetic op, when
 # the real graph carries no such Coerce: the op does its own coercion, so
 # B::SoN feeds the operand directly. Only these two absorbed shapes are
@@ -2129,7 +2129,7 @@ sub _mark_coerce_absorption {
         my $cs = $consumers{ $node->id } // [];
         next unless @$cs == 1;
         my $sole_kind = _node_kind($cs->[0]);
-        next unless ($to eq 'Bool' && $_TRUTHINESS_OP{$sole_kind})
+        next unless ($to eq 'Boolean' && $_TRUTHINESS_OP{$sole_kind})
                  || ($to eq 'Num'  && $_NUMIFYING_OP{$sole_kind});
         $satisfied->{ $node->id } = 1;
     }

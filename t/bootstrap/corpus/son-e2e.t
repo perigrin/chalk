@@ -151,7 +151,7 @@ my @slice = (
     { topic => 'strings',     src => q{"hello" . " world"},      expect => 'green' },
 
     # Constant-folded comparisons: B::SoN recovers PL_sv_yes/PL_sv_no as a
-    # Boolean Constant (4b-3b), and the LLVM backend lowers a Bool constant to
+    # Boolean Constant (4b-3b), and the LLVM backend lowers a Boolean constant to
     # i1, so these now reach lli == perl (Bool:1 / Bool:).
     { topic => 'statements',  src => '1 < 2', expect => 'green' },
     { topic => 'statements',  src => '2 < 1', expect => 'green' },

@@ -128,13 +128,13 @@ IR
     my $spec = <<'IR';
 %fa=FieldAccess(field_index: 0, field_stash: "C") :Int
 %fb=FieldAccess(field_index: 1, field_stash: "C") :Int
-%r=NumLt(%fa, %fb) :Bool
+%r=NumLt(%fa, %fb) :Boolean
 return %r
 IR
     my $wrong = <<'IR';
 %fa=FieldAccess(field_index: 0, field_stash: "C") :Int
 %fb=FieldAccess(field_index: 1, field_stash: "C") :Int
-%r=NumLt(%fb, %fa) :Bool
+%r=NumLt(%fb, %fa) :Boolean
 return %r
 IR
     is verdict($spec, $wrong), 'FAIL', 'H1 FieldAccess operand swap FAILs';
@@ -241,7 +241,7 @@ IR
     my $spec = <<'IR';
 %n     = Constant(5) :Int
 %zero  = Constant(0) :Int
-%cmp   = NumGt(%n, %zero) :Bool
+%cmp   = NumGt(%n, %zero) :Boolean
 %xn    = Constant("$x") :Str
 %vx    = VarDecl(%xn) :Int
 %c1    = Constant(1) :Int
@@ -263,7 +263,7 @@ IR
     my $real = <<'IR';
 %n     = Constant(5) :Int
 %zero  = Constant(0) :Int
-%cmp   = NumGt(%n, %zero) :Bool
+%cmp   = NumGt(%n, %zero) :Boolean
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %tern  = TernaryExpr(%cmp, %c1, %c2) :Int

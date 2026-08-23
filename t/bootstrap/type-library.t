@@ -85,9 +85,9 @@ ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('None', 'Int'),
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('None', 'Array'),
     'None is subtype of Array');
 
-# Bool, Undef, Regex
-ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Bool', 'Scalar'),
-    'Bool is subtype of Scalar');
+# Boolean, Undef, Regex
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Boolean', 'Scalar'),
+    'Boolean is subtype of Scalar');
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Undef', 'Scalar'),
     'Undef is subtype of Scalar');
 ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Regex', 'Scalar'),
@@ -316,7 +316,7 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_builtin('foo'), undef,
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_binary_op('==');
     ok(defined $sig, 'get_binary_op(==) returns defined value');
-    is($sig->{result}, 'Bool', '== result is Bool');
+    is($sig->{result}, 'Boolean', '== result is Boolean');
 }
 
 # String comparison
@@ -324,7 +324,7 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_builtin('foo'), undef,
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_binary_op('eq');
     ok(defined $sig, 'get_binary_op(eq) returns defined value');
     is($sig->{left}, 'Str', 'eq left operand is Str');
-    is($sig->{result}, 'Bool', 'eq result is Bool');
+    is($sig->{result}, 'Boolean', 'eq result is Boolean');
 }
 
 # Logical operators
@@ -341,7 +341,7 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_builtin('foo'), undef,
     ok(defined $sig, 'get_binary_op(=~) returns defined value');
     is($sig->{left}, 'Str', '=~ left operand is Str');
     is($sig->{right}, 'Regex', '=~ right operand is Regex');
-    is($sig->{result}, 'Bool', '=~ result is Bool');
+    is($sig->{result}, 'Boolean', '=~ result is Boolean');
 }
 
 # isa operator
@@ -349,7 +349,7 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_builtin('foo'), undef,
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_binary_op('isa');
     ok(defined $sig, 'get_binary_op(isa) returns defined value');
     is($sig->{left}, 'Scalar', 'isa left operand is Scalar');
-    is($sig->{result}, 'Bool', 'isa result is Bool');
+    is($sig->{result}, 'Boolean', 'isa result is Boolean');
 }
 
 # Range operator
@@ -386,7 +386,7 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_binary_op('???'), undef,
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op('!');
     ok(defined $sig, 'get_unary_op(!) returns defined value');
     is($sig->{operand}, 'Any', 'unary ! operand is Any');
-    is($sig->{result}, 'Bool', 'unary ! result is Bool');
+    is($sig->{result}, 'Boolean', 'unary ! result is Boolean');
 }
 
 {
@@ -399,7 +399,7 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_binary_op('???'), undef,
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op('not');
     ok(defined $sig, 'get_unary_op(not) returns defined value');
-    is($sig->{result}, 'Bool', 'unary not result is Bool');
+    is($sig->{result}, 'Boolean', 'unary not result is Boolean');
 }
 
 {
@@ -509,13 +509,13 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'Scalar'), 'Str',
 is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Int', 'Scalar'), 'Int',
     'narrow_type(Int, Scalar) = Int (already scalar-ish)');
 
-# Bool context: everything narrows to Bool
-is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('List', 'Bool'), 'Bool',
-    'narrow_type(List, Bool) = Bool');
-is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'Bool'), 'Bool',
-    'narrow_type(Str, Bool) = Bool');
-is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Array', 'Bool'), 'Bool',
-    'narrow_type(Array, Bool) = Bool');
+# Boolean context: everything narrows to Boolean
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('List', 'Boolean'), 'Boolean',
+    'narrow_type(List, Boolean) = Boolean');
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'Boolean'), 'Boolean',
+    'narrow_type(Str, Boolean) = Boolean');
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Array', 'Boolean'), 'Boolean',
+    'narrow_type(Array, Boolean) = Boolean');
 
 # Void context: discards type info
 is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Int', 'Void'), undef,
@@ -664,7 +664,7 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
 # ---------------------------------------------------------------------------
 
 subtest 'Unknown is top: every type is a subtype of it' => sub {
-    for my $t (qw(Int Num Str Bool Undef Scalar ArrayRef HashRef CodeRef
+    for my $t (qw(Int Num Str Boolean Undef Scalar ArrayRef HashRef CodeRef
                   Object Array Hash Code Glob List Ref None Any)) {
         ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype($t, 'Unknown'),
             "$t <: Unknown");
@@ -672,7 +672,7 @@ subtest 'Unknown is top: every type is a subtype of it' => sub {
 };
 
 subtest 'Unknown is not a subtype of anything below top' => sub {
-    for my $t (qw(Scalar Str Num Int Bool Ref List Code)) {
+    for my $t (qw(Scalar Str Num Int Boolean Ref List Code)) {
         ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Unknown', $t),
             "Unknown NOT <: $t");
     }

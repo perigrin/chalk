@@ -38,7 +38,7 @@ context: scalar
 ```ir
 %start = Start()
 %s      = Constant("ab-cd") :Str
-%m      = RegexMatch(%s, pattern: "(\w+)-(\w+)") :Bool
+%m      = RegexMatch(%s, pattern: "(\w+)-(\w+)") :Boolean
 %result = RegexCapture(%m, n: 1) :Str
 %nl = Constant("\n") :Str
 %p  = Print(%result, %nl)
@@ -69,7 +69,7 @@ context: scalar
 ```ir
 %start = Start()
 %s      = Constant("foo") :Str
-%m      = RegexMatch(%s, pattern: "(o+)") :Bool
+%m      = RegexMatch(%s, pattern: "(o+)") :Boolean
 %cap    = RegexCapture(%m, n: 1) :Str
 %len    = Length(%cap) :Int
 %zero   = Constant(0) :Int

@@ -38,7 +38,7 @@ unless (-f $LOGICAL_MD) {
 #   L2  (||):  GREEN — cfg-blocks-phi lands Or lowering (branch+phi)
 #   L3  (//):  GREEN — DefinedOr with Int-typed LHS (always defined); Undef repr + definedness branch
 #   L3b (//):  GREEN — DefinedOr with Undef-typed LHS (runtime-undef via alloca+store+load)
-#   L4  (!):   GREEN — Bool repr (i1) + Not (xor i1) + Coerce(Int->Bool) + type-tagged return
+#   L4  (!):   GREEN — Boolean repr (i1) + Not (xor i1) + Coerce(Int->Boolean) + type-tagged return
 # ---------------------------------------------------------------------------
 
 my $cases = Chalk::CodeGen::Harness::MdtestCorpus->parse_file($LOGICAL_MD);
@@ -59,7 +59,7 @@ ok((grep { /L4.*not/i                } @titles), 'case: L4 not present');
 #   L2  (||):  GREEN — Or lowering via branch+phi
 #   L3  (//):  GREEN — DefinedOr via Undef representation + definedness branch+phi
 #   L3b (//):  GREEN — DefinedOr undef-left path (runtime-undef via alloca+store+load)
-#   L4  (!):   GREEN — Bool repr + Not + Coerce(Int->Bool) + type-tagged Bool return
+#   L4  (!):   GREEN — Boolean repr + Not + Coerce(Int->Boolean) + type-tagged Boolean return
 # ---------------------------------------------------------------------------
 
 subtest 'All cases declare L: GREEN' => sub {
@@ -162,7 +162,7 @@ subtest 'L3, L3b, L4 all build graphs (all are GREEN)' => sub {
         ok(defined $return_node && !$@,
             "case '$l3b_case->{title}': build_graph_from_ir returns a node (GREEN, undef-left lowers)");
     }
-    # L4 (!) now has a buildable graph (Not + Coerce Bool).
+    # L4 (!) now has a buildable graph (Not + Coerce Boolean).
     my ($l4_case) = grep { $_->{title} =~ /L4.*not/i } @$cases;
     if (defined $l4_case) {
         my $ir_text = $l4_case->{ir} // '';
@@ -265,9 +265,9 @@ subtest 'L3b constructive proof: DefinedOr(Undef,Int) builds and lowers to 7 via
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 6: L4 constructive proof — Not(Bool) builds and lowers correctly
+# SECTION 6: L4 constructive proof — Not(Boolean) builds and lowers correctly
 #
-# !5 => false (Bool:). The ir-block uses Coerce(Int->Bool) for truthiness then
+# !5 => false (Bool:). The ir-block uses Coerce(Int->Boolean) for truthiness then
 # Not (xor i1 %cond, true). lli output must match the type-tagged perl oracle.
 # ---------------------------------------------------------------------------
 
@@ -307,7 +307,7 @@ subtest 'L4 constructive proof: Not builds and lowers to Bool: (false) via lli' 
         # Structural sanity: .ll contains xor i1 (Not instruction).
         like($ll, qr/xor i1/, 'L4 .ll: contains xor i1 (Not lowering)');
         # .ll contains icmp ne (truthiness coercion from Int).
-        like($ll, qr/icmp ne/, 'L4 .ll: contains icmp ne (Int->Bool truthiness)');
+        like($ll, qr/icmp ne/, 'L4 .ll: contains icmp ne (Int->Boolean truthiness)');
     }
 };
 

@@ -55,7 +55,7 @@ my @CASES = (
     ['Coerce Int->Str (interp)',    'my $n=42; print "n=$n"; print "\n";'],
     ['Coerce Int->Str (say)',       'say(7);'],
     ['Coerce Num->Str',             'say(0.5);'],
-    ['Coerce Bool->Str',            'say(1==1);'],
+    ['Coerce Boolean->Str',            'say(1==1);'],
     ['StrEq over two Str',          'my $a="x"; print(($a eq "x") ? "1" : "0"); print "\n";'],
     ['StrEq with an Int operand',   'my $a=1; print(($a eq "1") ? "1" : "0"); print "\n";'],
     ['Str ternary (select)',        'my $c=0; print($c ? "y" : "n"); print "\n";'],

@@ -128,7 +128,7 @@ cmp_ok($passing, '>=', 8,
   . 'anything asserted it: this gate only ever ran synthetic one-liners, and the '
   . 'worklist that did name real files scored them on a wrapped contract that has '
   . 'since been deleted. Every file-scoring gate now shares one runner. '
-  . 'The Int/Str/Bool/Undef return-value type-tag epilogue -- needed only so the '
+  . 'The Int/Str/Boolean/Undef return-value type-tag epilogue -- needed only so the '
   . 'corpus harness can read back a fragment\'s return value -- is suppressed at '
   . 'emission time by program_mode => 1 (defaults off; the corpus reads the tag as '
   . 'its oracle). Every program in this gate now passes; ADD programs to raise it '

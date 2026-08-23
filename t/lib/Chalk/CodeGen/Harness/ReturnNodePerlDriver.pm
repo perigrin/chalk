@@ -106,7 +106,7 @@ sub run {
 #
 # Covers the computation slice: Int/Num constants, Add/Subtract/Multiply/Divide/
 # Modulo, Coerce, VarDecl/PadAccess/Assign/CompoundAssign (straight-line only),
-# TernaryExpr with Bool condition.
+# TernaryExpr with Boolean condition.
 sub _emit_return_as_perl {
     my ($return_node) = @_;
 
@@ -130,7 +130,7 @@ sub _emit_return_as_perl {
     my $value_node = $return_node->inputs->[0];
     my $expr       = _emit_expr( $value_node, \%var_table );
 
-    # Emit type-tagged output: both P and L corners emit tags so Bool is
+    # Emit type-tagged output: both P and L corners emit tags so Boolean is
     # distinguishable from its Str coercion in the three-corner Comparator.
     # The tagging logic is the canonical rule from Chalk::CodeGen::Harness::TypeTag.
     my $tag_fragment = Chalk::CodeGen::Harness::TypeTag::oracle_perl_fragment();

@@ -196,7 +196,7 @@ END_IR
     my $ir_block = <<'END_IR';
 %n    = Constant(5) :Int
 %zero = Constant(0) :Int
-%cmp  = NumGt(%n, %zero) :Bool
+%cmp  = NumGt(%n, %zero) :Boolean
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %tern = TernaryExpr(%cmp, %c1, %c2) :Int
@@ -219,7 +219,7 @@ END_IR
         is(scalar(@$tern_inputs), 3, 'TernaryExpr has exactly 3 inputs');
         isa_ok($tern_inputs->[0], 'Chalk::IR::Node::NumGt',
             'TernaryExpr cond input is NumGt');
-        is($tern_inputs->[0]->representation, 'Bool', 'cond (NumGt) has Bool repr');
+        is($tern_inputs->[0]->representation, 'Boolean', 'cond (NumGt) has Boolean repr');
         is($tern_inputs->[1]->value, '1', 'then-branch constant is 1');
         is($tern_inputs->[2]->value, '2', 'else-branch constant is 2');
     }
@@ -270,7 +270,7 @@ END_IR
     my $ir_block = <<'END_IR';
 %n    = Constant(5) :Int
 %zero = Constant(0) :Int
-%cmp  = NumGt(%n, %zero) :Bool
+%cmp  = NumGt(%n, %zero) :Boolean
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %tern = TernaryExpr(%cmp, %c1, %c2) :Int

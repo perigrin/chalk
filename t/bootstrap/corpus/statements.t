@@ -167,7 +167,7 @@ subtest 'constructive proof: multiple-statements builds and lowers to 3' => sub 
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 4: Bare-bool constructive proofs — NumLt lowers to Bool with type-tag
+# SECTION 4: Bare-bool constructive proofs — NumLt lowers to Boolean with type-tag
 #
 # Both true (1 < 2 => Bool:1) and false (2 < 1 => Bool:) cases must lower GREEN.
 # Bilateral coverage rule: both sides are checked so a one-sided miscompile
@@ -246,7 +246,7 @@ subtest 'constructive proof: bare bool false (2<1) builds and lowers to Bool:' =
 # ---------------------------------------------------------------------------
 # SECTION 5: Adversarial guard — REMOVED, pending replacement
 #
-# There was a guard here proving that a Bool lowered as a raw Int gets caught:
+# There was a guard here proving that a Boolean lowered as a raw Int gets caught:
 # under the FRAGMENT contract its graph returned Int:0 where the perl oracle
 # returned Bool:, a tag mismatch that failed loudly.
 #
@@ -258,10 +258,10 @@ subtest 'constructive proof: bare bool false (2<1) builds and lowers to Bool:' =
 # It is REMOVED rather than left passing. A guard that cannot fail is worse than
 # no guard: it reads as coverage while proving nothing, which is the exact
 # vacuity this project keeps having to dig out. Restoring it needs a fixture
-# that genuinely misrepresents a Bool under the PROGRAM contract — a new
+# that genuinely misrepresents a Boolean under the PROGRAM contract — a new
 # adversarial case, not an edit to the old one.
 #
-# Tracked: docs/plans/2026-08-13-followups.md, "Bool-as-Int adversarial guard".
+# Tracked: docs/plans/2026-08-13-followups.md, "Boolean-as-Int adversarial guard".
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

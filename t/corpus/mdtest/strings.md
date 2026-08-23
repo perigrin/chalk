@@ -435,7 +435,7 @@ context: scalar
 %c1  = Concat(%s0, %sf) :Str
 %nl  = Constant("\n") :Str
 %cat = Concat(%c1, %nl) :Str
-%p   = Print(%cat) :Bool
+%p   = Print(%cat) :Boolean
 %one = Constant(1) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%one : Int -> Str) :Str
