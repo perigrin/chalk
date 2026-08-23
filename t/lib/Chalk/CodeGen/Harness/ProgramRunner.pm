@@ -17,6 +17,55 @@ my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI  = '/usr/lib/llvm-15/bin/lli';
 
+# This runner consumes ARBITRARY REAL FILES — that is its whole contract, and
+# the reason it must filter by EXCLUSION rather than inclusion.
+#
+# It used to pass `package=main`, an INCLUSION filter, which emits only the
+# packages it is told about. Since the file is handed over unmodified, this
+# runner cannot know what packages it declares, so every one of them was
+# dropped from the wire. A call into a dropped package then arrives with no
+# resolved callee and therefore no return type, and GAPs at _require_repr as
+# "reached LLVM backend with NO representation" — a message naming
+# TypeInference when the cause is that the callee was never loaded.
+#
+# That was LIVE on the Phase-5 target set: t/base/lex.t declares `Someother`
+# and `v10`, and t/cmd/subval.t goes through this same runner.
+#
+# A source scan for `^package` would not have fixed it. lex.t also creates the
+# `xyz` and `foo::::::` namespaces via qualified SUB declarations
+# (`sub xyz::foo {...}`) with no `package` statement anywhere, so a
+# declaration-scanning fix would find two of its namespaces and miss two more.
+#
+# The list below is the producer's own dependency footprint plus perl's pragma
+# modules — measured, not guessed: compiling a two-package program with no
+# filter emits 17 infrastructure namespaces alongside the user's. Excluding
+# them fails toward NOISE (an unanticipated dependency leaks into the wire,
+# which is visible) rather than toward SILENCE (an unanticipated user package
+# disappears, which is not). If a future producer dependency leaks, the fix is
+# to add it here; nothing user-facing breaks in the meantime.
+#
+# Matching is by PREFIX, so a bare name here covers both the package itself and
+# anything beneath it: `Carp` excludes Carp and Carp::Heavy alike. Do not write
+# `Carp::` — that form leaves the bare `Carp` package itself in the wire.
+my $PKG_EXCLUDE = join(',', map { "not_package=$_" } qw(
+    SoN
+    B
+    JSON
+    Carp
+    Config
+    Exporter
+    DynaLoader
+    List
+    Scalar
+    overload
+    overloading
+    warnings
+    strict
+    utf8
+    bytes
+    feature
+));
+
 # ---------------------------------------------------------------------------
 # WHY THIS EXISTS, AND WHAT IT REPLACED
 #
@@ -130,7 +179,7 @@ sub _perl_oracle ($path) {
 sub _compile_and_run ($path) {
     my ($efh, $etmp) = tempfile(SUFFIX => '.err', UNLINK => 1);
     close $efh;
-    my $json = qx($PERL -I$SON -MO=SoN,json,package=main $path 2>$etmp);
+    my $json = qx($PERL -I$SON -MO=SoN,json,$PKG_EXCLUDE $path 2>$etmp);
     my $producer_err = do { local (@ARGV, $/) = ($etmp); <> } // '';
 
     return (undef, undef, 'producer emitted no JSON', undef) unless $json =~ /\S/;

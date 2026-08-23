@@ -137,6 +137,17 @@ class Chalk::CodeGen::Harness::Mode2Adapter {
         print $fh $prog;
         close $fh;
 
+        # `package=main` (INCLUSION) is correct HERE and must not be switched to
+        # the not_package= exclusion ProgramRunner uses. This adapter CONSTRUCTS
+        # its input three lines above -- `package main;` plus one sub -- so the
+        # set of packages is known exactly and cannot contain a user package the
+        # filter has not been told about. Inclusion is the tighter filter and
+        # keeps the wire minimal.
+        #
+        # ProgramRunner differs because it consumes arbitrary real files
+        # unmodified, so it cannot enumerate what it is filtering for; there,
+        # inclusion silently drops whatever it was not told about. See the
+        # $PKG_EXCLUDE comment in ProgramRunner.pm.
         my $json = qx($PERL -I$SON -MO=SoN,json,package=main $tmp 2>/dev/null);
         return (undef, "B::SoN produced no JSON", undef) unless $json =~ /\S/;
 
