@@ -5870,10 +5870,35 @@ sub _lower_call_direct {
     $self->{_arg_bind}{ refaddr($arg_reads[$_]) } = $arg_refs[$_]
         for 0 .. $#arg_reads;
 
+    # The callee's body nodes must NOT outlive this inline frame in the value
+    # cache. The callee graph is ONE object shared by every call site (measured:
+    # both `Call#2` and `Call#3` in `f(1)+f(2)` hold the same callee graph
+    # refaddr, and its Multiply node has a single id and a single refaddr), so
+    # a cache keyed on node id serves site 2 whatever site 1 computed --
+    # with site 1's ARGUMENT baked in. That is F14/F15/F16: `f(1)+f(2)` emitted
+    # exactly ONE `mul` and printed 4 where perl prints 6.
+    #
+    # refaddr keying does not fix this, unlike _arg_bind's collision: there the
+    # keys were per-node and merely needed to be unique across graphs, whereas
+    # here the callee node objects are LITERALLY IDENTICAL between sites. What
+    # varies is the frame, so the frame is what the scoping must follow.
+    #
+    # Snapshot-and-restore rather than a fresh empty cache: the caller's own
+    # already-lowered nodes stay visible to the inlined body (its arg refs were
+    # lowered in this context, above), and entries the callee added are dropped
+    # on the way out. Mirrors _arg_bind's local-scoped frame directly above.
+    #
+    # `f(3)+f(3)` passed before this fix by coincidence -- one cached
+    # computation happens to be right for both sites -- which is why the corpus
+    # case insists the arguments DIFFER.
+    my %cache_before = $self->{cache}->%*;
+    my $ref = $self->_lower_inlined_effects_then_value(\@effect_chain, $value);
+    $self->{cache}->%* = %cache_before;
+
     # Memoize under the caller Call node's id, same reasoning as the
     # no-argument path above: this Call can be reached a second time as the
-    # Return's value after already running as a statement effect.
-    my $ref = $self->_lower_inlined_effects_then_value(\@effect_chain, $value);
+    # Return's value after already running as a statement effect. Written
+    # AFTER the restore above -- it is a caller-side entry and must survive.
     $self->{cache}{ $node->id } = $ref;
     return $ref;
 }

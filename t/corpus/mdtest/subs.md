@@ -517,7 +517,7 @@ chain, which IS re-driven per call site. The VALUE is lowered once through the
 shared `{cache}` and served to the second site with the first site's argument
 baked in.
 
-Measured before the fix: `f(1)+f(2)` gave 4 where perl gives 6, and the emitted
+Measured before the fix (Chalk 5c34fdf9 and earlier): `f(1)+f(2)` gave 4 where perl gives 6, and the emitted
 LLVM contained exactly ONE `mul` for two calls.
 
 Arguments must DIFFER. `f(3)+f(3)` passes today by coincidence -- the single
@@ -538,14 +538,27 @@ context: scalar
 
 ```ir
 %start = Start()
-%c6   = Constant(6) :Int
-%co   = Coerce(%c6 : Int -> Str) :Str
+%c1   = Constant(1) :Int
+%f1   = Call(%c1, dispatch_kind: "direct", name: "main::f") :Int
+%c2   = Constant(2) :Int
+%f2   = Call(%c2, dispatch_kind: "direct", name: "main::f") :Int
+%sum  = Add(%f1, %f2) :Int
+%co   = Coerce(%sum : Int -> Str) :Str
 %nl   = Constant("\n") :Str
-%cat  = Concat(%co, %nl)
-%p    = Print(%cat)
+%p    = Print(%co, %nl)
 return %p
 L: GREEN
 ```
+
+The two Calls stay DISTINCT nodes with distinct arguments -- that is the whole
+contract here. Before the fix the graph was the same shape but the LOWERING
+collapsed both to one computation, so the shape leg alone could never have
+caught this; only the behavior leg did.
+
+Written from measured output. An earlier version of this block expected a
+folded `Constant(6)`, which nothing produces: the producer does not
+constant-fold across a call, and Print takes its operands directly rather than
+through a Concat.
 
 ## F15 the same call nested in its own argument
 
@@ -554,7 +567,7 @@ cached, then the outer call reads that cache entry rather than computing over
 the inner result. Worth its own case: an argument-binding fix could plausibly
 close F14 and not this.
 
-Measured before the fix: 2 where perl gives 4.
+Measured before the fix (Chalk 5c34fdf9 and earlier): 2 where perl gives 4.
 
 ```perl
 # source
@@ -571,19 +584,28 @@ context: scalar
 
 ```ir
 %start = Start()
-%c4   = Constant(4) :Int
-%co   = Coerce(%c4 : Int -> Str) :Str
+%c1   = Constant(1) :Int
+%inner = Call(%c1, dispatch_kind: "direct", name: "main::f") :Int
+%outer = Call(%inner, dispatch_kind: "direct", name: "main::f") :Int
+%co   = Coerce(%outer : Int -> Str) :Str
 %nl   = Constant("\n") :Str
-%cat  = Concat(%co, %nl)
-%p    = Print(%cat)
+%p    = Print(%co, %nl)
 return %p
 L: GREEN
 ```
 
+The nesting is visible in the edge: the outer Call takes the INNER Call as its
+argument, rather than both reading the same constant. That is what makes this
+case distinct from F14 -- an argument-binding fix could plausibly close F14 and
+leave this one broken.
+
+Written from measured output; see the note under F14 about the folded
+`Constant(4)` an earlier version of this block expected.
+
 ## F16 two calls in separate statements
 
 The same defect outside a single expression, so a fix scoped to one expression
-tree does not close it. Measured before the fix: `2 2` where perl gives `2 4`.
+tree does not close it. Measured before the fix (Chalk 5c34fdf9 and earlier): `2 2` where perl gives `2 4`.
 
 ```perl
 # source
