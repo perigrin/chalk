@@ -5,37 +5,63 @@ use utf8;
 use experimental 'class';
 
 class Chalk::Grammar::Perl::TypeLibrary {
-    # Type hierarchy from docs/perl-types-practical.md.
-    # Each type maps to its direct parent. 'Any' has no parent.
-    # 'None' is the bottom type (subtype of everything).
+    # Type hierarchy. Each type maps to its direct parent; 'Unknown' has no
+    # parent. 'None' is the bottom type (subtype of everything).
+    #
+    # This is the CANONICAL lattice. It matches the formal paper's "Complete Type
+    # Hierarchy" (2-perl-types-formal.md), which is verified mechanically over all
+    # 729 ordered pairs by types-paper/appendix-a/lattice-check.pl. B::SoN's
+    # SoN::IR::Stamp mirrors this table; the two must not drift.
+    #
+    # Unknown is the sole STRUCTURAL root, matching the paper's tree. The paper
+    # drew the root as `Unknown / Any` until the lattice was unified, which
+    # deleted Any from the hierarchy on the grounds that no Perl syntax can name
+    # it. Any survives HERE only as a signature-table pragma (see below); it is
+    # not a parent in this table, so join never has to choose between two tops.
+    #
+    # Two deliberate divergences from the paper remain, both filed rather than
+    # fixed here because each is a rename sweep with its own blast radius:
+    #
+    #   Bool is the paper's Boolean. Same type, same two members. The paper
+    #        settled on Boolean in both documents specifically to kill chalk's
+    #        on-the-wire rename table, so this SHOULD converge — but 1100+ sites
+    #        across chalk and the producer say Bool today.
+    #   Any  should be deleted outright per the unification decision. It appears
+    #        nowhere outside this file, but the "13 of 13 uses are variadic
+    #        tails" measurement behind that decision is now stale: several uses
+    #        are return types, binary-op results, and unary operands, plus a
+    #        fast path in type_satisfies.
     my %PARENT = (
-        # Scalar branch
-        Scalar    => 'Any',
+        # Scalar branch (arity 1)
+        Scalar    => 'List',        # {1} is a subset of {0,1,2,...}
+        Void      => 'List',        # arity 0: yields nothing. Sibling of Scalar.
         Undef     => 'Scalar',
-        Bool      => 'Scalar',
-        Regex     => 'Scalar',
         Str       => 'Scalar',
         Num       => 'Str',
         Int       => 'Num',
-        DualVar   => 'Scalar',
+        Bool      => 'Str',         # true/false: Str carrying boolean marking
+        VString   => 'Str',         # v-strings: Str carrying 'V' magic
+        DualVar   => 'Scalar',      # in Scalar but in neither Str nor Num
         Ref       => 'Scalar',
+        Object    => 'Ref',
+        Regex     => 'Object',      # compiled patterns: blessed into Regexp
         ScalarRef => 'Ref',
+        LValueRef => 'ScalarRef',   # \substr: aliases a RANGE, not a whole scalar
         ArrayRef  => 'Ref',
         HashRef   => 'Ref',
         CodeRef   => 'Ref',
         GlobRef   => 'Ref',
-        Object    => 'Ref',
 
         # Collection branch
-        List      => 'Any',
+        List      => 'Unknown',
         Array     => 'List',
         Hash      => 'List',
 
-        # Code branch
-        Code      => 'Any',
-
-        # Glob branch (symbol table entries, distinct from GlobRef)
-        Glob      => 'Any',
+        # Non-value branches
+        Code      => 'Unknown',     # subroutines
+        Glob      => 'Unknown',     # symbol table entries, distinct from GlobRef
+        IO        => 'Unknown',     # filehandles/directory handles (*STDOUT{IO})
+        Format    => 'Unknown',     # write() templates
     );
 
     # Cache for is_subtype lookups
@@ -49,9 +75,9 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # Assign a unique bit position to each leaf type.
         my $bit = 0;
         my @leaf_types = qw(
-            Undef Bool Regex Int DualVar
-            ScalarRef ArrayRef HashRef CodeRef GlobRef Object
-            Array Hash Code Glob
+            Undef Bool VString Regex Int DualVar Void
+            LValueRef ArrayRef HashRef CodeRef GlobRef
+            Array Hash Code Glob IO Format
         );
         for my $type (@leaf_types) {
             $TYPE_BITSET{$type} = 1 << $bit++;
@@ -60,8 +86,12 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # Internal intermediate types get their own bit too, so that
         # is_subtype(Num, Num) and is_subtype(Str, Str) work via exact match
         # and subtypes include their ancestor's bit.
+        # Object and ScalarRef are here rather than above because each now has a
+        # child (Regex, LValueRef) and so is no longer a leaf.
         $TYPE_BITSET{Num} = (1 << $bit++);
         $TYPE_BITSET{Str} = (1 << $bit++);
+        $TYPE_BITSET{Object} = (1 << $bit++);
+        $TYPE_BITSET{ScalarRef} = (1 << $bit++);
         $TYPE_BITSET{Ref} = (1 << $bit++);
         $TYPE_BITSET{Scalar} = (1 << $bit++);
         $TYPE_BITSET{List} = (1 << $bit++);
@@ -77,33 +107,37 @@ class Chalk::Grammar::Perl::TypeLibrary {
             }
         }
 
-        # Any is the root — OR of all types
-        $TYPE_BITSET{Any} = 0;
+        # Unknown is the structural root — OR of all types.
+        $TYPE_BITSET{Unknown} = 0;
         for my $type (keys %TYPE_BITSET) {
-            $TYPE_BITSET{Any} |= $TYPE_BITSET{$type};
+            $TYPE_BITSET{Unknown} |= $TYPE_BITSET{$type};
         }
 
-        # Unknown is the PESSIMISTIC top: the same position as Any and the same
+        # Any is the PERMISSIVE top: the same position as Unknown and the same
         # value set, but a different obligation — exactly TypeScript's
-        # `unknown` vs `any`.
+        # `unknown` vs `any`. The paper states this directly (Top Types):
+        # `Unknown := V` and `Any := V`, two pragma types over one value set.
         #
         #   Any     opts OUT of checking. A legitimate static answer (`push`'s
         #           second argument accepts anything, and that is a fact).
         #   Unknown is SOUND top: inference has not determined the type, and
         #           nothing may be done with the value until it is NARROWED.
         #
-        # They are mutually assignable (both top, same values), so Unknown
-        # carries Any's bits and Any gains Unknown's — is_subtype is true in
-        # both directions. What differs is what each MEANS to a consumer: an
-        # `Any` reaching the backend is a design fact, an `Unknown` reaching it
-        # is an inference failure.
+        # They are mutually assignable (both top, same values), so Any carries
+        # Unknown's bits and Unknown gains Any's — is_subtype is true in both
+        # directions. What differs is what each MEANS to a consumer: an `Any`
+        # reaching the backend is a design fact, an `Unknown` reaching it is an
+        # inference failure.
+        #
+        # Only Unknown is a parent in %PARENT. Any is a pragma, not a branch of
+        # the tree, so join never has to choose between two structural roots.
         #
         # This distinction is the point. 'Scalar' used to double as the "I do
         # not know" placeholder (the producer wrote it for an unstamped
         # operand), so the backend's Scalar GAP could not tell "this scalar type
         # is not lowered yet" from "nothing ever typed this".
-        $TYPE_BITSET{Unknown} = $TYPE_BITSET{Any};
-        $TYPE_BITSET{Any}    |= $TYPE_BITSET{Unknown};
+        $TYPE_BITSET{Any}      = $TYPE_BITSET{Unknown};
+        $TYPE_BITSET{Unknown} |= $TYPE_BITSET{Any};
 
         # None is the bottom type — 0 (subtype of everything by convention)
         $TYPE_BITSET{None} = 0;
@@ -237,6 +271,82 @@ class Chalk::Grammar::Perl::TypeLibrary {
 
         $subtype_cache{$cache_key} = false;
         return false;
+    }
+
+    # Returns the ancestor chain of $type, nearest first, including $type itself.
+    # 'Unknown' is the structural root and terminates every chain; None is
+    # handled by the callers.
+    sub _ancestors($type) {
+        my @chain = ($type);
+        my $current = $type;
+        while (my $next = $PARENT{$current}) {
+            push @chain, $next;
+            $current = $next;
+        }
+        push @chain, 'Unknown' unless $chain[-1] eq 'Unknown';
+        return @chain;
+    }
+
+    # Least upper bound: the nearest type that both arguments are subtypes of.
+    #
+    # This is what a merge point needs — two branches of a ternary, two callsites
+    # of the same sub, a Phi's inputs. The result keeps as much information as is
+    # true of BOTH inputs and no more.
+    #
+    # None is the identity (T join None == T), which is what lets a recursive
+    # function type from its base case: the recursive arm contributes None on the
+    # first pass, so Int join None == Int rather than collapsing to a top.
+    #
+    # Uniqueness depends on %PARENT being a TREE (one parent per type). A second
+    # parent edge would allow several minimal upper bounds and no least one, so
+    # anything adding one must re-establish this.
+    sub join_types($left, $right) {
+        return $left if !defined $right;
+        return $right if !defined $left;
+        return $left if $left eq $right;
+
+        # None is bottom: the identity for join.
+        return $right if $left eq 'None';
+        return $left  if $right eq 'None';
+
+        # Unknown is the pessimistic top and absorbs: joining against a type we
+        # failed to infer cannot manufacture information.
+        return 'Unknown' if $left eq 'Unknown' || $right eq 'Unknown';
+
+        return $right if is_subtype($left, $right);
+        return $left  if is_subtype($right, $left);
+
+        # Nearest common ancestor: first element of the left chain that also
+        # appears in the right chain. Walking nearest-first makes it the LEAST
+        # upper bound rather than merely an upper bound.
+        my %right_chain = map { $_ => 1 } _ancestors($right);
+        for my $ancestor (_ancestors($left)) {
+            return $ancestor if $right_chain{$ancestor};
+        }
+        return 'Unknown';
+    }
+
+    # Greatest lower bound: the nearest type that is a subtype of both arguments.
+    #
+    # Used for narrowing — a value reaching a position that requires Str, already
+    # known to be Num, is Num. Unrelated types meet at None, which is the correct
+    # answer (no value inhabits both) and not an error.
+    sub meet_types($left, $right) {
+        return $left if !defined $right;
+        return $right if !defined $left;
+        return $left if $left eq $right;
+
+        return 'None' if $left eq 'None' || $right eq 'None';
+
+        # Unknown is top for meet: it constrains nothing, so the other side wins.
+        return $right if $left eq 'Unknown';
+        return $left  if $right eq 'Unknown';
+
+        return $left  if is_subtype($left, $right);
+        return $right if is_subtype($right, $left);
+
+        # Neither contains the other: nothing inhabits both.
+        return 'None';
     }
 
     # Narrows a type based on evaluation context.
@@ -537,13 +647,13 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # Two signatures conflict when they disagree about a shared operand
     # position. A position present in one and absent from the other is arity
     # overloading, not disagreement.
-    sub _signatures_conflict($a, $b) {
-        my @a = _operand_types($a);
-        my @b = _operand_types($b);
-        my $shared = @a < @b ? @a : @b;
+    sub _signatures_conflict($left, $right) {
+        my @left  = _operand_types($left);
+        my @right = _operand_types($right);
+        my $shared = @left < @right ? @left : @right;
         for my $i (0 .. $shared - 1) {
-            next unless defined $a[$i] && defined $b[$i];
-            return true if $a[$i] ne $b[$i];
+            next unless defined $left[$i] && defined $right[$i];
+            return true if $left[$i] ne $right[$i];
         }
         return false;
     }
