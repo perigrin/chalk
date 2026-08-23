@@ -18,13 +18,22 @@ use Chalk::IR::Node;
 #   3. inference ran and could not decide   (a bug)
 #
 # Splitting the hierarchy removes meaning (1) from the field entirely, so an
-# undef `type` can only ever be an inference question. That is the same
+# undef `stamp` can only ever be an inference question. That is the same
 # absence-vs-value distinction `Unknown` exists to make, applied to the other
 # axis -- see docs/plans/2026-08-21-type-vs-representation-seams.md.
 #
-# THE PREDICATE IS `$node isa Chalk::IR::Value`, never `->can('type')`. `can`
+# THE FIELD IS `stamp` (Chalk::IR::Node.pm:20), not `type`. There is no `type`
+# field in either repo. It is a STAMP in C2's and Graal's sense -- an
+# abstract-interpretation fact ABOUT a value, of which the type is one
+# component -- and the name is deliberate: Graal's stamps also carry non-null,
+# exact type and integer bounds, filled in by refinement passes. Chalk has no
+# such passes yet, so `type` is currently the only component, but the
+# machinery is intended. Do not "correct" the name to Type.
+#
+# THE PREDICATE IS `$node isa Chalk::IR::Value`, never `->can('stamp')`. `can`
 # is duck-typing over a NAME and answers true for any class that happens to
-# define a `type` method for unrelated reasons; `isa` asks the actual question.
+# define a `stamp` method for unrelated reasons; `isa` asks the actual
+# question.
 # It is also CLOSED -- there is no opt-in-by-defining-a-method escape hatch --
 # so a value node nobody reparents fails by not being recognised as a value,
 # which is loud, rather than by silently carrying an untyped field.

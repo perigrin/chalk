@@ -62,9 +62,10 @@ from control nodes by CLASS, and its own comment states the rule:
 > A node either defines a value or it does not, and that is a STRUCTURAL fact
 > about the node kind, not a property to be filled in.
 
-It enumerates the same three-way overload, for the `type` field rather than for
-`node_type`. The producer has no equivalent — `lib/SoN/IR/` is `Graph`, `Node`,
-`NodeFactory`, `Stamp` and nothing else.
+It enumerates the same three-way overload, for the `stamp` field rather than
+for `node_type`. (That comment said "the `type` field" — there is no `type`
+field in either repo; the field is `stamp`, at `Chalk::IR::Node.pm:20`.
+Corrected.)
 
 Mirroring that split (`SoN::IR::Value :isa(SoN::IR::Node)`) would collapse
 `undef node_type` to one meaning and make `isa` the uniform predicate across the
