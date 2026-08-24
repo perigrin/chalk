@@ -38,22 +38,27 @@ class Chalk::IR::Node {
     # decoration, not a structural property of the node's content.
     field $schedule_data :reader = undef;
 
-    # Machine-level representation of the value produced by this node.
-    # Realized lattice (see typed-ir-representation.md): 'Boolean' (i1),
-    # 'Int' (i64), 'Num' (double/f64), 'Str' ({ptr,len,encoding}),
-    # 'Undef'/'Slot' ({defined,payload}), 'Array' ({len,cap,Slot*}),
-    # 'Hash' (linear-scan table), 'ArrayRef'/'HashRef' (i8* to the boxed
-    # aggregate), 'Object' (i8* to {vtable*, Slot...}); plus the older
-    # 'Ptr'/'Struct'/'Scalar' (boxed Perl SV*, conservative fallback).
-    # Set post-construction by the IR builder or a lowering pass via
-    # set_representation(); undef = not yet assigned.
-    # Excluded from content_hash: representation is a per-use lowering
-    # decision, not a structural property of what value the node IS. Two
-    # nodes with identical content (same literal, same operation, same
-    # inputs) must still hash-cons to one node regardless of what
-    # representation the builder later assigns. Coerce nodes (§2 of
-    # typed-ir-representation.md) bridge between representations on edges.
-    field $representation :reader = undef;
+    # NO SEPARATE `representation` FIELD. It was folded into `stamp` above:
+    # `representation`/`set_representation` are a deprecated ALIAS for
+    # `stamp`/`set_stamp` (see the bottom of this class for why, and for the
+    # conditions under which the alias is deleted).
+    #
+    # The machine vocabulary that field carried is recorded here because it is
+    # still what the BACKEND expects to read, until the lowering pass exists to
+    # produce it: 'Boolean' (i1), 'Int' (i64), 'Num' (double/f64),
+    # 'Str' ({ptr,len,encoding}), 'Undef'/'Slot' ({defined,payload}),
+    # 'Array' ({len,cap,Slot*}), 'Hash' (linear-scan table),
+    # 'ArrayRef'/'HashRef' (i8* to the boxed aggregate),
+    # 'Object' (i8* to {vtable*, Slot...}).
+    #
+    # Note 11 of those 12 names are ALSO type-lattice members -- which is what
+    # makes the alias sound. `Slot` is the sole exception and is assigned at
+    # exactly one site; see docs/plans/2026-08-24-there-should-be-no-representation-field.md.
+    #
+    # The exclusion from content_hash still holds and now applies to `stamp`:
+    # two nodes with identical content (same literal, same operation, same
+    # inputs) must hash-cons to one node regardless of what type is later
+    # assigned. Coerce nodes bridge between representations on edges.
 
     # Add a consumer to this node's consumer list
     method add_consumer($node) {
@@ -230,11 +235,40 @@ class Chalk::IR::Node {
         return;
     }
 
-    # Late-binding setter for the machine-level representation.
-    # Called by the IR builder or a lowering pass after the node is
-    # constructed. Does not affect content_hash or hash-consing identity.
+    # ---------------------------------------------------------------------
+    # DEPRECATED ALIAS. `representation` and `set_representation` are the same
+    # storage as `stamp`/`set_stamp` -- ONE FIELD, TWO NAMES.
+    #
+    # WHY: the loader is moving onto the type axis
+    # (docs/plans/2026-08-24-loader-analysis-pipeline.md, slice 3). The backend
+    # reads `representation` at 43 sites and branches on it 94 times, and the
+    # lowering pass that would produce real machine representations does not
+    # exist yet -- so the field cannot simply stop being written.
+    #
+    # An ALIAS rather than a dual-write, deliberately: a dual-write stores the
+    # same fact twice and the two copies can rot apart, which this project has
+    # a documented instance of (CLAUDE.md: `body` arrayrefs, 15 reader sites
+    # outstanding). One field cannot diverge from itself.
+    #
+    # THE ALIAS IS SILENT ON PURPOSE. No deprecation warning: it would fire on
+    # every one of the backend's 43 reads in every test run, which is noise
+    # standing in for a check the deletion already performs exactly. The
+    # enforcement is that DELETING these two methods breaks compilation at
+    # every remaining caller.
+    #
+    # NOTHING WILL REMIND ANYONE THIS EXISTS. Removal is a named first step of
+    # the lowering-pass work; see the DESIGNED section of
+    # docs/architecture/ir-and-lowering.md.
+    #
+    # WHY IT CANNOT BE THE END STATE: `Unknown` is the correct TYPE for an
+    # un-narrowed node and an invalid REPRESENTATION for the same node --
+    # _repr_to_llvm_type dies on it, and three loader passes treat a node that
+    # has one as already-typed. One value, right on one axis and poison on the
+    # other. The two axes must become separate fields again once the lowering
+    # pass can produce the second one.
+    method representation()      { return $stamp }
     method set_representation($repr) {
-        $representation = $repr;
+        $stamp = $repr;
         return;
     }
 }
