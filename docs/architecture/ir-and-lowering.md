@@ -486,8 +486,18 @@ robust to that, or it may not claim proof at all — only a guard.
 
 - The graph→graph lowering pass itself. Zero exist; the seam to insert one
   at is three lines (`Target/LLVM.pm:53-59`).
+  **Its first step is deleting the `representation` alias** — see below.
 - Connecting `set_stamp` on load, so a chalk-typed graph is a live object
   and not only transient wire JSON.
+- **Deleting `Chalk::IR::Node`'s `representation`/`set_representation` alias.**
+  Under `docs/plans/2026-08-24-loader-analysis-pipeline.md` the loader moves
+  onto the type axis and these two become DELIBERATELY SILENT forwarders onto
+  `stamp`/`set_stamp`, so the backend's 43 reads keep working with no edits
+  during the transition. There is no deprecation warning by design — the
+  enforcement is that deleting the alias breaks compilation at every remaining
+  caller. **Nothing will otherwise remind anyone the alias exists**, which is
+  why its removal is recorded here as a named step of the lowering work rather
+  than left to be rediscovered.
 - Retiring `Slot` by threading access provenance through Stamp subclasses.
 - Backward use-demand propagation as a smaller, prerequisite-satisfied first
   step toward informed representation selection.

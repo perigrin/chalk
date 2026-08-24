@@ -226,10 +226,16 @@ is where this plan says it belongs anyway.
 Non-literal assignments (computed values from `_join_repr` and friends) are
 lattice joins by construction, so they alias cleanly.
 
-**Open sub-question:** whether the alias should WARN on use. A warning would
-make the remaining call sites visible without breaking them, at the cost of
-noise in every test run. Probably better to leave it silent and rely on the
-compile-time break at deletion.
+**DECIDED (perigrin, 2026-08-24): the alias is SILENT.** No deprecation warning
+on use. The enforcement is the compile-time break when the alias is deleted,
+not a runtime nag — a warning would fire on every one of the backend's 43 reads
+in every test run, which is noise standing in for a check that the deletion
+already performs exactly.
+
+The corollary is that nothing will remind anyone the alias exists. Its removal
+is therefore a named step of the lowering-pass work rather than something to
+notice later, and it is recorded as such here so it is not discovered by
+archaeology.
 
 ### What the pipeline IS, named properly (perigrin, 2026-08-24)
 
