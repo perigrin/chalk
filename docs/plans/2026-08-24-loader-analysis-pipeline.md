@@ -159,7 +159,38 @@ Each slice is independently landable and independently verifiable. The corpus
 gate must read `gate-green=218 behavior=218 shape=218 invariant=218 worklist=0`
 after every one; the executable gate must stay 8/8.
 
-### Slice 1 — extract, change nothing
+### Slice 1 — extract, change nothing  ✅ **DONE 2026-08-24**
+
+**Landed.** `Chalk::IR::Analysis` now holds the 11 passes and the call
+sequence; `from_json` decodes and delegates. The pass order and every comment
+moved verbatim.
+
+**The experiment answered YES**: the gate held at `218/218/218/218` with zero
+`not ok`, executable gate 8/8. The sequence IS separable, so every later slice
+is safe to attempt on that count.
+
+Two things the pre-verification did not predict, both found by doing it:
+
+- **`_replay_classes` builds the MOP mid-sequence**, so the extracted `run()`
+  must RETURN the MOP, not just mutate graphs. Its signature is
+  `run($graphs, $classes) -> ($graphs, $mop)`. The plan had said
+  `run($graphs, $classes, $mop)` — the MOP is an output, not an input.
+- **The two modules refer to each other** (Analysis calls the pass subs, which
+  still live in Serialize::JSON), so the call site uses `require` rather than a
+  top-level `use`. A compile-time `use` on both sides is a load cycle.
+
+  Worth recording: **`perl -c` passes on a `from_json` that cannot run.** The
+  missing load only surfaced when the function was actually called. A
+  compile-check is not a load-check here.
+
+`from_json` keeps its signature, so all ~40 callers are untouched. The passes
+were left in `Serialize::JSON` and called qualified rather than moved wholesale
+— a second, larger move with no behavioural content, deliberately not bundled
+into the experiment.
+
+Original text follows.
+
+### Slice 1 (as planned) — extract, change nothing
 
 Move the 8 analyses and the 13-call sequence out of `from_json` into a new
 module (`Chalk::IR::Analysis`, name open). `from_json` decodes and returns; the
