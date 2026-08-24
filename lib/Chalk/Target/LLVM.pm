@@ -634,17 +634,12 @@ sub _emit_class_registry_ir {
     # a Str-RETURNING method, so the scan above (which keys on return_repr) would
     # miss most uses. An unused type declaration is inert; a missing one makes
     # lli reject the module with "invalid indices for insertvalue".
-    unless ($ctx->{_str_type_emitted}) {
-        push @lines, '; Str VALUE type (layout: Context::_str_fields)';
-        push @lines, Chalk::Target::LLVM::Context::_str_type_decl();
-        $ctx->{_str_type_emitted} = 1;
-    }
+    push @lines, $ctx->render_str_type_once;
 
     if ($need_strpair) {
         push @lines, '; StrPair for Str method return values (layout: Context::_strpair_fields)';
-        push @lines, Chalk::Target::LLVM::Context::_strpair_type_decl();
+        push @lines, $ctx->render_strpair_type_once;
         $ctx->{_need_strpair} = 1;
-        $ctx->{_strpair_emitted} = 1;  # I3: track emission to prevent double-declare in post-class re-emit
     }
 
     # Type pre-pass: emit EVERY class's vtable + object-struct type before any
@@ -1334,10 +1329,8 @@ sub lower_with_elaboration {
     # _need_aggregate_types flag above relies on. Declaring it in the earlier
     # prologue would need a pre-scan, which is the trap the _need_strpair "I3"
     # re-emit below exists to patch around.
-    if ($ctx->{_need_str_type} && !$ctx->{_str_type_emitted}) {
-        push @lines, '; Str VALUE type (layout: Context::_str_fields)';
-        push @lines, Chalk::Target::LLVM::Context::_str_type_decl();
-        $ctx->{_str_type_emitted} = 1;
+    if ($ctx->{_need_str_type}) {
+        push @lines, $ctx->render_str_type_once;
     }
 
     # Emit @chalk_str_to_num helper + strtod declaration when Coerce(Str->Num) is used.
@@ -1435,10 +1428,12 @@ sub lower_with_elaboration {
     # method (LOCAL scan returns 0) but a Str :param is bound, _lower_new emits %StrPair*
     # references without %StrPair being declared — lli rejects. The _strpair_emitted flag
     # (set at the existing line-376 emit site) prevents double-declare.
-    if ($ctx->{_need_strpair} && !$ctx->{_strpair_emitted}) {
-        push @lines, '; StrPair for Str values (post-class re-emit, I3; layout: Context::_strpair_fields)';
-        push @lines, Chalk::Target::LLVM::Context::_strpair_type_decl();
-        $ctx->{_strpair_emitted} = 1;
+    if ($ctx->{_need_strpair}) {
+        my @strpair_lines = $ctx->render_strpair_type_once;
+        if (@strpair_lines) {
+            push @lines, '; StrPair for Str values (post-class re-emit, I3; layout: Context::_strpair_fields)';
+            push @lines, @strpair_lines;
+        }
     }
 
     push @lines, '';

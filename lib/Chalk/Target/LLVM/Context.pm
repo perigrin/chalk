@@ -348,6 +348,39 @@ sub _struct_size_bytes {
     return $size;
 }
 
+# render_str_type_once() -> @llvm_lines (possibly empty)
+#
+# %Str, the first-class Str VALUE type, declared at most once per Context.
+# Three call sites in Target/LLVM.pm each need "declare %Str unless it's
+# already been declared" -- the main prologue (which runs before body
+# lowering, so it may not know yet that %Str is needed), the class-registry
+# prologue (which runs before METHOD BODIES lower, so it may not know
+# either), and neither may have run at all if the other already emitted it.
+# Centralizing the guard here means all three share one flag and one
+# decision instead of each hand-checking $ctx->{_str_type_emitted}.
+sub render_str_type_once {
+    my ($self) = @_;
+    return () if $self->{_str_type_emitted};
+    $self->{_str_type_emitted} = 1;
+    return ('; Str VALUE type (layout: Context::_str_fields)', _str_type_decl());
+}
+
+# render_strpair_type_once() -> @llvm_lines (possibly empty)
+#
+# %StrPair's type-decl line, declared at most once per Context, guarded by
+# _strpair_emitted (I3: the flag that stops the post-class re-emit from
+# double-declaring when a Str :param bind already forced %StrPair before any
+# Str-returning method was found). Returns just the decl line, not a leading
+# comment -- callers push their own comment first (the wording differs by
+# call site: "for Str method return values" at the class-registry prologue
+# vs. "post-class re-emit, I3" at the F6 re-emit site).
+sub render_strpair_type_once {
+    my ($self) = @_;
+    return () if $self->{_strpair_emitted};
+    $self->{_strpair_emitted} = 1;
+    return _strpair_type_decl();
+}
+
 # ---------------------------------------------------------------------------
 # The Str seam.
 #
