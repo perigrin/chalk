@@ -154,9 +154,27 @@ target are each independently discovering this is not guaranteed.
 ## OPEN — decisions needed before or during
 
 1. **Does `from_json` keep a convenience wrapper**, or do all callers change?
-   **Measured: 40 files call `from_json`** — this is the biggest churn decision
-   in the plan, and the reason slice 1 must settle it before anything else.
-   Consumers span `lib/`, `t/`, and both corpus harness
+   40 files reference it, but the breakdown makes this MUCH cheaper than that
+   number suggests — measured:
+
+   | location | files | what they are |
+   |---|---|---|
+   | `t/bootstrap/**` | 34 | unit tests wanting "a loaded graph" |
+   | `t/lib/.../Harness/` | 3 | `ProgramRunner`, `Mode2Adapter`, `Phase5LibCoverage` — the real pipeline |
+   | `lib/` | **1** | the file that DEFINES it |
+
+   **No production code calls `from_json` at all.** The only `lib/` hits are the
+   definition plus three comments. So the churn is: 3 harnesses take an explicit
+   analysis step (they already sequence the pipeline), and 34 unit tests are
+   exactly the population a convenience wrapper exists for.
+
+   Worth recording separately, because it is a larger observation than this
+   plan: **the end-to-end pipeline (`B::SoN` → `from_json` → LLVM lower) exists
+   only under `t/lib/`.** `script/` has `chalk-emit-son-json` for the producer
+   half and nothing for the consumer half. Given the project's stated goal that
+   "the output is EXECUTABLES", that the only driver is a test harness is a
+   finding in its own right. Not this plan's to fix. Consumers also span both
+   corpus harness
    modules. A wrapper is less churn; explicit is more honest about the phase
    boundary.
 2. **Where does the analysis live** — `Chalk::IR::Analysis`, a set of passes
