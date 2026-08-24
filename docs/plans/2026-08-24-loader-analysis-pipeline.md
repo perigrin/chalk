@@ -335,6 +335,51 @@ writing `representation`.**
   regression unattributable, which is the specific mistake this note exists to
   prevent.
 
+  > ### ⛔ 3b IS BLOCKED. Do not start it. (agentic review + coordinator proof, 2026-08-24)
+  >
+  > Removing `%LOWERABLE_STAMP` **reintroduces a known miscompile**, and slice
+  > 3a is what makes it reachable. Proven end-to-end, not reasoned:
+  >
+  >     wire:                  Subscript stamp=Unknown
+  >     TODAY (gate present):  Subscript -> Slot        (correct)
+  >     UNDER 3b (no gate):    Subscript -> Unknown     Slot fix SKIPPED
+  >
+  > The mechanism is a guard protecting a fix:
+  >
+  >     JSON.pm:1441    next if defined $node->representation;
+  >     JSON.pm:1459    $node->set_representation('Slot');   # the OOB fix
+  >
+  > Today an out-of-bounds `Subscript` arrives stamped `Unknown`,
+  > `%LOWERABLE_STAMP` DROPS it, the field stays undef, the guard passes, and
+  > the `Slot` fix fires. Under 3b the `Unknown` lands in the field, the guard
+  > SKIPS, and the fix never runs — which `JSON.pm:1447-1456` documents as "a
+  > silent miscompile" and corpus `references.md` R9 pins (an OOB read must
+  > print `Undef:`, not the payload `0`).
+  >
+  > **There are NINE such guards**, not the three this document said earlier:
+  > `JSON.pm:693, 700, 760, 804, 1342, 1441, 1771, 1783, 1868`. (My "3" came
+  > from grepping one exact string instead of the pattern; the reviewer said 8
+  > and was much closer.) Each is a place where `defined representation` means
+  > "already decided" — and `Unknown` makes that true while meaning the
+  > opposite.
+  >
+  > **Volume matters here.** A census over five produced wires: `Unknown`
+  > **4894** occurrences, `ArrayRef`/`HashRef` 81, `Scalar` 20. So the one
+  > value that breaks the guards is 60× the volume of the ones 3b would help.
+  >
+  > **PRECONDITION for 3b, either of:**
+  > 1. exclude `Unknown` (and `Scalar`/`List`) from the widened set — 3b then
+  >    becomes the two-name `ArrayRef`/`HashRef` change it was estimated as; or
+  > 2. re-express the nine `defined ...->representation` guards as a
+  >    COMMITTED-TYPE predicate (`defined && ne 'Unknown'`), which is the
+  >    `_is_narrowed` distinction the producer already made
+  >    (perl5-son `dc3aea1`) arriving on the chalk side.
+  >
+  > Option 2 is the honest fix and generalises; option 1 is smaller. Either way
+  > **`ArrayRef`/`HashRef` are genuinely just being dropped** and both already
+  > have machine encodings (`Context.pm:3531-3532`), so that part of 3b remains
+  > worth doing once the guards are safe.
+
   **MEASURED, and 3b is far smaller than the 19 suggests.** Sweeping 12
   programs covering arrays, hashes, refs, regex, coderefs, methods, loops and
   list-returning subs, and counting every stamp the producer emits for

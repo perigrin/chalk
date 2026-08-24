@@ -16,7 +16,21 @@ class Chalk::IR::Node {
     # This is mutable to allow building the graph
     field $consumers :reader = [];
 
-    # Optional stamp for identifying parse-origin or generation context
+    # The node's TYPE. Also reachable as `representation` -- see the deprecated
+    # alias at the bottom of this class; they are the same storage.
+    #
+    # `:param` NOTE. A stamp can be supplied at CONSTRUCTION, which the
+    # representation field never allowed. Since the two are now one field, a
+    # constructor-supplied stamp also pre-sets the representation -- and NINE
+    # loader passes are guarded by `defined $node->representation` meaning
+    # "already decided", so such a node is INVISIBLE TO INFERENCE and bypasses
+    # the %LOWERABLE_STAMP filtering the wire path applies.
+    #
+    # Measured: nothing in lib/ passes `stamp =>` at construction (zero sites),
+    # so this is latent, not live. It is left in place because three tests do
+    # use it (t/bootstrap/ir-node-base.t:35, ir-node-data.t:18,25) and removing
+    # it would break them for no production gain. Do not start using it in
+    # production code without deciding what it means for inference.
     field $stamp        :param :reader = undef;
 
     # Optional compat_class overrides the result of class() for back-compat
@@ -262,10 +276,28 @@ class Chalk::IR::Node {
     #
     # WHY IT CANNOT BE THE END STATE: `Unknown` is the correct TYPE for an
     # un-narrowed node and an invalid REPRESENTATION for the same node --
-    # _repr_to_llvm_type dies on it, and three loader passes treat a node that
+    # _repr_to_llvm_type dies on it, and NINE loader passes treat a node that
     # has one as already-typed. One value, right on one axis and poison on the
     # other. The two axes must become separate fields again once the lowering
     # pass can produce the second one.
+    #
+    # THE ALIAS IS DESTRUCTIVE IN ONE DIRECTION, and one live site relies on it.
+    # `set_representation` OVERWRITES the type; it does not merely provide a
+    # second name for reading it:
+    #
+    #     set_stamp('Int')        -> stamp=Int
+    #     set_representation('Slot') -> stamp=Slot     the Int TYPE is gone
+    #
+    # `Chalk::IR::Serialize::JSON:1459` does exactly this for a statically
+    # out-of-bounds Subscript, and `Slot` is NOT a lattice type. So after
+    # loading, the type axis of every provably-OOB element read is corrupted.
+    #
+    # THIS IS CURRENTLY HARMLESS ONLY BECAUSE NOTHING IN lib/ READS ->stamp.
+    # That is a load-bearing precondition, not an accident: the moment a
+    # consumer reads the type axis, it will read `Slot` for those nodes and be
+    # wrong. The honest type there is `Undef` -- an OOB read yields perl's
+    # undef -- with `Slot` being the lowering pass's ENCODING choice.
+    # Pinned by t/bootstrap/ir/stamp-alias-preconditions.t.
     method representation()      { return $stamp }
     method set_representation($repr) {
         $stamp = $repr;
