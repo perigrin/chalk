@@ -100,7 +100,7 @@ END_IR
     my $val   = $return_node->inputs->[0];
     my @nodes = ($return_node->inputs->[0],
                  $return_node->inputs->[0]->inputs->@*);
-    my $inv = Chalk::IR::Graph::TypedInvariant->check(\@nodes);
+    my $inv = Chalk::IR::Graph::TypedInvariant->check_nodes(\@nodes);
     ok($inv->{ok}, 'arith-add built graph passes TypedInvariant');
     is(scalar(@{ $inv->{violations} }), 0, 'no violations');
 }
@@ -173,7 +173,7 @@ END_IR
     # But the TypedInvariant must flag violations
     my @nodes = ($return_node->inputs->[0],
                  $return_node->inputs->[0]->inputs->@*);
-    my $inv = Chalk::IR::Graph::TypedInvariant->check(\@nodes);
+    my $inv = Chalk::IR::Graph::TypedInvariant->check_nodes(\@nodes);
     ok(!$inv->{ok}, 'ill-typed block fails TypedInvariant (Num input to Add without Coerce)');
     ok(scalar(@{ $inv->{violations} }) > 0, 'TypedInvariant records violations');
 }

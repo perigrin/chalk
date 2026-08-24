@@ -82,7 +82,7 @@ sub build_graph ($phi_value_count) {
 
 # check() returns a RESULT OBJECT ({ ok, violations }), not a flat list.
 sub violations_for ($g) {
-    my ($result) = Chalk::IR::Graph::TypedInvariant->check($g->nodes);
+    my ($result) = Chalk::IR::Graph::TypedInvariant->check($g);
     return (($result->{violations} // [])->@*);
 }
 

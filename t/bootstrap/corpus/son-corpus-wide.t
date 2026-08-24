@@ -237,7 +237,7 @@ for my $md (@topics) {
                 ? 'missing [' . join(', ', $shape->{missing}->@*) . ']'
                 : ($shape->{reason} // '');
 
-            my $inv = eval { Chalk::IR::Graph::TypedInvariant->check($g->nodes) }
+            my $inv = eval { Chalk::IR::Graph::TypedInvariant->check($g) }
                 // { ok => 0, violations => [{ message => "died: $@" }] };
             $inv_ok  = $inv->{ok} ? 1 : 0;
             $inv_why = $inv->{ok} ? ''

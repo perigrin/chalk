@@ -20,7 +20,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $add = $f->make('Add', inputs => [$lhs, $rhs]);
     $add->set_representation('Int');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$lhs, $rhs, $add]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$lhs, $rhs, $add]);
     ok($result->{ok}, 'well-formed Add(Int,Int)->Int passes the invariant');
     is(scalar @{ $result->{violations} }, 0,
         'no violations in well-formed graph');
@@ -39,7 +39,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $add = $f->make('Add', inputs => [$lhs, $bad_rhs]);
     $add->set_representation('Int');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$lhs, $bad_rhs, $add]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$lhs, $bad_rhs, $add]);
     ok(!$result->{ok}, 'malformed Add(Int,Scalar) without Coerce FAILS the invariant');
     ok(scalar @{ $result->{violations} } > 0,
         'at least one violation reported for unbridged mismatch');
@@ -63,7 +63,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $add = $f->make('Add', inputs => [$lhs, $coerce]);
     $add->set_representation('Int');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$lhs, $scalar_val, $coerce, $add]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$lhs, $scalar_val, $coerce, $add]);
     ok($result->{ok}, 'Coerce-bridged graph passes the invariant');
     is(scalar @{ $result->{violations} }, 0,
         'no violations when Coerce bridges the representation gap');
@@ -80,7 +80,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $add = $f->make('Add', inputs => [$lhs, $bad_rhs]);
     $add->set_representation('Int');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$lhs, $bad_rhs, $add]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$lhs, $bad_rhs, $add]);
     ok(!$result->{ok}, 'Add(Int,Num) without Coerce fails');
     my $v = $result->{violations}[0];
     ok(defined $v, 'violation record is defined');
@@ -99,7 +99,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $rhs = $f->make('Constant', value => '2', const_type => 'integer');
     my $add = $f->make('Add', inputs => [$lhs, $rhs]);
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$lhs, $rhs, $add]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$lhs, $rhs, $add]);
     ok($result->{ok}, 'undef representation on operands is not a violation (not yet assigned)');
 }
 
@@ -121,7 +121,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $div = $f->make('Divide', inputs => [$coe_lhs, $coe_rhs]);
     $div->set_representation('Num');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check(
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes(
         [$lhs_i, $rhs_i, $coe_lhs, $coe_rhs, $div]);
     ok($result->{ok}, 'Divide(Coerce(Int->Num), Coerce(Int->Num)) passes the invariant');
     is(scalar @{ $result->{violations} }, 0,
@@ -139,7 +139,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $div = $f->make('Divide', inputs => [$lhs, $rhs]);
     $div->set_representation('Num');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$lhs, $rhs, $div]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$lhs, $rhs, $div]);
     ok(!$result->{ok}, 'Divide(Int, Int) without Coerce fails the invariant');
     ok(scalar @{ $result->{violations} } > 0, 'violations reported for bare-Int Divide');
 }
@@ -157,7 +157,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $len = $f->make('Length', inputs => [$arr]);
     $len->set_representation('Int');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$c1, $arr, $len]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$c1, $arr, $len]);
     ok($result->{ok}, 'H2-8 bilateral: Length(ArrayRef)->Int passes the invariant');
     is(scalar @{ $result->{violations} }, 0, 'H2-8: no violations for well-typed Length');
 }
@@ -172,7 +172,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $len = $f->make('Length', inputs => [$wrong]);
     $len->set_representation('Int');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$wrong, $len]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$wrong, $len]);
     ok(!$result->{ok}, 'H2-9 bilateral: Length(Int) FAILS the invariant (Int is not Array or Str)');
     ok(scalar @{ $result->{violations} } > 0, 'H2-9: violations reported for ill-typed Length');
 }
@@ -190,7 +190,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $sub = $f->make('Subscript', inputs => [$arr, $idx]);
     $sub->set_representation('Int');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$arr, $idx, $sub]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$arr, $idx, $sub]);
     ok($result->{ok}, 'H2-10 bilateral: Subscript(ArrayRef, Int) passes the invariant');
     is(scalar @{ $result->{violations} }, 0, 'H2-10: no violations for Subscript(ArrayRef,Int)');
 }
@@ -206,7 +206,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $sub = $f->make('Subscript', inputs => [$not_ctr, $idx]);
     $sub->set_representation('Int');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$not_ctr, $idx, $sub]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$not_ctr, $idx, $sub]);
     ok(!$result->{ok}, 'H2-11 bilateral: Subscript(Int, Int) FAILS (Int is not Array or Hash)');
     ok(scalar @{ $result->{violations} } > 0, 'H2-11: violations reported for Subscript with Int container');
 }
@@ -221,7 +221,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '@');
     $deref->set_representation('Array');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$ref, $deref]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$ref, $deref]);
     ok($result->{ok}, 'H2-12 bilateral: PostfixDeref(ArrayRef) passes the invariant');
     is(scalar @{ $result->{violations} }, 0, 'H2-12: no violations for PostfixDeref(ArrayRef)');
 }
@@ -235,7 +235,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $deref = $f->make('PostfixDeref', inputs => [$not_ref], sigil => '@');
     $deref->set_representation('Array');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$not_ref, $deref]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$not_ref, $deref]);
     ok(!$result->{ok}, 'H2-13 bilateral: PostfixDeref(Int) FAILS (Int is not ArrayRef or HashRef)');
     ok(scalar @{ $result->{violations} } > 0, 'H2-13: violations reported for ill-typed PostfixDeref');
 }

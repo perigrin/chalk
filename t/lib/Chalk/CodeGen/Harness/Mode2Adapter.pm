@@ -82,7 +82,7 @@ class Chalk::CodeGen::Harness::Mode2Adapter {
         my $behavior_ok  = defined $lli && $lli eq $expected_tag;
         my ($invariant_ok, $inv_why) = (0, 'no loaded graph');
         if (defined $g) {
-            my $inv = eval { Chalk::IR::Graph::TypedInvariant->check($g->nodes) }
+            my $inv = eval { Chalk::IR::Graph::TypedInvariant->check($g) }
                 // { ok => 0, violations => [{ message => "died: $@" }] };
             $invariant_ok = $inv->{ok} ? 1 : 0;
             $inv_why = $inv->{ok} ? ''

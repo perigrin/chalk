@@ -78,7 +78,7 @@ sub branch_graph ($with_preds) {
 
 # check() returns a RESULT OBJECT ({ ok, violations }), not a flat list.
 sub predecessor_violations ($g) {
-    my ($result) = Chalk::IR::Graph::TypedInvariant->check($g->nodes);
+    my ($result) = Chalk::IR::Graph::TypedInvariant->check($g);
     return grep { ($_->{message} // '') =~ /predecessor/i }
            (($result->{violations} // [])->@*);
 }
@@ -111,7 +111,7 @@ subtest 'a Phi on a branchless Region is exempt' => sub {
     my $phi = $f->make('Phi', region => $region, values => [$c1, $c2]);
     $phi->set_representation('Int');
 
-    my ($result) = Chalk::IR::Graph::TypedInvariant->check([$phi, $region, $c1, $c2]);
+    my ($result) = Chalk::IR::Graph::TypedInvariant->check_nodes([$phi, $region, $c1, $c2]);
     my @v = grep { ($_->{message} // '') =~ /predecessor/i }
             (($result->{violations} // [])->@*);
 
@@ -131,7 +131,7 @@ subtest 'a loop Phi is exempt' => sub {
     my $phi  = $f->make('Phi', region => $loop, values => [$init]);
     $phi->set_representation('Int');
 
-    my ($result) = Chalk::IR::Graph::TypedInvariant->check([$phi, $loop, $init, $start]);
+    my ($result) = Chalk::IR::Graph::TypedInvariant->check_nodes([$phi, $loop, $init, $start]);
     my @v = grep { ($_->{message} // '') =~ /predecessor/i }
             (($result->{violations} // [])->@*);
 

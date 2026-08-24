@@ -134,7 +134,7 @@ sub run_file ($class, $path) {
 
     # The loaded graph must satisfy the TypedInvariant. A program that prints
     # the right bytes off a malformed graph is not a pass.
-    my $inv = eval { Chalk::IR::Graph::TypedInvariant->check($graph->nodes) }
+    my $inv = eval { Chalk::IR::Graph::TypedInvariant->check($graph) }
         // { ok => 0, violations => [{ message => "died: $@" }] };
     unless ($inv->{ok}) {
         my $why = join('; ', map { $_->{message} } $inv->{violations}->@*);

@@ -18,7 +18,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $print = $f->make('Print', inputs => [$msg]);
     $print->set_control_in($start);
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$start, $msg, $print]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$start, $msg, $print]);
     ok($result->{ok}, 'Print with control_in set passes the control-chain leg');
     is(scalar @{ $result->{violations} }, 0,
         'no violations when Print is pinned to control');
@@ -36,7 +36,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $print = $f->make('Print', inputs => [$msg]);
     # No set_control_in call -- control_in stays undef.
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$msg, $print]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$msg, $print]);
     ok(!$result->{ok}, 'Print with undef control_in FAILS the control-chain leg');
     ok(scalar @{ $result->{violations} } > 0,
         'a violation is reported for the unpinned Print');
@@ -57,7 +57,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $assign = $f->make('Assign', inputs => [$target, $value]);
     $assign->set_control_in($start);
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$start, $target, $value, $assign]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$start, $target, $value, $assign]);
     ok($result->{ok}, 'Assign with control_in set passes the control-chain leg');
 }
 
@@ -71,7 +71,7 @@ use Chalk::IR::Graph::TypedInvariant;
     $value->set_representation('Int');
     my $assign = $f->make('Assign', inputs => [$target, $value]);
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$target, $value, $assign]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$target, $value, $assign]);
     ok(!$result->{ok}, 'Assign with undef control_in FAILS the control-chain leg');
     ok(scalar @{ $result->{violations} } > 0,
         'a violation is reported for the unpinned Assign');
@@ -87,7 +87,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $ret = $f->make_cfg('Return', inputs => [$value]);
     $ret->set_control_in($start);
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$start, $value, $ret]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$start, $value, $ret]);
     ok($result->{ok}, 'Return with control_in set passes the control-chain leg');
 }
 
@@ -99,7 +99,7 @@ use Chalk::IR::Graph::TypedInvariant;
     $value->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$value]);
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$value, $ret]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$value, $ret]);
     ok(!$result->{ok}, 'Return with undef control_in FAILS the control-chain leg');
     ok(scalar @{ $result->{violations} } > 0,
         'a violation is reported for the unpinned Return');
@@ -115,7 +115,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $call = $f->make('Call', inputs => [$arg], dispatch_kind => 'direct', name => 'main::foo');
     $call->set_control_in($start);
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$start, $arg, $call]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$start, $arg, $call]);
     ok($result->{ok}, 'Call with control_in set passes the control-chain leg');
 }
 
@@ -127,7 +127,7 @@ use Chalk::IR::Graph::TypedInvariant;
     $arg->set_representation('Int');
     my $call = $f->make('Call', inputs => [$arg], dispatch_kind => 'direct', name => 'main::foo');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$arg, $call]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$arg, $call]);
     ok(!$result->{ok}, 'Call with undef control_in FAILS the control-chain leg');
     ok(scalar @{ $result->{violations} } > 0,
         'a violation is reported for the unpinned Call');
@@ -143,7 +143,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $unwind = $f->make_cfg('Unwind', inputs => [$msg]);
     $unwind->set_control_in($start);
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$start, $msg, $unwind]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$start, $msg, $unwind]);
     ok($result->{ok}, 'Unwind with control_in set passes the control-chain leg');
 }
 
@@ -155,7 +155,7 @@ use Chalk::IR::Graph::TypedInvariant;
     $msg->set_representation('Str');
     my $unwind = $f->make_cfg('Unwind', inputs => [$msg]);
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$msg, $unwind]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$msg, $unwind]);
     ok(!$result->{ok}, 'Unwind with undef control_in FAILS the control-chain leg');
     ok(scalar @{ $result->{violations} } > 0,
         'a violation is reported for the unpinned Unwind');
@@ -170,7 +170,7 @@ use Chalk::IR::Graph::TypedInvariant;
     $subject->set_representation('Str');
     my $match = $f->make('RegexMatch', inputs => [$subject], pattern => 'x', flags => '');
 
-    my $result = Chalk::IR::Graph::TypedInvariant->check([$subject, $match]);
+    my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$subject, $match]);
     ok($result->{ok}, 'RegexMatch with undef control_in is exempt from the control-chain leg');
 }
 

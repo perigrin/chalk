@@ -1,5 +1,5 @@
 # ABOUTME: Well-typed-graph invariant checker for the typed-IR-representation model.
-# ABOUTME: Walks a node list and flags unbridged representation mismatches (H2 from the arch review).
+# ABOUTME: Checks a Graph and flags unbridged representation mismatches (H2 from the arch review).
 package Chalk::IR::Graph::TypedInvariant;
 use 5.42.0;
 use utf8;
@@ -195,7 +195,57 @@ sub _check_repr_for_position {
 #
 # Any other combination is a violation: the operand has a definite, wrong
 # representation and no Coerce bridges the gap.
+# check($graph) -> {ok, violations}
+#
+# THE ENTRY POINT. Takes a Chalk::IR::Graph, because the question this module
+# exists to answer -- "is this graph well-typed?" -- is a property of a graph.
+# A node list cannot answer it: it is whatever the caller assembled, so a
+# missing node reads identically to a graph that never had one.
+#
+# This module's own comments recorded that limitation in three places while the
+# signature was still a node list; the control-chain leg's is the clearest:
+# "an effect reachable ONLY through control (not present in that node list) is
+# invisible to it". Taking the graph is the first step toward closing it -- the
+# walk below still uses ->nodes, so control-only reachability is NOT yet covered
+# (see check_nodes' note), but the caller can no longer hand over a set that
+# silently omits things.
+#
+# Slice 5 of docs/plans/2026-08-24-loader-analysis-pipeline.md runs this at the
+# end of the analysis pipeline as the loader's exit gate.
 sub check {
+    my ($class, $graph) = @_;
+
+    # An unmigrated caller passing an arrayref must fail loudly. Accepting it
+    # would check a fragment while reading as a graph check -- and a caller
+    # whose list happened to be empty would get a vacuous ok=1.
+    unless (blessed($graph) && $graph->can('nodes')) {
+        require Carp;
+        Carp::croak(
+            'TypedInvariant->check expects a Chalk::IR::Graph. To check a '
+          . 'node fragment (no Start, no Return), call check_nodes(\\@nodes) '
+          . '-- it answers a weaker question and is named for it.'
+        );
+    }
+
+    return $class->check_nodes($graph->nodes);
+}
+
+# check_nodes(\@nodes) -> {ok, violations}
+#
+# Checks a FRAGMENT: a bare list of nodes, which may have no Start and no
+# Return. This is the weaker question, and it is named differently so a caller
+# cannot reach for it by accident.
+#
+# It exists for the unit tests that isolate ONE typing rule over three floating
+# nodes (`[$lhs, $rhs, $add]`). Wrapping those in a synthetic Graph would give
+# each a Start and a Return it does not care about, obscuring what it pins.
+#
+# WHAT IT CANNOT ANSWER, and why check($graph) is the real entry:
+#   - completeness ("every Value node here is typed") is a claim about the
+#     caller's list, not about a graph;
+#   - reachability -- an orphaned node and a live one are indistinguishable;
+#   - a node reachable only through the control chain is simply absent.
+sub check_nodes {
     my ($class, $nodes) = @_;
     my @violations;
 

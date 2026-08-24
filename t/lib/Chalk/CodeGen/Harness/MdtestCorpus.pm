@@ -1017,7 +1017,7 @@ sub _run_ir_shape_check {
 
     # Run the TypedInvariant on the built graph to catch ill-typed blocks
     my @all_nodes = _collect_all_nodes($return_node);
-    my $inv = Chalk::IR::Graph::TypedInvariant->check(\@all_nodes);
+    my $inv = Chalk::IR::Graph::TypedInvariant->check_nodes(\@all_nodes);
     unless ($inv->{ok}) {
         my $violations_str = join('; ', map { $_->{message} } @{ $inv->{violations} });
         push @$fail_reasons,
@@ -1087,7 +1087,7 @@ sub spec_invariant_check {
     my @nodes = eval { _collect_all_nodes($spec_return) };
     return { verdict => 'SKIP', reason => "spec graph unwalkable: $@" } if $@;
 
-    my $inv = eval { Chalk::IR::Graph::TypedInvariant->check(\@nodes) }
+    my $inv = eval { Chalk::IR::Graph::TypedInvariant->check_nodes(\@nodes) }
         // { ok => 0, violations => [{ message => "died: $@" }] };
 
     # A SPEC IS A SUBSET, so not every invariant applies to it. The shape leg
