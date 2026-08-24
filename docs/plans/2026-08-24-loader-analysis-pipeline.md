@@ -247,11 +247,35 @@ writing `representation`.**
 
   That reshapes 3b substantially:
 
-  - **`Unknown` should stay dropped** as a *representation*. It is the
-    pessimistic top and has no machine encoding; chalk's own comment at
-    `Serialize/JSON.pm:1088` says an "Unknown GAP means nothing ever typed
-    this". Under the alias it lives on the type axis, which is exactly right.
-    So this one needs no work at all — the gate is doing the right thing for it.
+  - **`Unknown` must stay dropped, and the reason is much stronger than
+    "it has no encoding" — it is a POISON VALUE in that field.** Verified two
+    ways:
+
+        _repr_to_llvm_type('Unknown')  ->  DIES:
+          "'Unknown' is the pessimistic top: INFERENCE never determined a type
+           for this value. Nothing may be done with it until it is narrowed."
+
+    and **3 inference passes in the loader are guarded by
+    `next if defined $node->representation`** — so a node holding `Unknown`
+    is treated as ALREADY TYPED and skipped by every subsequent inference pass.
+
+    So writing `Unknown` into the representation field does two bad things at
+    once: it **blocks the inference that would have narrowed it**, and any node
+    that survives to machine-type selection **dies**. `%LOWERABLE_STAMP` is not
+    merely filtering an unlowerable name; it is the thing preventing a poison
+    value from entering the pipeline.
+
+    **This corrects an earlier claim in this document** that `Unknown` "needs no
+    work at all". It needs the most care of the three: the gate's `Unknown`
+    exclusion is load-bearing and must survive 3b in some form.
+
+    It also sharpens what the alias means. Under a single field, `Unknown` is
+    the correct TYPE for an un-narrowed node and an invalid REPRESENTATION for
+    the same node — the same value being right on one axis and poison on the
+    other. That is the clearest argument in this document for why the two axes
+    must eventually be separate FIELDS again (one type, one machine type), not
+    one field with two names. The alias is a transition device, and this is the
+    concrete reason it cannot be the end state.
   - **`ArrayRef`/`HashRef` are the only real cases**, and both ALREADY have
     machine encodings (`%_REPR_LLVM_TYPE`: `ArrayRef => 'i8*'`,
     `HashRef => 'i8*'`). So they are being dropped despite being lowerable —
