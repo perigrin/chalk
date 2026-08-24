@@ -35,6 +35,7 @@ use Chalk::IR::NodeFactory;   # is_statement_node() classifier used by the value
 # Re-export helpers from the main package so unqualified calls in this
 # package resolve correctly (both packages share the same implementation).
 *_require_repr              = \&Chalk::Target::LLVM::_require_repr;
+*_encode_c_string            = \&Chalk::Target::LLVM::_encode_c_string;
 
 # _method_fn_type($result_repr) -> LLVM fn type string for method signatures.
 # Duplicate of the module-level sub; both packages need it to avoid cross-package calls.
@@ -522,6 +523,27 @@ sub _str_parts {
     $self->_emit("  $p = extractvalue %Str $str_ref, " . _str_idx('ptr') . "  ; %Str.ptr");
     $self->_emit("  $l = extractvalue %Str $str_ref, " . _str_idx('len') . "  ; %Str.len");
     return ($p, $l);
+}
+
+# render_str_globals() -> @llvm_lines
+#
+# Emit string-constant globals accumulated by THIS context during body
+# lowering (a method body or ADJUST block, each lowered in its own fresh
+# Context). They cannot go in the main module prologue -- that has already
+# been emitted by the time a body lowers -- so the caller places these lines
+# in the class section, near the function that references them.
+sub render_str_globals {
+    my ($self) = @_;
+    my @lines;
+    if (defined $self->{_str_globals} && @{ $self->{_str_globals} }) {
+        for my $g (@{ $self->{_str_globals} }) {
+            my ($gname, $content, $blen) = @$g;
+            my $total = $blen + 1;
+            my $enc = _encode_c_string($content);
+            push @lines, "$gname = private unnamed_addr constant [$total x i8] c\"$enc\\00\", align 1";
+        }
+    }
+    return @lines;
 }
 
 # blocks() -> arrayref of { label, insts, terminator }

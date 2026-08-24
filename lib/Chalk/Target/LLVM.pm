@@ -638,25 +638,6 @@ sub _render_context_blocks {
     return @lines;
 }
 
-# _render_str_globals($body_ctx) -> @llvm_lines
-#
-# Emit string-constant globals accumulated by a body-lowering context.
-# They cannot go in the main prologue (already emitted); the caller places
-# them in the class section near the function that references them.
-sub _render_str_globals {
-    my ($body_ctx) = @_;
-    my @lines;
-    if (defined $body_ctx->{_str_globals} && @{ $body_ctx->{_str_globals} }) {
-        for my $g (@{ $body_ctx->{_str_globals} }) {
-            my ($gname, $content, $blen) = @$g;
-            my $total = $blen + 1;
-            my $enc = _encode_c_string($content);
-            push @lines, "$gname = private unnamed_addr constant [$total x i8] c\"$enc\\00\", align 1";
-        }
-    }
-    return @lines;
-}
-
 # _emit_class_registry_ir(\%registry, $ctx) -> @llvm_lines
 #
 # Emits all class-related LLVM IR declarations: type defs, vtable globals,
@@ -911,7 +892,7 @@ sub _emit_class_registry_ir {
             # Propagate _need_* flags to the main ctx (F6 bug class) and
             # emit the body's string-constant globals into the class section.
             $ctx->absorb_need_flags_from($body_ctx);
-            push @lines, _render_str_globals($body_ctx);
+            push @lines, $body_ctx->render_str_globals;
         }
 
         # 4a-2. SUB body functions (one define per plain `sub` in the class).
@@ -989,7 +970,7 @@ sub _emit_class_registry_ir {
             push @lines, '';
 
             $ctx->absorb_need_flags_from($body_ctx);
-            push @lines, _render_str_globals($body_ctx);
+            push @lines, $body_ctx->render_str_globals;
         }
 
         # 4b. ADJUST function: one @Cls__ADJUST(i8* %self) per class with
@@ -1025,7 +1006,7 @@ sub _emit_class_registry_ir {
 
             # Same flag/global propagation as the method-body loop above.
             $ctx->absorb_need_flags_from($adj_ctx);
-            push @lines, _render_str_globals($adj_ctx);
+            push @lines, $adj_ctx->render_str_globals;
         }
 
         # Vtable global: @Cls__vtable = { class-name-ptr, fn-ptr0, fn-ptr1, ... }
