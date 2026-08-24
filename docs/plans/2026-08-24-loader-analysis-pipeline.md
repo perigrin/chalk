@@ -214,6 +214,57 @@ Today `_stamp_method_call_reprs` rebuilds `return_type` from scratch. Instead:
 This is the "validate/update rather than discard/rebuild" distinction. It is
 strictly less work than today AND converts a silent divergence into a loud one.
 
+**BLOCKING GAP, measured 2026-08-24: THE WIRE CARRIES NO `return_type` FOR
+CLASS METHODS.** Slice 2 as written cannot be implemented for the case it is
+actually about.
+
+Probed nine `feature class` methods (int/str/num returns, a field read, a
+computed expression, a boolean, a concat, a chained `$self->a`, and a generated
+`:reader`):
+
+    PROGRAM        METHOD   WIRE       LOADER
+    int method     P::m     absent     Int
+    str method     P::m     absent     Str
+    num method     P::m     absent     Num
+    field read     P::m     absent     Int
+    computed       P::m     absent     Int
+    bool method    P::m     absent     Boolean
+    concat meth    P::m     absent     Str
+    chained meth   P::a     absent     Int
+    chained meth   P::b     absent     Int
+
+    WIRE ABSENT   9   (of 9)
+
+**Nine of nine absent.** The cause is structural, not a probe artifact — the
+producer stores methods and subs differently:
+
+    B/SoN.pm:669   $classes->{$pkg}{subs}{$name} = { name, graph, params,
+                                                     signature, uses_args,
+                                                     return_type }
+    B/SoN.pm:888   $class{methods}{$name} = "${pkg_name}::${name}"
+                                            # a BARE STRING — no metadata slot
+
+Subs get a metadata hashref; methods get a graph name. So there is no
+`return_type` to seed from, and **`_stamp_method_call_reprs` — the very function
+slice 2 proposes to replace — is currently the ONLY source of a method's return
+type.** It is not redundant work there; it is the only work.
+
+**Consequences for the plan:**
+
+- Slice 2 splits: **2a** covers plain subs (where the wire has the data and the
+  15-sub measurement applies) and **2b** is blocked pending a producer change
+  that gives methods a metadata record.
+- The earlier claim that the loader "rebuilds what the wire already sent" holds
+  for SUBS and is **false for METHODS**. The plan's framing overstated the case
+  by generalising a sub-only measurement.
+- 2b is a cross-repo change (producer emits method metadata, chalk consumes it)
+  and therefore carries the mirror obligation and the no-version-pin
+  serialization hazard.
+
+**This is the single most useful thing the assessment produced**, and it was
+found by doing exactly what the plan's own caveat asked for: re-measuring on
+methods rather than trusting a sub-only sample.
+
 ### Slice 3 — move the analyses onto the TYPE axis  ← THE CENTRAL SLICE
 
 Under the scope rule this is no longer "additively preserve the type axis". It
@@ -468,12 +519,52 @@ Prerequisites, both real:
 
 - **slice 3 must land first** — there are no stamps to check until the analyses
   write them.
-- **`%OP_REQUIRED_REPR` must be re-examined on the type axis.** It is currently
-  exactness-based, and that exactness was measured to be load-bearing:
-  converting `_conforms` from `eq` to `is_subtype` was attempted and killed on
-  measurement (`2026-08-14-representation-is-the-targets-type-system.md`). The
-  same table over TYPES may need different answers, since `Int <: Num` is a
-  meaningful relation for types in a way it is not for machine encodings.
+- **`%OP_REQUIRED_REPR` must be re-examined on the type axis** — and having now
+  READ it (`TypedInvariant.pm:21-57`), the picture is better than this plan
+  assumed, in a specific and useful way.
+
+  **All of the table's vocabulary is already lattice types.** Every value is a
+  `TypeLibrary` `%PARENT` member — verified for the widest entry,
+  `Length => [Array ArrayRef Hash HashRef Str]`, all five of which are lattice
+  types. So there is no entry whose requirement is meaningless as a type. The
+  vocabulary transfers unchanged.
+
+  **And the table already reasons in subtype terms in its own comments**, which
+  is the opposite of what "exactness-based" implies:
+
+  > `Add`'s signature is `(Num, Num) -> Num`; **`Int <: Num`**, so an all-Int
+  > application IS a Num application whose result stays in Int, and `add i64` is
+  > the representation chosen for it — **an optimization, not a second
+  > integer-specific operator.**
+
+  So the design intent is already type-shaped; the exactness is an
+  IMPLEMENTATION of it, not a rejection of it.
+
+  **The mechanism that makes exactness work is `%OP_REQUIRES_OWN_REPR`**
+  (`:57`, `Add`/`Subtract`/`Multiply`). Those ops do not check against the table
+  at all — they require their operands to match **the node's own
+  representation**, exactly. The comment spells out why a fixed entry cannot
+  express it:
+
+      Add:Int over (Int, Int)         -> conforms, emits add i64
+      Add:Num over (Coerce->Num, Num) -> conforms via the Coerce bridge
+      Add:Int over (Int, Num)         -> VIOLATION
+
+  "`'Num'` alone rejects the honest all-Int case, and `'Int'` rejects the honest
+  Num one." That is why the `eq`→`is_subtype` conversion was killed: it was
+  applied to the WRONG THING. `is_subtype` on the table entry would let
+  `Add:Int over (Int, Num)` pass, dropping a fraction. The exactness is not
+  guarding the table, it is guarding the node-relative check.
+
+  **Revised assessment of slice 5:** the table transfers to types largely
+  intact. The care is needed at `%OP_REQUIRES_OWN_REPR`, where the check is
+  node-relative and where relaxing exactness is known to admit a real
+  miscompile. `Divide => 'Num'` and `Concat => 'Str'` are plain fixed
+  requirements and are unaffected; `Length`'s five-way list is a union and is
+  unaffected. **The plan's claim that Divide/Concat/Length are "the load-bearing
+  exactness cases" is WRONG** — they are the easy ones. Add/Subtract/Multiply
+  are the load-bearing cases, and they are load-bearing for a reason that is
+  about node-relative checking rather than about the type/repr distinction.
 
 **The payoff is the 31 `_require_repr` assertions.** Each is the backend
 discovering at lowering time that nothing upstream guaranteed what it needs.
