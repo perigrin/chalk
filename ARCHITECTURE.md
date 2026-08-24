@@ -79,6 +79,7 @@ full design rationale.
 | [Sea of Nodes IR](docs/architecture/sea-of-nodes-ir.md) | IR node types, hash consing, use-def chains, Graph container |
 | [MOP Layer](docs/architecture/mop.md) | Class/Method/Sub/Field/Phaser containers, per-parse factory ownership |
 | [IR Lowering](docs/architecture/ir-lowering.md) | Target backends, Perl/XS/C code generation (LLVM IR planned) |
+| [IR, Types, and Lowering](docs/architecture/ir-and-lowering.md) | Type vs. representation axes, the graph-to-graph lowering transformation, access provenance and the MOP — marked BUILT/DESIGNED/OPEN |
 | [Optimization](docs/architecture/optimization.md) | Implemented and planned IR-level passes |
 
 ## Key Design Principles
