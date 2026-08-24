@@ -184,17 +184,52 @@ writing `representation`.**
 rewrite exists there is nothing to produce those representations, so this slice
 cannot simply stop writing them without breaking every lowering path.
 
-Two candidate strategies, and this is an OPEN decision:
+**THE TRANSITION MECHANISM (perigrin): make the representation API a temporary
+ALIAS for the stamp API.** Not two stored values — one field, two names:
 
-- **(a) Dual-write** — set both `stamp` and `representation` from the same
-  computation, then delete the representation half when the lowering pass
-  lands. Keeps the gate green throughout; carries a known hazard, since this
-  project has a documented history of dual-write transitions that never
-  completed their second half (`CLAUDE.md`, MOP migration).
-- **(b) A shim in the target** — the backend derives a representation from the
-  node's stamp on read, as a temporary stand-in for the lowering pass. Smaller
-  and more honest about where the translation belongs, but it puts translation
-  logic in the target, which is where it must NOT end up.
+    method set_representation($r) { $self->set_stamp($r) }   # DEPRECATED alias
+    method representation()       { $self->stamp }            # DEPRECATED alias
+
+This is better than either option originally written here, and it is better for
+a structural reason rather than a stylistic one.
+
+- **There is no second stored value, so nothing can diverge.** The hazard of a
+  dual-write is two sources of truth rotting apart; an alias has one source of
+  truth, so that failure mode is unreachable by construction. Given this
+  project's documented history of dual-write migrations whose second half never
+  landed (`CLAUDE.md`: `body` arrayrefs dual-written with 15 reader sites still
+  outstanding), that matters more than the mechanism's simplicity.
+- **The deletion becomes compiler-enforced.** When the lowering pass lands,
+  delete the alias; every remaining caller fails to compile. That is a
+  mechanical endpoint, not a discipline-enforced one.
+- **The translation is not in the target.** It is a deprecated name on the IR
+  node, which is the right place for a name that is going away.
+- **The backend needs no edits at all** during the transition — its 43 reads
+  and 94 branches keep working.
+
+**Feasibility, measured.** The alias is only sound where a representation value
+is also a valid lattice type. Every literal `set_representation('...')` in
+`lib/`:
+
+    set_representation('ArrayRef')    lattice type  ✓
+    set_representation('Boolean')     lattice type  ✓
+    set_representation('Regex')       lattice type  ✓
+    set_representation('Slot')        NOT a type    ✗   (one site,
+                                                        Serialize/JSON.pm:1547)
+
+**Three of four are lattice members. `Slot` is the sole exception, at exactly
+one site** — the `_static_miss` out-of-bounds branch. Its honest type is
+`Undef` (an OOB read yields perl's `undef`), so that one line becomes
+`set_stamp('Undef')` and the `Slot` ENCODING moves to the lowering pass, which
+is where this plan says it belongs anyway.
+
+Non-literal assignments (computed values from `_join_repr` and friends) are
+lattice joins by construction, so they alias cleanly.
+
+**Open sub-question:** whether the alias should WARN on use. A warning would
+make the remaining call sites visible without breaking them, at the cost of
+noise in every test run. Probably better to leave it silent and rely on the
+compile-time break at deletion.
 
 ### What the pipeline IS, named properly (perigrin, 2026-08-24)
 
