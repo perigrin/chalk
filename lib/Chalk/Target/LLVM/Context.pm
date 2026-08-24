@@ -884,6 +884,20 @@ sub render_blocks {
 
 # render_str_globals() -> @llvm_lines
 #
+# slot_payload_for($def_bit) -> $payload_ref | undef
+#
+# Look up the payload SSA ref recorded alongside a Slot's defined-bit ref. A
+# Slot VALUE is represented as its defined-bit alone; the i64 payload lives
+# in this side table, keyed by that bit, because there is no single SSA ref
+# that carries both halves. Returns undef when nothing was recorded --
+# every call site (here, and the DefinedOr/Coerce sites inside this file)
+# dies on that case with its OWN diagnostic wording, so this reader does not
+# bake in any one of them.
+sub slot_payload_for {
+    my ($self, $def_bit) = @_;
+    return $self->{_slot_payload}{$def_bit};
+}
+
 # Emit string-constant globals accumulated by THIS context during body
 # lowering (a method body or ADJUST block, each lowered in its own fresh
 # Context). They cannot go in the main module prologue -- that has already

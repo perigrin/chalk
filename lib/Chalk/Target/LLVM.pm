@@ -1322,7 +1322,7 @@ sub lower_with_elaboration {
         #   defined=true  -> print "Int:<payload>\n"
         #   defined=false -> print "Undef:\n"
         my $def_bit  = $result_ref;
-        my $pay_val  = $ctx->{_slot_payload}{$def_bit}
+        my $pay_val  = $ctx->slot_payload_for($def_bit)
             // die "LLVM backend: Slot result missing payload in _slot_payload table";
         my $def_lbl  = $ctx->_fresh_label('slot_def');
         my $und_lbl  = $ctx->_fresh_label('slot_und');
