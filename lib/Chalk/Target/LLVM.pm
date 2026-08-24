@@ -825,11 +825,12 @@ sub _emit_class_registry_ir {
                 elab           => $body_elab,
                 class_registry => $registry,
             );
-            $body_ctx->{_in_method_body} = 1;
-            $body_ctx->{_method_self_name} = '%self';
-            $body_ctx->{_method_class_name} = $cname;
-            $body_ctx->{_method_name} = $mname;  # I1: used to prefix str_const globals uniquely
-            $body_ctx->{_need_strpair}  = $ctx->{_need_strpair} // 0;
+            # I1: method_name is used to prefix str_const globals uniquely
+            $body_ctx->configure_as_method_body(
+                class_name  => $cname,
+                method_name => $mname,
+                parent_ctx  => $ctx,
+            );
 
             # Emit the body's statement effects (field-store Assign, void Call, and
             # any branch-guarded If) in control order BEFORE the return value, so a
@@ -953,13 +954,16 @@ sub _emit_class_registry_ir {
                 elab           => $body_elab,
                 class_registry => $registry,
             );
-            # NOT _in_method_body: there is no $self to resolve a FieldAccess
+            # has_self => 0: there is no $self to resolve a FieldAccess
             # against. A sub touching a field is a compile error in perl, so a
             # FieldAccess here would be a producer bug and should fail loudly
             # rather than silently bind to a nonexistent invocant.
-            $body_ctx->{_method_class_name} = $cname;
-            $body_ctx->{_method_name}       = $sname;
-            $body_ctx->{_need_strpair}      = $ctx->{_need_strpair} // 0;
+            $body_ctx->configure_as_method_body(
+                class_name  => $cname,
+                method_name => $sname,
+                has_self    => 0,
+                parent_ctx  => $ctx,
+            );
 
             _process_control_chain($body_ctx, $body_return);
             my $body_val = $body_ctx->lower_value($body_node);
@@ -999,12 +1003,12 @@ sub _emit_class_registry_ir {
         my @adjust_stmts = map { @{ $_->{body_nodes} // [] } } @$adjusts;
         if (@adjust_stmts) {
             my $adj_ctx = Chalk::Target::LLVM::Context->new;
-            $adj_ctx->{_in_method_body}     = 1;
-            $adj_ctx->{_method_self_name}   = '%self';
-            $adj_ctx->{_method_class_name}  = $cname;
-            $adj_ctx->{_method_name}        = '__ADJUST';
-            $adj_ctx->{class_registry}      = $registry;
-            $adj_ctx->{_need_strpair}       = $ctx->{_need_strpair} // 0;
+            $adj_ctx->configure_as_method_body(
+                class_name     => $cname,
+                method_name    => '__ADJUST',
+                class_registry => $registry,
+                parent_ctx     => $ctx,
+            );
 
             $adj_ctx->lower_value($_) for @adjust_stmts;
             # Same back-propagation as the method-body path above: an ADJUST

@@ -189,6 +189,41 @@ sub inherit_need_flags_from {
     return $self;
 }
 
+# configure_as_method_body(class_name => $cname, method_name => $mname,
+#                           class_registry => $registry, parent_ctx => $ctx,
+#                           has_self => bool (default true)) -> $self
+#
+# Set up a freshly-constructed Context as the lowering target for one class
+# member's body: a method (has_self => 1, the default) or a plain class
+# `sub` (has_self => 0 -- there is no $self to resolve a FieldAccess
+# against; a sub touching a field is a compile error in perl, so a
+# FieldAccess reaching here would be a producer bug and should fail loudly
+# rather than silently bind to a nonexistent invocant). An ADJUST block is a
+# method body in this sense too (has_self => 1, method_name => '__ADJUST').
+#
+# Replaces the hand-rolled field-by-field setup that used to live at each of
+# the three call sites in Target/LLVM.pm (method body, sub body, ADJUST),
+# which is also where _need_strpair was copied down from the parent by hand;
+# that copy is now inherit_need_flags_from, covering all NEED_FLAGS (every
+# NEED_FLAGS site in this file only ever SETS a flag during lowering, never
+# reads one to change what gets emitted, so seeding the full set from the
+# parent up front cannot change body output -- only what the eventual
+# prologue renders, which absorb_need_flags_from already covers regardless
+# of when the seed happened).
+sub configure_as_method_body {
+    my ($self, %args) = @_;
+    my $has_self = $args{has_self} // 1;
+    if ($has_self) {
+        $self->{_in_method_body}   = 1;
+        $self->{_method_self_name} = '%self';
+    }
+    $self->{_method_class_name} = $args{class_name};
+    $self->{_method_name}       = $args{method_name};
+    $self->{class_registry}     = $args{class_registry} if defined $args{class_registry};
+    $self->inherit_need_flags_from($args{parent_ctx}) if defined $args{parent_ctx};
+    return $self;
+}
+
 # Index a phi record list by the merge block it belongs to. Returns an empty
 # index when there is no elaboration result, which is what a straight-line
 # context gets.
