@@ -40,21 +40,47 @@ its input, and today nothing establishes what that input guarantees.
 
 ## The enabling discovery: this is an EXTRACTION, not a rewrite
 
-Measured — every analysis in `from_json` already has a graph-only signature:
+Measured — every analysis called from `from_json` takes graphs (plus class
+metadata or the MOP), never the raw JSON:
 
-    _resolve_direct_calls        ($graphs)
-    _seed_and_propagate_reprs    ($graphs)
-    _seed_direct_call_arg_reprs  ($graphs)
-    _insert_str_coercions        ($graphs)
-    _narrow_unknown_coercions    ($graphs)
-    _stamp_field_access_reprs    ($classes, $graphs)
-    _stamp_method_call_reprs     ($classes, $graphs)
-    _infer_param_field_types     ($classes, $graphs)
+    _resolve_direct_calls           ($graphs)
+    _seed_and_propagate_reprs       ($graphs)
+    _propagate_computed_reprs       ($graphs)
+    _seed_direct_call_arg_reprs     ($graphs)
+    _insert_str_coercions           ($graphs)
+    _narrow_unknown_coercions       ($graphs)
+    _stamp_field_access_reprs       ($classes, $graphs)
+    _stamp_method_call_reprs        ($classes, $graphs)
+    _infer_param_field_types        ($classes, $graphs)
+    _infer_field_types_from_stores  ($classes, $graphs)
+    _attach_call_targets            ($graphs, $mop)
 
 **None takes `$data`. None touches the JSON.** They are already graph-to-graph
 analyses that merely happen to be *called from* the deserializer. `from_json`
 is 119 lines invoking them 13 times — `_seed_and_propagate_reprs` alone 5 times
 — around two `while` fixpoints.
+
+> **CORRECTION (2026-08-24, found by adversarial assessment): there are ELEVEN
+> analyses, not eight.** An earlier revision of this document listed 8 and every
+> downstream count ("the 8 analyses", "16 of 18 sites inside the 8") was
+> therefore understated. The three omitted are
+> `_propagate_computed_reprs` (the largest single `set_representation` site, 6
+> assignments), `_infer_field_types_from_stores`, and `_attach_call_targets`.
+>
+> `_attach_call_targets($graphs, $mop)` also breaks the tidy
+> "graphs-and-class-metadata" shape by taking the **MOP** — so the extracted
+> pipeline's signature is `run($graphs, $classes, $mop)`, not `run($graphs)`.
+> That is a real interface consequence, not a cosmetic one.
+>
+> A twelfth analysis-shaped sub, `_resolve_aggregate($node)`, is NOT a pass — it
+> is a node-level helper called from three other analyses and never from
+> `from_json`. Correctly excluded.
+>
+> **Lesson for the rest of this plan: the "8" came from reading the call
+> sequence rather than enumerating the definitions.** Any slice that says "the
+> N analyses" should be re-derived from `grep -E '^sub
+> (_infer|_seed|_stamp|_propagate|_resolve|_narrow|_insert|_attach)'` before it
+> is executed.
 
 74 of those 119 lines are comment. The ordering is heavily documented and was
 evidently hard-won. **That is an argument for moving this machinery intact, not
@@ -175,6 +201,71 @@ writing `representation`.**
   measurably DROPS 6 of 45 stamps including `ArrayRef`/`HashRef`; the type axis
   has no reason to inherit a gate that exists because the *representation*
   vocabulary is smaller.
+
+  **BUT THIS IS A SEPARATE EDIT FROM THE ALIAS, AND MUST BE SEQUENCED
+  SEPARATELY** (perigrin, 2026-08-24: *"This shouldn't cause the gate to drop
+  because we're aliasing"* — correcting a hypothesis of mine that it would).
+
+  The alias is **behaviour-preserving by construction**: if `representation()`
+  reads `stamp` and `set_representation()` writes `stamp`, they are ONE field.
+  A node with no representation today has no stamp either. `%LOWERABLE_STAMP`
+  sits UPSTREAM of the field and does the dropping, so under the alias alone
+  nothing newly acquires a value and no lowering path can change.
+
+  **Removing the gate is where the risk actually lives.** 19 lattice types are
+  currently dropped (`Scalar Void VString DualVar Ref Regex ScalarRef
+  LValueRef ArrayRef HashRef CodeRef GlobRef List Array Hash Code Glob IO
+  Format`). If they start reaching the backend, the target's 13 explicit
+  `repr eq 'Scalar'` refusals and 11 `->representation // <default>` sites are
+  the places that could change behaviour — and a regression would show up as
+  the gate dropping below 218.
+
+  So slice 3 splits into **3a (alias, expected to be a no-op at the gate)** and
+  **3b (remove the gate, expected to need work)**. Bundling them would make any
+  regression unattributable, which is the specific mistake this note exists to
+  prevent.
+
+  **MEASURED, and 3b is far smaller than the 19 suggests.** Sweeping 12
+  programs covering arrays, hashes, refs, regex, coderefs, methods, loops and
+  list-returning subs, and counting every stamp the producer emits for
+  user-package graphs:
+
+      STAMP        N     kept by %LOWERABLE_STAMP?
+      Int          27    kept
+      Str          27    kept
+      Undef        11    kept
+      Unknown       9    *** DROPPED ***
+      ArrayRef      6    *** DROPPED ***
+      HashRef       3    *** DROPPED ***
+      Boolean       2    kept
+      Object        1    kept
+
+  **Only THREE of the 19 are ever emitted: `Unknown`, `ArrayRef`, `HashRef`.**
+  The other 16 (`Scalar`, `Void`, `List`, `Ref`, `Regex`, `CodeRef`, `Array`,
+  `Hash`, `Glob`, …) never appear — they exist in the lattice but the producer
+  does not stamp anything with them for this code.
+
+  That reshapes 3b substantially:
+
+  - **`Unknown` should stay dropped** as a *representation*. It is the
+    pessimistic top and has no machine encoding; chalk's own comment at
+    `Serialize/JSON.pm:1088` says an "Unknown GAP means nothing ever typed
+    this". Under the alias it lives on the type axis, which is exactly right.
+    So this one needs no work at all — the gate is doing the right thing for it.
+  - **`ArrayRef`/`HashRef` are the only real cases**, and both ALREADY have
+    machine encodings (`%_REPR_LLVM_TYPE`: `ArrayRef => 'i8*'`,
+    `HashRef => 'i8*'`). So they are being dropped despite being lowerable —
+    which looks like an oversight in the six-name list rather than a deliberate
+    exclusion.
+
+  **So 3b is plausibly a two-name change**, not a 19-type migration. Still
+  verify at the gate: the target has 13 `repr eq 'Scalar'` refusals and 11
+  `->representation // <default>` sites, and `ArrayRef`/`HashRef` newly arriving
+  could reach a default that previously saw `''`.
+
+  Caveat: 12 hand-written programs is not the ring. A sweep over `t/base` and
+  the corpus would be a stronger sample, and the 16 never-emitted types are
+  "not emitted by THESE programs", not "unreachable".
 - `Slot` does not carry over either — it is not a lattice member. Wherever the
   loader currently assigns it, the honest type is `Undef` (an out-of-bounds read
   yields perl's `undef`), and `Slot` is the lowering pass's encoding decision.
