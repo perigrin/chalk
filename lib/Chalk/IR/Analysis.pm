@@ -187,19 +187,36 @@ sub run ($class, $graphs, $classes = undef) {
 # CURRENTLY DISABLED. THE INVARIANT DOES NOT HOLD YET -- and turning this on is
 # how we found that out, which is the point of writing it before relying on it.
 #
-# Enabling it drops the corpus gate 218 -> 200, with 18 cases failing. The
-# untyped Value nodes, by kind, across those failures:
+# Enabling it drops the corpus gate 218 -> 200, with 18 cases failing.
 #
-#     Phi          21
-#     ArgsSource   18
-#     PadAccess    12
-#     Call          6
-#     Ref           3
+# THE KIND BREAKDOWN THAT WAS RECORDED HERE WAS WRONG, and the way it was wrong
+# is worth keeping. It read:
 #
-# So five node kinds reach the end of the pipeline untyped. An earlier
-# 7-program census suggested the invariant already held -- it did not; that
-# sample simply contained none of these shapes. A hand-picked sample is not the
-# corpus.
+#     Phi 21, ArgsSource 18, PadAccess 12, Call 6, Ref 3
+#
+# Those counts came from loading whole producer JSON files, which carry the
+# producer's OWN internals (B::GV::SAFENAME, B::SoN::_cv_is_user_code,
+# Exporter::Heavy, ...) alongside the program under test. They described perl's
+# guts, not Chalk's corpus. A follow-up census scoped the way the corpus gate
+# scopes -- ProgramRunner's not_package= exclusion list -- found:
+#
+#     PadAccess   3 of 3   (ALL of them; closed, see _stamp_field_access_reprs)
+#     ArgsSource  1 of 1   (the `shift @_` read in a sub with args)
+#
+# Two kinds, not five. `Phi`, `Call` and `Ref` do not appear in user code at
+# all at this sample size. And the cascade that breakdown implied does not
+# exist: the DOWNSTREAM count (untyped node with an untyped input) is ZERO --
+# every untyped node is its own root, so there is no single hole to find whose
+# closure fixes the rest.
+#
+# An even earlier 7-program census suggested the invariant already held. It did
+# not. Between them the lesson is the same twice: a sample that is not scoped
+# the way the gate is scoped will mislead in whichever direction it happens to
+# be unrepresentative.
+#
+# Caveat on the corrected numbers too: eight hand-written programs is not the
+# 218-case corpus. Those counts are exact FOR THOSE SHAPES; more kinds will
+# surface when the invariant is enabled against the full gate.
 #
 # THIS IS A REAL GAP IN THE LOADER'S TYPING, not a bad assertion. Each of the
 # five is a node that DEFINES a value and reaches lowering with no type, which
@@ -208,10 +225,14 @@ sub run ($class, $graphs, $classes = undef) {
 # `:reader` accessor body is the clearest instance: `Pair::left` returns a pad
 # read that nothing types.
 #
-# TO ENABLE: close the five, or narrow the assertion to the kinds that are
-# genuinely covered and widen it as each is fixed. Do NOT enable it by
-# weakening it to "warn" -- a contract nothing enforces is the state this
-# function was written to end.
+# TO ENABLE: close the remaining roots, or narrow the assertion to the kinds
+# that are genuinely covered and widen it as each is fixed. PadAccess is
+# closed; ArgsSource is the one this census still names. Re-run the gate with
+# the assertion on to find what a corpus-sized sample adds -- do not assume the
+# eight-program list above is complete.
+#
+# Do NOT enable it by weakening it to "warn" -- a contract nothing enforces is
+# the state this function was written to end.
 # ============================================================================
 sub _assert_value_nodes_are_typed ($graphs) {
     my @untyped;
