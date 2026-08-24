@@ -173,6 +173,34 @@ caller runs the analysis explicitly.
   slice is safe to attempt. If it does not, the coupling is real and this plan
   needs rethinking before slice 2.
 
+**SEPARABILITY PRE-VERIFIED (2026-08-24).** Rather than discover coupling
+during the move, the three ways it could hide were checked first:
+
+1. **Does any analysis MUTATE the decoded JSON?** No. Searched every assignment
+   in the file whose left-hand side could reach `$classes`; every hit is a loop
+   variable or a `$changed` flag (`:1527-1627`, `:1936`). The analyses read
+   class metadata and write only to graph node objects.
+2. **Is there file-scoped mutable state the passes share?** None. Every
+   file-scoped variable is a constant table (`%LOWERABLE_STAMP`,
+   `%_COMPUTED_REPR`, `%_STR_CONTEXT_OPS`, `%_NODE_OPERAND_REPR`). The passes
+   communicate *only* through the graph objects they are handed — which is what
+   makes the extraction safe.
+3. **Does anything read `$data` in an order-dependent way?** No. `$data` is
+   touched at exactly 5 points in `from_json`, all of them `{methods}` or
+   `{classes}` (`:2`, `:4-5`, `:18-19`, `:58`). Nothing positional, nothing
+   dependent on node construction order. `:58` reads `$data->{classes}` inside
+   a fixpoint, but as a plain read of an already-decoded hash.
+
+**Consequence:** the extracted pipeline must receive `$classes` (the decoded
+class metadata) alongside the graphs — which, with `_attach_call_targets`
+needing the MOP, fixes the signature at
+`run($graphs, $classes, $mop)`. That is a decoded-JSON *value*, not the raw
+JSON string, so the phase boundary the plan proposes still holds.
+
+This does not prove the gate will stay at 218 — only that the three most likely
+coupling mechanisms are absent. Slice 1 remains the experiment; it is now an
+experiment with a specific expected outcome rather than an open question.
+
 ### Slice 2 — seed from the wire, and ASSERT
 
 Today `_stamp_method_call_reprs` rebuilds `return_type` from scratch. Instead:
