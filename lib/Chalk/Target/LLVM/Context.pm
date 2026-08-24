@@ -124,7 +124,9 @@ sub new {
         # Used by the Slot return epilogue to retrieve both fields.
         _slot_payload => {},
         # G5 MOP: class registry (class_name -> { methods, fields, ... }).
-        # Set by ElaboratedContext::new via the pre-scan in lower_with_elaboration.
+        # Passed to new() by the pre-scan in lower_with_elaboration. (Callers
+        # spell the constructor ElaboratedContext->new, but that package defines
+        # no new of its own -- it is an alias and inherits this one.)
         # Also set on method-body sub-contexts via direct hash assignment.
         class_registry => $class_registry // {},
         # G5 MOP: StrPair type needed (Str-returning methods)

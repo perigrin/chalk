@@ -33,8 +33,19 @@ package Chalk::Target::LLVM::ElaboratedContext;
 use 5.42.0;
 use utf8;
 
-use Chalk::Target::LLVM::Context;
-
-our @ISA = ('Chalk::Target::LLVM::Context');
+# `parent` rather than a raw `our @ISA =`. The project style is `feature class`
+# with `:isa()`, which is NOT available here: `:isa()` requires the parent to
+# be a `class`, and Chalk::Target::LLVM::Context is a plain package (as is
+# every module under lib/Chalk/Target/). Converting Context -- 7500+ lines --
+# is a separate change, so this file uses the closest in-spec construct for a
+# plain-package parent.
+#
+# `parent` also loads the module, so the separate `use` this file carried is
+# redundant and is gone. The difference from `our @ISA` is not cosmetic: the
+# assignment form is RUNTIME code, so the inheritance edge does not exist until
+# that statement executes. `use parent` establishes it at compile time, which
+# is what every other inheritance edge in this codebase does (111 files via
+# `:isa()`).
+use parent 'Chalk::Target::LLVM::Context';
 
 1;
