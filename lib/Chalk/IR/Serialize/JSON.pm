@@ -1884,18 +1884,49 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
 # _stamp_method_call_reprs($classes, \%graphs) — set each method Call's repr
 # from the resolved callee method's return repr (its body's Return value repr).
 sub _stamp_method_call_reprs ($classes, $graphs) {
-    # Build class::method -> return_repr from the loaded method graphs.
+    # Build class::method -> return_repr.
+    #
+    # THE WIRE IS THE FIRST SOURCE, not the graph walk. The producer computes
+    # each method's return type where it built the Return and knows the value
+    # node, and ships it in the `method_return_types` sibling map (a sibling
+    # because the {methods} value must stay a bare graph-name string that both
+    # repos index the graph map with). Re-deriving what was already sent is the
+    # recovery-by-scanning that the metadata channel exists to retire.
+    #
+    # The graph walk REMAINS, for two reasons: the producer sends `Unknown`
+    # where it genuinely cannot tell (it works method-by-method and cannot see
+    # a caller), and this loader has the whole program, so it can often do
+    # better. Measured on plain subs: 11 of 15 agreed, 4 were Unknown-on-wire
+    # and derivable here, ZERO disagreed.
+    #
+    # WHERE BOTH COMMIT AND DISAGREE, THAT IS A DEFECT IN ONE OF THEM. Nothing
+    # compared them before, so a divergence would have been silent -- the
+    # backend consuming one answer while the metadata channel carried another.
+    # Refuse loudly instead.
     my %ret_repr;
     for my $cname (keys %$classes) {
-        my $methods = $classes->{$cname}{methods} // {};
+        my $methods  = $classes->{$cname}{methods} // {};
+        my $wire_rts = $classes->{$cname}{method_return_types} // {};
+
         for my $mname (keys %$methods) {
+            my $wire = $wire_rts->{$mname};
+            $ret_repr{"$cname\::$mname"} = $wire
+                if defined $wire && $wire ne 'Unknown';
+
             my $g = $graphs->{ $methods->{$mname} } or next;
             my ($ret) = $g->returns->@*;
             next unless $ret;
             my $val = $ret->inputs->[0];
             next unless defined $val && blessed($val);
             my $repr = $val->representation;
-            $ret_repr{"$cname\::$mname"} = $repr if defined $repr;
+            next unless defined $repr;
+
+            if (defined $wire && $wire ne 'Unknown' && $wire ne $repr) {
+                die "IR: method $cname\::$mname has return type '$wire' on the "
+                  . "wire but '$repr' derived from its graph. One of the two is "
+                  . "wrong; refusing rather than picking silently.\n";
+            }
+            $ret_repr{"$cname\::$mname"} = $repr;
         }
 
         # A :reader field has no method graph — the backend synthesizes the
