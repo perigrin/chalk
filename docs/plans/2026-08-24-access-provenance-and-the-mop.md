@@ -168,8 +168,16 @@ a thing the IR needs a name for.
    means a richer wire encoding — and the producer/chalk mirror obligation
    applies.
 5. **What is provable, and how?** "This container is never tied in this
-   compilation unit" needs escape analysis. Chalk has none, and the field case
-   does NOT avoid it (see the correction above).
+   compilation unit" needs escape analysis in general, and Chalk has none. The
+   field case does NOT avoid it (see the correction above).
+
+   **But the self-hosting subset does** — measured: 0 `tie` sites and 1
+   mechanically-convertible `@ISA` across both repos. So the first
+   implementation has a subset where the speculation is trivially sound, and
+   the guard can be built afterwards rather than as a prerequisite. What must
+   NOT happen is shipping the narrow path with no guard and no check that the
+   subset assumption holds — that is a miscompile waiting for the first user
+   who ties something.
 
 ## "Runtime and compile time are kinda wibbly-wobbly here" — and they are
 
@@ -199,6 +207,29 @@ live here:
   own `BEGIN` fixed it. Whether a tie is even INSTALLABLE at a given moment
   depends on how much of the class hierarchy has executed, which is not a
   question with a phase-shaped answer.
+
+  **SCOPE NARROWING (perigrin): "Chalk's self hosting doesn't need runtime
+  `@ISA`."** Correct, and measured — which retires that particular
+  wibbliness from the SELF-HOSTING subset even though it stands for Perl
+  generally:
+
+  | | chalk `lib/` | producer `lib/` |
+  |---|---|---|
+  | files using `:isa()` (compile-time) | **111** | 92 on `feature class` |
+  | runtime `our @ISA =` | **1** | **0** |
+  | `tie` / `Tie::` | **0** | 0 |
+
+  The single `@ISA` site (`Target/LLVM/ElaboratedContext.pm:38`) is a
+  plain-package subclass whose parent is a literal, `use`d on the line
+  immediately above — no dynamism, and mechanically convertible to `:isa()`.
+
+  So for the self-hosting corpus the class graph IS statically known, and no
+  container is tied. That does not make provenance static in general — the
+  compiler must still handle Perl — but it means **the first implementation can
+  target a subset where the hard case provably does not arise**, which is the
+  "start somewhere" option the field-tie correction above appeared to remove.
+  It returns, relocated: not a safe access KIND, but a safe compilation
+  SUBSET.
 - **`use` is `BEGIN require` + `import`.** Loading a module executes arbitrary
   code during compilation, which can tie anything reachable.
 - **String eval compiles at runtime** — filed separately
