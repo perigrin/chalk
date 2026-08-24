@@ -431,6 +431,22 @@ giving one node two representations.
 So the model is: per-node representation, edge coercions for mismatches. Exactly
 `Node(Int) -> Node(i64)`.
 
+> **UPDATE 2026-08-23.** The model held, but the cache-key observation above
+> understated a hazard, and it bit. "Keyed by node id alone" is right about
+> REPRESENTATION and wrong about IDENTITY: the callee graph of an inlined
+> direct call is ONE OBJECT SHARED BY EVERY CALL SITE, so its nodes carry one
+> id and one refaddr across sites. The first inline cached the callee's body
+> and the second was served the first site's result — with the first site's
+> ARGUMENT baked in. `f(1)+f(2)` emitted exactly one `mul` and printed 4 where
+> perl prints 6 (corpus F14/F15/F16, fixed in `59864fcb` by snapshotting and
+> restoring the cache around the inline frame).
+>
+> This does NOT contradict SSA. Inlining VIOLATES the one-def-one-value premise
+> by construction: it instantiates the same def at N sites without minting new
+> defs. The cache key was correct for a single graph and wrong for a graph
+> reached through inlining, which is exactly the case Evidence 3's reasoning
+> did not cover.
+
 **Evidence 3 -- and it subsumes the other two: SSA FORBIDS THE ALTERNATIVE.**
 perigrin, on "if one node can need two machine types in one program": *this
 shouldn't be possible with SSA.*
@@ -548,5 +564,29 @@ which looks exactly like "nothing is typed".
 - Whether the value-facts needed by 0a/0b belong in the lattice, a separate
   analysis, or a node annotation. Undesigned.
 - Finding 1's input order `(cond, then, else)` is verified on one case.
-- Nothing here is fixed. Corpus gate is 214 across four legs at time of writing,
-  with the two return-type commits landed and none of these findings addressed.
+- ~~Nothing here is fixed. Corpus gate is 214 across four legs at time of
+  writing~~ — see the status update below.
+
+## Status update, 2026-08-23
+
+**The five seams here are still unfixed.** What changed around them:
+
+- **Corpus gate 214 → 218**, all four legs agreeing, worklist 0. The three
+  worklist entries live at the time of writing (F14/F15/F16) are closed, but by
+  the inline-cache fix annotated under Evidence 2 — NOT by anything in this
+  document.
+- **The two-lattice divergence is resolved** (`2026-08-22-two-lattices-one-ir.md`,
+  re-measured: 25/25 members agree, 0 differ). That was a PREREQUISITE for
+  several seams here but does not itself close any of them.
+- **`Bool` is now `Boolean` everywhere** and the stamp translation table is
+  deleted, so this document's `repr values: Int Num Bool Str ...` listing uses
+  the old spelling.
+- **The type field is now REQUIRED on value nodes** and defaults to `Unknown`
+  (producer `54bcb9e`), so "nothing is typed" is no longer expressible — an
+  untyped value node fails at construction. The vocabulary note in the
+  Retractions section still holds: the producer says `stamp`, chalk says
+  `representation`, and reading the wrong key returns undef everywhere.
+
+**The seams themselves — `Add`'s i64 wrap, the provably-integral `Num`,
+`TernaryExpr` joining its condition, `Add => 'join'` deriving a signature,
+`PadAccess` leaking perl's implementation — remain open and unaddressed.**
