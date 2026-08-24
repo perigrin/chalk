@@ -388,13 +388,24 @@ writing `representation`.**
   3b an unnarrowed graph would have compared `Unknown` against a committed wire
   type and fired the `die` on a graph that simply had nothing to say yet.
 
-  **STILL OPEN FOR 3b — a backend site outside this slice's scope.**
-  `Target/LLVM/Context.pm:5681` reads `!defined $array->representation` as
-  "needs seeding" and, when true, sets `ArrayRef` before the container-pointer
-  resolution that requires it. Under 3b an `ArrayRef` node arrives holding
-  `Unknown`, the seed is skipped, and `_load_array_header` runs without the repr
-  it depends on. This is the same class of bug the nine loader guards had, in a
-  file this slice deliberately did not touch. **3b must convert it.**
+  **RESOLVED — the backend site is converted too.** The seed that was inline at
+  `Target/LLVM/Context.pm:5681` is now `_seed_container_repr`, guarded on
+  commitment rather than defined-ness, with both polarities pinned by
+  `t/bootstrap/llvm-shift-pop-array-seed.t` (an `Unknown` array gets seeded; a
+  committed `Array` is left alone, since `Array` and `ArrayRef` take different
+  container-pointer paths). The predicate is spelled inline rather than imported
+  from the loader — the backend does not otherwise depend on the deserializer,
+  and one clause is not worth inverting that.
+
+  **Swept while there; no other backend site needs converting.** The `// ''`
+  defaulting reads (`:2441`, `:2472`, `:2563`, `:2748`, `:5261`, `:5338`,
+  `:5448`) are safe: `''` is compared with `eq` against real repr names, and
+  `Unknown` fails every such comparison exactly as `''` does. The two
+  committed-value defaults are safe for the same reason — `:3878`
+  (`// 'Boolean'`, then `if eq 'Int'`) skips its coercion branch on `Unknown`
+  just as it does on `Boolean`, and `:5659` (`// 'Int'`, then `die unless eq
+  'Int'`) GAPs loudly on `Unknown` rather than silently lowering it as Int,
+  which is the better outcome.
 
   The two sibling backend sites are safe and need no change: `Context.pm:1321`
   (`defined && eq 'Object'`) and `:1415` (`defined && eq 'Scalar'`) both pair

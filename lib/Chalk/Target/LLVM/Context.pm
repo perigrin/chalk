@@ -5624,6 +5624,38 @@ sub _lower_array_read {
 # and elems fields plus their pointers. The $tag labels the emitted comments.
 # The len/elems POINTERS are returned so a mutating caller (shift/pop) can store
 # an updated header back through them.
+# _seed_container_repr($array): give an ArrayRef literal its container repr when
+# nothing upstream committed one.
+#
+# _container_ptr resolves the container pointer through the repr, and the array
+# often has none: `while (shift @q) { ... }` drains a queue whose value nobody
+# reads, so no inference pass ever types it. An ArrayRef literal is always the
+# ArrayRef repr (a boxed aggregate pointer), so the backend can supply it.
+#
+# UNCOMMITTED IS NOT THE SAME AS UNDEF. `Unknown` is how the producer says it
+# could not type a value; it is a present answer that answers nothing. The guard
+# below therefore asks whether the array COMMITTED to a repr, not whether one is
+# defined -- the same distinction the loader's guards make via _is_narrowed
+# (Chalk::IR::Serialize::JSON, commit d3053a2a). Spelled inline rather than
+# imported: the backend does not otherwise depend on the deserializer, and one
+# clause is not worth inverting that.
+#
+# Slice 3b of docs/plans/2026-08-24-loader-analysis-pipeline.md is what makes
+# this live -- it stops dropping `Unknown` at the wire-stamp seed, so an
+# ArrayRef node starts arriving with one. Under a `defined` guard the seed would
+# be skipped and _container_ptr would resolve against a repr that names no
+# container.
+#
+# The seed is a FALLBACK, never an override: a committed repr survives, since
+# `Array` and `ArrayRef` take different container-pointer paths.
+sub _seed_container_repr ($array) {
+    my $repr = $array->representation;
+    return if defined $repr && $repr ne 'Unknown';
+    return unless $array->operation eq 'ArrayRef';
+    $array->set_representation('ArrayRef');
+    return;
+}
+
 sub _load_array_header {
     my ($self, $array, $tag) = @_;
     $self->{_need_aggregate_types} = 1;
@@ -5674,11 +5706,7 @@ sub _lower_builtin_shift_pop {
             || $repr eq 'Array' || $repr eq 'ArrayRef'
     } $node->inputs->@*;
     die "GAP: $name operand is not an Array/ArrayRef" unless defined $array;
-    # The array's repr may be unset if it is off the return value path; the
-    # container-pointer resolution needs it. An ArrayRef literal is always the
-    # ArrayRef repr (a boxed aggregate pointer).
-    $array->set_representation('ArrayRef')
-        if !defined $array->representation && $array->operation eq 'ArrayRef';
+    _seed_container_repr($array);
 
     my ($arr_ref, $len_ptr, $elem_ptr, $len, $elems)
         = $self->_load_array_header($array, $name);
