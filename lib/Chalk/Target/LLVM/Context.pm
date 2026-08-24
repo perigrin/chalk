@@ -375,8 +375,17 @@ sub render_str_type_once {
 # comment -- callers push their own comment first (the wording differs by
 # call site: "for Str method return values" at the class-registry prologue
 # vs. "post-class re-emit, I3" at the F6 re-emit site).
+#
+# Also sets _need_strpair -- calling this method is itself the thing that
+# makes %StrPair needed from here on (a method body lowered afterwards must
+# inherit the flag via configure_as_method_body's inherit_need_flags_from).
+# The class-registry call site used to set this by hand as a second line
+# right after calling this method; the post-class re-emit call site already
+# has it true as its own calling condition, so setting it again there is a
+# no-op.
 sub render_strpair_type_once {
     my ($self) = @_;
+    $self->{_need_strpair} = 1;
     return () if $self->{_strpair_emitted};
     $self->{_strpair_emitted} = 1;
     return _strpair_type_decl();

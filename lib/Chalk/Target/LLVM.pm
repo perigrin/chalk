@@ -639,7 +639,6 @@ sub _emit_class_registry_ir {
     if ($need_strpair) {
         push @lines, '; StrPair for Str method return values (layout: Context::_strpair_fields)';
         push @lines, $ctx->render_strpair_type_once;
-        $ctx->{_need_strpair} = 1;
     }
 
     # Type pre-pass: emit EVERY class's vtable + object-struct type before any
