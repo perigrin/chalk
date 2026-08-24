@@ -110,15 +110,84 @@ in the graph only as INPUTS TO THE CONSTRUCTOR NODE, which is exactly why
 `_element_repr` must walk back to them — there is no type to ask.
 
 **The lattice has no parameterised types.** `ArrayRef` is a leaf, not
-`ArrayRef[T]`. That single fact explains §1 (nothing to box a discriminant
-from), §2 (the walk-back is the only recovery route), §3 (a store cannot update
-a type that cannot vary), and §4's reference case (no initializer, therefore
-nothing at all).
+`ArrayRef[T]`.
 
-Whether the fix is parameterised types, an access descriptor carrying the
-element type at the USE site, or something else is precisely what the prior-art
-pass should discriminate — TurboFan's `ElementAccess` and Graal's `Stamp` sit
-on opposite sides of that choice.
+### CORRECTION — the bare stamp is RIGHT, and `ArrayRef[Int]` is an OPTIMIZATION
+
+perigrin, on the above: *"Perl doesn't optimize Array of Ints — everything is
+an Array of Scalars. Lowering to Array of Ints then is an OPTIMIZATION pass
+once we can guarantee that a given array only ever has Ints in it."*
+
+That inverts the framing, and it is correct. Perl has ONE array kind and it
+holds SVs. **The honest type of every Perl array is `ArrayRef[Scalar]`.** So
+the bare `ArrayRef` stamp is not missing a parameter — it is already correct at
+the honest width, and "an array of Ints and an array of Strs have the identical
+type" is a true statement about Perl rather than a defect.
+
+`ArrayRef[Int]` is therefore not a type the frontend DERIVES. It is a **proof
+obligation an optimization DISCHARGES**: valid exactly when the array
+provably only ever holds Ints, over its whole lifetime.
+
+**Which reveals what `_element_repr` actually is.** It ends in
+`_join_repr(@reprs)` over the container's initializers
+(`Serialize/JSON.pm:1701`) — a MONOMORPHISM CHECK wearing type inference's
+clothes. It answers "are all the initializers the same width?", which is the
+right question, over the wrong domain: initializers are not the whole lifetime,
+because stores are invisible to it.
+
+So the type-changing-store GAP is not a missing feature. It is the guard
+correctly refusing where the optimization's premise is unproven — the
+soundness condition is doing its job, and the message says exactly this:
+*"the container's element repr is inferred from its literal initializers only"*.
+
+**This relocates the design question.** It is not "how do we express
+`ArrayRef[Int]` in the lattice". It is:
+
+1. What is the ANALYSIS that proves an array is monomorphic over its whole
+   lifetime — all stores, all aliases, all calls that receive it?
+2. Where does the RESULT live? Not in the honest type (`ArrayRef[Scalar]` is
+   what the type says). Candidates: a refinement on the node, a separate
+   analysis result keyed by allocation site, or exactly the "stamp" idea from
+   C2/Graal — an abstract-interpretation fact ABOUT a value, distinct from its
+   type. See `2026-08-23-goto-silently-dropped.md` and
+   `SoN::IR::Value`'s comment on why `Stamp` is named as it is.
+3. What happens when the proof FAILS? The array stays `ArrayRef[Scalar]` and
+   its elements are boxed Slots — which is what `%Slot` already is. **`Slot` is
+   then not a hack but the CORRECT unoptimized representation**, and the
+   current defect is narrower than it appeared: not that `Slot` exists, but
+   that the unoptimized path GAPs instead of falling back to it.
+
+That last point is the most actionable thing measured today: `$a[1] = "x"`
+should lower to a boxed heterogeneous array, not refuse. **The fallback
+representation already exists and is nearly complete** — verified:
+
+- `_box_payload` (`Context.pm:955-1041`) has working arms for `Int`, `Num`,
+  `Str` (malloc'd into a `%StrPair`, pointer stored), `Boolean`, `Undef` and
+  `Scalar`. A `%Slot` can already hold any scalar type.
+- The refusal is in the STORE path (`Context.pm:1991-1999`), which calls
+  `_box_payload` for `Int|ArrayRef|HashRef|CodeRef|Object` and dies for
+  everything else — including the `Str` and `Num` that `_box_payload` handles
+  three functions away.
+
+So the store is not blocked by an inability to box. It is blocked because the
+READ side would misinterpret the cell: reads still type from initializers, so a
+`Str` stored into an `Int`-inferred array reads back as an `Int`. The GAP is
+guarding the read, from the write.
+
+The comment immediately above the refusal names the fix precisely
+(`Context.pm:1988`): *"inference joins stores as well as literals, this must
+stay a GAP."* — i.e. once the monomorphism analysis considers stores, the guard
+can lift. That is the same analysis §1 above asks for, seen from the other end.
+
+**Sequencing this suggests:** the analysis (does this array stay monomorphic
+over all stores?) is the single prerequisite. With it, the store path stops
+refusing AND the read path stops guessing — one fact serves both, and the
+heterogeneous case falls back to boxed `Slot`s that already work.
+
+Whether the monomorphism fact is carried as a Graal-style `Stamp` refinement or
+a TurboFan-style access descriptor is what the prior-art pass should
+discriminate — but both are now understood as ways to record an OPTIMIZATION's
+proof, not as ways to state a type.
 
 ## 5. What a design has to answer
 
