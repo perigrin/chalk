@@ -380,6 +380,26 @@ writing `representation`.**
   > have machine encodings (`Context.pm:3531-3532`), so that part of 3b remains
   > worth doing once the guards are safe.
 
+  **RESOLVED — option 2 landed.** `_is_narrowed` is defined at
+  `Serialize/JSON.pm:32` and all nine guards call it. Three further sites that
+  spelled the same predicate inline were folded in, and one of those turned out
+  to be a latent 3b landmine rather than a rename: the method-return
+  disagreement check gated the graph-derived repr on `defined` alone, so under
+  3b an unnarrowed graph would have compared `Unknown` against a committed wire
+  type and fired the `die` on a graph that simply had nothing to say yet.
+
+  **STILL OPEN FOR 3b — a backend site outside this slice's scope.**
+  `Target/LLVM/Context.pm:5681` reads `!defined $array->representation` as
+  "needs seeding" and, when true, sets `ArrayRef` before the container-pointer
+  resolution that requires it. Under 3b an `ArrayRef` node arrives holding
+  `Unknown`, the seed is skipped, and `_load_array_header` runs without the repr
+  it depends on. This is the same class of bug the nine loader guards had, in a
+  file this slice deliberately did not touch. **3b must convert it.**
+
+  The two sibling backend sites are safe and need no change: `Context.pm:1321`
+  (`defined && eq 'Object'`) and `:1415` (`defined && eq 'Scalar'`) both pair
+  `defined` with an equality test that already excludes `Unknown`.
+
   **MEASURED, and 3b is far smaller than the 19 suggests.** Sweeping 12
   programs covering arrays, hashes, refs, regex, coderefs, methods, loops and
   list-returning subs, and counting every stamp the producer emits for

@@ -72,6 +72,11 @@ subtest 'PRECONDITION: nothing in lib/ reads the type axis' => sub {
     for my $f (@files) {
         # Chalk::IR::Node itself defines the accessors; it is not a consumer.
         next if $f eq 'lib/Chalk/IR/Node.pm';
+        # Chalk::IR::Analysis reads ->stamp in _assert_value_nodes_are_typed,
+        # which asks only whether a stamp is PRESENT and never interprets its
+        # value. That is the one read the `Slot` corruption cannot mislead, so
+        # it is not the consumer this precondition is guarding against.
+        next if $f eq 'lib/Chalk/IR/Analysis.pm';
         open my $fh, '<', $f or next;
         while (my $line = <$fh>) {
             next if $line =~ /^\s*#/;              # comments are not readers

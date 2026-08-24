@@ -29,6 +29,29 @@ my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
 # _require_repr reports an honest GAP instead of mislowering.
 my %LOWERABLE_STAMP = map { $_ => 1 } qw(Int Num Str Boolean Undef Object);
 
+# _is_narrowed($repr) — has this node COMMITTED to a representation?
+#
+# Not the same question as `defined $repr`, and the difference is the whole
+# reason this exists. `Unknown` is how the producer says it could not type a
+# value; it is a present answer that answers nothing. A pass asking "was this
+# already decided, so I should leave it alone?" must say no to it.
+#
+# The two spellings agree today only because the wire-stamp seed below gates on
+# %LOWERABLE_STAMP, which drops `Unknown` and leaves the field undef. That gate
+# is removed in slice 3b (docs/plans/2026-08-24-loader-analysis-pipeline.md),
+# at which point `defined` would start reading the producer's admission of
+# ignorance as a committed type -- silently, since every such guard would just
+# stop doing its work. The measured casualty is the OOB->Slot fix below: it
+# would stop firing and corpus R9 would miscompile.
+#
+# The producer draws the same line (perl5-son FromOptree.pm:3100). It holds a
+# Stamp object and so tests `$stamp->type ne 'Unknown'`; this field holds a
+# plain string, so the test is against the string. If the field ever becomes a
+# Stamp here too, this is the one site that changes.
+sub _is_narrowed ($repr) {
+    return defined $repr && $repr ne 'Unknown';
+}
+
 # -----------------------------------------------------------------------
 # _extract_fields($node, \%id_remap) — returns a hashref of extra fields
 # for nodes that carry them, or undef if no extra fields.
@@ -690,14 +713,14 @@ sub _resolve_direct_calls ($graphs) {
             # Stamp the Call's repr from the callee's Return value, so the
             # backend and the shape contract see the call result's type. The
             # callee's single Return input[-1] is its result value.
-            unless (defined $node->representation) {
+            unless (_is_narrowed($node->representation)) {
                 my ($ret) = grep {
                     blessed($_) && $_->can('operation')
                         && $_->operation eq 'Return'
                 } $callee->returns->@*;
                 my $val = $ret ? $ret->inputs->[-1] : undef;
                 $node->set_representation($val->representation)
-                    if $val && defined $val->representation;
+                    if $val && _is_narrowed($val->representation);
             }
         }
     }
@@ -757,7 +780,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
                     # below: first caller wins, and a second caller with a
                     # different repr lowers through the first one's ops, which
                     # lli rejects loudly rather than miscompiling silently.
-                    next if defined $params{$i}->representation;
+                    next if _is_narrowed($params{$i}->representation);
                     $params{$i}->set_representation($repr);
                     $stamped++;
                 }
@@ -801,7 +824,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
             # ops, which lli rejects as a type mismatch (a loud verify error, not
             # a silent miscompile). Per-callsite specialization if polymorphic
             # direct calls ever need to lower.
-            next if defined $reads[0]->representation;
+            next if _is_narrowed($reads[0]->representation);
             $reads[0]->set_representation($arg_repr);
             $stamped++;
         }
@@ -1020,7 +1043,7 @@ sub _narrow_unknown_coercions ($graphs) {
                 # Still untyped: leave the Unknown in place so the backend can
                 # report it. Narrowing to a guess here would recreate exactly
                 # the bug this replaced.
-                next unless defined $repr && $repr ne 'Unknown';
+                next unless _is_narrowed($repr);
 
                 # The operand is ALREADY the target type: the coercion is an
                 # identity edge and the consumer can read the operand directly.
@@ -1339,7 +1362,7 @@ sub _seed_and_propagate_reprs ($graphs) {
             push @seed_nodes, $n unless $seen{ $n->id }++;
         }
         for my $node (@seed_nodes) {
-            next if defined $node->representation;
+            next if _is_narrowed($node->representation);
             # A qr// compiled-regex literal is a Constant of const_type 'regex';
             # its repr is Regex (the matcher value the backend resolves
             # statically). Keyed on const_type, not node kind, so it can't live
@@ -1438,7 +1461,7 @@ sub _propagate_computed_reprs ($graphs) {
         while ($changed) {
             $changed = 0;
             for my $node (@nodes) {
-                next if defined $node->representation;
+                next if _is_narrowed($node->representation);
                 my $op = $node->operation;
 
                 # A Subscript reads an element out of an aggregate container:
@@ -1768,7 +1791,7 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
 
     for my $g (values %$graphs) {
         for my $node ($g->nodes->@*) {
-            if ($node->operation eq 'FieldAccess' && !defined $node->representation) {
+            if ($node->operation eq 'FieldAccess' && !_is_narrowed($node->representation)) {
                 my $stash = $node->field_stash // next;
                 my $fidx  = $node->field_index;
                 my $type  = $field_type{"$stash\::" . ($fidx // -1)} // next;
@@ -1780,7 +1803,7 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
             # literal aggregate _element_repr can read). A LITERAL constant index
             # is left for the OOB->Slot path (references R9); only a non-literal
             # index needs this (its own _element_repr sees a FieldAccess).
-            if ($node->operation eq 'Subscript' && !defined $node->representation) {
+            if ($node->operation eq 'Subscript' && !_is_narrowed($node->representation)) {
                 my $cont = $node->inputs->[0];
                 next unless blessed($cont) && $cont->operation eq 'FieldAccess';
                 my $er = $field_elem_type{
@@ -1823,7 +1846,7 @@ sub _stamp_method_call_reprs ($classes, $graphs) {
         for my $mname (keys %$methods) {
             my $wire = $wire_rts->{$mname};
             $ret_repr{"$cname\::$mname"} = $wire
-                if defined $wire && $wire ne 'Unknown';
+                if _is_narrowed($wire);
 
             my $g = $graphs->{ $methods->{$mname} } or next;
             my ($ret) = $g->returns->@*;
@@ -1831,9 +1854,13 @@ sub _stamp_method_call_reprs ($classes, $graphs) {
             my $val = $ret->inputs->[0];
             next unless defined $val && blessed($val);
             my $repr = $val->representation;
-            next unless defined $repr;
+            # Not merely `defined`: an unnarrowed graph-derived repr is not a
+            # second opinion, so it must not be compared against the wire's.
+            # `Unknown ne Str` is true and would fire the disagreement die
+            # below on a graph that simply has nothing to say yet.
+            next unless _is_narrowed($repr);
 
-            if (defined $wire && $wire ne 'Unknown' && $wire ne $repr) {
+            if (_is_narrowed($wire) && $wire ne $repr) {
                 die "IR: method $cname\::$mname has return type '$wire' on the "
                   . "wire but '$repr' derived from its graph. One of the two is "
                   . "wrong; refusing rather than picking silently.\n";
@@ -1865,7 +1892,7 @@ sub _stamp_method_call_reprs ($classes, $graphs) {
             next unless $node->operation eq 'Call';
             next unless ($node->dispatch_kind // '') eq 'method';
             next if ($node->name // '') eq 'new';   # constructor: backend-handled
-            next if defined $node->representation;
+            next if _is_narrowed($node->representation);
             my $class = $node->class_name // next;
             my $mname = $node->name // '';
             # Resolve the method through the class's MRO: a call on Child of a
