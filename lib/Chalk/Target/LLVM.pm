@@ -1086,10 +1086,7 @@ sub lower_with_elaboration {
 
     # Classes require %Slot (for fields) and malloc (for New).
     # Set these flags early so the prologue emits them even before body lowering.
-    if (defined $class_registry && %$class_registry) {
-        $ctx->{_need_aggregate_types} = 1;
-        $ctx->{_need_malloc_memcpy}   = 1;
-    }
+    $ctx->require_class_support if defined $class_registry && %$class_registry;
 
     # Process the control chain — VarDecl/Assign/If/Loop.
     _process_control_chain($ctx, $return_node);
@@ -1209,10 +1206,7 @@ sub lower_with_elaboration {
     # (because the prologue runs before method bodies are lowered — F6 fix).
     if (defined $class_registry && %$class_registry) {
         push @lines, '';
-        unless ($ctx->{_strlen_declared}) {
-            push @lines, 'declare i64 @strlen(i8* nocapture readonly)';
-            $ctx->{_strlen_declared} = 1;
-        }
+        push @lines, $ctx->require_strlen_once;
         my @class_lines = _emit_class_registry_ir($class_registry, $ctx);
         push @lines, @class_lines;
     }

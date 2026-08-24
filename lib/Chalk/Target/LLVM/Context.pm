@@ -382,6 +382,33 @@ sub render_strpair_type_once {
     return _strpair_type_decl();
 }
 
+# require_class_support() -> $self
+#
+# Classes always require %Slot (for fields) and malloc (for New). Called
+# right after construction, before any control-chain processing, so the
+# prologue emits %Slot/%Array/%Hash and declares malloc/memcpy even if the
+# main graph itself never lowers an Array/Hash/Concat node -- a class with
+# only Int fields still needs %Slot for its object struct.
+sub require_class_support {
+    my ($self) = @_;
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+    return $self;
+}
+
+# require_strlen_once() -> @llvm_lines (possibly empty)
+#
+# `declare i64 @strlen(...)`, declared at most once per Context, guarded by
+# _strlen_declared. Three sites need this guard: here (before any class body
+# lowers, for Str field reads), and the two F6 post-class re-emit sites
+# (_need_getenv, which also needs strlen for the runtime value length).
+sub require_strlen_once {
+    my ($self) = @_;
+    return () if $self->{_strlen_declared};
+    $self->{_strlen_declared} = 1;
+    return 'declare i64 @strlen(i8* nocapture readonly)';
+}
+
 # render_need_flag_prologue($result_repr) -> @llvm_lines
 #
 # The pre-class-lowering half of the module prologue: declares/emits every
@@ -615,9 +642,7 @@ sub render_need_flag_postclass_reemit {
     # method-body EnvRead sets the flag after the prologue ran.
     if ($self->{_need_getenv} && !$self->{_getenv_emitted}) {
         push @lines, 'declare i8* @getenv(i8* nocapture readonly)';
-        push @lines, 'declare i64 @strlen(i8* nocapture readonly)'
-            unless $self->{_strlen_declared};
-        $self->{_strlen_declared} = 1;
+        push @lines, $self->require_strlen_once;
         $self->{_getenv_emitted}  = 1;
     }
 
