@@ -196,6 +196,57 @@ Two candidate strategies, and this is an OPEN decision:
   and more honest about where the translation belongs, but it puts translation
   logic in the target, which is where it must NOT end up.
 
+### What the pipeline IS, named properly (perigrin, 2026-08-24)
+
+> Note that the Loader *should do* a Type Inference and Type Check pass … which
+> is I believe the whole-program analysis we were discussing anyway … this is
+> basically a final pass to ensure that the Graph is Type Safe **and** as Narrow
+> as possible.
+
+That names the thing the slices below were circling, and it splits into **two
+distinct obligations** this plan had been conflating:
+
+| obligation | question | failure mode |
+|---|---|---|
+| **INFERENCE** | is every node as narrowly typed as derivable? | a `Unknown` that could have been `Int` — lowering GAPs or boxes needlessly |
+| **CHECKING** | is every node's type CONSISTENT with its operator and operands? | a wrongly-typed node reaches lowering and miscompiles |
+
+Inference makes it narrow. Checking proves it safe. **They are not the same
+pass and they can fail independently** — a graph can be maximally narrow and
+still ill-typed, or type-safe and uselessly wide.
+
+#### The checker already exists — and it is a TEST, not a compiler pass
+
+`Chalk::IR::Graph::TypedInvariant` implements exactly this: `%OP_REQUIRED_REPR`,
+per-position operand checks (`_check_repr_for_position`), and `_conforms`
+resolving subtype relations through `TypeLibrary`.
+
+**But measured: nothing in `lib/` calls it.** Its only consumers are
+`t/bootstrap/**` — including `son-corpus-wide.t:240`, where it is the corpus
+gate's `invariant` leg (the fourth number in
+`gate-green=218 behavior=218 shape=218 invariant=218`).
+
+So the compiler never checks its own graph. The check runs, thoroughly, in the
+test suite — which means an ill-typed graph produced outside a corpus case is
+caught by nothing. That is the same shape as the other findings today: the
+machinery exists, the consumer does not use it.
+
+**And it checks REPRESENTATIONS, not types** — `$node->representation()` at
+`:367` and `:382`. Under the scope rule above it must become a check over
+`stamp`. That is not a rename: `%OP_REQUIRED_REPR` was measured earlier this
+week to be load-bearing for exactness (`Divide`/`Concat`/`Length`), and
+converting `_conforms` from `eq` to `is_subtype` was tried and killed on
+measurement. Retargeting it to the type axis has to re-answer that question.
+
+#### What this means for the plan
+
+Slices 2 and 4 are the INFERENCE half. Slice 5 ("state the contract") is the
+CHECKING half, and is no longer a vague aspiration — it is *"run
+`TypedInvariant` as the pipeline's exit gate, over stamps"*. The 31
+`_require_repr` assertions in the target are each a symptom of that gate not
+existing: the backend re-discovering, one node at a time, that nothing upstream
+guaranteed what it needs.
+
 ### Slice 4 — the whole-program analyses
 
 The passes that genuinely need a program-wide view, which is what perigrin
@@ -215,12 +266,36 @@ means by "more than just the return values":
   makes this trivially true today (0 `tie` sites, measured), so this can be an
   assertion before it is an analysis.
 
-### Slice 5 — state the contract
+### Slice 5 — the TYPE CHECK, as the pipeline's exit gate
 
-An invariant the analysis pipeline guarantees on exit, checkable, so lowering
-can rely on it: e.g. *every `Value` node has a representation, or the graph is
-GAP-declared with a named reason*. Today 31 `_require_repr` assertions in the
-target are each independently discovering this is not guaranteed.
+Not a new mechanism: **run `Chalk::IR::Graph::TypedInvariant` at the end of the
+analysis pipeline, in `lib/`, over stamps.** Today it runs only in tests, and
+only over representations.
+
+The contract it establishes, which lowering may then assume:
+
+- every `Value` node carries a stamp (guaranteed structurally on the producer
+  side since `54bcb9e`; must hold after chalk's analyses too);
+- every node's stamp CONFORMS to its operator's requirement and its operands'
+  stamps, per `%OP_REQUIRED_REPR` / `%OP_PER_POSITION_REPR`;
+- a graph that fails is a GAP with a named reason, not a silent pass-through.
+
+Prerequisites, both real:
+
+- **slice 3 must land first** — there are no stamps to check until the analyses
+  write them.
+- **`%OP_REQUIRED_REPR` must be re-examined on the type axis.** It is currently
+  exactness-based, and that exactness was measured to be load-bearing:
+  converting `_conforms` from `eq` to `is_subtype` was attempted and killed on
+  measurement (`2026-08-14-representation-is-the-targets-type-system.md`). The
+  same table over TYPES may need different answers, since `Int <: Num` is a
+  meaningful relation for types in a way it is not for machine encodings.
+
+**The payoff is the 31 `_require_repr` assertions.** Each is the backend
+discovering at lowering time that nothing upstream guaranteed what it needs.
+With an exit gate they become redundant — and, more usefully, a failure moves
+from "the backend GAPped deep in emission" to "the analysis pipeline rejected
+this graph and said why".
 
 ## What this plan does NOT do
 
