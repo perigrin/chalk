@@ -6,6 +6,7 @@ use utf8;
 package Chalk::IR::Analysis;
 
 use Chalk::IR::Serialize::JSON ();
+use Chalk::IR::Value;
 
 # WHY THIS IS A SEPARATE MODULE
 #
@@ -152,9 +153,84 @@ sub run ($class, $graphs, $classes = undef) {
     # so a coercion inserted there is narrowed too.
     Chalk::IR::Serialize::JSON::_narrow_unknown_coercions(\%graphs);
 
+    # THE EXIT INVARIANT -- NOT YET ENFORCED. See
+    # _assert_value_nodes_are_typed below for why it is off and what has to
+    # happen before it can be turned on.
+    #
+    # _assert_value_nodes_are_typed(\%graphs);
+
     # $mop is returned only in list context; scalar context stays \%graphs for
     # the existing single-return callers.
     return (\%graphs, $mop);
+}
+
+# _assert_value_nodes_are_typed($graphs)
+#
+# THE INVARIANT: a Chalk::IR::Value node has a stamp after analysis. A control
+# node does not, and must not -- it defines no value, so there is no type for
+# it to carry and asking is a category error.
+#
+# WHY THIS IS CHECKED HERE rather than in Chalk::IR::Value's ADJUST (which is
+# how the PRODUCER enforces the same rule, perl5-son SoN::IR::Value): chalk's
+# loader constructs every node first (Serialize/JSON.pm:158) and assigns types
+# afterwards (:181 and the passes above). An ADJUST would fire on every node
+# before any pass had a chance to type it. The producer can use ADJUST because
+# it builds a node only once it knows the value; chalk cannot.
+#
+# WHY IT MATTERS. Once this holds, `defined $node->representation` STOPS
+# DISCRIMINATING for value nodes -- it is always true. The nine guards in the
+# loader that use it as "already decided" are then asking a question with a
+# fixed answer, and must be re-expressed as `_is_narrowed` (committed to
+# something, versus still Unknown).
+#
+# ============================================================================
+# CURRENTLY DISABLED. THE INVARIANT DOES NOT HOLD YET -- and turning this on is
+# how we found that out, which is the point of writing it before relying on it.
+#
+# Enabling it drops the corpus gate 218 -> 200, with 18 cases failing. The
+# untyped Value nodes, by kind, across those failures:
+#
+#     Phi          21
+#     ArgsSource   18
+#     PadAccess    12
+#     Call          6
+#     Ref           3
+#
+# So five node kinds reach the end of the pipeline untyped. An earlier
+# 7-program census suggested the invariant already held -- it did not; that
+# sample simply contained none of these shapes. A hand-picked sample is not the
+# corpus.
+#
+# THIS IS A REAL GAP IN THE LOADER'S TYPING, not a bad assertion. Each of the
+# five is a node that DEFINES a value and reaches lowering with no type, which
+# is exactly the GIGO condition the analysis pipeline exists to remove
+# (docs/plans/2026-08-24-loader-analysis-pipeline.md). `PadAccess` in a
+# `:reader` accessor body is the clearest instance: `Pair::left` returns a pad
+# read that nothing types.
+#
+# TO ENABLE: close the five, or narrow the assertion to the kinds that are
+# genuinely covered and widen it as each is fixed. Do NOT enable it by
+# weakening it to "warn" -- a contract nothing enforces is the state this
+# function was written to end.
+# ============================================================================
+sub _assert_value_nodes_are_typed ($graphs) {
+    my @untyped;
+    for my $gname (sort keys %$graphs) {
+        my $g = $graphs->{$gname} or next;
+        for my $node ($g->nodes->@*) {
+            next unless $node isa Chalk::IR::Value;
+            next if defined $node->stamp;
+            push @untyped, sprintf('%s in %s (%s)',
+                $node->operation, $gname, $node->id);
+            last if @untyped >= 5;   # naming five is enough to diagnose
+        }
+        last if @untyped >= 5;
+    }
+    return unless @untyped;
+
+    die "IR: analysis finished with untyped Value node(s) -- every node that "
+      . "DEFINES a value must carry a type by the end of the pipeline, so "
+      . "lowering can rely on it: @untyped\n";
 }
 
 1;
