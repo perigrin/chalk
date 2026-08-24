@@ -60,12 +60,68 @@ is 119 lines invoking them 13 times — `_seed_and_propagate_reprs` alone 5 time
 evidently hard-won. **That is an argument for moving this machinery intact, not
 for redesigning it.**
 
+## THE SCOPE RULE (perigrin, 2026-08-24)
+
+> I think no matter what `%STAMP_TO_REPR` dies and is replaced by the lowering
+> graph-rewrite that we haven't done yet … the Loader **is only** concerned
+> with building a well typed Chalk IR.
+
+This is a stronger constraint than the slices below were originally written
+against, and it settles more than `%STAMP_TO_REPR`. If the loader's only job is
+a well-typed Chalk IR, then **every representation assignment in the loader is
+out of scope** — the table is just the most visible instance.
+
+Measured, and the scale is the point: **18 `set_representation` sites in the
+loader, 16 of them inside the eight analyses.** Every one of the eight assigns
+representations.
+
+    _resolve_direct_calls          1
+    _stamp_field_access_reprs      2
+    _seed_and_propagate_reprs      2
+    _propagate_computed_reprs      6
+    _stamp_method_call_reprs       1
+    _seed_direct_call_arg_reprs    2
+    _insert_str_coercions          1
+    _narrow_unknown_coercions      1
+    _infer_param_field_types       0
+
+**But most of that is TYPE work wearing representation's clothes.**
+`_propagate_computed_reprs`, the largest at 6 sites, computes `_join_repr` over
+operand types and applies a per-op result rule (`%_COMPUTED_REPR`) — that is
+type propagation over the lattice. The only genuinely machine-level thing in it
+is `Slot`, which
+`2026-08-24-there-should-be-no-representation-field.md` already measured as the
+sole representation-vocabulary member that is not a lattice type name.
+
+So the rule does not delete these analyses. It **retargets** them: they compute
+types, and should write the type field. What leaves the loader is not the
+analysis but the *vocabulary translation* — `%STAMP_TO_REPR`, `%LOWERABLE_STAMP`,
+`Slot`, and `_repr_to_llvm_type`'s inputs — all of which become the lowering
+rewrite's job.
+
+**Consequence for the slices below:** slice 3 ("preserve the type axis") stops
+being an additive step and becomes the CENTRAL one. The loader should write
+`stamp` and stop writing `representation` entirely. Slice 2's assertion is then
+type-vs-type rather than type-vs-repr, which is a cleaner comparison than the
+one measured today.
+
+**Consequence for `%STAMP_TO_REPR`:** the producer's surviving copy
+(`SoN/IR/Serialize/JSON.pm:24`, flagged in
+`2026-08-24-plan-doc-staleness-audit.md`) needs no separate remediation. It dies
+with the same rewrite.
+
 ## The shape
 
-    from_json($json)            ->  a decoded graph set, and NOTHING else
-    Analysis->run($graphs, $mop) ->  a graph set with types resolved
+    from_json($json)             ->  a decoded graph set, and NOTHING else
+    Analysis->run($graphs, $mop) ->  a WELL-TYPED Chalk graph set
+                                     (stamps only; no representations)
     Lowering->run($graphs)       ->  a target-specialized graph   [FUTURE]
+                                     (types rewritten to machine types;
+                                      %STAMP_TO_REPR and Slot live HERE)
     Target->emit($lowered)       ->  LLVM text                    [FUTURE]
+
+The boundary between lines 2 and 3 is the scope rule above: everything the
+loader does is on the TYPE side of it.
 
 Only the first two are in this plan's scope. The second two are
 `docs/architecture/ir-and-lowering.md`'s DESIGNED section and are named here
@@ -104,16 +160,41 @@ Today `_stamp_method_call_reprs` rebuilds `return_type` from scratch. Instead:
 This is the "validate/update rather than discard/rebuild" distinction. It is
 strictly less work than today AND converts a silent divergence into a loud one.
 
-### Slice 3 — preserve the type axis
+### Slice 3 — move the analyses onto the TYPE axis  ← THE CENTRAL SLICE
 
-Call `set_stamp` on load so the loaded graph carries Chalk types, not only
-representations. Today it carries none.
+Under the scope rule this is no longer "additively preserve the type axis". It
+is the point of the whole plan: **the loader should write `stamp` and stop
+writing `representation`.**
 
-This is the prerequisite for the lowering pass having an input at all: a pass
-that "replaces Chalk types with lowered types" needs Chalk types to be present.
-Note `%LOWERABLE_STAMP` currently DROPS any stamp not in its six-name set
-(measured: 6 of 45 stamps dropped, including `ArrayRef`/`HashRef`) — the type
-axis must not inherit that gate.
+- Call `set_stamp` on load (today: zero callers in all of `lib/`).
+- Retarget the eight analyses' 16 `set_representation` calls to `set_stamp`.
+  Most are already type computations — `_propagate_computed_reprs` joins
+  operand types over the lattice — so this is a field change, not a logic
+  rewrite.
+- `%LOWERABLE_STAMP` does not carry over. It gates on a six-name set and
+  measurably DROPS 6 of 45 stamps including `ArrayRef`/`HashRef`; the type axis
+  has no reason to inherit a gate that exists because the *representation*
+  vocabulary is smaller.
+- `Slot` does not carry over either — it is not a lattice member. Wherever the
+  loader currently assigns it, the honest type is `Undef` (an out-of-bounds read
+  yields perl's `undef`), and `Slot` is the lowering pass's encoding decision.
+
+**The hard part is the transition, not the change.** The backend reads
+`representation` at 43 sites and branches on it 94 times. Until the lowering
+rewrite exists there is nothing to produce those representations, so this slice
+cannot simply stop writing them without breaking every lowering path.
+
+Two candidate strategies, and this is an OPEN decision:
+
+- **(a) Dual-write** — set both `stamp` and `representation` from the same
+  computation, then delete the representation half when the lowering pass
+  lands. Keeps the gate green throughout; carries a known hazard, since this
+  project has a documented history of dual-write transitions that never
+  completed their second half (`CLAUDE.md`, MOP migration).
+- **(b) A shim in the target** — the backend derives a representation from the
+  node's stamp on read, as a temporary stand-in for the lowering pass. Smaller
+  and more honest about where the translation belongs, but it puts translation
+  logic in the target, which is where it must NOT end up.
 
 ### Slice 4 — the whole-program analyses
 
