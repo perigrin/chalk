@@ -607,37 +607,6 @@ sub _populate_registry_from_mop_class {
     return;
 }
 
-# _render_context_blocks($ctx, $skip_first_label) -> @llvm_lines
-#
-# Render a lowering context's basic blocks, with the block that was CURRENT
-# at end of lowering rendered LAST: epilogue lines (printf/ret) attach
-# textually to the final rendered block and must close the block holding
-# the result value. Multi-block phi arms append continuation blocks after
-# the merge block, so creation order does not guarantee the current block
-# is last. Block order is otherwise semantically irrelevant in LLVM IR,
-# except that the entry block must stay first — the current block at end
-# of lowering is never the entry block when later blocks exist (fallback
-# preserves creation order if it ever were). $skip_first_label suppresses
-# block 0's label for callers that emit their own 'entry:' line.
-sub _render_context_blocks {
-    my ($ctx, $skip_first_label) = @_;
-    my @lines;
-    my $blocks = $ctx->blocks;
-    my $final_idx = $ctx->{current_idx} // $#$blocks;
-    $final_idx = $#$blocks if $final_idx == 0 && $#$blocks > 0;
-    for my $i ((grep { $_ != $final_idx } 0 .. $#$blocks), $final_idx) {
-        my $block = $blocks->[$i];
-        unless ($skip_first_label && $i == 0) {
-            push @lines, $block->{label} . ':';
-        }
-        push @lines, $block->{insts}->@*;
-        if (defined $block->{terminator}) {
-            push @lines, $block->{terminator};
-        }
-    }
-    return @lines;
-}
-
 # _emit_class_registry_ir(\%registry, $ctx) -> @llvm_lines
 #
 # Emits all class-related LLVM IR declarations: type defs, vtable globals,
@@ -840,7 +809,7 @@ sub _emit_class_registry_ir {
 
             # Emit all instructions from the body context (current block
             # renders last; the ret lines below attach textually to it).
-            push @lines, _render_context_blocks($body_ctx, 1);
+            push @lines, $body_ctx->render_blocks(1);
 
             # Emit return instruction
             if ($ret_repr eq 'Str') {
@@ -953,7 +922,7 @@ sub _emit_class_registry_ir {
 
             push @lines, "define internal $fn_ret $fn_name() {  ; sub body for ${cname}::${sname}";
             push @lines, 'entry:';
-            push @lines, _render_context_blocks($body_ctx, 1);
+            push @lines, $body_ctx->render_blocks(1);
 
             if ($ret_repr eq 'Str') {
                 push @lines, "  %ret_sp = extractvalue %Str $body_val, 0";
@@ -999,7 +968,7 @@ sub _emit_class_registry_ir {
 
             push @lines, "define internal void \@${cname}__ADJUST(i8* %self) {  ; ADJUST blocks for $cname";
             push @lines, 'entry:';
-            push @lines, _render_context_blocks($adj_ctx, 1);
+            push @lines, $adj_ctx->render_blocks(1);
             push @lines, '  ret void';
             push @lines, '}';
             push @lines, '';
@@ -1477,7 +1446,7 @@ sub lower_with_elaboration {
 
     # Current block renders last: the epilogue lines below (printf + ret)
     # attach textually to the final rendered block.
-    push @lines, _render_context_blocks($ctx, 0);
+    push @lines, $ctx->render_blocks(0);
 
     if ($program_mode) {
         # No epilogue printf — program_mode suppresses the type-tag print.

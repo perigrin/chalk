@@ -525,6 +525,37 @@ sub _str_parts {
     return ($p, $l);
 }
 
+# render_blocks($skip_first_label) -> @llvm_lines
+#
+# Render this context's basic blocks, with the block that was CURRENT at end
+# of lowering rendered LAST: epilogue lines (printf/ret) attach textually to
+# the final rendered block and must close the block holding the result
+# value. Multi-block phi arms append continuation blocks after the merge
+# block, so creation order does not guarantee the current block is last.
+# Block order is otherwise semantically irrelevant in LLVM IR, except that
+# the entry block must stay first — the current block at end of lowering is
+# never the entry block when later blocks exist (fallback preserves creation
+# order if it ever were). $skip_first_label suppresses block 0's label for
+# callers that emit their own 'entry:' line.
+sub render_blocks {
+    my ($self, $skip_first_label) = @_;
+    my @lines;
+    my $blocks = $self->{blocks};
+    my $final_idx = $self->{current_idx} // $#$blocks;
+    $final_idx = $#$blocks if $final_idx == 0 && $#$blocks > 0;
+    for my $i ((grep { $_ != $final_idx } 0 .. $#$blocks), $final_idx) {
+        my $block = $blocks->[$i];
+        unless ($skip_first_label && $i == 0) {
+            push @lines, $block->{label} . ':';
+        }
+        push @lines, $block->{insts}->@*;
+        if (defined $block->{terminator}) {
+            push @lines, $block->{terminator};
+        }
+    }
+    return @lines;
+}
+
 # render_str_globals() -> @llvm_lines
 #
 # Emit string-constant globals accumulated by THIS context during body

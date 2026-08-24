@@ -73,7 +73,7 @@ subtest 'the abort is idempotent per Unwind node' => sub {
     $ctx->_emit_unwind_terminator($unwind, 'second (must be suppressed)');
 
     my $emitted = join "\n",
-        map { join "\n", ($_->{insts} // [])->@* } ($ctx->{blocks} // [])->@*;
+        map { join "\n", ($_->{insts} // [])->@* } ($ctx->blocks // [])->@*;
     my $n = () = $emitted =~ /call void \@exit\(i32 255\)/g;
     is($n, 1, 'the second emit for the same Unwind is suppressed');
 };
