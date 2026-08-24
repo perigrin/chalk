@@ -144,6 +144,51 @@ sub new {
     }, $class;
 }
 
+# @NEED_FLAGS: the "does the prologue need to declare/emit X" flags that a
+# body-lowering Context (a method body or ADJUST block, each lowered in its
+# own fresh Context) can set independently of the main Context that renders
+# the module prologue. The prologue is assembled before bodies are lowered,
+# so a flag set only on a body Context is invisible to it unless copied up --
+# a flag left behind produces .ll that references an undeclared global/helper
+# (the F6 bug class).
+my @NEED_FLAGS = qw(
+    _need_malloc_memcpy
+    _need_strpair
+    _need_bool_str_globals
+    _need_str_to_num_helper
+    _need_memcmp
+    _need_aggregate_types
+    _need_getenv
+    _need_print_str_fmt
+    _need_print_int_fmt
+    _need_exit
+    _need_str_type
+);
+
+# absorb_need_flags_from($src_ctx) -> copy ALL NEED_FLAGS set on $src_ctx up
+# onto $self. Called on the main/parent context with a body/adjust context as
+# the source, after that body has been lowered.
+sub absorb_need_flags_from {
+    my ($self, $src_ctx) = @_;
+    for my $flag (@NEED_FLAGS) {
+        $self->{$flag} = 1 if $src_ctx->{$flag};
+    }
+    return $self;
+}
+
+# inherit_need_flags_from($parent_ctx) -> copy NEED_FLAGS DOWN from a parent
+# context onto $self. Used when constructing a fresh body/adjust Context that
+# must start with whatever the parent already knows it needs (e.g.
+# _need_strpair, set by an earlier :param binding on the main graph) so a
+# post-class re-emit isn't needed for state the parent already had.
+sub inherit_need_flags_from {
+    my ($self, $parent_ctx) = @_;
+    for my $flag (@NEED_FLAGS) {
+        $self->{$flag} = 1 if $parent_ctx->{$flag};
+    }
+    return $self;
+}
+
 # Index a phi record list by the merge block it belongs to. Returns an empty
 # index when there is no elaboration result, which is what a straight-line
 # context gets.

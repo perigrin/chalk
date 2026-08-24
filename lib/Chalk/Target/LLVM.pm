@@ -638,33 +638,6 @@ sub _render_context_blocks {
     return @lines;
 }
 
-# _propagate_need_flags($dst_ctx, $src_ctx)
-#
-# Copy ALL _need_* helper/declaration flags from a body-lowering context up
-# to the main context. The prologue is assembled before bodies are lowered
-# and reads these flags from the main ctx; a flag set only on a body ctx
-# would be invisible to it, producing .ll that references undeclared
-# globals/helpers (the F6 bug class).
-my @NEED_FLAGS = qw(
-    _need_malloc_memcpy
-    _need_strpair
-    _need_bool_str_globals
-    _need_str_to_num_helper
-    _need_memcmp
-    _need_aggregate_types
-    _need_getenv
-    _need_print_str_fmt
-    _need_print_int_fmt
-    _need_exit
-);
-
-sub _propagate_need_flags {
-    my ($dst_ctx, $src_ctx) = @_;
-    for my $flag (@NEED_FLAGS) {
-        $dst_ctx->{$flag} = 1 if $src_ctx->{$flag};
-    }
-}
-
 # _render_str_globals($body_ctx) -> @llvm_lines
 #
 # Emit string-constant globals accumulated by a body-lowering context.
@@ -867,15 +840,18 @@ sub _emit_class_registry_ir {
             # Lower the body value node into the method body context
             my $body_val = $body_ctx->lower_value($body_node);
 
-            # Propagate need-flags BACK UP. A method body is lowered in its own
-            # Context, so a flag set during that lowering is invisible to the
-            # parent $ctx that emits the type declarations — and %Str is
-            # declared from $ctx. Without this the body emits insertvalue over
-            # an undeclared %Str and lli rejects the module with "invalid
-            # indices for insertvalue". (%StrPair avoids this only by having a
-            # pre-scan over return_repr; %Str has none, because it is needed by
-            # any Str VALUE rather than only by a Str-returning method.)
-            $ctx->{_need_str_type} ||= $body_ctx->{_need_str_type};
+            # need-flag propagation BACK UP (including _need_str_type) happens
+            # once, below, via absorb_need_flags_from -- nothing between here
+            # and there reads $ctx's flags, so a single absorb after the body
+            # is fully rendered covers this without an extra early copy. A
+            # method body is lowered in its own Context, so a flag set during
+            # that lowering is invisible to the parent $ctx that emits the
+            # type declarations — and %Str is declared from $ctx. Without this
+            # the body emits insertvalue over an undeclared %Str and lli
+            # rejects the module with "invalid indices for insertvalue".
+            # (%StrPair avoids this only by having a pre-scan over
+            # return_repr; %Str has none, because it is needed by any Str
+            # VALUE rather than only by a Str-returning method.)
 
             push @lines, "define internal $fn_ret $fn_name(i8* %self) {  ; method body for ${cname}::${mname}";
             push @lines, 'entry:';
@@ -933,7 +909,7 @@ sub _emit_class_registry_ir {
 
             # Propagate _need_* flags to the main ctx (F6 bug class) and
             # emit the body's string-constant globals into the class section.
-            _propagate_need_flags($ctx, $body_ctx);
+            $ctx->absorb_need_flags_from($body_ctx);
             push @lines, _render_str_globals($body_ctx);
         }
 
@@ -987,7 +963,8 @@ sub _emit_class_registry_ir {
 
             _process_control_chain($body_ctx, $body_return);
             my $body_val = $body_ctx->lower_value($body_node);
-            $ctx->{_need_str_type} ||= $body_ctx->{_need_str_type};
+            # _need_str_type (and every other NEED_FLAG) is absorbed below via
+            # absorb_need_flags_from, once the body is fully rendered.
 
             push @lines, "define internal $fn_ret $fn_name() {  ; sub body for ${cname}::${sname}";
             push @lines, 'entry:';
@@ -1007,7 +984,7 @@ sub _emit_class_registry_ir {
             push @lines, '}';
             push @lines, '';
 
-            _propagate_need_flags($ctx, $body_ctx);
+            $ctx->absorb_need_flags_from($body_ctx);
             push @lines, _render_str_globals($body_ctx);
         }
 
@@ -1032,8 +1009,8 @@ sub _emit_class_registry_ir {
             $adj_ctx->lower_value($_) for @adjust_stmts;
             # Same back-propagation as the method-body path above: an ADJUST
             # block is lowered in its own Context, so a %Str built there is
-            # invisible to the $ctx that declares the type.
-            $ctx->{_need_str_type} ||= $adj_ctx->{_need_str_type};
+            # invisible to the $ctx that declares the type. absorb_need_flags_from
+            # below covers _need_str_type along with every other NEED_FLAG.
 
             push @lines, "define internal void \@${cname}__ADJUST(i8* %self) {  ; ADJUST blocks for $cname";
             push @lines, 'entry:';
@@ -1043,7 +1020,7 @@ sub _emit_class_registry_ir {
             push @lines, '';
 
             # Same flag/global propagation as the method-body loop above.
-            _propagate_need_flags($ctx, $adj_ctx);
+            $ctx->absorb_need_flags_from($adj_ctx);
             push @lines, _render_str_globals($adj_ctx);
         }
 
