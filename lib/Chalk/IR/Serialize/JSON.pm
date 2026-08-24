@@ -1796,11 +1796,29 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
     # elements -- an `field $items = [10,20,30]` field reads Int elements. A
     # Subscript over a FieldAccess to that field (`$items->[0]`, `$items->@*` in
     # a loop) then carries the element repr (zhi 019f61ad).
-    my (%field_type, %field_elem_type);
+    my (%field_type, %field_elem_type, %reader_graph_type);
     for my $cname (keys %$classes) {
         for my $f (($classes->{$cname}{fields} // [])->@*) {
             my $key = "$cname\::" . ($f->{fieldix} // -1);
             $field_type{$key} = $f->{type} if defined $f->{type};
+
+            # A :reader field gets a SYNTHESIZED accessor graph, named
+            # Class::fieldname, whose body reads the field through a PadAccess
+            # rather than the FieldAccess an explicit `method get { return $v }`
+            # produces. Same field, same type, different node kind -- and the
+            # FieldAccess arm below is the only rule that ever typed it, so the
+            # accessor body reached the end of the pipeline untyped.
+            #
+            # Record (graph name, varname) -> type so the walk can type it. The
+            # varname is matched too: an accessor graph contains exactly one
+            # field read, but keying on the graph alone would type ANY PadAccess
+            # that appeared there, and a future accessor body with a local would
+            # be silently mistyped.
+            if ($f->{is_reader} && defined $f->{type} && defined $f->{name}) {
+                my $accessor = $f->{name} =~ s/^[\$\@\%]//r;
+                $reader_graph_type{"$cname\::$accessor"} =
+                    { varname => $f->{name}, type => $f->{type} };
+            }
             # An aggregate default's element repr (widest of its elements).
             if (defined $f->{default_ref}
                     && (my $dg = $graphs->{ $f->{default_ref} })) {
@@ -1815,8 +1833,18 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
         }
     }
 
-    for my $g (values %$graphs) {
+    for my $gname (keys %$graphs) {
+        my $g = $graphs->{$gname};
+        my $reader = $reader_graph_type{$gname};
         for my $node ($g->nodes->@*) {
+            # The :reader accessor's field read (see %reader_graph_type above).
+            if ($reader && $node->operation eq 'PadAccess'
+                    && !_is_narrowed($node->representation)
+                    && $node->can('varname')
+                    && ($node->varname // '') eq $reader->{varname}) {
+                $node->set_representation($reader->{type});
+                next;
+            }
             if ($node->operation eq 'FieldAccess' && !_is_narrowed($node->representation)) {
                 my $stash = $node->field_stash // next;
                 my $fidx  = $node->field_index;
