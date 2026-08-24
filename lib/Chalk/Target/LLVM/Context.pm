@@ -884,6 +884,14 @@ sub render_blocks {
 
 # render_str_globals() -> @llvm_lines
 #
+# str_globals() -> arrayref of [ $global_name, $content, $byte_len ] triples
+#
+# The string-constant globals accumulated so far by THIS context. A reader
+# for tests that assert on the registered-global table directly (e.g. that a
+# failed _module_global_name call registered nothing); production code goes
+# through render_str_globals/render_need_flag_prologue instead.
+sub str_globals { $_[0]->{_str_globals} }
+
 # slot_payload_for($def_bit) -> $payload_ref | undef
 #
 # Look up the payload SSA ref recorded alongside a Slot's defined-bit ref. A
