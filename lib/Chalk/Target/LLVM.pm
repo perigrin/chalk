@@ -1192,164 +1192,11 @@ sub lower_with_elaboration {
         die "LLVM backend (elaboration): cannot emit return of repr=$result_repr";
     }
 
-    # When body lowering set _need_bool_str_globals (Coerce(Boolean->Str) used
-    # internally in a non-Str-return graph), emit those globals now. They are
-    # always emitted for a Str result repr (above); this branch handles the
-    # case where the return is not Str but the body contains a Coerce(Boolean->Str)
-    # in the MAIN graph (not a method body — method bodies are handled post-class).
-    if ($ctx->{_need_bool_str_globals} && $result_repr ne 'Str') {
-        push @lines, '@coerce_bool_str_true  = private unnamed_addr constant [2 x i8] c"1\00", align 1';
-        push @lines, '@coerce_bool_str_false = private unnamed_addr constant [1 x i8] c"\00",   align 1';
-        $ctx->{_bool_str_globals_emitted} = 1;
-    }
-
-    # Print emits its list args with a raw (untagged) printf format per arg type.
-    # These are distinct from the return-value epilogue formats (which prepend a
-    # type tag): a printed value is the raw content, not a tagged result.
-    if ($ctx->{_need_print_str_fmt}) {
-        # "%.*s\0" = 5 bytes = [5 x i8]
-        push @lines, '@fmt_print_str = private unnamed_addr constant [5 x i8] c"%.*s\00", align 1';
-    }
-    if ($ctx->{_need_print_int_fmt}) {
-        # "%lld\0" = %,l,l,d,\0 = 5 bytes = [5 x i8]
-        # %lld so printf reads the full i64 arg -- a bare %d truncates the
-        # varargs read to 32 bits on LP64 targets.
-        push @lines, '@fmt_print_int = private unnamed_addr constant [5 x i8] c"%lld\00", align 1';
-    }
-
-    if ($ctx->{_need_num_fmt}) {
-        # "%.15g\0" = 6 bytes = [6 x i8]. This is perl's own float
-        # stringification rule, verified against perl 5.42 on the corpus floats
-        # and on t/base/num.t's cases (0.1, 1e+34, 1.000001, 0.0005).
-        push @lines, '@fmt_num_g = private unnamed_addr constant [6 x i8] c"%.15g\00", align 1';
-    }
-
-    push @lines, '';
-    push @lines, 'declare i32 @printf(i8* nocapture readonly, ...)';
-    # snprintf renders a Num to Str: measure with a null buffer, then render.
-    # Same host-interface class as printf -- a plain C function, not libperl.
-    push @lines, 'declare i32 @snprintf(i8* nocapture, i64, i8* nocapture readonly, ...)'
-        if $ctx->{_need_snprintf};
-
-    # Emit string-constant globals collected during body lowering.
-    # Each Constant(:Str) node emits a private global; the names are stashed in
-    # _str_globals as [ $global_name, $content, $byte_len ] triples. We emit
-    # them here (before the function body) so they appear in the module before @main.
-    if (defined $ctx->{_str_globals}) {
-        push @lines, '';
-        for my $g ($ctx->{_str_globals}->@*) {
-            my ($gname, $content, $blen) = @$g;
-            my $total = $blen + 1;  # +1 for NUL terminator
-            # Encode the bytes as a c"..." literal (NUL is \00).
-            my $enc = _encode_c_string($content);
-            push @lines, "$gname = private unnamed_addr constant [$total x i8] c\"$enc\\00\", align 1";
-        }
-    }
-
-    # Emit package-scalar globals (EntryDef): one mutable i64 slot per
-    # package/global scalar (`our $g`), keyed by qualified name in _pkg_globals so
-    # each is emitted exactly once and store/read resolve the same slot. Zero-init:
-    # an unwritten package scalar reads as 0 (the numeric undef the backend uses).
-    if (defined $ctx->{_pkg_globals} && %{ $ctx->{_pkg_globals} }) {
-        push @lines, '';
-        for my $qual (sort keys $ctx->{_pkg_globals}->%*) {
-            my $gname = $ctx->{_pkg_globals}{$qual};
-            push @lines, "$gname = internal global i64 0, align 8  ; package scalar \$$qual";
-        }
-    }
-
-    # Emit Str package-scalar globals (EntryDef with a Str repr): a PAIR of
-    # mutable slots per qualified name — an i8* ptr (null-init) and an i64 len
-    # (zero-init). An unwritten Str package scalar reads as (null, 0), an empty
-    # string. Emitted once each via the _pkg_str_globals dedupe map.
-    if (defined $ctx->{_pkg_str_globals} && %{ $ctx->{_pkg_str_globals} }) {
-        push @lines, '';
-        for my $qual (sort keys $ctx->{_pkg_str_globals}->%*) {
-            my ($pname, $lname) = $ctx->{_pkg_str_globals}{$qual}->@*;
-            push @lines, "$pname = internal global i8* null, align 8  ; Str package scalar \$$qual (ptr)";
-            push @lines, "$lname = internal global i64 0, align 8  ; Str package scalar \$$qual (len)";
-        }
-    }
-
-    # Emit Num package-scalar globals (EntryDef with a Num repr): one mutable
-    # `double` slot per qualified name, zero-init — an unwritten Num package
-    # scalar reads as 0.0, the numeric undef the backend uses. Its own slot
-    # rather than the Int i64 one so the read knows which face the bits hold.
-    if (defined $ctx->{_pkg_num_globals} && %{ $ctx->{_pkg_num_globals} }) {
-        push @lines, '';
-        for my $qual (sort keys $ctx->{_pkg_num_globals}->%*) {
-            my $nname = $ctx->{_pkg_num_globals}{$qual};
-            push @lines, "$nname = internal global double 0.0, align 8  ; Num package scalar \$$qual";
-        }
-    }
-
-    # Declare malloc/memcpy when Str concat or aggregate operations were emitted.
-    # These are plain C host-interface functions — NOT libperl.
-    if ($ctx->{_need_malloc_memcpy}) {
-        push @lines, 'declare i8* @malloc(i64)';
-        push @lines, 'declare i8* @memcpy(i8*, i8*, i64)';
-    }
-
-    # Declare exit when a `die` arm was lowered (Unwind -> exit(255) + unreachable).
-    # A plain C host-interface function — NOT libperl.
-    if ($ctx->{_need_exit}) {
-        push @lines, 'declare void @exit(i32)';
-    }
-
-    # Declare getenv (+ strlen for the runtime value length) when EnvRead was
-    # emitted. Plain C host-interface functions — NOT libperl.
-    if ($ctx->{_need_getenv}) {
-        push @lines, 'declare i8* @getenv(i8* nocapture readonly)';
-        push @lines, 'declare i64 @strlen(i8* nocapture readonly)';
-        $ctx->{_strlen_declared} = 1;
-        $ctx->{_getenv_emitted}  = 1;
-    }
-
-    # Declare memcmp when hash key comparison operations were emitted.
-    if ($ctx->{_need_memcmp}) {
-        push @lines, 'declare i32 @memcmp(i8* nocapture readonly, i8* nocapture readonly, i64)';
-        $ctx->{_memcmp_emitted} = 1;
-    }
-
-    # Emit LLVM type declarations for Array/Hash aggregate structures when needed.
-    # %Slot = { i1 defined, i64 payload } (16 bytes with padding)
-    # %Array = { i64 len, i64 cap, %Slot* elems }
-    # %HashEntry = { i8* key_ptr, i64 key_len, i32 key_enc, i1 val_def, i64 val_pay }
-    # %Hash = { i64 count, i64 cap, %HashEntry* entries }
-    if ($ctx->{_need_aggregate_types}) {
-        push @lines, '%Slot       = type { i1, i64 }';
-        push @lines, '%Array      = type { i64, i64, %Slot* }';
-        push @lines, '%HashEntry  = type { i8*, i64, i32, i1, i64 }';
-        push @lines, '%Hash       = type { i64, i64, %HashEntry* }';
-    }
-
-    # %Str, the first-class Str VALUE type. Emitted here rather than in the
-    # class-registry prologue because _need_str_type is set DURING lowering (by
-    # _str_value), and this block runs after it — the same ordering the
-    # _need_aggregate_types flag above relies on. Declaring it in the earlier
-    # prologue would need a pre-scan, which is the trap the _need_strpair "I3"
-    # re-emit below exists to patch around.
-    if ($ctx->{_need_str_type}) {
-        push @lines, $ctx->render_str_type_once;
-    }
-
-    # Emit @chalk_str_to_num helper + strtod declaration when Coerce(Str->Num) is used.
-    #
-    # The helper implements perl's leading-numeric rule: skip whitespace, then parse
-    # a decimal number (no hex). The one divergence from libc strtod: strtod parses
-    # "0x10" as 16.0, but perl returns 0. We pre-check for "0x"/"0X" and return 0.0.
-    #
-    # strtod is a plain C library function (host interface, NOT libperl). The
-    # chalk_str_to_num function is a module-local helper; no external linkage needed.
-    if ($ctx->{_need_str_to_num_helper}) {
-        push @lines, '';
-        push @lines, 'declare double @strtod(i8* nocapture readonly, i8** nocapture)';
-        push @lines, '';
-        # @chalk_str_to_num(i8* %ptr, i64 %len) -> double
-        # Implements perl's leading-numeric rule (decimal only; "0x..." -> 0.0).
-        push @lines, _emit_str_to_num_helper();
-        $ctx->{_str_to_num_helper_emitted} = 1;
-    }
+    # Pre-class-lowering half of the module prologue: every global/helper
+    # this context's NEED_FLAGS say the module will use, given what has been
+    # lowered so far (not yet including any class method body — see the F6
+    # post-class re-emit call below).
+    push @lines, $ctx->render_need_flag_prologue($result_repr);
 
     # Emit class-related IR: type declarations, vtable globals, class-name constants,
     # strlen declaration (for Str field reads), and method body functions.
@@ -1370,71 +1217,12 @@ sub lower_with_elaboration {
         push @lines, @class_lines;
     }
 
-    # Post-class emission: emit any helpers/declarations that method bodies
-    # flagged via _need_* propagation but that the pre-class prologue did not emit.
-    # Each check is guarded by "was it already emitted?" (only applicable for
-    # _need_bool_str_globals when result_repr ne Str, and _need_str_to_num_helper).
-    if ($ctx->{_need_bool_str_globals} && $result_repr ne 'Str') {
-        # Only emit if the Str-prologue path (which always includes these globals)
-        # did NOT already emit them. The Str-prologue emits them unconditionally
-        # when result_repr eq 'Str'; for all other reprs, we must emit here if needed.
-        # To avoid duplicate definitions, we track whether they were already emitted.
-        # The prologue emits them only when result_repr eq 'Str' (lines ~668-669) or
-        # when _need_bool_str_globals was already set on $ctx before class-lowering.
-        # Since we only reach here when result_repr ne 'Str', the prologue cannot have
-        # emitted them (it checks `$result_repr ne 'Str'` too), so we need to emit now
-        # IF the flag was newly set by method-body propagation (not by the main graph).
-        # Guard: if the prologue already emitted them (result_repr ne Str path at line 710),
-        # they'll be duplicated. We use $ctx->{_bool_str_globals_emitted} to track this.
-        unless ($ctx->{_bool_str_globals_emitted}) {
-            push @lines, '';
-            push @lines, '@coerce_bool_str_true  = private unnamed_addr constant [2 x i8] c"1\00", align 1';
-            push @lines, '@coerce_bool_str_false = private unnamed_addr constant [1 x i8] c"\00",   align 1';
-            $ctx->{_bool_str_globals_emitted} = 1;
-        }
-    }
-    if ($ctx->{_need_str_to_num_helper} && !$ctx->{_str_to_num_helper_emitted}) {
-        push @lines, '';
-        push @lines, 'declare double @strtod(i8* nocapture readonly, i8** nocapture)';
-        push @lines, '';
-        push @lines, _emit_str_to_num_helper();
-        $ctx->{_str_to_num_helper_emitted} = 1;
-    }
-    # Post-class re-emit for _need_memcmp: a method body doing Subscript(Hash)
-    # sets _need_memcmp on $body_ctx (propagated to $ctx by G.5), but the prologue
-    # memcmp declare runs BEFORE method bodies lower. If the flag was set only by a
-    # method body, the prologue missed it. Emit here, guarded by _memcmp_emitted so
-    # a non-method hash op + a method hash op cannot double-declare.
-    if ($ctx->{_need_memcmp} && !$ctx->{_memcmp_emitted}) {
-        push @lines, 'declare i32 @memcmp(i8* nocapture readonly, i8* nocapture readonly, i64)';
-        $ctx->{_memcmp_emitted} = 1;
-    }
-
-    # Post-class re-emit for _need_getenv (same F6 pattern as memcmp): a
-    # method-body EnvRead sets the flag after the prologue ran.
-    if ($ctx->{_need_getenv} && !$ctx->{_getenv_emitted}) {
-        push @lines, 'declare i8* @getenv(i8* nocapture readonly)';
-        push @lines, 'declare i64 @strlen(i8* nocapture readonly)'
-            unless $ctx->{_strlen_declared};
-        $ctx->{_strlen_declared} = 1;
-        $ctx->{_getenv_emitted}  = 1;
-    }
-
-    # Post-class re-emit for _need_strpair (I3):
-    # %StrPair is declared by _emit_class_registry_ir only when some method RETURNS Str
-    # (the LOCAL $need_strpair scan at line ~366 checks return_repr). But _need_strpair
-    # is also set during lower_value (e.g. _lower_new at ~3545 when binding a Str :param
-    # field), which runs BEFORE _emit_class_registry_ir. If the class has no Str-returning
-    # method (LOCAL scan returns 0) but a Str :param is bound, _lower_new emits %StrPair*
-    # references without %StrPair being declared — lli rejects. The _strpair_emitted flag
-    # (set at the existing line-376 emit site) prevents double-declare.
-    if ($ctx->{_need_strpair}) {
-        my @strpair_lines = $ctx->render_strpair_type_once;
-        if (@strpair_lines) {
-            push @lines, '; StrPair for Str values (post-class re-emit, I3; layout: Context::_strpair_fields)';
-            push @lines, @strpair_lines;
-        }
-    }
+    # Post-class-lowering half (the F6 fix): a method body or ADJUST block
+    # lowers in its OWN Context and is only absorbed into $ctx (via
+    # absorb_need_flags_from) after _emit_class_registry_ir runs above, so a
+    # flag it set is invisible to render_need_flag_prologue, which ran before
+    # any body lowered.
+    push @lines, $ctx->render_need_flag_postclass_reemit($result_repr);
 
     push @lines, '';
     push @lines, 'define i32 @main() {';
