@@ -27,7 +27,33 @@ my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
 # carries is which stamps the backend can actually lower. A stamp outside it
 # (Scalar, List, DualVar, a ref type) leaves the representation unset so
 # _require_repr reports an honest GAP instead of mislowering.
-my %LOWERABLE_STAMP = map { $_ => 1 } qw(Int Num Str Boolean Undef Object);
+# The wire stamps that may enter the representation field. This is a filter on a
+# SHARED field, not a statement about the lattice: `stamp` and `representation`
+# are one field under the transitional alias (Chalk::IR::Node), so a name
+# admitted here is simultaneously claimed as a machine encoding.
+#
+# `Unknown` is excluded and MUST STAY excluded. It is not merely unlowerable --
+# it is a poison value in this field, in two ways at once. It blocks the
+# inference that would have narrowed it (the loader's guards read a present
+# repr as "already decided"; _is_narrowed below softens that but the passes
+# still have nothing to narrow FROM), and any node still holding it at machine
+# type selection dies in _repr_to_llvm_type: "the pessimistic top: INFERENCE
+# never determined a type for this value."
+#
+# That is also the sharpest argument that the alias cannot be the end state:
+# `Unknown` is the CORRECT type for an un-narrowed node and an INVALID
+# representation for that same node. One value, right on one axis and poison on
+# the other, is what a single shared field cannot express -- see
+# docs/plans/2026-08-24-loader-analysis-pipeline.md.
+#
+# `ArrayRef`/`HashRef` are admitted (slice 3b). Both already have machine
+# encodings in %_REPR_LLVM_TYPE (`i8*`, a boxed aggregate pointer), so dropping
+# them was an omission in the original six-name list rather than a deliberate
+# exclusion. Measured over 12 programs, they are 9 of the 86 stamps the producer
+# emits; `Unknown` is another 9, and the remaining 16 lattice names are never
+# emitted at all.
+my %LOWERABLE_STAMP = map { $_ => 1 }
+    qw(Int Num Str Boolean Undef Object ArrayRef HashRef);
 
 # _is_narrowed($repr) — has this node COMMITTED to a representation?
 #

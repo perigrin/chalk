@@ -335,6 +335,11 @@ writing `representation`.**
   regression unattributable, which is the specific mistake this note exists to
   prevent.
 
+  > ### ✅ 3b IS DONE (2026-08-24). The block below is kept as the record of why
+  > ### it was blocked and what unblocked it — the analysis stands, the verdict
+  > ### does not. `ArrayRef`/`HashRef` are admitted; `Unknown` stays dropped
+  > ### permanently, for the poison-value reason measured below.
+  >
   > ### ⛔ 3b IS BLOCKED. Do not start it. (agentic review + coordinator proof, 2026-08-24)
   >
   > Removing `%LOWERABLE_STAMP` **reintroduces a known miscompile**, and slice
@@ -476,6 +481,37 @@ writing `representation`.**
   Caveat: 12 hand-written programs is not the ring. A sweep over `t/base` and
   the corpus would be a stronger sample, and the 16 never-emitted types are
   "not emitted by THESE programs", not "unreachable".
+
+  **LANDED, and it was exactly the two-name change.** `%LOWERABLE_STAMP` gained
+  `ArrayRef` and `HashRef`; nothing else changed. Corpus gate 218/218/218/218,
+  worklist 0, zero failures.
+
+  **Verified live rather than assumed.** A green gate after a filter widening is
+  ambiguous — it reads the same whether the change worked or whether nothing
+  reached the field at all. Loading four aggregate programs and counting what
+  lands: **75 nodes now carry `ArrayRef`/`HashRef` where they previously carried
+  `undef`**. The change is doing something and the gate holds anyway.
+
+  That measurement also settles the one inference this plan had left untested.
+  Earlier notes reasoned `ArrayRef`/`HashRef` were harmless because no guard
+  branches on those names; that was never confirmed at the gate. It is now, and
+  the sites where behaviour genuinely changes are the ones the caveat above
+  predicted — `_box_payload` (`Context.pm:2472`, `:2563`, `:5261`, `:5338`) now
+  sees a real aggregate repr where it saw `''`, and `_container_ptr`'s
+  `eq "${kind}Ref"` test (`:5448`) now takes the boxing path for a nested
+  aggregate that previously fell through unboxed.
+
+  **The same run makes the `Unknown` exclusion permanent, not provisional.**
+  `Unknown` is **976 of ~1800 wire stamps** — over half of everything the
+  producer emits. Admitting it would flood the shared field with a value that
+  dies at machine-type selection. `Scalar` (4 per program) is likewise emitted
+  and likewise correctly dropped.
+
+  Pinned by `t/bootstrap/ir/lowerable-stamp-admission.t`, which drives a real
+  load rather than reading the filter hash (it stays lexical — exposing
+  production state to make it assertable would be backwards). Both directions:
+  eight names reach the field, `Unknown` does not and still dies in
+  `_repr_to_llvm_type`, and ten never-emitted lattice names stay out.
 - `Slot` does not carry over either — it is not a lattice member. Wherever the
   loader currently assigns it, the honest type is `Undef` (an out-of-bounds read
   yields perl's `undef`), and `Slot` is the lowering pass's encoding decision.
