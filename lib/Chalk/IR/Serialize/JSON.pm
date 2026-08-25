@@ -1597,28 +1597,28 @@ sub _propagate_computed_reprs ($graphs) {
                 my @ranked = grep { $_ ne 'Undef' } @reprs;
                 @reprs = @ranked if @ranked;
 
-                # A DefinedOr over a Slot is the SAME case, one step later. A
-                # Slot is Maybe[T]: statically we do not know whether the value
-                # is there, but `//` is precisely the operator that decides --
-                # if the Slot is undef the RHS is taken, so the Slot arm
-                # contributes no type to widen, exactly as an Undef arm does
-                # not.
+                # A `Slot` arm is NOT dropped here, and the reason is worth
+                # stating because dropping it looks reasonable.
                 #
-                # And `Slot` cannot be ranked anyway: it is a machine encoding,
-                # not a lattice member, so _join_repr has no chain to place it
-                # on and returns undef for the whole merge. That left `$a[9] //
-                # 42` UNTYPED, which the backend then defaulted to Int on one
-                # path and printed through the Slot epilogue on another --
-                # printing `Undef:` where perl prints 42.
+                # `Slot` is Maybe[word] with the word's type nowhere in the
+                # node, so it cannot be ranked -- _join_repr has no chain to
+                # place it on and the whole merge goes untyped. The tempting fix
+                # is to drop the Slot arm and type the merge from the other one,
+                # since `//` decides the maybe-ness anyway.
                 #
-                # DefinedOr only. A Phi or TernaryExpr over a Slot arm has NOT
-                # discharged the maybe-ness -- either arm can still be the
-                # result -- so dropping it there would claim a definedness
-                # nothing established.
-                if ($op eq 'DefinedOr') {
-                    my @defined_arms = grep { $_ ne 'Slot' } @reprs;
-                    @reprs = @defined_arms if @defined_arms;
-                }
+                # That is WRONG, and measurably: it tells the backend to unbox
+                # the Slot's payload as the other arm's type, on a claim nothing
+                # established. For a Str-element array it emits
+                # `phi %Str [ i64 ... ]`; where both encodings are i64 it would
+                # not even fail loudly.
+                #
+                # A merge of "maybe" and "definitely" is resolved by PROVING one
+                # arm dead (Chalk::Bootstrap::Optimizer::DefinedOrFold, which
+                # deletes the merge outright when the index is statically
+                # decidable) or by BOXING to the common encoding. Never by
+                # unboxing on an unproven type. An untyped merge that reaches
+                # the backend is a GAP, which is the correct outcome until the
+                # boxing path exists.
 
                 my $widest = _join_repr(@reprs);
                 next unless defined $widest;
