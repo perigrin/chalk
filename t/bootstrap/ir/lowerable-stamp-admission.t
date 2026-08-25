@@ -56,6 +56,14 @@ subtest 'the lowerable names reach the field' => sub {
     # are what slice 3b added.
     is loads_as($_), $_, "$_ is admitted"
         for qw(Int Num Str Boolean Undef Object ArrayRef HashRef);
+
+    # Array/Hash are the CONTAINERS (%Array*, %Hash*), not the references that
+    # point at them. They were listed below as never-emitted until perl5-son
+    # 86d7f73 began stamping aggregate signature parameters from their sigil
+    # (`sub f($x, @rest)` -> @rest : Array). Dropping them here would discard
+    # the only type information the producer can offer about a slurpy.
+    is loads_as($_), $_, "$_ is admitted (the container, not a Ref to one)"
+        for qw(Array Hash);
 };
 
 subtest 'Unknown is excluded -- it is poison, not merely unlowerable' => sub {
@@ -73,13 +81,19 @@ subtest 'Unknown is excluded -- it is poison, not merely unlowerable' => sub {
         'a node still holding Unknown dies at machine-type selection';
 };
 
-subtest 'the never-emitted lattice names stay out' => sub {
+subtest 'the names with no machine encoding stay out' => sub {
     # These exist in the lattice but have no machine encoding. `Scalar` in
     # particular IS emitted by the producer (measured: 4 per program) and is
     # correctly dropped -- it needs a boxed value representation that does not
     # exist yet.
+    #
+    # `Array`/`Hash` used to be listed here, on the reasoning that they were
+    # never emitted. That was a measurement, not a principle, and it expired:
+    # see the admission subtest above. Being unemitted is not a reason to
+    # exclude a name that HAS an encoding -- the reason to exclude is having
+    # none, which is what every name below has in common.
     isnt loads_as($_), $_, "$_ is not admitted"
-        for qw(Scalar List Any Void Ref Regex CodeRef Array Hash Glob);
+        for qw(Scalar List Any Void Ref Regex CodeRef Glob);
 };
 
 done_testing;

@@ -50,10 +50,25 @@ my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
 # encodings in %_REPR_LLVM_TYPE (`i8*`, a boxed aggregate pointer), so dropping
 # them was an omission in the original six-name list rather than a deliberate
 # exclusion. Measured over 12 programs, they are 9 of the 86 stamps the producer
-# emits; `Unknown` is another 9, and the remaining 16 lattice names are never
-# emitted at all.
+# emits; `Unknown` is another 9.
+#
+# `Array`/`Hash` are admitted too, and they are the CONTAINERS -- `%Array*`
+# ({i64, i64, %Slot*}) and `%Hash*` -- not the ArrayRef/HashRef references that
+# point at them. Both have had machine encodings all along
+# (`Context.pm:3529-3530`); what was missing was a producer that emitted them.
+# An earlier note here recorded that the remaining lattice names "are never
+# emitted at all", which was true when measured and is now false for these two:
+# perl5-son 86d7f73 stamps an aggregate SIGNATURE PARAMETER from its sigil, so
+# `sub f($x, @rest)` sends @rest as Array and `sub g($x, %opt)` sends %opt as
+# Hash. Dropping them here would discard the only type information that end can
+# provide about a slurpy.
+#
+# Note the asymmetry with the element type: the CONTAINER lowers, but
+# `Array[Scalar]`'s ELEMENT does not, for want of a boxed value representation
+# (docs/architecture/ir-and-lowering.md section 5). Admitting `Array` types the
+# container; it does not make an arbitrary element read lowerable.
 my %LOWERABLE_STAMP = map { $_ => 1 }
-    qw(Int Num Str Boolean Undef Object ArrayRef HashRef);
+    qw(Int Num Str Boolean Undef Object ArrayRef HashRef Array Hash);
 
 # _is_narrowed($repr) — has this node COMMITTED to a representation?
 #
