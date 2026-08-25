@@ -222,24 +222,34 @@ sub run ($class, $graphs, $classes = undef) {
 #     Call         2   root         main::__PROGRAM__
 #     Ref          1   root         main::__PROGRAM__
 #
-# So the real work is NINE root nodes in three kinds. The seven Phis are all
+# So the real work was NINE root nodes in three kinds. The seven Phis are all
 # downstream -- untyped because their inputs are -- and should resolve when the
 # roots do rather than needing rules of their own.
 #
-# ArgsSource is two thirds of the roots, and it is the interesting one: it is
-# `@_`, hash-consed one per graph with NO FIELDS, so a single opaque node
-# stands for the whole argument list. Its honest type is Array (an array of
-# scalars: it has storage, you can shift it, index it, take scalar @_ -- List
-# is the flattening notion and would be one level too wide). But Array[Scalar]
-# does not LOWER, because the element needs a boxed representation that does
-# not exist; see docs/architecture/ir-and-lowering.md section 5.
+# ARGSSOURCE IS CLOSED (perl5-son 714ec0e), taking 6 of the 9 roots with it.
+# Re-measured after: SIXTEEN -> TEN untyped, THREE roots left (Call 2, Ref 1),
+# and ArgsSource does not appear at all.
 #
-# Stamping it would therefore satisfy this invariant while leaving the node
-# unlowerable -- and would paper over the real defect, which Parameter.pm
-# already documents: routing a parameter read through `@_` makes
-# `Subscript(ArgsSource, 0, MemStart)` a MEMORY READ "ordered against every
-# other memory op for no semantic reason", where a pure zero-input Parameter
-# belongs. ArgsSource is untyped because it is the wrong node on that path.
+# The fix was to stamp `@_` as `Array` at the producer. It defaulted to
+# `Unknown`, which claims inference FAILED when nothing had ever asked: `@_` is
+# an array of scalars structurally, for every sub, with no inference required.
+# (`List` would be one level too wide -- that is the flattening notion, and the
+# backend refuses it as signature vocabulary.)
+#
+# An earlier note here argued AGAINST stamping it, on two grounds. Both were
+# wrong, and the record is kept because the reasoning is the reusable part:
+#
+#   - "Array[Scalar] does not lower, so the stamp is useless." True about the
+#     ELEMENT, irrelevant to the CONTAINER. %Array* has had a machine encoding
+#     all along, and nothing reads ArgsSource as a value -- `shift` and `$_[0]`
+#     mint their own nodes, typed from the callsite. Only `my @a = @_` needs
+#     the element type, and that shape stays a GAP.
+#   - "It would paper over the real defect: a parameter read should not route
+#     through @_ as a MEMORY READ (Parameter.pm)." That defect is real and
+#     already fixed for the case it covers -- a signature sub mints Parameter
+#     nodes and has no ArgsSource at all. `shift` is not that case: it MUTATES
+#     the list, which is a genuine array operation, so ArgsSource is the right
+#     node there and typing it is not papering over anything.
 #
 # THIS IS A REAL GAP IN THE LOADER'S TYPING, not a bad assertion. Each of the
 # five is a node that DEFINES a value and reaches lowering with no type, which
@@ -248,10 +258,12 @@ sub run ($class, $graphs, $classes = undef) {
 # `:reader` accessor body is the clearest instance: `Pair::left` returns a pad
 # read that nothing types.
 #
-# TO ENABLE: close the nine roots, or narrow the assertion to the kinds that
-# are genuinely covered and widen it as each is fixed. PadAccess is closed.
-# ArgsSource (6) wants the Parameter migration rather than a stamp; Call (2)
-# and Ref (1) are unexamined.
+# TO ENABLE: close the three remaining roots, or narrow the assertion to the
+# kinds that are genuinely covered and widen it as each is fixed. PadAccess and
+# ArgsSource are closed. Call (2) and Ref (1) are unexamined, and the 7 Phis
+# should follow from them without rules of their own -- worth re-measuring
+# rather than assuming, since every census this session has corrected the one
+# before it.
 #
 # Do NOT enable it by weakening it to "warn" -- a contract nothing enforces is
 # the state this function was written to end.
