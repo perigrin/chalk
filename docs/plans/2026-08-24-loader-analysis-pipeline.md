@@ -625,20 +625,80 @@ CHECKING half, and is no longer a vague aspiration — it is *"run
 existing: the backend re-discovering, one node at a time, that nothing upstream
 guaranteed what it needs.
 
-### Slice 4 — the whole-program analyses
+### Slice 4 — the TYPE INFERENCE pass
 
-The passes that genuinely need a program-wide view, which is what perigrin
-means by "more than just the return values":
+**4a — A TOTAL JOIN. This is the slice, and the four analyses below all
+depend on it.**
+
+The original version of this slice listed four whole-program analyses and
+omitted the primitive every one of them needs: **combining two types.** That
+was a real defect in the plan, not a reordering — the analyses were specified
+as though `join` existed.
+
+**It does not.** Measured 2026-08-25: `TypeLibrary` has `is_subtype` and **no
+`join`** — no `lub`, no `least_common_ancestor`, not even `parent`. The lattice
+can answer "is A below B" and cannot answer "what is the least type above
+both", which is the question every merge in the compiler asks.
+
+So `_join_repr` (`IR/Serialize/JSON.pm`) improvised: it walks the linear
+`Int <: Num <: Str` spine and returns `undef` when the arms are SIBLINGS.
+That `undef` — an untyped merge — is what four separate sites then improvised
+around, each in its own way:
+
+- the `Undef`-arm drop immediately above the join call, which types
+  `my $a; $a // 9` as `Int` when the honest answer is `Scalar`;
+- the `'same'` rule for `And`/`Or`, which bails entirely on any mismatch;
+- a `Slot`-arm drop added and then REVERTED on 2026-08-25 (`b1c2220c`) —
+  it was unboxing on an unproven claim, and emitted `phi %Str [ i64 ... ]`;
+- the backend's `$repr // 'Int'` defaults, which guess when the loader
+  supplied nothing.
+
+Four copies of a missing function, each wrong in a different way.
+
+**The producer already solved this.** `SoN::IR::Stamp` precomputes `%ANCESTORS`
+and `%DEPTH` and does real LCA. Verified against it directly:
+
+    join(Undef,    Int) = Scalar        join(Int,   Str) = Str
+    join(ArrayRef, Int) = Scalar        join(Array, Int) = List
+
+Total for every pair tried, and `join(Undef, Int) = Scalar` is exactly the
+answer the improvisations were avoiding. **Chalk has the wrong side of a solved
+problem.** (Flag for whoever implements: `join(Boolean, Int) = Str` falls out
+of `Boolean <: Str` — defensible, but confirm it is intended rather than an
+artifact of Boolean's parent.)
+
+The work: give `TypeLibrary` a real `join`, make `_join_repr` call it, delete
+the improvisations. Mostly SUBTRACTION.
+
+**Consequence that makes this three changes, not one.** A total join produces
+`Scalar` where nothing was produced before, and `Scalar` has no machine type —
+so a graph that GAPs today with "no repr" would GAP with "Scalar has no machine
+representation". Landing the join therefore also needs:
+
+- `Scalar => '%Slot'` in `%_REPR_LLVM_TYPE`. `%Slot` is `{i1 defined, i64
+  payload}` and is already the un-narrowed encoding (§5 of
+  `docs/architecture/ir-and-lowering.md`); `Scalar` is the un-narrowed TYPE.
+  Same statement on two axes.
+- **merge sites BOX rather than unbox.** Boxing into the common encoding is
+  sound given nothing; unboxing needs the payload's type AND needs the payload
+  to really be that type, which is the one option that can be silently wrong.
+
+**4b — the whole-program analyses**, each of which is a join over a set once
+4a exists:
 
 - **call-graph resolution** — `_resolve_direct_calls` / `_attach_call_targets`,
   already whole-program, currently interleaved;
-- **argument-type seeding** across call boundaries (`_seed_direct_call_arg_reprs`);
+- **argument-type seeding** across call boundaries
+  (`_seed_direct_call_arg_reprs`) — today MONOMORPHIC (first caller wins); the
+  correct form is a JOIN over N callsites, which 4a supplies;
 - **container monomorphism** — the analysis
   `2026-08-24-chalk-memory-model-baseline.md` §4a identifies as the real
   question behind `ArrayRef[Int]`: is this container's element type stable over
   its whole lifetime, across all stores? Today `_element_repr` answers a
   narrower question (are the INITIALIZERS homogeneous) and the store path GAPs
-  rather than falling back;
+  rather than falling back. This IS a join over every store's type — the
+  monomorphism proof is "the join is narrower than Scalar", which is not
+  expressible until 4a lands;
 - **escape / no-tie** — needed before any provenance narrowing can be trusted
   (`2026-08-24-access-provenance-and-the-mop.md`). Note the self-hosting subset
   makes this trivially true today (0 `tie` sites, measured), so this can be an
