@@ -1893,6 +1893,25 @@ sub _emit_to_str {
         return $self->_emit_int_to_str($input_ref);
     }
 
+    # `print undef` prints the empty string. Undef is a UNIT TYPE -- one value,
+    # so one answer, and no runtime work: the input ref is not even read.
+    #
+    # Kept SEPARATE from the Unknown arm below although both emit "". They are
+    # different claims, and the lattice keeps them apart for that reason
+    # ("Scalar is a legitimate static answer, Unknown is an inference failure").
+    if ($from eq 'Undef') {
+        return $self->_emit_empty_str($label);
+    }
+
+    # An UNKNOWN operand reaching stringification is an inference failure that
+    # got this far. "" is the only defensible rendering -- a value nothing
+    # typed can be treated only as perl treats undef -- but it is a FALLBACK,
+    # not a stringification, and it is worth being able to find later. The
+    # honest fix is upstream: whatever should have typed this did not.
+    if ($from eq 'Unknown') {
+        return $self->_emit_empty_str($label);
+    }
+
     # A Slot is Maybe[word]: its SSA ref is the %Slot aggregate, so both halves
     # are read off it with extractvalue. Perl prints an undefined value
     # as the empty string, so render the payload as an Int and select it against
@@ -1919,8 +1938,23 @@ sub _emit_to_str {
         return $ptr;
     }
 
-    die "GAP: $label is not lowered runtime-free (Int, Boolean, Num, Slot and Str "
-      . "are wired; an aggregate has no stringification).";
+    die "GAP: $label is not lowered runtime-free (Int, Boolean, Num, Slot, "
+      . "Undef, Unknown and Str are wired; an aggregate has no "
+      . "stringification).";
+}
+
+# _emit_empty_str($label) -> $ptr to "", with its length recorded as 0.
+#
+# The shared tail of the Undef and Unknown arms. The length REGISTRATION is the
+# part that matters: a Str is a (ptr, len) pair, and an unrecorded length on a
+# shared "" global is how the Boolean arm once printed a stray byte of "1".
+# Zero is a length, and it has to be written down like any other.
+sub _emit_empty_str {
+    my ($self, $label) = @_;
+    my ($nil_g, undef, $nil_tot) = $self->_module_global_name('undef_str', '');
+    my $ptr = $self->_fresh;
+    $self->_emit_entry("  $ptr = getelementptr inbounds [$nil_tot x i8], [$nil_tot x i8]* $nil_g, i64 0, i64 0  ; $label: \"\"");
+    return $self->_set_str_len($ptr, 0);
 }
 
 # _emit_int_to_str($val_ref) -> $ptr (an i8* to a runtime-rendered decimal string,
@@ -3320,15 +3354,32 @@ sub _lower_defined_or {
     # lhs_ref IS the payload.
     my $lhs_phi_val;
     if ($lhs_repr eq 'Undef') {
-        # The payload was recorded by _lower_constant in _undef_payload.
-        $lhs_phi_val = $self->{_undef_payload}{ $lhs_node->id };
+        # The payload was recorded by _lower_constant in _undef_payload -- as an
+        # i64, which is only usable when the RESULT is an i64. `my $u; $u // ""`
+        # merges into a %Str, and feeding the recorded payload there produced
+        # `phi %Str [ i64 ... ]`: a type mismatch that never compiled.
+        #
+        # This arm is UNREACHABLE at runtime: the LHS is statically undef, so
+        # the branch always takes the RHS. It still has to be well-TYPED,
+        # because LLVM checks every phi operand whether or not the edge is
+        # taken. So the fallback below is not a fallback for this case -- it is
+        # the correct answer, and the recorded payload is what needs the guard.
+        my $recorded = $self->{_undef_payload}{ $lhs_node->id };
+        $lhs_phi_val = $recorded if defined $recorded && $llvm_type eq 'i64';
         unless (defined $lhs_phi_val) {
             # Fallback: emit a zero of the result type if no payload was recorded.
-            $lhs_phi_val = $self->_fresh;
             if ($llvm_type eq 'double') {
+                $lhs_phi_val = $self->_fresh;
                 $self->_emit("  $lhs_phi_val = fadd double 0.0, 0.0  ; DefinedOr: undef LHS payload fallback (Num)");
             }
+            elsif ($llvm_type =~ /^%/) {
+                # An aggregate result (%Str, %Slot). `add %Str 0, 0` is not an
+                # instruction; LLVM's own name for a value of any type that is
+                # never read is `undef`, which is exactly what this operand is.
+                $lhs_phi_val = 'undef';
+            }
             else {
+                $lhs_phi_val = $self->_fresh;
                 $self->_emit("  $lhs_phi_val = add $llvm_type 0, 0  ; DefinedOr: undef LHS payload fallback");
             }
         }

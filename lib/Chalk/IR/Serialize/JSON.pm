@@ -1597,6 +1597,29 @@ sub _propagate_computed_reprs ($graphs) {
                 my @ranked = grep { $_ ne 'Undef' } @reprs;
                 @reprs = @ranked if @ranked;
 
+                # A DefinedOr over a Slot is the SAME case, one step later. A
+                # Slot is Maybe[T]: statically we do not know whether the value
+                # is there, but `//` is precisely the operator that decides --
+                # if the Slot is undef the RHS is taken, so the Slot arm
+                # contributes no type to widen, exactly as an Undef arm does
+                # not.
+                #
+                # And `Slot` cannot be ranked anyway: it is a machine encoding,
+                # not a lattice member, so _join_repr has no chain to place it
+                # on and returns undef for the whole merge. That left `$a[9] //
+                # 42` UNTYPED, which the backend then defaulted to Int on one
+                # path and printed through the Slot epilogue on another --
+                # printing `Undef:` where perl prints 42.
+                #
+                # DefinedOr only. A Phi or TernaryExpr over a Slot arm has NOT
+                # discharged the maybe-ness -- either arm can still be the
+                # result -- so dropping it there would claim a definedness
+                # nothing established.
+                if ($op eq 'DefinedOr') {
+                    my @defined_arms = grep { $_ ne 'Slot' } @reprs;
+                    @reprs = @defined_arms if @defined_arms;
+                }
+
                 my $widest = _join_repr(@reprs);
                 next unless defined $widest;
                 $node->set_representation($widest);
