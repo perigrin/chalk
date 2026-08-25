@@ -635,13 +635,20 @@ omitted the primitive every one of them needs: **combining two types.** That
 was a real defect in the plan, not a reordering — the analyses were specified
 as though `join` existed.
 
-**It does not.** Measured 2026-08-25: `TypeLibrary` has `is_subtype` and **no
-`join`** — no `lub`, no `least_common_ancestor`, not even `parent`. The lattice
-can answer "is A below B" and cannot answer "what is the least type above
-both", which is the question every merge in the compiler asks.
+**It exists, and is not called.** `TypeLibrary::join_types` is a proper total
+LCA — bottom identity, top absorption, subtype shortcuts, nearest-common-
+ancestor walk — sitting beside `meet_types` and `narrow_type`. Verified
+2026-08-25:
 
-So `_join_repr` (`IR/Serialize/JSON.pm`) improvised: it walks the linear
-`Int <: Num <: Str` spine and returns `undef` when the arms are SIBLINGS.
+    join_types(Undef,    Int) = Scalar     join_types(Int,   Str) = Str
+    join_types(ArrayRef, Int) = Scalar     join_types(Array, Int) = List
+
+**`_join_repr` (`IR/Serialize/JSON.pm`) does not use it.** It reimplements a
+weaker rule beside it: return whichever ARM is a supertype of all the others,
+via `is_subtype` in a loop. That works only when one arm dominates; SIBLINGS
+have no dominating arm, so it returns `undef`. Measured: the loader calls
+`join_types` ZERO times, while importing `is_subtype` from the same module.
+
 That `undef` — an untyped merge — is what four separate sites then improvised
 around, each in its own way:
 
@@ -655,20 +662,24 @@ around, each in its own way:
 
 Four copies of a missing function, each wrong in a different way.
 
-**The producer already solved this.** `SoN::IR::Stamp` precomputes `%ANCESTORS`
-and `%DEPTH` and does real LCA. Verified against it directly:
+**Both sides of the wire already solved it, identically.** The producer's
+`SoN::IR::Stamp::join` precomputes `%ANCESTORS`/`%DEPTH` and does LCA;
+chalk's `join_types` walks ancestor chains. They agree on every pair tried,
+including `join(Undef, Int) = Scalar` — exactly the answer the improvisations
+were avoiding.
 
-    join(Undef,    Int) = Scalar        join(Int,   Str) = Str
-    join(ArrayRef, Int) = Scalar        join(Array, Int) = List
+So this is NOT "implement a join". The join is implemented, correct, and
+unused. **The work is deleting `_join_repr`'s body and calling `join_types`,
+then removing the improvisations that existed to survive its `undef`.** Mostly
+SUBTRACTION.
 
-Total for every pair tried, and `join(Undef, Int) = Scalar` is exactly the
-answer the improvisations were avoiding. **Chalk has the wrong side of a solved
-problem.** (Flag for whoever implements: `join(Boolean, Int) = Str` falls out
-of `Boolean <: Str` — defensible, but confirm it is intended rather than an
-artifact of Boolean's parent.)
-
-The work: give `TypeLibrary` a real `join`, make `_join_repr` call it, delete
-the improvisations. Mostly SUBTRACTION.
+(Flag for whoever does it: `join_types(Boolean, Int) = Str` falls out of
+`Boolean <: Str` — defensible, but confirm it is intended rather than an
+artifact of Boolean's parent. And `join_types(Slot, Int) = Unknown`, correctly:
+`Slot` is a machine encoding, not a lattice member, so it cannot participate in
+a type join at all — which is the real reason the `Slot` arm could not be
+joined, and the reason the honest fix is to stamp a statically-missing read
+`Undef` rather than `Slot`.)
 
 **Consequence that makes this three changes, not one.** A total join produces
 `Scalar` where nothing was produced before, and `Scalar` has no machine type —
