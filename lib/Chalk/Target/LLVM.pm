@@ -1314,16 +1314,20 @@ sub lower_with_elaboration {
         push @lines, '  call i32 (i8*, ...) @printf(i8* %fmt_s_u_ptr, i8* %undef_str_ptr)';
     }
     elsif ($result_repr eq 'Slot') {
-        # Slot result: tagged-scalar from array/hash read.
-        # result_ref is the i1 defined-bit SSA ref.
-        # The payload (i64) is retrieved from _slot_payload{result_ref}.
+        # Slot result: tagged-scalar from array/hash read. result_ref is the
+        # %Slot aggregate; both halves come off it here.
+        #
+        # These extracts are pushed into @lines rather than emitted through the
+        # context, because this epilogue builds its own text -- but they are the
+        # same two instructions _slot_defined_bit/_slot_payload_of emit.
         #
         # Branch on defined-bit:
         #   defined=true  -> print "Int:<payload>\n"
         #   defined=false -> print "Undef:\n"
-        my $def_bit  = $result_ref;
-        my $pay_val  = $ctx->slot_payload_for($def_bit)
-            // die "LLVM backend: Slot result missing payload in _slot_payload table";
+        my $def_bit = $ctx->_fresh;
+        my $pay_val = $ctx->_fresh;
+        push @lines, "  $def_bit = extractvalue %Slot $result_ref, 0  ; Slot.defined";
+        push @lines, "  $pay_val = extractvalue %Slot $result_ref, 1  ; Slot.payload";
         my $def_lbl  = $ctx->_fresh_label('slot_def');
         my $und_lbl  = $ctx->_fresh_label('slot_und');
         my $end_lbl  = $ctx->_fresh_label('slot_end');

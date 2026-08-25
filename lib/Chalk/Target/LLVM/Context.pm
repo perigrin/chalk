@@ -121,10 +121,6 @@ sub new {
         #     Set when Subscript(Hash) is lowered; triggers memcmp declaration.
         _need_aggregate_types => 0,
         _need_memcmp          => 0,
-        # Slot repr tracking: parallel to _undef_defined_bit/_undef_payload for Undef.
-        # Maps the SSA def-bit ref -> SSA payload ref (i64).
-        # Used by the Slot return epilogue to retrieve both fields.
-        _slot_payload => {},
         # G5 MOP: class registry (class_name -> { methods, fields, ... }).
         # Passed to new() by the pre-scan in lower_with_elaboration. (Callers
         # spell the constructor ElaboratedContext->new, but that package defines
@@ -892,18 +888,56 @@ sub render_blocks {
 # through render_str_globals/render_need_flag_prologue instead.
 sub str_globals { $_[0]->{_str_globals} }
 
-# slot_payload_for($def_bit) -> $payload_ref | undef
+# A SLOT VALUE IS ONE AGGREGATE, NOT TWO HALVES.
 #
-# Look up the payload SSA ref recorded alongside a Slot's defined-bit ref. A
-# Slot VALUE is represented as its defined-bit alone; the i64 payload lives
-# in this side table, keyed by that bit, because there is no single SSA ref
-# that carries both halves. Returns undef when nothing was recorded --
-# every call site (here, and the DefinedOr/Coerce sites inside this file)
-# dies on that case with its OWN diagnostic wording, so this reader does not
-# bake in any one of them.
-sub slot_payload_for {
-    my ($self, $def_bit) = @_;
-    return $self->{_slot_payload}{$def_bit};
+# %Slot is { i1 defined, i64 payload }. It used to be carried as its DEFINED
+# BIT ALONE -- the node's cached SSA ref was the i1, and the payload lived in a
+# side table keyed by that ref, "because there is no single SSA ref that
+# carries both halves". There is: the aggregate itself, exactly as %Str already
+# carries its own (ptr, len) pair so that a merge cannot desynchronize them.
+#
+# The side table had two failure modes, and the second is why it is gone:
+#
+#   - A consumer holding the cached ref and forgetting the lookup used a
+#     defined-bit where a value belonged. Three `// die` guards existed to
+#     catch that, which is evidence it happened rather than reassurance.
+#   - It was keyed by an SSA REF STRING while SSA numbering is PER-GRAPH, so
+#     `%1` in one graph is not `%1` in another -- the string-keyed-cache shape
+#     that has caused silent cross-graph miscompiles in this codebase before.
+#
+# And it could not survive a phi: merging the def-bit leaves the payload
+# behind, so both producer sites emitted two parallel phis by hand and relinked
+# them. One `phi %Slot` replaces that.
+
+# _build_slot($defined, $payload, $what) -> $slot_ref
+#
+# $defined is an i1 operand ('i1 true', or a bare SSA ref), $payload an i64.
+sub _build_slot {
+    my ($self, $defined, $payload, $what) = @_;
+    my $partial = $self->_fresh;
+    my $slot    = $self->_fresh;
+    # `undef` is LLVM's poison aggregate, not perl's undef -- the starting
+    # value into which both fields are inserted.
+    my $d = $defined =~ /^i1 / ? $defined : "i1 $defined";
+    $self->_emit("  $partial = insertvalue %Slot undef, $d, 0  ; $what: defined");
+    $self->_emit("  $slot = insertvalue %Slot $partial, i64 $payload, 1  ; $what: payload");
+    return $slot;
+}
+
+# _slot_defined_bit($slot_ref) -> $i1_ref
+sub _slot_defined_bit {
+    my ($self, $slot_ref) = @_;
+    my $ref = $self->_fresh;
+    $self->_emit("  $ref = extractvalue %Slot $slot_ref, 0  ; Slot.defined");
+    return $ref;
+}
+
+# _slot_payload_of($slot_ref) -> $i64_ref
+sub _slot_payload_of {
+    my ($self, $slot_ref) = @_;
+    my $ref = $self->_fresh;
+    $self->_emit("  $ref = extractvalue %Slot $slot_ref, 1  ; Slot.payload");
+    return $ref;
 }
 
 # Emit string-constant globals accumulated by THIS context during body
@@ -1859,8 +1893,8 @@ sub _emit_to_str {
         return $self->_emit_int_to_str($input_ref);
     }
 
-    # A Slot is Maybe[word]: its SSA ref IS the defined bit, with the payload
-    # carried in _slot_payload keyed by that ref. Perl prints an undefined value
+    # A Slot is Maybe[word]: its SSA ref is the %Slot aggregate, so both halves
+    # are read off it with extractvalue. Perl prints an undefined value
     # as the empty string, so render the payload as an Int and select it against
     # "" on the defined bit -- pointer AND length together, since a Str is a
     # (ptr, len) pair and an undef contributes zero bytes.
@@ -1870,17 +1904,17 @@ sub _emit_to_str {
     # a digit loop over an i64 that is 0 when undefined -- so the undefined case
     # renders "0" into a buffer nobody reads.
     if ($from eq 'Slot') {
-        my $payload = $self->{_slot_payload}{$input_ref};
-        die "GAP: $label has no tracked payload — a Slot's SSA ref is its "
-          . "defined bit, and the payload is recorded alongside it."
-            unless defined $payload;
+        # No lookup, and no way for either half to be missing: they are fields
+        # 0 and 1 of the value we were handed.
+        my $defined = $self->_slot_defined_bit($input_ref);
+        my $payload = $self->_slot_payload_of($input_ref);
 
         my ($rendered, $rlen) = $self->_str_parts($self->_emit_int_to_str($payload));
         my ($nil_g, undef, $nil_tot) = $self->_module_global_name('slot_str', '');
         my ($nil_p, $ptr, $len) = ($self->_fresh, $self->_fresh, $self->_fresh);
         $self->_emit_entry("  $nil_p = getelementptr inbounds [$nil_tot x i8], [$nil_tot x i8]* $nil_g, i64 0, i64 0  ; $label: \"\"");
-        $self->_emit("  $ptr = select i1 $input_ref, i8* $rendered, i8* $nil_p  ; $label -> ptr");
-        $self->_emit("  $len = select i1 $input_ref, i64 $rlen, i64 0  ; $label -> len");
+        $self->_emit("  $ptr = select i1 $defined, i8* $rendered, i8* $nil_p  ; $label -> ptr");
+        $self->_emit("  $len = select i1 $defined, i64 $rlen, i64 0  ; $label -> len");
         $ptr = $self->_set_str_len($ptr, $len);
         return $ptr;
     }
@@ -3233,13 +3267,11 @@ sub _lower_defined_or {
         $defined_cond = $lhs_ref;
     }
     elsif ($lhs_repr eq 'Slot') {
-        # A Slot LHS (an array/hash element read) is runtime-decided: lhs_ref IS
-        # the i1 defined-bit from the bounds/key check, and its i64 PAYLOAD is
-        # recorded in _slot_payload keyed by that bit. Branch on the real bit --
-        # folding to always-defined would use the def-bit (i1) as the value where
-        # the i64 payload is expected, and reading `$a[$i] // rhs` on an
-        # out-of-bounds index must yield the rhs, not the element (019f6654).
-        $defined_cond = $lhs_ref;
+        # A Slot LHS (an array/hash element read) is runtime-decided: read the
+        # defined bit off the aggregate and branch on it. Folding to
+        # always-defined would make `$a[$i] // rhs` on an out-of-bounds index
+        # yield the element rather than the rhs (019f6654).
+        $defined_cond = $self->_slot_defined_bit($lhs_ref);
     }
     else {
         # Non-Undef LHS: always defined. Emit i1 true as a compile-time constant.
@@ -3249,6 +3281,15 @@ sub _lower_defined_or {
         $self->_emit("  $always_true = add i1 0, 1              ; DefinedOr: non-Undef LHS always defined (i1 true)");
         $defined_cond = $always_true;
     }
+
+    # A Slot LHS's payload is extracted HERE, in the entry block, before the
+    # branch below -- not at the phi that consumes it. LLVM requires every phi
+    # to be at the top of its block, so an extractvalue emitted in the merge
+    # block would land above the phi and make the module invalid ("PHI nodes not
+    # grouped at top of basic block"). Extracting in the predecessor also
+    # dominates the edge, which is what the phi needs.
+    my $slot_payload;
+    $slot_payload = $self->_slot_payload_of($lhs_ref) if $lhs_repr eq 'Slot';
 
     # Allocate block labels.
     my $undef_label = $self->_fresh_label('dor.undef.');
@@ -3266,7 +3307,13 @@ sub _lower_defined_or {
     # End block: phi merges lhs value (defined path) and rhs value (undef path).
     $self->_new_block($end_label);
     my $result = $self->_fresh;
-    my $llvm_type = _repr_to_llvm_type($repr // 'Int');
+    # A DefinedOr RESULT is never a Slot, whatever the node is stamped: either
+    # the LHS was defined (its payload) or the RHS replaced it, so the value is
+    # defined by construction and the maybe-ness has been discharged. The phi
+    # merges an i64 payload with the RHS, so it must be typed as the payload --
+    # `%Slot` here would be an aggregate phi over two i64 operands.
+    my $phi_repr  = ( ( $repr // 'Int' ) eq 'Slot' ) ? 'Int' : ( $repr // 'Int' );
+    my $llvm_type = _repr_to_llvm_type($phi_repr);
 
     # LHS payload for the phi: when LHS is Undef-typed, use the recorded payload
     # (i64 0 for Constant(undef)) or a zero for the type. When LHS is a typed value,
@@ -3287,10 +3334,9 @@ sub _lower_defined_or {
         }
     }
     elsif ($lhs_repr eq 'Slot') {
-        # lhs_ref is the Slot's i1 def-bit; the i64 payload (the element value on
-        # the defined path) is recorded in _slot_payload keyed by that bit.
-        $lhs_phi_val = $self->{_slot_payload}{ $lhs_ref }
-            // die "LLVM backend: DefinedOr Slot LHS missing payload in _slot_payload table";
+        # The element value on the defined path is field 1 of the aggregate,
+        # extracted in the entry block above (see the comment there).
+        $lhs_phi_val = $slot_payload;
     }
     else {
         $lhs_phi_val = $lhs_ref;
@@ -3324,9 +3370,16 @@ sub _lower_defined {
     # Lower the operand to get its value ref (or defined bit for Undef-typed).
     my $op_ref = $self->lower_value($operand);
 
-    if ($op_repr eq 'Undef' || $op_repr eq 'Slot') {
-        # op_ref IS the defined bit (i1): from _lower_constant's alloca/load for
-        # Undef, or from the array/hash read's bounds/key check for Slot.
+    if ($op_repr eq 'Slot') {
+        # A Slot's value is the %Slot aggregate; its defined bit is field 0.
+        # Split from the Undef arm below, which is genuinely a bare i1 -- the
+        # two shared a branch while a Slot was ALSO carried as its defined bit.
+        my $bit = $self->_slot_defined_bit($op_ref);
+        $self->{cache}{$node->id} = $bit;
+        return $bit;
+    }
+    elsif ($op_repr eq 'Undef') {
+        # op_ref IS the defined bit (i1), from _lower_constant's alloca/load.
         $self->{cache}{$node->id} = $op_ref;
         return $op_ref;
     }
@@ -5606,16 +5659,22 @@ sub _lower_array_read {
         return $ptr;
     }
     else {
-        # Slot repr: phi-select defined-bit and payload at the merge point.
-        # The epilogue retrieves the payload from _slot_payload keyed by the def ref.
+        # Slot repr. The halves are phi'd separately -- we are ALREADY in the
+        # merge block here (the sibling arms above emit their phis directly),
+        # so an aggregate built per-arm would land after the phi that uses it
+        # and would not dominate its incoming edge. Phi the halves, then
+        # assemble ONCE, here.
+        #
+        # The assembly is what matters: the node's value is the %Slot, so no
+        # consumer can hold one half and look up the other. The two phis are an
+        # implementation detail of this block rather than the representation.
         my $def_phi = $self->_fresh;
         my $pay_phi = $self->_fresh;
         $self->_emit("  $def_phi = phi i1  [ $def_val, \%$lbl_inb ], [ false, \%$lbl_oob ]  ; ArrayRead :Slot defined phi");
         $self->_emit("  $pay_phi = phi i64 [ $pay_val, \%$lbl_inb ], [ 0,          \%$lbl_oob ]  ; ArrayRead :Slot payload phi");
-        # Track payload for the Slot epilogue.
-        $self->{_slot_payload}{$def_phi} = $pay_phi;
-        $self->{cache}{ $node->id } = $def_phi;
-        return $def_phi;
+        my $slot = $self->_build_slot($def_phi, $pay_phi, 'ArrayRead');
+        $self->{cache}{ $node->id } = $slot;
+        return $slot;
     }
 }
 
@@ -5920,14 +5979,16 @@ sub _lower_hash_read {
         return $sptr;
     }
     else {
-        # Slot repr: phi-select defined-bit and payload. Track payload for epilogue.
+        # Slot repr. As in ArrayRead: we are already in the merge block, so the
+        # halves are phi'd here and assembled into the aggregate immediately.
+        # The node's value is the %Slot, not the defined bit.
         my $def_phi = $self->_fresh;
         my $pay_phi = $self->_fresh;
         $self->_emit("  $def_phi = phi i1  [ $vd_val, \%$lbl_hit ], [ false, \%$lbl_miss ]  ; HashRead :Slot defined phi");
         $self->_emit("  $pay_phi = phi i64 [ $vp_val, \%$lbl_hit ], [ 0,     \%$lbl_miss ]  ; HashRead :Slot payload phi");
-        $self->{_slot_payload}{$def_phi} = $pay_phi;
-        $self->{cache}{ $node->id } = $def_phi;
-        return $def_phi;
+        my $slot = $self->_build_slot($def_phi, $pay_phi, 'HashRead');
+        $self->{cache}{ $node->id } = $slot;
+        return $slot;
     }
 }
 
