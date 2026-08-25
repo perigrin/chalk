@@ -214,9 +214,32 @@ sub run ($class, $graphs, $classes = undef) {
 # the way the gate is scoped will mislead in whichever direction it happens to
 # be unrepresentative.
 #
-# Caveat on the corrected numbers too: eight hand-written programs is not the
-# 218-case corpus. Those counts are exact FOR THOSE SHAPES; more kinds will
-# surface when the invariant is enabled against the full gate.
+# MEASURED AGAINST THE FULL 218-CASE CORPUS (2026-08-25), which is what the
+# eight-program caveat above asked for. Sixteen untyped Value nodes in total:
+#
+#     Phi          7   DOWNSTREAM   main::__PROGRAM__
+#     ArgsSource   6   root         main::f, main::id
+#     Call         2   root         main::__PROGRAM__
+#     Ref          1   root         main::__PROGRAM__
+#
+# So the real work is NINE root nodes in three kinds. The seven Phis are all
+# downstream -- untyped because their inputs are -- and should resolve when the
+# roots do rather than needing rules of their own.
+#
+# ArgsSource is two thirds of the roots, and it is the interesting one: it is
+# `@_`, hash-consed one per graph with NO FIELDS, so a single opaque node
+# stands for the whole argument list. Its honest type is Array (an array of
+# scalars: it has storage, you can shift it, index it, take scalar @_ -- List
+# is the flattening notion and would be one level too wide). But Array[Scalar]
+# does not LOWER, because the element needs a boxed representation that does
+# not exist; see docs/architecture/ir-and-lowering.md section 5.
+#
+# Stamping it would therefore satisfy this invariant while leaving the node
+# unlowerable -- and would paper over the real defect, which Parameter.pm
+# already documents: routing a parameter read through `@_` makes
+# `Subscript(ArgsSource, 0, MemStart)` a MEMORY READ "ordered against every
+# other memory op for no semantic reason", where a pure zero-input Parameter
+# belongs. ArgsSource is untyped because it is the wrong node on that path.
 #
 # THIS IS A REAL GAP IN THE LOADER'S TYPING, not a bad assertion. Each of the
 # five is a node that DEFINES a value and reaches lowering with no type, which
@@ -225,11 +248,10 @@ sub run ($class, $graphs, $classes = undef) {
 # `:reader` accessor body is the clearest instance: `Pair::left` returns a pad
 # read that nothing types.
 #
-# TO ENABLE: close the remaining roots, or narrow the assertion to the kinds
-# that are genuinely covered and widen it as each is fixed. PadAccess is
-# closed; ArgsSource is the one this census still names. Re-run the gate with
-# the assertion on to find what a corpus-sized sample adds -- do not assume the
-# eight-program list above is complete.
+# TO ENABLE: close the nine roots, or narrow the assertion to the kinds that
+# are genuinely covered and widen it as each is fixed. PadAccess is closed.
+# ArgsSource (6) wants the Parameter migration rather than a stamp; Call (2)
+# and Ref (1) are unexamined.
 #
 # Do NOT enable it by weakening it to "warn" -- a contract nothing enforces is
 # the state this function was written to end.

@@ -393,6 +393,94 @@ a boxed cell rather than refuse) and does not add alias classes — it changes
 initializer" to "the use says," which is a strictly smaller and more
 tractable step than the full provenance redesign.
 
+### Why `%Slot` is not an SV, and what SSA buys
+
+**Status: DESIGN RATIONALE. Constrains the lowering pass; nothing below is
+built.**
+
+`%Slot` is `{ i1 defined, i64 payload }` — a discriminated cell holding a
+value whose type the compiler could not pin down. Stated that way it is
+recognisably **an SV in miniature**: `i1 defined` is `SvOK`, `i64 payload` is
+the union with one arm, and the obvious next move — add a tag naming which of
+Int/Num/Str/ref the payload holds — is the road to `sv_flags` + `sv_any`.
+
+**That road is the project's recorded failure mode, and it must not be taken
+by default.** The optree says *what* IR; the semantics say *how it behaves*;
+neither says *how we implement it*, and importing perl's implementation into
+that layer is exactly the mistake. The distinction that keeps the two apart:
+
+- **perl needs an SV because it cannot know the type.** Every scalar is
+  dynamically typed, so every scalar pays for the discriminator.
+- **Chalk needs a tagged cell only where inference FAILED.** The cell is the
+  residue of an unproven type, and the whole analysis pipeline exists to make
+  it rare.
+
+Same data structure, opposite default. If the tagged cell is the common case,
+Chalk has reimplemented perl and gained nothing.
+
+**And SSA removes most of the need for the tag.** A slot in SSA holds one
+defined value, and that value's type is fixed at compile time. `(1, "x")` is
+not a cell needing a runtime discriminator — it is slot 0 : `Int` and slot 1 :
+`Str`, both statically known. The heterogeneity is ACROSS POSITIONS, not
+within one. Only a genuinely dynamic index makes element type a runtime
+question. So `%Slot` needs no type tag: the `i1` discriminates the one axis
+that survives SSA — present versus absent, which is really dynamic (OOB reads,
+sparse arrays, `delete`) — and type, which is not dynamic, does not belong in
+the cell.
+
+That makes `%Slot` the **un-narrowed encoding**, not the universal one, and
+gives the lowering pass a ladder rather than a single answer:
+
+| what has been proven | what is materialised |
+|---|---|
+| nothing — dynamic index, elements not uniform | full `%Slot` per element |
+| element positions known statically | per-position type; no cell |
+| `Array[Int]` monomorphic over its lifetime | raw `i64` elements; **`%Slot` gone entirely** |
+
+The bottom row is the point: monomorphism does not merely let the tag be
+elided, it **deletes the container cell**. An `Array[Int]` is `i64*` plus a
+length. `%Slot` is the price of having proven nothing yet, and the optimizer's
+job is to stop paying it. This is the same claim §5's `ArrayRef[Scalar]`
+reframing makes about types, expressed as machine encodings.
+
+**`Undef` is a unit type, so a `{defined=0}` slot hash-conses to one value.**
+There is exactly one inhabitant, which means the payload is not merely
+irrelevant — it is not part of the value. Two undef slots are the same value
+in the sense hash-consing means, exactly as `true` and `false` are singletons
+rather than two `i1`s that compare equal. The type axis already agrees:
+`Undef` is in `%LOWERABLE_STAMP` and `_repr_to_llvm_type('Undef')` answers
+with a constant rather than refusing (`t/bootstrap/ir/repr-to-llvm-type-total.t`
+calls it "a unit type, not a refusal"). The slot-level consequence is that
+same fact one layer down — a provably-undef slot need not be materialised as a
+cell at all, collapsing the ladder from the other end.
+
+**Which is why `%Slot` is a TARGET type and not a lattice type.** `Scalar` is
+a type: a real lattice element meaning "some scalar, not yet narrowed."
+`%Slot` is what the LLVM backend picks when it must lower a `Scalar`. A
+different target could pick differently; a sufficiently narrowed program never
+materialises one at all. The lattice describes the program; the target type
+describes a compilation choice about it. This is the cleanest instance of the
+rule that **representation is just the type of the lowering target** — and the
+reason `Slot` sitting in the stamp field today (the OOB path,
+`IR/Serialize/JSON.pm:1459`) is a genuine corruption of the type axis rather
+than a harmless naming overlap.
+
+**The concrete first case where the split pays.** `$a[9]` on a three-element
+array is *statically* out of bounds — the loader knows it at the site above,
+which is why it writes something there at all. It writes `Slot`, the encoding.
+The honest type is `Undef`, and once it records that, the unit-type fact means
+the backend emits the shared undef instead of constructing a cell. That is one
+line in the loader plus the backend knowing what `Undef` means; it is blocked
+on the lowering pass existing, but it is small, testable, and already pinned
+with a warning in `t/bootstrap/ir/stamp-alias-preconditions.t`.
+
+**Open, and not answered here:** `Array` is excluded from `%LOWERABLE_STAMP`
+despite having a machine encoding (`%Array*`), which looks like the same
+omission `ArrayRef`/`HashRef` had before slice 3b admitted them. The container
+lowers; it is `Array[Scalar]`'s *element* that does not, for want of the boxed
+representation this section describes. Whether admitting `Array` is safe on
+its own is unmeasured.
+
 ---
 
 ## 6. The MOP: tie and magic as user-defined implementations of access
@@ -499,6 +587,14 @@ robust to that, or it may not claim proof at all — only a guard.
   why its removal is recorded here as a named step of the lowering work rather
   than left to be rediscovered.
 - Retiring `Slot` by threading access provenance through Stamp subclasses.
+- **`%Slot` as the un-narrowed encoding on a narrowing ladder, NOT a
+  general-purpose SV.** SSA fixes each slot's type at compile time, so the cell
+  needs no type tag — only the defined-bit, which is genuinely dynamic.
+  Monomorphism (`Array[Int]`) deletes the cell rather than merely eliding a
+  tag; a provably-`Undef` slot collapses to a hash-consed singleton. This is
+  why `%Slot` is a target type and not a lattice type. See §5.
+- Recording `Undef` (not `Slot`) as the type of a statically-OOB element read,
+  which is the first small case where the type/target split pays.
 - Backward use-demand propagation as a smaller, prerequisite-satisfied first
   step toward informed representation selection.
 - Modeling tie/magic as MOP-dispatched alternative implementations of the
