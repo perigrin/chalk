@@ -672,6 +672,40 @@ job AND scheduling AND emission at once, so an encoding decision has nowhere to
 be RECORDED — which is why `%Slot`-vs-`i64` landed in the emitter and why
 `_slot_payload` was a side table rather than a graph property.
 
+**T2 PRODUCES SoN, NOT A CFG.** Worth stating because the opposite is a
+natural misreading: T2 is called "lowering", and lowering sounds like it should
+land in blocks.
+
+It does not, and the pipeline says why — the **Scheduler runs after T2**. If T2
+produced a CFG, scheduling would already be done: a CFG IS the schedule, with
+nodes in blocks, blocks ordered, and phis placed. That is exactly what
+`Elaborate` does, downstream. So T2 hands the Scheduler something still
+unscheduled, which means still a sea of nodes.
+
+The division:
+
+- **T2** — encoding decisions over a FLOATING graph: `Scalar` becomes `%Slot`,
+  merges acquire boxing nodes, `Undef` becomes a hash-consed singleton. Same
+  graph shape as its input; different vocabulary on the stamps (machine types
+  rather than lattice types).
+- **Scheduler** — SoN → CFG. Dominators, elaboration, phi placement, block
+  assignment. This is the sea-to-blocks step, and it is the only one.
+
+There is a design reason beyond tidiness: **the second optimizer slot sits
+between T2 and the Scheduler.** Optimizations there — CSE over boxed values,
+eliding a box whose only consumer immediately unboxes, hoisting an invariant
+`%Slot` — are tractable on a floating graph and much harder once blocks are
+assigned. Making T2 produce a CFG would force that slot to optimize across a
+schedule.
+
+V8 hit precisely that interaction, in their own words
+(`docs/research/2026-08-02-effect-ordering-prior-art.md` §3): two identical
+divisions were CSE'd to one, then **re-duplicated by the scheduler** — "we
+started with 2 divisions, then 'optimized'". Note what that citation does and
+does not support: it is evidence that optimization and scheduling interact
+badly when entangled, not a claim that this ordering is why V8 left
+sea-of-nodes.
+
 **The Scheduler is misfiled, by the same axis confusion.** It schedules LLVM
 SoN while living in the Chalk IR namespace. The split is clean and the files
 already declare it in their own ABOUTMEs:
