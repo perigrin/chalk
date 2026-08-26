@@ -11,9 +11,10 @@ class Chalk::CodeGen::Pipeline;
 
 # Per-graph transforms, threaded ONE GRAPH AT A TIME (D4 / spec section 2).
 # A transform is `sub ($graph) { ...; return $graph }`. This is the slot T1,
-# T2 and the optimizers land in; it is deliberately NOT a `($graphs,$mop)`
+# T2 and the optimizers land in; it is deliberately NOT a `($graphs, $mop)`
 # whole-set signature, which is the defect (finding B1) that killed the
-# previous decomposition.
+# previous decomposition -- a whole-set signature lets a pass reach the program
+# through a Map<String,Graph> passed alongside instead of through the EDGES.
 field $transforms :param :reader = [];
 
 # run($json, $select, %opts) -> \@units
@@ -61,8 +62,9 @@ method _run ($json, $select, %opts) {
     }
     return ([], undef, undef, $load_error) unless $graphs;
 
-    # Per-graph transform threading (D4). Applied to every loaded graph before
-    # selection, so a transform sees the same graph set the selector will.
+    # Per-graph transform threading (D4). Each transform sees ONE graph at a
+    # time, never the set. Applied before selection so a transform sees the
+    # same graphs the selector will.
     for my $t ($transforms->@*) {
         $graphs->{$_} = $t->($graphs->{$_}) for sort keys $graphs->%*;
     }

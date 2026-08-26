@@ -85,4 +85,46 @@ my $broken = Chalk::CodeGen::Pipeline->new->run('{"methods":{}}', $select);
 is(ref $broken, 'ARRAY', 'an empty wire still returns an arrayref');
 is(scalar @$broken, 0, 'no selected units means no result rows');
 
+
+# ---------------------------------------------------------------------------
+# The transform slot: PER GRAPH, one graph at a time.
+#
+# This is the whole T1/T2/Optimizers accommodation, and it is born in the
+# spec-section-2 shape: a transform is `sub ($graph) { ...; return $graph }`.
+# It is deliberately NOT `($graphs, $mop)` -- a whole-set signature is finding
+# B1, the defect that killed the previous decomposition, because it lets a pass
+# reach the program through a Map<String,Graph> passed alongside instead of
+# through the EDGES the spec requires.
+#
+# Proving the seam does not require building T1: an identity transform must be
+# invoked once per loaded graph and must not perturb the lowered output.
+# ---------------------------------------------------------------------------
+my $seen = 0;
+my $identity = sub ($g) { $seen++; return $g };
+
+my (undef, $loaded) = Chalk::CodeGen::Pipeline->new->run_detail($json, $select);
+my $graph_count = scalar keys $loaded->%*;
+cmp_ok($graph_count, '>', 0, "the wire loaded $graph_count graphs (not a vacuous count)");
+
+my $transformed = Chalk::CodeGen::Pipeline
+    ->new(transforms => [ $identity ])->run($json, $select);
+
+is($seen, $graph_count, 'the transform ran once PER GRAPH, not once per run');
+
+# Byte-identical lowered output: an identity transform changes nothing.
+is(scalar $transformed->@*, scalar $units->@*, 'same unit count with a transform');
+for my $i (0 .. $#$units) {
+    is($transformed->[$i]{label}, $units->[$i]{label}, "unit $i label unchanged");
+    is($transformed->[$i]{ll}, $units->[$i]{ll},
+       "unit $i lowered output is BYTE-IDENTICAL under an identity transform");
+}
+
+# The contract is per-graph: the transform receives a Graph, never the set.
+my @arg_kinds;
+Chalk::CodeGen::Pipeline->new(transforms => [ sub ($g) { push @arg_kinds, ref $g; $g } ])
+    ->run($json, $select);
+is(scalar @arg_kinds, $graph_count, 'one invocation per graph');
+is_deeply([ grep { $_ ne 'Chalk::IR::Graph' } @arg_kinds ], [],
+          'every transform argument is a Chalk::IR::Graph -- never a hash of them (D4/B1)');
+
 done_testing;
