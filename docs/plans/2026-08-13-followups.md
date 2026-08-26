@@ -54,3 +54,47 @@ Do not describe these as pre-existing until measured against 73a51600. An
 earlier baseline in this session stashed the working tree rather than comparing
 against that commit, and reported migration fallout as inherited red — twelve
 failures that the migration had actually caused.
+
+## C backend: a genuine crash in parked code, exercised by a legacy-comparison test
+
+**Filed 2026-08-26. Not fixed, deliberately — see "why not now".**
+
+`t/bootstrap/c-analysis-helpers-schedule.t` dies:
+
+    Can't locate object method "value" via package "Chalk::IR::Node::Start"
+    at lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm line 803
+
+**The bug is real, and small.** `:803` reads a `VarDecl`'s name:
+
+    my $vname = ref($name) ? $name->value : "$name";
+
+It assumes the name is a plain string or something answering `->value`. It is
+neither: a `Start` node arrives, `ref()` is true, and `->value` does not exist.
+Either a `VarDecl` is being built with a control node where its name belongs,
+or this helper is reading the wrong input slot. Both are worth knowing; neither
+is diagnosable without deciding what that path is supposed to receive.
+
+**Why not now.** Two reasons, and the second is the binding one:
+
+1. The test compares a Schedule-consuming rewrite against a LEGACY
+   implementation ("Verifies the 6 schedule-substrate helpers produce
+   equivalent results to legacy") — its own ABOUTME. A test whose oracle is a
+   superseded implementation reports drift from something already replaced.
+2. **The C backend is parked.** `CLAUDE.md` records it: `Target::C`'s public
+   `generate($mop)` is a stub, its real entry is
+   `_generate_c_files($ir, $sa, $ctx)` — the last surviving `($sa,$ctx)`
+   backchannel, "the same 'literal moved, contract didn't' pattern
+   `compat_class` had" — and per the LLVM-first decision it parks near-capstone
+   with the C/XS axis.
+
+Fixing a crash inside parked code, found by a test measuring against a legacy
+oracle, is work on the axis that was deliberately deferred.
+
+**What it is evidence FOR.** The C backend needs rethinking rather than
+patching, which is what the parking decision already says. Record this crash as
+one datum in that case, not as a bug to chase.
+
+**Do not** silence the test to make the suite green. It is failing honestly,
+and a red test that names a real crash is worth more than a green one that
+hides it — the failure mode this project has already had to dig out repeatedly
+(`red_tests_hide_real_bugs`).
