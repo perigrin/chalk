@@ -127,4 +127,42 @@ is(scalar @arg_kinds, $graph_count, 'one invocation per graph');
 is_deeply([ grep { $_ ne 'Chalk::IR::Graph' } @arg_kinds ], [],
           'every transform argument is a Chalk::IR::Graph -- never a hash of them (D4/B1)');
 
+# --- The MOP edge survives a transform that returns a NEW graph -----------
+#
+# CLAUDE.md's immutability rule tells every pass author to return new objects,
+# and Graph's $mop is a plain :param populated once by Analysis::run. So the
+# natural transform shape severs the edge spec section 2 says a pass reaches
+# the program through -- and it does so INVISIBLY: the pipeline's own $mop
+# still lowers, and the emitted IR stays byte-identical, so no corpus gate run
+# can see it. Only an assertion INSIDE the selector can.
+{
+    my $fresh = sub ($g) {
+        Chalk::IR::Graph->new(start => $g->start, returns => [ $g->returns->@* ]);
+    };
+    my ($n_total, $n_with_mop) = (0, 0);
+    Chalk::CodeGen::Pipeline->new(transforms => [$fresh])->run($json, sub ($graphs, $mop) {
+        for my $name (sort keys %$graphs) {
+            $n_total++;
+            $n_with_mop++ if defined $graphs->{$name}->mop;
+        }
+        return ();
+    });
+    cmp_ok($n_total, '>', 0, 'the fresh-graph transform reached a non-empty graph set');
+    is($n_with_mop, $n_total,
+       'every graph still carries the MOP edge after a transform returns a NEW Graph');
+}
+
+# A transform that does not return a Graph is refused BY NAME, not left to
+# surface later as an unattributed method-call-on-undef.
+{
+    my $err;
+    eval {
+        Chalk::CodeGen::Pipeline->new(transforms => [ sub ($g) { return } ])
+            ->run($json, $select);
+        1;
+    } or $err = $@;
+    like($err, qr/transform returned/, 'a non-Graph transform return dies loudly');
+    like($err, qr/for graph '/, 'and the failure names the offending graph');
+}
+
 done_testing;

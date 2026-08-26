@@ -4,6 +4,7 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
+use Scalar::Util qw(blessed);
 use Chalk::IR::Serialize::JSON ();
 use Chalk::Target::LLVM ();
 
@@ -60,17 +61,36 @@ method _run ($json, $select, %opts) {
     }
     return ([], undef, undef, $load_error) unless $graphs && $graphs->%*;
 
-    # The MOP arrives on the graphs, not in a second return slot. Every graph
-    # carries the same one, so any graph answers -- sorted so the choice is
-    # deterministic rather than hash-order.
-    my $mop = $graphs->{ (sort keys $graphs->%*)[0] }->mop;
-
-    # Per-graph transform threading (D4). Each transform sees ONE graph at a
+    # Per-graph transform threading (D4). Each transform sees ONE GRAPH at a
     # time, never the set. Applied before selection so a transform sees the
     # same graphs the selector will.
+    #
+    # The MOP edge is RE-ESTABLISHED after each transform rather than trusted
+    # to survive it. A transform that returns a NEW Graph -- which CLAUDE.md's
+    # immutability rule actively encourages, and which every optimizer pass
+    # will do -- gets `undef` for $mop, because Graph's $mop is a plain :param
+    # populated once by Analysis::run's sweep. Severing it is INVISIBLE to the
+    # corpus gate: the pipeline's own $mop still lowers correctly and the
+    # emitted IR is byte-identical, while every graph in the set has lost the
+    # edge that spec section 2 says a pass reaches the program through.
+    # Carrying it forward is what keeps `run($graph) -> $graph` honest.
     for my $t ($transforms->@*) {
-        $graphs->{$_} = $t->($graphs->{$_}) for sort keys $graphs->%*;
+        for my $name (sort keys $graphs->%*) {
+            my $old = $graphs->{$name};
+            my $new = $t->($old);
+            blessed($new) && $new->isa('Chalk::IR::Graph')
+                or die "Pipeline: a transform returned "
+                     . (defined $new ? "'$new'" : 'undef')
+                     . " for graph '$name'; transforms are \$graph -> \$graph.\n";
+            $new->set_mop($old->mop) unless defined $new->mop;
+            $graphs->{$name} = $new;
+        }
     }
+
+    # Read the MOP AFTER the transforms, so a transform that legitimately
+    # installs a new one is honoured. Every graph carries the same MOP, so any
+    # answers -- sorted so the choice is deterministic, not hash-order.
+    my $mop = $graphs->{ (sort keys $graphs->%*)[0] }->mop;
 
     my @units;
     for my $pair ($select->($graphs, $mop)) {
