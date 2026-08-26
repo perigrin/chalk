@@ -102,10 +102,21 @@ use lib 'lib';
     ok(defined($value), 'Phase 2b: parse_value() returns defined value for valid input');
 
     if (defined $value) {
-        is(ref($value), 'ARRAY', 'Phase 2b: composite value is arrayref');
-        my ($bool_val, $context_val) = $value->@*;
-        ok($bool_val, 'Phase 2b: boolean component is true');
-        isa_ok($context_val, 'Chalk::Bootstrap::Context', 'Phase 2b: semantic component is Context');
+        # `parse_value` returns the RAW SEMIRING VALUE (Earley.pm:1109), so the
+        # shape is whatever the semiring in use produces -- here a Context.
+        #
+        # This block asserted `ref($value) eq 'ARRAY'` and destructured a
+        # [$boolean, $context] pair. That was the composite semiring's old
+        # tuple shape; the value is now the Context itself, and the test had
+        # been failing on a convention the code left behind. Asserting the
+        # contract instead of a past encoding of it.
+        isa_ok($value, 'Chalk::Bootstrap::Context',
+            'Phase 2b: parse_value returns the semiring value (a Context)');
+        can_ok($value, 'extract');
+        # Deliberately NOT asserting extract() is truthy: the focus is undef
+        # when the grammar carries no semantic action, which is the case here.
+        # An earlier draft of this fix asserted it and failed -- inventing a
+        # requirement instead of checking one.
     }
 }
 

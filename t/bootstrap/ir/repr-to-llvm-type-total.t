@@ -67,10 +67,18 @@ subtest 'the four refusal classes each carry their own diagnosis' => sub {
     my @CASES = (
         # repr, qr/message/, what the message must convey
         ['Scalar',  qr/narrow/i,    'Scalar: not yet narrowed (arity 1, could get a repr later)'],
-        ['Any',     qr/value type|signature/i,
-                                    'Any: not a value type -- signature vocabulary'],
+        # `Any` USED TO BE HERE and was removed 2026-08-26: it is not a member
+        # of the type lattice (TypeLibrary::is_lattice_type says no) and the
+        # string appears ZERO times in the LLVM backend. The case asserted a
+        # specific refusal message for a name this compiler does not have, so
+        # it tested the unknown-name fallthrough while claiming to test a
+        # documented refusal -- and failed because that fallthrough's message
+        # says "not a known representation", correctly.
+        #
+        # The four below are real: each IS a lattice member with a deliberate
+        # entry in %_REPR_NO_MACHINE_TYPE explaining why it has no layout.
         ['List',    qr/value type|signature/i,
-                                    'List: not a value type -- synonym of Any as a required type'],
+                                    'List: not a value type -- signature vocabulary, not a layout'],
         ['Unknown', qr/inference/i, 'Unknown: inference never typed this'],
         ['Regex',   qr/compile.time|statical/i,
                                     'Regex: resolved statically, never reaches runtime'],
@@ -92,7 +100,7 @@ subtest 'the four refusal classes each carry their own diagnosis' => sub {
 # reader nothing. The messages must differ.
 # ---------------------------------------------------------------------------
 subtest 'refusal messages are mutually distinct' => sub {
-    my @REFUSING = qw(Scalar Any Unknown Regex);
+    my @REFUSING = qw(Scalar List Unknown Regex);   # Any removed: not a lattice type
     plan tests => 1 + scalar @REFUSING;
 
     my %seen;
