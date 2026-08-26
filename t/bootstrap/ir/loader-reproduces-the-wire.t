@@ -120,11 +120,16 @@ for my $name (sort keys %programs) {
         my $wire = wire_for($programs{$name});
         skip_all "producer emitted no JSON for $name" unless $wire;
 
-        my ($graphs) = from_json($wire);
-        ok $graphs, 'the wire loads';
+        my $graphs = from_json($wire);
+        # NOT `ok $graphs`: an empty hashref is truthy, so that assertion held
+        # even when nothing loaded. Same for `ok $reencoded` -- to_json({})
+        # returns 60 truthy bytes. Assert the content, not the reference.
+        ok $graphs && %$graphs, 'the wire loads at least one graph';
 
         my $reencoded = to_json($graphs);
-        ok $reencoded, 'the loaded graph re-encodes';
+        my $decoded = JSON::PP->new->decode($reencoded);
+        ok $decoded->{methods} && %{ $decoded->{methods} },
+            'the loaded graph re-encodes with its methods intact';
 
         my $diffs = stamp_diffs($wire, $reencoded);
         $total += scalar @$diffs;
