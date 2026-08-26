@@ -625,10 +625,65 @@ CHECKING half, and is no longer a vague aspiration — it is *"run
 existing: the backend re-discovering, one node at a time, that nothing upstream
 guaranteed what it needs.
 
-### Slice 4 — the TYPE INFERENCE pass
+### Slice 4 — T1, the TYPE INFERENCE + CHECK transformation
 
-**4a — A TOTAL JOIN. This is the slice, and the four analyses below all
-depend on it.**
+**WHAT KIND OF THING THIS IS.** T1 is a REQUIRED STAGE of compilation, not an
+optimizer pass. The distinction has a test: *can the compiler still produce a
+correct program with this stage removed?* An optimizer answers yes — remove it
+and you get a slower correct program. T1 answers no. Filing required
+transformations under `Optimizer::` repeats, at the namespace level, the error
+this project already recorded once when the inliner became the only call
+mechanism.
+
+What T1 shares with an optimizer pass is the SHAPE — `Graph -> Graph`, same
+signature, same composability, same isolated testability. That is an interface,
+not a category. `Optimizer::Pass` describes the contract well and is named for
+one consumer of it.
+
+**T1 owns the TYPE axis and only that.** Input: a Chalk graph. Output: the same
+graph with every Value node carrying a lattice type, and a check that every
+operator's operands conform. No machine encodings are chosen; nothing knows
+what LLVM is. The second transformation (T2, Chalk SoN -> LLVM SoN) owns the
+encoding axis and is where `Scalar` acquires `%Slot`, merges box, and `Undef`
+becomes a hash-consed singleton.
+
+**WHY THIS ORDER, AND NOT MERELY THIS ORDER — WHY T2 IS MEANINGLESS WITHOUT
+T1.** The corpus gate checks BEHAVIOR: `lli` output matches perl over 218
+programs. That is an empirical result about 218 programs, not a claim about the
+compiler. 2026-08-25 is the proof: three real bugs shipped and were reverted
+with the gate GREEN throughout, because `//`-over-element has zero corpus
+coverage.
+
+T1's check is a different kind of claim — *this graph is well-typed under
+Perl's semantics* — and it holds for programs nobody has written. That is the
+layer where correctness can be established, because it is the layer where the
+semantics live. LLVM does not know Perl has a `Scalar`; it knows `i64` and
+`%Slot`. A type error surviving into T2 gets faithfully lowered into a correct
+encoding of a wrong program.
+
+So: **an untyped node is the compiler admitting it does not know what the
+program means.** Lowering one is guessing with extra steps.
+
+**LANDING CRITERION, stated so it is not mistaken later.** Not "the gate still
+reads 218". It is "every Value node carries a type, and every operator's
+operands conform." If enabling the check drops the gate, the gate was measuring
+something weaker than it appeared to, and the failing cases were never sound —
+only untested in the direction that would have shown it.
+
+**T1 LANDS ALONE. Verified, correcting an earlier claim in this document that
+it was "three changes that can't land apart":**
+
+- every `Scalar` refusal in the codebase is in `Target/` — measured, zero
+  outside the backend. A `Scalar` STAMP is legal in a Chalk graph.
+- `TypedInvariant` has no `Scalar` special case — it checks `Scalar` against
+  `%OP_REQUIRED_REPR` like any other type.
+
+So T1 may produce `Scalar` freely and its own exit gate accepts it. Only T2
+must answer what `Scalar` lowers to. The `Scalar => '%Slot'` and merge-boxing
+bullets previously listed here are **T2 work** and have been moved out.
+
+**4a — THE TOTAL JOIN. This is the substance of T1, and the analyses in 4b
+all depend on it.**
 
 The original version of this slice listed four whole-program analyses and
 omitted the primitive every one of them needs: **combining two types.** That
@@ -681,18 +736,50 @@ a type join at all — which is the real reason the `Slot` arm could not be
 joined, and the reason the honest fix is to stamp a statically-missing read
 `Undef` rather than `Slot`.)
 
-**Consequence that makes this three changes, not one.** A total join produces
-`Scalar` where nothing was produced before, and `Scalar` has no machine type —
-so a graph that GAPs today with "no repr" would GAP with "Scalar has no machine
-representation". Landing the join therefore also needs:
+**What a total join changes downstream, and why it is T2's problem not T1's.**
+The join produces `Scalar` where nothing was produced before. `Scalar` is a
+legitimate TYPE — T1 emits it, T1's check accepts it, and no non-backend code
+rejects it (measured above). What it does not have is a machine encoding, so a
+graph that GAPs today with "no repr" will GAP with "Scalar has no machine
+representation" until T2 exists. **A different GAP with a better message is
+still a GAP: no regression, and the failure now names the real gap.**
 
-- `Scalar => '%Slot'` in `%_REPR_LLVM_TYPE`. `%Slot` is `{i1 defined, i64
-  payload}` and is already the un-narrowed encoding (§5 of
-  `docs/architecture/ir-and-lowering.md`); `Scalar` is the un-narrowed TYPE.
-  Same statement on two axes.
+T2 then owes two things, recorded here so they are not rediscovered:
+
+- `Scalar => '%Slot'`. `%Slot` is `{i1 defined, i64 payload}` and is already
+  the un-narrowed encoding (§5 of `docs/architecture/ir-and-lowering.md`);
+  `Scalar` is the un-narrowed TYPE. The same statement on two axes, which is
+  exactly why they belong in different transformations.
 - **merge sites BOX rather than unbox.** Boxing into the common encoding is
   sound given nothing; unboxing needs the payload's type AND needs the payload
-  to really be that type, which is the one option that can be silently wrong.
+  to really BE that type — the one option that can be silently wrong, and the
+  one this session shipped and reverted.
+
+**WHAT IS NECESSARY IN THE CODE — measured 2026-08-26, not estimated.**
+
+The edit surface is small and bounded:
+
+- `_join_repr` — ONE definition (`Serialize/JSON.pm:1352`), TWO callers
+  (`:1623`, `:1699`). Its body becomes a fold of `join_types` over the list.
+- THREE improvisations to delete, all within ~50 lines of the callers:
+  the `Unknown` drop (`:1365`), the `Undef` drop (`:1597`), the `'same'`
+  uniqueness bail for And/Or (`:1580`).
+- `Chalk::IR::Analysis` already holds the 17 pass invocations, extracted in
+  slice 1. T1's body is that sequence; the work is giving it the `Graph ->
+  Graph` shape and a name that says what it is, not assembling it.
+
+**One behavioural disagreement to settle before deleting anything.**
+`_join_repr` DROPS `Unknown` arms and joins the rest; `join_types` ABSORBS —
+any `Unknown` operand makes the result `Unknown`. Opposite policies, and the
+loader depends on the dropping one today.
+
+Both are defensible and they answer different questions. Dropping treats
+`Unknown` as "no constraint from this arm" (epistemic); absorbing treats it as
+"the result cannot be known if an input is not" (sound-top). For a MERGE the
+dropping policy is probably right — an un-inferred arm should not poison a
+merge whose other arms agree — but that is a decision to make deliberately at
+the call site, not to inherit by accident. Whichever is chosen, it belongs in
+ONE place with the reasoning attached.
 
 **4b — the whole-program analyses**, each of which is a join over a set once
 4a exists:
