@@ -126,10 +126,37 @@ Self-hosted there is no second opinion to compare against, because the frontend
 IS chalk. Then the check is internal consistency — conformance and soundness —
 not agreement with a producer.
 
-## THE EXIT CONDITION: no `Unknown` leaves T1
+## THE EXIT CONDITION, both halves
+
+A graph leaving T1 satisfies **both**:
+
+1. **every Value node carries a stamp** — no absent types; and
+2. **no stamp is `Unknown`** — no failed ones.
+
+The two are different failures and must be diagnosed differently, which is the
+part worth writing down. An ABSENT stamp means *nothing ever asked*: no pass
+covers that node kind, so the bug is a missing rule. An `Unknown` stamp means
+*something asked and could not conclude*: a rule ran and gave up, so the bug is
+in what it had to work with. Reporting both as "untyped" merges two unrelated
+investigations — the same merge the backend already refuses to make between
+`Scalar` and `Unknown`.
+
+They are also separate populations today, measured: **10 absent** across the
+218-case corpus (2 `Call`, 1 `Ref`, 7 downstream `Phi`) against **976 of ~1800
+stamps `Unknown`** in a four-program sample. Closing one says nothing about the
+other.
+
+**Control nodes carry NO type, and this is not a weaker form of the rule.**
+`Start`, `Region`, `If`, `Loop` define no value, so asking their type is a
+category error and answering it is a bug — an early round-trip run showed
+`Start: wire=(none) reloaded=Int`, which was corruption, not under-typing. The
+totality condition is over Value nodes precisely, and a checker that walks
+"every node" is wrong in a way that will look like progress.
+
+## Why no `Unknown` may leave
 
 A graph that exits T1 carrying an `Unknown` is an **error**, not a
-less-narrowed success.
+less-narrowed success — the second half of the condition above.
 
 This follows from what `Unknown` means on each side of the pass. On INPUT it is
 honest: the frontend sees one compilation unit and is saying "I could not
@@ -247,9 +274,15 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
 
    - **no stamp may widen** without a merge that requires it — `Int` in,
      `Scalar` out, is a failure;
+   - **absent-stamp count at the exit must reach ZERO** — every Value node
+     carries one. Counted over Value nodes only; a control node carrying a
+     stamp is its own failure, not a success;
    - **`Unknown` count at the exit must reach ZERO** — the exit condition
      above, not merely a downward trend. Until it does, the residue is
      REPORTED with what each node needed and why it was unavailable;
+   - the two counts are reported SEPARATELY. They name different bugs (a
+     missing rule versus a rule that could not conclude), and a single
+     "untyped" number hides which one moved;
    - **the count of narrowed nodes** (strictly-below-input type) is the number
      that must trend up, per corpus case, tracked like the gate floor.
 
