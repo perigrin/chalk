@@ -672,6 +672,24 @@ job AND scheduling AND emission at once, so an encoding decision has nowhere to
 be RECORDED — which is why `%Slot`-vs-`i64` landed in the emitter and why
 `_slot_payload` was a side table rather than a graph property.
 
+**The Scheduler is misfiled, by the same axis confusion.** It schedules LLVM
+SoN while living in the Chalk IR namespace. The split is clean and the files
+already declare it in their own ABOUTMEs:
+
+- `IR::Schedule::Dominators` — *"CFG skeleton + dominator tree for Chalk SoN IR
+  control nodes... Cooper-Harvey-Kennedy"*. A CFG algorithm, target-independent
+  by construction. **Stays in `Chalk::IR::`.**
+- `IR::Schedule::Elaborate` — *"placement pass for the Chalk **LLVM** back-half
+  scheduler"*, with four in-body references to what the LLVM backend expects
+  (phi lookup keys, `var_table` snapshots). **Moves to
+  `Chalk::Target::LLVM::`.**
+- `IR::Schedule::Item`, `IR::Scheduler::EagerPinning` — unexamined; classify
+  before moving.
+
+Not done now: a namespace move through the scheduler while T1/T2 are being
+defined would tangle two changes. It lands naturally when T2 extracts, since
+that is when the LLVM-SoN side gets a home.
+
 **T1 IS A CLASS taking a graph and producing a well-typed graph.**
 
 ### What "well-typed" means, precisely
