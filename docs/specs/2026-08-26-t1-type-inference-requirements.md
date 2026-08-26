@@ -2,8 +2,9 @@
 
 **Date:** 2026-08-26
 **Status:** REQUIREMENTS. T1 does not exist. `Chalk::IR::Analysis` is a pass
-sequence (eleven passes, seventeen invocations, called from `from_json`); T1 is
-a transformation with a contract, and the gap between them is this document.
+sequence (eleven passes, seventeen invocations over a hash of graphs handed to
+it by the loader); T1 is a transformation with a contract over ONE graph, and
+the gap between them is this document.
 
 How these requirements were arrived at — the corrections, the failed split, the
 measurements — is in `docs/specs/2026-08-26-t1-derivation.md` and in the commit
@@ -24,14 +25,14 @@ transform fails loudly.
 **Outcome ranking.** An un-narrowed type lands in one of three places, and they
 are not comparable:
 
-  | outcome | verdict |
-  |---|---|
-  | **boxed** | correct, slower. Acceptable. |
-  | **GAP** | no program, loudly. Acceptable. |
-  | **guess** | wrong program, silently. **The only unacceptable one.** |
+| outcome | verdict |
+|---|---|
+| **boxed** | correct, slower. Acceptable. |
+| **GAP** | no program, loudly. Acceptable. |
+| **guess** | wrong program, silently. **The only unacceptable one.** |
 
-  **Boxing is okay; incorrect lowering is not.** Narrowing matters because it
-  moves work off the boxed path — never because the boxed path is wrong.
+**Boxing is okay; incorrect lowering is not.** Narrowing matters because it
+moves work off the boxed path — never because the boxed path is wrong.
 
 ## 2. Entry contract
 
@@ -41,9 +42,20 @@ are not comparable:
   T2 > Optimizers > Scheduler`. Self-hosted there is no loader (the frontend is
   chalk's own parser), so anything reachable only via `from_json` is dead code
   in the configuration that matters.
-- **Per graph, not per graph-set.** Whole-program passes (call resolution,
-  cross-call argument seeding) are 4b and separable; the per-graph core is 4a.
-- **No `$classes` parameter** — see §6.
+- **ONE GRAPH. There is no "graph set" in the architecture** — that is a
+  serialization container (the wire's `methods` section), and modelling
+  transport as architecture is what makes the contract look impossible.
+  Inter-unit references are EDGES: a `Call` carries a reference to its callee,
+  through which the callee's return type is reachable. Graal is the same shape
+  — a `StructuredGraph` per method, with inlining pulling the callee in
+  *through* the call node. There is no `Map<String, Graph>` in the design.
+- **No `$classes` parameter.** Class metadata passed alongside the graph is the
+  same error one level up. It belongs ON the graph, reachable — see §6.
+
+"T1 sees the whole program" therefore does not mean "T1 is handed every graph".
+It means **the program is reachable from the graph**: follow the call edge to
+the callee's types, the field reference to its declared type. Requiring a set
+would be an admission that those edges are missing.
 
 ## 3. Input: a PARTIALLY TYPED graph
 
@@ -54,8 +66,9 @@ some `Unknown`, some absent.
 - **`Unknown` is an INPUT VALUE, not a hole** — the frontend saying "I could
   not determine this", which is information.
 - **T1 NARROWS, it does not assign from scratch.** It uses what a single-unit
-  frontend cannot see: whole-program call resolution, cross-graph argument
-  types, container monomorphism.
+  frontend cannot see: a callee's return type through the call edge, argument
+  types through the same edge in reverse, container monomorphism over every
+  store. All reached FROM the graph (§2), not supplied alongside it.
 - **T1 must never WIDEN a frontend stamp without cause.** `Int` in, `Scalar`
   out is a precision regression even though both are sound. The only legitimate
   widening is a JOIN the graph requires, traceable to that merge.
@@ -155,21 +168,54 @@ does not write, and references that never escape staying in value-SSA at all.
 (Kotlin's stability rules, mypy's aliasing note, Flow's `is_const_like`) fared
 better than those that met it in a bug report.
 
-## 6. The MOP must ride on the IR
+## 6. The MOP must ride on the IR — it IS the inter-unit edge
 
-`_replay_classes` builds the MOP and is one of the eleven passes, so today the
-MOP is an *output of inference* — forcing `run` to return `($graphs, $mop)` and
-every consumer to obtain both together.
+**This is what makes §2's one-graph contract possible, not merely honest.**
 
-The MOP is part of the stamp/IR. `_build_registry_from_mop` is a second copy of
-what the MOP already knows, rebuilt at lowering time. With the MOP on the IR,
-T1 neither takes class metadata nor returns a MOP; it types a graph whose class
-information is already present, and `run($graph) -> $graph` is true rather than
-true-by-omission.
+A `Call` resolves its callee through a MOP handle — the node already documents
+it: *"codegen can read the callee's graph/params/return-type directly."* That
+handle is the inter-unit reference. With the MOP on the IR, a `Call` can answer
+"what does my callee return" from the graph it is already in, and T1 needs no
+set. Without it, the only way to reach a callee is a lookup in a hash somebody
+passed alongside — which is the graph-set shape §2 rejects.
+
+Today the MOP is an *output of inference*: `_replay_classes` builds it and is
+one of the eleven passes, forcing `run` to return `($graphs, $mop)` and every
+consumer to take both. That is also why removing the loader's analysis call
+broke the backend at `_build_registry_from_mop` — the connection between caller
+and callee WAS the return value, so severing it left nothing to resolve
+through.
+
+`_build_registry_from_mop` is a second copy of what the MOP already knows,
+rebuilt at lowering time. It goes away for the same reason: if the MOP is on
+the graph, there is nothing to rebuild.
 
 A prerequisite for the CONTRACT, not one forced by any past breakage.
 
-## 7. What T1 must stop inheriting from the loader
+## 7. The pipeline object must exist first
+
+§2 says T1 is "entered from the pipeline". **There is no pipeline.** Three
+harnesses each run the same sequence inline:
+
+    my ($graphs, $mop) = from_json($json);
+    ... lower($ret, mop => $mop)
+
+`ProgramRunner`, `Mode2Adapter`, `Phase5LibCoverage` — identical, copy-pasted.
+That is why removing the loader's analysis call broke three places at once: the
+pipeline exists three times, in test harnesses, with no single seam to change.
+
+**Build it before wiring T1.** One object owning `Loader > T1 > Optimizers >
+T2 > Optimizers > Scheduler`, with the harnesses calling it instead of
+assembling their own. Then wiring T1 is one edit, and the acceptance criteria
+below stop conflicting: `loader-reproduces-the-wire.t` can reach 0 (the loader
+stops analysing) while the gate holds at 218 (the pipeline runs T1), because
+the same change does both.
+
+Wiring T1 into three call sites separately would work and is the wrong shape:
+it duplicates the pipeline a fourth time rather than removing the duplication,
+and the next stage — T2 — would face the same three edits again.
+
+## 8. What T1 must stop inheriting from the loader
 
 Two loader behaviours are inference, not deserialization:
 
@@ -183,7 +229,7 @@ Both move only when T1 exists. The exit condition settles the filter: if no
 `Unknown` leaves T1, none reaches the backend, so the filter guards a case that
 has stopped occurring — deletable on T1's completion.
 
-## 8. Acceptance
+## 9. Acceptance
 
 Not "the gate still reads 218" — that measures behaviour over 218 programs, and
 2026-08-25 shipped three real bugs with the gate green throughout.
@@ -204,7 +250,7 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
    `_assert_value_nodes_are_typed` already is.
 5. **The corpus gate holds at 218** as a floor, not a definition of done.
 
-## 9. Open
+## 10. Open
 
 - **The `Unknown` join policy.** `_join_repr` DROPS `Unknown` arms and joins the
   rest; `join_types` ABSORBS (any `Unknown` operand ⇒ `Unknown`). Opposite
