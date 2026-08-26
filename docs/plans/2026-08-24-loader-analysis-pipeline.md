@@ -945,18 +945,27 @@ The edit surface is small and bounded:
   slice 1. T1's body is that sequence; the work is giving it the `Graph ->
   Graph` shape and a name that says what it is, not assembling it.
 
-**One behavioural disagreement to settle before deleting anything.**
-`_join_repr` DROPS `Unknown` arms and joins the rest; `join_types` ABSORBS —
-any `Unknown` operand makes the result `Unknown`. Opposite policies, and the
-loader depends on the dropping one today.
+**One behavioural difference, SETTLED: absorb.** `_join_repr` DROPS `Unknown`
+arms and joins the rest; `join_types` ABSORBS — any `Unknown` operand makes the
+result `Unknown`. The loader depends on dropping today, and **dropping is
+wrong**.
 
-Both are defensible and they answer different questions. Dropping treats
-`Unknown` as "no constraint from this arm" (epistemic); absorbing treats it as
-"the result cannot be known if an input is not" (sound-top). For a MERGE the
-dropping policy is probably right — an un-inferred arm should not poison a
-merge whose other arms agree — but that is a decision to make deliberately at
-the call site, not to inherit by accident. Whichever is chosen, it belongs in
-ONE place with the reasoning attached.
+An earlier draft of this section said dropping was "probably right", on the
+grounds that an un-inferred arm should not poison a merge whose other arms
+agree. That reasoning fails because **an `Unknown` arm in a merge is usually
+TEMPORARY** — it is a callee's return type that a later fixpoint iteration
+resolves. So the question is not "what does `join(Unknown, Int)` mean" but
+"what should a join do when an input has not been narrowed YET", which is a
+fixpoint ordering question rather than a lattice one.
+
+Absorb yields `Unknown` and recomputes once the input resolves: correct, merely
+slower to converge. Drop commits to `Int` before the evidence is in, and is
+wrong if the callee returns `Str` — the same error as the reverted `Slot`-arm
+drop, one level up. The poison-spreading objection is just non-convergence:
+run to fixpoint, and a surviving `Unknown` means the input genuinely could not
+be resolved, which T1's exit condition reports at the arm that actually failed.
+
+Full reasoning in `docs/specs/2026-08-26-t1-type-inference-requirements.md` §10.
 
 **4b — the whole-program analyses**, each of which is a join over a set once
 4a exists:

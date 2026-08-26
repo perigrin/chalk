@@ -74,9 +74,19 @@ some `Unknown`, some absent.
   widening is a JOIN the graph requires, traceable to that merge.
 
 **A frontend stamp is EVIDENCE, not an axiom.** Where T1 independently derives
-a contradicting type, that is an error to REPORT — not a value to silently
-overwrite in either direction (slice 2's rule for method return types: seed
-from the wire, die on disagreement).
+a contradicting type, **T1 DIES, naming the node and both claims.**
+
+Not a GAP, and not a policy about which side wins. A contradiction means one of
+the two is WRONG, and both are chalk's code — so it is a bug to investigate,
+not a case to have a rule for. "Prefer the derivation" and "prefer the wire"
+are both ways of continuing past a self-contradiction; a GAP would claim chalk
+does not support the construct, which is false when chalk supports it and
+merely disagrees with itself about it.
+
+This is slice 2's existing rule for method return types — seed from the wire,
+die on disagreement, *"refusing rather than picking silently"* — generalised.
+It may want revisiting once chalk is no longer under active development; while
+it is, a contradiction surfacing loudly is worth more than a compiled program.
 
 T1 checks what it computes anyway; it does not audit the producer. And the
 frame dissolves at self-hosting, where the frontend IS chalk — a disagreement
@@ -96,6 +106,22 @@ On input `Unknown` is honest (one compilation unit). On output it is not,
 because T1 sees the whole program — so if T1 cannot determine a type, no later
 phase has more to work with. `Unknown` at the exit is an **unfinished
 analysis**, not an un-narrowed type.
+
+**It is a GAP, not an internal error**, and the distinction matters for what it
+implies. Perl has constructs with no static type at any phase — `eval "$str"`,
+`$obj->$name()`, runtime `@ISA` mutation, `AUTOLOAD`, glob assignment. For
+those, `Unknown` is permanently correct rather than unfinished.
+
+They need no special handling, because **an un-typeable construct is an
+un-lowerable one**: `eval "$str"` has no static type AND no runtime-free
+lowering, for the same reason. So `Unknown` at the exit is an early, legible
+report of a GAP the backend would raise anyway — chalk declining a construct it
+does not support, which is the project's existing idiom and implies nothing
+broken.
+
+That also disposes of a tempting refinement: a separate `Dynamic` stamp for
+"provably not statically knowable" would be machinery to distinguish two cases
+that get identical treatment.
 
 **`Scalar` is NOT the same category.** It is a real answer and a legitimate
 exit type — *"Scalar is a legitimate static answer, Unknown is an inference
@@ -138,9 +164,23 @@ Three points to copy, each with the failure it prevents:
 | never fold the narrow stamp back onto the guarded input | *"only true at this point in the control flow"* — Graal allows it only under `guard == null && !hasMoreThanOneUsage()`, i.e. when it was not flow-sensitive |
 | two independent bits: `_floating` (may it move?) vs `_narrows_type` (removable when the input is that narrow?) | C2 collapsed them and an array access floated above its range check |
 
-Pis live exactly as long as things float — Graal's `FixReadsPhase` deletes
-every one once reads are pinned and re-derives positionally. If Chalk's
-scheduler pins before codegen, the Pis should die there.
+**Lifecycle — three owners, and all three must be assigned or the obligation
+falls between them.** Graal's division, which puts each job where the
+information is:
+
+| phase | job |
+|---|---|
+| **frontend** | CREATES a Pi at the guard. It is the only phase that sees `if (defined $x)` as syntax and knows the branch is a type test — Graal's main producer is likewise the bytecode parser, not a later analysis. |
+| **T1** | STRENGTHENS. It knows types the frontend does not, so a Pi's `piStamp` can improve; monotonically, never widening (§5 rule 1). T1 does not create the refinement structure, only sharpens it. |
+| **Scheduler** | DELETES every Pi once nodes are pinned, then re-derives positionally. A Pi's whole job is to say "this holds only here" to a value that FLOATS; once position is fixed the position says it. |
+
+Pis live exactly as long as things float — Graal's `FixReadsPhase` is the same
+boundary. **A Pi reaching the backend is a bug**: it is a node with no lowering,
+because by then it should have been positional information rather than a value.
+
+The failure if this is left unassigned: the frontend creates them, nothing
+strengthens them (so they stay as weak as the frontend's knowledge), and
+nothing deletes them (so they arrive at a backend with no rule for them).
 
 Prior art for `remove(σ, Undef)` specifically: Tobin-Hochstadt & Felleisen's
 occurrence typing (POPL 2008, ICFP 2010), which names **Perl** as a motivating
@@ -244,17 +284,56 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
    - no stamp may widen without a merge requiring it;
    - `Unknown` count at the exit reaches ZERO;
    - arrived-absent count reported separately as a frontend metric;
-   - narrowed-node count trends up per corpus case, tracked like the gate floor.
+   - narrowed-node count trends up per corpus case, tracked like the gate
+     floor — **but only ever raised on a run where the gate holds at 218.**
+
+     A ratchet on narrowing alone rewards exactly the bug this spec exists to
+     prevent: `Int` where a `Str` can flow IS a narrowing, it raises the count,
+     and it is a miscompile. Soundness (condition 4) forbids it but is a
+     property to prove, not a number to check — so the checkable metric would
+     be the one shaping behaviour. Pairing them closes it: unsound narrowing
+     shows up as wrong output, so the count cannot rise on a broken run.
 4. **The first version REPORTS rather than asserts** — the exit condition fails
    broadly today, and an assertion that must be disabled to land is what
    `_assert_value_nodes_are_typed` already is.
 5. **The corpus gate holds at 218** as a floor, not a definition of done.
 
-## 10. Open
+## 10. The `Unknown` join policy: ABSORB
 
-- **The `Unknown` join policy.** `_join_repr` DROPS `Unknown` arms and joins the
-  rest; `join_types` ABSORBS (any `Unknown` operand ⇒ `Unknown`). Opposite
-  policies, both defensible, and the loader depends on dropping today. Decide
-  deliberately, in one place, with the reasoning attached.
+`join(Unknown, T)` is `Unknown`. This is what `join_types` already does;
+`_join_repr` DROPS the `Unknown` arm and joins the rest, and the loader depends
+on that today. **Dropping is wrong**, and the reason is not that it violates
+the lattice definition — it is that it guesses ahead of the fixpoint.
+
+An `Unknown` arm in a merge is usually TEMPORARY:
+
+```perl
+my $v;
+if ($c) { $v = f() }   # f's return type not yet resolved -> Unknown
+else    { $v = 2 }     # Int
+```
+
+The `Unknown` is `f`'s return type, which T1 resolves by following the call
+edge. So the real question is not "what is `join(Unknown, Int)`" but **"what
+should a join do when an input has not been narrowed YET"** — a fixpoint
+ordering question, not a lattice one.
+
+- **Absorb** yields `Unknown`, and the next iteration recomputes once `f`
+  resolves. Correct; merely slower to converge.
+- **Drop** yields `Int` immediately, and is WRONG if `f` returns `Str`. It is
+  the same error as the reverted `Slot`-arm drop, one level up: committing to
+  an answer before the evidence is in.
+
+**The poison-spreading objection to absorb is just non-convergence.** Run to
+fixpoint and a surviving `Unknown` means `f` genuinely could not be resolved —
+which §4 then reports at the arm that actually failed, rather than at every
+merge downstream of it.
+
+## 11. Open
+
 - **`_join_repr` calling `join_types`** — tracked in the plan §4a, mostly
-  subtraction.
+  subtraction. With absorb settled above, this is the change that adopts it.
+- **The pipeline object's shape** (§7) — stages fixed or configurable, what it
+  takes, what a caller gets back. `Phase5LibCoverage` wants per-unit results
+  rather than one output, so the three harnesses define the requirement.
+  Derive the shape from them when building rather than designing it here.
