@@ -50,17 +50,20 @@ method run_detail ($json, $select, %opts) {
 }
 
 method _run ($json, $select, %opts) {
-    my ($graphs, $mop);
+    my $graphs;
     my $load_error;
     try {
-        # THE SINGLE SITE. Phase 2 step 4 collapses the two-value return here
-        # and nowhere else -- that is the whole point of this file existing.
-        ($graphs, $mop) = Chalk::IR::Serialize::JSON::from_json($json);
+        $graphs = Chalk::IR::Serialize::JSON::from_json($json);
     }
     catch ($e) {
         $load_error = "from_json failed: $e";
     }
-    return ([], undef, undef, $load_error) unless $graphs;
+    return ([], undef, undef, $load_error) unless $graphs && $graphs->%*;
+
+    # The MOP arrives on the graphs, not in a second return slot. Every graph
+    # carries the same one, so any graph answers -- sorted so the choice is
+    # deterministic rather than hash-order.
+    my $mop = $graphs->{ (sort keys $graphs->%*)[0] }->mop;
 
     # Per-graph transform threading (D4). Each transform sees ONE graph at a
     # time, never the set. Applied before selection so a transform sees the

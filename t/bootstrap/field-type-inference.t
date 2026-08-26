@@ -26,7 +26,8 @@ PL
     print $fh $src; close $fh;
     my $json = qx($PERL -I$SON -MO=SoN,json,package=main,package=$class $tmp 2>/dev/null);
     return undef unless $json =~ /\S/;
-    my ($graphs, $mop) = from_json($json);
+    my $graphs = from_json($json);
+    my $mop = (values %$graphs)[0]->mop;
     return undef unless $mop;
     my ($cls) = grep { $_->name eq $class } $mop->classes;
     return undef unless $cls;

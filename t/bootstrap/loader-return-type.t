@@ -29,7 +29,8 @@ sub sub_meta ( $program, $class, $name ) {
     close $fh;
     my $json = qx($PERL -I$SON -MO=SoN,json,package=main $tmp 2>/dev/null);
     return undef unless $json =~ /\S/;
-    my ( undef, $mop ) = Chalk::IR::Serialize::JSON::from_json($json);
+    my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
+    my $mop = (values %$graphs)[0]->mop;
     my $cls = $mop && $mop->for_class($class) or return undef;
     my ($s) = grep { $_->name eq $name } $cls->subs;
     return $s;

@@ -96,8 +96,9 @@ sub emit_ll {
     my $json = qx($PERL -I$SON -MO=SoN,json,package=main,package=C $ptmp 2>/dev/null);
     return (undef, 'producer emitted no JSON') unless $json =~ /\S/;
 
-    my ($graphs, $mop) = eval { Chalk::IR::Serialize::JSON::from_json($json) };
+    my $graphs = eval { Chalk::IR::Serialize::JSON::from_json($json) };
     return (undef, "loader failed: $@") unless $graphs;
+    my $mop = (values %$graphs)[0]->mop;
 
     my $g = $graphs->{'main::__PROGRAM__'} // $graphs->{'main::__main__'}
         or return (undef, 'no entry graph');

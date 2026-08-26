@@ -27,7 +27,8 @@ sub run_i64 ($body) {
     print $fh $src; close $fh;
     my $json = qx($PERL -I$SON -MO=SoN,json,package=main $tmp 2>/dev/null);
     return (undef, "no JSON") unless $json =~ /\S/;
-    my ($graphs, $mop) = from_json($json);
+    my $graphs = from_json($json);
+    my $mop = (values %$graphs)[0]->mop;
     my $g = $graphs->{'main::corpus_case'} or return (undef, "no graph");
     my $ret = $g->returns->[0] or return (undef, "no Return");
     my $ll  = Chalk::Target::LLVM->lower($ret, (defined $mop ? (mop => $mop) : ()));

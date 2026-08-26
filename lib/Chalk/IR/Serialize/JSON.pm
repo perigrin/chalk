@@ -704,13 +704,8 @@ sub from_json ($json_string) {
     # callers keep working during the transition; measured by
     # t/bootstrap/ir/loader-reproduces-the-wire.t, it adds 16 stamps the wire
     # never sent. That number reaching zero is what finishing the split means.
-    my ($analysed, $mop) = Chalk::IR::Analysis->run(
+    return Chalk::IR::Analysis->run(
         \%graphs, (ref $data->{classes} eq "HASH" ? $data->{classes} : undef));
-
-    # $mop is returned only in list context; scalar context stays \%graphs for
-    # the existing single-return callers.
-    return ($analysed, $mop) if wantarray;
-    return $analysed;
 }
 
 

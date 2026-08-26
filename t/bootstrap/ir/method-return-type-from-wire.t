@@ -55,8 +55,8 @@ sub wire_with_method_return_type ($claimed) {
 
 subtest 'the wire agreeing with the graph loads cleanly' => sub {
     my $json = wire_with_method_return_type('Int');
-    my ($graphs, $mop);
-    ok lives { ($graphs, $mop) = Chalk::IR::Serialize::JSON::from_json($json) },
+    my $graphs;
+    ok lives { $graphs = Chalk::IR::Serialize::JSON::from_json($json) },
         'loads without dying' or note $@;
     ok $graphs && $graphs->{'P::m'}, 'the method graph is present';
 };

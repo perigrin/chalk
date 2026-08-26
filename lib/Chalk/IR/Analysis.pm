@@ -47,14 +47,14 @@ use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype / join_types: the lattice
 # vocabulary translation becomes the lowering pass's job. This module is where
 # that change will happen.
 
-# run($graphs, $classes, $mop_out) -> ($graphs, $mop)
+# run($graphs, $classes) -> \%graphs
 #
 # $graphs  — hashref of name => Chalk::IR::Graph, freshly deserialized
 # $classes — the decoded `classes` section of the wire, or undef
 #
-# Returns the same graph set (mutated in place, as the passes have always done)
-# and the MOP built by _replay_classes, or undef when the wire declared no
-# classes.
+# Returns the same graph set (mutated in place, as the passes have always
+# done), and nothing else. The MOP is not a second return slot: every graph
+# carries it on $g->mop, so a caller reaches it through an edge.
 # _ctor_arg_reprs(\%graphs) -> ("class\0param_name" => repr, ...)
 # Scan every graph for Call(new) nodes; each binds param_names[i] to inputs[i],
 # so it records the repr of the argument passed for each named :param. First
@@ -308,9 +308,10 @@ sub run ($class, $graphs, $classes = undef) {
     #
     # _assert_value_nodes_are_typed(\%graphs);
 
-    # $mop is returned only in list context; scalar context stays \%graphs for
-    # the existing single-return callers.
-    return (\%graphs, $mop);
+    # The graph set IS the result. $mop is not returned alongside it -- it was
+    # attached to every graph above, so a caller wanting the MOP asks a graph
+    # for it rather than destructuring a second slot.
+    return \%graphs;
 }
 
 # _assert_value_nodes_are_typed($graphs)

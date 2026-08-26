@@ -25,7 +25,8 @@ sub mop_for ($src, $name, %opt) {
     my $filter = $opt{no_filter} ? '' : ',package=main';
     my $json = qx{$PERL -I$SON -MO=SoN,json$filter $file 2>$dir/$name.err};
     die "no JSON emitted for $name" unless length $json;
-    my (undef, $mop) = Chalk::IR::Serialize::JSON::from_json($json);
+    my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
+    my $mop = (values %$graphs)[0]->mop;
     return $mop;
 }
 

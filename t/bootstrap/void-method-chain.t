@@ -26,7 +26,8 @@ sub lower_and_run ($program) {
     close $fh;
     my $json = qx($PERL -I$SON -MO=SoN,json,package=main $tmp 2>/dev/null);
     return ( 'err', 'no JSON' ) unless $json =~ /\S/;
-    my ( $graphs, $mop ) = Chalk::IR::Serialize::JSON::from_json($json);
+    my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
+    my $mop = (values %$graphs)[0]->mop;
     my $g = $graphs->{'main::corpus_case'} or return ( 'err', 'no graph' );
     my $ll = eval {
         Chalk::Target::LLVM->lower( $g->returns->[0],

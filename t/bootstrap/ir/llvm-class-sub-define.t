@@ -28,7 +28,8 @@ sub ll_for ($src, $name) {
     # would report a refusal that has nothing to do with its subject.
     my $json = qx{$PERL -I$SON -MO=SoN,json,package=main $file 2>$dir/$name.err};
     die "no JSON emitted for $name" unless length $json;
-    my ($graphs, $mop) = Chalk::IR::Serialize::JSON::from_json($json);
+    my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
+    my $mop = (values %$graphs)[0]->mop;
     my $g = $graphs->{'main::__PROGRAM__'} // $graphs->{'main::__main__'}
         or die "no entry graph for $name";
     my $ret = $g->returns->[0] or die "no Return node for $name";

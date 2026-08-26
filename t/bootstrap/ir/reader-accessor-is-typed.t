@@ -42,7 +42,10 @@ sub load_program ($body) {
     close $fh;
     my $json = qx($PERL -I$SON -MO=SoN,json,$PKG_EXCLUDE $tmp 2>/dev/null);
     return unless $json =~ /\S/;
-    return Chalk::IR::Serialize::JSON::from_json($json);
+    my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
+    # The MOP rides on the graphs; sorted for a deterministic choice.
+    my $mop = %$graphs ? $graphs->{ (sort keys %$graphs)[0] }->mop : undef;
+    return ($graphs, $mop);
 }
 
 my ($graphs, $mop) = load_program(<<'PROG');

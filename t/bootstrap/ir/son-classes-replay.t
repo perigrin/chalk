@@ -47,7 +47,8 @@ subtest 'scalar context stays backward-compatible (\%graphs)' => sub {
 };
 
 subtest 'list context returns a sealed MOP with the class' => sub {
-    my ($graphs, $mop) = Chalk::IR::Serialize::JSON::from_json($json);
+    my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
+    my $mop = (values %$graphs)[0]->mop;
     ok(defined $mop, 'got a MOP in list context');
     ok($mop->is_sealed, 'the MOP is sealed');
 
@@ -57,7 +58,8 @@ subtest 'list context returns a sealed MOP with the class' => sub {
 };
 
 subtest 'the field is declared with its :param attribute' => sub {
-    my (undef, $mop) = Chalk::IR::Serialize::JSON::from_json($json);
+    my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
+    my $mop = (values %$graphs)[0]->mop;
     my $cls = $mop->for_class('Counter');
     my ($field) = $cls->fields;
     ok(defined $field, 'class has a field');
@@ -68,7 +70,8 @@ subtest 'the field is declared with its :param attribute' => sub {
 };
 
 subtest 'the method is declared with its loaded graph' => sub {
-    my ($graphs, $mop) = Chalk::IR::Serialize::JSON::from_json($json);
+    my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
+    my $mop = (values %$graphs)[0]->mop;
     my $cls = $mop->for_class('Counter');
     my ($method) = grep { $_->name eq 'val' } $cls->methods;
     ok(defined $method, 'method val is declared');

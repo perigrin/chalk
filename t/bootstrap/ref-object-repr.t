@@ -21,7 +21,8 @@ sub load_nodes ($driver, $head = '', @classes) {
     my $pkgs = join(',', 'package=main', map { "package=$_" } @classes);
     my $json = qx($PERL -I$SON -MO=SoN,json,$pkgs $tmp 2>/dev/null);
     return () unless $json =~ /\S/;
-    my ($graphs, $mop) = from_json($json);
+    my $graphs = from_json($json);
+    my $mop = (values %$graphs)[0]->mop;
     my $g = $graphs->{'main::corpus_case'} or return ();
     return $g->nodes->@*;
 }

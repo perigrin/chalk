@@ -26,14 +26,19 @@ sub load ($src, $name) {
     close $fh;
     my $json = qx{$PERL -I$SON -MO=SoN,json,package=main $file 2>$dir/$name.err};
     die "no JSON emitted for $name" unless length $json;
-    return Chalk::IR::Serialize::JSON::from_json($json);
+    my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
+    # The MOP comes off a GRAPH, not off a second return slot -- that is the
+    # property the subtests below assert, so the helper must not smuggle it in
+    # by another route. Sorted for a deterministic choice of graph.
+    my $mop = %$graphs ? $graphs->{ (sort keys %$graphs)[0] }->mop : undef;
+    return ($graphs, $mop);
 }
 
 # A program with no classes and no named subs makes the producer emit
 # `classes: undef`. The loader used to take that as "there is nothing to build a
-# MOP from" and return a one-element list, so a caller asking for the MOP got
-# undef -- an edge that exists for some programs and not others. Every program
-# has a `main`, so every load has a MOP.
+# MOP from" and skip the replay, so a caller asking for the MOP got undef -- an
+# edge that exists for some programs and not others. Every program has a `main`,
+# so every load has a MOP, reachable from any graph it produced.
 subtest 'a class-less program still yields a MOP' => sub {
     my ($graphs, $mop) = load('my $x = 1 + 2; print $x, "\n";', 'classless');
     ok defined $graphs, 'the graphs came back' or return;
