@@ -11,6 +11,7 @@ use Chalk::IR::Serialize::JSON ();
 use Chalk::IR::Graph::TypedInvariant;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::MdtestCorpus;
+use Chalk::CodeGen::Pipeline;
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
@@ -75,19 +76,31 @@ sub run_through_bson ($source) {
         unless $data->{methods}{'main::__PROGRAM__'}
             || $data->{methods}{'main::__main__'};
 
-    my ($graphs, $mop) = eval { Chalk::IR::Serialize::JSON::from_json($json) };
-    return (undef, "from_json failed: $@")           unless $graphs;
-    my $g = $graphs->{'main::__PROGRAM__'} // $graphs->{'main::__main__'}
-        or return (undef, "no loaded graph");
-    my $ret = $g->returns->[0] or return (undef, "no Return node", $g);
-
+    # Load and lower the entry unit through the ONE pipeline seam.
+    #
     # program_mode: the Int:/Str: return-value epilogue exists ONLY so a
     # fragment harness could read a value back. A program states its own output,
     # so the tag is suppressed — deleting its last consumer is the point of the
-    # corpus-as-programs migration.
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1,
-                                               (defined $mop ? (mop => $mop) : ())) };
-    return (undef, "lower: $@", $g) if $@;
+    # corpus-as-programs migration. It rides on the CALL (D6), never on pipeline
+    # state: the three callers whose oracle CONSUMES the epilogue must keep
+    # getting it (see t/bootstrap/corpus/mode2-omits-program-mode.t).
+    my $select = sub ($graphs, $mop) {
+        my $g = $graphs->{'main::__PROGRAM__'} // $graphs->{'main::__main__'}
+            or return ();
+        my $ret = $g->returns->[0] or return ();
+        return ([ 'main::__PROGRAM__', $ret ]);
+    };
+
+    my ($units, $graphs, undef, $load_err) = Chalk::CodeGen::Pipeline->new
+        ->run_detail($json, $select, program_mode => 1);
+    return (undef, $load_err) if $load_err;
+
+    my $g = $graphs->{'main::__PROGRAM__'} // $graphs->{'main::__main__'}
+        or return (undef, "no loaded graph");
+    return (undef, "no Return node", $g) unless @$units;
+    my $unit = $units->[0];
+    return (undef, "lower: $unit->{err}", $g) unless $unit->{ok};
+    my $ll = $unit->{ll};
 
     my ($lfh, $lltmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $lfh $ll; close $lfh;
