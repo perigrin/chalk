@@ -228,6 +228,15 @@ class-less probe). Steps, in order:
    `_stamp_method_call_reprs` is already unguarded and already receives
    `{}`. Note `:205`'s `_seed_and_propagate_reprs` newly runs for 186
    cases — covered by the scratch experiment's byte-identical result.
+   **Two corrections from recon (2026-08-26), neither a blocker:** the
+   argument omits `_attach_call_targets` (`:483-541`), which ALSO newly runs,
+   is NOT classes-keyed, and carries a `die` at `:531-537` whose `$cls`
+   operand is always truthy because `MOP.pm:29-33` unconditionally seeds class
+   `main` (unreachable in the 22 measured cases, but it belongs in the
+   argument); and `_stamp_field_access_reprs` returns VOID, not 0 — no
+   consequence, its return value is never tested, but "all three return 0" is
+   not literally true. **G2 PASSED 2026-08-26 at 218/218/218/218**, coordinator-
+   verified on committed HEAD e33ba8ad; nothing was reverted.
    **Gate run G2.** If the gate moves at all, revert — the experiment's
    premise is wrong; do not patch.
 2. **Graph carries the MOP.** RED: subtest 3 — every graph's `$g->mop` is
@@ -240,19 +249,58 @@ class-less probe). Steps, in order:
    graph — `to_json` (`JSON.pm:430`) drops it; round-tripping the MOP is
    deferred (§11).
 3. **Method dispatch onto the edge** — the step that makes spec §2 true.
-   RED: subtest 4 — a
-   `Child->new->m` method-dispatch Call's `target` is a
+   RED: subtest 4 — a `Child->new->m` method-dispatch Call's `target` is a
    `Chalk::MOP::Method`. Fails at `:487-490`'s `eq 'direct'` filter.
    GREEN: widen `_attach_call_targets` to `'method'`, resolving through
-   `$mop->for_class(...)` and the parent chain — **UNVERIFIED that
-   MOP::Class exposes a usable parent/MRO traversal; check before
-   building** — and rewrite `_stamp_method_call_reprs` (`:1626-1642`) to
-   read `$node->target->return_type`. KEEP the wire-vs-graph disagreement
-   die at `:1598-1605` — load-bearing. **Before landing, settle the OPEN
-   DISAGREEMENT on revert-independence in scratch**: land 1+2+3, revert 3
-   alone, confirm the gate returns to its post-step-2 value (step 3
-   rewrites resolution inside the `:238` fixpoint that step 1 newly
-   feeds). **Gate run G3.**
+   `Chalk::MOP::Class::find_method` (`MOP/Class.pm:143-151` — recursively
+   walks `$superclass`; the loader DOES populate it, `Analysis.pm:874-877`,
+   and `_classes_in_parent_order` guarantees a parent is declared first).
+   **UNVERIFIED RESOLVED 2026-08-26 by recon: the traversal exists.** Do NOT
+   use `Chalk::MOP::find_method` (`MOP.pm:67-74`) — it scans `values %classes`
+   in unordered hash order and returns the first name match, a
+   non-deterministic guess rather than resolution.
+
+   **AMENDED 2026-08-26 — the plan's prescribed GREEN was WRONG and would
+   have regressed the gate.** Reading `$node->target->return_type` returns
+   `undef` for EVERY method: `MOP::Method` declares
+   `field $return_type :param :reader = undef` (`MOP/Method.pm:15`) with NO
+   setter, and `_replay_classes` passes ONLY `graph` when declaring a method
+   (`Analysis.pm:932-934`) — while `declare_sub` twenty lines below DOES pass
+   `return_type`, under a comment explaining precisely why the loader must
+   carry the wire's declared type (`:958-966`). **That Method/Sub asymmetry
+   is the real defect.** Verified at HEAD by the coordinator; measured live on
+   a Base/Child program: `method m return_type=UNDEF` while the corresponding
+   Call is correctly `repr=Int`. So step 3 MUST ALSO thread the wire's type
+   into `declare_method`, mirroring `declare_sub`:
+   `return_type => $wire_rts->{$mname} // 'Unknown'` — `Unknown`, never
+   `undef`, for the reason `:958-964` already gives (an absence forces every
+   downstream consumer to invent its own meaning). This is real added scope
+   the original step did not budget.
+
+   **THE DIE MUST BE RE-SOURCED, NOT MERELY KEPT.** The wire-vs-graph
+   disagreement die at `:1598-1605` is load-bearing and stays — but it
+   compares the WIRE value (`$wire_rts->{$mname}`, read at `:1584`) against
+   the GRAPH-derived value (`$ret->inputs->[0]->representation`). Moving the
+   wire value onto `MOP::Method::return_type` re-sources its left operand
+   (`$method->return_type`), while the right operand still needs the
+   `$graphs->{$methods->{$mname}}` walk that lives in the very loop being
+   rewritten. Keeping the die AND rewriting resolution are in tension: if the
+   shape is not fixed deliberately, the die is silently weakened into
+   comparing a value against itself. **Prove it still fires**: a test that
+   forces a wire/graph disagreement and asserts the die, red before and green
+   after — otherwise "kept" is unverified.
+
+   **Before landing, settle the OPEN DISAGREEMENT on revert-independence in
+   scratch** — RESOLVED 2026-08-26 by recon: step 3 IS independently
+   revertible. Step 1's `$classes` is block-lexical (dies at `:221`) while the
+   `:237` fixpoint reads `$data->{classes}` directly, and the two changes
+   touch DISJOINT node populations (every `classes: undef` case measured has
+   zero Call nodes; every method-Call case has populated `classes`, where step
+   1 is a proven no-op). **CAVEAT, and it is the important half: because the
+   domains are disjoint, a step-3 revert looks clean EVEN IF STEP 3 WAS
+   WRONG.** G3's revert check is therefore NOT evidence that step 3 is
+   correct — only the method-stamp tests are. **Gate run G3.**
+
 4. **Collapse the return shape.** `Analysis.pm:302` → `return \%graphs;`;
    `JSON.pm:707` single-value; delete the wantarray line at `:712`; fix
    the stale comment at `Analysis.pm:300-301` (false of its own function).
