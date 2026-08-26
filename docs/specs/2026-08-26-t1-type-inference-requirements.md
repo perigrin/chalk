@@ -126,25 +126,38 @@ Self-hosted there is no second opinion to compare against, because the frontend
 IS chalk. Then the check is internal consistency — conformance and soundness —
 not agreement with a producer.
 
-## THE EXIT CONDITION, both halves
+## THE EXIT CONDITION
 
-A graph leaving T1 satisfies **both**:
+**T1 NEVER HAS AN ABSENT TYPE — it normalizes on entry.** A Value node
+arriving without a stamp is treated as `Unknown`, because that is what absence
+means: no type was determined here. The only difference between the two is
+whether some pass bothered to write the fact down, and that is not a difference
+worth carrying through a transformation.
 
-1. **every Value node carries a stamp** — no absent types; and
-2. **no stamp is `Unknown`** — no failed ones.
+So there is exactly ONE exit condition:
 
-The two are different failures and must be diagnosed differently, which is the
-part worth writing down. An ABSENT stamp means *nothing ever asked*: no pass
-covers that node kind, so the bug is a missing rule. An `Unknown` stamp means
-*something asked and could not conclude*: a rule ran and gave up, so the bug is
-in what it had to work with. Reporting both as "untyped" merges two unrelated
-investigations — the same merge the backend already refuses to make between
-`Scalar` and `Unknown`.
+> **No Value node leaves T1 stamped `Unknown`.**
 
-They are also separate populations today, measured: **10 absent** across the
-218-case corpus (2 `Call`, 1 `Ref`, 7 downstream `Phi`) against **976 of ~1800
-stamps `Unknown`** in a four-program sample. Closing one says nothing about the
-other.
+Normalizing is not giving up on those nodes — it is the opposite. An absent
+stamp is invisible to inference (nothing to narrow FROM, and guards that ask
+"already decided?" read absence inconsistently); `Unknown` is a value in the
+lattice that every rule can act on. Normalize first, then narrow as far as the
+program permits. Absent means "not yet asked"; `Unknown` means "asked, and here
+is the honest answer" — T1's job is to move nodes off `Unknown`, and it can
+only do that for nodes it can see.
+
+This also matches the producer, where the rule already holds structurally:
+`SoN::IR::Value` requires a stamp at construction, so absence is impossible on
+that side.
+
+**An earlier draft of this document made absent and `Unknown` two distinct
+failure classes** with separate diagnostics and separate counts, on the
+reasoning that one means "a missing rule" and the other "a rule that could not
+conclude". That distinction dissolves under normalization: after entry there
+are no absent stamps to distinguish. What survives is a diagnostic nicety — a
+node that arrived absent may be worth naming as such when reporting an
+irreducible `Unknown`, since it suggests no rule covers that node kind at all.
+That is reporting detail, not a second condition.
 
 **Control nodes carry NO type, and this is not a weaker form of the rule.**
 `Start`, `Region`, `If`, `Loop` define no value, so asking their type is a
@@ -156,7 +169,8 @@ totality condition is over Value nodes precisely, and a checker that walks
 ## Why no `Unknown` may leave
 
 A graph that exits T1 carrying an `Unknown` is an **error**, not a
-less-narrowed success — the second half of the condition above.
+less-narrowed success. Absence normalizes to `Unknown` on entry, so this one
+condition covers every Value node the graph carries.
 
 This follows from what `Unknown` means on each side of the pass. On INPUT it is
 honest: the frontend sees one compilation unit and is saying "I could not
@@ -274,24 +288,28 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
 
    - **no stamp may widen** without a merge that requires it — `Int` in,
      `Scalar` out, is a failure;
-   - **absent-stamp count at the exit must reach ZERO** — every Value node
-     carries one. Counted over Value nodes only; a control node carrying a
-     stamp is its own failure, not a success;
-   - **`Unknown` count at the exit must reach ZERO** — the exit condition
-     above, not merely a downward trend. Until it does, the residue is
-     REPORTED with what each node needed and why it was unavailable;
-   - the two counts are reported SEPARATELY. They name different bugs (a
-     missing rule versus a rule that could not conclude), and a single
-     "untyped" number hides which one moved;
+   - **`Unknown` count at the exit must reach ZERO.** Absence is normalized to
+     `Unknown` on entry, so this is the whole condition — there is no separate
+     absent-stamp count. Counted over Value nodes only; a control node carrying
+     a stamp is its own failure, not a success. Until the count reaches zero
+     the residue is REPORTED, naming what each node needed and why it was
+     unavailable — and noting where a node ARRIVED absent, which hints that no
+     rule covers its kind at all;
    - **the count of narrowed nodes** (strictly-below-input type) is the number
      that must trend up, per corpus case, tracked like the gate floor.
 
    That comparison needs no oracle: the input graph IS the baseline.
-3. Conditions 1 and 2 do NOT hold today: 10 untyped Value nodes (2 `Call`,
-   1 `Ref`, 7 downstream `Phi`) and `Slot` — a machine encoding — reaches the
-   stamp field via the OOB path. **The first version therefore REPORTS rather
-   than asserts.** An assertion that must be disabled to land is what
-   `_assert_value_nodes_are_typed` already is.
+3. The exit condition does NOT hold today, and by a wide margin. Measured: 10
+   Value nodes reach the end of the current pass sequence with no stamp at all
+   (2 `Call`, 1 `Ref`, 7 downstream `Phi`) — those normalize to `Unknown` and
+   join the far larger `Unknown` population the producer already ships (976 of
+   ~1800 stamps in a four-program sample). Separately, `Slot` — a machine
+   ENCODING — reaches the stamp field via the OOB path, which condition 2
+   (lattice membership) rejects.
+
+   **The first version therefore REPORTS rather than asserts.** An assertion
+   that must be disabled to land is what `_assert_value_nodes_are_typed`
+   already is.
 4. The corpus gate holds at 218 as a floor, not as the definition of done.
 
 ## Prerequisites, in order
