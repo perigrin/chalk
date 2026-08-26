@@ -33,9 +33,11 @@ use Chalk::IR::Serialize::JSON ();   # _static_miss / _element_at
 #
 # WHY IT IS A PASS. `_static_miss` reads the container node and the index node
 # and answers from the graph alone -- a Chalk IR fact, needing no serializer and
-# no target. The loader's job is a well-typed graph
-# (docs/plans/2026-08-24-loader-analysis-pipeline.md); discharging a decided
-# branch is an optimizer's.
+# no target. The loader's job is to reproduce the graph the frontend
+# serialized, and nothing else
+# (docs/plans/2026-08-24-loader-analysis-pipeline.md); typing that graph is the
+# inference transformation's job, and discharging a decided branch is an
+# optimizer's.
 class Chalk::Bootstrap::Optimizer::DefinedOrFold
     :isa(Chalk::Bootstrap::Optimizer::Pass) {
 

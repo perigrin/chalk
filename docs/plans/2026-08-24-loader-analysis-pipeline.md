@@ -86,16 +86,45 @@ is 119 lines invoking them 13 times — `_seed_and_propagate_reprs` alone 5 time
 evidently hard-won. **That is an argument for moving this machinery intact, not
 for redesigning it.**
 
-## THE SCOPE RULE (perigrin, 2026-08-24)
+## THE SCOPE RULE (perigrin, 2026-08-24, TIGHTENED 2026-08-26)
 
 > I think no matter what `%STAMP_TO_REPR` dies and is replaced by the lowering
 > graph-rewrite that we haven't done yet … the Loader **is only** concerned
 > with building a well typed Chalk IR.
 
-This is a stronger constraint than the slices below were originally written
-against, and it settles more than `%STAMP_TO_REPR`. If the loader's only job is
-a well-typed Chalk IR, then **every representation assignment in the loader is
-out of scope** — the table is just the most visible instance.
+**Tightened, and this supersedes the reading above:**
+
+> The Loader's job is to reproduce the graph that the Frontend serialized …
+> that's it.
+
+Not "a well-typed graph" — **the graph that was sent.** Deserialization and
+nothing else. Typing it is a separate transformation's job (T1, slice 4), and
+the difference is not pedantic: "build a well-typed IR" licenses the loader to
+run inference, which is exactly what it does today and exactly what this plan
+set out to stop.
+
+**SLICE 1 IS THEREFORE PARTIAL, NOT DONE.** It moved the 11 passes into
+`Chalk::IR::Analysis` and claimed to make "the phase boundary explicit". It did
+not. Measured 2026-08-26:
+
+- `from_json` still CALLS the analysis (`Serialize/JSON.pm:900`), and the
+  comment says why — *"so its ~40 existing callers are unchanged."* That is
+  convenience, not a boundary.
+- the 17 pass invocations in `Analysis.pm` all reach BACK INTO
+  `Serialize::JSON` — the pass bodies never left the loader's file.
+- the two modules therefore refer to each other, and `Analysis.pm` must
+  `require` at the call site to break a load cycle. **The cycle is the code
+  saying the split is not real.**
+
+So T1's first job is not "add a stage after the loader". It is **finish the
+move**: the pass bodies leave `Serialize/JSON.pm`, `from_json` stops calling
+them, the cycle resolves on its own. The ~40 callers that currently get
+inference for free will need the stage run explicitly — which is the point, not
+a cost, because a caller that wants a decoded graph should get a decoded graph.
+
+If the loader only reproduces the serialized graph, then **every representation
+assignment AND every type inference in the loader is out of scope** —
+`%STAMP_TO_REPR` is just the most visible instance.
 
 Measured, and the scale is the point: **18 `set_representation` sites in the
 loader, 16 of them inside the eight analyses.** Every one of the eight assigns
