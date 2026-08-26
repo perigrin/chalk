@@ -179,12 +179,36 @@ disappears from the record precisely because T1 did its job.
 Measured today: **10 such nodes** across the 218-case corpus (2 `Call`, 1
 `Ref`, 7 downstream `Phi`). That is a frontend punch list, not a T1 backlog.
 
-**Control nodes carry NO type, and this is not a weaker form of the rule.**
-`Start`, `Region`, `If`, `Loop` define no value, so asking their type is a
-category error and answering it is a bug — an early round-trip run showed
+**Control nodes have no type OF THEIR OWN.** `Start`, `Region`, `If`, `Loop`
+define no value, so asking "what is this `If`'s type" is a category error and
+answering it is a bug — an early round-trip run showed
 `Start: wire=(none) reloaded=Int`, which was corruption, not under-typing. The
 totality condition is over Value nodes precisely, and a checker that walks
 "every node" is wrong in a way that will look like progress.
+
+**But control nodes CARRY TYPE INFORMATION, and this is unresolved.** A branch
+is a type guard: `if (defined $x)` establishes that `$x` is not `Undef` on the
+then-edge and is `Undef` on the else-edge. Same for `if (ref $x eq 'ARRAY')`
+and plain truthiness. That is a fact about ANOTHER node's type, conditioned on
+an edge — so "control nodes carry no type" is true and beside the point.
+
+Condition 5 (maximal narrowing) REQUIRES this: without flow-sensitivity, `$x`
+inside the guard keeps its entry type and T1 leaves narrowing on the table that
+the program plainly supports.
+
+**OPEN — where the refinement lives.** Three shapes, genuinely different:
+
+1. **on the control node** — `If` carries a predicate; consumers walk to the
+   branch to learn what they may assume;
+2. **on the edge** — the per-arm `Proj` nodes already exist and a refinement is
+   inherently edge-scoped;
+3. **in the value graph** — SSA's usual answer: the then-arm references a
+   DIFFERENT node for `$x`, carrying the narrower stamp. Graal's `PiNode` is
+   this shape, and it is why keeping the name `Stamp` was deliberate ("we're
+   gonna need that machinery" — the refinement facts Graal's stamps carry).
+
+Not guessing between them. Being researched against Graal, C2, TurboFan/
+Turboshaft and TypeScript's flow-graph narrowing before it is written down.
 
 ## Why no `Unknown` may leave
 
