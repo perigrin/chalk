@@ -1232,7 +1232,7 @@ sub _propagate_computed_reprs ($graphs) {
                 }
 
                 my $rule = $_COMPUTED_REPR{$op} // next;
-                if ($rule ne 'join' && $rule ne 'same') {
+                if ($rule ne 'join') {
                     $node->set_representation($rule);
                     $changed = 1;
                     next;
@@ -1258,16 +1258,6 @@ sub _propagate_computed_reprs ($graphs) {
 
                 my @reprs = map { $_->representation } @in;
                 next if grep { !defined } @reprs;          # an input still untyped
-                if ($rule eq 'same') {
-                    # And/Or: the result IS one operand, so both must share a repr.
-                    # Leave untyped (the backend GAPs loudly) on a genuine mismatch
-                    # rather than guess a widened type the merge phi can't express.
-                    my %uniq = map { $_ => 1 } @reprs;
-                    next unless keys %uniq == 1;
-                    $node->set_representation($reprs[0]);
-                    $changed = 1;
-                    next;
-                }
                 # Undef is not RANKED -- it is not wider or narrower than Int,
                 # it is a different thing -- but it is not unknown either. A
                 # merge of Undef with T yields T on the arm that is taken, and

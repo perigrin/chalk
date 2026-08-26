@@ -74,4 +74,30 @@ subtest 'the fold agrees with the lattice on every pair of stamps' => sub {
     is \@disagree, [], 'every ordered pair folds to the lattice join';
 };
 
+# The rule dispatch in _seed_and_propagate_reprs handles 'join' and everything
+# else (a rule naming a fixed repr outright). It USED to carry a third arm,
+# 'same' -- require both operand reprs to agree, yield that repr -- for And/Or.
+# 6d9fc083 moved And/Or onto 'join', which is a strict superset of 'same', and
+# nothing has mapped to 'same' since; the arm was unreachable code from that
+# commit until it was deleted.
+#
+# No red test can exist for code nothing can reach, so this is the honest
+# check: assert the table cannot revive the arm. If a rule ever needs
+# agree-or-nothing semantics again, it comes back with a test that reaches it.
+subtest 'the repr rule table names no rule the dispatch cannot run' => sub {
+    my $src = do {
+        open my $fh, '<', 'lib/Chalk/IR/Analysis.pm' or die "Analysis.pm: $!";
+        local $/;
+        <$fh>;
+    };
+    my ($table) = $src =~ /my \%_COMPUTED_REPR = \((.*?)\n\);/s
+        or die 'could not find %_COMPUTED_REPR';
+
+    # Strip comments -- the table's prose discusses 'same' at length, on purpose.
+    (my $code = $table) =~ s/^\s*#.*$//mg;
+
+    unlike $code, qr/=>\s*'same'/,
+        q{no rule maps to 'same' -- the dispatch arm for it is gone};
+};
+
 done_testing;
