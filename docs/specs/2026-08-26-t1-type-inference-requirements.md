@@ -96,16 +96,74 @@ Three consequences:
   requires (a merge whose arms genuinely disagree), and it must be traceable to
   that merge.
 
-**And T1 does not trust the input.** "Partially typed" is not "correctly
-typed": the frontend can be wrong, and today's producer has been (an aggregate
-parameter unstamped for a stale reason; `@_` stamped `Unknown` because nothing
-asked). So T1 re-derives what it can and **reports a contradiction** rather
-than silently preferring either side — the pattern slice 2 already established
-for method return types ("refusing rather than picking silently").
+**A frontend stamp is EVIDENCE, not an axiom.** "Partially typed" is not
+"correctly typed", and today's producer has shipped wrong stamps: an aggregate
+parameter left unstamped because a comment described a die that had stopped
+happening; `@_` stamped `Unknown` because nothing ever asked; an ADJUST block
+dropped from the wire entirely by a bare `eval`. All three found by accident.
+
+So where T1 independently derives a type and its answer CONTRADICTS the wire's,
+that is an error to report — not a value to silently overwrite in either
+direction. Slice 2 already does this for method return types: seed from the
+wire, die on disagreement, "refusing rather than picking silently".
+
+Three things this deliberately does NOT mean:
+
+- **not** re-derive everything and discard the wire — that throws away the
+  frontend's work, and "a pass to validate/update the values that ship across
+  the wire is very different from throwing all of the data out";
+- **not** distrust `Unknown` — it is an honest answer on input, with nothing to
+  contradict;
+- **not** an obligation to audit. T1 checks what it computes anyway; it does
+  not do extra work to police the producer.
+
+And note the frame breaks down at self-hosting, where the frontend IS chalk.
+There is no second party to trust: a disagreement is chalk contradicting
+itself, in one of two places you own. The check is internal consistency, not
+verification of a supplier.
 
 Self-hosted there is no second opinion to compare against, because the frontend
 IS chalk. Then the check is internal consistency — conformance and soundness —
 not agreement with a producer.
+
+## THE EXIT CONDITION: no `Unknown` leaves T1
+
+A graph that exits T1 carrying an `Unknown` is an **error**, not a
+less-narrowed success.
+
+This follows from what `Unknown` means on each side of the pass. On INPUT it is
+honest: the frontend sees one compilation unit and is saying "I could not
+determine this". On OUTPUT it is not, because T1 sees the whole program — call
+graph, cross-unit arguments, every store into a container. If T1 cannot
+determine a type, no later phase has more information to work with, so shipping
+`Unknown` only defers the failure to a phase equipped to diagnose it worse.
+
+`Unknown` at the exit is therefore an **unfinished analysis**, not an
+un-narrowed type.
+
+**`Scalar` is NOT in the same category and must not be conflated with it.**
+`Scalar` is a real answer — "one value, genuinely not narrowable further here"
+— and a legitimate exit type. The backend's own diagnosis already draws this
+line: *"Scalar is a legitimate static answer, Unknown is an inference failure."*
+So condition 5's "maximally narrowed" is a TREND for everything else and a
+BINARY at this one point: `Scalar` may exit, `Unknown` may not.
+
+Two consequences worth stating up front:
+
+- **Guard reporting stops being optional.** "Error: Unknown at node N" is
+  unactionable across a 218-case corpus. T1 has to name what it could not
+  determine and what would have determined it. That was deferred as a
+  follow-up; this exit condition makes it load-bearing.
+- **Today this would fail broadly.** The producer emits `Unknown` heavily — 976
+  of ~1800 stamps in one four-program measurement. Most should narrow once
+  whole-program inference actually runs; "most" is not "all", and the residue
+  is precisely the interesting set. Expect the first implementation to REPORT
+  the residue rather than die on it, and to shrink it deliberately.
+
+It also settles `%LOWERABLE_STAMP` (below): if `Unknown` cannot exit T1, it
+cannot reach the backend, so the filter is guarding against a phase that no
+longer produces it. That makes the filter deletable on T1's completion rather
+than T2's.
 
 ## What T1 owns
 
@@ -138,12 +196,14 @@ them without it is what cost 82 corpus cases:
    about the CURRENT wiring — today's backend cannot receive an un-narrowed
    type — not a demonstration that the filter is load-bearing in principle.
 
-   A T1 that actually narrows would resolve most of those `Unknown`s before the
-   backend ever sees them, so the filter may be deletable well before T2 exists.
-   **The measurement is a floor, not a constraint on the design.** What is
-   structural is only this: the question "can the backend lower this type?"
-   belongs to the lowering phase, so wherever the filter ends up, it is not the
-   loader.
+   **The exit condition settles this.** If no `Unknown` may leave T1, then no
+   `Unknown` reaches the backend, and the filter is guarding a case that has
+   stopped occurring. It is deletable on T1's completion — not T2's, as an
+   earlier draft of this document guessed.
+
+   **The measurement is a floor, not a constraint on the design.** What remains
+   structural is only this: "can the backend lower this type?" is the lowering
+   phase's question, so wherever the filter ends up, it is not the loader.
 
 ## The MOP problem — resolve before the entry contract
 
@@ -187,7 +247,9 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
 
    - **no stamp may widen** without a merge that requires it — `Int` in,
      `Scalar` out, is a failure;
-   - **`Unknown` count must not rise**, and should fall;
+   - **`Unknown` count at the exit must reach ZERO** — the exit condition
+     above, not merely a downward trend. Until it does, the residue is
+     REPORTED with what each node needed and why it was unavailable;
    - **the count of narrowed nodes** (strictly-below-input type) is the number
      that must trend up, per corpus case, tracked like the gate floor.
 
