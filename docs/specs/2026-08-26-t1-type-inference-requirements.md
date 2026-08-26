@@ -196,19 +196,114 @@ Condition 5 (maximal narrowing) REQUIRES this: without flow-sensitivity, `$x`
 inside the guard keeps its entry type and T1 leaves narrowing on the table that
 the program plainly supports.
 
-**OPEN — where the refinement lives.** Three shapes, genuinely different:
+### RESOLVED: the refinement is a VALUE NODE (Pi-style)
 
-1. **on the control node** — `If` carries a predicate; consumers walk to the
-   branch to learn what they may assume;
-2. **on the edge** — the per-arm `Proj` nodes already exist and a refinement is
-   inherently edge-scoped;
-3. **in the value graph** — SSA's usual answer: the then-arm references a
-   DIFFERENT node for `$x`, carrying the narrower stamp. Graal's `PiNode` is
-   this shape, and it is why keeping the name `Stamp` was deliberate ("we're
-   gonna need that machinery" — the refinement facts Graal's stamps carry).
+Researched against Graal, C2, TurboFan/Turboshaft and TypeScript
+(2026-08-26). The answer is not close:
 
-Not guessing between them. Being researched against Graal, C2, TurboFan/
-Turboshaft and TypeScript's flow-graph narrowing before it is written down.
+| system | where refinement lives |
+|---|---|
+| Graal | `PiNode` — value node with a guard input |
+| HotSpot C2 | `ConstraintCast` family — value node, control edge `in(0)` |
+| V8 TurboFan | `TypeGuard` — a `kPure` node that nonetheless takes a control input |
+| V8 Turboshaft | block-keyed side table — **and it abandoned floating nodes to do that** |
+| TypeScript, Kotlin, mypy, C# | recomputed on demand over a CFG |
+
+**The dividing line is not language or paradigm — it is whether the IR
+floats.** A floating value has no position, so the only way to say "this fact
+holds only here" is to make the fact BE a value whose inputs pin it. Chalk's IR
+floats, so the side-table option is not available at an acceptable price.
+
+**And this preserves "control nodes carry no stamp".** Graal's `GuardingNode`
+is a **marker interface with zero methods** — the guard is not a condition
+object, it is any node occupying a control position where the fact holds (a
+plain `BeginNode` qualifies). In Chalk terms the Pi's guard input is the
+`Proj`/`Region` for the taken branch. Control nodes INFLUENCE stamps by being
+pointed at; they still carry none. Soundness falls out of ordinary dominance
+with no scheduler changes.
+
+Three design points to copy, each with its failure mode:
+
+1. **Store the DELTA, not the result.** Graal keeps `piStamp` = "what the guard
+   proves and nothing more", and computes the effective stamp as
+   `piStamp ⊓ input.stamp` on demand, asserting monotonicity on strengthening.
+   The node then cannot go stale when a later pass improves the input, and
+   re-running inference is idempotent — which matters because Chalk builds IR
+   during parse.
+2. **Never fold the narrow stamp back onto the guarded input.** Graal permits
+   it only under `guard == null && !hasMoreThanOneUsage()` — both conditions,
+   and their conjunction amounts to "this was not actually flow-sensitive".
+   Folding back asserts the fact globally; its own comment: *"the type injected
+   by the PiNode is only true at this point in the control flow."*
+3. **Two independent bits, not one.** C2's master split `_floating` (may this
+   move?) from `_narrows_type` (removable once the input is that narrow?).
+   Collapsing them has a documented failure: an array access floating above its
+   range check.
+
+Also worth knowing: Graal's `FixReadsPhase` **deletes every Pi** once reads are
+pinned, then re-derives the same facts positionally. Pis exist exactly as long
+as things float. If Chalk's scheduler pins before codegen, the Pis should die
+there — or they become permanent clutter with no remaining job.
+
+**On `remove(σ, Undef)` specifically:** the canonical formalism is
+Tobin-Hochstadt & Felleisen's occurrence typing (POPL 2008, ICFP 2010), which
+attaches a then/else proposition pair to every expression and defines exactly
+this environment operation. POPL 2008 §1 names **Perl** as a motivating
+language. Nullability narrowing is the base case of the machinery, not a
+special case bolted on.
+
+### The aliasing boundary — START CONSERVATIVE
+
+Every system surveyed has a soundness hole here, and Perl's is worse than most
+because its aliasing is idiomatic rather than exceptional:
+
+- **`foreach` aliases the loop variable to each element** — `for (@a) { $_ = 1 }`
+  mutates `@a`;
+- **`@_` aliases the caller's arguments** — `sub f { $_[0] = 5 }` writes the
+  caller's variable;
+- **`\$x` escapes the location** — anything holding the reference can write
+  through it;
+- **`local` swaps a package variable's value dynamically** across a call.
+
+A refinement is a claim about a NAME; the value lives at a LOCATION; Perl lets
+other names reach that location. `if (defined $x) { f(); ... }` is unsound the
+moment `f` can write through a path that reaches `$x`.
+
+**What makes this tractable: SSA already answers it.** A value that stays in
+value-SSA has no alias — that is what SSA means. Chalk already demotes on
+escape ("taking a reference to a variable makes it address-taken; it must be
+demoted from value-SSA to memory"). So:
+
+> **THE POLICY: a refinement holds only on a value that never leaves
+> value-SSA.** Anything in memory is not refined, and no analysis is required
+> to know that — the demotion already happened.
+
+This is sound, needs no new machinery, and costs only precision. Take it as the
+default and do not apologise for it.
+
+**Liberalising it is optimization work, and fertile ground.** Each of these
+buys precision by discharging a proof, and each belongs in an optimizer pass
+rather than in T1:
+
+- **non-escaping locals survive calls.** Flow's two-tier model: a call
+  invalidates PROPERTY refinements but not refinements on locals proven not to
+  escape. Needs the escape analysis slice 4b already scopes.
+- **`foreach` over a container nothing else writes.** A monomorphism/no-write
+  proof over the loop body makes `$_`'s refinement survive.
+- **`@_` when the callee provably does not write its arguments.** Whole-program,
+  and the call graph is already being built.
+- **a reference that provably never escapes its scope** can stay in value-SSA
+  rather than being demoted at all — this one improves far more than
+  refinement.
+
+Note the shape: every liberalisation is "prove the alias cannot happen, then
+keep the refinement". That is exactly the narrowing-ladder pattern from
+`docs/architecture/ir-and-lowering.md` §5, where `%Slot` disappears once
+monomorphism is proven. Same principle, different axis.
+
+**Name the policy in the code**, not just here. Every system that wrote its
+boundary down (Kotlin's stability rules, mypy's aliasing note, Flow's
+`is_const_like`) fared better than the ones that discovered it in a bug report.
 
 ## Why no `Unknown` may leave
 
