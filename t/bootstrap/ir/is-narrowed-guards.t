@@ -6,6 +6,7 @@ use utf8;
 use Test2::V0;
 
 use Chalk::IR::Serialize::JSON;
+use Chalk::IR::Analysis;
 
 # THE DISTINCTION. Nine sites in the loader ask "has this node already been
 # assigned a representation?" and skip their work when the answer is yes. They
@@ -35,7 +36,7 @@ use Chalk::IR::Serialize::JSON;
 # question once is what makes converting them mechanical.
 
 subtest '_is_narrowed separates committed from undecided' => sub {
-    my $narrowed = \&Chalk::IR::Serialize::JSON::_is_narrowed;
+    my $narrowed = \&Chalk::IR::Analysis::_is_narrowed;
 
     ok !$narrowed->(undef), 'undef is not narrowed -- nothing was decided';
     ok !$narrowed->('Unknown'),
@@ -59,25 +60,33 @@ subtest 'the predicate is what the nine guards actually call' => sub {
     # one that will misread `Unknown` the moment 3b lands. Sweep for the old
     # spelling so a reintroduced one fails HERE, with this explanation,
     # rather than as a silent miscompile after the gate is removed.
-    open my $fh, '<', 'lib/Chalk/IR/Serialize/JSON.pm'
-        or die "cannot read the loader: $!";
-    my @stale;
-    while (my $line = <$fh>) {
-        next if $line =~ /^\s*#/;                    # comments explain, not guard
-        next unless $line =~ /->representation\b/;
-        next unless $line =~ /\bdefined\b/;
-        # _is_narrowed itself is the one place the old spelling is correct.
-        next if $line =~ /sub _is_narrowed/;
-        push @stale, "$.: " . ($line =~ s/^\s+|\s+$//gr);
-    }
-    close $fh;
+    # BOTH files. The guards moved to Analysis.pm when the inference passes
+    # left the loader, but the loader still decodes stamps off the wire and
+    # could regrow one. Either file gaining a bare `defined ->representation`
+    # is the regression this sweeps for.
+    for my $path (qw(
+        lib/Chalk/IR/Analysis.pm
+        lib/Chalk/IR/Serialize/JSON.pm
+    )) {
+        open my $fh, '<', $path or die "cannot read $path: $!";
+        my @stale;
+        while (my $line = <$fh>) {
+            next if $line =~ /^\s*#/;                # comments explain, not guard
+            next unless $line =~ /->representation\b/;
+            next unless $line =~ /\bdefined\b/;
+            # _is_narrowed itself is the one place the old spelling is correct.
+            next if $line =~ /sub _is_narrowed/;
+            push @stale, "$.: " . ($line =~ s/^\s+|\s+$//gr);
+        }
+        close $fh;
 
-    is \@stale, [],
-        'no guard tests defined-ness of a representation'
-        or diag(
-            "These sites ask `defined ->representation`, which reads Unknown\n"
-          . "as a committed answer. Use _is_narrowed(\$node->representation)."
-        );
+        is \@stale, [],
+            "no guard tests defined-ness of a representation in $path"
+            or diag(
+                "These sites ask `defined ->representation`, which reads Unknown\n"
+              . "as a committed answer. Use _is_narrowed(\$node->representation)."
+            );
+    }
 };
 
 done_testing;

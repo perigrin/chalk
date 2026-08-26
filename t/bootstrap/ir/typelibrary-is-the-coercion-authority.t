@@ -9,6 +9,7 @@ use Test::More;
 use lib 'lib';
 use Chalk::Grammar::Perl::TypeLibrary;
 use Chalk::IR::Graph;
+use Chalk::IR::Analysis;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Serialize::JSON;
 
@@ -63,7 +64,7 @@ subtest 'a non-Str operand of StrLt gets a coercion' => sub {
     my $graph = Chalk::IR::Graph->new;
     $graph->merge($cmp);
 
-    my $n = Chalk::IR::Serialize::JSON::_insert_str_coercions({ main => $graph });
+    my $n = Chalk::IR::Analysis::_insert_str_coercions({ main => $graph });
     is $n, 1, 'exactly one coercion inserted';
 
     my $coerced = $cmp->inputs->[0];
@@ -95,7 +96,7 @@ subtest 'an undef input slot is skipped, not coerced' => sub {
     my $graph = Chalk::IR::Graph->new;
     $graph->merge($cmp);
 
-    Chalk::IR::Serialize::JSON::_insert_str_coercions({ main => $graph });
+    Chalk::IR::Analysis::_insert_str_coercions({ main => $graph });
 
     ok !defined $cmp->inputs->[0], 'the undef slot is left alone';
     isa_ok $cmp->inputs->[1], 'Chalk::IR::Node::Coerce', 'the Int operand';

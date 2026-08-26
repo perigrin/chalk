@@ -6,6 +6,7 @@ use utf8;
 use Test2::V0;
 
 use lib 'lib', 't/lib';
+use Chalk::IR::Analysis;
 use Chalk::Grammar::Perl::TypeLibrary;
 require Chalk::IR::Serialize::JSON;
 
@@ -33,13 +34,13 @@ subtest 'the lattice fact that motivates the drop' => sub {
 };
 
 subtest 'a join with an Unknown arm types from the known arm' => sub {
-    my $j = Chalk::IR::Serialize::JSON::_join_repr('Int', 'Unknown');
+    my $j = Chalk::IR::Analysis::_join_repr('Int', 'Unknown');
     is $j, 'Int', 'Int joined with Unknown is Int, not Unknown';
 
-    is Chalk::IR::Serialize::JSON::_join_repr('Unknown', 'Int'), 'Int',
+    is Chalk::IR::Analysis::_join_repr('Unknown', 'Int'), 'Int',
         'and the same regardless of arm order';
 
-    is Chalk::IR::Serialize::JSON::_join_repr('Int', 'Str'), 'Str',
+    is Chalk::IR::Analysis::_join_repr('Int', 'Str'), 'Str',
         'a join of two KNOWN types is unaffected';
 };
 
@@ -47,7 +48,7 @@ subtest 'a join with an Unknown arm types from the known arm' => sub {
 # merge is still undetermined, and _join_repr's contract is to return undef so
 # the caller leaves the node untyped and the backend GAPs loudly.
 subtest 'an all-Unknown join stays undetermined' => sub {
-    is Chalk::IR::Serialize::JSON::_join_repr('Unknown', 'Unknown'), 'Unknown',
+    is Chalk::IR::Analysis::_join_repr('Unknown', 'Unknown'), 'Unknown',
         'nothing known -> still Unknown, not a guessed type';
 };
 

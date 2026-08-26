@@ -8,7 +8,7 @@ use Scalar::Util qw(blessed);
 
 use Chalk::Bootstrap::Optimizer::Pass;
 use Chalk::IR::Graph;
-use Chalk::IR::Serialize::JSON ();   # _static_miss / _element_at
+use Chalk::IR::Analysis ();   # _static_miss / _resolve_aggregate / _unwrap_ref
 
 # `$a[9] // 42` over a three-element literal array is STATICALLY 42: the read
 # provably misses, so `//` has a compile-time answer. `$a[1] // 42` is
@@ -91,7 +91,7 @@ class Chalk::Bootstrap::Optimizer::DefinedOrFold
 
         # A provable MISS: the read yields undef, so `//` yields the RHS.
         return $rhs
-            if Chalk::IR::Serialize::JSON::_static_miss($container, $index);
+            if Chalk::IR::Analysis::_static_miss($container, $index);
 
         # Otherwise the read may be a provable HIT -- resolvable to the very
         # element node, which makes the RHS dead.
@@ -108,8 +108,8 @@ class Chalk::Bootstrap::Optimizer::DefinedOrFold
     # adversarial review. Same resolution, same flattening bail-out, or the same
     # class of bug returns here.
     method _element_at($container, $index) {
-        $container = Chalk::IR::Serialize::JSON::_resolve_aggregate(
-            Chalk::IR::Serialize::JSON::_unwrap_ref($container));
+        $container = Chalk::IR::Analysis::_resolve_aggregate(
+            Chalk::IR::Analysis::_unwrap_ref($container));
         return undef unless defined $container && blessed($container);
 
         my @in = $container->inputs->@*;

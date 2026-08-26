@@ -6,6 +6,7 @@ use utf8;
 use Test2::V0;
 
 use lib 'lib', 't/lib';
+use Chalk::IR::Analysis;
 require Chalk::IR::Serialize::JSON;
 require Chalk::IR::NodeFactory;
 
@@ -35,7 +36,7 @@ sub ternary_with ( $cond_repr, $then_repr, $else_repr ) {
     } ( $cond_repr, $then_repr, $else_repr );
 
     my $t = $f->make( 'TernaryExpr', inputs => \@in );
-    Chalk::IR::Serialize::JSON::_propagate_computed_reprs(
+    Chalk::IR::Analysis::_propagate_computed_reprs(
         { g => _graph_of( $t, @in ) } );
     return $t->representation;
 }
