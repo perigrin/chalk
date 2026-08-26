@@ -9,6 +9,7 @@ use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
 use Chalk::IR::Serialize::JSON ();
 use Chalk::Target::LLVM;
+use Chalk::CodeGen::Pipeline;
 use Chalk::CodeGen::Harness::TypeTag;
 
 # ---------------------------------------------------------------------------
@@ -82,24 +83,27 @@ sub run_through_bson ($source) {
     return (undef, "JSON decode failed: $@") unless $data;
     return (undef, "no main::corpus_case method")
         unless $data->{methods}{'main::corpus_case'};
-
-    # Load the whole blob (all methods + the classes section). List context
-    # yields the sealed MOP when a classes section is present.
-    my ($graphs, $mop) = eval {
-        Chalk::IR::Serialize::JSON::from_json($json);
+    # Load the whole blob and lower main::corpus_case, through the ONE pipeline
+    # seam. program_mode is DELIBERATELY ABSENT: this test's perl oracle is a
+    # type-tagged canonical value, so the Int:/Str: epilogue must be emitted for
+    # the comparison at the bottom of this file to mean anything. Same reason,
+    # same shape as Mode2Adapter -- see the comment there and the standing
+    # regression test t/bootstrap/corpus/mode2-omits-program-mode.t.
+    my $select = sub ($graphs, $mop) {
+        my $g = $graphs->{'main::corpus_case'} or return ();
+        my $ret = $g->returns->[0] or return ();
+        return ([ 'main::corpus_case', $ret ]);
     };
-    return (undef, "from_json failed: $@") unless $graphs;
 
-    my $g = $graphs->{'main::corpus_case'};
-    return (undef, "no loaded graph") unless $g;
+    my ($units, $graphs, undef, $load_err) =
+        Chalk::CodeGen::Pipeline->new->run_detail($json, $select);
+    return (undef, $load_err) if $load_err;
 
-    my $ret = $g->returns->[0];
-    return (undef, "no Return node") unless $ret;
-
-    my $ll = eval {
-        Chalk::Target::LLVM->lower($ret, (defined $mop ? (mop => $mop) : ()));
-    };
-    return (undef, "LLVM lowering GAP: $@") if $@;
+    return (undef, "no loaded graph") unless $graphs->{'main::corpus_case'};
+    return (undef, "no Return node")  unless @$units;
+    my $unit = $units->[0];
+    return (undef, "LLVM lowering GAP: $unit->{err}") unless $unit->{ok};
+    my $ll = $unit->{ll};
 
     # Run the emitted IR through lli.
     my ($lfh, $lltmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
