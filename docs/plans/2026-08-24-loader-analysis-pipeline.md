@@ -656,6 +656,76 @@ guaranteed what it needs.
 
 ### Slice 4 — T1, the TYPE INFERENCE + CHECK transformation
 
+**WHERE T1 SITS.** The backend pipeline is:
+
+    Loader > T1 > Optimizers > T2 > Optimizers > Scheduler > LLVM IR > lli
+
+Measured 2026-08-26, what actually exists: Loader yes; **T1 no** (its 17 passes
+are inside the loader); Chalk-SoN optimizers — classes exist, **no stage runs
+them**; **T2 no** (its work is smeared through `Target/LLVM*`, decided inline at
+emit time); LLVM-SoN optimizers no; Scheduler yes (`IR::Schedule::Dominators`,
+`::Elaborate`); emission yes.
+
+Both transformations are missing and both optimizer slots are missing. That
+explains the shape of the 2026-08-25 bugs: `Target::LLVM::lower()` does T2's
+job AND scheduling AND emission at once, so an encoding decision has nowhere to
+be RECORDED — which is why `%Slot`-vs-`i64` landed in the emitter and why
+`_slot_payload` was a side table rather than a graph property.
+
+**T1 IS A CLASS taking a graph and producing a well-typed graph.**
+
+### What "well-typed" means, precisely
+
+1. **Total.** Every `Value` node carries a stamp. Control nodes (`Start`,
+   `Region`, `If`, `Loop`) carry none and must not — they define no value, so
+   asking is a category error.
+
+2. **Lattice-membered.** Every stamp is a `TypeLibrary` `%PARENT` member. This
+   excludes `Slot`, a machine ENCODING that currently reaches the stamp field
+   via the OOB path and which `t/bootstrap/ir/stamp-alias-preconditions.t`
+   already flags as corruption. `Unknown` is permitted but distinguished: a
+   legitimate element meaning "inference did not determine this".
+
+3. **Conformant.** Every node's stamp and its operands' stamps satisfy the
+   operator's signature (`%OP_REQUIRED_REPR` / `%OP_PER_POSITION_REPR`, plus
+   `%OP_REQUIRES_OWN_REPR` for Add/Subtract/Multiply). A mismatch is bridged by
+   an explicit `Coerce` or it is a violation. No implicit conversion.
+
+4. **Sound.** Every stamp is a SUPERTYPE of every value the node can hold at
+   runtime. `Scalar` where `Int` was provable is imprecise but well-typed;
+   `Int` where a `Str` can flow is NOT well-typed however often it is right in
+   practice. This is the condition the reverted `Slot`-arm drop violated.
+
+5. **MAXIMALLY NARROWED.** As narrow as the program permits.
+
+   Condition 5 is not a quality metric bolted onto a correctness definition —
+   it is part of the correctness definition, and an earlier draft of this
+   section got that wrong. Narrowing is optional in an OPTIMIZER: skip it and
+   the program is slower. It is not optional here, because **T1's output is the
+   input to a stage that must choose an encoding.** A `Scalar` that could have
+   been `Int` does not produce a slower program; it produces a boxed one, a
+   GAP, or — the 2026-08-25 failure mode — a later stage GUESSING what T1
+   declined to determine.
+
+   The test of the definition: `Unknown` everywhere satisfies conditions 1-4
+   and is worthless. A definition a useless answer satisfies is the wrong
+   definition.
+
+   This requires real FLOW ANALYSIS, not the local rules the loader does today:
+   the type of `$x` after `if (defined $x)` is narrower than before it, and a
+   merge's type depends on which paths reach it.
+
+**DEFERRED, deliberately, until basic narrowing works: guard reporting.** When
+T1 can see that a value COULD be narrowed if the program said one more thing,
+it should say so — distinguishing "this genuinely cannot be narrowed" (a
+dynamic index into a heterogeneous container, honestly `Scalar`) from "this
+needs a type guard here, and here is which". That turns an inference failure
+into actionable output instead of a silent `Scalar`, and it is the same shape
+as the enforce-at-the-store principle in
+`docs/architecture/ir-and-lowering.md` §5. It is deferred because a diagnostic
+written before the analysis exists is speculation about failures nothing has
+measured.
+
 **WHAT KIND OF THING THIS IS.** T1 is a REQUIRED STAGE of compilation, not an
 optimizer pass. The distinction has a test: *can the compiler still produce a
 correct program with this stage removed?* An optimizer answers yes — remove it
@@ -694,10 +764,23 @@ So: **an untyped node is the compiler admitting it does not know what the
 program means.** Lowering one is guessing with extra steps.
 
 **LANDING CRITERION, stated so it is not mistaken later.** Not "the gate still
-reads 218". It is "every Value node carries a type, and every operator's
-operands conform." If enabling the check drops the gate, the gate was measuring
-something weaker than it appeared to, and the failing cases were never sound —
-only untested in the direction that would have shown it.
+reads 218". It is the five conditions above — including condition 5, so a run
+that types everything `Unknown` is a FAILURE, not a pass. If enabling the check
+drops the gate, the gate was measuring something weaker than it appeared to,
+and the failing cases were never sound — only untested in the direction that
+would have shown it.
+
+Because condition 5 is part of the contract, **T1's tests measure HOW NARROW,
+not merely whether typed.** A regression that widens `Int` to `Scalar` across
+the corpus passes a typed/untyped check and fails this one.
+
+**KNOWN TO FAIL TODAY, so the first version REPORTS rather than asserts.**
+Conditions 1 and 2 do not hold on the current corpus: 10 untyped Value nodes
+(2 `Call`, 1 `Ref`, 7 downstream `Phi` — measured 2026-08-25) and `Slot` is
+written into the stamp field on the OOB path. An assertion that must be
+disabled to land is what `Chalk::IR::Analysis::_assert_value_nodes_are_typed`
+already is; a report that shrinks toward zero is the honest form of the same
+contract.
 
 **T1 LANDS ALONE. Verified, correcting an earlier claim in this document that
 it was "three changes that can't land apart":**
