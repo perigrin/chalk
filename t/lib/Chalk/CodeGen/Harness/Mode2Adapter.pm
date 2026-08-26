@@ -11,6 +11,7 @@ use JSON::PP;
 use Chalk::IR::Serialize::JSON ();
 use Chalk::IR::Graph::TypedInvariant;
 use Chalk::Target::LLVM;
+use Chalk::CodeGen::Pipeline;
 use Chalk::CodeGen::Harness::TypeTag;
 
 # Wrap each harvested Mode-2 case (I10 extractor output) into a tri-fold runner.
@@ -156,15 +157,36 @@ class Chalk::CodeGen::Harness::Mode2Adapter {
         return (undef, "no main::corpus_case method", undef)
             unless $data->{methods}{'main::corpus_case'};
 
-        my ($graphs, $mop) = eval { Chalk::IR::Serialize::JSON::from_json($json) };
-        return (undef, "from_json failed: $@", undef) unless $graphs;
+        # The case's single unit, lowered through the ONE pipeline seam.
+        #
+        # program_mode IS DELIBERATELY ABSENT AND MUST STAY ABSENT. It suppresses
+        # the Int:/Str: return-value epilogue -- and this adapter's behavior
+        # oracle, _tag_expected below, CONSUMES that epilogue: it turns the
+        # harvested plain literal (4) into the tagged face lli prints (`Int:4`)
+        # and compares them. Pass program_mode here and every comparison fails
+        # against an untagged value, silently reading the conformance tally to
+        # zero. ProgramRunner and son-corpus-wide.t pass it because they compare
+        # a PROGRAM's stdout, which states its own output.
+        #
+        # This is not left to the comment: t/bootstrap/corpus/mode2-omits-
+        # program-mode.t observes the actual %opts at the seam and fails if the
+        # flag ever appears.
+        my $select = sub ($graphs, $mop) {
+            my $g = $graphs->{'main::corpus_case'} or return ();
+            my $ret = $g->returns->[0] or return ();
+            return ([ 'main::corpus_case', $ret ]);
+        };
+
+        my ($units, $graphs, undef, $load_err) =
+            Chalk::CodeGen::Pipeline->new->run_detail($json, $select);
+        return (undef, $load_err, undef) if $load_err;
+
         my $g = $graphs->{'main::corpus_case'}
             or return (undef, "no loaded graph", undef);
-        my $ret = $g->returns->[0]
-            or return (undef, "no Return node", $g);
-
-        my $ll = eval { Chalk::Target::LLVM->lower($ret, (defined $mop ? (mop => $mop) : ())) };
-        return (undef, "lower: $@", $g) if $@;
+        return (undef, "no Return node", $g) unless @$units;
+        my $unit = $units->[0];
+        return (undef, "lower: $unit->{err}", $g) unless $unit->{ok};
+        my $ll = $unit->{ll};
 
         my ($lfh, $lltmp) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
         binmode $lfh, ':utf8';
