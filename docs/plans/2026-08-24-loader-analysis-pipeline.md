@@ -973,32 +973,114 @@ exit condition reports at the arm that actually failed.
 
 Full reasoning in `docs/specs/2026-08-26-t1-type-inference-requirements.md` §10.
 
-**4b — the whole-program analyses**, each of which is a join over a set once
-4a exists:
+**4b — the analyses that reach BEYOND ONE NODE**, each a join over a set of
+facts gathered by following edges, once 4a exists.
+
+**Not "over a graph set".** An earlier draft of this section said that, and it
+contradicts the entry contract: there is no graph set in the architecture, only
+one graph whose `Call` nodes carry references to their callees
+(`docs/specs/2026-08-26-t1-type-inference-requirements.md` §2). Every analysis
+below gathers its set by TRAVERSING EDGES from the graph it is given. Written
+the other way, a builder would pass a hash of graphs and rebuild the shape the
+contract rejects.
 
 - **call-graph resolution** — `_resolve_direct_calls` / `_attach_call_targets`,
-  already whole-program, currently interleaved;
-- **argument-type seeding** across call boundaries
-  (`_seed_direct_call_arg_reprs`) — today MONOMORPHIC (first caller wins); the
-  correct form is a JOIN over N callsites, which 4a supplies;
+  which is what populates the callee reference the other analyses traverse.
+  Currently interleaved with the rest;
+- **argument-type seeding** — follow each callee's incoming call edges BACKWARD
+  to their argument types and join. Today MONOMORPHIC (`_seed_direct_call_arg_reprs`,
+  first caller wins); the correct form is a join over every callsite that
+  reaches this callee, which 4a supplies. The set is "the callers", found by
+  traversal, not supplied;
 - **container monomorphism** — the analysis
   `2026-08-24-chalk-memory-model-baseline.md` §4a identifies as the real
   question behind `ArrayRef[Int]`: is this container's element type stable over
   its whole lifetime, across all stores? Today `_element_repr` answers a
   narrower question (are the INITIALIZERS homogeneous) and the store path GAPs
-  rather than falling back. This IS a join over every store's type — the
-  monomorphism proof is "the join is narrower than Scalar", which is not
-  expressible until 4a lands;
+  rather than falling back. The set here is "every store into this container",
+  found by walking the container's uses — a join over those, with the
+  monomorphism proof being "the join is narrower than Scalar", not expressible
+  until 4a lands;
 - **escape / no-tie** — needed before any provenance narrowing can be trusted
   (`2026-08-24-access-provenance-and-the-mop.md`). Note the self-hosting subset
   makes this trivially true today (0 `tie` sites, measured), so this can be an
-  assertion before it is an analysis.
+  assertion before it is an analysis. Also what liberalising the §5 aliasing
+  policy depends on.
+
+**4c — THE PIPELINE OBJECT. Do this FIRST; it is not last because it is least.**
+
+Spec §7. T1 is "entered from the pipeline" and there is no pipeline: three
+harnesses — `ProgramRunner`, `Mode2Adapter`, `Phase5LibCoverage` — each run
+`from_json` then `lower(mop => ...)` inline, identically. The pipeline exists
+three times, in test code, with no single seam.
+
+That is why deleting the loader's analysis call broke three places at once
+(2026-08-25, gate 218 → 136). Build one object owning
+`Loader > T1 > Optimizers > T2 > Optimizers > Scheduler`, have the harnesses
+call it, and wiring T1 becomes one edit instead of three.
+
+It also resolves a conflict in the acceptance criteria: `loader-reproduces-the-wire.t`
+can reach 0 (the loader stops analysing) while the corpus gate holds at 218
+(the pipeline runs T1) only if one change does both.
+
+Shape deliberately unspecified — `Phase5LibCoverage` wants per-unit results
+rather than one output, so the three callers define the requirement. Derive it
+from them.
+
+**4d — THE MOP RIDES ON THE IR.**
+
+Spec §6, and a prerequisite for §2's `run($graph) -> $graph` being true rather
+than true-by-omission. A `Call` resolves its callee through a MOP handle; that
+handle IS the inter-unit edge. With the MOP on the graph, a `Call` answers
+"what does my callee return" from the graph it is in, and 4b's traversals have
+something to traverse.
+
+Today `_replay_classes` builds the MOP and is one of the eleven passes, so the
+MOP is an OUTPUT of inference — forcing `run` to return `($graphs, $mop)` and
+every consumer to take both. `_build_registry_from_mop` then rebuilds a second
+copy at lowering time and goes away with this change.
+
+**4e — Pi-STYLE FLOW REFINEMENT.**
+
+Spec §5, and what condition 5 (maximal narrowing) requires: without it, `$x`
+inside `if (defined $x)` keeps its entry type.
+
+- a Pi node carrying `piStamp` (the DELTA the guard proves), with the effective
+  stamp computed as `piStamp ⊓ input.stamp` and monotonic on strengthening;
+- guard input = the `Proj`/`Region` for the taken branch, so control nodes
+  influence stamps without carrying one;
+- **three owners, all assigned or the obligation falls between them**: frontend
+  CREATES at the guard, T1 STRENGTHENS, scheduler DELETES once pinned. A Pi
+  reaching the backend is a bug;
+- the aliasing policy: a refinement holds only on a value that never leaves
+  value-SSA. Liberalising it is optimizer work and depends on 4b's escape
+  analysis.
+
+Ordering: **4c → 4d → 4a → 4b → 4e.** 4c gives a seam, 4d makes the entry
+contract true, 4a supplies the join everything else needs, 4b uses it across
+edges, 4e adds flow-sensitivity last because it is the only piece that is not
+a prerequisite for the others.
 
 ### Slice 5 — the TYPE CHECK, as the pipeline's exit gate
 
 Not a new mechanism: **run `Chalk::IR::Graph::TypedInvariant` at the end of the
 analysis pipeline, in `lib/`, over stamps.** Today it runs only in tests, and
 only over representations.
+
+**Two behaviours from spec §4 belong here, and are scheduled nowhere else:**
+
+- **absence normalizes to `Unknown` on ENTRY to T1.** A Value node arriving
+  without a stamp becomes `Unknown` — the only difference between them is
+  whether a pass wrote the fact down, and an absent stamp is INVISIBLE to
+  inference while `Unknown` is a lattice value every rule can act on. This is
+  what makes the exit condition a single check rather than two.
+- **arrived-absent is reported as a FRONTEND metric**, separately from the exit
+  count and unconditionally — including for nodes T1 goes on to type. Absence
+  is structurally impossible at the producer (`SoN::IR::Value` requires a stamp
+  at construction), so it means something bypassed that constructor. Reporting
+  only the ones T1 FAILS to type would hide the cheapest frontend bugs
+  precisely because T1 fixed them downstream. Measured: 10 nodes across the
+  218-case corpus.
 
 The contract it establishes, which lowering may then assume:
 
