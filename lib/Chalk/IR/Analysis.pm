@@ -245,7 +245,7 @@ sub run ($class, $graphs, $classes = undef) {
     # propagate until a pass stamps nothing new (zhi 019f5e57). Bounded by the
     # finite number of Call nodes; a graph with no method Calls converges in one
     # pass (stamped==0 immediately).
-    while (_stamp_method_call_reprs($classes, \%graphs) > 0) {
+    while (_stamp_method_call_reprs($classes, \%graphs, $mop) > 0) {
         _seed_and_propagate_reprs(\%graphs);
     }
 
@@ -496,9 +496,30 @@ sub _attach_call_targets ($graphs, $mop) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
             next unless $node->operation eq 'Call'
                 && $node->can('dispatch_kind')
-                && ($node->dispatch_kind // '') eq 'direct'
                 && $node->can('set_target')
                 && !defined $node->target;
+
+            my $kind = $node->dispatch_kind // '';
+
+            # METHOD dispatch. The Call already knows its statically-resolved
+            # class; the method itself is found by asking the CLASS, whose
+            # find_method walks the superclass chain -- so an inherited call
+            # lands on the DECLARING class's metaobject. Chalk::MOP::find_method
+            # would answer too, but by scanning `values %classes` in hash order
+            # and returning the first name match: a guess, not a resolution.
+            #
+            # `new` is the backend-synthesized constructor -- no metaobject
+            # exists for it -- and a `:reader` accessor is synthesized too. Both
+            # are legitimately target-less; only a genuine method resolves here.
+            if ($kind eq 'method') {
+                my $cls = defined $node->class_name
+                    ? $mop->for_class($node->class_name) : undef;
+                my $m = $cls ? $cls->find_method($node->name // '') : undef;
+                $node->set_target($m) if $m;
+                next;
+            }
+
+            next unless $kind eq 'direct';
 
             my ($cls_name, $sub_name) = ($node->name // '') =~ /^(.*)::([^:]+)$/;
             my $cls = defined $cls_name ? $mop->for_class($cls_name) : undef;
@@ -933,10 +954,19 @@ sub _replay_classes ($classes, $graphs) {
         }
 
         my $methods = $cd->{methods} // {};
+        # The producer DECLARES each method's return type in the
+        # method_return_types sibling map; the loader CARRIES it, exactly as
+        # declare_sub below carries a sub's. A wire without the entry
+        # predates the declaration and arrives as `Unknown` -- the lattice
+        # top -- never as undef. `Unknown` is a real type meaning
+        # "inference has not determined this"; undef is an ABSENCE, and an
+        # absence forces every downstream consumer to invent its own meaning.
+        my $wire_rts = $cd->{method_return_types} // {};
         for my $mname (sort keys %$methods) {
             my $graph = $graphs->{ $methods->{$mname} };
             $cls->declare_method($mname,
                 (defined $graph ? (graph => $graph) : ()),
+                return_type => ($wire_rts->{$mname} // 'Unknown'),
             );
         }
 
@@ -1562,9 +1592,9 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
     return;
 }
 
-# _stamp_method_call_reprs($classes, \%graphs) — set each method Call's repr
+# _stamp_method_call_reprs($classes, \%graphs, $mop) — set each method Call's repr
 # from the resolved callee method's return repr (its body's Return value repr).
-sub _stamp_method_call_reprs ($classes, $graphs) {
+sub _stamp_method_call_reprs ($classes, $graphs, $mop) {
     # Build class::method -> return_repr.
     #
     # THE WIRE IS THE FIRST SOURCE, not the graph walk. The producer computes
@@ -1589,8 +1619,16 @@ sub _stamp_method_call_reprs ($classes, $graphs) {
         my $methods  = $classes->{$cname}{methods} // {};
         my $wire_rts = $classes->{$cname}{method_return_types} // {};
 
+        my $cls = $mop->for_class($cname);
         for my $mname (keys %$methods) {
-            my $wire = $wire_rts->{$mname};
+            # The wire value now rides on the METAOBJECT: declare_method carries
+            # method_return_types, mirroring declare_sub. Read it from there, so
+            # the LEFT operand of the disagreement die below is the same value
+            # every downstream consumer sees. The RIGHT operand stays the graph
+            # walk immediately following -- without it the die would degrade
+            # into comparing a value against itself and quietly stop firing.
+            my $meta = $cls ? $cls->find_method($mname) : undef;
+            my $wire = $meta ? $meta->return_type : $wire_rts->{$mname};
             $ret_repr{"$cname\::$mname"} = $wire
                 if _is_narrowed($wire);
 
@@ -1641,15 +1679,31 @@ sub _stamp_method_call_reprs ($classes, $graphs) {
             next if _is_narrowed($node->representation);
             my $class = $node->class_name // next;
             my $mname = $node->name // '';
-            # Resolve the method through the class's MRO: a call on Child of a
-            # method inherited from Base has no Child::m entry, so walk the
-            # parent chain until the method is found (or the chain ends).
+            # Resolve through the EDGE. _attach_call_targets has already put the
+            # callee's metaobject on the Call, resolved through
+            # Chalk::MOP::Class::find_method -- which walks the superclass chain,
+            # so an inherited call already names its DECLARING class here. No
+            # second, hand-rolled parent walk over the raw wire records.
+            #
+            # A `:reader` accessor has NO metaobject -- the backend synthesizes
+            # it, so no declare_method ever ran for it -- and a reader IS
+            # inherited (`Child->new(v=>9)->v` on a `field $v :reader` declared
+            # on Base). That case keeps the parent walk over the wire records,
+            # which is the only place a reader's owning class is recorded.
+            # Measured: without this fallback the inherited reader loses its
+            # stamp (Int -> undef) and the backend hits its NO-REPR guard.
+            my $target = $node->target;
             my $repr;
-            my $c = $class;
-            my %seen;
-            while (defined $c && !$seen{$c}++) {
-                if (defined(my $r = $ret_repr{"$c\::$mname"})) { $repr = $r; last; }
-                $c = $classes->{$c}{parent};
+            if ($target && $target->isa('Chalk::MOP::Method')) {
+                $repr = $ret_repr{ $target->class->name . '::' . $target->name };
+            }
+            else {
+                my $c = $class;
+                my %walked;
+                while (defined $c && !$walked{$c}++) {
+                    if (defined(my $r = $ret_repr{"$c\::$mname"})) { $repr = $r; last; }
+                    $c = $classes->{$c}{parent};
+                }
             }
             defined $repr or next;
             $node->set_representation($repr);

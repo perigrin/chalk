@@ -535,8 +535,15 @@ sub _populate_registry_from_mop_class {
     for my $m ($cls->methods) {
         my $mname     = $m->name;
         my $body_node = _method_body_root($m);
-        my $ret_repr  = $m->return_type
-            // _require_repr($body_node, "MOP::Method '$mname' body root");
+        # Same rule as MOP::Sub above: the producer's declaration is
+        # authoritative when it determined one, but `Unknown` means inference
+        # did NOT, and `Unknown` has no encoding -- fall through to the body
+        # root. (A method's return_type used to be universally undef, which made
+        # `//` do this by accident; now that declare_method carries the wire's
+        # value it arrives as the lattice top and must be tested for.)
+        my $ret_repr  = ( ( $m->return_type // 'Unknown' ) ne 'Unknown' )
+            ? $m->return_type
+            : _require_repr($body_node, "MOP::Method '$mname' body root");
         unless (grep { ($_->{name} // '') eq $mname } @{ $registry->{$cname}{methods} }) {
             push @{ $registry->{$cname}{methods} }, {
                 name        => $mname,
