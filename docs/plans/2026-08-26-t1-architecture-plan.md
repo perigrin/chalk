@@ -3,8 +3,7 @@
 **Date:** 2026-08-26
 **Status:** PLAN. Replaces the slice-4 decomposition (4a–4e) of
 `docs/plans/2026-08-24-loader-analysis-pipeline.md`, which failed build
-verification (`docs/plans/2026-08-26-slice4-build-verification.md`: five
-NEEDS_REWORK verdicts, six BLOCKING findings, six cross-slice conflicts).
+verification (`docs/plans/2026-08-26-slice4-build-verification.md`).
 **Contract:** `docs/specs/2026-08-26-t1-type-inference-requirements.md` (the
 T1 spec). Settled decisions live there and in
 `docs/specs/2026-08-26-t1-derivation.md`; this plan does not re-argue them.
@@ -26,8 +25,7 @@ with T1 a class — `Chalk::IR::Transform::TypeInference->new(...)->run($graph)
 stamped `Unknown`, reaching the whole program through EDGES (a Call's MOP
 handle), never through a `Map<String,Graph>` passed alongside.
 
-What exists at HEAD, stated the way the verification established it (the old
-plan had both of these inverted):
+What exists at HEAD, as the verification established it:
 
 1. **A pipeline exists, FUSED INSIDE THE LOADER.** `Serialize/JSON.pm:707`
    calls `Chalk::IR::Analysis->run` and is that method's only caller
@@ -55,85 +53,50 @@ The remaining gap, item by item:
 | §4 exit condition | `_assert_value_nodes_are_typed` commented out at `Analysis.pm:298`; enabling it drops the gate 218 → 200 per its own comment block |
 | §5 Pi refinement | No Pi node exists; `defined $x` has NO expressible piStamp in the current lattice (B6, confirmed by execution: `meet(Scalar,Scalar)=Scalar`) |
 | §8 loader inference | `%LOWERABLE_STAMP` live at `JSON.pm:71`/`:634`; Print→Boolean seed still in the loader |
-| §1 no guessing | FOUR live `$repr // 'Int'` backend guesses: `Target/LLVM/Context.pm:3349, :4071, :5801, :6827` (all four re-verified verbatim at HEAD) — B4, unowned by the old plan |
+| §1 no guessing | FOUR live `$repr // 'Int'` backend guesses: `Target/LLVM/Context.pm:3349, :4071, :5801, :6827` (all four re-verified verbatim at HEAD) — B4 |
 
 ---
 
-## 2. Why this factoring, not the old one
-
-The old plan decomposed around EXISTING PASS NAMES (the join, the analyses,
-the pipeline, the MOP, the Pi) and every blocking finding landed BETWEEN its
-units: B1 spanned 4c/4b/4e, B6 spanned 4e/4a two slices apart, B4 fell
-between all of them, B2 depended on T2 which no unit built. The units were
-individually plausible and collectively unable to catch their own conflicts.
+## 2. Blocker dispositions
 
 This plan decomposes around **what must be true before T1 can exist**, in
-dependency order, with a decision phase in front. The verification kept the
-old ordering (4c→4d→4a→4b→4e) as sound in dependency DIRECTION; this plan
-keeps that direction and changes the units:
-
-- **Phase 0** makes every decision whose absence caused a cross-slice
-  conflict, BEFORE any code (B6/C3 is the model: the piStamp vocabulary
-  choice silently falsifies phase-3 join pins if made in phase 6).
-- **Phase 5 exists at all.** The old plan improved `Analysis.pm` in place
-  and never contained the step where `Chalk::IR::Transform::TypeInference`
-  is BORN with the spec-§2 contract and `from_json` stops analysing. That
-  step — the one the spec is about — had no owner. It is now a phase.
-- **B4 has an owner** (phase 3): the backend guesses retire in the same arc
-  that makes the join total, because a total join is what makes "repr absent
-  at the backend" a bug rather than a Tuesday.
-- **Every seam introduced conforms to `$graph -> $graph` from its first
-  commit** (B1): the pipeline's transforms slot threads per-graph; T1's
-  public contract is per-graph; the one transitional whole-set hash is
-  fenced inside module privacy with a filed migration (§Phase 5).
-
+dependency order, with a decision phase in front; it keeps the old
+ordering's dependency DIRECTION (4c→4d→4a→4b→4e) and changes the units.
 How the six blockers are disposed of:
 
 | Blocker | Disposition |
 |---|---|
 | B1 graph-set shape | Resolved by construction: Phase 1 step 7 ships `transforms => [$g -> $g]`; Phase 5 births T1 with `run($graph)`; the transitional hash is fenced (Phase 5, "the fence") |
-| B2 Undef-drop vs the 218 floor | RULED: deletion is IN SCOPE (Phase 3); gate 218 → 215 with three declared GAPs; spec §9.5 amended in the same commit; restoration is T2's acceptance criterion |
+| B2 Undef-drop vs the 218 floor | RULED (D2): deletion is IN SCOPE (Phase 3 step 4); gate 218 → 215 with three declared GAPs; spec §9.5 amended in the same commit; restoration is T2's acceptance criterion |
 | B3 fixpoint freezing + second `_element_repr` caller | Discharged by a mandatory measurement gate (G5) BEFORE the total-join lands; the remedy is chosen from that data (Phase 3 step 0) |
-| B4 `$repr // 'Int'` | Owned: Phase 3 step 4 converts all four sites to loud GAP dies, measured first |
+| B4 `$repr // 'Int'` | Owned: Phase 3 step 5 converts all four sites to loud GAP dies, measured first |
 | B5 DefinedOrFold store-blindness | Resolved by construction: the `_element_at` refusal lands in the SAME COMMIT as store-aware `_element_repr` (Phase 4 step 1), with `lli == perl == 99` as the acceptance test |
-| B6 inexpressible piStamp | Phase 0 decision D1, made before any join pin lands. Recommended: separate refinement vocabulary, `%PARENT` untouched |
+| B6 inexpressible piStamp | RULED (D1) before any join pin lands: separate refinement vocabulary, `%PARENT` untouched |
 
 ---
 
 ## 3. Phase 0 — decisions before code
 
-No code. Each decision is recorded here with its recommendation; the two
-that touch the spec need perigrin's ruling (see §11 Open Questions). Do not
-start Phase 1 until D1 and D2 are ratified.
+No code. All six are decided; D1 and D2 were ruled by perigrin 2026-08-26
+(G0 satisfied).
 
-**D1 — piStamp vocabulary (resolves B6/C3).**
+**D1 — piStamp vocabulary (resolves B6/C3). RULED BY PERIGRIN 2026-08-26:
+a separate refinement vocabulary; `%PARENT` is NOT reparented.** Background:
 `TypeLibrary.pm:17-56` places `Undef` as a SIBLING of `Str`/`Num`/`Ref`
 under `Scalar`; there is no complement operator; `meet(Scalar,Scalar) =
 Scalar`, so the spec §5 worked example (`if (defined $x)`) has no
-expressible piStamp today. Two options:
+expressible piStamp today. The rule: `piStamp` values are a small closed
+set (initially just `NotUndef`) with their own
+`refine($pi_stamp, $lattice_type)` meet, defined beside `meet_types` in
+TypeLibrary. Phase 3 may pin join results — including
+`Boolean,Int -> Str` — against the lattice as it stands today.
 
-- **(a) RECOMMENDED: a separate refinement vocabulary.** `piStamp` values
-  are a small closed set (initially just `NotUndef`) with their own
-  `refine($pi_stamp, $lattice_type)` meet against lattice types, defined
-  beside `meet_types` in TypeLibrary. `%PARENT` is untouched, so every
-  `join_types` pair — including the phase-3 pins `Boolean,Int -> Str`
-  (ruled INTENDED by perigrin) — keeps its meaning.
-- **(b) reparent `%PARENT`** (add a `Defined` member, move `Str`/`Num`/…
-  under it). Changes `join_types` for existing pairs and silently falsifies
-  phase-3 contract tests landed two phases earlier. Take only with explicit
-  sign-off, and then write phase-3 pins against the FINAL lattice.
-
-**RULED BY PERIGRIN 2026-08-26: (a).** `%PARENT` is NOT reparented; piStamp
-is a separate refinement vocabulary. Phase 3 may pin join results against the
-lattice as it stands today.
-
-**D2 — the Undef drop IS DELETED; the gate drops 218 → 215 (resolves B2).**
-Deleting `Analysis.pm:1228-1241` moves L3b/L3c/L3d GREEN → GAP because
-`Scalar` has no machine encoding until T2 exists (`Context.pm:3646-3651`,
-`:3676-3682` — dies).
-
-**RULED BY PERIGRIN 2026-08-26: the temporary drop is acceptable.** The
-deletion is IN SCOPE for Phase 3. Consequences, which the builder must honour:
+**D2 — the Undef drop IS DELETED; the gate drops 218 → 215 (resolves B2).
+RULED BY PERIGRIN 2026-08-26: the temporary drop is acceptable; deletion is
+IN SCOPE for Phase 3 (step 4).** Deleting `Analysis.pm:1228-1241` moves
+L3b/L3c/L3d GREEN → GAP because `Scalar` has no machine encoding until T2
+exists (`Context.pm:3646-3651`, `:3676-3682` — dies). Consequences, which
+the builder must honour:
 
 - **Spec §9.5's floor becomes 215** for the duration, with L3b/L3c/L3d
   DECLARED GAPs naming `Scalar` and pointing at T2. Amend §9.5 in the same
@@ -144,22 +107,16 @@ deletion is IN SCOPE for Phase 3. Consequences, which the builder must honour:
 - **The restoration is T2's acceptance criterion, not a wish.** File it as
   blocked-by-T2: "restore L3b/L3c/L3d to GREEN; gate returns to 218." T2 is
   not done while the gate reads 215.
-- This is the invariant working as designed: a declared GAP is acceptable, a
-  silent wrong answer is not (spec §1). The drop buys a total join, which is
-  what makes the guesses in D3 retireable.
 
 **D3 — the backend guesses become GAPs (resolves B4).** DECIDED IN-PLAN.
 The four `// 'Int'` sites convert to loud dies in Phase 3, after measuring
-which corpus cases reach each site. Rationale: spec §1's table — a guess is
-the only unacceptable outcome; a GAP is acceptable. Removing loader
-compensations (this plan's whole direction) makes the guesses MORE
-reachable, so they cannot outlive the compensations.
+which corpus cases reach each site. Removing loader compensations makes the
+guesses MORE reachable, so they cannot outlive the compensations.
 
 **D4 — the transform contract is `$graph -> $graph`, per graph.** DECIDED
-by spec §2; recorded because the old 4c design violated it
-(`transforms => [sub ($graphs,$mop) {...}]`). Every seam in this plan
-threads transforms per graph. Whether a whole-set hash may survive
-PRIVATELY inside a module during transition: yes, fenced — see Phase 5.
+by spec §2. Every seam in this plan threads transforms per graph. A
+whole-set hash may survive PRIVATELY inside a module during transition,
+fenced — see Phase 5.
 
 **D5 — B5's fix is atomic with the change that exposes it.** DECIDED
 IN-PLAN. `DefinedOrFold::_element_at` (`DefinedOrFold.pm:104-135`) learns
@@ -180,17 +137,15 @@ consumes the `Int:`/`Str:` epilogue that `program_mode` suppresses).
 ## 4. Phase 1 — the seam (all five assemblers route through one Pipeline)
 
 **Goal:** one object the harnesses call, so later phases edit ONE site
-instead of five. The 2026-08-25 incident (gate 218 → 136 because the
-assemblers broke simultaneously) is the empirical argument; C5 says both
-later high-risk steps re-create that mechanism if ANY assembler stays
-inline. Five, not three — the fourth is the gate itself
+instead of five (C5: any assembler left inline re-creates the 2026-08-25
+218→136 mechanism). Five, not three — the fourth is the gate itself
 (`son-corpus-wide.t:60-119`), the fifth is `son-e2e.t:66`.
 
 New file: `t/lib/Chalk/CodeGen/Pipeline.pm` (~120 lines — UNVERIFIED, an
 estimate of unwritten code). Under `t/lib` because every caller is
 test-tier and `lib/` has zero (verified: no production code calls
 `from_json` at all); it moves to `lib/` when a production entry point
-exists (§9 deferrals).
+exists (§11 deferrals).
 
 Contract, derived from the hardest caller (Phase5LibCoverage wants per-unit
 results and does not abort on first failure — `:108-122`):
@@ -251,7 +206,7 @@ assemblers of the full sequence; they migrate, if at all, in Phase 5.
 
 ## 5. Phase 2 — the edge exists everywhere (the MOP rides on the IR)
 
-**Goal:** spec §6. The strongest of the old sub-slices; its riskiest step
+**Goal:** spec §6. The riskiest step
 was already proven gate-neutral by the verifier's scratch experiment
 (byte-identical stamps on all 218; byte-identical LLVM IR on the
 class-less probe). Steps, in order:
@@ -283,9 +238,9 @@ class-less probe). Steps, in order:
    before seal and `MOP/Field.pm` has no type setter). Attach after
    `_replay_classes`. Do NOT assert the invariant on a `to_json`-reloaded
    graph — `to_json` (`JSON.pm:430`) drops it; round-tripping the MOP is
-   deferred (§9).
-3. **Method dispatch onto the edge** — the step that makes spec §2 true
-   and the step the old plan did not contain. RED: subtest 4 — a
+   deferred (§11).
+3. **Method dispatch onto the edge** — the step that makes spec §2 true.
+   RED: subtest 4 — a
    `Child->new->m` method-dispatch Call's `target` is a
    `Chalk::MOP::Method`. Fails at `:487-490`'s `eq 'direct'` filter.
    GREEN: widen `_attach_call_targets` to `'method'`, resolving through
@@ -314,16 +269,16 @@ class-less probe). Steps, in order:
    fact the MOP does not hold (vtable slots, flattened inheritance,
    exactly-one-Return enforcement, return-repr fallback, `:reader`
    synthesis records, two policy filters — all six re-confirmed). Its
-   retirement belongs to the LLVM-reads-MOP work (§9).
+   retirement belongs to the LLVM-reads-MOP work (§11).
 
 ---
 
 ## 6. Phase 3 — the total join, and the guesses retire
 
 **Goal:** spec §10 (absorb) and §1 (no silent guess), on the join that
-every Phase-4 analysis folds over. All landing steps are measured
-corpus-inert; the phase is bracketed by a measurement gate in front (B3)
-and a must-not-move gate run behind.
+every Phase-4 analysis folds over, plus the D2 deletion. Steps 1–3 are
+measured corpus-inert; the phase is bracketed by a measurement gate in
+front (B3) and a gate run behind with an EXACT expected value.
 
 0. **G5 — discharge B3 before any join code.** Re-run the total-join
    simulation over the corpus, instrumenting: BOTH `_element_repr` callers
@@ -362,14 +317,23 @@ and a must-not-move gate run behind.
    condition-drop) — it alone keeps `ternary-joins-arms-only.t` subtest 1
    green (`join_types('Boolean','Int','Int') = 'Str'` over the raw list).
    Verify: simulation still shows ZERO stamp changes (the Undef drop at
-   `:1240` runs ahead of the join and stays, per D2).
+   `:1240` still runs ahead of the join at this step; it is deleted in
+   step 4).
 3. **Delete the dead `'same'` branch** (`:1218-1226`; `:1192` becomes
    `if ($rule ne 'join')`). Dead since 6d9fc083 — `%_COMPUTED_REPR` maps
    And/Or to `'join'`; nothing maps to `'same'`. No red test can exist for
    unreachable code; the honest check is a coverage assertion that no
    `%_COMPUTED_REPR` value is `'same'`. **Commit separately** so any gate
    movement is attributable.
-4. **The guesses become GAPs (B4, D3).** First MEASURE which corpus cases
+4. **The Undef drop is deleted (D2).** Delete `Analysis.pm:1228-1241`.
+   Same commit: amend spec §9.5's floor to 215 with L3b/L3c/L3d as
+   DECLARED GAPs naming `Scalar` and pointing at T2; update the three
+   corpus contracts (`logical.md:180`, `logical.md:1053`, L3c's
+   Region-Phi) per the verification doc's parked-step-4 procedure; lower
+   the gate floor assertion (`son-corpus-wide.t:322`) to 215. File the
+   restoration on zhi (D2, §11). **Commit separately; expected gate: 215
+   EXACTLY** — any other number falsifies the D2 accounting.
+5. **The guesses become GAPs (B4, D3).** First MEASURE which corpus cases
    reach each of `Context.pm:3349`, `:4071`, `:5801`, `:6827` (an
    `warn`+run over the corpus in scratch — not committed). Then RED: a
    unit test per site driving a repr-less node into it, asserting a die
@@ -378,14 +342,12 @@ and a must-not-move gate run behind.
    DefinedOr phi path — if the measurement shows corpus cases reaching a
    site with a live guess, THAT IS A LATENT MISCOMPILE at HEAD; report it
    to perigrin before converting, since conversion will move the gate
-   (GREEN → GAP is a gate drop that this plan treats as a finding, not a
-   regression — see §10 honesty note).
-5. **Exit: G6 gate run.** Floor 218 and the count must NOT move (all
-   landed steps are corpus-inert; movement falsifies the inertness claim).
-   Exception: if step 4's measurement found live-guess cases, the expected
-   number is 218 minus those cases, each now a loud GAP naming a real bug
-   — perigrin decides between landing that and reverting the specific
-   site pending a fix.
+   (GREEN → GAP is a gate drop treated as a finding, not a regression).
+6. **Exit: G6 gate run.** Expected 215 exactly (218 minus the three D2
+   GAPs; steps 1–3 are corpus-inert). Exception: if step 5's measurement
+   found live-guess cases, subtract those too — each is a loud GAP naming
+   a real bug; perigrin decides between landing that and reverting the
+   specific site pending a fix.
 
 ---
 
@@ -448,7 +410,7 @@ Phase 3, the guard hoist to Phase 2; what remains:
    `t/bootstrap/no-tie-in-the-subset.t` green over `lib/` (operator-form
    patterns; both repos re-measured at zero). No IR pass — the analysis
    does not need to exist; the obligation is a guard on the source subset.
-5. **Exit: G8 gate run.** Floor 218; expected movement: cases that
+5. **Exit: G8 gate run.** Floor 215; expected movement: cases that
    previously GAPped at `Context.pm:2547` on heterogeneous stores may go
    green — a floor RAISE, taken only on a run where the gate holds
    (spec §9.3 pairing rule).
@@ -457,9 +419,9 @@ Phase 3, the guard hoist to Phase 2; what remains:
 
 ## 8. Phase 5 — T1 is born, and the loader stops analysing
 
-**Goal:** the step the old plan never contained. After phases 1–4 the seam
-exists, the edge is total, the join is total, the analyses traverse edges.
-Now the class exists and the fusion ends.
+**Goal:** after phases 1–4 the seam exists, the edge is total, the join is
+total, the analyses traverse edges. Now the class exists and the fusion
+ends.
 
 1. **The class, with the spec-§2 contract.** RED: new
    `t/bootstrap/transform/type-inference-contract.t` — 
@@ -473,8 +435,7 @@ Now the class exists and the fusion ends.
    the `%graphs` hash they still take. That hash is PRIVATE, never in any
    signature outside `Analysis.pm`, marked at its one construction site
    with a comment naming this paragraph, and its elimination (each pass
-   rewritten to pure edge traversal) is the filed migration in §9. T1 is
-   born conforming; the debt is inside, fenced, and named. **Class
+   rewritten to pure edge traversal) is the filed migration in §11. **Class
    metadata:** the loader attaches the DECODED wire `classes` section to
    graphs (pure deserialization — reproducing what the frontend
    serialized); T1 reads it from the graph, builds and seals the MOP
@@ -509,14 +470,15 @@ Now the class exists and the fusion ends.
    `grep -rln from_json t/bootstrap --include='*.t'` before executing.
    **Acceptance, the two numbers that must move together (spec §7/§9.1):**
    `loader-reproduces-the-wire.t` reads **0** and asserts, AND the gate
-   holds at **218**. One change does both or the seam is wrong.
+   holds at **215** (D2's number until T2). One change does both or the
+   seam is wrong.
    **Gate run G9.**
 5. **What does NOT happen here:** `%LOWERABLE_STAMP` and the
    Print→Boolean seed stay in place until the exit report's `Unknown`
    count reaches zero (spec §8: the filter is deletable on T1's
    COMPLETION — while Unknowns still leave T1, the filter is what keeps
    the poison value out of the shared stamp/representation field, per the
-   old plan's 3b record). Tracked in §9.
+   old plan's 3b record). Tracked in §11.
 
 ---
 
@@ -544,10 +506,8 @@ implements it.
    `NodeFactory.pm:91`'s `%DATA_CLASSES`. Confirm Pi lands in
    `node-identity-kind.t`'s `@checked`, not silently in `@unbuildable`
    (needs a `%REQUIRED` entry at `:144`).
-3. **Topo order, red status unknown.** The old step here (TypedInvariant
-   exemption) was REFUTED by execution — `representation()` is on the
-   Node base class and both cited sites already skip undef on the next
-   line; the proposed red was vacuously green. Replacement subject:
+3. **Topo order, red status unknown.** (The old TypedInvariant-exemption
+   step was refuted — verification doc, slice 5.) Subject:
    `Graph::nodes()` topo order with a control-node producer edge on a
    value node — UNTESTED by anyone, and MEMORY warns against changing
    that walk. Build `Pi(value, guard=Proj)`, call `nodes()`, assert Proj
@@ -577,7 +537,7 @@ implements it.
    "the only phase that sees `if (defined $x)` as syntax" — for the
    B::SoN path that phase does not exist (it walks the optree); Chalk's
    own `Bootstrap/Perl/Actions.pm` (7 `make('If')` sites) is the natural
-   single-repo owner (spec erratum, §11). RED:
+   single-repo owner (spec erratum, §13). RED:
    `pi-narrows-under-defined-guard.t` — the use INSIDE the guard has the
    narrower effective stamp; the use OUTSIDE does not. T1's STRENGTHEN
    rule: a Pi's effective stamp is `refine(pi_stamp, input.stamp)`,
@@ -593,41 +553,36 @@ implements it.
 
 ---
 
-## 10. Gate schedule — where the coordinator runs the 218
+## 10. Gate schedule — where the coordinator runs the gate
 
 The gate is `t/bootstrap/corpus/son-corpus-wide.t` (~10 min), floor
-asserted at `:322` (`cmp_ok >= 218`). ALWAYS run by the coordinator on
+asserted at `:322` (`cmp_ok >= 218`; 215 after Phase 3 step 4 lowers it
+per D2). ALWAYS run by the coordinator on
 committed HEAD, never a subagent self-report; serialized (the gate reads
 perl5-son live). Every step between gate runs is a separate commit,
 independently revertible.
 
 | Gate | After | Kind | Expected |
 |---|---|---|---|
-| G0 | Phase 0 | decisions recorded, D1/D2 ratified by perigrin | — |
+| G0 | Phase 0 | decisions recorded; D1/D2 ratified 2026-08-26 | DONE |
 | G1 | Phase 1 step 6 | gate run | 218; wire.t = 16; all five assemblers through Pipeline or STOP |
 | G2 | Phase 2 step 1 | gate run | 218 exactly (scratch experiment predicts byte-identical); any movement = revert, not patch |
 | G3 | Phase 2 step 3 | gate run + scratch revert-independence check first | 218 |
 | G4 | Phase 2 step 4 | gate run + 25 affected files + 3 silent-survivor hand-reads | 218 |
 | G5 | before Phase 3 step 2 | measurement only (both `_element_repr` callers, freeze count, `:1598` reachability) | remedy decided from data |
-| G6 | Phase 3 | gate run | 218 and MUST NOT MOVE — unless step 4's measurement found live-guess cases, in which case the drop equals those cases, each a named latent miscompile surfaced (perigrin rules before landing) |
+| G5b | Phase 3 step 4 | gate run | 215 exactly (218 − L3b/L3c/L3d); anything else falsifies the D2 accounting |
+| G6 | Phase 3 | gate run | 215 and MUST NOT MOVE further — unless step 5's measurement found live-guess cases, in which case the drop equals those cases, each a named latent miscompile surfaced (perigrin rules before landing) |
 | G7 | before Phase 4 step 3 | measurement only (multi-callsite callee census) | test strategy calibrated |
-| G8 | Phase 4 | gate run + white-box internal callers + `lli==perl==99` for B5 | ≥ 218; a raise is legitimate (2547-GAP cases going green) and is taken per §9.3 pairing |
-| G9 | Phase 5 step 4 | gate run | **218 AND wire.t = 0, in the same run** — the spec-§7 acceptance |
-| G10 | Phase 6 step 6 | gate run | 218 |
-| G11 | Phase 6 step 7 | cross-repo gate | 218 |
+| G8 | Phase 4 | gate run + white-box internal callers + `lli==perl==99` for B5 | ≥ 215; a raise is legitimate (2547-GAP cases going green) and is taken per §9.3 pairing |
+| G9 | Phase 5 step 4 | gate run | **215 AND wire.t = 0, in the same run** — the spec-§7 acceptance |
+| G10 | Phase 6 step 6 | gate run | 215 |
+| G11 | Phase 6 step 7 | cross-repo gate | 215 |
 
 Standing at every gate: `loader-reproduces-the-wire.t` never RISES above 16
-(target 0 at G9); every RED is proven red before its green (two of the old
-plan's reds were demonstrably vacuous; one more was green-on-arrival after
-re-scoping).
-
-**Honesty about the number:** two places in this plan can legitimately move
-it. Phase 3 step 4 can DROP it by surfacing latent guess-miscompiles as
-loud GAPs — that is the project invariant working (GAP-not-miscompile), and
-each such case is a bug report, not a regression; perigrin rules on landing
-vs. deferring per-site. Phase 4 can RAISE it by fixing heterogeneous-store
-containers. Nothing else may move it, and D2 parks the one old-plan step
-that knowingly broke it.
+(target 0 at G9); every RED is proven red before its green. Only three
+places may move the number — Phase 3 step 4 (218 → 215, D2), Phase 3
+step 5 (surfaced guess-miscompiles, perigrin rules per-site), Phase 4 (a
+raise). Nothing else may move it.
 
 ---
 
@@ -636,7 +591,7 @@ that knowingly broke it.
 | Deferred item | Why | Tracked where |
 |---|---|---|
 | T2 (encoding transform) | its own project; spec §1 defines it | file on zhi when Phase 5 completes: "T2 — the encoding transform (Scalar→%Slot, merge boxing, Undef singleton)" |
-| ~~Undef-drop deletion~~ — NO LONGER DEFERRED | D2 ruled 2026-08-26: in scope, Phase 3, gate → 215 | what IS deferred is the RESTORATION: file on zhi blocked-by-T2, "restore L3b/L3c/L3d to GREEN; gate returns to 218" — T2 is not done while the gate reads 215 |
+| Restoration of L3b/L3c/L3d to GREEN (gate 215 → 218) | requires T2's `Scalar` encoding (D2) | file on zhi blocked-by-T2 at Phase 3 step 4: "restore L3b/L3c/L3d to GREEN; gate returns to 218" — T2 is not done while the gate reads 215 |
 | `%LOWERABLE_STAMP` + Print→Boolean seed removal | spec §8: deletable only when T1's exit-Unknown count is zero | named step of the T2/exit-zero follow-up; re-check the nine `_is_narrowed` guard sites then |
 | `_build_registry_from_mop` retirement | derives six facts the MOP lacks | `docs/plans/2026-06-11-*` LLVM-reads-MOP line (zhi chain "MOP migration") |
 | MOP round-trip through `to_json` | `to_json` emits only `{version, source, methods}` | file on zhi with the T2 chain; until then the Graph-mop invariant is not asserted on reloaded graphs |
@@ -683,26 +638,20 @@ Carried forward or newly introduced; do not build a gate on any of these.
 
 ## 13. Open questions for perigrin (spec touches — flagged, not edited)
 
-1. ~~**D1 ratification.**~~ **RULED 2026-08-26: option (a)** — a separate
-   refinement vocabulary; `%PARENT` is not reparented. Spec §5's worked
-   example remains a SPEC GAP until the vocabulary is written; the fix is
-   additive (a `refine()` beside `meet_types`), so no landed join pin moves.
-2. ~~**D2 ratification.**~~ **RULED 2026-08-26: the temporary drop is
-   acceptable.** The Undef drop is deleted in Phase 3, the gate goes to 215
-   with L3b/L3c/L3d as declared GAPs, spec §9.5 is amended in the same
-   commit, and restoration to 218 becomes T2's acceptance criterion.
-3. **Spec §5 erratum.** "The frontend CREATES a Pi… the only phase that
+1. **Spec §5 erratum.** "The frontend CREATES a Pi… the only phase that
    sees `if (defined $x)` as syntax" — on the B::SoN path no phase sees
-   syntax (it walks the optree); Chalk's own `Actions.pm` does. Phase 6
-   step 6 proceeds on Actions.pm as the single-repo owner; the spec
-   sentence should eventually say "the frontend" without the syntax
-   rationale, or name both frontends.
-4. **Spec §4 gap: `meet_types` (and `refine`) can return `None`.** A Pi
+   syntax; Chalk's own `Actions.pm` does (Phase 6 step 6 proceeds on that
+   basis). The spec sentence should eventually say "the frontend" without
+   the syntax rationale, or name both frontends. Also: spec §5's worked
+   example remains a SPEC GAP until D1's vocabulary is written; the fix is
+   additive (a `refine()` beside `meet_types`), so no landed join pin
+   moves.
+2. **Spec §4 gap: `meet_types` (and `refine`) can return `None`.** A Pi
    whose piStamp contradicts its input yields the lattice bottom — an
    unreachable-branch fact. The exit condition never discusses `None`. Is
    it a GAP, a dead-code fact for the optimizers, or §3-style
-   contradiction evidence (die)? Needed before Phase 6 step 6, not before.
-5. **Phase 3 step 4's expected finding.** If the guess-site measurement
+   contradiction evidence (die)? Needed by Phase 6 step 6, not earlier.
+3. **Phase 3 step 5's expected finding.** If the guess-site measurement
    shows corpus cases reaching a live `// 'Int'`, the gate will drop when
    the guess becomes a GAP — each such case is a latent miscompile at
    HEAD. Standing instruction requested: land the loud GAP and lower
