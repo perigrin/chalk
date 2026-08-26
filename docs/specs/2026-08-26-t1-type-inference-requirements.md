@@ -150,14 +150,34 @@ This also matches the producer, where the rule already holds structurally:
 `SoN::IR::Value` requires a stamp at construction, so absence is impossible on
 that side.
 
-**An earlier draft of this document made absent and `Unknown` two distinct
-failure classes** with separate diagnostics and separate counts, on the
-reasoning that one means "a missing rule" and the other "a rule that could not
-conclude". That distinction dissolves under normalization: after entry there
-are no absent stamps to distinguish. What survives is a diagnostic nicety — a
-node that arrived absent may be worth naming as such when reporting an
-irreducible `Unknown`, since it suggests no rule covers that node kind at all.
-That is reporting detail, not a second condition.
+### Absent IS a distinct bug class — in the FRONTEND, not in T1
+
+The distinction dissolves *for T1*, which normalizes both and treats them
+identically from entry onward. It does not dissolve upstream, and conflating
+the two there loses real information:
+
+- **`Unknown` on the wire** — the frontend looked and honestly could not
+  determine a type. Correct behaviour. Nothing to fix.
+- **ABSENT on the wire** — the frontend never looked. No stamping rule covers
+  that node kind. **That is a frontend bug.**
+
+The producer's own design says so: `SoN::IR::Value` requires a stamp at
+construction, so absence is structurally impossible there. **An absent stamp
+arriving on the wire means something bypassed that constructor** — which is
+exactly the shape of two bugs already found and fixed this month: `ArgsSource`
+defaulting to `Unknown` because nothing asked, and aggregate signature
+parameters left unstamped because a comment described a die that had stopped
+happening.
+
+So T1 normalizes, but **must not erase the signal**. Every node that ARRIVES
+absent is recorded and reported as a frontend defect, whether or not T1 later
+narrows it. Reporting it only when the node stays `Unknown` — as an earlier
+draft of this section had it — hides exactly the cheapest cases: an absent node
+that T1 successfully types is still a frontend rule that does not exist, and it
+disappears from the record precisely because T1 did its job.
+
+Measured today: **10 such nodes** across the 218-case corpus (2 `Call`, 1
+`Ref`, 7 downstream `Phi`). That is a frontend punch list, not a T1 backlog.
 
 **Control nodes carry NO type, and this is not a weaker form of the rule.**
 `Start`, `Region`, `If`, `Loop` define no value, so asking their type is a
@@ -289,12 +309,16 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
    - **no stamp may widen** without a merge that requires it — `Int` in,
      `Scalar` out, is a failure;
    - **`Unknown` count at the exit must reach ZERO.** Absence is normalized to
-     `Unknown` on entry, so this is the whole condition — there is no separate
-     absent-stamp count. Counted over Value nodes only; a control node carrying
-     a stamp is its own failure, not a success. Until the count reaches zero
-     the residue is REPORTED, naming what each node needed and why it was
-     unavailable — and noting where a node ARRIVED absent, which hints that no
-     rule covers its kind at all;
+     `Unknown` on entry, so this is the whole EXIT condition. Counted over
+     Value nodes only; a control node carrying a stamp is its own failure, not
+     a success. Until the count reaches zero the residue is REPORTED, naming
+     what each node needed and why it was unavailable;
+   - **arrived-absent count is reported separately, and is a FRONTEND metric.**
+     Not an exit condition — T1 normalizes those nodes and may well type them —
+     but every one is a frontend rule that does not exist, and the count is
+     only visible here. It must be reported whether or not T1 narrows the node,
+     or the easiest frontend bugs vanish from the record by being fixed
+     downstream;
    - **the count of narrowed nodes** (strictly-below-input type) is the number
      that must trend up, per corpus case, tracked like the gate floor.
 
