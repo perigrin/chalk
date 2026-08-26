@@ -4,6 +4,40 @@
 **Status:** REQUIREMENTS. T1 does not exist. This says what would have to be
 true for it to.
 
+## T1 IS A CORRECTNESS TRANSFORM, NOT AN OPTIMIZATION
+
+Stated first because every other requirement follows from it, and because I
+have drifted off it twice: filing `DefinedOrFold` under `Optimizer::` by
+default, and writing narrowing as a "quality metric" before being corrected.
+
+**The test:** *can the compiler still produce a correct program without this
+stage?* Remove an optimizer and you get a slower correct program. Remove T1 and
+the backend receives a graph it cannot lower — or lowers by guessing, which is
+what produced three real miscompiles on 2026-08-25. **T2 is the same**: remove
+it and there is no encoding at all.
+
+Four consequences, none cosmetic:
+
+1. **Namespace.** Neither belongs under `Optimizer::`. Not tidiness — filing a
+   required stage as optional is exactly how the inliner became the only call
+   mechanism, which this project already recorded as an architectural error.
+   They share the `Graph -> Graph` SHAPE with optimizer passes; that is an
+   interface, not a category.
+2. **Failure semantics.** An optimizer that cannot handle a case DECLINES and
+   passes it through. A correctness transform that cannot handle a case FAILS
+   LOUDLY. That is why "no `Unknown` exits T1" is an error rather than a
+   best-effort target: declining is not available to it.
+3. **Narrowing is correctness here, not precision.** In an optimizer,
+   narrowing is a nice-to-have. In T1 it is part of the contract, because T1's
+   output is the input to a stage that must CHOOSE AN ENCODING — an
+   un-narrowed type does not produce a slower program, it produces a boxed one,
+   a GAP, or a downstream guess.
+4. **It settles what may be optional AROUND them.** `DefinedOrFold` genuinely
+   is an optimizer: remove it and T2 still boxes correctly, just over a merge
+   that need not have existed. It is in the right namespace — but it got there
+   by default rather than by asking the question, which is the habit this
+   section exists to break.
+
 ## Why this document exists
 
 On 2026-08-26 I attempted the loader/T1 split by deleting `from_json`'s call to

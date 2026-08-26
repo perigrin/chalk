@@ -908,6 +908,13 @@ graph that GAPs today with "no repr" will GAP with "Scalar has no machine
 representation" until T2 exists. **A different GAP with a better message is
 still a GAP: no regression, and the failure now names the real gap.**
 
+**T2 IS ALSO A CORRECTNESS TRANSFORM, not an optimization.** Same test as T1:
+remove an optimizer and the program is slower; remove T2 and there is no
+encoding at all. So it fails loudly rather than declining, and it does not
+belong under `Optimizer::` however much it shares the `Graph -> Graph` shape.
+See `docs/specs/2026-08-26-t1-type-inference-requirements.md` §1 for why that
+distinction is load-bearing rather than cosmetic.
+
 T2 then owes two things, recorded here so they are not rediscovered:
 
 - `Scalar => '%Slot'`. `%Slot` is `{i1 defined, i64 payload}` and is already
