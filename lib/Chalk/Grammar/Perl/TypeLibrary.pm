@@ -215,6 +215,28 @@ class Chalk::Grammar::Perl::TypeLibrary {
     }
 
     # Returns true if $child is a subtype of (or equal to) $parent.
+    # is_lattice_type($name) -> is this a member of the type lattice at all?
+    #
+    # The lattice is %PARENT, and it is lexical -- so a caller outside this
+    # module cannot ask "is this a type?" without one of these. That gap is why
+    # machine ENCODINGS have been able to sit in type-shaped fields unchallenged:
+    # `Slot` (the {i1 defined, i64 payload} cell) reaches the stamp field via
+    # the OOB path, and nothing could cheaply tell it apart from `Undef`.
+    #
+    # Use it at any boundary where a type-shaped value crosses out of the
+    # compiler -- serialization being the first, since a non-lattice name
+    # written to the wire turns an in-memory confusion into a persistent one.
+    # `Unknown` (top) and `None` (bottom) are members but are NOT %PARENT keys:
+    # every branch points UP to Unknown and nothing points below None, so
+    # neither has a parent entry of its own. Testing %PARENT alone rejects both
+    # -- verified, and it would have silently dropped every deliberate
+    # `Unknown` the producer sends.
+    sub is_lattice_type($name) {
+        return false unless defined $name;
+        return true if $name eq 'Unknown' || $name eq 'None';
+        return exists $PARENT{$name} ? true : false;
+    }
+
     # Uses O(1) bitwise AND when both types have bitfields.
     # Falls back to parent-chain walking for unknown types.
     # None is subtype of everything.

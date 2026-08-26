@@ -39,7 +39,7 @@ subtest 'set_representation DESTROYS the type -- this is not symmetric' => sub {
         'the Int type is gone -- destructive, by construction';
 };
 
-subtest 'PRECONDITION: nothing in lib/ reads the type axis' => sub {
+subtest 'PRECONDITION: no UNGUARDED reader of the type axis in lib/' => sub {
     # THE LOAD-BEARING FACT. The loader writes `Slot` into the shared field for
     # a statically out-of-bounds Subscript (Serialize/JSON.pm:1459), and `Slot`
     # is not a member of the type lattice. Every provably-OOB element read
@@ -50,9 +50,23 @@ subtest 'PRECONDITION: nothing in lib/ reads the type axis' => sub {
     # an OOB read yields perl's undef, with `Slot` being the lowering pass's
     # encoding choice.
     #
-    # So: fail here, loudly, the moment a production ->stamp reader appears.
-    # Fixing this test means fixing the OOB path to write a TYPE, not deleting
-    # the assertion.
+    # So: fail here, loudly, the moment an UNGUARDED production ->stamp reader
+    # appears. Fixing this test means fixing the OOB path to write a TYPE, not
+    # deleting the assertion.
+    #
+    # NARROWED 2026-08-26, when the first legitimate reader arrived. `to_json`
+    # must read the stamp -- a serializer that cannot emit the type axis means
+    # chalk cannot hand a typed graph to anything, including a future chalk.
+    # It reads the field and then REFUSES to emit a non-lattice value, via
+    # TypeLibrary::is_lattice_type, so `Slot` is dropped rather than written to
+    # the wire.
+    #
+    # That is the shape a safe reader has: read, then check membership before
+    # believing it. The sweep therefore exempts a reader on a line that also
+    # tests lattice membership, and still fails on a bare one. It is a
+    # heuristic -- a reader that checks membership three lines later passes
+    # this and should not -- but it discriminates the case that exists, and a
+    # heuristic that names its limit beats an assertion quietly deleted.
     my $root = 'lib';
     my @readers;
     my @files;
@@ -69,6 +83,11 @@ subtest 'PRECONDITION: nothing in lib/ reads the type axis' => sub {
     };
     $walk->($root);
 
+    # A guard is not always on the reader's own line -- `to_json`'s spans an
+    # if-condition and its body. Read each file whole and look for the check
+    # within a few lines ABOVE the read, which is where a guard lives.
+    my $GUARD_WINDOW = 4;
+
     for my $f (@files) {
         # Chalk::IR::Node itself defines the accessors; it is not a consumer.
         next if $f eq 'lib/Chalk/IR/Node.pm';
@@ -78,13 +97,23 @@ subtest 'PRECONDITION: nothing in lib/ reads the type axis' => sub {
         # it is not the consumer this precondition is guarding against.
         next if $f eq 'lib/Chalk/IR/Analysis.pm';
         open my $fh, '<', $f or next;
-        while (my $line = <$fh>) {
+        my @lines = <$fh>;
+        close $fh;
+
+        for my $i (0 .. $#lines) {
+            my $line = $lines[$i];
             next if $line =~ /^\s*#/;              # comments are not readers
             next unless $line =~ /->stamp\b/;
             next if $line =~ /->stamp\s*\(/;       # a call, not the reader
-            push @readers, "$f:$.";
+
+            # A reader that checks lattice membership -- on its own line or in
+            # the guard just above -- has done the one thing that makes reading
+            # this field safe.
+            my $from = $i - $GUARD_WINDOW < 0 ? 0 : $i - $GUARD_WINDOW;
+            next if grep { /is_lattice_type/ } @lines[ $from .. $i ];
+
+            push @readers, "$f:" . ( $i + 1 );
         }
-        close $fh;
     }
 
     is \@readers, [],

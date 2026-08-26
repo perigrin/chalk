@@ -73,14 +73,35 @@ sub stamp_diffs ($before_json, $after_json) {
         my $a = ($after->{methods}{$gname} // {})->{nodes} // [];
         unless (@$a) { push @diffs, "$gname: MISSING from re-encode"; next }
 
-        my %after_by_id = map { ($_->{id} // '') => $_ } @$a;
-        for my $bn (@$b) {
-            my $an = $after_by_id{ $bn->{id} // '' } or next;
-            my ($bs, $as) = ($bn->{stamp}, $an->{stamp});
-            next if !defined $bs && !defined $as;
-            next if defined $bs && defined $as && $bs eq $as;
-            push @diffs, sprintf('%s %s: wire=%s reloaded=%s',
-                $gname, $bn->{op} // '?', $bs // '(none)', $as // '(none)');
+        # NOT KEYED ON id. Wire ids are POSITIONAL, and `to_json` renumbers by
+        # its own topological walk -- wire id=0 is Start while reloaded id=0 is
+        # a Constant. An earlier version of this comparison keyed on id and
+        # reported three phantom differences, including two stamps that looked
+        # SWAPPED (Int<->ArrayRef) but were simply two different nodes.
+        #
+        # Compare the multiset of (op, stamp) pairs per graph instead. That is
+        # invariant under renumbering and still catches a stamp appearing,
+        # vanishing, or changing -- which is all this test is about. It cannot
+        # localise WHICH node of a repeated op changed, and does not need to.
+        my (%b_count, %a_count);
+        $b_count{ ( $_->{op} // '?' ) . "\0" . ( $_->{stamp} // '(none)' ) }++
+            for @$b;
+        $a_count{ ( $_->{op} // '?' ) . "\0" . ( $_->{stamp} // '(none)' ) }++
+            for @$a;
+
+        for my $key (sort keys %b_count) {
+            my $delta = ( $b_count{$key} // 0 ) - ( $a_count{$key} // 0 );
+            next if $delta <= 0;
+            my ($op, $stamp) = split /\0/, $key;
+            push @diffs, sprintf('%s %s:%s -- %d fewer after reload',
+                $gname, $op, $stamp, $delta);
+        }
+        for my $key (sort keys %a_count) {
+            my $delta = ( $a_count{$key} // 0 ) - ( $b_count{$key} // 0 );
+            next if $delta <= 0;
+            my ($op, $stamp) = split /\0/, $key;
+            push @diffs, sprintf('%s %s:%s -- %d MORE after reload',
+                $gname, $op, $stamp, $delta);
         }
     }
     return \@diffs;
@@ -118,7 +139,9 @@ for my $name (sort keys %programs) {
 
 diag('');
 diag("TOTAL stamp differences across the round trip: $total");
-diag('Today these are stamps DROPPED, because to_json emits no stamp field.');
-diag('Fix that first; the residue is then the T1 split, and this asserts.');
+diag('Every one is now a stamp the LOADER ADDED -- Print seeded Boolean,');
+diag('Subscript/Call/Add narrowed from Unknown. That is inference running');
+diag('inside the loader, and it is the size of the T1 split. When T1 moves');
+diag('out, this reaches zero and becomes an assertion.');
 
 done_testing;

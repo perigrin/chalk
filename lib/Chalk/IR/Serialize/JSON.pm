@@ -362,6 +362,49 @@ sub _serialize_graph ($graph) {
             inputs => \@inputs,
         );
         $entry{fields} = $fields if defined $fields;
+        # THE TYPE AXIS. Emitted here because a graph that loses its types on
+        # the way out is not serialized, only sketched.
+        #
+        # This was missing entirely: `stamp` appeared nowhere in to_json, so
+        # every type a graph carried was dropped at serialization. The load
+        # side has always read the field -- B::SoN sends it -- which is how the
+        # asymmetry survived: the wire schema had the key, and only chalk's
+        # emitter never wrote it. Measured by round-tripping producer wire
+        # (t/bootstrap/ir/loader-reproduces-the-wire.t): 27 stamps lost across
+        # four small programs.
+        #
+        # It matters most where there is no B::SoN at all. `to_json` is the
+        # SELF-HOSTING output path, so a serializer that cannot express types
+        # means chalk cannot hand a typed graph to anything -- including a
+        # future chalk.
+        #
+        # Absence stays ABSENT rather than becoming null: the load side
+        # distinguishes "no stamp" from "stamped Unknown", and a key that is
+        # always present would erase that distinction.
+        # ONLY LATTICE TYPES GO ON THE WIRE. The stamp field is shared with
+        # `representation` under the transitional alias, so a machine ENCODING
+        # can be sitting in it -- the OOB path writes `Slot` (a non-lattice
+        # name) at _seed_and_propagate_reprs. Emitting that would make an
+        # in-memory corruption PERSISTENT and hand the next reader a "type"
+        # no lattice contains.
+        #
+        # t/bootstrap/ir/stamp-alias-preconditions.t exists for exactly this,
+        # and caught it: adding the reader above tripped its "nothing in lib/
+        # reads the type axis" sweep, and `"stamp": "Slot"` was verified
+        # reaching the wire before this guard.
+        #
+        # Dropping is right rather than lossy: `Slot` is not information the
+        # TYPE axis can carry, and the honest type for a statically-missing
+        # read is `Undef` (see docs/architecture/ir-and-lowering.md §5). When
+        # the OOB path records that instead, this filter stops firing on its
+        # own. Until then a dropped Slot is better than a fabricated type.
+        # The read and the membership check are ONE expression deliberately:
+        # reading this field is only safe when the check accompanies it, and
+        # the sweep in stamp-alias-preconditions.t recognises that shape.
+        if ($node->can('stamp')
+                && Chalk::Grammar::Perl::TypeLibrary::is_lattice_type($node->stamp)) {
+            $entry{stamp} = $node->stamp;
+        }
         # Produce-time control: emit the control_in edge as its own wire key
         # so from_json can decode it back onto control_in directly, instead
         # of the old convention of flattening control into inputs[0] plus a
