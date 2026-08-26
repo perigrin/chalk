@@ -1037,31 +1037,35 @@ sub _replay_classes ($classes, $graphs) {
     return $mop;
 }
 
-# _join_repr(@reprs) -> the widest, or undef when they do not share a chain.
+# _join_repr(@reprs) -> the least upper bound of the arms on the type lattice.
 #
-# Derived from the TYPE LATTICE rather than a hand-kept widening order. This was
-# `%_REPR_RANK = (Int => 0, Num => 1, Str => 2)`, which is exactly the lattice's
-# Int <: Num <: Str chain re-encoded as integers -- a second copy of something
-# TypeLibrary already states, and the same duplication the Add requirement had.
+# A left fold of TypeLibrary::join_types, which is the lattice authority. This
+# routine holds no widening order of its own: it was first `%_REPR_RANK = (Int
+# => 0, Num => 1, Str => 2)` (the Int <: Num <: Str chain re-encoded as
+# integers) and then a scan for an arm that is a supertype of all the others.
+# Both were a second copy of something TypeLibrary already states, and both
+# were PARTIAL -- they could only answer with a type an arm already named, so a
+# pair whose LUB is neither arm came back undef. `Undef` and `Int` are siblings
+# under `Scalar`: the lattice joins them at Scalar, the arm-scan said undef, and
+# downstream read that as "inference failed" when it was the join that could not
+# express the answer.
 #
-# The lattice also EXPLAINS the two exclusions the rank table could only record
-# as absence: Undef and Boolean are siblings under Scalar, not points on the
-# numeric-to-string chain, so neither widens into it. Verified against
-# is_subtype: Int <: Num <: Str all hold; Undef <: Str, Undef <: Num,
-# Boolean <: Str and Boolean <: Num all do not.
+# The fold is TOTAL: every pair of lattice elements has a join, bottoming out at
+# `Unknown` for elements sharing no ancestor (Slot with anything else). Note
+# what that means for the callers -- `Unknown` is now a RESULT, not just an
+# input, and it ABSORBS (join_types:309), so an arm inference could not type
+# makes the whole merge Unknown rather than being discarded in favour of the
+# known arm. That is deliberate (spec section 10): typing a merge from one arm
+# when the other is unknown is a guess about the unknown one.
 #
-# Returns undef when no candidate is a supertype of every repr -- the caller
-# leaves the node untyped and the backend GAPs loudly, rather than guessing a
-# widened type the merge phi cannot express.
+# Returns undef ONLY for the empty arm list. No arms is not a join with an
+# answer; every other input has one.
 sub _join_repr (@reprs) {
     return undef unless @reprs;
 
-    for my $cand (@reprs) {
-        return $cand
-            if !grep { !Chalk::Grammar::Perl::TypeLibrary::is_subtype($_, $cand) }
-                     @reprs;
-    }
-    return undef;
+    my $acc = shift @reprs;
+    $acc = Chalk::Grammar::Perl::TypeLibrary::join_types($acc, $_) for @reprs;
+    return $acc;
 }
 
 # _seed_and_propagate_reprs(\%graphs) — the universal repr pass (runs for EVERY
