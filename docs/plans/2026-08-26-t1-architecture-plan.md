@@ -313,6 +313,17 @@ class-less probe). Steps, in order:
    change to the second value and cannot be trusted to fail. This step
    most resembles the 218→136 change; it lands ONLY because Phase 1
    migrated all five assemblers (C5). **Gate run G4.**
+**REVIEW DEBT, RULED 2026-08-26.** Steps 0-3 received adversarial VERIFICATION
+   (did behaviour change: 22-case differential, 240-case corpus sweep, bidirectional
+   die sabotage) but NOT agentic REVIEW (is the code sound). Phase 1 received
+   neither — its `Pipeline.pm` is new infrastructure that all five assemblers
+   INCLUDING THE GATE route through, so a wrong-but-consistent Pipeline reads as
+   green. perigrin ruled: defer, and review Phase 1 + Phase 2 as ONE unit at G4.
+   **That review is a G4 exit condition, not optional cleanup.** Evidence the gap
+   is real: `LLVM.pm:538`'s latent `// ` bug was found by a step-3 agent tripping
+   over it, not by anyone reading the code — and its four B4 siblings are still
+   unreviewed with Phase 3 heading straight at them.
+
 5. **Do NOT delete `_build_registry_from_mop`.** It derives six classes of
    fact the MOP does not hold (vtable slots, flattened inheritance,
    exactly-one-Return enforcement, return-repr fallback, `:reader`
