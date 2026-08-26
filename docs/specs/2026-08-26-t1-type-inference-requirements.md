@@ -88,10 +88,7 @@ die on disagreement, *"refusing rather than picking silently"* — generalised.
 It may want revisiting once chalk is no longer under active development; while
 it is, a contradiction surfacing loudly is worth more than a compiled program.
 
-T1 checks what it computes anyway; it does not audit the producer. And the
-frame dissolves at self-hosting, where the frontend IS chalk — a disagreement
-is chalk contradicting itself, so the check is internal consistency, not
-verification of a supplier.
+T1 checks what it computes anyway; it does not audit the producer.
 
 ## 4. Exit condition
 
@@ -102,26 +99,15 @@ inference, while `Unknown` is a lattice value every rule can act on.
 
 > **No Value node leaves T1 stamped `Unknown`.**
 
-On input `Unknown` is honest (one compilation unit). On output it is not,
-because T1 sees the whole program — so if T1 cannot determine a type, no later
-phase has more to work with. `Unknown` at the exit is an **unfinished
-analysis**, not an un-narrowed type.
+On input `Unknown` is honest — one compilation unit. On output it is not,
+because T1 sees the whole program, so no later phase has more to work with.
 
-**It is a GAP, not an internal error**, and the distinction matters for what it
-implies. Perl has constructs with no static type at any phase — `eval "$str"`,
-`$obj->$name()`, runtime `@ISA` mutation, `AUTOLOAD`, glob assignment. For
-those, `Unknown` is permanently correct rather than unfinished.
-
-They need no special handling, because **an un-typeable construct is an
-un-lowerable one**: `eval "$str"` has no static type AND no runtime-free
-lowering, for the same reason. So `Unknown` at the exit is an early, legible
-report of a GAP the backend would raise anyway — chalk declining a construct it
-does not support, which is the project's existing idiom and implies nothing
+**It is a GAP, not an internal error.** Perl has constructs with no static type
+at any phase (`eval "$str"`, `$obj->$name()`, runtime `@ISA`), and they need no
+special handling because **an un-typeable construct is an un-lowerable one** —
+same reason, so the exit condition reports early what the backend would raise
+anyway. Chalk declining a construct it does not support, which implies nothing
 broken.
-
-That also disposes of a tempting refinement: a separate `Dynamic` stamp for
-"provably not statically knowable" would be machinery to distinguish two cases
-that get identical treatment.
 
 **`Scalar` is NOT the same category.** It is a real answer and a legitimate
 exit type — *"Scalar is a legitimate static answer, Unknown is an inference
@@ -150,11 +136,11 @@ make the fact BE a value whose inputs pin it. Every floating-IR system does
 this — Graal `PiNode`, C2 `ConstraintCast`, TurboFan `TypeGuard` (survey in the
 derivation doc).
 
-This preserves "control nodes carry no stamp": Graal's `GuardingNode` is a
-marker interface with **zero methods** — the guard is any node in a control
-position where the fact holds. The Pi's guard input is the `Proj`/`Region` for
-the taken branch. Control nodes influence stamps by being pointed at.
-Soundness falls out of dominance, with no scheduler changes.
+**The Pi's guard input is the `Proj`/`Region` for the taken branch**, so
+control nodes influence stamps by being pointed at while still carrying none,
+and soundness falls out of dominance with no scheduler changes. Graal's
+`GuardingNode` is a marker interface with zero methods for exactly this reason
+— the guard is a position, not a condition object.
 
 Three points to copy, each with the failure it prevents:
 
@@ -174,13 +160,9 @@ information is:
 | **T1** | STRENGTHENS. It knows types the frontend does not, so a Pi's `piStamp` can improve; monotonically, never widening (§5 rule 1). T1 does not create the refinement structure, only sharpens it. |
 | **Scheduler** | DELETES every Pi once nodes are pinned, then re-derives positionally. A Pi's whole job is to say "this holds only here" to a value that FLOATS; once position is fixed the position says it. |
 
-Pis live exactly as long as things float — Graal's `FixReadsPhase` is the same
-boundary. **A Pi reaching the backend is a bug**: it is a node with no lowering,
-because by then it should have been positional information rather than a value.
-
-The failure if this is left unassigned: the frontend creates them, nothing
-strengthens them (so they stay as weak as the frontend's knowledge), and
-nothing deletes them (so they arrive at a backend with no rule for them).
+**A Pi reaching the backend is a bug** — a node with no lowering, because by
+then it should have become positional information. Graal's `FixReadsPhase` is
+the same boundary.
 
 Prior art for `remove(σ, Undef)` specifically: Tobin-Hochstadt & Felleisen's
 occurrence typing (POPL 2008, ICFP 2010), which names **Perl** as a motivating
@@ -204,9 +186,6 @@ Candidates: non-escaping locals surviving calls (Flow's two-tier model),
 `foreach` over a container nothing else writes, `@_` where the callee provably
 does not write, and references that never escape staying in value-SSA at all.
 
-**Name the policy in the code.** Every system that wrote its boundary down
-(Kotlin's stability rules, mypy's aliasing note, Flow's `is_const_like`) fared
-better than those that met it in a bug report.
 
 ## 6. The MOP must ride on the IR — it IS the inter-unit edge
 
@@ -219,18 +198,11 @@ handle is the inter-unit reference. With the MOP on the IR, a `Call` can answer
 set. Without it, the only way to reach a callee is a lookup in a hash somebody
 passed alongside — which is the graph-set shape §2 rejects.
 
-Today the MOP is an *output of inference*: `_replay_classes` builds it and is
-one of the eleven passes, forcing `run` to return `($graphs, $mop)` and every
-consumer to take both. That is also why removing the loader's analysis call
-broke the backend at `_build_registry_from_mop` — the connection between caller
-and callee WAS the return value, so severing it left nothing to resolve
-through.
-
-`_build_registry_from_mop` is a second copy of what the MOP already knows,
-rebuilt at lowering time. It goes away for the same reason: if the MOP is on
-the graph, there is nothing to rebuild.
-
-A prerequisite for the CONTRACT, not one forced by any past breakage.
+Today the MOP is an *output of inference* — `_replay_classes` builds it and is
+one of the eleven passes — which forces `run` to return `($graphs, $mop)` and
+every consumer to take both. `_build_registry_from_mop` then rebuilds a second
+copy at lowering time; with the MOP on the graph there is nothing to rebuild,
+so it goes away too.
 
 ## 7. The pipeline object must exist first
 
@@ -251,9 +223,6 @@ below stop conflicting: `loader-reproduces-the-wire.t` can reach 0 (the loader
 stops analysing) while the gate holds at 218 (the pipeline runs T1), because
 the same change does both.
 
-Wiring T1 into three call sites separately would work and is the wrong shape:
-it duplicates the pipeline a fourth time rather than removing the duplication,
-and the next stage — T2 — would face the same three edits again.
 
 ## 8. What T1 must stop inheriting from the loader
 
@@ -286,13 +255,10 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
    - arrived-absent count reported separately as a frontend metric;
    - narrowed-node count trends up per corpus case, tracked like the gate
      floor — **but only ever raised on a run where the gate holds at 218.**
-
-     A ratchet on narrowing alone rewards exactly the bug this spec exists to
-     prevent: `Int` where a `Str` can flow IS a narrowing, it raises the count,
-     and it is a miscompile. Soundness (condition 4) forbids it but is a
-     property to prove, not a number to check — so the checkable metric would
-     be the one shaping behaviour. Pairing them closes it: unsound narrowing
-     shows up as wrong output, so the count cannot rise on a broken run.
+     Alone it would reward the bug this spec prevents: `Int` where a `Str` can
+     flow IS a narrowing and raises the count. Soundness forbids it but is a
+     property to prove rather than a number to check, so pairing is what makes
+     the checkable metric safe.
 4. **The first version REPORTS rather than asserts** — the exit condition fails
    broadly today, and an assertion that must be disabled to land is what
    `_assert_value_nodes_are_typed` already is.
@@ -300,12 +266,8 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
 
 ## 10. The `Unknown` join policy: ABSORB
 
-`join(Unknown, T)` is `Unknown`. This is what `join_types` already does;
-`_join_repr` DROPS the `Unknown` arm and joins the rest, and the loader depends
-on that today. **Dropping is wrong**, and the reason is not that it violates
-the lattice definition — it is that it guesses ahead of the fixpoint.
-
-An `Unknown` arm in a merge is usually TEMPORARY:
+`join(Unknown, T)` is `Unknown` — what `join_types` already does. `_join_repr`
+DROPS the `Unknown` arm and joins the rest, and the loader depends on that.
 
 ```perl
 my $v;
@@ -313,29 +275,24 @@ if ($c) { $v = f() }   # f's return type not yet resolved -> Unknown
 else    { $v = 2 }     # Int
 ```
 
-**The decisive argument does not depend on the fixpoint at all.** Drop is sound
-only if `f`'s type is ALREADY KNOWN at the join — which is to say, only if `f`
-is defined and analysed before its use. **Perl does not work that way**:
-forward references, mutual recursion, methods resolved through `@ISA`, a sub
-defined below its caller. So drop is either unsound, or it imposes a
-declaration-order constraint the language does not have.
+**Drop is sound only if `f`'s type is already known at the join** — only if `f`
+is defined and analysed before its use. Perl does not work that way: forward
+references, mutual recursion, `@ISA` resolution, a sub defined below its
+caller. So drop is either unsound, or it imposes a declaration-order constraint
+the language does not have.
 
-That also makes the fixpoint NECESSARY rather than incidental. Since
-use-before-definition is legal, no single ordered pass can type everything, so
-iteration is forced by the language rather than chosen. And absorb is what
-makes iteration work:
+That makes the fixpoint FORCED BY THE LANGUAGE rather than an implementation
+choice, and absorb is what makes iteration work:
 
-- **Absorb** yields `Unknown` — a sound intermediate that a later round
-  sharpens once `f` resolves. Correct; merely slower to converge.
-- **Drop** yields `Int` — an UNSOUND intermediate that later rounds have no
-  reason to revisit, because it looks resolved. Wrong if `f` returns `Str`, and
-  the same error as the reverted `Slot`-arm drop one level up: committing to an
-  answer before the evidence is in.
+- **Absorb** yields `Unknown` — a sound intermediate a later round sharpens.
+- **Drop** yields `Int` — an unsound one later rounds have no reason to
+  revisit, because it looks resolved. The same error as the reverted `Slot`-arm
+  drop: committing before the evidence is in, and self-concealing where
+  `Unknown` would have advertised that work remained.
 
-**The poison-spreading objection to absorb is just non-convergence.** Run to
-fixpoint and a surviving `Unknown` means `f` genuinely could not be resolved —
-which §4 then reports at the arm that actually failed, rather than at every
-merge downstream of it.
+The poison-spreading objection to absorb is just non-convergence: run to
+fixpoint, and a surviving `Unknown` means `f` genuinely could not be resolved,
+which §4 reports at the arm that actually failed.
 
 ## 11. Open
 
