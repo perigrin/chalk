@@ -27,11 +27,20 @@ Four consequences, none cosmetic:
    passes it through. A correctness transform that cannot handle a case FAILS
    LOUDLY. That is why "no `Unknown` exits T1" is an error rather than a
    best-effort target: declining is not available to it.
-3. **Narrowing is correctness here, not precision.** In an optimizer,
-   narrowing is a nice-to-have. In T1 it is part of the contract, because T1's
-   output is the input to a stage that must CHOOSE AN ENCODING — an
-   un-narrowed type does not produce a slower program, it produces a boxed one,
-   a GAP, or a downstream guess.
+3. **Narrowing is correctness here, not precision** — but with the outcomes
+   ranked, because they are NOT comparable. T1's output feeds a stage that must
+   choose an encoding, and an un-narrowed type leads to one of three places:
+
+   | outcome | verdict |
+   |---|---|
+   | **boxed** | CORRECT, slower. Perfectly acceptable. |
+   | **GAP** | no program, loudly. Acceptable. |
+   | **guess** | wrong program, silently. **The only unacceptable one.** |
+
+   **Boxing is okay; incorrect lowering is not.** An earlier draft listed those
+   three as though they were comparable bad outcomes; they are not, and the
+   ordering is the whole point. Narrowing matters because it moves work off the
+   boxed path — never because the boxed path is wrong.
 4. **It settles what may be optional AROUND them.** `DefinedOrFold` genuinely
    is an optimizer: remove it and T2 still boxes correctly, just over a merge
    that need not have existed. It is in the right namespace — but it got there
@@ -388,8 +397,8 @@ Its output is well-typed per the five conditions in
 `docs/plans/2026-08-24-loader-analysis-pipeline.md` §"What well-typed means":
 **total, lattice-membered, conformant, sound, maximally narrowed.** Condition 5
 is part of correctness, not a quality metric: T1's output feeds a stage that
-must pick an encoding, so an un-narrowed type does not produce a slower program
-— it produces a boxed one, a GAP, or a later stage guessing.
+must pick an encoding, so an un-narrowed type lands on the boxed path, a GAP,
+or a later stage guessing — ranked in §1, and only the last is unacceptable.
 
 ## What T1 does NOT own, and must stop inheriting
 

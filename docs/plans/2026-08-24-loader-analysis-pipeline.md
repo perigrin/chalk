@@ -755,9 +755,15 @@ that is when the LLVM-SoN side gets a home.
    section got that wrong. Narrowing is optional in an OPTIMIZER: skip it and
    the program is slower. It is not optional here, because **T1's output is the
    input to a stage that must choose an encoding.** A `Scalar` that could have
-   been `Int` does not produce a slower program; it produces a boxed one, a
-   GAP, or — the 2026-08-25 failure mode — a later stage GUESSING what T1
-   declined to determine.
+   been `Int` lands on the boxed path, a GAP, or — the 2026-08-25 failure mode
+   — a later stage GUESSING what T1 declined to determine.
+
+   **Those three are NOT comparable, and the ranking is the point. Boxing is
+   okay; incorrect lowering is not.** A boxed value is CORRECT and slower,
+   which is acceptable; a GAP is no program, loudly, which is acceptable; a
+   guess is a wrong program, silently, and is the only unacceptable outcome.
+   Narrowing matters because it moves work off the boxed path — never because
+   the boxed path is wrong.
 
    The test of the definition: `Unknown` everywhere satisfies conditions 1-4
    and is worthless. A definition a useless answer satisfies is the wrong

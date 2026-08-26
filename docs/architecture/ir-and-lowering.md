@@ -439,8 +439,17 @@ gives the lowering pass a ladder rather than a single answer:
 
 The bottom row is the point: monomorphism does not merely let the tag be
 elided, it **deletes the container cell**. An `Array[Int]` is `i64*` plus a
-length. `%Slot` is the price of having proven nothing yet, and the optimizer's
-job is to stop paying it. This is the same claim §5's `ArrayRef[Scalar]`
+length. `%Slot` is what you pay for having proven nothing yet, and the
+optimizer's job is to stop paying it.
+
+**Read that as a cost, not a defect. Boxing is okay; incorrect lowering is
+not.** The boxed form is CORRECT — it is the encoding that is always available
+and always right, and it is the floor the ladder rises from rather than a
+failure state to escape. Narrowing removes an unnecessary cost; it never
+repairs a wrong answer. Anything that unboxes without a proof is trading the
+one property that is not negotiable for the one that is.
+
+This is the same claim §5's `ArrayRef[Scalar]`
 reframing makes about types, expressed as machine encodings.
 
 **`Undef` is a unit type, so a `{defined=0}` slot hash-conses to one value.**
