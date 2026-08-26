@@ -313,16 +313,24 @@ if ($c) { $v = f() }   # f's return type not yet resolved -> Unknown
 else    { $v = 2 }     # Int
 ```
 
-The `Unknown` is `f`'s return type, which T1 resolves by following the call
-edge. So the real question is not "what is `join(Unknown, Int)`" but **"what
-should a join do when an input has not been narrowed YET"** — a fixpoint
-ordering question, not a lattice one.
+**The decisive argument does not depend on the fixpoint at all.** Drop is sound
+only if `f`'s type is ALREADY KNOWN at the join — which is to say, only if `f`
+is defined and analysed before its use. **Perl does not work that way**:
+forward references, mutual recursion, methods resolved through `@ISA`, a sub
+defined below its caller. So drop is either unsound, or it imposes a
+declaration-order constraint the language does not have.
 
-- **Absorb** yields `Unknown`, and the next iteration recomputes once `f`
-  resolves. Correct; merely slower to converge.
-- **Drop** yields `Int` immediately, and is WRONG if `f` returns `Str`. It is
-  the same error as the reverted `Slot`-arm drop, one level up: committing to
-  an answer before the evidence is in.
+That also makes the fixpoint NECESSARY rather than incidental. Since
+use-before-definition is legal, no single ordered pass can type everything, so
+iteration is forced by the language rather than chosen. And absorb is what
+makes iteration work:
+
+- **Absorb** yields `Unknown` — a sound intermediate that a later round
+  sharpens once `f` resolves. Correct; merely slower to converge.
+- **Drop** yields `Int` — an UNSOUND intermediate that later rounds have no
+  reason to revisit, because it looks resolved. Wrong if `f` returns `Str`, and
+  the same error as the reverted `Slot`-arm drop one level up: committing to an
+  answer before the evidence is in.
 
 **The poison-spreading objection to absorb is just non-convergence.** Run to
 fixpoint and a surviving `Unknown` means `f` genuinely could not be resolved —

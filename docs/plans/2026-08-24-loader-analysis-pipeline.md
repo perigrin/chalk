@@ -952,18 +952,24 @@ wrong**.
 
 An earlier draft of this section said dropping was "probably right", on the
 grounds that an un-inferred arm should not poison a merge whose other arms
-agree. That reasoning fails because **an `Unknown` arm in a merge is usually
-TEMPORARY** — it is a callee's return type that a later fixpoint iteration
-resolves. So the question is not "what does `join(Unknown, Int)` mean" but
-"what should a join do when an input has not been narrowed YET", which is a
-fixpoint ordering question rather than a lattice one.
+agree.
 
-Absorb yields `Unknown` and recomputes once the input resolves: correct, merely
-slower to converge. Drop commits to `Int` before the evidence is in, and is
-wrong if the callee returns `Str` — the same error as the reverted `Slot`-arm
-drop, one level up. The poison-spreading objection is just non-convergence:
-run to fixpoint, and a surviving `Unknown` means the input genuinely could not
-be resolved, which T1's exit condition reports at the arm that actually failed.
+**Drop is sound only if the callee's type is already known at the join** — i.e.
+only if every sub is defined and analysed before its use. Perl does not work
+that way: forward references, mutual recursion, `@ISA` resolution, a sub
+defined below its caller. So drop is either unsound or it imposes a
+declaration-order constraint the language does not have.
+
+That also makes the fixpoint NECESSARY rather than incidental — no single
+ordered pass can type a language permitting use-before-definition — and absorb
+is what makes iteration work. Absorb yields a SOUND intermediate that a later
+round sharpens; drop yields an unsound one that later rounds have no reason to
+revisit, because it looks resolved. Wrong if the callee returns `Str`, and the
+same error as the reverted `Slot`-arm drop one level up.
+
+The poison-spreading objection is just non-convergence: run to fixpoint, and a
+surviving `Unknown` means the input genuinely could not be resolved, which T1's
+exit condition reports at the arm that actually failed.
 
 Full reasoning in `docs/specs/2026-08-26-t1-type-inference-requirements.md` §10.
 
