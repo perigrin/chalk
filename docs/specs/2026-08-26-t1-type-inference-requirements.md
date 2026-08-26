@@ -17,6 +17,18 @@ building a transformation, and I let the two read as the same thing: perigrin
 chose "build T1 as a class first, wire it after", I agreed, and then committed
 a file move whose message described where T1's body *would* live.
 
+**WHAT THAT FAILURE DOES AND DOES NOT ESTABLISH.** It is not decisive about the
+design, and this document originally over-read it. Removing a phase that eleven
+passes depend on, while changing nothing else, breaks the things that depended
+on it — that is a fact about the current wiring, and the goal is NOT to preserve
+the current implementation. T1 is expected to differ from `Analysis` in shape,
+in what it consumes, and in what it guarantees.
+
+Read the numbers as a FLOOR: they say what breaks if only the wiring changes,
+which is useful for sequencing and useless as a constraint on the target design.
+Every "prerequisite" below is a prerequisite for keeping today's code working —
+a different T1 may dissolve several of them rather than satisfy them.
+
 So this document is the thing that was missing — the requirements, written
 before the build, so that "did we add T1?" has an answer that is not an
 impression.
@@ -121,11 +133,17 @@ them without it is what cost 82 corpus cases:
    T2's question asked two phases early. Its effect is that the loader
    **discards type information the frontend sent**.
 
-   MEASURED: removing it alone drops the gate to 136, with 78 failures naming
-   `Unknown`. Nothing downstream can receive an un-narrowed type today because
-   the phase that would resolve or cleanly refuse it does not exist. **It stays
-   until T2, and it does not belong in the loader even then** — it moves to T2
-   as a refusal with a diagnosis rather than a silent drop.
+   MEASURED, and read carefully: removing it **with nothing else changed**
+   drops the gate to 136, with 78 failures naming `Unknown`. That is a fact
+   about the CURRENT wiring — today's backend cannot receive an un-narrowed
+   type — not a demonstration that the filter is load-bearing in principle.
+
+   A T1 that actually narrows would resolve most of those `Unknown`s before the
+   backend ever sees them, so the filter may be deletable well before T2 exists.
+   **The measurement is a floor, not a constraint on the design.** What is
+   structural is only this: the question "can the backend lower this type?"
+   belongs to the lowering phase, so wherever the filter ends up, it is not the
+   loader.
 
 ## The MOP problem — resolve before the entry contract
 
@@ -142,7 +160,13 @@ rather than a typed refusal.
 If the MOP rides on the IR, then T1 neither takes class metadata nor returns a
 MOP; it types a graph whose class information is already present. That makes
 the entry contract `run($graph) -> $graph` honestly, instead of by omission.
-**This is a prerequisite, not a follow-up.**
+
+Note which direction the dependency runs: this is a prerequisite for
+`run($graph) -> $graph` being TRUE, not a prerequisite forced by today's
+breakage. `_replay_classes` being one of the eleven passes is a property of the
+current implementation; a T1 that does not inherit those eleven passes may
+never face the question. **Resolve it because the contract needs it, not
+because the failed split demanded it.**
 
 ## Acceptance
 
@@ -176,6 +200,10 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
 4. The corpus gate holds at 218 as a floor, not as the definition of done.
 
 ## Prerequisites, in order
+
+Each of these is a prerequisite for a T1 that INHERITS the current passes.
+A T1 built differently may dissolve rather than satisfy them — that is a
+legitimate outcome, and preferable where it applies.
 
 1. **The MOP rides on the IR** (above). Without it the entry contract is a lie.
 2. **`_join_repr` calls `join_types`.** `TypeLibrary::join_types` is a correct
