@@ -182,7 +182,13 @@ my %_COERCIBLE_TO = (
 
 sub run ($class, $graphs, $classes = undef) {
     my %graphs = %$graphs;
-    my $data   = { classes => $classes };
+
+    # A MOP always exists: a program with no classes still has `main`. The
+    # replay below used to be skipped entirely when the wire sent
+    # `classes: undef`, which made the MOP an edge that existed for some
+    # programs and not others. Normalised once, here, so every pass below sees
+    # a hash.
+    $classes = {} unless ref $classes eq q{HASH};
 
     # Resolve each direct sub call (dispatch_kind='direct') to its callee graph
     # by name, so the backend can lower the call to the callee's result. A
@@ -193,32 +199,31 @@ sub run ($class, $graphs, $classes = undef) {
     # 4c: a `classes` section (from B::SoN) is replayed into a sealed MOP. Field
     # types must be inferred onto the raw records BEFORE the MOP is sealed, so
     # each declared field carries its type (the backend reads it from the MOP).
-    my $mop;
-    if (ref $data->{classes} eq 'HASH' && %{ $data->{classes} }) {
-        my $classes = $data->{classes};
+    # With an empty $classes the field-inference passes write nothing (their
+    # write loops are classes-keyed) and _replay_classes builds the MOP
+    # holding just the ADJUST-seeded `main`.
 
-        # A :param field's type comes from the constructor argument.
-        _infer_param_field_types($classes, \%graphs);
-        # Stamp the field reads that are already typed, then propagate so an
-        # ADJUST expression over them (`$val * 2`) carries a repr.
+    # A :param field's type comes from the constructor argument.
+    _infer_param_field_types($classes, \%graphs);
+    # Stamp the field reads that are already typed, then propagate so an
+    # ADJUST expression over them (`$val * 2`) carries a repr.
+    _stamp_field_access_reprs($classes, \%graphs);
+    _seed_and_propagate_reprs(\%graphs);
+    # An ADJUST-only field (no :param, no default) is typed from the value an
+    # ADJUST stores into it (Assign(FieldAccess-lvalue, value)). Re-stamp the
+    # now-typed field reads (the accessor body's FieldAccess) after.
+    if (_infer_field_types_from_stores($classes, \%graphs)) {
         _stamp_field_access_reprs($classes, \%graphs);
-        _seed_and_propagate_reprs(\%graphs);
-        # An ADJUST-only field (no :param, no default) is typed from the value an
-        # ADJUST stores into it (Assign(FieldAccess-lvalue, value)). Re-stamp the
-        # now-typed field reads (the accessor body's FieldAccess) after.
-        if (_infer_field_types_from_stores($classes, \%graphs)) {
-            _stamp_field_access_reprs($classes, \%graphs);
-        }
-
-        $mop = _replay_classes($classes, \%graphs);
-
-        # Attach each resolved direct Call's callee METAOBJECT as soon as the
-        # MOP exists. This used to run at the very end of from_json, on the
-        # belief that the repr fixpoint below needed to precede it -- measured
-        # wrong: _replay_classes seals the MOP ~30 lines BEFORE the direct-call
-        # fixpoint, so the metaobject is available to it.
-        _attach_call_targets(\%graphs, $mop);
     }
+
+    my $mop = _replay_classes($classes, \%graphs);
+
+    # Attach each resolved direct Call's callee METAOBJECT as soon as the
+    # MOP exists. This used to run at the very end of from_json, on the
+    # belief that the repr fixpoint below needed to precede it -- measured
+    # wrong: _replay_classes seals the MOP ~30 lines BEFORE the direct-call
+    # fixpoint, so the metaobject is available to it.
+    _attach_call_targets(\%graphs, $mop);
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
     # through computed + aggregate-read nodes for EVERY graph (class or not).
@@ -234,7 +239,7 @@ sub run ($class, $graphs, $classes = undef) {
     # propagate until a pass stamps nothing new (zhi 019f5e57). Bounded by the
     # finite number of Call nodes; a graph with no method Calls converges in one
     # pass (stamped==0 immediately).
-    while (_stamp_method_call_reprs($data->{classes} // {}, \%graphs) > 0) {
+    while (_stamp_method_call_reprs($classes, \%graphs) > 0) {
         _seed_and_propagate_reprs(\%graphs);
     }
 

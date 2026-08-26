@@ -709,7 +709,7 @@ sub from_json ($json_string) {
 
     # $mop is returned only in list context; scalar context stays \%graphs for
     # the existing single-return callers.
-    return ($analysed, $mop) if wantarray && defined $mop;
+    return ($analysed, $mop) if wantarray;
     return $analysed;
 }
 
