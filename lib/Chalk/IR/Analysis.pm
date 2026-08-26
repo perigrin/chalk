@@ -964,6 +964,16 @@ sub _replay_classes ($classes, $graphs) {
         # absence forces every downstream consumer to invent its own meaning.
         my $wire_rts = $cd->{method_return_types} // {};
         for my $mname (sort keys %$methods) {
+            # NOT declare_sub's die-on-missing-graph rule, deliberately.
+            # An agentic review proposed mirroring it here on symmetry
+            # grounds; MEASURED, that regresses a passing test. Real producer
+            # wire declares methods whose graph is legitimately absent from
+            # the loaded set (SoN::FromOptree::StackSim::merge), and
+            # call-target-is-a-metaobject.t asserts the loader keeps going and
+            # reports the disagreement at the CALL rather than aborting the
+            # whole load. Subs and methods differ here: a sub is recorded only
+            # after translate() succeeds, so its absence really is a
+            # contradiction; a method's is not.
             my $graph = $graphs->{ $methods->{$mname} };
             $cls->declare_method($mname,
                 (defined $graph ? (graph => $graph) : ()),
@@ -1693,18 +1703,21 @@ sub _stamp_method_call_reprs ($classes, $graphs, $mop) {
             # which is the only place a reader's owning class is recorded.
             # Measured: without this fallback the inherited reader loses its
             # stamp (Int -> undef) and the backend hits its NO-REPR guard.
+            # The edge is the authoritative STARTING point, not a
+            # replacement for the walk. Keying only on the declaring class
+            # drops the stamp whenever %ret_repr has no entry for it -- and
+            # the walk could never run, because the two arms were mutually
+            # exclusive on $target. A dropped stamp reaches
+            # _lower_call_method's _require_repr and GAPs the WHOLE program.
             my $target = $node->target;
+            my $c = ($target && $target->isa('Chalk::MOP::Method'))
+                  ? $target->class->name
+                  : $class;
             my $repr;
-            if ($target && $target->isa('Chalk::MOP::Method')) {
-                $repr = $ret_repr{ $target->class->name . '::' . $target->name };
-            }
-            else {
-                my $c = $class;
-                my %walked;
-                while (defined $c && !$walked{$c}++) {
-                    if (defined(my $r = $ret_repr{"$c\::$mname"})) { $repr = $r; last; }
-                    $c = $classes->{$c}{parent};
-                }
+            my %walked;
+            while (defined $c && !$walked{$c}++) {
+                if (defined(my $r = $ret_repr{"$c\::$mname"})) { $repr = $r; last; }
+                $c = $classes->{$c}{parent};
             }
             defined $repr or next;
             $node->set_representation($repr);

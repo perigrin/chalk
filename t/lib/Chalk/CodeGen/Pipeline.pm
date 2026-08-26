@@ -34,11 +34,12 @@ field $transforms :param :reader = [];
 #   program_mode => 1   suppress the Int:/Str: return-value epilogue
 # Anything else in %opts is passed through to lower() verbatim.
 #
-# A load failure is reported, not thrown: every unit gets `ok => false` with
-# the loader's error -- except that with nothing loaded there are no units, so
-# the caller sees an empty list plus `load_error` from run_with_load_error.
+# A load failure is reported, not thrown. With nothing loaded there are no
+# units, so run() returns an empty list -- which is ALSO what a successful
+# load selecting zero units returns. Callers that must tell those apart use
+# run_detail, whose fourth value is the load error.
 method run ($json, $select, %opts) {
-    my ($units, undef, undef) = $self->_run($json, $select, %opts);
+    my ($units) = $self->_run($json, $select, %opts);
     return $units;
 }
 
@@ -59,7 +60,12 @@ method _run ($json, $select, %opts) {
     catch ($e) {
         $load_error = "from_json failed: $e";
     }
-    return ([], undef, undef, $load_error) unless $graphs && $graphs->%*;
+    # A FAILED load and a load that succeeded with an empty graph set are
+    # different outcomes and must not collapse into one. Only the failure
+    # nulls the $graphs slot; an empty-but-real set is returned as itself, so
+    # a caller checking `defined $graphs` learns whether from_json ran.
+    return ([], undef, undef, $load_error) if defined $load_error;
+    return ([], $graphs, undef, undef) unless $graphs && $graphs->%*;
 
     # Per-graph transform threading (D4). Each transform sees ONE GRAPH at a
     # time, never the set. Applied before selection so a transform sees the
