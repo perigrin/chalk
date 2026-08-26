@@ -1054,7 +1054,11 @@ inside `if (defined $x)` keeps its entry type.
   reaching the backend is a bug;
 - the aliasing policy: a refinement holds only on a value that never leaves
   value-SSA. Liberalising it is optimizer work and depends on 4b's escape
-  analysis.
+  analysis. Each candidate has the `%Slot` narrowing-ladder shape — prove the
+  alias cannot happen, then keep the refinement: non-escaping locals surviving
+  calls (Flow's two-tier model), `foreach` over a container nothing else
+  writes, `@_` where the callee provably does not write, and references that
+  never escape staying in value-SSA at all.
 
 Ordering: **4c → 4d → 4a → 4b → 4e.** 4c gives a seam, 4d makes the entry
 contract true, 4a supplies the join everything else needs, 4b uses it across

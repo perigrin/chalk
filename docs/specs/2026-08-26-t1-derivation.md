@@ -101,6 +101,25 @@ primary sources rather than memory, after two same-day errors from recall
 | V8 Turboshaft | block-keyed side table — abandoned floating nodes to do it |
 | TypeScript, Kotlin, mypy, C# | recomputed on demand over a CFG |
 
+The design details each system justifies, which spec §5 states as bare rules:
+
+- **the guard is a position, not a condition object** — Graal's `GuardingNode`
+  is a marker interface with ZERO methods.
+- **never fold the narrow stamp back onto the guarded input** — a Pi is *"only
+  true at this point in the control flow"*; Graal permits the fold only under
+  `guard == null && !hasMoreThanOneUsage()`, i.e. exactly when it was not
+  flow-sensitive after all.
+- **`_floating` and `_narrows_type` are two independent bits** — C2 collapsed
+  them and an array access floated above its range check.
+- **the frontend creates the Pi** — Graal's main producer is the bytecode
+  parser, not a later analysis: it is the phase that sees the guard as syntax.
+- **a Pi must not reach the backend** — Graal's `FixReadsPhase` is that same
+  boundary.
+
+Prior art for `remove(σ, Undef)` specifically: Tobin-Hochstadt & Felleisen's
+occurrence typing (POPL 2008, ICFP 2010), which names **Perl** as a motivating
+language. Nullability narrowing is the base case there, not a special case.
+
 **The dividing line is whether the IR floats**, not language or paradigm.
 TypeScript's on-demand model is explicitly motivated by IDE laziness, which a
 batch compiler does not need, and its documented cost is exponential re-walking
@@ -121,3 +140,54 @@ observed difference was the reverse.
 It matters beyond testing: `to_json` is the self-hosting output path, and there
 is a planned bootstrap step where B::SoN parses Chalk itself. A serializer that
 drops types means chalk cannot hand a typed graph to a future chalk.
+
+## Why absorb, in full
+
+The contract states the rule (spec §10); this is the argument, which took two
+corrections to get right.
+
+`join(Unknown, T)` is `Unknown` — what `join_types` already does. `_join_repr`
+DROPS the `Unknown` arm and joins the rest, and the loader depends on that.
+
+```perl
+my $v;
+if ($c) { $v = f() }   # f's return type not yet resolved -> Unknown
+else    { $v = 2 }     # Int
+```
+
+**First version of the argument, too weak:** drop "guesses ahead of the
+fixpoint" — true, but it presupposes there IS an iteration and that `f`
+eventually resolves.
+
+**The decisive argument, from perigrin:** drop is sound only if `f`'s type is
+already known at the join — only if `f` is defined and analysed before its use.
+Perl does not work that way: forward references, mutual recursion, `@ISA`
+resolution, a sub defined below its caller. So drop is either unsound, or it
+imposes a declaration-order constraint the language does not have.
+
+That inverts what the fixpoint IS. Since use-before-definition is legal, no
+single ordered pass can type everything — iteration is FORCED BY THE LANGUAGE
+rather than chosen. And absorb is what makes it work:
+
+- **Absorb** yields `Unknown` — a sound intermediate a later round sharpens.
+- **Drop** yields `Int` — an unsound one later rounds have no reason to
+  revisit, because it looks resolved. The same error as the reverted `Slot`-arm
+  drop: committing before the evidence is in, and SELF-CONCEALING where
+  `Unknown` would have advertised that work remained.
+
+The poison-spreading objection to absorb is just non-convergence: run to
+fixpoint, and a surviving `Unknown` means `f` genuinely could not be resolved,
+which the exit condition reports at the arm that actually failed.
+
+## The graph set that is not in the architecture
+
+An early draft of §2 took `run(\%graphs, $classes)` as the entry contract,
+because the loader returns a hash of graphs and every consumer takes one.
+perigrin rejected it: the program-as-graph-set is a misalignment with how SoN
+implementations actually work.
+
+Graal is the reference shape — a `StructuredGraph` PER METHOD, with inlining
+pulling the callee in *through* the call node rather than iterating a map. The
+hash is the wire's `methods` section, i.e. transport. Modelling transport as
+architecture is what made the one-graph contract look impossible, and the fix
+is that inter-unit references are EDGES (spec §2, §6).

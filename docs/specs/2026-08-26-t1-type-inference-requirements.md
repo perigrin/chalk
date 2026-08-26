@@ -43,14 +43,11 @@ moves work off the boxed path — never because the boxed path is wrong.
   chalk's own parser), so anything reachable only via `from_json` is dead code
   in the configuration that matters.
 - **ONE GRAPH. There is no "graph set" in the architecture** — that is a
-  serialization container (the wire's `methods` section), and modelling
-  transport as architecture is what makes the contract look impossible.
-  Inter-unit references are EDGES: a `Call` carries a reference to its callee,
-  through which the callee's return type is reachable. Graal is the same shape
-  — a `StructuredGraph` per method, with inlining pulling the callee in
-  *through* the call node. There is no `Map<String, Graph>` in the design.
-- **No `$classes` parameter.** Class metadata passed alongside the graph is the
-  same error one level up. It belongs ON the graph, reachable — see §6.
+  serialization container (the wire's `methods` section). Inter-unit references
+  are EDGES: a `Call` carries a reference to its callee, through which the
+  callee's return type is reachable. There is no `Map<String, Graph>`.
+- **No `$classes` parameter.** Class metadata belongs ON the graph, reachable —
+  see §6.
 
 "T1 sees the whole program" therefore does not mean "T1 is handed every graph".
 It means **the program is reachable from the graph**: follow the call edge to
@@ -76,17 +73,10 @@ some `Unknown`, some absent.
 **A frontend stamp is EVIDENCE, not an axiom.** Where T1 independently derives
 a contradicting type, **T1 DIES, naming the node and both claims.**
 
-Not a GAP, and not a policy about which side wins. A contradiction means one of
-the two is WRONG, and both are chalk's code — so it is a bug to investigate,
-not a case to have a rule for. "Prefer the derivation" and "prefer the wire"
-are both ways of continuing past a self-contradiction; a GAP would claim chalk
-does not support the construct, which is false when chalk supports it and
-merely disagrees with itself about it.
-
-This is slice 2's existing rule for method return types — seed from the wire,
-die on disagreement, *"refusing rather than picking silently"* — generalised.
-It may want revisiting once chalk is no longer under active development; while
-it is, a contradiction surfacing loudly is worth more than a compiled program.
+Not a GAP: both claims are chalk's code, so a contradiction is a bug to
+investigate, not a case to have a rule for. This generalises slice 2's existing
+rule for method return types. It may want revisiting once chalk is no longer
+under active development.
 
 T1 checks what it computes anyway; it does not audit the producer.
 
@@ -132,41 +122,31 @@ guard keeps its entry type.
 
 **The refinement is a VALUE node, not an annotation on the branch.** A floating
 value has no position, so the only way to say "this fact holds only here" is to
-make the fact BE a value whose inputs pin it. Every floating-IR system does
-this — Graal `PiNode`, C2 `ConstraintCast`, TurboFan `TypeGuard` (survey in the
-derivation doc).
+make the fact BE a value whose inputs pin it — what every floating IR does
+(survey in the derivation doc).
 
-**The Pi's guard input is the `Proj`/`Region` for the taken branch**, so
-control nodes influence stamps by being pointed at while still carrying none,
-and soundness falls out of dominance with no scheduler changes. Graal's
-`GuardingNode` is a marker interface with zero methods for exactly this reason
-— the guard is a position, not a condition object.
+**The Pi's guard input is the `Proj`/`Region` for the taken branch**, so control
+nodes influence stamps by being pointed at while still carrying none, and
+soundness falls out of dominance with no scheduler changes.
 
-Three points to copy, each with the failure it prevents:
+Three rules, each with the failure it prevents:
 
-| rule | why |
+| rule | prevents |
 |---|---|
-| store the DELTA — `piStamp` is what the guard proves; effective stamp is `piStamp ⊓ input.stamp`, recomputed, monotonic | cannot go stale when a later pass improves the input, and Chalk builds IR during parse |
-| never fold the narrow stamp back onto the guarded input | *"only true at this point in the control flow"* — Graal allows it only under `guard == null && !hasMoreThanOneUsage()`, i.e. when it was not flow-sensitive |
+| store the DELTA — `piStamp` is what the guard proves; effective stamp is `piStamp ⊓ input.stamp`, recomputed, monotonic | a stale refinement when a later pass improves the input |
+| never fold the narrow stamp back onto the guarded input | a fact true only under the guard escaping to where it is false |
 | two independent bits: `_floating` (may it move?) vs `_narrows_type` (removable when the input is that narrow?) | C2 collapsed them and an array access floated above its range check |
 
 **Lifecycle — three owners, and all three must be assigned or the obligation
-falls between them.** Graal's division, which puts each job where the
-information is:
+falls between them:**
 
 | phase | job |
 |---|---|
-| **frontend** | CREATES a Pi at the guard. It is the only phase that sees `if (defined $x)` as syntax and knows the branch is a type test — Graal's main producer is likewise the bytecode parser, not a later analysis. |
-| **T1** | STRENGTHENS. It knows types the frontend does not, so a Pi's `piStamp` can improve; monotonically, never widening (§5 rule 1). T1 does not create the refinement structure, only sharpens it. |
-| **Scheduler** | DELETES every Pi once nodes are pinned, then re-derives positionally. A Pi's whole job is to say "this holds only here" to a value that FLOATS; once position is fixed the position says it. |
+| **frontend** | CREATES a Pi at the guard — the only phase that sees `if (defined $x)` as syntax. |
+| **T1** | STRENGTHENS `piStamp` monotonically, never widening. It does not create the structure. |
+| **Scheduler** | DELETES every Pi once nodes are pinned; position then says what the Pi said. |
 
-**A Pi reaching the backend is a bug** — a node with no lowering, because by
-then it should have become positional information. Graal's `FixReadsPhase` is
-the same boundary.
-
-Prior art for `remove(σ, Undef)` specifically: Tobin-Hochstadt & Felleisen's
-occurrence typing (POPL 2008, ICFP 2010), which names **Perl** as a motivating
-language. Nullability narrowing is the base case, not a special case.
+**A Pi reaching the backend is a bug** — a node with no lowering.
 
 ### Aliasing: start conservative
 
@@ -180,11 +160,8 @@ across a call.
 > already demotes on escape.
 
 Sound, no new machinery, costs only precision. **Liberalising it is future
-optimization work** — every liberalisation has the same shape as the `%Slot`
-narrowing ladder: prove the alias cannot happen, then keep the refinement.
-Candidates: non-escaping locals surviving calls (Flow's two-tier model),
-`foreach` over a container nothing else writes, `@_` where the callee provably
-does not write, and references that never escape staying in value-SSA at all.
+optimization work** — prove the alias cannot happen, then keep the refinement.
+Candidates in plan §4e.
 
 
 ## 6. The MOP must ride on the IR — it IS the inter-unit edge
@@ -206,23 +183,12 @@ so it goes away too.
 
 ## 7. The pipeline object must exist first
 
-§2 says T1 is "entered from the pipeline". **There is no pipeline.** Three
-harnesses each run the same sequence inline:
-
-    my ($graphs, $mop) = from_json($json);
-    ... lower($ret, mop => $mop)
-
-`ProgramRunner`, `Mode2Adapter`, `Phase5LibCoverage` — identical, copy-pasted.
-That is why removing the loader's analysis call broke three places at once: the
-pipeline exists three times, in test harnesses, with no single seam to change.
-
-**Build it before wiring T1.** One object owning `Loader > T1 > Optimizers >
-T2 > Optimizers > Scheduler`, with the harnesses calling it instead of
-assembling their own. Then wiring T1 is one edit, and the acceptance criteria
-below stop conflicting: `loader-reproduces-the-wire.t` can reach 0 (the loader
-stops analysing) while the gate holds at 218 (the pipeline runs T1), because
-the same change does both.
-
+§2 says T1 is "entered from the pipeline". **There is no pipeline** — three
+test harnesses assemble the same sequence inline. **Build it before wiring
+T1**: one object owning `Loader > T1 > Optimizers > T2 > Optimizers >
+Scheduler`, with the harnesses calling it. Then the acceptance criteria below
+stop conflicting — `loader-reproduces-the-wire.t` reaches 0 while the gate
+holds at 218, because the same change does both. Plan §4c.
 
 ## 8. What T1 must stop inheriting from the loader
 
@@ -267,32 +233,14 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
 ## 10. The `Unknown` join policy: ABSORB
 
 `join(Unknown, T)` is `Unknown` — what `join_types` already does. `_join_repr`
-DROPS the `Unknown` arm and joins the rest, and the loader depends on that.
+DROPS the `Unknown` arm and joins the rest; that arm adopts absorb (plan §4a).
 
-```perl
-my $v;
-if ($c) { $v = f() }   # f's return type not yet resolved -> Unknown
-else    { $v = 2 }     # Int
-```
-
-**Drop is sound only if `f`'s type is already known at the join** — only if `f`
-is defined and analysed before its use. Perl does not work that way: forward
-references, mutual recursion, `@ISA` resolution, a sub defined below its
-caller. So drop is either unsound, or it imposes a declaration-order constraint
-the language does not have.
-
-That makes the fixpoint FORCED BY THE LANGUAGE rather than an implementation
-choice, and absorb is what makes iteration work:
-
-- **Absorb** yields `Unknown` — a sound intermediate a later round sharpens.
-- **Drop** yields `Int` — an unsound one later rounds have no reason to
-  revisit, because it looks resolved. The same error as the reverted `Slot`-arm
-  drop: committing before the evidence is in, and self-concealing where
-  `Unknown` would have advertised that work remained.
-
-The poison-spreading objection to absorb is just non-convergence: run to
-fixpoint, and a surviving `Unknown` means `f` genuinely could not be resolved,
-which §4 reports at the arm that actually failed.
+Drop is sound only if a callee is analysed before its use, which Perl does not
+require — forward references, mutual recursion, `@ISA`. So iteration is forced
+by the language, and absorb is what makes it work: a sound intermediate a later
+round sharpens, where drop yields an unsound one that looks resolved. Run to
+fixpoint; a surviving `Unknown` is §4's GAP at the arm that failed. Full
+argument in the derivation doc.
 
 ## 11. Open
 
