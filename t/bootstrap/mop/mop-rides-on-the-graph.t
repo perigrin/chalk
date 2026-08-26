@@ -4,6 +4,7 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use File::Temp qw(tempdir);
+use Scalar::Util qw(refaddr);
 use lib 'lib', 't/lib';
 use Chalk::IR::Serialize::JSON;
 
@@ -35,6 +36,20 @@ subtest 'a class-less program still yields a MOP' => sub {
     ok defined $graphs, 'the graphs came back' or return;
     ok defined $mop, 'and so did the MOP';
     isa_ok $mop, 'Chalk::MOP';
+};
+
+# The MOP is reached through an EDGE on the IR, not through a second return
+# value threaded alongside it. Every graph in a load points at the SAME sealed
+# MOP -- one program, one metaobject universe -- so a pass holding only a graph
+# can still reach the whole program.
+subtest 'every graph carries the run MOP' => sub {
+    my ($graphs, $mop) = load('my $x = 1 + 2; print $x, "\n";', 'graph_mop');
+    ok defined $mop, 'the run has a MOP' or return;
+    ok keys %$graphs, 'and at least one graph' or return;
+    for my $name (sort keys %$graphs) {
+        is refaddr($graphs->{$name}->mop), refaddr($mop),
+            "graph $name carries the run MOP";
+    }
 };
 
 done_testing;

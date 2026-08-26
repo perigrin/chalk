@@ -218,6 +218,12 @@ sub run ($class, $graphs, $classes = undef) {
 
     my $mop = _replay_classes($classes, \%graphs);
 
+    # The MOP rides on the IR (spec §6). Every graph in this run points at the
+    # SAME sealed MOP, so a transform holding one graph reaches the whole
+    # program through an edge instead of a graph-set passed alongside it.
+    # Attached here, the first point the MOP is sealed.
+    $_->set_mop($mop) for values %graphs;
+
     # Attach each resolved direct Call's callee METAOBJECT as soon as the
     # MOP exists. This used to run at the very end of from_json, on the
     # belief that the repr fixpoint below needed to precede it -- measured

@@ -12,6 +12,15 @@ class Chalk::IR::Graph {
     field $returns_param :param(returns)    = [];
     field $schedule      :param :reader     = {};
 
+    # The program's sealed MOP, reachable from any graph. Spec §6: the MOP is
+    # an EDGE on the IR, not a value threaded alongside it, so a pass holding
+    # only a graph can still reach the whole program. A setter rather than a
+    # constructor param because the MOP is sealed only after every graph
+    # exists -- the ordering is structural, not a convenience.
+    field $mop :param :reader = undef;
+
+    method set_mop ($m) { $mop = $m; return $self; }
+
     # Per-graph hash-cons cache (content-hash → node).
     # Scoped to this graph so consumer lists cannot leak across graphs.
     # Bidirectional traversal in nodes() relies on per-graph scope: consumer
