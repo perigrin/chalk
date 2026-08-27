@@ -79,7 +79,14 @@ subtest 'the four refusal classes each carry their own diagnosis' => sub {
         # entry in %_REPR_NO_MACHINE_TYPE explaining why it has no layout.
         ['List',    qr/value type|signature/i,
                                     'List: not a value type -- signature vocabulary, not a layout'],
-        ['Unknown', qr/inference/i, 'Unknown: inference never typed this'],
+        # NOT qr/inference/: that wording asserted Unknown means inference
+        # FAILED, and perigrin corrected it (2026-08-27). Unknown is the
+        # lattice TOP -- a real type meaning "any value whatsoever", which is
+        # sometimes the CORRECT answer (a runtime-keyed lookup genuinely is
+        # top). What is true is narrower: a top-typed value cannot be LOWERED
+        # until something narrows it. Assert the refusal names that, not a bug.
+        ['Unknown', qr/top|narrow/i,
+                                    'Unknown: the lattice top -- needs narrowing before it can be lowered'],
         ['Regex',   qr/compile.time|statical/i,
                                     'Regex: resolved statically, never reaches runtime'],
     );

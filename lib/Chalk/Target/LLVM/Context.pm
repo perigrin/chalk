@@ -3650,8 +3650,10 @@ my %_REPR_NO_MACHINE_TYPE = (
     Scalar  => "'Scalar' is an abstract type with no machine representation: it "
              . "denotes one value whose concrete type was never NARROWED. Fix the "
              . "narrowing that should have resolved it, or GAP at the operation "
-             . "that needs a concrete type. (NOT the same as Unknown: Scalar is a "
-             . "legitimate static answer, Unknown is an inference failure.)",
+             . "that needs a concrete type. (Differs from Unknown only in HOW FAR "
+             . "UP it sits -- Scalar tops the SCALAR SPINE, Unknown tops the whole "
+             . "lattice. Both are legitimate answers; neither has an encoding "
+             . "today. Scalar's is %Slot once T2 exists.)",
 
     # Arity 0+: does not denote one value at all, so it can never have a layout.
     # This is also the vocabulary a variadic signature position uses, so it
@@ -3663,10 +3665,20 @@ my %_REPR_NO_MACHINE_TYPE = (
              . "exists. Reaching machine-type selection means signature "
              . "vocabulary leaked into the value pipeline: a LAYER VIOLATION.",
 
-    # Inference never ran. Distinct from Scalar by design.
-    Unknown => "'Unknown' is the pessimistic top: INFERENCE never determined a "
-             . "type for this value. Nothing may be done with it until it is "
-             . "narrowed. Fix the inference that should have typed it.",
+    # The lattice TOP. A real type, and reaching it is not by itself a bug:
+    # `Unknown` denotes "any value whatsoever", which is a coherent and
+    # sometimes CORRECT answer (a runtime-keyed lookup genuinely is top until
+    # something narrows it). What is true is narrower -- a top-typed value
+    # cannot be LOWERED, because every machine type is a commitment this type
+    # declines to make. Distinct from Scalar only in HOW FAR UP it sits:
+    # Scalar is the top of the scalar spine, Unknown the top of the whole
+    # lattice. Neither has an encoding today.
+    Unknown => "'Unknown' is the lattice TOP: this value may be anything, so no "
+             . "machine type can hold it. That is an answer, not necessarily a "
+             . "failure -- but the program cannot be compiled until something "
+             . "NARROWS it: a producer stamp, a flow refinement, or a callsite. "
+             . "If no such information exists, this construct is legitimately "
+             . "un-compilable and the GAP is correct.",
 
     # A legitimate, fully-known type that exists only at compile time.
     Regex   => "'Regex' is resolved STATICALLY and never reaches runtime: a qr// "
