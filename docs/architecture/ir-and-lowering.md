@@ -433,7 +433,7 @@ gives the lowering pass a ladder rather than a single answer:
 
 | what has been proven | what is materialised |
 |---|---|
-| nothing — genuinely dynamic index, or a join that leaves `Scalar` | full `%Slot` per element |
+| nothing beyond `Array[Scalar]` — the join reached the top of the spine | full `%Slot` per element |
 | element positions known statically | per-position type; no cell |
 | `Array[Int]` monomorphic over its lifetime | raw `i64` elements; **`%Slot` gone entirely** |
 
@@ -442,27 +442,44 @@ elided, it **deletes the container cell**. An `Array[Int]` is `i64*` plus a
 length. `%Slot` is what you pay for having proven nothing yet, and the
 optimizer's job is to stop paying it.
 
-**"ELEMENTS NOT UNIFORM" WAS LOOSE WORDING, now corrected in the table above**
-(perigrin, 2026-08-27). Mixed element TYPES never justify `%Slot`, for a reason
-stronger than the "across positions, not within one" argument above: the lattice
-join makes them uniform. `@a` holding an `Int` and a `Str` has type
-`Array[Int|Str]`, and since `Int <: Num <: Str` that **reduces to
-`Array[Str]`** — monomorphic, bottom row of the ladder, raw `Str` elements and
-no cell, with a `Coerce(Int -> Str)` at the `Int` element's store site.
+**THERE IS NO "HETEROMORPHIC" CASE — THERE IS ONLY HOW FAR UP THE SPINE YOU
+GOT** (perigrin, 2026-08-27, correcting two earlier passes at this paragraph
+including one of mine).
 
-On a TOTAL join (Phase 3) any set of scalar element types has a least upper
-bound, so "different types" can never by itself mean "not uniform". What
-actually reaches the top row is narrower:
+The table used to say `%Slot` is for arrays whose "elements are not uniform".
+That framing is wrong twice over.
 
-- a **genuinely dynamic index**, where which element is read is a runtime
-  question, so no per-position fact applies (the case the paragraph above
-  already names);
-- a join that lands on **`Scalar`** — cross-kind, e.g. `join(Int, ArrayRef)` —
-  which has no machine encoding at all until T2 exists. That is the D2 case
-  (`logical.md` L3b/L3c/L3d) that took the gate to 215.
+First, mixed element types reduce. `@a` holding an `Int` and a `Str` has type
+`Array[Int|Str]`, and since `Int <: Num <: Str` that IS `Array[Str]` —
+monomorphic, raw `Str` elements, no cell, with a `Coerce(Int -> Str)` at the
+`Int` element's store site. On a total join (Phase 3) any set of scalar element
+types has a least upper bound, so "different types" can never by itself mean
+"not uniform".
 
-The `i1` is the other axis entirely, and it is not a type question:
-present-versus-absent, which IS dynamic (OOB reads, sparse arrays, `delete`).
+Second — and this is the part that dissolves the distinction — **every Perl
+array reduces to `Array[Scalar]` at worst**, because `Scalar` is the top of the
+scalar spine and the join is total. `Array[Scalar]` IS a homomorphic type; its
+element encoding is `%Slot`. So the "heteromorphic array" and the
+`Array[Scalar]` array are the SAME CASE, and `%Slot` is not the residue of an
+unusual join — it is the residue of an UNFINISHED one.
+
+The ladder is therefore one axis with three stopping points, not a taxonomy of
+container shapes:
+
+| proven | element encoding |
+|---|---|
+| `Array[Int]` | raw `i64` |
+| `Array[Str]` | raw `Str` |
+| `Array[Scalar]` — nothing narrower proven | `%Slot` |
+
+Read that way, `join(Int, ArrayRef) = Scalar` is not a special cross-kind
+outcome; it is the same top reached by a different route. And `Scalar` is the
+DEFAULT, not the exotic case: it is what you get whenever narrowing has not
+proven better, which is exactly why the pipeline exists and why "the optimizer's
+job is to stop paying it" is the right summary.
+
+The `i1` remains a different axis and is not a type question at all:
+present-versus-absent, which IS dynamic — OOB reads, sparse arrays, `delete`.
 
 **A MISS IS NOT A SLOT** (perigrin, 2026-08-27). The ladder's top row is
 *heteromorphism* — "dynamic index, elements not uniform" — so `%Slot` is what a
