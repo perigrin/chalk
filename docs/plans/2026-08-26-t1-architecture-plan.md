@@ -622,6 +622,27 @@ The symptom list is one cause:
 - **The circularity in old step 5** - the filter is deletable once
   Unknown-at-exit is zero, but the filter is what makes Unknown unmeasurable.
 
+**CORRECTION 2026-08-27: THE BOUNDARY IS ALREADY BUILT. §5.0 is ONE half, not
+two.** An earlier note here (and a message to the bson session) claimed §5.0
+also had to teach the backend boundary to refuse `Unknown`, on the grounds that
+`_require_repr` (`Target/LLVM.pm:80`) checks only `undef`. **That was wrong:
+`_require_repr` is not the boundary.** The boundary is
+`Context.pm:_repr_to_llvm_type` (`:3679`), it is the ONLY path from a
+representation to a machine type (8 call sites, zero bypasses — the one
+non-funnel mapping at `:2100` is a `Coerce` arm whose target is already known),
+and it is TOTAL by construction: known type, or `%_REPR_NO_MACHINE_TYPE` with a
+reason, or "not a representation this compiler knows at all — a new repr
+reaching here needs a decision, not a default."
+
+Verified by execution: `Int -> i64`, `Str -> %Str`, and `Scalar`, `Unknown`,
+`List`, `undef` each die with a DISTINCT message. The table already draws the
+distinction this section is about, in its own words: *"NOT the same as Unknown:
+Scalar is a legitimate static answer, Unknown is an inference failure."*
+
+So removing the loader filter cannot produce a silent garbage encode. It
+produces a loud GAP naming the node — which is the outcome §5.0 wanted, already
+implemented, waiting for the filter to stop hiding the cases from it.
+
 **THE FIX - move the QUESTION, keep the ANSWER.** Loader reproduces the wire
 verbatim (spec 2); T1 narrows and can finally SEE `Unknown` as the input value
 spec 3 says it is; T2's boundary answers encodability and refuses an
