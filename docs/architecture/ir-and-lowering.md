@@ -442,6 +442,29 @@ elided, it **deletes the container cell**. An `Array[Int]` is `i64*` plus a
 length. `%Slot` is what you pay for having proven nothing yet, and the
 optimizer's job is to stop paying it.
 
+**A MISS IS NOT A SLOT** (perigrin, 2026-08-27). The ladder's top row is
+*heteromorphism* — "dynamic index, elements not uniform" — so `%Slot` is what a
+container pays when its elements cannot share a width. A read that is **not in
+the container at all** has no membership to encode, and reaching for `%Slot`
+there imports a container-uniformity mechanism into a case with no container
+question.
+
+Worked case, corpus `references.md` R10: `my %h = (a => 1, b => 2); say($h{z})`.
+On the TYPE axis the missing-key read is **`Undef`** — a real lattice member,
+statically known, since the key is a literal absent from a literal hash. On the
+ENCODING axis the container is uniform `Int`, so by the bottom row it warrants
+**no `%Slot` whatsoever**. The `Coerce(Slot -> Str)` in that case's `ir` block
+is what today's lowering happens to emit, not what the case requires.
+
+This is the axis distinction in miniature, and it is easy to get backwards: the
+gate's SHAPE leg reports encodings (`Subscript :Slot`), the type axis wants
+`Undef`, and quoting the shape leg as if it were a type is how `Slot` — which is
+not in the lattice at all, and for which `join_types(Slot, Int)` is `Unknown` —
+ends up proposed as a stamp. The producer-side rule that follows: a provably
+absent read (missing literal key, constant index provably out of range) is
+`Undef`; only a genuinely undecidable one (computed index, runtime key) is
+`Unknown`.
+
 **Read that as a cost, not a defect. Boxing is okay; incorrect lowering is
 not.** The boxed form is CORRECT — it is the encoding that is always available
 and always right, and it is the floor the ladder rises from rather than a
