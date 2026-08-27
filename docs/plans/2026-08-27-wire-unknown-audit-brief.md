@@ -196,7 +196,15 @@ whenever a block still encodes the old answer.
 The 100 that remain arrive at chalk's graph as **ABSENCES**, because
 `%LOWERABLE_STAMP` omits `Unknown` — the level violation this plan's §5.0 owns.
 
-### Provenance caveat: the producer commits are LOCAL
+### Provenance caveat: RESOLVED 2026-08-27 — the producer is pushed
+
+`origin/pu` is now `a8685ba` (perigrin authorised it; fast-forward
+`36ddeea..a8685ba`, zero unpushed). **So `f2d5637` is fetchable, and every gate
+number in this document is reproducible** rather than a claim about one
+machine's working tree. The section below is kept as the record of why that
+mattered.
+
+### (Historical) the producer commits were LOCAL
 
 Producer final state `a8685ba`, tree clean. **Nothing is pushed** — perl5-son's
 `pu` is protected and pushing is perigrin's call. Measured 2026-08-27: `pu` is
