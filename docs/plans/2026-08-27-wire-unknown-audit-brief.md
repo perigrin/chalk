@@ -195,3 +195,17 @@ whenever a block still encodes the old answer.
 
 The 100 that remain arrive at chalk's graph as **ABSENCES**, because
 `%LOWERABLE_STAMP` omits `Unknown` — the level violation this plan's §5.0 owns.
+
+### Provenance caveat: the producer commits are LOCAL
+
+Producer final state `a8685ba`, tree clean. **Nothing is pushed** — perl5-son's
+`pu` is protected and pushing is perigrin's call. Measured 2026-08-27: `pu` is
+**142 commits ahead of `origin/pu`**, so this long predates the audit (bson's
+six sit on top of 136 that were already local).
+
+This matters for reading every gate number in this document. Chalk's corpus gate
+resolves the producer as a **live filesystem path with no version pin**, so
+`215/215/215/215 at f2d5637` means *the working tree at ~/dev/perl5-son*, not
+anything on origin. Anyone reproducing these numbers from a fresh clone will get
+the pre-audit producer and a different result. The numbers are honest about what
+they measured; they are not reproducible off origin until the branch is pushed.
