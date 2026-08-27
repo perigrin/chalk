@@ -649,6 +649,35 @@ spec 3 says it is; T2's boundary answers encodability and refuses an
 un-encodable type LOUDLY. What the loader dropped silently, the boundary GAPs -
 GAP-not-miscompile preserved by construction.
 
+**MEASURED 2026-08-27, wire cache at producer `a8685ba`, 240 corpus wires.**
+What the loader drops, counted over every stamped node in every graph of every
+wire (so these totals include producer internals pulled in by `use`; the
+PROPORTION is the finding, not the absolute):
+
+| stamp | dropped | what it is |
+|---|---|---|
+| `Unknown` | 208,660 | the lattice top — the known case |
+| `Scalar` | 1,683 | top of the SCALAR SPINE — a legitimate answer, discarded |
+| `List` | 720 | signature vocabulary |
+| `ScalarRef` | 480 | **not a representation the backend knows AT ALL** |
+| `Regex` | 1 | compile-time only |
+
+**211,544 of 437,109 stamped nodes — 48% — never reach the graph.**
+
+Two things this changes about §5.0's framing:
+
+1. **The filter is not just hiding `Unknown`.** It discards FOUR kinds of real
+   type information, three unrelated to inference failure. `Scalar` in
+   particular is a legitimate static answer (top of the spine, encoding `%Slot`
+   once T2 exists) and the loader throws it away.
+2. **`ScalarRef` is an unanswered DESIGN QUESTION, not noise.** The producer
+   emits it 480 times; `_repr_to_llvm_type` routes it to the
+   *"not a known representation"* fallthrough, whose own comment says "a new
+   repr reaching here needs a decision, not a default." So deleting the filter
+   surfaces a decision nobody has made — which is the right outcome (a loud
+   refusal beats a silent drop), but it must be EXPECTED rather than read as
+   §5.0 breaking something.
+
 **5.0 lands BEFORE the MOP graph registry and before T1** - both were being
 built against numbers this filter distorts. Measure the blast radius first
 (scratch A/B, CWD inside the scratch tree); the filter has been load-bearing a
