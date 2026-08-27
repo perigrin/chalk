@@ -76,3 +76,60 @@ workstream's remaining cases VISIBLE — today they are dropped silently.
 - Suites need `prove -Ilib -Iblib/lib -j1` on a CLEAN build (stale `blib` masks
   deletions); a SINGLE test is fine with just `-Ilib`.
 - `ag` has NO `-q` flag.
+
+---
+
+## RESULT, round 1 (bson session, producer `bf2b039`, 2026-08-27)
+
+**Wire `Unknown` 233 -> 195.** Chalk gate re-run by the coordinator against that
+producer: **215/215/215/215, 241/241, 0 failures** — chalk-neutral, no movement
+in either direction. The pin is now `bf2b039`, not `714ec0e`.
+
+**The premise HELD, and by a wide margin.** The brief said explicitly that if
+most of the 233 landed in bucket one, the premise was wrong and that was the
+finding. It did not:
+
+| bucket | count | share |
+|---|---|---|
+| one — optree genuinely cannot know | ~15 | ~6% |
+| two — optree knows, producer never asked | ~200 | ~86% |
+| three — asked, then dropped | 0 confirmed | — |
+
+**Two structural findings worth more than the headline:**
+
+1. **87 of 233 (37%) are pure CASCADES** — Unknown fully explained by an Unknown
+   input (Assign 28, Add 18, Subscript 17, Phi 16, Multiply 4, Call 2,
+   Subtract 1, TernaryExpr 1). The corpus never had 233 independent decisions;
+   it had **146 roots**. Fixing a root collapses its cascade for free — which is
+   why closing FieldAccess 21->6 also bought Call 60->37.
+2. **ZERO runtime-polymorphic dispatch in the whole corpus** — no
+   `$obj->$name()`, no `eval "$str"`. That was the premise's biggest risk and it
+   did not materialise. Bucket one is the `Array[Scalar]` element-type wall
+   (`my ($a,$b) = @_` binds a whole list, so element types need the callsite —
+   the producer's own comment at `FromOptree.pm:4771` already said so).
+
+**The sharpest instance, and why §5.0 is its twin:** `return_type: "Int"` sits on
+the sub record while the Call node **in the same JSON document** reads stamp
+`"Unknown"`. The producer computed the answer and discarded it at the last step.
+That is the same defect shape as §5.0 one layer down — chalk's
+`%LOWERABLE_STAMP` omits `Unknown`, so every `Unknown` the producer *does* send
+arrives at the graph as an ABSENCE. **Two independent throw-aways of the same
+information, at two different levels**, which is precisely why the belt-and-
+suspenders framing was right.
+
+**Landed in `bf2b039`:** items 1 and 3 (Call return type, FieldAccess), which
+interlock through a dependency chain — field type -> FieldAccess stamp -> method
+return type -> Call stamp — so method return types are re-derived between the two
+stamping passes. Only propagates, never invents: negative subtests (undetermined
+callee, recursive call, field with no default) passed before the fix and still
+pass, so a blanket stamp could not have satisfied them.
+
+**Still open:** Subscript (27 + 17 cascade), Phi join (19 + 16), PadAccess (10),
+self-typed leftovers (11).
+
+**Chalk-side note recorded here because it changes what §5.0 must do:**
+`Target/LLVM.pm:80` `_require_repr` refuses **only `undef`** — it would pass
+`'Unknown'` straight through to lowering. So §5.0 has two halves: the loader
+stops filtering AND the boundary learns to refuse `Unknown`. Removing the filter
+alone converts a silent DROP into a silent GARBAGE ENCODE, which is strictly
+worse.
