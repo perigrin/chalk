@@ -353,6 +353,32 @@ front (B3) and a gate run behind with an EXACT expected value.
    refinable. Either remedy lands WITH step 2, not after it. The old
    "exactly 3 movers" figure is not usable as a revert criterion — its
    simulation could not see `:1510` or the freezing.
+
+   **DISCHARGED 2026-08-27. Result: NO REMEDY AT STEP 2 — it moves to step 4,
+   ratified by perigrin.** Measured over 231 corpus cases with BOTH callers
+   instrumented (locate sites by CONTENT: every Phase-3 line number in this
+   plan runs ~50 LOW against HEAD): the total fold changes NOTHING. Zero
+   movers, not three; zero nodes stamped `Scalar` anywhere; zero freeze
+   events; the fixpoint runs the same 2 iterations; the `:1598` die is
+   unreachable (its 7 die-eligible methods are structurally join-immune).
+
+   Root cause of the null, which this plan did not know: **the corpus produces
+   NO heterogeneous join at all** — 94 `_join_repr` calls, every one
+   homogeneous — because the Undef drop and the TernaryExpr condition-drop
+   both run AHEAD of the join. A MEASURED null, not a blind one: sensitivity
+   controls forcing a `Scalar` produce 228 freeze events, 65 on iteration
+   >= 2, so the harness detects the hazard when it is present.
+
+   The hazard is real as a code-reading and has NO INSTANCE until step 4
+   deletes the Undef drop and makes `join(Undef,Int) = Scalar` reachable. A
+   remedy here would be unexercised code with a green-on-arrival test — the
+   defect class this plan refuses elsewhere. **The remedy lands in step 4.**
+   If one is needed, the data favours teaching `_is_narrowed` that `Scalar`
+   is refinable (13 call sites, one contract, and `Scalar` is by construction
+   not a commitment) over restructuring the write discipline.
+
+   **The usable revert criterion for step 2 is ANY nonzero stamp diff**, not a
+   movers count. Re-run the harness (`scratchpad/g5/`) as step 4 gate.
 1. **Absorb.** RED: rewrite `t/bootstrap/join-drops-unknown.t` →
    `join-absorbs-unknown.t`: `_join_repr('Int','Unknown') eq 'Unknown'`
    and the reverse arm order (both return `'Int'` at HEAD). Keep the
@@ -392,7 +418,31 @@ front (B3) and a gate run behind with an EXACT expected value.
    the gate floor assertion (`son-corpus-wide.t:322`) to 215. File the
    restoration on zhi (D2, §11). **Commit separately; expected gate: 215
    EXACTLY** — any other number falsifies the D2 accounting.
-5. **The guesses become GAPs (B4, D3).** First MEASURE which corpus cases
+5. **The guesses become GAPs (B4, D3).**
+
+   **CENSUS DONE 2026-08-27: NO LIVE GUESS. The "report before converting"
+   trigger did NOT fire; step 5 is gate-inert.** All four sites ARE reached
+   (`:3349` x2 cases, `:4071` x1, `:5801` x2, `:6827` x11) but the left
+   operand is ALWAYS DEFINED, so the fallback never supplies a value. Verified
+   with a POSITIVE CONTROL rather than a bare zero: undef-only warns reported
+   nothing, then the same warns made unconditional lit up all four — so the
+   zero is a true negative, not dead instrumentation.
+
+   **The reaching values are NOT uniformly `Int`.** `:6827` sees `Str`
+   (Child.kind, Animal.name, Greeter.hello) and `Undef` (Counter.bump). These
+   sites are safe because the operand is always DEFINED, not because `Int`
+   was the right guess — had a `Str` case arrived undef, the guess would have
+   emitted an i64 ABI cast over a string, exactly the silent-garbage channel
+   spec §1 forbids. Converting costs nothing at the gate today and closes the
+   channel against a future producer.
+
+   Conversion notes from the census: `:5801` is already effectively dead (the
+   next line dies unless repr eq `Int`), so dropping its `// 'Int'` is a
+   simplification rather than a new guard; `:3349` uses `$repr` TWICE in one
+   ternary, so hoist ONE required-repr fetch above the expression or the die
+   cannot say which read failed.
+
+   Original instruction, for reference: First MEASURE which corpus cases
    reach each of `Context.pm:3349`, `:4071`, `:5801`, `:6827` (an
    `warn`+run over the corpus in scratch — not committed). Then RED: a
    unit test per site driving a repr-less node into it, asserting a die
