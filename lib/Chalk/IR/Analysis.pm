@@ -5,7 +5,7 @@ use utf8;
 
 package Chalk::IR::Analysis;
 
-use Scalar::Util qw(blessed);
+use Scalar::Util qw(blessed refaddr);
 
 use Chalk::IR::Value;
 use Chalk::IR::Graph;
@@ -633,6 +633,35 @@ sub _resolve_direct_calls ($graphs) {
 # callee's shift is stamped on a prior pass.
 sub _seed_direct_call_arg_reprs ($graphs) {
     my $stamped = 0;
+
+    # GATHER, then stamp. The callee's argument read is ONE node shared by
+    # every callsite, so it can carry only one stamp and that stamp has to be
+    # true of every value that reaches it. Stamping inline made it whichever
+    # callsite the walk happened to reach first: measured on
+    # `sub g { my $x = shift; return $x } g(1); g("hello")`, source order
+    # alone selected between two different wrong answers -- the reversed order
+    # stamped the read `Int` and left the Str-argument Call carrying an Int
+    # stamp, which is the unsound direction.
+    #
+    # So the sweep below only COLLECTS: read node => the reprs arriving at it,
+    # keyed by refaddr because the read is a shared singleton reached through
+    # `$node->target->graph`. The join and the single stamp happen after.
+    #
+    # TERMINATION. `_is_narrowed` is this fixpoint's termination latch (pinned
+    # by ir/is-narrowed-guards.t and ir/propagate-fixpoint-terminates.t), and
+    # loosening it to "re-stamp whenever something changed" is what hangs the
+    # loop. What replaces it here is not looser: the existing stamp is folded
+    # INTO the join, so a stamp only ever moves UP the lattice, and the
+    # lattice is finite with `Unknown` at the top. A node can therefore be
+    # re-stamped only finitely often, and `$stamped` counts only real moves.
+    my %pending;    # refaddr(read) => { node => $n, reprs => [...] }
+
+    my $collect = sub ($read, $repr) {
+        my $slot = $pending{ refaddr($read) } //= { node => $read, reprs => [] };
+        push $slot->{reprs}->@*, $repr;
+        return;
+    };
+
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
             next unless $node->operation eq 'Call'
@@ -666,13 +695,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
                     # guessing here.
                     my $arg = $args[$i] or next;
                     my $repr = $arg->representation // next;
-                    # Same monomorphic-callee assumption as the shift path
-                    # below: first caller wins, and a second caller with a
-                    # different repr lowers through the first one's ops, which
-                    # lli rejects loudly rather than miscompiling silently.
-                    next if _is_narrowed($params{$i}->representation);
-                    $params{$i}->set_representation($repr);
-                    $stamped++;
+                    $collect->( $params{$i}, $repr );
                 }
                 next;
             }
@@ -707,18 +730,34 @@ sub _seed_direct_call_arg_reprs ($graphs) {
             next unless @reads == 1 && @args == 1;
 
             my $arg_repr = $args[0]->representation // next;
-            # ponytail: monomorphic callee assumption — the callee's arg read is
-            # stamped by the FIRST caller's arg repr and shared across call
-            # sites. A second caller with a DIFFERENT repr (Str vs Int) does not
-            # re-stamp; the backend then lowers its arg through the first repr's
-            # ops, which lli rejects as a type mismatch (a loud verify error, not
-            # a silent miscompile). Per-callsite specialization if polymorphic
-            # direct calls ever need to lower.
-            next if _is_narrowed($reads[0]->representation);
-            $reads[0]->set_representation($arg_repr);
-            $stamped++;
+            $collect->( $reads[0], $arg_repr );
         }
     }
+
+    # JOIN, then stamp once. The read's existing stamp joins in as another
+    # arm, so this is monotone: the answer is always a supertype of what was
+    # there. `_join_repr` is the lattice authority (TypeLibrary::join_types
+    # folded), which is what makes `Int` and `Str` arrive at `Str` rather than
+    # at whichever the walk saw first.
+    #
+    # Sorted by node id so the traversal order of `%pending` cannot reach the
+    # output -- determinism, and the thing the order-independence assertion in
+    # ir/direct-call-args-join-all-callsites.t pins.
+    for my $slot (
+        sort { $a->{node}->id cmp $b->{node}->id } values %pending )
+    {
+        my $read = $slot->{node};
+        my $existing = $read->representation;
+        my $joined = _join_repr( grep { defined } $existing, $slot->{reprs}->@* );
+        next unless defined $joined;
+
+        # Only a real move counts. `$stamped` drives the caller's `while`, so
+        # returning a nonzero for a no-op re-stamp is what would spin it.
+        next if defined $existing && $existing eq $joined;
+        $read->set_representation($joined);
+        $stamped++;
+    }
+
     return $stamped;
 }
 
