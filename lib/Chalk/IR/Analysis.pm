@@ -579,7 +579,26 @@ sub _resolve_direct_calls ($graphs) {
             next unless $node->operation eq 'Call'
                 && $node->can('dispatch_kind')
                 && ($node->dispatch_kind // '') eq 'direct';
-            my $callee = $graphs->{ $node->name } or next;
+            # THE EDGE FIRST. `target` is the callee metaobject and it holds
+            # the callee graph -- the same object the name lookup returns
+            # (asserted by refaddr in ir/resolve-direct-calls-reads-the-edge.t),
+            # reached without the Map<String,Graph> the T1 contract retires.
+            #
+            # The name read stays as the PRE-MOP BOOTSTRAP, and only that.
+            # `run` calls this pass twice; the first call precedes
+            # _attach_call_targets (which cannot run before _replay_classes
+            # seals the MOP), so at that call every direct Call has `target`
+            # undef. Measured: that first pass is where most direct-call result
+            # stamps come from, and ir/llvm-class-sub-define.t fails without
+            # it. The name read retires when _attach_call_targets can precede
+            # the first resolve.
+            my $callee
+                = ( $node->can('target')
+                    && $node->target
+                    && $node->target->can('graph')
+                    && $node->target->graph )
+                || $graphs->{ $node->name // '' }
+                or next;
 
             # Stamp the Call's repr from the callee's Return value, so the
             # backend and the shape contract see the call result's type. The
