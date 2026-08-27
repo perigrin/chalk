@@ -565,6 +565,27 @@ Phase 3, the guard hoist to Phase 2; what remains:
    `t/bootstrap/no-tie-in-the-subset.t` green over `lib/` (operator-form
    patterns; both repos re-measured at zero). No IR pass — the analysis
    does not need to exist; the obligation is a guard on the source subset.
+**G7 DISCHARGED 2026-08-27, and it REFUTED this step's own bilateral
+   prescription.** Census over 231 cases: **4 multi-callsite callees, ZERO
+   polymorphic** (confirmed twice — by IR census keyed on
+   `refaddr(target->graph)`, and by an independent source-text count). So on
+   every gate case `join(args) == args[0]`, and gather-then-stamp is
+   behaviourally IDENTICAL to first-caller-wins: **the gate holds whether the
+   join is correct, inverted, or absent.** The tests carry the whole burden;
+   G8 green says nothing about the join.
+
+   The plan said to get bilaterality by REVERSING THE CALL ORDER. Measured,
+   that is vacuous: both orders stamp `Int` identically, because
+   first-caller-wins is first in `Graph::nodes()` TOPOLOGICAL walk order, not
+   source order, and content-derived node ids merely swap which id carries the
+   Int. One assertion written twice. The real bilateral pair is
+   TYPE-DIRECTION: **widening lost** (shared read stamped Int while a Str
+   reaches it) and **narrowing invented** (a Call stamped from its sibling
+   site alone). The landed test
+   (`ir/direct-call-args-join-all-callsites.t`) asserts both plus explicit
+   ORDER-INDEPENDENCE, since monomorphic seeding is correct today only by
+   accident of a walk order MEMORY warns against changing.
+
 5. **Exit: G8 gate run.** Floor 215; expected movement: cases that
    previously GAPped at `Context.pm:2547` on heterogeneous stores may go
    green — a floor RAISE, taken only on a run where the gate holds
@@ -584,17 +605,36 @@ ends.
    graph; a Value node arriving stamp-less is `Unknown` after entry
    normalization (spec §4); control nodes are untouched. GREEN: new
    `lib/Chalk/IR/Transform/TypeInference.pm` whose body DELEGATES to the
-   existing `Analysis` sequence. **The fence:** internally, the transform
-   reaches the program from `$graph` — via `$graph->mop` (Phase 2) it
-   enumerates the compilation unit's graphs and hands the existing passes
-   the `%graphs` hash they still take. That hash is PRIVATE, never in any
-   signature outside `Analysis.pm`, marked at its one construction site
-   with a comment naming this paragraph, and its elimination (each pass
-   rewritten to pure edge traversal) is the filed migration in §11. **Class
-   metadata:** the loader attaches the DECODED wire `classes` section to
-   graphs (pure deserialization — reproducing what the frontend
-   serialized); T1 reads it from the graph, builds and seals the MOP
-   mid-run (structurally forced, Phase 2 step 2), attaches it at exit.
+   existing `Analysis` sequence. **AMENDED 2026-08-27 — the original fence was UNBUILDABLE; measured, not
+   argued.** It said the transform reaches the program via `$graph->mop`,
+   which 'enumerates the compilation unit's graphs'. **The MOP cannot do
+   that.** `Chalk::MOP` holds only `%classes`; a graph is reachable solely
+   as `MOP::Method->graph`, `MOP::Sub->graph`, or a field default. Measured
+   on a real wire (coordinator-reproduced): of Point::__DEFAULT_0,
+   Point::bump, Point::x, main::__PROGRAM__, main::helper, only **bump and
+   helper are REACHABLE** — the entry graph `main::__PROGRAM__`, the
+   `:reader` accessor, and the field default are NOT. On a class-less
+   program it is 0 of 1. Enumerating that way hands the passes a SILENT
+   SUBSET that omits the very graph the corpus gate lowers: spec §1's
+   **guess** row, not its GAP row.
+
+   Second, independent leg — an ORDERING one no better registry fixes: step 4
+   makes `from_json` return decoded graphs and nothing else, but
+   `Graph::$mop` is populated ONLY by the `set_mop` sweep inside
+   `Analysis`. Once Analysis leaves the loader, every graph arrives at T1
+   with `mop => undef` — so `$graph->mop` is undef AT T1'S ENTRY BY
+   CONSTRUCTION.
+
+   **RULED BY PERIGRIN 2026-08-27: give the MOP a unit-level GRAPH REGISTRY**,
+   populated where the `set_mop` sweep already runs, and attached by the
+   LOADER so it survives the split. The MOP becomes the honest unit handle it
+   was always described as; `$graph->mop` stays the single edge; spec §2's
+   real prohibition — no `Map<String,Graph>` in a PUBLIC signature, no
+   `$classes` parameter — is satisfied, since the registry is reached
+   THROUGH the edge rather than passed alongside it. Note what this does NOT
+   change: the `%graphs` hash the existing passes still take stays PRIVATE to
+   `Analysis.pm`, with its elimination the filed migration in §11.
+
    No `$classes` parameter anywhere public.
 2. **Entry normalization and the frontend metric.** RED: a wire with a
    stamp-less Value node yields (a) that node stamped `Unknown` post-entry
