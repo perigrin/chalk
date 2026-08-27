@@ -593,6 +593,70 @@ Phase 3, the guard hoist to Phase 2; what remains:
 
 ---
 
+## 8. Phase 5 PREFACE
+
+### 5.0 - `%LOWERABLE_STAMP` IS AT THE WRONG LEVEL (perigrin, 2026-08-27)
+
+**This is a LEVEL VIOLATION and it is the root cause of most of Phase 5's
+trouble.** `%LOWERABLE_STAMP` (`Serialize/JSON.pm:72-73`) asks *can the BACKEND
+encode this?* - a T2-axis question - and runs inside `from_json`, the LOADER,
+three phases upstream. Its own comment convicts it: every sentence is about
+machine encodings (`%Array*` as `{i64, i64, %Slot*}`, "for want of a boxed value
+representation"). That is `Target::LLVM` reasoning living in the deserializer,
+and the name says it out loud: **LOWERABLE**.
+
+Same class as the `$repr // 'Int'` guesses Phase 3 retired: the backend's
+encoding question answered without the authority to answer it. Four small
+instances fixed; the large one left standing.
+
+The symptom list is one cause:
+
+- **233 wire `Unknown`s written into the graph as ABSENCES** (231 cases
+  measured) - the absent/Unknown conflation spec 4 forbids, committed by the
+  loader before T1 exists.
+- **T1's frontend metric corrupted**: post-load "absent = 23" is residue of 233
+  dropped `Unknown`s, not 23 frontend bugs.
+- **Absorb inert** - Phase 3 step 1 had to record that `join(Unknown,T)` changes
+  nothing, because the filter nulls every Unknown before inference sees it.
+- **G5's null** - no heterogeneous join in the corpus, 94 calls all homogeneous.
+- **The circularity in old step 5** - the filter is deletable once
+  Unknown-at-exit is zero, but the filter is what makes Unknown unmeasurable.
+
+**THE FIX - move the QUESTION, keep the ANSWER.** Loader reproduces the wire
+verbatim (spec 2); T1 narrows and can finally SEE `Unknown` as the input value
+spec 3 says it is; T2's boundary answers encodability and refuses an
+un-encodable type LOUDLY. What the loader dropped silently, the boundary GAPs -
+GAP-not-miscompile preserved by construction.
+
+**5.0 lands BEFORE the MOP graph registry and before T1** - both were being
+built against numbers this filter distorts. Measure the blast radius first
+(scratch A/B, CWD inside the scratch tree); the filter has been load-bearing a
+long time and `Unknown` reaching the backend is exactly what it prevented.
+
+### 5.0b - THE UPSTREAM QUESTION: why does the wire carry `Unknown` AT ALL?
+
+perigrin, 2026-08-27, and it cuts deeper than 5.0. 5.0 moves a filter
+downstream; this asks why the input needs filtering. **233 `Unknown` stamps on
+the wire is a FRONTEND defect, not a fact of life.** B::SoN walks a real optree
+with real SV types available; nothing the Chalk backend does with those types
+could not have been determined at the producer. An `Unknown` on the wire is the
+producer declining to answer a question it was holding the evidence for.
+
+Filed as its own workstream (separate session, perl5-son): audit what the 233
+actually are, by op and by cause, and close the ones the optree can answer. The
+two are complementary - 5.0 makes chalk honest about what it receives; 5.0b
+reduces what there is to be honest about. **Neither blocks the other**, and
+5.0's GAP-shaped refusal is what makes 5.0b's remaining cases visible instead
+of silently dropped.
+
+**BELT AND SUSPENDERS, deliberately** (perigrin): they fail in different
+directions and neither alone is sufficient. Fix only the producer and chalk
+still TRUSTS its input, so the next producer regression silently drops stamps
+again - the defect class that produced this whole phase. Fix only the boundary
+and the 233 real `Unknown`s become loud GAPs: honest, but not compiling. Both
+gives the producer answering what it can, and the boundary refusing what it
+cannot rather than guessing.
+
 ## 8. Phase 5 — T1 is born, and the loader stops analysing
 
 **Goal:** after phases 1–4 the seam exists, the edge is total, the join is
