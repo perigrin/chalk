@@ -433,7 +433,7 @@ gives the lowering pass a ladder rather than a single answer:
 
 | what has been proven | what is materialised |
 |---|---|
-| nothing — dynamic index, elements not uniform | full `%Slot` per element |
+| nothing — genuinely dynamic index, or a join that leaves `Scalar` | full `%Slot` per element |
 | element positions known statically | per-position type; no cell |
 | `Array[Int]` monomorphic over its lifetime | raw `i64` elements; **`%Slot` gone entirely** |
 
@@ -441,6 +441,28 @@ The bottom row is the point: monomorphism does not merely let the tag be
 elided, it **deletes the container cell**. An `Array[Int]` is `i64*` plus a
 length. `%Slot` is what you pay for having proven nothing yet, and the
 optimizer's job is to stop paying it.
+
+**"ELEMENTS NOT UNIFORM" WAS LOOSE WORDING, now corrected in the table above**
+(perigrin, 2026-08-27). Mixed element TYPES never justify `%Slot`, for a reason
+stronger than the "across positions, not within one" argument above: the lattice
+join makes them uniform. `@a` holding an `Int` and a `Str` has type
+`Array[Int|Str]`, and since `Int <: Num <: Str` that **reduces to
+`Array[Str]`** — monomorphic, bottom row of the ladder, raw `Str` elements and
+no cell, with a `Coerce(Int -> Str)` at the `Int` element's store site.
+
+On a TOTAL join (Phase 3) any set of scalar element types has a least upper
+bound, so "different types" can never by itself mean "not uniform". What
+actually reaches the top row is narrower:
+
+- a **genuinely dynamic index**, where which element is read is a runtime
+  question, so no per-position fact applies (the case the paragraph above
+  already names);
+- a join that lands on **`Scalar`** — cross-kind, e.g. `join(Int, ArrayRef)` —
+  which has no machine encoding at all until T2 exists. That is the D2 case
+  (`logical.md` L3b/L3c/L3d) that took the gate to 215.
+
+The `i1` is the other axis entirely, and it is not a type question:
+present-versus-absent, which IS dynamic (OOB reads, sparse arrays, `delete`).
 
 **A MISS IS NOT A SLOT** (perigrin, 2026-08-27). The ladder's top row is
 *heteromorphism* — "dynamic index, elements not uniform" — so `%Slot` is what a
