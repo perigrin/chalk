@@ -133,3 +133,65 @@ self-typed leftovers (11).
 stops filtering AND the boundary learns to refuse `Unknown`. Removing the filter
 alone converts a silent DROP into a silent GARBAGE ENCODE, which is strictly
 worse.
+
+---
+
+## CLOSED, 2026-08-27 — 233 -> 100, producer `f2d5637`
+
+Chalk gate re-run by the coordinator: **215/215/215/215, 241/241, 0 failures**.
+Pin is `f2d5637`.
+
+| commit | change | wire Unknown |
+|---|---|---|
+| `bf2b039` | Call return type + FieldAccess | 233 -> 195 |
+| `7cc1c11` | Subscript of an unwritten literal | 195 -> 171 |
+| `7967639` | Phi / `&&` / `\|\|` / `//` join | 171 -> 140 |
+| `364a631` | a missing key is `Undef`; three self-typed stamps | 140 -> 125 |
+| `f2d5637` | an Assign is stamped with the value it stored | 125 -> 100 |
+
+By op: Call 60->37, Subscript 44->18, Phi 35->10, Assign 28->3, FieldAccess
+21->6, Add 18->9; DefinedOr/Constant/Not/Ref to zero.
+
+**The premise held** — ~86% of the original 233 was the producer declining a
+question it held the evidence for. Bucket three (asked, then dropped) stayed at
+**zero**.
+
+**Stopped on the CAUSE SPLIT, not the number.** Re-run over the remaining 100 it
+has inverted: 58 bucket one, 29 cascades off them, 6 the producer's own
+soundness guard, 7 memory Phis. Going further would mean inventing answers or
+weakening the guard.
+
+### Two findings that constrain THIS side
+
+**The 7 memory Phis must stay `Unknown`, and T1 must not "fix" them.** They merge
+MEMORY STATES, not values, and `MemStart` carries no stamp at all. Stamping them
+from a store's value type would assert that a memory state is an `Int` — which
+would reach chalk's merge sites and be propagated by the join. A wrong answer
+with a plausible shape.
+
+**The `:param` wall is genuinely undecidable at the producer.** A field with no
+default has NO `type` key on the wire — absent, not `Unknown` — because the type
+depends on what a caller passes at construction. Same wall as the 28
+callee-return cases bottoming out at `shift`. Narrowing these needs CALLSITE
+information, which is T1's job (plan Phase 4's argument seeding), not the
+producer's.
+
+### The one miscompile, and how the pairing caught it
+
+`7cc1c11` stamped a missing hash key with the container's element type, so
+`my %h = (a => 1, b => 2); say($h{z})` printed `0` where perl prints empty.
+Caught by the **behavioural** leg on the first gate run after it landed —
+`invariant` still read 215 while the other three read 214. Fixed in `364a631` by
+generalising the producer's own out-of-range rule to both container kinds.
+
+Three corpus `ir` blocks then failed the SHAPE leg with zero behavioural
+mismatches: they specified `Subscript :Slot` where the correct type-axis answer
+is `Undef`. **The specs were stale, not the stamps** — updated in chalk
+`3ebf0ce8`. Expect the shape leg to move first on any future stamp change; it
+compares hand-written spec against wire, so a correct producer change reddens it
+whenever a block still encodes the old answer.
+
+### What remains is chalk's, not the producer's
+
+The 100 that remain arrive at chalk's graph as **ABSENCES**, because
+`%LOWERABLE_STAMP` omits `Unknown` — the level violation this plan's §5.0 owns.
