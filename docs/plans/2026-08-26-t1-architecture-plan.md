@@ -678,6 +678,36 @@ Two things this changes about §5.0's framing:
    refusal beats a silent drop), but it must be EXPECTED rather than read as
    §5.0 breaking something.
 
+**AND THE FILTER MAKES THE BACKEND BLAME THE WRONG LAYER.** Measured on the
+same cache, the correspondence is exact. The ops the wire stamps `Unknown` are
+
+| op | wire says `Unknown` |
+|---|---|
+| `Call` | 66,277 |
+| `PadAccess` | 46,570 |
+| `Subscript` | 35,778 |
+| `Assign` | 17,523 |
+| `FieldAccess` | 9,366 |
+| `EntryDef` | 5,040 |
+
+and the backend's top refusals on the same corpus are `PadAccess`,
+`Call(method)`, `Defined.operand`, `Subscript.container`, `Assign`, `EntryDef`
+— all of them *"reached LLVM backend with NO representation (undef) — **fix
+TypeInference** so this node carries an explicit repr before lowering."*
+
+The chain, measured end to end: the producer stamps `Unknown` (an honest
+answer); the loader DELETES it because `%LOWERABLE_STAMP` omits `Unknown`,
+leaving the field absent; the backend then refuses and **names TypeInference as
+the culprit**. But inference never saw a value to narrow — the loader removed it
+first.
+
+So the level violation does not merely corrupt a metric. **It produces a
+MISLEADING DIAGNOSTIC**, which is worse than a redundant one: it sends the next
+reader to debug T1 for a defect in `Serialize/JSON.pm`. Deleting the filter
+fixes the message as a side effect, because an `Unknown` that arrives intact
+gets the accurate refusal ("this value may be anything… the program cannot be
+compiled until something NARROWS it") instead of a false accusation.
+
 **5.0 lands BEFORE the MOP graph registry and before T1** - both were being
 built against numbers this filter distorts. Measure the blast radius first
 (scratch A/B, CWD inside the scratch tree); the filter has been load-bearing a
