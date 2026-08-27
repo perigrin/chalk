@@ -177,13 +177,13 @@ context: scalar
 %cb    = Constant(7) :Int
 %vdb   = VarDecl(%cnb, %cb) :Int
 %pb    = PadAccess(%vdb, "$b") :Int
-%r     = DefinedOr(%pa, %pb) :Int
+%r     = DefinedOr(%pa, %pb) :Scalar
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%r : Int -> Str) :Str
+%co_p  = Coerce(%r : Scalar -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
-L: GREEN
+L: GAP(the merge is Scalar -- the join of an Undef arm with a defined arm -- and Scalar has no machine encoding until T2 exists. DECLARED, not discovered: perigrin ruled (D2, 2026-08-26) that deleting the Undef drop is worth this temporary drop, because Int was the WRONG answer for a value that is undef on one path, and a loud GAP naming Scalar beats a green that lies. Restoring this case to GREEN is T2's acceptance criterion -- T2 is not done while it stands. See spec 9.5, which pins the floor at 215 and makes it a CEILING too: a fourth case GAPping here is a regression, not more of the same)
 ```
 
 ## L3c defined-or with an early-return fallback
@@ -240,10 +240,10 @@ context: scalar
 %p   = Print(%co, %nl)
 %reg = Region(%p)
 %und = Constant(undef) :Undef
-%phi = Phi(%c99, %und) :Int
+%phi = Phi(%c99, %und) :Scalar
 return %phi
 control: %start -> %p
-L: GREEN
+L: GAP(the merge is Scalar -- the join of an Undef arm with a defined arm -- and Scalar has no machine encoding until T2 exists. DECLARED, not discovered: perigrin ruled (D2, 2026-08-26) that deleting the Undef drop is worth this temporary drop, because Int was the WRONG answer for a value that is undef on one path, and a loud GAP naming Scalar beats a green that lies. Restoring this case to GREEN is T2's acceptance criterion -- T2 is not done while it stands. See spec 9.5, which pins the floor at 215 and makes it a CEILING too: a fourth case GAPping here is a regression, not more of the same)
 ```
 
 ## L5 void print in a true && arm
@@ -1030,8 +1030,17 @@ symptom in place:
 1. a bare `my $a;` now binds an `Undef` constant, so the arm is typed
 2. the join could not combine `Undef` with `Int` at all — `Undef` is not on the
    `Int <: Num <: Str` chain, so it was skipped as unrankable and the merge
-   stayed untyped even with both arms correct. `Undef` contributes no value to
-   widen, so it is dropped before the join and the defined arm's type wins.
+   stayed untyped even with both arms correct. The join is the lattice join
+   now, and it is total: `Undef` and `Int` are siblings under `Scalar`, so the
+   merge is `Scalar`.
+
+   It is NOT the defined arm's type. `Undef` was dropped before the join for a
+   while, on the argument that it "contributes no value to widen" — which is
+   about RUNTIME VALUES, and the join is about TYPES. `$a // 9` yields `Undef`
+   on no path here, but the merge's STATIC type must cover both arms, and
+   claiming `Int` for a node whose left arm is provably undef is a narrowing
+   nothing established. Deleting that drop is what makes this case honest, and
+   what makes it a GAP: `Scalar` has no machine encoding until T2.
 
 ```perl
 # source
@@ -1050,9 +1059,9 @@ context: scalar
 %start = Start()
 %u   = Constant(undef) :Undef
 %d   = Constant(9) :Int
-%dor = DefinedOr(%u, %d) :Int
+%dor = DefinedOr(%u, %d) :Scalar
 %nl  = Constant("\n") :Str
-%co_p   = Coerce(%dor : Int -> Str) :Str
+%co_p   = Coerce(%dor : Scalar -> Str) :Str
 %p   = Print(%co_p, %nl)
 %one = Constant(1) :Int
 %nl = Constant("\n") :Str
@@ -1060,7 +1069,7 @@ context: scalar
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
-L: GREEN
+L: GAP(the merge is Scalar -- the join of an Undef arm with a defined arm -- and Scalar has no machine encoding until T2 exists. DECLARED, not discovered: perigrin ruled (D2, 2026-08-26) that deleting the Undef drop is worth this temporary drop, because Int was the WRONG answer for a value that is undef on one path, and a loud GAP naming Scalar beats a green that lies. Restoring this case to GREEN is T2's acceptance criterion -- T2 is not done while it stands. See spec 9.5, which pins the floor at 215 and makes it a CEILING too: a fourth case GAPping here is a regression, not more of the same)
 ```
 
 ## L3e defined-or whose LHS IS defined (bilateral)

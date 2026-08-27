@@ -54,21 +54,40 @@ ok((grep { /L4.*not/i                } @titles), 'case: L4 not present');
 # ---------------------------------------------------------------------------
 # SECTION 3: Verify L-verdict declarations per case
 #
-# All 5 cases declare L: GREEN:
+# What the 5 named cases declare:
 #   L1  (&&):  GREEN — And lowering via branch+phi
 #   L2  (||):  GREEN — Or lowering via branch+phi
 #   L3  (//):  GREEN — DefinedOr via Undef representation + definedness branch+phi
-#   L3b (//):  GREEN — DefinedOr undef-left path (runtime-undef via alloca+store+load)
+#   L3b (//):  GAP   — the merge is Scalar (Undef joined with Int); no machine
+#                     encoding until T2 (D2). Restoring GREEN is T2 acceptance criteria.
 #   L4  (!):   GREEN — Boolean repr + Not + Coerce(Int->Boolean) + type-tagged Boolean return
 # ---------------------------------------------------------------------------
 
-subtest 'All cases declare L: GREEN' => sub {
+# The three D2 GAPs. An `Undef` arm now enters the join, so a merge of Undef
+# with a defined arm is `Scalar` -- the correct least upper bound of two
+# siblings -- and `Scalar` has no machine encoding until T2 exists. perigrin
+# ruled (D2, 2026-08-26) that the temporary drop is worth it: `Int` was the
+# WRONG answer for a value that is undef on one path.
+#
+# NAMED, not pattern-matched, and that is the point. Spec 9.5 makes 215 a
+# CEILING as well as a floor -- a FOURTH case GAPping here is a regression,
+# not more of the same -- so this list going stale must FAIL the test rather
+# than quietly absorb a new GAP. Restoring these to GREEN is T2's acceptance
+# criterion.
+my %DECLARED_GAP = map { $_ => 1 } (
+    'L3b defined-or undef-left',
+    'L3c defined-or with an early-return fallback',
+    'L3d defined-or over an UNINITIALISED lexical',
+);
+
+subtest 'every case declares the L: verdict it is supposed to' => sub {
     plan tests => scalar @$cases;
     for my $case (@$cases) {
         my $ir_text = $case->{ir} // '';
         my $decl    = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
         my $title   = $case->{title};
-        is($decl, 'GREEN', "case '$title': declared L: GREEN");
+        my $want    = $DECLARED_GAP{$title} ? 'GAP' : 'GREEN';
+        is($decl, $want, "case '$title': declared L: $want");
     }
 };
 
@@ -142,7 +161,10 @@ subtest 'L2 constructive proof: Or builds and lowers to 3 via lli' => sub {
     }
 };
 
-subtest 'L3, L3b, L4 all build graphs (all are GREEN)' => sub {
+# Buildability only -- a graph being well-formed is a separate question from
+# whether the backend can encode it. L3b BUILDS but is a declared GAP (D2): the
+# merge is Scalar, which has no machine encoding until T2.
+subtest 'L3, L3b, L4 all build graphs' => sub {
     plan tests => 3;
     # L3 (//) now has a buildable graph (DefinedOr with Int LHS).
     my ($l3_case) = grep { $_->{title} =~ /^L3 / } @$cases;
@@ -160,7 +182,7 @@ subtest 'L3, L3b, L4 all build graphs (all are GREEN)' => sub {
         my $return_node;
         eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
         ok(defined $return_node && !$@,
-            "case '$l3b_case->{title}': build_graph_from_ir returns a node (GREEN, undef-left lowers)");
+            "case '$l3b_case->{title}': build_graph_from_ir returns a node (builds; GAP only at the encoding)");
     }
     # L4 (!) now has a buildable graph (Not + Coerce Boolean).
     my ($l4_case) = grep { $_->{title} =~ /L4.*not/i } @$cases;
@@ -221,7 +243,19 @@ subtest 'L3 constructive proof: DefinedOr(Int,Int) builds and lowers to 3 via ll
     }
 };
 
-subtest 'L3b constructive proof: DefinedOr(Undef,Int) builds and lowers to 7 via lli' => sub {
+# L3b WAS a lowering proof: DefinedOr(Undef,Int) built, lowered, and lli
+# printed 7. It cannot lower any more, and that is the D2 ruling landing
+# rather than a regression: the merge is `Scalar` now -- the join of an Undef
+# arm with a defined arm -- and `Scalar` has no machine encoding until T2.
+#
+# So the subtest inverts. It is the GAP's REGRESSION LOCK: it pins that the
+# case still BUILDS (the graph is well-formed; only the encoding is missing),
+# that lowering refuses LOUDLY, and that the refusal names `Scalar` and the
+# node. A silent miscompile or a differently-shaped failure fails this test.
+#
+# When T2 lands, this reverts to the lowering proof it was, along with the
+# `L: GAP(...)` declaration in logical.md and the spec 9.5 floor.
+subtest 'L3b declared GAP: DefinedOr(Undef,Int) is Scalar and refuses to lower' => sub {
     my ($l3b_case) = grep { $_->{title} =~ /L3b/ } @$cases;
     ok(defined $l3b_case, 'L3b case found');
 
@@ -230,37 +264,26 @@ subtest 'L3b constructive proof: DefinedOr(Undef,Int) builds and lowers to 7 via
     eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
     ok(!$@, "L3b build_graph_from_ir does not croak (got: $@)")
         or diag("build error: $@");
-    ok(defined $return_node, 'L3b build_graph_from_ir returns a defined Return node');
+    ok(defined $return_node, 'L3b still BUILDS -- the graph is well-formed, only the encoding is missing');
 
     my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
-    is($verdict, 'GREEN', 'L3b ir block declares L: GREEN');
+    is($verdict, 'GAP', 'L3b ir block declares L: GAP (D2 -- restoring GREEN is T2 acceptance criteria)');
+
+    # The join is what changed, and the ir block must say so.
+    like($ir_text, qr/DefinedOr\(%pa, %pb\) :Scalar/,
+        'L3b ir block pins the merge at :Scalar -- Undef and Int are siblings under it');
 
     if (defined $return_node) {
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
-        ok(!$meta->{marked_unsupported}, 'L3b DefinedOr(Undef) graph is truly GREEN (not marked_unsupported)')
-            or diag("gap reason: " . ($meta->{gap_reason} // 'none') . "\nerror: " . ($meta->{lower_error} // 'none'));
 
-        # Libperl-free assertion.
-        my $ll = $meta->{ll_text} // '';
-        unlike($ll, qr/Perl_/, 'L3b .ll: no Perl_ C-API symbols');
-        unlike($ll, qr/\bSV\b/, 'L3b .ll: no SV type symbols');
-        unlike($ll, qr/sv_/,    'L3b .ll: no sv_ C-API symbols');
-        unlike($ll, qr/libperl/,'L3b .ll: no libperl reference');
+        ok($meta->{marked_unsupported},
+            'L3b lowering REFUSES -- a loud GAP, not a silent Int guess');
 
-        my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '7', "L3b lli prints 7 (undef//7 == 7, right operand)");
-        is($lli_out, $l3b_case->{_perl_actual} // '7',
-            "L3b lli output matches perl oracle");
-
-        # Runtime-undef guard: .ll must use alloca+store+load for the defined bit.
-        # This prevents LLVM from constant-folding the branch even with optimizations.
-        like($ll, qr/alloca/,   'L3b .ll: contains alloca (runtime-opaque defined bit)');
-        like($ll, qr/store i1/, 'L3b .ll: contains store i1 (defined bit written to alloca)');
-        like($ll, qr/load i1/,  'L3b .ll: contains load i1 (defined bit read at runtime)');
-
-        # Structural sanity: definedness branch present.
-        like($ll, qr/br i1/,    'L3b .ll: contains br i1 (definedness branch)');
-        like($ll, qr/phi i64/,  'L3b .ll: contains phi i64 (operand-selecting merge)');
+        # The refusal must name the repr AND the node, or a later reader
+        # cannot tell this GAP from any other lowering failure.
+        my $err = $meta->{lower_error} // '';
+        like($err, qr/Scalar/,    'L3b GAP names the repr that has no encoding');
+        like($err, qr/DefinedOr/, 'L3b GAP names the node that carries it');
     }
 };
 

@@ -1258,20 +1258,6 @@ sub _propagate_computed_reprs ($graphs) {
 
                 my @reprs = map { $_->representation } @in;
                 next if grep { !defined } @reprs;          # an input still untyped
-                # Undef is not RANKED -- it is not wider or narrower than Int,
-                # it is a different thing -- but it is not unknown either. A
-                # merge of Undef with T yields T on the arm that is taken, and
-                # the Undef arm contributes no value to widen: `my $a; $a // 9`
-                # is 9, and a ternary whose other arm is Undef yields the
-                # defined arm's type.
-                #
-                # Dropping the Undef arms BEFORE ranking is what lets that
-                # merge type at all; without it the grep below bails on the
-                # unranked Undef and the merge reaches the backend untyped --
-                # which reads as a defective merge when the real defect is that
-                # the lattice has no rule for the absence case.
-                my @ranked = grep { $_ ne 'Undef' } @reprs;
-                @reprs = @ranked if @ranked;
 
                 # A `Slot` arm is NOT dropped here, and the reason is worth
                 # stating because dropping it looks reasonable.

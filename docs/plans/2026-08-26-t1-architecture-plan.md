@@ -418,6 +418,52 @@ front (B3) and a gate run behind with an EXACT expected value.
    the gate floor assertion (`son-corpus-wide.t:322`) to 215. File the
    restoration on zhi (D2, §11). **Commit separately; expected gate: 215
    EXACTLY** — any other number falsifies the D2 accounting.
+
+   **LANDED 2026-08-27. Deletion + spec amendment + the three corpus
+   contracts + the gate floor, in one commit as D2 requires.** Located by
+   content, not by number (the plan's `:1228-1241` is `:1261-1274` at HEAD).
+
+   **The D2 accounting is CONFIRMED BY MEASUREMENT, not just arithmetic.**
+   Full node-by-node stamp diff over all 231 corpus cases, drop-present vs
+   drop-deleted: **2971 stamps each side, 5 nodes differ, in exactly 3 cases**
+   — L3b `DefinedOr` Int→Scalar, L3c `Phi#6` Int→Scalar, L3d `DefinedOr`
+   Int→Scalar, plus the two Coerce nodes whose `from=` identity follows. The
+   corpus-wide untyped-node count is UNCHANGED (812 both sides): nothing else
+   went untyped. 218 − 3 = 215.
+
+   **B3 REMEDY: REFUSED, on positive evidence.** The hazard went live exactly
+   as G5 predicted — 0 `Scalar` guard-skips before the deletion, **9 after
+   (3 on iteration ≥ 2)**. But all three candidate landings are net-negative:
+
+   1. **The plan's favoured remedy DOES NOT TERMINATE.** Teaching
+      `_is_narrowed` that `Scalar` is refinable diverges: L3b alone reached
+      iteration **457,642** and was still climbing when killed (237MB log vs
+      1.3MB normal). Mechanism, confirmed by reading: **all six `$changed = 1`
+      sites in `_propagate_computed_reprs` are UNCONDITIONAL** — none tests
+      whether the repr actually moved. Loop termination rests ENTIRELY on
+      `_is_narrowed` acting as a one-shot latch. **This inverts the plan's
+      cost comparison:** `teach_is_narrowed_scalar_refinable` cannot be landed
+      alone at all; it REQUIRES `withhold_until_fixpoint_stable` (the option
+      the plan deprioritised as "a larger diff for the same effect") as a
+      prerequisite, because the latch it removes is what makes the loop finite.
+   2. **With termination restored, the freeze withholds NOTHING.** Probe =
+      Scalar-refinable + idempotent join write (`next if $prev eq $widest`);
+      terminates, max iteration 2. Every node's FINAL repr is identical to the
+      frozen run. The hazard's premise — "a later refinement is permanently
+      lost" — is measured FALSE here: a merge's join is computed from arms that
+      are already final, so there is no better second answer being suppressed.
+   3. **Its only measured effect is a regression.** The 4 differing lines are
+      two Coerce nodes' hash-consed identity: frozen records
+      `Coerce|from=Scalar`, unfrozen records `Coerce|from=Unknown` — the Coerce
+      is built from a STALER reading of its still-moving input.
+
+   So the remedy is refused for the same reason step 2 refused it, but now on
+   evidence rather than absence. **Revival trigger:** some pass must be able to
+   narrow a node AFTER it is first stamped `Scalar`; nothing does today. The
+   precondition for any future remedy is the write-discipline fix (`$changed`
+   only on an actual move) — that is the load-bearing half and `_is_narrowed`
+   is the cosmetic half. **Do not land them in the other order.** Data:
+   `scratchpad/g5/NOTES.md`, "G5 RE-RUN at step 4".
 5. **The guesses become GAPs (B4, D3).**
 
    **CENSUS DONE 2026-08-27: NO LIVE GUESS. The "report before converting"
@@ -700,7 +746,7 @@ raise). Nothing else may move it.
 | Deferred item | Why | Tracked where |
 |---|---|---|
 | T2 (encoding transform) | its own project; spec §1 defines it | file on zhi when Phase 5 completes: "T2 — the encoding transform (Scalar→%Slot, merge boxing, Undef singleton)" |
-| Restoration of L3b/L3c/L3d to GREEN (gate 215 → 218) | requires T2's `Scalar` encoding (D2) | file on zhi blocked-by-T2 at Phase 3 step 4: "restore L3b/L3c/L3d to GREEN; gate returns to 218" — T2 is not done while the gate reads 215 |
+| **Restoration of L3b/L3c/L3d to GREEN (gate 215 → 218)** | requires T2's `Scalar` encoding (D2) | **FILED HERE, 2026-08-27, as Phase 3 step 4 landed the drop.** BLOCKED-BY: T2. Scope: give `Scalar` a machine encoding, then revert the three `L: GAP(the merge is Scalar ...)` declarations in `t/corpus/mdtest/logical.md` (L3b, L3c, L3d) to `L: GREEN`, restore the spec §9.5 floor to 218, and raise the `son-corpus-wide.t` floor assertion from 215 back to 218. The IR-block stamps (`:Scalar` on the DefinedOr/Phi and their Coerce arms) are CORRECT and must NOT be reverted — the join is right; only the encoding is missing. **T2 is not done while the gate reads 215.** Not on zhi by instruction; this table is the record. |
 | `%LOWERABLE_STAMP` + Print→Boolean seed removal | spec §8: deletable only when T1's exit-Unknown count is zero | named step of the T2/exit-zero follow-up; re-check the nine `_is_narrowed` guard sites then |
 | `_build_registry_from_mop` retirement | derives six facts the MOP lacks | `docs/plans/2026-06-11-*` LLVM-reads-MOP line (zhi chain "MOP migration") |
 | MOP round-trip through `to_json` | `to_json` emits only `{version, source, methods}` | file on zhi with the T2 chain; until then the Graph-mop invariant is not asserted on reloaded graphs |

@@ -188,7 +188,7 @@ test harnesses assemble the same sequence inline. **Build it before wiring
 T1**: one object owning `Loader > T1 > Optimizers > T2 > Optimizers >
 Scheduler`, with the harnesses calling it. Then the acceptance criteria below
 stop conflicting — `loader-reproduces-the-wire.t` reaches 0 while the gate
-holds at 218, because the same change does both. Plan §4c.
+holds at its floor, because the same change does both. Plan §4c.
 
 ## 8. What T1 must stop inheriting from the loader
 
@@ -206,8 +206,9 @@ has stopped occurring — deletable on T1's completion.
 
 ## 9. Acceptance
 
-Not "the gate still reads 218" — that measures behaviour over 218 programs, and
-2026-08-25 shipped three real bugs with the gate green throughout.
+Not "the gate still reads its floor" — that measures behaviour over a few
+hundred programs, and 2026-08-25 shipped three real bugs with the gate green
+throughout.
 
 1. **`loader-reproduces-the-wire.t` reads 0 and asserts.** Today 16, every one
    the loader overwriting what the wire sent.
@@ -220,7 +221,8 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
    - `Unknown` count at the exit reaches ZERO;
    - arrived-absent count reported separately as a frontend metric;
    - narrowed-node count trends up per corpus case, tracked like the gate
-     floor — **but only ever raised on a run where the gate holds at 218.**
+     floor — **but only ever raised on a run where the gate holds at its
+     floor (§9.5).**
      Alone it would reward the bug this spec prevents: `Int` where a `Str` can
      flow IS a narrowing and raises the count. Soundness forbids it but is a
      property to prove rather than a number to check, so pairing is what makes
@@ -228,7 +230,33 @@ Not "the gate still reads 218" — that measures behaviour over 218 programs, an
 4. **The first version REPORTS rather than asserts** — the exit condition fails
    broadly today, and an assertion that must be disabled to land is what
    `_assert_value_nodes_are_typed` already is.
-5. **The corpus gate holds at 218** as a floor, not a definition of done.
+5. **The corpus gate holds at 215** as a floor, not a definition of done.
+
+   The floor was 218. It is 215 while the `Undef` drop stays deleted (D2,
+   ruled by perigrin 2026-08-26): an `Undef` arm now enters the join, so
+   `join(Undef, Int)` is `Scalar` — the correct least upper bound of two
+   siblings — and `Scalar` has no machine encoding until T2 exists. Three
+   corpus cases therefore lower to a DECLARED GAP naming `Scalar`:
+
+   | case | node | was | is |
+   |---|---|---|---|
+   | `logical.md` L3b defined-or undef-left | `DefinedOr` | Int | **Scalar** |
+   | `logical.md` L3c defined-or with an early-return fallback | `Phi` | Int | **Scalar** |
+   | `logical.md` L3d defined-or over an UNINITIALISED lexical | `DefinedOr` | Int | **Scalar** |
+
+   These three were GREEN. This is a real regression, taken deliberately:
+   `Int` was the WRONG answer for a value that is undef on one path, and a
+   loud GAP naming `Scalar` is worth more than a green that lies. Measured
+   at the stamp level over all 231 corpus cases — five nodes in three cases
+   move, and nothing else; the corpus-wide untyped-node count is unchanged.
+
+   **215 is a CEILING as well as a floor while it stands.** A fourth case
+   going GAP is a REGRESSION, not more of the same. The three are named
+   above precisely so a fourth is visible.
+
+   **Restoring 218 is T2's acceptance criterion, not a wish.** T2 gives
+   `Scalar` a machine encoding; the three cases return to GREEN and the
+   floor returns to 218. **T2 is not done while the gate reads 215.**
 
 ## 10. The `Unknown` join policy: ABSORB
 
