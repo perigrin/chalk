@@ -244,9 +244,9 @@ context: scalar
 %c2  = Constant(2) :Int
 %arr = ArrayRef(%c1, %c2) :ArrayRef
 %idx = Constant(5) :Int
-%r   = Subscript(%arr, %idx) :Slot
+%r   = Subscript(%arr, %idx) :Undef
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%r : Slot -> Str) :Str
+%co_p  = Coerce(%r : Undef -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p

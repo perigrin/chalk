@@ -421,9 +421,9 @@ context: scalar
 %c3  = Constant(3) :Int
 %arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
 %idx = Constant(9) :Int
-%r   = Subscript(%arr, %idx) :Slot
+%r   = Subscript(%arr, %idx) :Undef
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%r : Slot -> Str) :Str
+%co_p  = Coerce(%r : Undef -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
@@ -457,9 +457,9 @@ context: scalar
 %v2   = Constant(2) :Int
 %hash = HashRef(%ka, %v1, %kb, %v2) :HashRef
 %lk   = Constant("z") :Str
-%r    = Subscript(%hash, %lk) :Slot
+%r    = Subscript(%hash, %lk) :Undef
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%r : Slot -> Str) :Str
+%co_p  = Coerce(%r : Undef -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
