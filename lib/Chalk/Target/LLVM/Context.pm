@@ -3346,7 +3346,10 @@ sub _lower_defined_or {
     # defined by construction and the maybe-ness has been discharged. The phi
     # merges an i64 payload with the RHS, so it must be typed as the payload --
     # `%Slot` here would be an aggregate phi over two i64 operands.
-    my $phi_repr  = ( ( $repr // 'Int' ) eq 'Slot' ) ? 'Int' : ( $repr // 'Int' );
+    # ONE required fetch, hoisted: the expression reads the repr twice, and a
+    # per-read fallback could not say which read had nothing to read.
+    my $node_repr = _require_repr($node, 'DefinedOr');
+    my $phi_repr  = ( $node_repr eq 'Slot' ) ? 'Int' : $node_repr;
     my $llvm_type = _repr_to_llvm_type($phi_repr);
 
     # LHS payload for the phi: when LHS is Undef-typed, use the recorded payload
@@ -4068,7 +4071,10 @@ sub _process_if_node {
             $else_ref //= '0';
 
             # Look up the VarDecl repr for this phi.
-            my $var_repr  = $self->{_vd_repr}{$vd_id} // 'Int';
+            my $var_repr  = $self->{_vd_repr}{$vd_id}
+                // die "GAP: elab merge Phi for VarDecl vd=$vd_id has NO "
+                     . "representation recorded — fix TypeInference so the "
+                     . "VarDecl carries an explicit repr before lowering.";
             my $llvm_type = Chalk::Target::LLVM::Context::_repr_to_llvm_type($var_repr);
 
             my $phi_ref  = $self->_fresh;
@@ -5798,9 +5804,12 @@ sub _lower_builtin_shift_pop {
     $self->{_need_aggregate_types} = 1;
 
     my $name = $node->name;   # 'shift' or 'pop'
-    my $repr = $node->representation // 'Int';
-    die "GAP: $name element repr=$repr not lowered (only Int elements yet)"
-        unless $repr eq 'Int';
+    # No fallback: the die below already rejects everything but Int, so a
+    # guessed 'Int' only made the message name a repr the node never had.
+    my $repr = $node->representation;
+    die "GAP: $name element repr=" . ($repr // 'NONE (undef)')
+      . " not lowered (only Int elements yet)"
+        unless defined $repr && $repr eq 'Int';
 
     # The array is the aggregate input. Post-load the loader has already moved the
     # leading control token to control_in (the is_stmt_effect contract), so the
@@ -6824,7 +6833,12 @@ sub _lower_call_method {
     # vtable function was DEFINED per the registry's return_repr. The i8*
     # fn-ptr bitcast means lli ACCEPTS a mismatch — the silent-garbage
     # channel (branch-review I4). Die loudly instead.
-    my $abi_repr = $minfo->{return_repr} // 'Int';
+    my $abi_repr = $minfo->{return_repr}
+        // die "GAP: Call(method) '$method_name' — class '$class_name' vtable "
+             . "entry has NO return_repr, so the call site's ABI cast cannot be "
+             . "cross-checked. Guessing one would cast a $result_repr result "
+             . "through a fabricated ABI. Fix the MOP so the method declares "
+             . "its return repr.";
     if ($result_repr ne $abi_repr) {
         die "GAP: Call(method) '$method_name' node repr=$result_repr disagrees "
           . "with class '$class_name' vtable ABI return_repr=$abi_repr — "

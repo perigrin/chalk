@@ -316,4 +316,128 @@ subtest 'undef-repr DefinedOr lhs dies loudly' => sub {
     }
 };
 
+# ============================================================
+# Phase 3 step 5 (B4/D3): the four remaining backend `// 'Int'` guesses in
+# Context.pm become loud GAPs. The 2026-08-27 census found no LIVE guess at any
+# of them -- every reaching case has a DEFINED left operand -- but the reaching
+# values are NOT uniformly Int (the vtable ABI site sees Str and Undef), so an
+# undef arrival would have emitted an i64 cast over a string. Per spec §1 a
+# silent guess is the only unacceptable outcome; a GAP is fine.
+# ============================================================
+
+use Chalk::Target::LLVM::Context;
+
+# Site A (_lower_defined_or, the phi-repr read): the DefinedOr NODE's own repr.
+# Test 8 above covers the LHS; this covers the node. `$repr` is read TWICE in
+# one ternary, so the fix hoists a single required fetch above the expression.
+subtest 'undef-repr DefinedOr NODE dies loudly at the phi-repr read' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    my $lhs = $f->make('Constant', value => 5, const_type => 'integer');
+    $lhs->set_representation('Int');
+    my $rhs = $f->make('Constant', value => 99, const_type => 'integer');
+    $rhs->set_representation('Int');
+    my $dor = $f->make('DefinedOr', inputs => [$lhs, $rhs]);
+    # Intentionally do NOT set representation on the DefinedOr itself.
+    my $ret = $f->make_cfg('Return', inputs => [$dor]);
+
+    my ($ll, $err);
+    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'undef-repr DefinedOr node: lower() dies loudly')
+        or diag("Got no error; .ll:\n" . substr($ll // '', 0, 300));
+    like($err // '', qr/GAP/, 'DefinedOr node error is a GAP');
+    like($err // '', qr/DefinedOr/, 'DefinedOr node error names the node');
+    like($err // '', qr/repr/i, 'DefinedOr node error names the missing repr');
+};
+
+# Site B (_process_if_node, the elab merge phi): the VarDecl repr side table.
+# Drive it directly -- an injected phi record whose vd_id has no _vd_repr entry
+# is exactly the shape the guess covered for.
+subtest 'missing _vd_repr for an elab merge phi dies loudly' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $cond = $f->make('Constant', value => 1, const_type => 'integer');
+    $cond->set_representation('Int');
+    my $if_node = $f->make('If', inputs => [undef, $cond]);
+    my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
+    my $proj1   = $f->make('Proj', inputs => [$if_node], index => 1);
+    my $region  = $f->make('Region', inputs => [$proj0, $proj1]);
+    $if_node->set_region($region);
+
+    my $ctx = Chalk::Target::LLVM::Context->new;
+    # One phi to place, for a VarDecl id the repr table does not know.
+    $ctx->{elab_phi_by_block}{ 'if.merge.' . $region->id } = [ { vd_id => 4242 } ];
+
+    my $err;
+    eval { $ctx->_process_if_node($if_node); 1 };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'unknown _vd_repr at merge phi: _process_if_node dies loudly')
+        or diag('Got no error');
+    like($err // '', qr/GAP/, 'merge-phi error is a GAP');
+    like($err // '', qr/(?:Phi|VarDecl|vd=?4242)/i,
+        'merge-phi error names the node');
+    like($err // '', qr/repr/i, 'merge-phi error names the missing repr');
+};
+
+# Site C (_lower_builtin_shift_pop): the guess was already effectively dead --
+# the very next line dies unless the repr is exactly 'Int'. Dropping the `//`
+# lets that existing die carry the GAP, so this pins the message, not a new guard.
+subtest 'undef-repr shift/pop dies loudly naming the missing repr' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    my $arr = $f->make('ArrayRef', inputs => []);
+    $arr->set_representation('ArrayRef');
+    my $shift = $f->make('Call', name => 'shift', dispatch_kind => 'builtin',
+                         inputs => [$arr]);
+    # Intentionally do NOT set representation on the shift.
+
+    my $ctx = Chalk::Target::LLVM::Context->new;
+    my $err;
+    eval { $ctx->_lower_builtin_shift_pop($shift); 1 };
+    $err = $@;
+
+    ok(defined $err && length $err, 'undef-repr shift: dies loudly')
+        or diag('Got no error');
+    like($err // '', qr/GAP/, 'shift error is a GAP');
+    like($err // '', qr/shift/, 'shift error names the node');
+    # RED at HEAD: the guess makes the message say "repr=Int", which is a lie --
+    # the node has NO repr. The GAP must not report a repr the node never had.
+    unlike($err // '', qr/repr=Int\b/,
+        'shift error does not report the guessed Int as the node repr');
+};
+
+# Site D (_lower_call_method, the vtable ABI cross-check): the registry's
+# return_repr. The census saw Str (Child.kind, Animal.name) and Undef
+# (Counter.bump) here -- an undef arrival under the guess would have compared
+# a Str node repr against a fabricated 'Int' and died with the wrong reason,
+# or worse agreed with an Int node and emitted the mismatched indirect call.
+subtest 'missing vtable return_repr dies loudly naming the method' => sub {
+    my $f = Chalk::IR::NodeFactory->new;
+    my $obj = $f->make('Constant', value => 1, const_type => 'integer');
+    $obj->set_representation('Int');
+    my $call = $f->make('Call', name => 'kind', dispatch_kind => 'method',
+                        class_name => 'Child', inputs => [$obj]);
+    $call->set_representation('Int');
+
+    my $ctx = Chalk::Target::LLVM::Context->new(
+        class_registry => {
+            Child => { methods => [ { name => 'kind', vtable_slot => 0 } ] },
+        },
+    );
+
+    my $err;
+    eval { $ctx->_lower_call_method($call); 1 };
+    $err = $@;
+
+    ok(defined $err && length $err,
+        'registry entry with no return_repr: dies loudly')
+        or diag('Got no error');
+    like($err // '', qr/GAP/, 'vtable ABI error is a GAP');
+    like($err // '', qr/kind/, 'vtable ABI error names the method');
+    like($err // '', qr/return_repr/, 'vtable ABI error names the missing repr');
+};
+
 done_testing();
