@@ -9,6 +9,7 @@ use Scalar::Util qw(blessed);
 use Chalk::Bootstrap::Optimizer::Pass;
 use Chalk::IR::Graph;
 use Chalk::IR::Analysis ();   # _static_miss / _resolve_aggregate / _unwrap_ref
+                              # / _has_element_store
 
 # `$a[9] // 42` over a three-element literal array is STATICALLY 42: the read
 # provably misses, so `//` has a compile-time answer. `$a[1] // 42` is
@@ -108,6 +109,15 @@ class Chalk::Bootstrap::Optimizer::DefinedOrFold
     # adversarial review. Same resolution, same flattening bail-out, or the same
     # class of bug returns here.
     method _element_at($container, $index) {
+        # A container that is ever STORED INTO is not the literal it was
+        # written as: `my @a=(1,2); $a[0]=99;` leaves the initializer 1 in the
+        # ArrayRef's inputs while the live element is 99. Folding the read to
+        # the initializer is a wrong answer, not a stale one. The store is a
+        # consumer-edge fact (Chalk::IR::Analysis::_has_element_store), so the
+        # refusal costs one traversal and needs no ordering assumption.
+        return undef
+            if Chalk::IR::Analysis::_has_element_store($container);
+
         $container = Chalk::IR::Analysis::_resolve_aggregate(
             Chalk::IR::Analysis::_unwrap_ref($container));
         return undef unless defined $container && blessed($container);

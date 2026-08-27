@@ -1328,9 +1328,15 @@ sub _resolve_aggregate ($node) {
 }
 
 # _element_repr($container) — the element type of an ArrayRef/HashRef container,
-# inferred as the widest element repr of its inputs. For a HashRef the inputs
-# alternate key,value; the values are the odd positions. Returns undef when the
-# element types are not yet known.
+# inferred as the widest element repr of its inputs JOINED WITH the repr of
+# every value STORED into it. For a HashRef the inputs alternate key,value; the
+# values are the odd positions. Returns undef when the element types are not yet
+# known.
+#
+# The stores matter because a container is not frozen at its initializer: in
+# `my @a=(1,2); $a[0]="hello";` the literals say Int and the live element is a
+# Str. Reading the initializers alone stamps every later read Int, and a Str
+# then reaches the backend wearing an Int stamp.
 sub _element_repr ($container) {
     $container = _resolve_aggregate(_unwrap_ref($container));
     return undef unless defined $container && blessed($container);
@@ -1347,6 +1353,13 @@ sub _element_repr ($container) {
         return undef;   # container repr not a literal aggregate we can read
     }
     my @reprs = map { blessed($_) ? $_->representation : undef } @elems;
+    # An UNTYPED store contributes undef, which fails the all-defined check
+    # below — correct, because the caller runs inside the repr fixpoint and
+    # will ask again once that store's rhs is typed. Answering from the
+    # literals alone while a store is still untyped would commit to a type the
+    # store may be about to widen.
+    push @reprs, map { blessed($_) ? $_->representation : undef }
+                 _element_store_values($container);
     return undef unless @reprs;
     return undef if grep { !defined } @reprs;
     # A NESTED aggregate: the elements are themselves aggregates ([[1,2],[3,4]]).
@@ -1359,6 +1372,50 @@ sub _element_repr ($container) {
         return $reprs[0];
     }
     return _join_repr(@reprs);
+}
+
+# THE ELEMENT-STORE WALK, shared by the two functions below.
+#
+# A store's lvalue is a Subscript over the container, so every store is
+# reachable from the container by CONSUMER EDGES alone — container -> its
+# Subscript consumers -> each Subscript's Assign consumer -> that Assign. No
+# memory model, no statement ordering, no whole-program table. A post-store
+# READ is a Subscript consumer of the container too, but it is never an
+# Assign's inputs[0], which is exactly what distinguishes it from an lvalue.
+#
+# Returns the Assign nodes, in deterministic (node id) order.
+sub _element_stores ($container) {
+    $container = _resolve_aggregate(_unwrap_ref($container));
+    return () unless defined $container && blessed($container)
+        && $container->can('consumers');
+    my @stores;
+    for my $sub ($container->consumers->@*) {
+        next unless blessed($sub) && $sub->operation eq 'Subscript';
+        for my $use ($sub->can('consumers') ? $sub->consumers->@* : ()) {
+            next unless blessed($use) && $use->operation eq 'Assign';
+            my @ai = ($use->inputs // [])->@*;
+            next unless @ai >= 2;
+            next unless blessed($ai[0]) && $ai[0] == $sub;   # lvalue, not rhs
+            push @stores, $use;
+        }
+    }
+    my %seen;
+    return grep { !$seen{ $_->id }++ }
+           sort { ($a->id // '') cmp ($b->id // '') } @stores;
+}
+
+# _has_element_store($container) — true iff anything is ever stored into this
+# container's elements. A consumer asking "is this container still the literal I
+# can see?" must answer no from the FIRST store, whether or not that store's
+# value can be read: an untyped store still changes what lives there.
+sub _has_element_store ($container) {
+    return scalar(_element_stores($container)) ? true : false;
+}
+
+# _element_store_values($container) — the value each store writes (an Assign's
+# rhs is its last input), in the same order.
+sub _element_store_values ($container) {
+    return map { ($_->inputs // [])->[-1] } _element_stores($container);
 }
 
 # _static_miss($container, $index) — true iff a Subscript read is a provable
