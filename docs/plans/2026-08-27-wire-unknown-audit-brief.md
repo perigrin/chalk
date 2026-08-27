@@ -199,10 +199,20 @@ The 100 that remain arrive at chalk's graph as **ABSENCES**, because
 ### Provenance caveat: RESOLVED 2026-08-27 — the producer is pushed
 
 `origin/pu` is now `a8685ba` (perigrin authorised it; fast-forward
-`36ddeea..a8685ba`, zero unpushed). **So `f2d5637` is fetchable, and every gate
-number in this document is reproducible** rather than a claim about one
-machine's working tree. The section below is kept as the record of why that
-mattered.
+`36ddeea..a8685ba`, zero unpushed). All three pins — `714ec0e`, `bf2b039`,
+`f2d5637` — are reachable from `origin/pu`, so **every gate number in this
+document is now reproducible** rather than a claim about one machine's working
+tree.
+
+**A first version of this note said only `f2d5637` had been unreproducible.
+That understated it, and bson caught it.** `714ec0e` — the ORIGINAL pin, the one
+the 233 baseline and the first four gate readings were taken against — was
+local-only too: verified, it is NOT an ancestor of `36ddeea`, the old
+`origin/pu` head. So the unreproducible set was not "the last pin"; it was
+**every pin, including the 215/215/215/215 baseline the whole audit was measured
+against**. Nothing was checkable by anyone else until the push.
+
+The section below is kept as the record of why that mattered.
 
 ### (Historical) the producer commits were LOCAL
 
