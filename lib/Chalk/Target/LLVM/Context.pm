@@ -6858,6 +6858,25 @@ sub _lower_call_method {
     # vtable function was DEFINED per the registry's return_repr. The i8*
     # fn-ptr bitcast means lli ACCEPTS a mismatch — the silent-garbage
     # channel (branch-review I4). Die loudly instead.
+    #
+    # THIS IS A T2 CHECK, NOT A T1 ONE (perigrin, 2026-08-28). Both operands are
+    # REPRESENTATIONS — `_repr_to_llvm_type` inputs, Int => i64 vs Num =>
+    # double. The vtable ABI is a property of the LOWERING GRAPH: it names the
+    # machine slot an indirect call reads through, not the Perl type of the
+    # method. So the `ne` below is an ENCODING coherence test and its wording
+    # ("disagrees") should not be read as a type conflict.
+    #
+    # The distinction is load-bearing because Int <: Num in the lattice
+    # (%PARENT: Int => 'Num'; join(Int,Num) = Num). A node stamped Num where the
+    # ABI says Int is therefore SOUND on the type axis — the join moved up, and
+    # an Int value IS a Num. What is unsound is reading i64 bits through a
+    # double slot, which is why this fires. Measured 2026-08-28: corpus R15
+    # printed 1.48219693752374e-323 for perl's 3, i.e. i64 3's bits as a double.
+    #
+    # The real obligation is T2's and does not exist yet: inserting the
+    # `sitofp` at this boundary the way arithmetic already does for its operands
+    # (:1642-1650). Until T2 exists this guard is standing in for that pass —
+    # correctly refusing rather than guessing, per spec §1.
     my $abi_repr = $minfo->{return_repr}
         // die "GAP: Call(method) '$method_name' — class '$class_name' vtable "
              . "entry has NO return_repr, so the call site's ABI cast cannot be "
