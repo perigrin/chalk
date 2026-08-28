@@ -708,6 +708,36 @@ fixes the message as a side effect, because an `Unknown` that arrives intact
 gets the accurate refusal ("this value may be anything… the program cannot be
 compiled until something NARROWS it") instead of a false accusation.
 
+**AND IT IS NOT A ONE-LINE EDIT: THE FILTER IS ALSO A PERFORMANCE GUARD.**
+Measured 2026-08-27 on the A/B trees (wire cache `a8685ba`, live `lib/`
+untouched), loading ONE wire — `arithmetic-1.json`, 412 graphs:
+
+| tree | `from_json` |
+|---|---|
+| filter intact | **5.93s** |
+| filter removed | **>900s (capped, never completed)** |
+
+**>150x, and it is in the LOAD, not in lowering.** A full corpus arm ran 338
+minutes of CPU against ~25 for the baseline before being killed.
+
+The mechanism follows from Phase 3's finding that `_is_narrowed` is the
+fixpoint's TERMINATION LATCH. Today ~48% of stamps are deleted at load, so those
+nodes are ABSENT and do not re-enter the loop the same way. Admit all 208,660
+`Unknown` stamps and every one becomes a node the fixpoint keeps revisiting,
+because `Unknown` is not narrowed. The filter has been accidentally acting as a
+throughput guard on an inference loop never designed for the full `Unknown`
+population.
+
+**Consequence for sequencing.** §5.0 cannot be "delete the filter and measure":
+that is a one-line edit whose cost is a compiler that does not finish. The
+filter comes out only once the fixpoint tolerates `Unknown` at scale — which is
+T1's job (a worklist that does not re-derive a node whose inputs have not
+changed), not the loader's. **§5.0 therefore lands AFTER T1 exists, not before
+it.** The earlier "5.0 lands BEFORE the MOP graph registry and before T1" is
+retracted; what still holds is that T1 must be built against numbers this filter
+distorts, so the MEASUREMENT above is the input to T1's design rather than a
+prerequisite edit.
+
 **5.0 lands BEFORE the MOP graph registry and before T1** - both were being
 built against numbers this filter distorts. Measure the blast radius first
 (scratch A/B, CWD inside the scratch tree); the filter has been load-bearing a
