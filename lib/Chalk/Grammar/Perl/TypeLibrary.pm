@@ -49,6 +49,28 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # list and does survive assignment to a scalar; it sits here because a
         # symbol-table entry is a name, not because it fails to behave like a
         # value.
+        #
+        # MEASURED CONSEQUENCE (2026-08-28, exhaustive over all 26 members):
+        # these four parenting straight to `Unknown` is the ONLY route by which
+        # a join CLIMBS to it. 180 ordered pairs join to `Unknown` with neither
+        # operand `Unknown`, and every one involves Code/Glob/IO/Format (48
+        # appearances each); every other type appears only when paired with one
+        # of them. Ordinary joins stay put -- join(List,Int) = List,
+        # join(Array,Int) = List, join(Int,ArrayRef) = Scalar.
+        #
+        # That makes `Unknown` the honest lub of a NAME and a VALUE: two things
+        # with no common structure, so the lattice is right to have no better
+        # answer. It also makes reaching `Unknown` by climbing a program-level
+        # error rather than an imprecision -- worth distinguishing from the two
+        # other routes (absorption from an already-`Unknown` arm, and a node
+        # nobody ran an analysis on, which is the common case in practice).
+        #
+        # `Glob <: List` has been PROPOSED (2026-08-28) on the five-typed-slots
+        # reading -- *x{SCALAR,ARRAY,HASH,CODE,IO} are all populable at once.
+        # It is NOT implemented: `is_subtype(Glob, List)` is false today, and
+        # all four behave identically. The comment above already weighed this
+        # ("Glob is the loose one") and placed it here deliberately, so the
+        # proposal reopens a settled call rather than reporting a defect.
         Code      => 'Unknown',     # subroutines
         Glob      => 'Unknown',     # symbol table entries, distinct from GlobRef
         IO        => 'Unknown',     # filehandles/directory handles (*STDOUT{IO})
