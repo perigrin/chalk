@@ -6873,10 +6873,31 @@ sub _lower_call_method {
     # double slot, which is why this fires. Measured 2026-08-28: corpus R15
     # printed 1.48219693752374e-323 for perl's 3, i.e. i64 3's bits as a double.
     #
-    # The real obligation is T2's and does not exist yet: inserting the
-    # `sitofp` at this boundary the way arithmetic already does for its operands
-    # (:1642-1650). Until T2 exists this guard is standing in for that pass —
-    # correctly refusing rather than guessing, per spec §1.
+    # I hypothesised twice that a missing `sitofp` at THIS boundary was a real
+    # chalk-side gap. FALSIFIED by measurement, 2026-08-28 — recorded because a
+    # negative result that is not written down gets re-derived.
+    #
+    # Probe: `class Box { field $v :param :reader = 0; method half { $v / 2 } }`
+    # — a Num-returning method and an Int-returning `:reader` on ONE vtable, on
+    # a truthful wire. It lowers, and `lli` matches perl exactly (3.5 / 7). The
+    # emitted module shows why:
+    #
+    #   define internal double @Box__half(i8* %self)
+    #   define internal i64    @Box__v(i8* %self)
+    #   @Box__vtable = { ..., i8* bitcast (double (i8*)* @Box__half to i8*),
+    #                         i8* bitcast (i64    (i8*)* @Box__v    to i8*) }
+    #
+    # EACH METHOD IS DEFINED AT ITS OWN RETURN TYPE, and the vtable bitcasts
+    # each function pointer separately — there is no shared slot type for an
+    # Int and a Num to collide in. The `sitofp`s in that module sit INSIDE
+    # `Box::half`, promoting the Int field read for the divide, which is where
+    # a coercion belongs.
+    #
+    # So this guard fires only when the NODE's repr disagrees with the
+    # REGISTRY's, and both derive from the same wire: on a truthful wire they
+    # agree by construction. The 6 failures that prompted the hypothesis were
+    # downstream of a FABRICATED stamp (producer 1f1dd43 typed a Call from its
+    # caller's requirement), not of a missing cast.
     my $abi_repr = $minfo->{return_repr}
         // die "GAP: Call(method) '$method_name' — class '$class_name' vtable "
              . "entry has NO return_repr, so the call site's ABI cast cannot be "
