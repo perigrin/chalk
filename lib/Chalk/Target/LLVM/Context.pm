@@ -3650,10 +3650,11 @@ my %_REPR_NO_MACHINE_TYPE = (
     Scalar  => "'Scalar' is an abstract type with no machine representation: it "
              . "denotes one value whose concrete type was never NARROWED. Fix the "
              . "narrowing that should have resolved it, or GAP at the operation "
-             . "that needs a concrete type. (Differs from Unknown only in HOW FAR "
-             . "UP it sits -- Scalar tops the SCALAR SPINE, Unknown tops the whole "
-             . "lattice. Both are legitimate answers; neither has an encoding "
-             . "today. Scalar's is %Slot once T2 exists.)",
+             . "that needs a concrete type. (Its absence here is TARGET-SPECIFIC: "
+             . "runtime-free lowering has no box, so no representation. An XS "
+             . "target on SV* would map Scalar => SV* and this entry would not "
+             . "exist. Contrast Unknown, which is absent from EVERY target's map. "
+             . "Scalar's LLVM encoding is %Slot once T2 exists.)",
 
     # Arity 0+: does not denote one value at all, so it can never have a layout.
     # This is also the vocabulary a variadic signature position uses, so it
@@ -3665,14 +3666,20 @@ my %_REPR_NO_MACHINE_TYPE = (
              . "exists. Reaching machine-type selection means signature "
              . "vocabulary leaked into the value pipeline: a LAYER VIOLATION.",
 
-    # The lattice TOP. A real type, and reaching it is not by itself a bug:
-    # `Unknown` denotes "any value whatsoever", which is a coherent and
-    # sometimes CORRECT answer (a runtime-keyed lookup genuinely is top until
-    # something narrows it). What is true is narrower -- a top-typed value
-    # cannot be LOWERED, because every machine type is a commitment this type
-    # declines to make. Distinct from Scalar only in HOW FAR UP it sits:
-    # Scalar is the top of the scalar spine, Unknown the top of the whole
-    # lattice. Neither has an encoding today.
+    # An ERROR STATE, not a kind of value, and NOT merely "higher than Scalar".
+    # The distinction is the KIND of absence
+    # (docs/architecture/2026-08-09-types-fetches-and-contexts.md): Scalar is
+    # absent from THIS target's map and an SV*-based target would have it;
+    # Unknown is absent from EVERY target's map, permanently.
+    #
+    # It is also hard to REACH by construction, which is why arriving here is a
+    # signal rather than a resting state. Measured against %PARENT: no join of
+    # two types below it produces it -- every ephemeral join climbs to `List`
+    # (join(List,Int), join(Array,Int), join(Void,Int), join(Hash,Str) are all
+    # `List`), and `List => 'Unknown'` puts Unknown ABOVE the ephemeral branch.
+    # So Unknown is reachable only by ABSORPTION (an arm already Unknown) or by
+    # declaration. A value carrying it is claiming it may not be a runtime
+    # object at all.
     Unknown => "'Unknown' is the lattice TOP: this value may be anything, so no "
              . "machine type can hold it. That is an answer, not necessarily a "
              . "failure -- but the program cannot be compiled until something "
