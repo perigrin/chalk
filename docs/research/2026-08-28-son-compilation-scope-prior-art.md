@@ -406,3 +406,55 @@ Stated explicitly, not smoothed over:
    can see" as a deliberate AOT strategy.** My finding is an absence: every AOT
    system I could source starts from roots. Absence of evidence is reported here
    as absence, not as proof of impossibility.
+
+
+---
+
+## Addendum, 2026-08-28: the 412 are THREE categories, not two
+
+perigrin: *"JSON::PP shouldn't be part of any of the applications we are
+building — it's an artifact of the self-hosting / wire generation."*
+
+Measured on `arithmetic-1.json` (`my $x = 1 + 2; print $x`):
+
+| category | graphs | what it is |
+|---|---|---|
+| **toolchain** | **346 (84%)** | the compiler serializing ITSELF — `JSON::PP` 48, `SoN::*` producer internals |
+| runtime/pragma | 66 | `warnings` 12, `Carp` 11, `bytes` 8, `overload` 7 — perl loaded these FOR the program |
+| the program | **1** | `main::__PROGRAM__` |
+
+**These want different treatments, and conflating them was my error.**
+
+**The 346 are not a reachability question.** `JSON::PP` is in the wire because
+it is what `B::SoN` uses to WRITE the wire; `SoN::*` is the producer itself. No
+root set in any program can reach them — a C compiler does not emit its own
+parser into your object file. Excluding them loses no information, because there
+is no configuration in which they are the subject. That is the TOOL declining to
+serialize itself, and it is the producer's own business.
+
+Self-hosting does not change this. When chalk eventually compiles `B::SoN`, that
+is a different invocation with `SoN::*` as the target; "do not serialize the
+CURRENTLY-EXECUTING toolchain" stays correct, because the running producer is
+still not the subject.
+
+**The 66 ARE reachability's business**, and belong to the consumer. `Carp` may
+be reachable from a program calling `croak`; `overload` may matter. Deciding
+needs a root set, which is chalk's job per the AOT findings above.
+
+**Precedent already exists, unnamed:** `ProgramRunner` passes 17
+`not_package=` exclusion terms to the producer; `Phase5LibCoverage` passes none.
+The harnesses have been hand-filtering this for a while.
+
+### Correction to my own measurements
+
+Numbers I reported earlier in this session were taken over ALL 412 graphs and
+described as facts about the program. They are not:
+
+- "208,660 `Unknown` stamps", "48% of the type axis dropped" — overwhelmingly
+  `JSON::PP` and `Carp`, not the program. bson's corpus-scoped **100** is the
+  meaningful figure; mine differed by three orders of magnitude because it
+  measured the producer's implementation.
+- the **>150x** slowdown on removing `%LOWERABLE_STAMP` is therefore suspect as
+  an ALGORITHMIC finding. It may be scope: inference running over 346 graphs of
+  toolchain. Re-measure against a program-scoped graph set before treating it as
+  a fact about the fixpoint.
