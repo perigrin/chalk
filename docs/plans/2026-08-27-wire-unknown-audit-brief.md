@@ -227,3 +227,55 @@ resolves the producer as a **live filesystem path with no version pin**, so
 anything on origin. Anyone reproducing these numbers from a fresh clone will get
 the pre-audit producer and a different result. The numbers are honest about what
 they measured; they are not reproducible off origin until the branch is pushed.
+
+---
+
+## The backward-inference rule (2026-08-28) — and why it constrains T1
+
+Producer `1f1dd43` added backward inference (a use site constrains its operands:
+`$x + 1` makes `$x` `Num`) and took wire `Unknown` **100 -> 43**. It also
+regressed chalk's gate **215 -> 199** with real miscompiles, and the diagnosis
+is a rule worth carrying into T1's design.
+
+**What went wrong:** the pass stamped `Call` nodes from what the CALLER does
+with the result. For `$p->left - $p->right` where `Pair::left`'s
+`method_return_types` is `Unknown` (verified: `field $left :param` with no
+default has no declared type, so the body is genuinely untyped), it stamped both
+Calls `Num` from `Subtract`'s requirement. **The wire then asserted a return
+type the callee did not have.**
+
+Chalk saw it two ways, and they are one defect:
+
+- **loudly**, 6 cases: `Call(method) 'left' node repr=Num disagrees with class
+  'Pair' vtable ABI return_repr=Int` (`Context.pm:6868`) — the guard working;
+- **silently**, the miscompile: `references` R15 printed
+  `1.48219693752374e-323` where perl prints `3`. Bit-checked: **`i64 3`
+  reinterpreted as a `double` is `1.5e-323`** — an integer's bits read as a
+  float, downstream of the same fabrication.
+
+**THE RULE (bson, confirmed):**
+
+> **Backward inference is valid only where the type is GENUINELY OPEN** — a slot
+> read with no other source: `PadAccess`, `FieldAccess`, `Parameter`. Everything
+> else has an authoritative source elsewhere and must be left to the pass that
+> consults it: a `Call`'s type is its **callee's return type**, a `Subscript`'s
+> is its **container's element type**, a `Phi`'s is the **join of its arms**.
+>
+> Backward inference FILLS A HOLE. Where another pass owns the answer, a
+> use-site constraint is a weaker second opinion and must not preempt it.
+
+**Why this binds T1 and not only the producer.** T1 does the same job on the same
+lattice, so the same rule applies to any use-site reasoning chalk adds — and
+chalk has MORE ways to get this wrong, because it can see callees the producer
+could not resolve. The failure mode is not "a wrong type"; it is **a type
+asserted where none was known**, which reads as narrowing and is fabrication.
+
+Note it is the ORDERING rule generalised: bson had already established that
+backward must run LAST so a forward pass's actual type is not preempted by a
+constraint. It applied that to ORDER but not to SCOPE — the same mistake in a
+second dimension.
+
+**Chalk-side consequence, recorded so it is not re-derived:** do NOT add an
+`Int -> Num` widening cast in response to this evidence. The wire was lying. A
+legitimate Int/Num boundary may exist, but it must be diagnosed against a wire
+that is telling the truth.
