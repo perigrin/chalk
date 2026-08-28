@@ -3672,14 +3672,20 @@ my %_REPR_NO_MACHINE_TYPE = (
     # absent from THIS target's map and an SV*-based target would have it;
     # Unknown is absent from EVERY target's map, permanently.
     #
-    # It is also hard to REACH by construction, which is why arriving here is a
-    # signal rather than a resting state. Measured against %PARENT: no join of
-    # two types below it produces it -- every ephemeral join climbs to `List`
-    # (join(List,Int), join(Array,Int), join(Void,Int), join(Hash,Str) are all
-    # `List`), and `List => 'Unknown'` puts Unknown ABOVE the ephemeral branch.
-    # So Unknown is reachable only by ABSORPTION (an arm already Unknown) or by
-    # declaration. A value carrying it is claiming it may not be a runtime
-    # object at all.
+    # It is also RARE BY CONSTRUCTION, which is why arriving here is a signal
+    # rather than a resting state -- but not because nothing climbs to it. An
+    # earlier version of this comment claimed that, from a sample that happened
+    # to omit the four types it is true of. Measured EXHAUSTIVELY over all 26
+    # %PARENT members: 180 ordered pairs join to Unknown with neither operand
+    # Unknown, and EVERY ONE involves Code, Glob, IO or Format (48 appearances
+    # each; every other type appears only when paired with one of those four).
+    #
+    # Those four are the NON-ARITY entities: a callable or a symbol-table slot
+    # is not a plural value, so it has no least upper bound with one. Ordinary
+    # joins stay put -- join(List,Int), join(List,Array), join(Array,Int) are
+    # all `List`; join(Int,ArrayRef) is `Scalar`. So Unknown is reached by
+    # ABSORPTION, by DECLARATION, or by joining a callable/slot with a value,
+    # and that last case is a program-level error rather than an imprecision.
     Unknown => "'Unknown' is the lattice TOP: this value may be anything, so no "
              . "machine type can hold it. That is an answer, not necessarily a "
              . "failure -- but the program cannot be compiled until something "
