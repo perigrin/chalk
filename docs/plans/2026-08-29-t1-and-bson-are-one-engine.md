@@ -197,3 +197,55 @@ Settle per pass, during convergence, on evidence.
 
 The reviewer also did not verify the `Unknown 233 -> 80` figure and ran no
 tests; both are stated as reasoned rather than measured.
+
+---
+
+## The IR-op alias: tried, MEASURED, reverted (2026-08-29)
+
+perigrin, on `%IR_OP_SOURCE_NAME`: *"This feels like it's duplicating the
+TypeLibrary again, especially the operator signatures … add an alias to the
+signatures rather than duplicating the entire dictionary?"*
+
+The diagnosis is right. `%BINARY_OP_SIGNATURES` is keyed by SOURCE OPERATOR
+(`'+'`, `'eq'`), which suits its two parser-side callers, while every
+IR-pipeline caller holds a node's `operation` (`Add`, `StrEq`). The bridge
+between them is a SECOND NAMING SYSTEM for one set of facts, and it drifts
+silently: a missing key returns `undef`, and callers read `undef` as "no
+requirement" rather than "not in the map". Measured: `Add`, `Subtract` and
+`Multiply` were absent, so `$x + 1` imposed no constraint at all — the
+motivating case for backward inference, quietly inert.
+
+The alias approach is also right in structure: the table already assigns SHARED
+HASHREFS (`$num_num_num` is one object under six keys), so adding IR names as
+further keys onto the same refs is genuinely not a copy, and the two names
+cannot disagree.
+
+**It was implemented and it REGRESSED THE GATE 207 -> 169, with 102 behavioural
+mismatches** (`lli ''` against `perl '30'`, `'-10'`, `'6'` …). Reverted whole
+rather than patched.
+
+**Why, and it is not a flaw in the alias idea.** `operand_repr_for_ir_op` has
+TWO consumers with different needs:
+
+- `Analysis.pm::_required_operand_repr` -> **`_insert_str_coercions`**, which
+  MATERIALISES a Coerce node at every position with an answer;
+- `Transform/BackwardInference.pm`, which only READS the requirement to narrow
+  a type.
+
+Today `%_NODE_OPERAND_REPR` holds exactly one entry (`Print => 'Str'`), so the
+coercion pass only ever touches Print operands. Teaching the lookup about
+arithmetic made it insert coercions on every Add/Subtract/Multiply operand,
+which is what produced empty output.
+
+**So the requirement table is fine; the CONSUMER is overloaded.** "What does
+this position require?" is one question, and "should a Coerce be materialised
+here?" is another — the coercion pass has been getting away with conflating
+them only because its table had a single entry.
+
+**What this makes the next step.** Separate the two questions before aliasing:
+give `_insert_str_coercions` its own explicit table (it effectively has one
+already, `%_NODE_OPERAND_REPR`) and let the type-requirement lookup answer
+freely for everyone else. Then the alias lands without touching coercion
+behaviour. That is a change to `Analysis.pm`'s coercion pass, which amendment 1
+puts on chalk's side of the line, so it is chalk's to make and not a
+convergence question.
