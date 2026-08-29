@@ -1382,7 +1382,14 @@ sub _propagate_computed_reprs ($graphs) {
                 # the backend is a GAP, which is the correct outcome until the
                 # boxing path exists.
 
-                my $widest = _join_repr(@reprs);
+                # KILDALL'S STORE DISCIPLINE (1973, step A4). The join folds the
+                # node's EXISTING stamp in as an operand, so each successive store
+                # is >= the last and the sequence is an ascending chain in a
+                # lattice of height ~6. Joining inputs ALONE lets a store move
+                # SIDEWAYS between incomparable elements, which the change guard
+                # below cannot stop -- termination would then be luck of which
+                # moves happen to be reachable rather than a proof.
+                my $widest = _join_repr($node->representation, @reprs);
                 next unless defined $widest;
                 my $prev = $node->representation;
                     next if defined $prev && $prev eq $widest;
