@@ -42,17 +42,13 @@ use Chalk::IR::NodeFactory;   # is_statement_node() classifier used by the value
 # Duplicate of the module-level sub; both packages need it to avoid cross-package calls.
 sub _method_fn_type {
     my ($result_repr) = @_;
-    return 'i64 (i8*)' if !defined $result_repr || $result_repr eq 'Int';
-    return '%StrPair (i8*)' if $result_repr eq 'Str';
-    return 'i1 (i8*)'   if $result_repr eq 'Boolean';
-    return 'double (i8*)' if $result_repr eq 'Num';
-    return 'i1 (i8*)'   if $result_repr eq 'Undef';   # defined-bit, always false
-    # Scalar returns the uniform cell (perigrin, 2026-08-29). This arm exists
-    # because the chain above hand-rolls what %_REPR_LLVM_TYPE already answers;
-    # it is a LOOKUP, not a transformation, so unlike the boxing at :6318 it
-    # belongs here rather than in T2.
-    return '%Slot (i8*)' if $result_repr eq 'Scalar';
-    die "LLVM MOP: unsupported method return repr '$result_repr'";
+    # DERIVED, not a parallel table. A method's function-pointer type is its
+    # return type applied to (i8*), so there is exactly one authority for both
+    # and they cannot drift. They HAD drifted: this chain grew a `Scalar` arm
+    # that _method_fn_llvm_ret_type never got, so a Scalar-returning method
+    # could be pointed at but not called -- invisible because the ABI equality
+    # check upstream rejected the Scalar/Int pair before either was reached.
+    return Chalk::Target::LLVM::_method_fn_llvm_ret_type($result_repr) . ' (i8*)';
 }
 
 sub new {
@@ -6288,6 +6284,48 @@ sub _box_payload {
       . "invalid IR.";
 }
 
+# _field_store_is_coherent($field_repr, $value_repr) -> bool
+#
+# The i64 field payload holds ONE of two kinds of thing, and store and read must
+# agree on which:
+#
+#   DIRECT -- the value itself in the 64 bits: Int (identity), Boolean (zext).
+#   BOXED  -- a POINTER stored via ptrtoint: Str (a StrPair*), ArrayRef/HashRef
+#             (an i8*).
+#
+# _store_field_payload picks by the VALUE's repr; _lower_field_access_in_method
+# reads by the FieldAccess NODE's repr. When those disagree about the KIND, the
+# read `inttoptr`s an integer or uses an address as a number -- the segfault
+# this check exists to prevent.
+#
+# This is a T2 question and only a T2 question: GIVEN THESE TWO ENCODINGS, IS
+# THIS STORE COHERENT? It is deliberately NOT subtyping. `Str <: Scalar` holds
+# in the type lattice, yet storing a StrPair* into a Scalar-declared field is
+# incoherent, because a Scalar-declared read loads a bare i64. Subtyping is the
+# wrong tool here; agreement of interpretation is the right one.
+#
+# `Scalar` is the un-narrowed cell: its payload is a plain i64, so it accepts
+# any DIRECT value (this is what makes Int-into-Scalar legal, and it is the
+# whole 9-case `classes` regression) and refuses every BOXED one.
+sub _field_store_is_coherent {
+    my ($field_repr, $value_repr) = @_;
+
+    # No declaration, nothing to disagree with.
+    return true if !defined $field_repr;
+    return true if $field_repr eq $value_repr;
+
+    my %BOXED  = map { $_ => 1 } qw(Str ArrayRef HashRef);
+    my %DIRECT = map { $_ => 1 } qw(Int Boolean);
+
+    # The general cell reads as a bare i64, so it holds any direct value.
+    return $DIRECT{$value_repr} ? true : false if $field_repr eq 'Scalar';
+
+    # Otherwise the two must name the SAME encoding, and the equality check
+    # above already covered that: distinct boxed kinds bitcast differently on
+    # read, and a direct value read as boxed (or the reverse) misreads the bits.
+    return false;
+}
+
 sub _store_field_payload {
     my ($self, $val_ref, $repr, $pay_gep, $pname) = @_;
 
@@ -6423,9 +6461,9 @@ sub _lower_call_new {
         # producer correctly widened `:param` fields to Scalar (9d23bda).
         my $field_repr = $finfo->{field_repr};
         die "GAP: Call(new) $class_name field '$pname' declared repr=$field_repr "
-          . "but constructor argument repr=$repr — repr conflict, refusing to "
-          . "emit mismatched store/read IR."
-            if defined $field_repr && $field_repr ne $repr;
+          . "but constructor argument repr=$repr — the payload would be written "
+          . "under one interpretation and read under another."
+            unless _field_store_is_coherent($field_repr, $repr);
         my $val_ref = $self->lower_value($pval);
 
         my $def_gep = $self->_fresh;

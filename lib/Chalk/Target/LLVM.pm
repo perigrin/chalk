@@ -221,6 +221,12 @@ sub _method_fn_llvm_ret_type {
     return 'i1'       if $repr eq 'Boolean';
     return 'double'   if $repr eq 'Num';
     return 'i1'       if $repr eq 'Undef';   # defined-bit, always false
+    # Scalar is the un-narrowed cell (perigrin, 2026-08-29): a method whose
+    # return type was never narrowed returns the uniform %Slot. This arm was
+    # missing while _method_fn_type already answered '%Slot (i8*)' for the
+    # POINTER, so a Scalar-returning method could be pointed at but not called
+    # -- the two authorities the call site assumes are one had drifted apart.
+    return '%Slot'    if $repr eq 'Scalar';
     die "LLVM MOP: unsupported method return repr '$repr' for fn return type";
 }
 
