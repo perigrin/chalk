@@ -14,6 +14,29 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # SoN::IR::Stamp mirrors this table; the two must not drift.
     #
     # Unknown is the sole root, matching the paper's tree.
+    # WHAT A TYPE MAY BE REPRESENTED BY (perigrin, 2026-08-29), which this
+    # table determines and which nothing in the IR should encode:
+    #
+    #   a Chalk type may be represented by the representation of ANY OF ITS
+    #   SUBTYPES, or by its own.
+    #
+    # So `Str`'s candidates are its own (%Str) plus everything in its downward
+    # cone -- Num's, Int's, Boolean's, VString's. That is WHY a Str may be a
+    # `double`: Num <: Str, so Num's representation is available to it whenever
+    # what actually flows is a Num. Not a special case, and not (as an earlier
+    # note here framed it) a matter of "what nothing observes" -- observation
+    # analysis is how T2 PROVES which subtype's representation applies; the
+    # SUBTYPE RELATION is what makes it legal.
+    #
+    # And the other half, which is the constraint on this side: CHALK'S IR
+    # NEITHER KNOWS NOR CARES what the representation is or should be. The type
+    # is the IR's business; the representation is T2's, chosen per site with
+    # context in hand (see Target/LLVM/Context.pm::_repr_to_llvm_type, whose
+    # one-argument shape cannot express that). `Node.pm:55` already records the
+    # structural half -- there is no separate `representation` field, it was
+    # folded into `stamp` -- and retiring the deprecated alias is the remaining
+    # work.
+
     my %PARENT = (
         # Scalar branch (arity 1)
         Scalar    => 'List',        # {1} is a subset of {0,1,2,...}

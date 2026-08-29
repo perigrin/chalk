@@ -3638,12 +3638,18 @@ sub _lower_phi {
 # `i64` — or a `double`, for exactly the same reason. The type says what the
 # value may BE; the representation may drop whatever no use OBSERVES.
 #
-# Which gives the general form: **the candidate representations of a type are
-# the ways of not representing what nothing looks at.** Each candidate drops
-# something the general one carries — the `enc` field, the defined bit, the
-# length, the indirection — and is legal exactly when nothing observes what was
-# dropped. So `Int -> i64` is not "the" representation of Int; it is the one
-# that survives when nothing needs it boxed, aliased, or undef-able.
+# The general form, stated closed rather than by its effect (perigrin,
+# 2026-08-29): **a Chalk type may be represented by the representation of ANY
+# OF ITS SUBTYPES, or by its own.** `Str`'s candidates are `%Str` plus its whole
+# downward cone — Num's, Int's, Boolean's, VString's — which is why a `Str` may
+# be a `double` with no special case needed.
+#
+# An earlier version of this note said the candidates are "the ways of not
+# representing what nothing looks at". That describes the EFFECT and mistakes it
+# for the rule: observation analysis is how T2 PROVES which subtype's
+# representation applies to a given site; the SUBTYPE RELATION is what makes it
+# legal in the first place. So `Int -> i64` is not "the" representation of Int —
+# it is Int's own, and it is equally available to Num, Str and Scalar.
 #
 # T2's input is therefore NOT a type per site. It is a type PLUS THE SET OF
 # OBSERVATIONS made on that value, which is a materially harder analysis than a
