@@ -1750,10 +1750,43 @@ sub _stamp_method_call_reprs ($classes, $graphs, $mop) {
             # below on a graph that simply has nothing to say yet.
             next unless _is_narrowed($repr);
 
+            # ORDERED, NOT ALTERNATIVES. `ne` asks whether two lattice points
+            # are the same STRING, so `Scalar` on the wire against `Int` from
+            # the graph read as a defect in one of them. It is not: Int <:
+            # Scalar, the producer said "a scalar", this proved "an Int", and
+            # BOTH ARE TRUE. Take the narrower and say nothing.
+            #
+            # WHY THE PRODUCER SENDS A SUPERTYPE. It compiles ahead of time, so
+            # a node it cannot narrow may not ship `Unknown` -- that is a hole
+            # in the emitted program, not a missing annotation. A subscript
+            # reads ONE slot of an aggregate, always a scalar, so an
+            # unnarrowable element read ships `Scalar` (which lowers to %Slot).
+            # A field-held literal is exactly that: its elements live in a
+            # separate default graph the producer does not cross and this
+            # loader does.
+            #
+            # A REAL CONTRADICTION STILL DIES -- two types on different
+            # branches, neither refining the other.
             if (_is_narrowed($wire) && $wire ne $repr) {
-                die "IR: method $cname\::$mname has return type '$wire' on the "
-                  . "wire but '$repr' derived from its graph. One of the two is "
-                  . "wrong; refusing rather than picking silently.\n";
+                my $wire_narrower
+                    = Chalk::Grammar::Perl::TypeLibrary::is_subtype($wire, $repr);
+                my $repr_narrower
+                    = Chalk::Grammar::Perl::TypeLibrary::is_subtype($repr, $wire);
+
+                if (!$wire_narrower && !$repr_narrower) {
+                    die "IR: method $cname\::$mname has return type '$wire' on "
+                      . "the wire but '$repr' derived from its graph, and "
+                      . "neither refines the other. One of the two is wrong; "
+                      . "refusing rather than picking silently.\n";
+                }
+
+                # The narrower of the two is the answer. When the WIRE is
+                # narrower the graph simply had less to go on, so keep the wire
+                # and do not overwrite it with the weaker derivation below.
+                if ($wire_narrower) {
+                    $ret_repr{"$cname\::$mname"} = $wire;
+                    next;
+                }
             }
             $ret_repr{"$cname\::$mname"} = $repr;
         }
