@@ -116,10 +116,15 @@ SRC
     is $call->representation, 'Int',
         'the NARROWER of the two wins -- the graph refines the wire';
 
-    # NOTE, not asserted: MOP::Method->return_type still reads the wire value
-    # (`Scalar`). It is populated at declare_method time and has no setter, so
-    # this function cannot correct it. Pre-existing split, widened in reach by
-    # this fix rather than created by it -- filed separately.
+    # AND THE METAOBJECT CARRIES IT TOO. Target::LLVM reads return_type off the
+    # metaobject when emitting the callee's signature, so a metaobject left at
+    # the wider wire value would emit a wider return than these call sites
+    # expect. set_return_type narrows it in place.
+    my $mop = (values %$graphs)[0]->mop;
+    my $cls = $mop && $mop->for_class('Bag') or return fail 'Bag has no metaobject';
+    my $m = $cls->find_method('first') or return fail 'Bag::first has no metaobject';
+    is $m->return_type, 'Int',
+        'the metaobject carries the narrowed type, not the wire supertype';
 };
 
 # BILATERAL. The check exists to catch a real contradiction, and widening it to

@@ -17,7 +17,10 @@ use Chalk::IR::Serialize::JSON ();
 # 3e9557c). This test pins the consumer contract:
 #   - the wire's answer is USED, not ignored;
 #   - `Unknown` on the wire defers to the loader, which sees the whole program;
-#   - a genuine DISAGREEMENT is a defect and must die, because nothing else
+#   - a wire SUPERTYPE is refined by the graph, not refused: the two are
+#     ORDERED, so the narrower one is simply the better answer;
+#   - a genuine DISAGREEMENT -- two types on different branches, neither
+#     refining the other -- is a defect and must die, because nothing else
 #     compares the two and the backend would otherwise consume one answer while
 #     the metadata channel carried the other.
 
@@ -77,17 +80,36 @@ subtest 'a wire with NO type at all still loads' => sub {
         'an absent method_return_types map is tolerated';
 };
 
-subtest 'a genuine DISAGREEMENT is refused, loudly' => sub {
-    # The wire claims Str; the graph plainly returns an Int constant. Before
-    # this contract the loader silently preferred its own derivation and the
-    # wire's claim went unread -- so a producer bug of exactly this shape was
-    # undetectable.
+# A WIRE SUPERTYPE IS NOT A DISAGREEMENT. This case used to claim `Str` over an
+# Int-returning body and expect a refusal, on the reading that the producer must
+# have been wrong. It is not wrong: `Int <: Num <: Str` in this lattice, so an
+# Int already satisfies a Str claim exactly as it satisfies a Scalar one. The
+# producer compiles ahead of time and works one CV at a time, so it ships the
+# narrowest type it can prove and that is sometimes a supertype of what this
+# loader -- which has the whole program -- can derive. Refine, do not refuse.
+subtest 'a wire SUPERTYPE is refined by the graph, not refused' => sub {
     my $json = wire_with_method_return_type('Str');
+    my $graphs;
+    ok lives { $graphs = Chalk::IR::Serialize::JSON::from_json($json) },
+        'a wire Str over an Int-returning body loads' or note $@;
+    ok $graphs && $graphs->{'P::m'}, 'the method graph is present';
+};
+
+# THE REFUSAL MUST SURVIVE, or widening the check to a subtype test would have
+# disabled it. Two types on different branches -- neither refines the other --
+# are a real contradiction and still die.
+subtest 'a genuine DISAGREEMENT is refused, loudly' => sub {
+    # The wire claims Code; the graph plainly returns an Int constant. Neither
+    # is a subtype of the other, so there is no answer that satisfies both and
+    # one of the two is a defect. Before this contract the loader silently
+    # preferred its own derivation and the wire's claim went unread -- so a
+    # producer bug of exactly this shape was undetectable.
+    my $json = wire_with_method_return_type('Code');
     my $err = dies { Chalk::IR::Serialize::JSON::from_json($json) };
 
     ok $err, 'a disagreement dies rather than picking silently';
     like $err, qr/\bP::m\b/,     'the message names the method';
-    like $err, qr/\bStr\b/,      'the message names the wire type';
+    like $err, qr/\bCode\b/,     'the message names the wire type';
     like $err, qr/\bInt\b/,      'the message names the derived type';
     like $err, qr/refus|wrong/i, 'the message says it is refusing, not guessing';
 };

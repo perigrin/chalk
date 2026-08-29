@@ -28,6 +28,23 @@ use Chalk::MOP;
     ok(!defined $sub->return_type, 'return_type defaults to undef');
 }
 
+# THE RETURN TYPE MAY BE NARROWED AFTER DECLARATION, and only narrowed. Same
+# contract as Chalk::MOP::Method::set_return_type -- see t/bootstrap/mop/method.t
+# for the reasoning. A sub carries it for the same consumer: Target::LLVM reads
+# return_type directly when emitting the callee's signature.
+{
+    my $mop = Chalk::MOP->new;
+    my $cls = $mop->declare_class('NarrowableSub');
+    my $sub = $cls->declare_sub('s', return_type => 'Scalar');
+
+    $sub->set_return_type('Int');
+    is($sub->return_type, 'Int', 'a subtype narrows the declared type');
+
+    my $ok = eval { $sub->set_return_type('Scalar'); 1 };
+    ok(!$ok, 'widening a determined type is refused');
+    is($sub->return_type, 'Int', 'the determined type survives the refusal');
+}
+
 # params default to empty
 {
     my $mop = Chalk::MOP->new;
