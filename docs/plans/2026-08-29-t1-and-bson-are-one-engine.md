@@ -63,12 +63,44 @@ Consequences worth stating before anyone acts:
   `B/SoN.pm` (2123) and `SoN/IR/Serialize/JSON.pm` (1334). Neither is a small
   extraction, and the shared subset is what matters, not the totals.
 
-## What must be decided, and is NOT decided here
+## RULED 2026-08-29 (perigrin): the producer's implementation IS the source
 
-1. **Which side is the source of truth?** The producer's is more complete
-   today. Chalk's runs against a loaded graph rather than an optree walk.
-2. **What exactly is the engine?** The passes above are the candidate set; the
-   boundary between "the engine" and "this side's plumbing" is unmeasured.
+> For Chalk the source of truth is to take the Producer's implementation and
+> modify it to run against a loaded graph.
+
+So chalk does not author T1 and does not import `_infer_backward` into
+`Analysis.pm`. It takes the producer's engine and adapts it. That is the
+opposite direction from the one I had assumed.
+
+**And the adaptation is smaller than the ruling's wording implies, because the
+engine is ALREADY graph-based.** Measured 2026-08-29:
+
+| pass | lines | optree references |
+|---|---|---|
+| `_stamp_field_reads` | 25 | 0 |
+| `_stamp_reader_accessors` | 35 | 0 |
+| `_stamp_calls_from_callees` | 19 | 0 |
+| `_stamp_literal_subscripts` | 17 | 0 |
+| `_stamp_merges` | 40 | 0 |
+| `_stamp_derived` | 17 | 0 |
+| `_infer_backward` | 69 | 0 (the one grep hit is the `B::SoN::TypeLibrary::` package prefix) |
+| **total** | **222** | **0** |
+
+`_infer_backward($graphs)` takes a graph set and iterates `$graph->nodes->@*`.
+There is no `B::` optree access anywhere in the engine. So "modify it to run
+against a loaded graph" is not a rewrite from optree-walking to graph-walking —
+it is a VOCABULARY translation (`SoN::IR::Value` -> `Chalk::IR::Value`, the
+stamp accessor) plus an entry point.
+
+222 lines against chalk `Analysis.pm`'s 1842 is also the shape of the answer to
+question 2 below: the ENGINE is small, and most of `Analysis.pm` is this side's
+plumbing.
+
+## What must be decided, and is NOT decided here
+2. **What exactly is the engine?** The seven passes measured above (222 lines)
+   are the strong candidate. What is NOT yet established is which parts of
+   chalk's 1842-line `Analysis.pm` the mirror REPLACES versus which are
+   genuinely chalk-side plumbing that must survive.
 3. **What enforces agreement?** For `TypeLibrary` the answer is already stated:
    chalk's corpus gate runs producer output through chalk's lowering, so a
    disagreement surfaces BEHAVIOURALLY rather than silently. That is the only
