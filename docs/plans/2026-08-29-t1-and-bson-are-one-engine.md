@@ -106,3 +106,39 @@ plumbing.
    disagreement surfaces BEHAVIOURALLY rather than silently. That is the only
    enforcement mechanism either side has, and it must cover the engine too or
    the mirror rots.
+
+---
+
+## CORRECTION 2026-08-29: 222 was an undercount, and the duplication is worse
+## than "one engine written twice"
+
+**The 222-line figure counts only `B/SoN.pm`.** The producer has FIVE more live
+inference passes in `SoN/IR/Serialize/JSON.pm` (each with 2 references —
+definition plus call, so none is dead):
+
+| pass | lines |
+|---|---|
+| `_propagate_computed_reprs` | 89 |
+| `_stamp_method_call_reprs` | 60 |
+| `_stamp_field_access_reprs` | 51 |
+| `_infer_field_types_from_stores` | 42 |
+| `_infer_param_field_types` | 14 |
+| **subtotal** | **256** |
+
+So the engine is **~478 lines**, not 222. I flagged this as a risk to the
+reviewer before checking it; it is real, and it roughly doubles Path A's port.
+
+**And the location is the finding.** Those five live in the producer's
+`SoN/IR/Serialize/JSON.pm`, which has its own `from_json` (`:663`) and calls
+inference from inside it (`:717`). That is the SAME FUSION chalk has —
+inference inside deserialization, in a file of the same name, in both repos.
+
+This is not two implementations of one engine. It is **one architectural defect
+duplicated on both sides**: the loader doing inference. Chalk's Phase 5 exists
+to split that on the chalk side (`JSON.pm:707`); nothing has proposed splitting
+it on the producer side, and the ruling to adopt the producer's implementation
+would import the fusion along with the engine unless the port separates them.
+
+Which sharpens the open question about what "the engine" is: the passes are
+identifiable, but on BOTH sides they are entangled with a loader, and the port
+has to disentangle rather than copy.
