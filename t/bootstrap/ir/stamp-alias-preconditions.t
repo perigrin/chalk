@@ -40,19 +40,25 @@ subtest 'set_representation DESTROYS the type -- this is not symmetric' => sub {
 };
 
 subtest 'PRECONDITION: no UNGUARDED reader of the type axis in lib/' => sub {
-    # THE LOAD-BEARING FACT. The loader writes `Slot` into the shared field for
-    # a statically out-of-bounds Subscript (Serialize/JSON.pm:1459), and `Slot`
-    # is not a member of the type lattice. Every provably-OOB element read
-    # therefore has a corrupted type axis after loading.
+    # RESOLVED 2026-08-29 (`3396682a`) -- and resolved the way this comment
+    # said to resolve it. It used to read:
     #
-    # That is harmless only while NO consumer reads ->stamp. The first one
-    # added will read `Slot` and be wrong -- the honest type is `Undef`, since
-    # an OOB read yields perl's undef, with `Slot` being the lowering pass's
-    # encoding choice.
+    #   "The loader writes `Slot` ... `Slot` is not a member of the type
+    #    lattice. Every provably-OOB element read therefore has a corrupted
+    #    type axis after loading. ... Fixing this test means fixing the OOB
+    #    path to write a TYPE, not deleting the assertion."
     #
-    # So: fail here, loudly, the moment an UNGUARDED production ->stamp reader
-    # appears. Fixing this test means fixing the OOB path to write a TYPE, not
-    # deleting the assertion.
+    # The OOB path now writes `Undef` -- a lattice member, and the exact type
+    # the old comment named as honest. The producer independently agrees: an
+    # out-of-range literal index and an absent literal hash key both arrive
+    # stamped `Undef`. So no lib/ writer puts a non-type into the shared field
+    # any more, and a ->stamp reader can no longer be poisoned by one.
+    #
+    # THE ASSERTION STAYS, per its own instruction, but its job has changed:
+    # it now guards against the hazard RETURNING rather than documenting a live
+    # one. A new unguarded reader is no longer a bug by itself -- what would be
+    # a bug is a new WRITER of a non-lattice name, which is what this catches
+    # by keeping readers honest about the field they are reading.
     #
     # NARROWED 2026-08-26, when the first legitimate reader arrived. `to_json`
     # must read the stamp -- a serializer that cannot emit the type axis means

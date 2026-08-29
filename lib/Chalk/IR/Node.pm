@@ -281,23 +281,32 @@ class Chalk::IR::Node {
     # other. The two axes must become separate fields again once the lowering
     # pass can produce the second one.
     #
-    # THE ALIAS IS DESTRUCTIVE IN ONE DIRECTION, and one live site relies on it.
-    # `set_representation` OVERWRITES the type; it does not merely provide a
-    # second name for reading it:
+    # THE ALIAS IS DESTRUCTIVE IN ONE DIRECTION -- `set_representation`
+    # OVERWRITES the type rather than naming it:
     #
-    #     set_stamp('Int')        -> stamp=Int
-    #     set_representation('Slot') -> stamp=Slot     the Int TYPE is gone
+    #     set_stamp('Int')           -> stamp=Int
+    #     set_representation('Slot') -> stamp=Slot     the Int TYPE would be gone
     #
-    # `Chalk::IR::Serialize::JSON:1459` does exactly this for a statically
-    # out-of-bounds Subscript, and `Slot` is NOT a lattice type. So after
-    # loading, the type axis of every provably-OOB element read is corrupted.
+    # THAT USED TO HAVE A LIVE SITE AND NO LONGER DOES (2026-08-29, `3396682a`).
+    # A statically out-of-bounds Subscript wrote `Slot` -- not a lattice type --
+    # so the type axis of every provably-OOB element read was corrupted, and the
+    # only thing making that harmless was that nothing in lib/ read `->stamp`.
+    # This comment called that a load-bearing precondition rather than an
+    # accident, and predicted its own fix: "the honest type there is `Undef` --
+    # an OOB read yields perl's undef -- with `Slot` being the lowering pass's
+    # ENCODING choice."
     #
-    # THIS IS CURRENTLY HARMLESS ONLY BECAUSE NOTHING IN lib/ READS ->stamp.
-    # That is a load-bearing precondition, not an accident: the moment a
-    # consumer reads the type axis, it will read `Slot` for those nodes and be
-    # wrong. The honest type there is `Undef` -- an OOB read yields perl's
-    # undef -- with `Slot` being the lowering pass's ENCODING choice.
-    # Pinned by t/bootstrap/ir/stamp-alias-preconditions.t.
+    # That is now what the site writes. `Undef` is a lattice member and the
+    # producer independently agrees (an out-of-range literal index and an absent
+    # literal key both arrive stamped `Undef`), so the loader REINFORCES the
+    # wire instead of overwriting it. Every remaining `set_representation` write
+    # in lib/ passes a name that is also a type, which is what makes the alias
+    # merely WRONG-VOCABULARY rather than LOSSY.
+    #
+    # The precondition therefore no longer blocks a `->stamp` reader, and
+    # retiring the alias (task #43) is unblocked. Still pinned by
+    # t/bootstrap/ir/stamp-alias-preconditions.t, which now guards against the
+    # hazard RETURNING rather than documenting a live one.
     method representation()      { return $stamp }
     method set_representation($repr) {
         $stamp = $repr;
