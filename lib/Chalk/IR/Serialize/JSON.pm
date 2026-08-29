@@ -69,7 +69,21 @@ my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
 # (docs/architecture/ir-and-lowering.md section 5). Admitting `Array` types the
 # container; it does not make an arbitrary element read lowerable.
 my %LOWERABLE_STAMP = map { $_ => 1 }
-    qw(Int Num Str Boolean Undef Object ArrayRef HashRef Array Hash);
+    qw(Int Num Str Boolean Undef Object ArrayRef HashRef Array Hash Scalar);
+
+# is_lowerable_stamp($stamp) -> bool
+#
+# The table's one question, asked directly. Exposed because it is a CONTRACT
+# with the backend -- a stamp admitted here is claimed to have a machine
+# encoding -- and a contract with no way to check it drifts. `Scalar` was
+# excluded here long after it gained one (%Slot at both LLVM type
+# authorities), and the cost was the largest single GAP group in the corpus
+# gate: a method returning an un-narrowed Scalar reached lowering with no
+# representation at all.
+sub is_lowerable_stamp ($stamp) {
+    return false if !defined $stamp;
+    return $LOWERABLE_STAMP{$stamp} ? true : false;
+}
 
 
 # -----------------------------------------------------------------------
@@ -631,7 +645,7 @@ sub _deserialize_graph ($method_data) {
         # Map a B::SoN stamp to a Chalk representation so the backend can lower
         # the node runtime-free. Chalk's own serializer emits no stamp, so this
         # only fires for B::SoN-produced JSON.
-        if (defined $nd->{stamp} && $LOWERABLE_STAMP{ $nd->{stamp} }) {
+        if (is_lowerable_stamp($nd->{stamp})) {
             $node->set_representation($nd->{stamp});
         }
 
