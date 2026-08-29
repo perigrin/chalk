@@ -314,8 +314,32 @@ materialising conversions between encodings (T2's). Today's pass does the
 second with a hand-maintained requirement table; the `meet` rule would do the
 first properly.
 
-**Consequence for the alias thread:** narrowing `_insert_str_coercions` to
-node-level contracts is still the right immediate step, because it unblocks the
-alias without deciding this. But the pass's eventual home is T2, where the
-encoding question belongs — and `meet = None` belongs in T1's checker, where it
-would report an impossible pair rather than invent a conversion.
+**RULED (perigrin, 2026-08-29): representations are something we deal with at
+T2.** Which settles where this pass belongs, and retracts my proposed fix.
+
+`_insert_str_coercions` mints `Coerce` nodes carrying **`from_repr` /
+`to_repr`** — representation vocabulary, explicitly — and it runs at
+`Analysis.pm:295`, inside the LOADER's pass sequence. It is a T2 pass living in
+T1's file, materialising encoding conversions during deserialization.
+
+I had proposed NARROWING it to node-level contracts so the alias could land.
+That treats a PLACEMENT error as a SCOPING error: it keeps a T2 pass in T1 and
+merely makes it fire less often. The same mistake as `%LOWERABLE_STAMP`
+answering the backend's admission question inside the loader, which this
+session spent its length unwinding — and I nearly repeated it while writing up
+why it was wrong.
+
+**The corrected shape:**
+
+| question | rule | home |
+|---|---|---|
+| can any value satisfy both ends? | `meet = None` | **T1** — report an impossible pair; do NOT invent a conversion |
+| do these have different machine layouts? | repr inequality | **T2** — emit the stringify / `sitofp` |
+
+So the coercion pass does not get narrowed; it gets MOVED, and split on the way
+— its refusal half is T1's checker, its materialisation half is T2's.
+
+**Consequence for the alias thread:** the alias is no longer blocked by the
+coercion pass's scope, because once the pass leaves `Analysis.pm` the general
+requirement lookup has only inference consumers. The blocker was never the
+table.
