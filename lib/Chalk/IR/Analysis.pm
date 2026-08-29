@@ -1264,7 +1264,20 @@ sub _propagate_computed_reprs ($graphs) {
                 # repr (019f2e25).
                 if ($op eq 'Subscript') {
                     if (_static_miss( $node->inputs->[0], $node->inputs->[1] )) {
-                        $node->set_representation('Slot');
+                        # `Undef`, not `Slot` (perigrin, 2026-08-27/29). A read
+                        # that is not there has a TYPE -- undef -- and `Undef`
+                        # is a lattice member. `Slot` is its ENCODING and is not
+                        # in the lattice at all, so writing it here overwrote
+                        # the type axis with an encoding: the one destructive
+                        # use of the `representation` alias, and the reason
+                        # nothing in lib/ could safely read ->stamp.
+                        #
+                        # The producer already agrees: an out-of-range literal
+                        # index and an absent literal hash key both arrive
+                        # stamped `Undef` (verified on the wire, producer
+                        # 9d23bda). So this now REINFORCES the wire's answer
+                        # rather than replacing it.
+                        $node->set_stamp('Undef');
                         $changed = 1;
                         next;
                     }
