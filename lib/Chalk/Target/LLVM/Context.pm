@@ -241,6 +241,25 @@ sub _index_elab_phis {
 }
 
 # ---------------------------------------------------------------------------
+# %StrPair SHOULD NOT STILL EXIST (perigrin, 2026-08-29). It was to be fully
+# replaced by %Str, and was not — an INCOMPLETE MIGRATION, 47 uses live at this
+# writing. The consolidation this comment goes on to describe (four literal
+# definitions reduced to one) is a different job from the replacement, and
+# doing the first can read as having done the second.
+#
+# Measured split: %Str is the SSA VALUE type; %StrPair survives on the PAYLOAD
+# paths — Str-returning methods, ArrayRead and HashRead, where a Str is stored
+# as an i64 payload and `inttoptr`'d back. Both carry { ptr, len }; only %Str
+# carries `enc`.
+#
+# So %StrPair IS a %Str with the encoding field dropped — a REPRESENTATION
+# CHOICE that got frozen into a second type. Under the T2 framing recorded at
+# _repr_to_llvm_type, dropping `enc` where no use observes the encoding is a
+# legitimate thing for T2 to CHOOSE per site; what is wrong is that the choice
+# is currently made by which code path you are on. Retiring %StrPair is
+# therefore not just cleanup: it is removing a T2 decision that was hardcoded
+# before T2 existed.
+#
 # The %StrPair layout: ONE definition, everything else derived from it.
 #
 # This was written as a literal `%StrPair = type { i8*, i64 }` at LLVM.pm:640
@@ -3613,6 +3632,22 @@ sub _lower_phi {
 # and that is T2 CHOOSING with context in hand, not an optimiser cleaning up
 # after a fixed lowering. Same for a `Scalar` whose payload is only ever an Int:
 # the cell may be unnecessary.
+#
+# **And it runs the whole chain, not one link** (perigrin, 2026-08-29). Since
+# `Int <: Num <: Str`, a `Str` whose STRINGINESS is never observed may be an
+# `i64` — or a `double`, for exactly the same reason. The type says what the
+# value may BE; the representation may drop whatever no use OBSERVES.
+#
+# Which gives the general form: **the candidate representations of a type are
+# the ways of not representing what nothing looks at.** Each candidate drops
+# something the general one carries — the `enc` field, the defined bit, the
+# length, the indirection — and is legal exactly when nothing observes what was
+# dropped. So `Int -> i64` is not "the" representation of Int; it is the one
+# that survives when nothing needs it boxed, aliased, or undef-able.
+#
+# T2's input is therefore NOT a type per site. It is a type PLUS THE SET OF
+# OBSERVATIONS made on that value, which is a materially harder analysis than a
+# lookup and is the reason this function's shape cannot be the final one.
 #
 # So when T2 is built, this becomes a per-SITE or per-REGION decision rather than
 # a total function, and the hash below degrades to the default it always was.
