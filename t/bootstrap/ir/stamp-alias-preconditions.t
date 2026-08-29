@@ -40,25 +40,9 @@ subtest 'set_representation DESTROYS the type -- this is not symmetric' => sub {
 };
 
 subtest 'PRECONDITION: no UNGUARDED reader of the type axis in lib/' => sub {
-    # RESOLVED 2026-08-29 (`3396682a`) -- and resolved the way this comment
-    # said to resolve it. It used to read:
-    #
-    #   "The loader writes `Slot` ... `Slot` is not a member of the type
-    #    lattice. Every provably-OOB element read therefore has a corrupted
-    #    type axis after loading. ... Fixing this test means fixing the OOB
-    #    path to write a TYPE, not deleting the assertion."
-    #
-    # The OOB path now writes `Undef` -- a lattice member, and the exact type
-    # the old comment named as honest. The producer independently agrees: an
-    # out-of-range literal index and an absent literal hash key both arrive
-    # stamped `Undef`. So no lib/ writer puts a non-type into the shared field
-    # any more, and a ->stamp reader can no longer be poisoned by one.
-    #
-    # THE ASSERTION STAYS, per its own instruction, but its job has changed:
-    # it now guards against the hazard RETURNING rather than documenting a live
-    # one. A new unguarded reader is no longer a bug by itself -- what would be
-    # a bug is a new WRITER of a non-lattice name, which is what this catches
-    # by keeping readers honest about the field they are reading.
+    # No lib/ writer puts a non-lattice name into the shared field, so a
+    # `->stamp` reader cannot be poisoned by one. This guards that: it fails if
+    # a new WRITER of a non-type appears.
     #
     # NARROWED 2026-08-26, when the first legitimate reader arrived. `to_json`
     # must read the stamp -- a serializer that cannot emit the type axis means
