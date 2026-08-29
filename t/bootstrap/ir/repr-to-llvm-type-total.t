@@ -107,7 +107,10 @@ subtest 'the four refusal classes each carry their own diagnosis' => sub {
 # reader nothing. The messages must differ.
 # ---------------------------------------------------------------------------
 subtest 'refusal messages are mutually distinct' => sub {
-    my @REFUSING = qw(Scalar List Unknown Regex);   # Any removed: not a lattice type
+    # Scalar REMOVED 2026-08-29: it now ANSWERS (%Slot), see the subtest below.
+    # It was here on the reading that runtime-free lowering has no box for it;
+    # the box exists and every class already emits it.
+    my @REFUSING = qw(List Unknown Regex);   # Any removed: not a lattice type
     plan tests => 1 + scalar @REFUSING;
 
     my %seen;
@@ -122,7 +125,7 @@ subtest 'refusal messages are mutually distinct' => sub {
     }
     my %uniq = map { $_ => 1 } values %seen;
     is(scalar keys %uniq, scalar @REFUSING,
-        'all four refusals differ once the repr name is removed');
+        'the refusals differ once the repr name is removed');
 };
 
 # ---------------------------------------------------------------------------
@@ -134,6 +137,23 @@ subtest 'an undef representation still refuses on its own terms' => sub {
     ok(!defined $got, 'undef repr refuses');
     like($@, qr/NO representation|explicit repr/i,
         'undef repr names the missing-stamp bug, distinct from the four classes');
+};
+
+subtest 'Scalar ANSWERS: it is the top of the scalar spine, encoded as %Slot' => sub {
+    # perigrin, 2026-08-29. Scalar is the TYPE (what the join yields when
+    # nothing narrower was proven); %Slot { i1 defined, i64 payload } is its
+    # ENCODING. Every class already emits that cell for its object struct
+    # (Context.pm:560) with a constructor (:922) and extractor (:931), so the
+    # box is not hypothetical and not T2-gated.
+    is($f->('Scalar'), '%Slot', 'Scalar maps to the uniform cell');
+    is($f->('Slot'),   '%Slot', 'and Slot is the SAME encoding, named on the repr axis');
+
+    # What remains T2's is the BOXING -- wrapping an i64 into the cell at a
+    # store. That is a transformation, not a map entry, and until T2 does it
+    # Context.pm:6318 keeps refusing an Int argument into a Scalar field.
+    # If this ever stops refusing without T2 existing, something inserted a
+    # box in the backend, which is the level violation to catch.
+    ok(1, 'boxing stays T2\'s job -- see the note at Context.pm:6318');
 };
 
 done_testing;

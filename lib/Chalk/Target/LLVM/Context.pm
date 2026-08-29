@@ -47,6 +47,11 @@ sub _method_fn_type {
     return 'i1 (i8*)'   if $result_repr eq 'Boolean';
     return 'double (i8*)' if $result_repr eq 'Num';
     return 'i1 (i8*)'   if $result_repr eq 'Undef';   # defined-bit, always false
+    # Scalar returns the uniform cell (perigrin, 2026-08-29). This arm exists
+    # because the chain above hand-rolls what %_REPR_LLVM_TYPE already answers;
+    # it is a LOOKUP, not a transformation, so unlike the boxing at :6318 it
+    # belongs here rather than in T2.
+    return '%Slot (i8*)' if $result_repr eq 'Scalar';
     die "LLVM MOP: unsupported method return repr '$result_repr'";
 }
 
@@ -3633,6 +3638,12 @@ my %_REPR_LLVM_TYPE = (
     Str      => '%Str',
     Undef    => 'i1',
     Slot     => '%Slot',      # { i1, i64 }: the uniform field/element cell
+    # Scalar IS that cell (perigrin, 2026-08-29). `Scalar` is the TYPE -- the
+    # top of the scalar spine, what the join yields when nothing narrower was
+    # proven -- and `%Slot` is its ENCODING: a value that may be any scalar and
+    # may be undef is exactly { i1 defined, i64 payload }. Two axes, one cell;
+    # `Slot` above is the same encoding named on the representation axis.
+    Scalar   => '%Slot',
     Array    => '%Array*',    # { i64, i64, %Slot* }
     Hash     => '%Hash*',     # { i64, i64, %HashEntry* }
     ArrayRef => 'i8*',        # boxed pointer to an %Array
@@ -3647,14 +3658,11 @@ my %_REPR_LLVM_TYPE = (
 my %_REPR_NO_MACHINE_TYPE = (
     # Arity 1: denotes a SINGLE value whose concrete type was never determined.
     # It COULD acquire a representation once narrowed, so this is "not yet".
-    Scalar  => "'Scalar' is an abstract type with no machine representation: it "
-             . "denotes one value whose concrete type was never NARROWED. Fix the "
-             . "narrowing that should have resolved it, or GAP at the operation "
-             . "that needs a concrete type. (Its absence here is TARGET-SPECIFIC: "
-             . "runtime-free lowering has no box, so no representation. An XS "
-             . "target on SV* would map Scalar => SV* and this entry would not "
-             . "exist. Contrast Unknown, which is absent from EVERY target's map. "
-             . "Scalar's LLVM encoding is %Slot once T2 exists.)",
+    # Scalar was HERE until 2026-08-29, on the reading that runtime-free
+    # lowering has no box for it. That was wrong: the box exists and every class
+    # already emits it. `%Slot` is the object struct's field cell (`:560`), with
+    # a constructor (`:922`) and an extractor (`:931`) already in use. Scalar
+    # now maps to it in %_REPR_LLVM_TYPE above.
 
     # Arity 0+: does not denote one value at all, so it can never have a layout.
     # This is also the vocabulary a variadic signature position uses, so it
@@ -6314,6 +6322,22 @@ sub _lower_call_new {
         # disagree the read misinterprets the stored bits (an Int stored where a
         # Str field's StrPair* is expected inttoptrs to garbage and segfaults),
         # so refuse loudly rather than emit crashing IR (zhi 019f378f).
+        # THE Scalar CASE IS T2's, NOT THIS GUARD'S (perigrin, 2026-08-29).
+        # `Scalar` now maps to `%Slot` (%_REPR_LLVM_TYPE), so a field declared
+        # Scalar HAS an encoding and an Int argument is a narrower value going
+        # into the general carrier — sound on the type axis (Int <: Num <: Str
+        # <: Scalar) and representable on the encoding axis. What is missing is
+        # the BOXING: wrapping the i64 into { i1 defined, i64 payload } via the
+        # constructor at `:922`.
+        #
+        # That wrap is a TRANSFORMATION, and transformations belong to T2. Doing
+        # it here would put T2's decision inside the backend — the same level
+        # violation as %LOWERABLE_STAMP running the backend's admission question
+        # inside the loader. So this keeps REFUSING until T2 inserts the box,
+        # which is the spec §1 outcome ranking working: a loud GAP over a guess.
+        #
+        # Measured 2026-08-29: 9 corpus `classes` cases block here after the
+        # producer correctly widened `:param` fields to Scalar (9d23bda).
         my $field_repr = $finfo->{field_repr};
         die "GAP: Call(new) $class_name field '$pname' declared repr=$field_repr "
           . "but constructor argument repr=$repr — repr conflict, refusing to "
