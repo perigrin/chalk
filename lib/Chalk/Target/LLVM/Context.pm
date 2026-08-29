@@ -3595,6 +3595,31 @@ sub _lower_phi {
 # ---------------------------------------------------------------------------
 # _repr_to_llvm_type($repr) -> LLVM type string
 #
+# T2 CONSTRAINT, RECORDED 2026-08-29 (perigrin). This function's SHAPE encodes
+# an assumption T2 must be free to break: that a representation is a function of
+# the TYPE ALONE. It takes one argument and consults a hash, so it can only ever
+# answer the context-free default.
+#
+# The problem T2 actually faces is MAPPING BETWEEN DISJOINT ORDERS. Chalk's
+# lattice is ordered — `Int <: Num <: Str <: Scalar`. LLVM's types are NOT: there
+# is no relation whatsoever between `i64` and `double`, no subtyping and no
+# implicit conversion, only an explicit `sitofp`/`fptosi`. So T2 is not a
+# homomorphism from one ordered structure onto another. The order information
+# cannot be PRESERVED; it has to be DISCHARGED, and discharged as instructions.
+#
+# The consequence, which this signature cannot express: **a `Num` need not be a
+# `double`.** If every value reaching a Num-typed slot is provably integral,
+# `i64` is the better representation and the `sitofp` should not exist at all —
+# and that is T2 CHOOSING with context in hand, not an optimiser cleaning up
+# after a fixed lowering. Same for a `Scalar` whose payload is only ever an Int:
+# the cell may be unnecessary.
+#
+# So when T2 is built, this becomes a per-SITE or per-REGION decision rather than
+# a total function, and the hash below degrades to the default it always was.
+# Until then, seven call sites read it as authoritative — which is correct for
+# the context-free case and is exactly the fluidity T1 must not have taken away
+# from T2 (see the store guard at Call(new), which refuses for this reason).
+#
 # THIS TARGET'S `type_for`: the map from a Chalk representation to the machine
 # type that holds it. It is TOTAL over every representation Chalk can construct
 # — every input gets a defined answer, and where that answer is a refusal the

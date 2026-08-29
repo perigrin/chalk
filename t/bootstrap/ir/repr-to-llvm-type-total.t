@@ -63,10 +63,12 @@ subtest 'Undef answers (a unit type, not a refusal)' => sub {
 # undiagnosable report -- exactly the merge the Unknown/Scalar split exists to
 # undo (TypeLibrary.pm:101-104).
 # ---------------------------------------------------------------------------
-subtest 'the four refusal classes each carry their own diagnosis' => sub {
+subtest 'each refusal class carries its own diagnosis' => sub {
     my @CASES = (
         # repr, qr/message/, what the message must convey
-        ['Scalar',  qr/narrow/i,    'Scalar: not yet narrowed (arity 1, could get a repr later)'],
+        # Scalar REMOVED 2026-08-29: it ANSWERS now (%Slot). See the dedicated
+        # subtest below. It was listed here on the reading that runtime-free
+        # lowering has no box for it -- the box exists and every class emits it.
         # `Any` USED TO BE HERE and was removed 2026-08-26: it is not a member
         # of the type lattice (TypeLibrary::is_lattice_type says no) and the
         # string appears ZERO times in the LLVM backend. The case asserted a
