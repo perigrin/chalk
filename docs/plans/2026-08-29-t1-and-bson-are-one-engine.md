@@ -242,6 +242,29 @@ this position require?" is one question, and "should a Coerce be materialised
 here?" is another — the coercion pass has been getting away with conflating
 them only because its table had a single entry.
 
+**CORRECTED, after perigrin asked whether `%_NODE_OPERAND_REPR` is itself a
+copy.** It is not, and its comment anticipates the question: *"This hash exists
+for genuine node-level contracts only; an entry that merely restates a source
+signature belongs in TypeLibrary instead."* Its one member is a case where the
+node and the source genuinely DISAGREE — the IR `Print` node lowers one
+representation so every argument position is `Str`, while the source builtin
+`print` is variadic over `List` because perl flattens into it. Two claims about
+two different things, which is also why `%IR_OP_SOURCE_NAME` lists `Print` as
+deliberately absent. It is an override table for real conflicts, correctly
+scoped, with one member.
+
+That sharpens the diagnosis rather than dissolving it. **The pass is named
+`_insert_str_coercions`** — it inserts STRING coercions, and `Print => 'Str'`
+being its only requirement is the scope, not an incompleteness. Making `Add`
+answer `Num` turned a string-coercion pass into a general one.
+
+So the fix is NOT "give the coercion pass its own table"; it effectively has
+one. The mismatch is that it reaches through `_required_operand_repr` into the
+GENERAL signature lookup at all, when its own contract is narrower than that
+lookup's answers. Either it consults only node-level contracts, or it is
+renamed and re-scoped to be the general coercion pass it would then be — and
+that second option is a real design change, not a repair.
+
 **What this makes the next step.** Separate the two questions before aliasing:
 give `_insert_str_coercions` its own explicit table (it effectively has one
 already, `%_NODE_OPERAND_REPR`) and let the type-requirement lookup answer
