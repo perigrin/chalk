@@ -142,3 +142,58 @@ would import the fusion along with the engine unless the port separates them.
 Which sharpens the open question about what "the engine" is: the passes are
 identifiable, but on BOTH sides they are entangled with a loader, and the port
 has to disentangle rather than copy.
+
+---
+
+## Adversarial review, 2026-08-29: ruling UPHELD, scoped by three amendments
+
+A Fable reviewer was asked to build the strongest case AGAINST the ruling and
+endorse it only if it survived. It survives.
+
+**The decisive evidence, which neither the ruling nor my analysis had:** diff
+the five shared passes. Verified independently by me:
+
+| pass | diff lines, chalk vs producer |
+|---|---|
+| `_infer_param_field_types` | **0 — byte-identical** |
+| `_infer_field_types_from_stores` | **0 — byte-identical** |
+| `_stamp_field_access_reprs` | 45 |
+| `_propagate_computed_reprs` | 84 |
+| `_stamp_method_call_reprs` | 106 |
+
+One engine written twice, **already mid-divergence**. That is what settles the
+direction: Path B (keep chalk's, import what it lacks) does not avoid the drift,
+it INSTITUTIONALISES it. A declared source of truth is the only thing that stops
+two copies drifting further.
+
+### The three amendments, all binding
+
+1. **The ruling is scoped to the STAMPING/INFERENCE subset — it is NOT
+   "replace `Analysis.pm`".** My earlier wording ("`Analysis.pm`'s inference is
+   replaced by the port") overstates what is replaceable. `Analysis.pm` also
+   does loader LINKING and REWRITING with no producer equivalent:
+   `_resolve_direct_calls`, `_replay_classes` (MOP sealing),
+   `_attach_call_targets`, `_insert_str_coercions`,
+   `_narrow_unknown_coercions`, `_assert_value_nodes_are_typed`. Those stay
+   chalk's. Discarding them would throw away working, gate-load-bearing code.
+
+2. **Entry-point adaptation is mandatory, not cosmetic.** `_infer_backward($graphs)`
+   and its siblings take a graph SET; spec §2 forbids `Map<String, Graph>` in a
+   public signature. And note chalk's `_stamp_method_call_reprs` diverged by
+   growing a `$mop` parameter — **chalk's drift is ARCHITECTURAL** (MOP edges),
+   so converging those three passes is RECONCILIATION, not copy-paste.
+
+3. **Land additively, converge incrementally.** Import the 7-pass engine first
+   (pure addition — chalk has no `_infer_backward` at all), then converge the
+   three diverged passes ONE AT A TIME against the gate. Blast radius per step
+   is one pass, not one 1842-line file.
+
+### Explicitly NOT settled
+
+**Which direction each of the three diverged passes should converge.** The
+reviewer flagged, correctly, that "producer wins" must not be assumed per-pass —
+chalk's `$mop` parameter is a chalk-side improvement, not drift to be undone.
+Settle per pass, during convergence, on evidence.
+
+The reviewer also did not verify the `Unknown 233 -> 80` figure and ran no
+tests; both are stated as reasoned rather than measured.
