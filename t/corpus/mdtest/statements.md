@@ -645,7 +645,7 @@ and the corpus had no case for it until now.
 
 `Print`'s IR signature is `Print(Str...)` — one operator over one representation.
 The Perl BUILTIN `print` takes a LIST and flattens it, which is why
-`TypeLibrary.pm` types its argument `Any`, in the same breath and for the same
+`TypeLibrary.pm` types its argument `List`, in the same breath and for the same
 reason as the `die`/`warn` entries three lines above it ("variadic: accept
 scalars and arrays via flattening"). Those two statements are about DIFFERENT
 LAYERS — `%_STR_CONTEXT_OPS` is keyed by IR op, `%BUILTIN_SIGNATURES` by source
@@ -653,7 +653,7 @@ builtin, and TypeLibrary never names an IR node — so they do not contradict ea
 other. Tightening the builtin's `arg_types` to `Str` on the strength of the IR
 contract would REJECT this program at parse time: `TypeInference.pm:391` returns
 undef on a signature mismatch, and `Array` is on the collection branch
-(`Array -> List -> Any`), disjoint from `Str`.
+(`Array -> List`), disjoint from `Str`.
 
 Nothing pinned that. Every existing print case passes a scalar, so the whole
 family stayed green while `print @a` broke — the reason this case exists.
