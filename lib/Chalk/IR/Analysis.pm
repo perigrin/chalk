@@ -10,7 +10,7 @@ use Scalar::Util qw(blessed refaddr);
 use Chalk::IR::Value;
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
-use Chalk::IR::Transform::Coercion;       # the T2 coercion passes
+use Chalk::IR::Node::Coerce;             # _insert_str_coercions builds these
 use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype / join_types: the lattice
 
 # NOTE: no `use Chalk::IR::Serialize::JSON` here, and none is needed. The passes
@@ -292,7 +292,7 @@ sub run ($class, $graphs, $classes = undef) {
     #
     # Runs last, after every repr fixpoint above, because that is the first
     # point the operand's representation is actually known.
-    Chalk::IR::Transform::Coercion::_insert_str_coercions(\%graphs);
+    _insert_str_coercions(\%graphs);
 
     # NARROW the Unknowns. The producer writes from_repr 'Unknown' for a Coerce
     # whose operand it could not type -- honestly, since a direct call's result
@@ -300,7 +300,7 @@ sub run ($class, $graphs, $classes = undef) {
     # fixpoint has run and the operand usually IS typed, so the Coerce can be
     # rebuilt against the narrowed type. Runs last, after _insert_str_coercions,
     # so a coercion inserted there is narrowed too.
-    Chalk::IR::Transform::Coercion::_narrow_unknown_coercions(\%graphs);
+    _narrow_unknown_coercions(\%graphs);
 
     # THE EXIT INVARIANT -- NOT YET ENFORCED. See
     # _assert_value_nodes_are_typed below for why it is off and what has to
@@ -761,10 +761,166 @@ sub _seed_direct_call_arg_reprs ($graphs) {
     return $stamped;
 }
 
-# The coercion passes MOVED to Chalk::IR::Transform::Coercion (2026-08-29).
-# They mint Coerce nodes carrying from_repr/to_repr -- representation
-# vocabulary -- and representations are T2's, not the loader's. The two
-# call sites below now delegate.
+# _coercion_exists($from, $to) -> bool. Is this conversion defined at all?
+sub _coercion_exists ($from, $to) {
+    return false if !defined $from || !defined $to;
+    return ($_COERCIBLE_TO{$from} && $_COERCIBLE_TO{$from}{$to}) ? true : false;
+}
+
+# _required_operand_repr($op, $position) -> repr, or undef for "no opinion".
+#
+# The node's own contract first, then the source signature. A position with no
+# answer is left alone: a missed coercion GAPs loudly downstream, whereas a
+# guessed one is a silent wrong answer.
+sub _required_operand_repr ($op, $position) {
+    return $_NODE_OPERAND_REPR{$op}
+        if exists $_NODE_OPERAND_REPR{$op};
+    return Chalk::Grammar::Perl::TypeLibrary::operand_repr_for_ir_op($op, $position);
+}
+
+sub _insert_str_coercions ($graphs) {
+    my $inserted = 0;
+    # Its own factory: _deserialize_graph's is per-graph and not retained, and a
+    # node's identity is its content hash, so nodes minted here are consistent
+    # with the ones already in the graph.
+    my $factory = Chalk::IR::NodeFactory->new();
+    for my $name (sort keys %$graphs) {
+        my $g = $graphs->{$name} or next;
+        for my $node (_all_graph_nodes($g)) {
+            next unless $node->can('operation');
+            my $op = $node->operation;
+            my $inputs = $node->inputs // next;
+            for my $i (0 .. $inputs->$#*) {
+                # Asked PER POSITION, because signatures are per position --
+                # `substr(Str, Num, Num)` wants different types at different
+                # operands, which a whole-node flag cannot express.
+                my $want = _required_operand_repr($op, $i) // next;
+
+                my $in = $inputs->[$i];
+                next unless defined $in && ref $in && ref($in) ne 'ARRAY';
+                next unless $in->can('representation');
+                my $repr = $in->representation;
+                # undef repr: nothing established a type, so a coercion here
+                # would be the guess the producer already declined to make.
+                # The backend reports it against the operator, which names the
+                # node that actually needs a type.
+                next unless defined $repr;
+                next if $repr eq $want;
+                next if $in->isa('Chalk::IR::Node::Coerce');
+
+                # A position that accepts a SET takes this repr as-is.
+                next if Chalk::Grammar::Perl::TypeLibrary::accepts_operand_repr($op, $repr);
+
+                # A COERCION IS A CONVERSION, NOT A SUBSUMPTION. Whether one
+                # exists is a question about the PAIR -- is this conversion
+                # defined? -- and NOT a question about the lattice. Int->Str is
+                # legitimate because stringification is defined for an Int, not
+                # because Int <: Str; Boolean->Str is equally legitimate even
+                # though Boolean is a SIBLING of Str under Scalar and no subtype
+                # relation holds in either direction.
+                #
+                # Keying this on subtyping was wrong twice over, both measured:
+                # requiring `is_subtype($repr, $want)` un-lowered six cases
+                # whose Boolean/Slot operands print perfectly well, and exempting
+                # Str wholesale then un-lowered eight more by stringifying the
+                # ArrayRef operand of `scalar @a`.
+                #
+                # The defined pairs are the ones _lower_coerce implements
+                # (Context.pm _lower_coerce): Int<->Num, anything->Boolean,
+                # Boolean->Num/Int, Undef->Int/Num, scalars->Str, Str->Num/Boolean.
+                # Aggregates appear in NONE of them -- an ArrayRef reaching a
+                # scalar position is a type error to report, not a missing
+                # conversion to invent.
+                next unless _coercion_exists($repr, $want);
+
+                my $c = $factory->make('Coerce',
+                    inputs    => [$in],
+                    from_repr => $repr,
+                    to_repr   => $want,
+                );
+                $c->set_representation($want);
+                $inputs->[$i] = $c;
+                $inserted++;
+            }
+        }
+    }
+    return $inserted;
+}
+
+# _narrow_unknown_coercions(\%graphs) -> count of Coerce nodes narrowed.
+#
+# A Coerce carrying from_repr 'Unknown' is a coercion whose SOURCE type was not
+# determined when the node was built. 'Unknown' is the pessimistic top type
+# (TypeScript's `unknown`, not its `any`): it holds any value but obliges the
+# holder to NARROW it before use. This is that narrowing.
+#
+# The producer writes it for an unstamped operand, which is honest at its stage
+# -- a direct call's result cannot be typed while the callee's graph may not
+# exist yet. By the time this runs every repr fixpoint has completed and the
+# operand usually carries a concrete repr, so the Coerce is REBUILT against it.
+#
+# Rebuilt, not mutated: from_repr is part of Coerce's content_hash (per
+# typed-ir-representation.md, Coerce[Str->Num](x) and Coerce[Int->Num](x) are
+# distinct nodes), so narrowing changes the node's IDENTITY. Mutating in place
+# would leave a node whose hash no longer matches its contents, which breaks
+# hash-consing. The consumer's input slot is repointed and the old Coerce is
+# removed from its operand's consumer list, so no orphan is left listed as a
+# reader of a node it no longer reads.
+#
+# An Unknown that CANNOT be narrowed is left alone deliberately: the backend
+# then reports it as an inference failure naming the operand, which is the
+# whole point of distinguishing Unknown from Scalar. A Scalar GAP means "this
+# scalar type is not lowered"; an Unknown GAP means "nothing ever typed this".
+sub _narrow_unknown_coercions ($graphs) {
+    my $narrowed = 0;
+    my $factory  = Chalk::IR::NodeFactory->new();
+
+    for my $name (sort keys %$graphs) {
+        my $g = $graphs->{$name} or next;
+        for my $node (_all_graph_nodes($g)) {
+            my $inputs = ($node->can('inputs') ? $node->inputs : undef) or next;
+
+            for my $i (0 .. $inputs->$#*) {
+                my $c = $inputs->[$i];
+                next unless blessed($c)
+                         && $c->isa('Chalk::IR::Node::Coerce')
+                         && ($c->from_repr // '') eq 'Unknown';
+
+                my $operand = ($c->inputs // [])->[0];
+                next unless blessed($operand) && $operand->can('representation');
+                my $repr = $operand->representation;
+
+                # Still untyped: leave the Unknown in place so the backend can
+                # report it. Narrowing to a guess here would recreate exactly
+                # the bug this replaced.
+                next unless _is_narrowed($repr);
+
+                # The operand is ALREADY the target type: the coercion is an
+                # identity edge and the consumer can read the operand directly.
+                if ($repr eq $c->to_repr) {
+                    $inputs->[$i] = $operand;
+                    $c->remove_consumer($node) if $c->can('remove_consumer');
+                    $operand->remove_consumer($c) if $operand->can('remove_consumer');
+                    $narrowed++;
+                    next;
+                }
+
+                my $new = $factory->make('Coerce',
+                    inputs    => [$operand],
+                    from_repr => $repr,
+                    to_repr   => $c->to_repr,
+                );
+                $new->set_representation($c->to_repr);
+
+                $inputs->[$i] = $new;
+                # The old Coerce no longer reads the operand.
+                $operand->remove_consumer($c) if $operand->can('remove_consumer');
+                $narrowed++;
+            }
+        }
+    }
+    return $narrowed;
+}
 
 sub _ctor_arg_reprs ($graphs) {
     my %map;
