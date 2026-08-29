@@ -272,3 +272,50 @@ freely for everyone else. Then the alias lands without touching coercion
 behaviour. That is a change to `Analysis.pm`'s coercion pass, which amendment 1
 puts on chalk's side of the line, so it is chalk's to make and not a
 convergence question.
+
+---
+
+## Should coercions be inserted where `meet` is `None`? — MEASURED: no, not alone
+
+perigrin asked whether the coercion rule should be "insert where `meet()` is
+`None`", which is bson's formulation, recorded earlier: *"`meet` returning
+`None` is a SITE, not a verdict: no single type satisfies both ends, so a
+coercion node goes there."*
+
+It is principled where the current pass is ad hoc — but measured against the
+lattice it does NOT fire for the cases that matter:
+
+| operand | required | repr-equality (today) | `meet = None` |
+|---|---|---|---|
+| `Int` | `Str` | COERCE | **no** |
+| `Boolean` | `Str` | COERCE | **no** |
+| `Num` | `Str` | COERCE | **no** |
+| `Undef` | `Str` | COERCE | COERCE |
+| `Array` | `Str` | COERCE | COERCE |
+
+`meet(Int, Str) = Int`, not `None`, because `Int <: Num <: Str` — an `Int`
+GENUINELY satisfies a `Str` requirement on the type axis. So a meet-based rule
+inserts nothing for `print 42`, and `_lower_print` GAPs on an Int-repr operand
+(verified: `Context.pm:8195` handles only `repr eq 'Str'`).
+
+**The two rules answer different questions, and both are needed:**
+
+- **`meet = None`** — *no value can satisfy both ends*. A TYPE error, and the
+  right test for whether a conversion is SEMANTICALLY required. This is what
+  catches `Array` into a scalar position.
+- **repr inequality** — *these have different machine layouts*. An ENCODING
+  question, and the right test for whether a stringify or `sitofp` must be
+  EMITTED. This is what catches `Int` into a `Str` position, which is sound by
+  subtyping and still needs `snprintf`.
+
+So the axis distinction lands here too, and it says the coercion pass has two
+jobs that were never separated: refusing impossible pairs (T1's question) and
+materialising conversions between encodings (T2's). Today's pass does the
+second with a hand-maintained requirement table; the `meet` rule would do the
+first properly.
+
+**Consequence for the alias thread:** narrowing `_insert_str_coercions` to
+node-level contracts is still the right immediate step, because it unblocks the
+alias without deciding this. But the pass's eventual home is T2, where the
+encoding question belongs — and `meet = None` belongs in T1's checker, where it
+would report an impossible pair rather than invent a conversion.
