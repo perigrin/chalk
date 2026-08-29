@@ -75,6 +75,23 @@ sub _declared_slot_type ($node) {
 
 # run(\%graphs) -> count of nodes newly stamped.
 sub run ($graphs) {
+    # TERMINATION. Three independent things bound this loop, in order of
+    # strength:
+    #
+    #   1. The `Unknown` gate below. A node is only ever considered while its
+    #      stamp is literally 'Unknown', and filling it removes it from
+    #      consideration for good -- so each node moves AT MOST ONCE and the
+    #      loop is bounded by the number of holes. This is what actually
+    #      terminates the pass today (measured: 8 chained holes settle in 2
+    #      rounds).
+    #   2. Kildall's store discipline at the write site -- meet the node's own
+    #      stamp into the result, and store only on a change. That is what
+    #      keeps the chain monotone if (1) is ever loosened, which is exactly
+    #      what an optimistic CCP-style phase for recursive calls would need.
+    #   3. $ROUNDS, a belt. It must never be the thing that stops the loop:
+    #      exhausting it would silently TRUNCATE inference, leaving holes
+    #      unfilled with no signal. Hence the die below -- reaching the cap is
+    #      a bug in (1) or (2), not a tuning problem to be fixed by raising it.
     my $ROUNDS  = 10;
     my $stamped = 0;
 
@@ -117,15 +134,31 @@ sub run ($graphs) {
                 my $want = $required{ $node->id } or next;
                 next if $want eq 'Unknown';
 
+                # Kildall's store discipline, in the descending direction:
+                # fold every source -- the declaration, the requirement, AND
+                # the stamp already on the node -- into a single meet. Meeting
+                # in the node's own value is what makes the chain monotone:
+                # without it a later round can move the stamp SIDEWAYS between
+                # two incomparable types and the loop need never settle.
                 my $declared = _declared_slot_type($node);
-                my $result   = defined $declared
-                    ? Chalk::Grammar::Perl::TypeLibrary::meet_types($declared, $want)
-                    : $want;
+                my $result   = $want;
+                for my $src ($declared, $node->stamp) {
+                    next unless defined $src && $src ne 'Unknown';
+                    $result = Chalk::Grammar::Perl::TypeLibrary::meet_types($result, $src);
+                    last unless defined $result;
+                }
 
                 # `None` means the declaration and the use cannot both hold.
                 # That is a COERCION SITE, not a type here -- leave it for the
                 # pass that materialises coercions rather than stamping a bottom.
                 next if !defined $result || $result eq 'None' || $result eq 'Unknown';
+
+                # ...and store only on an actual move. That is the other half
+                # of the proof: a strictly descending chain in a lattice of
+                # finite height must reach quiescence, so `last unless $changed`
+                # below is the real termination argument. $ROUNDS is a belt.
+                my $prev = $node->stamp;
+                next if defined $prev && $prev eq $result;
 
                 $node->set_stamp($result);
                 $changed++;
@@ -134,6 +167,11 @@ sub run ($graphs) {
         }
 
         last unless $changed;
+
+        die "BackwardInference did not reach a fixpoint in $ROUNDS rounds; "
+          . "this means a stamp is moving repeatedly rather than settling, "
+          . "and inference would otherwise be silently truncated"
+            if $round == $ROUNDS;
     }
 
     return $stamped;
