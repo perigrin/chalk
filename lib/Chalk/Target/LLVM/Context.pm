@@ -6364,9 +6364,21 @@ sub _store_field_payload {
         $self->_emit("  $pay_i64 = ptrtoint i8* $val_ref to i64  ; $repr ptr -> i64 for field '$pname'");
     } elsif ($repr eq 'Int') {
         $self->_emit("  $pay_i64 = add i64 0, $val_ref  ; identity: Int->i64 for field '$pname'");
+    } elsif ($repr eq 'Num') {
+        # REINTERPRET the bits into the cell; do NOT convert. `fptosi` would
+        # truncate 1.5 to 1 and silently lose the value -- the payload is a
+        # 64-bit box, not an integer the number is being coerced to.
+        #
+        # The machine type comes from %_REPR_LLVM_TYPE rather than being named
+        # here: what Num encodes AS is that table's decision and revisable per
+        # context, so a second literal at this site would be a parallel
+        # authority that could drift. Only the KIND of move -- a
+        # reinterpretation -- is fixed here.
+        my $num_ty = _repr_to_llvm_type($repr);
+        $self->_emit("  $pay_i64 = bitcast $num_ty $val_ref to i64  ; $repr bits -> i64 payload for field '$pname'");
     } else {
         die "GAP: field '$pname' value repr=$repr cannot be stored in an i64 "
-          . "payload (only Int/Boolean/Str/ArrayRef/HashRef are lowered) — "
+          . "payload (only Int/Num/Boolean/Str/ArrayRef/HashRef are lowered) — "
           . "refusing to emit invalid IR.";
     }
     $self->_emit("  store i64 $pay_i64, i64* $pay_gep  ; field '$pname' payload");

@@ -197,21 +197,16 @@ call_strtod:
 END_HELPER
 }
 
-# _method_fn_type($result_repr) -> LLVM fn type string (no asterisk; add * for ptr)
-# Returns the LLVM function TYPE string for a method with the given result repr.
-# Used in both vtable bitcast expressions and call-site casts.
-sub _method_fn_type {
-    my ($result_repr) = @_;
-    return 'i64 (i8*)' if !defined $result_repr || $result_repr eq 'Int';
-    return '%StrPair (i8*)' if $result_repr eq 'Str';
-    return 'i1 (i8*)'   if $result_repr eq 'Boolean';
-    return 'double (i8*)' if $result_repr eq 'Num';
-    # Undef return: a method whose body value is statically undef (e.g. an
-    # if/else field-mutation whose discarded residual is the assignment value).
-    # Undef lowers to the i1 defined-bit (always false), same shape as Boolean.
-    return 'i1 (i8*)'   if $result_repr eq 'Undef';
-    die "LLVM MOP: unsupported method return repr '$result_repr'";
-}
+# A method's function TYPE is its return type applied to (i8*). There is one
+# definition of that, in Chalk::Target::LLVM::Context, and it derives from
+# _method_fn_llvm_ret_type below -- so the vtable bitcast, the call-site cast,
+# and the definition can never disagree.
+#
+# A SECOND copy of this function lived here and answered from its own literal
+# chain. It had already drifted: Context's grew a `Scalar` arm that this one
+# never got, so a Scalar-returning method died here while lowering fine there.
+# Two functions with the same name in different packages is how that stayed
+# invisible.
 
 # _method_fn_llvm_ret_type($repr) -> LLVM return type for method function header
 sub _method_fn_llvm_ret_type {
@@ -993,7 +988,7 @@ sub _emit_class_registry_ir {
             my $mname   = $minfo->{name};
             my $fn_name = '@' . $cname . '__' . $mname;
             my $ret_repr = $minfo->{return_repr} // 'Int';
-            my $fn_type_str = _method_fn_type($ret_repr);
+            my $fn_type_str = Chalk::Target::LLVM::Context::_method_fn_type($ret_repr);
             push @vt_init, "i8* bitcast ($fn_type_str* $fn_name to i8*)";
         }
         push @lines, "$vt_global = private unnamed_addr constant $vt_type { " . join(', ', @vt_init) . " }  ; vtable for $cname";

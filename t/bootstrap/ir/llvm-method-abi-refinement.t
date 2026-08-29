@@ -60,4 +60,22 @@ subtest 'Scalar and Int are DIFFERENT machine types' => sub {
     is($ret_ty->('Int'),    'i64',   'Int returns a bare machine word');
 };
 
+subtest 'there is exactly ONE definition of the method fn type' => sub {
+    # A second `sub _method_fn_type` lived in Chalk::Target::LLVM with its own
+    # literal chain. Same name, different package, one caller each -- so it
+    # drifted invisibly: Context's grew a Scalar arm and that one did not, and
+    # a Scalar-returning method died in one path while lowering fine in the
+    # other. Unifying the two authorities is worth nothing if a third copy can
+    # reappear, so the uniqueness is what gets pinned.
+    my @defs;
+    for my $f (qw(lib/Chalk/Target/LLVM.pm lib/Chalk/Target/LLVM/Context.pm)) {
+        open my $fh, '<', $f or die "$f: $!";
+        local $/;
+        my $src = <$fh>;
+        push @defs, $f while $src =~ /^sub _method_fn_type\b/mg;
+    }
+    is(scalar @defs, 1, 'exactly one sub _method_fn_type across the LLVM target')
+        or diag("defined in: @defs");
+};
+
 done_testing;
