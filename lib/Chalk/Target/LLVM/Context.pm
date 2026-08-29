@@ -6322,19 +6322,36 @@ sub _lower_call_new {
         # disagree the read misinterprets the stored bits (an Int stored where a
         # Str field's StrPair* is expected inttoptrs to garbage and segfaults),
         # so refuse loudly rather than emit crashing IR (zhi 019f378f).
-        # THE Scalar CASE IS T2's, NOT THIS GUARD'S (perigrin, 2026-08-29).
-        # `Scalar` now maps to `%Slot` (%_REPR_LLVM_TYPE), so a field declared
-        # Scalar HAS an encoding and an Int argument is a narrower value going
-        # into the general carrier — sound on the type axis (Int <: Num <: Str
-        # <: Scalar) and representable on the encoding axis. What is missing is
-        # the BOXING: wrapping the i64 into { i1 defined, i64 payload } via the
-        # constructor at `:922`.
+        # THIS GUARD ASKS A T2 QUESTION AND MUST NOT ASK A T1 ONE
+        # (perigrin, 2026-08-29).
         #
-        # That wrap is a TRANSFORMATION, and transformations belong to T2. Doing
-        # it here would put T2's decision inside the backend — the same level
-        # violation as %LOWERABLE_STAMP running the backend's admission question
-        # inside the loader. So this keeps REFUSING until T2 inserts the box,
-        # which is the spec §1 outcome ranking working: a loud GAP over a guess.
+        # The tempting reasoning is "Int <: Scalar, so permit the store". That
+        # is a TYPE relation, and it is not what a store site may decide on. The
+        # equally tempting counter-reasoning — "an Int field is i64 (8 bytes), a
+        # Scalar field is %Slot (16 bytes), so the shapes differ" — is WORSE: it
+        # asserts a LAYOUT as though it followed from the type. It does not, and
+        # here it is not even true. Measured: `%Box.obj = type { %Box.vt*,
+        # %Slot }` — every field is ALREADY a %Slot whatever its declared repr,
+        # the store writes the defined bit and payload separately, and
+        # `field_repr` governs how the payload is INTERPRETED on read, not the
+        # cell's shape.
+        #
+        # The general point, which is why this comment is long: statements of
+        # the form "type X is N bytes" OVER-DECIDE. They fix an encoding that
+        # T1 must be free to leave open — if T1's `Scalar` were bound to a
+        # 16-byte cell, T1 could neither narrow it later without the encoding
+        # going wrong, nor leave it unnarrowed without paying for a box. T1's
+        # answer stays A TYPE; T2 decides what it costs, and an SV*-based target
+        # would decide differently.
+        #
+        # So the question this site may ask is T2's: GIVEN THESE TWO ENCODINGS,
+        # IS THIS STORE COHERENT? The hazard it exists for is a payload written
+        # under one interpretation and read under another — the `inttoptr`
+        # segfault below. `$field_repr ne $repr` is a crude proxy for that, and
+        # it currently refuses stores that are in fact coherent (Int into the
+        # general cell). Narrowing it to compare INTERPRETATIONS is T2 work and
+        # wants the ref case checked first: `Box->new(v => [1,2])` is legal and
+        # the payload is i64.
         #
         # Measured 2026-08-29: 9 corpus `classes` cases block here after the
         # producer correctly widened `:param` fields to Scalar (9d23bda).
