@@ -343,3 +343,69 @@ So the coercion pass does not get narrowed; it gets MOVED, and split on the way
 coercion pass's scope, because once the pass leaves `Analysis.pm` the general
 requirement lookup has only inference consumers. The blocker was never the
 table.
+
+---
+
+## The cross-session collision, 2026-08-29 — resolved, and what it cost
+
+The bson session committed twice to chalk's `phase5-capstone` (`37ccfcb2`,
+`d925b589`; 8 files, +374/-173) while I was editing `Analysis.pm`. Both sides
+contributed:
+
+- **Mine:** I left an in-progress `lib/` edit uncommitted in a tree another
+  session was committing from. **Uncommitted is not private.**
+- **Theirs:** `git add lib/Chalk/IR/Analysis.pm` — staging a file BY NAME and
+  assuming its contents were their own work.
+
+The result was a broken HEAD: their commit captured my call sites into
+`Chalk::IR::Transform::Coercion`, a module I deleted when I reverted the
+experiment. Repaired in `bdb74505` by recovering the four passes from
+`bb3671bc`.
+
+**Measurement casualty:** my gate reading of **146** was my half-finished move
+plus their two commits plus the breakage. Withdrawn — it measured nothing.
+Re-run at the repaired HEAD: **207/207/208/215, 0 behavioural mismatches**, so
+the 207 baseline was correct all along.
+
+**DECISION: their two commits are KEPT, not reverted.** They offered either.
+Reverting would discard a sound change to protect an attribution, and `bdb74505`
+already builds on them. All four tests they added pass; the gate holds at 207.
+I own them going forward.
+
+**Pin correction:** the producer has moved to `8c15e32` (Subscript is never
+`Unknown`), so today's 207 is measured against THAT, not the `337ceab` I had
+pinned. The pin is updated rather than the reading.
+
+### The producer-side finding, which is the part worth keeping
+
+`8c15e32` makes a `Subscript` never `Unknown`: `$a[...]` and `$h{...}` read ONE
+slot, and one slot of any Perl aggregate holds a scalar (a slice is a different
+node kind — `Slice :isa(Aggregate)` vs `Subscript :isa(Access)` — and nothing
+builds one yet). So a read nothing could narrow now ships `Scalar`.
+
+perigrin's reasoning, recorded because it generalises: **an AoT compiler has no
+runtime to defer to, so an `Unknown` is not a missing annotation — it is a hole
+in the emitted program.** `Scalar` lowers to `%Slot`, which every prologue
+already emits. Ranking: **narrow type > `%Slot` > nothing.** An unconverged type
+costs speed; a missing representation costs the program.
+
+**What it exposes on this side, unfixed:**
+
+1. `_stamp_method_call_reprs` compares wire against graph-derived with `ne`.
+   `Scalar` on the wire against `Int` from the graph is NOT a disagreement —
+   `Int <: Scalar`, the producer said "a scalar", the loader proved "an Int",
+   both true. Corpus `classes.md` #17 is the case; unfixed it takes loadable
+   cases 231 -> 230.
+2. The same `ne` blindness is in `_is_narrowed` (`Analysis.pm:460`), which
+   terminates the fixpoint on the FIRST stamp rather than on the absence of
+   narrowing.
+3. `t/bootstrap/ir/method-return-type-from-wire.t`'s "genuine DISAGREEMENT"
+   case is wire `Str` vs graph `Int` — a SUPERTYPE, not a contradiction.
+   perigrin ruled the test premise stale, not the lattice. `Code` vs `Array`
+   would be a real one.
+
+Five pre-existing failures bson hit and did not touch (`mop/sub-replay.t`,
+`ir/element-repr-joins-stores.t`, `ir/llvm-class-sub-define.t`,
+`ir/son-aggregate-repr.t`, `ir/stamp-alias-preconditions.t`) — it verified them
+by reverting the producer with chalk held constant, after misreporting once and
+retracting on a guess. **Re-check rather than inherit.**
