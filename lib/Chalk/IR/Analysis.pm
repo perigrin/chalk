@@ -457,8 +457,31 @@ sub _assert_value_nodes_are_typed ($graphs) {
 # Stamp object and so tests `$stamp->type ne 'Unknown'`; this field holds a
 # plain string, so the test is against the string. If the field ever becomes a
 # Stamp here too, this is the one site that changes.
+# `Scalar` IS REFINABLE, and is excluded for the same reason `Unknown` is
+# (2026-08-29). Both are answers that commit to nothing: `Unknown` is the
+# lattice top, `Scalar` the top of the SCALAR SPINE -- what the join yields when
+# nothing narrower was proven. A guard asking "was this already decided, so
+# leave it alone?" must say no to both.
+#
+# This became live rather than theoretical when the producer started shipping
+# `Scalar` for every un-narrowable Subscript (perl5-son 8c15e32: a subscript
+# reads ONE slot, and one slot holds a scalar). Before that nothing produced a
+# `Scalar` stamp, which is why Phase 3's G5 measured ZERO instances of the
+# hazard and could not reproduce it. With it treated as committed, the three
+# fixpoint guards (:1150, :1249, :1826) skip such a node PERMANENTLY and it can
+# never reach `Int` even where the graph proves it.
+#
+# TERMINATION IS PRESERVED, which matters because this sub is the fixpoint's
+# latch (pinned by ir/propagate-fixpoint-terminates.t, and Phase 3 proved that
+# loosening it to "re-stamp whenever something changed" hangs the loop). The
+# exemption is not that loosening: a refinement from `Scalar` is strictly
+# DOWNWARD along a finite spine -- Scalar -> Str -> Num -> Int, at most three
+# steps -- and every landing point IS a commitment, so the node stops being
+# revisited. Pinned by ir/scalar-is-refinable.t.
 sub _is_narrowed ($repr) {
-    return defined $repr && $repr ne 'Unknown';
+    return false if !defined $repr;
+    return false if $repr eq 'Unknown' || $repr eq 'Scalar';
+    return true;
 }
 
 # -----------------------------------------------------------------------
@@ -1283,6 +1306,8 @@ sub _propagate_computed_reprs ($graphs) {
                     }
                     my $repr = _element_repr( $node->inputs->[0] );
                     next unless defined $repr;
+                    my $prev = $node->representation;
+                    next if defined $prev && $prev eq $repr;
                     $node->set_representation($repr);
                     $changed = 1;
                     next;
@@ -1297,6 +1322,8 @@ sub _propagate_computed_reprs ($graphs) {
                     my $value = $node->inputs->[-1];
                     next unless defined $value && blessed($value);
                     my $repr = $value->representation // next;
+                    my $prev = $node->representation;
+                    next if defined $prev && $prev eq $repr;
                     $node->set_representation($repr);
                     $changed = 1;
                     next;
@@ -1304,6 +1331,8 @@ sub _propagate_computed_reprs ($graphs) {
 
                 my $rule = $_COMPUTED_REPR{$op} // next;
                 if ($rule ne 'join') {
+                    my $prev = $node->representation;
+                    next if defined $prev && $prev eq $rule;
                     $node->set_representation($rule);
                     $changed = 1;
                     next;
@@ -1355,7 +1384,9 @@ sub _propagate_computed_reprs ($graphs) {
 
                 my $widest = _join_repr(@reprs);
                 next unless defined $widest;
-                $node->set_representation($widest);
+                my $prev = $node->representation;
+                    next if defined $prev && $prev eq $widest;
+                    $node->set_representation($widest);
                 $changed = 1;
             }
         }
