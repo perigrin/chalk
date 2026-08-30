@@ -1263,3 +1263,62 @@ the single-record shape §6 asks for; the producer-side twin-record smell
 (`method_return_types` holding a bare string and reconstructing
 `"${cname}::${mname}"`, beside `subs` holding a record with `{graph}`,
 producing two twin rederive passes) has no counterpart here.
+
+## `eval` is not a coercion: an effect wearing a pure node's type (2026-08-30)
+
+> "That's a place where eval is different from a pure coercion … it has
+> effects." — perigrin
+
+The producer now models `eval "..."` as `Coerce[Str -> Code]` (perl5-son
+`8ac7ed3`), replacing an op-table refusal. The wire is verified correct here —
+`from_repr=Str to_repr=Code`, control-pinned, with Region/Phi carrying the trap
+— and the contract division is right: the producer states the conversion, the
+consumer refuses what it cannot emit.
+
+**But `Coerce` is the wrong node TYPE for it, and chalk's own design says so.**
+
+A `Coerce[Int -> Str]` is pure: same input, same output, no observable trace,
+deletable when unused. **`eval` violates every part of that** — it can `die`,
+define subs, touch globals, set `$@`; the same string twice need not behave the
+same way.
+
+**Measured:**
+
+    Coerce->is_fixed = FALSE   (the TYPE declares itself pure)
+    Unwind->is_fixed = TRUE
+
+Yet this instance carries `control_in`. So effect-ness has become **a property
+of one instance rather than of the type** — and `Node.pm:95` states the opposite
+rule, with prior art behind it:
+
+> *"A PROPERTY OF THE TYPE, deliberately … In Graal an effectful node IS a
+> FixedNode, which is why its diamond-collapse test degenerates to 'is the arm
+> empty?' — the side-effect question is subsumed structurally and never asked.
+> Chalk cannot take that shortcut while the answer lives in a name list a
+> consumer must remember to consult."*
+
+The producer's own bug proves the cost: with the Coerce left pure, DCE removed
+a void-context `eval q{1};` entirely and **the eval vanished** — a miscompile,
+not a GAP. They fixed it by pinning that instance. That fix is correct and does
+not generalise: every consumer must now ask "is THIS Coerce pinned?" rather than
+"is a Coerce pure?", which is exactly the name-list fragility `Node.pm` names.
+
+### The consequence chalk already exhibits
+
+Chalk refuses the eval graph — but with the WRONG message:
+
+    LLVM backend: Phi node encountered in lower_value before its enclosing
+    if/loop structure was processed … (region=Region#2, head=undef)
+
+Not `Str -> Code`. The scheduler reaches the Phi before anything reaches the
+Coerce, so the refusal names a scheduling invariant instead of the unsupported
+conversion — and `head=undef` reads as an internal invariant violation, sending
+a reader after a scheduler bug. Same class as the producer's stack underflows:
+**it fires before the honest GAP and masks it.**
+
+**[OPEN]** Whether `eval` wants its own node type (effectful by type, the way
+`Unwind` is) rather than a control-pinned `Coerce`. That would make DCE-safety
+structural rather than per-instance, and would let chalk refuse at the
+conversion rather than at the Phi. Not proposed to the producer as a change —
+the current shape works and the alternative is a wire-contract question.
+Recorded because the pin is load-bearing and easy to lose.
