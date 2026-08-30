@@ -1220,3 +1220,46 @@ disagreement (die is the GAP-not-miscompile answer, but a merely STALE wire
 would then break the build), and whether the 1760 site's die is the template or
 whether a narrowable disagreement should narrow silently and only an
 INCOMPARABLE one should die.
+
+### CORRECTIONS from perl5-son-2c (2026-08-30) — attribution, and §6 rejects the remedy
+
+Note this arrived from a DIFFERENT producer session (`perl5-son-2c`, not `e6`),
+which matters because one of the corrections is itself about provenance.
+
+**1. THE T1/POLICY SPLIT IS PERIGRIN'S, NOT THE BSON SESSION'S.** I recorded it
+as theirs and thanked them for it. It is perigrin's ruling and predates this
+conversation by four days: **T1 spec §6**, from *"`_build_registry_from_mop` is
+a code smell … I don't think we should have a registry, and the MOP is part of
+the stamp/IR"*. Re-attributed here; the earlier entry's framing of it as a
+teammate's insight is wrong.
+
+**2. THE PRODUCER DOES HAVE CALLSITE INFORMATION.** The `e6` session told me it
+does not, and corrected that: `_discover_and_translate` holds every graph at
+once, both callsites are on the wire, `_stamp_calls_from_callees` already walks
+that structure (it just reads the callee's `return_type` and never the caller's
+arguments), and the name→graph lookup exists in `_rederive_sub_return_types`.
+**Caller→callee is a direction never written, not one the producer cannot see.**
+
+**3. AND §6 REJECTS THE SHAPE I WAS HEADED FOR.** Verified in the spec at
+`docs/specs/2026-08-26-t1-type-inference-requirements.md:165-178`:
+
+> With the MOP on the IR, a `Call` can answer "what does my callee return" from
+> the graph it is already in, and T1 needs no set. Without it, the only way to
+> reach a callee is a lookup in a hash somebody passed alongside — **which is
+> the graph-set shape §2 rejects.**
+
+A caller-index over a graph set is not a smaller version of the right fix; it is
+the shape the spec already condemned. So the call-argument seed is **4a/4b work
+blocked behind 4d**, and the ordering is fixed: **4c → 4d → 4a → 4b → 4e**.
+
+**Consequence for the call-edge Coerce (F22).** Do NOT build it. It would sit on
+a seed that has to move, and the seed's reachability path is exactly what §6
+changes. F22 stays a declared GAP until 4d lands.
+
+**What is already right on chalk's side.** `resolved_graph` does not exist here
+— `Chalk::IR::Node::Call` carries ONE handle, `target` (`Call.pm:35`), and
+`_resolve_direct_calls` now reads it exclusively (`ee9e220a`, today). That is
+the single-record shape §6 asks for; the producer-side twin-record smell
+(`method_return_types` holding a bare string and reconstructing
+`"${cname}::${mname}"`, beside `subs` holding a record with `{graph}`,
+producing two twin rederive passes) has no counterpart here.
