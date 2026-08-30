@@ -985,3 +985,51 @@ comment already names.
 **This reorders the sequence.** Divide/Add was last because it was assumed
 small; it is last because it is BLOCKED ON T2, which is blocked on T1. StrEq
 remains the only step runnable today.
+
+### CORRECTION to step 1c (2026-08-30) — this ground was already covered
+
+perigrin: *"We discussed before if this isn't duplicating the behavior from
+TypeLibrary … I think we agreed it was."* Correct, and the entry above ("The
+IR-op alias: tried, MEASURED, reverted") records it. **My step-1c writeup
+`f63ea974` contradicts that record and is wrong in two ways:**
+
+1. It says the arithmetic IR ops "look simply missing" and carry "no such
+   note". **They were tried.** `Add`/`Subtract`/`Multiply` were added to the
+   lookup, the gate went **207 → 169 with 102 behavioural mismatches**, and it
+   was reverted whole. That is the opposite of missing — it is measured and
+   rejected.
+
+2. It frames declaring Divide/Add as a table extension gated on T2. **The
+   agreed diagnosis is that the CONSUMER is overloaded, not that the table is
+   incomplete.** `operand_repr_for_ir_op` serves two consumers with different
+   needs: `_insert_str_coercions`, which MATERIALISES a Coerce at every
+   position with an answer, and `BackwardInference`, which only READS the
+   requirement. The coercion pass has been getting away with conflating "what
+   does this position require?" with "should a Coerce be materialised here?"
+   only because its table has a single entry.
+
+**The prescribed next step was already written and I did not follow it:**
+
+> Separate the two questions before aliasing: give `_insert_str_coercions` its
+> own explicit table (it effectively has one already, `%_NODE_OPERAND_REPR`)
+> and let the type-requirement lookup answer freely for everyone else. Then the
+> alias lands without touching coercion behaviour.
+
+**What survives from `f63ea974`:** only the simulation numbers, and they now
+read as CONFIRMATION of the 2026-08-29 finding rather than as a new one — the
+`Int -> Num` insertions it predicts are precisely the 102-mismatch mechanism,
+measured a second time by a different route. The `Scalar -> Num` declines are
+real and still want the `%Slot` tag, but they are the smaller half.
+
+**Corrected sequencing for 1c:**
+
+    1. de-conflate the consumer -- _insert_str_coercions consults only
+       node-level contracts, not the general signature lookup
+    2. THEN the alias lands (IR names as further keys onto the SHARED
+       hashrefs -- genuinely not a copy, and the two names cannot disagree)
+    3. Scalar -> Num still wants the %Slot tag, but that is now a separate,
+       smaller question rather than the blocker
+
+Step 1 is a change to `Analysis.pm`'s coercion pass and is the real work. It is
+NOT blocked on T2 — I said it was, and that was a consequence of the wrong
+framing, not a measurement.
