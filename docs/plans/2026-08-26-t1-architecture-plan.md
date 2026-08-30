@@ -1074,3 +1074,51 @@ reading of that 44 as a Phase-1 gap was wrong.
 **Conclusion: Phase 1's code is done; Phase 1 is not exited.** The blocker is
 not implementation but the two conditions above, and both are shared with later
 phases rather than local to this one.
+
+## PHASE 2 AUDIT (coordinator, 2026-08-30)
+
+**Steps 0-3: ALL COMPLETE, including the amended scope.**
+
+| step | deliverable | state |
+|---|---|---|
+| 0 | `mop-rides-on-the-graph.t` RED pin | present, **3/3 green** |
+| 1 | classes guard dissolved; `defined $mop` deleted | `Analysis.pm:196` unguarded; no `wantarray` in JSON.pm |
+| 2 | `Graph` carries the MOP | `Graph.pm:20` `field $mop`, `:22` `set_mop` |
+| 3 | method dispatch onto the edge | `Analysis.pm:538` handles `'method'` ahead of the `'direct'` filter |
+| 3-amend | `declare_method` threads the wire type | `Analysis.pm:1059`; `MOP::Method::set_return_type` narrows-only (`:50`) |
+| 3-amend | the wire-vs-graph die re-sourced, not weakened | `Analysis.pm:1768` — the wire value rides the metaobject |
+
+The three pins the phase names all pass at exactly the predicted counts:
+`call-target-is-a-metaobject.t` **5/5**, `call-node-resolved-handle.t` **7/7**,
+`mop-rides-on-the-graph.t` **3/3**.
+
+### CORRECTION to the Phase 1 audit above
+
+**The "missing pins" finding in the Phase 1 audit was WRONG, and so was the
+same claim about Phase 2's pins.** All three exist and are green:
+
+- `call-target-is-a-metaobject.t` and `call-node-resolved-handle.t` are in
+  `t/bootstrap/mop/`; I searched only `t/bootstrap/ir/`.
+- `loader-reproduces-the-wire.t` is in `t/bootstrap/ir/`; my `find` over `t/`
+  timed out and I read the empty result as absence.
+
+Git confirms both were added (2026-08-20, 2026-05-20) and never deleted. The
+plan is NOT stale about its own pins, and the regression coverage is real.
+**Strike the "resolve before trusting any phase's exit criteria" warning in the
+Phase 1 audit — it rested entirely on this error.**
+
+`loader-reproduces-the-wire.t` passes 4/4. Phase 1's exit says it "still reads
+16"; it reports four subtests, so the 16 is either a stale count or refers to
+something the file no longer prints — worth a look when Phase 1 is formally
+exited, but it is passing, not missing.
+
+**A search that finds nothing is not evidence of absence** — it is evidence the
+search was wrong until the search itself is verified. Two of today's findings
+died on this.
+
+### What remains for BOTH phases
+
+One thing, shared: **the gate reads 205 against a floor of 215** (`not ok 247`).
+Neither phase can be formally exited on a gate failing its own floor, and
+whether that gap predates this session is still unmeasured. That is now the only
+open blocker for Phases 1 and 2 — everything else in both is done and green.
