@@ -1178,3 +1178,46 @@ attributed, and a change that moves it can be read against a known baseline.
 Phase 1 and Phase 2 can be formally exited once these two are closed or
 accepted; the coercion handoff (StrEq first) has a measurable floor to work
 against.
+
+## PHASE 3 AUDIT (coordinator, 2026-08-30)
+
+Audited step by step. An earlier note in this session called Phase 3 "landed"
+on the strength of two greps; this is the real check.
+
+**Steps 1-4: ALL COMPLETE.** Every value the plan pins was verified by
+execution against `_join_repr`, not by reading:
+
+| step | deliverable | verified |
+|---|---|---|
+| 1 | absorb — `join(Int,Unknown) = Unknown`, both arm orders | **yes**, and `join-drops-unknown.t` is renamed to `join-absorbs-unknown.t` |
+| 2 | the total fold | **every pin matches**: `(Undef,Int)→Scalar`, `(ArrayRef,Int)→Scalar`, `(Array,Int)→List`, `(Boolean,Int)→Str`, `(Slot,Int)→Unknown`, `(Slot,Slot)→Slot` |
+| 3 | delete the dead `'same'` branch | **gone** |
+| 4 | the D2 Undef-drop deletion | landed 2026-08-27 with a full node-by-node stamp diff (2971 stamps each side, 5 nodes differ across exactly 3 cases); the three GAP declarations are in `logical.md` and the floor reads 215 |
+
+### The B3 remedy the plan REFUSED — and why today's work made it safe
+
+Step 4 records that the favoured remedy, *teaching `_is_narrowed` that `Scalar`
+is refinable*, **DOES NOT TERMINATE**: L3b reached iteration **457,642** and was
+still climbing. The measured mechanism: *"all six `$changed = 1` sites in
+`_propagate_computed_reprs` are UNCONDITIONAL — none tests whether the repr
+actually moved. Loop termination rests ENTIRELY on `_is_narrowed` acting as a
+one-shot latch."*
+
+**`6db5dcdc` did exactly what the plan refused** — and it terminates, because
+the same commit replaced the latch it removed. Verified at HEAD: of the four
+write sites in that loop, **three now carry `next if defined $prev && $prev eq
+$repr`**, the change guard. The fourth writes the CONSTANT `'Undef'`, so it
+converges after one write and cannot oscillate.
+
+So the plan's cost comparison was right about the code as it stood, and the
+refusal was correct at the time. What changed is not the judgement but the
+precondition: **the latch was replaced before the thing that depended on it was
+removed.** `5b5c98a1` then added the other half of Kildall's discipline (fold
+the old value into the join), so the chain is monotone as well as guarded.
+
+The two cases this cost are named and attributed in the bisect entry below;
+neither is a miscompile.
+
+**Phase 3 needs no further work.** Its remaining item is not a step but a
+consequence: restoring L3b/L3c/L3d to GREEN and the floor to 218 is **T2's**
+acceptance criterion, which is blocked on T1 completing.
