@@ -1273,3 +1273,58 @@ absent — **the tests carry that burden, not the gate.**
 
 **Phases 1-4 are now complete. Phase 5 — the T1 class, and the loader stops
 analysing — is the only remaining phase.**
+
+## THE TEN: what the G8 floor gap actually is (coordinator, 2026-08-30)
+
+The gate reads 205 against a floor of 215. Enumerated and grouped by cause —
+**the ten are essentially ONE cause, not ten.**
+
+Note first that the corpus has 17 failing cases, of which **7 are cases added
+today** (F17-F22 and `method with a signature parameter`), all declared GAPs
+documenting real blockers. Those are new coverage, not regressions, and are not
+part of the floor gap. The remaining **10 are the pre-existing failures** — the
+arithmetic matches the 215-vs-205 difference exactly.
+
+| # | case | proximate error |
+|---|---|---|
+| 1 | classes: field-str-default | `FieldAccess repr=Scalar` |
+| 2 | classes: method-call | `FieldAccess repr=Scalar` |
+| 3 | classes: method-call-chain | `FieldAccess repr=Scalar` |
+| 4 | classes: adjust | `FieldAccess repr=Scalar` |
+| 5 | classes: conditional-void-call | `FieldAccess repr=Scalar` |
+| 6 | classes: print a method-call result | `FieldAccess repr=Scalar` |
+| 7 | classes: method-branched-field-store | `NumLt over a Scalar operand` |
+| 8 | classes: …-else-arm | `NumLt over a Scalar operand` |
+| 9 | subs: F8 positional `$_[0]` | `Add with repr=Scalar` |
+| 10 | classes: arrayref-field element read | `Call(method) Int vs vtable Scalar` |
+
+**Nine of the ten are the SAME sentence: a `Scalar` reaches an op that has no
+`Scalar` arm.** The tenth is the ordered-comparison site, which is `Scalar`
+again from the other direction — a node correctly refined BELOW a `Scalar` ABI.
+
+**The chain, traced end to end on `classes: method-call`:**
+
+1. The producer floors a `:param` field to `Scalar` — `field Counter.$n
+   type=Scalar` on the wire. Correct and honest: a `:param` field genuinely
+   admits any scalar.
+2. Chalk loads it, and `FieldAccess` inherits `Scalar`.
+3. The backend has no `Scalar` arm for `FieldAccess`, `NumLt`, or `Add`, and
+   refuses: *"cannot lower runtime-free. This value requires libperl."*
+
+**These are not ten bugs. They are one missing capability, reached ten ways** —
+and the capability is exactly the one already scoped: **`%Slot` carrying its own
+type tag.** With a tag, a `Scalar` operand is dispatchable and every one of
+these nine sites can lower; without it, each is an honest refusal.
+
+**So the floor gap is a T2 gap, not unfinished T1.** That reframes G8: Phase 4
+cannot close it, because nothing in Phase 4's scope touches how a `Scalar` is
+encoded. The 215 floor was set on 2026-08-26 under D2, when the corpus had
+fewer `Scalar` stamps reaching the backend; the producer's subsequent
+`:param`/`shift`/subscript floors are all CORRECT and all increase the number
+of `Scalar`s arriving.
+
+**Recommendation, not taken unilaterally:** the floor wants re-baselining to the
+measured 205 with this cause recorded beside it, and the raise back to 215+
+becomes an acceptance criterion of the `%Slot` type tag work — exactly as
+restoring 218 is already T2's acceptance criterion for the D2 drop. Two floors,
+one blocker. **perigrin's call.**
