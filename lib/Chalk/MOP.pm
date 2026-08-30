@@ -17,6 +17,31 @@ class Chalk::MOP {
     # registered class.
     field $sealed = false;
 
+    # THE UNIT'S GRAPH REGISTRY -- the MOP is the unit handle (T1 spec §6).
+    #
+    # A Call answers "what does my callee return" from the graph it is already
+    # in: graph -> mop -> graphs. Without this, reaching a sibling means a
+    # lookup in a hash somebody passed alongside, which is the graph-set shape
+    # §2 rejects. The registry satisfies §2's real prohibition -- no
+    # Map<String,Graph> in a PUBLIC signature -- because it is reached THROUGH
+    # the edge rather than passed beside it.
+    #
+    # Populated by the LOADER, where the `set_mop` sweep already runs, so it
+    # survives the T1 split. NOT populated at construction: graphs necessarily
+    # precede the MOP (the MOP is built FROM them), the same ordering that
+    # forces Graph::set_mop to be a setter rather than a param.
+    field %graph_registry;
+
+    method graphs() { return { %graph_registry } }
+
+    method register_graphs($graphs) {
+        # A copy, so a later mutation of the loader's private hash cannot
+        # reach through the edge. The GRAPHS are shared by reference -- the
+        # registry names the same objects, it does not clone them.
+        %graph_registry = $graphs->%*;
+        return $self;
+    }
+
     method is_sealed() { return $sealed }
 
     method seal() {

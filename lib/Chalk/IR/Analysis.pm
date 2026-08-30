@@ -229,6 +229,11 @@ sub run ($class, $graphs, $classes = undef) {
     # program through an edge instead of a graph-set passed alongside it.
     # Attached here, the first point the MOP is sealed.
     $_->set_mop($mop) for values %graphs;
+    # The reverse direction of the same edge (T1 spec §6): a graph reaches the
+    # MOP, and the MOP reaches every graph in the unit. Attached HERE, in the
+    # loader, so it survives the T1 split -- T1 receives one graph and can
+    # still reach its siblings without being handed a set.
+    $mop->register_graphs(\%graphs);
 
     # Attach each resolved direct Call's callee METAOBJECT as soon as the
     # MOP exists. This used to run at the very end of from_json, on the
