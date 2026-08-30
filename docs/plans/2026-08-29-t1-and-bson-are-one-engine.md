@@ -706,3 +706,89 @@ lowering will see `"op": "Count"` where it saw `"op": "Length"` over an array or
 hash. **Not yet taken here.** When it is: `Count` wants the arm `Length(Array)`
 had, and `Length`'s arm can then stop handling aggregates. `ir-value-split.t`
 pins the 88/89 divergence explicitly so it stays a red test rather than drift.
+
+### THE POSITIVE HALF, and a correction to the entry above (2026-08-30)
+
+The entry above records only the negative result and then over-reads it. Both
+are fixed here. Attribution: **[PERIGRIN]** his ruling, **[FOUND]** measured.
+
+**THE RULE [PERIGRIN]:**
+
+    coerce when  meet(from, to) != from
+    the node is  Coerce[from -> to]
+
+**The meet is ONLY THE PREDICATE. The target is ALWAYS `to`** — the position's
+requirement, never the meet. Read it as: *does the source already satisfy the
+target?* If the meet IS the source, nothing changes and no node is built.
+
+That answers the objection that "every Int reaching a Str position would need a
+node": `meet(Int, Str) = Int = from`, so no node. Verified on chalk's lattice:
+
+    Int    -> Str    meet=Int    no node
+    Num    -> Str    meet=Num    no node
+    Int    -> Num    meet=Int    no node
+    Str    -> Num    meet=Num    COERCE[Str -> Num]
+    Scalar -> Num    meet=Num    COERCE[Scalar -> Num]
+    Scalar -> Str    meet=Str    COERCE[Scalar -> Str]
+    Num    -> Int    meet=Int    COERCE[Num -> Int]
+
+**It is DIRECTED even though meet is symmetric**, because it compares the result
+against ONE side. Same pair, opposite answers:
+
+    meet(Str, Num) = Num != Str  -> coerce
+    meet(Num, Str) = Num == Num  -> do not
+
+One direction of each pair fires, so the relation is **acyclic**.
+
+**CORRECTION: the NAC_pi / cyclic-ambiguity objection recorded above does NOT
+apply to this rule.** It was raised against `==None` as a trigger and does not
+survive the correction. The entry above should be read as describing the
+REJECTED rule only.
+
+**Why `==None` was wrong, precisely:** it is the narrower case of two
+INCOMPARABLE types, so it misses every NARROWING. `Str -> Num` and
+`Scalar -> Str` both need real conversions and neither meets to `None`.
+**[FOUND]** over the 240-block corpus: `==None` finds **0** sites; `!= from`
+finds **28** (Scalar→Num 22, Str→Num 6, across Add/NumEq/Multiply/Subtract/
+NumLt/NumNe).
+
+**WHERE COERCE BELONGS [PERIGRIN]:** it is a **T1 node** and stays one; the
+producer keeps emitting it "where it makes sense *at the Chalk level*". The
+error was "a previous design flaw which lead us to believe it should coerce at
+the T1 level for T2 issues." Separately and earlier: **Coerce is Type → Type,
+nothing to do with representations** — the `_repr` suffix on its fields is the
+bad design being fixed. A rename to `from_type`/`to_type` follows but is a
+WIRE-CONTRACT change and is **NOT scheduled**.
+
+**THE PRODUCER SHOULD EMIT Coerce — RESOLVED [PERIGRIN].** The "maybe it should
+emit none" note is stale; drop it. But the corollary is sharp. **[FOUND]**, all
+234 Coerce nodes the producer emits today, classified:
+
+| | count | |
+|---|---:|---|
+| source already satisfies target (`meet == from`) | 154 | legacy — T2 work done at T1 |
+| a real Chalk-level TYPE change | **0** | |
+| untyped source (`from = Unknown`) | 80 | |
+
+**Zero are type conversions**, by construction: FromOptree hardcodes only
+`to_repr => 'Str'` and `'Num'`, and every source reaching those already
+satisfies them. [PERIGRIN] calls the 234 "a legacy artifact that need to be
+fixed." The inverse also held: `my $h = "hello"; $h + 1` got NO Coerce and its
+Add was stamped `Str` — wrong, not merely imprecise, since perl returns 1.
+
+**MY OVER-READING, RETRACTED.** The entry above says chalk's
+`_insert_str_coercions` "already does the right thing" because it asks a
+directed per-position question. Being directed is necessary and NOT sufficient:
+what is unsettled is whether that pass asks a **repr** question in a position
+that wants a **type** question. `_required_operand_repr` is named for the repr
+axis. Given [PERIGRIN]'s ruling that Coerce is Type → Type, that naming is the
+same one-field-two-axes shape as `_is_narrowed` and `%LOWERABLE_STAMP`. **Not
+fixed here** — chalk is red at 205 against a floor of 215 with the gap
+unbisected, and a coercion change landing in an unreadable measurement is how
+the 207→169 revert happened.
+
+**ORDERING [FOUND].** The 80 `Unknown`-source nodes exist only because insertion
+happens at BUILD time, before inference. A rule reading the operand's *settled*
+type structurally cannot produce them — it forces insertion to a pass AFTER the
+fixpoint. Same lesson as the `:param` floor: the weakest answer speaks last, and
+**a question you cannot answer yet must not be asked yet.**
