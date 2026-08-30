@@ -2579,15 +2579,26 @@ sub _lower_assign {
             # inference joins stores as well as literals, this must stay a GAP.
             my $rhs_repr = $rhs->representation // '';
             my $rhs_i64;
-            if ($rhs_repr =~ /\A(?:Int|ArrayRef|HashRef|CodeRef|Object)\z/) {
+            # `Str` is admitted now that _element_repr JOINS STORES as well as
+            # literal initializers (Analysis.pm's _element_store_values). The
+            # exclusion below was correct while the element type came from the
+            # initializers alone -- a Str stored into an Int-typed container
+            # would have been read back as an integer, printing a raw address.
+            # Measured: `my @arr=(1,2); $arr[0]="hello"; print $arr[0]` now
+            # infers element repr Str, so the store and the read agree.
+            #
+            # `Num` stays out: it is a distinct 64-bit ENCODING question (which
+            # reading of the payload bits), not an element-typing one, and it
+            # wants the %Slot type tag rather than this guard.
+            if ($rhs_repr =~ /\A(?:Int|Str|ArrayRef|HashRef|CodeRef|Object)\z/) {
                 $rhs_i64 = $self->_box_payload($rhs_ref, $rhs_repr,
                                                'Assign(Array-lvalue) rhs');
             }
             else {
                 die "GAP: Assign(Array-lvalue) rhs repr=$rhs_repr cannot be stored "
-                  . "in an i64 Slot payload — the container's element repr is "
-                  . "inferred from its literal initializers only, so a "
-                  . "type-changing store would read back at the old repr.";
+                  . "in an i64 Slot payload. The element repr joins stores as "
+                  . "well as initializers, so this is an ENCODING gap (how to "
+                  . "read the payload bits back), not a typing one.";
             }
             $self->_emit("  store i64 $rhs_i64, i64* $slot_pay  ; Assign(Array-lvalue): store value");
 
