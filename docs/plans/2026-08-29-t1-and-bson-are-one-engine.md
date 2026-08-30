@@ -469,3 +469,53 @@ exactly that move: a previous trim gutted `from_json`'s classes branch believing
 it dead. It was not — the branch ran four inference passes, discarded the
 results, then died, and no test caught it. Read that test's header before
 touching `SoN::IR::Serialize::JSON`.
+
+### The producer's shape, stated correctly (2026-08-30)
+
+"The produce path has zero inference passes" is only half a result, and the
+sharper half changes what a port is porting. The passes are not in EITHER
+serializer: they are in `lib/B/SoN.pm` itself, and `B/SoN.pm:13` loads a dumb
+440-line `SoN::Serialize::JSON` to emit.
+
+So the producer's architecture is **inference in the compiler FRONT END,
+emitted by a dumb serializer** — which is what a front end should look like.
+Chalk's is **inference inside a LOADER** (`Analysis.pm`, run from `from_json`).
+Those are genuinely different shapes, not one engine written twice, and the
+difference is architectural rather than incidental.
+
+**Nobody has yet compared `Chalk::IR::Analysis` against `B/SoN.pm`'s twelve
+passes.** Every comparison to date — this document's included — was against the
+vendored copy. Whatever duplication exists between the two REAL engines is
+unmeasured, and it may be small: `_infer_backward` has no chalk equivalent, and
+the producer's twelve are mostly floors and re-derivations shaped by walking an
+optree-derived graph. If that comparison is done, it should be done ONCE, by
+whichever side is doing the port.
+
+### Two rules a port will hit (measured by the bson session, 2026-08-30)
+
+**1. The weakest answer must speak LAST.** Every pass in the chain guards on
+only-fill-`Unknown`, so a floor that runs EARLY consumes the hole the precise
+passes needed. A `:param`-field floor written at extraction time made
+`field $n :param; method inc { $n + 1 }` come out `Scalar` where `Num` is
+provable — each later pass saw a filled slot and skipped the node. Three tests
+red. Moved after the fixpoint, correct. The rule is already written twice in
+`B/SoN.pm`; **a port that lifts passes without lifting their ORDER reproduces
+this, and the failure is silent precision loss, not a crash.**
+
+**2. Coverage alone ranks the wrong implementation first.** The broken
+extraction-time floor closed **14** wire `Unknown`s; the correct one closes
+**10**. A port measured by "how many holes did it fill" would have picked the
+version that fills them with worse answers. Pair any coverage number with a
+precision check.
+
+### Counting `Unknown` on the wire: count by ROLE, not by grep
+
+`"Unknown"` appears on the wire in at least three distinct roles — a node
+stamp, a return-type record, and a `Coerce`'s `from_repr` (written at
+`FromOptree.pm:116` as `$stamp->type`, at BUILD time, before the inference
+chain runs). Summing them produces a number that means nothing; that error
+put a wrong 124 into a producer commit message before it was caught.
+
+The producer session owns a scripted, re-runnable census. **Do not
+reimplement it here** — ask for a number rather than building a second
+counter, which is the duplication this document exists to think about.
