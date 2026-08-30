@@ -519,3 +519,76 @@ put a wrong 124 into a producer commit message before it was caught.
 The producer session owns a scripted, re-runnable census. **Do not
 reimplement it here** — ask for a number rather than building a second
 counter, which is the duplication this document exists to think about.
+
+### RETRACTED, same day: the DO-NOT-DELETE above, and what replaced it
+
+**The vendored loader is deleted** (perl5-son `bcdbb4e`). The "DO NOT delete
+the vendored loader" section above is withdrawn — I recorded it on the bson
+session's reasoning, and perigrin pushed back on that reasoning directly:
+*"1300 lines of stale library code for a test? Why not rewrite the test?"*
+
+The argument for keeping it was that `t/from-json-classes-branch.t` covered a
+real regression. Measured, it did not cover what it claimed: the three values
+that test credited chalk's loader with DERIVING — `field $n = 5` → `Int`,
+`Counter::val` → `FieldAccess Int`, `Counter::plus` → `Add Int` — are all
+emitted by the producer itself. The test verified that a consumer could
+reconstruct information **already on the wire**.
+
+Both tests moved to the wire rather than being dropped:
+`t/wire-classes-section-typed.t` asserts those three values on producer output
+(the regression restated producer-side: "a classes section reaches the wire
+untyped"), and the forward-reference test now scans EVERY node for a forward
+`control_in` (measured: 0) rather than confirming one round trip survived —
+strictly stronger, and needing no loader, since a forward reference is a
+property of the JSON.
+
+Net −1330 lines; wire output byte-identical in every role.
+
+**Consequence for this document.** The producer repo now carries NO loader, so
+the seven passes this document inventoried for "the producer's side" are gone
+from it entirely — they were never the producer's. **The producer's pass
+inventory is exactly the twelve in `B/SoN.pm`**, and the comparison nobody has
+done is the only comparison left.
+
+**Round-trip coverage of producer output through chalk's loader belongs HERE**,
+against a pinned producer JSON fixture — `t/bootstrap/ir-node-unify-roundtrip.t`
+is where that lives.
+
+---
+
+## What the two engines actually are (perigrin, 2026-08-30)
+
+The framing this whole document was reaching for, and did not have:
+
+> The inference exists on *this* front end (B::SoN). It doesn't yet exist on the
+> Chalk parser front end … and it may be that `Analysis.pm` is the one for the
+> Chalk parser.
+
+**Measured here:**
+
+- `Chalk::IR::Analysis->run` has **exactly one caller**: `Serialize/JSON.pm:721`,
+  inside `from_json`. It runs only on the B::SoN path.
+- The Chalk parser front end **stamps nothing** — no `set_stamp` or
+  `set_representation` anywhere under `lib/Chalk/Grammar/` or
+  `lib/Chalk/Bootstrap/`. (`TypeLibrary.pm` matches a grep only because it
+  DEFINES the lattice.)
+
+So there is no duplication to merge. **B::SoN has a front end with inference;
+the Chalk parser has a front end with none.** `Analysis.pm` is the only
+inference engine chalk owns, currently mounted on the loader because that is
+the only place it has a typed graph to run on.
+
+This retires the port question as posed. Nothing needs porting FROM B::SoN — it
+already has its inference, correctly placed in its front end. The work is
+moving `Analysis.pm` OFF `from_json` and onto the Chalk parser's own IR
+emission, where it becomes the front-end inference that side lacks.
+
+**Two questions that decide whether this is a move or a wait:**
+
+1. Does the Chalk parser emit IR to run inference over yet, or would
+   `Analysis.pm` have nothing to analyse there today?
+2. Does `Analysis.pm` keep running on the B::SoN path after the move? If yes it
+   is a COPY, not a move, and we are back to two engines. If no, B::SoN graphs
+   arrive typed by their own front end and chalk trusts them — which is where
+   the "producer is the source of truth" ruling finally becomes load-bearing
+   rather than aspirational.
