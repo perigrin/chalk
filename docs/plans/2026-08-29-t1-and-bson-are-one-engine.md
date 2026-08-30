@@ -792,3 +792,92 @@ happens at BUILD time, before inference. A rule reading the operand's *settled*
 type structurally cannot produce them — it forces insertion to a pass AFTER the
 fixpoint. Same lesson as the `:param` floor: the weakest answer speaks last, and
 **a question you cannot answer yet must not be asked yet.**
+
+## The producer→consumer coercion handoff (2026-08-30, both sessions)
+
+The producer's 234 Coerce nodes are legacy T2-work-at-T1 ([PERIGRIN]: "a legacy
+artifact that need to be fixed"). Removing them means chalk must insert where
+the producer stops. Measured from both sides:
+
+**Chalk's pass is DORMANT, not redundant.** `_insert_str_coercions` inserts
+**zero** today — because the producer already inserted, so the operand arrives
+already `Str` and the pass correctly declines. The machinery exists and has
+never been exercised on a raw operand.
+
+**Its predicate is NOT a meet** — four decline paths, none a lattice operation:
+
+    next unless defined $repr;                    # the producer's own refusal
+    next if $repr eq $want;                       # STRING EQUALITY
+    next if $in->isa('...::Node::Coerce');
+    next if accepts_operand_repr($op, $repr);     # position accepts a SET
+    next unless _coercion_exists($repr, $want);   # is this PAIR defined?
+
+Deliberately a defined-conversion-pair question, not a subtyping one: requiring
+`is_subtype` un-lowered six cases whose Boolean/Slot operands print fine, and
+exempting Str wholesale un-lowered eight more.
+
+**Coverage of the producer's nine insertion positions (238 edges):**
+
+| site | edges | chalk covers | uncovered |
+|---|---:|---:|---|
+| StrEq pos0 | 5 | **5** | **0** — safe with no prerequisite |
+| Concat pos1 | 28 | 21 | 7 (Scalar) |
+| Print pos0 | 193 | 171 | 22 (Scalar 16, Unknown 6) |
+| Divide/Add | 5 | **0** | chalk declares NO requirement for these ops |
+
+**StrEq is the first site**, agreed both sides: the only one where both
+declarations already line up. Divide/Add are the worst first choice — chalk has
+no operand requirement for them, so deleting there reproduces the
+integer-division miscompile (`7/2`) rather than testing the handoff.
+
+**Two symmetric prerequisites, neither urgent, both [OPEN] with perigrin:**
+`Print` has no operand requirement in the producer's TypeLibrary (197 edges);
+`Divide`/`Add` have none in chalk's (5 edges).
+
+### `Scalar` has NO defined conversion, and the code already says so
+
+Measured here — `Scalar` is the only source type with **zero** outgoing pairs:
+
+    Scalar -> Str/Num/Int/Boolean   ALL undefined
+    Int/Num/Boolean/Undef -> Str    all DEFINED
+
+And `Context.pm:2193` refuses it explicitly:
+
+    die "Coerce involving Scalar reached LLVM backend — cannot lower runtime-free."
+
+**[FOUND, bson] the Scalar operands are a DELIBERATE FLOOR, not an inference
+gap** — `:param` fields and Call results floored at `Scalar` because a `:param`
+field genuinely admits any scalar and that is the honest T1 answer. So the
+question is not "fix the inference"; that option does not exist. It is:
+
+> **Does the target have a way to stringify a value known only to be
+> scalar-ish?** A T2 capability question about lowering — not a question about
+> whether T1 tried hard enough.
+
+Either the pair exists in the target or such a value cannot be printed.
+**[OPEN — perigrin's ruling], blocks Concat and Print deletion.**
+
+### Two corrections worth keeping
+
+**The `Unknown → Str` population is 6, not 54.** [FOUND, bson] Of the Print
+arguments whose Coerce has `from_repr = Unknown`, only **6** have an operand
+still untyped after inference; **48** carry real answers (Call[Int] 8,
+Call[Scalar] 9, Subscript[Int] 5, Add[Num] 3, …). So it is mostly the producer
+ASKING TOO EARLY, not refusing to guess — the same build-time-before-inference
+root cause as everything else today. **Do not build coverage for 54 Unknown
+operands; build it for 6.** Chalk's decline is right for exactly those 6.
+
+**"23 Scalar operands" and "0 Scalar coercions" are both correct.** They count
+different populations: chalk's 23 is operands that would arrive RAW after
+deletion; the producer's 0 is coercions whose `from_repr` IS `Scalar` (all 18
+Scalar-sourced nodes are `Scalar → Num`, created by the `:param` floor feeding
+arithmetic). Not a contradiction.
+
+### Sequencing (agreed)
+
+    0. chalk's bisect -- gate readable            <- BLOCKING EVERYTHING
+    1. DONE -- chalk's predicate verified, it is not a meet
+    2. StrEq deletion, both sides pinned          <- safe, no prerequisite
+    3. the Scalar ruling (above)                  <- blocks 4
+    4. Concat, then Print (after the producer's TypeLibrary prerequisite)
+    5. Divide/Add last, after chalk declares their Num requirement
