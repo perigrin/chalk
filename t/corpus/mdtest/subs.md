@@ -632,3 +632,136 @@ context: scalar
 return %p
 L: GREEN
 ```
+
+## F17 named sub with a signature parameter
+
+A sub declared with a signature (`sub f($x)`) called with one argument. This is
+the single most common sub form in `lib/Chalk/` -- 94 uses, against ZERO corpus
+coverage before this case.
+
+It LOWERS but does not RUN: `lli` prints nothing where perl prints 42. The
+callee's body never sees the argument, because argument binding for direct calls
+is the F3 gap (`_lower_call_direct` inlines a no-argument callee's result). So
+the sub form itself is not the blocker -- passing a value into it is.
+
+RECORDED HONESTLY BECAUSE I GOT IT WRONG FIRST: my probe called
+`Chalk::Target::LLVM->lower` on this shape, saw no exception, and I wrote the
+case GREEN. Lowering is not executing. The behavioural leg caught it on the
+first gate run. This is precisely the trap the bson session measured on the
+producer side the same day -- a broken implementation that closes more holes
+than the correct one scores better on coverage alone -- and a corpus case
+declared from a lowering probe rather than an execution is the same error in
+the other direction.
+
+```perl
+# source
+use 5.42.0;
+sub f($x) { $x + 1 }
+say(f(41));
+```
+
+```behavior
+stdout: 42\n
+return: Bool:1
+context: scalar
+```
+
+L: GAP: direct call argument binding is unimplemented (F3) -- the call lowers, emits no output, and lli prints nothing where perl prints 42
+
+## F18 sort with a comparator block
+
+`sort { $a <=> $b }` -- 16 uses in `lib/Chalk/`, no corpus coverage. The block
+is a Call the backend does not lower.
+
+GAP: `LLVM backend: cannot lower op=Call (not in literal-arithmetic slice)`
+
+The same blocker covers F19 and F20: sort, grep and map blocks are ONE gap
+reached three ways, together accounting for 293 uses in `lib/Chalk/`. They are
+filed as three cases because a fix scoped to one block-taking builtin would
+close only that one, and the corpus should say so.
+
+```perl
+# source
+use 5.42.0;
+my @s = sort { $a <=> $b } (3,1,2);
+say($s[0]);
+```
+
+```behavior
+stdout: 1\n
+return: Bool:1
+context: scalar
+```
+
+L: GAP: LLVM backend: cannot lower op=Call (not in literal-arithmetic slice)
+
+## F19 grep with a block
+
+`grep { ... }` -- part of the 277 grep/map block uses in `lib/Chalk/`. Same
+blocker as F18.
+
+```perl
+# source
+use 5.42.0;
+my @g = grep { $_ > 1 } (3,1,2);
+say(scalar(@g));
+```
+
+```behavior
+stdout: 2\n
+return: Bool:1
+context: scalar
+```
+
+L: GAP: LLVM backend: cannot lower op=Call (not in literal-arithmetic slice)
+
+## F20 map with a block
+
+`map { ... }` -- the other half of the 277. Same blocker as F18.
+
+```perl
+# source
+use 5.42.0;
+my @m = map { $_ * 2 } (1,2);
+say($m[1]);
+```
+
+```behavior
+stdout: 4\n
+return: Bool:1
+context: scalar
+```
+
+L: GAP: LLVM backend: cannot lower op=Call (not in literal-arithmetic slice)
+
+## F21 postfix hash dereference `->%*`
+
+`$h->%*` -- 85 uses in `lib/Chalk/`, no corpus coverage. Unlike F18-F20 this is
+NOT an honest GAP: the backend CRASHES.
+
+    Can't call method "id" on an undefined value at lib/Chalk/Target/LLVM/Context.pm
+
+A crash is not a refusal. The GAP-not-miscompile invariant says an unsupported
+construct must be REFUSED with a message naming what is missing; dying on an
+undefined value names nothing and cannot be distinguished from a bug in a
+supported path. This case exists to hold that distinction open: the fix is
+either a real lowering or an honest GAP, and either closes it.
+
+The array form `->@*` lowers (5 corpus cases), so this is specific to the hash
+form rather than to postfix dereference generally.
+
+```perl
+# source
+use 5.42.0;
+my $h = {a=>1};
+my %c = $h->%*;
+say($c{a});
+```
+
+```behavior
+stdout: 1\n
+return: Bool:1
+context: scalar
+```
+
+L: GAP: postfix hash dereference crashes rather than refusing -- Can't call method "id" on an undefined value
