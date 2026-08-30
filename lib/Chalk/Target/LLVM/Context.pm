@@ -2190,7 +2190,27 @@ sub _emit_coercion {
         $self->_emit("  $ref = xor i1 $is_false, true  ; Coerce[Str->Boolean]: invert -> Boolean");
     }
     elsif ($from eq 'Scalar' || $to eq 'Scalar') {
-        die "Coerce involving Scalar reached LLVM backend — cannot lower runtime-free.";
+        # NOT "cannot lower" -- that was this message until 2026-08-30 and it
+        # was false. Scalar HAS a machine encoding (%Slot, `_repr_to_llvm_type`)
+        # and the machinery to build and take it apart is right here:
+        # `insertvalue`/`extractvalue` for the defined bit and the payload.
+        # A Scalar CAN be lowered, in more than one way.
+        #
+        # What is missing is the DECISION, and it is T2's: a %Slot payload is
+        # i64 bits whose interpretation is not recorded in the cell, so
+        # stringifying one means choosing how to read those bits -- as an
+        # integer, as a double, as a pointer to a string. That is a dispatch on
+        # information the value does not carry, which needs either a tag or a
+        # runtime, and picking one here would hardcode a representation choice
+        # at the wrong layer. The same over-decision as "an Int field is i64",
+        # measured false, and as %LOWERABLE_STAMP freezing a T2 fact into a T1
+        # filter.
+        #
+        # This die dates from 2026-07-15, six weeks BEFORE Scalar gained %Slot
+        # (2026-08-29). It outlived its own reason and its wording hid that.
+        die "GAP: Coerce[$from -> $to] needs a T2 decision about how to read a "
+          . "%Slot payload (tagged? runtime? per-context choice?) -- Scalar is "
+          . "lowerable, but which reading to emit is not settled.";
     }
     else {
         die "LLVM backend: cannot lower $what\[$from->$to]";
