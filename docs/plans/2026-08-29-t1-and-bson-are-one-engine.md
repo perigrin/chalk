@@ -409,3 +409,63 @@ Five pre-existing failures bson hit and did not touch (`mop/sub-replay.t`,
 `ir/son-aggregate-repr.t`, `ir/stamp-alias-preconditions.t`) — it verified them
 by reverting the producer with chalk held constant, after misreporting once and
 retracting on a guess. **Re-check rather than inherit.**
+
+---
+
+## CORRECTION, 2026-08-30: the evidence above compares chalk against chalk
+
+**Found by the bson session (perl5-son-e6), verified independently here. The
+RULING is untouched; its stated evidence is not.**
+
+This document's central argument — "five passes share a NAME … that is one
+engine written twice" (§ above) — compares `Chalk::IR::Analysis` against
+`SoN::IR::Serialize::JSON`. That second module is **a vendored copy of chalk's
+own loader**, kept in the producer repo on purpose. So the five matching names
+are chalk on both sides of the comparison, and the byte-identical diffs cited
+for `_infer_param_field_types` and `_infer_field_types_from_stores` (0 lines
+different) are the EXPECTED result for a vendored copy, not a finding.
+
+Provenance, from the producer's own history: `d838da6` "rename: divorce
+vendored Chalk::IR:: namespace to SoN::IR::" and `82e97cc` "trim: delete 13
+never-loaded vendored Chalk::IR modules" — which deleted 13 sibling vendored
+modules and KEPT this one so producer output can be round-tripped through the
+real cross-repo boundary in tests.
+
+### Measured here, 2026-08-30
+
+| pass-name set | size | overlap with `Chalk::IR::Analysis` |
+|---|---|---|
+| live producer engine | — | **0 — disjoint** |
+| vendored chalk loader (`SoN::IR::Serialize::JSON`) | 19 | **12 shared names** |
+
+The live engine is in **`lib/B/SoN.pm` itself** — not in either serializer.
+`B/SoN.pm:13` loads `SoN::Serialize::JSON` (440 lines, zero inference passes);
+`SoN::IR::Serialize::JSON` is absent from `%INC` at produce time. Its twelve
+passes (`_floor_subscripts`, `_infer_backward`, `_stamp_calls_from_callees`,
+`_rederive_method_return_types`, …) share **no name** with chalk's.
+
+### What this does and does not change
+
+- **The ruling stands on its own merits.** The producer's implementation being
+  the source of truth does not depend on this evidence, and `_infer_backward`
+  genuinely has no chalk equivalent — the port that shipped as
+  `Chalk::IR::Transform::BackwardInference` is real work against a real gap.
+- **"Already mid-divergence" is withdrawn.** Two copies of one file diverging
+  slightly is vendored-copy drift, not two implementations of one engine
+  growing apart.
+- **The ~478-line estimate is withdrawn.** It measures chalk-plus-vendored-
+  chalk. The live engine is a different, larger, differently-shaped body of
+  code in `B/SoN.pm`, and porting from it is not the same task this document
+  scoped.
+- **What survives is the QUESTION, not the answer:** two repos infer types over
+  the same graphs with disjoint pass sets. Whether that is duplication worth
+  merging is now genuinely open, and the honest comparison — chalk's
+  `Analysis.pm` against `B/SoN.pm`'s twelve passes — has not been done.
+
+### DO NOT delete the vendored loader
+
+`t/from-json-classes-branch.t` in the producer is a regression test against
+exactly that move: a previous trim gutted `from_json`'s classes branch believing
+it dead. It was not — the branch ran four inference passes, discarded the
+results, then died, and no test caught it. Read that test's header before
+touching `SoN::IR::Serialize::JSON`.
