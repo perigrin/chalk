@@ -661,3 +661,48 @@ loader, because the loader is handed JSON of unknown provenance and must defend
 itself. What changes is the OTHER half — the Chalk parser's front end is
 buildable now, and when it exists it needs its own inference, which is where the
 genuine "shared or separate" question finally lands.
+
+## `meet() == None` as a coercion trigger: answered NO (2026-08-30)
+
+perigrin asked whether coercions should be inserted where `meet()` is `None`.
+The bson session scoped it on the producer and the answer is negative; verified
+here against chalk's own `TypeLibrary::meet_types`:
+
+    meet(Int, Str)    = Int      <- non-bottom. The Int ALREADY satisfies a Str
+                                    requirement on the TYPE axis.
+    meet(Num, Str)    = Num
+    meet(Scalar, Str) = Str
+    meet(Array, Str)  = None     <- bottom, and NOT a coercion site
+
+**`meet == None` fires on nothing we want to coerce.** Meet is bottom exactly
+when two types are INCOMPARABLE, and the cases that need a coercion are the ones
+where meet is non-bottom — an Int flowing into a Str position. So the trigger is
+inverted: it is silent on all 234 real Coerce nodes and fires only where the
+types cannot be reconciled at all.
+
+The producer measured 14 `None` sites over the corpus, **all** `meet(Array, Str)`
+on a `Length` node — an array count checked against a signature written for
+strings. That was a NODE VOCABULARY defect, not a coercion site: one node served
+`length($s)` (perl's length op, characters in a string) and `scalar(@a)` (no
+perl op at all, a synthesised count). Splitting `Count` out of `Length`
+(producer `93a2d12`) takes the same simulation to **zero**.
+
+**Chalk's `_insert_str_coercions` already does the right thing** and this is why
+it survives the finding: it asks `_required_operand_repr($op, $i)` — a DIRECTED,
+per-position question, "what does this position require" — never a symmetric
+meet. Two independent literature results (Swamy/Hicks/Bierman ICFP 2009) agree
+the trigger must be a directed judgment (is there a coercion path from t to t'),
+and add that Perl's Int/Num/Str convert in BOTH directions, so the coercion graph
+is cyclic and NAC_pi fails: unconditional insertion is not strongly unambiguous
+for this lattice, and because Perl coercions warn and are lossy they are
+EFFECTFUL, ruling out the usual confluence-based coherence argument.
+
+### Node roster divergence: 88 (chalk) vs 89 (producer)
+
+`Count` is new on the wire wherever `Length` previously appeared over an
+aggregate; `Count` carries `operands => ['List']` and the same `Int` stamp
+`Length` carried, so wire stamps are byte-identical across the split. Chalk's
+lowering will see `"op": "Count"` where it saw `"op": "Length"` over an array or
+hash. **Not yet taken here.** When it is: `Count` wants the arm `Length(Array)`
+had, and `Length`'s arm can then stop handling aggregates. `ir-value-split.t`
+pins the 88/89 divergence explicitly so it stays a red test rather than drift.
