@@ -243,6 +243,22 @@ return: Bool:1
 context: scalar
 ```
 
+Measured 2026-08-30 against producer `8c15e32`: the producer emits this cleanly
+-- a `Parameter` node carrying the bound argument -- and the BACKEND refuses it.
+
+L: GAP: LLVM backend: cannot lower op=Parameter (not in literal-arithmetic slice)
+
+This is a DIFFERENT blocker from subs.md F17, and the difference is the useful
+part. F17 (`sub f($x)`) LOWERS and silently produces no output: the call site
+never binds the argument, so the callee reads nothing. Here the argument IS
+bound -- the producer built a `Parameter` node for it -- and the backend has no
+lowering for that op at all. One is a missing call-site binding; the other is a
+missing node lowering. A fix for either leaves the other standing.
+
+Together they are the whole parameterised-call story, and at 920 method uses
+plus 94 sub uses they are the largest single idiom gap between the corpus and
+`lib/Chalk/`.
+
 ```ir
 %start = Start()
 %cls    = MOP::Class(name: "Greeter")
@@ -882,4 +898,29 @@ context: scalar
 return %p
 control: %start -> %p
 L: GREEN
+```
+
+## method with a signature parameter
+
+`method plus($k)` -- a method taking an argument beyond the invocant. This is
+the single most common declaration form in `lib/Chalk/`: 920 uses, against ZERO
+corpus coverage before this case. Every method the compiler's own source
+defines has this shape.
+
+```perl
+# source
+use 5.42.0;
+use feature 'class';
+no warnings 'experimental::class';
+class Counter {
+    field $n :param = 0;
+    method plus($k) { $n + $k }
+}
+say(Counter->new(n => 10)->plus(32));
+```
+
+```behavior
+stdout: 42\n
+return: Bool:1
+context: scalar
 ```
