@@ -592,3 +592,39 @@ emission, where it becomes the front-end inference that side lacks.
    arrive typed by their own front end and chalk trusts them — which is where
    the "producer is the source of truth" ruling finally becomes load-bearing
    rather than aspirational.
+
+### Both questions answered (2026-08-30) — it is a WAIT, and the move is not the shape
+
+**(1) Does the Chalk parser emit IR to run inference over? Measured: barely.**
+`lib/Chalk/Grammar/BNF/Actions.pm` — the parser's semantic layer — constructs
+**three `Constant` nodes and nothing else**. No `Add`, `Call`, `FieldAccess`, or
+control flow, and zero `set_stamp` / `set_representation`. `Analysis.pm` would
+have essentially nothing to analyse there today.
+
+So moving it is a WAIT, gated on the Chalk parser emitting real IR. The
+Phase-5 capstone work (`docs/plans/`, parse-perl roadmap Phase 6) is what
+unblocks it; nothing here should be restructured in anticipation.
+
+**(2) Does `Analysis.pm` keep running on the JSON path? YES — and the reason
+retires the "move" framing entirely (perigrin, 2026-08-30):**
+
+> Yes it does, but because we don't know that the graph coming in *is* from
+> B::SoN … we're just handed JSON.
+
+This corrects the premise above. Chalk is not handed *B::SoN's* graphs; it is
+handed **JSON of unknown provenance**. "The producer is the source of truth" is
+a statement about ONE producer chalk happens to consume, not a property of the
+input format. A loader that assumed its input was typed because B::SoN types its
+output would be trusting a coincidence of who called it.
+
+So `Analysis.pm` is not a pass that lives in the wrong place and should be
+relocated. It is **the loader's defensive inference over untrusted input**, and
+it must stay. When the Chalk parser gains a front end, that front end needs
+inference too — and whether it SHARES this code or gets its own is the open
+question, but it is not served by moving anything off the loader.
+
+**What this means for the two-engine question:** there may end up being three
+positions, not two — B::SoN's front end, the Chalk parser's future front end,
+and the loader's defensive pass over arbitrary JSON. Only the last exists in
+chalk today. The "one engine written twice" framing was wrong in both
+directions: not one engine duplicated, and not two engines either.
