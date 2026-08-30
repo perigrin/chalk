@@ -628,3 +628,36 @@ positions, not two — B::SoN's front end, the Chalk parser's future front end,
 and the loader's defensive pass over arbitrary JSON. Only the last exists in
 chalk today. The "one engine written twice" framing was wrong in both
 directions: not one engine duplicated, and not two engines either.
+
+### The dependency runs the other way (perigrin, 2026-08-30)
+
+The entry above called the parser's three-`Constant` output a WAIT — as though
+the parser were simply unfinished and `Analysis.pm` had to wait on it. That has
+the causality backwards:
+
+> The parser is unfinished because we didn't have a complete IR.
+
+**Measured:**
+
+| | last changed |
+|---|---|
+| `lib/Chalk/Grammar/BNF/Actions.pm` (parser semantic layer) | **2026-05-21** |
+| `lib/Chalk/IR/Node/` (88 node types) | **2026-08-22** |
+
+The parser stopped in May emitting three `Constant` nodes because that was
+close to all the IR could then express. `Call`, `Phi`, `Coerce`, `Parameter`,
+`If`, `Loop`, `TryCatch`, `Region`, `Unwind` and most of the 88 landed AFTER it
+stopped, and nobody went back to the parser.
+
+So the parser is not waiting on anything. **The gate it stalled against has
+been open since August**, and the T1/T2 work is the last of what was missing.
+"Analysis.pm waits for the parser" inverts a dependency that has already
+resolved — the correct statement is that the parser has three months of
+unclaimed IR available to it, and re-opening `Actions.pm` is now unblocked
+work rather than blocked work.
+
+This does not change the ruling in the entry above: `Analysis.pm` stays on the
+loader, because the loader is handed JSON of unknown provenance and must defend
+itself. What changes is the OTHER half — the Chalk parser's front end is
+buildable now, and when it exists it needs its own inference, which is where the
+genuine "shared or separate" question finally lands.
