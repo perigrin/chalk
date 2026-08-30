@@ -1151,3 +1151,72 @@ positions at all.
 Not built: it would change stamps on a shape the corpus exercises once, and the
 gate cannot discriminate the result — precisely the situation where a test, not
 a gate, has to carry the claim.
+
+## THE WIRE IS INPUT: verify, do not re-derive (perigrin, 2026-08-30)
+
+> "Chalk has to treat the wire as the input level and assume that unless Chalk
+> itself has verified that nothing is optimal."
+>
+> "My premise is based on the idea that verification is cheaper than
+> derivation."
+>
+> Consistency, not soundness.
+
+This corrects the framing in the entry above, which treated the producer's
+`Scalar` floor as a collaborator's answer that chalk refines. It is not. **The
+wire is INPUT, and an input claim is unverified until chalk checks it.**
+
+The distinction that follows, and which the previous entry collapsed:
+
+| | |
+|---|---|
+| wire says `Scalar`, chalk **checks** and narrows to `Str` | verified; the better answer is a side effect |
+| wire says `Scalar`, chalk **accepts** it | **no verification happened** — the stamp may be right, nothing established that |
+| wire says X, chalk derives Y **incomparable** with X | the wire is WRONG — the case worth dying on |
+
+The third is what the premise buys. If chalk only ever fills holes, a wrong
+wire stamp is **structurally invisible**: there is no path on which chalk and
+the producer disagree, so disagreement cannot be reported. Same shape as the
+Pipeline MOP finding — wrong-but-consistent, invisible because nothing
+cross-checks.
+
+**CONSISTENCY, NOT SOUNDNESS.** Confirming `meet(wire, derived) == derived` is
+cheap and local. Confirming the wire's claim is SOUND is not — for a `Call`
+return it means trusting the callee's record, which is another wire claim, and
+the regress has no bottom. Consistency is decidable against what chalk already
+computes; soundness is not chalk's to establish.
+
+### The pattern is already implemented, at exactly ONE site
+
+`Analysis.pm:1760-1790` (method return types) is this model, and its comment
+states the premise almost verbatim: *"Re-deriving what was already sent is the
+recovery-by-scanning that the metadata channel exists to retire."* It has all
+three arms — the wire is the first source, the graph walk remains because the
+producer works method-by-method and cannot see a caller, and:
+
+> **WHERE BOTH COMMIT AND DISAGREE, THAT IS A DEFECT IN ONE OF THEM.** Nothing
+> compared them before, so a divergence would have been silent — the backend
+> consuming one answer while the metadata channel carried another. Refuse
+> loudly instead.
+
+Measured there: **11 of 15 agreed, 4 were Unknown-on-wire and derivable, ZERO
+disagreed.**
+
+### And absent at seven others
+
+Seven guards have the shape *"the wire answered something narrow, so skip"* —
+`Analysis.pm:645, 1189, 1288, 1724, 1730, 1742, 1880`. Each is deference, not
+verification. Under this ruling each should become *"the wire answered, so
+CHECK"*: derive anyway where derivation is cheap, `meet` the two, and refuse
+where they are incomparable.
+
+The `shift` case is the worked example. The producer floors bare `shift` to
+`Scalar` (correct — a fact about the operator). Chalk has the callsites and can
+narrow to `Str`. Today it accepts `Scalar` and stops, which is the middle row:
+the stamp is right by luck, not by structure.
+
+**NOT BUILT.** Two things to settle first: what chalk does on a genuine
+disagreement (die is the GAP-not-miscompile answer, but a merely STALE wire
+would then break the build), and whether the 1760 site's die is the template or
+whether a narrowable disagreement should narrow silently and only an
+INCOMPARABLE one should die.
