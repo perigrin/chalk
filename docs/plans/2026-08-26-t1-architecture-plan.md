@@ -1122,3 +1122,59 @@ One thing, shared: **the gate reads 205 against a floor of 215** (`not ok 247`).
 Neither phase can be formally exited on a gate failing its own floor, and
 whether that gap predates this session is still unmeasured. That is now the only
 open blocker for Phases 1 and 2 — everything else in both is done and green.
+
+## THE 205-vs-215 BISECT (coordinator, 2026-08-30)
+
+Measured against a PINNED producer (`8c15e32`) at every step, so the producer
+could not move underneath the measurement — the failure that made an earlier
+reading of 162 look like a regression.
+
+| commit | gate-green | |
+|---|---:|---|
+| `bdb74505` restore the coercion passes | **207** | session baseline |
+| `6db5dcdc` Scalar is refinable | **206** | −1 |
+| `5b5c98a1` fixpoint folds the old value | 206 | |
+| `45eb3183` round cap | 206 | |
+| `ebdd6a23` field store coherent by encoding | 206 | |
+| `6b0e45f0` Scalar is lowerable | **205** | −1 |
+| `17ba4c08` Num field payload | 205 | |
+| HEAD | **205** | |
+
+**The gap is 2 cases, not 10, and both are mine.** The floor of 215 was never
+met during this session — `bdb74505` already read 207 — so 215 reflects a state
+before the session and the "10 cases below floor" framing was wrong.
+
+**Case 1, lost by `6db5dcdc`: `classes: arrayref-field element read`**
+
+    GAP: Call(method) 'first' node repr=Int disagrees with class 'Bag'
+         vtable ABI return_repr=Scalar
+
+**Predicted in that commit's own message** and then lost track of: making
+`Scalar` refinable means a node correctly narrows `Scalar -> Int` while the
+vtable does not follow, and an ordered comparison reads the refinement as a
+disagreement. `Int <: Scalar` — a refinement, not a contradiction.
+
+**Case 2, lost by `6b0e45f0`: `subs: F8 positional $_[0] subscript`**
+
+    lower: Add with repr=Scalar ...
+
+Admitting `Scalar` to the representation field means an `Add` now legitimately
+carries `Scalar`, which the backend has no arm for. Same shape as case 1: the
+type answer got better and a consumer that assumed it could not be `Scalar`
+now refuses it.
+
+**Both are the SAME defect class, and it is the one this session kept finding:**
+a consumer written when `Scalar` could not appear, now meeting a `Scalar` that
+is correct. `%LOWERABLE_STAMP`, the field-store `ne`, the vtable ABI check, the
+"cannot lower Scalar" die — all the same. These two are the remaining members,
+now named.
+
+**Neither is a miscompile.** Both are honest GAPs, zero behavioural mismatches
+throughout. The trade was: 21 GAPs closed by `6b0e45f0` against 1 case moved to
+a GAP — recorded here so the ledger is explicit rather than implied.
+
+**What this unblocks.** The gate is now READABLE: 205 is explained, both losses
+attributed, and a change that moves it can be read against a known baseline.
+Phase 1 and Phase 2 can be formally exited once these two are closed or
+accepted; the coercion handoff (StrEq first) has a measurable floor to work
+against.
