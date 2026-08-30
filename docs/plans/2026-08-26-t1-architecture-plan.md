@@ -1025,3 +1025,52 @@ Carried forward or newly introduced; do not build a gate on any of these.
    the guess becomes a GAP — each such case is a latent miscompile at
    HEAD. Standing instruction requested: land the loud GAP and lower
    nothing else, or hold that site until a fix exists?
+
+---
+
+## PHASE 1 AUDIT (coordinator, 2026-08-30)
+
+Audited against Phase 1's own step list rather than against memory, after
+"largely landed" was used here as a hedge for an unrun check.
+
+**Steps 1-7: ALL COMPLETE.**
+
+| step | deliverable | state |
+|---|---|---|
+| 1 | `t/bootstrap/codegen-harness/pipeline.t` + `Pipeline.pm` | present; **38/38 green** |
+| 2 | Phase5LibCoverage migrated | `Pipeline`=5, `from_json`=0 |
+| 3 | ProgramRunner migrated | `Pipeline`=2, `from_json`=0 |
+| 4 | Mode2Adapter migrated | `Pipeline`=2, `from_json`=0 |
+| 5 | son-e2e.t migrated | `Pipeline`=3, `from_json`=0 |
+| 6 | son-corpus-wide.t migrated | `Pipeline`=2, `from_json`=0 in code |
+| 7 | `transforms` threaded per graph | `Pipeline.pm:19,83`; pinned by pipeline.t 25/33/34 |
+
+**No assembler is left inline.** Phase 1's stop condition ("If any assembler
+is left inline, STOP") is not triggered.
+
+A `grep -rln from_json t/` returns 44 files, which looks alarming and is not:
+Phase 1 explicitly scopes out "the ~17 other `t/bootstrap/*.t` files doing
+`from_json`+`lower` inline for single-purpose unit tests … they migrate, if at
+all, in Phase 5". Those are not assemblers of the full sequence. An earlier
+reading of that 44 as a Phase-1 gap was wrong.
+
+**Two exit conditions are NOT met, and neither is code:**
+
+1. **`loader-reproduces-the-wire.t` DOES NOT EXIST.** The exit says it "still
+   reads 16". No file of that name is anywhere in `t/`. Same pattern as Phase
+   2's `call-target-is-a-metaobject.t` and `call-node-resolved-handle.t`, also
+   named as existing and also absent. Either these were renamed and this plan
+   is stale about its own pins, or they were never written and the regression
+   coverage those phases claim is imaginary. **Resolve before trusting any
+   phase's exit criteria.**
+
+2. **The G1 gate run reads 205 against a stated floor of 218** (the floor
+   assertion itself was since lowered to 215 by D2, and the gate is failing
+   even that: `not ok 247`). The floor text says "215 is a CEILING as well as
+   a floor" and "T2 is not done while this reads 215". It reads 205. Whether
+   that 10-case gap predates this session is UNMEASURED and is the next thing
+   to bisect — a gate failing its own floor cannot validate a phase exit.
+
+**Conclusion: Phase 1's code is done; Phase 1 is not exited.** The blocker is
+not implementation but the two conditions above, and both are shared with later
+phases rather than local to this one.
