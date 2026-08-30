@@ -1033,3 +1033,57 @@ real and still want the `%Slot` tag, but they are the smaller half.
 Step 1 is a change to `Analysis.pm`'s coercion pass and is the real work. It is
 NOT blocked on T2 — I said it was, and that was a consequence of the wrong
 framing, not a measurement.
+
+### A FIFTH coercion site, and the rule does NOT fire there (2026-08-30)
+
+Corpus case `subs.md F22` (`sub id { my $x = shift; return $x }` called with
+`1` and with `"hi"`) is the first polymorphic callee the corpus has ever
+contained. Measured: **T1's join is correct** — the shared `shift` read is
+stamped `Str`, the join of `Int` and `Str` — and the backend emits **invalid
+IR**, because the callee is emitted once at the joined type while the `Int`
+callsite passes a raw `i64`:
+
+    error: '%tmp_1' defined with type 'i64' but expected '%Str = type { i8*, i64, i32 }'
+
+**This is a coercion site the producer does not emit and chalk does not insert
+— a FIFTH, beside Print/Concat/StrEq/Divide/Add.** It is a call-edge site
+rather than an operand position.
+
+**And the rule as stated does not fire on it.** Checked:
+
+    callsite id(1):   from=Int to=Str  meet=Int == from  -> NO NODE
+    callsite id("hi"): from=Str to=Str  meet=Str == from  -> NO NODE
+
+`Int -> Str` IS a defined conversion pair, so this is not a missing pair. The
+rule declines because on the TYPE axis an `Int` already satisfies a `Str`
+requirement — which is exactly right for an OPERAND position (`print $x` needs
+a value it can stringify, and an Int is one) and exactly wrong for a CALL
+BOUNDARY, where the callee has ONE emitted body at ONE machine type and an i64
+does not satisfy a `%Str` parameter.
+
+**So the difference is which axis "satisfies" is asked on.** Operand positions
+ask a TYPE question, and `meet(from,to) != from` answers it. A call boundary
+asks an ENCODING question: does the argument's representation match the
+parameter's? Same lattice, different predicate — and the second one is not
+derivable from the first, because type satisfaction does not imply encoding
+satisfaction.
+
+**Which layer owns it is [OPEN — perigrin].** perigrin's instruction was that
+T1 should detect this and insert. The tension to resolve: if T1 inserts here,
+T1 is deciding on the basis of a fact (the callee's single emitted body) that
+belongs to lowering — the same shape as `%LOWERABLE_STAMP` asking a T2 question
+in the loader. Two readings, both defensible:
+
+1. **T1 inserts, and the trigger generalises.** The rule becomes "coerce when
+   the value does not satisfy the position", with satisfaction defined per
+   position kind — meet-based at operands, equality-based at call edges. T1
+   never mentions machine types; it says "this parameter's type is Str and this
+   argument's is Int", which is a pure type statement.
+2. **T2 inserts, because the site exists only because of a lowering choice.**
+   Per-callsite specialisation would make the mismatch disappear entirely
+   without any coercion — the mismatch is an artefact of emitting one body, not
+   a property of the program.
+
+Reading 1 looks right on the evidence: the argument-vs-parameter type
+disagreement is visible in T1 with no encoding knowledge, and specialisation is
+an optimisation T2 may or may not take. Recorded rather than acted on.
