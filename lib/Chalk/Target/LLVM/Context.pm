@@ -7144,6 +7144,20 @@ sub _lower_call_method {
         # there once, not in a parallel inline table).
         my $ret_ty = Chalk::Target::LLVM::_method_fn_llvm_ret_type($result_repr);
         $self->_emit("  $result = call $ret_ty $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> $ret_ty");
+        # THE CALL IS AT THE ABI; THE NODE MAY KNOW MORE. When the vtable
+        # declares Scalar the callee returns %Slot, but this node's repr may
+        # have been refined to something narrower -- Int <: Scalar. Consumers
+        # read the cached ref AT THE NODE'S REPR, so the payload is unpacked
+        # here rather than caching a %Slot where an i64 is expected. The
+        # refinement is honoured at the boundary, not by calling at the
+        # narrower type: the callee has ONE emitted body at ONE machine type.
+        if ($result_repr eq 'Scalar' && ($node->representation // '') ne 'Scalar') {
+            my $pay = $self->_fresh;
+            $self->_emit("  $pay = extractvalue %Slot $result, 1  ; Call(method) $method_name: Slot payload -> "
+                       . ($node->representation // '?'));
+            $self->{cache}{ $node->id } = $pay;
+            return $pay;
+        }
         $self->{cache}{ $node->id } = $result;
         return $result;
     }

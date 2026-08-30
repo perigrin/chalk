@@ -854,6 +854,17 @@ sub _emit_class_registry_ir {
                 # residual): the body value is the i1 defined-bit (always 0).
                 push @lines, "  ret i1 $body_val";
             }
+            elsif ($ret_repr eq 'Scalar') {
+                # The ABI is %Slot = { i1 defined, i64 payload }. The body value
+                # is the PAYLOAD, so it is boxed here rather than returned bare
+                # -- without this the header says %Slot and the ret says i64,
+                # which lli rejects outright ("value doesn't match function
+                # result type"). Defined is true: a method that reached its
+                # Return produced a value.
+                push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, 0";
+                push @lines, "  %ret_s1 = insertvalue %Slot %ret_s0, i64 $body_val, 1";
+                push @lines, '  ret %Slot %ret_s1';
+            }
             else {
                 push @lines, "  ret i64 $body_val";
             }
@@ -936,6 +947,12 @@ sub _emit_class_registry_ir {
             elsif ($ret_repr eq 'Num')  { push @lines, "  ret double $body_val" }
             elsif ($ret_repr eq 'Boolean'
                 || $ret_repr eq 'Undef'){ push @lines, "  ret i1 $body_val" }
+            elsif ($ret_repr eq 'Scalar') {
+                # Boxed into %Slot -- see the sibling site above.
+                push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, 0";
+                push @lines, "  %ret_s1 = insertvalue %Slot %ret_s0, i64 $body_val, 1";
+                push @lines, '  ret %Slot %ret_s1';
+            }
             else                        { push @lines, "  ret i64 $body_val" }
             push @lines, '}';
             push @lines, '';
