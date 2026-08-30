@@ -4,7 +4,7 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Scalar::Util qw(blessed);
+use Scalar::Util qw(blessed refaddr);
 use Chalk::IR::Serialize::JSON ();
 use Chalk::Target::LLVM ();
 
@@ -80,10 +80,22 @@ method _run ($json, $select, %opts) {
     # emitted IR is byte-identical, while every graph in the set has lost the
     # edge that spec section 2 says a pass reaches the program through.
     # Carrying it forward is what keeps `run($graph) -> $graph` honest.
-    for my $t ($transforms->@*) {
+    for my $i (0 .. $transforms->$#*) {
+        my $t = $transforms->[$i];
         for my $name (sort keys $graphs->%*) {
             my $old = $graphs->{$name};
-            my $new = $t->($old);
+            # Attributed, because the wrong-return check below already goes to
+            # the trouble of naming the graph and an exception should not be
+            # anonymous by comparison. With several passes installed (T1, T2,
+            # optimizers -- this slot's whole purpose) a bare "Can't call
+            # method on an undefined value" says nothing about WHICH pass on
+            # WHICH graph. The die still propagates: a transform failure is not
+            # a per-unit lowering GAP and must never be recorded as one.
+            my $new;
+            try { $new = $t->($old) }
+            catch ($e) {
+                die "Pipeline: transform $i died on graph '$name': $e";
+            }
             blessed($new) && $new->isa('Chalk::IR::Graph')
                 or die "Pipeline: a transform returned "
                      . (defined $new ? "'$new'" : 'undef')
@@ -96,7 +108,24 @@ method _run ($json, $select, %opts) {
     # Read the MOP AFTER the transforms, so a transform that legitimately
     # installs a new one is honoured. Every graph carries the same MOP, so any
     # answers -- sorted so the choice is deterministic, not hash-order.
-    my $mop = $graphs->{ (sort keys $graphs->%*)[0] }->mop;
+    my @names = sort keys $graphs->%*;
+    my $mop   = $graphs->{ $names[0] }->mop;
+
+    # CHECKED, not assumed. The read above is sound only because Analysis::run
+    # points every graph at ONE sealed MOP -- but this runs AFTER the
+    # transforms, and a transform holds one graph at a time. A pass that
+    # installs a MOP on a SUBSET (the natural shape for anything rewriting some
+    # classes) leaves the set inconsistent, and nothing downstream can see it:
+    # lower() takes a single mop, the IR still emits, and half the program is
+    # compiled against a MOP it no longer points at. Every caller reads only
+    # the lowered text, so no consumer can disagree with any other -- the
+    # wrong-but-CONSISTENT answer this seam's review existed to find.
+    for my $n (@names) {
+        my $m = $graphs->{$n}->mop;
+        next if (defined $m ? refaddr($m) : 0) == (defined $mop ? refaddr($mop) : 0);
+        die "Pipeline: graph '$n' carries a different MOP than '$names[0]' -- "
+          . "a transform installed a MOP on part of the graph set.\n";
+    }
 
     my @units;
     for my $pair ($select->($graphs, $mop)) {

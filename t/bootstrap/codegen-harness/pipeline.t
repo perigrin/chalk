@@ -165,4 +165,40 @@ is_deeply([ grep { $_ ne 'Chalk::IR::Graph' } @arg_kinds ], [],
     like($err, qr/for graph '/, 'and the failure names the offending graph');
 }
 
+subtest 'a transform that splits the MOP is caught, not silently resolved' => sub {
+    # THE FAILURE THE SEAM EXISTS TO MAKE VISIBLE, and the one no caller can
+    # see. Pipeline reads the MOP from whichever graph sorts first, justified
+    # by "every graph carries the same MOP". That is true of Analysis::run's
+    # output -- it points every graph at one sealed MOP -- but the read happens
+    # AFTER the transforms, and a transform holds ONE GRAPH AT A TIME. A pass
+    # that installs a new MOP on a SUBSET (the natural shape for anything that
+    # rewrites some classes: StructPromotion, a T2 encoding pass) leaves the
+    # set inconsistent.
+    #
+    # Nothing downstream can notice. lower() takes a single mop, the IR still
+    # emits, and half the program is compiled against a MOP it no longer points
+    # at. All five callers read only $units->[0]{ll}; none compares MOP
+    # identity across the set, so no consumer can disagree with any other --
+    # a wrong-but-consistent answer, which is precisely what this seam's
+    # review was for.
+    my $seen = 0;
+    my $splitter = sub ($g) {
+        # Install a DIFFERENT MOP on the second graph only.
+        $g->set_mop(Chalk::MOP->new) if $seen++ == 1;
+        return $g;
+    };
+
+    my $err;
+    eval {
+        Chalk::CodeGen::Pipeline->new(transforms => [$splitter])
+            ->run($json, $select);
+        1;
+    } or $err = $@;
+
+    like($err, qr/different MOP/,
+         'a split MOP set dies rather than silently using the first-sorted one');
+    like($err, qr/transform/,
+         'and the message names a transform as the cause');
+};
+
 done_testing;
