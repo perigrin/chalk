@@ -1087,3 +1087,67 @@ in the loader. Two readings, both defensible:
 Reading 1 looks right on the evidence: the argument-vs-parameter type
 disagreement is visible in T1 with no encoding knowledge, and specialisation is
 an optimisation T2 may or may not take. Recorded rather than acted on.
+
+### The producer's `shift` floor SILENCES chalk's call-argument join (2026-08-30)
+
+Bisected by the bson session and reproduced here. The two of us measured
+different wire stamps for corpus F22 and both were right: there is **exactly one
+commit** between the pins and it is precisely the one that touches this.
+
+    8c15e32  id=Unknown  id=Unknown  shift=Unknown   <- chalk's pin
+    2c75c38  id=Scalar   id=Scalar   shift=Scalar    <- the immediate CHILD
+
+`2c75c38` "fix(shift): bare shift drains @_, and returns one scalar" adds a
+producer floor, Unknown-guarded so it only fills a hole. It is a fact about the
+OPERATOR, not any callsite — bare `shift` removes one scalar slot from `@_`, so
+its result is one scalar whatever the callers pass. Target-independent, and
+honestly T1.
+
+**Measured consequence for chalk, and it is a silent one:**
+
+| producer | post-load stamps |
+|---|---|
+| `8c15e32` (Unknown on the wire) | `Str`, `Str`, `Str` — the join runs |
+| `2c75c38` (Scalar on the wire) | **`Scalar`, `Scalar`, `Scalar` — the join does not** |
+
+The join stops happening. Not an error, not a GAP: the answer is simply less
+precise, and nothing reports it. F22 lowers no better either way, so the corpus
+gate cannot see the difference.
+
+**`Str` does NOT contradict `Scalar`.** `Scalar` is the honest floor from
+`shift` alone; `Str` is strictly more precise and comes from information the
+producer does not have (the callsites). `meet(Scalar, Str) = Str`, so chalk's
+join is a legal NARROWING of the producer's floor. The division of labour holds
+— it now starts from `Scalar` rather than `Unknown`.
+
+**Which pass, measured by disabling each in turn** (against `8c15e32`, counting
+`repr=Str`):
+
+    without _seed_direct_call_arg_reprs   3 -> 2   <- contributes
+    without _stamp_method_call_reprs      3 -> 3
+    without _propagate_computed_reprs     3 -> 3
+
+So `_seed_direct_call_arg_reprs` is the pass, and it is CHALK-side
+(`Analysis.pm:673`, called from the fixpoint at `:264`) — not a producer pass,
+which is why a grep of perl5-son found nothing.
+
+**THE ORDERING RULE, restated as a cross-repo obligation.** The bson session's
+own rule — *"a floor must be written AFTER every narrowing pass, or the passes
+that only fill Unknown skip it"* — was applied correctly WITHIN the producer.
+What this case shows is that it does not stop at the repo boundary: **a
+producer-side floor runs before every chalk-side narrowing pass, unavoidably,
+because it is on the wire before chalk starts.** So a floor that is correctly
+late on one side is unconditionally early on the other.
+
+The remedy is not to remove the floor — it is right, and `Scalar` is better
+than `Unknown` for every consumer that cannot narrow. It is that **chalk's
+narrowing passes must treat `Scalar` as narrowable**, which is what
+`_is_narrowed`'s `Scalar` exemption already does for the fixpoint. The seed
+pass needs the same treatment; it currently keys on `Parameter` nodes, and this
+wire shape has `ArgsSource` + a `shift` Call instead, so it does not reach these
+positions at all.
+
+**[OPEN]** Whether the seed should also fire on the `ArgsSource`/`shift` shape.
+Not built: it would change stamps on a shape the corpus exercises once, and the
+gate cannot discriminate the result — precisely the situation where a test, not
+a gate, has to carry the claim.
