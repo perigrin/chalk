@@ -53,7 +53,7 @@ The remaining gap, item by item:
 | §4 exit condition | `_assert_value_nodes_are_typed` commented out at `Analysis.pm:298`; enabling it drops the gate 218 → 200 per its own comment block |
 | §5 Pi refinement | No Pi node exists; `defined $x` has NO expressible piStamp in the current lattice (B6, confirmed by execution: `meet(Scalar,Scalar)=Scalar`) |
 | §8 loader inference | `%LOWERABLE_STAMP` live at `JSON.pm:71`/`:634`; Print→Boolean seed still in the loader |
-| §1 no guessing | FOUR live `$repr // 'Int'` backend guesses: `Target/LLVM/Context.pm:3349, :4071, :5801, :6827` (all four re-verified verbatim at HEAD) — B4 |
+| §1 no guessing | **CLOSED 2026-08-27 by `e59121b8`** — all four converted to loud GAP dies, pinned by `t/bootstrap/ir/llvm-undef-repr-guard.t` (13/13). The census found all four REACHED but never with an undef left operand: latent hazards, not live miscompiles. Verified independently at G4: zero `// 'Int'` remain in `Context.pm`. |
 
 ---
 
@@ -69,7 +69,7 @@ How the six blockers are disposed of:
 | B1 graph-set shape | Resolved by construction: Phase 1 step 7 ships `transforms => [$g -> $g]`; Phase 5 births T1 with `run($graph)`; the transitional hash is fenced (Phase 5, "the fence") |
 | B2 Undef-drop vs the 218 floor | RULED (D2): deletion is IN SCOPE (Phase 3 step 4); gate 218 → 215 with three declared GAPs; spec §9.5 amended in the same commit; restoration is T2's acceptance criterion |
 | B3 fixpoint freezing + second `_element_repr` caller | Discharged by a mandatory measurement gate (G5) BEFORE the total-join lands; the remedy is chosen from that data (Phase 3 step 0) |
-| B4 `$repr // 'Int'` | Owned: Phase 3 step 5 converts all four sites to loud GAP dies, measured first |
+| B4 `$repr // 'Int'` | **CLOSED `e59121b8` (2026-08-27)**, ahead of Phase 3 step 5. Do not re-audit. |
 | B5 DefinedOrFold store-blindness | Resolved by construction: the `_element_at` refusal lands in the SAME COMMIT as store-aware `_element_repr` (Phase 4 step 1), with `lli == perl == 99` as the acceptance test |
 | B6 inexpressible piStamp | RULED (D1) before any join pin lands: separate refinement vocabulary, `%PARENT` untouched |
 

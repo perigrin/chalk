@@ -696,7 +696,7 @@ sub _emit_class_registry_ir {
         for my $minfo (@$methods) {
             my $mname     = $minfo->{name};
             my $fn_name   = '@' . $cname . '__' . $mname;
-            my $ret_repr  = $minfo->{return_repr} // 'Int';
+            my $ret_repr  = $minfo->{return_repr};
             my $fn_ret    = _method_fn_llvm_ret_type($ret_repr);
 
             if ($minfo->{inherited_from}) {
@@ -895,7 +895,7 @@ sub _emit_class_registry_ir {
         for my $sinfo ($emit_sub_defines ? @{ $reg->{subs} // [] } : ()) {
             my $sname    = $sinfo->{name};
             my $fn_name  = '@' . $cname . '__' . $sname;
-            my $ret_repr = $sinfo->{return_repr} // 'Int';
+            my $ret_repr = $sinfo->{return_repr};
             my $fn_ret   = _method_fn_llvm_ret_type($ret_repr);
 
             my $body_return = $sinfo->{body_return};
@@ -987,7 +987,7 @@ sub _emit_class_registry_ir {
         for my $minfo (@$methods) {
             my $mname   = $minfo->{name};
             my $fn_name = '@' . $cname . '__' . $mname;
-            my $ret_repr = $minfo->{return_repr} // 'Int';
+            my $ret_repr = $minfo->{return_repr};
             my $fn_type_str = Chalk::Target::LLVM::Context::_method_fn_type($ret_repr);
             push @vt_init, "i8* bitcast ($fn_type_str* $fn_name to i8*)";
         }

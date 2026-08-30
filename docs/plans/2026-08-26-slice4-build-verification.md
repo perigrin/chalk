@@ -43,7 +43,7 @@ Six. Each is repeated at the head of its sub-slice section.
 | B1 | 4c (+4b, 4e) | The graph-set shape spec §2 forbids is being institutionalized at the new seams |
 | B2 | 4a | Step 4 knowingly moves the gate 218 → 215; spec §9.5 makes 218 an acceptance criterion |
 | B3 | 4a | The total join creates a precision regression and an unanalyzed blast radius |
-| B4 | 4a (+4b) | The plan's FOURTH improvisation (`$repr // 'Int'`) has no owner — four live sites |
+| B4 | CLOSED | **`e59121b8` (2026-08-27)** converted all four `$repr // 'Int'` sites to loud GAP dies; pinned by `t/bootstrap/ir/llvm-undef-repr-guard.t` (13/13). Re-verified at G4: zero remain in `Context.pm`. |
 | B5 | 4b | Analysis (iii) widens a known silent-miscompile divergence with DefinedOrFold |
 | B6 | 4e (+4a) | `defined` has no expressible piStamp; the fix reparents the lattice under 4a's feet |
 
