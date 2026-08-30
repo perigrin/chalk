@@ -881,3 +881,57 @@ arithmetic). Not a contradiction.
     3. the Scalar ruling (above)                  <- blocks 4
     4. Concat, then Print (after the producer's TypeLibrary prerequisite)
     5. Divide/Add last, after chalk declares their Num requirement
+
+## T2 DIRECTION: `%Slot` should carry its own type tag (perigrin, 2026-08-30)
+
+> "%Slot I think needs to embed its type via an enum or something"
+
+This is the answer to the question the corrected `Coerce[Scalar -> …]` die
+leaves open, and it settles it in the direction that keeps chalk runtime-free.
+
+**The problem, restated.** `%Slot = type { i1, i64 }` — a defined bit and 64
+payload bits **whose interpretation is not recorded anywhere in the cell**. So
+`Coerce[Scalar -> Str]` cannot be emitted: stringifying means choosing whether
+those bits are an integer, a double, or a pointer to a string, and the value
+does not say. Two ways out: ask a runtime at every use, or **make the value
+carry the answer**.
+
+**The direction: a third field, a type tag.**
+
+    %Slot = type { i1, i64 }        ->  { i1 defined, i32 tag, i64 payload }
+
+`Coerce[Scalar -> Str]` then lowers as a switch on the tag into the arms that
+already exist — `Int -> Str`, `Num -> Str`, `Boolean -> Str` are all defined
+pairs with working lowerings today. **Nothing new needs inventing; the dispatch
+just needs an input.** Same for `Scalar -> Num`, which is 18 of the producer's
+current Scalar-sourced coercions.
+
+**Why this is the right shape rather than a runtime call:**
+
+- It keeps the RF (runtime-free) property. A tag switch is branches and the
+  existing conversion arms; a runtime call is libperl.
+- It matches what `%Slot` already is. The comment at `Context.pm:913` records
+  that carrying the defined bit ALONE (payload in a side table keyed by SSA
+  ref) failed twice — a consumer using a def-bit as a value, and per-graph SSA
+  numbering making the key ambiguous — and that the fix was **one aggregate
+  carrying every part together**, exactly as `%Str` carries `(ptr, len)`. A
+  type tag is the same argument applied once more: the information a consumer
+  needs travels IN the value, not beside it.
+- It is `Scalar`'s honest encoding. `Scalar` is the top of the scalar spine —
+  "any scalar, we did not narrow further". A cell that means that must be able
+  to say WHICH scalar it turned out to hold, or the type is unusable at the
+  boundary where it matters.
+
+**Scope, measured before proposing anything:** the surface is small — the type
+declaration at `Context.pm:580`, two named accessors (`_slot_defined_bit`,
+`_slot_payload_of`), `_build_slot`, and **4** raw `insertvalue`/`extractvalue`
+sites. `%HashEntry` (`:582`) embeds a `%Slot`-shaped tail and would move with
+it.
+
+**NOT SCHEDULED, and deliberately.** This is T2 architecture, and [PERIGRIN]
+ruled the same day that **T2 is premature until T1 is complete**. Recorded here
+so the design decision is not re-derived from scratch when T2 opens, and so the
+`Coerce[Scalar -> …]` GAP has a named destination rather than reading as an
+open question. It also retires the framing in the entry above: the question was
+never "can the target stringify a scalar-ish value" — it is "the value must
+carry its own type", and the answer is a tag.
