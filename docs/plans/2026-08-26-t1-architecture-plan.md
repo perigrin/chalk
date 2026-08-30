@@ -1221,3 +1221,55 @@ neither is a miscompile.
 **Phase 3 needs no further work.** Its remaining item is not a step but a
 consequence: restoring L3b/L3c/L3d to GREEN and the floor to 218 is **T2's**
 acceptance criterion, which is blocked on T1 completing.
+
+## PHASE 4 AUDIT (coordinator, 2026-08-30)
+
+**All four steps COMPLETE.** Two were already built; two were finished today.
+
+| step | state |
+|---|---|
+| 1 container monomorphism + B5 | **done today** (`dcafcbd2`) — the analysis half was already built |
+| 2 `_resolve_direct_calls` reads the edge | **done today** (`ee9e220a`) — the edge read existed; the fallback did not |
+| 3 cross-call argument join | **already done** — gather-then-stamp implemented (`%pending` keyed by `refaddr`), `direct-call-args-join-all-callsites.t` 3/3 including order-independence |
+| 4 the no-tie assertion | **already done** — `no-tie-in-the-subset.t` 2/2, with the RED-proof subtest that pins the patterns actually catch `tie`, so the green is not vacuous |
+
+### What each of today's two turned out to be
+
+Neither was the work the plan described, and in both cases the plan's
+prescription had been overtaken.
+
+**Step 1 was a stale guard, not missing inference.** `_element_repr` ALREADY
+joined stores (`_element_store_values` walks exactly the consumer edges the
+step prescribes), and B5 — predicted to fold to the initializer `1` — already
+printed 99. The only gap was the backend's `Assign(Array-lvalue)` guard
+excluding `Str`, under a comment naming its own expiry: *"Until the
+element-type inference joins stores as well as literals, this must stay a
+GAP."* It does. `my @arr=(1,2); $arr[0]="hello"; print $arr[0]` went from GAP
+to `lli: hello` / `perl: hello`.
+
+**Step 2 was an ORDERING bug, not a missing edge read.** The edge read existed;
+the graph-name fallback beside it fired 18 times over the corpus. Instrumenting
+BOTH sides showed 18 attaches and 18 fallbacks on the SAME node ids, with the
+fallback first: `_resolve_direct_calls` was called at `:197`, BEFORE
+`_attach_call_targets` at `:232`, and again in the fixpoint. Every direct Call
+reached the early pass with `target` undef. That early call is dead weight
+(deleting it moves nothing), so it and the fallback are both gone.
+
+### The pattern across all four phases
+
+Three of today's fixes were the same defect: **a guard that was correct when
+written and outlived its reason** — `%LOWERABLE_STAMP` excluding `Scalar`, the
+"cannot lower Scalar" die, and the `Assign(Array-lvalue)` `Str` exclusion. Each
+named its own expiry condition in a comment, each condition had since been met,
+and nobody rechecked. Worth a standing habit: **when a comment says "until X",
+grep for whether X has happened.**
+
+### Phase 4 exit
+
+Gate **205/205/207/218** against pinned producer `8c15e32`, zero behavioural
+mismatches, `loader-reproduces-the-wire` green. G7's own warning stands for the
+record: the gate holds whether the argument join is correct, inverted, or
+absent — **the tests carry that burden, not the gate.**
+
+**Phases 1-4 are now complete. Phase 5 — the T1 class, and the loader stops
+analysing — is the only remaining phase.**
