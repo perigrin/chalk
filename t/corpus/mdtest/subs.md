@@ -765,3 +765,49 @@ context: scalar
 ```
 
 L: GAP: postfix hash dereference crashes rather than refusing -- Can't call method "id" on an undefined value
+
+## F22 polymorphic callee: one sub called with Int and with Str
+
+The shape the corpus has NEVER contained. G7's census over 231 cases found **4
+multi-callsite callees and ZERO polymorphic**, and recorded what that costs:
+"on every gate case `join(args) == args[0]`, and gather-then-stamp is
+behaviourally IDENTICAL to first-caller-wins: **the gate holds whether the join
+is correct, inverted, or absent.**" This case is the discriminator that was
+missing.
+
+Measured 2026-08-30 against producer `8c15e32`: the JOIN IS CORRECT and the
+LOWERING IS NOT. `_seed_direct_call_arg_reprs` stamps the shared `shift` read
+`Str` — the join of `Int` and `Str`, not first-caller-wins, which would give
+`Int` — and both Call nodes carry `Str`. So T1 gets the right answer.
+
+The backend then emits invalid IR:
+
+    error: '%tmp_1' defined with type 'i64' but expected '%Str = type { i8*, i64, i32 }'
+      %tmp_2 = extractvalue %Str %tmp_1, 0   ; %Str.ptr
+
+The callee body is emitted once, at the JOINED type (`%Str`), but the `Int`
+call site passes its argument as a raw `i64`. Nothing coerces at the boundary.
+This is a T2 gap, not a typing one: T1 correctly says "this parameter is Str at
+one site and Int at the other, so the parameter is Str", and lowering needs
+either a `Coerce[Int -> Str]` at the narrowing call site or a per-callsite
+specialisation of the callee.
+
+It is also the first case where the argument join is OBSERVABLE. Every other
+corpus case is monomorphic, so this is the only one that would go red if the
+join were inverted or deleted.
+
+```perl
+# source
+use 5.42.0;
+sub id { my $x = shift; return $x }
+say(id(1));
+say(id("hi"));
+```
+
+```behavior
+stdout: 1\nhi\n
+return: Bool:1
+context: scalar
+```
+
+L: GAP: the callee is emitted once at the joined type (%Str) but the Int callsite passes a raw i64 -- no coercion at the call boundary
