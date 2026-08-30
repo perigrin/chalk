@@ -104,4 +104,27 @@ subtest 'with the edge present, the name hash is not what is read' => sub {
         for @c;
 };
 
+subtest 'the graph-name hash is not read AT ALL' => sub {
+    # The stronger claim, and the one step 2 actually wants: not "the edge is
+    # preferred" but "the name is never consulted". The fallback survived only
+    # because _resolve_direct_calls was ALSO called once before
+    # _attach_call_targets, so every Call reached it with target undef and took
+    # the name path -- measured, exactly once per call, 18 times over the
+    # corpus. Deleting that early call moved nothing (205 before and after),
+    # so the fallback had no remaining reader and is gone.
+    my $src = do {
+        open my $fh, '<', 'lib/Chalk/IR/Analysis.pm' or die $!;
+        local $/; <$fh>;
+    };
+    unlike($src, qr/\|\|\s*\$graphs->\{ \$node->name/,
+           'no name-hash fallback remains in the resolve');
+
+    # And the ordering that made it necessary must not come back: an early
+    # resolve would silently re-introduce the fallback path.
+    my ($attach_at) = $src =~ /\A(.*?)^\s+_attach_call_targets\(/ms;
+    ok(defined $attach_at, 'the attach call is present');
+    unlike($attach_at // '', qr/^\s+_resolve_direct_calls\(/m,
+           'and no resolve runs before it');
+};
+
 done_testing;

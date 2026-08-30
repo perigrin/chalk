@@ -190,11 +190,17 @@ sub run ($class, $graphs, $classes = undef) {
     # a hash.
     $classes = {} unless ref $classes eq q{HASH};
 
-    # Resolve each direct sub call (dispatch_kind='direct') to its callee graph
-    # by name, so the backend can lower the call to the callee's result. A
-    # top-level named sub is its own graph (keyed by fully-qualified name), not a
-    # MOP class method; the Call carries its callee metaobject on `target`.
-    _resolve_direct_calls(\%graphs);
+    # NO EARLY RESOLVE. This used to run here, BEFORE _attach_call_targets
+    # below, so every direct Call reached it with `target` still undef and fell
+    # back to the graph-name hash -- measured, exactly once per call, 18 times
+    # over the corpus. That fallback was the whole reason the name read
+    # survived: the comment in _resolve_direct_calls said it retires "when
+    # _attach_call_targets can precede the first resolve", and this call was
+    # what stopped it.
+    #
+    # Measured: deleting it moves nothing (205/205/207/218 before and after).
+    # The fixpoint's resolve below does the same work WITH targets attached, so
+    # the early pass only ever produced answers the later one recomputes.
 
     # 4c: a `classes` section (from B::SoN) is replayed into a sealed MOP. Field
     # types must be inferred onto the raw records BEFORE the MOP is sealed, so
@@ -631,7 +637,6 @@ sub _resolve_direct_calls ($graphs) {
                     && $node->target
                     && $node->target->can('graph')
                     && $node->target->graph )
-                || $graphs->{ $node->name // '' }
                 or next;
 
             # Stamp the Call's repr from the callee's Return value, so the
