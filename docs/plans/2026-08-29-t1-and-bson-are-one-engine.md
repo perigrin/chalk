@@ -935,3 +935,53 @@ so the design decision is not re-derived from scratch when T2 opens, and so the
 open question. It also retires the framing in the entry above: the question was
 never "can the target stringify a scalar-ish value" — it is "the value must
 carry its own type", and the answer is a tag.
+
+### Step 1c — chalk declares Divide/Add: SIMULATED, and it is NOT a no-op
+
+The producer's half of the symmetric prerequisite landed as a measured no-op
+(`363df04`: declaring `Print` changed 0 wire nodes, because Int/Num/Str/Boolean
+all meet to themselves against Str). The bson session flagged that chalk's half
+might differ, since Divide operands arrive PRE-COERCED from the producer today
+and that is exactly what chalk's rule would newly see. **Measured, and they were
+right.**
+
+**Why the requirement is absent:** `%IR_OP_SOURCE_NAME` maps IR ops to source
+operators, and `Divide`/`Add`/`Subtract`/`Multiply`/`NumLt`… are simply not in
+it. The arithmetic signatures DO exist at source level; the IR ops are unmapped,
+so `operand_repr_for_ir_op` returns undef and `_insert_str_coercions` declines
+by "no opinion" rather than by judgment. Unlike `BitAnd` (genuinely ambiguous —
+numeric `&` vs string-bitwise `&.` share a node) and `Print` (variadic over
+List by design), **the arithmetic ops carry no such note: they look simply
+missing.**
+
+**Simulated delta** if `Divide/Add/Subtract/Multiply/Modulo/Power/Num*` declared
+`Num`, over subs.md and classes.md:
+
+    WOULD INSERT   Int -> Num       many, 1-6 per case
+    WOULD DECLINE  Scalar -> Num    several, "no defined pair"
+
+So landing it does two things at once, and only one is wanted:
+
+1. **`Int -> Num` insertions** — these are the coercions the producer emits
+   today at its Divide site. Chalk taking them over is the POINT of the handoff.
+2. **`Scalar -> Num` declines** — chalk has no defined pair for these, so the
+   coercion would be silently dropped rather than inserted. This is the same
+   blocker as `Scalar -> Str` on Concat/Print, and it is waiting on the `%Slot`
+   type tag.
+
+**NOT LANDED.** Doing it now would move the gate for two reasons at once and
+make the result unreadable — the exact shape of the 207→169 revert. The correct
+order is:
+
+    1. the %Slot type tag exists (T2)         <- makes Scalar -> Num a defined pair
+    2. THEN chalk declares Divide/Add         <- now purely additive
+    3. THEN the producer deletes its Divide site
+
+Until then the producer must KEEP its Divide site: deleting it while chalk
+declines `Scalar -> Num` and declares nothing for `Divide` drops the coercion
+entirely and `7/2` lowers as integer division — the miscompile that site's own
+comment already names.
+
+**This reorders the sequence.** Divide/Add was last because it was assumed
+small; it is last because it is BLOCKED ON T2, which is blocked on T1. StrEq
+remains the only step runnable today.
