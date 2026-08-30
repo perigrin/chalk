@@ -229,7 +229,7 @@ sub run ($class, $graphs, $classes = undef) {
     # belief that the repr fixpoint below needed to precede it -- measured
     # wrong: _replay_classes seals the MOP ~30 lines BEFORE the direct-call
     # fixpoint, so the metaobject is available to it.
-    _attach_call_targets(\%graphs, $mop);
+    _attach_call_targets(\%graphs, $mop, $classes);
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
     # through computed + aggregate-read nodes for EVERY graph (class or not).
@@ -505,7 +505,7 @@ sub _all_graph_nodes ($g) {
     return @out;
 }
 
-# _attach_call_targets(\%graphs, $mop) — give each resolved direct Call its
+# _attach_call_targets(\%graphs, $mop, $classes) — give each resolved direct Call its
 # callee METAOBJECT.
 #
 # The MOP is Chalk's deliberate divergence from classic Sea of Nodes: a flat
@@ -515,7 +515,7 @@ sub _all_graph_nodes ($g) {
 #
 # Keyed by the callee's fully-qualified name (`main::f`), which is how the
 # producer names the graph and how declare_sub records the metaobject.
-sub _attach_call_targets ($graphs, $mop) {
+sub _attach_call_targets ($graphs, $mop, $classes = {}) {
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
             next unless $node->operation eq 'Call'
@@ -590,7 +590,18 @@ sub _attach_call_targets ($graphs, $mop) {
               . "graph but deliberately not recorded as a sub "
               . "(B::SoN::_record_sub's early returns), so it cannot be called "
               . "in sub form."
-                if $cls && exists $graphs->{ $node->name // '' };
+                #
+                # `exists $classes->{$cls_name}` is load-bearing: Chalk::MOP's
+                # ADJUST seeds class `main` on EVERY load, so its presence in
+                # the MOP is NOT evidence the wire declared it. Without this,
+                # a wire carrying subs and no `classes` key (the two are
+                # independent) made every top-level sub call look like a class
+                # contradicting itself, and the loader died on a program shape
+                # it had loaded a commit earlier. Only a class the wire
+                # actually DECLARED can contradict itself.
+                if $cls
+                && exists $classes->{$cls_name}
+                && exists $graphs->{ $node->name // '' };
         }
     }
     return;
@@ -1906,9 +1917,21 @@ sub _stamp_method_call_reprs ($classes, $graphs, $mop) {
 sub _classes_in_parent_order ($classes) {
     my @order;
     my %placed;
+    my %placing;
     my $place;
     $place = sub ($name) {
-        return if $placed{$name};
+        # %placing is the cycle guard, and it must be SEPARATE from %placed:
+        # a class is marked placed only AFTER its parent is, so on a cyclic
+        # chain %placed alone never stops the descent and the walk recurses
+        # until memory is exhausted -- not a catchable error, just a dead
+        # process. The loader is defensive over JSON of unknown provenance, so
+        # a malformed wire must fail in a way a caller can catch.
+        #
+        # The MOP OBJECT graph cannot cycle (superclass is constructor-only and
+        # parents are declared first); the risk is one layer earlier, on the raw
+        # wire records. _stamp_method_call_reprs already guards the same
+        # {parent} chain this way.
+        return if $placed{$name} || $placing{$name}++;
         my $parent = $classes->{$name}{parent};
         $place->($parent) if defined $parent && exists $classes->{$parent};
         $placed{$name} = 1;
