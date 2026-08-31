@@ -861,8 +861,10 @@ sub _emit_class_registry_ir {
                 # which lli rejects outright ("value doesn't match function
                 # result type"). Defined is true: a method that reached its
                 # Return produced a value.
-                push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, 0";
-                push @lines, "  %ret_s1 = insertvalue %Slot %ret_s0, i64 $body_val, 1";
+                my $ri_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
+                my $ri_pay = Chalk::Target::LLVM::Context::_slot_idx('payload');
+                push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, $ri_def";
+                push @lines, "  %ret_s1 = insertvalue %Slot %ret_s0, i64 $body_val, $ri_pay";
                 push @lines, '  ret %Slot %ret_s1';
             }
             else {
@@ -949,8 +951,10 @@ sub _emit_class_registry_ir {
                 || $ret_repr eq 'Undef'){ push @lines, "  ret i1 $body_val" }
             elsif ($ret_repr eq 'Scalar') {
                 # Boxed into %Slot -- see the sibling site above.
-                push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, 0";
-                push @lines, "  %ret_s1 = insertvalue %Slot %ret_s0, i64 $body_val, 1";
+                my $ri_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
+                my $ri_pay = Chalk::Target::LLVM::Context::_slot_idx('payload');
+                push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, $ri_def";
+                push @lines, "  %ret_s1 = insertvalue %Slot %ret_s0, i64 $body_val, $ri_pay";
                 push @lines, '  ret %Slot %ret_s1';
             }
             else                        { push @lines, "  ret i64 $body_val" }
@@ -1351,8 +1355,10 @@ sub lower_with_elaboration {
         #   defined=false -> print "Undef:\n"
         my $def_bit = $ctx->_fresh;
         my $pay_val = $ctx->_fresh;
-        push @lines, "  $def_bit = extractvalue %Slot $result_ref, 0  ; Slot.defined";
-        push @lines, "  $pay_val = extractvalue %Slot $result_ref, 1  ; Slot.payload";
+        my $xi_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
+        my $xi_pay = Chalk::Target::LLVM::Context::_slot_idx('payload');
+        push @lines, "  $def_bit = extractvalue %Slot $result_ref, $xi_def  ; Slot.defined";
+        push @lines, "  $pay_val = extractvalue %Slot $result_ref, $xi_pay  ; Slot.payload";
         my $def_lbl  = $ctx->_fresh_label('slot_def');
         my $und_lbl  = $ctx->_fresh_label('slot_und');
         my $end_lbl  = $ctx->_fresh_label('slot_end');

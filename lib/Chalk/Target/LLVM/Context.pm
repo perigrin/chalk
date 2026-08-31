@@ -1032,8 +1032,9 @@ sub _build_slot {
     # `undef` is LLVM's poison aggregate, not perl's undef -- the starting
     # value into which both fields are inserted.
     my $d = $defined =~ /^i1 / ? $defined : "i1 $defined";
-    $self->_emit("  $partial = insertvalue %Slot undef, $d, 0  ; $what: defined");
-    $self->_emit("  $slot = insertvalue %Slot $partial, i64 $payload, 1  ; $what: payload");
+    my ($i_def, $i_pay) = (_slot_idx('defined'), _slot_idx('payload'));
+    $self->_emit("  $partial = insertvalue %Slot undef, $d, $i_def  ; $what: defined");
+    $self->_emit("  $slot = insertvalue %Slot $partial, i64 $payload, $i_pay  ; $what: payload");
     return $slot;
 }
 
@@ -1041,7 +1042,8 @@ sub _build_slot {
 sub _slot_defined_bit {
     my ($self, $slot_ref) = @_;
     my $ref = $self->_fresh;
-    $self->_emit("  $ref = extractvalue %Slot $slot_ref, 0  ; Slot.defined");
+    my $i_def = _slot_idx('defined');
+    $self->_emit("  $ref = extractvalue %Slot $slot_ref, $i_def  ; Slot.defined");
     return $ref;
 }
 
@@ -1049,7 +1051,8 @@ sub _slot_defined_bit {
 sub _slot_payload_of {
     my ($self, $slot_ref) = @_;
     my $ref = $self->_fresh;
-    $self->_emit("  $ref = extractvalue %Slot $slot_ref, 1  ; Slot.payload");
+    my $i_pay = _slot_idx('payload');
+    $self->_emit("  $ref = extractvalue %Slot $slot_ref, $i_pay  ; Slot.payload");
     return $ref;
 }
 
@@ -2670,8 +2673,9 @@ sub _lower_assign {
             $self->_emit("  $elems = load %Slot*, %Slot** $elem_ptr  ; Assign(Array-lvalue): load elems");
             my $slot_def = $self->_fresh;
             my $slot_pay = $self->_fresh;
-            $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 0  ; Assign(Array-lvalue): slot def ptr");
-            $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 1  ; Assign(Array-lvalue): slot pay ptr");
+            my ($gi_def, $gi_pay) = (_slot_idx('defined'), _slot_idx('payload'));
+            $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 $gi_def  ; Assign(Array-lvalue): slot def ptr");
+            $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 $gi_pay  ; Assign(Array-lvalue): slot pay ptr");
             $self->_emit("  store i1 true, i1* $slot_def  ; Assign(Array-lvalue): defined=true");
             # The rhs is boxed into the Slot's one-word payload — see
             # _box_payload for the per-repr rule.
@@ -5598,8 +5602,9 @@ sub _lower_array_ref {
         my $elem_ref = $self->lower_value($inputs->[$i]);
         my $slot_def = $self->_fresh;
         my $slot_pay = $self->_fresh;
-        $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 0  ; ArrayRef: slot[$i] defined ptr");
-        $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 1  ; ArrayRef: slot[$i] payload ptr");
+        my ($gi_def, $gi_pay) = (_slot_idx('defined'), _slot_idx('payload'));
+        $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_def  ; ArrayRef: slot[$i] defined ptr");
+        $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_pay  ; ArrayRef: slot[$i] payload ptr");
         $self->_emit("  store i1 true, i1* $slot_def  ; ArrayRef: slot[$i] defined=true");
         my $elem_repr = $inputs->[$i]->representation // '';
         my $elem_i64  = $self->_box_payload($elem_ref, $elem_repr,
@@ -5894,8 +5899,9 @@ sub _lower_array_read {
     my $def_val  = $self->_fresh;
     my $pay_val  = $self->_fresh;
     $self->_emit("  $slot_p   = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx  ; ArrayRead: slot ptr");
-    $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 0  ; ArrayRead: slot defined ptr");
-    $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 1  ; ArrayRead: slot payload ptr");
+    my ($gi_def, $gi_pay) = (_slot_idx('defined'), _slot_idx('payload'));
+    $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 $gi_def  ; ArrayRead: slot defined ptr");
+    $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 $gi_pay  ; ArrayRead: slot payload ptr");
     $self->_emit("  $def_val  = load i1,  i1*  $slot_def  ; ArrayRead: load defined bit");
     $self->_emit("  $pay_val  = load i64, i64* $slot_pay  ; ArrayRead: load payload");
     $self->_set_terminator("  br label \%$lbl_end");
@@ -6090,7 +6096,8 @@ sub _lower_builtin_shift_pop {
     my $slot_pay = $self->_fresh;
     my $pay_val  = $self->_fresh;
     $self->_emit("  $slot_p   = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx  ; $name: slot ptr");
-    $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 1  ; $name: payload ptr");
+    my $gi_pay = _slot_idx('payload');
+    $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 $gi_pay  ; $name: payload ptr");
     $self->_emit("  $pay_val  = load i64, i64* $slot_pay  ; $name: load payload");
     # Update the header: len := len-1; shift also advances elems by one slot.
     my $new_len = $self->_fresh;
@@ -7264,7 +7271,8 @@ sub _lower_call_method {
         # narrower type: the callee has ONE emitted body at ONE machine type.
         if ($result_repr eq 'Scalar' && ($node->representation // '') ne 'Scalar') {
             my $pay = $self->_fresh;
-            $self->_emit("  $pay = extractvalue %Slot $result, 1  ; Call(method) $method_name: Slot payload -> "
+            my $mi_pay = _slot_idx('payload');
+            $self->_emit("  $pay = extractvalue %Slot $result, $mi_pay  ; Call(method) $method_name: Slot payload -> "
                        . ($node->representation // '?'));
             $self->{cache}{ $node->id } = $pay;
             return $pay;
