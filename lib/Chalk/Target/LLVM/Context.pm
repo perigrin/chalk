@@ -6323,9 +6323,24 @@ sub _container_ptr {
     $container = $self->_unwrap_ref_container($container);
     my $repr = $container->representation // '';
     my $v = $self->lower_value($container);
-    return $v unless $repr eq "${kind}Ref";   # unboxed %Array*/%Hash* already
+
+    # WHICH FORM THE VALUE IS IN is decided by what PRODUCED it, not by the
+    # node's stamp. `_lower_array_ref` and `_lower_hash_ref` ALWAYS return the
+    # boxed i8* -- their own comment calls it "the canonical ref result" --
+    # whatever repr the node carries. Gating the unbox on `$repr eq
+    # "${kind}Ref"` therefore handed a raw i8* straight to a typed GEP for any
+    # node stamped `Array` or `Hash`, and lli rejected the module:
+    #   '%tmp_26' defined with type 'i8*' but expected '%Array*'
+    # (measured on corpus D3b, `for my $x (@a) { $s += $x }`).
+    #
+    # Both spellings denote the same thing here -- `Array` and `ArrayRef` are
+    # one container reached two ways -- so the unbox is driven by the
+    # constructor's ACTUAL output form.
+    my $boxed = ($repr eq "${kind}Ref" || $repr eq $kind) ? true : false;
+    return $v unless $boxed;
+
     my $typed = $self->_fresh;
-    $self->_emit("  $typed = bitcast i8* $v to %${kind}*  ; ${kind}Ref -> ${kind}* (at use)");
+    $self->_emit("  $typed = bitcast i8* $v to %${kind}*  ; $repr -> ${kind}* (at use)");
     return $typed;
 }
 
