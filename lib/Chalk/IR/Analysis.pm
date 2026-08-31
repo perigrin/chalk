@@ -180,7 +180,15 @@ my %_COERCIBLE_TO = (
     Slot  => { Str => 1 },
 );
 
-sub run ($class, $graphs, $classes = undef) {
+# hydrate($graphs, $classes) -> \%graphs
+#
+# THE LOADER'S HALF. Replays the wire's raw `classes` records into a sealed MOP
+# and attaches it to every graph. This is the only half that needs the raw
+# section, and the three field-inference passes run here, BEFORE the seal, for
+# a structural reason: field types must land on the records while they are
+# still mutable, because MOP::Field has no type setter. They infer ONTO THE
+# RECORDS -- construction, not inference over graphs.
+sub hydrate ($class, $graphs, $classes = undef) {
     my %graphs = %$graphs;
 
     # A MOP always exists: a program with no classes still has `main`. The
@@ -234,6 +242,29 @@ sub run ($class, $graphs, $classes = undef) {
     # loader, so it survives the T1 split -- T1 receives one graph and can
     # still reach its siblings without being handed a set.
     $mop->register_graphs(\%graphs);
+    # THE HYDRATION HALF ENDS HERE. Everything above replays the wire's raw
+    # `classes` records into a sealed MOP and attaches it to every graph --
+    # deserialization, reproducing what the frontend sent. Everything below
+    # infers types, and reads the MOP through its protocol rather than the
+    # records it was built from (a25cae08), which is what lets the two
+    # separate at all.
+    return \%graphs;
+}
+
+# infer($graphs) -> \%graphs
+#
+# T1'S HALF. Needs only graphs and the MOP edge they carry -- no raw `classes`
+# section, which is why it can run after the seal and, in due course, from a
+# single graph's MOP registry rather than a set.
+#
+# ORDERED, NOT INTERLEAVED (perigrin, 2026-08-31): hydration completes, then
+# inference runs and reads the result repeatedly. Reading class structure many
+# times is inference doing its job against a finished model, not the two being
+# entangled.
+sub infer ($class, $graphs) {
+    my %graphs = $graphs->%*;
+    my ($mop) = grep { defined } map { $_->mop } values %graphs;
+    return $graphs unless defined $mop;
 
     # Attach each resolved direct Call's callee METAOBJECT as soon as the
     # MOP exists. This used to run at the very end of from_json, on the
@@ -324,6 +355,17 @@ sub run ($class, $graphs, $classes = undef) {
     # for it rather than destructuring a second slot.
     return \%graphs;
 }
+
+# run($graphs, $classes) -> \%graphs
+#
+# THE COMPOSITION, kept so the ~49 existing callers do not move in this commit:
+# hydrate-then-infer and nothing else. A caller wanting only a faithful
+# reproduction of the wire calls hydrate; T1 calls infer.
+sub run ($class, $graphs, $classes = undef) {
+    $class->hydrate($graphs, $classes);
+    return $class->infer($graphs);
+}
+
 
 # _assert_value_nodes_are_typed($graphs)
 #
