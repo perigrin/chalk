@@ -15,7 +15,7 @@ use Chalk::IR::Node::Start;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::VarDecl;
-use Chalk::IR::Node::ArrayRef;
+use Chalk::IR::Node::ArrayLiteral;
 use Chalk::IR::Node::Add;
 
 my $spec = {
@@ -78,7 +78,7 @@ my $spec = {
     # Wrong: my $a = [1, 2] — $a gets the arrayref, not 1
     my $e1  = $factory->make('Constant', value => '1', const_type => 'integer');
     my $e2  = $factory->make('Constant', value => '2', const_type => 'integer');
-    my $arr = $factory->make('ArrayRef', inputs => [[$e1, $e2]]);
+    my $arr = $factory->make('ArrayLiteral', inputs => [[$e1, $e2]]);
 
     # my $a = [1, 2]
     my $name_a = $factory->make('Constant', value => '$a', const_type => 'string');

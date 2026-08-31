@@ -132,7 +132,7 @@ use Chalk::IR::Node::VarDecl;
     );
 
     # ArrayRefExpr takes elements as its single input (an array of nodes)
-    my $arr = $typed->make('ArrayRef',
+    my $arr = $typed->make('ArrayLiteral',
         inputs       => [[$decl]],
         compat_class => 'ArrayRefExpr',
     );

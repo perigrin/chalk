@@ -58,7 +58,7 @@ subtest 'if-merge explicit Phi with a multi-block then-arm (I5)' => sub {
     my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
     $cmp->set_representation('Boolean');
 
-    my $aref = $f->make('ArrayRef', inputs => [int_const($f, 42)]);
+    my $aref = $f->make('ArrayLiteral', inputs => [int_const($f, 42)]);
     $aref->set_representation('ArrayRef');
     my $sub = $f->make('Subscript', inputs => [$aref, int_const($f, 0)]);
     $sub->set_representation('Int');
@@ -114,7 +114,7 @@ subtest 'two explicit Phis on one Region, later arm multi-block (review C1)' => 
     $phi_a->set_representation('Int');
 
     # Phi B: multi-block then-arm (bounds-checked Subscript).
-    my $aref = $f->make('ArrayRef', inputs => [int_const($f, 42)]);
+    my $aref = $f->make('ArrayLiteral', inputs => [int_const($f, 42)]);
     $aref->set_representation('ArrayRef');
     my $sub = $f->make('Subscript', inputs => [$aref, int_const($f, 0)]);
     $sub->set_representation('Int');
@@ -139,7 +139,7 @@ subtest 'two explicit Phis on one Region, later arm multi-block (review C1)' => 
 subtest 'loop phi with a multi-block init value (I5)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $aref = $f->make('ArrayRef', inputs => [int_const($f, 3)]);
+    my $aref = $f->make('ArrayLiteral', inputs => [int_const($f, 3)]);
     $aref->set_representation('ArrayRef');
     my $n_init = $f->make('Subscript', inputs => [$aref, int_const($f, 0)]);
     $n_init->set_representation('Int');
@@ -193,7 +193,7 @@ subtest 'loop phi with a multi-block init value (I5)' => sub {
 subtest 'loop phi with a multi-block backedge value (I5)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $aref = $f->make('ArrayRef', inputs => [int_const($f, 0), int_const($f, 5)]);
+    my $aref = $f->make('ArrayLiteral', inputs => [int_const($f, 0), int_const($f, 5)]);
     $aref->set_representation('ArrayRef');
 
     my $one = int_const($f, 1);
@@ -280,7 +280,7 @@ subtest 'elab phi labels + branch-snapshot arm reads (review gaps 2+3)' => sub {
     $asg_else->set_control_in($proj1);
 
     # Explicit Phi: then-arm = [40]->[0] + $t (multi-block AND reads $t).
-    my $aref = $f->make('ArrayRef', inputs => [int_const($f, 40)]);
+    my $aref = $f->make('ArrayLiteral', inputs => [int_const($f, 40)]);
     $aref->set_representation('ArrayRef');
     my $sub = $f->make('Subscript', inputs => [$aref, int_const($f, 0)]);
     $sub->set_representation('Int');

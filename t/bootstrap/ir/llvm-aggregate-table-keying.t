@@ -45,7 +45,7 @@ sub int_const {
 subtest 'subscript after ref reassign reads the new array' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $a1 = $f->make('ArrayRef', inputs => [int_const($f, 1)]);
+    my $a1 = $f->make('ArrayLiteral', inputs => [int_const($f, 1)]);
     $a1->set_representation('ArrayRef');
     my $nr = $f->make('Constant', value => '$r', const_type => 'string');
     my $vr = $f->make('VarDecl', inputs => [$nr, $a1]);
@@ -59,7 +59,7 @@ subtest 'subscript after ref reassign reads the new array' => sub {
     my $vp = $f->make('VarDecl', inputs => [$np, $sub0]);
     $vp->set_representation('Int');
 
-    my $a2 = $f->make('ArrayRef', inputs => [int_const($f, 9)]);
+    my $a2 = $f->make('ArrayLiteral', inputs => [int_const($f, 9)]);
     $a2->set_representation('ArrayRef');
     my $rrL = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
     my $asg = $f->make('Assign', inputs => [$rrL, $a2]);
@@ -86,7 +86,7 @@ subtest 'subscript after ref reassign reads the new array' => sub {
 subtest 'element store after ref reassign hits the new array' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $a1 = $f->make('ArrayRef', inputs => [int_const($f, 1)]);
+    my $a1 = $f->make('ArrayLiteral', inputs => [int_const($f, 1)]);
     $a1->set_representation('ArrayRef');
     my $nr = $f->make('Constant', value => '$r', const_type => 'string');
     my $vr = $f->make('VarDecl', inputs => [$nr, $a1]);
@@ -100,7 +100,7 @@ subtest 'element store after ref reassign hits the new array' => sub {
     my $vp = $f->make('VarDecl', inputs => [$np, $sub0]);
     $vp->set_representation('Int');
 
-    my $a2 = $f->make('ArrayRef', inputs => [int_const($f, 9)]);
+    my $a2 = $f->make('ArrayLiteral', inputs => [int_const($f, 9)]);
     $a2->set_representation('ArrayRef');
     my $rrL = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
     my $asg = $f->make('Assign', inputs => [$rrL, $a2]);

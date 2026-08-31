@@ -133,7 +133,7 @@ subtest 'repeat scalar rebind increments twice (C1+C3 interaction)' => sub {
 subtest 'Subscript read-store-read re-reads the element (C2)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $arr = $f->make('ArrayRef', inputs => [int_const($f, 1), int_const($f, 2)]);
+    my $arr = $f->make('ArrayLiteral', inputs => [int_const($f, 1), int_const($f, 2)]);
     $arr->set_representation('ArrayRef');
     my $i0 = int_const($f, 0);
 
@@ -168,7 +168,7 @@ subtest 'Subscript read-store-read re-reads the element (C2)' => sub {
 subtest 'pre-store binding keeps its old value (no over-correction)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $arr = $f->make('ArrayRef', inputs => [int_const($f, 1), int_const($f, 2)]);
+    my $arr = $f->make('ArrayLiteral', inputs => [int_const($f, 1), int_const($f, 2)]);
     $arr->set_representation('ArrayRef');
     my $i0 = int_const($f, 0);
 

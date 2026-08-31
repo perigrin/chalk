@@ -242,7 +242,7 @@ context: scalar
 %start = Start()
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
-%arr = ArrayRef(%c1, %c2) :Array
+%arr = ArrayLiteral(%c1, %c2) :Array
 %idx = Constant(5) :Int
 %r   = Subscript(%arr, %idx) :Undef
 %nl = Constant("\n") :Str

@@ -67,7 +67,7 @@ subtest 'I-A: ArrayRef node used as Subscript container AND PostfixDeref input' 
     my $c30 = $f->make('Constant', value => '30', const_type => 'integer');
     $c30->set_representation('Int');
 
-    my $arr = $f->make('ArrayRef', inputs => [$c10, $c20, $c30]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c10, $c20, $c30]);
     $arr->set_representation('ArrayRef');
 
     # Consumer 1: Subscript($arr, 1) -> Int:20
@@ -129,7 +129,7 @@ subtest 'I-A(Hash): HashRef node used as Subscript container AND PostfixDeref in
     $v8->set_representation('Int');
 
     # One HashRef node, used twice
-    my $hash = $f->make('HashRef', inputs => [$ka, $v7, $kb, $v8]);
+    my $hash = $f->make('HashLiteral', inputs => [$ka, $v7, $kb, $v8]);
     $hash->set_representation('HashRef');
 
     # Consumer 1: Subscript($hash, "x") -> Int:7
@@ -189,7 +189,7 @@ subtest 'I-B(Array-lvalue): Assign stores ArrayRef value -> ptrtoint needed' => 
     $z1->set_representation('Int');
     my $z2 = $f->make('Constant', value => '0', const_type => 'integer');
     $z2->set_representation('Int');
-    my $outer = $f->make('ArrayRef', inputs => [$z0, $z1, $z2]);
+    my $outer = $f->make('ArrayLiteral', inputs => [$z0, $z1, $z2]);
     $outer->set_representation('ArrayRef');
 
     # Inner array ref: [5, 6, 7]
@@ -199,7 +199,7 @@ subtest 'I-B(Array-lvalue): Assign stores ArrayRef value -> ptrtoint needed' => 
     $c6->set_representation('Int');
     my $c7 = $f->make('Constant', value => '7', const_type => 'integer');
     $c7->set_representation('Int');
-    my $inner = $f->make('ArrayRef', inputs => [$c5, $c6, $c7]);
+    my $inner = $f->make('ArrayLiteral', inputs => [$c5, $c6, $c7]);
     $inner->set_representation('ArrayRef');
 
     # Subscript lvalue: $outer[0]
@@ -264,14 +264,14 @@ subtest 'I-B(HashRef-value): ref stored in hash slot + read back -> ptrtoint/int
     $c1->set_representation('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
     $c2->set_representation('Int');
-    my $inner = $f->make('ArrayRef', inputs => [$c1, $c2]);
+    my $inner = $f->make('ArrayLiteral', inputs => [$c1, $c2]);
     $inner->set_representation('ArrayRef');
 
     # Hash: { "k" => $inner }  -- value is ArrayRef (i8*) (V1: store needs ptrtoint)
     my $key = $f->make('Constant', value => 'k', const_type => 'string');
     $key->set_representation('Str');
 
-    my $hash = $f->make('HashRef', inputs => [$key, $inner]);
+    my $hash = $f->make('HashLiteral', inputs => [$key, $inner]);
     $hash->set_representation('HashRef');
 
     # Read the ref back OUT of the hash slot (V2: read needs inttoptr).
@@ -324,7 +324,7 @@ subtest 'V1: hash element-store of a ref value -> ptrtoint guard' => sub {
     $key->set_representation('Str');
     my $zero = $f->make('Constant', value => '0', const_type => 'integer');
     $zero->set_representation('Int');
-    my $hash = $f->make('HashRef', inputs => [$key, $zero]);
+    my $hash = $f->make('HashLiteral', inputs => [$key, $zero]);
     $hash->set_representation('HashRef');
 
     # Inner array: [1, 2]
@@ -332,7 +332,7 @@ subtest 'V1: hash element-store of a ref value -> ptrtoint guard' => sub {
     $c1->set_representation('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
     $c2->set_representation('Int');
-    my $inner = $f->make('ArrayRef', inputs => [$c1, $c2]);
+    my $inner = $f->make('ArrayLiteral', inputs => [$c1, $c2]);
     $inner->set_representation('ArrayRef');
 
     # $h{"k"} = $inner  -- element store of a ref (V1: store needs ptrtoint)
@@ -435,7 +435,7 @@ subtest 'I-D: Length(PostfixDeref(@$ref)) — scalar(@$ref) — valid IR' => sub
     $c200->set_representation('Int');
     my $c300 = $f->make('Constant', value => '300', const_type => 'integer');
     $c300->set_representation('Int');
-    my $ref = $f->make('ArrayRef', inputs => [$c100, $c200, $c300]);
+    my $ref = $f->make('ArrayLiteral', inputs => [$c100, $c200, $c300]);
     $ref->set_representation('ArrayRef');
 
     # PostfixDeref(@, ref) -> Array
@@ -492,7 +492,7 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
         my $f = _mk();
         my $s = $f->make('Constant', value => 'oops', const_type => 'string');
         $s->set_representation('Str');
-        my $arr = $f->make('ArrayRef', inputs => [$s]);
+        my $arr = $f->make('ArrayLiteral', inputs => [$s]);
         $arr->set_representation('ArrayRef');
         my $len = $f->make('Length', inputs => [$arr]);
         $len->set_representation('Int');
@@ -512,7 +512,7 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
         $k->set_representation('Str');
         my $v = $f->make('Constant', value => 'oops', const_type => 'string');
         $v->set_representation('Str');
-        my $h = $f->make('HashRef', inputs => [$k, $v]);
+        my $h = $f->make('HashLiteral', inputs => [$k, $v]);
         $h->set_representation('HashRef');
         my $len = $f->make('Length', inputs => [$h]);
         $len->set_representation('Int');
@@ -542,7 +542,7 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
         my $f = _mk();
         my $z = $f->make('Constant', value => '0', const_type => 'integer');
         $z->set_representation('Int');
-        my $arr = $f->make('ArrayRef', inputs => [$z]);
+        my $arr = $f->make('ArrayLiteral', inputs => [$z]);
         $arr->set_representation('ArrayRef');
         my $idx = $f->make('Constant', value => '0', const_type => 'integer');
         $idx->set_representation('Int');

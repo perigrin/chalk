@@ -8709,7 +8709,7 @@
             {
                "id" : 6,
                "inputs" : [],
-               "op" : "ArrayRef",
+               "op" : "ArrayLiteral",
                "stamp" : "ArrayRef"
             },
             {
@@ -8725,7 +8725,7 @@
             {
                "id" : 8,
                "inputs" : [],
-               "op" : "HashRef",
+               "op" : "HashLiteral",
                "stamp" : "HashRef"
             },
             {
@@ -8741,7 +8741,7 @@
             {
                "id" : 10,
                "inputs" : [],
-               "op" : "ArrayRef",
+               "op" : "ArrayLiteral",
                "stamp" : "ArrayRef"
             },
             {
@@ -8758,7 +8758,7 @@
                   9,
                   10
                ],
-               "op" : "HashRef",
+               "op" : "HashLiteral",
                "stamp" : "HashRef"
             },
             {
@@ -9529,7 +9529,7 @@
                "inputs" : [
                   17
                ],
-               "op" : "ArrayRef",
+               "op" : "ArrayLiteral",
                "stamp" : "Array"
             },
             {
@@ -9649,7 +9649,7 @@
                "inputs" : [
                   30
                ],
-               "op" : "ArrayRef",
+               "op" : "ArrayLiteral",
                "stamp" : "Array"
             },
             {
@@ -10666,7 +10666,7 @@
             {
                "id" : 1,
                "inputs" : [],
-               "op" : "HashRef",
+               "op" : "HashLiteral",
                "stamp" : "Hash"
             },
             {
@@ -13516,7 +13516,7 @@
                   6,
                   2
                ],
-               "op" : "HashRef",
+               "op" : "HashLiteral",
                "stamp" : "HashRef"
             },
             {
@@ -13754,7 +13754,7 @@
                   13,
                   14
                ],
-               "op" : "HashRef",
+               "op" : "HashLiteral",
                "stamp" : "HashRef"
             },
             {
@@ -13826,7 +13826,7 @@
                   3,
                   4
                ],
-               "op" : "HashRef",
+               "op" : "HashLiteral",
                "stamp" : "HashRef"
             },
             {
@@ -18632,7 +18632,7 @@
                   5,
                   6
                ],
-               "op" : "HashRef",
+               "op" : "HashLiteral",
                "stamp" : "HashRef"
             },
             {
@@ -20100,7 +20100,7 @@
                "inputs" : [
                   3
                ],
-               "op" : "ArrayRef",
+               "op" : "ArrayLiteral",
                "stamp" : "ArrayRef"
             },
             {
@@ -22194,7 +22194,7 @@
                "inputs" : [
                   1
                ],
-               "op" : "HashRef",
+               "op" : "HashLiteral",
                "stamp" : "HashRef"
             },
             {
@@ -23553,7 +23553,7 @@
                   4,
                   13
                ],
-               "op" : "ArrayRef",
+               "op" : "ArrayLiteral",
                "stamp" : "ArrayRef"
             },
             {
@@ -24019,7 +24019,7 @@
                "inputs" : [
                   2
                ],
-               "op" : "ArrayRef",
+               "op" : "ArrayLiteral",
                "stamp" : "ArrayRef"
             },
             {
@@ -34984,7 +34984,7 @@
                "inputs" : [
                   2
                ],
-               "op" : "ArrayRef",
+               "op" : "ArrayLiteral",
                "stamp" : "ArrayRef"
             },
             {

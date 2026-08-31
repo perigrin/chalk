@@ -18,8 +18,8 @@ use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::Interpolate;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
-use Chalk::IR::Node::HashRef;
-use Chalk::IR::Node::ArrayRef;
+use Chalk::IR::Node::HashLiteral;
+use Chalk::IR::Node::ArrayLiteral;
 use Chalk::IR::Node::AnonSub;
 use Chalk::IR::Node::RegexMatch;
 use Chalk::IR::Node::RegexSubst;
@@ -722,8 +722,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 || $node isa Chalk::IR::Node::Call
                 || $node isa Chalk::IR::Node::Subscript
                 || $node isa Chalk::IR::Node::PostfixDeref
-                || $node isa Chalk::IR::Node::HashRef
-                || $node isa Chalk::IR::Node::ArrayRef
+                || $node isa Chalk::IR::Node::HashLiteral
+                || $node isa Chalk::IR::Node::ArrayLiteral
                 || $node isa Chalk::IR::Node::AnonSub
                 || $node isa Chalk::IR::Node::RegexMatch
                 || $node isa Chalk::IR::Node::RegexSubst
@@ -1042,8 +1042,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         }
         if ($node isa Chalk::IR::Node::Subscript)   { return $self->_emit_subscript_expr($node); }
         if ($node isa Chalk::IR::Node::PostfixDeref) { return $self->_emit_postfix_deref_expr($node); }
-        if ($node isa Chalk::IR::Node::HashRef)     { return $self->_emit_hash_ref_expr($node); }
-        if ($node isa Chalk::IR::Node::ArrayRef)    { return $self->_emit_array_ref_expr($node); }
+        if ($node isa Chalk::IR::Node::HashLiteral)     { return $self->_emit_hash_ref_expr($node); }
+        if ($node isa Chalk::IR::Node::ArrayLiteral)    { return $self->_emit_array_ref_expr($node); }
         if ($node isa Chalk::IR::Node::AnonSub)     { return $self->_emit_anon_sub_expr($node); }
         if ($node isa Chalk::IR::Node::RegexMatch)  { return $self->_emit_regex_match($node); }
         if ($node isa Chalk::IR::Node::RegexSubst)  { return $self->_emit_regex_subst($node); }
@@ -1124,7 +1124,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # emit as a parenthesized list rather than a ref constructor.
     method _emit_init_expr($var, $init) {
         # Hash variable with HashRefExpr init: emit as (k, v, ...) not { k, v, ... }
-        if ($var =~ /^\%/ && $init isa Chalk::IR::Node::HashRef) {
+        if ($var =~ /^\%/ && $init isa Chalk::IR::Node::HashLiteral) {
             my $pairs = $init->inputs()->[0];
             if ($pairs->@*) {
                 my @strs = map { $self->_emit_expr($_) } $pairs->@*;
@@ -1133,7 +1133,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return '()';
         }
         # Array variable with ArrayRef init: emit as (elems) not [elems]
-        if ($var =~ /^\@/ && $init isa Chalk::IR::Node::ArrayRef) {
+        if ($var =~ /^\@/ && $init isa Chalk::IR::Node::ArrayLiteral) {
             my $elems = $init->inputs()->[0];
             if ($elems->@*) {
                 my @strs = map { $self->_emit_expr($_) } $elems->@*;

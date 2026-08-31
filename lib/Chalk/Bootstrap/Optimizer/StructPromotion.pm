@@ -11,7 +11,7 @@ use Chalk::IR::NodeFactory;
 use Chalk::IR::Node;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::VarDecl;
-use Chalk::IR::Node::HashRef;
+use Chalk::IR::Node::HashLiteral;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::Call;
@@ -265,7 +265,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
             my $initializer = $node->init();
 
             if (defined $initializer
-                && $initializer isa Chalk::IR::Node::HashRef) {
+                && $initializer isa Chalk::IR::Node::HashLiteral) {
 
                 my $var_name = $variable->value();
                 my $var_key  = "${var_prefix}::${var_name}";
@@ -686,7 +686,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
                 my $initializer = $stmt->init();
 
                 next unless defined $initializer
-                    && $initializer isa Chalk::IR::Node::HashRef;
+                    && $initializer isa Chalk::IR::Node::HashLiteral;
 
                 my $var_name = $var_node->value();
                 my $var_key  = "${var_prefix}::${var_name}";

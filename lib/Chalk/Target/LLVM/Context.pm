@@ -1522,10 +1522,10 @@ sub lower_value {
     elsif ($op eq 'Loop') {
         return $self->_lower_loop($node);
     }
-    elsif ($op eq 'ArrayRef') {
+    elsif ($op eq 'ArrayLiteral') {
         return $self->_lower_array_ref($node);
     }
-    elsif ($op eq 'HashRef') {
+    elsif ($op eq 'HashLiteral') {
         return $self->_lower_hash_ref($node);
     }
     elsif ($op eq 'Length') {
@@ -5265,7 +5265,7 @@ sub _prelower_loop_drain_operands {
             my ($array) = grep {
                 my $op  = blessed($_) ? $_->operation : '';
                 my $rep = (blessed($_) && $_->representation) // '';
-                $op eq 'ArrayRef' || $op eq 'HashRef'
+                $op eq 'ArrayLiteral' || $op eq 'HashLiteral'
                     || $rep eq 'Array' || $rep eq 'ArrayRef'
             } $n->inputs->@*;
             next unless defined $array;
@@ -6570,7 +6570,7 @@ sub _lower_array_read {
 sub _seed_container_repr ($array) {
     my $repr = $array->representation;
     return if defined $repr && $repr ne 'Unknown';
-    return unless $array->operation eq 'ArrayRef';
+    return unless $array->operation eq 'ArrayLiteral';
     $array->set_representation('ArrayRef');
     return;
 }
@@ -6624,7 +6624,7 @@ sub _lower_builtin_shift_pop {
     my ($array) = grep {
         my $op   = blessed($_) ? $_->operation : '';
         my $repr = (blessed($_) && $_->representation) // '';
-        $op eq 'ArrayRef' || $op eq 'HashRef'
+        $op eq 'ArrayLiteral' || $op eq 'HashLiteral'
             || $repr eq 'Array' || $repr eq 'ArrayRef'
     } $node->inputs->@*;
     die "GAP: $name operand is not an Array/ArrayRef" unless defined $array;

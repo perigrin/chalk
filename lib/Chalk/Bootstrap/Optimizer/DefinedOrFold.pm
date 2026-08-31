@@ -128,18 +128,18 @@ class Chalk::Bootstrap::Optimizer::DefinedOrFold
         # expands to many elements at runtime, so a positional index over the
         # input list is wrong. _static_miss bails here for the same reason.
         return undef if grep {
-            blessed($_) && ($_->operation eq 'ArrayRef' || $_->operation eq 'HashRef')
+            blessed($_) && ($_->operation eq 'ArrayLiteral' || $_->operation eq 'HashLiteral')
         } @in;
 
         my $op = $container->operation;
-        if ($op eq 'ArrayRef') {
+        if ($op eq 'ArrayLiteral') {
             return undef unless ($index->const_type // '') eq 'integer';
             my $i = $index->value;
             $i += scalar @in if $i < 0;          # perl's from-the-end
             return undef if $i < 0 || $i > $#in; # _static_miss owns the miss
             return $in[$i];
         }
-        if ($op eq 'HashRef') {
+        if ($op eq 'HashLiteral') {
             my $key = $index->value // return undef;
             for my $i (grep { $_ % 2 == 0 } 0 .. $#in) {   # even = keys
                 my $k = $in[$i];

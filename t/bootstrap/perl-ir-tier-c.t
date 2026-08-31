@@ -171,7 +171,7 @@ my sub c($val) {
 # ============================================================
 
 {
-    my $node = $typed->make('HashRef',
+    my $node = $typed->make('HashLiteral',
         inputs       => [[c('key'), c('val')]],
         compat_class => 'HashRefExpr',
     );
@@ -186,7 +186,7 @@ my sub c($val) {
 # ============================================================
 
 {
-    my $node = $typed->make('ArrayRef',
+    my $node = $typed->make('ArrayLiteral',
         inputs       => [[c('1'), c('2')]],
         compat_class => 'ArrayRefExpr',
     );

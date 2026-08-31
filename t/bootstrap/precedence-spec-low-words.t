@@ -46,7 +46,7 @@ use Chalk::IR::Node::Not;
 use Chalk::IR::Node::NumEq;
 use Chalk::IR::Node::Assign;
 use Chalk::IR::Node::Call;
-use Chalk::IR::Node::HashRef;
+use Chalk::IR::Node::HashLiteral;
 use Chalk::IR::Node::Constant;
 
 # ============================================================================
@@ -211,9 +211,9 @@ subtest 'L21 => parses identically to , in a parenthesized list' => sub {
     my $with_comma = parse_expr("('key', 'val')");
     my $with_arrow = parse_expr("('key' => 'val')");
 
-    isa_with_shape($with_arrow, 'Chalk::IR::Node::HashRef',
+    isa_with_shape($with_arrow, 'Chalk::IR::Node::HashLiteral',
         '("key" => "val") is a HashRef-shaped list');
-    isa_with_shape($with_comma, 'Chalk::IR::Node::HashRef',
+    isa_with_shape($with_comma, 'Chalk::IR::Node::HashLiteral',
         '("key", "val") is a HashRef-shaped list');
     is(shape_of($with_arrow), shape_of($with_comma),
         '=> and , produce identical IR shape');
@@ -234,7 +234,7 @@ subtest 'L21 , in a parenthesized list flattens to an n-ary HashRef child list' 
     # [Const(1), Const(2), Const(3)] — flat, not nested. Lock that in.
     my $expr = parse_expr('(1, 2, 3)');
 
-    my $hr = isa_with_shape($expr, 'Chalk::IR::Node::HashRef',
+    my $hr = isa_with_shape($expr, 'Chalk::IR::Node::HashLiteral',
         'top is HashRef') or return;
     my $items = $hr->inputs()->[0];
     ok(ref($items) eq 'ARRAY', 'HashRef child is an arrayref of items')

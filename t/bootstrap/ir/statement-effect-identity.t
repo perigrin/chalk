@@ -51,7 +51,7 @@ subtest 'Assign(Subscript-lvalue) has per-call identity' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $mk_store = sub {
-        my $arr = $f->make('ArrayRef', inputs => []);
+        my $arr = $f->make('ArrayLiteral', inputs => []);
         $arr->set_representation('ArrayRef');
         my $idx = $f->make('Constant', value => '0', const_type => 'integer');
         $idx->set_representation('Int');

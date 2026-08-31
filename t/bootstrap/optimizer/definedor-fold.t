@@ -41,7 +41,7 @@ sub build_case ($index_value, @elements) {
         $n;
     } @elements;
 
-    my $arr = $f->make('ArrayRef', inputs => [@elems]);
+    my $arr = $f->make('ArrayLiteral', inputs => [@elems]);
     $arr->set_representation('ArrayRef');
 
     my $idx = $f->make('Constant', value => $index_value, const_type => 'integer');
@@ -91,7 +91,7 @@ subtest 'a DYNAMIC index is left alone' => sub {
         my $n = $f->make('Constant', value => $_, const_type => 'integer');
         $n->set_representation('Int'); $n;
     } (1, 2, 3);
-    my $arr = $f->make('ArrayRef', inputs => [@elems]);
+    my $arr = $f->make('ArrayLiteral', inputs => [@elems]);
     $arr->set_representation('ArrayRef');
 
     # A PadAccess index is not a Constant, so nothing is statically decidable.

@@ -182,7 +182,7 @@ context: scalar
 %c1    = Constant(10) :Int
 %c2    = Constant(20) :Int
 %c3    = Constant(30) :Int
-%arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr   = ArrayLiteral(%c1, %c2, %c3) :ArrayRef
 %len   = Length(%arr) :Int
 return %len
 L: GAP(multi-value list return: callee drops all-but-last, needs list-result + caller flatten)

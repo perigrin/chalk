@@ -125,12 +125,22 @@ my %_COMPUTED_REPR = (
     NumCmp => 'Int', StrCmp => 'Int',
 );
 
-# Aggregate/regex nodes whose OWN repr is fixed by their kind (RC1). An
-# ArrayRef/HashRef literal is a boxed aggregate pointer; a RegexMatch result is
-# a boolean.
+# Nodes whose OWN repr is fixed by their kind (RC1). A RegexMatch result is a
+# boolean whatever it matched.
+#
+# ArrayLiteral/HashLiteral ARE NOT HERE, and the reason is the whole point of
+# the 2026-08-31 producer rename. The op used to be called `ArrayRef`, and this
+# table read `ArrayRef => 'ArrayRef'` -- the op name used AS the type. That is
+# only correct when the constructor is named for the thing it produces, and it
+# is not: one `ArrayLiteral` builds BOTH `[1,2,3]` (a genuine reference,
+# stamp=ArrayRef) and `my @a = (10,20,30)` (a plain array, stamp=Array). Seeding
+# from the op name stamped every lexical array as a reference.
+#
+# The producer already sends the right answer on the wire, so there is nothing
+# to seed: the literal's repr is whatever its stamp says. The same conflation
+# cost 37 corpus spec blocks and one wrong fix of mine on the consumer side, and
+# it died loudly in the producer's own code the moment the two strings differed.
 my %_SEED_REPR = (
-    ArrayRef   => 'ArrayRef',
-    HashRef    => 'HashRef',
     RegexMatch => 'Boolean',
 );
 
@@ -1093,7 +1103,7 @@ sub _replay_classes ($classes, $graphs) {
             # lowers (zhi 019f61ad).
             my $field_type = $f->{type};
             if (defined $default_node && $default_node->can('representation')
-                    && ($default_node->representation // '') =~ /^(?:Array|Hash)Ref$/) {
+                    && ($default_node->representation // '') =~ /^(?:Array|Hash)Literal$/) {
                 $field_type = $default_node->representation;
             }
 
@@ -1497,7 +1507,7 @@ sub _resolve_aggregate ($node) {
     while (blessed($node) && $node->operation eq 'Subscript' && $depth++ < 64) {
         my $c   = _unwrap_ref($node->inputs->[0]);
         my $idx = $node->inputs->[1];
-        last unless blessed($c) && $c->operation eq 'ArrayRef'
+        last unless blessed($c) && $c->operation eq 'ArrayLiteral'
             && blessed($idx) && $idx->operation eq 'Constant'
             && ($idx->const_type // '') eq 'integer';
         my $i   = $idx->value;
@@ -1526,10 +1536,10 @@ sub _element_repr ($container) {
     my $op = $container->operation;
     my @in = $container->inputs->@*;
     my @elems;
-    if ($op eq 'ArrayRef') {
+    if ($op eq 'ArrayLiteral') {
         @elems = @in;
     }
-    elsif ($op eq 'HashRef') {
+    elsif ($op eq 'HashLiteral') {
         @elems = @in[ grep { $_ % 2 } 0 .. $#in ];   # odd = values
     }
     else {
@@ -1627,11 +1637,11 @@ sub _static_miss ($container, $index) {
     # (undef). Only a scalar-literal aggregate (all inputs plain scalars) is
     # statically decidable.
     my $flattens = grep {
-        blessed($_) && ($_->operation eq 'ArrayRef' || $_->operation eq 'HashRef')
+        blessed($_) && ($_->operation eq 'ArrayLiteral' || $_->operation eq 'HashLiteral')
     } $container->inputs->@*;
     return false if $flattens;
 
-    if ($op eq 'ArrayRef') {
+    if ($op eq 'ArrayLiteral') {
         # An integer literal index; out of bounds (or negative past the start)
         # is a miss. A negative index within range (perl's from-the-end) is NOT
         # a miss, so only flag idx >= len or idx < -len.
@@ -1640,7 +1650,7 @@ sub _static_miss ($container, $index) {
         my $len = scalar $container->inputs->@*;
         return ($idx >= $len || $idx < -$len) ? true : false;
     }
-    if ($op eq 'HashRef') {
+    if ($op eq 'HashLiteral') {
         # A string key absent from the literal keys (even positions) is a miss.
         my $key = $index->value // return false;
         my @in  = $container->inputs->@*;
@@ -1777,7 +1787,7 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
                 my ($dret) = $dg->returns->@*;
                 my $default = $dret ? $dret->inputs->[0] : undef;
                 if (defined $default && blessed($default)
-                        && $default->operation =~ /^(?:Array|Hash)Ref$/) {
+                        && $default->operation =~ /^(?:Array|Hash)Literal$/) {
                     my $er = _element_repr($default);
                     $field_elem_type{$key} = $er if defined $er;
                 }

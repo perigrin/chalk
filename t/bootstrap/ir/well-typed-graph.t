@@ -152,7 +152,7 @@ use Chalk::IR::Graph::TypedInvariant;
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
     $c1->set_representation('Int');
-    my $arr = $f->make('ArrayRef', inputs => [$c1]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1]);
     $arr->set_representation('ArrayRef');
     my $len = $f->make('Length', inputs => [$arr]);
     $len->set_representation('Int');
@@ -183,7 +183,7 @@ use Chalk::IR::Graph::TypedInvariant;
 {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $arr = $f->make('ArrayRef', inputs => []);
+    my $arr = $f->make('ArrayLiteral', inputs => []);
     $arr->set_representation('ArrayRef');
     my $idx = $f->make('Constant', value => '0', const_type => 'integer');
     $idx->set_representation('Int');
@@ -216,7 +216,7 @@ use Chalk::IR::Graph::TypedInvariant;
 {
     my $f = Chalk::IR::NodeFactory->new;
 
-    my $ref = $f->make('ArrayRef', inputs => []);
+    my $ref = $f->make('ArrayLiteral', inputs => []);
     $ref->set_representation('ArrayRef');
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '@');
     $deref->set_representation('Array');

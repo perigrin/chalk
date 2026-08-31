@@ -29,7 +29,7 @@ sub build ($store_it) {
         $n->set_representation('Int');
         $n;
     } (1, 2);
-    my $arr = $f->make('ArrayRef', inputs => [@elems]);
+    my $arr = $f->make('ArrayLiteral', inputs => [@elems]);
     $arr->set_representation('ArrayRef');
 
     my $idx = $f->make('Constant', value => '0', const_type => 'integer');

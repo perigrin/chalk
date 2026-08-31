@@ -50,13 +50,13 @@ subtest 'aggregate constructors have per-call identity at the factory' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $one = int_const($f, 1);
 
-    my $a1 = $f->make('ArrayRef', inputs => [$one]);
-    my $a2 = $f->make('ArrayRef', inputs => [$one]);
+    my $a1 = $f->make('ArrayLiteral', inputs => [$one]);
+    my $a2 = $f->make('ArrayLiteral', inputs => [$one]);
     isnt($a1->id, $a2->id, 'identical ArrayRef literals are distinct nodes');
 
     my $k = str_const($f, 'k');
-    my $h1 = $f->make('HashRef', inputs => [$k, $one]);
-    my $h2 = $f->make('HashRef', inputs => [$k, $one]);
+    my $h1 = $f->make('HashLiteral', inputs => [$k, $one]);
+    my $h2 = $f->make('HashLiteral', inputs => [$k, $one]);
     isnt($h1->id, $h2->id, 'identical HashRef literals are distinct nodes');
 };
 
@@ -67,13 +67,13 @@ subtest 'identical array literals do not alias' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my ($one_a, $two_a) = (int_const($f, 1), int_const($f, 2));
-    my $lit_a = $f->make('ArrayRef', inputs => [$one_a, $two_a]);
+    my $lit_a = $f->make('ArrayLiteral', inputs => [$one_a, $two_a]);
     $lit_a->set_representation('ArrayRef');
     my $na = $f->make('Constant', value => '$a', const_type => 'string');
     my $va = $f->make('VarDecl', inputs => [$na, $lit_a]);
     $va->set_representation('ArrayRef');
 
-    my $lit_b = $f->make('ArrayRef', inputs => [$one_a, $two_a]);
+    my $lit_b = $f->make('ArrayLiteral', inputs => [$one_a, $two_a]);
     $lit_b->set_representation('ArrayRef');
     isnt($lit_b->id, $lit_a->id, 'precondition: the two literals are distinct nodes');
     my $nb = $f->make('Constant', value => '$b', const_type => 'string');

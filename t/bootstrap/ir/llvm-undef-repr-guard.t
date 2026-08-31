@@ -388,7 +388,7 @@ subtest 'missing _vd_repr for an elab merge phi dies loudly' => sub {
 # lets that existing die carry the GAP, so this pins the message, not a new guard.
 subtest 'undef-repr shift/pop dies loudly naming the missing repr' => sub {
     my $f = Chalk::IR::NodeFactory->new;
-    my $arr = $f->make('ArrayRef', inputs => []);
+    my $arr = $f->make('ArrayLiteral', inputs => []);
     $arr->set_representation('ArrayRef');
     my $shift = $f->make('Call', name => 'shift', dispatch_kind => 'builtin',
                          inputs => [$arr]);

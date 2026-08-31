@@ -111,7 +111,7 @@ my $typed   = Chalk::IR::NodeFactory->new;
     );
 
     # Create ArrayRef with same single constant
-    my $arr = $typed->make('ArrayRef',
+    my $arr = $typed->make('ArrayLiteral',
         inputs       => [$const1],
         compat_class => 'ArrayRefExpr',
     );
@@ -156,17 +156,17 @@ my $typed   = Chalk::IR::NodeFactory->new;
         value      => 'same',
     );
 
-    my $arr1 = $typed->make('ArrayRef',
+    my $arr1 = $typed->make('ArrayLiteral',
         inputs       => [$const],
         compat_class => 'ArrayRefExpr',
     );
 
-    my $arr2 = $typed->make('ArrayRef',
+    my $arr2 = $typed->make('ArrayLiteral',
         inputs       => [$const],
         compat_class => 'ArrayRefExpr',
     );
 
-    my $hash = $typed->make('HashRef',
+    my $hash = $typed->make('HashLiteral',
         inputs       => [$const],
         compat_class => 'HashRefExpr',
     );

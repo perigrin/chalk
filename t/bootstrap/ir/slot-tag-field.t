@@ -91,7 +91,7 @@ subtest 'the backend stamps a stored element with its own reading' => sub {
         $n->set_representation('Int');
         push @c, $n;
     }
-    my $arr = $f->make('ArrayRef', inputs => \@c);
+    my $arr = $f->make('ArrayLiteral', inputs => \@c);
     $arr->set_representation('ArrayRef');
     my $len = $f->make('Length', inputs => [$arr]);
     $len->set_representation('Int');

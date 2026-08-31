@@ -21,8 +21,8 @@ use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::Not;
 use Chalk::IR::Node::And;
 use Chalk::IR::Node::Or;
-use Chalk::IR::Node::ArrayRef;
-use Chalk::IR::Node::HashRef;
+use Chalk::IR::Node::ArrayLiteral;
+use Chalk::IR::Node::HashLiteral;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
@@ -881,12 +881,12 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _ir_default_to_perl($node) {
         return undef unless defined $node;
 
-        if ($node isa Chalk::IR::Node::ArrayRef) {
+        if ($node isa Chalk::IR::Node::ArrayLiteral) {
             my $elements = $node->inputs()->[0];
             return '[]' if !$elements->@*;
         }
 
-        if ($node isa Chalk::IR::Node::HashRef) {
+        if ($node isa Chalk::IR::Node::HashLiteral) {
             my $pairs = $node->inputs()->[0];
             return '{}' if !$pairs->@*;
         }
@@ -2357,7 +2357,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             my $right_expr = $self->_emit_expr($node->right(), $declared_vars);
             return "(SvTRUE($left_expr) ? $left_expr : $right_expr)";
         }
-        if ($node isa Chalk::IR::Node::ArrayRef) {
+        if ($node isa Chalk::IR::Node::ArrayLiteral) {
             # Array reference constructor: build a new AV and populate with elements.
             my $elems = $node->inputs()->[0];
             my @elem_nodes = (ref($elems) eq 'ARRAY') ? $elems->@* : ();

@@ -72,7 +72,7 @@ sub ctor($class, %inputs) {
         );
     }
     if ($class eq 'HashRefExpr') {
-        return $typed->make('HashRef',
+        return $typed->make('HashLiteral',
             inputs       => [$inputs{pairs}],
             compat_class => 'HashRefExpr',
         );

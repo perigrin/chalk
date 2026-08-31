@@ -30,7 +30,7 @@ use Chalk::Target::LLVM::Context;
 
 sub array_node_with_repr ($repr) {
     my $f = Chalk::IR::NodeFactory->new;
-    my $n = $f->make('ArrayRef', inputs => []);
+    my $n = $f->make('ArrayLiteral', inputs => []);
     $n->set_representation($repr) if defined $repr;
     return $n;
 }
@@ -61,7 +61,7 @@ subtest 'only an ArrayRef literal is seeded' => sub {
     # seed: guessing a container repr for a node whose op does not guarantee
     # one is how a wrong repr becomes a wrong container pointer.
     my $f = Chalk::IR::NodeFactory->new;
-    my $n = $f->make('HashRef', inputs => []);
+    my $n = $f->make('HashLiteral', inputs => []);
     Chalk::Target::LLVM::Context::_seed_container_repr($n);
     is $n->representation, undef,
         'a HashRef is not seeded with ArrayRef';

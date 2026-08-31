@@ -236,7 +236,7 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
     my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
     $v1->set_representation('Int');
 
-    my $hash = $f->make('HashRef', inputs => [$ka, $v1]);
+    my $hash = $f->make('HashLiteral', inputs => [$ka, $v1]);
     $hash->set_representation('HashRef');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');

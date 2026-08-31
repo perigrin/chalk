@@ -52,7 +52,7 @@ subtest 'A1: ArrayRef(1,2,3) + Length -> Int:3' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $arr->set_representation('ArrayRef');
 
     my $len = $f->make('Length', inputs => [$arr]);
@@ -94,7 +94,7 @@ subtest 'A2: ArrayRef(1,2,3) + Subscript(idx=1) -> Int:2' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $arr->set_representation('ArrayRef');
 
     my $idx = $f->make('Constant', value => '1', const_type => 'integer');
@@ -137,7 +137,7 @@ subtest 'A3: Subscript OOB (idx=9 on len=3) -> Undef:' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $arr->set_representation('ArrayRef');
 
     my $idx = $f->make('Constant', value => '9', const_type => 'integer');
@@ -183,7 +183,7 @@ subtest 'A3d: Defined(Subscript OOB, Slot) -> Bool: (false)' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $arr->set_representation('ArrayRef');
 
     my $idx = $f->make('Constant', value => '9', const_type => 'integer');
@@ -228,7 +228,7 @@ subtest 'A3e: Defined(Subscript in-bounds, Int) -> Bool:1 (true)' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $arr->set_representation('ArrayRef');
 
     my $idx = $f->make('Constant', value => '1', const_type => 'integer');
@@ -274,7 +274,7 @@ subtest 'A3f: DefinedOr(Subscript OOB Slot, 99) -> Int:99 (rhs)' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $arr->set_representation('ArrayRef');
 
     my $idx = $f->make('Constant', value => '9', const_type => 'integer');
@@ -323,7 +323,7 @@ subtest 'A3g: DefinedOr(Subscript in-bounds Int, 99) -> Int:2 (element)' => sub 
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $arr->set_representation('ArrayRef');
 
     my $idx = $f->make('Constant', value => '1', const_type => 'integer');
@@ -370,7 +370,7 @@ subtest 'A4: HashRef(a=>1,b=>2) + Subscript("a") -> Int:1' => sub {
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
     $v2->set_representation('Int');
 
-    my $hash = $f->make('HashRef', inputs => [$ka, $v1, $kb, $v2]);
+    my $hash = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
     $hash->set_representation('HashRef');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
@@ -415,7 +415,7 @@ subtest 'A5: Subscript missing key -> Undef:' => sub {
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
     $v2->set_representation('Int');
 
-    my $hash = $f->make('HashRef', inputs => [$ka, $v1, $kb, $v2]);
+    my $hash = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
     $hash->set_representation('HashRef');
 
     my $lk = $f->make('Constant', value => 'z', const_type => 'string');
@@ -457,7 +457,7 @@ subtest 'A6: ArrayRef[1,2,3] deref [0] -> Int:1' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $ref = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $ref = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $ref->set_representation('ArrayRef');
 
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '@');
@@ -504,7 +504,7 @@ subtest 'A7: HashRef{a=>1,b=>2} deref {a} -> Int:1' => sub {
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
     $v2->set_representation('Int');
 
-    my $ref = $f->make('HashRef', inputs => [$ka, $v1, $kb, $v2]);
+    my $ref = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
     $ref->set_representation('HashRef');
 
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '%');
@@ -549,7 +549,7 @@ subtest 'A8: Assign(Subscript-lvalue, 42) -> Int:42' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $arr->set_representation('ArrayRef');
 
     my $idx = $f->make('Constant', value => '0', const_type => 'integer');
@@ -596,7 +596,7 @@ subtest 'A9: Assign(Hash-Subscript-lvalue, 99) -> Int:99' => sub {
     my $v0 = $f->make('Constant', value => '0', const_type => 'integer');
     $v0->set_representation('Int');
 
-    my $hash = $f->make('HashRef', inputs => [$kk, $v0]);
+    my $hash = $f->make('HashLiteral', inputs => [$kk, $v0]);
     $hash->set_representation('HashRef');
 
     my $wk = $f->make('Constant', value => 'k', const_type => 'string');
@@ -649,13 +649,13 @@ subtest 'A10: nested ArrayRef [[1,2],[3,4]] ->[1][0] -> Int:3' => sub {
     $ca4->set_representation('Int');
 
     # Inner refs (canonical ArrayRef with inline elements)
-    my $ref0 = $f->make('ArrayRef', inputs => [$ca1, $ca2]);
+    my $ref0 = $f->make('ArrayLiteral', inputs => [$ca1, $ca2]);
     $ref0->set_representation('ArrayRef');
-    my $ref1 = $f->make('ArrayRef', inputs => [$ca3, $ca4]);
+    my $ref1 = $f->make('ArrayLiteral', inputs => [$ca3, $ca4]);
     $ref1->set_representation('ArrayRef');
 
     # Outer array of refs: [(ref to [1,2]), (ref to [3,4])]
-    my $outer_ref = $f->make('ArrayRef', inputs => [$ref0, $ref1]);
+    my $outer_ref = $f->make('ArrayLiteral', inputs => [$ref0, $ref1]);
     $outer_ref->set_representation('ArrayRef');
 
     # Deref outer: $r->[1] = inner array ref (an ArrayRef pointer)
@@ -731,7 +731,7 @@ subtest 'A12: canonical Subscript(ArrayRef, idx=1) -> Int:2' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $arr->set_representation('ArrayRef');
 
     my $idx = $f->make('Constant', value => '1', const_type => 'integer');
@@ -776,7 +776,7 @@ subtest 'A13: canonical Subscript(HashRef, key="a") -> Int:1' => sub {
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
     $v2->set_representation('Int');
 
-    my $hash = $f->make('HashRef', inputs => [$ka, $v1, $kb, $v2]);
+    my $hash = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
     $hash->set_representation('HashRef');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
@@ -818,7 +818,7 @@ subtest 'A14: canonical PostfixDeref(sigil=@, ArrayRef) deref -> Int:1' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $ref = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $ref = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $ref->set_representation('ArrayRef');
 
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '@');
@@ -864,7 +864,7 @@ subtest 'A15: canonical PostfixDeref(sigil=%, HashRef) deref -> Int:1' => sub {
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
     $v2->set_representation('Int');
 
-    my $ref = $f->make('HashRef', inputs => [$ka, $v1, $kb, $v2]);
+    my $ref = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
     $ref->set_representation('HashRef');
 
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '%');
@@ -909,7 +909,7 @@ subtest 'A16: canonical ArrayRef(1,2,3) + Length -> Int:3' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $aref = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $aref = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $aref->set_representation('ArrayRef');
 
     my $len = $f->make('Length', inputs => [$aref]);
@@ -946,7 +946,7 @@ subtest 'A17: canonical ArrayRef(1,2,3) + Subscript(1) -> Int:2' => sub {
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $aref = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $aref = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $aref->set_representation('ArrayRef');
 
     my $idx = $f->make('Constant', value => '1', const_type => 'integer');
@@ -988,7 +988,7 @@ subtest 'A18: canonical HashRef(a=>1,b=>2) + Subscript("a") -> Int:1' => sub {
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
     $v2->set_representation('Int');
 
-    my $href = $f->make('HashRef', inputs => [$ka, $v1, $kb, $v2]);
+    my $href = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
     $href->set_representation('HashRef');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
@@ -1030,7 +1030,7 @@ subtest 'A19: Assign(Subscript-lvalue, 42) emits store and returns Int:42' => su
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
     $c3->set_representation('Int');
 
-    my $arr = $f->make('ArrayRef', inputs => [$c1, $c2, $c3]);
+    my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
     $arr->set_representation('ArrayRef');
 
     # Subscript(%arr, idx=0) in lvalue position

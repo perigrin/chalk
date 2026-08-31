@@ -28,7 +28,7 @@ my $json = JSON::PP->new->encode({
                   fields => { value => 2, const_type => 'integer' } },
                 { id => 3, op => 'Constant', inputs => [], stamp => 'Int',
                   fields => { value => 3, const_type => 'integer' } },
-                { id => 4, op => 'ArrayRef', inputs => [1, 2, 3] },
+                { id => 4, op => 'ArrayLiteral', inputs => [1, 2, 3] },
                 { id => 5, op => 'Constant', inputs => [], stamp => 'Int',
                   fields => { value => 1, const_type => 'integer' } },
                 { id => 6, op => 'Subscript', inputs => [4, 5] },
@@ -76,9 +76,9 @@ subtest 'a Subscript over an ArrayRef of ArrayRefs reads an ArrayRef element' =>
                       fields => { value => 3, const_type => 'integer' } },
                     { id => 4, op => 'Constant', inputs => [], stamp => 'Int',
                       fields => { value => 4, const_type => 'integer' } },
-                    { id => 5, op => 'ArrayRef', inputs => [1, 2] },   # [1,2]
-                    { id => 6, op => 'ArrayRef', inputs => [3, 4] },   # [3,4]
-                    { id => 7, op => 'ArrayRef', inputs => [5, 6] },   # [[1,2],[3,4]]
+                    { id => 5, op => 'ArrayLiteral', inputs => [1, 2] },   # [1,2]
+                    { id => 6, op => 'ArrayLiteral', inputs => [3, 4] },   # [3,4]
+                    { id => 7, op => 'ArrayLiteral', inputs => [5, 6] },   # [[1,2],[3,4]]
                     { id => 8, op => 'Constant', inputs => [], stamp => 'Int',
                       fields => { value => 1, const_type => 'integer' } },
                     { id => 9, op => 'Subscript', inputs => [7, 8] },  # $r->[1]
@@ -114,9 +114,9 @@ subtest 'an OOB inner index in a nested deref reads a Slot (not the element type
                       fields => { value => 3, const_type => 'integer' } },
                     { id => 4, op => 'Constant', inputs => [], stamp => 'Int',
                       fields => { value => 4, const_type => 'integer' } },
-                    { id => 5, op => 'ArrayRef', inputs => [1, 2] },   # [1,2]
-                    { id => 6, op => 'ArrayRef', inputs => [3, 4] },   # [3,4]
-                    { id => 7, op => 'ArrayRef', inputs => [5, 6] },   # [[1,2],[3,4]]
+                    { id => 5, op => 'ArrayLiteral', inputs => [1, 2] },   # [1,2]
+                    { id => 6, op => 'ArrayLiteral', inputs => [3, 4] },   # [3,4]
+                    { id => 7, op => 'ArrayLiteral', inputs => [5, 6] },   # [[1,2],[3,4]]
                     { id => 8, op => 'Constant', inputs => [], stamp => 'Int',
                       fields => { value => 1, const_type => 'integer' } },
                     { id => 9, op => 'Subscript', inputs => [7, 8] },  # $r->[1] = [3,4]

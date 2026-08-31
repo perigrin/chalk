@@ -799,7 +799,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         if (ref($args) eq 'ARRAY' && @$args) {
                             my $hash = $args->[0];
                             if (defined $hash
-                                    && $hash isa Chalk::IR::Node::HashRef) {
+                                    && $hash isa Chalk::IR::Node::HashLiteral) {
                                 my $pairs = $hash->inputs->[0];
                                 if (ref($pairs) eq 'ARRAY') {
                                     for (my $i = 0; $i < @$pairs; $i += 2) {

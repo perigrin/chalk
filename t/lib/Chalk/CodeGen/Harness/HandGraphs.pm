@@ -13,8 +13,8 @@ use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::Call;
-use Chalk::IR::Node::ArrayRef;
-use Chalk::IR::Node::HashRef;
+use Chalk::IR::Node::ArrayLiteral;
+use Chalk::IR::Node::HashLiteral;
 use Chalk::IR::Node::Assign;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::UnaryOp;
@@ -370,7 +370,7 @@ sub _build_A2 {
 
     # ArrayRef node: inputs[0] = perl arrayref of element nodes
     my @elems = ($e1, $e2, $e3);
-    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+    my $arr_ref = $factory->make('ArrayLiteral', inputs => [\@elems]);
 
     # VarDecl: my @list = (1, 2, 3)
     my $name_list = $factory->make('Constant', value => '@list', const_type => 'string');
@@ -426,7 +426,7 @@ sub _build_A3 {
 
     # HashRef node: inputs[0] = perl arrayref of interleaved key/value nodes
     my @pairs = ($key_a, $val_1, $key_b, $val_2);
-    my $hash_ref = $factory->make('HashRef', inputs => [\@pairs]);
+    my $hash_ref = $factory->make('HashLiteral', inputs => [\@pairs]);
 
     # VarDecl: my %h = (a => 1, b => 2)
     my $name_h = $factory->make('Constant', value => '%h', const_type => 'string');
@@ -680,7 +680,7 @@ sub _build_M4 {
     my $e1      = $factory->make('Constant', value => '1',     const_type => 'integer');
     my $e2      = $factory->make('Constant', value => '2',     const_type => 'integer');
     my @elems   = ($e1, $e2);
-    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+    my $arr_ref = $factory->make('ArrayLiteral', inputs => [\@elems]);
     my $name_l  = $factory->make('Constant', value => '@list', const_type => 'string');
     my $var_l   = $factory->make('VarDecl', inputs => [$name_l, $arr_ref], scope => 'my');
     $var_l->set_control_in($start);
@@ -788,7 +788,7 @@ sub _build_M10 {
     my $e1      = $factory->make('Constant', value => '1',     const_type => 'integer');
     my $e2      = $factory->make('Constant', value => '2',     const_type => 'integer');
     my @elems   = ($e1, $e2);
-    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+    my $arr_ref = $factory->make('ArrayLiteral', inputs => [\@elems]);
     my $name_l  = $factory->make('Constant', value => '@list', const_type => 'string');
     my $var_l   = $factory->make('VarDecl', inputs => [$name_l, $arr_ref], scope => 'my');
     $var_l->set_control_in($start);
@@ -839,7 +839,7 @@ sub _build_M11 {
     my $key_k    = $factory->make('Constant', value => 'k', const_type => 'string');
     my $val_1    = $factory->make('Constant', value => '1', const_type => 'integer');
     my @pairs    = ($key_k, $val_1);
-    my $hash_ref = $factory->make('HashRef', inputs => [\@pairs]);
+    my $hash_ref = $factory->make('HashLiteral', inputs => [\@pairs]);
     my $name_h   = $factory->make('Constant', value => '%h', const_type => 'string');
     my $var_h    = $factory->make('VarDecl', inputs => [$name_h, $hash_ref], scope => 'my');
     $var_h->set_control_in($start);
@@ -1101,7 +1101,7 @@ sub _build_M23 {
     my $key_a    = $factory->make('Constant', value => 'a', const_type => 'string');
     my $val_1    = $factory->make('Constant', value => '1', const_type => 'integer');
     my @pairs    = ($key_a, $val_1);
-    my $hash_ref = $factory->make('HashRef', inputs => [\@pairs]);
+    my $hash_ref = $factory->make('HashLiteral', inputs => [\@pairs]);
     my $name_h   = $factory->make('Constant', value => '%h', const_type => 'string');
     my $var_h    = $factory->make('VarDecl', inputs => [$name_h, $hash_ref], scope => 'my');
     $var_h->set_control_in($start);
@@ -1561,7 +1561,7 @@ sub _build_J3 {
     my $str_b  = $factory->make('Constant', value => 'b', const_type => 'string');
     my $str_c  = $factory->make('Constant', value => 'c', const_type => 'string');
     my @elems  = ($str_a, $str_b, $str_c);
-    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+    my $arr_ref = $factory->make('ArrayLiteral', inputs => [\@elems]);
 
     # VarDecl: my @keys = qw(a b c)
     my $name_keys = $factory->make('Constant', value => '@keys', const_type => 'string');
@@ -1823,7 +1823,7 @@ sub _build_G1 {
     my $e1     = $factory->make('Constant', value => '1', const_type => 'integer');
     my $e2     = $factory->make('Constant', value => '2', const_type => 'integer');
     my @elems  = ($e1, $e2);
-    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+    my $arr_ref = $factory->make('ArrayLiteral', inputs => [\@elems]);
 
     # VarDecl: my $r = [1, 2]
     my $name_r = $factory->make('Constant', value => '$r', const_type => 'string');
@@ -1869,7 +1869,7 @@ sub _build_G2 {
     my $key_a    = $factory->make('Constant', value => 'a', const_type => 'string');
     my $val_1    = $factory->make('Constant', value => '1', const_type => 'integer');
     my @pairs    = ($key_a, $val_1);
-    my $hash_ref = $factory->make('HashRef', inputs => [\@pairs]);
+    my $hash_ref = $factory->make('HashLiteral', inputs => [\@pairs]);
 
     # VarDecl: my $r = { a => 1 }
     my $name_r = $factory->make('Constant', value => '$r', const_type => 'string');
@@ -1915,7 +1915,7 @@ sub _build_G3 {
     my $e1     = $factory->make('Constant', value => '1', const_type => 'integer');
     my $e2     = $factory->make('Constant', value => '2', const_type => 'integer');
     my @elems  = ($e1, $e2);
-    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+    my $arr_ref = $factory->make('ArrayLiteral', inputs => [\@elems]);
     my $name_a  = $factory->make('Constant', value => '@a', const_type => 'string');
     my $var_a   = $factory->make('VarDecl', inputs => [$name_a, $arr_ref], scope => 'my');
     $var_a->set_control_in($start);
@@ -1957,7 +1957,7 @@ sub _build_G4 {
     my $key_k    = $factory->make('Constant', value => 'k', const_type => 'string');
     my $val_1    = $factory->make('Constant', value => '1', const_type => 'integer');
     my @pairs    = ($key_k, $val_1);
-    my $hash_ref = $factory->make('HashRef', inputs => [\@pairs]);
+    my $hash_ref = $factory->make('HashLiteral', inputs => [\@pairs]);
     my $name_h   = $factory->make('Constant', value => '%h', const_type => 'string');
     my $var_h    = $factory->make('VarDecl', inputs => [$name_h, $hash_ref], scope => 'my');
     $var_h->set_control_in($start);
@@ -1997,7 +1997,7 @@ sub _build_B1 {
     # VarDecl: my @list = ()
     my $name_list = $factory->make('Constant', value => '@list', const_type => 'string');
     my @no_elems  = ();
-    my $arr_ref   = $factory->make('ArrayRef', inputs => [\@no_elems]);
+    my $arr_ref   = $factory->make('ArrayLiteral', inputs => [\@no_elems]);
     my $var_list  = $factory->make('VarDecl', inputs => [$name_list, $arr_ref], scope => 'my');
     $var_list->set_control_in($start);
 
@@ -2239,7 +2239,7 @@ sub _build_B7 {
     # VarDecl: my @list = ()
     my $name_list = $factory->make('Constant', value => '@list', const_type => 'string');
     my @no_elems  = ();
-    my $arr_ref   = $factory->make('ArrayRef', inputs => [\@no_elems]);
+    my $arr_ref   = $factory->make('ArrayLiteral', inputs => [\@no_elems]);
     my $var_list  = $factory->make('VarDecl', inputs => [$name_list, $arr_ref], scope => 'my');
     $var_list->set_control_in($start);
 
@@ -2466,7 +2466,7 @@ sub _build_C4 {
     my $name_a  = $factory->make('Constant', value => '@a', const_type => 'string');
     my $one     = $factory->make('Constant', value => '1',  const_type => 'integer');
     my @elems   = ($one);
-    my $arr_ref = $factory->make('ArrayRef', inputs => [\@elems]);
+    my $arr_ref = $factory->make('ArrayLiteral', inputs => [\@elems]);
     my $var_a   = $factory->make('VarDecl', inputs => [$name_a, $arr_ref], scope => 'my');
     $var_a->set_control_in($start);
 
@@ -2516,7 +2516,7 @@ sub _build_C5 {
     # VarDecl: my %h = ()
     my $name_h   = $factory->make('Constant', value => '%h', const_type => 'string');
     my @no_pairs = ();
-    my $hash_ref = $factory->make('HashRef', inputs => [\@no_pairs]);
+    my $hash_ref = $factory->make('HashLiteral', inputs => [\@no_pairs]);
     my $var_h    = $factory->make('VarDecl', inputs => [$name_h, $hash_ref], scope => 'my');
     $var_h->set_control_in($start);
 
@@ -4233,7 +4233,7 @@ sub _build_T2_Add {
             # Default value node: [] — an ArrayRef with no elements.
             my $df = Chalk::IR::NodeFactory->new;
             my @empty;
-            $df->make('ArrayRef', inputs => [\@empty]);
+            $df->make('ArrayLiteral', inputs => [\@empty]);
         },
     );
 
@@ -4390,7 +4390,7 @@ sub _build_T2_BinOp {
         default_value => do {
             my $df = Chalk::IR::NodeFactory->new;
             my @empty;
-            $df->make('ArrayRef', inputs => [\@empty]);
+            $df->make('ArrayLiteral', inputs => [\@empty]);
         },
     );
 

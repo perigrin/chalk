@@ -17,8 +17,8 @@ use Chalk::IR::Node::Interpolate;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::BinOp;
-use Chalk::IR::Node::HashRef;
-use Chalk::IR::Node::ArrayRef;
+use Chalk::IR::Node::HashLiteral;
+use Chalk::IR::Node::ArrayLiteral;
 use Chalk::IR::Node::AnonSub;
 use Chalk::IR::UseInfo;
 use Chalk::IR::ClassInfo;
@@ -1688,14 +1688,14 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         return undef unless $init_node isa Chalk::IR::Node;
 
         # my $scalar = [] — empty array reference
-        if ($init_node isa Chalk::IR::Node::ArrayRef) {
+        if ($init_node isa Chalk::IR::Node::ArrayLiteral) {
             my $elems = $init_node->inputs()->[0];
             if (!defined $elems || (ref($elems) eq 'ARRAY' && $elems->@* == 0)) {
                 return 'newRV_noinc((SV*)newAV())';
             }
         }
         # my $scalar = {} — empty hash reference
-        if ($init_node isa Chalk::IR::Node::HashRef) {
+        if ($init_node isa Chalk::IR::Node::HashLiteral) {
             my $elems = $init_node->inputs()->[0];
             if (!defined $elems || (ref($elems) eq 'ARRAY' && $elems->@* == 0)) {
                 return 'newRV_noinc((SV*)newHV())';
@@ -2366,9 +2366,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 my $escaped = $self->_escape_c_string($val);
                 push @lines, "            OP *defop = newSVOP(OP_CONST, 0, newSVpvs(\"$escaped\"));";
             }
-        } elsif ($default isa Chalk::IR::Node::ArrayRef) {
+        } elsif ($default isa Chalk::IR::Node::ArrayLiteral) {
             push @lines, '            OP *defop = newANONLIST(NULL);';
-        } elsif ($default isa Chalk::IR::Node::HashRef) {
+        } elsif ($default isa Chalk::IR::Node::HashLiteral) {
             push @lines, '            OP *defop = newANONHASH(NULL);';
         } else {
             # Unknown default — skip defop entirely

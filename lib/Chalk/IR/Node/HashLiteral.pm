@@ -6,7 +6,7 @@ use experimental 'class';
 
 use Chalk::IR::Node::Aggregate;
 
-class Chalk::IR::Node::HashRef :isa(Chalk::IR::Node::Aggregate) {
-    method operation() { 'HashRef' }
+class Chalk::IR::Node::HashLiteral :isa(Chalk::IR::Node::Aggregate) {
+    method operation() { 'HashLiteral' }
     method staleness_kind() { 'opaque' }
 }

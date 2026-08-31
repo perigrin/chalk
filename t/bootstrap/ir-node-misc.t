@@ -8,8 +8,8 @@ use lib 'lib';
 use Chalk::IR::Node;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Aggregate;
-use Chalk::IR::Node::HashRef;
-use Chalk::IR::Node::ArrayRef;
+use Chalk::IR::Node::HashLiteral;
+use Chalk::IR::Node::ArrayLiteral;
 use Chalk::IR::Node::Interpolate;
 use Chalk::IR::Node::AnonSub;
 use Chalk::IR::Node::Regex;
@@ -28,11 +28,11 @@ is($call->dispatch_kind(), 'method', 'Call dispatch_kind');
 is($call->name(), 'foo', 'Call name');
 like($call->content_hash(), qr/Call\|dispatch_kind=method\|name=foo/, 'Call content_hash');
 
-my $hr = Chalk::IR::Node::HashRef->new(id => 'hr_0', inputs => []);
+my $hr = Chalk::IR::Node::HashLiteral->new(id => 'hr_0', inputs => []);
 isa_ok($hr, 'Chalk::IR::Node::Aggregate', 'HashRef isa Aggregate');
 is($hr->operation(), 'HashRef', 'HashRef operation');
 
-my $ar = Chalk::IR::Node::ArrayRef->new(id => 'ar_0', inputs => []);
+my $ar = Chalk::IR::Node::ArrayLiteral->new(id => 'ar_0', inputs => []);
 isa_ok($ar, 'Chalk::IR::Node::Aggregate', 'ArrayRef isa Aggregate');
 is($ar->operation(), 'ArrayRef', 'ArrayRef operation');
 
