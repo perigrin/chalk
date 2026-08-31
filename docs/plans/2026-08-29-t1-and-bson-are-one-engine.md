@@ -1402,3 +1402,49 @@ resting on it rests on something the IR does not represent.
 
 Recorded as a fact about why that particular case is not dead code. The RULE is
 reasons 1-3.
+
+## `$@` should be modelled in the IR eventually (perigrin, 2026-08-31)
+
+Measured: **chalk models no punctuation global.** `grep` over `lib/Chalk/IR/Node/`
+finds no `$@`, `ERRSV`, or equivalent, and the producer session reports the same
+absence on their side. So a graph containing an `eval` describes a construct
+whose only unconditional effect is a write to something the IR does not
+represent.
+
+**Why this is worse than a missing feature.** A program can OBSERVE `$@`. A
+graph that omits it is INCOMPLETE, not merely unlowerable — and the difference
+matters because an incomplete graph can be lowered *successfully* and still be
+wrong, whereas an unlowerable one refuses. This is the absent-vs-`Unknown`
+distinction one level up: the effect is not "unknown", it is unrepresented, and
+no consumer can tell.
+
+**There is a precedent, and its caveat is the design constraint.**
+`Chalk::IR::Node::EnvRead` already models reading external state as a node —
+host process state, a `Value`, hash-consed. But its comment says exactly why
+that works:
+
+> *"Env writes are not modelled, so the read is constant per process and
+> hash-consing two reads of the same key to one node is sound."*
+
+**`$@` is the opposite case in every respect.** It is written constantly — by
+every eval, successful or not — so:
+
+- it CANNOT be hash-consed: two reads of `$@` at different program points are
+  different values, which is the `staleness_kind` question, not a naming one;
+- the READ is ordered against every write, so it is not a free-floating `Value`
+  the way an `EnvRead` is;
+- the WRITE is implicit — no source construct writes `$@` directly; it is a
+  side effect of `eval` and `die`, which is why nothing in the walker has a
+  natural place to emit it.
+
+**That third point is the real work.** Modelling the read is the easy half and
+resembles `EnvRead`. Modelling the *write* means every effectful construct that
+touches `$@` must say so, which is a producer-side question about what an `eval`
+node carries — and it connects to the open question above about whether `eval`
+wants its own effectful-by-type node rather than a control-pinned `Coerce`. A
+node that owns the eval effect is also the natural place to hang its `$@` write.
+
+**NOT SCHEDULED.** Recorded so the connection is not lost: `$@` modelling, the
+`eval` node type, and the producer's two stack-underflow crashes (`eval { die }`
+then `$@`) are one cluster, not three items. The crashes are the current
+symptom of the absence.
