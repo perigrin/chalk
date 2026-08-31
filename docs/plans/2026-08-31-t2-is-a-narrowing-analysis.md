@@ -364,3 +364,133 @@ are.** Establish before trusting any gate number from this producer.
 against the old pin). The floor's own text — *"Restoring 218 is T2 acceptance
 criteria; T2 is not done while this reads 215"* — still holds, but the gap it
 must close is ~60 cases, not ~10.
+
+---
+
+# REVISION 2026-08-31 (evening): reviewed, traced, and re-scoped
+
+Two independent reviews (adversarial + ponytail) plus a full trace of one
+failing case. The design analysis SURVIVED; the slice built against it did not,
+and three of the numbers above were wrong. This section supersedes the
+measurements, not the analysis.
+
+## The slice was reverted: the tag broke codegen
+
+Commit 6101b9ef added `tag` at index 1, shifting `payload` from 1 to 2 while
+every production read and write still used literal indices. **16 failures in
+`t/bootstrap/ir/llvm-array-hash.t`**, bisected and reproduced. Two fault
+classes: `insertvalue` became an i64-into-i8 type error `lli` rejects, and
+`getelementptr ... i32 1` silently addressed the TAG BYTE instead of the
+payload -- which under opaque pointers is heap corruption, not an error.
+
+`_slot_idx` was written to prevent exactly this and had **zero production
+callers**. Its test asserted that `_slot_idx` works, never that anything CALLS
+it -- AC-green over an untested path. Reverted in 8d4e512c; the sizeof
+conversion was kept (it is independent and found the %HashEntry 48-vs-32 bug).
+
+## The numbers were wrong
+
+| claimed above | measured |
+|---|---|
+| 33 blocked sites | **11 cases** -- each message prints 3x |
+| a family of `Coerce[Scalar -> X]` | **one pair**, `Scalar -> Num` |
+| 218 is the target | **215 is the CEILING** -- `L: GREEN` count in the corpus |
+| 120 behavioural mismatches, feared silent miscompiles | **117 are empty output** from programs that never lowered; 3 are real, all declared B::SoN TODOs |
+
+The corpus holds 247 cases: 215 declared `L: GREEN`, 32 declared `L: GAP`. So
+"restore 218" exceeds the number of green-declared cases that exist, and the
+gap T2 faces is 157 -> 215, of which most is NOT T2's: 18 inliner-declination
+(the F3/define+call gap) and ~114 producer gaps.
+
+## THE TRACE -- what actually produces `Coerce[Scalar -> Num]`
+
+Ran the `field-attrs` case end to end. The chain, each step measured:
+
+1. **The producer emits `Coerce[Unknown -> Str]`** for the `say`. It does NOT
+   emit `Scalar -> Num`.
+2. **`:reader` calls land `Scalar`.** The wire says `field $left: Scalar` and
+   `Pair::left return_type` is ABSENT. A `:param` field with no declared type
+   is honestly Scalar on the class record.
+3. **`_narrow_unknown_coercions` (`Analysis.pm:994`) mints it.** It rebuilds
+   the Coerce with `from_repr => $repr`, the operand's actual representation.
+   Operand is Scalar, so the new node is `Coerce[Scalar -> ...]`.
+4. **`Add` wants Num**, so the node becomes `Coerce[Scalar -> Num]`.
+5. **The backend dies** -- no arm for a Scalar source.
+
+**So the `Scalar` is HONEST and this is genuinely T2's problem**, exactly as
+the analysis above says. Two hypotheses were killed by the trace:
+
+- *"It is a mis-stamp upstream; the spec says :Int"* (ponytail). The spec's
+  `:Int` is what a CORRECT T2 would produce, not what the wire carries. The
+  supporting argument -- `%_COERCIBLE_TO` has no Scalar key, so chalk cannot
+  mint this -- breaks at its first link: that table gates `Analysis.pm:920`,
+  and the node comes from `:994`, which does not consult it.
+- *"It comes from an arm join"* (mine). The die now interpolates `$what`
+  (4f4ba467); all 11 report `Coerce`, the node path at `:2165`.
+
+## What T2 must decide, stated concretely
+
+For `Coerce[Scalar -> Num]` where the Scalar is a `:reader` return:
+
+**The type IS knowable, but not from the class record.** `Pair->new(left => 10)`
+passes an Int. The field's type is knowable at the CONSTRUCTION SITE, and the
+reader returns whatever the field holds. That is a whole-program fact -- the
+`_seed_direct_call_arg_reprs` fixpoint already does this shape of reasoning for
+sub arguments (`Serialize/JSON.pm`, joins over N callsites).
+
+So the first slice is **compile-time narrowing, not a runtime tag**: propagate
+the constructor argument's repr to the field, and the field's repr to the
+reader's return. If every construction site of `Pair` passes an Int for `left`,
+`Pair::left` returns Int and the Coerce becomes `Int -> Num`, which already
+lowers (`sitofp`).
+
+**The runtime tag is the RESIDUAL case**, for a field genuinely written with
+two different readings from different sites. Build it when a case proves it
+exists -- the ponytail review's charge that it was "a runtime answer to a
+compile-time question" is CORRECT for the 11 measured cases.
+
+## Blocker ordering (revised -- the plan above had this wrong)
+
+1. **`_field_store_is_coherent`** (`Context.pm:6449`, landed ebdd6a23) refuses
+   `Num` and `Str` into a Scalar-declared field. Measured: `field=Scalar
+   value=Int` TRUE, `value=Num` false, `value=Str` false. Those are exactly the
+   stores the spine collapse must make. **The plan above never mentions it.**
+2. **The tag vocabulary is undersized.** `_box_payload` boxes EIGHT reprs into a
+   Slot payload (Int, Num, Str, Boolean, ArrayRef, HashRef, CodeRef, Object);
+   a 4-value tag maps five to `Undef`, so a live heap pointer would tag
+   identically to a genuinely-undefined cell.
+3. **There is no `phi %Slot`.** Merges emit two parallel phis (`Context.pm:5964`
+   and `:5965`); a third field is silently dropped at every merge and
+   reconstructed from whatever `_build_slot` was passed.
+4. **Index migration** -- route every insertvalue/extractvalue/GEP through
+   `_slot_idx`, and give `%HashEntry` (a hardcoded literal embedding slot-like
+   fields) the same treatment.
+
+Items 2-4 are prerequisites for the TAG. Item 1 gates the compile-time path
+too. **The compile-time slice needs only item 1.**
+
+## Acceptance criterion (replacing "restore 218")
+
+215 is not well-formed for T2: it mixes families T2 cannot move, and a
+coincidentally-correct encoding scores green on the behaviour leg. Use instead:
+
+- **zero `Coerce[Scalar -> *]` GAPs** (currently 11 cases), AND
+- **gate-green does not regress** from its measured value, AND
+- the corpus pins the narrowed repr, so a wrong-but-passing encoding is caught
+  by shape rather than by stdout.
+
+## Deleted from this plan as YAGNI
+
+- **Interval analysis for width selection.** Nothing blocks on it; keep one
+  sentence saying the tag vocabulary extends additively when it arrives.
+- **The pluggable target type-system description.** One target exists; the
+  boundary is unfalsifiable until a second one does.
+- **The `ir-t2` corpus block.** Nothing produces a second vocabulary yet. File
+  it when T2 exists.
+- **Rewriting `stamp` to hold LLVM types after T2.** The value comes from the
+  checker, and the checker does not exist. One field with two vocabularies and
+  no verifier is a footgun.
+
+KEPT: the `lib/Chalk/IR/` must-not-mention-LLVM grep gate (cheap, catches
+`return_repr` on MethodInfo) -- with an allowlist, since `IR/Target.pm` names
+LLVM legitimately as an example.
