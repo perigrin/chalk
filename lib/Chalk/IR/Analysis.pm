@@ -968,9 +968,15 @@ sub _narrow_unknown_coercions ($graphs) {
 
             for my $i (0 .. $inputs->$#*) {
                 my $c = $inputs->[$i];
+                # NOT just 'Unknown'. `Scalar` is equally un-narrowed -- the
+                # top of the scalar spine, which has no single machine reading
+                # -- and the producer emits Coerce[Scalar -> Num] directly for
+                # a :param field's :reader. Narrowing only Unknown left every
+                # such node to die in the backend for want of a Scalar arm.
+                # _is_narrowed states the rule; both callers now use it.
                 next unless blessed($c)
                          && $c->isa('Chalk::IR::Node::Coerce')
-                         && ($c->from_repr // '') eq 'Unknown';
+                         && !_is_narrowed($c->from_repr);
 
                 my $operand = ($c->inputs // [])->[0];
                 next unless blessed($operand) && $operand->can('representation');
@@ -1660,7 +1666,13 @@ sub _infer_param_field_types ($classes, $graphs) {
     my $inferred = 0;
     for my $cname (keys %$classes) {
         for my $f (($classes->{$cname}{fields} // [])->@*) {
-            next if defined $f->{type};
+            # NOT `defined`: the producer sends `Scalar` for an untyped
+            # :param field -- the honest un-narrowed top -- and Scalar is
+            # defined. Guarding on definedness stopped this inference the day
+            # the producer started being explicit, leaving every :reader return
+            # Scalar and reaching the backend as Coerce[Scalar -> Num], which
+            # has no arm. _is_narrowed already states the rule.
+            next if _is_narrowed($f->{type});
             my $pn = $f->{param_name} // next;
             my $repr = $ctor_arg_repr{"$cname\0$pn"} // next;
             $f->{type} = $repr;
@@ -1711,7 +1723,13 @@ sub _infer_field_types_from_stores ($classes, $graphs) {
     my $inferred = 0;
     for my $cname (keys %$classes) {
         for my $f (($classes->{$cname}{fields} // [])->@*) {
-            next if defined $f->{type};
+            # NOT `defined`: the producer sends `Scalar` for an untyped
+            # :param field -- the honest un-narrowed top -- and Scalar is
+            # defined. Guarding on definedness stopped this inference the day
+            # the producer started being explicit, leaving every :reader return
+            # Scalar and reaching the backend as Coerce[Scalar -> Num], which
+            # has no arm. _is_narrowed already states the rule.
+            next if _is_narrowed($f->{type});
             my $repr = $store_repr{"$cname\0" . ($f->{fieldix} // -1)} // next;
             $f->{type} = $repr;
             $inferred++;
