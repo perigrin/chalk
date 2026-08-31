@@ -13,14 +13,23 @@ class Chalk::MOP::Field {
     field $has_default   :param :reader = false;
     field $default_value :param :reader = undef;
     field $type          :param :reader = undef;
-    # Does this field synthesize a reader method?
+    # Does this field carry the `:reader` attribute?
     #
-    # ON THE PROTOCOL, not recovered from an attribute string. A `:reader`
-    # field has no method graph -- the backend synthesizes the accessor and its
-    # return repr IS the field type -- so an inference pass running AFTER the
-    # seal has to be able to ask. Reaching into the raw wire record for
-    # `is_reader` was one of four such reads that kept type inference tied to
-    # deserialization.
+    # ON THE PROTOCOL, not recovered from an attribute string. `:reader` DOES
+    # create a real reader method -- perl generates it, and the producer
+    # translates it: measured, `field $x :reader` in class P yields a graph
+    # named `P::x` on the wire exactly as an explicit method would.
+    #
+    # What it does NOT get is an entry in the class's `methods` RECORD.
+    # Measured on the same pair: an explicit `method get` appears in
+    # `classes.Q.methods`, while the generated `P::x` does not appear in
+    # `classes.P.methods` at all -- that record lists only methods written in
+    # the source.
+    #
+    # So a pass walking `$cls->methods` to collect return types never sees a
+    # reader, and has to derive its return repr from THE FIELD instead: the
+    # accessor returns the field, so its type is the field's type. That is why
+    # the question has to be askable of a Field after the seal.
     field $is_reader     :param :reader = false;
     field $attributes    :param = [];
 

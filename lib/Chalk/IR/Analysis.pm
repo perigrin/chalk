@@ -1910,10 +1910,17 @@ sub _stamp_method_call_reprs ($graphs, $mop) {
             $ret_repr{"$cname\::$mname"} = $repr;
         }
 
-        # A :reader field has no method graph — the backend synthesizes the
-        # accessor. Its return repr IS the field type (filled by _replay_classes
-        # from the default or the constructor argument). The reader method is
-        # named after the field, sigil-stripped.
+        # A :reader field DOES get a real method -- perl generates it and the
+        # producer translates it, so `field $x :reader` in class P ships a
+        # graph named `P::x` exactly as an explicit method would (measured).
+        #
+        # What it does NOT get is an entry in the class's `methods` RECORD,
+        # which lists only methods written in the source. So the loop above,
+        # which walks $cls->methods, never sees a reader -- and its return repr
+        # has to come from THE FIELD instead: the accessor returns the field,
+        # so its type is the field's type (filled by _replay_classes from the
+        # default or the constructor argument). The method is named after the
+        # field, sigil-stripped.
         for my $f ($cls->fields) {
             next unless $f->is_reader && defined $f->type;
             my $rname = ($f->name // '') =~ s/^[\$\@%]//r;
