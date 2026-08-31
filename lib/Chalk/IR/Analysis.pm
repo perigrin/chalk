@@ -240,7 +240,7 @@ sub run ($class, $graphs, $classes = undef) {
     # belief that the repr fixpoint below needed to precede it -- measured
     # wrong: _replay_classes seals the MOP ~30 lines BEFORE the direct-call
     # fixpoint, so the metaobject is available to it.
-    _attach_call_targets(\%graphs, $mop, $classes);
+    _attach_call_targets(\%graphs, $mop);
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
     # through computed + aggregate-read nodes for EVERY graph (class or not).
@@ -256,7 +256,7 @@ sub run ($class, $graphs, $classes = undef) {
     # propagate until a pass stamps nothing new (zhi 019f5e57). Bounded by the
     # finite number of Call nodes; a graph with no method Calls converges in one
     # pass (stamped==0 immediately).
-    while (_stamp_method_call_reprs($classes, \%graphs, $mop) > 0) {
+    while (_stamp_method_call_reprs(\%graphs, $mop) > 0) {
         _seed_and_propagate_reprs(\%graphs);
     }
 
@@ -526,7 +526,7 @@ sub _all_graph_nodes ($g) {
 #
 # Keyed by the callee's fully-qualified name (`main::f`), which is how the
 # producer names the graph and how declare_sub records the metaobject.
-sub _attach_call_targets ($graphs, $mop, $classes = {}) {
+sub _attach_call_targets ($graphs, $mop) {
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
             next unless $node->operation eq 'Call'
@@ -602,7 +602,7 @@ sub _attach_call_targets ($graphs, $mop, $classes = {}) {
               . "(B::SoN::_record_sub's early returns), so it cannot be called "
               . "in sub form."
                 #
-                # `exists $classes->{$cls_name}` is load-bearing: Chalk::MOP's
+                # `$mop->was_declared` is load-bearing: Chalk::MOP's
                 # ADJUST seeds class `main` on EVERY load, so its presence in
                 # the MOP is NOT evidence the wire declared it. Without this,
                 # a wire carrying subs and no `classes` key (the two are
@@ -611,7 +611,7 @@ sub _attach_call_targets ($graphs, $mop, $classes = {}) {
                 # it had loaded a commit earlier. Only a class the wire
                 # actually DECLARED can contradict itself.
                 if $cls
-                && exists $classes->{$cls_name}
+                && $mop->was_declared($cls_name)
                 && exists $graphs->{ $node->name // '' };
         }
     }
@@ -1010,12 +1010,16 @@ sub _replay_classes ($classes, $graphs) {
             (defined $super  ? (superclass  => $super)  : ()),
             (defined $parent ? (parent_name => $parent) : ()),
         );
+        # Recorded so a post-seal pass can tell a DECLARED class from the
+        # `main` Chalk::MOP seeds unconditionally.
+        $mop->mark_declared($name);
 
         for my $f (($cd->{fields} // [])->@*) {
             my $vname = $f->{name} // '$?';
             my @attrs;
             push @attrs, ':param'  if $f->{is_param};
             push @attrs, ':reader' if $f->{is_reader};
+            my $is_reader = $f->{is_reader} ? true : false;
 
             # A field default (4c-1b) rides as a graph-ref whose Return value is
             # the default Constant; wire it as default_value + has_default. The
@@ -1049,6 +1053,7 @@ sub _replay_classes ($classes, $graphs) {
                 sigil      => substr($vname, 0, 1),
                 param_name => $f->{param_name},
                 attributes => \@attrs,
+                is_reader  => $is_reader,
                 (defined $field_type ? (type => $field_type) : ()),
                 ($has_default
                     ? (default_value => $default_node, has_default => true)
@@ -1759,7 +1764,7 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
 
 # _stamp_method_call_reprs($classes, \%graphs, $mop) — set each method Call's repr
 # from the resolved callee method's return repr (its body's Return value repr).
-sub _stamp_method_call_reprs ($classes, $graphs, $mop) {
+sub _stamp_method_call_reprs ($graphs, $mop) {
     # Build class::method -> return_repr.
     #
     # THE WIRE IS THE FIRST SOURCE, not the graph walk. The producer computes
@@ -1780,24 +1785,29 @@ sub _stamp_method_call_reprs ($classes, $graphs, $mop) {
     # backend consuming one answer while the metadata channel carried another.
     # Refuse loudly instead.
     my %ret_repr;
-    for my $cname (keys %$classes) {
-        my $methods  = $classes->{$cname}{methods} // {};
-        my $wire_rts = $classes->{$cname}{method_return_types} // {};
-
-        my $cls = $mop->for_class($cname);
-        for my $mname (keys %$methods) {
+    # THROUGH THE PROTOCOL, not the raw records. Every question below is one
+    # the MOP already answers: which classes exist, their methods, each
+    # method's wire-declared return type (declare_method carries it), and its
+    # callee graph. Reaching past the metaobject into the section it was BUILT
+    # FROM is what tied inference to deserialization -- and after the seal
+    # those records are gone, so the reach is a lifetime bug waiting to happen.
+    # ->classes returns Class OBJECTS, not names -- sorted by name here so the
+    # walk stays deterministic without a second lookup.
+    for my $cls (sort { $a->name cmp $b->name } $mop->classes) {
+        my $cname = $cls->name;
+        for my $meta ($cls->methods) {
+            my $mname = $meta->name;
             # The wire value now rides on the METAOBJECT: declare_method carries
             # method_return_types, mirroring declare_sub. Read it from there, so
             # the LEFT operand of the disagreement die below is the same value
             # every downstream consumer sees. The RIGHT operand stays the graph
             # walk immediately following -- without it the die would degrade
             # into comparing a value against itself and quietly stop firing.
-            my $meta = $cls ? $cls->find_method($mname) : undef;
-            my $wire = $meta ? $meta->return_type : $wire_rts->{$mname};
+            my $wire = $meta->return_type;
             $ret_repr{"$cname\::$mname"} = $wire
                 if _is_narrowed($wire);
 
-            my $g = $graphs->{ $methods->{$mname} } or next;
+            my $g = $meta->graph or next;
             my ($ret) = $g->returns->@*;
             next unless $ret;
             my $val = $ret->inputs->[0];
@@ -1862,10 +1872,10 @@ sub _stamp_method_call_reprs ($classes, $graphs, $mop) {
         # accessor. Its return repr IS the field type (filled by _replay_classes
         # from the default or the constructor argument). The reader method is
         # named after the field, sigil-stripped.
-        for my $f (($classes->{$cname}{fields} // [])->@*) {
-            next unless $f->{is_reader} && defined $f->{type};
-            my $rname = ($f->{name} // '') =~ s/^[\$\@%]//r;
-            $ret_repr{"$cname\::$rname"} = $f->{type} if length $rname;
+        for my $f ($cls->fields) {
+            next unless $f->is_reader && defined $f->type;
+            my $rname = ($f->name // '') =~ s/^[\$\@%]//r;
+            $ret_repr{"$cname\::$rname"} = $f->type if length $rname;
         }
     }
 
@@ -1912,7 +1922,9 @@ sub _stamp_method_call_reprs ($classes, $graphs, $mop) {
             my %walked;
             while (defined $c && !$walked{$c}++) {
                 if (defined(my $r = $ret_repr{"$c\::$mname"})) { $repr = $r; last; }
-                $c = $classes->{$c}{parent};
+                my $pc  = $mop->for_class($c);
+                my $sup = $pc ? $pc->superclass : undef;
+                $c = $sup ? $sup->name : undef;
             }
             defined $repr or next;
             $node->set_representation($repr);

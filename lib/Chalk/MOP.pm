@@ -34,6 +34,18 @@ class Chalk::MOP {
 
     method graphs() { return { %graph_registry } }
 
+    # WAS THIS CLASS DECLARED BY THE WIRE, as opposed to seeded?
+    #
+    # Chalk::MOP's ADJUST seeds `main` on every load, so `for_class('main')`
+    # being true is NOT evidence the wire said anything about it -- a
+    # distinction that cost a loader crash on any wire carrying subs and no
+    # `classes` key (bc255ea3). The raw records answered this before; on the
+    # protocol, the answer survives the seal, so an inference pass never needs
+    # the wire section to ask.
+    field %declared;
+    method was_declared ($name) { return $declared{$name} ? true : false }
+    method mark_declared ($name) { $declared{$name} = 1; return $self }
+
     method register_graphs($graphs) {
         # A copy, so a later mutation of the loader's private hash cannot
         # reach through the edge. The GRAPHS are shared by reference -- the

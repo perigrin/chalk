@@ -13,6 +13,15 @@ class Chalk::MOP::Field {
     field $has_default   :param :reader = false;
     field $default_value :param :reader = undef;
     field $type          :param :reader = undef;
+    # Does this field synthesize a reader method?
+    #
+    # ON THE PROTOCOL, not recovered from an attribute string. A `:reader`
+    # field has no method graph -- the backend synthesizes the accessor and its
+    # return repr IS the field type -- so an inference pass running AFTER the
+    # seal has to be able to ask. Reaching into the raw wire record for
+    # `is_reader` was one of four such reads that kept type inference tied to
+    # deserialization.
+    field $is_reader     :param :reader = false;
     field $attributes    :param = [];
 
     method attributes() { return $attributes->@* }
