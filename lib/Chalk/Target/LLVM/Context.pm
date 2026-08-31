@@ -644,14 +644,19 @@ sub render_need_flag_prologue {
     }
 
     # Emit Num package-scalar globals (EntryDef with a Num repr): one mutable
-    # `double` slot per qualified name, zero-init — an unwritten Num package
-    # scalar reads as 0.0, the numeric undef the backend uses. Its own slot
-    # rather than the Int i64 one so the read knows which face the bits hold.
+    # slot per qualified name in Num's own machine type, zero-init — an
+    # unwritten Num package scalar reads as that type's zero, the numeric undef
+    # the backend uses. Its own slot rather than the Int i64 one so the read
+    # knows which face the bits hold. The type and the zero both come from the
+    # representation so this global cannot disagree with the load at
+    # _lower_stash_access or the store at _lower_assign.
     if (defined $self->{_pkg_num_globals} && %{ $self->{_pkg_num_globals} }) {
+        my $nty  = _repr_to_llvm_type('Num');
+        my $nzer = _repr_zero('Num');
         push @lines, '';
         for my $qual (sort keys $self->{_pkg_num_globals}->%*) {
             my $nname = $self->{_pkg_num_globals}{$qual};
-            push @lines, "$nname = internal global double 0.0, align 8  ; Num package scalar \$$qual";
+            push @lines, "$nname = internal global $nty $nzer, align 8  ; Num package scalar \$$qual";
         }
     }
 
@@ -1700,9 +1705,15 @@ sub _lower_constant {
         # integer type". Give it a fractional part so it is typed as a double.
         # Measured: `say 1e3` emitted `fadd double 0.0, 1000` and lli refused
         # to run the module at all.
-        my $dval = ($val =~ /\A-?\d+\z/) ? "$val.0" : $val;
+        my $ty   = _repr_to_llvm_type($repr);
+        my $zero = _repr_zero($repr);
+        my $op   = _repr_opcode('add', $repr);
+        # The `.0` suffix is itself a representation decision -- an integral
+        # machine type must NOT get one -- so it is gated on the same predicate
+        # the opcode and the zero are, not on the repr's name.
+        my $dval = (_repr_is_float($repr) && $val =~ /\A-?\d+\z/) ? "$val.0" : $val;
         my $ref = $self->_fresh;
-        $self->_emit("  $ref = fadd double 0.0, $dval    ; Constant($val, repr=Num -> double)");
+        $self->_emit("  $ref = $op $ty $zero, $dval    ; Constant($val, repr=Num -> $ty)");
         $self->{cache}{$node->id} = $ref;
         return $ref;
     }
@@ -1791,11 +1802,16 @@ sub _lower_constant {
     }
 }
 
-# Integer -> float op names for a Num-repr arithmetic result. The loader's
-# repr-join (Serialize::JSON _propagate_computed_reprs) already widens an
-# Add/Subtract/Multiply over any Num operand to Num; the backend must then
-# emit the float op and sitofp any Int operand into a double.
-my %_INT_TO_FLOAT_OP = (add => 'fadd', sub => 'fsub', mul => 'fmul');
+# The loader's repr-join (Serialize::JSON _propagate_computed_reprs) already
+# widens an Add/Subtract/Multiply over any Num operand to Num; the backend must
+# then emit whatever instruction that representation's machine type calls for,
+# and bring each operand to that type first.
+#
+# The op table that stood here (%_INT_TO_FLOAT_OP: add=>fadd, sub=>fsub,
+# mul=>fmul) is now %_FLOAT_OPCODE beside %_REPR_LLVM_TYPE, reached through
+# _repr_opcode. Here it was keyed by the mnemonic ALONE, so the representation
+# entered only through a `$repr eq 'Num'` branch that hardcoded `double` next
+# to it -- the machine type asserted at the site rather than asked for.
 
 sub _lower_binop_int {
     my ($self, $node, $llvm_op) = @_;
@@ -1810,43 +1826,56 @@ sub _lower_binop_int {
 
     my $inputs  = $node->inputs;
 
-    # A Num-repr arithmetic op (the repr-join widened it because at least one
-    # operand is Num — e.g. a Num-init loop accumulator `$s=$s+$x`) lowers as a
-    # float op over doubles: each Int operand is sitofp'd to double first. An
-    # `add i64` over a double operand is invalid IR (lli verify: "double but
-    # expected i64"). 019f63e9.
-    if ($repr eq 'Num') {
-        my $fop = $_INT_TO_FLOAT_OP{$llvm_op}
-            // die "GAP: $op with repr=Num has no float LLVM op for '$llvm_op'";
-        my $lhs_ref = $self->_lower_as_double($inputs->[0]);
-        my $rhs_ref = $self->_lower_as_double($inputs->[1]);
-        my $ref = $self->_fresh;
-        $self->_emit("  $ref = $fop double $lhs_ref, $rhs_ref  ; $op(repr=Num) -> double $fop");
-        $self->{cache}{$node->id} = $ref;
-        return $ref;
-    }
+    # The result's representation decides BOTH the machine type and the
+    # instruction; neither is named here. A Num-repr arithmetic op (the
+    # repr-join widened it because at least one operand is Num — e.g. a Num-init
+    # loop accumulator `$s=$s+$x`) currently lands on `fadd double` because
+    # %_REPR_LLVM_TYPE maps Num to double, and each operand is brought to that
+    # type first. An `add i64` over a double operand is invalid IR (lli verify:
+    # "double but expected i64"). 019f63e9.
+    #
+    # The single branch that used to read `if ($repr eq 'Num')` is gone: were
+    # Num to map to an integral type, _repr_opcode would return the integer
+    # mnemonic and _lower_as_repr would emit no conversion, with no edit here.
+    my $ty     = _repr_to_llvm_type($repr);
+    my $opcode = _repr_opcode($llvm_op, $repr);
 
-    my $lhs_ref = $self->lower_value($inputs->[0]);
-    my $rhs_ref = $self->lower_value($inputs->[1]);
+    my $lhs_ref = $self->_lower_as_repr($inputs->[0], $repr);
+    my $rhs_ref = $self->_lower_as_repr($inputs->[1], $repr);
 
     my $ref = $self->_fresh;
-    $self->_emit("  $ref = $llvm_op i64 $lhs_ref, $rhs_ref  ; $op(repr=Int) -> i64 $llvm_op");
+    $self->_emit("  $ref = $opcode $ty $lhs_ref, $rhs_ref  ; $op(repr=$repr) -> $ty $opcode");
     $self->{cache}{$node->id} = $ref;
     return $ref;
 }
 
-# _lower_as_double($node) -> an SSA double ref for $node, inserting a
-# `sitofp i64 -> double` when the operand's representation is Int. A Num operand
-# passes through unchanged. Used by Num-repr arithmetic to promote Int operands.
-sub _lower_as_double {
-    my ($self, $node) = @_;
+# _lower_as_repr($node, $want) -> an SSA ref for $node in representation $want's
+# machine type, emitting a conversion only when the two machine types differ.
+#
+# Replaces _lower_as_double, whose NAME presumed the answer: it could only ever
+# bring an operand to a double, so a caller had already decided the destination
+# was floating-point before asking. Here the destination is a REPRESENTATION and
+# the instruction (if any) comes from _repr_convert_op.
+#
+# An operand with no representation at all is treated as already being in the
+# destination's type -- the pre-existing behaviour on the integer path, where
+# a bare untyped operand was passed to `add i64` unconverted.
+sub _lower_as_repr {
+    my ($self, $node, $want) = @_;
     my $ref  = $self->lower_value($node);
     my $orep = (ref($node) && $node->can('representation'))
         ? $node->representation : undef;
-    return $ref if defined $orep && $orep eq 'Num';
-    # Int (or a bare untyped operand feeding a Num op) -> sitofp to double.
-    my $conv = $self->_fresh;
-    $self->_emit("  $conv = sitofp i64 $ref to double  ; promote Int operand to double for Num arithmetic");
+
+    # A bare untyped operand feeding a float-typed op still needs promoting:
+    # its SSA value is an integer one. This mirrors _lower_as_double, which
+    # sitofp'd exactly this case.
+    $orep //= _repr_is_float($want) ? 'Int' : $want;
+
+    my $conv_op = _repr_convert_op($orep, $want) or return $ref;
+    my $from_ty = _repr_to_llvm_type($orep);
+    my $to_ty   = _repr_to_llvm_type($want);
+    my $conv    = $self->_fresh;
+    $self->_emit("  $conv = $conv_op $from_ty $ref to $to_ty  ; promote $orep operand to $want for $want arithmetic");
     return $conv;
 }
 
@@ -1870,17 +1899,32 @@ sub _lower_divide {
         die "Divide with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
 
-    # Num representation: fdiv double. Each operand is promoted to double via
-    # _lower_as_double first -- an Int operand (e.g. a Num-init loop divisor,
-    # or plain `$a/$b` where both are Int) would otherwise feed a raw i64 to
-    # fdiv, which lli rejects ("defined with type 'i64' but expected
-    # 'double'"). Mirrors _lower_binop_int's Num arm (Context.pm:702-703).
+    # Each operand is brought to the result's representation via _lower_as_repr
+    # first -- an Int operand (e.g. a Num-init loop divisor, or plain `$a/$b`
+    # where both are Int) would otherwise feed a raw i64 to fdiv, which lli
+    # rejects ("defined with type 'i64' but expected 'double'"). Mirrors
+    # _lower_binop_int.
+    #
+    # The machine type is asked for; the FLOAT-ness of the division is not, and
+    # deliberately so. Perl `/` is float division as a matter of SEMANTICS
+    # (3/4 == 0.75), which is why the Int arm above is a GAP rather than an
+    # `sdiv`. If Num were ever mapped to an integral type, this site must FAIL
+    # rather than quietly pick `sdiv` -- so it asserts the representation it
+    # needs instead of dispatching on it. That assertion is the guard the
+    # Int-repr GAP above would otherwise lose.
+    die "GAP: op=Divide at repr=$repr, whose machine type is "
+      . _repr_to_llvm_type($repr) . " — Perl `/` is float division, so this "
+      . "representation cannot carry a Divide result. An integral machine type "
+      . "here would emit truncating division and miscompile against perl."
+        unless _repr_is_float($repr);
+
+    my $ty      = _repr_to_llvm_type($repr);
     my $inputs  = $node->inputs;
-    my $lhs_ref = $self->_lower_as_double($inputs->[0]);
-    my $rhs_ref = $self->_lower_as_double($inputs->[1]);
+    my $lhs_ref = $self->_lower_as_repr($inputs->[0], $repr);
+    my $rhs_ref = $self->_lower_as_repr($inputs->[1], $repr);
 
     my $ref = $self->_fresh;
-    $self->_emit("  $ref = fdiv double $lhs_ref, $rhs_ref  ; Divide(repr=Num) -> fdiv double");
+    $self->_emit("  $ref = fdiv $ty $lhs_ref, $rhs_ref  ; Divide(repr=$repr) -> fdiv $ty");
     $self->{cache}{$node->id} = $ref;
     return $ref;
 }
@@ -2374,7 +2418,13 @@ sub _unbox_payload_as {
 
     my $ref = $self->_fresh;
     if ($repr eq 'Num') {
-        $self->_emit("  $ref = bitcast i64 $payload to double  ; $label: payload -> Num");
+        # REINTERPRET, not convert: the payload word holds this value's bits.
+        # Only the KIND of move is fixed here; the type it lands in is
+        # %_REPR_LLVM_TYPE's decision, exactly as at _store_field_payload's
+        # already-correct sibling. Were Num to map to i64 the bitcast becomes a
+        # no-op the verifier accepts, not a wrong type.
+        my $num_ty = _repr_to_llvm_type($repr);
+        $self->_emit("  $ref = bitcast i64 $payload to $num_ty  ; $label: payload -> Num");
         return $ref;
     }
     if ($repr eq 'Boolean') {
@@ -2446,20 +2496,36 @@ sub _emit_coercion {
 
     my $ref = $self->_fresh;
 
-    if ($from eq 'Int' && $to eq 'Num') {
-        $self->_emit("  $ref = sitofp i64 $input_ref to double  ; Coerce[Int->Num]");
-    }
-    elsif ($from eq 'Num' && $to eq 'Int') {
-        $self->_emit("  $ref = fptosi double $input_ref to i64  ; Coerce[Num->Int]");
+    # The numeric arrows. Which instruction bridges Int and Num is a fact about
+    # their REPRESENTATIONS, not their names: _repr_convert_op reads both ends
+    # out of %_REPR_LLVM_TYPE and answers `sitofp`/`fptosi` only while one side
+    # is integral and the other is not. Map Num to an integral type and it
+    # returns undef -- the arrow is the identity and nothing is emitted, which
+    # is the correct answer, reached without editing this arm.
+    if (($from eq 'Int' && $to eq 'Num') || ($from eq 'Num' && $to eq 'Int')) {
+        my $conv = _repr_convert_op($from, $to);
+        return $input_ref unless $conv;   # same machine type: nothing to bridge
+        my $ft = _repr_to_llvm_type($from);
+        my $tt = _repr_to_llvm_type($to);
+        $self->_emit("  $ref = $conv $ft $input_ref to $tt  ; Coerce[$from->$to]");
     }
     # Coerce(*->Boolean) = truthiness: produce i1 from the input's machine type.
-    elsif ($to eq 'Boolean' && $from eq 'Int') {
-        # Int truthiness: nonzero -> true (1), zero -> false (0).
-        $self->_emit("  $ref = icmp ne i64 $input_ref, 0  ; Coerce[Int->Boolean] truthiness");
-    }
-    elsif ($to eq 'Boolean' && $from eq 'Num') {
-        # Num truthiness: nonzero -> true, zero (including -0.0) -> false.
-        $self->_emit("  $ref = fcmp une double $input_ref, 0.0  ; Coerce[Num->Boolean] truthiness");
+    # One arm for both numeric sources. Int truthiness: nonzero -> true (1),
+    # zero -> false (0). Num truthiness: nonzero -> true, zero (INCLUDING -0.0)
+    # -> false, which `une` against 0.0 gives for free.
+    #
+    # Which compare instruction and which not-equal predicate apply is decided
+    # by $from's machine type: integral gets `icmp ne`, floating gets `fcmp une`
+    # (unordered, so a NaN is true -- perl's behaviour, and the reason the
+    # predicates differ by more than a leading `f`). The zero it compares
+    # against comes from the same authority, so -0.0 stays covered whatever
+    # that zero becomes.
+    elsif ($to eq 'Boolean' && ($from eq 'Int' || $from eq 'Num')) {
+        my $cmp   = _repr_opcode('icmp', $from);
+        my $pred  = _repr_is_float($from) ? 'une' : 'ne';
+        my $ty    = _repr_to_llvm_type($from);
+        my $zero  = _repr_zero($from);
+        $self->_emit("  $ref = $cmp $pred $ty $input_ref, $zero  ; Coerce[$from->Boolean] truthiness");
     }
     elsif ($to eq 'Boolean' && $from eq 'Boolean') {
         # Identity coercion — just pass through. (Also caught by the
@@ -2473,7 +2539,14 @@ sub _emit_coercion {
     # consumer -- a Boolean-tagged cell read as Num lands in a `phi double`
     # beside a genuine double -- and lli rejected it there.
     elsif ($from eq 'Boolean' && $to eq 'Num') {
-        $self->_emit("  $ref = uitofp i1 $input_ref to double  ; Coerce[Boolean->Num] 0.0/1.0");
+        # `uitofp` vs `zext` is exactly the choice _repr_convert_op makes, from
+        # Num's machine type rather than from its name -- and it knows i1 is
+        # UNsigned, which is the bug the comment above records.
+        my $conv = _repr_convert_op($from, $to) // 'zext';
+        my $ft   = _repr_to_llvm_type($from);
+        my $tt   = _repr_to_llvm_type($to);
+        my $one  = _repr_is_float($to) ? '0.0/1.0' : '0/1';
+        $self->_emit("  $ref = $conv $ft $input_ref to $tt  ; Coerce[Boolean->Num] $one");
     }
     # Coerce(Boolean->Int) = 0/1: zero-extend i1 to i64 (same as Boolean->Num for integers).
     elsif ($from eq 'Boolean' && $to eq 'Int') {
@@ -2485,9 +2558,13 @@ sub _emit_coercion {
     # of that bit -- zext'ing the bit would also give 0 here, but only by
     # coincidence, and would be wrong the moment Undef is represented otherwise.
     elsif ($from eq 'Undef' && ($to eq 'Int' || $to eq 'Num')) {
-        my $zero = $to eq 'Int' ? '0' : '0.0';
-        my $ty   = $to eq 'Int' ? 'i64' : 'double';
-        my $op   = $to eq 'Int' ? 'add' : 'fadd';
+        # These three ternaries were the functor written inline in miniature:
+        # one branch on the Chalk type picking a zero literal, one picking a
+        # machine type, one picking an opcode -- three chances to disagree.
+        # All three now come from the same authority keyed by the same repr.
+        my $zero = _repr_zero($to);
+        my $ty   = _repr_to_llvm_type($to);
+        my $op   = _repr_opcode('add', $to);
         $self->_emit("  $ref = $op $ty $zero, $zero  ; $what\[Undef->$to] = 0");
     }
     # Coerce(Undef->Boolean) = false. Perl is unambiguous: undef is FALSE in
@@ -2500,7 +2577,14 @@ sub _emit_coercion {
     # read as Boolean takes the undef path, and that path needs an answer for
     # every target type it can be asked for.
     elsif ($from eq 'Undef' && $to eq 'Boolean') {
-        $self->_emit("  $ref = icmp ne i1 false, true  ; $what\[Undef->Boolean] = false");
+        # `icmp ne i1 false, true` computes (false != true) = TRUE, which is
+        # the OPPOSITE of what the trailing comment claimed and of what perl
+        # does: undef is false. Caught by the composition characterization --
+        # Undef->Int->Boolean, Undef->Num->Boolean and Undef->Str->Boolean all
+        # independently produced false, three agreeing witnesses against this
+        # one outlier. `add i1 0, 0` is the constant false, matching how
+        # Constant(Boolean) is emitted elsewhere in this file.
+        $self->_emit("  $ref = add i1 0, 0  ; $what\[Undef->Boolean] = false (perl: undef is false)");
     }
     # ---- %Slot: the uniform scalar cell, read and written by its TAG ----
     #
@@ -2675,16 +2759,23 @@ sub _ensure_i1 {
 
     return $ref if $repr eq 'Boolean';
 
+    die "LLVM backend: _ensure_i1 cannot convert repr=$repr to i1"
+        unless $repr eq 'Int' || $repr eq 'Num';
+
+    # Same shape as _emit_coercion's truthiness arm, and the same semantics:
+    # Int nonzero -> true (1) / zero -> false (0); Num nonzero -> true / zero
+    # (including -0.0) -> false.
+    #
+    # The compare instruction, its not-equal predicate, the operand type and
+    # the zero are four answers to one question -- what does this
+    # representation look like on the machine -- so all four come from the one
+    # place that answers it.
     my $cond = $self->_fresh;
-    if ($repr eq 'Int') {
-        $self->_emit("  $cond = icmp ne i64 $ref, 0  ; _ensure_i1: Int truthiness -> i1");
-    }
-    elsif ($repr eq 'Num') {
-        $self->_emit("  $cond = fcmp une double $ref, 0.0  ; _ensure_i1: Num truthiness -> i1");
-    }
-    else {
-        die "LLVM backend: _ensure_i1 cannot convert repr=$repr to i1";
-    }
+    my $cmp  = _repr_opcode('icmp', $repr);
+    my $pred = _repr_is_float($repr) ? 'une' : 'ne';
+    my $ty   = _repr_to_llvm_type($repr);
+    my $zero = _repr_zero($repr);
+    $self->_emit("  $cond = $cmp $pred $ty $ref, $zero  ; _ensure_i1: $repr truthiness -> i1");
     return $cond;
 }
 
@@ -2722,13 +2813,14 @@ sub _lower_vardecl {
             die "GAP: VarDecl with repr=Str and no initializer reached LLVM backend — "
               . "uninit Str is not yet lowered (would require an empty-string global).";
         }
+        # A zero of the declared representation's own machine type, materialized
+        # by that type's own add-identity instruction. Naming `double`/`0.0`
+        # here would re-decide what Num is at a site whose only actual question
+        # is "what is zero".
         my $zero = $self->_fresh;
-        if ($repr eq 'Num') {
-            $self->_emit("  $zero = fadd double 0.0, 0.0  ; VarDecl uninit Num -> 0.0");
-        }
-        else {
-            $self->_emit("  $zero = add i64 0, 0  ; VarDecl uninit Int -> 0");
-        }
+        my $z    = _repr_zero($repr);
+        $self->_emit("  $zero = " . _repr_opcode('add', $repr) . ' '
+            . _repr_to_llvm_type($repr) . " $z, $z  ; VarDecl uninit $repr -> $z");
         $init_ref = $zero;
     }
 
@@ -2946,7 +3038,8 @@ sub _lower_assign {
         # bits hold.
         if ($rhs_repr eq 'Num') {
             my $nname = $self->_pkg_num_global_name($lhs->stash_name, $var);
-            $self->_emit("  store double $rhs_ref, double* $nname  ; Assign(EntryDef-lvalue): store \$$var (Num package scalar)");
+            my $nty = _repr_to_llvm_type($rhs_repr);
+            $self->_emit("  store $nty $rhs_ref, $nty* $nname  ; Assign(EntryDef-lvalue): store \$$var (Num package scalar)");
             $self->{cache}{ $node->id } = $rhs_ref;
             return $rhs_ref;
         }
@@ -3204,8 +3297,14 @@ sub _coerce_ref_to_num {
     my ($self, $ref, $repr, $op) = @_;
     return $ref if defined $repr && $repr eq 'Num';
     if (!defined $repr || $repr eq 'Int') {
+        # Which instruction (if any) bridges Int to Num is _repr_convert_op's
+        # answer, read out of both reprs' machine types. Undef here means the
+        # two share a type and the value is already in the right shape --
+        # unreachable while Num is a double, correct the moment it is not.
+        my $conv = _repr_convert_op('Int', 'Num') or return $ref;
         my $d = $self->_fresh;
-        $self->_emit("  $d = sitofp i64 $ref to double  ; $op: Int operand -> double");
+        $self->_emit("  $d = $conv " . _repr_to_llvm_type('Int') . " $ref to "
+            . _repr_to_llvm_type('Num') . "  ; $op: Int operand -> Num");
         return $d;
     }
     if ($repr eq 'Str') {
@@ -3255,12 +3354,21 @@ sub _lower_icmp_int {
         return $ref;
     }
 
-    my $fpred = $FCMP_PREDICATE{$op}
+    # Both operands are numified to the Num representation, so WHICH predicate
+    # table applies -- and which compare instruction -- follows from Num's
+    # machine type rather than from the fact that it is called Num. The two
+    # tables are not a naming variation: NumNe is `une` here and `ne` there,
+    # because unordered-not-equal is what makes NaN compare perl-style. Picking
+    # the table IS the representation decision, so it is asked for.
+    my $numeric = _repr_is_float('Num');
+    my $cmp     = _repr_opcode('icmp', 'Num');
+    my $fpred   = ($numeric ? $FCMP_PREDICATE{$op} : $ICMP_PREDICATE{$op})
         or die "LLVM backend: unknown comparison op=$op";
+    my $nty   = _repr_to_llvm_type('Num');
     my $lhs_d = $self->_coerce_ref_to_num($lhs_ref, $lhs_repr, $op);
     my $rhs_d = $self->_coerce_ref_to_num($rhs_ref, $rhs_repr, $op);
     my $ref = $self->_fresh;
-    $self->_emit("  $ref = fcmp $fpred double $lhs_d, $rhs_d  ; $op(Boolean) -> i1 fcmp $fpred (numified operands)");
+    $self->_emit("  $ref = $cmp $fpred $nty $lhs_d, $rhs_d  ; $op(Boolean) -> i1 $cmp $fpred (numified operands)");
     $self->{cache}{$node->id} = $ref;
     return $ref;
 }
@@ -3446,17 +3554,15 @@ sub _lower_ternary {
         return $ptr;
     }
 
-    my $branch_type;
-    if ($true_repr eq 'Int' && $fals_repr eq 'Int') {
-        $branch_type = 'i64';
-    }
-    elsif ($true_repr eq 'Num' && $fals_repr eq 'Num') {
-        $branch_type = 'double';
-    }
-    else {
-        die "LLVM backend: TernaryExpr branches have mismatched or unsupported types "
-          . "(true=$true_repr, false=$fals_repr)";
-    }
+    # The two-arm literal chain that stood here ('i64' for Int, 'double' for
+    # Num) was a copy of %_REPR_LLVM_TYPE narrowed to two entries. The real
+    # condition is that the arms AGREE on a representation; what that
+    # representation looks like on the machine is not this site's question.
+    die "LLVM backend: TernaryExpr branches have mismatched or unsupported types "
+      . "(true=$true_repr, false=$fals_repr)"
+        unless ($true_repr eq 'Int' || $true_repr eq 'Num')
+            && $true_repr eq $fals_repr;
+    my $branch_type = _repr_to_llvm_type($true_repr);
 
     my $ref = $self->_fresh;
     $self->_emit("  $ref = select i1 $cond_ref, $branch_type $true_ref, $branch_type $fals_ref"
@@ -3849,9 +3955,14 @@ sub _lower_defined_or {
         $lhs_phi_val = $recorded if defined $recorded && $llvm_type eq 'i64';
         unless (defined $lhs_phi_val) {
             # Fallback: emit a zero of the result type if no payload was recorded.
-            if ($llvm_type eq 'double') {
+            if (_repr_is_float($phi_repr)) {
+                # Asked the table for $llvm_type at :3831 and then compared it
+                # to the string 'double' to re-decide the zero. Both halves now
+                # come from the representation, so they cannot disagree.
+                my $z = _repr_zero($phi_repr);
                 $lhs_phi_val = $self->_fresh;
-                $self->_emit("  $lhs_phi_val = fadd double 0.0, 0.0  ; DefinedOr: undef LHS payload fallback (Num)");
+                $self->_emit("  $lhs_phi_val = " . _repr_opcode('add', $phi_repr)
+                    . " $llvm_type $z, $z  ; DefinedOr: undef LHS payload fallback ($phi_repr)");
             }
             elsif ($llvm_type =~ /^%/) {
                 # An aggregate result (%Str, %Slot). `add %Str 0, 0` is not an
@@ -4241,6 +4352,95 @@ sub _repr_to_llvm_type ($repr //= die "node reached machine-type selection with 
     die "LLVM backend: no LLVM type for representation '$repr' — this is not a "
       . "known representation. Add it to %_REPR_LLVM_TYPE with its machine type, "
       . "or to %_REPR_NO_MACHINE_TYPE with the reason it has none.";
+}
+
+# The zero VALUE for each representation, in that representation's own machine
+# type. This is the second half of the object map: `%_REPR_LLVM_TYPE` says what
+# type a Num is, and this says what literal writes a zero AT that type. The two
+# must move together -- if Num ever maps to an integer type its zero stops being
+# `0.0` -- so keeping them apart as `_repr_to_llvm_type(...)` plus a hardcoded
+# `0.0` is exactly the parallel authority the type map was written to prevent.
+my %_REPR_ZERO = (
+    Int     => '0',
+    Num     => '0.0',
+    Boolean => '0',
+    Undef   => '0',
+);
+
+# Accessors returning the two maps THEMSELVES, so a caller can ask what the
+# functor currently maps -- and, under `local`, ask what it WOULD emit under a
+# different mapping. That second use is the point: the claim "this branch picks
+# `add` rather than `fadd` the day Num maps to i64" is only checkable if the
+# mapping can be moved without editing an emit site.
+sub _repr_llvm_type_map { return \%_REPR_LLVM_TYPE }
+sub _repr_zero_map      { return \%_REPR_ZERO }
+
+sub _repr_zero ($repr //= die "asked for the zero literal with NO representation (undef)") {
+    return $_REPR_ZERO{$repr} // die
+        "LLVM backend: no zero literal for representation '$repr' — add it to "
+      . "%_REPR_ZERO beside its machine type in %_REPR_LLVM_TYPE.";
+}
+
+# The ARROW half of T2. `%_REPR_LLVM_TYPE` maps Chalk types to machine types
+# (objects); this maps a Chalk operation AT a representation to the machine
+# instruction that performs it (arrows). Naming an opcode inline -- `fadd`
+# because the repr is Num -- asserts a machine type at a site that never asked
+# for one, which is how `Num |-> double` got baked into ~40 places.
+#
+# Keyed by the INTEGER mnemonic because that is the operation's identity
+# independent of representation: `add` IS "the addition arrow", and which
+# instruction realizes it is what the representation decides. A repr whose
+# machine type is integral therefore picks the integer opcode by falling
+# through -- no per-site edit needed the day Num maps to i64.
+my %_FLOAT_OPCODE = (
+    add   => 'fadd',
+    sub   => 'fsub',
+    mul   => 'fmul',
+    div   => 'fdiv',
+    'icmp' => 'fcmp',
+);
+
+# _repr_is_float($repr) -> whether this representation's machine type is a
+# floating-point type. The ONE predicate the opcode/instruction choices consult,
+# derived from %_REPR_LLVM_TYPE rather than from the repr NAME. Ask this, never
+# `$repr eq 'Num'`, when the question is "which instruction family".
+sub _repr_is_float ($repr //= die "asked whether a NO representation (undef) is float") {
+    my $ty = _repr_to_llvm_type($repr);
+    return $ty eq 'double' || $ty eq 'float';
+}
+
+# _repr_opcode($int_mnemonic, $repr) -> the instruction to emit for that
+# operation at that representation. Int-typed reprs get the integer mnemonic
+# unchanged; float-typed reprs get the float sibling.
+sub _repr_opcode {
+    my ($mnemonic, $repr) = @_;
+    return $mnemonic unless _repr_is_float($repr);
+    return $_FLOAT_OPCODE{$mnemonic} // die
+        "GAP: no float instruction for '$mnemonic' at repr=$repr — add it to "
+      . "%_FLOAT_OPCODE.";
+}
+
+# _repr_convert_op($from, $to) -> the instruction that converts a value of
+# representation $from into representation $to, or undef when the two share a
+# machine type and no instruction is needed (the arrow is the identity).
+#
+# This is where `Int <: Num |-> sitofp` actually lives. The subtyping is a fact
+# about the TYPES; that it costs a `sitofp` is a fact about the current
+# REPRESENTATION choice, and holds only while Int is integral and Num is not.
+# Map Num to i64 and every one of these arrows becomes the identity -- which is
+# what returning undef says.
+sub _repr_convert_op {
+    my ($from, $to) = @_;
+    my $ft = _repr_to_llvm_type($from);
+    my $tt = _repr_to_llvm_type($to);
+    return undef if $ft eq $tt;               # identity: nothing to emit
+
+    my $ff = _repr_is_float($from);
+    my $tf = _repr_is_float($to);
+    return 'sitofp' if !$ff && $tf && $from ne 'Boolean';   # signed int -> float
+    return 'uitofp' if !$ff && $tf;                          # i1 is UNsigned
+    return 'fptosi' if  $ff && !$tf;                         # float -> signed int
+    return undef;   # int<->int of differing widths: caller's business, not ours
 }
 
 # ---------------------------------------------------------------------------
@@ -6269,8 +6469,11 @@ sub _lower_array_read {
         $self->_emit("  $raw_pay = phi i64 [ $pay_val, \%$lbl_inb ], [ 0, \%$lbl_oob ]  ; ArrayRead :$repr raw payload");
 
         if ($repr eq 'Num') {
+            # Reinterpretation into the representation's own machine type; see
+            # _unbox_payload_as, which does the same move for the same reason.
+            my $num_ty = _repr_to_llvm_type($repr);
             my $d = $self->_fresh;
-            $self->_emit("  $d = bitcast i64 $raw_pay to double  ; ArrayRead :Num payload -> double");
+            $self->_emit("  $d = bitcast i64 $raw_pay to $num_ty  ; ArrayRead :Num payload -> $num_ty");
             $self->{cache}{ $node->id } = $d;
             return $d;
         }
@@ -6608,8 +6811,11 @@ sub _lower_hash_read {
         $self->_emit("  $raw_pay = phi i64 [ $vp_val, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; HashRead :$repr raw payload");
 
         if ($repr eq 'Num') {
+            # Reinterpretation into the representation's own machine type; see
+            # _unbox_payload_as, which does the same move for the same reason.
+            my $num_ty = _repr_to_llvm_type($repr);
             my $d = $self->_fresh;
-            $self->_emit("  $d = bitcast i64 $raw_pay to double  ; HashRead :Num payload -> double");
+            $self->_emit("  $d = bitcast i64 $raw_pay to $num_ty  ; HashRead :Num payload -> $num_ty");
             $self->{cache}{ $node->id } = $d;
             return $d;
         }
@@ -6754,7 +6960,8 @@ sub _box_payload {
     if ($repr eq 'Num') {
         # A double is exactly one word: reinterpret its bits rather than boxing.
         # The read side bitcasts back, so no precision is lost.
-        $self->_emit("  $ref = bitcast double $val_ref to i64  ; Num -> i64 payload for $what");
+        my $num_ty = _repr_to_llvm_type($repr);
+        $self->_emit("  $ref = bitcast $num_ty $val_ref to i64  ; Num -> i64 payload for $what");
         return $ref;
     }
     if ($repr eq 'Boolean') {
@@ -8578,7 +8785,8 @@ sub _lower_stash_access {
     if ($repr eq 'Num') {
         my $nname = $self->_pkg_num_global_name($node->stash_name, $var);
         my $val   = $self->_fresh;
-        $self->_emit("  $val = load double, double* $nname  ; EntryDef: read \$$var (Num package scalar)");
+        my $nty = _repr_to_llvm_type($repr);
+        $self->_emit("  $val = load $nty, $nty* $nname  ; EntryDef: read \$$var (Num package scalar)");
         $self->{cache}{ $node->id } = $val;
         return $val;
     }

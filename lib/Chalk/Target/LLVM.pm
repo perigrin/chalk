@@ -211,18 +211,35 @@ END_HELPER
 # _method_fn_llvm_ret_type($repr) -> LLVM return type for method function header
 sub _method_fn_llvm_ret_type {
     my ($repr) = @_;
-    return 'i64'      if !defined $repr || $repr eq 'Int';
+
+    # An absent repr is answered as Int HERE and nowhere else. This is a real
+    # third authority -- it decides a machine type with no Chalk type in hand,
+    # which _repr_to_llvm_type refuses outright -- and it is kept only because
+    # callers rely on it today. It is deliberately NOT pushed down into the
+    # type map: the map's refusal is correct, and the default is this
+    # function's own leniency, visible at the one site that grants it.
+    $repr //= 'Int';
+
+    # Str is the ONLY divergence from %_REPR_LLVM_TYPE, and it is a genuine
+    # one: a Str VALUE is %Str (ptr,len,enc) but a Str RETURN crosses the
+    # function boundary as %StrPair (ptr,len).
     return '%StrPair' if $repr eq 'Str';
-    return 'i1'       if $repr eq 'Boolean';
-    return 'double'   if $repr eq 'Num';
-    return 'i1'       if $repr eq 'Undef';   # defined-bit, always false
-    # Scalar is the un-narrowed cell (perigrin, 2026-08-29): a method whose
-    # return type was never narrowed returns the uniform %Slot. This arm was
-    # missing while _method_fn_type already answered '%Slot (i8*)' for the
-    # POINTER, so a Scalar-returning method could be pointed at but not called
-    # -- the two authorities the call site assumes are one had drifted apart.
-    return '%Slot'    if $repr eq 'Scalar';
-    die "LLVM MOP: unsupported method return repr '$repr' for fn return type";
+
+    # Every other representation DEFERS. The literal chain that stood here
+    # (i64/i1/double/i1/%Slot) answered the same question %_REPR_LLVM_TYPE
+    # answers, from its own copy of the answers -- and it had drifted twice by
+    # the time it was collapsed:
+    #
+    #   Scalar is the un-narrowed cell (perigrin, 2026-08-29): a method whose
+    #   return type was never narrowed returns the uniform %Slot. That arm was
+    #   missing here while _method_fn_type already answered '%Slot (i8*)' for
+    #   the POINTER, so a Scalar-returning method could be pointed at but not
+    #   called -- the two authorities the call site assumes are one had drifted
+    #   apart.
+    #
+    # Deferring is what makes a third drift impossible rather than merely
+    # unlikely: there is no longer a second set of answers to disagree with.
+    return Chalk::Target::LLVM::Context::_repr_to_llvm_type($repr);
 }
 
 # ---------------------------------------------------------------------------
@@ -710,8 +727,12 @@ sub _emit_class_registry_ir {
                     push @lines, '  ret %StrPair %r';
                 }
                 elsif ($ret_repr eq 'Num') {
-                    push @lines, "  %r = call double $parent_fn(i8* %self)";
-                    push @lines, '  ret double %r';
+                    # $fn_ret is already this repr's return type (:700); naming
+                    # `double` again here was a second authority for the same
+                    # answer, in the one place where disagreeing with the
+                    # function's own header is guaranteed-invalid IR.
+                    push @lines, "  %r = call $fn_ret $parent_fn(i8* %self)";
+                    push @lines, "  ret $fn_ret %r";
                 }
                 elsif ($ret_repr eq 'Boolean') {
                     push @lines, "  %r = call i1 $parent_fn(i8* %self)";
@@ -849,7 +870,7 @@ sub _emit_class_registry_ir {
                 }
             }
             elsif ($ret_repr eq 'Num') {
-                push @lines, "  ret double $body_val";
+                push @lines, "  ret $fn_ret $body_val";
             }
             elsif ($ret_repr eq 'Boolean') {
                 push @lines, "  ret i1 $body_val";
@@ -959,7 +980,7 @@ sub _emit_class_registry_ir {
                 push @lines, "  %ret_r1 = insertvalue %StrPair %ret_r0, i64 %ret_sl, 1";
                 push @lines, '  ret %StrPair %ret_r1';
             }
-            elsif ($ret_repr eq 'Num')  { push @lines, "  ret double $body_val" }
+            elsif ($ret_repr eq 'Num')  { push @lines, "  ret $fn_ret $body_val" }
             elsif ($ret_repr eq 'Boolean'
                 || $ret_repr eq 'Undef'){ push @lines, "  ret i1 $body_val" }
             elsif ($ret_repr eq 'Scalar') {
@@ -1283,6 +1304,20 @@ sub lower_with_elaboration {
         push @lines, "  call i32 (i8*, ...) \@printf(i8* %fmt_ptr, i64 $result_ref)";
     }
     elsif ($result_repr eq 'Num') {
+        # The most representation-entangled site in the backend: the 0x7FF0…/
+        # 0xFFF0… constants below are IEEE-754 BINARY64 bit patterns, and the
+        # %g format at :1173 is C's rendering of a double. Neither survives a
+        # change to Num's machine type, and neither can be derived from
+        # %_REPR_LLVM_TYPE -- so this site ASSERTS the representation it was
+        # written for rather than interpolating a type it cannot honour. A
+        # silent wrong-format print is exactly the failure this refuses.
+        my $nty = Chalk::Target::LLVM::Context::_repr_to_llvm_type($result_repr);
+        die "LLVM backend: printing a $result_repr result assumes IEEE-754 "
+          . "binary64 (the Inf/NaN bit patterns and the %g format below), but "
+          . "$result_repr's machine type is now '$nty'. Rewrite this printer "
+          . "for that type."
+            unless $nty eq 'double';
+
         # Non-finite detection: fcmp uno for NaN; fcmp oeq against +Inf/-Inf constants.
         # Perl formats non-finite as Inf/-Inf/NaN (capitalized); C %g gives lowercase.
         # We branch on non-finite and print the perl-style string constants instead.
