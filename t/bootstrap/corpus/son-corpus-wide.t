@@ -177,7 +177,7 @@ sub perl_oracle ($source) {
 my @topics = sort glob('t/corpus/mdtest/*.md');
 
 my %tally = (green => 0, gap_declared => 0, bug => 0, no_source => 0,
-             shape_ok => 0, inv_ok => 0, gate_green => 0);
+             shape_ok => 0, inv_ok => 0, gate_green => 0, todo => 0);
 my %by_topic;
 my @bugs;
 
@@ -197,6 +197,16 @@ for my $md (@topics) {
 
         my $verdict = Chalk::CodeGen::Harness::MdtestCorpus
             ->parse_l_verdict_from_ir($case->{ir} // '');
+
+        # A case with NO ir block, and one whose ir block is pure-GAP, are both
+        # WORK WE INTEND TO DO rather than a check that does not apply here.
+        # The shape and invariant legs now say TODO for them (they used to say
+        # SKIP, and the shape leg said PASS for a pure-GAP block -- absence
+        # rendered as success). Counted here, at the classification point,
+        # because a pure-GAP case short-circuits below before any leg runs.
+        $tally{todo}++
+            if !(defined $case->{ir} && $case->{ir} =~ /\S/)
+            || Chalk::CodeGen::Harness::MdtestCorpus::_is_pure_gap_block($case->{ir});
 
         # Corpus-declared GAP: not expected to lower; record honestly.
         if ($verdict eq 'GAP') {
@@ -321,8 +331,8 @@ for my $t (sort keys %by_topic) {
 }
 diag("");
 diag(sprintf(
-    "TOTAL: gate-green=%d  behavior=%d  shape=%d  invariant=%d  gap-declared=%d  worklist=%d  (no-source sections=%d)",
-    @tally{qw(gate_green green shape_ok inv_ok gap_declared bug no_source)}));
+    "TOTAL: gate-green=%d  behavior=%d  shape=%d  invariant=%d  gap-declared=%d  todo=%d  worklist=%d  (no-source sections=%d)",
+    @tally{qw(gate_green green shape_ok inv_ok gap_declared todo bug no_source)}));
 if (@bugs) {
     diag("");
     diag("=== worklist (triple-contract gaps to close) ===");

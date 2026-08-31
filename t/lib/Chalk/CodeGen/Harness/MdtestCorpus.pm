@@ -76,7 +76,11 @@ sub parse_file {
 # Returns a hashref:
 #   title        => string
 #   behavior     => { verdict: PASS|CAPTURED|FAIL, actual: $S, declared: $D }
-#   ir_shape     => { verdict: PASS|FAIL|SKIP, missing: [...] }   (SKIP if no ir block)
+#   ir_shape     => { verdict: PASS|FAIL|SKIP|TODO, missing: [...] }
+#                  (TODO if no ir block, or a pure-GAP block: both are work we
+#                   intend to do, not a check that does not apply. SKIP stays
+#                   for genuinely inapplicable cases -- an unbuildable or
+#                   unwalkable spec, whose finding another leg reports.)
 #   l_verdict    => { verdict: PASS|FAIL|SKIP, actual: str, declared: str }
 #   overall      => PASS | FAIL | CAPTURED
 #   fail_reasons => [...]
@@ -990,7 +994,7 @@ sub _run_ir_shape_check {
 
     my $ir_text = $case->{ir};
     unless (defined $ir_text && $ir_text =~ /\S/) {
-        return { verdict => 'SKIP', missing => [], reason => 'no ir block' };
+        return { verdict => 'TODO', missing => [], reason => 'no ir block' };
     }
 
     # Determine if this is a pure-GAP block (no buildable graph)
@@ -998,8 +1002,10 @@ sub _run_ir_shape_check {
     my $is_pure_gap      = _is_pure_gap_block($ir_text);
 
     if ($is_pure_gap) {
-        # Pure-GAP: no nodes to build or validate — structural check passes trivially.
-        return { verdict => 'PASS', missing => [], reason => 'pure-GAP block; no graph to check' };
+        # Pure-GAP: no nodes to build or validate. That is not a passing shape --
+        # it is a spec that has not been written yet, which is WORK WE INTEND TO
+        # DO. Reporting it as PASS made an absent spec read as a satisfied one.
+        return { verdict => 'TODO', missing => [], reason => 'pure-GAP block; no graph to check' };
     }
 
     # Build the graph from the ir block
@@ -1067,12 +1073,14 @@ my %_OPERAND_RETURNING = (And => 1, Or => 1, DefinedOr => 1);
 sub spec_invariant_check {
     my ($class, $ir_text) = @_;
 
-    return { verdict => 'SKIP', reason => 'no ir block' }
+    return { verdict => 'TODO', reason => 'no ir block' }
         unless defined $ir_text && $ir_text =~ /\S/;
 
     # A declared-GAP block has no nodes to check. It is not a spec failure, and
-    # it is not a passing shape either -- there is nothing to have an opinion on.
-    return { verdict => 'SKIP', reason => 'pure-GAP block; no graph to check' }
+    # it is not a passing shape either -- but it is not an inapplicable check
+    # either: the spec is simply unwritten. TODO records the intent to write it,
+    # where SKIP claimed the check did not apply here.
+    return { verdict => 'TODO', reason => 'pure-GAP block; no graph to check' }
         if _is_pure_gap_block($ir_text);
 
     my $spec_return;
@@ -1118,15 +1126,17 @@ sub spec_invariant_check {
 sub shape_subset_check {
     my ($class, $ir_text, $return_node) = @_;
 
-    return { verdict => 'SKIP', missing => [], reason => 'no ir block' }
+    return { verdict => 'TODO', missing => [], reason => 'no ir block' }
         unless defined $ir_text && $ir_text =~ /\S/;
     return { verdict => 'SKIP', missing => [], reason => 'no real graph' }
         unless defined $return_node;
     if (_is_pure_gap_block($ir_text)) {
-        # Only a declared-GAP block passes vacuously; a node-line-free block
-        # claiming L: GREEN is a malformed spec, not a free pass.
+        # Only a declared-GAP block is excused; a node-line-free block claiming
+        # L: GREEN is a malformed spec, not a free pass. The excused case is a
+        # TODO rather than a PASS: there is no shape to enforce BECAUSE none has
+        # been written, and calling that green makes absence look like success.
         return __PACKAGE__->parse_l_verdict_from_ir($ir_text) eq 'GAP'
-            ? { verdict => 'PASS', missing => [], reason => 'pure-GAP block; no shape to enforce' }
+            ? { verdict => 'TODO', missing => [], reason => 'pure-GAP block; no shape to enforce' }
             : { verdict => 'SKIP', missing => [], reason => 'malformed spec: no node lines but not a declared GAP' };
     }
 

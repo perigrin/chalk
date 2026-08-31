@@ -117,6 +117,12 @@ The final `TOTAL:` diag line is the scoreboard. A current run:
 - `behavior` / `shape` / `invariant` — per-leg pass counts (diagnostic: when
   these exceed `gate-green`, some case passes two legs but not the third).
 - `gap-declared` — cases marked `L: GAP`.
+- `todo` — cases with NO `ir` block, plus cases whose `ir` block is pure-GAP
+  (only an `L: GAP(...)` line, no node lines). The shape and invariant legs
+  report `TODO` for these: an unwritten spec is work we intend to do, not a
+  check that does not apply. They never count toward `gate-green`. Distinct
+  from `SKIP`, which is reserved for a genuinely inapplicable check — an
+  unbuildable or unwalkable spec block, whose finding another leg reports.
 - `worklist` — `L: GREEN` cases that failed the contract (should-lower but
   doesn't). `worklist=0` means every declared-GREEN idiom actually lowers.
 - `no-source sections` — `##` headings with no `perl` block (prose only).

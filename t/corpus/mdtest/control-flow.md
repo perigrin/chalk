@@ -1543,6 +1543,7 @@ context: scalar
 %pr    = Print(%msg)
 %merge = Region(%pr, %c0)
 %val   = Phi(%c1, %c0, region: %merge)
+return %val
 control: %pr -> %merge
 L: GAP(LLVM backend: Phi node encountered in lower_value before its enclosing if/loop structure was processed -- a TryCatch-desugared Region never runs through _process_if_node/_process_loop_node, the only place that primes Phi bookkeeping; measured via Chalk::Target::LLVM->lower on the real B::SoN graph, error at lib/Chalk/Target/LLVM/Context.pm line 2295)
 ```

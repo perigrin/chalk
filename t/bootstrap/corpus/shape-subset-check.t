@@ -85,11 +85,13 @@ END_IR
     is($res->{verdict}, 'FAIL', 'Divide :Int spec does not match a :Num Divide');
 }
 
-# Test 5: a pure-GAP block (no node lines) passes trivially against any graph.
+# Test 5: a pure-GAP block (no node lines) has no shape to enforce against any
+# graph -- but that is because none has been WRITTEN, so it is a TODO rather
+# than a PASS. Rendering it green made an unwritten spec read as a satisfied one.
 {
     my $real = $C->build_graph_from_ir($SPEC);
     my $res  = $C->shape_subset_check("L: GAP(not lowered)\n", $real);
-    is($res->{verdict}, 'PASS', 'pure-GAP spec has no shape to enforce');
+    is($res->{verdict}, 'TODO', 'pure-GAP spec is a TODO, not a free PASS');
 }
 
 # Test 6: a node-line-free block that claims L: GREEN is a malformed spec, not
