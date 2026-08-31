@@ -194,3 +194,66 @@ shrinks `Int`'s candidate set without changing the pass's shape.
 - Whether `enc` on `%Str` should record "has this been rendered to characters
   yet", given a `Str` may hold a Num. Named from a field name, NOT verified —
   check what `enc` is actually set to before relying on this.
+
+## The corpus is T2's contract-test home — and it needs a second block
+
+perigrin: *"The 'both' case I am pretty sure should be added to the corpus
+tests."* Right, for the reason the corpus already exists: the `ir` blocks are
+spec AND optimizer contract, the one place "what the graph should look like" is
+written down and gate-enforced. Putting a T2 contract in unit tests would
+fragment the spec across two mechanisms — and the 29 assertion sites measured
+above are exactly that fragmentation.
+
+**What it needs.** The `ir` block pins ONE graph in ONE vocabulary
+(`MdtestCorpus.pm:66`, *"constructive self-consistency — build the graph FROM
+the ir block"*). A T2 contract pins TWO: the Chalk-typed graph and the
+LLVM-typed one. Either a second fence (`ir` and `ir-t2`) or a phase marker
+inside the existing block. A real addition to the corpus format, not a free ride
+on it.
+
+**Why it is worth it.** A second block is the shape leg run twice at different
+phases, which makes stamp-vocabulary drift detectable — the failure mode this
+whole design circles.
+
+## Absence must not read as success: SKIP -> TODO
+
+perigrin: *"A missing T2 should show up as a TODO test ... not a SKIP. Same with
+the IR block actually."* And then: *"Pure GAP should become TODO too."*
+
+A SKIP claims the check does not apply. A missing `ir` block, a missing `ir-t2`
+block, and a declared GAP are all **work we intend to do**. TODO says that,
+keeps them counted, and turns "how many cases lack a spec?" from an unasked
+question into a number that trends to zero.
+
+This is the fourth member of a recorded family. The other three: the shape leg
+does not check operands of control-reachable nodes; there is no exit-code
+oracle; GAP-declared cases pass without executing. All four are absence rendered
+as success.
+
+**The file already contradicts itself on pure-GAP.** `:1002` returns **PASS**
+(*"structural check passes trivially"*) while `:1075` returns **SKIP** for the
+same block. One leg calls it green, another calls it inapplicable, neither calls
+it outstanding. The `PASS` is the worse half: a case with no spec content
+scoring a green shape leg. **Both must move together** — fixing only the SKIP
+leaves the shape leg green-lighting the same 15 cases.
+
+### Census (measured 2026-08-31, 247 cases with source)
+
+| bucket | count | verdict |
+|---|---|---|
+| no `ir` block | 7 | -> **TODO** |
+| pure-GAP block | 15 | -> **TODO** |
+| unbuildable spec | 1 | -> **FAIL** |
+| invariant PASS | 224 | unchanged |
+| invariant FAIL | 0 | unchanged |
+| unwalkable | 0 | — |
+
+**22 TODOs and 1 FAIL.** With pure-GAP moved, the honest-SKIP bucket EMPTIES:
+every remaining SKIP was absence dressed as success or inapplicability.
+
+The 7 missing-`ir` cases are all from the 2026-08-29/31 T1 sessions — F17-F22 in
+`subs.md` plus the signature-method case in `classes.md`. So the TODO change
+surfaces THIS session's own unfinished work, which is what a TODO is for.
+
+**Neither change depends on T2 existing.** Both are the absence-as-success
+family, fixable now.
