@@ -334,6 +334,86 @@ sub _str_type_decl {
 
 sub _str_size_bytes { return _struct_size_bytes(@_STR_FIELDS) }
 
+# ---------------------------------------------------------------------------
+# %Slot -- the uniform scalar cell, and the ONE place its layout is written.
+#
+# A Slot is what a value gets when nothing narrower was proven: an array
+# element, a hash value, an object field, or any `Scalar`. Two axes meet in
+# this struct -- `Scalar` is the TYPE (top of the spine) and `%Slot` is its
+# ENCODING.
+#
+# THE TAG IS WHY THIS EXISTS. `_lower_coerce` dies on Coerce[Scalar -> X] with
+# "a %Slot payload is i64 bits whose interpretation is not recorded in the
+# cell ... which needs either a tag or a runtime" -- measured at 33 corpus
+# sites. The payload alone cannot say whether its bits are an integer, a
+# double, or a pointer to a string, so a consumer either guesses or refuses.
+# `tag` records the answer the producer already knew, making the read a
+# dispatch on data rather than a guess.
+#
+# Derived from a field list rather than written as a literal for the same
+# reason %Str is: `$n * 16` at the ArrayRef site hardcoded the two-field size,
+# and a field added without updating it would silently UNDER-ALLOCATE -- a
+# wrong answer, not a compile error. _slot_size_bytes computes it.
+#
+# Measured: with the tag the cell is still 16 bytes. `i8` lands in padding the
+# two-field layout already had, so no allocation anywhere changed.
+my @_SLOT_FIELDS = (
+    { name => 'defined', llvm => 'i1',  bytes => 1 },
+    # The representation tag. Its VALUES are the target's vocabulary, not the
+    # lattice's: this is the encoding axis, so it answers "how do I read the
+    # payload", never "what type is this".
+    { name => 'tag',     llvm => 'i8',  bytes => 1 },
+    { name => 'payload', llvm => 'i64', bytes => 8 },
+);
+
+# The tag values. Undef is 0 so a ZEROED cell reads as undef rather than as a
+# valid Int -- a memset'd buffer must not look like a defined zero.
+my %_SLOT_TAG = (
+    Undef => 0,
+    Int   => 1,
+    Num   => 2,
+    Str   => 3,
+);
+
+# _slot_fields() -> the field list (for size computation and tests).
+sub _slot_fields { return @_SLOT_FIELDS }
+
+# Field INDEX by name. insertvalue/extractvalue take positional indices, and a
+# literal index is how a field reordering becomes a silent miscompile -- the
+# defined-bit read where a payload belonged.
+my %_SLOT_IDX = do { my $i = 0; map { $_->{name} => $i++ } @_SLOT_FIELDS };
+sub _slot_idx { my $n = $_[-1]; return $_SLOT_IDX{$n} // die "no %Slot field named '$n'" }
+
+# _slot_tag_value($repr) -> the i8 tag constant for a representation name.
+sub _slot_tag_value {
+    my $r = $_[-1];
+    return $_SLOT_TAG{$r} // die "no %Slot tag for representation '$r'";
+}
+
+# _slot_tag_names() -> the tagged representations, for tests and diagnostics.
+sub _slot_tag_names { return sort keys %_SLOT_TAG }
+
+# _slot_tag_for_repr($repr) -> a tag NAME safe to build a Slot with.
+#
+# Maps a representation onto the reading its payload carries. A repr with no
+# concrete reading -- `Scalar` (the un-narrowed top), `Unknown`, or none at all
+# -- yields 'Undef': the cell records that the reading is NOT ESTABLISHED
+# rather than asserting one. That is the honest answer until T2 narrows it, and
+# it is what keeps this from becoming the guess the tag exists to remove.
+sub _slot_tag_for_repr {
+    my $r = $_[-1];
+    return 'Undef' unless defined $r;
+    return exists $_SLOT_TAG{$r} ? $r : 'Undef';
+}
+
+# _slot_type_decl() -> the LLVM type declaration line.
+sub _slot_type_decl {
+    return '%Slot = type { ' . join(', ', map { $_->{llvm} } @_SLOT_FIELDS) . ' }';
+}
+
+# _slot_size_bytes() -> the allocation size for one cell.
+sub _slot_size_bytes { return _struct_size_bytes(@_SLOT_FIELDS) }
+
 # _strpair_fields() -> the field list (for size computation and tests).
 sub _strpair_fields { return @_STRPAIR_FIELDS }
 
@@ -572,12 +652,14 @@ sub render_need_flag_prologue {
     }
 
     # Emit LLVM type declarations for Array/Hash aggregate structures when needed.
-    # %Slot = { i1 defined, i64 payload } (16 bytes with padding)
+    # %Slot = { i1 defined, i8 tag, i64 payload } (16 bytes with padding --
+    #   the tag rides in padding the two-field cell already had, so adding
+    #   it changed no allocation). Rendered from @_SLOT_FIELDS, not a literal.
     # %Array = { i64 len, i64 cap, %Slot* elems }
     # %HashEntry = { i8* key_ptr, i64 key_len, i32 key_enc, i1 val_def, i64 val_pay }
     # %Hash = { i64 count, i64 cap, %HashEntry* entries }
     if ($self->{_need_aggregate_types}) {
-        push @lines, '%Slot       = type { i1, i64 }';
+        push @lines, _slot_type_decl();
         push @lines, '%Array      = type { i64, i64, %Slot* }';
         push @lines, '%HashEntry  = type { i8*, i64, i32, i1, i64 }';
         push @lines, '%Hash       = type { i64, i64, %HashEntry* }';
@@ -5486,8 +5568,9 @@ sub _lower_array_ref {
     my $inputs = $node->inputs;
     my $n      = scalar @$inputs;
 
-    # Allocate slot buffer: n * sizeof(%Slot).
-    my $slot_bytes = $n * 16;
+    # Allocate slot buffer: n * sizeof(%Slot). COMPUTED, not a literal 16:
+    # a field added to @_SLOT_FIELDS must not silently under-allocate here.
+    my $slot_bytes = $n * _slot_size_bytes();
     my $slot_buf = $self->_fresh;
     $self->_emit("  $slot_buf = call i8* \@malloc(i64 $slot_bytes)  ; ArrayRef: alloc $n slots");
     my $slots = $self->_fresh;
