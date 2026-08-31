@@ -1426,3 +1426,68 @@ the verifier produced one, with more confidence than any of the three
 investigations it was checking. "Confidence: high … all four I reproduced myself
 with commands, not readings" was the most confident sentence in the report and
 the false one. **A verification layer is not self-verifying.**
+
+## 205 -> 157 against producer 4df7576: DIAGNOSED, not fixed (2026-08-31)
+
+Measured after the fixpoint-termination fix (`65a538fe`). No hang, zero
+behavioural mismatches — every one of the 48 is an honest refusal. Three
+causes, and they are not one problem:
+
+| cause | count | whose |
+|---|---:|---|
+| `Unknown data node operation: Count` | **14** | a NODE ROSTER gap — chalk has 88 classes, the producer 89 |
+| `Coerce[Scalar -> Num] needs a T2 decision` | **30** | **T2** |
+| `shape: missing [ArrayRef :ArrayRef]` / `[HashRef :HashRef]` | ~20 (overlapping) | corpus specs pinning the OLD node vocabulary |
+
+(The three overlap: a case can both GAP on a Coerce and fail its shape leg.)
+
+**1. `Count` — 14 cases, a known and already-negotiated change.** The producer
+split `Count` out of `Length` (`93a2d12`): `length($s)` is perl's length op over
+a string, `scalar(@a)` is a synthesised element count and no perl op at all. One
+node was serving two operations. I recorded that split when they proposed it and
+have not taken it — chalk needs `Chalk::IR::Node::Count`. **Mechanical, and the
+producer measured wire stamps byte-identical across it.**
+
+**2. `Coerce[Scalar -> Num]` — 30 cases, and this is perigrin's point.** Not a
+missing feature: chalk's own die says so, in the wording corrected earlier today
+(`3bdaeeb9`):
+
+> *needs a T2 decision about how to read a `%Slot` payload (tagged? runtime?
+> per-context choice?) — Scalar is lowerable, but which reading to emit is not
+> settled.*
+
+`Scalar` HAS an encoding (`%Slot`). What is missing is the decision recorded as
+T2 direction (`302b254b`): **`%Slot` carrying its own type tag**, so a Scalar
+operand is dispatchable. With a tag these lower through conversion arms that
+already exist; without one each is an honest refusal.
+
+The producer's floors are why this grew. `:param` fields, bare `shift`, and
+subscripts now floor to `Scalar` — all correct, all target-independent, all
+increasing the number of `Scalar`s reaching the backend. **T1 getting better is
+what makes the T2 gap bigger**, which is the shape of the finding rather than a
+regression in either repo.
+
+**3. The `ArrayRef :ArrayRef` shape failures are corpus specs, not code.** The
+`ir` blocks pin the old vocabulary; the producer's Array/Hash split (proposed,
+not yet landed) is the same class of change as `Count`. These move when the
+corpus is updated to the new node names.
+
+### What this says about sequencing
+
+**perigrin, 2026-08-31: "this may be a sign we need T2." The numbers agree.**
+30 of 48 are one T2 decision, and it is the same decision blocking the G8 floor
+gap — where **9 of 10** pre-existing failures are a `Scalar` reaching an op with
+no `Scalar` arm.
+
+Two floors, one blocker, and it is not T1's:
+
+- **G8's floor (205 vs 215):** 9 of 10 are `Scalar`-has-no-arm.
+- **Producer 4df7576 (157 vs 205):** 30 of 48 are `Coerce[Scalar -> Num]`.
+
+Both dissolve with the `%Slot` type tag. Neither dissolves with more T1 work —
+and T1 improving makes both LARGER, because better inference means more values
+correctly typed `Scalar` and therefore more of them arriving at a backend that
+cannot dispatch on it.
+
+**NOTHING FIXED HERE.** The pin stays at `8c15e32` (205) until the roster gap
+and the tag are decided.
