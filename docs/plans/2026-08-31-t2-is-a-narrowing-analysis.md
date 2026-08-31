@@ -634,3 +634,70 @@ explicitly -- but the soundness work is still owed.
 `Call :Int` / `Coerce(Int -> Str)` and we produce `Num`, because the operand
 arrives `Num` and `Add => 'join'` yields `join(Num, Int) = Num`. No miscompile,
 a spec-vs-output disagreement about precision.
+
+## `Array` is `Array[Scalar]` -- the element type is computed but never stored
+
+perigrin, correcting a claim of mine that `ArgsSource` is Array-stamped and so
+"has no scalar meaning": *"Array is really Array[Scalar] baring any other
+narrowing ... but if we can prove that all the inputs to a function are Int then
+we can assert that ArgSource is Array[Int] instead of Array[Scalar]."*
+
+Measured, and the inference already exists.
+
+**`_element_repr($container)` (`Analysis.pm:1523`) computes exactly this.** It
+collects every element's repr -- the literal inputs AND every store's rhs
+(`_element_store_values`) -- and joins them. It refuses to answer while any
+contributor is untyped, deliberately: *"Answering from the literals alone while
+a store is still untyped would commit to a type the store may be about to
+widen."* That is `Array[T]` inference with the right soundness discipline.
+
+**But the answer is thrown away almost everywhere.** Three call sites:
+
+| site | what it does with the answer |
+|---|---|
+| `:1381` | uses it inline to stamp one Subscript, discards it |
+| `:1781` | stores it -- in `%field_elem_type`, keyed by class+fieldix |
+| (that map) | read back at `:1815` to stamp a Subscript over a FieldAccess |
+
+So the ONLY persistent carrier for an element type is a side table for object
+FIELDS. There is no `Array[T]` on the node, and no carrier at all for a
+container that is not a field.
+
+**And `_element_repr` cannot even see `ArgsSource`.** It answers for `ArrayRef`
+and `HashRef` and returns undef for everything else (`:1529-1534`). `@_` is an
+`ArgsSource` node, so the one function that could compute `Array[Int]` for a
+parameter list declines to look at it.
+
+### Why this matters for the F8 question
+
+The chain perigrin describes -- prove every callsite passes Int, therefore
+`ArgsSource` is `Array[Int]`, therefore `$_[0]` is `Int` -- has every piece
+already built EXCEPT the carrier:
+
+- the per-callsite argument reprs: `_seed_direct_call_arg_reprs` collects them
+- the join over callsites: same pass, `_join_repr`
+- the element-type computation: `_element_repr`
+- **the place to WRITE `Array[Int]`: does not exist**
+
+`representation` is a single scalar string per node. `Array` and `Array[Int]`
+are not distinguishable in it, which is why the answer has to be recomputed at
+each use or stashed in a side table keyed by something else.
+
+### The design question this raises
+
+A parameterized repr (`Array[T]`, `Hash[T]`) is a bigger change than the T2
+spine collapse and should NOT be folded into it. But it is the same shape as the
+`%Slot` tag: a container whose element reading is not recorded forces every
+consumer to either guess or refuse.
+
+Two observations, neither built:
+
+1. **The side table already proves the pattern works.** `%field_elem_type` is
+   `Array[T]` for one kind of container, spelled as an out-of-band map. Generalizing
+   the carrier is a refactor of something that exists, not a new invention.
+2. **`ArgsSource` is the highest-value container to parameterize**, because a
+   sub's parameter list is where the whole-program join is most likely to
+   succeed -- callsites are enumerable, unlike arbitrary array stores.
+
+NOT BUILT. Recorded because the F8 shape-leg failure traces here, and because
+the "Array has no scalar meaning" reading was wrong.
