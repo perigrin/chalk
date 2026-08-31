@@ -6,6 +6,7 @@ use experimental 'class';
 
 use Scalar::Util qw(blessed);
 use Chalk::IR::Value;
+use Chalk::Grammar::Perl::TypeLibrary ();
 
 class Chalk::IR::Transform::TypeInference {
     # THE REPORT (spec §9.4). Populated by run(); undef before the first one.
@@ -25,19 +26,83 @@ class Chalk::IR::Transform::TypeInference {
     method run ($graph) {
         my $arrived_absent = _normalize_entry($graph);
 
+        # SNAPSHOT BEFORE, so narrowing and widening are OBSERVED rather than
+        # inferred from what the passes claim to have done. A pass that reports
+        # its own effect is the shape that let a silent widening ship before.
+        my %before = _stamp_snapshot($graph);
+
+        # THE SEAM. Inference itself is still the loader's Analysis sequence;
+        # step 4 moves the call to here. It is a named method rather than
+        # nothing so the report is measured AROUND it -- when the body arrives,
+        # the measurement does not have to be rewritten, and a test can
+        # substitute a body today to prove the counters actually move.
+        $self->_infer($graph);
+
+        my %after = _stamp_snapshot($graph);
+
+        my ($narrowed, $widened) = (0, 0);
+        for my $id (sort keys %after) {
+            my $was = $before{$id} // next;
+            my $now = $after{$id};
+            next if $was eq $now;
+            # NARROWED: the new type is a subtype of the old -- more was
+            # determined. WIDENED: the reverse, and spec §3/§9.3 forbid it
+            # unless a merge required it. Counted, not refused: the number is
+            # the finding.
+            if (Chalk::Grammar::Perl::TypeLibrary::is_subtype($now, $was)) {
+                $narrowed++;
+            }
+            elsif (Chalk::Grammar::Perl::TypeLibrary::is_subtype($was, $now)) {
+                $widened++;
+            }
+        }
+
         $report = {
-            arrived_absent => $arrived_absent,
-            # The remaining spec §9.4 fields land with step 3, which runs
-            # TypedInvariant over stamps as part of the report. Declared here
-            # as undef rather than omitted: an absent key and a key holding
-            # "not measured" are different claims, and this file is where the
-            # distinction is supposed to be enforced.
-            unknown_at_exit       => undef,
-            narrowed_count        => undef,
-            widened_without_merge => undef,
+            arrived_absent        => $arrived_absent,
+            unknown_at_exit       => _count_unknown($graph),
+            narrowed_count        => $narrowed,
+            widened_without_merge => $widened,
         };
 
         return $graph;
+    }
+
+    # _infer($graph) -> void. The inference body.
+    #
+    # EMPTY TODAY, deliberately and visibly. The loader still runs the Analysis
+    # sequence inline (step 4 moves it here), so T1 currently normalizes and
+    # measures without inferring. An empty method that is CALLED is honest
+    # about that; folding it away would make the report's zeros look like
+    # findings rather than like the absence of a body.
+    method _infer ($graph) { return }
+
+    # _stamp_snapshot($graph) -> (node id => repr) for every typed Value node.
+    sub _stamp_snapshot ($graph) {
+        my %seen;
+        for my $node (($graph->nodes // [])->@*) {
+            next unless blessed($node) && $node->isa('Chalk::IR::Value');
+            my $r = $node->representation // next;
+            $seen{ $node->id } = $r;
+        }
+        return %seen;
+    }
+
+    # _count_unknown($graph) -> Value nodes still holding the lattice top.
+    #
+    # This is the number spec §9.4 exists to surface, and it is REPORTED rather
+    # than asserted. `_assert_value_nodes_are_typed` (Analysis.pm) is the
+    # assertion version and it is commented out at its call site because 18
+    # cases fail it -- a check that must be disabled to ship is not a check.
+    # A count can be driven down deliberately; an all-or-nothing assertion can
+    # only be switched off.
+    sub _count_unknown ($graph) {
+        my $n = 0;
+        for my $node (($graph->nodes // [])->@*) {
+            next unless blessed($node) && $node->isa('Chalk::IR::Value');
+            my $r = $node->representation // next;
+            $n++ if $r eq 'Unknown';
+        }
+        return $n;
     }
 
     # _normalize_entry($graph) -> count of nodes that ARRIVED ABSENT
