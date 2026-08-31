@@ -701,3 +701,48 @@ Two observations, neither built:
 
 NOT BUILT. Recorded because the F8 shape-leg failure traces here, and because
 the "Array has no scalar meaning" reading was wrong.
+
+### The container inventory: `_element_repr` sees 2 of 10
+
+perigrin: *"There are a bunch more types than that we care about too, Array and
+Hash being the most obvious."* Correct, and the gap is wider than the
+`ArgsSource` case above.
+
+**Array and Hash are REPRS with no literal node class.** `%_REPR_LLVM_TYPE` has
+`Array => '%Array*'` and `Hash => '%Hash*'` (`Context.pm:4167-4168`), distinct
+from `ArrayRef`/`HashRef` (boxed `i8*`). So a value can BE an Array without ever
+passing through an `ArrayRef` node -- and `_element_repr` only pattern-matches
+the two literal-constructor node types.
+
+Container-ish node classes that exist, against what `_element_repr` answers for:
+
+| node | what it holds | `_element_repr`? | stamped in Analysis.pm? |
+|---|---|---|---|
+| `ArrayRef` | literal `[...]` | YES | — |
+| `HashRef` | literal `{...}` | YES | — |
+| `ArgsSource` | `@_` | no | 2 mentions |
+| `Slice` | container + index list -> slice | no | **0** |
+| `PostfixDeref` | `->@*`, `->%*` | no | **0** |
+| `ExpressionList` | comma lists / call args | no | **0** |
+| `ListAssign` | `my ($a,$b) = (...)` | no | — |
+| `StructRef` | promoted hash-to-struct | no | **0** |
+| `Ref` | `\` constructor | no | — |
+| `RefType` | `ref()` -> Str | n/a (not a container) | — |
+
+**Four of these have ZERO mentions in `Analysis.pm`** -- `Slice`,
+`PostfixDeref`, `ExpressionList`, `StructRef`. Nothing in the type layer has an
+opinion about them at all, so an element read through any of them starts
+un-narrowed and stays that way.
+
+`Slice` and `PostfixDeref` are the notable pair: both are element-producing
+reads whose result type is exactly the container's element type. They are the
+same question as `Subscript`, and `Subscript` at least gets stamped from
+`%field_elem_type` when its container is a FieldAccess.
+
+**This strengthens the carrier argument rather than changing it.** A parameterized
+repr would answer for every row at once, where the current design needs a
+bespoke rule per node kind -- and has one for two of ten.
+
+**Sequencing unchanged**: still not folded into the T2 spine collapse. But the
+inventory says the eventual carrier work is broader than "teach `_element_repr`
+about `ArgsSource`", which is how the previous section framed it.
