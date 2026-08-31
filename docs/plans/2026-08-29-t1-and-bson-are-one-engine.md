@@ -1560,3 +1560,43 @@ to take when the time comes.
 ruling on whether T2 lands as a full pass now or whether a narrower "enough T2
 that the lowerings work" is intended — his phrasing suggests the latter, and
 that is a smaller thing than the spec's T2.
+
+### `%StrPair` should fold into `%Str` — and it is the SAME work as the tag
+
+perigrin, 2026-08-31: *"%StrPair should probably be folded into %Str period."*
+Measured, and it is a half-finished migration whose remaining half is the Slot
+payload path.
+
+    %Str      = { i8* ptr, i64 len, i32 enc }   the VALUE type
+    %StrPair  = { i8* ptr, i64 len }            the BOXED HEAP CELL
+
+The code says so itself, in `@_STRPAIR_FIELDS`'s own comment: *"this is the
+BOXED HEAP CELL, deliberately still two fields. The THREE-field %Str below is
+the VALUE type. **They are being reconciled**; see the %Str block for why the
+value type moved first."*
+
+So the value type moved and the boxed cell did not. **52 `StrPair` references
+remain against 43 for `%Str`** — the older shape is still the larger one.
+
+**Where it survives is the finding.** All 22 `%StrPair*` uses are the same
+pattern: a Str boxed into an i64 payload and recovered from it —
+
+    inttoptr i64 $raw_pay to %StrPair*     ArrayRead :Str
+    inttoptr i64 $raw_pay to %StrPair*     HashRead :Str
+    bitcast  i8* $pair_raw to %StrPair*    field store
+    inttoptr i64 $pay      to %StrPair*    field read
+
+Array elements, hash values, object fields. **That is the `%Slot` payload path**
+— exactly the code the type tag has to touch. `%StrPair` exists because a
+`%Slot` payload is one i64 and a `%Str` is three fields, so a Str in a slot has
+to be boxed behind a pointer.
+
+**Which makes these one piece of work, not two.** A tagged `%Slot` is the thing
+that decides how its payload is read; `%StrPair` is a hand-rolled answer to that
+same question for one type, predating the tag. Folding it in before the tag
+exists would mean rebuilding the boxing twice.
+
+**Recorded, not started.** The `enc` field is the substantive difference — a
+boxed Str currently loses its encoding, which is a real gap independent of the
+tag, and the fold is where it gets fixed. Sequenced after the T2 pass exists,
+alongside the tag rather than before it.
