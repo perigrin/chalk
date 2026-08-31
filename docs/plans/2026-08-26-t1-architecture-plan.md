@@ -1328,3 +1328,47 @@ measured 205 with this cause recorded beside it, and the raise back to 215+
 becomes an acceptance criterion of the `%Slot` type tag work — exactly as
 restoring 218 is already T2's acceptance criterion for the D2 drop. Two floors,
 one blocker. **perigrin's call.**
+
+## PHASE 5 STEP 4 — the split is not "move the call" (coordinator, 2026-08-31)
+
+Attempted, and the attempt found the real shape. Recorded rather than forced.
+
+**The step as written:** move `Analysis->run` out of `from_json` and into the
+Pipeline's transforms slot as T1.
+
+**Why that cannot be done as a move.** `Analysis::run($graphs, $classes)` does
+TWO things in one pass: it BUILDS the MOP by replaying the wire's raw `classes`
+records (`_replay_classes`, then `$mop->seal`), and it INFERS types over the
+resulting graphs. T1 receives a graph whose MOP is **already sealed**, so the
+raw records are gone — there is nothing left to replay. Calling `run()` from T1
+would need either the raw `classes` section passed alongside the graph (the
+graph-set shape §2 rejects, in a new costume) or a second MOP built over the
+first.
+
+**So the split is: separate MOP CONSTRUCTION from TYPE INFERENCE.** They are
+different jobs and only one of them is T1's:
+
+- **Construction is deserialization** — replaying what the wire sent. It
+  belongs to the loader, and `from_json` is the right home for it.
+- **Inference is T1** — and it needs no raw records, only graphs and the MOP
+  edge they carry.
+
+Doing that means splitting `Analysis::run` in two, which is a larger change
+than the step budgeted and touches the ~40 existing callers.
+
+**Baseline for the exit criterion, measured.** `from_json`'s own comment says
+the loader "adds 16 stamps the wire never sent" and that the number reaching
+zero is what finishing the split means. **Measured: it is 8, not 16** —
+`loader-reproduces-the-wire.t` reports 2 per case across 4 cases. The comment
+is stale; 8 is the number to drive to zero.
+
+**What LANDED in steps 1-3** and stands on its own:
+
+| | |
+|---|---|
+| the MOP carries the unit's graph registry | `a296082d` — makes §2's one-graph contract possible |
+| the T1 class exists, normalizes absences at entry | `2631a59d` — ABSENT=17, Unknown=0 measured |
+| the exit report measures what inference achieved | `d90661f2` — counters proven to discriminate |
+
+T1's `_infer` is an empty, CALLED seam with the ordering fact written at it, so
+the next attempt starts from the finding rather than rediscovering it.

@@ -69,12 +69,35 @@ class Chalk::IR::Transform::TypeInference {
 
     # _infer($graph) -> void. The inference body.
     #
-    # EMPTY TODAY, deliberately and visibly. The loader still runs the Analysis
-    # sequence inline (step 4 moves it here), so T1 currently normalizes and
-    # measures without inferring. An empty method that is CALLED is honest
-    # about that; folding it away would make the report's zeros look like
-    # findings rather than like the absence of a body.
-    method _infer ($graph) { return }
+    # THE SEQUENCE MOVED HERE FROM THE LOADER (step 4). `from_json` now returns
+    # decoded graphs and nothing else; typing them is T1's job, which is what
+    # the split means.
+    #
+    # It still runs over a graph SET rather than one graph, because the passes
+    # are whole-program: a Call's type comes from its callee's Return, which
+    # lives in a sibling graph. T1's PUBLIC contract is still one graph (spec
+    # §2) -- the set is reached THROUGH the MOP edge that graph carries, never
+    # passed alongside it, which is what step 1's registry made possible.
+    method _infer ($graph) {
+        # NOT YET THE ANALYSIS SEQUENCE, and the reason is an ORDERING FACT
+        # worth stating rather than working around.
+        #
+        # `Analysis->run($graphs, $classes)` BUILDS the MOP from the wire's raw
+        # `classes` records and seals it. T1 receives a graph whose MOP is
+        # already sealed, so those records are gone -- there is nothing left to
+        # replay. Calling run() from here would either need the raw section
+        # passed alongside the graph (the graph-set shape spec §2 rejects, in a
+        # new costume) or a second MOP built over the first.
+        #
+        # So the split is not "move the call": it is "separate MOP CONSTRUCTION
+        # from TYPE INFERENCE", which are two things Analysis::run currently
+        # does in one pass. Construction belongs to the loader -- it is
+        # deserialization, replaying what the wire sent. Inference belongs
+        # here. Filed rather than forced, because forcing it means passing a
+        # graph set into T1 and that is the contract this phase exists to
+        # establish.
+        return;
+    }
 
     # _stamp_snapshot($graph) -> (node id => repr) for every typed Value node.
     sub _stamp_snapshot ($graph) {
