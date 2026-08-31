@@ -1491,3 +1491,58 @@ cannot dispatch on it.
 
 **NOTHING FIXED HERE.** The pin stays at `8c15e32` (205) until the roster gap
 and the tag are decided.
+
+### The 4df7576 wire diff, verified here (2026-08-31)
+
+The producer session diffed actual JSON between my pin and their HEAD. I
+reproduced the two claims that matter on one probe program
+(`my @a=(1,2,3); scalar(@a); length("abc")`):
+
+    8c15e32:   ArrayRef:ArrayRef    Length:Int
+    4df7576:   ArrayRef:Array       Count:Int
+
+**Both confirmed, and both correct my earlier record.**
+
+**1. `Count` SUBTRACTS from `Length`; it is not additive.** `scalar(@a)` arrived
+as `Length:Int` and now arrives as `Count:Int`. `Length`'s contract narrowed to
+strings only. So my 14 "Unknown data node operation: Count" failures are not 14
+new sites — they are **sites that used to arrive as `Length` and no longer do**.
+Adding `Count` while leaving `Length` accepting aggregates would leave a class
+nothing emits into.
+
+**2. Array/Hash is a STAMP change on the EXISTING classes, and it already
+landed.** This is why my roster diff found nothing but `Count`:
+
+    my @a = (1,2,3)   ->  class ArrayRef, stamp Array      (was stamp ArrayRef)
+    my $ar = [1,2]    ->  class ArrayRef, stamp ArrayRef   (unchanged)
+
+I had it filed as a proposal needing two new node classes and a paired
+cross-repo change. **It needed neither.** My ~20 `shape: missing [ArrayRef
+:ArrayRef]` failures are failing against something already shipped, not
+something pending — so the corpus specs can be updated once, together with
+`Count`, with no second wave.
+
+**3. `Coerce[Str -> Code]` for `entereval` is also live.** All three things I
+was tracking as queued are in `4df7576`. The producer reports nothing further
+queued that changes wire shape; remaining work there closes GAPs rather than
+altering what ships.
+
+### What this makes the roster work
+
+Not "add a class". Three things, one pass:
+
+1. add `Chalk::IR::Node::Count`;
+2. **narrow `Length` to strings** — otherwise a dead class;
+3. update the corpus `ir` blocks for both `Count` and the `Array`/`Hash`
+   stamps.
+
+**Still does not touch the 30 `Coerce[Scalar -> Num]` refusals**, which remain
+the T2 tag decision. The roster work moves 14 + ~20; the tag moves 30 here and 9
+of the 10 in the G8 floor gap.
+
+**A process note worth keeping.** A class-name diff showed ONE difference and
+missed two live contract changes — a stamp vocabulary change and a narrowed
+operator contract, neither visible in a file listing. The reader fix was a third
+of the same kind: no class changed, but `:reader` entering the `methods` record
+hung my fixpoint. **Roster equality is not wire compatibility**, and the diff
+that looks authoritative is the one to distrust.
