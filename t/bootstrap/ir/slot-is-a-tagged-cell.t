@@ -39,16 +39,9 @@ subtest 'the type declaration is rendered from the field list' => sub {
     }
 };
 
-subtest 'the size is COMPUTED, never a magic multiplier' => sub {
-    my $size = $C->_slot_size_bytes;
-    ok $size > 0, "size is positive ($size)";
-
-    # The size must actually track the field list. This is the assertion that
-    # would have caught `$n * 16` surviving a third field.
-    my @f = $C->_slot_fields;
-    my $raw = 0;
-    $raw += $_->{bytes} for @f;
-    ok $size >= $raw, "size ($size) covers the raw field bytes ($raw)";
+subtest q{size comes from LLVM, not from perl} => sub {
+    ok !Chalk::Target::LLVM::Context->can(q{_slot_size_bytes}),
+        q{perl-side sizing is gone -- see struct-sizes-come-from-llvm.t};
 };
 
 subtest 'field indices are looked up by name, not written as literals' => sub {

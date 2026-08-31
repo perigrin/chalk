@@ -314,6 +314,38 @@ my @_STRPAIR_FIELDS = (
 # `%HashEntry` already stores for a hash key (key_ptr, key_len, key_enc) and
 # what Context.pm:897 already specifies, and leaving it out would mean touching
 # every one of these sites twice.
+# _sizeof_llvm_type($ty) -> a constant expression giving sizeof($ty) in bytes.
+#
+# The standard LLVM idiom: index one element past a null pointer and convert
+# the resulting address to an integer. LLVM computes it from the type
+# declaration it is already emitting, so the size CANNOT DRIFT from the struct
+# -- which a hand-written byte count silently does the day a field is added.
+#
+# This replaced four literals: `$n * 16` for a %Slot array, `$npairs * 48` for
+# %HashEntry, and `malloc(i64 24)` twice for the %Array and %Hash headers. The
+# %Slot one became wrong-in-waiting the moment the cell gained a tag field, and
+# %HashEntry embeds a slot's worth of fields, so it was next.
+#
+# It is a constant EXPRESSION, not an SSA value, so it can appear inline in a
+# malloc argument but must be multiplied with _sizeof_times below when a count
+# is involved. Precedent: the Call(new) object allocation already does exactly
+# this.
+sub _sizeof_llvm_type {
+    my $ty = $_[-1];
+    return "ptrtoint ($ty* getelementptr ($ty, $ty* null, i64 1) to i64)";
+}
+
+# _sizeof_times($ty, $n) -> a constant expression for $n * sizeof($ty).
+#
+# $n is a compile-time integer here; a RUNTIME count needs a `mul i64` against
+# _sizeof_llvm_type instead, which is why this takes a literal rather than
+# pretending to handle both.
+sub _sizeof_times {
+    my ($ty, $n) = @_[-2, -1];
+    $n =~ /^\d+$/ or die "_sizeof_times: count must be a compile-time integer, got '$n'";
+    return "mul (i64 $n, i64 " . _sizeof_llvm_type($ty) . ")";
+}
+
 my @_STR_FIELDS = (
     { name => 'ptr', llvm => 'i8*', bytes => 8 },
     { name => 'len', llvm => 'i64', bytes => 8 },
@@ -332,7 +364,6 @@ sub _str_type_decl {
     return '%Str = type { ' . join(', ', map { $_->{llvm} } @_STR_FIELDS) . ' }';
 }
 
-sub _str_size_bytes { return _struct_size_bytes(@_STR_FIELDS) }
 
 # ---------------------------------------------------------------------------
 # %Slot -- the uniform scalar cell, and the ONE place its layout is written.
@@ -411,8 +442,6 @@ sub _slot_type_decl {
     return '%Slot = type { ' . join(', ', map { $_->{llvm} } @_SLOT_FIELDS) . ' }';
 }
 
-# _slot_size_bytes() -> the allocation size for one cell.
-sub _slot_size_bytes { return _struct_size_bytes(@_SLOT_FIELDS) }
 
 # _strpair_fields() -> the field list (for size computation and tests).
 sub _strpair_fields { return @_STRPAIR_FIELDS }
@@ -424,26 +453,12 @@ sub _strpair_type_decl {
          . ' }';
 }
 
-# _strpair_size_bytes() -> the allocation size for the boxed heap cell.
-sub _strpair_size_bytes { return _struct_size_bytes(@_STRPAIR_FIELDS) }
 
-# _struct_size_bytes(@fields) -> size per LLVM's struct layout rules: each
-# field is aligned to its own width, and the struct is padded to the alignment
-# of its largest member. Shared by both layouts so neither can drift into its
-# own arithmetic.
-sub _struct_size_bytes {
-    my @fields = @_;
-    my $size = 0;
-    my $max  = 0;
-    for my $f (@fields) {
-        my $w = $f->{bytes};
-        $size = int(($size + $w - 1) / $w) * $w;   # align this field
-        $size += $w;
-        $max = $w if $w > $max;
-    }
-    $size = int(($size + $max - 1) / $max) * $max if $max;   # tail padding
-    return $size;
-}
+# Struct SIZES are not computed here. LLVM computes them from the type
+# declaration via _sizeof_llvm_type, so the emitted size cannot drift from the
+# emitted struct. This function used to re-implement LLVM's alignment rules in
+# perl -- two sources of truth for one layout, and the `bytes` fields below
+# survive only as documentation of intended widths.
 
 # render_str_type_once() -> @llvm_lines (possibly empty)
 #
@@ -5568,9 +5583,8 @@ sub _lower_array_ref {
     my $inputs = $node->inputs;
     my $n      = scalar @$inputs;
 
-    # Allocate slot buffer: n * sizeof(%Slot). COMPUTED, not a literal 16:
-    # a field added to @_SLOT_FIELDS must not silently under-allocate here.
-    my $slot_bytes = $n * _slot_size_bytes();
+    # Allocate slot buffer: n * sizeof(%Slot), sized BY LLVM from the type.
+    my $slot_bytes = _sizeof_times('%Slot', $n);
     my $slot_buf = $self->_fresh;
     $self->_emit("  $slot_buf = call i8* \@malloc(i64 $slot_bytes)  ; ArrayRef: alloc $n slots");
     my $slots = $self->_fresh;
@@ -5590,9 +5604,10 @@ sub _lower_array_ref {
         $self->_emit("  store i64 $elem_i64, i64* $slot_pay  ; ArrayRef: slot[$i] payload=$elem_i64");
     }
 
-    # Allocate Array header: { i64 len, i64 cap, %Slot* elems } = 24 bytes.
+    # Allocate Array header: { i64 len, i64 cap, %Slot* elems }, sized by LLVM.
     my $arr_buf = $self->_fresh;
-    $self->_emit("  $arr_buf = call i8* \@malloc(i64 24)  ; ArrayRef: alloc Array header");
+    my $arr_sz  = _sizeof_llvm_type('%Array');
+    $self->_emit("  $arr_buf = call i8* \@malloc(i64 $arr_sz)  ; ArrayRef: alloc Array header");
     my $arr = $self->_fresh;
     $self->_emit("  $arr = bitcast i8* $arr_buf to %Array*  ; ArrayRef: Array ptr");
     my $len_ptr = $self->_fresh;
@@ -5626,7 +5641,9 @@ sub _lower_hash_ref {
     my $inputs = $node->inputs;
     my $npairs = scalar(@$inputs) / 2;
 
-    my $entry_bytes = $npairs * 48;
+    # Sized by LLVM from %HashEntry: it embeds a slot's worth of value fields,
+    # so a hand-written 48 goes wrong exactly when those change.
+    my $entry_bytes = _sizeof_times('%HashEntry', $npairs);
     my $ent_buf = $self->_fresh;
     $self->_emit("  $ent_buf = call i8* \@malloc(i64 $entry_bytes)  ; HashRef: alloc $npairs entries");
     my $ents = $self->_fresh;
@@ -5668,7 +5685,8 @@ sub _lower_hash_ref {
     }
 
     my $hash_buf = $self->_fresh;
-    $self->_emit("  $hash_buf = call i8* \@malloc(i64 24)  ; HashRef: alloc Hash header");
+    my $hash_sz  = _sizeof_llvm_type('%Hash');
+    $self->_emit("  $hash_buf = call i8* \@malloc(i64 $hash_sz)  ; HashRef: alloc Hash header");
     my $hash = $self->_fresh;
     $self->_emit("  $hash = bitcast i8* $hash_buf to %Hash*  ; HashRef: Hash ptr");
     my $cnt_ptr = $self->_fresh;
@@ -6363,7 +6381,7 @@ sub _box_payload {
         my ($str_ptr, $len_ref) = $self->_str_parts($val_ref);
         my $pair_raw = $self->_fresh;
         my $pair_ptr = $self->_fresh;
-        my $pair_bytes = _strpair_size_bytes();
+        my $pair_bytes = _sizeof_llvm_type('%StrPair');
         $self->_emit("  $pair_raw = call i8* \@malloc(i64 $pair_bytes)  ; alloc StrPair ($pair_bytes bytes) for $what");
         $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
         my $pp_gep = $self->_fresh;
@@ -6454,7 +6472,7 @@ sub _store_field_payload {
         my ($str_ptr, $len_ref) = $self->_str_parts($val_ref);
         my $pair_raw = $self->_fresh;
         my $pair_ptr = $self->_fresh;
-        my $pair_bytes = _strpair_size_bytes();
+        my $pair_bytes = _sizeof_llvm_type('%StrPair');
         $self->_emit("  $pair_raw = call i8* \@malloc(i64 $pair_bytes)  ; alloc StrPair ($pair_bytes bytes) for field '$pname'");
         $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
         my $pp_gep = $self->_fresh;

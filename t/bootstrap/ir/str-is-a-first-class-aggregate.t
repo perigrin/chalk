@@ -46,27 +46,32 @@ subtest 'the encoding field exists and is field 2' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# The size must stay DERIVED. This is the trap the previous commit closed for
-# %StrPair: adding a third field makes the struct 24 bytes with tail padding,
-# and any hardcoded 16 would under-allocate and corrupt the heap silently,
-# because every corpus string is ASCII so `enc` is always 0.
+# The size must stay DERIVED -- and it is now LLVM that derives it. Adding the
+# third field makes the struct 24 bytes with tail padding, and a hardcoded 16
+# would under-allocate and corrupt the heap silently, because every corpus
+# string is ASCII so `enc` is always 0.
+#
+# This subtest used to call _str_size_bytes and then RE-COMPUTE the expected
+# value with the same alignment arithmetic -- a third copy of LLVM's layout
+# rules, checking a second copy against itself. Both are gone: the emitted IR
+# asks LLVM via `getelementptr null, i64 1`, so the size cannot disagree with
+# the struct. What is worth pinning now is that the ALLOCATION SITES go through
+# that helper rather than restating a number.
 # ---------------------------------------------------------------------------
-subtest 'adding the third field moves the size with it' => sub {
-    plan tests => 2;
+subtest 'the size is asked of LLVM, never restated in perl' => sub {
+    plan tests => 4;
 
-    my $size = Chalk::Target::LLVM::Context::_str_size_bytes();
-    is($size, 24, '{i8*, i64, i32} is 24 bytes with tail padding, not 16');
+    ok(!Chalk::Target::LLVM::Context->can('_str_size_bytes'),
+       'the perl-side size function is gone');
 
+    my $sz = Chalk::Target::LLVM::Context::_sizeof_llvm_type('%Str');
+    like($sz, qr/getelementptr/, 'the size is a getelementptr constant expression');
+    like($sz, qr/\Q%Str\E/,      'it names %Str, so it tracks the declaration');
+
+    # The field list survives as the declaration's source, so a third field
+    # still moves the emitted struct -- which is what moves the size.
     my @f = Chalk::Target::LLVM::Context::_str_fields();
-    my ($expect, $max) = (0, 0);
-    for my $x (@f) {
-        my $w = $x->{bytes};
-        $expect = int(($expect + $w - 1) / $w) * $w;
-        $expect += $w;
-        $max = $w if $w > $max;
-    }
-    $expect = int(($expect + $max - 1) / $max) * $max if $max;
-    is($size, $expect, 'the size is computed from the field list, not restated');
+    is(scalar(@f), 3, '{ptr, len, enc} -- three fields');
 };
 
 subtest 'the type declaration is built from the fields' => sub {
