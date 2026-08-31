@@ -1484,3 +1484,79 @@ Revised: `$@` modelling stays FILED, and the cluster it belongs to — the eval
 node type, the `$@` write side, the underflow crashes — is Perl-subset
 breadth. **`try`/`catch` is what chalk itself needs, and `entertrycatch`
 already lowers to a Region merge on the producer side.**
+
+## T2 architecture review before building the tag (2026-08-31)
+
+perigrin asked for a review of the T2 architecture and episodic memory before I
+start. **Episodic memory is unavailable this session — the MCP server failed to
+connect and stayed down through two `/mcp` retries — so this rests on the repo
+record only.** Anything that lived solely in conversational recall is not
+consulted here, and that limitation is the first finding.
+
+### What the spec actually says T2 IS
+
+`docs/specs/2026-08-26-t1-type-inference-requirements.md`, and it does not match
+what I was about to build:
+
+> *"one object owning `Loader > T1 > Optimizers > T2 > Optimizers > Scheduler`"*
+>
+> *"The test: can the compiler still produce a correct program without this
+> stage? … Remove T1 and the backend receives a graph it cannot lower — or
+> lowers by guessing. **T2 is the same**: remove it and there is no encoding at
+> all."*
+>
+> *"neither may DECLINE a case it cannot handle: an optimizer passes it
+> through, a correctness [pass may not]"*
+
+**T2 is a PASS IN THE PIPELINE, not a change to the backend.** It sits between
+optimizer stages and owns the encoding decision as a `Graph -> Graph`
+transformation — the same shape as T1, and for the same reason: it is a
+correctness stage, not an optimization.
+
+### What I was about to do instead, and why it was wrong
+
+I had scoped "add a tag field to `%Slot`" as a **backend edit** — change the
+type declaration in `Target/LLVM/Context.pm`, fix the sites that index into it.
+That is T2's *consequence*, not T2. It would put the encoding decision in the
+same place `%LOWERABLE_STAMP` put it — inside a consumer, below the layer that
+owns it — which is the exact level violation this whole phase exists to undo.
+
+**The tag is what T2 EMITS. T2 is the pass that decides it.**
+
+### The measured surface, which is larger than the plan estimated
+
+Recorded so the next attempt starts from it rather than the old figure:
+
+| | plan said | measured |
+|---|---|---|
+| raw `insertvalue`/`extractvalue` | 4 | **5** |
+| `getelementptr` into a `%Slot` | — | **10** (3 at index 0, 4 at index 1) |
+| field-cell GEPs (`obj`, `slot_idx`, 0/1) | — | **9** |
+| **hardcoded size** | — | **`$n * 16` at `:5490`** |
+
+**The size is the trap.** `%Str` and `%StrPair` compute their sizes from a field
+list (`_struct_size_bytes(@_STR_FIELDS)`); `%Slot` hardcodes 16, and a third
+field makes that silently wrong — a buffer under-allocation, not a compile
+error. That must become a field list before any field is added, and it is worth
+doing on its own regardless of the tag.
+
+`%HashEntry = type { i8*, i64, i32, i1, i64 }` inlines a Slot-shaped tail rather
+than embedding `%Slot`, so it does not follow automatically.
+
+**Appending the tag as field 2** (`{i1 defined, i64 payload, i32 tag}`) keeps all
+16 literal indices valid, unlike inserting it in the middle. That is the shape
+to take when the time comes.
+
+### Sequencing, revised
+
+1. **`%Slot` gets a field list** and `_slot_size_bytes`, replacing `$n * 16`.
+   Pure refactor, no behaviour change, removes the silent-corruption trap.
+2. **T2 exists as a pass** — `Chalk::IR::Transform::…`, `Graph -> Graph`,
+   entered from the Pipeline's transforms slot, mirroring T1's shape.
+3. **The tag is what it emits.** Backend sites follow from the pass, not before
+   it.
+
+**NOT STARTED.** Step 1 is safe and useful today; steps 2-3 want perigrin's
+ruling on whether T2 lands as a full pass now or whether a narrower "enough T2
+that the lowerings work" is intended — his phrasing suggests the latter, and
+that is a smaller thing than the spec's T2.
