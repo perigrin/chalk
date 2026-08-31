@@ -1448,3 +1448,39 @@ node that owns the eval effect is also the natural place to hang its `$@` write.
 `eval` node type, and the producer's two stack-underflow crashes (`eval { die }`
 then `$@`) are one cluster, not three items. The crashes are the current
 symptom of the absence.
+
+### CORRECTION: chalk DOES model globals, and `$@` is not on the self-hosting path
+
+Two corrections to the entry above, both perigrin's.
+
+**1. "Chalk models no punctuation global" was wrong** — I grepped for `$@` and
+`ERRSV` and concluded from the absence, the same error as the "missing pins"
+earlier. Chalk models `@_` as `ArgsSource`, and `EntryDef` covers stash
+variables generally, with the sigil as part of node identity:
+
+> *"`_` alone names THREE different things in perl: the scalar `$_`, the
+> argument array `@_`, and the bareword `_` filetest handle … A name-only
+> identity hash-consed the first two into ONE node — measured."*
+
+So the machinery for naming a global read EXISTS, and `$@` would be an
+`EntryDef`-shaped read rather than a new kind of thing. What `$@` still needs
+beyond that is the WRITE side, which remains the real work: `EnvRead`'s
+hash-consing is sound only because "env writes are not modelled", and `$@` is
+written by every eval.
+
+**2. Measured: `$@` appears ZERO times in `lib/`.** Chalk's own source never
+reads or writes it — the project mandates `try`/`catch` over `eval` blocks, and
+`try`/`catch` compiles to `entertrycatch` with the error bound to a LEXICAL
+(`$e`), not to `$@`. Verified: inside a `catch` block, `$@` is empty.
+
+**So `$@` is NOT on the self-hosting path.** It is a Perl-subset completeness
+question, not a blocker for compiling chalk with chalk. That lowers its
+priority relative to everything gating Phase 5, and it means the producer's two
+stack-underflow crashes (`eval { die }` then `$@`) are also off the
+self-hosting path — they matter for `t/base` coverage, which is the producer
+session's current target, not for the capstone.
+
+Revised: `$@` modelling stays FILED, and the cluster it belongs to — the eval
+node type, the `$@` write side, the underflow crashes — is Perl-subset
+breadth. **`try`/`catch` is what chalk itself needs, and `entertrycatch`
+already lowers to a Region merge on the producer side.**
