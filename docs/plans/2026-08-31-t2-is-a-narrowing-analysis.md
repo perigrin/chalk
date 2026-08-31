@@ -494,3 +494,79 @@ coincidentally-correct encoding scores green on the behaviour leg. Use instead:
 KEPT: the `lib/Chalk/IR/` must-not-mention-LLVM grep gate (cheap, catches
 `return_repr` on MethodInfo) -- with an allowlist, since `IR/Target.pm` names
 LLVM legitimately as an example.
+
+## Narrowing a producer's widening: `join(Scalar, Int) = Scalar` is the blocker
+
+perigrin, on whether chalk should narrow a widening the producer chose:
+*"Yes if we can guarantee it. The producer isn't necessarily reliable ...
+currently it's B::SoN but that may not always be true."*
+
+That is a stronger principle than fixing one case: the wire is an INPUT, and
+chalk should not inherit its imprecision. Here is exactly what stands in the
+way, measured on F8 (`sub f { $_[0] + 1 }`).
+
+**The producer's widening is locally correct.** Inside `main::f`, `$_[0]` reads
+an element of `@_` -- an array of Slots -- and nothing local narrows it. So
+`Coerce[Scalar -> Num]` is the honest answer THERE. The `Int` is only knowable
+whole-program: the caller passes `Constant(10) :Int`.
+
+**The pass that should close this already exists and already handles the
+shape.** `_seed_direct_call_arg_reprs` (`Analysis.pm:720`) recognizes both
+`shift @_` and `$_[0]` (`Subscript(ArgsSource, Constant(0))`, `:800-814`), and
+joins over every callsite rather than taking the first -- its own comment
+records the measurement that source order alone otherwise picked between two
+different wrong answers.
+
+**The blocker is one line, and it is deliberate.** At `:837`:
+
+    my $joined = _join_repr( grep { defined } $existing, $slot->{reprs}->@* );
+
+The read's EXISTING stamp folds in as another arm. Measured:
+
+    join(Scalar, Int)  = Scalar
+    join(Unknown, Int) = Unknown
+    join(Num, Int)     = Num
+
+So a read already stamped `Scalar` absorbs every callsite's `Int` and the
+fixpoint can never move it DOWN. That is not an oversight -- the comment at
+`:830-835` names it as the termination latch: *"the existing stamp is folded
+INTO the join, so a stamp only ever moves UP the lattice, and the lattice is
+finite with `Unknown` at the top. A node can therefore be re-stamped only
+finitely often."* Two tests pin it (`ir/is-narrowed-guards.t`,
+`ir/propagate-fixpoint-terminates.t`), and loosening it to "re-stamp whenever
+something changed" is recorded as what HANGS the loop.
+
+### The design question
+
+Narrowing requires moving DOWN the lattice, which is what the termination
+argument forbids. Three ways out, none free:
+
+1. **Don't fold the existing stamp when it is un-narrowed.** `Scalar` and
+   `Unknown` are not evidence -- they are the ABSENCE of evidence, so folding
+   them in gives an un-narrowed answer priority over a real measurement. This is
+   the smallest change and preserves termination: the join is still monotone
+   over the callsite arms, and an un-narrowed existing stamp simply stops
+   poisoning it. RISK: a read stamped `Scalar` for a REASON (a genuine
+   multi-type callsite set that already joined to `Scalar`) would be re-narrowed
+   on the next pass and oscillate. Needs a way to distinguish "Scalar because
+   nothing narrowed it" from "Scalar because the join said so" -- which is the
+   same distinction the %Slot tag draws between `Opaque` and `Undef`.
+
+2. **Two-phase: collect all callsite arms, then stamp once, never re-entering.**
+   Terminates by construction. Larger change to the fixpoint's shape.
+
+3. **Leave it, and treat the producer's widening as authoritative.** This is the
+   status quo, and it is what perigrin's principle rejects.
+
+**DO NOT bolt (1) on without resolving its risk.** A narrowing that oscillates
+is worse than one that never happens, and the memory note on the `Length`
+narrowing records a chalk-side narrowing that regressed the gate 205->195 and
+was reverted, on the grounds that the narrowing was the PRODUCER's. The
+difference here is that perigrin has now stated the opposite principle
+explicitly -- but the soundness work is still owed.
+
+**F8's status:** its behavioural failure is FIXED (commit 352e2253; lli prints
+11, exit 0, matching perl). What remains is the SHAPE leg only: the spec pins
+`Call :Int` / `Coerce(Int -> Str)` and we produce `Num`, because the operand
+arrives `Num` and `Add => 'join'` yields `join(Num, Int) = Num`. No miscompile,
+a spec-vs-output disagreement about precision.
