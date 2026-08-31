@@ -1045,7 +1045,7 @@ context: scalar
 %c20   = Constant(20) :Int
 %c30   = Constant(30) :Int
 %arr   = ArrayRef(%c10, %c20, %c30) :Array
-%len   = Length(%arr) :Int
+%len   = Count(%arr) :Int
 %c1    = Constant(1) :Int
 %last  = Subtract(%len, %c1) :Int
 %nl = Constant("\n") :Str
@@ -1202,7 +1202,7 @@ context: scalar
 %c4    = Constant(4) :Int
 %c6    = Constant(6) :Int
 %arr   = ArrayRef(%c2, %c4, %c6) :Array
-%len   = Length(%arr) :Int
+%len   = Count(%arr) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%len : Int -> Str) :Str
 %p  = Print(%co_p, %nl)

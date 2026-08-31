@@ -47,7 +47,7 @@ context: scalar
 %c2  = Constant(2) :Int
 %c3  = Constant(3) :Int
 %arr = ArrayRef(%c1, %c2, %c3) :Array
-%r   = Length(%arr) :Int
+%r   = Count(%arr) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%r : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
@@ -84,7 +84,7 @@ context: scalar
 %c2  = Constant(2) :Int
 %c3  = Constant(3) :Int
 %arr = ArrayRef(%c1, %c2, %c3) :Array
-%r   = Length(%arr) :Int
+%r   = Count(%arr) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%r : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
@@ -192,7 +192,7 @@ context: scalar
 %kb   = Constant("b") :Str
 %v2   = Constant(2) :Int
 %hash = HashRef(%ka, %v1, %kb, %v2) :Hash
-%r    = Length(%hash) :Int
+%r    = Count(%hash) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%r : Int -> Str) :Str
 %p  = Print(%co_p, %nl)
