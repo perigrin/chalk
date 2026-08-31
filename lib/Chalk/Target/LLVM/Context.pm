@@ -390,10 +390,6 @@ sub _str_type_decl {
 # two-field layout already had, so no allocation anywhere changed.
 my @_SLOT_FIELDS = (
     { name => 'defined', llvm => 'i1',  bytes => 1 },
-    # The representation tag. Its VALUES are the target's vocabulary, not the
-    # lattice's: this is the encoding axis, so it answers "how do I read the
-    # payload", never "what type is this".
-    { name => 'tag',     llvm => 'i8',  bytes => 1 },
     { name => 'payload', llvm => 'i64', bytes => 8 },
 );
 
