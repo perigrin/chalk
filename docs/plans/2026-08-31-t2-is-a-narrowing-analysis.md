@@ -309,3 +309,58 @@ leg.** The interface is designed toward and built when a second target asks.
 The 26 existing leaks are NOT in scope for the T2 build. `return_repr` on
 `MethodInfo` looks load-bearing — likely a chain, not a slice — and should be
 filed separately rather than folded in.
+
+## Measured 2026-08-31: the producer got MORE correct and the gate FELL
+
+perigrin predicted the producer work had eliminated `Unknown`. Measured against
+two pinned producers on the identical chalk tree:
+
+| producer | gate-green | behavior | shape | invariant | worklist |
+|---|---|---|---|---|---|
+| `8c15e32` (36 commits back) | 205 | 205 | 207 | 219 | 17 |
+| `4d57f70` (HEAD) | **157** | 157 | 161 | 219 | 65 |
+
+**48 cases lost, and that is the design being confirmed rather than a
+regression.** The dominant failure family, 33 occurrences:
+
+    GAP: Coerce[Scalar -> Num] needs a T2 decision about how to read a %Slot payload
+
+That message NAMES T2. It is a blocker chalk declared for exactly this
+situation. The producer converted `Unknown` stamps into `Scalar`; chalk now
+receives an honest type where it previously got a failure value. `Scalar` is the
+top of the spine — the un-narrowed type that REQUIRES T2 to pick an encoding.
+
+**So 205 -> 157 is the size of the T2-shaped hole**, visible now that the
+producer has stopped hiding it behind `Unknown`. The recorded pattern firing at
+scale: T1 improving makes T2's job LARGER.
+
+`invariant=219` is UNCHANGED across both producers. The graphs are legal; only
+their lowering is blocked. That is the definition of a T2 problem, and it is
+the leg that proves the fall is not a correctness regression in the IR.
+
+### Other families (not T2's, do not scope them in)
+
+- 18 x `direct call to '...': callee has effect(s) on its control chain` — the
+  inliner declination sites, the known F3/define+call gap.
+- 3 x `field 'name' declared repr=Scalar but constructor argument repr=Str`
+- 3 x `Call(method) reached LLVM backend with NO representation (undef)`
+- 3 x `Call(method) 'first' node repr=Int disagrees with class 'Bag' vtable ABI
+  return_repr=Scalar`
+
+### UNRESOLVED, and it outranks the gate number
+
+Behavioural mismatches (`lli` output != perl) went **21 -> 120**. Those are not
+declared GAPs. If they are the `Coerce` fallback at `Context.pm:1938` silently
+emitting `""` — the path whose own comment calls it *"a FALLBACK, not a
+stringification ... the honest fix is upstream"* — then the producer improvement
+WIDENED A SILENT-MISCOMPILE CLASS, not merely an honest-blocker class.
+
+Silent wrong output outranks a declared GAP. **Not yet confirmed which these
+are.** Establish before trusting any gate number from this producer.
+
+### The floor
+
+215 is now far out of reach by producer drift alone (157 against HEAD, 205
+against the old pin). The floor's own text — *"Restoring 218 is T2 acceptance
+criteria; T2 is not done while this reads 215"* — still holds, but the gap it
+must close is ~60 cases, not ~10.
