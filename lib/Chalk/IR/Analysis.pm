@@ -1976,6 +1976,20 @@ sub _stamp_method_call_reprs ($graphs, $mop) {
                 $c = $sup ? $sup->name : undef;
             }
             defined $repr or next;
+            # WRITE ON MOVE, not on visit. The caller loops
+            # `while (_stamp_method_call_reprs(...) > 0)`, so a count that
+            # rises on every visit never reaches zero and the loop spins
+            # forever -- measured: stamped=2 at iteration 1 and still 2 at
+            # iteration 600, on a class with two `:param :reader` fields.
+            #
+            # This is the discipline 6db5dcdc established for
+            # _propagate_computed_reprs and missed here, the fifth site. It
+            # became reachable when the producer started shipping a reader as
+            # a real method (perl5-son 4df7576): before that a :reader had no
+            # entry in the class's methods record, so this loop never saw one
+            # and could not re-stamp it.
+            my $prev = $node->representation;
+            next if defined $prev && $prev eq $repr;
             $node->set_representation($repr);
             $stamped++;
         }
