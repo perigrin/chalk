@@ -2308,7 +2308,14 @@ sub _emit_coercion {
         #
         # This die dates from 2026-07-15, six weeks BEFORE Scalar gained %Slot
         # (2026-08-29). It outlived its own reason and its wording hid that.
-        die "GAP: Coerce[$from -> $to] needs a T2 decision about how to read a "
+        # $what NAMES THE CALLER. It was omitted here until 2026-08-31 while
+        # every other arm's comment interpolates it, so this die reported the
+        # conversion but hid WHERE it came from -- and _emit_coercion is
+        # reached from seven sites, five of them merge points (And/Or/Ternary
+        # arm joins) that pass reprs directly. Reading "Coerce[Scalar -> Num]"
+        # invites the guess that a Coerce NODE is at fault; the label says
+        # whether it was a node or an arm join.
+        die "GAP: $what\[$from -> $to] needs a T2 decision about how to read a "
           . "%Slot payload (tagged? runtime? per-context choice?) -- Scalar is "
           . "lowerable, but which reading to emit is not settled.";
     }
