@@ -536,12 +536,76 @@ finitely often."* Two tests pin it (`ir/is-narrowed-guards.t`,
 `ir/propagate-fixpoint-terminates.t`), and loosening it to "re-stamp whenever
 something changed" is recorded as what HANGS the loop.
 
+### CORRECTION: meet already exists, is sound, and is already used
+
+perigrin asked the right question -- *"Why join and not meet?"* -- and it
+dissolves most of the section above. Two claims there were wrong.
+
+**Wrong 1: "`meet_types` and `narrow_type` have ZERO callers."** That note is
+stale. `BackwardInference.pm` calls `meet_types` twice (`:125`, `:147`).
+Measured, it already gives the answer this needs:
+
+    meet(Scalar, Int)  = Int
+    meet(Unknown, Int) = Int
+    meet(Num, Int)     = Int
+    meet(Scalar, Str)  = Str
+
+`Unknown` is documented as TOP for meet -- *"it constrains nothing, so the
+other side wins"* -- which is exactly the treatment `Scalar` needs.
+
+**Wrong 2: the two operators are not a special case, they answer different
+questions.** The line at `:837` does two jobs with one operator:
+
+| arm | right operator | why |
+|---|---|---|
+| the callsite reprs | **join** | the read is ONE node shared by every caller, so its stamp must be true of ALL of them -- `join(Int, Str) = Str` |
+| the existing stamp | **meet** | that is not a callsite, it is the analysis's PRIOR STATE, and `Scalar` there is the absence of a measurement rather than one |
+
+Join across callsites is soundness. Joining the prior state in was chosen for
+TERMINATION, and meet gets termination a different way.
+
+**And the termination pattern is already written down.** `BackwardInference`
+runs meet in the descending direction with the discipline this needs, in its
+own words: *"Kildall's store discipline, in the descending direction: fold every
+source -- the declaration, the requirement, AND the stamp already on the node --
+into a single meet. Meeting in the node's own value is what makes the chain
+monotone: without it a later round can move the stamp SIDEWAYS between two
+incomparable types and the loop need never settle."*
+
+So the oscillation risk named above has a known answer: fold the node's own
+stamp into the MEET (not the join), and the descent is monotone over a finite
+lattice.
+
+### What actually remains: which nodes may be narrowed
+
+`_is_backward_inferable` admits exactly three operations -- `PadAccess`,
+`FieldAccess`, `Parameter`. A `Subscript` is NOT among them, so F8's `$_[0]`
+read is ineligible today.
+
+That guard is the recorded lesson **"fill a hole, never preempt a source"**: a
+backward requirement may only type a node that READS a value, never one that
+COMPUTES one, because a computed node's type is derived from its operands and
+overwriting it asserts something never derived from anything. The memory note
+records shipping a miscompile (gate 215->199, an i64 read as a double) by
+ignoring exactly this.
+
+**So the open question is narrow and specific: is a `Subscript(ArgsSource, 0)`
+a READ or a COMPUTATION?** It reads an element of `@_`, which argues read --
+the same category as `FieldAccess`. But `Subscript` in general computes over an
+arbitrary container, and admitting the operation wholesale would admit those
+too. The honest move is a predicate over the SHAPE (`Subscript` whose container
+is `ArgsSource` and whose index is a literal) rather than over the operation.
+
+NOT BUILT. The guard exists for a measured reason and widening it needs its own
+evidence.
+
 ### The design question
 
 Narrowing requires moving DOWN the lattice, which is what the termination
 argument forbids. Three ways out, none free:
 
-1. **Don't fold the existing stamp when it is un-narrowed.** `Scalar` and
+1. **[SUPERSEDED by the correction above -- the operator is the answer, not a
+   special case.]** Don't fold the existing stamp when it is un-narrowed. `Scalar` and
    `Unknown` are not evidence -- they are the ABSENCE of evidence, so folding
    them in gives an un-narrowed answer priority over a real measurement. This is
    the smallest change and preserves termination: the join is still monotone
