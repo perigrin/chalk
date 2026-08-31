@@ -390,16 +390,34 @@ sub _str_type_decl {
 # two-field layout already had, so no allocation anywhere changed.
 my @_SLOT_FIELDS = (
     { name => 'defined', llvm => 'i1',  bytes => 1 },
+    { name => 'tag',     llvm => 'i8',  bytes => 1 },
     { name => 'payload', llvm => 'i64', bytes => 8 },
 );
 
 # The tag values. Undef is 0 so a ZEROED cell reads as undef rather than as a
 # valid Int -- a memset'd buffer must not look like a defined zero.
+#
+# The vocabulary must be TOTAL over what _box_payload boxes. It boxes eight
+# representations; a four-value table mapped five of them onto Undef, which
+# makes a live heap pointer indistinguishable from an undefined cell -- not a
+# type error LLVM would catch, but a wrong value read at runtime.
+#
+# Opaque is NOT a representation. It records that the reading was never
+# ESTABLISHED, which is a different fact from a cell that IS undef: the first
+# says nothing was determined, the second asserts a determination. Collapsing
+# them onto 0 would let a consumer treat an un-narrowed cell as known-undef and
+# skip the coercion it still needs.
 my %_SLOT_TAG = (
-    Undef => 0,
-    Int   => 1,
-    Num   => 2,
-    Str   => 3,
+    Undef    => 0,
+    Int      => 1,
+    Num      => 2,
+    Str      => 3,
+    Boolean  => 4,
+    ArrayRef => 5,
+    HashRef  => 6,
+    CodeRef  => 7,
+    Object   => 8,
+    Opaque   => 9,
 );
 
 # _slot_fields() -> the field list (for size computation and tests).
@@ -424,13 +442,16 @@ sub _slot_tag_names { return sort keys %_SLOT_TAG }
 #
 # Maps a representation onto the reading its payload carries. A repr with no
 # concrete reading -- `Scalar` (the un-narrowed top), `Unknown`, or none at all
-# -- yields 'Undef': the cell records that the reading is NOT ESTABLISHED
+# -- yields 'Opaque': the cell records that the reading is NOT ESTABLISHED
 # rather than asserting one. That is the honest answer until T2 narrows it, and
 # it is what keeps this from becoming the guess the tag exists to remove.
+#
+# 'Opaque', not 'Undef': an un-narrowed Scalar is not a cell that IS undef, and
+# a consumer must be able to tell "no reading yet" from "the reading is undef".
 sub _slot_tag_for_repr {
     my $r = $_[-1];
-    return 'Undef' unless defined $r;
-    return exists $_SLOT_TAG{$r} ? $r : 'Undef';
+    return 'Opaque' unless defined $r;
+    return exists $_SLOT_TAG{$r} ? $r : 'Opaque';
 }
 
 # _slot_type_decl() -> the LLVM type declaration line.
@@ -669,6 +690,20 @@ sub render_need_flag_prologue {
     # %Array = { i64 len, i64 cap, %Slot* elems }
     # %HashEntry = { i8* key_ptr, i64 key_len, i32 key_enc, i1 val_def, i64 val_pay }
     # %Hash = { i64 count, i64 cap, %HashEntry* entries }
+    #
+    # %HashEntry INLINES a slot's value fields rather than embedding a %Slot,
+    # so the tag added to %Slot did not shift any %HashEntry index. It carries
+    # NO tag of its own yet, and that is a deliberate scope line, not an
+    # oversight: a hash value's reading is currently established by the READING
+    # node's repr (HashRead stamps the Slot it builds from `$repr`), so nothing
+    # yet consults a stored tag. It needs one exactly when a hash value's
+    # reading must survive independently of the reader's stamp -- a Scalar-typed
+    # hash whose values have mixed readings, which is the same case that makes
+    # the %Slot tag load-bearing. Widening it is a layout change to a hardcoded
+    # literal with five index sites (HashRef, HashRead, Assign(Hash-lvalue)),
+    # and those indices are literals today: they must move to a named field list
+    # of their own FIRST, exactly as @_SLOT_FIELDS did, or the widening repeats
+    # the off-by-one that the %Slot tag attempt was reverted for.
     if ($self->{_need_aggregate_types}) {
         push @lines, _slot_type_decl();
         push @lines, '%Array      = type { i64, i64, %Slot* }';
@@ -1003,7 +1038,7 @@ sub str_globals { $_[0]->{_str_globals} }
 
 # A SLOT VALUE IS ONE AGGREGATE, NOT TWO HALVES.
 #
-# %Slot is { i1 defined, i64 payload }. It used to be carried as its DEFINED
+# %Slot is { i1 defined, i8 tag, i64 payload }. It used to be carried as its DEFINED
 # BIT ALONE -- the node's cached SSA ref was the i1, and the payload lived in a
 # side table keyed by that ref, "because there is no single SSA ref that
 # carries both halves". There is: the aggregate itself, exactly as %Str already
@@ -1022,25 +1057,52 @@ sub str_globals { $_[0]->{_str_globals} }
 # behind, so both producer sites emitted two parallel phis by hand and relinked
 # them. One `phi %Slot` replaces that.
 
-# _build_slot($defined, $payload, $what) -> $slot_ref
+# _build_slot($defined, $payload, $tag_name, $what) -> $slot_ref
 #
 # $defined is an i1 operand ('i1 true', or a bare SSA ref), $payload an i64.
+#
+# $tag_name is REQUIRED and has no default. A default would be a guess wearing
+# the syntax of a fact, and the tag exists precisely to stop consumers guessing.
+# A caller that does not know the reading says so by passing 'Opaque' -- see
+# _slot_tag_for_repr, which maps an un-narrowed repr onto exactly that.
 sub _build_slot {
-    my ($self, $defined, $payload, $what) = @_;
-    my $partial = $self->_fresh;
-    my $slot    = $self->_fresh;
+    my ($self, $defined, $payload, $tag_name, $what) = @_;
+    # Naming %Slot as a value is what makes its type declaration necessary;
+    # setting the flag HERE rather than at each caller means a new Slot
+    # producer cannot forget it and emit a module that references an
+    # undeclared type.
+    $self->{_need_aggregate_types} = 1;
+    die "_build_slot($what): tag is required -- pass 'Opaque' if the reading "
+      . "is not established" unless defined $tag_name && length $tag_name;
+    my $tag = _slot_tag_value($tag_name);
+    my $s0   = $self->_fresh;
+    my $s1   = $self->_fresh;
+    my $slot = $self->_fresh;
     # `undef` is LLVM's poison aggregate, not perl's undef -- the starting
-    # value into which both fields are inserted.
+    # value into which the fields are inserted.
     my $d = $defined =~ /^i1 / ? $defined : "i1 $defined";
-    my ($i_def, $i_pay) = (_slot_idx('defined'), _slot_idx('payload'));
-    $self->_emit("  $partial = insertvalue %Slot undef, $d, $i_def  ; $what: defined");
-    $self->_emit("  $slot = insertvalue %Slot $partial, i64 $payload, $i_pay  ; $what: payload");
+    my ($i_def, $i_tag, $i_pay) =
+        (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
+    $self->_emit("  $s0 = insertvalue %Slot undef, $d, $i_def  ; $what: defined");
+    $self->_emit("  $s1 = insertvalue %Slot $s0, i8 $tag, $i_tag  ; $what: tag=$tag_name");
+    $self->_emit("  $slot = insertvalue %Slot $s1, i64 $payload, $i_pay  ; $what: payload");
     return $slot;
+}
+
+# _slot_tag_of($slot_ref) -> $i8_ref
+sub _slot_tag_of {
+    my ($self, $slot_ref) = @_;
+    $self->{_need_aggregate_types} = 1;   # naming %Slot requires its declaration
+    my $ref = $self->_fresh;
+    my $i_tag = _slot_idx('tag');
+    $self->_emit("  $ref = extractvalue %Slot $slot_ref, $i_tag  ; Slot.tag");
+    return $ref;
 }
 
 # _slot_defined_bit($slot_ref) -> $i1_ref
 sub _slot_defined_bit {
     my ($self, $slot_ref) = @_;
+    $self->{_need_aggregate_types} = 1;   # naming %Slot requires its declaration
     my $ref = $self->_fresh;
     my $i_def = _slot_idx('defined');
     $self->_emit("  $ref = extractvalue %Slot $slot_ref, $i_def  ; Slot.defined");
@@ -1050,6 +1112,7 @@ sub _slot_defined_bit {
 # _slot_payload_of($slot_ref) -> $i64_ref
 sub _slot_payload_of {
     my ($self, $slot_ref) = @_;
+    $self->{_need_aggregate_types} = 1;   # naming %Slot requires its declaration
     my $ref = $self->_fresh;
     my $i_pay = _slot_idx('payload');
     $self->_emit("  $ref = extractvalue %Slot $slot_ref, $i_pay  ; Slot.payload");
@@ -2159,6 +2222,176 @@ sub _emit_int_to_str {
     return $ptr;
 }
 
+# _emit_box_into_slot($input_ref, $from, $label) -> $slot_ref
+#
+# Coerce(X -> Scalar): wrap a value in the uniform cell. The tag is NOT a
+# guess here -- $from is the reading, by definition, so `_slot_tag_for_repr`
+# turns it into the tag directly and the cell leaves this function knowing how
+# to be read back.
+#
+# Undef is the one source with no payload: perl's undef is a single value, so
+# the cell is `defined=false, tag=Undef, payload=0` and $input_ref (which for
+# an Undef value is its always-false defined bit) is not read at all. That is
+# the same reasoning the Coerce(Undef->Int) arm gives for using the constant 0
+# rather than zext'ing the bit.
+sub _emit_box_into_slot {
+    my ($self, $input_ref, $from, $label) = @_;
+
+    return $self->_build_slot('false', '0', 'Undef', "$label: undef cell")
+        if $from eq 'Undef';
+
+    # An UNKNOWN operand is an inference failure that got this far. It has no
+    # established reading, so it boxes as Opaque -- and a later read of that
+    # cell takes the not-established path rather than inventing an Int.
+    return $self->_build_slot('true', '0', 'Opaque', "$label: unknown cell")
+        if $from eq 'Unknown';
+
+    my $payload = $self->_box_payload($input_ref, $from, $label);
+    return $self->_build_slot('true', $payload,
+                              _slot_tag_for_repr($from), "$label: box");
+}
+
+# _emit_read_slot_as($slot_ref, $to, $label) -> the SSA ref of the reading
+#
+# Coerce(Scalar -> X): dispatch on the cell's tag. Each reachable tag gets its
+# own block emitting the conversion that reading calls for, and a phi at the
+# join picks the one that ran.
+#
+# TWO facts short-circuit the dispatch, and both are about honesty rather than
+# speed:
+#
+#   - An UNDEFINED cell must not consult the tag at all. Perl's undef has ONE
+#     coercion per target type regardless of what bits the payload holds: "" for
+#     Str, 0 for Int, 0.0 for Num. Reading the tag there would let a stale
+#     payload change the answer for a value that has no payload.
+#   - The NOT-ESTABLISHED tag (Opaque) takes that same path. This is the whole
+#     point of having Opaque distinct from Undef at the vocabulary level: we do
+#     not know how to read those bits, so we decline to, and falling through to
+#     "read it as an Int" would be exactly the guess the tag exists to remove.
+#     It is deliberately NOT a die -- a merge arm can carry an un-narrowed cell
+#     down a path that never uses the value.
+sub _emit_read_slot_as {
+    my ($self, $slot_ref, $to, $label) = @_;
+
+    my $defined = $self->_slot_defined_bit($slot_ref);
+    my $tag     = $self->_slot_tag_of($slot_ref);
+    my $payload = $self->_slot_payload_of($slot_ref);
+
+    # The readings worth dispatching on: a tag whose payload this backend can
+    # actually convert to $to. Every other tag (a live ArrayRef/HashRef/
+    # CodeRef/Object pointer, say) has no numeric or string face to emit, so it
+    # joins the undef path rather than being read as an integer address.
+    #
+    # $to is NOT excluded. `grep { $_ ne $to }` stood here on the reasoning
+    # that a reading equal to the target needs no conversion -- true, and
+    # irrelevant: it still needs its own TAG TEST, or a Num-tagged cell read as
+    # Num matches nothing and falls through to the undef arm. Measured: it
+    # returned 0 for 3.5. The conversion is what is skipped when $repr eq $to,
+    # not the dispatch.
+    # converted to $to. Every other tag (a live ArrayRef/HashRef/CodeRef/Object
+    # pointer, say) has no numeric or string face this backend can emit, so it
+    # joins the undef path rather than being read as an integer address.
+    my @readings = qw(Int Num Str Boolean);
+
+    my $entry     = $self->_current_block_label;
+    my $lbl_join  = $self->_fresh_label('slotrd.join.');
+    my $lbl_undef = $self->_fresh_label('slotrd.undef.');
+
+    # known = defined AND tag is one we can read. Anything else -> the undef path.
+    my $known = $self->_fresh;
+    $self->_emit("  $known = icmp ne i1 $defined, 0  ; $label: defined?");
+
+    # Chain of tag tests. Each candidate reading gets a test block and a body
+    # block; the last test falls through to the undef path.
+    my @arms;            # ([$value_operand, $block_label], ...)
+    my @test_lbls = map { $self->_fresh_label('slotrd.t' . $_ . '.') } 0 .. $#readings;
+    my @body_lbls = map { $self->_fresh_label('slotrd.b' . $_ . '.') } 0 .. $#readings;
+
+    # Guard the whole chain on the defined bit: undefined goes straight to the
+    # undef arm without touching the tag.
+    $self->_set_terminator("  br i1 $known, label \%$test_lbls[0], label \%$lbl_undef")
+        if @readings;
+    $self->_set_terminator("  br label \%$lbl_undef") unless @readings;
+
+    for my $i (0 .. $#readings) {
+        my $repr = $readings[$i];
+        my $next = $i < $#readings ? $test_lbls[$i+1] : $lbl_undef;
+
+        $self->_new_block($test_lbls[$i]);
+        my $hit = $self->_fresh;
+        my $tv  = _slot_tag_value($repr);
+        $self->_emit("  $hit = icmp eq i8 $tag, $tv  ; $label: tag == $repr?");
+        $self->_set_terminator("  br i1 $hit, label \%$body_lbls[$i], label \%$next");
+
+        $self->_new_block($body_lbls[$i]);
+        my $val = $self->_unbox_payload_as($payload, $repr, "$label: tag=$repr");
+        # The reading is a $repr; bridge it to $to with the ordinary arms.
+        $val = $self->_emit_coercion($val, $repr, $to, "$label\[$repr]")
+            if $repr ne $to;
+        # _emit_coercion may itself have opened blocks (Int->Str renders in a
+        # loop), so the incoming edge is whatever block is current NOW, not the
+        # body label we opened. Reading it back is the same discipline the
+        # Stringify loop uses with _current_block_label.
+        push @arms, [$val, $self->_current_block_label];
+        $self->_set_terminator("  br label \%$lbl_join");
+    }
+
+    # The undef / not-established arm: one answer per target type, no payload read.
+    $self->_new_block($lbl_undef);
+    my $undef_val = $self->_emit_coercion('i1 false', 'Undef', $to,
+                                          "$label: undefined or not-established");
+    push @arms, [$undef_val, $self->_current_block_label];
+    $self->_set_terminator("  br label \%$lbl_join");
+
+    $self->_new_block($lbl_join);
+    my $ty = _repr_to_llvm_type($to);
+    my $out = $self->_fresh;
+    $self->_emit("  $out = phi $ty "
+        . join(', ', map { "[ $_->[0], \%$_->[1] ]" } @arms)
+        . "  ; $label: reading selected by tag");
+    return $out;
+}
+
+# _unbox_payload_as($payload_ref, $repr, $label) -> the SSA ref of the i64
+# payload read AS $repr. The exact inverse of _box_payload, and it must stay
+# that way: the two are one encoding written from both ends, and a divergence
+# between them is a silent misread rather than a type error.
+sub _unbox_payload_as {
+    my ($self, $payload, $repr, $label) = @_;
+
+    return $payload if $repr eq 'Int';   # an Int IS the payload word
+
+    my $ref = $self->_fresh;
+    if ($repr eq 'Num') {
+        $self->_emit("  $ref = bitcast i64 $payload to double  ; $label: payload -> Num");
+        return $ref;
+    }
+    if ($repr eq 'Boolean') {
+        $self->_emit("  $ref = icmp ne i64 $payload, 0  ; $label: payload -> Boolean");
+        return $ref;
+    }
+    if ($repr eq 'Str') {
+        # _box_payload stores a %StrPair* via ptrtoint; read the pair back and
+        # rebuild the (ptr, len) VALUE so the length travels with the pointer.
+        $self->{_need_strpair} = 1;
+        my $pair = $self->_fresh;
+        $self->_emit("  $pair = inttoptr i64 $payload to %StrPair*  ; $label: payload -> StrPair*");
+        my $pp = $self->_fresh;
+        $self->_emit("  $pp = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 0  ; $label: StrPair.ptr");
+        my $sp = $self->_fresh;
+        $self->_emit("  $sp = load i8*, i8** $pp  ; $label: str ptr");
+        my $lp = $self->_fresh;
+        $self->_emit("  $lp = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 1  ; $label: StrPair.len");
+        my $sl = $self->_fresh;
+        $self->_emit("  $sl = load i64, i64* $lp  ; $label: str len");
+        return $self->_str_value($sp, len => $sl);
+    }
+
+    die "GAP: $label cannot read a %Slot payload as $repr -- _box_payload has "
+      . "no inverse for it. The two are one encoding written from both ends; "
+      . "add the read here when the write is added there.";
+}
+
 sub _lower_coerce {
     my ($self, $node) = @_;
 
@@ -2205,9 +2438,14 @@ sub _emit_coercion {
         # $from eq $to guard above; kept so the arm list stays exhaustive.)
         return $input_ref;
     }
-    # Coerce(Boolean->Num) = 0 (false) or 1 (true): zero-extend i1 to i64.
+    # Coerce(Boolean->Num) = 0.0 (false) or 1.0 (true). Num IS `double`
+    # (%_REPR_LLVM_TYPE), so the result must BE a double: `zext ... to i64`
+    # stood here and produced an i64, which typechecks only until something
+    # merges it with a real Num. The %Slot tag dispatch is the first such
+    # consumer -- a Boolean-tagged cell read as Num lands in a `phi double`
+    # beside a genuine double -- and lli rejected it there.
     elsif ($from eq 'Boolean' && $to eq 'Num') {
-        $self->_emit("  $ref = zext i1 $input_ref to i64  ; Coerce[Boolean->Num] 0/1");
+        $self->_emit("  $ref = uitofp i1 $input_ref to double  ; Coerce[Boolean->Num] 0.0/1.0");
     }
     # Coerce(Boolean->Int) = 0/1: zero-extend i1 to i64 (same as Boolean->Num for integers).
     elsif ($from eq 'Boolean' && $to eq 'Int') {
@@ -2223,6 +2461,56 @@ sub _emit_coercion {
         my $ty   = $to eq 'Int' ? 'i64' : 'double';
         my $op   = $to eq 'Int' ? 'add' : 'fadd';
         $self->_emit("  $ref = $op $ty $zero, $zero  ; $what\[Undef->$to] = 0");
+    }
+    # Coerce(Undef->Boolean) = false. Perl is unambiguous: undef is FALSE in
+    # boolean context. Like the Int/Num arm above, the answer is the constant
+    # rather than a conversion of the input ref -- an Undef value carries no
+    # information that could change it.
+    #
+    # This edge had no arm until 2026-08-31 while Undef->Int and Undef->Num did.
+    # The %Slot tag dispatch is the first caller to reach it: an undefined cell
+    # read as Boolean takes the undef path, and that path needs an answer for
+    # every target type it can be asked for.
+    elsif ($from eq 'Undef' && $to eq 'Boolean') {
+        $self->_emit("  $ref = icmp ne i1 false, true  ; $what\[Undef->Boolean] = false");
+    }
+    # ---- %Slot: the uniform scalar cell, read and written by its TAG ----
+    #
+    # A `die` stood here from 2026-07-15 to 2026-08-31 saying Scalar "needs a
+    # T2 decision about how to read a %Slot payload (tagged? runtime?
+    # per-context choice?)". That question is now answered, and the answer is
+    # the first option: %Slot carries an `i8 tag` naming how its payload is to
+    # be read. The two arms below are the decision made concrete -- a write
+    # that records the reading, and a read that dispatches on it.
+    #
+    # Why it took a field rather than a cleverer emitter: the die was never
+    # about missing machinery. Scalar always HAD a machine encoding and
+    # insertvalue/extractvalue always worked. What was missing was
+    # INFORMATION -- the payload is 64 bits whose interpretation lived nowhere,
+    # so any reading emitted here would have been a guess hardcoding a
+    # representation choice at the wrong layer. The tag moves that fact into
+    # the cell, where the producer can write down what it already knew.
+    #
+    # $what NAMES THE CALLER, and both arms pass it down. _emit_coercion is
+    # reached from seven sites, five of them merge points (And/Or/Ternary arm
+    # joins) that pass reprs directly with no Coerce NODE on the edge. When one
+    # of these dies, the label is what says whether a node or an arm join
+    # produced the conversion.
+    elsif ($to eq 'Scalar' || $to eq 'Slot') {
+        # BOXING. No dispatch is needed and none would be honest: the source's
+        # own representation IS the reading, so it becomes the tag. This is the
+        # only point in the pipeline where the interpretation of those 64 bits
+        # is known for free, which is exactly why the tag is written here.
+        return $self->_emit_box_into_slot($input_ref, $from, "$what\[$from -> $to]");
+    }
+    elsif ($from eq 'Scalar' || $from eq 'Slot') {
+        # READING. The 2026-07-15 die that stood here said this needed "a T2
+        # decision about how to read a %Slot payload ... either a tag or a
+        # runtime". It is a tag: %Slot carries an i8 naming the reading its
+        # producer already knew, so the read is a dispatch on data rather than
+        # the guess the die refused to make. The comment was right about what
+        # was missing; the missing thing now exists.
+        return $self->_emit_read_slot_as($input_ref, $to, "$what\[$from -> $to]");
     }
     # Coerce(Boolean->Str) = select between "" and "1" string-face constants.
     # The Str representation is not fully modelled yet (G3), but the Boolean string-face
@@ -2250,6 +2538,20 @@ sub _emit_coercion {
         # Flag that the str-to-num helper + strtod declaration are needed.
         $self->{_need_str_to_num_helper} = 1;
         $self->_emit("  $ref = call double \@chalk_str_to_num(i8* $ptr_ref, i64 $len_ref)  ; Coerce[Str->Num] leading-numeric");
+    }
+    # Coerce(Str->Int): perl reads the string as a NUMBER and then truncates
+    # toward zero -- `int("3.9abc")` is 3, not 0 and not 4. So this composes the
+    # two arms that already implement those halves rather than re-deriving the
+    # leading-numeric rule a second time; a second copy of that rule is how the
+    # "0x10" divergence would come back on one path only.
+    #
+    # This edge had NO arm until 2026-08-31 (Str->Num and Str->Boolean did),
+    # which was latent while nothing routed a Str into an Int. The %Slot tag
+    # dispatch is the first caller that reaches it: reading a cell as Int must
+    # enumerate the Str tag, because the cell may hold one.
+    elsif ($from eq 'Str' && $to eq 'Int') {
+        my $as_num = $self->_emit_coercion($input_ref, 'Str', 'Num', $what);
+        return $self->_emit_coercion($as_num, 'Num', 'Int', $what);
     }
     # Coerce(Str->Boolean): perl's string truthiness rule.
     # false iff the string is "" (empty) or exactly "0".
@@ -2291,36 +2593,6 @@ sub _emit_coercion {
         $self->_emit("  $is_false = or i1 $is_empty, $is_single_zero  ; Coerce[Str->Boolean]: is false?");
         # result = NOT is_false -> true iff non-empty and not "0"
         $self->_emit("  $ref = xor i1 $is_false, true  ; Coerce[Str->Boolean]: invert -> Boolean");
-    }
-    elsif ($from eq 'Scalar' || $to eq 'Scalar') {
-        # NOT "cannot lower" -- that was this message until 2026-08-30 and it
-        # was false. Scalar HAS a machine encoding (%Slot, `_repr_to_llvm_type`)
-        # and the machinery to build and take it apart is right here:
-        # `insertvalue`/`extractvalue` for the defined bit and the payload.
-        # A Scalar CAN be lowered, in more than one way.
-        #
-        # What is missing is the DECISION, and it is T2's: a %Slot payload is
-        # i64 bits whose interpretation is not recorded in the cell, so
-        # stringifying one means choosing how to read those bits -- as an
-        # integer, as a double, as a pointer to a string. That is a dispatch on
-        # information the value does not carry, which needs either a tag or a
-        # runtime, and picking one here would hardcode a representation choice
-        # at the wrong layer. The same over-decision as "an Int field is i64",
-        # measured false, and as %LOWERABLE_STAMP freezing a T2 fact into a T1
-        # filter.
-        #
-        # This die dates from 2026-07-15, six weeks BEFORE Scalar gained %Slot
-        # (2026-08-29). It outlived its own reason and its wording hid that.
-        # $what NAMES THE CALLER. It was omitted here until 2026-08-31 while
-        # every other arm's comment interpolates it, so this die reported the
-        # conversion but hid WHERE it came from -- and _emit_coercion is
-        # reached from seven sites, five of them merge points (And/Or/Ternary
-        # arm joins) that pass reprs directly. Reading "Coerce[Scalar -> Num]"
-        # invites the guess that a Coerce NODE is at fault; the label says
-        # whether it was a node or an arm join.
-        die "GAP: $what\[$from -> $to] needs a T2 decision about how to read a "
-          . "%Slot payload (tagged? runtime? per-context choice?) -- Scalar is "
-          . "lowerable, but which reading to emit is not settled.";
     }
     else {
         die "LLVM backend: cannot lower $what\[$from->$to]";
@@ -2552,6 +2824,11 @@ sub _lower_assign {
         my $class_name  = $lhs->field_stash;
         my $val_repr    = _require_repr($rhs, 'Assign(FieldAccess-lvalue).rhs');
         my $slot_idx    = $field_index + 1;
+        # An object field IS a %Slot cell. Its subfield indices come from
+        # _slot_idx, never a literal: a field added to @_SLOT_FIELDS must
+        # not silently re-aim these GEPs at the wrong bytes.
+        my ($fi_def, $fi_tag, $fi_pay) =
+            (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
         # Self pointer: must be in method/ADJUST body context
         my $obj_raw = $self->{_method_self_name}
             // die "LLVM MOP: Assign(FieldAccess-lvalue) used outside method/ADJUST body context "
@@ -2560,15 +2837,20 @@ sub _lower_assign {
         $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; Assign(FieldAccess-lvalue): typed self");
         # Store defined=true
         my $def_gep = $self->_fresh;
-        $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 0  ; FieldAccess-lvalue[$field_index] defined");
+        $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_def  ; FieldAccess-lvalue[$field_index] defined");
         $self->_emit("  store i1 true, i1* $def_gep  ; FieldAccess-lvalue[$field_index] defined=true");
+        my $tag_gep = $self->_fresh;
+        my $tag_nm  = _slot_tag_for_repr($val_repr);
+        $self->_emit("  $tag_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_tag  ; FieldAccess-lvalue[$field_index] tag");
+        $self->_emit("  store i8 " . _slot_tag_value($tag_nm) . ", i8* $tag_gep  ; FieldAccess-lvalue[$field_index] tag=$tag_nm");
+
         # Store payload — the repr-dispatched boxing (Str StrPair, Boolean zext,
         # ref ptrtoint, Int identity) is owned by _store_field_payload, shared
         # with the :param binding and default-value paths so every field write
         # boxes a given repr identically. The Assign expression's value is what
         # the helper returns (the i8* for Str, the boxed i64 otherwise).
         my $pay_gep = $self->_fresh;
-        $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 1  ; FieldAccess-lvalue[$field_index] payload");
+        $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_pay  ; FieldAccess-lvalue[$field_index] payload");
         my $stored = $self->_store_field_payload($rhs_ref, $val_repr, $pay_gep,
                                                  "FieldAccess-lvalue[$field_index]");
         $self->{cache}{ $node->id } = $stored;
@@ -2672,9 +2954,12 @@ sub _lower_assign {
             $self->_emit("  $elem_ptr = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 2  ; Assign(Array-lvalue): elems ptr");
             $self->_emit("  $elems = load %Slot*, %Slot** $elem_ptr  ; Assign(Array-lvalue): load elems");
             my $slot_def = $self->_fresh;
+            my $slot_tag = $self->_fresh;
             my $slot_pay = $self->_fresh;
-            my ($gi_def, $gi_pay) = (_slot_idx('defined'), _slot_idx('payload'));
+            my ($gi_def, $gi_tag, $gi_pay) =
+                (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
             $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 $gi_def  ; Assign(Array-lvalue): slot def ptr");
+            $self->_emit("  $slot_tag = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 $gi_tag  ; Assign(Array-lvalue): slot tag ptr");
             $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 $gi_pay  ; Assign(Array-lvalue): slot pay ptr");
             $self->_emit("  store i1 true, i1* $slot_def  ; Assign(Array-lvalue): defined=true");
             # The rhs is boxed into the Slot's one-word payload — see
@@ -2711,6 +2996,9 @@ sub _lower_assign {
                   . "well as initializers, so this is an ENCODING gap (how to "
                   . "read the payload bits back), not a typing one.";
             }
+            # The rhs repr is the reading _box_payload just used; record it.
+            my $rhs_tag = _slot_tag_for_repr($rhs_repr);
+            $self->_emit("  store i8 " . _slot_tag_value($rhs_tag) . ", i8* $slot_tag  ; Assign(Array-lvalue): tag=$rhs_tag");
             $self->_emit("  store i64 $rhs_i64, i64* $slot_pay  ; Assign(Array-lvalue): store value");
 
             $self->{cache}{ $node->id } = $rhs_ref;
@@ -3841,11 +4129,11 @@ my %_REPR_LLVM_TYPE = (
     # length travel together, so a merge cannot desynchronize them.
     Str      => '%Str',
     Undef    => 'i1',
-    Slot     => '%Slot',      # { i1, i64 }: the uniform field/element cell
+    Slot     => '%Slot',      # { i1, i8, i64 }: the uniform field/element cell
     # Scalar IS that cell (perigrin, 2026-08-29). `Scalar` is the TYPE -- the
     # top of the scalar spine, what the join yields when nothing narrower was
     # proven -- and `%Slot` is its ENCODING: a value that may be any scalar and
-    # may be undef is exactly { i1 defined, i64 payload }. Two axes, one cell;
+    # may be undef is exactly { i1 defined, i8 tag, i64 payload }. Two axes, one cell;
     # `Slot` above is the same encoding named on the representation axis.
     Scalar   => '%Slot',
     Array    => '%Array*',    # { i64, i64, %Slot* }
@@ -5561,7 +5849,7 @@ sub _find_block_idx {
 #
 # Array representation: %Array = { i64 len, i64 cap, %Slot* elems }
 # Hash representation:  %Hash  = { i64 count, i64 cap, %HashEntry* entries }
-# Slot type:            %Slot  = { i1 defined, i64 payload }
+# Slot type:            %Slot  = { i1 defined, i8 tag, i64 payload }
 # HashEntry type:       %HashEntry = { i8* key_ptr, i64 key_len, i32 key_enc,
 #                                      i1 val_defined, i64 val_payload }
 # Ref types:  ArrayRef = bitcast %Array* to i8* (pointer, no additional tag needed)
@@ -5601,12 +5889,20 @@ sub _lower_array_ref {
     for my $i (0 .. $n - 1) {
         my $elem_ref = $self->lower_value($inputs->[$i]);
         my $slot_def = $self->_fresh;
+        my $slot_tag = $self->_fresh;
         my $slot_pay = $self->_fresh;
-        my ($gi_def, $gi_pay) = (_slot_idx('defined'), _slot_idx('payload'));
+        my ($gi_def, $gi_tag, $gi_pay) =
+            (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
         $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_def  ; ArrayRef: slot[$i] defined ptr");
+        $self->_emit("  $slot_tag = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_tag  ; ArrayRef: slot[$i] tag ptr");
         $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_pay  ; ArrayRef: slot[$i] payload ptr");
         $self->_emit("  store i1 true, i1* $slot_def  ; ArrayRef: slot[$i] defined=true");
         my $elem_repr = $inputs->[$i]->representation // '';
+        # The element's own repr IS the reading its payload carries -- the very
+        # repr _box_payload boxes by on the next line. Recording it here is what
+        # lets a later consumer read the payload back without guessing.
+        my $elem_tag  = _slot_tag_for_repr($elem_repr);
+        $self->_emit("  store i8 " . _slot_tag_value($elem_tag) . ", i8* $slot_tag  ; ArrayRef: slot[$i] tag=$elem_tag");
         my $elem_i64  = $self->_box_payload($elem_ref, $elem_repr,
                                             "ArrayRef elem[$i]");
         $self->_emit("  store i64 $elem_i64, i64* $slot_pay  ; ArrayRef: slot[$i] payload=$elem_i64");
@@ -5892,22 +6188,29 @@ sub _lower_array_read {
     $self->_set_terminator("  br i1 $ok, label \%$lbl_inb, label \%$lbl_oob");
     $self->_new_block($lbl_inb);
 
-    # In-bounds: load the slot at elems[idx].
+    # In-bounds: load the WHOLE slot at elems[idx].
+    #
+    # One aggregate load, not a GEP+load per field. The Slot-repr merge below
+    # is a single `phi %Slot`, so this arm has to supply a COMPLETE Slot --
+    # tag included. Phi'ing the fields separately and reassembling in the
+    # merge block would drop the STORED tag and substitute one derived from
+    # this node's own repr, which is exactly the guess the tag exists to
+    # remove. The narrow arms (Int/Num/Str/ptr) want only the payload, and
+    # `extractvalue` off this same load gives it to them.
     my $slot_p   = $self->_fresh;
-    my $slot_def = $self->_fresh;
-    my $slot_pay = $self->_fresh;
-    my $def_val  = $self->_fresh;
+    my $slot_all = $self->_fresh;
     my $pay_val  = $self->_fresh;
     $self->_emit("  $slot_p   = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx  ; ArrayRead: slot ptr");
-    my ($gi_def, $gi_pay) = (_slot_idx('defined'), _slot_idx('payload'));
-    $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 $gi_def  ; ArrayRead: slot defined ptr");
-    $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 $gi_pay  ; ArrayRead: slot payload ptr");
-    $self->_emit("  $def_val  = load i1,  i1*  $slot_def  ; ArrayRead: load defined bit");
-    $self->_emit("  $pay_val  = load i64, i64* $slot_pay  ; ArrayRead: load payload");
+    $self->_emit("  $slot_all = load %Slot, %Slot* $slot_p  ; ArrayRead: load whole slot");
+    $self->_emit("  $pay_val  = extractvalue %Slot $slot_all, " . _slot_idx('payload') . "  ; ArrayRead: payload");
     $self->_set_terminator("  br label \%$lbl_end");
 
     $self->_new_block($lbl_oob);
-    # OOB: produce an undef-like slot (defined=false, payload=0).
+    # OOB: an EXPLICIT undef slot -- defined=false, tag=Undef, payload=0 --
+    # built here in the arm block so the phi's incoming value is a complete
+    # aggregate rather than a poison one with two fields patched in. Tag is
+    # 'Undef', not 'Opaque': defined=false means the reading IS established.
+    my $slot_oob = $self->_build_slot('false', '0', 'Undef', 'ArrayRead OOB');
     $self->_set_terminator("  br label \%$lbl_end");
 
     $self->_new_block($lbl_end);
@@ -5959,20 +6262,19 @@ sub _lower_array_read {
         return $ptr;
     }
     else {
-        # Slot repr. The halves are phi'd separately -- we are ALREADY in the
-        # merge block here (the sibling arms above emit their phis directly),
-        # so an aggregate built per-arm would land after the phi that uses it
-        # and would not dominate its incoming edge. Phi the halves, then
-        # assemble ONCE, here.
+        # Slot repr. ONE `phi %Slot` over whole aggregates, not a phi per
+        # field. %Slot is a first-class LLVM value exactly as %Str is, and a
+        # single phi is the only form a merge cannot desynchronize: a field
+        # added to the struct with no matching phi would be SILENTLY DROPPED
+        # here -- a wrong value, which lli does not diagnose, rather than a
+        # type error, which it does.
         #
-        # The assembly is what matters: the node's value is the %Slot, so no
-        # consumer can hold one half and look up the other. The two phis are an
-        # implementation detail of this block rather than the representation.
-        my $def_phi = $self->_fresh;
-        my $pay_phi = $self->_fresh;
-        $self->_emit("  $def_phi = phi i1  [ $def_val, \%$lbl_inb ], [ false, \%$lbl_oob ]  ; ArrayRead :Slot defined phi");
-        $self->_emit("  $pay_phi = phi i64 [ $pay_val, \%$lbl_inb ], [ 0,          \%$lbl_oob ]  ; ArrayRead :Slot payload phi");
-        my $slot = $self->_build_slot($def_phi, $pay_phi, 'ArrayRead');
+        # Both arms already hold complete Slots: the in-bounds arm loaded the
+        # aggregate, the OOB arm built an explicit undef one. The tag rides
+        # through untouched, so the reading recorded at the STORE survives the
+        # merge instead of being re-derived from this node's repr.
+        my $slot = $self->_fresh;
+        $self->_emit("  $slot = phi %Slot [ $slot_all, \%$lbl_inb ], [ $slot_oob, \%$lbl_oob ]  ; ArrayRead :Slot phi");
         $self->{cache}{ $node->id } = $slot;
         return $slot;
     }
@@ -6224,6 +6526,15 @@ sub _lower_hash_read {
     my $vp_val = $self->_fresh;
     $self->_emit("  $vd_val = load i1,  i1*  $ent_vdp  ; HashRead: val defined bit");
     $self->_emit("  $vp_val = load i64, i64* $ent_vpp  ; HashRead: val payload");
+    # Build the complete Slot HERE, in the arm, so the merge below can be one
+    # `phi %Slot`. %HashEntry inlines val_def/val_pay rather than embedding a
+    # %Slot and carries NO tag field, so unlike ArrayRead there is no stored
+    # tag to recover -- the reading is whatever this node's repr establishes,
+    # which for the Slot arm is un-narrowed, i.e. 'Opaque'. When %HashEntry
+    # grows a tag (see the note at %HashEntry's declaration) this reads it
+    # instead, and nothing else here changes.
+    my $slot_hit = $self->_build_slot($vd_val, $vp_val,
+                                      _slot_tag_for_repr($repr), 'HashRead hit');
     $self->_set_terminator("  br label \%$lbl_end");
 
     # hnxt: i++ and back-edge to loop header.
@@ -6234,6 +6545,11 @@ sub _lower_hash_read {
 
     # hmiss: key not found.
     $self->_new_block($lbl_miss);
+    # An EXPLICIT undef slot for this arm -- defined=false, tag=Undef,
+    # payload=0 -- so the phi's incoming value is a complete aggregate, no
+    # field left poison. Tag is 'Undef' rather than 'Opaque': a missing key
+    # reads as undef, and that reading IS established.
+    my $slot_miss = $self->_build_slot('false', '0', 'Undef', 'HashRead miss');
     $self->_set_terminator("  br label \%$lbl_end");
 
     # hend: result phi.
@@ -6283,14 +6599,11 @@ sub _lower_hash_read {
         return $sptr;
     }
     else {
-        # Slot repr. As in ArrayRead: we are already in the merge block, so the
-        # halves are phi'd here and assembled into the aggregate immediately.
-        # The node's value is the %Slot, not the defined bit.
-        my $def_phi = $self->_fresh;
-        my $pay_phi = $self->_fresh;
-        $self->_emit("  $def_phi = phi i1  [ $vd_val, \%$lbl_hit ], [ false, \%$lbl_miss ]  ; HashRead :Slot defined phi");
-        $self->_emit("  $pay_phi = phi i64 [ $vp_val, \%$lbl_hit ], [ 0,     \%$lbl_miss ]  ; HashRead :Slot payload phi");
-        my $slot = $self->_build_slot($def_phi, $pay_phi, 'HashRead');
+        # Slot repr. As in ArrayRead: ONE `phi %Slot` over whole aggregates.
+        # Both arms built complete Slots above, so no field can be dropped by
+        # a merge that forgot to grow a phi alongside it.
+        my $slot = $self->_fresh;
+        $self->_emit("  $slot = phi %Slot [ $slot_hit, \%$lbl_hit ], [ $slot_miss, \%$lbl_miss ]  ; HashRead :Slot phi");
         $self->{cache}{ $node->id } = $slot;
         return $slot;
     }
@@ -6581,6 +6894,11 @@ sub _lower_call_new {
         }
         my $fidx = $finfo->{field_index};
         my $slot_idx = $fidx + 1;
+        # An object field IS a %Slot cell. Its subfield indices come from
+        # _slot_idx, never a literal: a field added to @_SLOT_FIELDS must
+        # not silently re-aim these GEPs at the wrong bytes.
+        my ($fi_def, $fi_tag, $fi_pay) =
+            (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
         my $repr = defined $pval ? _require_repr($pval, 'Call(new).:param.field') : 'Int';
         # The payload is STORED using the constructor argument's repr but READ
         # back using the field's DECLARED repr (the FieldAccess path). If they
@@ -6628,10 +6946,15 @@ sub _lower_call_new {
         my $val_ref = $self->lower_value($pval);
 
         my $def_gep = $self->_fresh;
-        $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; field[$fidx] defined bit");
+        $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; field[$fidx] defined bit");
         $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' defined=true");
+        my $tag_gep = $self->_fresh;
+        my $tag_nm  = _slot_tag_for_repr($repr);
+        $self->_emit("  $tag_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag  ; field[$fidx] tag");
+        $self->_emit("  store i8 " . _slot_tag_value($tag_nm) . ", i8* $tag_gep  ; field '$pname' tag=$tag_nm");
+
         my $pay_gep = $self->_fresh;
-        $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; field[$fidx] payload");
+        $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay  ; field[$fidx] payload");
 
         $self->_store_field_payload($val_ref, $repr, $pay_gep, $pname);
     }
@@ -6645,6 +6968,11 @@ sub _lower_call_new {
         next if grep { $_ eq $fkey || $_ eq $pname } @$param_names;
         my $fidx     = $finfo->{field_index};
         my $slot_idx = $fidx + 1;
+        # An object field IS a %Slot cell. Its subfield indices come from
+        # _slot_idx, never a literal: a field added to @_SLOT_FIELDS must
+        # not silently re-aim these GEPs at the wrong bytes.
+        my ($fi_def, $fi_tag, $fi_pay) =
+            (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
         if ($finfo->{has_default}) {
             my $def_node = $finfo->{default_node};
             # has_default promises a default value node. If it is missing the MOP
@@ -6657,19 +6985,30 @@ sub _lower_call_new {
             my $def_repr = _require_repr($def_node, 'Call(new).default.field');
             my $def_ref  = $self->lower_value($def_node);
             my $def_gep = $self->_fresh;
-            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; default field[$fidx] defined");
+            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; default field[$fidx] defined");
             $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' default defined=true");
+            my $tag_gep = $self->_fresh;
+            my $tag_nm  = _slot_tag_for_repr($def_repr);
+            $self->_emit("  $tag_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag  ; default field[$fidx] tag");
+            $self->_emit("  store i8 " . _slot_tag_value($tag_nm) . ", i8* $tag_gep  ; field '$pname' default tag=$tag_nm");
+
             my $pay_gep = $self->_fresh;
-            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; default field[$fidx] payload");
+            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay  ; default field[$fidx] payload");
             # Box the default the same way a :param value is (Str -> StrPair,
             # Boolean -> zext, else identity) via the shared payload-store helper.
             $self->_store_field_payload($def_ref, $def_repr, $pay_gep, $pname);
         } else {
             my $def_gep = $self->_fresh;
-            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 0  ; uninit field[$fidx] defined");
+            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; uninit field[$fidx] defined");
             $self->_emit("  store i1 false, i1* $def_gep  ; field '$pname' not initialized");
+            # defined=false, so the reading IS established: the cell is undef.
+            # That is Undef, not Opaque -- Opaque means no reading was determined.
+            my $tag_gep = $self->_fresh;
+            $self->_emit("  $tag_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag  ; uninit field[$fidx] tag");
+            $self->_emit("  store i8 " . _slot_tag_value('Undef') . ", i8* $tag_gep  ; field '$pname' tag=Undef");
+
             my $pay_gep = $self->_fresh;
-            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 1  ; uninit field[$fidx] payload");
+            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay  ; uninit field[$fidx] payload");
             $self->_emit("  store i64 0, i64* $pay_gep  ; field '$pname' payload=0");
         }
     }
@@ -8476,11 +8815,16 @@ sub _lower_field_access_in_method {
     my $repr        = _require_repr($node, 'FieldAccess(method)');
 
     my $slot_idx  = $field_index + 1;
+    # An object field IS a %Slot cell. Its subfield indices come from
+    # _slot_idx, never a literal: a field added to @_SLOT_FIELDS must
+    # not silently re-aim these GEPs at the wrong bytes.
+    my ($fi_def, $fi_tag, $fi_pay) =
+        (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
     my $obj_raw   = $self->{_method_self_name} // '%self';
     my $obj_typed = $self->_fresh;
     $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; FieldAccess: typed self");
     my $pay_gep   = $self->_fresh;
-    $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 1  ; field[$field_index] payload");
+    $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_pay  ; field[$field_index] payload");
     my $pay       = $self->_fresh;
     $self->_emit("  $pay = load i64, i64* $pay_gep  ; load field[$field_index] payload");
 

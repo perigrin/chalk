@@ -51,14 +51,18 @@ subtest '%Slot is a value type, not a pointer' => sub {
 subtest 'the aggregate carries both halves' => sub {
     my $ctx = Chalk::Target::LLVM::Context->new;
 
-    my $slot = $ctx->_build_slot('i1 true', '%pay', 'test');
+    my $slot = $ctx->_build_slot('i1 true', '%pay', 'Opaque', 'test');
     like emitted($ctx), qr/insertvalue/,
         'a Slot is CONSTRUCTED, not tracked alongside';
 
-    # Both fields must be written. A build that set only the defined bit would
-    # leave the payload poison -- undef in LLVM's sense, not perl's.
+    # EVERY field must be written. A build that set only some would leave the
+    # rest poison -- undef in LLVM's sense, not perl's. Counted against the
+    # declared field list rather than a literal, so a field added without a
+    # matching insertvalue turns this red instead of shipping a poison field.
     my @inserts = emitted($ctx) =~ /insertvalue/g;
-    is scalar(@inserts), 2, 'both fields are inserted (defined AND payload)';
+    my $nfields = scalar(Chalk::Target::LLVM::Context::_slot_fields());
+    is scalar(@inserts), $nfields,
+        "all $nfields declared fields are inserted";
 };
 
 subtest 'the halves are read back off the aggregate' => sub {
@@ -66,10 +70,15 @@ subtest 'the halves are read back off the aggregate' => sub {
     my $def = $ctx->_slot_defined_bit('%s');
     my $pay = $ctx->_slot_payload_of('%s');
 
-    like emitted($ctx), qr/extractvalue %Slot %s, 0/,
-        'the defined bit is field 0';
-    like emitted($ctx), qr/extractvalue %Slot %s, 1/,
-        'the payload is field 1';
+    # Asserted against _slot_idx, NOT a literal: a literal here would keep
+    # passing while production drifted to a different index, which is the
+    # failure mode this whole naming scheme exists to prevent.
+    my $i_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
+    my $i_pay = Chalk::Target::LLVM::Context::_slot_idx('payload');
+    like emitted($ctx), qr/extractvalue %Slot %s, $i_def\b/,
+        'the defined bit is read at the named defined index';
+    like emitted($ctx), qr/extractvalue %Slot %s, $i_pay\b/,
+        'the payload is read at the named payload index';
     isnt $def, $pay, 'they are distinct SSA values';
 };
 

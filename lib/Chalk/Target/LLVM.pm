@@ -730,14 +730,19 @@ sub _emit_class_registry_ir {
                 # :reader synthesized method: load field at field_index and return
                 my $fidx     = $minfo->{reader_field_index};
                 my $slot_idx = $fidx + 1;
+                # An object field IS a %Slot cell; its subfield indices are
+                # named, never literal (a literal is how the last tag attempt
+                # aimed a GEP at the wrong bytes).
+                my $fi_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
+                my $fi_pay = Chalk::Target::LLVM::Context::_slot_idx('payload');
                 push @lines, "define internal $fn_ret $fn_name(i8* %self) {  ; :reader for field $fidx";
                 push @lines, 'entry:';
                 push @lines, "  %obj = bitcast i8* %self to %${cname}.obj*";
                 # Load defined bit
-                push @lines, "  %def_gep = getelementptr inbounds %${cname}.obj, %${cname}.obj* %obj, i64 0, i32 $slot_idx, i32 0";
+                push @lines, "  %def_gep = getelementptr inbounds %${cname}.obj, %${cname}.obj* %obj, i64 0, i32 $slot_idx, i32 $fi_def";
                 push @lines, '  %def = load i1, i1* %def_gep';
                 # Load payload
-                push @lines, "  %pay_gep = getelementptr inbounds %${cname}.obj, %${cname}.obj* %obj, i64 0, i32 $slot_idx, i32 1";
+                push @lines, "  %pay_gep = getelementptr inbounds %${cname}.obj, %${cname}.obj* %obj, i64 0, i32 $slot_idx, i32 $fi_pay";
                 push @lines, '  %pay = load i64, i64* %pay_gep';
                 if ($ret_repr eq 'Str') {
                     # payload = StrPair* (as i64) -> cast back and return {ptr, len}
@@ -855,16 +860,24 @@ sub _emit_class_registry_ir {
                 push @lines, "  ret i1 $body_val";
             }
             elsif ($ret_repr eq 'Scalar') {
-                # The ABI is %Slot = { i1 defined, i64 payload }. The body value
+                # The ABI is %Slot = { i1 defined, i8 tag, i64 payload }. The body value
                 # is the PAYLOAD, so it is boxed here rather than returned bare
                 # -- without this the header says %Slot and the ret says i64,
                 # which lli rejects outright ("value doesn't match function
                 # result type"). Defined is true: a method that reached its
                 # Return produced a value.
                 my $ri_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
+                my $ri_tag = Chalk::Target::LLVM::Context::_slot_idx('tag');
                 my $ri_pay = Chalk::Target::LLVM::Context::_slot_idx('payload');
+                # The declared return repr is Scalar -- un-narrowed -- so the
+                # reading of these payload bits was never established. 'Opaque'
+                # says exactly that; 'Undef' would falsely assert the value IS
+                # undef when the defined bit right above says it is not.
+                my $ri_tagv = Chalk::Target::LLVM::Context::_slot_tag_value(
+                    Chalk::Target::LLVM::Context::_slot_tag_for_repr($ret_repr));
                 push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, $ri_def";
-                push @lines, "  %ret_s1 = insertvalue %Slot %ret_s0, i64 $body_val, $ri_pay";
+                push @lines, "  %ret_st = insertvalue %Slot %ret_s0, i8 $ri_tagv, $ri_tag";
+                push @lines, "  %ret_s1 = insertvalue %Slot %ret_st, i64 $body_val, $ri_pay";
                 push @lines, '  ret %Slot %ret_s1';
             }
             else {
@@ -952,9 +965,17 @@ sub _emit_class_registry_ir {
             elsif ($ret_repr eq 'Scalar') {
                 # Boxed into %Slot -- see the sibling site above.
                 my $ri_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
+                my $ri_tag = Chalk::Target::LLVM::Context::_slot_idx('tag');
                 my $ri_pay = Chalk::Target::LLVM::Context::_slot_idx('payload');
+                # The declared return repr is Scalar -- un-narrowed -- so the
+                # reading of these payload bits was never established. 'Opaque'
+                # says exactly that; 'Undef' would falsely assert the value IS
+                # undef when the defined bit right above says it is not.
+                my $ri_tagv = Chalk::Target::LLVM::Context::_slot_tag_value(
+                    Chalk::Target::LLVM::Context::_slot_tag_for_repr($ret_repr));
                 push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, $ri_def";
-                push @lines, "  %ret_s1 = insertvalue %Slot %ret_s0, i64 $body_val, $ri_pay";
+                push @lines, "  %ret_st = insertvalue %Slot %ret_s0, i8 $ri_tagv, $ri_tag";
+                push @lines, "  %ret_s1 = insertvalue %Slot %ret_st, i64 $body_val, $ri_pay";
                 push @lines, '  ret %Slot %ret_s1';
             }
             else                        { push @lines, "  ret i64 $body_val" }
@@ -1206,7 +1227,7 @@ sub lower_with_elaboration {
         push @lines, '@fmt_s_u    = private unnamed_addr constant [3 x i8] c"%s\00", align 1';
     }
     elsif ($result_repr eq 'Slot') {
-        # Slot result: a tagged-scalar {i1 defined, i64 payload} from array/hash reads.
+        # Slot result: a tagged-scalar {i1 defined, i8 tag, i64 payload} from array/hash reads.
         # If defined=true: print "Int:<payload>\n". If defined=false: print "Undef:\n".
         # "Int:%lld\n\0" = 10 bytes (full i64 payload, not a 32-bit-truncated read); "Undef:\n\0" = 8 bytes.
         push @lines, '@fmt_slot_int   = private unnamed_addr constant [10 x i8] c"Int:%lld\0A\00",  align 1';
