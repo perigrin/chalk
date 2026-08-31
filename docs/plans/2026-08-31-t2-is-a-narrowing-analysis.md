@@ -975,3 +975,58 @@ questions arrive together.
 arms in `_lower_coerce_from_slot`. The dispatch must stay exhaustive or an
 unhandled tag silently takes the undef arm -- a wrong value, not an error. A
 test that every tag value has an arm is the guard.
+
+## The vtable ABI guard: a fix that traded a GAP for a silent miscompile
+
+21 corpus cases die with
+
+    GAP: Call(method) 'left' node repr=Int disagrees with class 'Pair'
+    vtable ABI return_repr=Scalar
+
+**The diagnosis was right.** Traced it: the wire says `field $left: Scalar`;
+chalk's T1 narrowing correctly derives `Int` for the Call node from the
+constructor argument (`Pair->new(left => 10)`); but the vtable entry's
+`return_repr` comes from `$m->return_type`, the producer's declared value, and
+`LLVM.pm:543`/`:562` accepted it whenever it was not `Unknown`. A declared
+`Scalar` therefore beat a body root already narrowed to `Int`. The two
+disagreed, and the guard refused rather than emit a mismatched indirect call.
+
+**The fix was wrong.** Routing both sites through a `_declared_or_derived` that
+treats `Scalar` as un-narrowed made the module lower -- and produced:
+
+    lli '4622382067542392832' != perl '11'
+
+Verified independently: `unpack('q', pack('d', 11))` is exactly
+4622382067542392832. That is 11.0's BITS READ AS AN i64 -- the precise failure
+the guard exists to catch, and the same number pattern its own comment records
+from 2026-08-28.
+
+Behaviour went 198 -> 200 while gate-green stayed at 196, which is the tell: the
+cases stopped GAPping and started running WRONG. **A loud refusal became a
+silent wrong answer.** Reverted.
+
+### Why it fails, and what the real fix has to do
+
+Making the vtable say `Int` is only half a change. The method's emitted body
+still returns whatever its own lowering produces, and the call site still reads
+the result at the ABI type. Moving one of those three without the others just
+relocates the disagreement to where nothing checks it.
+
+The three that must agree:
+
+1. the **callee's emitted signature** (`define ... @Pair__left`)
+2. the **vtable entry's** declared `return_repr`
+3. the **call site's** expectation (the Call node's repr)
+
+Today (1) derives from the method body, (2) from the producer's declaration, and
+(3) from chalk's narrowing. The narrowing moved (3) and the fix moved (2), while
+(1) stayed where it was.
+
+**The honest fix is to narrow the METHOD, not just the call.** If T1 proves
+`Pair::left` returns Int, that fact belongs on the method -- so the body lowers
+at `i64`, the vtable says `Int`, and the call site agrees. All three move
+together or none do.
+
+**NOT ATTEMPTED.** It is a real piece of work, not a guard adjustment, and this
+session has already shipped one wrong fix here. The GAP is the correct behaviour
+until the three agree.
