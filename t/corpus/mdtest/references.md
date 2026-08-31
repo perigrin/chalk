@@ -46,7 +46,7 @@ context: scalar
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %c3  = Constant(3) :Int
-%arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr = ArrayRef(%c1, %c2, %c3) :Array
 %r   = Length(%arr) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%r : Int -> Str) :Str
@@ -83,7 +83,7 @@ context: scalar
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %c3  = Constant(3) :Int
-%arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr = ArrayRef(%c1, %c2, %c3) :Array
 %r   = Length(%arr) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%r : Int -> Str) :Str
@@ -117,7 +117,7 @@ context: scalar
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %c3  = Constant(3) :Int
-%arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr = ArrayRef(%c1, %c2, %c3) :Array
 %idx = Constant(1) :Int
 %r   = Subscript(%arr, %idx) :Int
 %nl = Constant("\n") :Str
@@ -153,7 +153,7 @@ context: scalar
 %v1   = Constant(1) :Int
 %kb   = Constant("b") :Str
 %v2   = Constant(2) :Int
-%hash = HashRef(%ka, %v1, %kb, %v2) :HashRef
+%hash = HashRef(%ka, %v1, %kb, %v2) :Hash
 %lk   = Constant("a") :Str
 %r    = Subscript(%hash, %lk) :Int
 %nl = Constant("\n") :Str
@@ -191,7 +191,7 @@ context: scalar
 %v1   = Constant(1) :Int
 %kb   = Constant("b") :Str
 %v2   = Constant(2) :Int
-%hash = HashRef(%ka, %v1, %kb, %v2) :HashRef
+%hash = HashRef(%ka, %v1, %kb, %v2) :Hash
 %r    = Length(%hash) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%r : Int -> Str) :Str
@@ -300,7 +300,7 @@ context: scalar
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %c3   = Constant(3) :Int
-%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr  = ArrayRef(%c1, %c2, %c3) :Array
 %idx  = Constant(0) :Int
 %lval = Subscript(%arr, %idx) :Int
 %nv   = Constant(42) :Int
@@ -337,7 +337,7 @@ context: scalar
 %start = Start()
 %kk   = Constant("k") :Str
 %v0   = Constant(0) :Int
-%hash = HashRef(%kk, %v0) :HashRef
+%hash = HashRef(%kk, %v0) :Hash
 %wk   = Constant("k") :Str
 %lval = Subscript(%hash, %wk) :Int
 %wv   = Constant(99) :Int
@@ -419,7 +419,7 @@ context: scalar
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
 %c3  = Constant(3) :Int
-%arr = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr = ArrayRef(%c1, %c2, %c3) :Array
 %idx = Constant(9) :Int
 %r   = Subscript(%arr, %idx) :Undef
 %nl = Constant("\n") :Str
@@ -455,7 +455,7 @@ context: scalar
 %v1   = Constant(1) :Int
 %kb   = Constant("b") :Str
 %v2   = Constant(2) :Int
-%hash = HashRef(%ka, %v1, %kb, %v2) :HashRef
+%hash = HashRef(%ka, %v1, %kb, %v2) :Hash
 %lk   = Constant("z") :Str
 %r    = Subscript(%hash, %lk) :Undef
 %nl = Constant("\n") :Str
@@ -527,7 +527,7 @@ context: scalar
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %c3   = Constant(3) :Int
-%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr  = ArrayRef(%c1, %c2, %c3) :Array
 %ref  = Ref(%arr)
 %i0   = Constant(0) :Int
 %lval = Subscript(%ref, %i0)
@@ -568,7 +568,7 @@ context: scalar
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %c3   = Constant(3) :Int
-%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr  = ArrayRef(%c1, %c2, %c3) :Array
 %i0   = Constant(0) :Int
 %lval = Subscript(%arr, %i0)
 %v42  = Constant(42) :Int
@@ -611,7 +611,7 @@ context: scalar
 %c5   = Constant(5) :Int
 %c6   = Constant(6) :Int
 %c7   = Constant(7) :Int
-%arr  = ArrayRef(%c5, %c6, %c7) :ArrayRef
+%arr  = ArrayRef(%c5, %c6, %c7) :Array
 %i0   = Constant(0) :Int
 %rd   = Subscript(%arr, %i0) :Int
 %v99  = Constant(99) :Int
@@ -653,7 +653,7 @@ context: scalar
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %c3   = Constant(3) :Int
-%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr  = ArrayRef(%c1, %c2, %c3) :Array
 %i0   = Constant(0) :Int
 %rd1  = Subscript(%arr, %i0) :Int
 %rd2  = Subscript(%arr, %i0) :Int
@@ -692,7 +692,7 @@ context: scalar
 %start = Start()
 %s0   = Constant("hi") :Str
 %s1   = Constant("there") :Str
-%arr  = ArrayRef(%s0, %s1) :ArrayRef
+%arr  = ArrayRef(%s0, %s1) :Array
 %i1   = Constant(1) :Int
 %rd   = Subscript(%arr, %i1) :Str
 %nl = Constant("\n") :Str
@@ -725,7 +725,7 @@ context: scalar
 %start = Start()
 %s0   = Constant("hi") :Str
 %s1   = Constant("there") :Str
-%arr  = ArrayRef(%s0, %s1) :ArrayRef
+%arr  = ArrayRef(%s0, %s1) :Array
 %i1   = Constant(1) :Int
 %rd   = Subscript(%arr, %i1) :Str
 %len  = Length(%rd) :Int
@@ -761,7 +761,7 @@ context: scalar
 %start = Start()
 %n0   = Constant(1.5) :Num
 %n1   = Constant(2.5) :Num
-%arr  = ArrayRef(%n0, %n1) :ArrayRef
+%arr  = ArrayRef(%n0, %n1) :Array
 %i1   = Constant(1) :Int
 %rd   = Subscript(%arr, %i1) :Num
 %nl = Constant("\n") :Str
@@ -796,7 +796,7 @@ context: scalar
 %start = Start()
 %k    = Constant("k") :Str
 %v    = Constant("val") :Str
-%h    = HashRef(%k, %v) :HashRef
+%h    = HashRef(%k, %v) :Hash
 %kk   = Constant("k") :Str
 %rd   = Subscript(%h, %kk) :Str
 %nl = Constant("\n") :Str
@@ -828,7 +828,7 @@ context: scalar
 %start = Start()
 %k    = Constant("k") :Str
 %v    = Constant(1.5) :Num
-%h    = HashRef(%k, %v) :HashRef
+%h    = HashRef(%k, %v) :Hash
 %kk   = Constant("k") :Str
 %rd   = Subscript(%h, %kk) :Num
 %nl = Constant("\n") :Str
@@ -876,7 +876,7 @@ context: scalar
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %c3   = Constant(3) :Int
-%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr  = ArrayRef(%c1, %c2, %c3) :Array
 %i0   = Constant(0) :Int
 %mem  = MemStart()
 %lval = Subscript(%arr, %i0) :Int
@@ -923,7 +923,7 @@ context: scalar
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %c3   = Constant(3) :Int
-%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr  = ArrayRef(%c1, %c2, %c3) :Array
 %i0   = Constant(0) :Int
 %mem  = MemStart()
 %lval = Subscript(%arr, %i0) :Int
@@ -969,7 +969,7 @@ context: scalar
 %start = Start()
 %kk   = Constant("k") :Str
 %c1   = Constant(1) :Int
-%h    = HashRef(%kk, %c1) :HashRef
+%h    = HashRef(%kk, %c1) :Hash
 %i0   = Constant(0) :Int
 %mem  = MemStart()
 %lval = Subscript(%h, %kk) :Int
@@ -1010,7 +1010,7 @@ context: scalar
 %start = Start()
 %kk   = Constant("k") :Str
 %c1   = Constant(1) :Int
-%h    = HashRef(%kk, %c1) :HashRef
+%h    = HashRef(%kk, %c1) :Hash
 %i0   = Constant(0) :Int
 %mem  = MemStart()
 %lval = Subscript(%h, %kk) :Int
@@ -1074,7 +1074,7 @@ context: scalar
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %c3   = Constant(3) :Int
-%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr  = ArrayRef(%c1, %c2, %c3) :Array
 %i0   = Constant(0) :Int
 %mem  = MemStart()
 %lval = Subscript(%arr, %i0) :Int
@@ -1129,7 +1129,7 @@ context: scalar
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %c3   = Constant(3) :Int
-%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr  = ArrayRef(%c1, %c2, %c3) :Array
 %mem  = MemStart()
 %lval = Subscript(%arr, %c0) :Int
 %v9   = Constant(9) :Int
@@ -1183,7 +1183,7 @@ context: scalar
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %c3   = Constant(3) :Int
-%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr  = ArrayRef(%c1, %c2, %c3) :Array
 %mem  = MemStart()
 %lval = Subscript(%arr, %c0) :Int
 %v9   = Constant(9) :Int

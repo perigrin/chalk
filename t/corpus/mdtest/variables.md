@@ -250,7 +250,7 @@ context: scalar
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
-%arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr   = ArrayRef(%c1, %c2, %c3) :Array
 %mem   = MemStart()
 %sh    = Call(%arr, %mem, dispatch_kind: "builtin", name: "shift") :Int
 %nl = Constant("\n") :Str
@@ -283,7 +283,7 @@ context: scalar
 %start = Start()
 %c5    = Constant(5) :Int
 %c6    = Constant(6) :Int
-%arr   = ArrayRef(%c5, %c6) :ArrayRef
+%arr   = ArrayRef(%c5, %c6) :Array
 %mem   = MemStart()
 %pp    = Call(%arr, %mem, dispatch_kind: "builtin", name: "pop") :Int
 %nl = Constant("\n") :Str
@@ -321,7 +321,7 @@ context: scalar
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
 %c4    = Constant(4) :Int
-%arr   = ArrayRef(%c1, %c2, %c3, %c4) :ArrayRef
+%arr   = ArrayRef(%c1, %c2, %c3, %c4) :Array
 %len   = Length(%arr) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%len : Int -> Str) :Str
@@ -359,7 +359,7 @@ context: scalar
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
-%arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr   = ArrayRef(%c1, %c2, %c3) :Array
 %len   = Length(%arr) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%len : Int -> Str) :Str
@@ -396,7 +396,7 @@ context: scalar
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
 %c4    = Constant(4) :Int
-%arr   = ArrayRef(%c1, %c2, %c3, %c4) :ArrayRef
+%arr   = ArrayRef(%c1, %c2, %c3, %c4) :Array
 %len   = Length(%arr) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%len : Int -> Str) :Str
@@ -433,7 +433,7 @@ context: scalar
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
 %c4    = Constant(4) :Int
-%arr   = ArrayRef(%c1, %c2, %c3, %c4) :ArrayRef
+%arr   = ArrayRef(%c1, %c2, %c3, %c4) :Array
 %len   = Length(%arr) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%len : Int -> Str) :Str
@@ -472,7 +472,7 @@ context: scalar
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
-%arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr   = ArrayRef(%c1, %c2, %c3) :Array
 %len   = Length(%arr) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%len : Int -> Str) :Str
