@@ -1322,3 +1322,83 @@ structural rather than per-instance, and would let chalk refuse at the
 conversion rather than at the Phi. Not proposed to the producer as a change —
 the current shape works and the alternative is a wire-contract question.
 Recorded because the pin is load-bearing and easy to lose.
+
+### Why the void-context `eval` deletion IS a miscompile — measured, not assumed
+
+perigrin challenged the claim above: *"Is that a miscompile? What was that eval
+doing? … what you've cited genuinely looks like dead code."* Fair — `eval q{1}`
+in void context cannot die, defines nothing, and its value is discarded. I had
+repeated the producer session's word without testing it.
+
+**Measured, and it is observable — for a reason neither of us stated:**
+
+    $@ = "prior"; eval q{1}; print "[$@]"    ->  []
+    $@ = "prior";            print "[$@]"    ->  [prior]
+
+**A successful `eval` CLEARS `$@`.** So the void-context eval performs a write
+to a global that a later reader can see. Deleting it changes observable state,
+which makes the deletion a miscompile after all — but on the SUCCESS path, not
+the failure path.
+
+The realistic shape:
+
+    eval q{die "x"};   # sets $@
+    eval q{1};         # CLEARS it -- this is the "dead" statement
+    # a reader of $@ here sees "" with the eval, "x at ..." without it
+
+**This sharpens the effect claim rather than merely confirming it.** The earlier
+entry argued `eval` is effectful because it *can* die, define subs, or touch
+globals — all true, and all reasons a SPECIFIC eval might be effectful. But
+`eval q{1}` does none of them and is still not deletable, because **clearing
+`$@` is unconditional: it happens on every successful eval, whatever the
+string.** There is no eval that is pure.
+
+That is a stronger argument for effect-by-type than the one recorded above: the
+effect is not a property of what the string does, so no analysis of the string
+can license removal. A `Coerce` whose purity depends on its operand's contents
+cannot be a pure node type.
+
+**Also worth noting what this makes `$@`:** the producer session reports `$@` is
+not modelled anywhere on their side. So the wire currently carries an eval whose
+only unconditional effect is a write to something the IR does not represent.
+That is the same absent-vs-Unknown distinction as elsewhere — the effect is not
+"unknown", it is unrepresented, and a consumer cannot tell.
+
+### Why `eval` is effectful — the plain reasons, not the clever one
+
+perigrin challenged the claim that deleting a void-context `eval q{1};` is a
+miscompile: *"what you've cited genuinely looks like dead code."* Fair — that
+eval cannot die, defines nothing, and its value is discarded. I had repeated
+the producer session's word without testing it.
+
+**`eval` is effectful for three plain reasons, any one of them sufficient:**
+
+1. **It can die.** A string eval is a control-flow construct, not a value
+   computation.
+2. **It can mutate the program** — define subs, assign globals, load modules.
+3. **It runs the compiler at runtime.** The conversion function IS perl, which
+   is why the producer's own GAP is a statement about WHEN (B::SoN runs at
+   CHECK time), not about types.
+
+That is enough to disqualify a node type whose contract is purity, and it needs
+no footnote. **A `Coerce` whose purity depends on its operand's contents cannot
+be a pure node type**, and no analysis of the string can restore that — the
+string is not knowable until runtime, which is the whole point of `eval`.
+
+**A measured observation, deliberately NOT the argument.** Testing the specific
+`eval q{1};` case, it turns out not to be as dead as it looks: a *successful*
+eval clears `$@`.
+
+    $@ = "prior"; eval q{1}; print "[$@]"   ->  []
+    $@ = "prior";            print "[$@]"   ->  [prior]
+
+So that statement is observable, and the producer session's "miscompile" was
+literally right. **But chalk's DCE contract should NOT rest on this.** Perigrin's
+objection stands: it is a corner of perl semantics that surprises people, and a
+correctness argument built on it is fragile — the next reader finds the rule
+unmotivated and "fixes" it. It is also unusable as a rule here, because `$@` is
+not modelled on the wire at all (per the producer session), so an argument
+resting on it rests on something the IR does not represent.
+
+Recorded as a fact about why that particular case is not dead code. The RULE is
+reasons 1-3.
