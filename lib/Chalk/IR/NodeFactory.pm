@@ -51,6 +51,7 @@ use Chalk::IR::Node::Defined;
 use Chalk::IR::Node::UnaryPlus;
 use Chalk::IR::Node::Ref;
 use Chalk::IR::Node::RefType;
+use Chalk::IR::Node::Count;
 use Chalk::IR::Node::Length;
 use Chalk::IR::Node::Slice;
 use Chalk::IR::Node::PadAccess;
@@ -96,7 +97,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     StrEq StrNe StrLt StrGt StrLe StrGe StrCmp
     And Or BitAnd BitOr BitXor LeftShift RightShift
     Assign Repeat Match NotMatch DefinedOr Xor Range Yada IsaOp
-    Not Negate Complement Defined UnaryPlus Ref RefType Length
+    Not Negate Complement Defined UnaryPlus Ref RefType Length Count
     PadAccess FieldAccess EntryDef ArgsSource Parameter Subscript Slice
     Call HashRef ArrayRef
     Interpolate AnonSub

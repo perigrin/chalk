@@ -1174,7 +1174,7 @@ my %PURE_DESCEND_OPS = map { $_ => 1 } qw(
     StrEq StrNe StrLt StrGt StrLe StrGe StrCmp
     And Or DefinedOr Xor Not Negate Complement Defined UnaryPlus
     BitAnd BitOr BitXor LeftShift RightShift
-    Coerce Interpolate Length PostfixDeref Ref RefType TernaryExpr
+    Coerce Interpolate Length Count PostfixDeref Ref RefType TernaryExpr
     Repeat Range IsaOp Slice
 );
 
@@ -1354,6 +1354,13 @@ sub lower_value {
         return $self->_lower_hash_ref($node);
     }
     elsif ($op eq 'Length') {
+        return $self->_lower_length($node);
+    }
+    # Count lowers through the SAME path Length used for an aggregate operand.
+    # The split was about which QUESTION the node asks (characters in a string
+    # vs elements in a container), not about how the count is computed -- so
+    # this is one dispatch line, not a new lowering.
+    elsif ($op eq 'Count') {
         return $self->_lower_length($node);
     }
     elsif ($op eq 'Subscript') {

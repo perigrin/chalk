@@ -594,7 +594,20 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # Note the parse-time table could not express a set anyway: type_satisfies
     # takes ONE required type, so widening arg_types would change every reader.
     my %IR_OP_ACCEPTED_REPRS = (
+        # Length KEEPS the aggregates, deliberately. The producer split Count
+        # out of it (93a2d12) so a post-split wire sends Count for
+        # `scalar(@a)` -- but a PRE-split wire still sends Length, and this
+        # loader reads JSON of unknown provenance. Measured: narrowing to Str
+        # alone cost 10 cases against pin 8c15e32 (205 -> 195), every one a
+        # Length node the older producer legitimately emits.
+        #
+        # The narrowing is the PRODUCER's to make, because it decides which
+        # node to emit. The consumer stays permissive.
         Length => { map { $_ => 1 } qw(Array ArrayRef Hash HashRef Str) },
+        # Count is the aggregate half. `List` is the lattice parent over Array
+        # and Hash: scalar(%h) is the key count and the answer is Int either
+        # way, so the set spans both the concrete kinds and their parent.
+        Count  => { map { $_ => 1 } qw(Array ArrayRef Hash HashRef List) },
     );
 
     # accepts_operand_repr($ir_op, $repr) -> true when the op takes this repr

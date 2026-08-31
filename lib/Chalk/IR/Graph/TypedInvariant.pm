@@ -30,7 +30,18 @@ my %OP_REQUIRED_REPR = (
     Divide   => 'Num',  # Perl `/` is always float division; inputs must be Num
     Modulo   => 'Int',  # perl's `%` is integer-valued
     Concat   => 'Str',  # String concatenation requires Str operands (G3)
+    # Length ACCEPTS AGGREGATES STILL, deliberately. The producer split
+    # Count out of Length (93a2d12) and the split is SUBTRACTIVE -- but a
+    # producer from BEFORE it still emits Length over an aggregate, and
+    # this loader must read both. Measured: narrowing this to Str alone
+    # turns 30 pre-split nodes into invariant violations (gate-green
+    # 205 -> 195 against pin 8c15e32). The narrowing belongs at the
+    # producer, which decides which node it emits; the CONSUMER stays
+    # permissive because it is handed JSON of unknown provenance.
     Length   => [qw(Array ArrayRef Hash HashRef Str)],  # scalar @arr (count), scalar %h (key count), or length($str); operand must be Array/ArrayRef, Hash/HashRef, or Str
+    # Count is the aggregate half of the old Length. `List` is the
+    # lattice parent over Array and Hash -- scalar(%h) is the key count.
+    Count    => [qw(Array ArrayRef Hash HashRef List)],
 );
 
 # Ops that are ONE operator applied at whatever representation their operands

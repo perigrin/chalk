@@ -112,7 +112,7 @@ my %_COMPUTED_REPR = (
     Divide => 'Num', Power => 'Num', Modulo => 'Int',
     BitAnd => 'Int', BitOr => 'Int', BitXor => 'Int',
     LeftShift => 'Int', RightShift => 'Int', Complement => 'Int',
-    Concat => 'Str', Length => 'Int',
+    Concat => 'Str', Length => 'Int', Count => 'Int',
     # ref($x) reads the type/class name of a reference -- always a Str,
     # regardless of the operand (ref($obj) -> class name, ref([...]) -> "ARRAY").
     RefType => 'Str',
