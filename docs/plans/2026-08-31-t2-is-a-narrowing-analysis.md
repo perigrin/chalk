@@ -919,3 +919,59 @@ analysis deferred as YAGNI. That deferral now has THREE independent reasons to
 be revisited: width selection for `Int`, precision adequacy for `Num`, and the
 composition law above. Still deferred; the reasons are recorded so the next
 person does not have to re-derive them.
+
+## "Global per value" was overstated -- it is about BOUNDARIES (deferred)
+
+perigrin, on the boundaries verdict: *"Explain this in an SSA world?"* -- a fair
+challenge, because in SSA "per value" and "per site" nearly collapse. A value is
+defined once, so one representation per value is almost free: the definition
+picks a machine type and every use reads that same SSA name at that type.
+
+So the measurement did NOT find a constraint on values. It found one on **merge
+and boundary points**, which are exactly where SSA stops being
+one-definition-one-value:
+
+| boundary | forces a global choice? |
+|---|---|
+| phi within a graph | **No** -- insert a conversion on the differing arm. Blocked today only because the guards (`Context.pm:3529`, `:4796`, `:7589`) compare repr NAMES rather than machine types, so Num-vs-Num reads as agreement and no conversion is emitted. That is a fixable bug, not a law. |
+| `%Slot` heap cell | **No, once the tag is representation-keyed.** See below. |
+| function ABI / vtable slot | **Yes** -- `Context.pm:7649`: *"the callee has ONE emitted body at ONE machine type."* A caller cannot dispatch on a tag it never sees. Two representations means two bodies, i.e. monomorphisation. |
+
+### The tag is not width-limited; it is vocabulary-limited
+
+perigrin: *"We could expand from i8 to allow more tags and a better
+distinction."* Measured: **10 of 256 values used** -- `Undef=0, Int=1, Num=2,
+Str=3, Boolean=4, ArrayRef=5, HashRef=6, CodeRef=7, Object=8, Opaque=9`. There
+are 246 free. No widening is needed.
+
+The real limit is that `%_SLOT_TAG` is keyed by **type** names, which is the T1
+vocabulary, while the tag answers *"how do I read these bits"* -- a T2 question.
+`_slot_tag_for_repr` even has "repr" in its name while mapping type names. So
+the fix is a vocabulary change, not a layout change:
+
+    Num => 2      becomes      Num_double => 2, Num_i64 => 10, ...
+
+That is the same axis confusion this whole plan exists to remove, surviving
+inside the mechanism built to remove it.
+
+### Why this is DEFERRED and not a blocker
+
+Nothing today needs two `Num` representations: `Num` maps to `double`
+everywhere, so no cell, phi or ABI can currently disagree. The question only
+bites once T2 starts choosing `i64` for an integral Num -- which depends on the
+interval/integrality analysis that is itself deferred.
+
+**Do NOT build against this yet.** Recorded so the reasoning is not re-derived:
+the boundaries research doc's "global per value" conclusion is too strong as
+written, and this section is the correction.
+
+**When it is picked up, the open question is the ABI case only** -- whether
+monomorphisation is on the table, given `_lower_call_direct` currently inlines
+and there are ZERO real ABI argument positions to count (the boundaries doc
+measured this). Retiring the inliner creates those positions, so the two
+questions arrive together.
+
+**And one hazard to carry forward:** widening the tag vocabulary multiplies the
+arms in `_lower_coerce_from_slot`. The dispatch must stay exhaustive or an
+unhandled tag silently takes the undef arm -- a wrong value, not an error. A
+test that every tag value has an arm is the guard.
