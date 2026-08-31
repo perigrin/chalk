@@ -6152,6 +6152,24 @@ sub _lower_array_ref {
     $self->_emit("  store i64 $n, i64* $cap_ptr  ; ArrayRef: cap=$n");
     $self->_emit("  store %Slot* $slots, %Slot** $elm_ptr  ; ArrayRef: store slots ptr");
 
+    # BOX ONLY WHEN THE NODE IS A REF. An `ArrayRef` OPERATION is how the
+    # producer spells a literal aggregate, and it is used for BOTH `[1,2,3]`
+    # (a genuine reference, repr=ArrayRef, boxed i8*) and a plain lexical
+    # `my @a = (10,20,30)` (repr=Array, an unboxed %Array*). perigrin, on
+    # `for my $x (@a)`: "There is no ArrayRef here."
+    #
+    # Boxing unconditionally handed a raw i8* to consumers that read the
+    # node's repr and expected %Array*, and lli rejected the module:
+    #   '%tmp_26' defined with type 'i8*' but expected '%Array*'
+    # Fixing it in _container_ptr instead -- by unboxing for `Array` too --
+    # was WRONG and broke the five genuine-reference cases in
+    # llvm-array-hash.t, which have nothing to unbox.
+    my $repr = $node->representation // 'ArrayRef';
+    if ($repr eq 'Array') {
+        $self->{cache}{ $node->id } = $arr;
+        return $arr;
+    }
+
     # The canonical ref result is the i8* (Array* bitcast).
     my $ref = $self->_fresh;
     $self->_emit("  $ref = bitcast %Array* $arr to i8*  ; ArrayRef: Array* -> i8* ref");
@@ -6232,8 +6250,17 @@ sub _lower_hash_ref {
     $self->_emit("  store %HashEntry* $ents, %HashEntry** $ent_ptr  ; HashRef: store entries ptr");
 
     # The canonical ref result is the i8* (Hash* bitcast).
+    # BOX ONLY WHEN THE NODE IS A REF -- the twin of the %Array case above.
+    # A `HashRef` OPERATION spells both `{a=>1}` (repr=HashRef, boxed i8*) and
+    # a plain lexical `my %h = (...)` (repr=Hash, an unboxed %Hash*).
+    my $hrepr = $node->representation // 'HashRef';
+    if ($hrepr eq 'Hash') {
+        $self->{cache}{ $node->id } = $hash;
+        return $hash;
+    }
+
     my $ref = $self->_fresh;
-    $self->_emit("  $ref = bitcast %Hash* $hash to i8*  ; HashRef: Hash* -> i8* ref");
+        $self->_emit("  $ref = bitcast %Hash* $hash to i8*  ; HashRef: Hash* -> i8* ref");
 
     $self->{cache}{ $node->id } = $ref;
     return $ref;
@@ -6323,24 +6350,9 @@ sub _container_ptr {
     $container = $self->_unwrap_ref_container($container);
     my $repr = $container->representation // '';
     my $v = $self->lower_value($container);
-
-    # WHICH FORM THE VALUE IS IN is decided by what PRODUCED it, not by the
-    # node's stamp. `_lower_array_ref` and `_lower_hash_ref` ALWAYS return the
-    # boxed i8* -- their own comment calls it "the canonical ref result" --
-    # whatever repr the node carries. Gating the unbox on `$repr eq
-    # "${kind}Ref"` therefore handed a raw i8* straight to a typed GEP for any
-    # node stamped `Array` or `Hash`, and lli rejected the module:
-    #   '%tmp_26' defined with type 'i8*' but expected '%Array*'
-    # (measured on corpus D3b, `for my $x (@a) { $s += $x }`).
-    #
-    # Both spellings denote the same thing here -- `Array` and `ArrayRef` are
-    # one container reached two ways -- so the unbox is driven by the
-    # constructor's ACTUAL output form.
-    my $boxed = ($repr eq "${kind}Ref" || $repr eq $kind) ? true : false;
-    return $v unless $boxed;
-
+    return $v unless $repr eq "${kind}Ref";   # unboxed %Array*/%Hash* already
     my $typed = $self->_fresh;
-    $self->_emit("  $typed = bitcast i8* $v to %${kind}*  ; $repr -> ${kind}* (at use)");
+    $self->_emit("  $typed = bitcast i8* $v to %${kind}*  ; ${kind}Ref -> ${kind}* (at use)");
     return $typed;
 }
 
