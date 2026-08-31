@@ -840,3 +840,82 @@ that arrow set -- which is precisely why it reads as debt.
 
 UNVERIFIED: that `Coerce[Str -> Num]` yields 0 for a non-numeric string in
 chalk's emitted code. Asserted from Perl semantics, not measured.
+
+## `Num` is not `double` either -- and the backend assumes it is, ~284 times
+
+perigrin: *"Remember how we said Int wasn't always going to map exactly to i64?
+Same thing for Num:double."* And on whether anything downstream depends on it
+structurally: *"That's a bug if true."*
+
+It is true, and it is not incidental.
+
+### The candidate set, corrected
+
+Since **Z is a subset of R**, a `Num` whose values are all integral can be
+represented by an INTEGER type. Nothing about the TYPE `Num` requires a float
+REPRESENTATION. So:
+
+    Num -> { i8..u64, float, double, Rat (num/den pair), bignum }
+
+which is the same shape as `Int -> {i8..u64}`, and the sets OVERLAP. `i64`
+serves an `Int`, and it serves a `Num` that happens to be integral. The type
+says what is PERMITTED; the value set says what is ADEQUATE.
+
+**This closes the composition failure properly.** `Int -> Num -> Str` lost
+digits because `Num |-> double` forced a `sitofp`. With `Num` represented as
+`i64` on that path, `Int -> Num` is a no-op and `Num -> Str` formats with
+`%ld` -- identical to the direct arm, so composition HOLDS. That is a real fix,
+where the `%g -> %.15g` change considered earlier only moves the cliff from ~6
+digits to ~15 and leaves 2^53 intact.
+
+### Measured: the assumption is baked into the emitter
+
+| | count |
+|---|---|
+| `_repr_to_llvm_type` calls (the table) | **12** |
+| literal `double` inside an `_emit` string | **23** |
+| literal `i64` inside an `_emit` string | **261** |
+| `double` mentions in `Context.pm` overall | 95 |
+
+Roughly twenty sites hardcode `double` specifically for a `Num` -- constants
+(`:1705`), arithmetic (`:1824`), division (`:1883`), truthiness (`:2683`),
+uninitialised VarDecl (`:2727`), package-scalar globals (`:654`, `:2949`), the
+Slot payload read (`:2377`, `:6273`), and most of the coercion arms.
+
+**`Int` is worse, not better.** 261 literal `i64` emissions against 12 table
+lookups. So neither axis is representation-independent today; `Num` is simply
+where it became visible first.
+
+This is the layering violation this plan already names in the abstract -- a
+consumer deciding an encoding -- found concretely. `%_REPR_LLVM_TYPE` is the
+declared authority for the type-to-machine mapping, and the emitter goes around
+it roughly 284 times.
+
+### Why this is not a quick fix
+
+An emitter site does not merely name a type; it selects an INSTRUCTION.
+`fadd double` vs `add i64` is not a substitution -- float and integer
+arithmetic are different opcodes. So representation-independence here means
+each arithmetic site dispatches on the chosen representation, not that a string
+gets interpolated. That is a real refactor of the emitter, and it is the work
+that makes `Num -> i64` expressible at all.
+
+### Consequence for merges and boundaries (NOT YET MEASURED)
+
+If `Num` may lower as `i64` at one site and `double` at another, then two
+`Num`-stamped values can have DIFFERENT machine types, and every phi, call
+boundary, field store and ABI return between them needs a conversion inserted.
+That is the monomorphize-vs-box question arriving in a new place, and it is the
+half that would fail silently rather than loudly.
+
+**COULD NOT CONFIRM** how many merge/boundary sites would be affected -- not
+measured. It must be, before anything widens `Num`'s representation.
+
+### Sequencing
+
+Not now. This is a larger change than the T2 spine collapse, and it depends on
+knowing whether a value set is integral -- which is the interval/integrality
+analysis deferred as YAGNI. That deferral now has THREE independent reasons to
+be revisited: width selection for `Int`, precision adequacy for `Num`, and the
+composition law above. Still deferred; the reasons are recorded so the next
+person does not have to re-derive them.
