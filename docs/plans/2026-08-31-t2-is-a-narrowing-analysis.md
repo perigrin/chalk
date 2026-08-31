@@ -746,3 +746,97 @@ bespoke rule per node kind -- and has one for two of ten.
 **Sequencing unchanged**: still not folded into the T2 spine collapse. But the
 inventory says the eventual carrier work is broader than "teach `_element_repr`
 about `ArgsSource`", which is how the previous section framed it.
+
+## T2 is a FUNCTOR, and that is the correctness criterion this plan lacked
+
+perigrin: *"T2 operates as a kind of endofunctor between the category of Chalk
+Types and the category of LLVM types."*
+
+The functor part is exactly right and it is load-bearing. (Pedantically not
+ENDO -- an endofunctor returns to the same category, `F: C -> C`; Chalk and
+LLVM types are different categories, so `T2: Chalk -> LLVM`. An optimizer pass
+would be the endofunctor.)
+
+**Why it matters: a functor maps ARROWS, not just objects.**
+
+| | Chalk | LLVM |
+|---|---|---|
+| objects | `Int`, `Num`, `Str`, `Scalar`, `Array` | `i64`, `double`, `%Str`, `%Slot`, `%Array*` |
+| arrows | `Int <: Num` (subsumption), plus Perl's coercions | `sitofp`, a format call, box-with-tag |
+
+Every framing in this document before now mapped OBJECTS and ignored ARROWS --
+"a stamp names a candidate set, narrow it to one". That is why the object
+mapping looked finished while `Coerce[Scalar -> Num]` died: `Scalar |-> %Slot`
+was never the problem. The missing thing was an IMAGE FOR AN ARROW, and the tag
+is what makes that arrow constructible.
+
+### The two obligations, and one of them FAILS TODAY
+
+**Identity: `T2(id_A) = id_{T2(A)}`.** Satisfied. `_emit_coercion` returns the
+input untouched when `$from eq $to` (`Context.pm:2445`, *"nothing to bridge"*).
+That early return is usually read as an optimization; it is actually the
+identity law.
+
+**Composition: `T2(g . f) = T2(g) . T2(f)`.** **VIOLATED.** Measured under
+lli 15:
+
+    Int -> Str  directly        : 123456789012345
+    Int -> Num -> Str  composed : 1.23457e+14
+    perl                        : 123456789012345
+
+`_emit_coercion` enumerates arms per PAIR (`:2449` onward: Int->Num, Num->Int,
+Str->Num, Str->Int, ...), so each arrow's image is written independently and
+nothing checks that composites agree. `Int -> Str` formats with `%ld`;
+`Int -> Num -> Str` goes through `sitofp` and formats with `%g`, which is lossy
+above 2^53. Perl agrees with the DIRECT path, so **the composed route is a
+miscompile**, not merely a different spelling.
+
+This is not hypothetical: `Add => 'join'` yields Num from an Int operand
+(measured on F8), so a value can acquire `Num` and reach a Str position by
+exactly this route.
+
+### What this gives the plan
+
+A correctness criterion it did not have. "Every corpus case is green" is a
+sample; the functor laws are a PROPERTY, checkable per arrow pair:
+
+1. **identity** -- `T2(A -> A)` emits no instruction. Holds.
+2. **composition** -- for every path `A -> B -> C` in the source category,
+   the composed emission must agree with the direct one. FAILS for
+   `Int -> Num -> Str`.
+
+That second law is a test that can be written now, over the arm table, without
+building anything else. It is a stronger check than the corpus because it is
+exhaustive over pairs rather than over sampled programs.
+
+### Where the categories genuinely differ
+
+LLVM's types are UNORDERED and structural -- no `i32 <: i64`, no join or meet,
+and `%Array*` vs `%Slot*` are simply different. perigrin: *"it's not even
+Latticed types ... more akin to HM Types."* Right, in that LLVM types are
+structural and equality-based: two types unify or they do not.
+
+A functor does not require the target to share the source's shape -- it only
+has to send each source arrow somewhere, preserving composition. So "LLVM is
+not a lattice" is not an obstacle; it is a category with different arrows. What
+it DOES mean is that Chalk's subsumption is not free in the target: `Int <: Num`
+costs a `sitofp`. The lattice says a conversion is PERMITTED; LLVM says what it
+COSTS.
+
+Caution on the HM reading: it describes the SHAPE of the target types, not that
+inference comes free. HM's power is unification solving for unknowns; chalk's
+stamps arrive from a producer and from lattice reasoning, and there is no
+unifier. Reading "HM-like" as "we get HM inference" would repeat the error of
+treating the lattice as if it were LLVM's type system.
+
+### The source category is bigger than the lattice
+
+One correction to an earlier framing in this session. `Coerce[Str -> Num]`
+(`"abc" + 1`) is NOT a subsumption arrow -- a Str is not a Num, and this is not
+the inverse of `Num <: Str`. It is a lossy conversion Perl defines. So the
+source category is **the subtype lattice PLUS Perl's coercion arrows**, and
+`%_COERCIBLE_TO` (`Analysis.pm:174`) is a hand-maintained fragment of exactly
+that arrow set -- which is precisely why it reads as debt.
+
+UNVERIFIED: that `Coerce[Str -> Num]` yields 0 for a non-numeric string in
+chalk's emitted code. Asserted from Perl semantics, not measured.
