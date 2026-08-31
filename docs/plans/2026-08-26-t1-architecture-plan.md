@@ -1372,3 +1372,57 @@ is stale; 8 is the number to drive to zero.
 
 T1's `_infer` is an empty, CALLED seam with the ordering fact written at it, so
 the next attempt starts from the finding rather than rediscovering it.
+
+### The split workflow: REFUTED on its own headline (coordinator, 2026-08-31)
+
+Four agents (three investigations + an adversarial verifier) were dispatched on
+"separate MOP construction from type inference". The verifier returned **"do NOT
+attempt the split yet"**, resting on one claim:
+
+> *"every quantitative claim about the split rests on a gate that does not
+> terminate … no gate-green number exists on HEAD, from any of the three
+> reports or from me."*
+
+**That claim is false, and I checked it before acting on it.**
+
+| what it claimed | measured here |
+|---|---|
+| `from_json` hangs on a `:param :reader` class | **`LOADED`, rc=0** |
+| corpus case `field-attrs` non-terminating | **`LOADED`, rc=0** |
+| "the gate does not run" | **runs in 61s, reports 205/205/207/219** |
+
+The verifier says it "reproduced it independently, not by reading" and reports
+`rc=124` with a 600-iteration probe. I cannot reproduce any of it. The gate has
+been measured at 205 more than a dozen times today, including immediately after
+reading that report.
+
+**What this costs.** The verifier's entire recommendation — fix a
+non-terminating `_stamp_method_call_reprs` first, defer the split, sequence
+three preparatory commits — is downstream of the hang. With no hang, the
+recommendation has no foundation, and I am not taking it.
+
+**What may still be worth keeping**, each needing independent measurement before
+it is believed:
+
+1. **The exit criterion may be unreachable as specified.** The claim: with
+   `Analysis::run` neutered, stamp diffs persist because `Print -> Boolean` is
+   seeded in the DESERIALIZER (`Serialize/JSON.pm:656-658`), one layer below
+   the split — so the metric would read 8 before and 8 after. If true, the
+   split would look like a failure. **Testable and worth testing.**
+2. **`loader-reproduces-the-wire.t`'s four probe programs are all class-free**,
+   so it cannot observe the class passes the blocker concerns. **Checkable by
+   reading the test.**
+3. **The wire-vs-graph `die` belongs in the loader**, not in an inference pass —
+   it validates deserialized input against producer metadata, which is a
+   trust-boundary check, not an inference result. Consistent with the
+   verify-consistency ruling.
+4. **`scratchpad/` contains seven full worktree copies**, so an unfiltered
+   `grep -rn` over the repo returns contaminated duplicates. That is a real
+   hazard and explains how several agents may have measured the wrong tree.
+
+**The process lesson, which is the durable part.** I built the workflow around
+an adversarial verifier precisely to catch plausible-but-unmeasured claims — and
+the verifier produced one, with more confidence than any of the three
+investigations it was checking. "Confidence: high … all four I reproduced myself
+with commands, not readings" was the most confident sentence in the report and
+the false one. **A verification layer is not self-verifying.**
