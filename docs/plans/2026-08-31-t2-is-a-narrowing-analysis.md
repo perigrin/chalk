@@ -257,3 +257,55 @@ surfaces THIS session's own unfinished work, which is what a TODO is for.
 
 **Neither change depends on T2 existing.** Both are the absence-as-success
 family, fixable now.
+
+## T1 is generic; T2's FRAMEWORK is generic, its IMPLEMENTATION is the target's
+
+perigrin: *"T1 is generic to Chalk, T2 architecturally is generic but the
+implementation is specific to the LLVM target ... we need to keep a robust
+separation between them as we look at alternative targets in the future."*
+
+The split falls where the design already landed. **The decision PROCEDURE is
+generic** — walk the graph, consult intervals and uses, narrow to a fixpoint.
+**The CANDIDATES are the target's** — `Int -> {i8..u64}` is LLVM's vocabulary; a
+JVM target says `{byte, short, int, long}`, a C target something else. Same pass,
+different alphabet.
+
+| layer | generic? | belongs in |
+|---|---|---|
+| T1 — types | fully | `lib/Chalk/IR/` |
+| T2 — narrowing framework | architecturally | `lib/Chalk/IR/Transform/` |
+| T2 — candidate sets + selection | **no, per-target** | `lib/Chalk/Target/<T>/` |
+
+So the target supplies a TYPE SYSTEM DESCRIPTION — what machine types exist,
+each Chalk type's candidate set, what a narrowing costs — and the generic pass
+consults it. An interface, not a table.
+
+### With one target the boundary is unfalsifiable — and it has already leaked
+
+Measured 2026-08-31: **26 LLVM references inside `lib/Chalk/IR/`**, the
+supposedly target-independent layer. Not merely comments:
+
+- `IR/MethodInfo.pm:19` — a field named **`return_repr`**, documented as *"the
+  LLVM representation of the method's return value"*. An LLVM-specific value on
+  a target-independent IR struct.
+- `IR/Schedule/Elaborate.pm:1` — its ABOUTME reads *"the Chalk **LLVM** back-half
+  scheduler"*. A scheduling pass named after one backend.
+
+`ls lib/Chalk/Target/` returns exactly one entry. With a single target nothing
+FAILS when the boundary leaks, so the leak stays invisible until a second target
+arrives and it all has to be untangled at once.
+
+**The enforceable test:** `lib/Chalk/IR/` must not mention LLVM. That is a grep,
+it can be a gate leg, and it currently fails at 26 sites. It would have caught
+`return_repr` landing on `MethodInfo`.
+
+### Sequencing: build the BOUNDARY, not the abstraction
+
+Do not build a pluggable target-description interface for a second target that
+does not exist. The honest version now: **put T2's LLVM-specific half under
+`Target/LLVM/`, keep the framework in `IR/Transform/`, add the grep as a gate
+leg.** The interface is designed toward and built when a second target asks.
+
+The 26 existing leaks are NOT in scope for the T2 build. `return_repr` on
+`MethodInfo` looks load-bearing — likely a chain, not a slice — and should be
+filed separately rather than folded in.
