@@ -1398,7 +1398,18 @@ sub lower_value {
     # _lower_call_direct for how the frame is built and torn down.
     if ($self->{_arg_bind}) {
         my $bound = $self->{_arg_bind}{ refaddr($node) };
-        return $bound if defined $bound;
+        if (defined $bound) {
+            # The binding carries the caller argument's REPR as well as its
+            # ref (see _lower_call_direct). Stamp the callee node with it so
+            # consumers in the inlined body read the value as what it actually
+            # is, not as the callee's un-narrowed `Scalar`.
+            if (defined $bound->{repr}
+                    && ($node->representation // '') ne $bound->{repr}
+                    && $node->can('set_representation')) {
+                $node->set_representation($bound->{repr});
+            }
+            return $bound->{ref};
+        }
     }
 
     # Cache: if we already lowered this node (hash-cons sharing), reuse the
@@ -2395,9 +2406,26 @@ sub _unbox_payload_as {
 sub _lower_coerce {
     my ($self, $node) = @_;
 
-    my $from = $node->from_repr;
-    my $to   = $node->to_repr;
+    my $to = $node->to_repr;
+
+    # Lower the operand FIRST, then ask what it actually is. `from_repr` is a
+    # static field stamped when the graph was loaded; it describes the operand
+    # the analysis saw, which is not always the value the backend ends up
+    # holding. Inlining is the case that matters: `_arg_bind` substitutes the
+    # caller's already-lowered argument for a callee's `$_[0]` read, so a node
+    # the analysis stamped `Scalar` (an @_ element, honestly un-narrowed in the
+    # callee) now holds the caller's `i64`. Emitting from the stale `Scalar`
+    # produced a %Slot tag dispatch against a bare integer -- "'%tmp_1' defined
+    # with type 'i64' but expected '%Slot'". The operand's own representation
+    # is the truth at emission time; from_repr is the fallback for operands
+    # that carry none.
     my $input_ref = $self->lower_value($node->inputs->[0]);
+    my $operand   = $node->inputs->[0];
+    my $from      = (blessed($operand) && $operand->can('representation')
+                     && defined $operand->representation)
+                  ? $operand->representation
+                  : $node->from_repr;
+
     my $ref = $self->_emit_coercion($input_ref, $from, $to, 'Coerce');
     $self->{cache}{$node->id} = $ref;
     return $ref;
@@ -7169,7 +7197,16 @@ sub _lower_call_direct {
     # the refaddr keys are per-node, so an inner callee's shift never shadows
     # an outer's.
     local $self->{_arg_bind} = { ($self->{_arg_bind} // {})->%* };
-    $self->{_arg_bind}{ refaddr($arg_reads[$_]) } = $arg_refs[$_]
+    # Bind the REF AND THE REPR. The callee's arg-read carries the callee's
+    # own stamp -- a `$_[0]` Subscript is `Scalar`, because @_ is an array of
+    # Slots and nothing in the callee narrows it. Substituting only the value
+    # left that Scalar stamp on a node now holding the caller's `i64`, so the
+    # surrounding Coerce[Scalar -> Num] emitted a %Slot tag dispatch against a
+    # bare integer: "'%tmp_1' defined with type 'i64' but expected '%Slot'".
+    # The repr is what every consumer uses to decide how to READ the value, so
+    # rebinding one without the other is a type lie.
+    $self->{_arg_bind}{ refaddr($arg_reads[$_]) } =
+        { ref => $arg_refs[$_], repr => $args[$_]->representation }
         for 0 .. $#arg_reads;
 
     # The callee's body nodes must NOT outlive this inline frame in the value
