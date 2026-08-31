@@ -51,26 +51,80 @@ A `Str`-stamped value that is really an Int either stores as `i64` and formats
 at each use, or formats once and stores as `%Str`. Those differ in cost AND in
 observable behavior — float formatting is not round-trip-free. A real choice.
 
-## `%_REPR_LLVM_TYPE` is T2's OUTPUT format, not the type mapping
+## T2's output is a graph annotated with LLVM types
 
-`Context.pm:3730` maps each representation to exactly one machine type. It looks
-like the design and is not (perigrin): *"This was built before we had as solid
-an understanding of the problem as we do now."*
+perigrin, correcting an earlier version of this doc: *"Wouldn't it be easier if
+T2's output were just a better annotated IR graph with LLVM types instead of
+Chalk types?"*
+
+Yes, and it is the better contract. **T2 rewrites the graph; every node comes
+out carrying an LLVM type.** The backend then READS a type off the node instead
+of computing one.
+
+**Why this beats handing the backend a narrowed Chalk type.** An LLVM-annotated
+graph is CHECKABLE on its own — every operand of an `add i64` is `i64`, every
+Phi's arms agree — before a byte of text is emitted. The alternative leaves the
+final step scattered across 8 backend call sites and unverifiable, which is
+exactly the shape that produced `bc943e3b` and `ebdd6a23`: consumers deciding
+encoding one site at a time. It also matches what T1 already does — a pass whose
+output is a graph, with an invariant checker over it.
+
+**It costs no new field.** Measured: `Node.pm:34` declares ONE field, `$stamp`,
+and `Node.pm:295` is `method representation() { return $stamp }` — a read alias,
+not a second slot. So this is not "add an LLVM type field"; it is **change what
+the one existing field HOLDS, at the point T2 rewrites the node.** Before T2 the
+stamp is a Chalk type; after T2 it is an LLVM type. One field, two phases, the
+pass as the boundary.
+
+(An earlier draft worried about a third type-ish field joining the `body`
+dual-write mess. That worry was wrong — the alias already unified them.)
+
+**And it gives the invariant checker a sharp question:** not "is this stamp
+sound?" but *"which vocabulary is this graph in?"* A graph past T2 holding
+`Scalar` in a stamp is a T2 bug, detectable without reasoning about types at all.
+
+### The mapping is a decision procedure, not a table
+
+`%_REPR_LLVM_TYPE` (`Context.pm:3730`) maps each representation to exactly one
+machine type. It looks like the design and is not (perigrin): *"This was built
+before we had as solid an understanding of the problem as we do now"*, and
+*"I'm not currently convinced that the mapping between Chalk and LLVM types
+makes sense as a table but you are correct that something needs to perform that
+mapping."*
 
 It is 1:1 precisely BECAUSE it was built assuming its input was already
 narrowed. `_repr_to_llvm_type` (`:3812`) dies on undef with a message blaming
-TypeInference — that die is the pre-split model showing through, assuming
-something upstream already collapsed the choice and treating failure as a T1
-bug. Under the split the collapse is T2's job.
+TypeInference — the pre-split model showing through, treating a missing
+narrowing as a T1 bug when the narrowing is T2's job.
 
-The table survives as the final lookup AFTER narrowing. What does not exist
-anywhere is the front half: the `Chalk type -> candidate LLVM types` relation,
-and the pass that shrinks each set to one.
+Once T2 owns the mapping it is a DECISION PROCEDURE: it can consult the
+interval, the uses, the sign. A hash literal expresses none of that. `Int ->
+i64` is a table entry only while nothing narrows; the moment intervals exist it
+is a computation. **Building it as a table now would bake in the very
+pre-narrowed assumption this split removes.**
 
-Two recent commits are the same discovery arriving one site at a time:
-`bc943e3b` *"'type X is N bytes' over-decides -- that is why the store guard is
-T2's"* and `ebdd6a23` *"a field store is coherent by encoding, not by type
-equality"*. Consumers asking a question no pass exists to answer.
+The die moves with it. Under a backend-side table, `_repr_to_llvm_type` failing
+on `Unknown` is a backend-time error blaming an earlier pass. Under this
+contract it is **T2 reporting its own failure to narrow**, at the point the
+decision was made, with the graph still in hand.
+
+### The test migration is a slice, not a chain
+
+Measured 2026-08-31: **29 sites across 14 files** assert a specific lattice
+value through `stamp`/`representation`. Concentrated —
+`mdtest-constructive-builder.t` (8), `son-aggregate-repr.t` (4),
+`element-store-repr.t` (3); the remaining 11 files hold 1-2 each.
+
+The other ~230 `representation` references in `lib/` and the rest of the 120
+touching test files READ through the alias, so they follow the field
+automatically. Only these 29 name a value, and a named value is
+Chalk-vocabulary — after T2 those nodes hold LLVM types.
+
+perigrin on the fix: *"The tests will need to be re-written to either check
+before T2 or to take into account the T2 transformation ... or both."* The
+"both" case is the valuable one: **a test asserting the Chalk stamp before T2
+and the LLVM type after is a contract test for the pass itself**, and those are
+the tests that would have caught the encoding decisions leaking into consumers.
 
 ## `%Slot` is what T2 emits when narrowing FAILS
 
