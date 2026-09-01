@@ -1579,6 +1579,11 @@ sub lower_value {
             && defined $node->name && ($node->name eq 'shift' || $node->name eq 'pop')) {
         return $self->_lower_builtin_shift_pop($node);
     }
+    # Call(builtin, sort): the operand's elements, ordered.
+    elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
+            && defined $node->name && $node->name eq 'sort') {
+        return $self->_lower_builtin_sort($node);
+    }
     # Call(builtin, keys): the hash's keys as an %Array of %Slot.
     elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
             && defined $node->name && $node->name eq 'keys') {
@@ -6720,6 +6725,206 @@ sub _load_array_header {
 #
 # inputs[0] is the array operand (or, when threaded as a statement effect, the
 # control leads and the array is inputs[1]); resolve it by repr, not position.
+# _lower_builtin_sort($node) -> $llvm_ref (an %Array* of %Slot)
+#
+# perl FOLDS the standard comparators into flags on the sort op, so the block
+# is gone by the time a producer sees it and what remains is the DECISION.
+# Without sort_cmp/sort_order three different programs are one node:
+#
+#   sort { $a <=> $b } (3,1,2)   perl 1
+#   sort { $b <=> $a } (3,1,2)   perl 3
+#   sort (3,1,2)                 perl 1   -- STRING compare, not numeric
+#
+# Bare `sort` defaulting to a string compare is the case that breaks ordinary
+# code, not an edge case: `sort (10, 9, 100)` is `10 100 9`.
+#
+# The sort is an INSERTION SORT over the %Slot buffer -- O(n^2), chosen
+# because the corpus sorts hash keys (2-3 elements) and a correct simple
+# algorithm beats a fast one this file cannot yet test at scale. The
+# comparator is the only interesting part; swapping in a better algorithm
+# later changes no caller.
+#
+# A COPY, not in place: perl's `sort` returns a new list and leaves its
+# operand alone, so sorting the operand's buffer would corrupt an array the
+# program can still read.
+sub _lower_builtin_sort {
+    my ($self, $node) = @_;
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+
+    my ($operand) = grep { blessed($_) } $node->inputs->@*;
+    die "GAP: sort expects a list operand." unless defined $operand;
+
+    my $cmp   = $node->can('sort_cmp')   ? $node->sort_cmp   : undef;
+    my $order = $node->can('sort_order') ? $node->sort_order : undef;
+    die "GAP: sort with no folded comparator — the producer states sort_cmp "
+      . "(numeric|string) and sort_order (ascending|descending); without them "
+      . "`sort {\$a<=>\$b}`, `sort {\$b<=>\$a}` and a bare string `sort` are "
+      . "one node and lowering would have to guess which."
+        unless defined $cmp && defined $order;
+    die "GAP: sort with a custom comparator block is not lowered (only perl's "
+      . "FOLDED numeric/string comparators are); got sort_cmp='$cmp'."
+        unless $cmp eq 'numeric' || $cmp eq 'string';
+
+    my $op_repr = $operand->can('representation') ? ($operand->representation // '') : '';
+    die "GAP: sort over an operand with repr=" . ($op_repr || 'NONE')
+      . " — only a materialised Array or ArrayRef has elements to order."
+        unless $op_repr eq 'Array' || $op_repr eq 'ArrayRef';
+
+    my $src = $self->_container_ptr($operand, 'Array');
+
+    # len/data of the source
+    my ($slen_p, $slen, $sdat_p, $sdat) =
+        ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $slen_p = getelementptr inbounds %Array, %Array* $src, i32 0, i32 0  ; sort: src len ptr");
+    $self->_emit("  $slen = load i64, i64* $slen_p  ; sort: element count");
+    $self->_emit("  $sdat_p = getelementptr inbounds %Array, %Array* $src, i32 0, i32 2  ; sort: src data ptr");
+    $self->_emit("  $sdat = load %Slot*, %Slot** $sdat_p  ; sort: src slots");
+
+    # Copy the buffer, then order the copy.
+    my ($bytes, $raw, $slots) = ($self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $bytes = mul i64 $slen, " . _sizeof_llvm_type('%Slot') . "  ; sort: buffer bytes");
+    $self->_emit("  $raw = call i8* \@malloc(i64 $bytes)  ; sort: alloc result buffer");
+    $self->_emit("  $slots = bitcast i8* $raw to %Slot*  ; sort: result slots");
+    my $src_i8 = $self->_fresh;
+    $self->_emit("  $src_i8 = bitcast %Slot* $sdat to i8*  ; sort: src as bytes");
+    $self->_emit("  call i8* \@memcpy(i8* $raw, i8* $src_i8, i64 $bytes)  ; sort: copy (perl's sort does not mutate its operand)");
+
+    my ($arr_raw, $arr) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $arr_raw = call i8* \@malloc(i64 " . _sizeof_llvm_type('%Array') . ")  ; sort: alloc %Array header");
+    $self->_emit("  $arr = bitcast i8* $arr_raw to %Array*  ; sort: %Array ptr");
+    my ($alen, $acap, $adat) = ($self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $alen = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0  ; sort: len ptr");
+    $self->_emit("  $acap = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 1  ; sort: cap ptr");
+    $self->_emit("  $adat = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2  ; sort: data ptr");
+    $self->_emit("  store i64 $slen, i64* $alen  ; sort: len");
+    $self->_emit("  store i64 $slen, i64* $acap  ; sort: cap");
+    $self->_emit("  store %Slot* $slots, %Slot** $adat  ; sort: data");
+
+    # Insertion sort: for i in 1..len-1, bubble slot[i] down while it is out
+    # of order against its predecessor.
+    my $n = $self->_fresh_label('sort');
+    my ($l_ohdr, $l_obody, $l_ihdr, $l_ibody, $l_swap, $l_inext, $l_onext, $l_end) =
+        ("${n}_ohdr", "${n}_obody", "${n}_ihdr", "${n}_ibody",
+         "${n}_swap", "${n}_inext", "${n}_onext", "${n}_end");
+
+    my ($i_phi, $i_next, $j_phi, $j_next) =
+        ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+
+    my $entry = $self->_current_block_label;
+    $self->_set_terminator("  br label \%$l_ohdr");
+
+    # outer: i = 1 .. len-1
+    $self->_new_block($l_ohdr);
+    $self->_emit("  $i_phi = phi i64 [ 1, \%$entry ], [ $i_next, \%$l_onext ]  ; sort: i");
+    my $i_more = $self->_fresh;
+    $self->_emit("  $i_more = icmp slt i64 $i_phi, $slen  ; sort: i < len?");
+    $self->_set_terminator("  br i1 $i_more, label \%$l_obody, label \%$l_end");
+
+    $self->_new_block($l_obody);
+    $self->_set_terminator("  br label \%$l_ihdr");
+
+    # inner: j = i, while j > 0 and slot[j-1] out of order vs slot[j], swap
+    $self->_new_block($l_ihdr);
+    $self->_emit("  $j_phi = phi i64 [ $i_phi, \%$l_obody ], [ $j_next, \%$l_swap ]  ; sort: j");
+    my $j_more = $self->_fresh;
+    $self->_emit("  $j_more = icmp sgt i64 $j_phi, 0  ; sort: j > 0?");
+    $self->_set_terminator("  br i1 $j_more, label \%$l_ibody, label \%$l_onext");
+
+    $self->_new_block($l_ibody);
+    my ($jm1, $pa, $pb) = ($self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $jm1 = sub i64 $j_phi, 1  ; sort: j-1");
+    $self->_emit("  $pa = getelementptr inbounds %Slot, %Slot* $slots, i64 $jm1  ; sort: slot[j-1]");
+    $self->_emit("  $pb = getelementptr inbounds %Slot, %Slot* $slots, i64 $j_phi  ; sort: slot[j]");
+
+    my $out_of_order = $self->_emit_slot_out_of_order($pa, $pb, $cmp, $order);
+    $self->_set_terminator("  br i1 $out_of_order, label \%$l_swap, label \%$l_onext");
+
+    # swap slot[j-1] and slot[j] as whole aggregates -- a field-wise swap that
+    # forgot one field would silently pair a key with another key's payload.
+    $self->_new_block($l_swap);
+    my ($va, $vb) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $va = load %Slot, %Slot* $pa  ; sort: slot[j-1]");
+    $self->_emit("  $vb = load %Slot, %Slot* $pb  ; sort: slot[j]");
+    $self->_emit("  store %Slot $vb, %Slot* $pa  ; sort: swap");
+    $self->_emit("  store %Slot $va, %Slot* $pb  ; sort: swap");
+    $self->_emit("  $j_next = sub i64 $j_phi, 1  ; sort: j--");
+    $self->_set_terminator("  br label \%$l_ihdr");
+
+    $self->_new_block($l_onext);
+    $self->_emit("  $i_next = add i64 $i_phi, 1  ; sort: i++");
+    $self->_set_terminator("  br label \%$l_ohdr");
+
+    $self->_new_block($l_end);
+
+    $self->{cache}{$node->id} = $arr;
+    return $arr;
+}
+
+# _emit_slot_out_of_order($pa, $pb, $cmp, $order) -> i1
+#
+# True when the slot at $pa must move after the slot at $pb. The comparator
+# is the producer's folded decision, not a guess: `numeric` reads payloads as
+# i64, `string` reads them as the %StrPair* a Str slot boxes.
+sub _emit_slot_out_of_order {
+    my ($self, $pa, $pb, $cmp, $order) = @_;
+
+    my $i_pay = _slot_idx('payload');
+    my ($ga, $gb, $a, $b) = ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $ga = getelementptr inbounds %Slot, %Slot* $pa, i32 0, i32 $i_pay  ; sort: lhs payload");
+    $self->_emit("  $gb = getelementptr inbounds %Slot, %Slot* $pb, i32 0, i32 $i_pay  ; sort: rhs payload");
+    $self->_emit("  $a = load i64, i64* $ga  ; sort: lhs");
+    $self->_emit("  $b = load i64, i64* $gb  ; sort: rhs");
+
+    my $res = $self->_fresh;
+    if ($cmp eq 'numeric') {
+        my $pred = $order eq 'descending' ? 'slt' : 'sgt';
+        $self->_emit("  $res = icmp $pred i64 $a, $b  ; sort: numeric $order");
+        return $res;
+    }
+
+    # A Str slot's payload is a %StrPair* (ptr,len) -- the same boxing every
+    # other Str write uses. memcmp over the shorter length, then length as the
+    # tiebreak, is perl's `cmp`.
+    my ($sa, $sb) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $sa = inttoptr i64 $a to %StrPair*  ; sort: lhs StrPair");
+    $self->_emit("  $sb = inttoptr i64 $b to %StrPair*  ; sort: rhs StrPair");
+    my ($apg, $alg, $bpg, $blg) = ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $apg = getelementptr inbounds %StrPair, %StrPair* $sa, i64 0, i32 0  ; sort: lhs ptr");
+    $self->_emit("  $alg = getelementptr inbounds %StrPair, %StrPair* $sa, i64 0, i32 1  ; sort: lhs len");
+    $self->_emit("  $bpg = getelementptr inbounds %StrPair, %StrPair* $sb, i64 0, i32 0  ; sort: rhs ptr");
+    $self->_emit("  $blg = getelementptr inbounds %StrPair, %StrPair* $sb, i64 0, i32 1  ; sort: rhs len");
+    my ($ap, $al, $bp, $bl) = ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $ap = load i8*, i8** $apg");
+    $self->_emit("  $al = load i64, i64* $alg");
+    $self->_emit("  $bp = load i8*, i8** $bpg");
+    $self->_emit("  $bl = load i64, i64* $blg");
+
+    my ($shorter_c, $shorter, $mc, $ne, $len_gt, $tie) =
+        ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $shorter_c = icmp slt i64 $al, $bl  ; sort: which is shorter?");
+    $self->_emit("  $shorter = select i1 $shorter_c, i64 $al, i64 $bl  ; sort: compare length");
+    $self->_emit("  $mc = call i32 \@memcmp(i8* nocapture readonly $ap, i8* nocapture readonly $bp, i64 $shorter)  ; sort: string compare");
+    $self->_emit("  $ne = icmp ne i32 $mc, 0  ; sort: bytes differ?");
+
+    # Equal over the shared prefix: the longer string sorts after.
+    $self->_emit("  $len_gt = icmp sgt i64 $al, $bl  ; sort: lhs longer?");
+    my $pred = $order eq 'descending' ? 'slt' : 'sgt';
+    my $byte_gt = $self->_fresh;
+    $self->_emit("  $byte_gt = icmp $pred i32 $mc, 0  ; sort: string $order");
+    # The length tiebreak inverts with the order, like the byte compare does.
+    # $len_gt is emitted above for the ascending case; descending needs its
+    # mirror, and taking the same ref for both would sort equal-prefix strings
+    # backwards in one direction.
+    my $tie_gt = $len_gt;
+    if ($order eq 'descending') {
+        $tie_gt = $self->_fresh;
+        $self->_emit("  $tie_gt = icmp slt i64 $al, $bl  ; sort: lhs shorter (descending tiebreak)");
+    }
+    $self->_emit("  $tie = select i1 $ne, i1 $byte_gt, i1 $tie_gt  ; sort: bytes, else length");
+    return $tie;
+}
+
 # _lower_builtin_keys($node) -> $llvm_ref (an %Array* of %Slot)
 #
 # PERL'S KEY ORDER IS NOT REPRODUCIBLE HERE. Measured on 5.42.0, three runs
@@ -6908,10 +7113,6 @@ sub _lower_builtin_join {
     # direct call resolves through the CALLEE'S LIST READING -- Return
     # inputs[0], never inputs[-1], which is the scalar face.
     my $elements = $self->_static_list_elements($list_node);
-    die "GAP: join over a list whose arity is not statically known "
-      . "(operand op=" . $list_node->operation . ") — the element count must be "
-      . "a compile-time fact; refusing to guess it."
-        unless defined $elements;
 
     # The separator is a Str by join's signature; anything else is bridged the
     # same way an operand of any Str-context operator is.
@@ -6920,6 +7121,20 @@ sub _lower_builtin_join {
                  ? $sep_node->representation : undef;
     $sep_ref = $self->_emit_coercion($sep_ref, $sep_repr, 'Str', 'join separator')
         if defined $sep_repr && $sep_repr ne 'Str';
+
+    # A RUNTIME-ARITY LIST LOOPS. `join(",", sort keys %h)` is the case the
+    # corpus wants (references.md R11) and its element count is the hash's
+    # runtime key count, so requiring a compile-time arity refused exactly the
+    # program this exists for. The static path stays because it emits straight
+    # -line concats with no loop when the count IS known.
+    unless (defined $elements) {
+        my $repr = $list_node->can('representation')
+                 ? ($list_node->representation // '') : '';
+        die "GAP: join over an operand with repr=" . ($repr || 'NONE')
+          . " — a runtime-arity join needs a materialised Array to walk."
+            unless $repr eq 'Array' || $repr eq 'ArrayRef';
+        return $self->_emit_join_loop($list_node, $sep_ref);
+    }
 
     # An empty list joins to the empty string, and a single element joins to
     # itself -- neither uses the separator at all.
@@ -6944,6 +7159,105 @@ sub _lower_builtin_join {
 
     $self->{cache}{$node->id} = $acc;
     return $acc;
+}
+
+# _emit_join_loop($list_node, $sep_ref) -> $llvm_ref (a Str)
+#
+# join over an %Array whose length is only known at runtime. Walks the slot
+# buffer accumulating `acc = acc . sep . element`, with the separator skipped
+# before the first element -- which is what makes it a join rather than a
+# concatenation with a trailing separator.
+#
+# The accumulator is a %Str carried through a phi, so its pointer and length
+# travel together and a merge cannot desynchronise them (the same reason %Str
+# is a first-class aggregate rather than two parallel values).
+sub _emit_join_loop {
+    my ($self, $list_node, $sep_ref) = @_;
+    $self->{_need_aggregate_types} = 1;
+
+    my $arr = $self->_container_ptr($list_node, 'Array');
+
+    my ($len_p, $len, $dat_p, $slots) =
+        ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $len_p = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0  ; join: len ptr");
+    $self->_emit("  $len = load i64, i64* $len_p  ; join: element count");
+    $self->_emit("  $dat_p = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2  ; join: data ptr");
+    $self->_emit("  $slots = load %Slot*, %Slot** $dat_p  ; join: slots");
+
+    my $empty = $self->_empty_str_ref('join: accumulator seed');
+
+    my $n = $self->_fresh_label('joinloop');
+    my ($l_hdr, $l_body, $l_sep, $l_app, $l_end) =
+        ("${n}_hdr", "${n}_body", "${n}_sep", "${n}_app", "${n}_end");
+
+    # THE ACCUMULATOR LIVES IN A STACK SLOT, not a phi. Its back-edge value is
+    # produced by _emit_str_append, whose SSA name does not exist until after
+    # the phi would have to name it -- and a phi cannot forward-reference a
+    # value this emitter has no way to pre-name. An alloca sidesteps the
+    # ordering entirely; mem2reg turns it back into a phi.
+    my $acc_slot = $self->_fresh;
+    $self->_emit_entry("  $acc_slot = alloca %Str  ; join: accumulator slot");
+    my $i_slot = $self->_fresh;
+    $self->_emit_entry("  $i_slot = alloca i64  ; join: index slot");
+    $self->_emit("  store i64 0, i64* $i_slot  ; join: index = 0");
+    $self->_emit("  store %Str $empty, %Str* $acc_slot  ; join: accumulator starts empty");
+
+    $self->_set_terminator("  br label \%$l_hdr");
+
+    # The index also lives in a slot rather than a phi. _emit_str_append and
+    # _emit_to_str can OPEN BLOCKS (Int->Str renders its digits in a loop), so
+    # the block control leaves the body from is not $l_app and a phi naming
+    # $l_app produced "Instruction does not dominate all uses". A slot has no
+    # predecessor to name.
+    $self->_new_block($l_hdr);
+    my $i_phi = $self->_fresh;
+    $self->_emit("  $i_phi = load i64, i64* $i_slot  ; join: index");
+    my $acc_phi = $self->_fresh;
+    $self->_emit("  $acc_phi = load %Str, %Str* $acc_slot  ; join: accumulator");
+    my $more = $self->_fresh;
+    $self->_emit("  $more = icmp slt i64 $i_phi, $len  ; join: i < len?");
+    $self->_set_terminator("  br i1 $more, label \%$l_body, label \%$l_end");
+
+    # The separator goes BEFORE every element except the first.
+    $self->_new_block($l_body);
+    my $first = $self->_fresh;
+    $self->_emit("  $first = icmp eq i64 $i_phi, 0  ; join: first element?");
+    $self->_set_terminator("  br i1 $first, label \%$l_app, label \%$l_sep");
+
+    $self->_new_block($l_sep);
+    my $with_sep = $self->_emit_str_append($acc_phi, $sep_ref, 'join: separator');
+    $self->_emit("  store %Str $with_sep, %Str* $acc_slot  ; join: accumulator .= separator");
+    $self->_set_terminator("  br label \%$l_app");
+
+    # Read the accumulator back rather than merging the two arms with a phi:
+    # the separator arm's own emission may have opened blocks, so its incoming
+    # label is not $l_sep.
+    $self->_new_block($l_app);
+    my $base = $self->_fresh;
+    $self->_emit("  $base = load %Str, %Str* $acc_slot  ; join: acc, separated");
+    my $slot_p = $self->_fresh;
+    $self->_emit("  $slot_p = getelementptr inbounds %Slot, %Slot* $slots, i64 $i_phi  ; join: slot[i]");
+    my $slot_v = $self->_fresh;
+    $self->_emit("  $slot_v = load %Slot, %Slot* $slot_p  ; join: element");
+    # THE TAG DECIDES HOW THE PAYLOAD READS. _emit_to_str('Slot', ...) renders
+    # the payload as an Int unconditionally, so a Str element printed as its
+    # %StrPair POINTER: `join(",", sort keys %h)` emitted
+    # "94372392710400,94372392636160" where perl prints "a,b". A slot's
+    # payload is i64 bits whose interpretation lives in its tag, which is the
+    # whole reason the tag exists.
+    my $el_str = $self->_emit_read_slot_as($slot_v, 'Str', 'join: element',
+                                           readings => [qw(Str Int Num Boolean)]);
+    my $acc_next = $self->_emit_str_append($base, $el_str, 'join: element');
+    $self->_emit("  store %Str $acc_next, %Str* $acc_slot  ; join: accumulator .= element");
+    my $i_next = $self->_fresh;
+    $self->_emit("  $i_next = add i64 $i_phi, 1  ; join: i++");
+    $self->_emit("  store i64 $i_next, i64* $i_slot  ; join: index++");
+    $self->_set_terminator("  br label \%$l_hdr");
+
+    $self->_new_block($l_end);
+    my $result = $self->_fresh;
+    $self->_emit("  $result = load %Str, %Str* $acc_slot  ; join: result");
+    return $result;
 }
 
 # _static_list_elements($node) -> \@element_nodes, or undef when the arity is

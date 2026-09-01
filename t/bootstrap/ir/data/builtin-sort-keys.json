@@ -1,0 +1,148 @@
+{
+   "methods" : {
+      "main::__PROGRAM__" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "undef",
+                  "value" : null
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Undef"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : ","
+               },
+               "id" : 2,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : "b"
+               },
+               "id" : 3,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "2"
+               },
+               "id" : 4,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : "a"
+               },
+               "id" : 5,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "1"
+               },
+               "id" : 6,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "id" : 7,
+               "inputs" : [
+                  3,
+                  4,
+                  5,
+                  6
+               ],
+               "op" : "HashLiteral",
+               "stamp" : "Hash"
+            },
+            {
+               "fields" : {
+                  "dispatch_kind" : "builtin",
+                  "name" : "keys",
+                  "param_names" : []
+               },
+               "id" : 8,
+               "inputs" : [
+                  7
+               ],
+               "op" : "Call",
+               "stamp" : "List"
+            },
+            {
+               "fields" : {
+                  "dispatch_kind" : "builtin",
+                  "name" : "sort",
+                  "param_names" : [],
+                  "sort_cmp" : "string",
+                  "sort_order" : "ascending"
+               },
+               "id" : 9,
+               "inputs" : [
+                  8
+               ],
+               "op" : "Call",
+               "stamp" : "List"
+            },
+            {
+               "fields" : {
+                  "dispatch_kind" : "builtin",
+                  "name" : "join",
+                  "param_names" : []
+               },
+               "id" : 10,
+               "inputs" : [
+                  2,
+                  9
+               ],
+               "op" : "Call",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 0,
+               "id" : 11,
+               "inputs" : [
+                  10
+               ],
+               "op" : "Print"
+            },
+            {
+               "control_in" : 11,
+               "id" : 12,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            12
+         ],
+         "start" : 0
+      }
+   },
+   "source" : null,
+   "version" : 1
+}
