@@ -50,16 +50,25 @@ sub returns_of {
     } $graph->nodes->@*;
 }
 
-# The fixture's three subs, and what each one's return shape must be. `agg`
-# is the NEGATIVE case and it is what makes this test discriminating: a bare
-# aggregate return needs no separate scalar face (the container already
-# answers both readings), so it has ONE input. Without it, a consumer reading
-# the last input is indistinguishable from one reading the right input --
-# they are the same slot whenever arity is 1, which is why this bug hid on
-# both sides of the wire.
+# The fixture's three subs. All three carry TWO readings, and `agg` is the
+# case that says why: `return @a` does NOT return a container.
+#
+#   my @l = agg()   3 elements     the array flattens, like any list return
+#   my $s = agg()   3              the COUNT, not the container
+#   return \@a      an ARRAY ref   the ONLY way a container survives a return
+#
+# An earlier producer skipped the flatten for a SINGLE operand, so agg kept
+# its operand's Array stamp and carried one reading. THIS TEST ASSERTED THAT
+# AS AN INVARIANT ("a bare aggregate answers both readings") -- encoding a
+# producer bug as a rule about perl. Return position imposes list context on
+# its operand exactly as `(99,@x)` does, so agg needs a scalar face (a Count)
+# like every other list return.
+#
+# What this file exists to pin is unaffected: distinguishing value() from
+# inputs[-1] needs A Return with two inputs, not a Return with one.
 my %expect_inputs = (
     'main::lit' => 2,   # return (10,20,30)      -- list literal
-    'main::agg' => 1,   # my @a=(...); return @a -- bare aggregate, no 2nd face
+    'main::agg' => 2,   # my @a=(...); return @a -- flattens; Count is the face
     'main::mix' => 2,   # return (99,@x)         -- mixed
 );
 
@@ -91,7 +100,7 @@ subtest 'both readings survive, and only where a second reading exists' => sub {
         }
         else {
             ok(!defined $ret->scalar_value(),
-                "$name has NO scalar face (a bare aggregate answers both)");
+                "$name has NO scalar face");
         }
     }
 };

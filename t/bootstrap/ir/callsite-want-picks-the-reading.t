@@ -8,6 +8,7 @@ use lib 'lib';
 
 use Chalk::IR::Serialize::JSON;
 use Chalk::IR::Analysis;
+use Chalk::IR::Node::Return;
 
 # A list-returning sub carries BOTH readings, because it is compiled once and
 # cannot see its caller's context -- perl leaves entersub's context slot empty
@@ -93,10 +94,14 @@ subtest 'the reading a callsite takes follows its want' => sub {
     }
 };
 
-# A sub with ONE reading has no scalar face to take, and a scalar callsite
-# must fall back to the single value rather than to undef. `agg` is that case:
-# `return @a` needs no second face because the container already answers both
-# readings (its scalar reading is its length).
+# A sub with ONE reading must answer EVERY context from it -- a scalar
+# callsite falls back to the single value rather than to undef.
+#
+# No graph in this fixture is that shape any more: `return @a` flattens like
+# any other list return and carries a Count as its scalar face, so all three
+# subs have two readings. The fallback is exercised against a SYNTHETIC
+# single-input Return instead, because the branch still exists in the
+# consumer and a fixture that cannot reach it leaves it untested.
 subtest 'a single-reading callee answers every context' => sub {
     my $agg = $graphs->{'main::agg'} or plan skip_all => 'no agg graph';
     my ($ret) = grep {
@@ -104,11 +109,21 @@ subtest 'a single-reading callee answers every context' => sub {
     } $agg->returns->@*;
     ok($ret, 'agg has a Return') or return;
 
-    ok(!defined $ret->scalar_value, 'agg has NO scalar face');
+    # agg DOES have a scalar face now -- `my $s = agg()` is 3, the count.
+    ok(defined $ret->scalar_value,
+        'agg has a scalar face (return @a flattens; its scalar reading is the count)');
 
+    # The single-reading fallback, exercised directly. A Return carrying one
+    # input answers scalar/list/void from that one value.
+    my $single = Chalk::IR::Node::Return->new(
+        id     => 'test-single-return',
+        inputs => [ $ret->value ],
+    );
+    ok(!defined $single->scalar_value, 'a one-input Return has NO scalar face');
     for my $want (qw(scalar list void)) {
-        is(Chalk::IR::Analysis::return_reading_for_want($ret, $want), $ret->value,
-            "agg in $want context falls back to its single reading");
+        is(Chalk::IR::Analysis::return_reading_for_want($single, $want),
+            $ret->value,
+            "a single-reading Return in $want context falls back to its one value");
     }
 };
 

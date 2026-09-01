@@ -13,7 +13,7 @@
                "params" : [
                   "@_"
                ],
-               "return_type" : "Array",
+               "return_type" : "List",
                "signature" : {
                   "kind" : "implicit",
                   "mandatory" : 0,
@@ -285,19 +285,50 @@
                   3
                ],
                "op" : "ArrayLiteral",
+               "stamp" : "List"
+            },
+            {
+               "id" : 5,
+               "inputs" : [
+                  1,
+                  2,
+                  3
+               ],
+               "op" : "ArrayLiteral",
                "stamp" : "Array"
             },
             {
-               "control_in" : 0,
-               "id" : 5,
+               "id" : 6,
                "inputs" : [
-                  4
+                  5
+               ],
+               "op" : "Count",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "List",
+                  "to_repr" : "Scalar"
+               },
+               "id" : 7,
+               "inputs" : [
+                  6
+               ],
+               "op" : "Coerce",
+               "stamp" : "Scalar"
+            },
+            {
+               "control_in" : 0,
+               "id" : 8,
+               "inputs" : [
+                  4,
+                  7
                ],
                "op" : "Return"
             }
          ],
          "returns" : [
-            5
+            8
          ],
          "start" : 0
       },
@@ -415,6 +446,16 @@
             {
                "id" : 4,
                "inputs" : [
+                  1,
+                  2,
+                  3
+               ],
+               "op" : "ArrayLiteral",
+               "stamp" : "List"
+            },
+            {
+               "id" : 5,
+               "inputs" : [
                   2,
                   3
                ],
@@ -422,18 +463,9 @@
                "stamp" : "Array"
             },
             {
-               "id" : 5,
-               "inputs" : [
-                  1,
-                  4
-               ],
-               "op" : "ArrayLiteral",
-               "stamp" : "List"
-            },
-            {
                "id" : 6,
                "inputs" : [
-                  4
+                  5
                ],
                "op" : "Count",
                "stamp" : "Int"
@@ -454,7 +486,7 @@
                "control_in" : 0,
                "id" : 8,
                "inputs" : [
-                  5,
+                  4,
                   7
                ],
                "op" : "Return"
