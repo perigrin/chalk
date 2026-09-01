@@ -1579,6 +1579,11 @@ sub lower_value {
             && defined $node->name && ($node->name eq 'shift' || $node->name eq 'pop')) {
         return $self->_lower_builtin_shift_pop($node);
     }
+    # Call(builtin, keys): the hash's keys as an %Array of %Slot.
+    elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
+            && defined $node->name && $node->name eq 'keys') {
+        return $self->_lower_builtin_keys($node);
+    }
     # Call(builtin, join): the separator plus the list's elements, in order.
     # Lowerable only when the list argument's ARITY IS STATIC -- see
     # _lower_builtin_join, which refuses otherwise rather than guessing a count.
@@ -2252,6 +2257,38 @@ sub _emit_to_str {
         $self->_emit("  $len = select i1 $defined, i64 $rlen, i64 0  ; $label -> len");
         $ptr = $self->_set_str_len($ptr, $len);
         return $ptr;
+    }
+
+    # AN AGGREGATE IN SCALAR CONTEXT IS ITS LENGTH, and that length is an Int
+    # with an ordinary stringification. Measured on perl 5.42.0:
+    #
+    #   my %h=(b=>2,a=>1);  scalar(keys %h)   2
+    #   my @k = keys %h;    scalar(@k)        2
+    #   "@k"                                  "a b"   <- interpolation, NOT this
+    #
+    # This is the same rule as a list return's scalar reading (`return @a` in
+    # scalar context is the count, not the container), so it belongs here as
+    # an arrow rather than at each site that happens to need it.
+    #
+    # It is NOT string INTERPOLATION: `"@k"` joins the elements with $" and is
+    # a different operation reached a different way. The refusal below stays
+    # for anything that really has no scalar reading.
+    if ($from eq 'Array' || $from eq 'ArrayRef' || $from eq 'Hash' || $from eq 'HashRef') {
+        my $kind = ($from eq 'Hash' || $from eq 'HashRef') ? 'Hash' : 'Array';
+        my $ptr  = $input_ref;
+        if ($from =~ /Ref$/) {
+            my $typed = $self->_fresh;
+            $self->_emit("  $typed = bitcast i8* $input_ref to %$kind*  ; $label: ${from} -> %$kind*");
+            $ptr = $typed;
+        }
+        # Field 0 of both %Array and %Hash is the count: %Array is
+        # { i64 len, i64 cap, %Slot* } and %Hash is { i64 count, i64 cap,
+        # %HashEntry* }, which is why one read serves both.
+        my ($cnt_ptr, $cnt) = ($self->_fresh, $self->_fresh);
+        $self->_emit("  $cnt_ptr = getelementptr inbounds %$kind, %$kind* $ptr, i32 0, i32 0  ; $label: count ptr");
+        $self->_emit("  $cnt = load i64, i64* $cnt_ptr  ; $label: scalar context = element count");
+        # _emit_to_str always yields a Str, so render the count as one.
+        return $self->_emit_int_to_str($cnt);
     }
 
     die "GAP: $label is not lowered runtime-free (Int, Boolean, Num, Slot, "
@@ -6683,6 +6720,141 @@ sub _load_array_header {
 #
 # inputs[0] is the array operand (or, when threaded as a statement effect, the
 # control leads and the array is inputs[1]); resolve it by repr, not position.
+# _lower_builtin_keys($node) -> $llvm_ref (an %Array* of %Slot)
+#
+# PERL'S KEY ORDER IS NOT DETERMINISTIC and there is nothing here to
+# reproduce. Measured on 5.42.0, three runs of one program:
+#
+#   my %h=(b=>2,a=>1,c=>3); print join(",", keys %h)
+#     b,a,c   /   b,c,a   /   a,b,c
+#
+# Hash key randomisation makes the order a per-process property. Chalk's
+# codegen must be byte-identical across runs, so adopting a random order is
+# not available even in principle.
+#
+# So this emits INSERTION ORDER -- the order the entries array already holds.
+# Deterministic, and a valid answer to a question perl deliberately leaves
+# unordered. A program whose output depends on which order it receives is
+# relying on unspecified behaviour, and every corpus use is order-independent
+# (`sort keys %h`, or a `scalar(keys %h)` count).
+#
+# THE STAMP IS `Unknown`, NOT `List`, so a rule reading the stamp to decide
+# lowerability would refuse this. What makes it lowerable is the OPERAND: a
+# %Hash is { i64 count, i64 cap, %HashEntry* entries } and a %HashEntry opens
+# with { i8* key_ptr, i64 key_len, ... }, so the key list is a structural read
+# at known offsets rather than a typed one.
+sub _lower_builtin_keys {
+    my ($self, $node) = @_;
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+
+    my ($operand) = grep { blessed($_) } $node->inputs->@*;
+    die "GAP: keys expects a hash operand." unless defined $operand;
+
+    my $op_repr = $operand->can('representation') ? ($operand->representation // '') : '';
+    die "GAP: keys over an operand with repr=" . ($op_repr || 'NONE')
+      . " — only a Hash or HashRef has a key list to read."
+        unless $op_repr eq 'Hash' || $op_repr eq 'HashRef';
+
+    my $hash = $self->_container_ptr($operand, 'Hash');
+
+    # count = hash->count (field 0)
+    my ($cnt_ptr, $cnt) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $cnt_ptr = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 0  ; keys: count ptr");
+    $self->_emit("  $cnt = load i64, i64* $cnt_ptr  ; keys: key count");
+
+    # entries = hash->entries (field 2)
+    my ($ent_ptr, $entries) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $ent_ptr = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 2  ; keys: entries ptr");
+    $self->_emit("  $entries = load %HashEntry*, %HashEntry** $ent_ptr  ; keys: entries");
+
+    # Allocate the result %Array header and its slot buffer. Sized from the
+    # type rather than a literal: a field added to %Slot must not silently
+    # under-allocate here (the same reasoning _slot_size_bytes exists for).
+    my $slot_bytes = $self->_fresh;
+    $self->_emit("  $slot_bytes = mul i64 $cnt, " . _sizeof_llvm_type('%Slot') . "  ; keys: slot buffer bytes");
+    my ($slot_raw, $slots) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $slot_raw = call i8* \@malloc(i64 $slot_bytes)  ; keys: alloc slot buffer");
+    $self->_emit("  $slots = bitcast i8* $slot_raw to %Slot*  ; keys: slot array ptr");
+
+    my ($arr_raw, $arr) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $arr_raw = call i8* \@malloc(i64 " . _sizeof_llvm_type('%Array') . ")  ; keys: alloc %Array header");
+    $self->_emit("  $arr = bitcast i8* $arr_raw to %Array*  ; keys: %Array ptr");
+
+    my ($alen, $acap, $adat) = ($self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $alen = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0  ; keys: len ptr");
+    $self->_emit("  $acap = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 1  ; keys: cap ptr");
+    $self->_emit("  $adat = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2  ; keys: data ptr");
+    $self->_emit("  store i64 $cnt, i64* $alen  ; keys: len = key count");
+    $self->_emit("  store i64 $cnt, i64* $acap  ; keys: cap = key count");
+    $self->_emit("  store %Slot* $slots, %Slot** $adat  ; keys: data = slot buffer");
+
+    # Copy each entry's key into the matching slot, in entries order.
+    my $n     = $self->_fresh_label('keys');
+    my $lhdr  = "${n}_hdr";
+    my $lbody = "${n}_body";
+    my $lend  = "${n}_end";
+    my $i_phi  = $self->_fresh;
+    my $i_next = $self->_fresh;
+
+    # Capture the predecessor label BEFORE branching -- the phi names the
+    # block control arrives from, which is the current block at this point.
+    my $prev = $self->_current_block_label;
+    $self->_set_terminator("  br label \%$lhdr");
+    $self->_new_block($lhdr);
+    $self->_emit("  $i_phi = phi i64 [ 0, \%$prev ], [ $i_next, \%$lbody ]  ; keys: index");
+    my $more = $self->_fresh;
+    $self->_emit("  $more = icmp slt i64 $i_phi, $cnt  ; keys: i < count?");
+    $self->_set_terminator("  br i1 $more, label \%$lbody, label \%$lend");
+
+    $self->_new_block($lbody);
+    my ($e_p, $kp_p, $kl_p, $kp, $kl) =
+        ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $e_p = getelementptr inbounds %HashEntry, %HashEntry* $entries, i64 $i_phi  ; keys: entry[i]");
+    $self->_emit("  $kp_p = getelementptr inbounds %HashEntry, %HashEntry* $e_p, i32 0, i32 0  ; keys: key_ptr field");
+    $self->_emit("  $kl_p = getelementptr inbounds %HashEntry, %HashEntry* $e_p, i32 0, i32 1  ; keys: key_len field");
+    $self->_emit("  $kp = load i8*, i8** $kp_p  ; keys: key ptr");
+    $self->_emit("  $kl = load i64, i64* $kl_p  ; keys: key len");
+
+    # The key is a Str; a Str in a %Slot payload is a boxed %StrPair*, which
+    # is what _box_payload emits for every other Str write.
+    my $key_str = $self->_set_str_len($kp, $kl);
+    my $payload = $self->_box_payload($key_str, 'Str', 'keys: key');
+
+    my ($s_p, $d_g, $t_g, $p_g) =
+        ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
+    $self->_emit("  $s_p = getelementptr inbounds %Slot, %Slot* $slots, i64 $i_phi  ; keys: slot[i]");
+    $self->_emit("  $d_g = getelementptr inbounds %Slot, %Slot* $s_p, i32 0, i32 " . _slot_idx('defined') . "  ; keys: slot.defined");
+    $self->_emit("  $t_g = getelementptr inbounds %Slot, %Slot* $s_p, i32 0, i32 " . _slot_idx('tag') . "  ; keys: slot.tag");
+    $self->_emit("  $p_g = getelementptr inbounds %Slot, %Slot* $s_p, i32 0, i32 " . _slot_idx('payload') . "  ; keys: slot.payload");
+    $self->_emit("  store i1 true, i1* $d_g  ; keys: a key is always defined");
+    $self->_emit("  store i8 " . _slot_tag_value('Str') . ", i8* $t_g  ; keys: tag = Str");
+    $self->_emit("  store i64 $payload, i64* $p_g  ; keys: payload = StrPair*");
+
+    $self->_emit("  $i_next = add i64 $i_phi, 1  ; keys: i++");
+    $self->_set_terminator("  br label \%$lhdr");
+
+    $self->_new_block($lend);
+
+    # STATE WHAT WAS PRODUCED. The Call arrives stamped `Unknown` (its List
+    # return has no machine type), and a consumer reading that stamp gets the
+    # Unknown path: `print scalar(keys %h)` emitted Coerce[Unknown -> Str],
+    # which rendered an EMPTY STRING where perl prints the key count. A
+    # silent wrong answer, not a GAP -- the emitted Print was there with
+    # `i64 0` as its length.
+    #
+    # A fallback, never an override, matching _seed_container_repr: a repr
+    # already committed by inference is the better answer and survives.
+    if ($node->can('set_representation')) {
+        my $existing = $node->can('representation') ? $node->representation : undef;
+        $node->set_representation('Array')
+            if !defined $existing || $existing eq 'Unknown';
+    }
+
+    $self->{cache}{$node->id} = $arr;
+    return $arr;
+}
+
 # _lower_builtin_join($node) -> $llvm_ref (a Str)
 #
 # `join($sep, LIST)` is the separator interleaved with the list's elements.

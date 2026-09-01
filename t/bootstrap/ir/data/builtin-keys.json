@@ -1,0 +1,121 @@
+{
+   "methods" : {
+      "main::__PROGRAM__" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "undef",
+                  "value" : null
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Undef"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : "b"
+               },
+               "id" : 2,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "2"
+               },
+               "id" : 3,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : "a"
+               },
+               "id" : 4,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "1"
+               },
+               "id" : 5,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "id" : 6,
+               "inputs" : [
+                  2,
+                  3,
+                  4,
+                  5
+               ],
+               "op" : "HashLiteral",
+               "stamp" : "Hash"
+            },
+            {
+               "fields" : {
+                  "dispatch_kind" : "builtin",
+                  "name" : "keys",
+                  "param_names" : []
+               },
+               "id" : 7,
+               "inputs" : [
+                  6
+               ],
+               "op" : "Call",
+               "stamp" : "Unknown"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "Unknown",
+                  "to_repr" : "Str"
+               },
+               "id" : 8,
+               "inputs" : [
+                  7
+               ],
+               "op" : "Coerce",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 0,
+               "id" : 9,
+               "inputs" : [
+                  8
+               ],
+               "op" : "Print"
+            },
+            {
+               "control_in" : 9,
+               "id" : 10,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            10
+         ],
+         "start" : 0
+      }
+   },
+   "source" : null,
+   "version" : 1
+}
