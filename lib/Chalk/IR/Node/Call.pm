@@ -47,6 +47,26 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # builtins/subs and for calls whose class is not statically known.
     field $class_name :param :reader = undef;
 
+    # A FOLDED sort's comparison kind and direction. perl folds the standard
+    # comparators into flags on the op (OPpSORT_NUMERIC, OPpSORT_DESCEND), so
+    # by the time a producer sees `sort { $a <=> $b }` the block is GONE and
+    # what remains is the decision. Without these, three different programs are
+    # one node:
+    #
+    #   sort { $a <=> $b } (3,1,2)   perl 1
+    #   sort { $b <=> $a } (3,1,2)   perl 3
+    #   sort (3,1,2)                 perl 1   -- STRING compare, not numeric
+    #
+    # Bare `sort` defaulting to a string compare is the case that breaks
+    # ordinary code rather than an edge case: `sort (10, 9, 100)` is
+    # `10 100 9`. Lowering sort without these would silently miscompile two of
+    # the three.
+    #
+    # Only a folded `sort` carries them; every other Call leaves them undef.
+    field $sort_cmp   :param :reader = undef;   # 'numeric' | 'string'
+    field $sort_order :param :reader = undef;   # 'ascending' | 'descending'
+
+
     method operation() { 'Call' }
     method staleness_kind() { 'opaque' }
 

@@ -111,6 +111,14 @@ sub _extract_fields ($node, $id_remap) {
             # (019eb42a MOP-direct); losing it makes a reloaded call
             # un-lowerable and changes its content hash.
             (defined $node->class_name ? (class_name => $node->class_name) : ()),
+            # A folded sort's comparison kind and direction. Losing them makes
+            # three different programs one node -- ascending numeric,
+            # descending numeric, and a STRING compare all read as `sort` over
+            # a list -- so a reloaded graph would lower to whichever the
+            # backend guessed. Emitted only when present, so every other Call
+            # is byte-identical to before.
+            (defined $node->sort_cmp   ? (sort_cmp   => $node->sort_cmp)   : ()),
+            (defined $node->sort_order ? (sort_order => $node->sort_order) : ()),
             # paren_form is part of content_hash (Call.pm) -- losing it would
             # change a reloaded call's identity/hash-consing behavior relative
             # to the graph that produced it.
@@ -519,6 +527,15 @@ sub _deserialize_graph ($method_data) {
                 if exists $fields->{class_name};
             $args{paren_form}    = $fields->{paren_form}
                 if exists $fields->{paren_form};
+            # A folded sort states what it compares and in which direction
+            # (perl5-son ebb46f0). The comment above this block -- "for fields
+            # Chalk nodes don't support, we silently drop them" -- is exactly
+            # how these would go missing, so they are named here rather than
+            # left to the default.
+            $args{sort_cmp}      = $fields->{sort_cmp}
+                if exists $fields->{sort_cmp};
+            $args{sort_order}    = $fields->{sort_order}
+                if exists $fields->{sort_order};
         }
         elsif ($op eq 'Phi') {
             $args{region} = $nodes[ $fields->{region} ];
