@@ -1579,6 +1579,13 @@ sub lower_value {
             && defined $node->name && ($node->name eq 'shift' || $node->name eq 'pop')) {
         return $self->_lower_builtin_shift_pop($node);
     }
+    # Call(builtin, join): the separator plus the list's elements, in order.
+    # Lowerable only when the list argument's ARITY IS STATIC -- see
+    # _lower_builtin_join, which refuses otherwise rather than guessing a count.
+    elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
+            && defined $node->name && $node->name eq 'join') {
+        return $self->_lower_builtin_join($node);
+    }
     # Call(builtin, exit): set the process exit status and abort. A program has
     # no return value — its observable contract is stdout plus exit status — so
     # `exit` is not a value-producing call at all; it terminates the block, the
@@ -2072,6 +2079,73 @@ sub _lower_concat {
 
     $self->{cache}{$node->id} = $buf;
     return $buf;
+}
+
+# _emit_str_append($lhs_ref, $rhs_ref, $label) -> $ptr
+#
+# Concatenate two Str VALUES, independent of any Concat node. _lower_concat
+# does this over a node's two inputs; a builtin folding N pieces has no node
+# per join, so the same emission is reached here without one.
+#
+# Copies exactly len_b bytes and stores the NUL explicitly rather than copying
+# len_b+1 "to include the source NUL" -- that is wrong for a VIEW-typed input
+# (a RegexCapture points into the middle of its subject, so the byte past the
+# view is the next subject byte, not NUL). Same reasoning as _lower_concat,
+# which is the shape this follows.
+sub _emit_str_append {
+    my ($self, $lhs_ref, $rhs_ref, $label) = @_;
+
+    my ($a_ptr, $len_a) = $self->_str_parts($lhs_ref);
+    my ($b_ptr, $len_b) = $self->_str_parts($rhs_ref);
+    die "GAP: $label cannot lower — an operand's byte length is not tracked "
+      . "(only Str values with a known length can be appended)."
+        unless defined $len_a && defined $len_b;
+
+    my $len_sum;
+    if ($len_a =~ /^\d+$/ && $len_b =~ /^\d+$/) {
+        $len_sum = $len_a + $len_b;
+    }
+    else {
+        $len_sum = $self->_fresh;
+        $self->_emit("  $len_sum = add i64 $len_a, $len_b  ; $label: total byte-len");
+    }
+
+    my $total;
+    if ($len_sum =~ /^\d+$/) {
+        $total = $len_sum + 1;
+    }
+    else {
+        $total = $self->_fresh;
+        $self->_emit("  $total = add i64 $len_sum, 1  ; $label: +1 for NUL terminator");
+    }
+
+    my $buf = $self->_fresh;
+    $self->_emit("  $buf = call i8* \@malloc(i64 $total)  ; $label: allocate result buffer");
+    $self->_emit("  call i8* \@memcpy(i8* $buf, i8* $a_ptr, i64 $len_a)  ; $label: copy lhs");
+
+    my $buf_b = $self->_fresh;
+    $self->_emit("  $buf_b = getelementptr inbounds i8, i8* $buf, i64 $len_a  ; $label: ptr after lhs");
+    $self->_emit("  call i8* \@memcpy(i8* $buf_b, i8* $b_ptr, i64 $len_b)  ; $label: copy rhs");
+
+    my $nul_ptr = $self->_fresh;
+    $self->_emit("  $nul_ptr = getelementptr inbounds i8, i8* $buf, i64 $len_sum  ; $label: NUL slot");
+    $self->_emit("  store i8 0, i8* $nul_ptr  ; $label: NUL-terminate");
+
+    $self->{_need_malloc_memcpy} = 1;
+    return $self->_set_str_len($buf, $len_sum);
+}
+
+# _empty_str_ref($label) -> $ptr to a zero-length Str
+#
+# The identity for a string fold: joining nothing yields "". Length 0 is
+# tracked like any other, so a consumer reading _str_parts gets (ptr, 0)
+# rather than an untracked pointer.
+sub _empty_str_ref {
+    my ($self, $label) = @_;
+    my ($glob, undef, $total) = $self->_module_global_name('empty_str', '');
+    my $ptr = $self->_fresh;
+    $self->_emit_entry("  $ptr = getelementptr inbounds [$total x i8], [$total x i8]* $glob, i64 0, i64 0  ; $label: \"\"");
+    return $self->_set_str_len($ptr, 0);
 }
 
 # _emit_to_str($from_repr, $input_ref, $label) -> $ptr
@@ -6609,6 +6683,113 @@ sub _load_array_header {
 #
 # inputs[0] is the array operand (or, when threaded as a statement effect, the
 # control leads and the array is inputs[1]); resolve it by repr, not position.
+# _lower_builtin_join($node) -> $llvm_ref (a Str)
+#
+# `join($sep, LIST)` is the separator interleaved with the list's elements.
+# TypeLibrary declares it (join => arg_types ['Str','List'], return_type 'Str')
+# and the producer stamps the Call Str, so the RESULT was never the problem --
+# join simply had no arm and fell through to "cannot lower op=Call".
+#
+# WHAT MAKES IT LOWERABLE IS THE ARGUMENT'S ARITY, NOT ITS TYPE. The list
+# argument is stamped List, which %LOWERABLE_STAMP deliberately excludes from
+# the representation field: List is arity-polymorphic (Scalar, Void, Array and
+# Hash all declare it as parent), so it has no single-value machine layout and
+# %_REPR_NO_MACHINE_TYPE refuses it by name.
+#
+# But a List PRODUCED BY an ArrayLiteral has a statically known element count,
+# which is a structural fact about that node rather than a property of its
+# type. With the count known, join is an ordinary concat chain: no runtime
+# list, no container, no length arithmetic.
+#
+# A list whose arity is not statically known cannot lower this way, and the
+# honest answer there is a GAP. Guessing a count would be a silent wrong
+# answer -- the class this file's other refusals exist to prevent.
+sub _lower_builtin_join {
+    my ($self, $node) = @_;
+
+    my @inputs = grep { blessed($_) } $node->inputs->@*;
+    die "GAP: join expects a separator and a list; got " . scalar(@inputs) . " operand(s)."
+        unless @inputs == 2;
+
+    my ($sep_node, $list_node) = @inputs;
+
+    # Resolve the list operand to the node that actually states the arity. A
+    # direct call resolves through the CALLEE'S LIST READING -- Return
+    # inputs[0], never inputs[-1], which is the scalar face.
+    my $elements = $self->_static_list_elements($list_node);
+    die "GAP: join over a list whose arity is not statically known "
+      . "(operand op=" . $list_node->operation . ") — the element count must be "
+      . "a compile-time fact; refusing to guess it."
+        unless defined $elements;
+
+    # The separator is a Str by join's signature; anything else is bridged the
+    # same way an operand of any Str-context operator is.
+    my $sep_ref = $self->lower_value($sep_node);
+    my $sep_repr = (blessed($sep_node) && $sep_node->can('representation'))
+                 ? $sep_node->representation : undef;
+    $sep_ref = $self->_emit_coercion($sep_ref, $sep_repr, 'Str', 'join separator')
+        if defined $sep_repr && $sep_repr ne 'Str';
+
+    # An empty list joins to the empty string, and a single element joins to
+    # itself -- neither uses the separator at all.
+    return $self->_empty_str_ref('join: empty list') unless $elements->@*;
+
+    my $acc;
+    for my $i (0 .. $elements->$#*) {
+        my $el      = $elements->[$i];
+        my $el_ref  = $self->lower_value($el);
+        my $el_repr = (blessed($el) && $el->can('representation'))
+                    ? $el->representation : undef;
+        $el_ref = $self->_emit_coercion($el_ref, $el_repr, 'Str', "join element[$i]")
+            if defined $el_repr && $el_repr ne 'Str';
+
+        if (!defined $acc) {
+            $acc = $el_ref;
+            next;
+        }
+        $acc = $self->_emit_str_append($acc, $sep_ref, "join: separator before element[$i]");
+        $acc = $self->_emit_str_append($acc, $el_ref,  "join: element[$i]");
+    }
+
+    $self->{cache}{$node->id} = $acc;
+    return $acc;
+}
+
+# _static_list_elements($node) -> \@element_nodes, or undef when the arity is
+# not a compile-time fact.
+#
+# An ArrayLiteral states its own arity. A direct Call resolves through its
+# callee's LIST reading (Return inputs[0]) -- the same slot the inliner takes,
+# and never inputs[-1], which is the scalar face and would silently substitute
+# one value for N.
+sub _static_list_elements {
+    my ($self, $node) = @_;
+    return undef unless blessed($node) && $node->can('operation');
+
+    my $op = $node->operation;
+    return [ grep { blessed($_) } $node->inputs->@* ] if $op eq 'ArrayLiteral';
+
+    if ($op eq 'Call' && $node->can('dispatch_kind')
+            && ($node->dispatch_kind // '') eq 'direct') {
+        my $target = $node->can('target') ? $node->target : undef;
+        my $graph  = ($target && $target->can('graph')) ? $target->graph : undef;
+        return undef unless $graph && $graph->can('returns');
+
+        my @returns = grep {
+            blessed($_) && $_->can('operation') && $_->operation eq 'Return'
+        } $graph->returns->@*;
+        return undef unless @returns == 1;
+
+        # The LIST reading, explicitly. A callsite wanting the scalar face
+        # would not be asking for a list at all.
+        my $list_reading = $returns[0]->value();
+        return undef unless blessed($list_reading);
+        return $self->_static_list_elements($list_reading);
+    }
+
+    return undef;
+}
+
 sub _lower_builtin_shift_pop {
     my ($self, $node) = @_;
     $self->{_need_aggregate_types} = 1;
