@@ -1091,3 +1091,50 @@ Concretely, before a third attempt:
 
 **The GAP is the correct behaviour meanwhile.** 21 cases refusing to compile is
 strictly better than 5 of them printing a double's bits as an integer.
+
+## `%Slot` is not privileged by un-narrowedness -- but not every cell needs one
+
+I wrote that a field "lives in a tagged %Slot because it is un-narrowed
+Scalar", implying a narrowed field would live elsewhere. Wrong, and the
+codebase already said so at `Context.pm:7178`: *"every field is ALREADY a
+%Slot whatever its declared repr ... `field_repr` governs how the payload is
+INTERPRETED on read, not the cell's shape."*
+
+perigrin's correction sharpens it into a rule: **not every cell needs to be a
+%Slot -- but every cell that takes `:param` does.**
+
+The reason is where the value comes from. A `:param` field is written by a
+CONSTRUCTOR CALL SITE, so its encoding cannot be settled by the class alone: two
+call sites may pass different types, and the class is compiled once. A field
+that is NOT `:param` is written only by its own class's code, so if T1 proves a
+type for it, that type is the whole story and the cell can be that type
+directly.
+
+**Measured, and today the rule is not implemented:**
+
+    class Box {
+        field $p :param = 0;   # wire: type=Scalar  is_param=1
+        field $q = 7;          # wire: type=Int     is_param=0
+    }
+    %Box.obj = type { %Box.vt*, %Slot, %Slot }
+
+`$q` is provably `Int`, written only by its own class, and still pays for a
+16-byte tagged cell to hold an i64. The producer already ships `is_param`, so
+the discriminator is on the wire.
+
+**This is a T2 question and it belongs to the same family as the rest of this
+plan.** The cell's shape is an ENCODING decision; `is_param` is the fact that
+says whether the encoding can be fixed at compile time. It is the same shape as
+"a Num whose values are all integral can be an i64": what the type permits
+versus what the program requires.
+
+**NOT BUILT.** Two cautions, both from this session's own record:
+
+1. **The store/read asymmetry must be fixed first.** `inc` writes `tag=Num` and
+   `val` reads with `sitofp` -- the write consults the tag, the read does not
+   (see the section above). Changing cell shapes while a reader ignores the tag
+   would move a live bug rather than fix it.
+2. **Do not let this become "an Int field is i64".** `Context.pm:7178` warns
+   against exactly that phrasing: it "asserts a LAYOUT as though it followed
+   from the type". The rule here is not type-driven -- it is driven by WHO MAY
+   WRITE the cell, which is what `:param` records.
