@@ -79,11 +79,11 @@
                   6
                ],
                "op" : "Call",
-               "stamp" : "Unknown"
+               "stamp" : "Int"
             },
             {
                "fields" : {
-                  "from_repr" : "Unknown",
+                  "from_repr" : "Int",
                   "to_repr" : "Str"
                },
                "id" : 8,

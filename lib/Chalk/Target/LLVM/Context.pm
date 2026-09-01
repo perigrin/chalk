@@ -6763,6 +6763,21 @@ sub _lower_builtin_keys {
     $self->_emit("  $cnt_ptr = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 0  ; keys: count ptr");
     $self->_emit("  $cnt = load i64, i64* $cnt_ptr  ; keys: key count");
 
+    # IN SCALAR CONTEXT `keys` IS THE COUNT, not a list to be counted later.
+    # The producer states which it is from the callsite's own OPf_WANT
+    # (want=2 stamps the Call Int, want=3 stamps it List), so this reads the
+    # decision rather than remaking it.
+    #
+    # Building the %Array either way was a type error, not a slow path: the
+    # consumer of an Int-stamped Call expects an i64 and got an %Array*
+    # ("'%tmp_42' defined with type '%Array*' but expected 'i64'"). Materialising
+    # a list nobody asked for is also the work perl skips here.
+    my $repr = $node->can('representation') ? ($node->representation // '') : '';
+    if ($repr eq 'Int') {
+        $self->{cache}{$node->id} = $cnt;
+        return $cnt;
+    }
+
     # entries = hash->entries (field 2)
     my ($ent_ptr, $entries) = ($self->_fresh, $self->_fresh);
     $self->_emit("  $ent_ptr = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 2  ; keys: entries ptr");
@@ -6836,21 +6851,10 @@ sub _lower_builtin_keys {
 
     $self->_new_block($lend);
 
-    # STATE WHAT WAS PRODUCED. The Call arrives stamped `Unknown` (its List
-    # return has no machine type), and a consumer reading that stamp gets the
-    # Unknown path: `print scalar(keys %h)` emitted Coerce[Unknown -> Str],
-    # which rendered an EMPTY STRING where perl prints the key count. A
-    # silent wrong answer, not a GAP -- the emitted Print was there with
-    # `i64 0` as its length.
-    #
-    # A fallback, never an override, matching _seed_container_repr: a repr
-    # already committed by inference is the better answer and survives.
-    if ($node->can('set_representation')) {
-        my $existing = $node->can('representation') ? $node->representation : undef;
-        $node->set_representation('Array')
-            if !defined $existing || $existing eq 'Unknown';
-    }
-
+    # The repr is seeded in ANALYSIS (Analysis.pm's builtin-List rule), not
+    # here. It was set here first and that was too late: _require_repr runs
+    # as a pre-lowering pass, so `Count(keys %h)` died on an operand with no
+    # representation before this arm ever ran.
     $self->{cache}{$node->id} = $arr;
     return $arr;
 }

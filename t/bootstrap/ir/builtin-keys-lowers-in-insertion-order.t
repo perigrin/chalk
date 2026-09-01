@@ -38,58 +38,76 @@ my $wire = do {
 };
 my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
 
-subtest 'a program using keys lowers' => sub {
-    my $prog = $graphs->{'main::__PROGRAM__'} or plan skip_all => 'no program graph';
-    my ($ret) = grep {
-        blessed($_) && $_->can('operation') && $_->operation eq 'Return'
-    } $prog->returns->@*;
-    ok($ret, 'the program has a Return') or return;
+# THE TWO CONTEXTS ARE DIFFERENT LOWERINGS, and the producer states which is
+# which from the callsite's own OPf_WANT -- want=2 stamps the Call Int, want=3
+# stamps it List. Reading that decision rather than remaking it is what keeps
+# the two honest:
+#
+#   print scalar(keys %h)          Call :Int    -> the count, an i64
+#   my @k = keys %h; scalar(@k)    Call :List   -> an %Array of %Slot
+#
+# Building the %Array in both cases was a TYPE ERROR, not a slow path: the
+# consumer of an Int-stamped Call expects an i64 and got an %Array*.
+my %FIXTURE = (
+    'scalar context' => 't/bootstrap/ir/data/builtin-keys.json',
+    'list context'   => 't/bootstrap/ir/data/builtin-keys-array.json',
+);
 
-    my $ir = eval { Chalk::Target::LLVM->lower($ret) };
-    my $err = $@;
-    ok($ir, 'the program lowers')
-        or diag "died: " . (split /\n/, $err)[0];
-    return unless $ir;
+for my $ctx (sort keys %FIXTURE) {
+    subtest "keys in $ctx lowers" => sub {
+        my $wire = do {
+            open my $fh, '<', $FIXTURE{$ctx} or plan skip_all => "fixture missing: $!";
+            local $/; <$fh>;
+        };
+        my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
+        my $prog = $graphs->{'main::__PROGRAM__'} or plan skip_all => 'no program graph';
+        my ($ret) = grep {
+            blessed($_) && $_->can('operation') && $_->operation eq 'Return'
+        } $prog->returns->@*;
+        ok($ret, 'the program has a Return') or return;
 
-    # LOWERING IS NOT CORRECTNESS. The first version of this arm lowered
-    # cleanly and printed NOTHING: the Call arrives stamped Unknown, so the
-    # Coerce took the Unknown path and rendered an empty string where perl
-    # prints 2 -- an emitted Print with `i64 0` as its length. A test that
-    # stopped at "it lowers" would have passed over that.
-    #
-    # The count must reach the output, so the emitted IR has to read a
-    # container's field 0. Asserting the READ is what distinguishes a real
-    # count from a zero-length string.
-    like($ir, qr/scalar context = element count/,
-        'the emitted IR reads the container count, not an empty string');
-};
+        my $ir = eval { Chalk::Target::LLVM->lower($ret) };
+        my $err = $@;
+        ok($ir, "the $ctx program lowers")
+            or diag "died: " . (split /\n/, $err)[0];
+        return unless $ir;
 
-# The Call is stamped Unknown on the wire, NOT List -- so a rule that read the
-# stamp to decide lowerability would refuse this. What makes it lowerable is
-# the OPERAND: a Hash has a count and an entries array, both at known offsets,
-# so the key list is a structural read rather than a typed one.
-subtest 'lowerability comes from the operand, not the stamp' => sub {
-    # A FRESH LOAD. Lowering STAMPS the Call (the arm states what it produced,
-    # so a downstream Coerce does not take the Unknown path), which means the
-    # graph the previous subtest lowered no longer shows the wire's stamp.
-    # Reading it there would assert the post-lowering state while claiming to
-    # describe the wire.
-    my $fresh = Chalk::IR::Serialize::JSON::from_json($wire);
-    my $prog = $fresh->{'main::__PROGRAM__'} or plan skip_all => 'no program graph';
+        # LOWERING IS NOT CORRECTNESS. The first version of this arm lowered
+        # cleanly and printed NOTHING -- the Call arrived stamped Unknown, so
+        # the Coerce took the Unknown path and rendered an empty string where
+        # perl prints 2, an emitted Print with `i64 0` as its length. A test
+        # that stopped at "it lowers" passed over that.
+        like($ir, qr/keys: key count/,
+            'the emitted IR reads the hash count');
+    };
+}
 
-    my ($keys) = grep {
-        blessed($_) && $_->can('operation') && $_->operation eq 'Call'
-            && $_->can('name') && ($_->name // '') eq 'keys'
-    } $prog->nodes->@*;
-    ok($keys, 'the fixture has a keys call') or return;
+# The wire stamp decides the shape, so the two fixtures must NOT agree -- if
+# both said the same thing, one lowering would serve both and this file would
+# be testing a constant.
+subtest 'the two contexts are stamped differently' => sub {
+    my %stamp;
+    for my $ctx (sort keys %FIXTURE) {
+        my $wire = do {
+            open my $fh, '<', $FIXTURE{$ctx} or plan skip_all => "fixture missing: $!";
+            local $/; <$fh>;
+        };
+        my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
+        my $prog = $graphs->{'main::__PROGRAM__'} or next;
+        my ($keys) = grep {
+            blessed($_) && $_->can('operation') && $_->operation eq 'Call'
+                && $_->can('name') && ($_->name // '') eq 'keys'
+        } $prog->nodes->@*;
+        ok($keys, "$ctx has a keys call") or next;
+        $stamp{$ctx} = $keys->representation // '<undef>';
+    }
 
-    ok(!defined $keys->representation,
-        'Call(keys) carries NO representation -- its List return has no machine type');
-
-    my ($operand) = grep { blessed($_) } $keys->inputs->@*;
-    ok($operand, 'keys has an operand');
-    is($operand->representation // '<undef>', 'Hash',
-        'and the operand IS a Hash -- which is what makes the read possible');
+    is($stamp{'scalar context'}, 'Int',
+        'a scalar-context keys is an Int -- the count itself');
+    is($stamp{'list context'}, 'Array',
+        'a list-context keys is an Array -- the materialised keys');
+    isnt($stamp{'scalar context'}, $stamp{'list context'},
+        'and the two DIFFER, so the stamp is doing work');
 };
 
 done_testing;

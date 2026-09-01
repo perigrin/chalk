@@ -685,6 +685,31 @@ sub _deserialize_graph ($method_data) {
             $node->set_representation($nd->{stamp});
         }
 
+        # A BUILTIN CALL STAMPED `List` YIELDS AN AGGREGATE, and its consumers
+        # need a representation before lowering -- _require_repr runs as a
+        # pre-pass, so `Count(keys %h)` died on an operand with none.
+        #
+        # This must happen HERE and cannot happen in Analysis: `stamp` and
+        # `representation` are ONE field, and is_lowerable_stamp above
+        # deliberately drops `List`, so by the time any later pass looks the
+        # wire's answer is gone. $nd->{stamp} is the last place it exists.
+        #
+        # `Array`, not `List`. List is the right TYPE and an invalid
+        # REPRESENTATION -- arity-polymorphic, refused by name in
+        # %_REPR_NO_MACHINE_TYPE -- and what enters this field must be an
+        # encoding. The encoding of a materialised list of scalars is %Array*.
+        #
+        # Keyed on the stamp the producer computed from the CALLSITE'S OWN
+        # CONTEXT (want=3 gives List, want=2 gives Int), not on a builtin-name
+        # table here: `keys` is a count in scalar context and the keys in list
+        # context, so a name table would be vaguer than the op. TypeLibrary
+        # has no `keys` row for exactly that reason.
+        if ($op eq 'Call'
+                && ($fields->{dispatch_kind} // '') eq 'builtin'
+                && ($nd->{stamp} // '') eq 'List') {
+            $node->set_representation('Array');
+        }
+
         # A Print carries no stamp (the producer leaves it unstamped), but perl's
         # print returns a genuine boolean (builtin::is_bool true), so a
         # value-context `my $ok = print ...` reads Bool:1. Seed the repr as Boolean
