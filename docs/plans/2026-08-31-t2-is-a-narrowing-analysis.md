@@ -1138,3 +1138,74 @@ versus what the program requires.
    against exactly that phrasing: it "asserts a LAYOUT as though it followed
    from the type". The rule here is not type-driven -- it is driven by WHO MAY
    WRITE the cell, which is what `:param` records.
+
+## THE RULE: boxing and unboxing a Slot MUST consult the type tag
+
+perigrin: *"Reading and Writing a slot (Boxing and Unboxing) must consult the
+type tag."*
+
+That is the invariant the tag exists to provide, and today only HALF of it
+holds. Measured in `Context.pm`:
+
+| | sites |
+|---|---|
+| WRITES that set the tag | 7 (`_build_slot`, field store `:2963`, array-lvalue `:3121`, ArrayRef `:6132`, box `:2306`, ...) |
+| READS that consult it | **1** -- `_lower_coerce_from_slot` (`:2332`) |
+| payload reads total | 10 |
+
+**The writes are already correct.** Every store site maps its value's repr
+through `_slot_tag_for_repr` and writes the tag beside the payload.
+
+**The reads take the answer from the caller instead.** `_unbox_payload_as($payload,
+$repr, $label)` receives `$repr` as an ARGUMENT -- what the consumer BELIEVES --
+and its first line is:
+
+    return $payload if $repr eq 'Int';   # an Int IS the payload word
+
+So when a cell holds `tag=Num` (double bits) and a consumer unboxes it as `Int`,
+that early return hands back the raw bits. No conversion, no error.
+
+### The measured consequence
+
+Corpus `method-call`:
+
+    class Counter {
+        field $n :param = 0;
+        method inc { $n += 1 }    # wire: return_type Num
+        method val { return $n }  # wire: return_type Scalar
+    }
+    Counter->new(n => 10); $c->inc; say($c->val);
+
+`inc` stores correctly -- `tag=Num`, payload `bitcast double 11.0 to i64`. `val`
+then reloads the payload and applies **`sitofp`**, an integer-to-double
+conversion, to bits that are already a double. Result:
+`4622382067542392832`, which is exactly `unpack('q', pack('d', 11.0))`.
+
+This is not caused by narrowing. It was there the whole time; the vtable ABI
+guard refused the module before it could run, which is why the case read as a
+GAP. Both of this session's attempts on those 21 cases removed the guard and
+revealed it.
+
+### Why this is the right layer
+
+Both attempts tried to make the CONSUMER's belief correct -- narrow the call
+site, then narrow the metaobject. Neither can work in general: a `:param` field
+is written by constructor call sites and mutated by any method, so no single
+compile-time answer is true of every write. **The cell knows what it holds. The
+reader has to ask it.**
+
+### What the fix has to do
+
+1. **`_unbox_payload_as` must read the tag, not take a repr.** Its signature is
+   the bug: a parameter for a fact the cell already carries.
+2. **The dispatch must be exhaustive**, as `_lower_coerce_from_slot` already is
+   -- one arm per tag value, with an unrecognized tag taking the undef path
+   rather than falling through to a reading.
+3. **Where the tag and the consumer's expectation genuinely differ, CONVERT.**
+   A cell tagged `Num` read as `Int` is `fptosi`, not a reinterpretation --
+   which is what perl does, and the opposite of what happens now.
+
+**Not built.** But unlike the two reverted attempts this is in the layer the
+defect is in, and it makes the 21 cases moot rather than unblocked: with the
+reader consulting the tag, the ABI disagreement stops mattering because the
+value is read correctly whatever the declared repr said.
