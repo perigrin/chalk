@@ -469,29 +469,66 @@ L: GREEN
 ## R11 hash keys sorted order
 
 `join(",", sort keys %h)` returns the keys in sorted (normalized) order.
-Hash iteration order is randomized in perl; the corpus normalizes by sorting.
-This case is `L: GAP` because `sort` and `join` are not yet in the LLVM
-lowering slice — they require list-context operations that are deferred to a
-future campaign group (list operators / control-flow-in-list). The behavior is
-specified for deterministic sorted output; unsorted reliance would be non-stable.
 
-The guard: raw `keys %h` order without sorting is NOT asserted as a stable GREEN
-result (perl's hash randomization makes it non-deterministic). Only the sorted
-form is corpus-stable.
+THE SORT IS LOAD-BEARING, not decoration. perl's hash order is randomised per
+process -- three runs of `keys %h` on 5.42.0 gave `b,a,c`, `b,c,a` and
+`a,b,c` -- so only the sorted form has a stable answer to assert. chalk's
+`keys` emits INSERTION order, which is deterministic but is NOT perl's, and
+sorting is what makes the two agree.
+
+Reproducing perl's own order was considered and rejected: it IS reproducible
+under PERL_HASH_SEED with PERL_PERTURB_KEYS=0, but it depends on collision
+history and bucket splits rather than on the key set (same keys inserted in a
+different order give a different answer, and inserting-then-deleting a fourth
+key changes it again), so matching it would mean reimplementing perl's hash
+internals and pinning chalk to one build. The randomisation is also deliberate
+hardening against collision-flooding attacks.
+
+Previously `L: GAP` while sort/join/keys were outside the LLVM slice. All
+three now lower: keys reads the %Hash header, sort orders a COPY of the slot
+buffer by the producer's folded comparator (sort_cmp=string, sort_order=
+ascending -- perl folds the comparator into op flags, so a bare `sort` is a
+STRING compare and `sort (10,9,100)` is `10 100 9`), and join walks a
+runtime-arity array.
+
+The source PRINTS its result. A case is run as a program, whose observable
+contract is stdout plus exit status -- a bare trailing expression is
+evaluated in void context and the producer correctly emits nothing for it
+(measured: the graph for the old form was Start/Constant(Undef)/Return, the
+whole computation gone), so the earlier form asserted a value the program
+never produced.
+
+BEHAVIOR IS GREEN AND THE OTHER TWO LEGS ARE NOT. lli and perl agree on
+`a,b`, which is what the lowering work bought. The remaining two are not
+about sort/join/keys:
+
+  - SHAPE: this block states no node lines. It is not a declared GAP any
+    more, so the shape leg has nothing to check against and says so.
+  - INVARIANT: `op Call has undef control_in` x3. TypedInvariant's
+    @CONTROL_CHAIN_OPS lists `Call` unconditionally, but keys/sort/join are
+    PURE value producers with no side effects, so being off the control
+    chain is correct for them. The invariant does not distinguish an
+    effectful Call from a pure one; the comment above that list reasons
+    about the regex family and does not address this case.
+
+Loosening the invariant to admit a pure Call is a change to a rule that
+polices every case, made in order to pass one -- so it is filed rather than
+taken here.
 
 ```perl
 # source
 my %h = (b => 2, a => 1);
-join(",", sort keys %h)
+print join(",", sort keys %h);
 ```
 
 ```behavior
-return: a,b
+stdout: a,b
+return: Bool:1
 context: scalar
 ```
 
 ```ir
-L: GAP(sort+join+keys requires list-context ops not yet in LLVM slice; deferred to list-operators campaign group)
+L: GAP(behavior GREEN -- lli and perl both print a,b; shape has no node lines and invariant flags pure keys/sort/join Calls as broken effect chains, neither about the lowering)
 ```
 
 ## R12 aliased element store (store via ref, read via name)
