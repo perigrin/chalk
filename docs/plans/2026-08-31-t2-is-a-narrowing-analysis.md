@@ -1209,3 +1209,54 @@ reader has to ask it.**
 defect is in, and it makes the 21 cases moot rather than unblocked: with the
 reader consulting the tag, the ABI disagreement stops mattering because the
 value is read correctly whatever the declared repr said.
+
+## F18 sort: the wire is complete, the LOWERING is blocked one layer up
+
+The fields landed (`f2baf894`) and a folded sort now states what it compares
+and in which direction. Attempted the lowering; it is blocked by something
+larger, and the attempt is reverted.
+
+### What was built and works
+
+`_lower_builtin_sort` -- an unrolled insertion sort over the %Slot buffer,
+picking `icmp sgt`/`slt` from `sort_order`, with a branchless select-and-store
+swap. `n` is a compile-time constant (the Call's inputs), so no loop is needed.
+It GAPs rather than defaults when `sort_cmp` is absent or `string`, since
+reading "no numeric flag" as "nothing to say" is how `sort (10, 9, 100)`
+becomes `9` instead of `10`.
+
+### What blocks it
+
+**A builtin Call gets no representation.** `Call(sort)` loads with `repr=?`, so
+the `ArrayLiteral` wrapping it dies first:
+
+    GAP: ArrayRef elem[0] has repr=, which has no i64 payload encoding
+
+Measured: nothing stamps a builtin Call's result. `_seed_direct_call_arg_reprs`
+handles DIRECT calls from the callee graph; a builtin has no callee graph.
+There is no builtin-name-to-repr table anywhere in `Analysis.pm`.
+
+**And the authority already answers.** `TypeLibrary.pm:232` declares
+`sort => { min_arity => 1, arg_types => ['List'], return_type => 'List' }`.
+Nothing reads it: the only `return_type` consumers in `Analysis.pm` are the MOP
+method/sub paths (`:1186`, `:1237`, `:1932`). A whole table of builtin
+signatures sits unconsumed.
+
+**`List` is not a machine type either.** `%_REPR_NO_MACHINE_TYPE` refuses it by
+name: *"'List' is signature vocabulary, not a value type ... it denotes a
+SEQUENCE rather than one value, so no single-value layout exists."* So even
+wired up, `sort`'s declared `List` does not tell the backend what to emit. What
+`sort` returns HERE is an `Array` -- the %Slot buffer -- and that is a
+representation decision, not the type the signature states.
+
+### Why this is the right place to stop
+
+The gap is not "sort has no arm". It is that **builtin Calls have no typing
+path at all**, and the fix is a T1 question with a wider blast radius than one
+op: which builtins get their result repr from TypeLibrary, how a `List` return
+type becomes an `Array` representation, and whether that is the signature's job
+or T2's. Adding a bespoke `sort => Array` stamp would work for F18 and would be
+exactly the parallel-authority pattern this session has now removed four times.
+
+**NOT BUILT.** The lowering is reverted; the wire plumbing stays, since it is
+correct and independently useful.
