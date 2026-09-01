@@ -7513,7 +7513,29 @@ sub _collect_straight_line_effect_chain {
         die "GAP: direct call to '$name': callee has effect(s) on its control "
           . "chain (print/store/...) that inlining does not yet thread in "
           . "program order."
-            unless $op eq 'Print';
+            unless $op eq 'Print' || $op eq 'Call';
+
+        # WHY `Call` IS HERE. This filter was written 2026-08-01 listing the
+        # effect shapes verified at that time, when a callee's chain held
+        # Print/Assign/Region. Two days later perl5-son 40d8f8b landed R1.0 --
+        # "every Call is a control-chain effect, void or not" -- and a
+        # `shift @_` became a control-chain node on EVERY argument-taking sub.
+        # The list was complete when written and was made incomplete by a
+        # change in the other repo, silently: refusing looks like correct
+        # conservatism, so nothing failed loudly while it refused the commonest
+        # shape in the language.
+        #
+        # The hazard it was built for is NOT what kept it narrow. That was the
+        # id-keyed cache collision (a callee Print#N served a caller Print#N's
+        # ref, silently dropping the effect), and the same commit fixed it with
+        # a fresh cache for the chain drive. `_lower_inlined_effects_then_value`
+        # is nine lines and inspects no op: fresh cache, fresh mut-read memo,
+        # process_control_node over whatever it is handed. The fix was never
+        # Print-specific; only this list was.
+        #
+        # Region/Loop/If still GAP below -- that is the parked memory-SSA
+        # re-entrant slice, a real remaining concern rather than an unmeasured
+        # one.
 
         push @chain, $c;
         $c = $c->can('control_in') ? $c->control_in : undef;
