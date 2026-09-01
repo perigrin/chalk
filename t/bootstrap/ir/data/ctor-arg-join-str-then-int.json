@@ -1,0 +1,242 @@
+{
+   "classes" : {
+      "Holder" : {
+         "adjusts" : [],
+         "fields" : [
+            {
+               "fieldix" : 0,
+               "is_param" : true,
+               "name" : "$v",
+               "param_name" : "v",
+               "type" : "Scalar"
+            }
+         ],
+         "method_return_types" : {
+            "get" : "Unknown"
+         },
+         "method_signatures" : {
+            "get" : {
+               "invocant" : true,
+               "kind" : "implicit",
+               "mandatory" : 0,
+               "optional" : 0,
+               "params" : [
+                  {
+                     "index" : 0,
+                     "name" : "@_",
+                     "sigil" : "@"
+                  }
+               ],
+               "slurpy" : "@"
+            }
+         },
+         "methods" : {
+            "get" : "Holder::get"
+         },
+         "name" : "Holder",
+         "parent" : null
+      }
+   },
+   "methods" : {
+      "Holder::get" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "field_index" : 0,
+                  "field_stash" : "Holder"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "FieldAccess",
+               "stamp" : "Unknown"
+            },
+            {
+               "control_in" : 0,
+               "id" : 2,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            2
+         ],
+         "start" : 0
+      },
+      "main::__PROGRAM__" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "undef",
+                  "value" : null
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Undef"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "42"
+               },
+               "id" : 2,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : "hello"
+               },
+               "id" : 3,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 0,
+               "fields" : {
+                  "class_name" : "Holder",
+                  "dispatch_kind" : "method",
+                  "name" : "new",
+                  "param_names" : [
+                     "v"
+                  ]
+               },
+               "id" : 4,
+               "inputs" : [
+                  3
+               ],
+               "op" : "Call",
+               "stamp" : "Object"
+            },
+            {
+               "control_in" : 4,
+               "fields" : {
+                  "class_name" : "Holder",
+                  "dispatch_kind" : "method",
+                  "name" : "new",
+                  "param_names" : [
+                     "v"
+                  ]
+               },
+               "id" : 5,
+               "inputs" : [
+                  2
+               ],
+               "op" : "Call",
+               "stamp" : "Object"
+            },
+            {
+               "control_in" : 5,
+               "fields" : {
+                  "class_name" : "Holder",
+                  "dispatch_kind" : "method",
+                  "name" : "get",
+                  "param_names" : []
+               },
+               "id" : 6,
+               "inputs" : [
+                  4
+               ],
+               "op" : "Call",
+               "stamp" : "Unknown"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "Unknown",
+                  "to_repr" : "Str"
+               },
+               "id" : 7,
+               "inputs" : [
+                  6
+               ],
+               "op" : "Coerce",
+               "stamp" : "Str"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : "\n"
+               },
+               "id" : 8,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 6,
+               "id" : 9,
+               "inputs" : [
+                  7,
+                  8
+               ],
+               "op" : "Print"
+            },
+            {
+               "control_in" : 9,
+               "fields" : {
+                  "class_name" : "Holder",
+                  "dispatch_kind" : "method",
+                  "name" : "get",
+                  "param_names" : []
+               },
+               "id" : 10,
+               "inputs" : [
+                  5
+               ],
+               "op" : "Call",
+               "stamp" : "Unknown"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "Unknown",
+                  "to_repr" : "Str"
+               },
+               "id" : 11,
+               "inputs" : [
+                  10
+               ],
+               "op" : "Coerce",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 10,
+               "id" : 12,
+               "inputs" : [
+                  11,
+                  8
+               ],
+               "op" : "Print"
+            },
+            {
+               "control_in" : 12,
+               "id" : 13,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            13
+         ],
+         "start" : 0
+      }
+   },
+   "source" : null,
+   "version" : 1
+}

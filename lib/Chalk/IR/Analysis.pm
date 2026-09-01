@@ -1039,7 +1039,22 @@ sub _ctor_arg_reprs ($graphs) {
                 my $arg  = $args[$i] or next;
                 my $repr = blessed($arg) ? $arg->representation : undef;
                 next unless defined $repr && $_INFERABLE_FIELD_REPR{$repr};
-                $map{"$class\0" . $pn->[$i]} //= $repr;
+
+                # JOIN over every construction site, never the first one.
+                # `//=` stood here, so the answer depended on the order
+                # `sort keys %$graphs` happened to produce. Measured on
+                # `Holder->new(v => 42)` and `Holder->new(v => "hello")` in one
+                # program: source order alone selected `Str` (correct, the join)
+                # or `Int` (WRONG -- a Str is stored into a field stamped Int).
+                #
+                # This is legitimate BECAUSE chalk is ahead-of-time (perigrin):
+                # every construction site is in the program graph, so a join
+                # over all of them is true of every value the field can hold.
+                # It is the same discipline `_seed_direct_call_arg_reprs`
+                # already applies to sub arguments, whose comment records the
+                # identical measurement for `g(1); g("hello")`.
+                my $k = "$class\0" . $pn->[$i];
+                $map{$k} = defined $map{$k} ? _join_repr($map{$k}, $repr) : $repr;
             }
         }
     }
