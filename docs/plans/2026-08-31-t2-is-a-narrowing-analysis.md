@@ -1030,3 +1030,64 @@ together or none do.
 **NOT ATTEMPTED.** It is a real piece of work, not a guard adjustment, and this
 session has already shipped one wrong fix here. The GAP is the correct behaviour
 until the three agree.
+
+### Attempt 2, also reverted: narrowing the METHOD is necessary but not sufficient
+
+The first attempt patched the vtable READER. This one did what that section
+said the real fix was -- narrow the metaobject so signature, vtable entry and
+call site all move together. It is still not enough, and the failure is
+identical.
+
+`_stamp_method_call_reprs` (`Analysis.pm:1909`) already contains this logic, and
+its comment already describes our exact case: *"`Scalar` on the wire against
+`Int` from the graph ... BOTH ARE TRUE. Take the narrower and say nothing."* It
+calls `set_return_type`, which is documented "NARROW the return type, never
+weaken it" and enforces a subtype check. **All of it existed.** The block was
+gated on `_is_narrowed($wire)`, and `Scalar` is not narrowed, so a `Scalar` wire
+skipped the code written for it. (Fourth site today missing that rule, after
+field inference, coercion narrowing, and the two vtable readers.)
+
+Opening the guard to `defined $wire` made the metaobject narrow correctly, and a
+hand probe was RIGHT: `class Pair { field $left :param :reader; ... }` lowered
+and `lli` printed 30 against perl's 30.
+
+**But the corpus disagreed.** ABI disagreements went 21 -> 0 while five cases
+went from GAP to WRONG VALUE:
+
+    method-call                       lli '4622382067542392832'  perl '11'
+    method-call-chain                 lli '4886416041057452032'  perl '12'
+    conditional-void-call             lli '4622382067542392832'  perl '11'
+    method-branched-field-store       lli '4624633867356078080'  perl '15'
+    method-branched-field-store-else  lli '4641276075354095616'  perl '201'
+
+Same bit-pattern family as attempt 1 -- a double's bits read as an i64.
+Reverted.
+
+**So the Pair probe passing was not evidence the change was right.** Pair's
+readers are pure field reads; `Counter::val` and the branched-field-store cases
+are not. Something in those paths still emits or reads at the wider type after
+the metaobject narrows, and one hand probe of the easy shape cannot see it.
+
+### What the 21 actually need
+
+Not a guard change. The three consumers of a method's return type -- the emitted
+signature, the vtable entry, the call site -- must be proven to agree by
+CONSTRUCTION, not by all happening to read one field. Two attempts have now
+moved one or two of them and left the third, and both times the corpus caught it
+where a hand probe did not.
+
+Concretely, before a third attempt:
+
+1. **Find every site that decides a method's return machine type.** Attempt 1
+   assumed two (`LLVM.pm:543`, `:562`); attempt 2 assumed the metaobject was the
+   single source. Neither enumeration was complete, and the wrong values prove
+   it.
+2. **Make the disagreement impossible rather than detected.** The guard at
+   `Context.pm:7824` is doing its job -- it is the only reason these are GAPs
+   instead of silent miscompiles. It should stay until agreement is structural.
+3. **Test the HARD shape first.** `Counter::val` with a branched field store,
+   not `Pair::left`. A probe that passes on the easy shape is what made attempt
+   2 look finished.
+
+**The GAP is the correct behaviour meanwhile.** 21 cases refusing to compile is
+strictly better than 5 of them printing a double's bits as an integer.
