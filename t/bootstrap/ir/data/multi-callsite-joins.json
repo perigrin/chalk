@@ -1,0 +1,217 @@
+{
+   "classes" : {
+      "main" : {
+         "adjusts" : [],
+         "fields" : [],
+         "methods" : {},
+         "name" : "main",
+         "parent" : null,
+         "subs" : {
+            "g" : {
+               "graph" : "main::g",
+               "name" : "g",
+               "params" : [
+                  "@_"
+               ],
+               "return_type" : "Scalar",
+               "signature" : {
+                  "kind" : "implicit",
+                  "mandatory" : 0,
+                  "optional" : 0,
+                  "params" : [
+                     {
+                        "index" : 0,
+                        "name" : "@_",
+                        "sigil" : "@"
+                     }
+                  ],
+                  "slurpy" : "@"
+               },
+               "uses_args" : true
+            }
+         }
+      }
+   },
+   "methods" : {
+      "main::__PROGRAM__" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "undef",
+                  "value" : null
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Undef"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : "hello"
+               },
+               "id" : 2,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "1"
+               },
+               "id" : 3,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "control_in" : 0,
+               "fields" : {
+                  "dispatch_kind" : "direct",
+                  "name" : "main::g",
+                  "param_names" : []
+               },
+               "id" : 4,
+               "inputs" : [
+                  3
+               ],
+               "op" : "Call",
+               "stamp" : "Scalar"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "Unknown",
+                  "to_repr" : "Str"
+               },
+               "id" : 5,
+               "inputs" : [
+                  4
+               ],
+               "op" : "Coerce",
+               "stamp" : "Str"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : "\n"
+               },
+               "id" : 6,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 4,
+               "id" : 7,
+               "inputs" : [
+                  5,
+                  6
+               ],
+               "op" : "Print"
+            },
+            {
+               "control_in" : 7,
+               "fields" : {
+                  "dispatch_kind" : "direct",
+                  "name" : "main::g",
+                  "param_names" : []
+               },
+               "id" : 8,
+               "inputs" : [
+                  2
+               ],
+               "op" : "Call",
+               "stamp" : "Scalar"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "Unknown",
+                  "to_repr" : "Str"
+               },
+               "id" : 9,
+               "inputs" : [
+                  8
+               ],
+               "op" : "Coerce",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 8,
+               "id" : 10,
+               "inputs" : [
+                  9,
+                  6
+               ],
+               "op" : "Print"
+            },
+            {
+               "control_in" : 10,
+               "id" : 11,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            11
+         ],
+         "start" : 0
+      },
+      "main::g" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "ArgsSource",
+               "stamp" : "Array"
+            },
+            {
+               "id" : 2,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
+               "control_in" : 0,
+               "fields" : {
+                  "dispatch_kind" : "builtin",
+                  "name" : "shift",
+                  "param_names" : []
+               },
+               "id" : 3,
+               "inputs" : [
+                  1,
+                  2
+               ],
+               "op" : "Call",
+               "stamp" : "Scalar"
+            },
+            {
+               "control_in" : 3,
+               "id" : 4,
+               "inputs" : [
+                  3
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            4
+         ],
+         "start" : 0
+      }
+   },
+   "source" : null,
+   "version" : 1
+}

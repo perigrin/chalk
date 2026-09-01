@@ -844,8 +844,49 @@ sub _seed_direct_call_arg_reprs ($graphs) {
     {
         my $read = $slot->{node};
         my $existing = $read->representation;
-        my $joined = _join_repr( grep { defined } $existing, $slot->{reprs}->@* );
-        next unless defined $joined;
+
+        # TWO QUESTIONS, TWO OPERATORS. Both arms went through _join_repr,
+        # which is right for one of them and wrong for the other.
+        #
+        #   ACROSS CALLSITES -- join. The read is ONE node shared by every
+        #   caller, so its stamp must be true of all of them: `g(1); g("hello")`
+        #   makes it Str, and anything narrower is unsound for one caller.
+        #
+        #   AGAINST THE PRIOR STAMP -- meet. That is not a caller. `Scalar` on
+        #   a `shift @_` read records that NOTHING NARROWED IT YET, and
+        #   join(Scalar, Int) = Scalar, so an absence of evidence outranked a
+        #   measurement. The read never moved; the producer's
+        #   Coerce[Scalar -> Num] stood; Add(Num, Int) joined to Num; and
+        #   `sub f { my $x = shift; $x + 1 }` called once as f(10) returned Num
+        #   where the corpus spec says Int. Int <: Num and the only call is
+        #   f(Int), so f : Int -> Int (perigrin).
+        my $from_sites = _join_repr( $slot->{reprs}->@* );
+        next unless defined $from_sites;
+
+        # TERMINATION, and why this does not oscillate. The old comment named
+        # folding $existing into the JOIN as this fixpoint's latch: stamps only
+        # climb, the lattice is finite, so a node re-stamps finitely often.
+        # Meeting descends instead, and mixing directions is how a fixpoint
+        # alternates -- so the descent needs its own argument, not the absence
+        # of the old one.
+        #
+        # It is BackwardInference's, already in the tree: fold the node's own
+        # stamp INTO the meet, "so a later round cannot move the stamp
+        # SIDEWAYS between two incomparable types and the loop need never
+        # settle". `meet` is monotone downward over a finite lattice, `None` is
+        # its bottom, and the `eq` guard below still refuses a no-op re-stamp,
+        # so `$stamped` counts only real moves.
+        my $narrowed = defined $existing
+            ? Chalk::Grammar::Perl::TypeLibrary::meet_types($existing, $from_sites)
+            : $from_sites;
+
+        # `None` means the two are unrelated -- the prior stamp and the
+        # callsites disagree with neither refining the other. That is a real
+        # defect somewhere upstream, not something to paper over by picking
+        # one; leave the stamp alone and let the backend GAP on whatever
+        # consumes it.
+        next unless defined $narrowed && $narrowed ne 'None';
+        my $joined = $narrowed;
 
         # Only a real move counts. `$stamped` drives the caller's `while`, so
         # returning a nonzero for a no-op re-stamp is what would spin it.
