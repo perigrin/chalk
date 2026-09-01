@@ -7826,10 +7826,31 @@ sub _lower_call_method {
              . "cross-checked. Guessing one would cast a $result_repr result "
              . "through a fabricated ABI. Fix the MOP so the method declares "
              . "its return repr.";
-    if ($result_repr ne $abi_repr) {
+    # THE TWO NO LONGER DERIVE FROM ONE SOURCE, so equality is the wrong test.
+    # The comment above says they "agree by construction" on a truthful wire --
+    # true when both came from the producer, and false since chalk's own T1
+    # narrows a Call from whole-program evidence the wire does not carry. A
+    # `:param` field is honestly `Scalar` on the wire and provably `Int` from
+    # its construction sites; the node knows more than the ABI, which is
+    # REFINEMENT, not disagreement.
+    #
+    # Refusing it was correct while nothing could bridge the two. Something can
+    # now: `Int <: Scalar`, the callee returns the `%Slot` its body was emitted
+    # at, and the unbox below reads that cell at the node's repr. So the test
+    # is whether the node REFINES the ABI, and only an unrelated pair is still
+    # a defect worth refusing.
+    #
+    # TWO EARLIER ATTEMPTS FIXED THIS FROM THE WRONG END (both reverted): they
+    # narrowed the CALLEE to match the node -- first the vtable entry, then the
+    # metaobject -- and emitted 4622382067542392832 for perl's 11, which is
+    # 11.0's bits read as an i64. The callee has ONE body at ONE machine type;
+    # it is the CALL that must meet it, and the refinement is honoured after.
+    if ($result_repr ne $abi_repr
+            && !Chalk::Grammar::Perl::TypeLibrary::is_subtype($result_repr, $abi_repr)) {
         die "GAP: Call(method) '$method_name' node repr=$result_repr disagrees "
           . "with class '$class_name' vtable ABI return_repr=$abi_repr — "
-          . "a mismatched indirect call would be silently wrong.";
+          . "neither refines the other, so a mismatched indirect call would be "
+          . "silently wrong.";
     }
 
     my $slot_idx = $minfo->{vtable_slot};
@@ -7853,7 +7874,10 @@ sub _lower_call_method {
     $self->_emit("  $opaque_fn = load i8*, i8** $fn_gep  ; load opaque fn ptr for '$method_name'");
 
     # Cast to actual fn-ptr type and call
-    my $fn_type  = _method_fn_type($result_repr);
+    # AT THE ABI. `$result_repr` (the node's, possibly refined) named this type
+    # until 2026-09-01, so a node narrowed to Int cast a `%Slot (i8*)` callee to
+    # `i64 (i8*)` and called it at the wrong type.
+    my $fn_type  = _method_fn_type($abi_repr);
     my $typed_fn = $self->_fresh;
     $self->_emit("  $typed_fn = bitcast i8* $opaque_fn to $fn_type*  ; cast to typed fn ptr");
 
@@ -7876,7 +7900,7 @@ sub _lower_call_method {
         # that DEFINED each method (_method_fn_llvm_ret_type) names the type here,
         # so call and definition can never disagree (and an unsupported repr dies
         # there once, not in a parallel inline table).
-        my $ret_ty = Chalk::Target::LLVM::_method_fn_llvm_ret_type($result_repr);
+        my $ret_ty = Chalk::Target::LLVM::_method_fn_llvm_ret_type($abi_repr);
         $self->_emit("  $result = call $ret_ty $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> $ret_ty");
         # THE CALL IS AT THE ABI; THE NODE MAY KNOW MORE. When the vtable
         # declares Scalar the callee returns %Slot, but this node's repr may
@@ -7885,7 +7909,7 @@ sub _lower_call_method {
         # here rather than caching a %Slot where an i64 is expected. The
         # refinement is honoured at the boundary, not by calling at the
         # narrower type: the callee has ONE emitted body at ONE machine type.
-        if ($result_repr eq 'Scalar' && ($node->representation // '') ne 'Scalar') {
+        if ($abi_repr eq 'Scalar' && ($node->representation // '') ne 'Scalar') {
             my $pay = $self->_fresh;
             my $mi_pay = _slot_idx('payload');
             $self->_emit("  $pay = extractvalue %Slot $result, $mi_pay  ; Call(method) $method_name: Slot payload -> "
