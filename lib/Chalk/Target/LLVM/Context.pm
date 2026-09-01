@@ -6722,15 +6722,30 @@ sub _load_array_header {
 # control leads and the array is inputs[1]); resolve it by repr, not position.
 # _lower_builtin_keys($node) -> $llvm_ref (an %Array* of %Slot)
 #
-# PERL'S KEY ORDER IS NOT DETERMINISTIC and there is nothing here to
-# reproduce. Measured on 5.42.0, three runs of one program:
+# PERL'S KEY ORDER IS NOT REPRODUCIBLE HERE. Measured on 5.42.0, three runs
+# of one program:
 #
 #   my %h=(b=>2,a=>1,c=>3); print join(",", keys %h)
 #     b,a,c   /   b,c,a   /   a,b,c
 #
-# Hash key randomisation makes the order a per-process property. Chalk's
-# codegen must be byte-identical across runs, so adopting a random order is
-# not available even in principle.
+# It IS made stable by PERL_HASH_SEED with PERL_PERTURB_KEYS=0 -- five runs
+# of the above then agree -- so "there is no order" would be wrong. The
+# reason not to reproduce it is what that stable order DEPENDS ON:
+#
+#   PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0
+#     my %h=(a=>1,b=>2,c=>3)              b,c,a
+#     my %h=(c=>3,b=>2,a=>1)              b,a,c   <- same keys, different order
+#     ...insert a 4th key and delete it   b,a,c   <- bucket growth changed it
+#
+# The order is a function of collision history and bucket splits, not of the
+# key set. Reproducing it means reimplementing perl's hash function, bucket
+# sizing and split thresholds bit-exactly, and pinning chalk to one perl
+# build's internals -- importing an implementation where this project's job
+# is to have its own.
+#
+# The randomisation is also a DELIBERATE SECURITY MEASURE (hardening against
+# collision-flooding complexity attacks), so depending on PERL_HASH_SEED=0
+# would rest chalk's correctness on a mode perl exists to let you turn off.
 #
 # So this emits INSERTION ORDER -- the order the entries array already holds.
 # Deterministic, and a valid answer to a question perl deliberately leaves
