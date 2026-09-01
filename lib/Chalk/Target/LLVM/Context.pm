@@ -7374,7 +7374,10 @@ sub _lower_call_direct {
       . scalar(@returns) . " Returns — exactly one is required to inline."
         if @returns != 1;
 
-    my $value = $returns[0]->inputs->[-1];
+    # ->value() is inputs[0], the LIST reading. Reading [-1] here took the
+    # SCALAR FACE of a list-returning callee -- a well-formed graph
+    # computing the wrong value, with no GAP.
+    my $value = $returns[0]->value();
     die "GAP: direct call to '$name': callee Return has no value input."
         unless defined $value;
 

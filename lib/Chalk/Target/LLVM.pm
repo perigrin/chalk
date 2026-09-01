@@ -400,7 +400,9 @@ sub _method_body_root {
       . scalar(@returns) . " Returns — the lowering root must be exactly one "
       . "(multi-exit method bodies are not lowered yet)."
         if @returns > 1;
-    my $value = $returns[0]->inputs->[-1];
+    # ->value() is inputs[0], the LIST reading -- see Return.pm. [-1]
+    # silently became the scalar face when a Return gained a second input.
+    my $value = $returns[0]->value();
     die "GAP: method '" . $mop_method->name . "' in class '$cname' has a "
       . "Return with no value input." unless defined $value;
     return $value;

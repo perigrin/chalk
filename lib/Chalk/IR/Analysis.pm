@@ -704,7 +704,10 @@ sub _resolve_direct_calls ($graphs) {
                     blessed($_) && $_->can('operation')
                         && $_->operation eq 'Return'
                 } $callee->returns->@*;
-                my $val = $ret ? $ret->inputs->[-1] : undef;
+                # ->value() is inputs[0]. Reading [-1] stamped every
+                # list-returning sub's callsites from its SCALAR face --
+                # the same bug bson hit in _graph_return_type (7b26a89).
+                my $val = $ret ? $ret->value() : undef;
                 $node->set_representation($val->representation)
                     if $val && _is_narrowed($val->representation);
             }

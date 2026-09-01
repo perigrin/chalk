@@ -117,6 +117,12 @@ sub _extract_fields ($node, $id_remap) {
             # a list -- so a reloaded graph would lower to whichever the
             # backend guessed. Emitted only when present, so every other Call
             # is byte-identical to before.
+            # The callsite's context. Emitted only when the producer stated
+            # one: an ABSENT want means perl left entersub's context slot
+            # empty (a call in last-operand position, whose context arrives at
+            # runtime), which is a different fact from "scalar". Writing a
+            # default here would erase that distinction at the seam.
+            (defined $node->want ? (want => $node->want) : ()),
             (defined $node->sort_cmp   ? (sort_cmp   => $node->sort_cmp)   : ()),
             (defined $node->sort_order ? (sort_order => $node->sort_order) : ()),
             # paren_form is part of content_hash (Call.pm) -- losing it would
@@ -523,6 +529,7 @@ sub _deserialize_graph ($method_data) {
             $args{name}          = $fields->{name};
             $args{param_names}   = $fields->{param_names}
                 if exists $fields->{param_names};
+            $args{want}          = $fields->{want} if exists $fields->{want};
             $args{class_name}    = $fields->{class_name}
                 if exists $fields->{class_name};
             $args{paren_form}    = $fields->{paren_form}

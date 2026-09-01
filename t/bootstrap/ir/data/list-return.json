@@ -1,0 +1,471 @@
+{
+   "classes" : {
+      "main" : {
+         "adjusts" : [],
+         "fields" : [],
+         "methods" : {},
+         "name" : "main",
+         "parent" : null,
+         "subs" : {
+            "agg" : {
+               "graph" : "main::agg",
+               "name" : "agg",
+               "params" : [
+                  "@_"
+               ],
+               "return_type" : "Array",
+               "signature" : {
+                  "kind" : "implicit",
+                  "mandatory" : 0,
+                  "optional" : 0,
+                  "params" : [
+                     {
+                        "index" : 0,
+                        "name" : "@_",
+                        "sigil" : "@"
+                     }
+                  ],
+                  "slurpy" : "@"
+               },
+               "uses_args" : false
+            },
+            "lit" : {
+               "graph" : "main::lit",
+               "name" : "lit",
+               "params" : [
+                  "@_"
+               ],
+               "return_type" : "List",
+               "signature" : {
+                  "kind" : "implicit",
+                  "mandatory" : 0,
+                  "optional" : 0,
+                  "params" : [
+                     {
+                        "index" : 0,
+                        "name" : "@_",
+                        "sigil" : "@"
+                     }
+                  ],
+                  "slurpy" : "@"
+               },
+               "uses_args" : false
+            },
+            "mix" : {
+               "graph" : "main::mix",
+               "name" : "mix",
+               "params" : [
+                  "@_"
+               ],
+               "return_type" : "List",
+               "signature" : {
+                  "kind" : "implicit",
+                  "mandatory" : 0,
+                  "optional" : 0,
+                  "params" : [
+                     {
+                        "index" : 0,
+                        "name" : "@_",
+                        "sigil" : "@"
+                     }
+                  ],
+                  "slurpy" : "@"
+               },
+               "uses_args" : false
+            }
+         }
+      }
+   },
+   "methods" : {
+      "main::__PROGRAM__" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "undef",
+                  "value" : null
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Undef"
+            },
+            {
+               "control_in" : 0,
+               "fields" : {
+                  "dispatch_kind" : "direct",
+                  "name" : "main::lit",
+                  "param_names" : [],
+                  "want" : "scalar"
+               },
+               "id" : 2,
+               "inputs" : [],
+               "op" : "Call",
+               "stamp" : "List"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "Unknown",
+                  "to_repr" : "Str"
+               },
+               "id" : 3,
+               "inputs" : [
+                  2
+               ],
+               "op" : "Coerce",
+               "stamp" : "Str"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : " "
+               },
+               "id" : 4,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "id" : 5,
+               "inputs" : [
+                  3,
+                  4
+               ],
+               "op" : "Concat",
+               "stamp" : "Str"
+            },
+            {
+               "fields" : {
+                  "sigil" : "$",
+                  "stash_name" : "main",
+                  "var_name" : "\""
+               },
+               "id" : 6,
+               "inputs" : [],
+               "op" : "EntryDef",
+               "stamp" : "Scalar"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "Scalar",
+                  "to_repr" : "Str"
+               },
+               "id" : 7,
+               "inputs" : [
+                  6
+               ],
+               "op" : "Coerce",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 2,
+               "fields" : {
+                  "dispatch_kind" : "direct",
+                  "name" : "main::lit",
+                  "param_names" : [],
+                  "want" : "list"
+               },
+               "id" : 8,
+               "inputs" : [],
+               "op" : "Call",
+               "stamp" : "List"
+            },
+            {
+               "fields" : {
+                  "dispatch_kind" : "builtin",
+                  "name" : "join",
+                  "param_names" : []
+               },
+               "id" : 9,
+               "inputs" : [
+                  7,
+                  8
+               ],
+               "op" : "Call",
+               "stamp" : "Str"
+            },
+            {
+               "id" : 10,
+               "inputs" : [
+                  5,
+                  9
+               ],
+               "op" : "Concat",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 8,
+               "fields" : {
+                  "dispatch_kind" : "direct",
+                  "name" : "main::mix",
+                  "param_names" : [],
+                  "want" : "void"
+               },
+               "id" : 11,
+               "inputs" : [],
+               "op" : "Call",
+               "stamp" : "List"
+            },
+            {
+               "control_in" : 11,
+               "id" : 12,
+               "inputs" : [
+                  10
+               ],
+               "op" : "Print"
+            },
+            {
+               "control_in" : 12,
+               "id" : 13,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            },
+            {
+               "id" : 14,
+               "inputs" : [
+                  8
+               ],
+               "op" : "ArrayLiteral",
+               "stamp" : "Array"
+            }
+         ],
+         "returns" : [
+            13
+         ],
+         "start" : 0
+      },
+      "main::agg" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "10"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "20"
+               },
+               "id" : 2,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "30"
+               },
+               "id" : 3,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "id" : 4,
+               "inputs" : [
+                  1,
+                  2,
+                  3
+               ],
+               "op" : "ArrayLiteral",
+               "stamp" : "Array"
+            },
+            {
+               "control_in" : 0,
+               "id" : 5,
+               "inputs" : [
+                  4
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            5
+         ],
+         "start" : 0
+      },
+      "main::lit" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "10"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "20"
+               },
+               "id" : 2,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "30"
+               },
+               "id" : 3,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "id" : 4,
+               "inputs" : [
+                  1,
+                  2,
+                  3
+               ],
+               "op" : "ArrayLiteral",
+               "stamp" : "List"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "List",
+                  "to_repr" : "Scalar"
+               },
+               "id" : 5,
+               "inputs" : [
+                  3
+               ],
+               "op" : "Coerce",
+               "stamp" : "Scalar"
+            },
+            {
+               "control_in" : 0,
+               "id" : 6,
+               "inputs" : [
+                  4,
+                  5
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            6
+         ],
+         "start" : 0
+      },
+      "main::mix" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "99"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "10"
+               },
+               "id" : 2,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "20"
+               },
+               "id" : 3,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "id" : 4,
+               "inputs" : [
+                  2,
+                  3
+               ],
+               "op" : "ArrayLiteral",
+               "stamp" : "Array"
+            },
+            {
+               "id" : 5,
+               "inputs" : [
+                  1,
+                  4
+               ],
+               "op" : "ArrayLiteral",
+               "stamp" : "List"
+            },
+            {
+               "id" : 6,
+               "inputs" : [
+                  4
+               ],
+               "op" : "Count",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "List",
+                  "to_repr" : "Scalar"
+               },
+               "id" : 7,
+               "inputs" : [
+                  6
+               ],
+               "op" : "Coerce",
+               "stamp" : "Scalar"
+            },
+            {
+               "control_in" : 0,
+               "id" : 8,
+               "inputs" : [
+                  5,
+                  7
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            8
+         ],
+         "start" : 0
+      }
+   },
+   "source" : null,
+   "version" : 1
+}

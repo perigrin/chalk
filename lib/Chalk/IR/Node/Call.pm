@@ -47,6 +47,25 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # builtins/subs and for calls whose class is not statically known.
     field $class_name :param :reader = undef;
 
+    # The CALLSITE's own context: 'void', 'scalar', 'list', or undef.
+    #
+    # UNDEF IS A REAL STATE, NOT MISSING DATA. perl leaves entersub's context
+    # slot empty for a call in LAST-OPERAND position, because that context
+    # arrives at runtime from the caller's frame:
+    #
+    #   sub f { return (9, g()) }   g's entersub is `KS` -- bare K
+    #   my $s = f();                f's entersub is `sKS`
+    #   my @l = f();                f's entersub is `lKS`
+    #
+    # That is the same fact that makes `wantarray` a runtime function. A
+    # consumer treating undef as "the producer said nothing" gets the
+    # last-operand case backwards, so the two must stay distinguishable.
+    #
+    # Not part of content_hash: the same call in scalar and list context is
+    # the same call, and its context is a per-use decoration -- the same
+    # reasoning that keeps control_in out of the hash (Node.pm:42).
+    field $want :param :reader = undef;
+
     # A FOLDED sort's comparison kind and direction. perl folds the standard
     # comparators into flags on the op (OPpSORT_NUMERIC, OPpSORT_DESCEND), so
     # by the time a producer sees `sort { $a <=> $b }` the block is GONE and
