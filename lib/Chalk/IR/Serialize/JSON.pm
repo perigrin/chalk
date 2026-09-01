@@ -100,6 +100,12 @@ sub _extract_fields ($node, $id_remap) {
             value      => defined $node->value ? "${\$node->value}" : undef,
         };
     }
+    if ($op eq 'AnonSub') {
+        # Emitted only when present: a frontend-built AnonSub has no wire
+        # name and falls back to per-node identity.
+        return { (defined $node->name ? (name => $node->name) : ()) };
+    }
+
     if ($op eq 'Call') {
         return {
             dispatch_kind => $node->dispatch_kind,
@@ -523,6 +529,12 @@ sub _deserialize_graph ($method_data) {
         if ($op eq 'Constant') {
             $args{value}      = $fields->{value};
             $args{const_type} = $fields->{const_type} if exists $fields->{const_type};
+        }
+        elsif ($op eq 'AnonSub') {
+            # The body's methods key. Without it the node falls back to a
+            # construction counter, and a reloaded AnonSub hashes differently
+            # from the graph that produced it.
+            $args{name} = $fields->{name} if exists $fields->{name};
         }
         elsif ($op eq 'Call') {
             $args{dispatch_kind} = $fields->{dispatch_kind};

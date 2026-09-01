@@ -1,0 +1,282 @@
+{
+   "classes" : {
+      "main" : {
+         "adjusts" : [],
+         "fields" : [],
+         "methods" : {},
+         "name" : "main",
+         "parent" : null,
+         "subs" : {
+            "apply" : {
+               "graph" : "main::apply",
+               "name" : "apply",
+               "params" : [
+                  "@_"
+               ],
+               "return_type" : "Int",
+               "signature" : {
+                  "kind" : "implicit",
+                  "mandatory" : 0,
+                  "optional" : 0,
+                  "params" : [
+                     {
+                        "index" : 0,
+                        "name" : "@_",
+                        "sigil" : "@"
+                     }
+                  ],
+                  "slurpy" : "@"
+               },
+               "uses_args" : true
+            }
+         }
+      }
+   },
+   "methods" : {
+      "main::__PROGRAM__" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "undef",
+                  "value" : null
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Undef"
+            },
+            {
+               "fields" : {
+                  "name" : "main::__PROGRAM__::__ANON__:3:6"
+               },
+               "id" : 2,
+               "inputs" : [],
+               "op" : "AnonSub",
+               "stamp" : "Code"
+            },
+            {
+               "fields" : {
+                  "sigil" : "%",
+                  "stash_name" : "main",
+                  "var_name" : "SIG"
+               },
+               "id" : 3,
+               "inputs" : [],
+               "op" : "EntryDef",
+               "stamp" : "Hash"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : "__WARN__"
+               },
+               "id" : 4,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "id" : 5,
+               "inputs" : [
+                  3,
+                  4
+               ],
+               "op" : "Subscript",
+               "stamp" : "Scalar"
+            },
+            {
+               "fields" : {
+                  "name" : "main::__PROGRAM__::__ANON__:2:2"
+               },
+               "id" : 6,
+               "inputs" : [],
+               "op" : "AnonSub",
+               "stamp" : "Code"
+            },
+            {
+               "control_in" : 0,
+               "id" : 7,
+               "inputs" : [
+                  5,
+                  6
+               ],
+               "op" : "Assign",
+               "stamp" : "Code"
+            },
+            {
+               "control_in" : 7,
+               "fields" : {
+                  "dispatch_kind" : "direct",
+                  "name" : "main::apply",
+                  "param_names" : [],
+                  "want" : "scalar"
+               },
+               "id" : 8,
+               "inputs" : [
+                  2
+               ],
+               "op" : "Call",
+               "stamp" : "Int"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "Unknown",
+                  "to_repr" : "Str"
+               },
+               "id" : 9,
+               "inputs" : [
+                  8
+               ],
+               "op" : "Coerce",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 8,
+               "id" : 10,
+               "inputs" : [
+                  9
+               ],
+               "op" : "Print"
+            },
+            {
+               "control_in" : 10,
+               "id" : 11,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            11
+         ],
+         "start" : 0
+      },
+      "main::__PROGRAM__::__ANON__:2:2" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "1"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "control_in" : 0,
+               "id" : 2,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            2
+         ],
+         "start" : 0
+      },
+      "main::__PROGRAM__::__ANON__:3:6" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "7"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "control_in" : 0,
+               "id" : 2,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            2
+         ],
+         "start" : 0
+      },
+      "main::apply" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "7"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "id" : 2,
+               "inputs" : [],
+               "op" : "ArgsSource",
+               "stamp" : "Array"
+            },
+            {
+               "id" : 3,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
+               "control_in" : 0,
+               "fields" : {
+                  "dispatch_kind" : "builtin",
+                  "name" : "shift",
+                  "param_names" : []
+               },
+               "id" : 4,
+               "inputs" : [
+                  2,
+                  3
+               ],
+               "op" : "Call",
+               "stamp" : "Scalar"
+            },
+            {
+               "control_in" : 4,
+               "id" : 5,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            5
+         ],
+         "start" : 0
+      }
+   },
+   "source" : null,
+   "version" : 1
+}
