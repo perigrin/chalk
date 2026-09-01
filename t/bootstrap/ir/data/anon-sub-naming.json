@@ -1,0 +1,284 @@
+{
+   "classes" : {
+      "main" : {
+         "adjusts" : [],
+         "fields" : [],
+         "methods" : {},
+         "name" : "main",
+         "parent" : null,
+         "subs" : {
+            "f" : {
+               "graph" : "main::f",
+               "name" : "f",
+               "params" : [
+                  "@_"
+               ],
+               "return_type" : "Unknown",
+               "signature" : {
+                  "kind" : "implicit",
+                  "mandatory" : 0,
+                  "optional" : 0,
+                  "params" : [
+                     {
+                        "index" : 0,
+                        "name" : "@_",
+                        "sigil" : "@"
+                     }
+                  ],
+                  "slurpy" : "@"
+               },
+               "uses_args" : false
+            },
+            "g" : {
+               "graph" : "main::g",
+               "name" : "g",
+               "params" : [
+                  "@_"
+               ],
+               "return_type" : "Unknown",
+               "signature" : {
+                  "kind" : "implicit",
+                  "mandatory" : 0,
+                  "optional" : 0,
+                  "params" : [
+                     {
+                        "index" : 0,
+                        "name" : "@_",
+                        "sigil" : "@"
+                     }
+                  ],
+                  "slurpy" : "@"
+               },
+               "uses_args" : false
+            }
+         }
+      }
+   },
+   "methods" : {
+      "main::__PROGRAM__" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "undef",
+                  "value" : null
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Undef"
+            },
+            {
+               "control_in" : 0,
+               "fields" : {
+                  "dispatch_kind" : "direct",
+                  "name" : "main::__PROGRAM__::__ANON__:3:2",
+                  "param_names" : [],
+                  "want" : "list"
+               },
+               "id" : 2,
+               "inputs" : [],
+               "op" : "Call",
+               "stamp" : "Unknown"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "Unknown",
+                  "to_repr" : "Str"
+               },
+               "id" : 3,
+               "inputs" : [
+                  2
+               ],
+               "op" : "Coerce",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 2,
+               "id" : 4,
+               "inputs" : [
+                  3
+               ],
+               "op" : "Print"
+            },
+            {
+               "control_in" : 4,
+               "id" : 5,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            5
+         ],
+         "start" : 0
+      },
+      "main::__PROGRAM__::__ANON__:3:2" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "42"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "control_in" : 0,
+               "id" : 2,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            2
+         ],
+         "start" : 0
+      },
+      "main::f" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "control_in" : 0,
+               "fields" : {
+                  "dispatch_kind" : "direct",
+                  "name" : "main::f::__ANON__:1:2",
+                  "param_names" : []
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Call",
+               "stamp" : "Unknown"
+            },
+            {
+               "control_in" : 1,
+               "id" : 2,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            2
+         ],
+         "start" : 0
+      },
+      "main::f::__ANON__:1:2" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "1"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "control_in" : 0,
+               "id" : 2,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            2
+         ],
+         "start" : 0
+      },
+      "main::g" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "control_in" : 0,
+               "fields" : {
+                  "dispatch_kind" : "direct",
+                  "name" : "main::g::__ANON__:2:2",
+                  "param_names" : []
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Call",
+               "stamp" : "Unknown"
+            },
+            {
+               "control_in" : 1,
+               "id" : 2,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            2
+         ],
+         "start" : 0
+      },
+      "main::g::__ANON__:2:2" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "2"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "control_in" : 0,
+               "id" : 2,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            2
+         ],
+         "start" : 0
+      }
+   },
+   "source" : null,
+   "version" : 1
+}
