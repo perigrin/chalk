@@ -670,6 +670,52 @@ sub _attach_call_targets ($graphs, $mop) {
     return;
 }
 
+# return_reading_for_want($return, $want) -> the input a callsite takes
+#
+# A list-returning sub carries TWO readings, because it is compiled once and
+# cannot see its caller's context: perl leaves entersub's context slot empty
+# for a call in last-operand position, which is the same fact that makes
+# `wantarray` a runtime function.
+#
+#   Return inputs[0]   the LIST reading: all N values
+#   Return inputs[1]   the SCALAR reading, or absent
+#
+# The producer has already applied the collapse rule, so the whole job here is
+# picking the slot. THE RULE IS NOT "last element" AND NOT "count" -- measured
+# against perl 5.42.0:
+#
+#   sub lit { return (10,20,30) }             my $s = lit()  -> 30
+#   sub agg { my @a=(10,20,30); return @a }   my $s = agg()  ->  3
+#   sub mix { my @x=(10,20); return (99,@x) } my $s = mix()  ->  2
+#
+# `mix` discriminates: the last ELEMENT of the flattened list is 20 where perl
+# says 2. It is the comma operator's rule -- the last OPERAND read in scalar
+# context, recursively -- and getting it wrong here would be a well-formed
+# graph computing a wrong number.
+#
+# AN UNDEF $want IS A REAL STATE, NOT MISSING DATA. It means perl left the
+# context slot empty (the last-operand case, whose context arrives at runtime
+# from the caller's frame), so it must not be read as "scalar". The LIST
+# reading is the sound default: it carries all N values, so nothing a later
+# collapse needs has been discarded.
+#
+# A callee with only ONE reading answers every context from it -- `return @a`
+# needs no second face, because the container already answers both readings
+# (its scalar reading is its length).
+sub return_reading_for_want ($return, $want) {
+    return undef unless defined $return;
+
+    my $list_reading = $return->value();
+
+    return $list_reading unless defined $want && $want eq 'scalar';
+
+    my $scalar_reading = $return->can('scalar_value')
+        ? $return->scalar_value()
+        : undef;
+
+    return defined $scalar_reading ? $scalar_reading : $list_reading;
+}
+
 sub _resolve_direct_calls ($graphs) {
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {

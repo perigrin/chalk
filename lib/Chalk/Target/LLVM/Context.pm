@@ -31,6 +31,7 @@ use utf8;
 # list of features to implement, it is not a GAP.
 
 use Chalk::IR::NodeFactory;   # is_statement_node() classifier used by the value/effect collectors
+use Chalk::IR::Analysis;      # return_reading_for_want: which of a callee reading a callsite takes
 
 # Re-export helpers from the main package so unqualified calls in this
 # package resolve correctly (both packages share the same implementation).
@@ -7374,10 +7375,19 @@ sub _lower_call_direct {
       . scalar(@returns) . " Returns — exactly one is required to inline."
         if @returns != 1;
 
-    # ->value() is inputs[0], the LIST reading. Reading [-1] here took the
-    # SCALAR FACE of a list-returning callee -- a well-formed graph
-    # computing the wrong value, with no GAP.
-    my $value = $returns[0]->value();
+    # WHICH READING THIS CALLSITE TAKES IS ITS OWN CONTEXT'S ANSWER. A
+    # list-returning callee carries two -- inputs[0] all N values, inputs[1]
+    # the scalar face -- because it is compiled once and cannot see its
+    # caller. Taking value() unconditionally is right for every list callsite
+    # and wrong for every scalar one, which is why a fixture with only
+    # list-context calls cannot tell the two apart.
+    #
+    # An undef want is a REAL state (perl leaves the slot empty for a call in
+    # last-operand position), and return_reading_for_want reads it as the list
+    # reading rather than as scalar -- see its comment for why that is the
+    # sound default.
+    my $want  = ($node && $node->can(q{want})) ? $node->want : undef;
+    my $value = Chalk::IR::Analysis::return_reading_for_want($returns[0], $want);
     die "GAP: direct call to '$name': callee Return has no value input."
         unless defined $value;
 
