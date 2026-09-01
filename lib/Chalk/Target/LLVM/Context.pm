@@ -2326,7 +2326,7 @@ sub _emit_box_into_slot {
 #     It is deliberately NOT a die -- a merge arm can carry an un-narrowed cell
 #     down a path that never uses the value.
 sub _emit_read_slot_as {
-    my ($self, $slot_ref, $to, $label) = @_;
+    my ($self, $slot_ref, $to, $label, %opt) = @_;
 
     my $defined = $self->_slot_defined_bit($slot_ref);
     my $tag     = $self->_slot_tag_of($slot_ref);
@@ -2346,7 +2346,13 @@ sub _emit_read_slot_as {
     # converted to $to. Every other tag (a live ArrayRef/HashRef/CodeRef/Object
     # pointer, say) has no numeric or string face this backend can emit, so it
     # joins the undef path rather than being read as an integer address.
-    my @readings = qw(Int Num Str Boolean);
+    # A caller may narrow the dispatch when its context cannot accept every
+    # reading -- see _lower_field_access_in_method, where the Str arm's
+    # %StrPair GEP would precede that type's declaration. Narrowing DROPS
+    # readings onto the undef arm, which is honest; it never reinterprets one
+    # reading's bits as another's, which is the defect this dispatch exists to
+    # prevent.
+    my @readings = $opt{readings} ? $opt{readings}->@* : qw(Int Num Str Boolean);
 
     my $entry     = $self->_current_block_label;
     my $lbl_join  = $self->_fresh_label('slotrd.join.');
@@ -9129,9 +9135,44 @@ sub _lower_field_access_in_method {
         return $ptr;
     }
     else {
-        # Int: payload is i64 directly
-        $self->{cache}{ $node->id } = $pay;
-        return $pay;
+        # SCALAR READINGS GO THROUGH THE TAG. "Int: payload is i64 directly"
+        # stood here, and it is only true when the cell was WRITTEN as an Int.
+        # A field is a %Slot, and every store site tags it: `$n += 1` on a
+        # `:param` field writes tag=Num with `bitcast double -> i64`, so reading
+        # the payload as an i64 hands back the double's BITS. Measured on corpus
+        # method-call: 4622382067542392832, which is exactly
+        # unpack('q', pack('d', 11.0)).
+        #
+        # perigrin's rule: boxing and unboxing a Slot MUST consult the type tag.
+        # The write half already did; this is the read half. _emit_read_slot_as
+        # is the same dispatch _lower_coerce_from_slot uses -- a defined-bit
+        # guard, one arm per tag, an undef path for anything unreadable -- so
+        # the two halves share one mechanism rather than agreeing by discipline.
+        #
+        # It wants the whole cell, not the payload word, so load the aggregate.
+        my $slot_gep = $self->_fresh;
+        $self->_emit("  $slot_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx  ; field[$field_index] cell");
+        my $slot = $self->_fresh;
+        $self->_emit("  $slot = load %Slot, %Slot* $slot_gep  ; load field[$field_index] cell");
+
+        # ONE READING ONLY WHEN THE CELL CANNOT HOLD ANOTHER. The full tag
+        # dispatch emits a Str arm, which GEPs a %StrPair -- and a method body
+        # is lowered BEFORE the prologue that honours `_need_strpair`, so the
+        # type is declared after its first use and lli refuses the module
+        # ("base element of getelementptr must be sized", corpus A5). That is a
+        # pre-existing emission-order limitation this read newly reaches.
+        #
+        # So dispatch only over the readings whose values share the target's
+        # machine type. Int and Num both land in a word, and confusing them is
+        # the actual defect here -- a cell written tag=Num and read as Int gave
+        # back the double's bits. A Str-tagged cell reaching an Int-typed read
+        # is a different question, and the undef arm answers it honestly rather
+        # than emitting a type the module has not declared yet.
+        my $val = $self->_emit_read_slot_as($slot, $repr,
+            "FieldAccess(method) field[$field_index] -> $repr",
+            readings => [qw(Int Num Boolean)]);
+        $self->{cache}{ $node->id } = $val;
+        return $val;
     }
 }
 

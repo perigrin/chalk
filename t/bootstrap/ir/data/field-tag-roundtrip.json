@@ -1,0 +1,315 @@
+{
+   "classes" : {
+      "Counter" : {
+         "adjusts" : [],
+         "fields" : [
+            {
+               "default_ref" : "Counter::__DEFAULT_0",
+               "fieldix" : 0,
+               "has_default" : true,
+               "is_param" : true,
+               "name" : "$n",
+               "param_name" : "n",
+               "type" : "Scalar"
+            }
+         ],
+         "method_return_types" : {
+            "inc" : "Num",
+            "val" : "Scalar"
+         },
+         "method_signatures" : {
+            "inc" : {
+               "invocant" : true,
+               "kind" : "implicit",
+               "mandatory" : 0,
+               "optional" : 0,
+               "params" : [
+                  {
+                     "index" : 0,
+                     "name" : "@_",
+                     "sigil" : "@"
+                  }
+               ],
+               "slurpy" : "@"
+            },
+            "val" : {
+               "invocant" : true,
+               "kind" : "implicit",
+               "mandatory" : 0,
+               "optional" : 0,
+               "params" : [
+                  {
+                     "index" : 0,
+                     "name" : "@_",
+                     "sigil" : "@"
+                  }
+               ],
+               "slurpy" : "@"
+            }
+         },
+         "methods" : {
+            "inc" : "Counter::inc",
+            "val" : "Counter::val"
+         },
+         "name" : "Counter",
+         "parent" : null
+      }
+   },
+   "methods" : {
+      "Counter::__DEFAULT_0" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "0"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "control_in" : 0,
+               "id" : 2,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            2
+         ],
+         "start" : 0
+      },
+      "Counter::inc" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "field_index" : 0,
+                  "field_stash" : "Counter"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "FieldAccess",
+               "stamp" : "Scalar"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "Scalar",
+                  "to_repr" : "Num"
+               },
+               "id" : 2,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Coerce",
+               "stamp" : "Num"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "1"
+               },
+               "id" : 3,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "id" : 4,
+               "inputs" : [
+                  2,
+                  3
+               ],
+               "op" : "Add",
+               "stamp" : "Num"
+            },
+            {
+               "control_in" : 0,
+               "id" : 5,
+               "inputs" : [
+                  1,
+                  4
+               ],
+               "op" : "Assign",
+               "stamp" : "Num"
+            },
+            {
+               "control_in" : 5,
+               "id" : 6,
+               "inputs" : [
+                  4
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            6
+         ],
+         "start" : 0
+      },
+      "Counter::val" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "field_index" : 0,
+                  "field_stash" : "Counter"
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "FieldAccess",
+               "stamp" : "Scalar"
+            },
+            {
+               "control_in" : 0,
+               "id" : 2,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            2
+         ],
+         "start" : 0
+      },
+      "main::__PROGRAM__" : {
+         "nodes" : [
+            {
+               "id" : 0,
+               "inputs" : [],
+               "op" : "Start"
+            },
+            {
+               "fields" : {
+                  "const_type" : "undef",
+                  "value" : null
+               },
+               "id" : 1,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Undef"
+            },
+            {
+               "fields" : {
+                  "const_type" : "integer",
+                  "value" : "10"
+               },
+               "id" : 2,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Int"
+            },
+            {
+               "control_in" : 0,
+               "fields" : {
+                  "class_name" : "Counter",
+                  "dispatch_kind" : "method",
+                  "name" : "new",
+                  "param_names" : [
+                     "n"
+                  ]
+               },
+               "id" : 3,
+               "inputs" : [
+                  2
+               ],
+               "op" : "Call",
+               "stamp" : "Object"
+            },
+            {
+               "control_in" : 3,
+               "fields" : {
+                  "class_name" : "Counter",
+                  "dispatch_kind" : "method",
+                  "name" : "inc",
+                  "param_names" : []
+               },
+               "id" : 4,
+               "inputs" : [
+                  3
+               ],
+               "op" : "Call",
+               "stamp" : "Num"
+            },
+            {
+               "control_in" : 4,
+               "fields" : {
+                  "class_name" : "Counter",
+                  "dispatch_kind" : "method",
+                  "name" : "val",
+                  "param_names" : []
+               },
+               "id" : 5,
+               "inputs" : [
+                  3
+               ],
+               "op" : "Call",
+               "stamp" : "Scalar"
+            },
+            {
+               "fields" : {
+                  "from_repr" : "Unknown",
+                  "to_repr" : "Str"
+               },
+               "id" : 6,
+               "inputs" : [
+                  5
+               ],
+               "op" : "Coerce",
+               "stamp" : "Str"
+            },
+            {
+               "fields" : {
+                  "const_type" : "string",
+                  "value" : "\n"
+               },
+               "id" : 7,
+               "inputs" : [],
+               "op" : "Constant",
+               "stamp" : "Str"
+            },
+            {
+               "control_in" : 5,
+               "id" : 8,
+               "inputs" : [
+                  6,
+                  7
+               ],
+               "op" : "Print"
+            },
+            {
+               "control_in" : 8,
+               "id" : 9,
+               "inputs" : [
+                  1
+               ],
+               "op" : "Return"
+            }
+         ],
+         "returns" : [
+            9
+         ],
+         "start" : 0
+      }
+   },
+   "source" : null,
+   "version" : 1
+}
