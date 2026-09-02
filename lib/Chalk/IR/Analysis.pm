@@ -2108,8 +2108,35 @@ sub _static_miss ($container, $index) {
     # HIT) -- deciding a miss here would turn a valid read into a false Slot
     # (undef). Only a scalar-literal aggregate (all inputs plain scalars) is
     # statically decidable.
+    #
+    # THE TEST IS ARITY, NOT OP NAME. This listed ArrayLiteral and HashLiteral
+    # because those were the flattening shapes that had been met; a Slice
+    # flattens exactly the same way and was not named, so `my @t = @a[-2,-1];
+    # $t[1]` counted the container's inputs as ONE, read index 1 as past the
+    # end, and stamped `Undef` -- for a read perl answers 4. A stamp of Undef
+    # is not a missing type, it is a WRONG one: the backend emits the tagged
+    # undef path and the program prints nothing where perl prints a value.
+    #
+    # So the question is "can this input stand for more than one element", and
+    # a node's STAMP already answers it. List/Array/Hash are the plural types;
+    # anything stamped one of them occupies one slot and expands to an unknown
+    # number, which is the same reason a nested literal does. Keyed on the type
+    # rather than on a list of ops, so ExpressionList/ListAppend/ListAssign --
+    # which are equally plural and equally unnamed here -- are covered without
+    # this list having to grow again.
+    #
+    # Found via perl5-son's own instance of this bug (b53a881); chalk
+    # reproduces it independently, and still did with their fix in place,
+    # because this guard is chalk's, over chalk's own loaded graph.
     my $flattens = grep {
-        blessed($_) && ($_->operation eq 'ArrayLiteral' || $_->operation eq 'HashLiteral')
+        blessed($_) && do {
+            my $op = $_->operation;
+            my $r  = $_->can('representation') ? ($_->representation // '') : '';
+            $op eq 'ArrayLiteral' || $op eq 'HashLiteral'
+                || $r eq 'List' || $r eq 'Array' || $r eq 'Hash'
+                || ($op eq 'Slice' || $op eq 'ExpressionList'
+                    || $op eq 'ListAppend' || $op eq 'ListAssign');
+        }
     } $container->inputs->@*;
     return false if $flattens;
 
