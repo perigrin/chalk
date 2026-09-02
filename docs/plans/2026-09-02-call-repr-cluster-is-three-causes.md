@@ -84,3 +84,58 @@ whose fossil comment is Mechanism A's bug.
 Diagnosis only; no lib/ change in this commit.
 
 Claude-Session: https://claude.ai/code/session_018s53vG3TsdscZhiB5ufrdM
+
+---
+
+# ADDENDUM 2026-09-02: what actually closed, and one finding for the producer
+
+## Mechanism B is closed, and it was four links, not one
+
+The diagnosis above named the vacuous widening at `_narrow_unknown_coercions`
+correctly, but retiring that edge alone moved nothing. The type failed to
+travel four separate times, each defect masking the next:
+
+1. the vacuous `Coerce[Int -> Num]` itself
+2. a direct `Call` frozen at its first stamp (`unless (_is_narrowed(...))`)
+3. a method SIGNATURE not following its narrowed BODY -- emitted
+   `define internal double` over an i64 body, which lli refuses
+4. a `join` op (`Add :Num`) holding a stamp its now-narrowed operands no
+   longer support
+
+Fixed in 5682a6e7. The unifying rule: **a stamp follows its own authority
+DOWNWARD.** A Call is typed by its callee; a join op by its operands. Both are
+FORWARD inference, so neither is the "preempt a source" mistake. Downward-only
+keeps every fixpoint monotone over a finite lattice.
+
+Gate 201 -> 208, seven cases fixed, zero broken, behavior and invariant legs
+unmoved.
+
+## Still open, and NOT this mechanism
+
+- `classes/adjust` -- the method returns a field written in an ADJUST block, so
+  the type comes from the field path, not the call path.
+- `subs/F15` -- the call nested in its own argument.
+
+## FOR THE PRODUCER: `print` should stamp Boolean, not Scalar
+
+perl5-son bc9b285 ("fix(stamps): type print, ...") began stamping `Print` and
+chose `Scalar`. Measured on logical.md L5d's own source:
+
+    producer 88c9b7a -> StrEq:Boolean  Print:None    And:Unknown
+    producer bc9b285 -> StrEq:Boolean  Print:Scalar  And:Scalar
+
+`And` then joins Boolean |_| Scalar = Scalar, which has no machine type, so
+the backend refuses at Context.pm:3854 (`Or`: :3932). Corpus cases L5d and L5e
+regressed 203 -> 201 on that change alone.
+
+PRINT RETURNS A REAL BOOLEAN. Confirmed against perl 5.42.0:
+
+    my $r = print "y\n";   # $r == 1, builtin::is_bool($r) is TRUE
+
+Two places in chalk already said so before the regression: every chalk-loaded
+graph stamps `Print :Boolean`, and t/corpus/mdtest/logical.md:359 states both
+operands are Boolean, "the StrEq guard and the Print, which returns a
+builtin::is_bool boolean".
+
+This is a one-line lattice fact on the producer side. With `Print => Boolean`
+the join lands on Boolean and both L5 cases lower again.
