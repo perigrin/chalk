@@ -301,6 +301,21 @@ sub hydrate ($class, $graphs, $classes = undef) {
     # ADJUST expression over them (`$val * 2`) carries a repr.
     _stamp_field_access_reprs($classes, \%graphs);
     _seed_and_propagate_reprs(\%graphs);
+    # RETIRE THE VACUOUS WIDENINGS FIRST, because the inference below reads a
+    # STORED VALUE'S repr and that reading is final -- it is written onto the
+    # raw field record, and _replay_classes seals the MOP over it a few lines
+    # down. There is no later pass that can move a field's type.
+    #
+    # Measured on classes.md `adjust`: the ADJUST body is
+    # `Multiply(Coerce[Scalar -> Num](FieldAccess(0) :Int), Constant(2) :Int)`.
+    # The stamp above already narrowed the field read to Int, which leaves the
+    # producer's Coerce converting an Int to a supertype nothing asked for --
+    # exactly the vacuous widening _narrow_unknown_coercions was taught to
+    # retire. Without the retirement here, Multiply joins to Num, $double is
+    # sealed `type: Num`, and `Call(double)` inherits Num where the spec pins
+    # Int. The retirement only ever moves a stamp DOWN, so running it earlier
+    # cannot widen anything a later pass would have to undo.
+    _narrow_unknown_coercions(\%graphs);
     # An ADJUST-only field (no :param, no default) is typed from the value an
     # ADJUST stores into it (Assign(FieldAccess-lvalue, value)). Re-stamp the
     # now-typed field reads (the accessor body's FieldAccess) after.
@@ -935,6 +950,22 @@ sub _resolve_direct_calls ($graphs) {
 # seeded (the backend inlines exactly that shape; other @_ shapes GAP there).
 # Run inside the repr fixpoint: a callee-of-a-callee is typed once its own
 # callee's shift is stamped on a prior pass.
+# _arg_is_self_call($arg, $callee) -> bool. Is this argument the RESULT of a
+# direct call into $callee itself? Then its repr is $callee's own return type,
+# not an independent measurement of what a caller passes in, and seeding
+# $callee's argument read from it closes a cycle. `f(f(1))` is the shape.
+#
+# Compared by graph identity (refaddr), not by name: the callee handle is the
+# one the loader resolved for both Calls, so the same sub is the same object.
+sub _arg_is_self_call ($arg, $callee) {
+    return false unless blessed($arg) && $arg->operation eq 'Call';
+    return false unless $arg->can('dispatch_kind')
+        && ($arg->dispatch_kind // '') eq 'direct';
+    return false unless $arg->can('target') && $arg->target;
+    my $arg_callee = $arg->target->graph or return false;
+    return refaddr($arg_callee) == refaddr($callee) ? true : false;
+}
+
 sub _seed_direct_call_arg_reprs ($graphs) {
     my $stamped = 0;
 
@@ -958,11 +989,16 @@ sub _seed_direct_call_arg_reprs ($graphs) {
     # INTO the join, so a stamp only ever moves UP the lattice, and the
     # lattice is finite with `Unknown` at the top. A node can therefore be
     # re-stamped only finitely often, and `$stamped` counts only real moves.
-    my %pending;    # refaddr(read) => { node => $n, reprs => [...] }
+    my %pending;    # refaddr(read) => { node => $n, reprs => [...], self => [...] }
 
-    my $collect = sub ($read, $repr) {
-        my $slot = $pending{ refaddr($read) } //= { node => $read, reprs => [] };
-        push $slot->{reprs}->@*, $repr;
+    # $self_arm marks an arm whose repr is NOT an independent measurement: the
+    # argument at that callsite is a direct Call into the very callee whose
+    # argument read we are seeding, so its stamp IS that callee's return type,
+    # which this seed is in the middle of deriving. See the join below.
+    my $collect = sub ($read, $repr, $self_arm = false) {
+        my $slot = $pending{ refaddr($read) }
+            //= { node => $read, reprs => [], self => [] };
+        push $slot->{ $self_arm ? 'self' : 'reprs' }->@*, $repr;
         return;
     };
 
@@ -999,7 +1035,8 @@ sub _seed_direct_call_arg_reprs ($graphs) {
                     # guessing here.
                     my $arg = $args[$i] or next;
                     my $repr = $arg->representation // next;
-                    $collect->( $params{$i}, $repr );
+                    $collect->( $params{$i}, $repr,
+                        _arg_is_self_call( $arg, $callee ) );
                 }
                 next;
             }
@@ -1034,7 +1071,8 @@ sub _seed_direct_call_arg_reprs ($graphs) {
             next unless @reads == 1 && @args == 1;
 
             my $arg_repr = $args[0]->representation // next;
-            $collect->( $reads[0], $arg_repr );
+            $collect->( $reads[0], $arg_repr,
+                _arg_is_self_call( $args[0], $callee ) );
         }
     }
 
@@ -1053,6 +1091,42 @@ sub _seed_direct_call_arg_reprs ($graphs) {
         my $read = $slot->{node};
         my $existing = $read->representation;
 
+        # A SELF-REFERENTIAL ARM IS NOT A SECOND CALLER'S MEASUREMENT. In
+        # `f(f(1))` both callsites bind the SAME read: the inner passes
+        # Constant(1) :Int, the outer passes the inner Call, whose stamp is
+        # f's own return type. Joining them makes the read a function of
+        # itself -- the outer arm is Num (the producer's honest widening of
+        # an unresolved return), join(Int, Num) = Num, the body stays Num, the
+        # inner Call is stamped Num from that body, and the next round joins
+        # the same Num. The cycle is stable at the pessimistic answer and
+        # nothing in the loop can descend out of it. Measured on subs.md F15:
+        # every pass held `Call :Num  Call :Num  shift :Num`.
+        #
+        # So a self arm is DEFERRED, not dropped: it is used only when it is
+        # the sole evidence (a genuinely recursive `sub f { f($n) }`, where
+        # there is no independent caller and the widened reading is the only
+        # honest answer). Once an independent arm exists, the read settles from
+        # it, the body re-derives, and _resolve_direct_calls carries the
+        # narrowed return to BOTH Calls -- the inner and the outer alike, which
+        # is why the outer never needed its own arm.
+        #
+        # SOUNDNESS. Dropping an arm is the direction that could under-widen,
+        # so it is worth being exact about why it cannot here: the omitted arm
+        # is not a value flowing in from outside, it is this read's own answer
+        # travelling around a cycle. Whatever the read settles to, the callee
+        # returns a function of it, and that is what the outer call passes
+        # back in -- so the arm is subsumed by the fixpoint rather than
+        # ignored by it. The stamp is still checked against the callee on the
+        # next round, and `_resolve_direct_calls` will only ever move a Call
+        # DOWN, so an arm that genuinely demanded a wider read would leave the
+        # Call unable to narrow rather than silently narrowing it.
+        #
+        # This is still FORWARD inference: the read is typed from its callers'
+        # arguments, exactly as before. All that changed is which arms count as
+        # a caller's independent argument.
+        my @arms = $slot->{reprs}->@*;
+        @arms = $slot->{self}->@* unless @arms;
+
         # TWO QUESTIONS, TWO OPERATORS. Both arms went through _join_repr,
         # which is right for one of them and wrong for the other.
         #
@@ -1068,7 +1142,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
         #   `sub f { my $x = shift; $x + 1 }` called once as f(10) returned Num
         #   where the corpus spec says Int. Int <: Num and the only call is
         #   f(Int), so f : Int -> Int (perigrin).
-        my $from_sites = _join_repr( $slot->{reprs}->@* );
+        my $from_sites = _join_repr(@arms);
         next unless defined $from_sites;
 
         # TERMINATION, and why this does not oscillate. The old comment named
@@ -1433,21 +1507,42 @@ sub _replay_classes ($classes, $graphs) {
                 $has_default  = defined $default_node;
             }
 
-            # A field whose default is an aggregate literal (`field $items = []`
-            # / `[1,2,3]` / `{}`) is an ArrayRef/HashRef, regardless of what the
-            # producer inferred for its `type` (which reads the first element's
-            # scalar type -- e.g. "integer" for `[10,20,30]`, a wrong scalar
-            # type). The default node is already repr-seeded ArrayRef/HashRef by
-            # %_SEED_REPR, and that repr is unambiguous (unlike the ctor-arg /
-            # ADJUST-store scalar inference, which the %_INFERABLE_FIELD_REPR gate
-            # guards), so lift it to the field type. This is what makes a
-            # FieldAccess to the field (and its :reader Call) carry ArrayRef so a
-            # `$items->[0]` / `scalar $items->@*` / `for my $x ($items->@*)`
-            # lowers (zhi 019f61ad).
             my $field_type = $f->{type};
-            if (defined $default_node && $default_node->can('representation')
-                    && ($default_node->representation // '') =~ /^(?:Array|Hash)Literal$/) {
-                $field_type = $default_node->representation;
+
+            # A field's DECLARED type types its own default expression.
+            #
+            # The default lives in a separate graph (`Bag::__DEFAULT_0`) that no
+            # forward pass can type on its own when the value is an AGGREGATE
+            # literal: measured on the pinned producer, the `[10,20,30]` of
+            # `field $items = [10,20,30]` arrives `ArrayLiteral :Unknown`, while
+            # the identical `[10,20,30]` in an ordinary graph arrives
+            # `ArrayLiteral :ArrayRef`. That difference is not a producer bug and
+            # %_SEED_REPR must not paper over it: ONE ArrayLiteral op builds both
+            # `[1,2,3]` (a reference) and `my @a = (1,2,3)` (a plain array), so
+            # the op name does not name the type (see the note at %_SEED_REPR).
+            #
+            # In a field default the ambiguity is ALREADY RESOLVED, and not by
+            # inference -- the field record on the wire carries `type` before
+            # either graph is walked. Carrying it down is forward inference from
+            # a declaration onto its initializer, which is why it is sound where
+            # stamping the CONSTRUCTION SITE is not: that would be typing a value
+            # by its consumer.
+            #
+            # FILL A HOLE, NEVER PREEMPT A SOURCE. Only an unnarrowed default is
+            # stamped. A `field $n = 0` default arrives `Constant :Int` -- which
+            # is strictly better than that field's own weaker wire type `Scalar`
+            # -- and overwriting it would swap an i64 for a %Slot. A type-sound
+            # stamp is still a wrong stamp when it was never derived from
+            # anything.
+            #
+            # Without this the default node reaches Target::LLVM with no
+            # representation and _require_repr reports it as
+            # "Call(new).default.field" (zhi 019f61ad).
+            if (defined $field_type
+                    && defined $default_node
+                    && $default_node->can('set_representation')
+                    && !_is_narrowed($default_node->representation)) {
+                $default_node->set_representation($field_type);
             }
 
             $cls->declare_field($vname,

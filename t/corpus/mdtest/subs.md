@@ -693,15 +693,24 @@ Print's operand is `Num -> Str`.
 
 ## F18 sort with a comparator block
 
-`sort { $a <=> $b }` -- 16 uses in `lib/Chalk/`, no corpus coverage. The block
-is a Call the backend does not lower.
+`sort { $a <=> $b }` -- 16 uses in `lib/Chalk/`. The comparator BLOCK does not
+survive to the IR: perl folds a recognised numeric/string comparator into the
+sort op itself, so the producer ships the COMPARISON KIND and DIRECTION as
+fields on the Call (`sort_cmp`, `sort_order`) rather than a callable body. That
+folding is what makes this lowerable without a general block-call mechanism.
 
-GAP: `LLVM backend: cannot lower op=Call (not in literal-arithmetic slice)`
+THE OPERANDS ARE BARE SCALARS, NOT AN AGGREGATE, and that is what blocked the
+lowering after the wire was already complete. perl flattens a literal list into
+sort's argument slots, so `sort { ... } (3,1,2)` arrives as a Call with THREE
+`Constant :Int` inputs -- no array anywhere. `_lower_builtin_sort` had been
+written against the only shape that ever reached it, `sort keys %h`, whose
+single operand IS an aggregate; it took `inputs[0]` as "the" operand and
+refused anything not Array/ArrayRef. It now materialises its N scalar operands
+into an `%Array` of `%Slot` through the same helper the array-literal path uses.
 
-The same blocker covers F19 and F20: sort, grep and map blocks are ONE gap
-reached three ways, together accounting for 293 uses in `lib/Chalk/`. They are
-filed as three cases because a fix scoped to one block-taking builtin would
-close only that one, and the corpus should say so.
+F19 and F20 are NOT closed by this and are no longer the same gap: they build a
+result list with `ListAppend`, which has no lowering, and a general
+block-calling mechanism is exactly what they still need.
 
 ```perl
 # source
@@ -716,7 +725,33 @@ return: Bool:1
 context: scalar
 ```
 
-L: GAP: LLVM backend: cannot lower op=Call (not in literal-arithmetic slice)
+```ir
+%three = Constant(3) :Int
+%one   = Constant(1) :Int
+%two   = Constant(2) :Int
+%sorted = Call(%three, %one, %two, dispatch_kind: "builtin", name: "sort") :Array
+%idx   = Constant(0) :Int
+%elem  = Subscript(%sorted, %idx) :Scalar
+%co    = Coerce(%elem : Unknown -> Str) :Str
+%nl    = Constant("\n") :Str
+%p     = Print(%co, %nl)
+return %p
+L: GREEN
+```
+
+The `Subscript` reads `:Scalar` and its `Coerce` reads `from_repr: Unknown`
+because an element read out of a runtime-ordered array is not statically
+narrowable to the element type -- sort's result is an `%Array` of `%Slot`, and
+which slot lands at index 0 is decided at runtime. The tagged read is the
+correct lowering, not a missing inference.
+
+NOTE ON THE INVARIANT LEG: this case reports `op Call has undef control_in
+(broken effect chain)`. That is the known false positive documented at
+`references.md:508-517` -- `@CONTROL_CHAIN_OPS` lists `Call` unconditionally,
+but `sort`, `keys` and `join` are PURE value producers, so being off the
+control chain is correct for them. Filed there rather than fixed here, because
+loosening a rule that polices every case in order to pass one is how a real
+effect-ordering bug gets through.
 
 ## F19 grep with a block
 

@@ -6333,17 +6333,21 @@ sub _find_block_idx {
 # ===========================================================================
 
 # _lower_array_ref: canonical ref-producing array constructor.
-# inputs = [elem0, elem1, ...]. Returns i8* (ArrayRef repr).
-# Consumers (Length/Subscript/element stores) resolve the typed %Array* at
-# their own use via _container_ptr.
-sub _lower_array_ref {
-    my ($self, $node) = @_;
+# _emit_array_of(\@element_nodes) -> $arr (an %Array*)
+#
+# Materialise a list of already-typed element nodes into a fresh %Array of
+# %Slot. Extracted from _lower_array_ref so a caller that has ELEMENTS but no
+# ArrayLiteral node can build the same buffer: perl flattens a literal list
+# into `sort`'s argument slots (`sort {$a<=>$b} (3,1,2)` is a Call with three
+# scalar inputs, measured on the wire), so the sort lowering has N elements and
+# no aggregate to point at.
+sub _emit_array_of {
+    my ($self, $inputs) = @_;
 
     $self->{_need_aggregate_types} = 1;
     $self->{_need_malloc_memcpy}   = 1;
 
-    my $inputs = $node->inputs;
-    my $n      = scalar @$inputs;
+    my $n = scalar @$inputs;
 
     # Allocate slot buffer: n * sizeof(%Slot), sized BY LLVM from the type.
     my $slot_bytes = _sizeof_times('%Slot', $n);
@@ -6390,6 +6394,16 @@ sub _lower_array_ref {
     $self->_emit("  store i64 $n, i64* $len_ptr  ; ArrayRef: len=$n");
     $self->_emit("  store i64 $n, i64* $cap_ptr  ; ArrayRef: cap=$n");
     $self->_emit("  store %Slot* $slots, %Slot** $elm_ptr  ; ArrayRef: store slots ptr");
+
+    return $arr;
+}
+
+# _lower_array_ref: canonical ref-producing array constructor.
+# inputs = [elem0, elem1, ...]. Returns i8* (ArrayRef repr) or %Array* (Array).
+sub _lower_array_ref {
+    my ($self, $node) = @_;
+
+    my $arr = $self->_emit_array_of($node->inputs);
 
     # BOX ONLY WHEN THE NODE IS A REF. An `ArrayRef` OPERATION is how the
     # producer spells a literal aggregate, and it is used for BOTH `[1,2,3]`
@@ -6867,9 +6881,17 @@ sub _lower_builtin_sort {
     my ($self, $node) = @_;
     $self->{_need_aggregate_types} = 1;
     $self->{_need_malloc_memcpy}   = 1;
+    # The string-compare arm below emits `call @memcmp`, so the declaration is
+    # this function's own requirement. It was missing and latent: the only sort
+    # shape that reached lowering was `sort keys %h`, whose hash lowering sets
+    # the flag on the way past. A bare `sort (10,9,100)` -- string compare over
+    # a flattened literal list, touching no hash -- emitted the call with no
+    # `declare`, and lli refused the module ("use of undefined value '@memcmp'").
+    $self->{_need_memcmp}          = 1;
 
-    my ($operand) = grep { blessed($_) } $node->inputs->@*;
-    die "GAP: sort expects a list operand." unless defined $operand;
+    my @elems = grep { blessed($_) } $node->inputs->@*;
+    die "GAP: sort expects a list operand." unless @elems;
+    my $operand = $elems[0];
 
     my $cmp   = $node->can('sort_cmp')   ? $node->sort_cmp   : undef;
     my $order = $node->can('sort_order') ? $node->sort_order : undef;
@@ -6883,11 +6905,51 @@ sub _lower_builtin_sort {
         unless $cmp eq 'numeric' || $cmp eq 'string';
 
     my $op_repr = $operand->can('representation') ? ($operand->representation // '') : '';
-    die "GAP: sort over an operand with repr=" . ($op_repr || 'NONE')
-      . " — only a materialised Array or ArrayRef has elements to order."
-        unless $op_repr eq 'Array' || $op_repr eq 'ArrayRef';
 
-    my $src = $self->_container_ptr($operand, 'Array');
+    # TWO OPERAND SHAPES REACH HERE, and the difference is perl's, not ours.
+    # `sort keys %h` passes ONE aggregate (the keys Call, stamped List and
+    # rescued to Array by the loader), while `sort {$a<=>$b} (3,1,2)` FLATTENS
+    # the literal list into three scalar argument slots -- measured on the wire
+    # for both, and the flattening also happens when the list is named
+    # (`my @a=(3,1,2); sort @a` folds to the same three Constants).
+    #
+    # So a single-input aggregate is sorted where it already lives; N scalars
+    # are materialised into an %Array first. Sorting reads a %Slot buffer and
+    # nothing else, so once the elements are in one the two shapes converge.
+    #
+    # The COPY below still applies to the aggregate shape: perl's sort does not
+    # mutate its operand. A buffer built here is already private, but copying it
+    # too costs one memcpy and keeps a single path.
+    my $src;
+    if (@elems == 1 && ($op_repr eq 'Array' || $op_repr eq 'ArrayRef')) {
+        $src = $self->_container_ptr($operand, 'Array');
+    }
+    else {
+        # Every element must be typed: _emit_array_of tags each slot from the
+        # element's own repr, and an untyped one would be boxed as a guess.
+        for my $i (0 .. $#elems) {
+            my $er = _require_repr($elems[$i], "sort element[$i]");
+
+            # A `string` COMPARATOR OVER A NON-Str ELEMENT IS A SEGFAULT, not a
+            # wrong answer. _emit_slot_out_of_order's string arm does
+            # `inttoptr i64 <payload> to %StrPair*` -- it ASSUMES the payload
+            # is a boxed Str. An Int element's payload is the integer itself,
+            # so `sort (10,9,100)` dereferenced address 10. Measured: lli
+            # crashed with a signal, not a diagnostic.
+            #
+            # perl really does compare those AS STRINGS (`sort (10,9,100)` is
+            # 10,100,9), so the refusal is about the LOWERING lacking an
+            # Int-to-Str materialisation inside the comparator, not about the
+            # semantics being unclear. GAP loudly until that exists.
+            die "GAP: sort with a STRING comparator over a $er element — the "
+              . "string compare reads each slot payload as a boxed Str, and a "
+              . "$er payload is the value itself. perl compares these as "
+              . "strings (`sort (10,9,100)` is 10,100,9); lowering it needs a "
+              . "numeric-to-string materialisation the comparator does not have."
+                if $cmp eq 'string' && $er ne 'Str';
+        }
+        $src = $self->_emit_array_of(\@elems);
+    }
 
     # len/data of the source
     my ($slen_p, $slen, $sdat_p, $sdat) =
