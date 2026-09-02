@@ -4474,6 +4474,23 @@ my %_REPR_LLVM_TYPE = (
     ArrayRef => 'i8*',        # boxed pointer to an %Array
     HashRef  => 'i8*',        # boxed pointer to a %Hash
     CodeRef  => 'i8*',
+    # A ScalarRef is a pointer exactly like its siblings -- measured, `\$x`
+    # is ROK with an address, structurally identical to `\@a` and `\%h`. Its
+    # absence here was an omission, not a decision: it was the only ref type
+    # with neither a machine type nor a named refusal.
+    ScalarRef => 'i8*',
+    # `Ref` IS INHABITED: perl reports `\\$y` (a ref to a ref) as `REF` from
+    # both ref() and reftype(), a kind distinct from SCALAR. So it is a
+    # concrete type, not a classifier -- an earlier version of this file
+    # refused it as "abstract" on the strength of nothing having
+    # `ref() eq 'Ref'`, which was a claim about CAPITALISATION rather than
+    # about inhabitants.
+    #
+    # And its layout needs no thought: a ref-to-ref is a pointer like every
+    # other reference. T2 mapping two Chalk types onto one LLVM type is
+    # ordinary -- Boolean and Undef already share i1 -- and T1 does not need
+    # to care that they coincide here (perigrin, 2026-09-02).
+    Ref      => 'i8*',
     Object   => 'i8*',        # pointer to { %Cls.vt*, %Slot, ... }
 );
 
@@ -4527,6 +4544,34 @@ my %_REPR_NO_MACHINE_TYPE = (
              . "un-compilable and the GAP is correct.",
 
     # A legitimate, fully-known type that exists only at compile time.
+    # THE FUNCTOR NEED NOT BE TOTAL, but it must not be SILENT. T2 maps the
+    # arrows it can map; an unmapped one is a legitimate outcome PROVIDED IT
+    # IS NAMED. These five had neither a machine type nor a reason, so a
+    # consumer reaching one got "not a known representation" -- true, and
+    # silent about whether that was intended.
+
+    LValueRef => "'LValueRef' aliases a RANGE rather than a whole scalar "
+             . "(`\\substr(\$s, 0, 1)`), so a pointer alone cannot express it "
+             . "-- it needs a base, an offset and a length, and writes through "
+             . "it must land back in the original buffer. A layout exists in "
+             . "principle; it is not i8* and has not been designed.",
+
+    GlobRef => "'GlobRef' points at a symbol-table entry -- a name bound to "
+             . "several slots at once (scalar, array, hash, code, IO). That is "
+             . "a runtime symbol table, which the runtime-free lowering does "
+             . "not have, so there is nothing for a pointer to point AT.",
+
+    DualVar => "'DualVar' is TWO INDEPENDENT VALUES in one cell: a string and "
+             . "a number that need not agree (`\$!` is the canonical one). No "
+             . "single scalar layout holds both, and picking either half is a "
+             . "silent wrong answer rather than a narrowing.",
+
+    VString => "'VString' is a Str carrying V magic -- the bytes are ordinary "
+             . "but the value also remembers it was written `v1.2.3`, which "
+             . "changes how it compares and prints. %Str has nowhere to put "
+             . "that, and dropping it would make a version string sort as its "
+             . "raw bytes.",
+
     Regex   => "'Regex' is resolved STATICALLY and never reaches runtime: a qr// "
              . "literal is compiled by _compile_regex_pattern at compile time and "
              . "the pattern is never an SSA value. Reaching machine-type "
