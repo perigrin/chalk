@@ -639,19 +639,20 @@ A sub declared with a signature (`sub f($x)`) called with one argument. This is
 the single most common sub form in `lib/Chalk/` -- 94 uses, against ZERO corpus
 coverage before this case.
 
-It LOWERS but does not RUN: `lli` prints nothing where perl prints 42. The
-callee's body never sees the argument, because argument binding for direct calls
-is the F3 gap (`_lower_call_direct` inlines a no-argument callee's result). So
-the sub form itself is not the blocker -- passing a value into it is.
+The argument reaches the callee: `lli` prints 42, as perl does. The callee body
+lives in its own graph (`main::f`), so the program graph names only the call
+boundary -- the `Constant(41)` bound as the Call's argument, and the `:Num`
+result the signature-bound `$x + 1` yields.
 
 RECORDED HONESTLY BECAUSE I GOT IT WRONG FIRST: my probe called
 `Chalk::Target::LLVM->lower` on this shape, saw no exception, and I wrote the
 case GREEN. Lowering is not executing. The behavioural leg caught it on the
-first gate run. This is precisely the trap the bson session measured on the
-producer side the same day -- a broken implementation that closes more holes
-than the correct one scores better on coverage alone -- and a corpus case
-declared from a lowering probe rather than an execution is the same error in
-the other direction.
+first gate run, and the case sat as a GAP (direct-call argument binding, F3)
+until the argument actually flowed. This is precisely the trap the bson session
+measured on the producer side the same day -- a broken implementation that
+closes more holes than the correct one scores better on coverage alone -- and a
+corpus case declared from a lowering probe rather than an execution is the same
+error in the other direction.
 
 ```perl
 # source
@@ -666,7 +667,22 @@ return: Bool:1
 context: scalar
 ```
 
-L: GAP: direct call argument binding is unimplemented (F3) -- the call lowers, emits no output, and lli prints nothing where perl prints 42
+```ir
+%start = Start()
+%c41  = Constant(41) :Int
+%call = Call(%c41, dispatch_kind: "direct", name: "main::f") :Num
+%co   = Coerce(%call : Num -> Str) :Str
+%nl   = Constant("\n") :Str
+%p    = Print(%co, %nl)
+return %p
+control: %start -> %call -> %p
+L: GREEN
+```
+
+The `Constant(41)` is wired INTO the Call, not merely present beside it -- that
+edge is the parameter binding this case exists to hold. Written from the
+measured graph: the Call is stamped `:Num` (not `:Int`), so the Coerce into
+Print's operand is `Num -> Str`.
 
 ## F18 sort with a comparator block
 
@@ -736,19 +752,19 @@ L: GAP: LLVM backend: cannot lower op=Call (not in literal-arithmetic slice)
 
 ## F21 postfix hash dereference `->%*`
 
-`$h->%*` -- 85 uses in `lib/Chalk/`, no corpus coverage. Unlike F18-F20 this is
-NOT an honest GAP: the backend CRASHES.
+`$h->%*` -- 85 uses in `lib/Chalk/`, no corpus coverage before this case.
+
+It was filed because the backend CRASHED rather than refusing:
 
     Can't call method "id" on an undefined value at lib/Chalk/Target/LLVM/Context.pm
 
 A crash is not a refusal. The GAP-not-miscompile invariant says an unsupported
 construct must be REFUSED with a message naming what is missing; dying on an
 undefined value names nothing and cannot be distinguished from a bug in a
-supported path. This case exists to hold that distinction open: the fix is
-either a real lowering or an honest GAP, and either closes it.
+supported path. That distinction is now closed the other way: the form lowers
+and runs, printing 1 as perl does.
 
-The array form `->@*` lowers (5 corpus cases), so this is specific to the hash
-form rather than to postfix dereference generally.
+The array form `->@*` lowers too (5 corpus cases), so neither form is special.
 
 ```perl
 # source
@@ -764,7 +780,40 @@ return: Bool:1
 context: scalar
 ```
 
-L: GAP: postfix hash dereference crashes rather than refusing -- Can't call method "id" on an undefined value
+```ir
+%start = Start()
+%ka    = Constant("a") :Str
+%v1    = Constant(1) :Int
+%hash  = HashLiteral(%ka, %v1) :Hash
+%lk    = Constant("a") :Str
+%r     = Subscript(%hash, %lk) :Int
+%co    = Coerce(%r : Int -> Str) :Str
+%nl    = Constant("\n") :Str
+%p     = Print(%co, %nl)
+return %p
+control: %start -> %p
+L: GREEN
+```
+
+Written from the measured graph. Two things it records that a guess would miss:
+
+The `HashLiteral` is `:Hash`, not the `:HashRef` that R5's `my $r = {a=>1}`
+carries. The whole `{a=>1}` / `->%*` / `my %c` round trip propagates away in the
+optree before B::SoN walks -- the hash is never materialised as a ref -- so the
+real graph reaches `$c{a}` as a direct Subscript over the literal.
+
+There is NO `PostfixDeref` node, and naming one would be wrong twice over. The
+deref-scaffolding rule subsumes a spec PostfixDeref whenever the real graph
+carries none, so the line would be unenforced -- its `sigil:` never compared,
+making an `@` deref indistinguishable from a `%` one. Worse, it would not be
+valid IR: PostfixDeref requires a ref-typed input, and the propagated aggregate
+here is a plain `:Hash`, so the spec-invariant leg rejects the block outright.
+R5 can name a PostfixDeref because its `$r` really is a `:HashRef`; this case
+has no ref left to deref.
+
+The enforced content is therefore the aggregate kind, the key Constant, the
+Subscript operand ORDER, and the `:Int` element repr -- each confirmed to FAIL
+the check when perturbed.
 
 ## F22 polymorphic callee: one sub called with Int and with Str
 
