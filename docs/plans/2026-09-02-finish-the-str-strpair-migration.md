@@ -91,6 +91,49 @@ Each step is independently verifiable, and none of them is "rename 99 sites".
    step that makes it real; if not, a field nothing reads should not be in the
    layout. THIS IS A SEPARATE DECISION and does not block 1-3.
 
+## STATUS 2026-09-02: steps 1-3 DONE, step 4 is a decision
+
+    step 1  widen %StrPair to three fields          1d58184c   behaviour-neutral
+    step 2  collapse the emitted name (103 sites)   1d58184c   behaviour-neutral
+    step 3  one need-flag; I3 re-emit deleted       86310af1   behaviour-neutral
+
+Each was gated separately against pinned producer 07fcdca, every leg identical:
+
+    gate-green=214 behavior=216 shape=215 invariant=221 worklist=8 gap=34
+
+And the migration paid for itself immediately: `field-str-default` (a Str field
+reading back as `undef` -- a silent miscompile) is fixed in 8dd58b78, because
+the Str arm of the field read could be RESTORED once the ordering hazard it was
+dropped for no longer existed.
+
+TWO THINGS FOUND ALONG THE WAY, both pre-existing:
+
+- `strpair-layout-single-source.t` was DEAD. It called `_strpair_size_bytes`,
+  a sub that no longer exists, and had been dying with "Undefined subroutine"
+  at session-start HEAD -- so the guard this plan CITED as the reason step 1
+  was safe had not run in a long time. Rewritten against `_sizeof_llvm_type`,
+  which is a stronger property than what it used to check: LLVM computes the
+  size from the declaration in the same module, so the two cannot disagree,
+  whereas the old test re-implemented LLVM's alignment rules in perl and
+  compared two guesses.
+
+- the IR suite went 6 failing files -> 4. The collapse closed
+  `emitted-ir-is-well-typed.t` as a side effect.
+
+### Step 4 remains, and it is a DECISION not a refactor
+
+`enc` is write-only: ONE writer (`_str_aggregate`), ZERO readers, and no caller
+passing a non-default. Measured, not assumed.
+
+    delete it   loses the non-ASCII design intent the %Str block documents,
+                and the encoding field is the only place that intent is
+                expressed in the layout
+    keep it     costs 4 bytes per boxed string and leaves a field that nothing
+                reads -- the shape this plan calls residue everywhere else
+
+Not decided here because the answer depends on whether non-ASCII strings are
+going to be supported, which is a product question. Left for perigrin.
+
 ## What forced this to be written down
 
 A fix for `classes/field-str-default` (a Str field reading back as undef)
