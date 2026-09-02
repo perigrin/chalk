@@ -383,8 +383,25 @@ if (@bugs) {
     };
 
     my @rows = sort { $a->{topic} cmp $b->{topic} || $a->{case} cmp $b->{case} } @worklist;
+
+    # WHICH PRODUCER PRODUCED THESE NUMBERS. The gate resolves perl5-son as a
+    # LIVE filesystem path, so two runs of the same chalk HEAD can disagree
+    # for reasons that are not in this repo at all. Measured 2026-09-02 on
+    # chalk a06e4ff9: producer 88c9b7a gave gate-green=203, producer bc9b285
+    # gave 201 -- the same two logical.md cases regressing because `print`
+    # began stamping Scalar, so `And(Boolean, Scalar)` joins to Scalar and has
+    # no machine type. Both readings were honest; without the SHA there is no
+    # way to tell a chalk regression from a producer one, and I misread the
+    # difference as my own until I re-measured against both.
+    my $son_sha = 'unknown';
+    if (my $git = qx(git -C \Q$SON\E rev-parse --short HEAD 2>/dev/null)) {
+        chomp $git;
+        $son_sha = $git if $git =~ /^[0-9a-f]+$/;
+    }
+
     my @json;
     push @json, '{';
+    push @json, sprintf('  "producer": "%s",', $son_sha);
     push @json, sprintf('  "gate_green": %d,', $tally{gate_green} // 0);
     push @json, sprintf('  "behavior": %d,',   $tally{green}      // 0);
     push @json, sprintf('  "shape": %d,',      $tally{shape_ok}   // 0);
