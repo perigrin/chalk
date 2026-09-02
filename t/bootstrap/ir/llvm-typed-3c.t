@@ -57,6 +57,43 @@ sub num_const {
     return $c;
 }
 
+# Helper: turn a value node into a PROGRAM — print it, then return Undef.
+#
+# A program's observable contract is stdout plus exit status; there is no
+# type-tag channel. Print takes a Str, so a non-Str value goes through a
+# Coerce(X -> Str), exactly as the producer inserts one for a print argument.
+# The value is bracketed by literal sentinels so an empty result stays
+# distinguishable from no output at all.
+#
+# $control_tail, when given, is the node the Print hangs off (the existing
+# statement chain); otherwise the Print starts a fresh chain at Start.
+sub print_program {
+    my ($f, $value_node, $control_tail) = @_;
+
+    my $repr = $value_node->representation;
+    my $printable = $value_node;
+    if ($repr ne 'Str') {
+        $printable = $f->make('Coerce',
+            inputs => [$value_node], from_repr => $repr, to_repr => 'Str');
+        $printable->set_representation('Str');
+    }
+
+    my $lb = $f->make('Constant', value => '[', const_type => 'string');
+    $lb->set_representation('Str');
+    my $rb = $f->make('Constant', value => ']', const_type => 'string');
+    $rb->set_representation('Str');
+
+    my $print = $f->make('Print', inputs => [$lb, $printable, $rb]);
+    $print->set_control_in($control_tail // $f->make_cfg('Start'));
+
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
+
+    return $ret;
+}
+
 # ===========================================================================
 # GROUP 1: arith-div — Perl `/` is float division
 #
@@ -80,20 +117,23 @@ sub num_const {
     my $div = $f->make('Divide', inputs => [$coe3, $coe4]);
     $div->set_representation('Num');
 
-    my $ret = $f->make_cfg('Return', inputs => [$div]);
+    my $ret = print_program($f, $div);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "arith-div DIV-1: Divide(Num) lowers without dying")
         or diag("lower() died: $@");
 
     SKIP: {
-        skip 'lower() failed', 3 unless defined $ll;
+        skip 'lower() failed', 4 unless defined $ll;
         like($ll, qr/fdiv double/, 'arith-div DIV-1: .ll contains fdiv double');
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'arith-div DIV-1: .ll is libperl-free');
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'arith-div DIV-1: lli exits 0');
-        is($out, 'Num:0.75', "arith-div DIV-1: lli output 'Num:0.75' matches perl oracle (type-tagged)");
+        is($out, '[0.75]', "arith-div DIV-1: prints 0.75");
+        # The type half of the old Num: tag — printing erases it, since a
+        # Str "0.75" and a Num 0.75 produce identical stdout.
+        is($div->representation, 'Num', "arith-div DIV-1: the printed value is Num-repr");
     }
 }
 
@@ -104,9 +144,9 @@ sub num_const {
     my $c4  = int_const($f, 4);
     my $div = $f->make('Divide', inputs => [$c3, $c4]);
     $div->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$div]);
+    my $ret = print_program($f, $div);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok($@, 'arith-div DIV-2: Divide with Int repr still dies (preserves correctness guard)');
     like($@, qr/GAP|Divide.*Int|not.*float/i,
         'arith-div DIV-2: error message mentions Divide or Int repr problem');
@@ -132,20 +172,23 @@ sub num_const {
     my $mod = $f->make('Modulo', inputs => [$cm7, $c3]);
     $mod->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$mod]);
+    my $ret = print_program($f, $mod);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'arith-mod MOD-1: Modulo(Int,Int) lowers without dying')
         or diag("lower() died: $@");
 
     SKIP: {
-        skip 'lower() failed', 4 unless defined $ll;
+        skip 'lower() failed', 5 unless defined $ll;
         like($ll, qr/srem i64/, 'arith-mod MOD-1: .ll contains srem i64');
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'arith-mod MOD-1: .ll is libperl-free');
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'arith-mod MOD-1: lli exits 0');
-        is($out, 'Int:2', "arith-mod MOD-1: lli output 'Int:2' matches perl oracle (-7 % 3 == 2, type-tagged)");
+        is($out, '[2]', "arith-mod MOD-1 (-7 % 3 == 2): prints 2");
+        # The type half of the old Int: tag — printing erases it, since a
+        # Str "2" and a Int 2 produce identical stdout.
+        is($mod->representation, 'Int', "arith-mod MOD-1 (-7 % 3 == 2): the printed value is Int-repr");
     }
 }
 
@@ -156,17 +199,20 @@ sub num_const {
     my $c3  = int_const($f, 3);
     my $mod = $f->make('Modulo', inputs => [$c7, $c3]);
     $mod->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$mod]);
+    my $ret = print_program($f, $mod);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'arith-mod MOD-2: Modulo(7,3) lowers without dying')
         or diag("lower() died: $@");
 
     SKIP: {
-        skip 'lower() failed', 2 unless defined $ll;
+        skip 'lower() failed', 3 unless defined $ll;
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'arith-mod MOD-2: lli exits 0');
-        is($out, 'Int:1', "arith-mod MOD-2: lli output 'Int:1' matches perl oracle (7 % 3 == 1, type-tagged)");
+        is($out, '[1]', "arith-mod MOD-2 (7 % 3 == 1): prints 1");
+        # The type half of the old Int: tag — printing erases it, since a
+        # Str "1" and a Int 1 produce identical stdout.
+        is($mod->representation, 'Int', "arith-mod MOD-2 (7 % 3 == 1): the printed value is Int-repr");
     }
 }
 
@@ -177,17 +223,20 @@ sub num_const {
     my $cm3  = int_const($f, -3);
     my $mod  = $f->make('Modulo', inputs => [$c7, $cm3]);
     $mod->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$mod]);
+    my $ret = print_program($f, $mod);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'arith-mod MOD-3: Modulo(7,-3) lowers without dying')
         or diag("lower() died: $@");
 
     SKIP: {
-        skip 'lower() failed', 2 unless defined $ll;
+        skip 'lower() failed', 3 unless defined $ll;
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'arith-mod MOD-3: lli exits 0');
-        is($out, 'Int:-2', "arith-mod MOD-3: lli output 'Int:-2' matches perl oracle (7 % -3 == -2, type-tagged)");
+        is($out, '[-2]', "arith-mod MOD-3 (7 % -3 == -2): prints -2");
+        # The type half of the old Int: tag — printing erases it, since a
+        # Str "-2" and a Int -2 produce identical stdout.
+        is($mod->representation, 'Int', "arith-mod MOD-3 (7 % -3 == -2): the printed value is Int-repr");
     }
 }
 
@@ -227,19 +276,22 @@ sub num_const {
     my $pad  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
     $pad->set_representation('Int');
 
-    my $ret  = $f->make_cfg('Return', inputs => [$pad]);
+    my $ret  = print_program($f, $pad);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'VAR-1 (A1): my $x=1; return $x — lowers without dying')
         or diag("lower() died: $@");
 
     SKIP: {
-        skip 'lower() failed', 4 unless defined $ll;
+        skip 'lower() failed', 5 unless defined $ll;
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'VAR-1 (A1): .ll is libperl-free');
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'VAR-1 (A1): lli exits 0');
-        is($out, 'Int:1', "VAR-1 (A1): lli output 'Int:1' matches perl oracle (type-tagged)");
+        is($out, '[1]', "VAR-1 (A1): prints 1");
+        # The type half of the old Int: tag — printing erases it, since a
+        # Str "1" and a Int 1 produce identical stdout.
+        is($pad->representation, 'Int', "VAR-1 (A1): the printed value is Int-repr");
     }
 }
 
@@ -270,21 +322,24 @@ sub num_const {
     my $pad  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
     $pad->set_representation('Int');
 
-    # Return's control_in = Assign (Return comes after Assign in the control chain)
-    my $ret  = $f->make_cfg('Return', inputs => [$pad]);
-    $ret->set_control_in($asgn);
+    # The Print comes after the Assign in the control chain, so it observes the
+    # post-assignment value.
+    my $ret  = print_program($f, $pad, $asgn);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'VAR-2 (C1): my $x=1; $x=2; return $x — lowers without dying')
         or diag("lower() died: $@");
 
     SKIP: {
-        skip 'lower() failed', 3 unless defined $ll;
+        skip 'lower() failed', 4 unless defined $ll;
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'VAR-2 (C1): .ll is libperl-free');
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'VAR-2 (C1): lli exits 0');
-        is($out, 'Int:2', "VAR-2 (C1): lli output 'Int:2' matches perl oracle (type-tagged)");
+        is($out, '[2]', "VAR-2 (C1): prints 2");
+        # The type half of the old Int: tag — printing erases it, since a
+        # Str "2" and a Int 2 produce identical stdout.
+        is($pad->representation, 'Int', "VAR-2 (C1): the printed value is Int-repr");
     }
 }
 
@@ -322,20 +377,22 @@ sub num_const {
     my $ret_pad = $f->make('PadAccess', targ => 0, varname => '$x_ret', inputs => [$vd]);
     $ret_pad->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$ret_pad]);
-    $ret->set_control_in($ca);
+    my $ret = print_program($f, $ret_pad, $ca);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'VAR-3 (C2): my $x=1; $x+=2; return $x — lowers without dying')
         or diag("lower() died: $@");
 
     SKIP: {
-        skip 'lower() failed', 3 unless defined $ll;
+        skip 'lower() failed', 4 unless defined $ll;
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'VAR-3 (C2): .ll is libperl-free');
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'VAR-3 (C2): lli exits 0');
-        is($out, 'Int:3', "VAR-3 (C2): lli output 'Int:3' matches perl oracle (type-tagged)");
+        is($out, '[3]', "VAR-3 (C2): prints 3");
+        # The type half of the old Int: tag — printing erases it, since a
+        # Str "3" and a Int 3 produce identical stdout.
+        is($ret_pad->representation, 'Int', "VAR-3 (C2): the printed value is Int-repr");
     }
 }
 
@@ -367,21 +424,24 @@ sub num_const {
     my $tern = $f->make('TernaryExpr', inputs => [$cmp, $c1, $c0]);
     $tern->set_representation('Int');
 
-    my $ret  = $f->make_cfg('Return', inputs => [$tern]);
+    my $ret  = print_program($f, $tern);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'CMP-1: TernaryExpr(NumGt(5,3), 1, 0) lowers without dying')
         or diag("lower() died: $@");
 
     SKIP: {
-        skip 'lower() failed', 3 unless defined $ll;
+        skip 'lower() failed', 4 unless defined $ll;
         like($ll, qr/icmp sgt i64/, 'CMP-1: .ll contains icmp sgt i64');
         like($ll, qr/select i1/, 'CMP-1: .ll contains select i1');
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'CMP-1: .ll is libperl-free');
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'CMP-1: lli exits 0');
-        is($out, 'Int:1', "CMP-1: lli output 'Int:1' (5 > 3 ? 1 : 0 == 1, type-tagged)");
+        is($out, '[1]', "CMP-1 (5 > 3 ? 1 : 0 == 1): prints 1");
+        # The type half of the old Int: tag — printing erases it, since a
+        # Str "1" and a Int 1 produce identical stdout.
+        is($tern->representation, 'Int', "CMP-1 (5 > 3 ? 1 : 0 == 1): the printed value is Int-repr");
     }
 }
 
@@ -398,17 +458,20 @@ sub num_const {
     my $tern = $f->make('TernaryExpr', inputs => [$cmp, $c1, $c0]);
     $tern->set_representation('Int');
 
-    my $ret  = $f->make_cfg('Return', inputs => [$tern]);
+    my $ret  = print_program($f, $tern);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'CMP-2: TernaryExpr(NumGt(1,3), 1, 0) lowers without dying')
         or diag("lower() died: $@");
 
     SKIP: {
-        skip 'lower() failed', 2 unless defined $ll;
+        skip 'lower() failed', 3 unless defined $ll;
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'CMP-2: lli exits 0');
-        is($out, 'Int:0', "CMP-2: lli output 'Int:0' (1 > 3 ? 1 : 0 == 0, type-tagged)");
+        is($out, '[0]', "CMP-2 (1 > 3 ? 1 : 0 == 0): prints 0");
+        # The type half of the old Int: tag — printing erases it, since a
+        # Str "0" and a Int 0 produce identical stdout.
+        is($tern->representation, 'Int', "CMP-2 (1 > 3 ? 1 : 0 == 0): the printed value is Int-repr");
     }
 }
 
@@ -426,19 +489,22 @@ sub num_const {
     my $tern = $f->make('TernaryExpr', inputs => [$cmp, $c1, $c2]);
     $tern->set_representation('Int');
 
-    my $ret  = $f->make_cfg('Return', inputs => [$tern]);
+    my $ret  = print_program($f, $tern);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'CMP-3 (D6): return 5 > 0 ? 1 : 2 lowers without dying')
         or diag("lower() died: $@");
 
     SKIP: {
-        skip 'lower() failed', 3 unless defined $ll;
+        skip 'lower() failed', 4 unless defined $ll;
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'CMP-3 (D6): .ll is libperl-free');
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'CMP-3 (D6): lli exits 0');
-        is($out, 'Int:1', "CMP-3 (D6): lli output 'Int:1' (5>0 ? 1 : 2 == 1, type-tagged)");
+        is($out, '[1]', "CMP-3 (D6) (5>0 ? 1 : 2 == 1): prints 1");
+        # The type half of the old Int: tag — printing erases it, since a
+        # Str "1" and a Int 1 produce identical stdout.
+        is($tern->representation, 'Int', "CMP-3 (D6) (5>0 ? 1 : 2 == 1): the printed value is Int-repr");
     }
 }
 
@@ -481,21 +547,24 @@ sub num_const {
     my $ryF = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
     $ryF->set_representation('Int');
     my $add = $f->make('Add', inputs => [$rx2, $ryF]); $add->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$add]);
-    $ret->set_control_in($asg); $asg->set_control_in($vy); $vy->set_control_in($vx);
+    $asg->set_control_in($vy); $vy->set_control_in($vx);
+    my $ret = print_program($f, $add, $asg);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'B1: read-before-and-after-reassign lowers correctly (scoped var_table is program-point-aware)')
         or diag("lower() died: $@");
 
     SKIP: {
-        skip 'lower() failed', 3 unless defined $ll;
+        skip 'lower() failed', 4 unless defined $ll;
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'B1: .ll is libperl-free');
 
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'B1: lli exits 0');
-        is($out, 'Int:3',
-            'B1: lli=Int:3 == perl=Int:3 (x=2 post-assign, y=1 pre-assign, 2+1=3, type-tagged)');
+        is($out, '[3]',
+            'B1: prints 3 (x=2 post-assign, y=1 pre-assign, 2+1=3)');
+        # The type half of the old Int: tag — printing erases it, since a
+        # Str "3" and an Int 3 produce identical stdout.
+        is($add->representation, 'Int', 'B1: the printed value is Int-repr');
     }
 }
 

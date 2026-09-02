@@ -50,6 +50,35 @@ sub int_const {
     return $c;
 }
 
+# Observe a value the way a program does: PRINT it, then return undef. A
+# program's observable contract is stdout plus exit status; it has no side
+# channel that hands a value back to a harness.
+#
+# The Print is appended AFTER the case's last existing effect, so the control
+# ordering every case here exists to test is preserved exactly.
+sub print_and_return {
+    my ($f, $value, $last_effect) = @_;
+
+    # Print takes a Str, so a non-Str value is bridged with an explicit
+    # Coerce -- the same node a source program's producer inserts.
+    my $arg  = $value;
+    my $repr = $value->representation;
+    if (!defined $repr || $repr ne 'Str') {
+        $arg = $f->make('Coerce', inputs => [$value],
+            from_repr => $repr, to_repr => 'Str');
+        $arg->set_representation('Str');
+    }
+
+    my $print = $f->make('Print', inputs => [$arg]);
+    $print->set_control_in($last_effect);
+
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
+    return $ret;
+}
+
 # ===========================================================================
 # SOUNDNESS RATIONALE (context for each test group)
 #
@@ -104,8 +133,9 @@ sub int_const {
     my $ryF = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
     $ryF->set_representation('Int');
     my $add = $f->make('Add', inputs => [$rx2, $ryF]); $add->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$add]);
-    $ret->set_control_in($asg); $asg->set_control_in($vy); $vy->set_control_in($vx);
+    # Existing chain: vx -> vy -> asg; the Print goes after asg.
+    $asg->set_control_in($vy); $vy->set_control_in($vx);
+    my $ret = print_and_return($f, $add, $asg);
 
     # Verify hash-consing: the "before" and "after" reads are the same node.
     is($rx1->id, $rx2->id,
@@ -113,7 +143,7 @@ sub int_const {
     is($rx1->id, $rxL->id,
         'Case (a): lhs of Assign also hash-cons to same PadAccess node');
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'Case (a): my $x=1; my $y=$x; $x=2; return $x+$y — lowers without dying')
         or diag("lower() died: $@");
 
@@ -122,8 +152,8 @@ sub int_const {
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (a): .ll is libperl-free');
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'Case (a): lli exits 0');
-        is($out, 'Int:3',
-            'Case (a): lli=Int:3 == perl=Int:3 (x=2 post-assign, y=1 pre-assign, 2+1=3, type-tagged)');
+        is($out, '3',
+            'Case (a): lli=3 == perl=3 (x=2 post-assign, y=1 pre-assign, 2+1=3)');
     }
 }
 
@@ -175,10 +205,11 @@ sub int_const {
 
     my $sum1 = $f->make('Add', inputs => [$rx_final, $ry_final]); $sum1->set_representation('Int');
     my $sum2 = $f->make('Add', inputs => [$sum1, $rz_final]); $sum2->set_representation('Int');
-    my $ret  = $f->make_cfg('Return', inputs => [$sum2]);
-    $ret->set_control_in($asg2);   $asg2->set_control_in($vz);
+    # Existing chain: vx -> vy -> asg1 -> vz -> asg2; the Print goes after asg2.
+    $asg2->set_control_in($vz);
     $vz->set_control_in($asg1);   $asg1->set_control_in($vy);
     $vy->set_control_in($vx);
+    my $ret = print_and_return($f, $sum2, $asg2);
 
     # All five $x PadAccess nodes must be the same hash-consed node.
     my @x_ids = map { $_->id } ($rx_for_y, $rxL1, $rx_for_z, $rxL2, $rx_final);
@@ -186,7 +217,7 @@ sub int_const {
     ok($all_same,
         'Case (b): all five $x PadAccess nodes hash-cons to one node (stale-cache risk maximal)');
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'Case (b): my $x=1; y=$x; $x=2; z=$x; $x=3; return $x+$y+$z — lowers without dying')
         or diag("lower() died: $@");
 
@@ -195,8 +226,8 @@ sub int_const {
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (b): .ll is libperl-free');
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'Case (b): lli exits 0');
-        is($out, 'Int:6',
-            'Case (b): lli=Int:6 == perl=Int:6 (x=3, y=1, z=2: 3+1+2=6, type-tagged)');
+        is($out, '6',
+            'Case (b): lli=6 == perl=6 (x=3, y=1, z=2: 3+1+2=6)');
     }
 }
 
@@ -260,13 +291,13 @@ for my $pair ([5, 6], [-1, 2]) {
     $ry_post->set_representation('Int');
 
     my $add = $f->make('Add', inputs => [$rx_post, $ry_post]); $add->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$add]);
+    # Existing chain: vn -> vx -> vy -> if_node; the Print goes after the merge.
     $if_node->set_control_in($vy);
     $vy->set_control_in($vx);
     $vx->set_control_in($vn);
-    $ret->set_control_in($if_node);
+    my $ret = print_and_return($f, $add, $if_node);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "Case (c) n=$n_val: if-branch reassign lowers without dying")
         or diag("lower() died: $@");
 
@@ -275,8 +306,8 @@ for my $pair ([5, 6], [-1, 2]) {
         unlike($ll, qr/\bSV\b|Perl_|libperl/, "Case (c) n=$n_val: .ll is libperl-free");
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, "Case (c) n=$n_val: lli exits 0");
-        is($out, "Int:$expected",
-            "Case (c) n=$n_val: lli=Int:$expected == perl=Int:$expected (type-tagged)");
+        is($out, "$expected",
+            "Case (c) n=$n_val: lli=$expected == perl=$expected");
     }
 }
 
@@ -341,13 +372,13 @@ for my $pair ([5, 6], [-1, 2]) {
     $s_new->set_control_in($body_proj);
     $i_new->set_control_in($body_proj);
 
-    my $ret = $f->make_cfg('Return', inputs => [$s_phi]);
+    # Existing chain: vi -> vx -> vs -> loop; the Print goes after the loop.
     $vs->set_control_in($vx);
     $vx->set_control_in($vi);
     $loop->set_control_in($vs);
-    $ret->set_control_in($loop);
+    my $ret = print_and_return($f, $s_phi, $loop);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'Case (d): loop-carried $x reassign ($i<3; $x=$x+1; $s+=$x) lowers without dying')
         or diag("lower() died: $@");
 
@@ -356,8 +387,8 @@ for my $pair ([5, 6], [-1, 2]) {
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (d): .ll is libperl-free');
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'Case (d): lli exits 0');
-        is($out, 'Int:6',
-            'Case (d): lli=Int:6 == perl=Int:6 (sum 1+2+3=6 via loop-carried x reassign, type-tagged)');
+        is($out, '6',
+            'Case (d): lli=6 == perl=6 (sum 1+2+3=6 via loop-carried x reassign)');
     }
 }
 
@@ -416,10 +447,11 @@ for my $pair ([5, 6], [-1, 2]) {
 
     my $sum1 = $f->make('Add', inputs => [$ra1, $ra2]); $sum1->set_representation('Int');
     my $sum2 = $f->make('Add', inputs => [$sum1, $ra3]); $sum2->set_representation('Int');
-    my $ret  = $f->make_cfg('Return', inputs => [$sum2]);
-    $ret->set_control_in($v3);   $v3->set_control_in($asg2);
+    # Existing chain: vx -> v1 -> asg1 -> v2 -> asg2 -> v3; the Print goes after v3.
+    $v3->set_control_in($asg2);
     $asg2->set_control_in($v2);  $v2->set_control_in($asg1);
     $asg1->set_control_in($v1);  $v1->set_control_in($vx);
+    my $ret = print_and_return($f, $sum2, $v3);
 
     # All $x reads and writes must be the same hash-consed node.
     my @x_ids = map { $_->id } ($r1, $rxL1, $r2, $rxL2, $r3);
@@ -427,7 +459,7 @@ for my $pair ([5, 6], [-1, 2]) {
     ok($all_same,
         'Case (e): all five $x accesses (3 reads + 2 assigns) hash-cons to one node');
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'Case (e): acc1=$x; $x=2; acc2=$x; $x=3; acc3=$x; return acc1+acc2+acc3 — lowers without dying')
         or diag("lower() died: $@");
 
@@ -436,8 +468,8 @@ for my $pair ([5, 6], [-1, 2]) {
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (e): .ll is libperl-free');
         my ($out, $exit) = run_lli($ll);
         is($exit, 0, 'Case (e): lli exits 0');
-        is($out, 'Int:6',
-            'Case (e): lli=Int:6 == perl=Int:6 (1+2+3=6: x reads each program-point value, type-tagged)');
+        is($out, '6',
+            'Case (e): lli=6 == perl=6 (1+2+3=6: x reads each program-point value)');
     }
 }
 

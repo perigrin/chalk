@@ -19,6 +19,35 @@ unless (-x $LLI) {
     plan skip_all => "lli not found at $LLI";
 }
 
+# Observe a value the way a program does: PRINT it, then return undef. A
+# program's observable contract is stdout plus exit status; it has no side
+# channel that hands a value back to a harness.
+#
+# The Print is appended AFTER the graph's last existing effect, so any
+# control ordering under test (if/else merges, loop exits) is preserved.
+sub print_and_return {
+    my ($f, $value, $last_effect) = @_;
+
+    # Print takes a Str, so a non-Str value is bridged with an explicit
+    # Coerce -- the same node a source program's producer inserts.
+    my $arg  = $value;
+    my $repr = $value->representation;
+    if (!defined $repr || $repr ne 'Str') {
+        $arg = $f->make('Coerce', inputs => [$value],
+            from_repr => $repr, to_repr => 'Str');
+        $arg->set_representation('Str');
+    }
+
+    my $print = $f->make('Print', inputs => [$arg]);
+    $print->set_control_in($last_effect // $f->make_cfg('Start'));
+
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
+    return $ret;
+}
+
 # L1: LLVM lowering module loads.
 ok(Chalk::Target::LLVM->can('lower'),
     'Chalk::Target::LLVM has a lower() method');
@@ -77,9 +106,9 @@ ok(Chalk::Target::LLVM->can('lower'),
     $c2->set_representation('Int');
     my $add = $f->make('Add', inputs => [$c1, $c2]);
     $add->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$add]);
+    my $ret = print_and_return($f, $add);
 
-    my $ll = Chalk::Target::LLVM->lower($ret);
+    my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
 
     # Write to temp file and run through lli
     my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -92,8 +121,8 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     is($exit, 0, 'lli exits cleanly on generated .ll');
 
-    # perl oracle (type-tagged: Int:3)
-    my $perl_out = 'Int:3';   # 1+2 under perl = Int:3 (type-tagged oracle)
+    # perl oracle: `print 1+2` writes 3 to stdout.
+    my $perl_out = '3';
 
     chomp $lli_out;
     is($lli_out, $perl_out,
@@ -116,9 +145,9 @@ ok(Chalk::Target::LLVM->can('lower'),
     # The repr-join (Serialize::JSON) widens Add(Num, Int) -> Num.
     my $add = $f->make('Add', inputs => [$cn, $ci]);
     $add->set_representation('Num');
-    my $ret = $f->make_cfg('Return', inputs => [$add]);
+    my $ret = print_and_return($f, $add);
 
-    my $ll = Chalk::Target::LLVM->lower($ret);
+    my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
 
     like($ll, qr/fadd double/,  'L4b .ll: Num-repr Add emits fadd double');
     like($ll, qr/sitofp i64/,   'L4b .ll: Int operand promoted with sitofp');
@@ -133,8 +162,8 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $exit    = $? >> 8;
     is($exit, 0, 'L4b lli exits cleanly on Num Add .ll');
     chomp $lli_out;
-    # perl oracle: 1.5 + 3 = 4.5 (type-tagged Num).
-    is($lli_out, 'Num:4.5', "L4b lli output is Num:4.5 (1.5+3, fadd double)");
+    # perl oracle: `print 1.5 + 3` writes 4.5 to stdout.
+    is($lli_out, '4.5', "L4b lli output is 4.5 (1.5+3, fadd double)");
 }
 
 # L4c: bilateral teeth for L4b -- an Int-repr Add stays `add i64` and does NOT
@@ -148,9 +177,9 @@ ok(Chalk::Target::LLVM->can('lower'),
     $c2->set_representation('Int');
     my $add = $f->make('Add', inputs => [$c1, $c2]);
     $add->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$add]);
+    my $ret = print_and_return($f, $add);
 
-    my $ll = Chalk::Target::LLVM->lower($ret);
+    my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
 
     like($ll, qr/add i64/,       'L4c .ll: Int-repr Add stays add i64');
     unlike($ll, qr/fadd double/, 'L4c .ll: no fadd double for the Int Add');
@@ -162,7 +191,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     close $fh;
     my $lli_out = qx($LLI $tmp 2>&1);
     chomp $lli_out;
-    is($lli_out, 'Int:6', "L4c lli output is Int:6 (2+4, add i64)");
+    is($lli_out, '6', "L4c lli output is 6 (2+4, add i64)");
 }
 
 # L5: runtime-free coverage — every value-def has a non-Scalar representation.
@@ -223,10 +252,10 @@ ok(Chalk::Target::LLVM->can('lower'),
     $c7->set_representation('Int');
     my $and = $f->make('And', inputs => [$c3, $c7]);
     $and->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$and]);
+    my $ret = print_and_return($f, $and);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "And node lowers without dying (got: $@)");
 
     SKIP: {
@@ -244,7 +273,7 @@ ok(Chalk::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'And .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, 'Int:7', "And .ll: lli output is Int:7 (3&&7 == 7, type-tagged)");
+        is($lli_out, '7', "And .ll: lli output is 7 (3&&7 == 7)");
     }
 }
 
@@ -263,10 +292,10 @@ ok(Chalk::Target::LLVM->can('lower'),
     $c7->set_representation('Int');
     my $or = $f->make('Or', inputs => [$c3, $c7]);
     $or->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$or]);
+    my $ret = print_and_return($f, $or);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "Or node lowers without dying (got: $@)");
 
     SKIP: {
@@ -284,7 +313,7 @@ ok(Chalk::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'Or .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, 'Int:3', "Or .ll: lli output is Int:3 (3||7 == 3, type-tagged)");
+        is($lli_out, '3', "Or .ll: lli output is 3 (3||7 == 3)");
     }
 }
 
@@ -374,12 +403,12 @@ ok(Chalk::Target::LLVM->can('lower'),
     $rx->set_representation('Int');
 
     # Return $x; control chain: vx -> if
-    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+    # Existing chain: vx -> if_node; the Print goes after the merge.
     $if_node->set_control_in($vx);
-    $ret->set_control_in($if_node);
+    my $ret = print_and_return($f, $rx, $if_node);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "If/else node lowers without dying (got: $@)");
 
     SKIP: {
@@ -399,7 +428,7 @@ ok(Chalk::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'If/else .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, 'Int:1', "If/else .ll: lli output is Int:1 (n=5, n>0 true -> x=1, type-tagged)");
+        is($lli_out, '1', "If/else .ll: lli output is 1 (n=5, n>0 true -> x=1)");
     }
 }
 
@@ -482,13 +511,13 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $rs = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     $rs->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$s_phi]);
+    # Existing chain: vn -> vs -> loop; the Print goes after the loop.
     $vs->set_control_in($vn);
     $loop->set_control_in($vs);
-    $ret->set_control_in($loop);
+    my $ret = print_and_return($f, $s_phi, $loop);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "Loop node lowers without dying (got: $@)");
 
     SKIP: {
@@ -507,7 +536,7 @@ ok(Chalk::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'Loop .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, 'Int:6', "Loop .ll: lli output is Int:6 (sum 3+2+1=6, type-tagged)");
+        is($lli_out, '6', "Loop .ll: lli output is 6 (sum 3+2+1=6)");
     }
 }
 
@@ -571,12 +600,12 @@ ok(Chalk::Target::LLVM->can('lower'),
     $rx->set_representation('Int');
 
     # Return $x; control: vx -> if
-    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+    # Existing chain: vx -> if_node; the Print goes after the merge.
     $if_node->set_control_in($vx);
-    $ret->set_control_in($if_node);
+    my $ret = print_and_return($f, $rx, $if_node);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "B3: one-branch if lowers without dying (got: $@)");
 
     SKIP: {
@@ -594,7 +623,7 @@ ok(Chalk::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'B3 .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, 'Int:1', "B3 lli output is Int:1 (n=5, n>0, then-branch runs: x=1, type-tagged)");
+        is($lli_out, '1', "B3 lli output is 1 (n=5, n>0, then-branch runs: x=1)");
     }
 }
 
@@ -660,12 +689,12 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
     $rx->set_representation('Num');
 
-    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+    # Existing chain: vx -> if_node; the Print goes after the merge.
     $if_node->set_control_in($vx);
-    $ret->set_control_in($if_node);
+    my $ret = print_and_return($f, $rx, $if_node);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "B2: Num-typed if/else lowers without dying (got: $@)");
 
     SKIP: {
@@ -683,7 +712,7 @@ ok(Chalk::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'B2 .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, 'Num:2.5', "B2 lli output is Num:2.5 (n=5, n>0 -> x=2.5, type-tagged)");
+        is($lli_out, '2.5', "B2 lli output is 2.5 (n=5, n>0 -> x=2.5)");
     }
 }
 
@@ -761,12 +790,12 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
     $rx->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+    # Existing chain: vx -> if_node; the Print goes after the merge.
     $if_node->set_control_in($vx);
-    $ret->set_control_in($if_node);
+    my $ret = print_and_return($f, $rx, $if_node);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "B1: dependent body stmts lower without dying (got: $@)");
 
     SKIP: {
@@ -784,7 +813,7 @@ ok(Chalk::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'B1 .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, 'Int:12', "B1 lli output is Int:12 (n=5, t=n+1=6, x=t*2=12, type-tagged)");
+        is($lli_out, '12', "B1 lli output is 12 (n=5, t=n+1=6, x=t*2=12)");
     }
 }
 
@@ -880,13 +909,13 @@ ok(Chalk::Target::LLVM->can('lower'),
     $n_new->set_control_in($body_proj);
     $s_new->set_control_in($body_proj);
 
-    my $ret = $f->make_cfg('Return', inputs => [$s_phi]);
+    # Existing chain: vn -> vs -> loop; the Print goes after the loop.
     $vs->set_control_in($vn);
     $loop->set_control_in($vs);
-    $ret->set_control_in($loop);
+    my $ret = print_and_return($f, $s_phi, $loop);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "H3: loop-with-body-comparison lowers without dying (got: $@)");
 
     SKIP: {
@@ -904,7 +933,7 @@ ok(Chalk::Target::LLVM->can('lower'),
         my $exit    = $? >> 8;
         is($exit, 0, 'H3 .ll: lli exits cleanly');
         chomp $lli_out;
-        is($lli_out, 'Int:21', "H3 lli output is Int:21 (n=3: 10+10+1=21, type-tagged)");
+        is($lli_out, '21', "H3 lli output is 21 (n=3: 10+10+1=21)");
     }
 }
 

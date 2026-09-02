@@ -13,10 +13,31 @@ unless (-x $LLI) {
     plan skip_all => "lli not found at $LLI";
 }
 
+# Wrap a value node into a PROGRAM: Start -> Print(Coerce(value->Str)) -> Return(undef).
+# A compiled program has no type-tag channel; its observable contract is stdout
+# plus exit status, so the value is observed by PRINTING it exactly as perl does.
+sub program_ret {
+    my ($f, $value) = @_;
+    my $printable = $value;
+    if (($value->representation // q{}) ne q{Str}) {
+        $printable = $f->make(q{Coerce}, inputs => [$value],
+            from_repr => $value->representation, to_repr => q{Str});
+        $printable->set_representation(q{Str});
+    }
+    my $start = $f->make_cfg(q{Start});
+    my $print = $f->make(q{Print}, inputs => [$printable]);
+    $print->set_control_in($start);
+    my $undef = $f->make(q{Constant}, value => undef, const_type => q{undef});
+    $undef->set_representation(q{Undef});
+    my $ret = $f->make_cfg(q{Return}, inputs => [$undef]);
+    $ret->set_control_in($print);
+    return $ret;
+}
+
 # Lower a Return node, run lli, return (stdout, ll-text). Dies on lli error.
 sub lli_run {
     my ($ret) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret);
+    my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $fh $ll;
@@ -43,44 +64,47 @@ sub match_node {
 }
 
 # T0: literal substring match — "foobar" =~ /foo/ is true.
-subtest 'T0 literal match: "foobar" =~ /foo/ => Bool:1' => sub {
+subtest 'T0 literal match: "foobar" =~ /foo/ => prints 1' => sub {
     my $f = _mk();
     my $m = match_node($f, 'foobar', 'foo');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
 
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
 
-    is($out, 'Bool:1', 'matched literal substring => Bool:1');
+    is($out, '1', 'matched literal substring => prints 1');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
     ok($ll !~ /Perl_|(?<![A-Za-z0-9_])SV(?![A-Za-z0-9_])|sv_|libperl|\bAV\b|\bHV\b/,
         'matcher .ll is libperl-free');
 };
 
 # T0: literal non-match — "foobar" =~ /xyz/ is false.
-subtest 'T0 literal non-match: "foobar" =~ /xyz/ => Bool:' => sub {
+subtest 'T0 literal non-match: "foobar" =~ /xyz/ => prints empty' => sub {
     my $f = _mk();
     my $m = match_node($f, 'foobar', 'xyz');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
 
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
 
-    is($out, 'Bool:', 'non-matching literal => Bool: (false)');
+    is($out, '', 'non-matching literal => prints empty (false)');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
 # T0: match not at offset 0 — "xfoo" =~ /foo/ is true (slide loop finds it).
-subtest 'T0 literal match mid-string: "xfoo" =~ /foo/ => Bool:1' => sub {
+subtest 'T0 literal match mid-string: "xfoo" =~ /foo/ => prints 1' => sub {
     my $f = _mk();
     my $m = match_node($f, 'xfoo', 'foo');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
 
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
 
-    is($out, 'Bool:1', 'matched substring at non-zero offset => Bool:1');
+    is($out, '1', 'matched substring at non-zero offset => prints 1');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
 # ---------------------------------------------------------------------------
@@ -89,64 +113,70 @@ subtest 'T0 literal match mid-string: "xfoo" =~ /foo/ => Bool:1' => sub {
 # the subject length.
 # ---------------------------------------------------------------------------
 
-subtest 'T1 ^anchor: "foobar" =~ /^foo/ => Bool:1 (matches at start)' => sub {
+subtest 'T1 ^anchor: "foobar" =~ /^foo/ => prints 1 (matches at start)' => sub {
     my $f = _mk();
     my $m = match_node($f, 'foobar', '^foo');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:1', '/^foo/ matches "foobar" at offset 0');
+    is($out, '1', '/^foo/ matches "foobar" at offset 0');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T1 ^anchor non-match: "xfoo" =~ /^foo/ => Bool: (not at start)' => sub {
+subtest 'T1 ^anchor non-match: "xfoo" =~ /^foo/ => prints empty (not at start)' => sub {
     my $f = _mk();
     my $m = match_node($f, 'xfoo', '^foo');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:', '/^foo/ does NOT match "xfoo" (foo is not at offset 0)');
+    is($out, '', '/^foo/ does NOT match "xfoo" (foo is not at offset 0)');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T1 $anchor: "foobar" =~ /bar$/ => Bool:1 (matches at end)' => sub {
+subtest 'T1 $anchor: "foobar" =~ /bar$/ => prints 1 (matches at end)' => sub {
     my $f = _mk();
     my $m = match_node($f, 'foobar', 'bar$');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:1', '/bar$/ matches "foobar" at the end');
+    is($out, '1', '/bar$/ matches "foobar" at the end');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T1 $anchor non-match: "foobar" =~ /foo$/ => Bool: (not at end)' => sub {
+subtest 'T1 $anchor non-match: "foobar" =~ /foo$/ => prints empty (not at end)' => sub {
     my $f = _mk();
     my $m = match_node($f, 'foobar', 'foo$');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:', '/foo$/ does NOT match "foobar" (foo is not at the end)');
+    is($out, '', '/foo$/ does NOT match "foobar" (foo is not at the end)');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T1 full-string ^...$: "foo" =~ /^foo$/ => Bool:1' => sub {
+subtest 'T1 full-string ^...$: "foo" =~ /^foo$/ => prints 1' => sub {
     my $f = _mk();
     my $m = match_node($f, 'foo', '^foo$');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:1', '/^foo$/ matches exactly "foo"');
+    is($out, '1', '/^foo$/ matches exactly "foo"');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T1 full-string non-match: "foobar" =~ /^foo$/ => Bool:' => sub {
+subtest 'T1 full-string non-match: "foobar" =~ /^foo$/ => prints empty' => sub {
     my $f = _mk();
     my $m = match_node($f, 'foobar', '^foo$');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:', '/^foo$/ does NOT match "foobar"');
+    is($out, '', '/^foo$/ does NOT match "foobar"');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
 # ---------------------------------------------------------------------------
@@ -154,115 +184,127 @@ subtest 'T1 full-string non-match: "foobar" =~ /^foo$/ => Bool:' => sub {
 # and `.` (any char). Each class atom is a predicate over one subject byte.
 # ---------------------------------------------------------------------------
 
-subtest 'T2 class range: "a9z" =~ /[0-9]/ => Bool:1' => sub {
+subtest 'T2 class range: "a9z" =~ /[0-9]/ => prints 1' => sub {
     my $f = _mk();
     my $m = match_node($f, 'a9z', '[0-9]');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:1', '/[0-9]/ finds the digit in "a9z"');
+    is($out, '1', '/[0-9]/ finds the digit in "a9z"');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T2 class range non-match: "abc" =~ /[0-9]/ => Bool:' => sub {
+subtest 'T2 class range non-match: "abc" =~ /[0-9]/ => prints empty' => sub {
     my $f = _mk();
     my $m = match_node($f, 'abc', '[0-9]');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:', '/[0-9]/ does NOT match "abc"');
+    is($out, '', '/[0-9]/ does NOT match "abc"');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T2 multi-range class: "_x" =~ /^[A-Za-z_]/ => Bool:1' => sub {
+subtest 'T2 multi-range class: "_x" =~ /^[A-Za-z_]/ => prints 1' => sub {
     my $f = _mk();
     my $m = match_node($f, '_x', '^[A-Za-z_]');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:1', '/^[A-Za-z_]/ matches "_x" (underscore in class)');
+    is($out, '1', '/^[A-Za-z_]/ matches "_x" (underscore in class)');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T2 multi-range class non-match: "9x" =~ /^[A-Za-z_]/ => Bool:' => sub {
+subtest 'T2 multi-range class non-match: "9x" =~ /^[A-Za-z_]/ => prints empty' => sub {
     my $f = _mk();
     my $m = match_node($f, '9x', '^[A-Za-z_]');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:', '/^[A-Za-z_]/ does NOT match "9x"');
+    is($out, '', '/^[A-Za-z_]/ does NOT match "9x"');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T2 negated class: "abc" =~ /[^0-9]/ => Bool:1' => sub {
+subtest 'T2 negated class: "abc" =~ /[^0-9]/ => prints 1' => sub {
     my $f = _mk();
     my $m = match_node($f, 'abc', '[^0-9]');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:1', '/[^0-9]/ matches a non-digit in "abc"');
+    is($out, '1', '/[^0-9]/ matches a non-digit in "abc"');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T2 negated class non-match: "123" =~ /[^0-9]/ => Bool:' => sub {
+subtest 'T2 negated class non-match: "123" =~ /[^0-9]/ => prints empty' => sub {
     my $f = _mk();
     my $m = match_node($f, '123', '[^0-9]');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:', '/[^0-9]/ does NOT match an all-digit subject');
+    is($out, '', '/[^0-9]/ does NOT match an all-digit subject');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T2 \\d shorthand: "x7" =~ /\\d/ => Bool:1' => sub {
+subtest 'T2 \\d shorthand: "x7" =~ /\\d/ => prints 1' => sub {
     my $f = _mk();
     my $m = match_node($f, 'x7', '\\d');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:1', '/\\d/ finds the digit in "x7"');
+    is($out, '1', '/\\d/ finds the digit in "x7"');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T2 \\w shorthand: "--a" =~ /\\w/ => Bool:1; "---" => Bool:' => sub {
+subtest 'T2 \\w shorthand: "--a" =~ /\\w/ => prints 1; "---" => prints empty' => sub {
     my $f = _mk();
     my $m1 = match_node($f, '--a', '\\w');
-    my $r1 = $f->make_cfg('Return', inputs => [$m1]);
-    my ($o1) = eval { lli_run($r1) };
+    my $r1 = program_ret($f, $m1);
+    my ($o1, $l1) = eval { lli_run($r1) };
     ok(!$@, "lowering + lli succeeded (match)") or do { diag("error: $@"); return };
-    is($o1, 'Bool:1', '/\\w/ matches the word char in "--a"');
+    is($o1, '1', '/\\w/ matches the word char in "--a"');
+    like($l1, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 
     my $f2 = _mk();
     my $m2 = match_node($f2, '---', '\\w');
-    my $r2 = $f2->make_cfg('Return', inputs => [$m2]);
-    my ($o2) = eval { lli_run($r2) };
+    my $r2 = program_ret($f2, $m2);
+    my ($o2, $l2) = eval { lli_run($r2) };
     ok(!$@, "lowering + lli succeeded (non-match)") or do { diag("error: $@"); return };
-    is($o2, 'Bool:', '/\\w/ does NOT match "---"');
+    is($o2, '', '/\\w/ does NOT match "---"');
+    like($l2, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
 subtest 'T2 dot: "ab" =~ /a.b/ vs "axb" — . matches any char' => sub {
     my $f = _mk();
     my $m = match_node($f, 'axb', 'a.b');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
-    my ($out) = eval { lli_run($ret) };
+    my $ret = program_ret($f, $m);
+    my ($out, $ll) = eval { lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:1', '/a.b/ matches "axb" (dot = any char)');
+    is($out, '1', '/a.b/ matches "axb" (dot = any char)');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
-subtest 'T2 escaped literal: "a.b" =~ /a\\.b/ => Bool:1; "axb" => Bool:' => sub {
+subtest 'T2 escaped literal: "a.b" =~ /a\\.b/ => prints 1; "axb" => prints empty' => sub {
     my $f = _mk();
     my $m1 = match_node($f, 'a.b', 'a\\.b');
-    my $r1 = $f->make_cfg('Return', inputs => [$m1]);
-    my ($o1) = eval { lli_run($r1) };
+    my $r1 = program_ret($f, $m1);
+    my ($o1, $l1) = eval { lli_run($r1) };
     ok(!$@, "lowering + lli succeeded (escaped dot match)") or do { diag("error: $@"); return };
-    is($o1, 'Bool:1', '/a\\.b/ matches literal "a.b"');
+    is($o1, '1', '/a\\.b/ matches literal "a.b"');
+    like($l1, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 
     my $f2 = _mk();
     my $m2 = match_node($f2, 'axb', 'a\\.b');
-    my $r2 = $f2->make_cfg('Return', inputs => [$m2]);
-    my ($o2) = eval { lli_run($r2) };
+    my $r2 = program_ret($f2, $m2);
+    my ($o2, $l2) = eval { lli_run($r2) };
     ok(!$@, "lowering + lli succeeded (escaped dot non-match)") or do { diag("error: $@"); return };
-    is($o2, 'Bool:', '/a\\.b/ does NOT match "axb" (escaped dot is literal)');
+    is($o2, '', '/a\\.b/ does NOT match "axb" (escaped dot is literal)');
+    like($l2, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
 # ---------------------------------------------------------------------------
@@ -272,60 +314,65 @@ subtest 'T2 escaped literal: "a.b" =~ /a\\.b/ => Bool:1; "axb" => Bool:' => sub 
 # ---------------------------------------------------------------------------
 
 # Helper: run one match and compare to expectation.
+# The printed value cannot distinguish Boolean from Int (both print "1"), so the
+# generated IR is also checked for the Boolean string-face coercion — an Int
+# result would stringify via Stringify[Int] instead.
 sub try_match {
     my ($subject, $pattern, $want, $label) = @_;
     my $f = _mk();
     my $m = match_node($f, $subject, $pattern);
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
-    my ($out) = eval { lli_run($ret) };
+    my $ret = program_ret($f, $m);
+    my ($out, $ll) = eval { lli_run($ret) };
     if ($@) { fail("$label: lowering/lli failed: $@"); return }
     is($out, $want, $label);
+    like($ll, qr/Coerce\[Boolean->Str\]/,
+        "$label: match stringified through the BOOLEAN face, not Int");
 }
 
 subtest 'T3 star: /ab*c/ — zero, many, and broken-tail cases' => sub {
-    try_match('ac',     'ab*c', 'Bool:1', '"ac"    =~ /ab*c/ (zero b)');
-    try_match('abbbc',  'ab*c', 'Bool:1', '"abbbc" =~ /ab*c/ (many b)');
-    try_match('abx',    'ab*c', 'Bool:',  '"abx"   !~ /ab*c/ (broken tail)');
+    try_match('ac',     'ab*c', '1', '"ac"    =~ /ab*c/ (zero b)');
+    try_match('abbbc',  'ab*c', '1', '"abbbc" =~ /ab*c/ (many b)');
+    try_match('abx',    'ab*c', '',  '"abx"   !~ /ab*c/ (broken tail)');
 };
 
 subtest 'T3 plus: /ab+c/ — requires at least one' => sub {
-    try_match('ac',    'ab+c', 'Bool:',  '"ac"   !~ /ab+c/ (plus needs >=1)');
-    try_match('abc',   'ab+c', 'Bool:1', '"abc"  =~ /ab+c/');
-    try_match('abbc',  'ab+c', 'Bool:1', '"abbc" =~ /ab+c/');
+    try_match('ac',    'ab+c', '',  '"ac"   !~ /ab+c/ (plus needs >=1)');
+    try_match('abc',   'ab+c', '1', '"abc"  =~ /ab+c/');
+    try_match('abbc',  'ab+c', '1', '"abbc" =~ /ab+c/');
 };
 
 subtest 'T3 optional: /ab?c/ — zero or one' => sub {
-    try_match('ac',    'ab?c', 'Bool:1', '"ac"   =~ /ab?c/ (zero)');
-    try_match('abc',   'ab?c', 'Bool:1', '"abc"  =~ /ab?c/ (one)');
-    try_match('abbc',  'ab?c', 'Bool:',  '"abbc" !~ /ab?c/ (two is too many)');
+    try_match('ac',    'ab?c', '1', '"ac"   =~ /ab?c/ (zero)');
+    try_match('abc',   'ab?c', '1', '"abc"  =~ /ab?c/ (one)');
+    try_match('abbc',  'ab?c', '',  '"abbc" !~ /ab?c/ (two is too many)');
 };
 
 subtest 'T3 backtracking keystone: /a*ab/ — greedy must back off' => sub {
     # Naive maximal-munch eats all the a's and then fails on 'ab'.
     # Correct greedy-with-backoff matches: a* takes "aa", then "ab" matches.
-    try_match('aaab', 'a*ab', 'Bool:1', '"aaab" =~ /a*ab/ (backoff required)');
-    try_match('b',    'a*ab', 'Bool:',  '"b"    !~ /a*ab/');
+    try_match('aaab', 'a*ab', '1', '"aaab" =~ /a*ab/ (backoff required)');
+    try_match('b',    'a*ab', '',  '"b"    !~ /a*ab/');
 };
 
 subtest 'T3 counted: /^a{2,3}$/ — bounded repetition' => sub {
-    try_match('aa',    '^a{2,3}$', 'Bool:1', '"aa"   =~ /^a{2,3}$/');
-    try_match('aaa',   '^a{2,3}$', 'Bool:1', '"aaa"  =~ /^a{2,3}$/');
-    try_match('a',     '^a{2,3}$', 'Bool:',  '"a"    !~ /^a{2,3}$/ (too few)');
-    try_match('aaaa',  '^a{2,3}$', 'Bool:',  '"aaaa" !~ /^a{2,3}$/ (too many)');
+    try_match('aa',    '^a{2,3}$', '1', '"aa"   =~ /^a{2,3}$/');
+    try_match('aaa',   '^a{2,3}$', '1', '"aaa"  =~ /^a{2,3}$/');
+    try_match('a',     '^a{2,3}$', '',  '"a"    !~ /^a{2,3}$/ (too few)');
+    try_match('aaaa',  '^a{2,3}$', '',  '"aaaa" !~ /^a{2,3}$/ (too many)');
 };
 
 subtest 'T3 the dominant lib/ shape: /^[A-Za-z_][A-Za-z0-9_]*$/' => sub {
     my $pat = '^[A-Za-z_][A-Za-z0-9_]*$';
-    try_match('foo_1', $pat, 'Bool:1', '"foo_1" is a valid identifier');
-    try_match('_',     $pat, 'Bool:1', '"_" is a valid identifier');
-    try_match('9bad',  $pat, 'Bool:',  '"9bad" is NOT (leading digit)');
-    try_match('',      $pat, 'Bool:',  '"" is NOT (empty)');
-    try_match('a-b',   $pat, 'Bool:',  '"a-b" is NOT (dash)');
+    try_match('foo_1', $pat, '1', '"foo_1" is a valid identifier');
+    try_match('_',     $pat, '1', '"_" is a valid identifier');
+    try_match('9bad',  $pat, '',  '"9bad" is NOT (leading digit)');
+    try_match('',      $pat, '',  '"" is NOT (empty)');
+    try_match('a-b',   $pat, '',  '"a-b" is NOT (dash)');
 };
 
 subtest 'T3 class quantifier: /\d+/ finds a digit run' => sub {
-    try_match('x42',  '\\d+', 'Bool:1', '"x42" =~ /\\d+/');
-    try_match('xyz',  '\\d+', 'Bool:',  '"xyz" !~ /\\d+/');
+    try_match('x42',  '\\d+', '1', '"x42" =~ /\\d+/');
+    try_match('xyz',  '\\d+', '',  '"xyz" !~ /\\d+/');
 };
 
 # ---------------------------------------------------------------------------
@@ -335,12 +382,12 @@ subtest 'T3 class quantifier: /\d+/ finds a digit run' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'T4 groups transparent to matching' => sub {
-    try_match('xfoo',  '(foo)',      'Bool:1', '"xfoo" =~ /(foo)/ (group does not change matching)');
-    try_match('xyz',   '(foo)',      'Bool:',  '"xyz"  !~ /(foo)/');
-    try_match('ab',    'a(b)',       'Bool:1', '"ab"   =~ /a(b)/');
-    try_match('a1b',   'a(\\d)b',    'Bool:1', '"a1b"  =~ /a(\\d)b/ (class inside group)');
-    try_match('aXXb',  'a(X+)b',     'Bool:1', '"aXXb" =~ /a(X+)b/ (quantifier inside group)');
-    try_match('ab',    'a(?:b)',     'Bool:1', '"ab"   =~ /a(?:b)/ (non-capturing transparent)');
+    try_match('xfoo',  '(foo)',      '1', '"xfoo" =~ /(foo)/ (group does not change matching)');
+    try_match('xyz',   '(foo)',      '',  '"xyz"  !~ /(foo)/');
+    try_match('ab',    'a(b)',       '1', '"ab"   =~ /a(b)/');
+    try_match('a1b',   'a(\\d)b',    '1', '"a1b"  =~ /a(\\d)b/ (class inside group)');
+    try_match('aXXb',  'a(X+)b',     '1', '"aXXb" =~ /a(X+)b/ (quantifier inside group)');
+    try_match('ab',    'a(?:b)',     '1', '"ab"   =~ /a(?:b)/ (non-capturing transparent)');
 };
 
 # ---------------------------------------------------------------------------
@@ -351,23 +398,23 @@ subtest 'T4 groups transparent to matching' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'escape: \\t matches a TAB byte, not letter t' => sub {
-    try_match("a\tb", 'a\\tb', 'Bool:1', '"a<TAB>b" =~ /a\\tb/ (escape = tab byte)');
-    try_match('atb',  'a\\tb', 'Bool:',  '"atb"    !~ /a\\tb/ (NOT the literal letter t)');
+    try_match("a\tb", 'a\\tb', '1', '"a<TAB>b" =~ /a\\tb/ (escape = tab byte)');
+    try_match('atb',  'a\\tb', '',  '"atb"    !~ /a\\tb/ (NOT the literal letter t)');
 };
 
 subtest 'escape: \\n matches a NEWLINE byte' => sub {
-    try_match("a\nb", 'a\\nb', 'Bool:1', 'newline byte matched by \\n');
-    try_match('anb',  'a\\nb', 'Bool:',  'literal n NOT matched by \\n');
+    try_match("a\nb", 'a\\nb', '1', 'newline byte matched by \\n');
+    try_match('anb',  'a\\nb', '',  'literal n NOT matched by \\n');
 };
 
 subtest 'escape: \\x hex escape matches the encoded byte' => sub {
-    try_match('axb', 'a\\x78b', 'Bool:1', '\\x78 is letter x by byte value');
-    try_match('aXb', 'a\\x78b', 'Bool:',  '\\x78 does not match X');
+    try_match('axb', 'a\\x78b', '1', '\\x78 is letter x by byte value');
+    try_match('aXb', 'a\\x78b', '',  '\\x78 does not match X');
 };
 
 subtest 'escape: \\t inside a character class' => sub {
-    try_match("a\t", '[\\t]', 'Bool:1', '[\\t] matches a tab');
-    try_match('at',  '[\\t]', 'Bool:',  '[\\t] does not match letter t');
+    try_match("a\t", '[\\t]', '1', '[\\t] matches a tab');
+    try_match('at',  '[\\t]', '',  '[\\t] does not match letter t');
 };
 
 subtest 'escape: assertion/unknown alphanumeric escapes die GAP' => sub {
@@ -387,16 +434,16 @@ subtest 'escape: assertion/unknown alphanumeric escapes die GAP' => sub {
 # ---------------------------------------------------------------------------
 
 subtest '$ anchor matches before a trailing newline (perl semantics)' => sub {
-    try_match("foo\n",  'foo$',  'Bool:1', '"foo\\n" =~ /foo$/ ($ before final newline)');
-    try_match("foo\nx", 'foo$',  'Bool:',  '"foo\\nx" !~ /foo$/ (newline not final)');
-    try_match("\n",     '^$',    'Bool:1', '"\\n" =~ /^$/ (empty line)');
-    try_match('x',      '^$',    'Bool:',  '"x" !~ /^$/');
+    try_match("foo\n",  'foo$',  '1', '"foo\\n" =~ /foo$/ ($ before final newline)');
+    try_match("foo\nx", 'foo$',  '',  '"foo\\nx" !~ /foo$/ (newline not final)');
+    try_match("\n",     '^$',    '1', '"\\n" =~ /^$/ (empty line)');
+    try_match('x',      '^$',    '',  '"x" !~ /^$/');
 };
 
 subtest 'trailing \\\\$ keeps the anchor (escaped backslash, then $)' => sub {
     # Pattern chars: a \ \ $ — perl reads literal a, literal backslash, ANCHOR.
-    try_match("a\\",  'a\\\\$', 'Bool:1', '"a\\" =~ /a\\\\$/ (anchor after escaped backslash)');
-    try_match('a\\b', 'a\\\\$', 'Bool:',  '"a\\b" !~ /a\\\\$/ (backslash not at end)');
+    try_match("a\\",  'a\\\\$', '1', '"a\\" =~ /a\\\\$/ (anchor after escaped backslash)');
+    try_match('a\\b', 'a\\\\$', '',  '"a\\b" !~ /a\\\\$/ (backslash not at end)');
 };
 
 # ---------------------------------------------------------------------------
@@ -433,7 +480,7 @@ subtest 'guards: flags and mid-pattern anchors die GAP' => sub {
 # inlines the same matcher — no new node class, no fn-ptr ABI.
 # ---------------------------------------------------------------------------
 
-subtest 'qr//: Constant(regex) + Match — "foobar" =~ qr/foo/ => Bool:1' => sub {
+subtest 'qr//: Constant(regex) + Match — "foobar" =~ qr/foo/ => prints 1' => sub {
     my $f = _mk();
     my $subj = $f->make('Constant', value => 'foobar', const_type => 'string');
     $subj->set_representation('Str');
@@ -441,17 +488,18 @@ subtest 'qr//: Constant(regex) + Match — "foobar" =~ qr/foo/ => Bool:1' => sub
     $qr->set_representation('Regex');
     my $m = $f->make('Match', inputs => [$subj, $qr]);
     $m->set_representation('Boolean');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
 
     my ($out, $ll);
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:1', 'qr-value applied via Match matches');
+    is($out, '1', 'qr-value applied via Match matches');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
     ok($ll !~ /Perl_|(?<![A-Za-z0-9_])SV(?![A-Za-z0-9_])|sv_|libperl|\bAV\b|\bHV\b/,
         'qr matcher .ll is libperl-free');
 };
 
-subtest 'qr// non-match: "xyz" =~ qr/foo/ => Bool:' => sub {
+subtest 'qr// non-match: "xyz" =~ qr/foo/ => prints empty' => sub {
     my $f = _mk();
     my $subj = $f->make('Constant', value => 'xyz', const_type => 'string');
     $subj->set_representation('Str');
@@ -459,11 +507,12 @@ subtest 'qr// non-match: "xyz" =~ qr/foo/ => Bool:' => sub {
     $qr->set_representation('Regex');
     my $m = $f->make('Match', inputs => [$subj, $qr]);
     $m->set_representation('Boolean');
-    my $ret = $f->make_cfg('Return', inputs => [$m]);
+    my $ret = program_ret($f, $m);
 
-    my ($out) = eval { lli_run($ret) };
+    my ($out, $ll) = eval { lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
-    is($out, 'Bool:', 'qr-value non-match is false');
+    is($out, '', 'qr-value non-match is false');
+    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
 };
 
 done_testing;

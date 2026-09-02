@@ -41,6 +41,33 @@ sub ll_exit_code {
 
 sub _mk { Chalk::IR::NodeFactory->new }
 
+# Observe a value the way a program does: PRINT it, then return undef. A
+# program's observable contract is stdout plus exit status; it has no side
+# channel that hands a value back to a harness. The Print is appended AFTER
+# the graph's last existing effect so any ordering under test is preserved.
+sub print_and_return {
+    my ($f, $value, $last_effect) = @_;
+
+    # Print takes a Str, so a non-Str value is bridged with an explicit
+    # Coerce -- the same node a source program's producer inserts.
+    my $arg  = $value;
+    my $repr = $value->representation;
+    if (!defined $repr || $repr ne 'Str') {
+        $arg = $f->make('Coerce', inputs => [$value],
+            from_repr => $repr, to_repr => 'Str');
+        $arg->set_representation('Str');
+    }
+
+    my $print = $f->make('Print', inputs => [$arg]);
+    $print->set_control_in($last_effect // $f->make_cfg('Start'));
+
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
+    return $ret;
+}
+
 # ---------------------------------------------------------------------------
 # I-A: cache poisoning in _lower_subscript (ArrayRef case)
 #
@@ -87,10 +114,10 @@ subtest 'I-A: ArrayRef node used as Subscript container AND PostfixDeref input' 
     my $sum = $f->make('Add', inputs => [$elem, $len]);
     $sum->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$sum]);
+    my $ret = print_and_return($f, $sum);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "I-A lower() does not die: $@") or diag("error: $@");
     diag("I-A .ll snippet:\n" . substr($ll // '', 0, 800)) unless defined $ll;
 
@@ -102,7 +129,7 @@ subtest 'I-A: ArrayRef node used as Subscript container AND PostfixDeref input' 
             or diag("I-A LLVM IR was invalid (cache poisoning bug):\n$ll");
 
         my $out = run_ll($ll);
-        is($out, 'Int:23', "I-A lli output is Int:23 (20+3)");
+        is($out, '23', "I-A lli output is 23 (20+3)");
     }
 
     done_testing;
@@ -151,10 +178,10 @@ subtest 'I-A(Hash): HashRef node used as Subscript container AND PostfixDeref in
     my $sum = $f->make('Add', inputs => [$elem, $elem2]);
     $sum->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$sum]);
+    my $ret = print_and_return($f, $sum);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "I-A(Hash) lower() does not die: $@") or diag("error: $@");
 
     SKIP: {
@@ -165,7 +192,7 @@ subtest 'I-A(Hash): HashRef node used as Subscript container AND PostfixDeref in
             or diag("I-A(Hash) LLVM IR was invalid (cache poisoning bug):\n$ll");
 
         my $out = run_ll($ll);
-        is($out, 'Int:15', "I-A(Hash) lli output is Int:15 (7+8)");
+        is($out, '15', "I-A(Hash) lli output is 15 (7+8)");
     }
 
     done_testing;
@@ -218,10 +245,10 @@ subtest 'I-B(Array-lvalue): Assign stores ArrayRef value -> ptrtoint needed' => 
     my $asgn_len = $f->make('Length', inputs => [$asgn]);
     $asgn_len->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$asgn_len]);
+    my $ret = print_and_return($f, $asgn_len);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "I-B(Array-lvalue) lower() does not die: $@") or diag("error: $@");
 
     SKIP: {
@@ -232,7 +259,7 @@ subtest 'I-B(Array-lvalue): Assign stores ArrayRef value -> ptrtoint needed' => 
             or diag("I-B(Array-lvalue): missing ptrtoint; store i64 i8* type mismatch:\n$ll");
 
         my $out = run_ll($ll);
-        is($out, 'Int:3', 'I-B(Array-lvalue) lli output is Int:3 (Length of ArrayRef returned by Assign)');
+        is($out, '3', 'I-B(Array-lvalue) lli output is 3 (Length of ArrayRef returned by Assign)');
     }
 
     done_testing;
@@ -284,10 +311,10 @@ subtest 'I-B(HashRef-value): ref stored in hash slot + read back -> ptrtoint/int
     my $got_len = $f->make('Length', inputs => [$got]);
     $got_len->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$got_len]);
+    my $ret = print_and_return($f, $got_len);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "I-B(HashRef-value) lower() does not die: $@") or diag("error: $@");
 
     SKIP: {
@@ -298,7 +325,7 @@ subtest 'I-B(HashRef-value): ref stored in hash slot + read back -> ptrtoint/int
             or diag("I-B(HashRef-value): missing ptrtoint/inttoptr on hash ref slot:\n$ll");
 
         my $out = run_ll($ll);
-        is($out, 'Int:2', 'I-B(HashRef-value) lli output is Int:2 (read-back inner array length)');
+        is($out, '2', 'I-B(HashRef-value) lli output is 2 (read-back inner array length)');
     }
 
     done_testing;
@@ -351,12 +378,12 @@ subtest 'V1: hash element-store of a ref value -> ptrtoint guard' => sub {
     my $got_len = $f->make('Length', inputs => [$got]);
     $got_len->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$got_len]);
-    # Thread the store as a control predecessor so it is emitted before the read.
-    $ret->set_control_in($assign) if $ret->can('set_control_in');
+    # Existing chain: the store is the last effect; the Print goes after it,
+    # keeping the store emitted before the read this case is testing.
+    my $ret = print_and_return($f, $got_len, $assign);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "V1 lower() does not die: $@") or diag("error: $@");
 
     SKIP: {
@@ -367,7 +394,7 @@ subtest 'V1: hash element-store of a ref value -> ptrtoint guard' => sub {
             or diag("V1: hash element-store missing ptrtoint; store i64 i8*:\n$ll");
 
         my $out = run_ll($ll);
-        is($out, 'Int:2', 'V1 lli output is Int:2 (read-back inner array length)');
+        is($out, '2', 'V1 lli output is 2 (read-back inner array length)');
     }
 
     done_testing;
@@ -393,10 +420,10 @@ subtest 'I-C: Length(Str) uses _str_len_table not extractvalue' => sub {
     my $len = $f->make('Length', inputs => [$str]);
     $len->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$len]);
+    my $ret = print_and_return($f, $len);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "I-C lower() does not die: $@") or diag("error: $@");
 
     SKIP: {
@@ -407,7 +434,7 @@ subtest 'I-C: Length(Str) uses _str_len_table not extractvalue' => sub {
             or diag("I-C: extractvalue on i8* is invalid LLVM IR:\n$ll");
 
         my $out = run_ll($ll);
-        is($out, 'Int:5', 'I-C lli output is Int:5 (length("hello")=5)');
+        is($out, '5', 'I-C lli output is 5 (length("hello")=5)');
     }
 
     done_testing;
@@ -446,10 +473,10 @@ subtest 'I-D: Length(PostfixDeref(@$ref)) — scalar(@$ref) — valid IR' => sub
     my $len = $f->make('Length', inputs => [$deref]);
     $len->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$len]);
+    my $ret = print_and_return($f, $len);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "I-D lower() does not die: $@") or diag("error: $@");
 
     SKIP: {
@@ -460,7 +487,7 @@ subtest 'I-D: Length(PostfixDeref(@$ref)) — scalar(@$ref) — valid IR' => sub
             or diag("I-D: bitcast i8* %Array* to %Array* is invalid LLVM IR:\n$ll");
 
         my $out = run_ll($ll);
-        is($out, 'Int:3', 'I-D lli output is Int:3 (scalar(@$ref) = 3)');
+        is($out, '3', 'I-D lli output is 3 (scalar(@$ref) = 3)');
     }
 
     done_testing;
@@ -497,7 +524,7 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
         my $len = $f->make('Length', inputs => [$arr]);
         $len->set_representation('Int');
         my $ret = $f->make_cfg('Return', inputs => [$len]);
-        eval { Chalk::Target::LLVM->lower($ret) };
+        eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
         unlike($@ // '', qr/GAP/,
             'a Str element in a literal ArrayRef lowers (boxed into a %StrPair)');
     }
@@ -517,7 +544,7 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
         my $len = $f->make('Length', inputs => [$h]);
         $len->set_representation('Int');
         my $ret = $f->make_cfg('Return', inputs => [$len]);
-        eval { Chalk::Target::LLVM->lower($ret) };
+        eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
         unlike($@ // '', qr/GAP/,
             'a Str value in a literal HashRef lowers (boxed into a %HashEntry)');
     }
@@ -553,7 +580,7 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
         my $as = $f->make('Assign', inputs => [$lv, $s]);
         $as->set_representation('Str');
         my $ret = $f->make_cfg('Return', inputs => [$as]);
-        eval { Chalk::Target::LLVM->lower($ret) };
+        eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
         unlike($@ // '', qr/GAP/,
             'a Str rhs in an element store lowers');
     }

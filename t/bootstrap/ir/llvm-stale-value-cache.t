@@ -42,6 +42,35 @@ sub int_const {
     return $c;
 }
 
+# Observe a value the way a program does: PRINT it, then return undef. A
+# program's observable contract is stdout plus exit status; it has no side
+# channel that hands a value back to a harness.
+#
+# The Print is appended AFTER the subtest's last existing effect, so the
+# control ordering each subtest exists to test is preserved exactly.
+sub print_and_return {
+    my ($f, $value, $last_effect) = @_;
+
+    # Print takes a Str, so a non-Str value is bridged with an explicit
+    # Coerce -- the same node a source program's producer inserts.
+    my $arg  = $value;
+    my $repr = $value->representation;
+    if (!defined $repr || $repr ne 'Str') {
+        $arg = $f->make('Coerce', inputs => [$value],
+            from_repr => $repr, to_repr => 'Str');
+        $arg->set_representation('Str');
+    }
+
+    my $print = $f->make('Print', inputs => [$arg]);
+    $print->set_control_in($last_effect // $f->make_cfg('Start'));
+
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
+    return $ret;
+}
+
 # my $x = 1; my $y = $x + 10; $x = 2; my $z = $x + 10; return $y + $z;
 # The two `$x + 10` Adds hash-cons to ONE node; the cache must not serve
 # the pre-assign SSA ref at the $z position. perl: 11 + 12 = 23.
@@ -79,15 +108,15 @@ subtest 'pure Add over reassigned PadAccess re-lowers per consumption (C1)' => s
     $rzF->set_representation('Int');
     my $sum = $f->make('Add', inputs => [$ryF, $rzF]);
     $sum->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$sum]);
-    $ret->set_control_in($vz);
+    # Existing chain: vx -> vy -> asg -> vz; the Print goes after vz.
     $vz->set_control_in($asg);
     $asg->set_control_in($vy);
     $vy->set_control_in($vx);
+    my $ret = print_and_return($f, $sum, $vz);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:23', 'post-assign consumption sees x=2 (perl: 11+12=23)');
+    is($out, '23', 'post-assign consumption sees x=2 (perl: 11+12=23)');
 };
 
 # my $x = 1; $x = $x + 1; $x = $x + 1; return $x;
@@ -117,14 +146,15 @@ subtest 'repeat scalar rebind increments twice (C1+C3 interaction)' => sub {
     isnt($asg1->id, $asg2->id, 'precondition: the two Assigns are distinct (Family-A)');
 
     my $rxF = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    my $ret = $f->make_cfg('Return', inputs => [$rxF]);
-    $ret->set_control_in($asg2);
+    $rxF->set_representation('Int');
+    # Existing chain: vx -> asg1 -> asg2; the Print goes after asg2.
     $asg2->set_control_in($asg1);
     $asg1->set_control_in($vx);
+    my $ret = print_and_return($f, $rxF, $asg2);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:3', 'two increments both fire (perl: 3)');
+    is($out, '3', 'two increments both fire (perl: 3)');
 };
 
 # my @a = (1,2); my $p = $a[0]; $a[0] = 9; return $a[0];
@@ -151,13 +181,13 @@ subtest 'Subscript read-store-read re-reads the element (C2)' => sub {
     $rd2->set_representation('Slot');
     is($rd2->id, $rd1->id, 'precondition: the two element reads hash-cons to one node');
 
-    my $ret = $f->make_cfg('Return', inputs => [$rd2]);
-    $ret->set_control_in($st);
+    # Existing chain: vp -> st; the Print goes after st.
     $st->set_control_in($vp);
+    my $ret = print_and_return($f, $rd2, $st);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:9', 'read after element store sees the stored value (perl: 9)');
+    is($out, '9', 'read after element store sees the stored value (perl: 9)');
 };
 
 # my @a = (1,2); my $p = $a[0]; $a[0] = 9; return $p;
@@ -185,13 +215,13 @@ subtest 'pre-store binding keeps its old value (no over-correction)' => sub {
     my $rp = $f->make('PadAccess', targ => 0, varname => '$p', inputs => [$vp]);
     $rp->set_representation('Slot');
 
-    my $ret = $f->make_cfg('Return', inputs => [$rp]);
-    $ret->set_control_in($st);
+    # Existing chain: vp -> st; the Print goes after st.
     $st->set_control_in($vp);
+    my $ret = print_and_return($f, $rp, $st);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:1', 'value bound before the store keeps the pre-store element (perl: 1)');
+    is($out, '1', 'value bound before the store keeps the pre-store element (perl: 1)');
 };
 
 # my $x = 1; $x += 2; $x += 2; return $x;
@@ -224,14 +254,14 @@ subtest 'repeat compound assign fires twice (C3 behavioral)' => sub {
 
     my $ret_pad = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
     $ret_pad->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$ret_pad]);
-    $ret->set_control_in($ca2);
+    # Existing chain: vd -> ca1 -> ca2; the Print goes after ca2.
     $ca2->set_control_in($ca1);
     $ca1->set_control_in($vd);
+    my $ret = print_and_return($f, $ret_pad, $ca2);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:5', 'both += fire (perl: 5)');
+    is($out, '5', 'both += fire (perl: 5)');
 };
 
 # class Pt { field $x :param; field $p; field $q;
@@ -300,11 +330,13 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     $get_q->set_representation('Int');
     my $sum = $f->make('Add', inputs => [$get_p, $get_q]);
     $sum->set_representation('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$sum]);
+    # No pre-existing top-level effect chain here (the ordering under test is
+    # inside the ADJUST body), so the Print hangs off a fresh Start.
+    my $ret = print_and_return($f, $sum);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:14', 'p keeps the pre-store value, q reads the stored one (perl: 5+9=14)');
+    is($out, '14', 'p keeps the pre-store value, q reads the stored one (perl: 5+9=14)');
 };
 
 done_testing;

@@ -17,6 +17,7 @@ skip_all "perl 5.42 not found"  unless -x $PERL;
 use lib 'lib', 't/lib';
 require Chalk::IR::Serialize::JSON;
 require Chalk::Target::LLVM;
+require Chalk::IR::NodeFactory;
 
 # Drive a snippet through B::SoN -> Chalk load -> LLVM lower -> lli; return
 # ('value', $lli_out) or ('gap', $err) or ('err', $why).
@@ -30,8 +31,8 @@ sub lower_and_run ($body) {
     my $mop = (values %$graphs)[0]->mop;
     my $g = $graphs->{'main::corpus_case'} or return ('err', 'no graph');
     my $ll = eval {
-        Chalk::Target::LLVM->lower($g->returns->[0],
-            (defined $mop ? (mop => $mop) : ()));
+        Chalk::Target::LLVM->lower(print_result($g->returns->[0]),
+            program_mode => 1, (defined $mop ? (mop => $mop) : ()));
     };
     return ('gap', $@) if $@;
     my ($lfh, $lltmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -41,24 +42,46 @@ sub lower_and_run ($body) {
     return ('value', $out);
 }
 
+# Rewrite a value-returning Return into a print-then-return-Undef program.
+# The incoming control chain (Start -> ... -> last effect) is preserved: the
+# Print hangs off $ret's own control_in, so nothing is reordered ahead of it.
+sub print_result ($ret) {
+    my $f    = Chalk::IR::NodeFactory->new;
+    my $val  = $ret->inputs->[-1];
+    my $repr = $val->representation // 'Str';
+    my $str  = $val;
+    if ($repr ne 'Str') {
+        $str = $f->make('Coerce', inputs => [$val],
+                        from_repr => $repr, to_repr => 'Str');
+        $str->set_representation('Str');
+    }
+    my $print = $f->make('Print', inputs => [$str]);
+    $print->set_control_in($ret->control_in);
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $new_ret = $f->make_cfg('Return', inputs => [$undef]);
+    $new_ret->set_control_in($print);
+    return $new_ret;
+}
+
 subtest 'R12: aliased element store via ref is visible through the array name' => sub {
     # $r = \@a shares backing storage with @a (Perl semantics); the store
     # through $r->[0] must be visible to $a[0]. perl oracle = 42.
     my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $r=\@a; $r->[0]=42; $a[0]');
     is($kind, 'value', 'lowered (not a GAP)') or return;
-    is($out, 'Int:42', 'lli returns 42 (the aliased store), not the pre-store 1');
+    is($out, '42', 'lli returns 42 (the aliased store), not the pre-store 1');
 };
 
 subtest 'non-aliased same-name store/read still works (regression)' => sub {
     my ($kind, $out) = lower_and_run('my @a=(1,2,3); $a[0]=42; $a[0]');
-    is("$kind:$out", 'value:Int:42', 'same-name element store/read -> 42');
+    is("$kind:$out", 'value:42', 'same-name element store/read -> 42');
 };
 
 subtest 'aliased store does not clobber a sibling slot' => sub {
     # After $r->[0]=42, a[1] must still be its initializer value 2 -- the
     # alias store wrote only slot 0, not slot 1.
     my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $r=\@a; $r->[0]=42; $a[1]');
-    is("$kind:$out", 'value:Int:2', 'sibling slot untouched by the aliased store -> 2');
+    is("$kind:$out", 'value:2', 'sibling slot untouched by the aliased store -> 2');
 };
 
 subtest 'aliased HASH store via ref is visible through the hash name' => sub {
@@ -66,7 +89,7 @@ subtest 'aliased HASH store via ref is visible through the hash name' => sub {
     # $r = \%h shares backing storage with %h, so $r->{a}=9 is visible via $h{a}.
     # perl oracle = 9. (Was an Int:1 miscompile before 2d -- zhi 019f330b.)
     my ($kind, $out) = lower_and_run('my %h=(a=>1); my $r=\%h; $r->{a}=9; $h{a}');
-    is("$kind:$out", 'value:Int:9', 'aliased hash store visible through the name -> 9');
+    is("$kind:$out", 'value:9', 'aliased hash store visible through the name -> 9');
 };
 
 subtest 'read via a ref ($r->[0] as rvalue) resolves the aliased target' => sub {
@@ -74,13 +97,13 @@ subtest 'read via a ref ($r->[0] as rvalue) resolves the aliased target' => sub 
     # mirroring the 2d store-lvalue path + _container_ptr: $r=\@a shares backing
     # storage, so $r->[0] reads the same aggregate $a[0] would. perl oracle = 42.
     my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $r=\@a; $r->[0]=42; $r->[0]');
-    is("$kind:$out", 'value:Int:42', 'read through the ref sees the aliased store -> 42');
+    is("$kind:$out", 'value:42', 'read through the ref sees the aliased store -> 42');
     # A hash-ref rvalue read resolves the same way (the HashRef branch).
     my ($hk, $ho) = lower_and_run('my %h=(a=>1); my $r=\%h; $r->{a}=9; $r->{a}');
-    is("$hk:$ho", 'value:Int:9', 'read through a hash ref sees the aliased store -> 9');
+    is("$hk:$ho", 'value:9', 'read through a hash ref sees the aliased store -> 9');
     # A read via a ref BEFORE any store still resolves the aliased aggregate.
     my ($rk, $ro) = lower_and_run('my @a=(5,6,7); my $r=\@a; $r->[1]');
-    is("$rk:$ro", 'value:Int:6', 'read via a ref with no store reads the initializer -> 6');
+    is("$rk:$ro", 'value:6', 'read via a ref with no store reads the initializer -> 6');
 };
 
 done_testing();

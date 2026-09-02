@@ -56,7 +56,58 @@ sub make_not_bool_str_graph {
     $coerce_bs->set_representation('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$coerce_bs]);
-    return $ret;
+    return ($ret, $coerce_bs);
+}
+
+# Program form of the same graph: print the Str-face value bracketed by literal
+# sentinels, then return Undef. A program's observable contract is stdout plus
+# exit status — there is no type-tag channel. The brackets are load-bearing:
+# the false face IS the empty string, so "[]" distinguishes "correctly printed
+# empty" from "printed nothing at all".
+# Program form of the same graph: print the Str-face value bracketed by literal
+# sentinels, then return Undef. A program's observable contract is stdout plus
+# exit status — there is no type-tag channel. The brackets are load-bearing:
+# the false face IS the empty string, so "[]" distinguishes "correctly printed
+# empty" from "printed nothing at all".
+sub make_not_bool_str_program {
+    my ($int_val) = @_;
+    my $f = Chalk::IR::NodeFactory->new;
+
+    my $cval = $f->make('Constant', value => $int_val, const_type => 'integer');
+    $cval->set_representation('Int');
+
+    my $coerce_ib = $f->make('Coerce',
+        from_repr => 'Int',
+        to_repr   => 'Boolean',
+        inputs    => [$cval],
+    );
+    $coerce_ib->set_representation('Boolean');
+
+    my $not_node = $f->make('Not', inputs => [$coerce_ib]);
+    $not_node->set_representation('Boolean');
+
+    my $coerce_bs = $f->make('Coerce',
+        from_repr => 'Boolean',
+        to_repr   => 'Str',
+        inputs    => [$not_node],
+    );
+    $coerce_bs->set_representation('Str');
+
+    my $lb = $f->make('Constant', value => '[', const_type => 'string');
+    $lb->set_representation('Str');
+    my $rb = $f->make('Constant', value => ']', const_type => 'string');
+    $rb->set_representation('Str');
+
+    my $start = $f->make_cfg('Start');
+    my $print = $f->make('Print', inputs => [$lb, $coerce_bs, $rb]);
+    $print->set_control_in($start);
+
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
+
+    return ($ret, $coerce_bs);
 }
 
 sub run_ll {
@@ -77,9 +128,9 @@ sub run_ll {
 # Lowers without dying.
 # ---------------------------------------------------------------------------
 {
-    my $ret = make_not_bool_str_graph(5);
+    my ($ret) = make_not_bool_str_program(5);
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "CBS1: Coerce(Boolean->Str) truthy-input lowers without dying (err: $@)");
     ok(defined $ll, 'CBS1: lower() returns defined text');
 }
@@ -90,9 +141,9 @@ sub run_ll {
 # Lowers without dying.
 # ---------------------------------------------------------------------------
 {
-    my $ret = make_not_bool_str_graph(0);
+    my ($ret) = make_not_bool_str_program(0);
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "CBS2: Coerce(Boolean->Str) falsy-input lowers without dying (err: $@)");
     ok(defined $ll, 'CBS2: lower() returns defined text');
 }
@@ -103,8 +154,8 @@ sub run_ll {
 # emitted the globals, causing lli to reject with "use of undefined value".
 # ---------------------------------------------------------------------------
 {
-    my $ret = make_not_bool_str_graph(5);
-    my $ll  = Chalk::Target::LLVM->lower($ret);
+    my ($ret) = make_not_bool_str_program(5);
+    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
 
     my ($exit, $out) = run_ll($ll);
 
@@ -118,8 +169,8 @@ sub run_ll {
 # The false-face ("") is the tricky one: [1 x i8] c"\00" (NUL only, empty string).
 # ---------------------------------------------------------------------------
 {
-    my $ret = make_not_bool_str_graph(0);
-    my $ll  = Chalk::Target::LLVM->lower($ret);
+    my ($ret) = make_not_bool_str_program(0);
+    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
 
     my ($exit, $out) = run_ll($ll);
 
@@ -129,41 +180,52 @@ sub run_ll {
 }
 
 # ---------------------------------------------------------------------------
-# CBS5: Bilateral oracle — truthy input (5), Not -> false -> "" -> Str:
+# CBS5: Bilateral oracle — truthy input (5), Not -> false -> "" (empty Str face).
 # perl oracle: my $a = 5; !$a gives false; "${\!$a}" eq ""
-# type-tagged: Str:
+#
+# The old type-tag `Str:` carried TWO facts: the VALUE ("") and the TYPE (Str,
+# not Bool). Printing erases the type half — a false Boolean and an empty Str
+# both print as nothing — so the type half is asserted on the node directly and
+# the value half is read off stdout, bracketed so empty is distinguishable from
+# absent.
 # ---------------------------------------------------------------------------
 {
-    my $ret = make_not_bool_str_graph(5);
-    my $ll  = Chalk::Target::LLVM->lower($ret);
+    my ($ret, $val) = make_not_bool_str_program(5);
+    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
 
     my ($exit, $out) = run_ll($ll);
 
-    is($exit, 0, 'CBS5: lli exit 0 for truthy->false->Str:');
-    is($out, 'Str:', 'CBS5: truthy input: Not(5)->false->Str: (empty string face)');
+    is($exit, 0, 'CBS5: lli exit 0 for truthy->false->empty Str face');
+    is($out, '[]', 'CBS5: truthy input: Not(5)->false->"" (empty string face)');
+    is($val->representation, 'Str',
+        'CBS5: the printed value is Str-repr, not Boolean (the type half of the old tag)');
 }
 
 # ---------------------------------------------------------------------------
-# CBS6: Bilateral oracle — falsy input (0), Not -> true -> "1" -> Str:1
+# CBS6: Bilateral oracle — falsy input (0), Not -> true -> "1" Str face.
 # perl oracle: my $a = 0; !$a gives true; "${\!$a}" eq "1"
-# type-tagged: Str:1
+#
+# The non-empty control for CBS5: same program shape, non-empty output. If the
+# Print path were emitting nothing at all, this leg would read "[]" too.
 # ---------------------------------------------------------------------------
 {
-    my $ret = make_not_bool_str_graph(0);
-    my $ll  = Chalk::Target::LLVM->lower($ret);
+    my ($ret, $val) = make_not_bool_str_program(0);
+    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
 
     my ($exit, $out) = run_ll($ll);
 
-    is($exit, 0, 'CBS6: lli exit 0 for falsy->true->Str:1');
-    is($out, 'Str:1', 'CBS6: falsy input: Not(0)->true->Str:1 ("1" string face)');
+    is($exit, 0, 'CBS6: lli exit 0 for falsy->true->"1" Str face');
+    is($out, '[1]', 'CBS6: falsy input: Not(0)->true->"1" ("1" string face)');
+    is($val->representation, 'Str',
+        'CBS6: the printed value is Str-repr, not Boolean (the type half of the old tag)');
 }
 
 # ---------------------------------------------------------------------------
 # CBS7: .ll is libperl-free for false-face case (truthy input 5).
 # ---------------------------------------------------------------------------
 {
-    my $ret = make_not_bool_str_graph(5);
-    my $ll  = Chalk::Target::LLVM->lower($ret);
+    my ($ret) = make_not_bool_str_program(5);
+    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
 
     unlike($ll, qr/Perl_/,    'CBS7: false-face Boolean->Str .ll: no Perl_ C-API');
     unlike($ll, qr/\bSV\b/,   'CBS7: false-face Boolean->Str .ll: no SV type');
@@ -174,8 +236,8 @@ sub run_ll {
 # CBS8: .ll is libperl-free for true-face case (falsy input 0).
 # ---------------------------------------------------------------------------
 {
-    my $ret = make_not_bool_str_graph(0);
-    my $ll  = Chalk::Target::LLVM->lower($ret);
+    my ($ret) = make_not_bool_str_program(0);
+    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
 
     unlike($ll, qr/Perl_/,    'CBS8: true-face Boolean->Str .ll: no Perl_ C-API');
     unlike($ll, qr/\bSV\b/,   'CBS8: true-face Boolean->Str .ll: no SV type');
@@ -183,25 +245,29 @@ sub run_ll {
 }
 
 # ---------------------------------------------------------------------------
-# CBS9: The emitted .ll declares both @coerce_bool_str_true and
-# @coerce_bool_str_false at the module level (bilateral global presence check).
+# CBS9: The emitted .ll materializes BOTH Boolean string faces, bilaterally.
+#
+# This used to assert on @coerce_bool_str_true/@coerce_bool_str_false. Those
+# globals were emitted unconditionally by the Str-return type-tag epilogue and
+# the Coerce lowering never referenced them: it emits its own @bool_str_N pair
+# and selects between them. With the epilogue gone the old names never appear,
+# so the check now names what the Coerce actually builds — the true face
+# [2 x i8] c"1\0" and the false face [1 x i8] c"\0" (NUL only = empty string) —
+# plus the select that picks one.
 # ---------------------------------------------------------------------------
 {
-    my $ret_t = make_not_bool_str_graph(0);   # true face (Not(0) = true)
-    my $ll_t  = Chalk::Target::LLVM->lower($ret_t);
+    for my $case ([0, 'true-face'], [5, 'false-face']) {
+        my ($int_val, $label) = $case->@*;
+        my ($r) = make_not_bool_str_program($int_val);
+        my $ll  = Chalk::Target::LLVM->lower($r, program_mode => 1);
 
-    like($ll_t, qr/\@coerce_bool_str_true/,
-        'CBS9: true-face .ll declares @coerce_bool_str_true global');
-    like($ll_t, qr/\@coerce_bool_str_false/,
-        'CBS9: true-face .ll declares @coerce_bool_str_false global');
-
-    my $ret_f = make_not_bool_str_graph(5);   # false face (Not(5) = false)
-    my $ll_f  = Chalk::Target::LLVM->lower($ret_f);
-
-    like($ll_f, qr/\@coerce_bool_str_true/,
-        'CBS9: false-face .ll declares @coerce_bool_str_true global');
-    like($ll_f, qr/\@coerce_bool_str_false/,
-        'CBS9: false-face .ll declares @coerce_bool_str_false global');
+        like($ll, qr/\@bool_str_\d+ = private unnamed_addr constant \[2 x i8\] c"1\\00"/,
+            "CBS9: $label .ll materializes the true face \"1\" as [2 x i8]");
+        like($ll, qr/\@bool_str_\d+ = private unnamed_addr constant \[1 x i8\] c"\\00"/,
+            "CBS9: $label .ll materializes the false face \"\" as [1 x i8] (NUL only)");
+        like($ll, qr/select i1 .*Coerce\[Boolean->Str\] -> ptr/,
+            "CBS9: $label .ll selects between the two faces at runtime");
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -228,10 +294,35 @@ sub run_ll {
     my $not_node = $f->make('Not', inputs => [$coerce]);
     $not_node->set_representation('Boolean');
 
-    my $ret = $f->make_cfg('Return', inputs => [$not_node]);
+    # The Not result is Boolean. A program cannot observe a Boolean directly:
+    # the backend refuses Print of a Boolean arg ("Print takes Str, so this
+    # needs a Coerce"), exactly as a source program would go through
+    # stringification. So the Boolean-ness is asserted on the node and the
+    # value is observed through the Coerce, bracketed to separate "printed
+    # empty" from "printed nothing".
+    is($not_node->representation, 'Boolean',
+        'F3A: Not(Boolean) result is Boolean-repr (the type half of the old Bool: tag)');
+
+    my $to_str = $f->make('Coerce',
+        from_repr => 'Boolean', to_repr => 'Str', inputs => [$not_node]);
+    $to_str->set_representation('Str');
+
+    my $lb = $f->make('Constant', value => '[', const_type => 'string');
+    $lb->set_representation('Str');
+    my $rb = $f->make('Constant', value => ']', const_type => 'string');
+    $rb->set_representation('Str');
+
+    my $start = $f->make_cfg('Start');
+    my $print = $f->make('Print', inputs => [$lb, $to_str, $rb]);
+    $print->set_control_in($start);
+
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "F3A: Not(Boolean) lowers without dying (err: $@)");
 
     SKIP: {
@@ -239,17 +330,10 @@ sub run_ll {
 
         like($ll, qr/xor i1/, 'F3A: .ll contains xor i1 (Not lowering)');
 
-        my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-        binmode $fh, ':utf8';
-        print $fh $ll;
-        close $fh;
+        my ($exit, $out) = run_ll($ll);
 
-        my $out  = qx($LLI $tmp 2>&1);
-        my $exit = $? >> 8;
-        chomp $out;
-
-        is($exit, 0,        'F3A: lli exits 0 for Not(Boolean) graph');
-        is($out, 'Bool:',   'F3A: Not(5) gives false = Bool: (type-tagged)');
+        is($exit, 0,     'F3A: lli exits 0 for Not(Boolean) graph');
+        is($out, '[]',   'F3A: Not(5) gives false, whose Str face is the empty string');
     }
 }
 
@@ -269,7 +353,7 @@ sub run_ll {
 
     my $ret = $f->make_cfg('Return', inputs => [$not_node]);
 
-    eval { Chalk::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     like($@, qr/representation/i,
         'F3B: Not with undef-repr operand dies loudly mentioning representation');
 }

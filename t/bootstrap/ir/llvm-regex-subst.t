@@ -16,7 +16,7 @@ unless (-x $LLI) {
 
 sub lli_run {
     my ($ret, %lower_opts) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret, %lower_opts);
+    my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1, %lower_opts);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $fh $ll;
@@ -24,11 +24,40 @@ sub lli_run {
     my $out = `$LLI $f 2>&1`;
     my $exit = $? >> 8;
     die "lli failed (exit $exit): $out\n--- .ll ---\n$ll" if $exit;
-    chomp $out;
+    # No chomp: the program prints exactly the value and nothing else, so
+    # every byte of stdout IS the result. A trailing newline in the subject
+    # is DATA here -- chomping would erase the difference between "abcX"
+    # and "abcX\n", which is exactly what the s/$/X/ case is testing.
     return ($out, $ll);
 }
 
 sub _mk { Chalk::IR::NodeFactory->new }
+
+# Observe a value the way a program does: PRINT it, then return undef. A
+# program's observable contract is stdout plus exit status; it has no side
+# channel that hands a value back to a harness.
+sub print_and_return {
+    my ($f, $value) = @_;
+
+    # Print takes a Str, so a non-Str value is bridged with an explicit
+    # Coerce -- the same node a source program's producer inserts.
+    my $arg  = $value;
+    my $repr = $value->representation;
+    if (!defined $repr || $repr ne 'Str') {
+        $arg = $f->make('Coerce', inputs => [$value],
+            from_repr => $repr, to_repr => 'Str');
+        $arg->set_representation('Str');
+    }
+
+    my $print = $f->make('Print', inputs => [$arg]);
+    $print->set_control_in($f->make_cfg('Start'));
+
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
+    return $ret;
+}
 
 # Build RegexSubst($subject =~ s/$pattern/$replacement/) -> Str (the result).
 sub subst_node {
@@ -46,7 +75,7 @@ sub try_subst {
     my ($subject, $pattern, $replacement, $want, $label) = @_;
     my $f = _mk();
     my $s = subst_node($f, $subject, $pattern, $replacement);
-    my $ret = $f->make_cfg('Return', inputs => [$s]);
+    my $ret = print_and_return($f, $s);
     my ($out, $ll) = eval { lli_run($ret) };
     if ($@) { fail("$label: lowering/lli failed: $@"); return }
     is($out, $want, $label);
@@ -55,7 +84,7 @@ sub try_subst {
 
 # R3 corpus shape: literal replace, first match.
 subtest 's/foo/baz/ on "foobar" => "bazbar"' => sub {
-    my $ll = try_subst('foobar', 'foo', 'baz', 'Str:bazbar',
+    my $ll = try_subst('foobar', 'foo', 'baz', 'bazbar',
         's/foo/baz/ replaces the first match');
     return unless defined $ll;
     ok($ll !~ /Perl_|(?<![A-Za-z0-9_])SV(?![A-Za-z0-9_])|sv_|libperl|\bAV\b|\bHV\b/,
@@ -63,34 +92,34 @@ subtest 's/foo/baz/ on "foobar" => "bazbar"' => sub {
 };
 
 subtest 's/// non-match leaves the subject unchanged' => sub {
-    try_subst('foobar', 'xyz', 'baz', 'Str:foobar',
+    try_subst('foobar', 'xyz', 'baz', 'foobar',
         's/xyz/baz/ does not change "foobar"');
 };
 
 subtest 's/// with different lengths (grow and shrink)' => sub {
-    try_subst('ab',    'b',   'XYZ', 'Str:aXYZ', 'replacement longer than match');
-    try_subst('aXYZb', 'XYZ', '',    'Str:ab',   'empty replacement deletes the match');
+    try_subst('ab',    'b',   'XYZ', 'aXYZ', 'replacement longer than match');
+    try_subst('aXYZb', 'XYZ', '',    'ab',   'empty replacement deletes the match');
 };
 
 subtest 's/// replaces only the FIRST match (no /g)' => sub {
-    try_subst('aXaXa', 'X', 'o', 'Str:aoaXa', 'only the first X is replaced');
+    try_subst('aXaXa', 'X', 'o', 'aoaXa', 'only the first X is replaced');
 };
 
 subtest 's/(o+)/[$1]/ — explicit capture consumed in the replacement' => sub {
-    try_subst('foobar', '(o+)', '[$1]', 'Str:f[oo]bar',
+    try_subst('foobar', '(o+)', '[$1]', 'f[oo]bar',
         '$1 in the replacement is the captured run');
 };
 
 subtest 's/(\\w+)-(\\w+)/$2_$1/ — two captures, reordered' => sub {
-    try_subst('ab-cd', '(\\w+)-(\\w+)', '$2_$1', 'Str:cd_ab',
+    try_subst('ab-cd', '(\\w+)-(\\w+)', '$2_$1', 'cd_ab',
         '$2 and $1 reorder the halves');
 };
 
 # Review F3: an end-anchored empty pattern splices at the END (append), not
 # at offset 0; with a trailing newline, before the newline (perl semantics).
 subtest 's/$/X/ appends (and respects a trailing newline)' => sub {
-    try_subst('abc',   '$', 'X', 'Str:abcX',  's/$/X/ appends to "abc"');
-    try_subst("abc\n", '$', 'X', "Str:abcX\n", 's/$/X/ inserts before the trailing newline');
+    try_subst('abc',   '$', 'X', 'abcX',  's/$/X/ appends to "abc"');
+    try_subst("abc\n", '$', 'X', "abcX\n", 's/$/X/ inserts before the trailing newline');
 };
 
 # Review: $10 must not silently parse as $1 . "0".
@@ -98,7 +127,7 @@ subtest 'replacement $N with multiple digits dies GAP' => sub {
     my $f = _mk();
     my $s = subst_node($f, 'a1b', '(\\d)', '[$10]');
     my $ret = $f->make_cfg('Return', inputs => [$s]);
-    eval { Chalk::Target::LLVM->lower($ret) };
+    eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     like($@, qr/GAP/, '$10 in a 1-group replacement dies GAP (not $1 . "0")');
 };
 
@@ -132,12 +161,12 @@ subtest 's/// in two method bodies: no duplicate @rxs_lit symbols' => sub {
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'meth_a',
         class_name => 'Subby', inputs => [$new_o]);
     $call->set_representation('Str');
-    my $ret = $f->make_cfg('Return', inputs => [$call]);
+    my $ret = print_and_return($f, $call);
 
     my ($out, $ll) = eval { lli_run($ret, mop => $mop) };
     ok(!$@, 'two method bodies with s/// lower + run (no duplicate symbol)')
         or do { diag("error: $@"); return };
-    is($out, 'Str:fLITo', 'method-body s/// result correct');
+    is($out, 'fLITo', 'method-body s/// result correct');
     my @defs = $ll =~ /^(\@\S*rxs_lit\S*) =/mg;
     my %seen; my @dups = grep { $seen{$_}++ } @defs;
     is(scalar @dups, 0, 'no duplicate @rxs_lit global symbols')

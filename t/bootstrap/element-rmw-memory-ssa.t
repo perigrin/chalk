@@ -17,6 +17,7 @@ skip_all "perl 5.42 not found"  unless -x $PERL;
 use lib 'lib', 't/lib';
 require Chalk::IR::Serialize::JSON;
 require Chalk::Target::LLVM;
+require Chalk::IR::NodeFactory;
 
 # Drive a snippet through B::SoN -> Chalk load -> LLVM lower -> lli.
 sub lower_and_run ($body) {
@@ -29,8 +30,8 @@ sub lower_and_run ($body) {
     my $mop = (values %$graphs)[0]->mop;
     my $g = $graphs->{'main::corpus_case'} or return ('err', 'no graph');
     my $ll = eval {
-        Chalk::Target::LLVM->lower($g->returns->[0],
-            (defined $mop ? (mop => $mop) : ()));
+        Chalk::Target::LLVM->lower(print_result($g->returns->[0]),
+            program_mode => 1, (defined $mop ? (mop => $mop) : ()));
     };
     return ('gap', $@) if $@;
     my ($lfh, $lltmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -40,10 +41,32 @@ sub lower_and_run ($body) {
     return ('value', $out);
 }
 
+# Rewrite a value-returning Return into a print-then-return-Undef program.
+# The incoming control chain (Start -> ... -> last effect) is preserved: the
+# Print hangs off $ret's own control_in, so nothing is reordered ahead of it.
+sub print_result ($ret) {
+    my $f    = Chalk::IR::NodeFactory->new;
+    my $val  = $ret->inputs->[-1];
+    my $repr = $val->representation // 'Str';
+    my $str  = $val;
+    if ($repr ne 'Str') {
+        $str = $f->make('Coerce', inputs => [$val],
+                        from_repr => $repr, to_repr => 'Str');
+        $str->set_representation('Str');
+    }
+    my $print = $f->make('Print', inputs => [$str]);
+    $print->set_control_in($ret->control_in);
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $new_ret = $f->make_cfg('Return', inputs => [$undef]);
+    $new_ret->set_control_in($print);
+    return $new_ret;
+}
+
 # The perl oracle for the same body (as a scalar-context do-block).
 sub perl_val ($body) {
     my ($fh, $tmp) = tempfile(SUFFIX => '.pl', UNLINK => 1);
-    print $fh "my \$r = do { $body }; print defined \$r ? \"Int:\$r\" : \"Undef:\";\n";
+    print $fh "my \$r = do { $body }; print defined \$r ? \"\$r\" : \"\";\n";
     close $fh;
     my $out = qx($PERL $tmp 2>&1);
     chomp $out;
@@ -53,19 +76,19 @@ sub perl_val ($body) {
 # Each case: [body, expected]. expected computed here matches perl (asserted too).
 my @cases = (
     # read-after-store: the store persists to the aggregate.
-    ['$a[0]++; $a[0]'                 => 'Int:2',  'array'],
-    ['$a[0]+=5; $a[0]'                => 'Int:6',  'array'],
-    ['$a[0]-=2; $a[0]'                => 'Int:-1', 'array'],  # 1-2
-    ['$h{k}++; $h{k}'                 => 'Int:2',  'hash'],
+    ['$a[0]++; $a[0]'                 => '2',  'array'],
+    ['$a[0]+=5; $a[0]'                => '6',  'array'],
+    ['$a[0]-=2; $a[0]'                => '-1', 'array'],  # 1-2
+    ['$h{k}++; $h{k}'                 => '2',  'hash'],
     # RMW-as-VALUE: post yields OLD, pre yields NEW, += yields the sum (ONCE).
-    ['$a[0]++'                        => 'Int:1',  'array'],  # post -> old
-    ['++$a[0]'                        => 'Int:2',  'array'],  # pre  -> new
-    ['$a[0]+=5'                       => 'Int:6',  'array'],  # sum ONCE, not 11
-    ['my $x=$a[0]++; $x'              => 'Int:1',  'array'],  # captured old
-    ['$h{k}++'                        => 'Int:1',  'hash'],   # post -> old (k=1)
+    ['$a[0]++'                        => '1',  'array'],  # post -> old
+    ['++$a[0]'                        => '2',  'array'],  # pre  -> new
+    ['$a[0]+=5'                       => '6',  'array'],  # sum ONCE, not 11
+    ['my $x=$a[0]++; $x'              => '1',  'array'],  # captured old
+    ['$h{k}++'                        => '1',  'hash'],   # post -> old (k=1)
     # regressions that MUST stay correct:
-    ['$a[0]=$a[0]+1; $a[0]'           => 'Int:2',  'array'],  # manual store-back
-    ['$a[0]++; $a[1]'                 => 'Int:2',  'array'],  # sibling slot untouched
+    ['$a[0]=$a[0]+1; $a[0]'           => '2',  'array'],  # manual store-back
+    ['$a[0]++; $a[1]'                 => '2',  'array'],  # sibling slot untouched
 );
 
 for my $c (@cases) {
@@ -80,10 +103,10 @@ for my $c (@cases) {
 
 # Scalar RMW must stay correct (the fix must not touch the pad/targ path).
 subtest 'scalar RMW unaffected' => sub {
-    for my $c (['my $i=1; $i++; $i' => 'Int:2'],
-               ['my $i=1; $i+=5; $i' => 'Int:6'],
-               ['my $i=1; $i++'      => 'Int:1'],   # post -> old
-               ['my $i=1; ++$i'      => 'Int:2']) { # pre  -> new
+    for my $c (['my $i=1; $i++; $i' => '2'],
+               ['my $i=1; $i+=5; $i' => '6'],
+               ['my $i=1; $i++'      => '1'],   # post -> old
+               ['my $i=1; ++$i'      => '2']) { # pre  -> new
         my ($rk, $out) = lower_and_run($c->[0]);
         is("$rk:$out", "value:$c->[1]", "scalar [$c->[0]] -> $c->[1]");
     }

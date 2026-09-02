@@ -18,6 +18,45 @@ unless (-x $LLI) {
     plan skip_all => "lli not found at $LLI";
 }
 
+use File::Temp qw(tempfile);
+
+# Wrap a Str-repr value node in a program: print it bracketed by literal
+# sentinels, then return Undef. A program's observable contract is stdout plus
+# exit status; there is no type-tag channel. The brackets are load-bearing —
+# undef's printed face IS the empty string, so "[]" separates "correctly
+# printed empty" from "printed nothing at all".
+sub print_program {
+    my ($f, $value_node, $control_tail) = @_;
+
+    my $lb = $f->make('Constant', value => '[', const_type => 'string');
+    $lb->set_representation('Str');
+    my $rb = $f->make('Constant', value => ']', const_type => 'string');
+    $rb->set_representation('Str');
+
+    my $head = $control_tail // $f->make_cfg('Start');
+    my $print = $f->make('Print', inputs => [$lb, $value_node, $rb]);
+    $print->set_control_in($head);
+
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
+
+    return $ret;
+}
+
+sub run_lli {
+    my ($ll) = @_;
+    my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+    binmode $fh, ':utf8';
+    print $fh $ll;
+    close $fh;
+    my $out  = qx($LLI $tmp 2>&1);
+    my $exit = $? >> 8;
+    chomp $out;
+    return ($out, $exit);
+}
+
 # ---------------------------------------------------------------------------
 # U1: Constant(undef) :Undef lowers without dying.
 #
@@ -31,12 +70,23 @@ subtest 'U1: Constant(undef) :Undef lowers without dying' => sub {
     my $cundef = $f->make('Constant', value => undef, const_type => 'undef');
     $cundef->set_representation('Undef');
 
-    # Build a graph: return the undef value itself (Undef result)
-    my $ret = $f->make_cfg('Return', inputs => [$cundef]);
+    # A program observes the undef the way perl does: by printing it. Print
+    # takes a Str, so the undef goes through Coerce(Undef->Str) — the same
+    # coercion the producer inserts for a print argument. Printing an Undef
+    # directly is refused by the backend ("Print takes Str, so this needs a
+    # Coerce"), which is the correct shape, not a limitation.
+    my $to_str = $f->make('Coerce',
+        from_repr => 'Undef', to_repr => 'Str', inputs => [$cundef]);
+    $to_str->set_representation('Str');
+
+    is($cundef->representation, 'Undef',
+        'U1: the constant is Undef-repr (unobservable from stdout: undef and "" both print as nothing)');
+
+    my $ret = print_program($f, $to_str);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
-    ok(!$@, "lower() does not die for Undef-repr return: $@")
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    ok(!$@, "lower() does not die for an Undef-valued program: $@")
         or diag("error: $@");
 
     if (defined $ll) {
@@ -45,6 +95,11 @@ subtest 'U1: Constant(undef) :Undef lowers without dying' => sub {
         unlike($ll, qr/sv_/,    'U1 .ll: no sv_ function calls');
         unlike($ll, qr/libperl/,'U1 .ll: no libperl reference');
         like($ll, qr/alloca|store|Undef/i, 'U1 .ll: Undef constant emits alloca or Undef marker');
+
+        my ($out, $exit) = run_lli($ll);
+        is($exit, 0, 'U1: lli exits 0');
+        # perl: `print undef` puts nothing on stdout (measured under 5.42.0).
+        is($out, '[]', 'U1: undef prints as the empty string, like perl');
     }
 
     done_testing;
@@ -84,12 +139,20 @@ subtest 'U2: DefinedOr(Int :defined, Int) => left operand via lli' => sub {
     my $dor   = $f->make('DefinedOr', inputs => [$pa, $pb]);
     $dor->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$dor]);
-    $ret->set_control_in($vdb);
+    # Print takes a Str, so the Int result is stringified — the same coercion
+    # the producer inserts for a print argument.
+    is($dor->representation, 'Int',
+        'U2: the // result is Int-repr (the type half of the old Int: tag; a Str "3" prints identically)');
+
+    my $to_str = $f->make('Coerce',
+        from_repr => 'Int', to_repr => 'Str', inputs => [$dor]);
+    $to_str->set_representation('Str');
+
     $vdb->set_control_in($vda);
+    my $ret = print_program($f, $to_str, $vdb);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "lower() does not die for DefinedOr(Int,Int): $@")
         or diag("error: $@");
 
@@ -99,15 +162,9 @@ subtest 'U2: DefinedOr(Int :defined, Int) => left operand via lli' => sub {
         unlike($ll, qr/sv_/,    'U2 .ll: no sv_ C-API symbols');
         unlike($ll, qr/libperl/,'U2 .ll: no libperl reference');
 
-        # Run through lli and check the result
-        use File::Temp qw(tempfile);
-        my ($fh, $tmpfile) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-        print $fh $ll;
-        close $fh;
-
-        my $lli_out = `$LLI $tmpfile 2>/dev/null`;
-        chomp $lli_out;
-        is($lli_out, 'Int:3', 'U2 lli output is Int:3 (3//7 = 3, left is defined)');
+        my ($lli_out, $lli_exit) = run_lli($ll);
+        is($lli_exit, 0, 'U2: lli exits 0');
+        is($lli_out, '[3]', 'U2 prints 3 (3//7 = 3, left is defined)');
     }
 
     done_testing;
@@ -152,12 +209,20 @@ subtest 'U3: DefinedOr(Undef :undef, Int) => right operand via lli' => sub {
     my $dor   = $f->make('DefinedOr', inputs => [$pa, $pb]);
     $dor->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$dor]);
-    $ret->set_control_in($vdb);
+    # Print takes a Str, so the Int result is stringified — the same coercion
+    # the producer inserts for a print argument.
+    is($dor->representation, 'Int',
+        'U3: the // result is Int-repr (the type half of the old Int: tag; a Str "7" prints identically)');
+
+    my $to_str = $f->make('Coerce',
+        from_repr => 'Int', to_repr => 'Str', inputs => [$dor]);
+    $to_str->set_representation('Str');
+
     $vdb->set_control_in($vda);
+    my $ret = print_program($f, $to_str, $vdb);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, "lower() does not die for DefinedOr(Undef,Int): $@")
         or diag("error: $@");
 
@@ -173,72 +238,66 @@ subtest 'U3: DefinedOr(Undef :undef, Int) => right operand via lli' => sub {
         like($ll, qr/store i1/, 'U3 .ll: store i1 present (defined bit stored to alloca slot)');
         like($ll, qr/load i1/, 'U3 .ll: load i1 present (defined bit loaded at runtime)');
 
-        # Run through lli and check the result
-        use File::Temp qw(tempfile);
-        my ($fh, $tmpfile) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-        print $fh $ll;
-        close $fh;
-
-        my $lli_out = `$LLI $tmpfile 2>/dev/null`;
-        chomp $lli_out;
-        is($lli_out, 'Int:7', 'U3 lli output is Int:7 (undef//7 = 7, right operand)');
+        my ($lli_out, $lli_exit) = run_lli($ll);
+        is($lli_exit, 0, 'U3: lli exits 0');
+        is($lli_out, '[7]', 'U3 prints 7 (undef//7 = 7, right operand)');
     }
 
     done_testing;
 };
 
 # ---------------------------------------------------------------------------
-# U4: TypeTag extended — llvm_prefixes contains Undef entry.
+# U4: REMOVED — it pinned the type-tag mechanism, which is being deleted.
 #
-# The TypeTag module must have an Undef entry in llvm_prefixes().
-# This is the pinning test: TypeTag is the single source of truth for tag
-# prefixes; the LLVM backend hard-codes these, pinned equal by this test.
-# ---------------------------------------------------------------------------
-subtest 'U4: TypeTag has Undef entry in llvm_prefixes' => sub {
-    use_ok('Chalk::CodeGen::Harness::TypeTag');
-    my $prefixes = Chalk::CodeGen::Harness::TypeTag->llvm_prefixes();
-    ok(exists $prefixes->{Undef}, 'TypeTag::llvm_prefixes has Undef key');
-    if (exists $prefixes->{Undef}) {
-        ok(defined $prefixes->{Undef}{perl_tag_prefix}, 'Undef entry has perl_tag_prefix');
-        ok(defined $prefixes->{Undef}{llvm_fmt_c},      'Undef entry has llvm_fmt_c');
-        is($prefixes->{Undef}{perl_tag_prefix}, 'Undef:', 'Undef perl_tag_prefix is "Undef:"');
-        # "Undef:\n\0" = U,n,d,e,f,:,\n,\0 = 8 bytes
-        is($prefixes->{Undef}{llvm_fmt_c}, 'Undef:\0A\00', 'Undef llvm_fmt_c is "Undef:\\0A\\00"');
-    }
-    done_testing;
-};
-
-# ---------------------------------------------------------------------------
-# U5: Undef return path — lli prints "Undef:" when result repr is Undef.
+# U4 asserted that Chalk::CodeGen::Harness::TypeTag->llvm_prefixes has an Undef
+# entry whose perl_tag_prefix is "Undef:" and whose llvm_fmt_c is the bytes of
+# "Undef:\n\0". Those are properties of the type-tag epilogue itself — the
+# channel a program does not have — so there is nothing to convert them into.
+# A program's undef is observed by printing it, which U1 now does.
 #
-# A graph that returns a Constant(undef) :Undef must produce lli output
-# matching the TypeTag oracle "Undef:". This exercises the return-value
-# epilogue for Undef-typed results.
+# If TypeTag survives for other consumers, its Undef entry belongs in a TypeTag
+# unit test, not here.
+#
 # ---------------------------------------------------------------------------
-subtest 'U5: Undef return repr prints "Undef:" via lli' => sub {
+# U5: REMOVED — same reason, one layer down.
+#
+# U5 asserted that the return-value epilogue prints "Undef:" for an Undef-repr
+# result. That IS the epilogue. With it deleted a program returning undef
+# prints nothing and exits 0, which is what the U5-shaped case below checks.
+# ---------------------------------------------------------------------------
+subtest 'U5: a program whose result is undef prints nothing and exits 0' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
+    # No Print at all: the whole program is `return undef`. Its entire
+    # observable contract is empty stdout plus exit 0.
     my $cundef = $f->make('Constant', value => undef, const_type => 'undef');
     $cundef->set_representation('Undef');
+    my $start = $f->make_cfg('Start');
     my $ret = $f->make_cfg('Return', inputs => [$cundef]);
+    $ret->set_control_in($start);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
-    ok(!$@, "lower() does not die for Undef return: $@")
+    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    ok(!$@, "lower() does not die for an undef-result program: $@")
         or diag("error: $@");
 
     if (defined $ll) {
-        unlike($ll, qr/Perl_/, 'U5 .ll: no Perl_ C-API symbols');
+        unlike($ll, qr/Perl_/,  'U5 .ll: no Perl_ C-API symbols');
         unlike($ll, qr/libperl/,'U5 .ll: no libperl reference');
 
-        use File::Temp qw(tempfile);
-        my ($fh, $tmpfile) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-        print $fh $ll;
-        close $fh;
+        my ($lli_out, $lli_exit) = run_lli($ll);
+        is($lli_exit, 0,  'U5: lli exits 0');
+        is($lli_out,  '', 'U5: nothing on stdout - no type-tag epilogue');
 
-        my $lli_out = `$LLI $tmpfile 2>/dev/null`;
-        chomp $lli_out;
-        is($lli_out, 'Undef:', 'U5 lli output is "Undef:" (type-tagged undef)');
+        # Control: the SAME program shape with a Print does reach stdout, so
+        # the empty result above is a real empty and not a dead lowering.
+        my $g = Chalk::IR::NodeFactory->new;
+        my $lit = $g->make('Constant', value => 'x', const_type => 'string');
+        $lit->set_representation('Str');
+        my $ll2 = Chalk::Target::LLVM->lower(print_program($g, $lit), program_mode => 1);
+        my ($out2, $exit2) = run_lli($ll2);
+        is($exit2, 0,    'U5 control: the printing twin exits 0');
+        is($out2,  '[x]','U5 control: the printing twin does reach stdout');
     }
 
     done_testing;
