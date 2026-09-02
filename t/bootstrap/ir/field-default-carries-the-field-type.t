@@ -4,6 +4,7 @@
 use 5.42.0;
 use utf8;
 use Test2::V0;
+use File::Temp ();
 
 use Chalk::IR::Serialize::JSON;
 
@@ -100,6 +101,68 @@ PROG
     is $dv->operation, 'Constant', 'the default is a scalar constant';
     is $dv->representation, 'Int',
         'the producer answer survives -- it is narrower than the field record';
+};
+
+# WHY A `:param` FIELD IS `Scalar` EVEN WITH A TYPED DEFAULT, and why the
+# reverse of this file's rule would be a miscompile.
+#
+# `field $s :param = "hi"` records type `Scalar`, not `Str`, and that is not a
+# gap in the producer -- it is the join of the default with what `:param`
+# admits. Measured on perl 5.42.0:
+#
+#     field $s :param = "hi"
+#     P->new->get              "hi"          the default
+#     P->new(s => 42)->get     42            an Int
+#     P->new(s => [1,2])->get  an ARRAY ref  not even a scalar value
+#
+# A caller may pass ANYTHING, so the default's `Str` is a true fact about the
+# INITIALISER and a false one about the FIELD. Taking the field's type FROM its
+# default -- the reverse of the rule this file pins -- would stamp `Str` on a
+# slot that legitimately holds an Int or a reference, and the read side would
+# then decode a %Slot as a %Str. That is a miscompile, not an imprecision.
+#
+# WITHOUT `:param` the constructor REJECTS the argument (measured: `Q->new(s =>
+# 42)` dies), so nothing but the default can ever reach the field and its type
+# is safe. That is the case the subtest above exercises.
+#
+# Reported by perl5-son (2026-09-02) and verified here independently. Pinned
+# because "type the field from its default" is the obvious repair to reach for
+# when a Str field default misbehaves, and it is correct only for the
+# non-:param half.
+# Written to a file rather than passed with -e: the programs are multi-line and
+# carry quotes of both kinds, which no amount of shell escaping survives
+# reliably.
+sub run_perl ($src) {
+    my ($fh, $tmp) = File::Temp::tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print {$fh} $src;
+    close $fh;
+    return scalar qx($^X $tmp 2>&1);
+}
+
+subtest ':param widens a field beyond its default, and perl says so' => sub {
+    # perl is the oracle -- the claim is about the LANGUAGE, so asserting it
+    # against chalk's own tables would be the table grading its own homework.
+    my $with_param = <<'PERL';
+use 5.42.0;
+use experimental 'class';
+class P { field $s :param = "hi"; method get { $s } }
+package main;
+print ref(P->new(s => [1,2])->get) || 'not-a-ref';
+PERL
+    my $out = run_perl($with_param);
+    is $out, 'ARRAY',
+        'a :param field accepts an ArrayRef despite a Str default -- so its type is Scalar';
+
+    my $without_param = <<'PERL';
+use 5.42.0;
+use experimental 'class';
+class Q { field $s = "hi"; method get { $s } }
+package main;
+print eval { Q->new(s => 42); 1 } ? 'accepted' : 'rejected';
+PERL
+    my $out2 = run_perl($without_param);
+    is $out2, 'rejected',
+        'a field WITHOUT :param rejects a constructor argument -- its default type is safe';
 };
 
 done_testing;
