@@ -902,3 +902,121 @@ context: scalar
 ```
 
 L: GAP: the callee is emitted once at the joined type (%Str) but the Int callsite passes a raw i64 -- no coercion at the call boundary
+
+## F23 `map` in SCALAR context is a count, not a stringified list
+
+The polarity F20 cannot see. F20 reads `my @m = map {...}` -- LIST context --
+and every corpus case for map and grep does the same, so the scalar reading had
+no coverage at all. It was a live miscompile on the producer side: map and grep
+lower to a counted loop with a `ListAppend` accumulator, and the scalar reading
+took the ACCUMULATOR, emitting `Coerce(Phi:Array -> Str)` -- stringifying the
+result list where perl prints a count. Fixed in perl5-son 07fcdca, which now
+inserts a `Count` before the coercion.
+
+Measured on 5.42.0, and the two readings are not close:
+
+    my $n = map  { $_*2 } (1,2,3)    3          a count
+    my @l = map  { $_*2 } (1,2,3)    (2,4,6)    the values
+
+Third instance of the same shape as `scalar reverse` and `scalar keys`: one
+rule covering several builtins, satisfied only by the ones that really are
+counts. The optree carried the answer the whole time (`mapstart sK` vs `lK`)
+and nothing read it.
+
+Filed as a pair with F20 for the reason the `exists` pair exists: a fix that
+made BOTH readings a count would pass a scalar-only case, and a fix that made
+both a list would pass a list-only case. Neither polarity alone can catch its
+own inversion.
+
+```perl
+# source
+use 5.42.0;
+my $n = map { $_ * 2 } (1,2,3);
+print $n, "\n";
+```
+
+```behavior
+stdout: 3\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+L: GAP(Length.operand reaches the backend with no representation -- the ListAppend accumulator is untyped; same blocker as F19/F20, not a context defect)
+```
+
+## F24 `grep` in SCALAR context is a count
+
+The same defect and the same fix, reached through the other block-taking
+builtin. Kept separate from F23 because a fix scoped to one builtin closes only
+that one -- the reason F18/F19/F20 are three cases rather than one.
+
+    my $n = grep { $_>1 } (1,2,3)    2          a count
+    my @l = grep { $_>1 } (1,2,3)    (2,3)      the values
+
+```perl
+# source
+use 5.42.0;
+my $n = grep { $_ > 1 } (1,2,3);
+print $n, "\n";
+```
+
+```behavior
+stdout: 2\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+L: GAP(Length.operand reaches the backend with no representation -- the ListAppend accumulator is untyped; same blocker as F19/F20, not a context defect)
+```
+
+## F25 `split` in scalar context
+
+`split` in scalar context yields the FIELD COUNT. It used to take down the
+producer's stack simulator rather than refusing: `split` is registered as a
+'mark' pop, but the scalar form has NO pushmark (the list form fuses into the
+assignment), so `pop_to_mark` died with "No mark on mark stack".
+
+THAT CLASS IS WORSE THAN A GAP: an internal error sends the reader after a
+simulator bug instead of a named construct, so the honest refusal underneath it
+never gets written. It now refuses by name (perl5-son 07fcdca).
+
+```perl
+# source
+use 5.42.0;
+my $n = split(/,/, "a,b");
+print $n, "\n";
+```
+
+```behavior
+stdout: 2\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+L: GAP(split refuses by name: the fields are not built at this point, so a shape whose operands are not on the stack cannot be constructed)
+```
+
+## F26 `split` in list context
+
+The other polarity, written at the same time rather than later. `split` in list
+context yields the fields themselves.
+
+```perl
+# source
+use 5.42.0;
+my @f = split(/,/, "a,b");
+print $f[0], "\n";
+```
+
+```behavior
+stdout: a\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+L: GAP(split refuses by name: the fields are not built at this point, so a shape whose operands are not on the stack cannot be constructed)
+```
