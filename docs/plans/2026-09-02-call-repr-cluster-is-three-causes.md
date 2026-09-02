@@ -139,3 +139,19 @@ builtin::is_bool boolean".
 
 This is a one-line lattice fact on the producer side. With `Print => Boolean`
 the join lands on Boolean and both L5 cases lower again.
+
+## RETRACTED 2026-09-02: `print` is Scalar, and Scalar is right
+
+The section above asked the producer to stamp `Print => Boolean`. **That was
+wrong and it is withdrawn.** perl5-son declined it with a measurement I had not
+made, and I have since reproduced that measurement independently:
+
+    print ""                                 -> 1,     is_bool TRUE
+    print {$handle_opened_for_input} "x"     -> undef, is_bool FALSE
+
+A failed print returns `undef`, warns ("Filehandle $ro opened only for input"),
+and DOES NOT DIE. That is reachable without contrivance: a closed STDOUT, a
+failed write, a full disk.
+
+So `print` yields `join(Boolean, Undef)`, and in this lattice that join is
+exactly **Scalar**. The producers
