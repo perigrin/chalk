@@ -120,19 +120,45 @@ TWO THINGS FOUND ALONG THE WAY, both pre-existing:
 - the IR suite went 6 failing files -> 4. The collapse closed
   `emitted-ir-is-well-typed.t` as a side effect.
 
-### Step 4 remains, and it is a DECISION not a refactor
+### Step 4: DONE -- keep it (3e29a367)
 
-`enc` is write-only: ONE writer (`_str_aggregate`), ZERO readers, and no caller
-passing a non-default. Measured, not assumed.
+perigrin: keep `enc`, "because we are definitely going to need it", and set the
+default to UTF-8 even though that breaks strict perl compatibility.
 
-    delete it   loses the non-ASCII design intent the %Str block documents,
-                and the encoding field is the only place that intent is
-                expressed in the layout
-    keep it     costs 4 bytes per boxed string and leaves a field that nothing
-                reads -- the shape this plan calls residue everywhere else
+IT IS NOT SPECULATIVE, which settles the question this plan left open.
+Measured in this repo:
 
-Not decided here because the answer depends on whether non-ASCII strings are
-going to be supported, which is a product question. Left for perigrin.
+    56 files under lib/Chalk carry non-ASCII bytes
+    174 declare `use utf8`
+    MOP.pm:81 has an em-dash INSIDE A `die` STRING -- string DATA, not a comment
+
+Self-hosting means compiling that source. (A non-ASCII literal GAPs honestly
+today rather than miscompiling -- verified.)
+
+AND THE FIELD'S SHAPE WAS WRONG IN MY FIRST PASS. I modelled it as a
+bytes-vs-characters flag with a closed three-value enum. perigrin corrected it:
+`enc` identifies a CHARACTER SET -- UTF-8, UTF-16, Shift-JIS, EUC-JP, the
+ISO-8859 family, EBCDIC; perl's own Encode knows 124. Bytes vs characters is a
+CONSEQUENCE of the encoding, not the question the field asks, and an enum is
+the wrong shape to grow. It is now a REGISTRY that dies on an unregistered
+name -- the refusal being the load-bearing part, since defaulting for an
+unrecognised encoding produces a module that runs and is wrong.
+
+A REAL DEFECT FELL OUT OF DECIDING THIS: none of the three heap-boxing sites
+wrote `enc` at all -- they stored ptr and len and left the third field as
+malloc garbage. Invisible while nothing reads it, and a heisenbug scheduled for
+the day a reader lands, surfacing in the READER rather than at the write that
+skipped it. All three now write it.
+
+## THE MIGRATION IS COMPLETE
+
+    step 1  widen to three fields                   1d58184c
+    step 2  collapse the emitted name               1d58184c
+    step 3  one need-flag; I3 re-emit deleted       86310af1
+    step 4  enc kept, registry, utf8 default        3e29a367
+
+Every step gated separately against pinned producer 07fcdca with every leg
+identical: gate-green=214 behavior=216 shape=215 invariant=221 worklist=8.
 
 ## What forced this to be written down
 
