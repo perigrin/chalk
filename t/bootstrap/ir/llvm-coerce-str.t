@@ -11,7 +11,6 @@ use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Node::Return;
 use Chalk::Target::LLVM;
-use Chalk::CodeGen::Harness::TypeTag;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 my $P   = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
@@ -35,23 +34,9 @@ sub run_lli {
     return ($out, $exit);
 }
 
-# ---------------------------------------------------------------------------
-# Helper: run perl oracle on a Str-to-numeric expression
-#   perl_str_to_num("abc")  -> what perl gives for "abc" + 0
-# ---------------------------------------------------------------------------
-sub perl_oracle_str_to_num {
-    my ($str) = @_;
-    # Use the TypeTag oracle fragment to get the canonical tag for perl's result.
-    # This uses the same non-finite detection (Inf/-Inf/NaN -> Num:) as TypeTag.
-    my $frag = Chalk::CodeGen::Harness::TypeTag::oracle_perl_fragment();
-    (my $escaped = $str) =~ s/\\/\\\\/g;
-    $escaped =~ s/"/\\"/g;
-    my $cmd = qq{$P -e 'my \$_result = "$escaped" + 0; $frag'};
-    my $out = qx($cmd 2>/dev/null);
-    chomp $out;
-    return $out;
-}
-
+# The Str->Num side has no helper of its own: the last subtest runs live perl
+# inline (`print "[", "$str" + 0, "]"`), which is exactly the expression a
+# program would print, with nothing to strip or reconcile.
 sub perl_oracle_str_to_bool {
     my ($str) = @_;
     (my $escaped = $str) =~ s/\\/\\\\/g;
@@ -90,10 +75,10 @@ sub make_print_program {
 # Constant(str :Str) -> Coerce(Str->Num) :Num -> Coerce(Num->Str) -> Print
 #
 # The second Coerce is not decoration: Print takes a Str, so a Num must be
-# stringified exactly as a source program stringifies it. Returns the Return
-# node plus the :Num node, so the caller can assert the REPRESENTATION —
-# printing a Num erases the Num-vs-Int distinction that the old Num: tag
-# carried, so that half of the old assertion moves onto the node.
+# stringified exactly as a source program stringifies it. Printing a Num erases
+# the Num-vs-Int distinction that the old Num: tag carried; the caller recovers
+# that half from the emitted IR, which routes a Num through @chalk_str_to_num
+# where an Int would not go.
 sub make_str_to_num_graph {
     my ($str_val) = @_;
     my $f = Chalk::IR::NodeFactory->new;
@@ -123,9 +108,9 @@ sub make_str_to_num_graph {
 #
 # The Boolean cannot be printed directly — the backend refuses ("Print takes
 # Str, so this needs a Coerce"), which is exactly how a source program observes
-# a boolean. Returns the :Boolean node so the caller can assert its repr: the
-# old Bool: tag's type half is not recoverable from stdout, since a false
-# Boolean's Str face and an empty Str both print as nothing.
+# a boolean. The old Bool: tag's type half is not recoverable from stdout — a
+# false Boolean's Str face and an empty Str both print as nothing — so the
+# caller recovers it from the emitted IR, where only a Boolean selects over i1.
 sub make_str_to_bool_graph {
     my ($str_val) = @_;
     my $f = Chalk::IR::NodeFactory->new;
@@ -173,15 +158,11 @@ sub make_str_to_bool_graph {
 # ".5"    -> 0.5   (leading dot)
 # "0x10"  -> 0     (perl does NOT parse hex)
 #
-# The non-finite cases are a REAL BACKEND BUG, not a conversion artifact, and
-# are held in a separate TODO table below. perl prints Inf/-Inf/NaN
-# (capitalized); Coerce(Num->Str) is a bare snprintf("%.15g") — see the
-# `from eq 'Num'` branch of Chalk::Target::LLVM::Context — with no non-finite
-# fixup, so it emits C's lowercase inf/-inf/nan. The deleted type-tag epilogue
-# DID have the fixup (fcmp uno / fcmp oeq against the Inf bit patterns,
-# selecting @num_inf_str/@num_ninf_str/@num_nan_str in Chalk::Target::LLVM),
-# which is why the divergence only surfaces once the epilogue goes. The fix is
-# to move that fixup into the Num->Str Coerce, where a real program reaches it.
+# The non-finite cases live in their own table below because they exercise a
+# separate branch: Coerce(Num->Str) special-cases Inf/-Inf/NaN with fcmp uno /
+# fcmp oeq against the Inf bit patterns (see the `from eq 'Num'` branch of
+# Chalk::Target::LLVM::Context), so that a program prints perl's capitalized
+# Inf/-Inf/NaN rather than C's lowercase inf/-inf/nan.
 # ---------------------------------------------------------------------------
 
 my @str_to_num_cases = (
@@ -198,8 +179,7 @@ my @str_to_num_cases = (
     ["0x.8p0",   "0",  "hex-float 0x.8p0 not parsed by perl -> 0"],
 );
 
-# Expected value is what PERL prints. Chalk currently prints the lowercase C
-# face, so these are TODO: they fail loudly the day the Coerce is fixed.
+# Expected value is what PERL prints: the capitalized Inf/-Inf/NaN faces.
 my @str_to_num_nonfinite = (
     ["inf",      "Inf",  "inf -> Inf (perl-style)"],
     ["Inf",      "Inf",  "Inf -> Inf (already capitalized)"],
@@ -220,9 +200,6 @@ subtest 'Coerce(Str->Num) adversarial cases: printed value == perl' => sub {
 
         # The type half of the old Num: tag — unrecoverable from stdout, since
         # a Num-repr 0 and an Int-repr 0 both print as "0".
-        is($num_node->representation, 'Num',
-            "$desc: the coerced node is Num-repr (the type half of the old tag)");
-
         my $ll = eval { Chalk::Target::LLVM->lower($ret_node, program_mode => 1) };
         if ($@) {
             fail("$desc: LLVM lowering failed: $@");
@@ -230,6 +207,15 @@ subtest 'Coerce(Str->Num) adversarial cases: printed value == perl' => sub {
             fail("$desc: (skip)");
             next;
         }
+
+        # The type half of the old Num: tag. Asserting $num_node->representation
+        # would be a tautology -- make_str_to_num_graph sets that field itself.
+        # The emitted IR is the independent witness: the Num path routes through
+        # @chalk_str_to_num (perl's leading-numeric scan) and stringifies the
+        # resulting double with snprintf("%.15g"). An Int-repr value takes
+        # neither, so this fails if the node stops being a Num.
+        like($ll, qr/call double \@chalk_str_to_num/,
+            "$desc: lowered through the Num path (the type half of the old tag)");
 
         my ($lli_out, $lli_exit) = run_lli($ll);
 
@@ -240,8 +226,8 @@ subtest 'Coerce(Str->Num) adversarial cases: printed value == perl' => sub {
     }
 };
 
-# Non-finite: perl's capitalized face vs the C lowercase face the Num->Str
-# Coerce currently emits. TODO because the backend is wrong, not the test.
+# Non-finite: the Num->Str Coerce must print perl's capitalized face, not the
+# lowercase one C's snprintf would give.
 subtest 'Coerce(Str->Num) non-finite: printed value == perl' => sub {
     plan tests => scalar(@str_to_num_nonfinite) * 2;
 
@@ -259,16 +245,8 @@ subtest 'Coerce(Str->Num) non-finite: printed value == perl' => sub {
         my ($lli_out, $lli_exit) = run_lli($ll);
 
         is($lli_exit, 0, "$desc: lli exits 0");
-
-        TODO: {
-            local $TODO = 'Coerce(Num->Str) is a bare snprintf("%.15g") with no '
-                        . 'non-finite fixup, so it prints C lowercase inf/-inf/nan '
-                        . 'where perl prints Inf/-Inf/NaN. The deleted type-tag '
-                        . 'epilogue had the fcmp-based fixup; it needs to move into '
-                        . 'the Coerce.';
-            is($lli_out, "[$expected]",
-                "$desc: printed '$lli_out' == expected '[$expected]'");
-        }
+        is($lli_out, "[$expected]",
+            "$desc: printed '$lli_out' == expected '[$expected]'");
     }
 };
 
@@ -304,9 +282,6 @@ subtest 'Coerce(Str->Boolean) edge cases: printed Str face == perl' => sub {
         my ($ret_node, $bool_node) = make_str_to_bool_graph($str);
 
         # The type half of the old Bool: tag.
-        is($bool_node->representation, 'Boolean',
-            "$desc: the coerced node is Boolean-repr (the type half of the old tag)");
-
         my $ll = eval { Chalk::Target::LLVM->lower($ret_node, program_mode => 1) };
         if ($@) {
             fail("$desc: LLVM lowering failed: $@");
@@ -315,6 +290,13 @@ subtest 'Coerce(Str->Boolean) edge cases: printed Str face == perl' => sub {
             fail("$desc: (skip)");
             next;
         }
+
+        # The type half of the old Bool: tag, asserted on the emitted IR rather
+        # than on the node (the test sets the node's field itself, so reading it
+        # back proves nothing). A Boolean reaches stdout only by selecting
+        # between the "1" and "" faces on an i1; a plain Str never does.
+        like($ll, qr/select i1 .*Coerce\[Boolean->Str\]/,
+            "$desc: lowered through the Boolean path (the type half of the old tag)");
 
         my ($lli_out, $lli_exit) = run_lli($ll);
 

@@ -9,7 +9,6 @@ use lib 'lib', 't/lib';
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
-use Chalk::CodeGen::Harness::TypeTag;
 
 my $P   = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $LLI = '/usr/lib/llvm-15/bin/lli';
@@ -20,8 +19,9 @@ unless (-x $LLI) {
 
 sub perl_oracle {
     my ($src) = @_;
-    my $tag = Chalk::CodeGen::Harness::TypeTag::oracle_perl_fragment();
-    my $prog = "use 5.42.0; use utf8;\nmy \$_result = do { $src };\n$tag\n";
+    my $prog = "use 5.42.0; use utf8;\n"
+             . "my \$_result = do { $src };\n"
+             . "print '[', \$_result // '', \"]\\n\";\n";
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.pl', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -34,9 +34,43 @@ sub perl_oracle {
     return $out;
 }
 
+# Print the returned value on stdout, bracketed, instead of relying on a
+# type-tag epilogue: rebuild the Return so the value flows through
+# Coerce->Str into a Print hung off the graph's existing control chain.
+sub print_returned_value {
+    my ($f, $ret_node) = @_;
+
+    my $v = $ret_node->inputs->[0];
+    my $s = $v;
+    if (($v->representation // '') ne 'Str') {
+        $s = $f->make('Coerce', inputs => [$v],
+            from_repr => $v->representation, to_repr => 'Str');
+        $s->set_representation('Str');
+    }
+
+    my $open = $f->make('Constant', value => '[', const_type => 'string');
+    $open->set_representation('Str');
+    my $close = $f->make('Constant', value => "]\n", const_type => 'string');
+    $close->set_representation('Str');
+
+    my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    for my $part ($open, $s, $close) {
+        my $p = $f->make('Print', inputs => [$part]);
+        $p->set_control_in($ctrl);
+        $ctrl = $p;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
+}
+
 sub lli_run {
-    my ($ret_node, $mop) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop);
+    my ($ret_node, $mop, $factory) = @_;
+    $ret_node = print_returned_value($factory, $ret_node) if $factory;
+    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop, program_mode => 1);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -76,7 +110,7 @@ subtest 'Call(name=new): class-simple ref($e) => "Empty" (Str)' => sub {
     my $ret = $f->make_cfg('Return', inputs => [$ref_result]);
 
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop, $f) };
     ok(!$@, "Call(new) lowering + lli succeeded: $@") or do {
         diag("Error: $@");
         return;
@@ -143,7 +177,7 @@ subtest 'Call(name=new): field-attrs Pair->new(left=>10, right=>20), left+right 
     my $ret = $f->make_cfg('Return', inputs => [$result]);
 
     my ($lli_out, $ll_text);
-    eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };
+    eval { ($lli_out, $ll_text) = lli_run($ret, $mop, $f) };
     ok(!$@, "Call(new) with :param fields succeeded: $@") or do {
         diag("Error: $@");
         return;

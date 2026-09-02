@@ -9,7 +9,6 @@ use lib 'lib', 't/lib';
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
-use Chalk::CodeGen::Harness::TypeTag;
 
 my $P   = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $LLI = '/usr/lib/llvm-15/bin/lli';
@@ -18,10 +17,13 @@ unless (-x $LLI) {
     plan skip_all => "lli not found at $LLI";
 }
 
+# Run the equivalent perl program and capture what it PRINTS -- a program's
+# observable contract is stdout, not a type tag. The brackets are load-bearing:
+# they separate "correctly printed the empty string" from "printed nothing".
 sub perl_oracle {
     my ($src) = @_;
-    my $tag = Chalk::CodeGen::Harness::TypeTag::oracle_perl_fragment();
-    my $prog = "use 5.42.0; use utf8;\nmy \$_result = do { $src };\n$tag\n";
+    my $prog = "use 5.42.0; use utf8;\nmy \$_result = do { $src };\n"
+             . "print \"[\", \$_result, \"]\";\n";
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.pl', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -30,13 +32,44 @@ sub perl_oracle {
     my $out = qx($P $f 2>&1);
     my $exit = $? >> 8;
     die "perl oracle failed (exit $exit): $out" if $exit;
-    chomp $out;
     return $out;
+}
+
+# Wrap a value node in a program that PRINTS it bracketed, then returns Undef.
+# A program's observable contract is stdout plus exit status, so the value has
+# to reach stdout the way a source program would: Print takes a Str, so a
+# non-Str value is stringified through a Coerce first, exactly as source would.
+sub make_print_program {
+    my ($f, $value_node, $repr) = @_;
+
+    my $str = $repr eq 'Str' ? $value_node
+        : do {
+            my $c = $f->make('Coerce', inputs => [$value_node],
+                from_repr => $repr, to_repr => 'Str');
+            $c->set_representation('Str');
+            $c;
+        };
+
+    my $lb = $f->make('Constant', value => '[', const_type => 'string');
+    $lb->set_representation('Str');
+    my $rb = $f->make('Constant', value => ']', const_type => 'string');
+    $rb->set_representation('Str');
+
+    my $start = $f->make_cfg('Start');
+    my $print = $f->make('Print', inputs => [$lb, $str, $rb]);
+    $print->set_control_in($start);
+
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
+
+    return $ret;
 }
 
 sub lli_run {
     my ($ret_node, $mop) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop);
+    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop, program_mode => 1);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -45,7 +78,6 @@ sub lli_run {
     my $out = qx($LLI $f 2>&1);
     my $exit = $? >> 8;
     die "lli failed (exit $exit): $out" if $exit;
-    chomp $out;
     return ($out, $ll);
 }
 
@@ -82,7 +114,7 @@ subtest 'Call(dispatch_kind=method, name=greet): $g->greet => 42 (Int)' => sub {
     );
     $result->set_representation('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$result]);
+    my $ret = make_print_program($f, $result, 'Int');
 
     my ($lli_out, $ll_text);
     eval { ($lli_out, $ll_text) = lli_run($ret, $mop) };

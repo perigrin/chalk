@@ -10,7 +10,6 @@ use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Return;
 use Chalk::Target::LLVM;
-use Chalk::CodeGen::Harness::TypeTag;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 

@@ -9,10 +9,8 @@ use lib 'lib', 't/lib';
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
-use Chalk::CodeGen::Harness::TypeTag;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
-my $P   = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 
 unless (-x $LLI) {
     plan skip_all => "lli not found at $LLI";
@@ -30,21 +28,37 @@ unless (-x $LLI) {
 #
 # Fix: after each method body lowers, propagate ALL _need_* from $body_ctx to $ctx.
 
-# Helper: run perl and get type-tagged output
-sub perl_oracle {
-    my ($src) = @_;
-    my $tag_fragment = Chalk::CodeGen::Harness::TypeTag::oracle_perl_fragment();
-    my $prog = "use 5.42.0; use utf8;\nmy \$_result = do { $src };\n$tag_fragment\n";
-    require File::Temp;
-    my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.pl', UNLINK => 1);
-    binmode $fh, ':utf8';
-    print $fh $prog;
-    close $fh;
-    my $out = qx($P $f 2>&1);
-    my $exit = $? >> 8;
-    die "perl oracle failed (exit $exit): $out" if $exit;
-    chomp $out;
-    return $out;
+# Wrap a value node in a program that PRINTS it bracketed, then returns Undef.
+# A program's observable contract is stdout plus exit status; Print takes a
+# Str, so a non-Str value is stringified through a Coerce exactly as a source
+# program would.  The brackets separate "correctly printed empty" from
+# "printed nothing at all".
+sub make_print_program {
+    my ($f, $value_node, $repr) = @_;
+
+    my $str = $repr eq 'Str' ? $value_node
+        : do {
+            my $c = $f->make('Coerce', inputs => [$value_node],
+                from_repr => $repr, to_repr => 'Str');
+            $c->set_representation('Str');
+            $c;
+        };
+
+    my $lb = $f->make('Constant', value => '[', const_type => 'string');
+    $lb->set_representation('Str');
+    my $rb = $f->make('Constant', value => ']', const_type => 'string');
+    $rb->set_representation('Str');
+
+    my $start = $f->make_cfg('Start');
+    my $print = $f->make('Print', inputs => [$lb, $str, $rb]);
+    $print->set_control_in($start);
+
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
+
+    return $ret;
 }
 
 # Helper: lower a Return node to .ll and run lli
@@ -150,9 +164,15 @@ subtest 'method body Coerce(Boolean->Str) emits no undeclared globals' => sub {
         or diag("missing chalk_str_to_num DEFINITION in .ll (F6 bug: _need_str_to_num_helper not propagated);\n"
                 . "first 600 chars:\n" . substr($ll_text, 0, 600));
 
-    my ($lli_out, undef, $err) = lli_run($ret, mop => $mop);
+    # Run it as a program: the Num result is stringified and printed, which is
+    # how a source program observes it.  perl prints "3" for the Num 3.0 that
+    # "3"+0 yields, so that is the whole expectation -- there is no tag left to
+    # carry the Num-vs-Int distinction, and the .ll assertions above are what
+    # pin the Num path (the @chalk_str_to_num definition).
+    my $prog_ret = make_print_program($f, $call, 'Num');
+    my ($lli_out, undef, $err) = lli_run($prog_ret, mop => $mop, program_mode => 1);
     if (!defined $err) {
-        like($lli_out, qr/^Num:3/, 'lli output is Num:3 (Str "3" -> Num 3.0)')
+        is($lli_out, '[3]', 'lli prints 3 (Str "3" -> Num 3.0 -> Str)')
             or diag("lli_out='${\($lli_out//'undef')}'");
     } else {
         ok(1, 'lli test skipped: MethodCall Num-return type dispatch is a pre-existing limitation');
@@ -206,14 +226,17 @@ subtest 'method body _need_memcmp propagated to prologue' => sub {
     ok(!$@, 'StrClass method body: lower() does not die')
         or do { diag("error: $@"); done_testing(); return };
 
-    # The .ll must accept lli without undeclared references
-    my ($lli_out, undef, $err) = lli_run($ret, mop => $mop);
+    # The .ll must accept lli without undeclared references, and the program
+    # must print the field it read -- "lli produced SOME output" was only ever
+    # satisfied by the type-tag epilogue, which is not a program's channel.
+    my $prog_ret = make_print_program($f, $call, 'Str');
+    my ($lli_out, undef, $err) = lli_run($prog_ret, mop => $mop, program_mode => 1);
     ok(!defined $err, 'lli accepts the .ll')
         or diag("lli error: $err\n.ll text:\n$ll_text");
 
     SKIP: {
         skip 'lli failed, cannot check output', 1 if defined $err;
-        ok(defined $lli_out && length $lli_out, 'lli produces output');
+        is($lli_out, '[hello]', 'lli prints the Str field the method returned');
     }
 };
 
@@ -286,10 +309,17 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
         'exactly one `declare i32 @memcmp` (no double-declare)')
         or diag("found " . scalar(@memcmp_decls) . " declarations");
 
-    # lli acceptance
-    my ($lli_out, undef, $err) = lli_run($ret, mop => $mop);
+    # lli acceptance, and the hash read must actually yield the stored value:
+    # a program observes { a => 1 }->{a} by printing it.
+    my $prog_ret = make_print_program($f, $call, 'Int');
+    my ($lli_out, undef, $err) = lli_run($prog_ret, mop => $mop, program_mode => 1);
     ok(!defined $err, 'lli accepts the .ll (no undeclared @memcmp)')
         or diag("lli error: $err\nfirst 800 chars of .ll:\n" . substr($ll_text // '', 0, 800));
+
+    SKIP: {
+        skip 'lli failed, cannot check output', 1 if defined $err;
+        is($lli_out, '[1]', 'lli prints the hash value the method body read');
+    }
 };
 
 done_testing();
