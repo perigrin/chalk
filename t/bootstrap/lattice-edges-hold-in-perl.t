@@ -222,4 +222,60 @@ subtest 'the untested branches are named, not hidden' => sub {
     note('Covered here: the scalar spine Int <: Num <: Str, and Boolean\'s exclusion from it.');
 };
 
+# WHY "A COERCION EXISTS" PROVES NOTHING, and therefore why this file tests
+# two factors instead of one.
+#
+# In perl almost every concrete type has a working coercion to almost every
+# other. Measured on 5.42.0 over 9 value kinds x 3 targets: 27 of 27 succeed
+# and NONE dies -- an ArrayRef, a CodeRef and a blessed Object all coerce to
+# Int without complaint. So "C(v) is defined" is nearly vacuous as evidence:
+# a lattice built on it would put CodeRef under Int.
+#
+# What separates a real subtype relation from a merely-coercible pair is what
+# the coercion COSTS, and there are two distinct costs:
+#
+#   DATA LOSS         the value does not survive. `0 + [1,2]` yields an
+#                     ADDRESS -- the coercion "succeeded" and the array is
+#                     gone. Factor 1 (membership) is what detects this: it
+#                     asks whether an admissible detour PRESERVES the value,
+#                     which an address does not.
+#
+#   BEHAVIOURAL LOSS  the value survives but stops answering. The number
+#                     `0 + [1,2]` is no longer a reference; `->[0]` on it is
+#                     meaningless. Factor 2 (substitutability) is what detects
+#                     this: it asks whether the PARENT's operations still work.
+#
+# Neither factor subsumes the other, which is the whole reason for two. The
+# Boolean case proves it in one direction -- factor 2 passes and factor 1
+# fails -- and this subtest proves the other: a pair where a coercion exists,
+# and both factors are needed to reject it.
+subtest 'a coercion existing is not evidence: it must also be lossless and behaviour-preserving' => sub {
+    no warnings;
+
+    # An ArrayRef coerces to Num. This is the fact that makes coercion-exists
+    # useless on its own.
+    my $aref = [1, 2];
+    my $as_num = eval { 0 + $aref };
+    ok(defined $as_num, 'ArrayRef DOES coerce to Num -- perl does not complain');
+
+    # DATA LOSS: what came back is an address, not the array. Round-tripping
+    # cannot recover it, which is exactly what factor 1 asks about.
+    my $back = eval { 0 + ("" . $as_num) };
+    is($back, $as_num, 'and the number round-trips as a number');
+    ok(!ref($as_num), 'but it is NOT a reference any more -- the value is gone');
+
+    # BEHAVIOURAL LOSS: the parent's operations stop working. A Ref's
+    # characteristic operation is dereferencing.
+    my $deref_survives = eval { my $x = $as_num->[0]; 1 } ? 1 : 0;
+    is($deref_survives, 0,
+        'and dereferencing it fails -- the operations did not come along');
+
+    # The lattice agrees, which is the point: ArrayRef is not under Num
+    # despite a coercion existing between them.
+    ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('ArrayRef', 'Num'),
+        'so the lattice does not place ArrayRef under Num');
+    ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('ArrayRef', 'Str'),
+        'nor under Str, for the same reason');
+};
+
 done_testing;

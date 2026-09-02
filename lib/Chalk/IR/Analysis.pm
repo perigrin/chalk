@@ -181,7 +181,7 @@ my %_NODE_OPERAND_REPR = (Print => 'Str');
 # from this table, so the loader declined to insert a Coerce for a conversion
 # that works and the operand GAPped later for the wrong reason. Two tables,
 # one claiming to mirror the other, nothing checking.
-# t/bootstrap/ir/coercible-mirrors-what-lowers.t now compares them pair by
+# t/bootstrap/ir/every-legal-coercion-is-lowered.t now compares them pair by
 # pair, in both directions, by ASKING the backend rather than grepping its
 # arms -- several pairs lower through shared paths that no
 # `$from eq X && $to eq Y` line names.
@@ -215,8 +215,17 @@ my %_COERCIBLE_TO = (
     # toward zero -- `int("3.9abc")` is 3 -- so it is Str->Num composed with
     # Num->Int, both of which were already here. Its absence meant the loader
     # declined to insert the Coerce and the operand GAPped downstream for a
-    # conversion that works. Pinned by
-    # t/bootstrap/ir/coercible-mirrors-what-lowers.t.
+    # conversion that works.
+    #
+    # IT WENT STALE RATHER THAN BEING WRONG WHEN WRITTEN, which is the point.
+    # This table was authored 2026-08-26 (f92c6869) and was accurate then. The
+    # backend GAINED the Str->Int arm on 2026-08-31 (91d50c1b), added for the
+    # %Slot tag dispatch -- reading a cell as Int has to enumerate the Str tag,
+    # because the cell may hold one. Nothing linked the two, so one side moved
+    # and the other did not. Two days, and the only symptom was a GAP that
+    # blamed the wrong layer.
+    #
+    # Pinned by t/bootstrap/ir/every-legal-coercion-is-lowered.t.
     Str   => { Num => 1, Int => 1, Boolean => 1 },
     Boolean  => { Int => 1, Num => 1, Str => 1 },
     Undef => { Int => 1, Num => 1, Str => 1, Boolean => 1 },
