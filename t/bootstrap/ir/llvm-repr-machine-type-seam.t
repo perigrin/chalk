@@ -189,10 +189,19 @@ subtest 'the method return-type authority defers to the type map' => sub {
             "$repr: the return-type answer IS the type map's answer");
     }
 
-    # Str is the one genuine divergence: a Str VALUE is %Str (ptr,len,enc) but
-    # a Str RETURN crosses the function boundary as %StrPair (ptr,len).
-    is($ret->('Str'), '%StrPair', 'Str return is %StrPair, a real ABI divergence');
-    is($map->('Str'), '%Str',     'while a Str value is %Str');
+    # THE DIVERGENCE IS GONE, which is what this now pins. A Str RETURN used
+    # to cross the function boundary as %StrPair (ptr,len) while a Str VALUE
+    # was %Str (ptr,len,enc) -- two types for one thing, and the difference was
+    # a field nothing ever read.
+    #
+    # They are one type since the collapse (see
+    # docs/plans/2026-09-02-finish-the-str-strpair-migration.md). This asserts
+    # the AGREEMENT rather than deleting the check: the return type and the
+    # value type must not drift apart again, and Str is the case where they
+    # once did.
+    is($ret->('Str'), $map->('Str'),
+        'Str: the return type and the value type are the SAME type');
+    is($map->('Str'), '%Str', 'and that type is %Str');
 
     # Remapping Num must move the return type too, or the vtable bitcast, the
     # call-site cast and the definition can disagree again.

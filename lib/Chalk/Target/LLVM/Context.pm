@@ -238,28 +238,28 @@ sub _index_elab_phis {
 }
 
 # ---------------------------------------------------------------------------
-# %StrPair SHOULD NOT STILL EXIST (perigrin, 2026-08-29). It was to be fully
+# %Str SHOULD NOT STILL EXIST (perigrin, 2026-08-29). It was to be fully
 # replaced by %Str, and was not — an INCOMPLETE MIGRATION, 47 uses live at this
 # writing. The consolidation this comment goes on to describe (four literal
 # definitions reduced to one) is a different job from the replacement, and
 # doing the first can read as having done the second.
 #
-# Measured split: %Str is the SSA VALUE type; %StrPair survives on the PAYLOAD
+# Measured split: %Str is the SSA VALUE type; %Str survives on the PAYLOAD
 # paths — Str-returning methods, ArrayRead and HashRead, where a Str is stored
 # as an i64 payload and `inttoptr`'d back. Both carry { ptr, len }; only %Str
 # carries `enc`.
 #
-# So %StrPair IS a %Str with the encoding field dropped — a REPRESENTATION
+# So %Str IS a %Str with the encoding field dropped — a REPRESENTATION
 # CHOICE that got frozen into a second type. Under the T2 framing recorded at
 # _repr_to_llvm_type, dropping `enc` where no use observes the encoding is a
 # legitimate thing for T2 to CHOOSE per site; what is wrong is that the choice
-# is currently made by which code path you are on. Retiring %StrPair is
+# is currently made by which code path you are on. Retiring %Str is
 # therefore not just cleanup: it is removing a T2 decision that was hardcoded
 # before T2 existed.
 #
-# The %StrPair layout: ONE definition, everything else derived from it.
+# The %Str layout: ONE definition, everything else derived from it.
 #
-# This was written as a literal `%StrPair = type { i8*, i64 }` at LLVM.pm:640
+# This was written as a literal `%Str = type { i8*, i64 }` at LLVM.pm:640
 # and again at :1313, with its byte size hardcoded a THIRD time as
 # `malloc(i64 16)` at two sites here — four places that had to agree, with
 # nothing enforcing it.
@@ -277,9 +277,26 @@ sub _index_elab_phis {
 my @_STRPAIR_FIELDS = (
     { name => 'ptr', llvm => 'i8*', bytes => 8 },
     { name => 'len', llvm => 'i64', bytes => 8 },
-    # NOTE: this is the BOXED HEAP CELL, deliberately still two fields. The
-    # THREE-field %Str below is the VALUE type. They are being reconciled; see
-    # the %Str block for why the value type moved first.
+    # WIDENED TO MATCH %Str (step 1 of the collapse; see
+    # docs/plans/2026-09-02-finish-the-str-strpair-migration.md).
+    #
+    # This was "deliberately still two fields" while %Str was the value type
+    # and %Str the boxed heap cell. They are the SAME LAYOUT now, which is
+    # what makes the remaining steps a substitution rather than a redesign:
+    # every site reads indices 0 and 1 (measured -- 18 hardcoded GEPs, all 0/1),
+    # so widening is invisible to readers and the third field simply rides
+    # along.
+    #
+    # The size is DERIVED (_sizeof_llvm_type over this list), so the allocation
+    # sites follow automatically -- which is exactly the property
+    # strpair-layout-single-source.t was written to guarantee before this
+    # widening could be attempted. The hardcoded `malloc(i64 16)` sites it
+    # warned about are already gone.
+    #
+    # `enc` is WRITE-ONLY today: one writer (_str_aggregate), zero readers,
+    # zero callers passing a non-default. Giving it a reader or deleting it is
+    # step 4 and a separate decision.
+    { name => 'enc', llvm => 'i32', bytes => 4 },   # 0 = ASCII/UTF-8 default
 );
 
 # ---------------------------------------------------------------------------
@@ -466,7 +483,11 @@ sub _strpair_fields { return @_STRPAIR_FIELDS }
 
 # _strpair_type_decl() -> the LLVM type declaration line.
 sub _strpair_type_decl {
-    return '%StrPair = type { '
+    # Returns the %Str declaration: @_STRPAIR_FIELDS and @_STR_FIELDS are the
+    # same layout since step 1, and the emitted name collapsed in step 2. This
+    # exists so strpair-layout-single-source.t keeps its single accessor while
+    # the remaining call sites are unwound in step 3.
+    return '%Str = type { '
          . join(', ', map { $_->{llvm} } @_STRPAIR_FIELDS)
          . ' }';
 }
@@ -497,16 +518,16 @@ sub render_str_type_once {
 
 # render_strpair_type_once() -> @llvm_lines (possibly empty)
 #
-# %StrPair's type-decl line, declared at most once per Context, guarded by
+# %Str's type-decl line, declared at most once per Context, guarded by
 # _strpair_emitted (I3: the flag that stops the post-class re-emit from
-# double-declaring when a Str :param bind already forced %StrPair before any
+# double-declaring when a Str :param bind already forced %Str before any
 # Str-returning method was found). Returns just the decl line, not a leading
 # comment -- callers push their own comment first (the wording differs by
 # call site: "for Str method return values" at the class-registry prologue
 # vs. "post-class re-emit, I3" at the F6 re-emit site).
 #
 # Also sets _need_strpair -- calling this method is itself the thing that
-# makes %StrPair needed from here on (a method body lowered afterwards must
+# makes %Str needed from here on (a method body lowered afterwards must
 # inherit the flag via configure_as_method_body's inherit_need_flags_from).
 # The class-registry call site used to set this by hand as a second line
 # right after calling this method; the post-class re-emit call site already
@@ -514,10 +535,17 @@ sub render_str_type_once {
 # no-op.
 sub render_strpair_type_once {
     my ($self) = @_;
+    # THE BOXED CELL AND THE VALUE TYPE ARE ONE TYPE NOW (step 2 of the
+    # collapse). This forwards to the %Str declaration rather than emitting a
+    # second one: two `%Str = type {...}` lines in a module is a redefinition
+    # and lli refuses it.
+    #
+    # Kept as a name rather than deleted at every call site, because the two
+    # callers mean different things by it -- the class-registry prologue
+    # declares ahead of method bodies, the I3 re-emit patches up a flag set
+    # during lowering -- and collapsing those call sites is step 3.
     $self->{_need_strpair} = 1;
-    return () if $self->{_strpair_emitted};
-    $self->{_strpair_emitted} = 1;
-    return _strpair_type_decl();
+    return $self->render_str_type_once;
 }
 
 # require_class_support() -> $self
@@ -806,12 +834,12 @@ sub render_need_flag_postclass_reemit {
     }
 
     # Post-class re-emit for _need_strpair (I3):
-    # %StrPair is declared by _emit_class_registry_ir only when some method RETURNS Str
+    # %Str is declared by _emit_class_registry_ir only when some method RETURNS Str
     # (its own LOCAL $need_strpair scan checks return_repr). But _need_strpair
     # is also set during lower_value (e.g. _lower_new when binding a Str :param
     # field), which runs BEFORE _emit_class_registry_ir. If the class has no Str-returning
-    # method (LOCAL scan returns 0) but a Str :param is bound, _lower_new emits %StrPair*
-    # references without %StrPair being declared — lli rejects. render_strpair_type_once's
+    # method (LOCAL scan returns 0) but a Str :param is bound, _lower_new emits %Str*
+    # references without %Str being declared — lli rejects. render_strpair_type_once's
     # own _strpair_emitted guard prevents double-declare.
     if ($self->{_need_strpair}) {
         my @strpair_lines = $self->render_strpair_type_once;
@@ -2536,7 +2564,7 @@ sub _emit_read_slot_as {
     # joins the undef path rather than being read as an integer address.
     # A caller may narrow the dispatch when its context cannot accept every
     # reading -- see _lower_field_access_in_method, where the Str arm's
-    # %StrPair GEP would precede that type's declaration. Narrowing DROPS
+    # %Str GEP would precede that type's declaration. Narrowing DROPS
     # readings onto the undef arm, which is honest; it never reinterprets one
     # reading's bits as another's, which is the defect this dispatch exists to
     # prevent.
@@ -2626,17 +2654,17 @@ sub _unbox_payload_as {
         return $ref;
     }
     if ($repr eq 'Str') {
-        # _box_payload stores a %StrPair* via ptrtoint; read the pair back and
+        # _box_payload stores a %Str* via ptrtoint; read the pair back and
         # rebuild the (ptr, len) VALUE so the length travels with the pointer.
         $self->{_need_strpair} = 1;
         my $pair = $self->_fresh;
-        $self->_emit("  $pair = inttoptr i64 $payload to %StrPair*  ; $label: payload -> StrPair*");
+        $self->_emit("  $pair = inttoptr i64 $payload to %Str*  ; $label: payload -> StrPair*");
         my $pp = $self->_fresh;
-        $self->_emit("  $pp = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 0  ; $label: StrPair.ptr");
+        $self->_emit("  $pp = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 0  ; $label: StrPair.ptr");
         my $sp = $self->_fresh;
         $self->_emit("  $sp = load i8*, i8** $pp  ; $label: str ptr");
         my $lp = $self->_fresh;
-        $self->_emit("  $lp = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 1  ; $label: StrPair.len");
+        $self->_emit("  $lp = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 1  ; $label: StrPair.len");
         my $sl = $self->_fresh;
         $self->_emit("  $sl = load i64, i64* $lp  ; $label: str len");
         return $self->_str_value($sp, len => $sl);
@@ -6521,7 +6549,7 @@ sub _lower_hash_ref {
 
 # _lower_length: repr-aware length of an Array or Str operand.
 # Array repr: load the len field from the %Array struct (array element count).
-# Str repr: load the len field from the %StrPair struct (byte length).
+# Str repr: load the len field from the %Str struct (byte length).
 # Both return i64 (repr=Int).
 sub _lower_length {
     my ($self, $node) = @_;
@@ -6740,7 +6768,7 @@ sub _lower_array_read {
         return $ptr;
     }
     elsif ($repr eq 'Str' || $repr eq 'Num') {
-        # The symmetric unbox of _box_payload. A Str payload is a %StrPair*
+        # The symmetric unbox of _box_payload. A Str payload is a %Str*
         # (a Str is a (ptr,len) pair and does not fit in one word); a Num
         # payload is the double's bits. Without these arms both fell through to
         # the Slot branch below and were read back as a defined-bit, which is
@@ -6761,9 +6789,9 @@ sub _lower_array_read {
         $self->{_need_strpair} = 1;
         my ($pair, $pp, $pl, $ptr, $len) =
             ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
-        $self->_emit("  $pair = inttoptr i64 $raw_pay to %StrPair*  ; ArrayRead :Str payload -> StrPair*");
-        $self->_emit("  $pp = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 0  ; StrPair.ptr");
-        $self->_emit("  $pl = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 1  ; StrPair.len");
+        $self->_emit("  $pair = inttoptr i64 $raw_pay to %Str*  ; ArrayRead :Str payload -> StrPair*");
+        $self->_emit("  $pp = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 0  ; StrPair.ptr");
+        $self->_emit("  $pl = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 1  ; StrPair.len");
         $self->_emit("  $ptr = load i8*, i8** $pp  ; ArrayRead :Str ptr");
         $self->_emit("  $len = load i64, i64* $pl  ; ArrayRead :Str len");
         # Re-register the length: a Str value is only usable by print/concat/
@@ -6932,7 +6960,7 @@ sub _lower_builtin_sort {
 
             # A `string` COMPARATOR OVER A NON-Str ELEMENT IS A SEGFAULT, not a
             # wrong answer. _emit_slot_out_of_order's string arm does
-            # `inttoptr i64 <payload> to %StrPair*` -- it ASSUMES the payload
+            # `inttoptr i64 <payload> to %Str*` -- it ASSUMES the payload
             # is a boxed Str. An Int element's payload is the integer itself,
             # so `sort (10,9,100)` dereferenced address 10. Measured: lli
             # crashed with a signal, not a diagnostic.
@@ -7043,7 +7071,7 @@ sub _lower_builtin_sort {
 #
 # True when the slot at $pa must move after the slot at $pb. The comparator
 # is the producer's folded decision, not a guess: `numeric` reads payloads as
-# i64, `string` reads them as the %StrPair* a Str slot boxes.
+# i64, `string` reads them as the %Str* a Str slot boxes.
 sub _emit_slot_out_of_order {
     my ($self, $pa, $pb, $cmp, $order) = @_;
 
@@ -7061,17 +7089,17 @@ sub _emit_slot_out_of_order {
         return $res;
     }
 
-    # A Str slot's payload is a %StrPair* (ptr,len) -- the same boxing every
+    # A Str slot's payload is a %Str* (ptr,len) -- the same boxing every
     # other Str write uses. memcmp over the shorter length, then length as the
     # tiebreak, is perl's `cmp`.
     my ($sa, $sb) = ($self->_fresh, $self->_fresh);
-    $self->_emit("  $sa = inttoptr i64 $a to %StrPair*  ; sort: lhs StrPair");
-    $self->_emit("  $sb = inttoptr i64 $b to %StrPair*  ; sort: rhs StrPair");
+    $self->_emit("  $sa = inttoptr i64 $a to %Str*  ; sort: lhs StrPair");
+    $self->_emit("  $sb = inttoptr i64 $b to %Str*  ; sort: rhs StrPair");
     my ($apg, $alg, $bpg, $blg) = ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
-    $self->_emit("  $apg = getelementptr inbounds %StrPair, %StrPair* $sa, i64 0, i32 0  ; sort: lhs ptr");
-    $self->_emit("  $alg = getelementptr inbounds %StrPair, %StrPair* $sa, i64 0, i32 1  ; sort: lhs len");
-    $self->_emit("  $bpg = getelementptr inbounds %StrPair, %StrPair* $sb, i64 0, i32 0  ; sort: rhs ptr");
-    $self->_emit("  $blg = getelementptr inbounds %StrPair, %StrPair* $sb, i64 0, i32 1  ; sort: rhs len");
+    $self->_emit("  $apg = getelementptr inbounds %Str, %Str* $sa, i64 0, i32 0  ; sort: lhs ptr");
+    $self->_emit("  $alg = getelementptr inbounds %Str, %Str* $sa, i64 0, i32 1  ; sort: lhs len");
+    $self->_emit("  $bpg = getelementptr inbounds %Str, %Str* $sb, i64 0, i32 0  ; sort: rhs ptr");
+    $self->_emit("  $blg = getelementptr inbounds %Str, %Str* $sb, i64 0, i32 1  ; sort: rhs len");
     my ($ap, $al, $bp, $bl) = ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
     $self->_emit("  $ap = load i8*, i8** $apg");
     $self->_emit("  $al = load i64, i64* $alg");
@@ -7229,7 +7257,7 @@ sub _lower_builtin_keys {
     $self->_emit("  $kp = load i8*, i8** $kp_p  ; keys: key ptr");
     $self->_emit("  $kl = load i64, i64* $kl_p  ; keys: key len");
 
-    # The key is a Str; a Str in a %Slot payload is a boxed %StrPair*, which
+    # The key is a Str; a Str in a %Slot payload is a boxed %Str*, which
     # is what _box_payload emits for every other Str write.
     my $key_str = $self->_set_str_len($kp, $kl);
     my $payload = $self->_box_payload($key_str, 'Str', 'keys: key');
@@ -7419,7 +7447,7 @@ sub _emit_join_loop {
     $self->_emit("  $slot_v = load %Slot, %Slot* $slot_p  ; join: element");
     # THE TAG DECIDES HOW THE PAYLOAD READS. _emit_to_str('Slot', ...) renders
     # the payload as an Int unconditionally, so a Str element printed as its
-    # %StrPair POINTER: `join(",", sort keys %h)` emitted
+    # %Str POINTER: `join(",", sort keys %h)` emitted
     # "94372392710400,94372392636160" where perl prints "a,b". A slot's
     # payload is i64 bits whose interpretation lives in its tag, which is the
     # whole reason the tag exists.
@@ -7703,7 +7731,7 @@ sub _lower_hash_read {
     }
     elsif ($repr eq 'Str' || $repr eq 'Num') {
         # The symmetric unbox of _box_payload, mirroring _lower_array_read: a
-        # Str payload is a %StrPair* (a Str is a (ptr,len) pair, too wide for
+        # Str payload is a %Str* (a Str is a (ptr,len) pair, too wide for
         # one word), a Num payload is the double's bits.
         my $raw_pay = $self->_fresh;
         $self->_emit("  $raw_pay = phi i64 [ $vp_val, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; HashRead :$repr raw payload");
@@ -7721,9 +7749,9 @@ sub _lower_hash_read {
         $self->{_need_strpair} = 1;
         my ($pair, $pp, $pl, $sptr, $slen) =
             ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
-        $self->_emit("  $pair = inttoptr i64 $raw_pay to %StrPair*  ; HashRead :Str payload -> StrPair*");
-        $self->_emit("  $pp = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 0  ; StrPair.ptr");
-        $self->_emit("  $pl = getelementptr inbounds %StrPair, %StrPair* $pair, i64 0, i32 1  ; StrPair.len");
+        $self->_emit("  $pair = inttoptr i64 $raw_pay to %Str*  ; HashRead :Str payload -> StrPair*");
+        $self->_emit("  $pp = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 0  ; StrPair.ptr");
+        $self->_emit("  $pl = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 1  ; StrPair.len");
         $self->_emit("  $sptr = load i8*, i8** $pp  ; HashRead :Str ptr");
         $self->_emit("  $slen = load i64, i64* $pl  ; HashRead :Str len");
         $sptr = $self->_set_str_len($sptr, $slen);
@@ -7799,7 +7827,7 @@ sub _lower_hash_deref {
 # Store a lowered value into an object field's i64 payload slot, boxing per repr.
 # The single owner of the slot-payload store dispatch, shared across the :param
 # binding path, the default-value path, and the FieldAccess-lvalue assign path so
-# every write boxes a given repr identically (019f4512): Str -> malloc a %StrPair,
+# every write boxes a given repr identically (019f4512): Str -> malloc a %Str,
 # store ptr+len, ptrtoint to i64; Boolean -> zext i1 to i64; ArrayRef/HashRef ->
 # ptrtoint i8* to i64; Int -> identity. The Str length is read from
 # _str_len_table (keyed by the value's SSA ref), falling back to a runtime strlen
@@ -7820,7 +7848,7 @@ sub _lower_hash_deref {
 # an object field, and a hash entry's inlined (val_def, val_pay) pair -- so
 # they share this rule rather than each deciding for themselves. They used to
 # decide separately, and the ones that were not exercised fell behind: a field
-# could hold a Str (boxed into a %StrPair) while an array element could not,
+# could hold a Str (boxed into a %Str) while an array element could not,
 # so `my @a = ("hi")` -- unremarkable Perl -- could not be represented.
 #
 # $what labels the emitted IR ("field 'n'", "ArrayRef elem[0]").
@@ -7830,27 +7858,27 @@ sub _box_payload {
     my $ref = $self->_fresh;
     if ($repr eq 'Str') {
         # A Str is a (ptr, len) PAIR and does not fit in one word, so box it
-        # into a heap %StrPair and carry the pointer. The length must come from
+        # into a heap %Str and carry the pointer. The length must come from
         # the length table; strlen would be wrong for a string with an embedded
         # NUL and is only a fallback for an untracked pointer.
         my ($str_ptr, $len_ref) = $self->_str_parts($val_ref);
         my $pair_raw = $self->_fresh;
         my $pair_ptr = $self->_fresh;
-        my $pair_bytes = _sizeof_llvm_type('%StrPair');
+        my $pair_bytes = _sizeof_llvm_type('%Str');
         $self->_emit("  $pair_raw = call i8* \@malloc(i64 $pair_bytes)  ; alloc StrPair ($pair_bytes bytes) for $what");
-        $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
+        $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %Str*  ; typed StrPair ptr");
         my $pp_gep = $self->_fresh;
-        $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
+        $self->_emit("  $pp_gep = getelementptr inbounds %Str, %Str* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
         $self->_emit("  store i8* $str_ptr, i8** $pp_gep  ; store str ptr");
         my $pl_gep = $self->_fresh;
-        $self->_emit("  $pl_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
+        $self->_emit("  $pl_gep = getelementptr inbounds %Str, %Str* $pair_ptr, i64 0, i32 1  ; StrPair.len");
         my $len_val = $len_ref;
         unless (defined $len_val) {
             $len_val = $self->_fresh;
             $self->_emit("  $len_val = call i64 \@strlen(i8* $str_ptr)  ; strlen for $what");
         }
         $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
-        $self->_emit("  $ref = ptrtoint %StrPair* $pair_ptr to i64  ; StrPair* -> i64 payload for $what");
+        $self->_emit("  $ref = ptrtoint %Str* $pair_ptr to i64  ; StrPair* -> i64 payload for $what");
         $self->{_need_strpair} = 1;
         $self->{_need_malloc_memcpy} = 1;
         return $ref;
@@ -7928,14 +7956,14 @@ sub _store_field_payload {
         my ($str_ptr, $len_ref) = $self->_str_parts($val_ref);
         my $pair_raw = $self->_fresh;
         my $pair_ptr = $self->_fresh;
-        my $pair_bytes = _sizeof_llvm_type('%StrPair');
+        my $pair_bytes = _sizeof_llvm_type('%Str');
         $self->_emit("  $pair_raw = call i8* \@malloc(i64 $pair_bytes)  ; alloc StrPair ($pair_bytes bytes) for field '$pname'");
-        $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %StrPair*  ; typed StrPair ptr");
+        $self->_emit("  $pair_ptr = bitcast i8* $pair_raw to %Str*  ; typed StrPair ptr");
         my $pp_gep = $self->_fresh;
-        $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
+        $self->_emit("  $pp_gep = getelementptr inbounds %Str, %Str* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
         $self->_emit("  store i8* $str_ptr, i8** $pp_gep  ; store str ptr");
         my $pl_gep = $self->_fresh;
-        $self->_emit("  $pl_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
+        $self->_emit("  $pl_gep = getelementptr inbounds %Str, %Str* $pair_ptr, i64 0, i32 1  ; StrPair.len");
         my $len_val = defined $len_ref ? $len_ref : 'zeroinitializer';
         if ($len_val eq 'zeroinitializer') {
             $len_val = $self->_fresh;
@@ -7943,7 +7971,7 @@ sub _store_field_payload {
         }
         $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
         my $pair_as_i64 = $self->_fresh;
-        $self->_emit("  $pair_as_i64 = ptrtoint %StrPair* $pair_ptr to i64  ; StrPair* -> i64 payload");
+        $self->_emit("  $pair_as_i64 = ptrtoint %Str* $pair_ptr to i64  ; StrPair* -> i64 payload");
         $self->_emit("  store i64 $pair_as_i64, i64* $pay_gep  ; field '$pname' Str payload = StrPair*");
         $self->{_need_strpair} = 1;
         return $val_ref;
@@ -8783,11 +8811,11 @@ sub _lower_call_method {
     my $result = $self->_fresh;
     if ($result_repr eq 'Str') {
         $self->{_need_strpair} = 1;
-        $self->_emit("  $result = call %StrPair $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> StrPair");
+        $self->_emit("  $result = call %Str $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> StrPair");
         my $str_ptr = $self->_fresh;
         my $str_len = $self->_fresh;
-        $self->_emit("  $str_ptr = extractvalue %StrPair $result, 0  ; Call(method) $method_name result ptr");
-        $self->_emit("  $str_len = extractvalue %StrPair $result, 1  ; Call(method) $method_name result len");
+        $self->_emit("  $str_ptr = extractvalue %Str $result, 0  ; Call(method) $method_name result ptr");
+        $self->_emit("  $str_len = extractvalue %Str $result, 1  ; Call(method) $method_name result len");
         $str_ptr = $self->_set_str_len($str_ptr, $str_len);
         $self->{cache}{ $node->id } = $str_ptr;
         return $str_ptr;
@@ -8795,7 +8823,7 @@ sub _lower_call_method {
     else {
         # The call's return type MUST match the typed fn pointer's return type
         # ($fn_type, cast above from $result_repr), or lli rejects the module. Str
-        # (%StrPair) was handled above; the same repr->LLVM-return-type authority
+        # (%Str) was handled above; the same repr->LLVM-return-type authority
         # that DEFINED each method (_method_fn_llvm_ret_type) names the type here,
         # so call and definition can never disagree (and an unsupported repr dies
         # there once, not in a parallel inline table).
@@ -10033,13 +10061,13 @@ sub _lower_field_access_in_method {
         # Payload is a StrPair* (as i64) — cast and extract {ptr, len}
         $self->{_need_strpair} = 1;
         my $pair_ptr = $self->_fresh;
-        $self->_emit("  $pair_ptr = inttoptr i64 $pay to %StrPair*  ; payload -> StrPair*");
+        $self->_emit("  $pair_ptr = inttoptr i64 $pay to %Str*  ; payload -> StrPair*");
         my $pp_gep = $self->_fresh;
-        $self->_emit("  $pp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
+        $self->_emit("  $pp_gep = getelementptr inbounds %Str, %Str* $pair_ptr, i64 0, i32 0  ; StrPair.ptr");
         my $sp = $self->_fresh;
         $self->_emit("  $sp = load i8*, i8** $pp_gep  ; load str ptr");
         my $lp_gep = $self->_fresh;
-        $self->_emit("  $lp_gep = getelementptr inbounds %StrPair, %StrPair* $pair_ptr, i64 0, i32 1  ; StrPair.len");
+        $self->_emit("  $lp_gep = getelementptr inbounds %Str, %Str* $pair_ptr, i64 0, i32 1  ; StrPair.len");
         my $sl = $self->_fresh;
         $self->_emit("  $sl = load i64, i64* $lp_gep  ; load str len");
         $sp = $self->_set_str_len($sp, $sl);
@@ -10079,7 +10107,7 @@ sub _lower_field_access_in_method {
         $self->_emit("  $slot = load %Slot, %Slot* $slot_gep  ; load field[$field_index] cell");
 
         # ONE READING ONLY WHEN THE CELL CANNOT HOLD ANOTHER. The full tag
-        # dispatch emits a Str arm, which GEPs a %StrPair -- and a method body
+        # dispatch emits a Str arm, which GEPs a %Str -- and a method body
         # is lowered BEFORE the prologue that honours `_need_strpair`, so the
         # type is declared after its first use and lli refuses the module
         # ("base element of getelementptr must be sized", corpus A5). That is a

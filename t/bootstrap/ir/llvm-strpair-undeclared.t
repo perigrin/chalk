@@ -88,11 +88,22 @@ subtest 'Str :param field + Int-returning method: %StrPair must be declared (I3)
         'Str-param Int-return class: lower() does not die')
         or do { diag("error: $err"); done_testing(); return };
 
-    # Must have at least one %StrPair declaration
-    my @strpair_decls = ($ll =~ /^%StrPair\s*=/mg);
-    is(scalar(@strpair_decls), 1,
-        '.ll has exactly one %StrPair declaration (I3: emitted even when no method returns Str)')
-        or diag("Found " . scalar(@strpair_decls) . " %StrPair declarations (expected 1);\n"
+    # THE TYPE IS %Str NOW, and the property is unchanged: the boxed-Str type
+    # must be declared EXACTLY ONCE. Once, not "at least once" -- a second
+    # `%Str = type {...}` line is a redefinition and lli refuses the module,
+    # which is the failure the collapse could most easily have introduced
+    # (%StrPair and %Str each had their own render-once guard, and forwarding
+    # one to the other is what keeps them from both firing).
+    #
+    # This file is named for %StrPair because that is the type whose CONDITIONAL
+    # declaration made "declared after first use" a recurring bug (I3). %Str is
+    # declared unconditionally at the prologue, so the ordering hazard is gone
+    # -- but the once-ness is still worth pinning, and this is where it is
+    # measured against a real emitted module.
+    my @str_decls = ($ll =~ /^%Str\s*=/mg);
+    is(scalar(@str_decls), 1,
+        '.ll has exactly one %Str declaration (was %StrPair before the collapse)')
+        or diag("Found " . scalar(@str_decls) . " %Str declarations (expected 1);\n"
                 . "First 800 chars:\n" . substr($ll, 0, 800));
 
     # lli must accept the .ll
@@ -144,10 +155,15 @@ subtest 'Str-returning method: exactly one %StrPair (I3 no double-declare)' => s
         'Str-returning method: lower() does not die')
         or do { diag("error: $err"); done_testing(); return };
 
-    my @strpair_decls = ($ll =~ /^%StrPair\s*=/mg);
-    is(scalar(@strpair_decls), 1,
-        'exactly one %StrPair declaration (no double-declare from post-class re-emit, I3)')
-        or diag("Found " . scalar(@strpair_decls) . " declarations;\nFirst 600 chars:\n" . substr($ll, 0, 600));
+    # ONCE, not "at least once". The collapse gave %StrPair and %Str the same
+    # name, and each had its own render-once guard -- so a double-declare is
+    # the failure this step could most easily have introduced. lli refuses a
+    # redefinition outright, which is why the count matters and not merely the
+    # presence.
+    my @str_decls = ($ll =~ /^%Str\s*=/mg);
+    is(scalar(@str_decls), 1,
+        'exactly one %Str declaration (no double-declare from post-class re-emit, I3)')
+        or diag("Found " . scalar(@str_decls) . " declarations;\nFirst 600 chars:\n" . substr($ll, 0, 600));
 
     require File::Temp;
     my ($fh, $tmpf) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);

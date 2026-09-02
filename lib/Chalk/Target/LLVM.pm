@@ -222,8 +222,8 @@ sub _method_fn_llvm_ret_type {
 
     # Str is the ONLY divergence from %_REPR_LLVM_TYPE, and it is a genuine
     # one: a Str VALUE is %Str (ptr,len,enc) but a Str RETURN crosses the
-    # function boundary as %StrPair (ptr,len).
-    return '%StrPair' if $repr eq 'Str';
+    # function boundary as %Str (ptr,len).
+    return '%Str' if $repr eq 'Str';
 
     # Every other representation DEFERS. The literal chain that stood here
     # (i64/i1/double/i1/%Slot) answered the same question %_REPR_LLVM_TYPE
@@ -643,19 +643,19 @@ sub _emit_class_registry_ir {
     my ($registry, $ctx) = @_;
     my @lines;
 
-    # Determine if any method returns Str -> need %StrPair type
+    # Determine if any method returns Str -> need %Str type
     my $need_strpair = 0;
     for my $cname (sort keys %$registry) {
         my $reg = $registry->{$cname};
-        # Subs share the %StrPair return ABI, so they must be in this pre-scan
+        # Subs share the %Str return ABI, so they must be in this pre-scan
         # too -- a Str-returning SUB in a class whose methods all return Int
-        # would otherwise emit insertvalue over an undeclared %StrPair.
+        # would otherwise emit insertvalue over an undeclared %Str.
         for my $m (@{ $reg->{methods} }, @{ $reg->{subs} // [] }) {
             $need_strpair = 1 if ($m->{return_repr} // '') eq 'Str';
         }
     }
 
-    # %Str is declared UNCONDITIONALLY here, unlike %StrPair. This prologue runs
+    # %Str is declared UNCONDITIONALLY here, unlike %Str. This prologue runs
     # BEFORE any method body is lowered, so a pre-scan cannot know whether a body
     # will build one — and %Str is needed by any Str VALUE at all, not merely by
     # a Str-RETURNING method, so the scan above (which keys on return_repr) would
@@ -725,8 +725,8 @@ sub _emit_class_registry_ir {
                 push @lines, "define internal $fn_ret $fn_name(i8* %self) {";
                 push @lines, 'entry:';
                 if ($ret_repr eq 'Str') {
-                    push @lines, "  %r = call %StrPair $parent_fn(i8* %self)";
-                    push @lines, '  ret %StrPair %r';
+                    push @lines, "  %r = call %Str $parent_fn(i8* %self)";
+                    push @lines, '  ret %Str %r';
                 }
                 elsif ($ret_repr eq 'Num') {
                     # $fn_ret is already this repr's return type (:700); naming
@@ -769,14 +769,14 @@ sub _emit_class_registry_ir {
                 push @lines, '  %pay = load i64, i64* %pay_gep';
                 if ($ret_repr eq 'Str') {
                     # payload = StrPair* (as i64) -> cast back and return {ptr, len}
-                    push @lines, '  %pair_ptr = inttoptr i64 %pay to %StrPair*';
-                    push @lines, '  %pp_gep = getelementptr inbounds %StrPair, %StrPair* %pair_ptr, i64 0, i32 0';
+                    push @lines, '  %pair_ptr = inttoptr i64 %pay to %Str*';
+                    push @lines, '  %pp_gep = getelementptr inbounds %Str, %Str* %pair_ptr, i64 0, i32 0';
                     push @lines, '  %sp = load i8*, i8** %pp_gep';
-                    push @lines, '  %lp_gep = getelementptr inbounds %StrPair, %StrPair* %pair_ptr, i64 0, i32 1';
+                    push @lines, '  %lp_gep = getelementptr inbounds %Str, %Str* %pair_ptr, i64 0, i32 1';
                     push @lines, '  %sl = load i64, i64* %lp_gep';
-                    push @lines, '  %r0 = insertvalue %StrPair undef, i8* %sp, 0';
-                    push @lines, '  %r1 = insertvalue %StrPair %r0, i64 %sl, 1';
-                    push @lines, '  ret %StrPair %r1';
+                    push @lines, '  %r0 = insertvalue %Str undef, i8* %sp, 0';
+                    push @lines, '  %r1 = insertvalue %Str %r0, i64 %sl, 1';
+                    push @lines, '  ret %Str %r1';
                 }
                 else {
                     push @lines, '  ret i64 %pay';
@@ -830,7 +830,7 @@ sub _emit_class_registry_ir {
             # type declarations — and %Str is declared from $ctx. Without this
             # the body emits insertvalue over an undeclared %Str and lli
             # rejects the module with "invalid indices for insertvalue".
-            # (%StrPair avoids this only by having a pre-scan over
+            # (%Str avoids this only by having a pre-scan over
             # return_repr; %Str has none, because it is needed by any Str
             # VALUE rather than only by a Str-returning method.)
 
@@ -845,7 +845,7 @@ sub _emit_class_registry_ir {
             if ($ret_repr eq 'Str') {
                 # Through the seam, not into the table. This was the one direct
                 # A Str-returning body hands back a %Str aggregate, so
-                # destructure it for the %StrPair return ABI. Emitted inline
+                # destructure it for the %Str return ABI. Emitted inline
                 # because this block pushes onto @lines directly rather than
                 # through the context, so _str_parts — which emits into the
                 # context's current block — cannot be used here.
@@ -859,16 +859,16 @@ sub _emit_class_registry_ir {
                 my $len_ref = '%ret_sl';
 
                 if (defined $len_ref) {
-                    push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* $ptr_val, 0";
-                    push @lines, "  %ret_r1 = insertvalue %StrPair %ret_r0, i64 $len_ref, 1";
-                    push @lines, '  ret %StrPair %ret_r1';
+                    push @lines, "  %ret_r0 = insertvalue %Str undef, i8* $ptr_val, 0";
+                    push @lines, "  %ret_r1 = insertvalue %Str %ret_r0, i64 $len_ref, 1";
+                    push @lines, '  ret %Str %ret_r1';
                 }
                 else {
                     # Compute strlen at runtime
                     push @lines, "  %ret_len = call i64 \@strlen(i8* $ptr_val)";
-                    push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* $ptr_val, 0";
-                    push @lines, "  %ret_r1 = insertvalue %StrPair %ret_r0, i64 %ret_len, 1";
-                    push @lines, '  ret %StrPair %ret_r1';
+                    push @lines, "  %ret_r0 = insertvalue %Str undef, i8* $ptr_val, 0";
+                    push @lines, "  %ret_r1 = insertvalue %Str %ret_r0, i64 %ret_len, 1";
+                    push @lines, '  ret %Str %ret_r1';
                 }
             }
             elsif ($ret_repr eq 'Num') {
@@ -1002,9 +1002,9 @@ sub _emit_class_registry_ir {
             if ($ret_repr eq 'Str') {
                 push @lines, "  %ret_sp = extractvalue %Str $body_val, 0";
                 push @lines, "  %ret_sl = extractvalue %Str $body_val, 1";
-                push @lines, "  %ret_r0 = insertvalue %StrPair undef, i8* %ret_sp, 0";
-                push @lines, "  %ret_r1 = insertvalue %StrPair %ret_r0, i64 %ret_sl, 1";
-                push @lines, '  ret %StrPair %ret_r1';
+                push @lines, "  %ret_r0 = insertvalue %Str undef, i8* %ret_sp, 0";
+                push @lines, "  %ret_r1 = insertvalue %Str %ret_r0, i64 %ret_sl, 1";
+                push @lines, '  ret %Str %ret_r1';
             }
             elsif ($ret_repr eq 'Num')  { push @lines, "  ret $fn_ret $body_val" }
             elsif ($ret_repr eq 'Boolean'
