@@ -178,16 +178,31 @@ my %_NODE_OPERAND_REPR = (Print => 'Str');
 #
 # Aggregates (Array/Hash/ArrayRef/HashRef/CodeRef) are deliberately ABSENT: no
 # conversion from an aggregate to a scalar repr is defined, so an aggregate in a
-# scalar position is a type error to REPORT, not a coercion to invent. Slot is
-# absent as a SOURCE for the same reason it is present as a target elsewhere --
-# it is a backend cell, unwrapped at its use site rather than converted here.
+# scalar position is a type error to REPORT, not a coercion to invent.
+#
+# EVERY KEY HERE IS A LATTICE TYPE, and that is a rule rather than an accident.
+# This table is T1 -- it reasons about the TYPE axis. `Slot` had a row here
+# (Slot => { Str => 1 }) and should never have: `Slot` is not a Chalk type. It
+# has no parent, no children and no membership rule; it names the
+# { i1 defined, i8 tag, i64 payload } cell that the TYPE `Scalar` encodes as.
+# Naming it here was T2 vocabulary leaking into a T1 table, which is the exact
+# confusion the functor exists to remove.
+#
+# The row was also unreachable: measured across every fixture in
+# t/bootstrap/ir/data/, `_coercion_exists` is called with `Int` and nothing
+# else -- `Slot` never appears as a source, because nothing in lib/ stamps it
+# and the wire never carries it (the loader drops a Slot stamp on sight, see
+# Serialize/JSON.pm). So removing it changes no behaviour; it removes a claim
+# that a repr can be a coercion SOURCE at the type layer.
+#
+# Pinned by t/bootstrap/ir/no-repr-names-at-t1.t, which fails if a
+# representation name reappears in live T1 code.
 my %_COERCIBLE_TO = (
     Int   => { Num => 1, Str => 1, Boolean => 1 },
     Num   => { Int => 1, Str => 1, Boolean => 1 },
     Str   => { Num => 1, Boolean => 1 },
     Boolean  => { Int => 1, Num => 1, Str => 1 },
     Undef => { Int => 1, Num => 1, Str => 1, Boolean => 1 },
-    Slot  => { Str => 1 },
 );
 
 # hydrate($graphs, $classes) -> \%graphs
