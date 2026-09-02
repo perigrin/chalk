@@ -129,8 +129,6 @@ sub new {
         # no new of its own -- it is an alias and inherits this one.)
         # Also set on method-body sub-contexts via direct hash assignment.
         class_registry => $class_registry // {},
-        # G5 MOP: StrPair type needed (Str-returning methods)
-        _need_strpair => 0,
         # G5 MOP: method body context flags
         _in_method_body      => 0,
         _method_self_name    => undef,
@@ -153,7 +151,6 @@ sub new {
 # (the F6 bug class).
 my @NEED_FLAGS = qw(
     _need_malloc_memcpy
-    _need_strpair
     _need_bool_str_globals
     _need_str_to_num_helper
     _need_memcmp
@@ -179,7 +176,7 @@ sub absorb_need_flags_from {
 # inherit_need_flags_from($parent_ctx) -> copy NEED_FLAGS DOWN from a parent
 # context onto $self. Used when constructing a fresh body/adjust Context that
 # must start with whatever the parent already knows it needs (e.g.
-# _need_strpair, set by an earlier :param binding on the main graph) so a
+# _need_str_type, set by an earlier :param binding on the main graph) so a
 # post-class re-emit isn't needed for state the parent already had.
 sub inherit_need_flags_from {
     my ($self, $parent_ctx) = @_;
@@ -203,7 +200,7 @@ sub inherit_need_flags_from {
 #
 # Replaces the hand-rolled field-by-field setup that used to live at each of
 # the three call sites in Target/LLVM.pm (method body, sub body, ADJUST),
-# which is also where _need_strpair was copied down from the parent by hand;
+# which is also where the boxed-Str need-flag was copied down by hand;
 # that copy is now inherit_need_flags_from, covering all NEED_FLAGS (every
 # NEED_FLAGS site in this file only ever SETS a flag during lowering, never
 # reads one to change what gets emitted, so seeding the full set from the
@@ -526,7 +523,7 @@ sub render_str_type_once {
 # call site: "for Str method return values" at the class-registry prologue
 # vs. "post-class re-emit, I3" at the F6 re-emit site).
 #
-# Also sets _need_strpair -- calling this method is itself the thing that
+# Sets NOTHING -- it is an alias for render_str_type_once, which owns the
 # makes %Str needed from here on (a method body lowered afterwards must
 # inherit the flag via configure_as_method_body's inherit_need_flags_from).
 # The class-registry call site used to set this by hand as a second line
@@ -535,16 +532,15 @@ sub render_str_type_once {
 # no-op.
 sub render_strpair_type_once {
     my ($self) = @_;
-    # THE BOXED CELL AND THE VALUE TYPE ARE ONE TYPE NOW (step 2 of the
-    # collapse). This forwards to the %Str declaration rather than emitting a
-    # second one: two `%Str = type {...}` lines in a module is a redefinition
-    # and lli refuses it.
+    # A PURE ALIAS for render_str_type_once, kept only so the class-registry
+    # prologue reads as "declare the boxed-Str type" at its own call site.
     #
-    # Kept as a name rather than deleted at every call site, because the two
-    # callers mean different things by it -- the class-registry prologue
-    # declares ahead of method bodies, the I3 re-emit patches up a flag set
-    # during lowering -- and collapsing those call sites is step 3.
-    $self->{_need_strpair} = 1;
+    # There is ONE type and ONE need-flag now. This sets neither, because
+    # render_str_type_once is the authority for both -- two flags guarding one
+    # declaration is the "several places that must agree" shape this migration
+    # exists to remove, and it was not merely untidy: the I3 post-class re-emit
+    # existed precisely because the two could disagree about whether the type
+    # had been declared yet.
     return $self->render_str_type_once;
 }
 
@@ -749,8 +745,8 @@ sub render_need_flag_prologue {
     # class-registry prologue because _need_str_type is set DURING lowering (by
     # _str_value), and this block runs after it — the same ordering the
     # _need_aggregate_types flag above relies on. Declaring it in the earlier
-    # prologue would need a pre-scan, which is the trap the _need_strpair "I3"
-    # re-emit below exists to patch around.
+    # prologue would need a pre-scan, which is the trap the old "I3" re-emit
+    # existed to patch around (deleted with the %StrPair collapse).
     if ($self->{_need_str_type}) {
         push @lines, $self->render_str_type_once;
     }
@@ -833,21 +829,22 @@ sub render_need_flag_postclass_reemit {
         $self->{_getenv_emitted}  = 1;
     }
 
-    # Post-class re-emit for _need_strpair (I3):
-    # %Str is declared by _emit_class_registry_ir only when some method RETURNS Str
-    # (its own LOCAL $need_strpair scan checks return_repr). But _need_strpair
-    # is also set during lower_value (e.g. _lower_new when binding a Str :param
-    # field), which runs BEFORE _emit_class_registry_ir. If the class has no Str-returning
-    # method (LOCAL scan returns 0) but a Str :param is bound, _lower_new emits %Str*
-    # references without %Str being declared — lli rejects. render_strpair_type_once's
-    # own _strpair_emitted guard prevents double-declare.
-    if ($self->{_need_strpair}) {
-        my @strpair_lines = $self->render_strpair_type_once;
-        if (@strpair_lines) {
-            push @lines, '; StrPair for Str values (post-class re-emit, I3; layout: Context::_strpair_fields)';
-            push @lines, @strpair_lines;
-        }
-    }
+    # THE I3 POST-CLASS RE-EMIT IS GONE, with the condition that made it
+    # necessary.
+    #
+    # It existed because %StrPair was declared from a PRE-SCAN (which methods
+    # return Str?) while _need_strpair could be set LATER, during lowering --
+    # so a Str :param bind in a class whose methods all return Int emitted
+    # references against an undeclared type and lli rejected the module. The
+    # re-emit patched that up after the fact.
+    #
+    # Since the collapse there is one type, one need-flag and one render-once
+    # guard, and render_str_type_once is idempotent -- so a late need is served
+    # by the declaration the prologue already emitted. Nothing is left to patch.
+    #
+    # This is the bug class the whole migration was for: the DROPPED Str arm of
+    # the method-body field read -- which made `field $s :param = "hi"` print an
+    # empty line -- was a workaround for exactly this ordering hazard.
 
     return @lines;
 }
@@ -2656,7 +2653,7 @@ sub _unbox_payload_as {
     if ($repr eq 'Str') {
         # _box_payload stores a %Str* via ptrtoint; read the pair back and
         # rebuild the (ptr, len) VALUE so the length travels with the pointer.
-        $self->{_need_strpair} = 1;
+        $self->{_need_str_type} = 1;
         my $pair = $self->_fresh;
         $self->_emit("  $pair = inttoptr i64 $payload to %Str*  ; $label: payload -> StrPair*");
         my $pp = $self->_fresh;
@@ -6786,7 +6783,7 @@ sub _lower_array_read {
             return $d;
         }
 
-        $self->{_need_strpair} = 1;
+        $self->{_need_str_type} = 1;
         my ($pair, $pp, $pl, $ptr, $len) =
             ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
         $self->_emit("  $pair = inttoptr i64 $raw_pay to %Str*  ; ArrayRead :Str payload -> StrPair*");
@@ -7746,7 +7743,7 @@ sub _lower_hash_read {
             return $d;
         }
 
-        $self->{_need_strpair} = 1;
+        $self->{_need_str_type} = 1;
         my ($pair, $pp, $pl, $sptr, $slen) =
             ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
         $self->_emit("  $pair = inttoptr i64 $raw_pay to %Str*  ; HashRead :Str payload -> StrPair*");
@@ -7879,7 +7876,7 @@ sub _box_payload {
         }
         $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
         $self->_emit("  $ref = ptrtoint %Str* $pair_ptr to i64  ; StrPair* -> i64 payload for $what");
-        $self->{_need_strpair} = 1;
+        $self->{_need_str_type} = 1;
         $self->{_need_malloc_memcpy} = 1;
         return $ref;
     }
@@ -7973,7 +7970,7 @@ sub _store_field_payload {
         my $pair_as_i64 = $self->_fresh;
         $self->_emit("  $pair_as_i64 = ptrtoint %Str* $pair_ptr to i64  ; StrPair* -> i64 payload");
         $self->_emit("  store i64 $pair_as_i64, i64* $pay_gep  ; field '$pname' Str payload = StrPair*");
-        $self->{_need_strpair} = 1;
+        $self->{_need_str_type} = 1;
         return $val_ref;
     }
 
@@ -8822,7 +8819,7 @@ sub _lower_call_method {
     # The ABI is the authority for both, and a refinement is honoured by
     # unboxing at the boundary -- which the else-branch below already does.
     if ($result_repr eq 'Str' && $abi_repr eq 'Str') {
-        $self->{_need_strpair} = 1;
+        $self->{_need_str_type} = 1;
         $self->_emit("  $result = call %Str $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> StrPair");
         my $str_ptr = $self->_fresh;
         my $str_len = $self->_fresh;
@@ -8861,7 +8858,7 @@ sub _lower_call_method {
             # Unpacked the same way the field read does: one encoding, read the
             # same way wherever it is met.
             if (($node->representation // '') eq 'Str') {
-                $self->{_need_strpair} = 1;
+                $self->{_need_str_type} = 1;
                 my $pair = $self->_fresh;
                 $self->_emit("  $pair = inttoptr i64 $pay to %Str*  ; Call(method) $method_name: payload -> %Str*");
                 my $pg = $self->_fresh;
@@ -10095,7 +10092,7 @@ sub _lower_field_access_in_method {
 
     if ($repr eq 'Str') {
         # Payload is a StrPair* (as i64) — cast and extract {ptr, len}
-        $self->{_need_strpair} = 1;
+        $self->{_need_str_type} = 1;
         my $pair_ptr = $self->_fresh;
         $self->_emit("  $pair_ptr = inttoptr i64 $pay to %Str*  ; payload -> StrPair*");
         my $pp_gep = $self->_fresh;

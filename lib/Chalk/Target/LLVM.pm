@@ -931,7 +931,7 @@ sub _emit_class_registry_ir {
                     my $ri_def = $C->can('_slot_idx')->('defined');
                     my $ri_tag = $C->can('_slot_idx')->('tag');
                     my $ri_pay = $C->can('_slot_idx')->('payload');
-                    $ctx->{_need_strpair} = 1;
+                    $ctx->{_need_str_type} = 1;
                     push @lines, "  %ret_xp = extractvalue %Str $body_val, "
                                . $C->can('_str_idx')->('ptr') . "  ; %Str.ptr";
                     push @lines, "  %ret_xl = extractvalue %Str $body_val, "
