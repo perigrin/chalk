@@ -89,6 +89,7 @@ use Chalk::IR::Node::Region;
 use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::ExpressionList;
 use Chalk::IR::Node::Coerce;
+use Chalk::IR::Node::ListAppend;
 
 my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Constant Phi
@@ -104,7 +105,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     RegexMatch RegexSubst RegexCapture Print EnvRead TryCatch
     PostfixDeref CompoundAssign BacktickExpr VarDecl ListAssign
     TernaryExpr StructRef StructFieldAccess
-    ExpressionList
+    ExpressionList ListAppend
     Start MemStart Return Unwind
     Coerce
 );
