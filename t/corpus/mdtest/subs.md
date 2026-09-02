@@ -641,8 +641,15 @@ coverage before this case.
 
 The argument reaches the callee: `lli` prints 42, as perl does. The callee body
 lives in its own graph (`main::f`), so the program graph names only the call
-boundary -- the `Constant(41)` bound as the Call's argument, and the `:Num`
+boundary -- the `Constant(41)` bound as the Call's argument, and the `:Int`
 result the signature-bound `$x + 1` yields.
+
+THIS SPEC READ `:Num` UNTIL THE TYPING CAUGHT UP WITH IT. The producer cannot
+see a callee's arguments, so it widens a signature-bound parameter to `Num` and
+`$x + 1` came back `Num` on the wire. That is honest ahead-of-time typing, not
+a defect -- but this loader has the whole program, sees the one callsite pass
+`Constant(41) :Int`, and `41 + 1` is an integer. The spec recorded the
+producer's limit as though it were the answer.
 
 RECORDED HONESTLY BECAUSE I GOT IT WRONG FIRST: my probe called
 `Chalk::Target::LLVM->lower` on this shape, saw no exception, and I wrote the
@@ -670,8 +677,8 @@ context: scalar
 ```ir
 %start = Start()
 %c41  = Constant(41) :Int
-%call = Call(%c41, dispatch_kind: "direct", name: "main::f") :Num
-%co   = Coerce(%call : Num -> Str) :Str
+%call = Call(%c41, dispatch_kind: "direct", name: "main::f") :Int
+%co   = Coerce(%call : Int -> Str) :Str
 %nl   = Constant("\n") :Str
 %p    = Print(%co, %nl)
 return %p

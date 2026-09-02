@@ -377,7 +377,42 @@ sub infer ($class, $graphs) {
     # stamp logic, which we re-run to catch calls newly resolvable this pass.
     while (_seed_direct_call_arg_reprs(\%graphs) > 0) {
         _seed_and_propagate_reprs(\%graphs);
+
+        # RETIRE VACUOUS WIDENINGS BEFORE THE CALL IS STAMPED FROM THE CALLEE.
+        # The seeding above narrows the callee's argument read (Scalar -> Int),
+        # which can leave the producer's Coerce[Scalar -> Num] a no-op over a
+        # value already narrower than its target. _resolve_direct_calls stamps
+        # the Call from the callee's RETURN, so if that retirement waits until
+        # the pass at the end of run(), the callee body settles to Int AFTER
+        # every callsite has already taken Num -- measured exactly that way:
+        # `Multiply :Int` in main::f with `Call :Num` in the driver, one link
+        # apart and both derived from the same edge.
+        #
+        # The pass is idempotent (it only rebuilds a Coerce whose operand is
+        # narrower than its own from_repr, and only retires one whose operand
+        # already satisfies the consumer), so running it here does not conflict
+        # with the call at the end of run() that narrows what
+        # _insert_str_coercions adds later.
+        _narrow_unknown_coercions(\%graphs);
+
         _resolve_direct_calls(\%graphs);
+
+        # A NARROWED BODY MUST CARRY ITS SIGNATURE WITH IT. The method-Call
+        # fixpoint above ran BEFORE this one, so a method whose body narrows
+        # here (its arg read seeded, its vacuous Coerce retired) was already
+        # stamped from the wider reading -- and Target::LLVM emits the callee's
+        # signature from the metaobject's return_type while emitting the BODY
+        # from the graph. Measured when this was missing: `Counter__inc`
+        # emitted `define internal double` over a body whose Add had become
+        # i64, and lli refused with "'%tmp_44' defined with type 'i64' but
+        # expected 'double'". The two halves of one function disagreed.
+        #
+        # _stamp_method_call_reprs already reconciles wire against graph and
+        # calls set_return_type with the narrower; set_return_type itself only
+        # ever narrows and dies on a widening. So re-running it here cannot
+        # weaken a type -- it only lets the metaobject catch up to a body this
+        # loop just refined.
+        _stamp_method_call_reprs(\%graphs, $mop);
     }
     # The loop stamps a Call's result repr in _resolve_direct_calls AFTER the
     # pass's _seed_and_propagate_reprs already ran, so a consumer of the call
@@ -420,6 +455,38 @@ sub infer ($class, $graphs) {
     # fixpoint has run and the operand usually IS typed, so the Coerce can be
     # rebuilt against the narrowed type. Runs last, after _insert_str_coercions,
     # so a coercion inserted there is narrowed too.
+    _narrow_unknown_coercions(\%graphs);
+
+    # RECONCILE THE SIGNATURES WITH THE BODIES ONE LAST TIME. The pass above
+    # can narrow a METHOD's body -- retiring a vacuous widening inside
+    # `method inc { $n += 1 }` moves its Return value from Num to Int -- and it
+    # runs after the method-Call fixpoint near the top of run(). Target::LLVM
+    # emits a method's SIGNATURE from the metaobject's return_type and its BODY
+    # from the graph, so a body narrowed here without a matching signature
+    # emits two halves of one function that disagree.
+    #
+    # Measured when this was missing: `define internal double @Counter__inc`
+    # over a body whose Add had become i64, and lli refused the module with
+    # "'%tmp_44' defined with type 'i64' but expected 'double'". That is a
+    # REFUSAL, not a miscompile -- but the same disagreement one step earlier
+    # is how 11.0's bits get read as an i64, which is precisely what
+    # ir/call-at-the-abi-unbox-at-the-node.t was written to catch.
+    #
+    # set_return_type only ever narrows and dies on a widening, so this cannot
+    # weaken a type another pass established; it lets the metaobject catch up.
+    _stamp_method_call_reprs(\%graphs, $mop);
+
+    # AND ONE MORE NARROWING, because the reconciliation above can move a
+    # method Call down (Num -> Int) and everything derived from it with it.
+    # A Coerce minted by _insert_str_coercions was stamped from the operand as
+    # it stood BEFORE that move, so `Coerce[Num -> Str]` can end up reading an
+    # Int. It lowers correctly either way -- _lower_coerce reads the operand's
+    # live representation and treats from_repr as a fallback -- but the node
+    # misdescribes itself, and the corpus shape leg reads the node.
+    #
+    # Both passes only ever narrow, so this pair converges rather than
+    # oscillating: the second call can only act on what the re-stamp moved,
+    # and the re-stamp can only move a stamp DOWN a finite lattice.
     _narrow_unknown_coercions(\%graphs);
 
     # THE EXIT INVARIANT -- NOT YET ENFORCED. See
@@ -813,17 +880,41 @@ sub _resolve_direct_calls ($graphs) {
             # Stamp the Call's repr from the callee's Return value, so the
             # backend and the shape contract see the call result's type. The
             # callee's single Return input[-1] is its result value.
-            unless (_is_narrowed($node->representation)) {
-                my ($ret) = grep {
-                    blessed($_) && $_->can('operation')
-                        && $_->operation eq 'Return'
-                } $callee->returns->@*;
-                # ->value() is inputs[0]. Reading [-1] stamped every
-                # list-returning sub's callsites from its SCALAR face --
-                # the same bug bson hit in _graph_return_type (7b26a89).
-                my $val = $ret ? $ret->value() : undef;
-                $node->set_representation($val->representation)
-                    if $val && _is_narrowed($val->representation);
+            # THE CALLEE'S RETURN IS THE AUTHORITATIVE SOURCE for a direct
+            # call's type, so this runs even when the Call already carries a
+            # stamp -- but only ever to move it DOWN the lattice, to a strict
+            # subtype of what it holds.
+            #
+            # An `unless (_is_narrowed(...))` guard here froze the FIRST answer.
+            # This pass runs inside a fixpoint whose earlier rounds narrow the
+            # callee's own body (a `shift @_` read seeded from the callsite,
+            # then a vacuous Coerce retired above it), so the first round stamps
+            # from a callee that has not settled yet. Measured on F5's fixture:
+            # main::f's body reached `Add :Int` while its one callsite still
+            # read `Call :Num`, one link apart, both derived from the same
+            # retired edge -- and the corpus specs for nine cases pin the Int.
+            #
+            # DOWNWARD ONLY, and that is what keeps this from being the
+            # "preempt a source" mistake. A Call is not typed by its consumer
+            # here; it is typed by its own callee, which the type rules already
+            # name as its authority. Refusing to move sideways or up means a
+            # callee that legitimately widens (a second callsite forcing a join)
+            # cannot be silently overwritten by a stale narrower reading.
+            my ($ret) = grep {
+                blessed($_) && $_->can('operation')
+                    && $_->operation eq 'Return'
+            } $callee->returns->@*;
+            # ->value() is inputs[0]. Reading [-1] stamped every
+            # list-returning sub's callsites from its SCALAR face --
+            # the same bug bson hit in _graph_return_type (7b26a89).
+            my $val = $ret ? $ret->value() : undef;
+            if ($val && _is_narrowed($val->representation)) {
+                my $have = $node->representation;
+                my $want = $val->representation;
+                $node->set_representation($want)
+                    if !_is_narrowed($have)
+                    || ($have ne $want
+                        && Chalk::Grammar::Perl::TypeLibrary::is_subtype($want, $have));
             }
         }
     }
@@ -1128,6 +1219,7 @@ sub _insert_str_coercions ($graphs) {
 sub _narrow_unknown_coercions ($graphs) {
     my $narrowed = 0;
     my $factory  = Chalk::IR::NodeFactory->new();
+    my @stale;      # consumers whose stamp was derived from a retired coercion
 
     for my $name (sort keys %$graphs) {
         my $g = $graphs->{$name} or next;
@@ -1142,13 +1234,31 @@ sub _narrow_unknown_coercions ($graphs) {
                 # a :param field's :reader. Narrowing only Unknown left every
                 # such node to die in the backend for want of a Scalar arm.
                 # _is_narrowed states the rule; both callers now use it.
-                next unless blessed($c)
-                         && $c->isa('Chalk::IR::Node::Coerce')
-                         && !_is_narrowed($c->from_repr);
+                next unless blessed($c) && $c->isa('Chalk::IR::Node::Coerce');
 
                 my $operand = ($c->inputs // [])->[0];
                 next unless blessed($operand) && $operand->can('representation');
                 my $repr = $operand->representation;
+
+                # A STALE `from_repr` IS ALSO UN-NARROWED, even when it names a
+                # real type. The gate here used to be `!_is_narrowed(from_repr)`
+                # -- Unknown or Scalar only -- which is right for the case that
+                # named this pass, but it skips a Coerce whose from_repr was
+                # accurate when the producer wrote it and has since been
+                # OUTRUN by its own operand. Measured on classes.md field-attrs:
+                # the operand narrowed Num -> Int when the vacuous widenings
+                # below it were retired, leaving `Coerce[Num -> Str]` reading an
+                # Int. It lowers correctly (_lower_coerce reads the operand's
+                # live representation and treats from_repr as a fallback), so
+                # this is not a miscompile -- but the node then MISDESCRIBES
+                # itself, and the corpus shape leg reads the node, so the spec's
+                # `Coerce(Int -> Str)` could not match.
+                #
+                # Rebuilding is the same operation either way: mint a Coerce
+                # whose from_repr is what the operand actually is.
+                next if _is_narrowed($c->from_repr)
+                    && defined $repr
+                    && $repr eq $c->from_repr;
 
                 # Still untyped: leave the Unknown in place so the backend can
                 # report it. Narrowing to a guess here would recreate exactly
@@ -1157,10 +1267,59 @@ sub _narrow_unknown_coercions ($graphs) {
 
                 # The operand is ALREADY the target type: the coercion is an
                 # identity edge and the consumer can read the operand directly.
-                if ($repr eq $c->to_repr) {
+                #
+                # ALSO RETIRED: a VACUOUS WIDENING. Once the operand narrows to
+                # a SUBTYPE of the target and the consumer requires no
+                # particular type at this position, the coercion converts a
+                # value to a supertype nothing asked for -- and the result is
+                # not merely redundant, it is WRONG on the type axis, because
+                # the widened repr propagates. Measured on
+                # `sub f { my $x = shift; $x * 2 }; f(10)`: the producer cannot
+                # type `shift @_` so it emits Coerce[Scalar -> Num];
+                # _seed_direct_call_arg_reprs then narrows the read to Int and
+                # this pass rebuilt the node as Coerce[Int -> Num], leaving the
+                # TARGET alone. Multiply(Num, Int) then joined to Num and every
+                # callsite of f inherited Num where the corpus specs pin Int --
+                # nine shape failures from one surviving edge (commit 92ffe890
+                # diagnosed this and deferred it as "the functor's identity law,
+                # unenforced").
+                #
+                # ONLY when the consumer requires nothing. Arithmetic is
+                # polymorphic over the numeric spine -- Multiply/Add ask for no
+                # particular operand type, so Multiply(Int, Int) is legal and
+                # yields Int. `Concat` DOES require Str, and there the coercion
+                # is load-bearing: dropping it would hand the backend an Int
+                # where it emits a string operation. _required_operand_repr is
+                # the authority for that distinction and is already how
+                # _insert_str_coercions decides to ADD one; retiring one is the
+                # same question asked in the other direction.
+                my $required = _required_operand_repr($node->operation, $i);
+                my $vacuous  = !defined $required
+                    && $repr ne $c->to_repr
+                    && Chalk::Grammar::Perl::TypeLibrary::is_subtype($repr, $c->to_repr);
+
+                if ($repr eq $c->to_repr || $vacuous) {
                     $inputs->[$i] = $operand;
                     $c->remove_consumer($node) if $c->can('remove_consumer');
                     $operand->remove_consumer($c) if $operand->can('remove_consumer');
+
+                    # A VACUOUS WIDENING'S CONSUMER IS NOW STALE. The producer
+                    # computed Multiply's `Num` by joining ITS OPERANDS -- one
+                    # of which was the coercion just retired. Dropping the edge
+                    # without clearing the stamp leaves the widened answer
+                    # standing over narrowed inputs, which is the whole defect
+                    # one link further down: `Multiply :Num <- [Int, Int]`.
+                    #
+                    # Cleared, not recomputed here: `_propagate_computed_reprs`
+                    # owns the join rule (`Multiply => 'join'`) and is the one
+                    # place that knows it. This pass only invalidates; the
+                    # re-propagation below derives the new answer. Restricted to
+                    # the vacuous case -- an identity edge ($repr eq to_repr)
+                    # changes no type, so its consumer's stamp is still true.
+                    if ($vacuous && $node->can('set_representation')) {
+                        push @stale, $node;
+                    }
+
                     $narrowed++;
                     next;
                 }
@@ -1179,6 +1338,17 @@ sub _narrow_unknown_coercions ($graphs) {
             }
         }
     }
+
+    # RE-DERIVE what the retirements invalidated. Clearing the stamp is safe
+    # only because the join rule can recompute it from the operands that
+    # remain; a node whose repr cannot be re-derived would be left worse off
+    # than before, so this runs the same propagation the loader already
+    # trusts rather than inventing an answer here.
+    if (@stale) {
+        $_->set_representation(undef) for @stale;
+        _propagate_computed_reprs($graphs);
+    }
+
     return $narrowed;
 }
 
@@ -1526,6 +1696,40 @@ sub _propagate_computed_reprs ($graphs) {
         while ($changed) {
             $changed = 0;
             for my $node (@nodes) {
+                # A JOIN-OP STAMP CAN GO STALE UNDER ITS OWN OPERANDS. The
+                # bailout below is what keeps this fixpoint terminating, but a
+                # `join` node (Add/Multiply/And/...) computed its answer FROM
+                # its inputs, and a later pass can narrow those inputs -- two
+                # `Call :Num` operands becoming `Call :Int` once their callee
+                # settled. The Add then holds a Num nothing supports any more,
+                # and the corpus specs for F14/F15 pin the Int.
+                #
+                # RE-DERIVED ONLY DOWNWARD, and only when every operand is
+                # narrowed: the recomputed join must be a strict SUBTYPE of the
+                # stamp it replaces. That preserves termination (a stamp
+                # descends a finite lattice finitely often) and keeps this
+                # forward inference -- the node is retyped from its own inputs,
+                # never from a consumer's requirement.
+                if (_is_narrowed($node->representation)
+                    && ($_COMPUTED_REPR{ $node->operation } // '') eq 'join') {
+                    my $inputs = $node->can('inputs') ? $node->inputs : undef;
+                    my @operand_reprs =
+                        map  { $_->representation }
+                        grep { blessed($_) && $_->can('representation')
+                                 && _is_narrowed($_->representation) }
+                        ($inputs ? $inputs->@* : ());
+                    my $have = $node->representation;
+                    if ($inputs && @operand_reprs == scalar(grep { blessed($_) } $inputs->@*)
+                        && @operand_reprs) {
+                        my $want = _join_repr(@operand_reprs);
+                        if (defined $want && $want ne $have
+                            && Chalk::Grammar::Perl::TypeLibrary::is_subtype($want, $have)) {
+                            $node->set_representation($want);
+                            $changed = 1;
+                        }
+                    }
+                }
+
                 next if _is_narrowed($node->representation);
                 my $op = $node->operation;
 
@@ -2142,7 +2346,17 @@ sub _stamp_method_call_reprs ($graphs, $mop) {
             next unless $node->operation eq 'Call';
             next unless ($node->dispatch_kind // '') eq 'method';
             next if ($node->name // '') eq 'new';   # constructor: backend-handled
-            next if _is_narrowed($node->representation);
+            # NO EARLY `_is_narrowed` BAILOUT. A method Call's authority is
+            # its CALLEE's return type, and the callee can narrow after this
+            # Call was first stamped: retiring a vacuous widening inside
+            # `method inc { $n += 1 }` moves its body Num -> Int, and the
+            # metaobject follows via set_return_type. A Call frozen at the
+            # first answer then disagrees with the ABI it calls through, which
+            # the backend refuses outright ("node repr=Num disagrees with class
+            # 'Counter' vtable ABI return_repr=Int", Context.pm:8687).
+            #
+            # The resolution below is unchanged; the DOWNWARD-ONLY test lives
+            # at the write site, where the callee's answer is actually in hand.
             my $class = $node->class_name // next;
             my $mname = $node->name // '';
             # Resolve through the EDGE. _attach_call_targets has already put the
@@ -2191,6 +2405,16 @@ sub _stamp_method_call_reprs ($graphs, $mop) {
             # and could not re-stamp it.
             my $prev = $node->representation;
             next if defined $prev && $prev eq $repr;
+
+            # DOWNWARD ONLY once a stamp exists. An unnarrowed Call takes the
+            # callee's answer outright; a narrowed one moves only to a strict
+            # SUBTYPE of what it holds. That keeps this monotone over a finite
+            # lattice (so the caller's `while (... > 0)` still terminates) and
+            # keeps it forward inference: the Call is typed by its own callee,
+            # never widened back by a later, weaker reading.
+            next if _is_narrowed($prev)
+                && !Chalk::Grammar::Perl::TypeLibrary::is_subtype($repr, $prev);
+
             $node->set_representation($repr);
             $stamped++;
         }
