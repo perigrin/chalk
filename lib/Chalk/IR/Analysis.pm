@@ -182,9 +182,31 @@ my %_NODE_OPERAND_REPR = (Print => 'Str');
 # open "Mirrors the arms _lower_coerce implements (Context.pm)", which made a
 # type-system fact answerable by one backend: a target with a missing arm
 # would have deleted a legal conversion from the language model, and a second
-# target would have had no say at all. T2 must implement each legal coercion
-# or refuse it BY NAME; it does not get to decide which are legal
-# (perigrin, 2026-09-02).
+# target would have had no say at all.
+#
+# T1 is the CHECKER -- it establishes a well-formed IR and a program as
+# type-safe as it can be made, the way TypeScript's checker does. Each T2 is
+# a FUNCTOR into a different category: LLVM's machine types today, and a Perl
+# target (TypeScript-to-JavaScript) is the obvious second.
+#
+# AND AN SV IS NOT A TYPE, which is the whole reason this layer exists. An SV
+# carries flags for WHICH SLOTS ARE CURRENTLY POPULATED -- IOK, NOK, POK --
+# not what the value IS, and they change as the value is used. Measured with
+# Devel::Peek on 5.42.0:
+#
+#     my $x = "5";        SV = PV     FLAGS = (POK, IsCOW, pPOK)
+#     my $y = $x + 0;     SV = PVIV   FLAGS = (IOK, POK, IsCOW, pIOK, pPOK)
+#
+# Same SV, same value, different answer -- reading it numerically populated a
+# second slot. So "what type is this SV" has no stable answer at runtime;
+# there is a bag of cached interpretations instead. Chalk decides the type
+# BEFORE lowering precisely so a target does not have to ask that question,
+# and so the answer cannot change underneath it.
+#
+# A functor into a category that is not total over the source NEED NOT BE
+# TOTAL -- we map the arrows we can map. So a coercion this target cannot
+# lower is a PARTIALITY to be named, not a defect in T1, and T1 does not get
+# edited down to fit it (perigrin, 2026-09-02).
 #
 # The relationship is still checked -- t/bootstrap/ir/every-legal-coercion-is-
 # lowered.t asks the backend, pair by pair, whether each legal coercion has an

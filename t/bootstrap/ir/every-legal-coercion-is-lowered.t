@@ -94,11 +94,21 @@ subtest 'every scalar pair agrees between T1 and T2' => sub {
               . "  => the loader will not insert this Coerce, and the operand\n"
               . "     GAPs downstream for a conversion that works.");
 
-    # A legal coercion this target cannot lower is a T2 HOLE. It is reported
-    # here because an unlowered legal conversion fails late and blames the
-    # wrong layer -- but the fix is ALWAYS to implement or explicitly refuse
-    # it in the target, NEVER to remove it from T1. T1 models perl; a second
-    # target with different gaps must not be able to change what perl does.
+    # A legal coercion this target cannot lower is a PARTIALITY, and the
+    # obligation is to NAME it, not necessarily to close it. T2 is a functor
+    # into a category that need not be total over the source -- we map the
+    # arrows we can map -- so an unmapped arrow is a legitimate outcome
+    # provided it is stated. What is not legitimate is silence: an unnamed
+    # gap fails late and blames the type layer for a target's limit.
+    #
+    # _repr_to_llvm_type already offers exactly this choice in its own
+    # message -- "add it to %_REPR_LLVM_TYPE with its machine type, or to
+    # %_REPR_NO_MACHINE_TYPE with the reason it has none". This assertion is
+    # the same demand one level up, for arrows rather than objects.
+    #
+    # Either way the fix is in the TARGET. T1 is never edited down to fit a
+    # backend's gaps; a second target with different limits must not be able
+    # to change what perl does.
     is_deeply(\@t1_only, [],
         'T2 HOLE: every legal coercion has an implementation in this target')
         or diag("  T1 admits but T2 cannot lower: @t1_only\n"
