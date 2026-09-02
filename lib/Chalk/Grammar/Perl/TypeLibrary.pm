@@ -45,7 +45,40 @@ class Chalk::Grammar::Perl::TypeLibrary {
         Str       => 'Scalar',
         Num       => 'Str',
         Int       => 'Num',
-        Boolean   => 'Str',         # true/false: Str carrying boolean marking
+        # BOOLEAN IS IN NEITHER Str NOR Num. It sat under Str, described as
+        # "Str carrying boolean marking", because every string operation works
+        # on a boolean with no coercion -- "x".true."y".false."z" is "x1yz",
+        # length(true)/length(false) are 1/0, uc(true) is "1". That is
+        # SUBSTITUTABILITY, and it is only half the subtype test:
+        #
+        #     A <: B  iff  (A subset-of B) and (every op of B holds for A)
+        #
+        # Membership is the other half, and it fails. Str membership asks for
+        # an ADMISSIBLE detour type S preserving the value. Measured on 5.42.0:
+        #
+        #     false   direct Str ""     via Num "0"    DIFFER
+        #     true    direct Str "1"    via Num "1"    agree
+        #
+        # `true` is preserved; `false` is not, and one counterexample falsifies
+        # membership. S=Str is inadmissible (vacuous -- identity on every Str)
+        # and S=Boolean is circular (Str's definition would depend on Boolean,
+        # inverting the stratification Scalar -> Str -> Num -> Int).
+        #
+        # TESTING ONE VALUE GETS THIS WRONG, since `true` agrees. So does
+        # testing one factor. perl-type-system-formal.md always said so:
+        # "Scalar contains values that belong neither to Str nor to Num -
+        # including Boolean (true/false), Undef (undef), Ref (references), and
+        # DualVars". The implementation contradicted the spec.
+        #
+        # CONSEQUENCE FOR CONSUMERS: join(Boolean, Int) was Str and is now
+        # Scalar, which is why this is not cosmetic -- the old answer invited a
+        # consumer to treat `-c $f` and `length $x` as the same kind of thing.
+        # They have no common type below Scalar. In the LLVM backend Scalar
+        # ENCODES AS %Slot (a tagged 16-byte cell) where Str is %Str (an
+        # unboxed ptr/len aggregate), so such a join now yields a boxed value
+        # that must be read back through its tag -- a refusal there is the
+        # boundary working, not a regression.
+        Boolean   => 'Scalar',      # in Scalar, in neither Str nor Num
         VString   => 'Str',         # v-strings: Str carrying 'V' magic
         DualVar   => 'Scalar',      # in Scalar but in neither Str nor Num
         Ref       => 'Scalar',
