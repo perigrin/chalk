@@ -2091,6 +2091,25 @@ sub _lower_concat {
     return $buf;
 }
 
+# _str_const_parts($text, $label) -> ($ptr, $byte_len)
+#
+# A literal string as a (pointer, length) pair, for a site that needs the two
+# halves separately -- a select over string constants has to choose the
+# pointer and the length on the SAME predicate, and a helper returning a
+# packed %Str would have to be taken apart again immediately.
+#
+# The global is emitted through _module_global_name, so identical text is
+# shared and the name stays deterministic. The length is the byte count
+# WITHOUT the NUL: _module_global_name's total includes it, and a %Str's
+# length never does.
+sub _str_const_parts {
+    my ($self, $text, $label) = @_;
+    my ($glob, undef, $total) = $self->_module_global_name('str_const', $text);
+    my $ptr = $self->_fresh;
+    $self->_emit_entry("  $ptr = getelementptr inbounds [$total x i8], [$total x i8]* $glob, i64 0, i64 0  ; $label: \"$text\"");
+    return ($ptr, $total - 1);
+}
+
 # _emit_str_append($lhs_ref, $rhs_ref, $label) -> $ptr
 #
 # Concatenate two Str VALUES, independent of any Concat node. _lower_concat
@@ -2212,7 +2231,59 @@ sub _emit_to_str {
         my $wrote = $self->_fresh;
         $self->_emit("  $wrote = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* $buf, i64 $size, i8* $fmt, double $input_ref)  ; $label: render");
         $buf = $self->_set_str_len($buf, $need64);
-        return $buf;
+
+        # PERL AND C DISAGREE ON NON-FINITE DOUBLES. Measured on perl 5.42.0:
+        #
+        #   9**9**9             "Inf"    C's %g gives "inf"
+        #   -9**9**9            "-Inf"   C gives "-inf"
+        #   9**9**9 - 9**9**9   "NaN"    C gives "nan"
+        #
+        # so the snprintf above is right for every finite value and wrong for
+        # exactly three. The return-value epilogue carried this fixup and the
+        # Coerce did not, which was invisible while every observation of a Num
+        # went through the epilogue -- a program that PRINTS a non-finite value
+        # reaches the Coerce instead. Moving it here puts it where a real
+        # program meets it; the epilogue's copy can then go with the epilogue.
+        #
+        # NaN is detected as `fcmp uno x, x` (a NaN is unordered with itself,
+        # the only value that is) and the infinities by their exact bit
+        # patterns. The selects nest so NaN wins over the +/-Inf choice, which
+        # matters because the +Inf compare is FALSE for a NaN but the ordering
+        # would otherwise depend on that.
+        my $is_nan  = $self->_fresh;
+        my $is_pinf = $self->_fresh;
+        my $is_ninf = $self->_fresh;
+        my $is_inf  = $self->_fresh;
+        my $is_nf   = $self->_fresh;
+        $self->_emit("  $is_nan = fcmp uno double $input_ref, $input_ref  ; $label: NaN iff unordered with itself");
+        $self->_emit("  $is_pinf = fcmp oeq double $input_ref, 0x7FF0000000000000  ; $label: +Inf");
+        $self->_emit("  $is_ninf = fcmp oeq double $input_ref, 0xFFF0000000000000  ; $label: -Inf");
+        $self->_emit("  $is_inf = or i1 $is_pinf, $is_ninf  ; $label: either infinity");
+        $self->_emit("  $is_nf = or i1 $is_nan, $is_inf  ; $label: non-finite?");
+
+        # Perl's spellings as ordinary tracked Str values -- NOT the epilogue's
+        # @num_*_str globals, which carry a `Num:` tag prefix and a trailing
+        # newline and are shaped for a printf rather than for a value.
+        my ($inf_ptr,  $inf_len)  = $self->_str_const_parts('Inf',  "$label: +Inf");
+        my ($ninf_ptr, $ninf_len) = $self->_str_const_parts('-Inf', "$label: -Inf");
+        my ($nan_ptr,  $nan_len)  = $self->_str_const_parts('NaN',  "$label: NaN");
+
+        my ($inf_sel_p, $nf_p, $out_p) = ($self->_fresh, $self->_fresh, $self->_fresh);
+        my ($inf_sel_l, $nf_l, $out_l) = ($self->_fresh, $self->_fresh, $self->_fresh);
+        $self->_emit("  $inf_sel_p = select i1 $is_pinf, i8* $inf_ptr, i8* $ninf_ptr  ; $label: +Inf or -Inf");
+        $self->_emit("  $inf_sel_l = select i1 $is_pinf, i64 $inf_len, i64 $ninf_len  ; $label: matching length");
+        $self->_emit("  $nf_p = select i1 $is_nan, i8* $nan_ptr, i8* $inf_sel_p  ; $label: NaN overrides");
+        $self->_emit("  $nf_l = select i1 $is_nan, i64 $nan_len, i64 $inf_sel_l  ; $label: matching length");
+
+        # The pointer and the length are selected TOGETHER on the same
+        # predicate: a mismatched pair would read the right buffer for the
+        # wrong number of bytes, which is a silent wrong answer rather than a
+        # crash. Same reasoning that makes %Str a first-class aggregate.
+        my ($fin_ptr, $fin_len) = $self->_str_parts($buf);
+        $self->_emit("  $out_p = select i1 $is_nf, i8* $nf_p, i8* $fin_ptr  ; $label: non-finite or rendered");
+        $self->_emit("  $out_l = select i1 $is_nf, i64 $nf_l, i64 $fin_len  ; $label: matching length");
+
+        return $self->_set_str_len($out_p, $out_l);
     }
 
     if ($from eq 'Int') {
