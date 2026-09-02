@@ -1202,6 +1202,34 @@ sub _process_control_chain {
                         my $a = $arm;
                         while (defined $a && blessed($a)) {
                             last if $seen{ $a->id }++;
+
+                            # AN UNWIND ON A HEADLESS-REGION ARM IS A CAUGHT
+                            # DIE, AND CHALK CANNOT LOWER ONE.
+                            #
+                            # The merge exists precisely BECAUSE control rejoins
+                            # after the catch, so this `die` does not abort the
+                            # program -- it transfers to the other arm. Lowering
+                            # it as a mainline abort emits `exit(255)` and kills
+                            # everything after the try/catch: measured on
+                            # `try { die "boom\n" } catch ($e) { print "caught\n" }`,
+                            # chalk printed `caught` and exited 255 where perl
+                            # prints `caught` then `2` and exits 0.
+                            #
+                            # Catching needs an LLVM landingpad and a personality
+                            # function, which this backend does not have -- the
+                            # TryCatch NODE arm in Context.pm already says so.
+                            # That GAP is unreachable here because the producer
+                            # desugars try/catch to Region+Unwind rather than
+                            # building a TryCatch node, so the refusal has to be
+                            # stated again at the shape it actually arrives in.
+                            if (($a->can('operation') ? $a->operation : '') eq 'Unwind') {
+                                die "GAP: a `die` inside a try block is not lowered "
+                                  . "runtime-free -- catching it needs an LLVM "
+                                  . "landingpad + personality function. The producer "
+                                  . "desugars try/catch to a headless Region, so this "
+                                  . "Unwind is a CAUGHT die, not a mainline abort.\n";
+                            }
+
                             push @chain, $a;
                             $a = $a->can('control_in') ? $a->control_in : undef;
                         }
