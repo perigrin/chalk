@@ -61,6 +61,34 @@ at least one topic file mentions them, not that they are covered well:
 | `local `   | 9               | 1            |
 | `wantarray`| 4               | 1            |
 
+## ZERO IS NOT THE ONLY EXPOSURE, and this table missed that at first
+
+The list above was built by looking for idioms with NO corpus file. That found
+the slice case, but it is the wrong shape for the biggest surface. High usage
+with THIN coverage is the same risk one step less obvious:
+
+| idiom     | lib/Chalk files | corpus files |
+|-----------|-----------------|--------------|
+| `join(`   | 44              | 2            |
+| `ref(`    | 34              | 2            |
+| `map {`   | 32              | 1            |
+| `grep {`  | 21              | 1            |
+| `keys %`  | 21              | 3            |
+| `split`   | 17              | 2            |
+| `sort {`  | 11              | 1            |
+| `substr`  | 10              | 1            |
+
+`join` at 44 library files against 2 corpus files is a larger surface than
+`lc(` at a single occurrence. And "one corpus file" is not one case, but it is
+thin enough that a SECOND POLARITY probably is not there -- which is exactly
+the shape that let the `exists` miscompile survive: the present-key case agreed
+with the broken mapping by coincidence, and only the absent-key case
+discriminated.
+
+So the ranking is not "zero first". It is roughly usage-weighted, and the
+question to ask of a covered idiom is whether the corpus has the case that
+would FAIL if the implementation were wrong -- not whether it has a case.
+
 ## What this is not
 
 It is NOT a claim that each row is a bug. It is a claim that each row is a
