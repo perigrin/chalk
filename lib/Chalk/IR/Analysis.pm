@@ -176,6 +176,16 @@ my %_NODE_OPERAND_REPR = (Print => 'Str');
 # mint a Coerce the backend cannot lower, which would turn a clear type error
 # into a confusing "not lowered runtime-free" GAP one layer too late.
 #
+# THAT MIRROR IS NOW ENFORCED, not merely asserted here. It was asserted for a
+# long time and was false: Str->Int was implemented in the backend and absent
+# from this table, so the loader declined to insert a Coerce for a conversion
+# that works and the operand GAPped later for the wrong reason. Two tables,
+# one claiming to mirror the other, nothing checking.
+# t/bootstrap/ir/coercible-mirrors-what-lowers.t now compares them pair by
+# pair, in both directions, by ASKING the backend rather than grepping its
+# arms -- several pairs lower through shared paths that no
+# `$from eq X && $to eq Y` line names.
+#
 # Aggregates (Array/Hash/ArrayRef/HashRef/CodeRef) are deliberately ABSENT: no
 # conversion from an aggregate to a scalar repr is defined, so an aggregate in a
 # scalar position is a type error to REPORT, not a coercion to invent.
@@ -200,7 +210,14 @@ my %_NODE_OPERAND_REPR = (Print => 'Str');
 my %_COERCIBLE_TO = (
     Int   => { Num => 1, Str => 1, Boolean => 1 },
     Num   => { Int => 1, Str => 1, Boolean => 1 },
-    Str   => { Num => 1, Boolean => 1 },
+    # Str -> Int was MISSING while the backend implemented it
+    # (Context.pm:2858). perl reads the string as a number and then truncates
+    # toward zero -- `int("3.9abc")` is 3 -- so it is Str->Num composed with
+    # Num->Int, both of which were already here. Its absence meant the loader
+    # declined to insert the Coerce and the operand GAPped downstream for a
+    # conversion that works. Pinned by
+    # t/bootstrap/ir/coercible-mirrors-what-lowers.t.
+    Str   => { Num => 1, Int => 1, Boolean => 1 },
     Boolean  => { Int => 1, Num => 1, Str => 1 },
     Undef => { Int => 1, Num => 1, Str => 1, Boolean => 1 },
 );
