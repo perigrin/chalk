@@ -883,25 +883,49 @@ sub _emit_class_registry_ir {
                 push @lines, "  ret i1 $body_val";
             }
             elsif ($ret_repr eq 'Scalar') {
-                # The ABI is %Slot = { i1 defined, i8 tag, i64 payload }. The body value
-                # is the PAYLOAD, so it is boxed here rather than returned bare
-                # -- without this the header says %Slot and the ret says i64,
-                # which lli rejects outright ("value doesn't match function
-                # result type"). Defined is true: a method that reached its
-                # Return produced a value.
-                my $ri_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
-                my $ri_tag = Chalk::Target::LLVM::Context::_slot_idx('tag');
-                my $ri_pay = Chalk::Target::LLVM::Context::_slot_idx('payload');
-                # The declared return repr is Scalar -- un-narrowed -- so the
-                # reading of these payload bits was never established. 'Opaque'
-                # says exactly that; 'Undef' would falsely assert the value IS
-                # undef when the defined bit right above says it is not.
-                my $ri_tagv = Chalk::Target::LLVM::Context::_slot_tag_value(
-                    Chalk::Target::LLVM::Context::_slot_tag_for_repr($ret_repr));
-                push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, $ri_def";
-                push @lines, "  %ret_st = insertvalue %Slot %ret_s0, i8 $ri_tagv, $ri_tag";
-                push @lines, "  %ret_s1 = insertvalue %Slot %ret_st, i64 $body_val, $ri_pay";
-                push @lines, '  ret %Slot %ret_s1';
+                # The ABI is %Slot = { i1 defined, i8 tag, i64 payload }.
+                #
+                # WHETHER TO BOX DEPENDS ON WHAT THE BODY ALREADY IS, and the
+                # body node's own repr is what says so. A body that computed a
+                # NARROWED value (an Int, a Num) hands back a bare payload and
+                # must be boxed. A body whose own repr is already `Scalar`
+                # hands back a COMPLETE %Slot -- a `field $s :param = "hi"`
+                # read lowers to a tag-dispatched `phi %Slot` -- and boxing
+                # that again puts a %Slot where the payload field wants an
+                # i64, which lli rejects: "'%tmp_34' defined with type '%Slot'
+                # but expected 'i64'". Measured on classes.md field-str-default
+                # and "print a method-call result", which failed identically at
+                # the same emission site.
+                #
+                # This arm read "the body value is the PAYLOAD" as though it
+                # were always true. It is true only of the narrowed case, which
+                # is the only one that had ever reached here.
+                my $body_repr = (blessed($body_node)
+                                 && $body_node->can('representation'))
+                              ? ($body_node->representation // '')
+                              : '';
+
+                if ($body_repr eq 'Scalar') {
+                    # Already a %Slot: the tag it carries is the reading the
+                    # body established, which is strictly better than the
+                    # Opaque one this arm would stamp on.
+                    push @lines, "  ret %Slot $body_val";
+                }
+                else {
+                    my $ri_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
+                    my $ri_tag = Chalk::Target::LLVM::Context::_slot_idx('tag');
+                    my $ri_pay = Chalk::Target::LLVM::Context::_slot_idx('payload');
+                    # The declared return repr is Scalar -- un-narrowed -- so the
+                    # reading of these payload bits was never established. 'Opaque'
+                    # says exactly that; 'Undef' would falsely assert the value IS
+                    # undef when the defined bit right above says it is not.
+                    my $ri_tagv = Chalk::Target::LLVM::Context::_slot_tag_value(
+                        Chalk::Target::LLVM::Context::_slot_tag_for_repr($ret_repr));
+                    push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, $ri_def";
+                    push @lines, "  %ret_st = insertvalue %Slot %ret_s0, i8 $ri_tagv, $ri_tag";
+                    push @lines, "  %ret_s1 = insertvalue %Slot %ret_st, i64 $body_val, $ri_pay";
+                    push @lines, '  ret %Slot %ret_s1';
+                }
             }
             else {
                 push @lines, "  ret i64 $body_val";
