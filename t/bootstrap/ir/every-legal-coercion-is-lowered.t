@@ -94,8 +94,13 @@ subtest 'every scalar pair agrees between T1 and T2' => sub {
               . "  => the loader will not insert this Coerce, and the operand\n"
               . "     GAPs downstream for a conversion that works.");
 
+    # A legal coercion this target cannot lower is a T2 HOLE. It is reported
+    # here because an unlowered legal conversion fails late and blames the
+    # wrong layer -- but the fix is ALWAYS to implement or explicitly refuse
+    # it in the target, NEVER to remove it from T1. T1 models perl; a second
+    # target with different gaps must not be able to change what perl does.
     is_deeply(\@t1_only, [],
-        'T2 HOLE: every legal coercion has an implementation or a named refusal')
+        'T2 HOLE: every legal coercion has an implementation in this target')
         or diag("  T1 admits but T2 cannot lower: @t1_only\n"
               . "  => the loader mints a Coerce that fails one layer later.");
 };

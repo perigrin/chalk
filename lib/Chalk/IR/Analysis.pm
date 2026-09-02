@@ -172,19 +172,24 @@ my %_NODE_OPERAND_REPR = (Print => 'Str');
 
 
 # The scalar representations a value can be CONVERTED to, keyed by source repr.
-# Mirrors the arms _lower_coerce implements (Context.pm) -- this pass must not
-# mint a Coerce the backend cannot lower, which would turn a clear type error
-# into a confusing "not lowered runtime-free" GAP one layer too late.
+# WHICH COERCIONS EXIST IS A FACT ABOUT PERL, and this table states it. It is
+# T1: it models the language, and it must be derivable from perl's behaviour
+# alone. Measured on 5.42.0 -- every one of the 16 pairs admitted here is a
+# conversion perl performs, and the 4 excluded all share a target, because
+# perl has no operation producing undef from a value.
 #
-# THAT MIRROR IS NOW ENFORCED, not merely asserted here. It was asserted for a
-# long time and was false: Str->Int was implemented in the backend and absent
-# from this table, so the loader declined to insert a Coerce for a conversion
-# that works and the operand GAPped later for the wrong reason. Two tables,
-# one claiming to mirror the other, nothing checking.
-# t/bootstrap/ir/every-legal-coercion-is-lowered.t now compares them pair by
-# pair, in both directions, by ASKING the backend rather than grepping its
-# arms -- several pairs lower through shared paths that no
-# `$from eq X && $to eq Y` line names.
+# IT MUST NOT BE DEFINED BY WHAT ANY TARGET CAN LOWER. This comment used to
+# open "Mirrors the arms _lower_coerce implements (Context.pm)", which made a
+# type-system fact answerable by one backend: a target with a missing arm
+# would have deleted a legal conversion from the language model, and a second
+# target would have had no say at all. T2 must implement each legal coercion
+# or refuse it BY NAME; it does not get to decide which are legal
+# (perigrin, 2026-09-02).
+#
+# The relationship is still checked -- t/bootstrap/ir/every-legal-coercion-is-
+# lowered.t asks the backend, pair by pair, whether each legal coercion has an
+# implementation -- but a failure there is a HOLE IN THE TARGET, to be fixed
+# in T2, never by editing this table down to fit.
 #
 # Aggregates (Array/Hash/ArrayRef/HashRef/CodeRef) are deliberately ABSENT: no
 # conversion from an aggregate to a scalar repr is defined, so an aggregate in a

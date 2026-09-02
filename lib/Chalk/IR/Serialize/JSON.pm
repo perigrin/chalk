@@ -23,9 +23,25 @@ my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
 # Chalk::Grammar::Perl::TypeLibrary, which is canonical); Chalk's backend
 # requires an explicit `representation`. The names agree, so the only question
 # at this boundary is which stamps the backend can lower.
-# The stamp names that are also representation names. This is a WHITELIST, not
-# a translation: the two vocabularies agree name-for-name, and what this set
-# carries is which stamps the backend can actually lower. A stamp outside it
+# THIS SET IS A T2 FACT SITTING IN A T1 FILE, and that is a layering defect,
+# not just an awkward home. T1 models perl; T2 decides what a given target can
+# lower. "Which stamps the backend can lower" is entirely the second question,
+# and answering it here means the LOADER -- shared by every target -- is gated
+# on one target's capabilities. A second backend with different gaps would
+# have no say, and would silently inherit LLVM's.
+#
+# It exists only because `stamp` and `representation` are ONE field under the
+# transitional alias, so admitting a name to the type axis simultaneously
+# claims it as a machine encoding. Split the fields and this set dissolves:
+# `stamp` takes every lattice type unconditionally, and `representation` is
+# written by T2 alone, where _repr_to_llvm_type and %_REPR_NO_MACHINE_TYPE
+# already do the refusing at the right layer.
+# See docs/plans/2026-08-24-loader-analysis-pipeline.md (slice 3).
+#
+# The whitelist itself, until then: the stamp names that are also
+# representation names. A WHITELIST, not a translation -- the two vocabularies
+# agree name-for-name, and what this set carries is which stamps the backend
+# can actually lower. A stamp outside it
 # (Scalar, List, DualVar, a ref type) leaves the representation unset so
 # _require_repr reports an honest GAP instead of mislowering.
 # The wire stamps that may enter the representation field. This is a filter on a
