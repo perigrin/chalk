@@ -180,6 +180,7 @@ my %tally = (green => 0, gap_declared => 0, bug => 0, no_source => 0,
 my %by_topic;
 my @bugs;
 my @worklist;   # the same gaps, structured for the artifact below
+my @gap_now_works;  # GAP-declared cases that have started working
 
 for my $md (@topics) {
     my $topic = $md =~ m{/([^/]+)\.md$} ? $1 : $md;
@@ -208,11 +209,63 @@ for my $md (@topics) {
             if !(defined $case->{ir} && $case->{ir} =~ /\S/)
             || Chalk::CodeGen::Harness::MdtestCorpus::_is_pure_gap_block($case->{ir});
 
-        # Corpus-declared GAP: not expected to lower; record honestly.
+        # Corpus-declared GAP: not expected to lower -- BUT RUN IT ANYWAY.
+        #
+        # This used to `pass()` without executing the source, which made a GAP
+        # declaration unfalsifiable in both directions: a case that had SILENTLY
+        # STARTED WORKING read exactly like one that still refused, and
+        # GAP-message drift was invisible. Measured during the
+        # bare-block-classification milestone: two cases drafted as GAP already
+        # lowered correctly, and had they shipped that way they would have
+        # pinned NOTHING while reading as coverage.
+        #
+        # So the case is executed and the declaration is CHECKED. A GAP that
+        # still refuses passes quietly. A GAP that now lowers AND agrees with
+        # perl is reported as a case to promote -- not a failure, because
+        # working is not a regression, but it must not stay silent either.
+        #
+        # A GAP that lowers and DISAGREES with perl is the dangerous one: the
+        # declaration was hiding a miscompile rather than an absence. That
+        # fails.
         if ($verdict eq 'GAP') {
             $tally{gap_declared}++;
             $by_topic{$topic}{gap}++;
-            pass("$label: corpus-declared GAP (skipped)");
+
+            my ($g_oracle, $g_wrote, $g_oexit) = perl_oracle($source);
+            my ($g_lli, $g_err, undef, $g_lexit) = run_through_bson($source);
+
+            my $g_agrees = defined $g_lli
+                        && $g_lli eq $g_oracle
+                        && ($g_lexit // 0) == ($g_oexit // 0);
+
+            if (!defined $g_lli) {
+                # Still refuses. This is the expected state for a declared GAP.
+                pass("$label: corpus-declared GAP (still refuses)");
+            }
+            elsif ($g_agrees && !$g_wrote) {
+                # AGREES, BUT ON NOTHING. Both sides printed no bytes, so the
+                # comparison is empty-to-empty and verifies nothing -- the same
+                # vacuity the main path guards with $vacuous. This is NOT a
+                # disagreement (the first version of this arm called it one and
+                # reported EIGHT false failures), and it is NOT evidence the gap
+                # has closed either. Reported as what it is.
+                pass("$label: corpus-declared GAP; it lowers but neither side "
+                   . "prints, so nothing is verified");
+            }
+            elsif ($g_agrees) {
+                pass("$label: corpus-declared GAP but it now LOWERS AND MATCHES perl "
+                   . "-- promote it to a real case");
+                push @gap_now_works, $label;
+            }
+            else {
+                fail("$label: corpus-declared GAP that LOWERS BUT DISAGREES with perl");
+                diag("  lli:  " . (defined $g_lli ? "'$g_lli'" : '(none)')
+                   . "  exit " . ($g_lexit // 0));
+                diag("  perl: '$g_oracle'  exit " . ($g_oexit // 0));
+                diag("  A GAP declaration is a claim that this does not compile.");
+                diag("  It compiled, and produced the wrong answer -- the");
+                diag("  declaration was hiding a miscompile, not an absence.");
+            }
             next;
         }
 
@@ -356,6 +409,17 @@ if (@bugs) {
     diag("");
     diag("=== worklist (triple-contract gaps to close) ===");
     diag("  $_") for @bugs;
+}
+
+# A declared GAP that has started working is FREE COVERAGE nobody claimed. It
+# is not a failure, so it would otherwise sit unnoticed in a passing run --
+# which is how a case stays declared-GAP long after the gap closed, pinning
+# nothing while reading as coverage.
+if (@gap_now_works) {
+    diag("");
+    diag("=== GAP-declared cases that NOW LOWER AND MATCH perl ===");
+    diag("  (promote these: delete the L: GAP line and write a real ir block)");
+    diag("  $_") for @gap_now_works;
 }
 
 # THE WORKLIST AS AN ARTIFACT, not only as scrollback.
