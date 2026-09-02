@@ -946,6 +946,14 @@ sub _emit_class_registry_ir {
                     push @lines, "  %ret_g1 = getelementptr inbounds %Str, %Str* %ret_pp, i64 0, i32 "
                                . $C->can('_str_idx')->('len');
                     push @lines, "  store i64 %ret_xl, i64* %ret_g1  ; %Str.len";
+                    # enc, like the two boxing sites in Context.pm: a field
+                    # left as malloc garbage is invisible until it has a
+                    # reader, and Chalk's own source is non-ASCII, so one is
+                    # coming.
+                    push @lines, "  %ret_g2 = getelementptr inbounds %Str, %Str* %ret_pp, i64 0, i32 "
+                               . $C->can('_str_idx')->('enc');
+                    push @lines, "  store i32 " . $C->can('_str_enc')->('utf8')
+                               . ", i32* %ret_g2  ; %Str.enc (utf8)";
                     push @lines, "  %ret_pi = ptrtoint %Str* %ret_pp to i64";
                     my $str_tag = $C->can('_slot_tag_value')->(
                                       $C->can('_slot_tag_for_repr')->('Str'));

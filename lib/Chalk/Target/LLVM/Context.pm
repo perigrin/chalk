@@ -293,7 +293,7 @@ my @_STRPAIR_FIELDS = (
     # `enc` is WRITE-ONLY today: one writer (_str_aggregate), zero readers,
     # zero callers passing a non-default. Giving it a reader or deleting it is
     # step 4 and a separate decision.
-    { name => 'enc', llvm => 'i32', bytes => 4 },   # 0 = ASCII/UTF-8 default
+    { name => q(enc), llvm => q(i32), bytes => 4 },   # charset id; see %_STR_ENC, default utf8
 );
 
 # ---------------------------------------------------------------------------
@@ -361,10 +361,67 @@ sub _sizeof_times {
     return "mul (i64 $n, i64 " . _sizeof_llvm_type($ty) . ")";
 }
 
+# %Str.enc -- WHICH CHARACTER SET the bytes behind `ptr` are written in.
+#
+# AN OPEN SET, NOT A FLAG (perigrin, 2026-09-02). This is a character-set
+# IDENTIFIER: UTF-8, UTF-16, Shift-JIS, EUC-JP, the ISO-8859 family, EBCDIC.
+# perl's own Encode knows 124 of them. An earlier version of this comment
+# described it as distinguishing "bytes vs characters", which is a CONSEQUENCE
+# of the encoding rather than the question the field asks -- and a two-way flag
+# would have been the wrong shape to grow.
+#
+# So the values below are a REGISTRY, not an enum: names are assigned numbers
+# as the backend learns to handle them, and an unknown name is an error rather
+# than a default. Nothing here caps how many there can be.
+#
+# CHALK'S DEFAULT IS UTF-8, AND THAT IS A DELIBERATE BREAK WITH PERL. perl has
+# no single default: a literal without `use utf8` is bytes-as-Latin-1, and with
+# `use utf8` it is decoded characters, so the same source text means different
+# things depending on a pragma. Measured on 5.42.0:
+#
+#     length("a\x{2014}b")            3    characters
+#     length(encode('UTF-8', $same))   5    bytes
+#
+# Chalk declines to carry that split: a Str IS UTF-8 unless its enc says
+# otherwise, so `len` is a byte count and `enc` says how to walk them.
+#
+# THIS IS NOT SPECULATIVE. Chalk is itself non-ASCII -- 56 files under
+# lib/Chalk carry non-ASCII bytes, 174 declare `use utf8`, and MOP.pm:81 has an
+# em-dash INSIDE A `die` STRING. Self-hosting means compiling that source.
+#
+# The numbers are Chalk's own and deliberately NOT the IANA MIBenum values:
+# borrowing an external registry's numbering would imply we implement its whole
+# set. utf8 is 0 so that a zeroed cell is the default rather than an unassigned
+# encoding.
+my %_STR_ENC = (
+    utf8   => 0,   # THE DEFAULT. len counts bytes; enc says how to walk them.
+    latin1 => 1,   # ISO-8859-1: one byte, one character (perl without utf8)
+    binary => 2,   # opaque octets: no character interpretation at all
+    # Add here as the backend learns each one. A name absent from this table is
+    # an ERROR at emit time (see _str_enc), never a silent 0 -- an encoding we
+    # cannot name is one we cannot correctly index, slice or measure.
+);
+
+# _str_enc($name) -> the i32 value for a named encoding.
+#
+# Dies on an unknown name. That is the point: the alternative is emitting a
+# default for a string whose encoding we did not recognise, which produces a
+# module that runs and is wrong.
+sub _str_enc {
+    my $n = $_[-1];
+    return $_STR_ENC{$n}
+        // die "no %Str encoding named '$n' -- add it to %_STR_ENC with a "
+             . "number once the backend can index and measure it";
+}
+
+# _str_encodings() -> the registry, for tests and for a future emitter that
+# needs to name what it supports.
+sub _str_encodings { return %_STR_ENC }
+
 my @_STR_FIELDS = (
     { name => 'ptr', llvm => 'i8*', bytes => 8 },
     { name => 'len', llvm => 'i64', bytes => 8 },
-    { name => 'enc', llvm => 'i32', bytes => 4 },   # 0 = ASCII/UTF-8 default
+    { name => q(enc), llvm => q(i32), bytes => 4 },   # charset id; see %_STR_ENC, default utf8
 );
 
 # Field INDEX by name, so emitters say _str_idx('len') rather than a bare 1.
@@ -948,7 +1005,7 @@ sub _str_value {
       . "because a perl string may contain an embedded NUL. Fix the producer to "
       . "record the length when it mints the pointer.";
 
-    my $enc = $opt{enc} // 0;   # 0 = ASCII/UTF-8 default
+    my $enc = $opt{enc} // _str_enc('utf8');
 
     # A Str CONSTANT's GEP is hoisted to the entry block so it dominates every
     # use — two if/else arms may share one hash-consed Str constant, and a
@@ -7875,7 +7932,16 @@ sub _box_payload {
             $self->_emit("  $len_val = call i64 \@strlen(i8* $str_ptr)  ; strlen for $what");
         }
         $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
-        $self->_emit("  $ref = ptrtoint %Str* $pair_ptr to i64  ; StrPair* -> i64 payload for $what");
+        # ENC IS WRITTEN, NOT LEFT AS MALLOC GARBAGE. It has no reader yet, so
+        # skipping it is invisible today and becomes a heisenbug the moment one
+        # lands -- in the reader, not here. 0 is the ASCII/UTF-8 default the
+        # field list documents; a boxed Str whose encoding was never decided is
+        # exactly the value that default is for.
+        my $pe_gep = $self->_fresh;
+        $self->_emit("  $pe_gep = getelementptr inbounds %Str, %Str* $pair_ptr, i64 0, i32 "
+                   . _str_idx('enc') . "  ; %Str.enc");
+        $self->_emit("  store i32 " . _str_enc('utf8') . ", i32* $pe_gep  ; store str enc (utf8)");
+        $self->_emit("  $ref = ptrtoint %Str* $pair_ptr to i64  ; boxed %Str -> i64 payload for $what");
         $self->{_need_str_type} = 1;
         $self->{_need_malloc_memcpy} = 1;
         return $ref;
@@ -7967,8 +8033,15 @@ sub _store_field_payload {
             $self->_emit("  $len_val = call i64 \@strlen(i8* $str_ptr)  ; strlen for Str field '$pname'");
         }
         $self->_emit("  store i64 $len_val, i64* $pl_gep  ; store str len");
+        # enc, for the same reason as the sibling boxing site above: an
+        # uninitialised field whose reader is coming is a heisenbug scheduled
+        # for the day the reader lands.
+        my $fe_gep = $self->_fresh;
+        $self->_emit("  $fe_gep = getelementptr inbounds %Str, %Str* $pair_ptr, i64 0, i32 "
+                   . _str_idx('enc') . "  ; %Str.enc");
+        $self->_emit("  store i32 " . _str_enc('utf8') . ", i32* $fe_gep  ; store str enc (utf8)");
         my $pair_as_i64 = $self->_fresh;
-        $self->_emit("  $pair_as_i64 = ptrtoint %Str* $pair_ptr to i64  ; StrPair* -> i64 payload");
+        $self->_emit("  $pair_as_i64 = ptrtoint %Str* $pair_ptr to i64  ; boxed %Str -> i64 payload");
         $self->_emit("  store i64 $pair_as_i64, i64* $pay_gep  ; field '$pname' Str payload = StrPair*");
         $self->{_need_str_type} = 1;
         return $val_ref;
