@@ -33,13 +33,45 @@ subtest 'a pair with no dominating arm still has a join' => sub {
         'an aggregate and a scalar join at List, not Scalar';
 };
 
-subtest 'Boolean widens into the string chain' => sub {
-    # PINNED DELIBERATELY. `Boolean <: Str` is INTENDED -- perigrin ruled on it
-    # 2026-08-26. Perl's booleans ARE the strings "1" and "", and the lattice
-    # says so. If this assertion ever fails, the lattice was changed; do NOT
-    # "fix" it by making Boolean a sibling of the chain.
-    is Chalk::IR::Analysis::_join_repr('Boolean', 'Int'), 'Str',
-        'Boolean joined with Int is Str (Boolean <: Str is intended)';
+subtest 'Boolean does NOT widen into the string chain' => sub {
+    # This pinned `Boolean <: Str` on the argument that "perl's booleans ARE
+    # the strings 1 and ''". They stringify to those strings; they are not
+    # them. Measured on 5.42.0: is_bool("1") and is_bool("") are both FALSE,
+    # while `"" . !!1` is "1" and `"" . !!0` is "". A stringification is not
+    # an identity, and reading one as the other is substitutability mistaken
+    # for membership -- which is exactly what the two-factor subtype test
+    # exists to keep apart:
+    #
+    #     A <: B  iff  (A subset-of B) and (every op of B holds for A)
+    #
+    # Factor 2 passes: every string operation works on a boolean uncoerced.
+    # Factor 1 fails, on `false`: it interprets directly as "" but as "0" via
+    # Num, and no admissible detour preserves it. `true` DOES pass, so a
+    # one-value probe reaches the wrong answer -- and Boolean has exactly two
+    # inhabitants, so failing on `false` fails on half the type.
+    #
+    # perl-type-system-formal.md always said so ("Scalar contains values that
+    # belong neither to Str nor to Num - including Boolean"). The lattice
+    # contradicted its own spec until 2777bfa4; perl5-son found and fixed the
+    # same inversion independently in 3da90cb.
+    #
+    # The full derivation, with the measurements, is in
+    # t/bootstrap/lattice-edges-hold-in-perl.t and
+    # t/bootstrap/ir/boolean-is-not-a-str.t.
+    is Chalk::IR::Analysis::_join_repr('Boolean', 'Int'), 'Scalar',
+        'Boolean joined with Int is Scalar -- they share no ancestor below it';
+
+    # The other two string-spine joins move for the same reason. Asserted
+    # rather than assumed: Num sits between Str and Int, so an edge change
+    # that left it behind would not be a coherent lattice.
+    is Chalk::IR::Analysis::_join_repr('Boolean', 'Str'), 'Scalar',
+        'Boolean joined with Str is Scalar';
+    is Chalk::IR::Analysis::_join_repr('Boolean', 'Num'), 'Scalar',
+        'Boolean joined with Num is Scalar';
+
+    # And the spine itself is untouched -- this was one edge, not a reshape.
+    is Chalk::IR::Analysis::_join_repr('Int', 'Str'), 'Str',
+        'Int joined with Str is still Str';
 };
 
 subtest 'Slot has no place on the lattice, and the join says so' => sub {
