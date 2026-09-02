@@ -35,6 +35,43 @@ sub run_lli {
     return ($out, $exit);
 }
 
+# Observe the returned value the way a program does: PRINT it, bracketed,
+# then return undef. A program's contract is stdout plus exit status; it
+# has no side channel that hands a value back to a harness. The Print is
+# appended AFTER the graph's last existing effect, so the control ordering
+# under test is preserved. Three Prints rather than one Concat: Concat
+# needs both operands to have tracked lengths, which a Coerce'd Int lacks.
+sub print_returned_value {
+    my ($f, $ret_node) = @_;
+
+    my $v    = $ret_node->inputs->[0];
+    my $repr = $v->representation;
+    my $s    = $v;
+    if (!defined $repr || $repr ne 'Str') {
+        $s = $f->make('Coerce', inputs => [$v],
+            from_repr => $repr, to_repr => 'Str');
+        $s->set_representation('Str');
+    }
+
+    my $open = $f->make('Constant', value => '[', const_type => 'string');
+    $open->set_representation('Str');
+    my $close = $f->make('Constant', value => "]\n", const_type => 'string');
+    $close->set_representation('Str');
+
+    my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    for my $part ($open, $s, $close) {
+        my $p = $f->make('Print', inputs => [$part]);
+        $p->set_control_in($ctrl);
+        $ctrl = $p;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
+}
+
 # class Pt { field $x :param; field $y; ADJUST { $y = $x + 1 }
 #            method gety { $y } }
 sub build_pt_mop {
@@ -82,9 +119,9 @@ subtest 'single new runs ADJUST (sanity)' => sub {
     $get_a->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$get_a]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:6', 'ADJUST stores y = x + 1 (perl: 6)');
+    is($out, '[6]', 'ADJUST stores y = x + 1 (perl: 6)');
 };
 
 # my $a = Pt->new(x => 5); my $b = Pt->new(x => 100);
@@ -115,9 +152,9 @@ subtest 'second new of the same class runs ADJUST too (I6)' => sub {
     $sum->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:107', 'both objects get their own ADJUST stores (perl: 6+101=107)');
+    is($out, '[107]', 'both objects get their own ADJUST stores (perl: 6+101=107)');
 };
 
 done_testing;

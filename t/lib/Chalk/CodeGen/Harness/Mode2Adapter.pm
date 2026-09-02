@@ -10,9 +10,9 @@ use JSON::PP;
 
 use Chalk::IR::Serialize::JSON ();
 use Chalk::IR::Graph::TypedInvariant;
+use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Pipeline;
-use Chalk::CodeGen::Harness::TypeTag;
 
 # Wrap each harvested Mode-2 case (I10 extractor output) into a tri-fold runner.
 #
@@ -23,7 +23,10 @@ use Chalk::CodeGen::Harness::TypeTag;
 #
 # BEHAVIOR: the harvested EXPECTED is the oracle — Perl's t/ already told us the
 # answer, so we DO NOT re-run perl. We lower `<preamble>; <subject>` under lli
-# and compare the lli result to the type-tagged harvested expected.
+# and compare the lli result to the harvested expected. The lowered graph is
+# wrapped so it PRINTS its return value bracketed (`[4]`); the expected is
+# bracketed the same way, so a case that correctly prints an empty value is
+# distinguishable from one that printed nothing at all.
 #
 # HONEST-NUMBER DISCIPLINE (R6.1): the harvested-conformance tally is SEPARATE
 # from hand-corpus gate-green. This module NEVER touches the hand corpus; it only
@@ -74,10 +77,10 @@ class Chalk::CodeGen::Harness::Mode2Adapter {
     # _run_one($case) -> { subject, expected, behavior_ok, invariant_ok, lli, err }
     #
     # BEHAVIOR: lower `<preamble>; <subject>` and compare the lli result to the
-    # type-tagged harvested expected (the oracle). INVARIANT: TypedInvariant over
-    # the loaded graph. NO shape leg (contract C).
+    # harvested expected (the oracle). INVARIANT: TypedInvariant over the loaded
+    # graph. NO shape leg (contract C).
     sub _run_one ($class, $case) {
-        my $expected_tag = _tag_expected($case);
+        my $expected_tag = _expected_printed($case);
         my ($lli, $err, $g) = _lower_case($case);
 
         my $behavior_ok  = defined $lli && $lli eq $expected_tag;
@@ -159,22 +162,14 @@ class Chalk::CodeGen::Harness::Mode2Adapter {
 
         # The case's single unit, lowered through the ONE pipeline seam.
         #
-        # program_mode IS DELIBERATELY ABSENT AND MUST STAY ABSENT. It suppresses
-        # the Int:/Str: return-value epilogue -- and this adapter's behavior
-        # oracle, _tag_expected below, CONSUMES that epilogue: it turns the
-        # harvested plain literal (4) into the tagged face lli prints (`Int:4`)
-        # and compares them. Pass program_mode here and every comparison fails
-        # against an untagged value, silently reading the conformance tally to
-        # zero. ProgramRunner and son-corpus-wide.t pass it because they compare
-        # a PROGRAM's stdout, which states its own output.
-        #
-        # This is not left to the comment: t/bootstrap/corpus/mode2-omits-
-        # program-mode.t observes the actual %opts at the seam and fails if the
-        # flag ever appears.
+        # A lowered graph prints only what its Print nodes print, so the value
+        # under test is not observable unless we make it so: the selector wraps
+        # the Return in a bracketed Print chain (_print_returned_value) and the
+        # behavior oracle compares that printed face to the harvested expected.
         my $select = sub ($graphs, $mop) {
             my $g = $graphs->{'main::corpus_case'} or return ();
             my $ret = $g->returns->[0] or return ();
-            return ([ 'main::corpus_case', $ret ]);
+            return ([ 'main::corpus_case', _print_returned_value($ret) ]);
         };
 
         my ($units, $graphs, undef, $load_err) =
@@ -204,6 +199,43 @@ class Chalk::CodeGen::Harness::Mode2Adapter {
 
     # --- helpers -------------------------------------------------------------
 
+    # _print_returned_value($ret) -> a new Return whose graph PRINTS the old
+    # return value, bracketed, before returning undef.
+    #
+    # Three Prints rather than one Concat: Concat requires both operands to have
+    # tracked lengths, which a Coerce'd Int does not have.
+    sub _print_returned_value ($ret) {
+        my $f = Chalk::IR::NodeFactory->new;
+
+        my $v = $ret->inputs->[0];
+        my $s = $v;
+        if (($v->representation // '') ne 'Str') {
+            $s = $f->make('Coerce', inputs => [$v],
+                from_repr => $v->representation, to_repr => 'Str');
+            $s->set_representation('Str');
+        }
+
+        my $open = $f->make('Constant', value => '[', const_type => 'string');
+        $open->set_representation('Str');
+        my $close = $f->make('Constant', value => "]\n", const_type => 'string');
+        $close->set_representation('Str');
+
+        # Hang the Prints off the Return's EXISTING control_in, so they run
+        # after every effect the case already had. Nothing is reordered.
+        my $ctrl = $ret->control_in // $f->make_cfg('Start');
+        for my $part ($open, $s, $close) {
+            my $p = $f->make('Print', inputs => [$part]);
+            $p->set_control_in($ctrl);
+            $ctrl = $p;
+        }
+
+        my $u = $f->make('Constant', value => undef, const_type => 'undef');
+        $u->set_representation('Undef');
+        my $new_ret = $f->make_cfg('Return', inputs => [$u]);
+        $new_ret->set_control_in($ctrl);
+        return $new_ret;
+    }
+
     # _case_body($case) -> "<preamble lines>\n<subject>"
     # A harvested case may carry a self-contained `my $x = <literal>;` preamble
     # (I10 R5.2) the subject references; the body is the preamble followed by the
@@ -213,11 +245,17 @@ class Chalk::CodeGen::Harness::Mode2Adapter {
         return join("\n", @pre, $case->{subject});
     }
 
-    # _tag_expected($case) -> the harvested expected, type-tagged to match the
-    # lli epilogue face. The harvested expected is a plain literal (e.g. 4 or '-')
-    # and lli prints `Int:4` / `Str:-`; infer_tag is the declared-value oracle
-    # (TypeTag) that turns a plain literal into its tagged face.
-    sub _tag_expected ($case) {
-        return Chalk::CodeGen::Harness::TypeTag::infer_tag($case->{expected});
+    # _expected_printed($case) -> the harvested expected in the face the wrapped
+    # graph prints: the plain value between brackets. The brackets are what makes
+    # "correctly printed an empty value" (`[]`) distinguishable from "printed
+    # nothing at all" ('').
+    #
+    # NOTE (type-not-value): printed output carries a VALUE, not a type. `0` from
+    # an Int, a Str, and a false Boolean are all `[0]`; undef and the empty string
+    # are both `[]`. A harvested case that needs those told apart cannot be
+    # certified on printed output alone and must be PROMOTED to the hand corpus,
+    # where the ir block pins the representation.
+    sub _expected_printed ($case) {
+        return '[' . ($case->{expected} // '') . ']';
     }
 }

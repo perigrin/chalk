@@ -18,6 +18,41 @@ use Chalk::Target::LLVM;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 
+# Observe a graph's result the way a program does -- by PRINTING it -- rather
+# than off a type-tag return epilogue. Rebuilds $ret so the value flows through
+# Coerce->Str into Prints hung off the graph's EXISTING control chain, so they
+# land after the last effect and do not perturb the block structure under test.
+# Three Prints rather than a Concat: a Coerce'd Int has no tracked length.
+sub print_returned_value {
+    my ($f, $ret_node) = @_;
+
+    my $v = $ret_node->inputs->[0];
+    my $str = $v;
+    if (($v->representation // '') ne 'Str') {
+        $str = $f->make('Coerce', inputs => [$v],
+            from_repr => $v->representation, to_repr => 'Str');
+        $str->set_representation('Str');
+    }
+
+    my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    for my $part ('[', $str, "]\n") {
+        my $val = ref $part ? $part : do {
+            my $k = $f->make('Constant', value => $part, const_type => 'string');
+            $k->set_representation('Str');
+            $k;
+        };
+        my $pr = $f->make('Print', inputs => [$val]);
+        $pr->set_control_in($ctrl);
+        $ctrl = $pr;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $prog_ret = $f->make_cfg('Return', inputs => [$u]);
+    $prog_ret->set_control_in($ctrl);
+    return $prog_ret;
+}
+
 # ---------------------------------------------------------------------------
 # E1: Module loads and exposes expected API.
 # ---------------------------------------------------------------------------
@@ -202,8 +237,11 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
         skip 'lli not found', 4 unless -x $LLI;
 
         # Route through LLVM backend using the elaboration pass.
+        my $pret  = print_returned_value($f, $ret);
+        my $pdom  = Chalk::IR::Schedule::Dominators->from_return_node($pret);
+        my $pelab = Chalk::IR::Schedule::Elaborate->from_return_node($pret, $pdom);
         my $ll;
-        eval { $ll = Chalk::Target::LLVM->lower_with_elaboration($ret, $elab) };
+        eval { $ll = Chalk::Target::LLVM->lower_with_elaboration($pret, $pelab, program_mode => 1) };
         ok(!$@, "E4/B3: LLVM lowering via elaboration pass succeeds (got: $@)");
 
         SKIP: {
@@ -220,7 +258,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
             my $exit    = $? >> 8;
             is($exit, 0, 'E4/B3 .ll: lli exits cleanly');
             chomp $lli_out;
-            is($lli_out, 'Int:1', 'E4/B3: lli output is Int:1 (n=5, n>0 true -> x=1, phi emits 1, type-tagged)');
+            is($lli_out, '[1]', 'E4/B3: lli prints 1 (n=5, n>0 true -> x=1, phi emits 1)');
         }
     }
 }
@@ -381,8 +419,14 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     SKIP: {
         skip 'E6: lli not found', 5 unless -x $LLI;
 
+        my $pret  = print_returned_value($f, $ret);
+
+        my $pdom  = Chalk::IR::Schedule::Dominators->from_return_node($pret);
+
+        my $pelab = Chalk::IR::Schedule::Elaborate->from_return_node($pret, $pdom);
+
         my $ll;
-        eval { $ll = Chalk::Target::LLVM->lower_with_elaboration($ret, $elab) };
+        eval { $ll = Chalk::Target::LLVM->lower_with_elaboration($pret, $pelab, program_mode => 1) };
         ok(!$@, "E6: LLVM lowering succeeds (got: $@)");
 
         SKIP: {
@@ -400,7 +444,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
             is($exit, 0, 'E6 .ll: lli exits cleanly');
             chomp $lli_out;
             # perl oracle: n=2, outer cond (2>0) true, inner cond (2>3) false -> x=1
-            is($lli_out, 'Int:1', 'E6: lli output is Int:1 (n=2, outer-true inner-false -> x=1) [B1+H1 repro, type-tagged]');
+            is($lli_out, '[1]', 'E6: lli prints 1 (n=2, outer-true inner-false -> x=1) [B1+H1 repro]');
         }
     }
 }
@@ -506,7 +550,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
         skip 'E7: lli not found', 6 unless -x $LLI;
 
         my $ll;
-        eval { $ll = Chalk::Target::LLVM->lower($ret) };
+        eval { $ll = Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1) };
         ok(!$@, "E7: loop-nested-in-if lowers without dying (got: $@)");
 
         SKIP: {
@@ -524,7 +568,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
             is($exit, 0, 'E7 .ll: lli exits cleanly');
             chomp $lli_out;
             # perl oracle: n=3, n>0 true -> loop: s = 3+2+1 = 6
-            is($lli_out, 'Int:6', 'E7: lli==perl=Int:6 (loop-nested-in-if, n=3, type-tagged)');
+            is($lli_out, '[6]', 'E7: lli==perl=6 (loop-nested-in-if, n=3)');
         }
     }
 }
@@ -665,8 +709,14 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     SKIP: {
         skip 'M2: lli not found', 5 unless -x $LLI;
 
+        my $pret  = print_returned_value($f, $ret);
+
+        my $pdom  = Chalk::IR::Schedule::Dominators->from_return_node($pret);
+
+        my $pelab = Chalk::IR::Schedule::Elaborate->from_return_node($pret, $pdom);
+
         my $ll;
-        eval { $ll = Chalk::Target::LLVM->lower_with_elaboration($ret, $elab) };
+        eval { $ll = Chalk::Target::LLVM->lower_with_elaboration($pret, $pelab, program_mode => 1) };
         ok(!$@, "M2: Region-as-control_in: LLVM lowering succeeds (got: $@)");
 
         SKIP: {
@@ -684,7 +734,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
             is($exit, 0, 'M2 .ll: lli exits cleanly');
             chomp $lli_out;
             # perl oracle: n=5, 5>0 true -> x=1
-            is($lli_out, 'Int:1', 'M2: lli==perl=Int:1 (Region-as-control_in, n=5, type-tagged)');
+            is($lli_out, '[1]', 'M2: lli==perl=1 (Region-as-control_in, n=5)');
         }
     }
 }
@@ -773,7 +823,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
         skip 'E9: lli not found', 6 unless -x $LLI;
 
         my $ll;
-        eval { $ll = Chalk::Target::LLVM->lower($ret) };
+        eval { $ll = Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1) };
         ok(!$@, "E9: if-nested-in-loop lowers without dying (got: $@)");
 
         SKIP: {
@@ -791,7 +841,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
             is($exit, 0, 'E9 .ll: lli exits cleanly');
             chomp $lli_out;
             # perl oracle: n=3 -> s=10; n=2 -> s=20; n=1 (not >1) -> s=21
-            is($lli_out, 'Int:21', 'E9: lli==perl=Int:21 (if-nested-in-loop, n=3, type-tagged)');
+            is($lli_out, '[21]', 'E9: lli==perl=21 (if-nested-in-loop, n=3)');
         }
     }
 }

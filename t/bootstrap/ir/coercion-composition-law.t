@@ -75,8 +75,19 @@ sub run_lli {
     return $out;
 }
 
-# Build Constant(repr=$path[0]) -> Coerce -> ... -> Coerce -> Return.
+# Build Constant(repr=$path[0]) -> Coerce -> ... -> Coerce -> print -> Return.
 # A one-hop path is the DIRECT arrow; a two-hop path is the COMPOSITE.
+#
+# The endpoint is OBSERVED by printing it, the way a program observes a value,
+# rather than by reading a type-tagged return epilogue. Both routes end at the
+# same representation C and are post-composed with the SAME arrow C->Str, so
+# the observation is applied identically to both arms and cannot manufacture or
+# hide a disagreement between them: if direct and composed differ at C, they
+# differ after C->Str unless C->Str itself collapses them, and the verdict table
+# below was re-measured against the previous epilogue-based readings to confirm
+# no verdict moved. Bracketed so a correctly-printed empty string ("" from
+# Undef->Str) is distinguishable from nothing printed. Three Prints rather than
+# a Concat: a Coerce'd Int has no tracked length.
 sub chain_graph {
     my ($val, $const_type, @path) = @_;
     my $f = Chalk::IR::NodeFactory->new;
@@ -87,13 +98,38 @@ sub chain_graph {
                       from_repr => $path[$i - 1], to_repr => $path[$i]);
         $n->set_representation($path[$i]);
     }
-    return $f->make_cfg('Return', inputs => [$n]);
+
+    my $str = $n;
+    if ($path[-1] ne 'Str') {
+        $str = $f->make('Coerce', inputs => [$n],
+                        from_repr => $path[-1], to_repr => 'Str');
+        $str->set_representation('Str');
+    }
+
+    my $ctrl = $f->make_cfg('Start');
+    for my $part ('[', $str, "]\n") {
+        my $val_node = ref $part ? $part : do {
+            my $k = $f->make('Constant', value => $part, const_type => 'string');
+            $k->set_representation('Str');
+            $k;
+        };
+        my $pr = $f->make('Print', inputs => [$val_node]);
+        $pr->set_control_in($ctrl);
+        $ctrl = $pr;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
 }
 
 # Emit and run one route. Returns the lli output, or a marker string.
 sub emit_route {
     my ($val, $const_type, @path) = @_;
-    my $ll = eval { Chalk::Target::LLVM->lower(chain_graph($val, $const_type, @path)) };
+    my $ll = eval { Chalk::Target::LLVM->lower(chain_graph($val, $const_type, @path),
+                                               program_mode => 1) };
     return 'LOWER-FAIL' if $@;
     my $out = run_lli($ll);
     return 'LLI-FAIL' if $out =~ /error:/;

@@ -34,6 +34,42 @@ sub mk_target {
     return $mop->for_class('main')->declare_sub('f', graph => $graph);
 }
 
+# Print the returned value on stdout, bracketed, instead of relying on a
+# type-tag epilogue: rebuild the Return so the value flows through
+# Coerce->Str into Prints hung off the graph's existing control chain.
+# Three Prints (not a Concat) because Concat needs tracked lengths on both
+# operands, which a Coerce'd Int does not have.
+sub print_returned_value {
+    my ($f, $ret_node) = @_;
+
+    my $v = $ret_node->inputs->[0];
+    my $s = $v;
+    if (($v->representation // '') ne 'Str') {
+        $s = $f->make('Coerce', inputs => [$v],
+            from_repr => $v->representation, to_repr => 'Str');
+        $s->set_representation('Str');
+    }
+
+    my $open = $f->make('Constant', value => '[', const_type => 'string');
+    $open->set_representation('Str');
+    my $close = $f->make('Constant', value => "]\n", const_type => 'string');
+    $close->set_representation('Str');
+
+    my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    for my $part ($open, $s, $close) {
+        my $p = $f->make('Print', inputs => [$part]);
+        $p->set_control_in($ctrl);
+        $ctrl = $p;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
+}
+
+
 sub run_lli {
     my ($ll) = @_;
     my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -148,9 +184,9 @@ subtest 'callee pure node id-collides with caller mutable-read: memo must not le
     my $ret = $f->make_cfg('Return', inputs => [$rxF]);
     $ret->set_control_in($asg);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:2', 'post-reassignment read of $x sees 2 (perl: 2), not the '
+    is($out, '[2]', 'post-reassignment read of $x sees 2 (perl: 2), not the '
         . 'memo-poisoned callee value or a stale pre-assign cache hit');
 };
 

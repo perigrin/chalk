@@ -20,6 +20,42 @@ unless (-x $LLI) {
 # node -> one malloc: a store through one "distinct" ref was visible
 # through the other (019eb6ff item 4).
 
+# Print the returned value on stdout, bracketed, instead of relying on a
+# type-tag epilogue: rebuild the Return so the value flows through
+# Coerce->Str into Prints hung off the graph's existing control chain.
+# Three Prints (not a Concat) because Concat needs tracked lengths on both
+# operands, which a Coerce'd Int does not have.
+sub print_returned_value {
+    my ($f, $ret_node) = @_;
+
+    my $v = $ret_node->inputs->[0];
+    my $s = $v;
+    if (($v->representation // '') ne 'Str') {
+        $s = $f->make('Coerce', inputs => [$v],
+            from_repr => $v->representation, to_repr => 'Str');
+        $s->set_representation('Str');
+    }
+
+    my $open = $f->make('Constant', value => '[', const_type => 'string');
+    $open->set_representation('Str');
+    my $close = $f->make('Constant', value => "]\n", const_type => 'string');
+    $close->set_representation('Str');
+
+    my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    for my $part ($open, $s, $close) {
+        my $p = $f->make('Print', inputs => [$part]);
+        $p->set_control_in($ctrl);
+        $ctrl = $p;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
+}
+
+
 sub run_lli {
     my ($ll) = @_;
     my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -97,9 +133,9 @@ subtest 'identical array literals do not alias' => sub {
     $st->set_control_in($vb);
     $vb->set_control_in($va);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:1', 'the store through $b is invisible through $a (perl: 1)');
+    is($out, '[1]', 'the store through $b is invisible through $a (perl: 1)');
 };
 
 done_testing;

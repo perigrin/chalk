@@ -25,12 +25,21 @@ sub run_lli ($ll_text) {
 }
 
 # Round-trip a constant through the uniform cell: Constant(:$from) ->
-# Coerce(from -> Scalar) -> Coerce(Scalar -> $to) -> Return.
+# Coerce(from -> Scalar) -> Coerce(Scalar -> $to) -> print -> Return.
 #
 # The BOX writes the tag from the source repr; the READ dispatches on it. If the
 # tag were dropped, ignored, or overwritten with a guess, the read would take
 # the wrong arm and the printed value would be wrong -- which is why this test
 # checks the value under lli rather than grepping the .ll for instructions.
+#
+# The value is observed the way a program observes one: PRINTED on stdout,
+# bracketed so a correctly-printed empty string is distinguishable from nothing
+# printed at all. Each wrong-arm failure mode this file exists to catch is a
+# wrong VALUE, not merely a wrong type -- a Num payload read as an Int would
+# print the raw bit pattern rather than 3, and a %StrPair pointer read as an
+# integer would print a heap address -- so the discrimination survives the loss
+# of the type tag. Three Prints rather than a Concat: a Coerce'd Int has no
+# tracked length.
 sub roundtrip_graph ($from, $value, $to) {
     my $f = Chalk::IR::NodeFactory->new;
 
@@ -46,38 +55,61 @@ sub roundtrip_graph ($from, $value, $to) {
                         from_repr => 'Scalar', to_repr => $to);
     $read->set_representation($to);
 
-    return $f->make_cfg('Return', inputs => [$read]);
+    my $str = $read;
+    if ($to ne 'Str') {
+        $str = $f->make('Coerce', inputs => [$read],
+                        from_repr => $to, to_repr => 'Str');
+        $str->set_representation('Str');
+    }
+
+    my $ctrl = $f->make_cfg('Start');
+    for my $part ('[', $str, "]\n") {
+        my $val = ref $part ? $part : do {
+            my $k = $f->make('Constant', value => $part, const_type => 'string');
+            $k->set_representation('Str');
+            $k;
+        };
+        my $pr = $f->make('Print', inputs => [$val]);
+        $pr->set_control_in($ctrl);
+        $ctrl = $pr;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
 }
 
 subtest 'Coerce[Scalar -> X] reads the tag: every reading, every target' => sub {
     # The oracle is perl itself. Each row is (source repr, literal, target repr,
-    # what the return epilogue must print).
+    # what the program must print on stdout).
     my @cases = (
         # An Int-tagged payload read as each target.
-        [ Int => 7,       Int     => 'Int:7'   ],
-        [ Int => 7,       Num     => 'Num:7'   ],
-        [ Int => 42,      Str     => 'Str:42'  ],
-        [ Int => 7,       Boolean => 'Bool:1'  ],
-        [ Int => 0,       Boolean => 'Bool:'   ],
+        [ Int => 7,       Int     => '[7]'   ],
+        [ Int => 7,       Num     => '[7]'   ],
+        [ Int => 42,      Str     => '[42]'  ],
+        [ Int => 7,       Boolean => '[1]'   ],
+        [ Int => 0,       Boolean => '[]'    ],
 
         # A Num-tagged payload. These are the rows that fail if the tag is
         # ignored: the payload is a bitcast double, so reading it as an Int
         # yields the raw bit pattern rather than 3.
-        [ Num => 3.5,     Num     => 'Num:3.5' ],
-        [ Num => 3.5,     Int     => 'Int:3'   ],
-        [ Num => 3.5,     Str     => 'Str:3.5' ],
-        [ Num => 3.5,     Boolean => 'Bool:1'  ],
-        [ Num => 0.0,     Boolean => 'Bool:'   ],
+        [ Num => 3.5,     Num     => '[3.5]' ],
+        [ Num => 3.5,     Int     => '[3]'   ],
+        [ Num => 3.5,     Str     => '[3.5]' ],
+        [ Num => 3.5,     Boolean => '[1]'   ],
+        [ Num => 0.0,     Boolean => '[]'    ],
 
         # A Str-tagged payload is a %StrPair POINTER. Read as an integer it
         # would be a heap address; the tag is what keeps it a string.
-        [ Str => 'hello', Str     => 'Str:hello' ],
-        [ Str => '12abc', Num     => 'Num:12'    ],
-        [ Str => '12abc', Int     => 'Int:12'    ],
-        [ Str => '12abc', Boolean => 'Bool:1'    ],
-        [ Str => '0',     Boolean => 'Bool:'     ],
-        [ Str => '',      Boolean => 'Bool:'     ],
-        [ Str => 'abc',   Boolean => 'Bool:1'    ],
+        [ Str => 'hello', Str     => '[hello]' ],
+        [ Str => '12abc', Num     => '[12]'    ],
+        [ Str => '12abc', Int     => '[12]'    ],
+        [ Str => '12abc', Boolean => '[1]'     ],
+        [ Str => '0',     Boolean => '[]'      ],
+        [ Str => '',      Boolean => '[]'      ],
+        [ Str => 'abc',   Boolean => '[1]'     ],
     );
 
     plan tests => scalar(@cases) * 2;
@@ -86,7 +118,7 @@ subtest 'Coerce[Scalar -> X] reads the tag: every reading, every target' => sub 
         my ($from, $value, $to, $want) = @$tc;
         my $desc = "$from(" . (length $value ? $value : q{''}) . ") -> Scalar -> $to";
 
-        my $ll = eval { Chalk::Target::LLVM->lower(roundtrip_graph($from, $value, $to)) };
+        my $ll = eval { Chalk::Target::LLVM->lower(roundtrip_graph($from, $value, $to), program_mode => 1) };
         if ($@) {
             fail("$desc: lowering failed: $@");
             fail("$desc: (skipped)");

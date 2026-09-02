@@ -18,7 +18,8 @@ plan skip_all => "perl 5.42 not found at $PERL" unless -x $PERL;
 
 # ---------------------------------------------------------------------------
 # Two harvested cases. The harvested EXPECTED is the oracle (Perl's t/ already
-# told us the answer) — the adapter must NOT re-run perl. Shape-leg contract C:
+# told us the answer) — the adapter must NOT re-run perl; it wraps the lowered
+# graph so the value is PRINTED (bracketed) and compares that. Shape-leg contract C:
 # harvested cases run BEHAVIOR + INVARIANT only (no hand-corpus ir block).
 #   * '2 + 2'  -> 4     — a self-contained arithmetic case that lowers GREEN.
 #   * '"-"'    -> '-'   — the shape a real harvest from opbasic/concat.t produces.

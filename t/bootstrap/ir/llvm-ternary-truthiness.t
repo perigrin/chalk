@@ -7,6 +7,7 @@ use JSON::PP;
 use File::Temp qw(tempfile);
 
 use lib 'lib';
+use Chalk::IR::NodeFactory;
 use Chalk::IR::Serialize::JSON ();
 
 # A statement-modifier merge (`$x = 7 if $c`) and a plain ternary (`$c ? 7 : 9`)
@@ -18,6 +19,39 @@ use Chalk::IR::Serialize::JSON ();
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 plan skip_all => "lli not found at $LLI" unless -x $LLI;
 require Chalk::Target::LLVM;
+
+# Observe the value the way a program does: PRINT it, bracketed, then return
+# undef. A program's contract is stdout plus exit status; it has no side
+# channel that hands a value back to a harness. The Print is appended AFTER
+# the graph's last existing effect, so the select under test still runs first.
+sub print_returned_value ($f, $ret_node) {
+    my $v    = $ret_node->inputs->[0];
+    my $repr = $v->representation;
+    my $s    = $v;
+    if (!defined $repr || $repr ne 'Str') {
+        $s = $f->make('Coerce', inputs => [$v],
+            from_repr => $repr, to_repr => 'Str');
+        $s->set_representation('Str');
+    }
+
+    my $open = $f->make('Constant', value => '[', const_type => 'string');
+    $open->set_representation('Str');
+    my $close = $f->make('Constant', value => "]\n", const_type => 'string');
+    $close->set_representation('Str');
+
+    my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    for my $part ($open, $s, $close) {
+        my $p = $f->make('Print', inputs => [$part]);
+        $p->set_control_in($ctrl);
+        $ctrl = $p;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
+}
 
 sub run_ternary ($cond_value) {
     my $json = JSON::PP->new->encode({
@@ -49,7 +83,8 @@ sub run_ternary ($cond_value) {
     });
     my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
     my $ret = $graphs->{'main::f'}->returns->[0];
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $f = Chalk::IR::NodeFactory->new;
+    my $ll = eval { Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1) };
     return (undef, $@) if $@;
     my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
     print {$fh} $ll;
@@ -62,12 +97,12 @@ sub run_ternary ($cond_value) {
 
 subtest 'Int condition coerces to i1: truthy selects the true arm' => sub {
     my ($out, $diag) = run_ternary(5);
-    is($out, 'Int:7', 'TernaryExpr(5, 7, 9) runs to Int:7') or diag($diag);
+    is($out, '[7]', 'TernaryExpr(5, 7, 9) prints 7') or diag($diag);
 };
 
 subtest 'Int condition coerces to i1: zero selects the false arm' => sub {
     my ($out, $diag) = run_ternary(0);
-    is($out, 'Int:9', 'TernaryExpr(0, 7, 9) runs to Int:9') or diag($diag);
+    is($out, '[9]', 'TernaryExpr(0, 7, 9) prints 9') or diag($diag);
 };
 
 done_testing();

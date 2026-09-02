@@ -34,6 +34,43 @@ sub run_lli {
     return ($out, $exit);
 }
 
+# Observe the returned value the way a program does: PRINT it, bracketed,
+# then return undef. A program's contract is stdout plus exit status; it
+# has no side channel that hands a value back to a harness. The Print is
+# appended AFTER the graph's last existing effect, so the control ordering
+# under test is preserved. Three Prints rather than one Concat: Concat
+# needs both operands to have tracked lengths, which a Coerce'd Int lacks.
+sub print_returned_value {
+    my ($f, $ret_node) = @_;
+
+    my $v    = $ret_node->inputs->[0];
+    my $repr = $v->representation;
+    my $s    = $v;
+    if (!defined $repr || $repr ne 'Str') {
+        $s = $f->make('Coerce', inputs => [$v],
+            from_repr => $repr, to_repr => 'Str');
+        $s->set_representation('Str');
+    }
+
+    my $open = $f->make('Constant', value => '[', const_type => 'string');
+    $open->set_representation('Str');
+    my $close = $f->make('Constant', value => "]\n", const_type => 'string');
+    $close->set_representation('Str');
+
+    my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    for my $part ($open, $s, $close) {
+        my $p = $f->make('Print', inputs => [$part]);
+        $p->set_control_in($ctrl);
+        $ctrl = $p;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
+}
+
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
@@ -75,9 +112,9 @@ subtest 'subscript after ref reassign reads the new array' => sub {
     $asg->set_control_in($vp);
     $vp->set_control_in($vr);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:9', 'the subscript reads the NEW array (perl: 9)');
+    is($out, '[9]', 'the subscript reads the NEW array (perl: 9)');
 };
 
 # my $r = [1]; my $p = $r->[0]; $r = [9]; $r->[0] = 7; my $q = $r->[0];
@@ -135,9 +172,9 @@ subtest 'element store after ref reassign hits the new array' => sub {
     $asg->set_control_in($vp);
     $vp->set_control_in($vr);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:8', 'pre-reassign read keeps 1; the store hits the new array (perl: 8)');
+    is($out, '[8]', 'pre-reassign read keeps 1; the store hits the new array (perl: 8)');
 };
 
 done_testing;

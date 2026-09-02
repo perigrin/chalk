@@ -13,9 +13,46 @@ unless (-x $LLI) {
     plan skip_all => "lli not found at $LLI";
 }
 
+# Print the returned value on stdout, bracketed, instead of relying on a
+# type-tag epilogue: rebuild the Return so the value flows through
+# Coerce->Str into Prints hung off the graph's existing control chain.
+# Three Prints (not a Concat) because Concat needs tracked lengths on both
+# operands, which a Coerce'd Int does not have.
+sub print_returned_value {
+    my ($f, $ret_node) = @_;
+
+    my $v = $ret_node->inputs->[0];
+    my $s = $v;
+    if (($v->representation // '') ne 'Str') {
+        $s = $f->make('Coerce', inputs => [$v],
+            from_repr => $v->representation, to_repr => 'Str');
+        $s->set_representation('Str');
+    }
+
+    my $open = $f->make('Constant', value => '[', const_type => 'string');
+    $open->set_representation('Str');
+    my $close = $f->make('Constant', value => "]\n", const_type => 'string');
+    $close->set_representation('Str');
+
+    my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    for my $part ($open, $s, $close) {
+        my $p = $f->make('Print', inputs => [$part]);
+        $p->set_control_in($ctrl);
+        $ctrl = $p;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
+}
+
 sub lli_run {
     my ($ret, %opts) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret, %opts);
+    my $factory = delete $opts{factory};
+    $ret = print_returned_value($factory, $ret) if $factory;
+    my $ll = Chalk::Target::LLVM->lower($ret, %opts, program_mode => 1);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $fh $ll;
@@ -35,9 +72,9 @@ subtest 'EnvRead of a set variable returns its value' => sub {
     my $e = $f->make('EnvRead', key => 'CHALK_G7_TEST');
     $e->set_representation('Str');
     my $ret = $f->make_cfg('Return', inputs => [$e]);
-    my ($out, $ll) = eval { lli_run($ret) };
+    my ($out, $ll) = eval { lli_run($ret, factory => $f) };
     ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
-    is($out, 'Str:hostval', '$ENV{CHALK_G7_TEST} read through getenv');
+    is($out, '[hostval]', '$ENV{CHALK_G7_TEST} read through getenv');
     ok($ll !~ /Perl_|(?<![A-Za-z0-9_])SV(?![A-Za-z0-9_])|sv_|libperl|\bAV\b|\bHV\b/,
         '.ll is libperl-free');
     like($ll, qr/\@getenv/, 'the read goes through the host C getenv');
@@ -49,9 +86,9 @@ subtest 'EnvRead of an UNSET variable yields the empty string (documented diverg
     my $e = $f->make('EnvRead', key => 'CHALK_G7_UNSET');
     $e->set_representation('Str');
     my $ret = $f->make_cfg('Return', inputs => [$e]);
-    my ($out) = eval { lli_run($ret) };
+    my ($out) = eval { lli_run($ret, factory => $f) };
     ok(!$@, 'lowering + lli succeeded (no NULL-deref)') or do { diag("error: $@"); return };
-    is($out, 'Str:', 'missing key reads as the empty string (undef face = tracked follow-up)');
+    is($out, '[]', 'missing key reads as the empty string (undef face = tracked follow-up)');
 };
 
 subtest 'EnvRead composes: length($ENV{...})' => sub {
@@ -62,9 +99,9 @@ subtest 'EnvRead composes: length($ENV{...})' => sub {
     my $len = $f->make('Length', inputs => [$e]);
     $len->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$len]);
-    my ($out) = eval { lli_run($ret) };
+    my ($out) = eval { lli_run($ret, factory => $f) };
     ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
-    is($out, 'Int:7', 'length of the env value (runtime strlen)');
+    is($out, '[7]', 'length of the env value (runtime strlen)');
 };
 
 # Review findings 1+2 (one trigger): EnvRead inside METHOD BODIES must
@@ -100,10 +137,10 @@ subtest 'EnvRead in two method bodies: declared getenv, no duplicate globals' =>
     $call->set_representation('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    my ($out, $ll) = eval { lli_run($ret, mop => $mop) };
+    my ($out, $ll) = eval { lli_run($ret, mop => $mop, factory => $f) };
     ok(!$@, 'two method bodies with EnvRead lower + run')
         or do { diag("error: $@"); return };
-    is($out, 'Str:mbody', 'method-body EnvRead reads the env');
+    is($out, '[mbody]', 'method-body EnvRead reads the env');
     like($ll, qr/declare i8\* \@getenv/, '@getenv is declared (F6 propagation)');
     my @defs = $ll =~ /^(\@\S*env_(?:key|empty)\S*) =/mg;
     my %seen; my @dups = grep { $seen{$_}++ } @defs;

@@ -21,6 +21,42 @@ unless (-x $LLI) {
 # graph and resolves Call.class_name against a registry built from
 # MOP::Class/Method/Field/Phaser::Adjust — the ClassInfo bridge retires.
 
+# Print the returned value on stdout, bracketed, instead of relying on a
+# type-tag epilogue: rebuild the Return so the value flows through
+# Coerce->Str into Prints hung off the graph's existing control chain.
+# Three Prints (not a Concat) because Concat needs tracked lengths on both
+# operands, which a Coerce'd Int does not have.
+sub print_returned_value {
+    my ($f, $ret_node) = @_;
+
+    my $v = $ret_node->inputs->[0];
+    my $s = $v;
+    if (($v->representation // '') ne 'Str') {
+        $s = $f->make('Coerce', inputs => [$v],
+            from_repr => $v->representation, to_repr => 'Str');
+        $s->set_representation('Str');
+    }
+
+    my $open = $f->make('Constant', value => '[', const_type => 'string');
+    $open->set_representation('Str');
+    my $close = $f->make('Constant', value => "]\n", const_type => 'string');
+    $close->set_representation('Str');
+
+    my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    for my $part ($open, $s, $close) {
+        my $p = $f->make('Print', inputs => [$part]);
+        $p->set_control_in($ctrl);
+        $ctrl = $p;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
+}
+
+
 sub run_lli {
     my ($ll) = @_;
     my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -86,11 +122,11 @@ subtest 'field + reader + ADJUST + method via the sealed MOP' => sub {
     $sum->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
 
-    my $ll = Chalk::Target::LLVM->lower($ret, mop => $mop);
+    my $ll = Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1);
     unlike($ll, qr/\bSV\b|Perl_|libperl/, '.ll is libperl-free');
     my ($out, $exit) = run_lli($ll);
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:11', 'ADJUST + method + :reader all dispatch (perl: 6+5=11)');
+    is($out, '[11]', 'ADJUST + method + :reader all dispatch (perl: 6+5=11)');
 };
 
 # class Base { method seven { 7 } }  class Kid :isa(Base) {}
@@ -115,9 +151,9 @@ subtest ':isa inheritance through the MOP registry' => sub {
     $call->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:7', 'inherited method dispatches through the child vtable (perl: 7)');
+    is($out, '[7]', 'inherited method dispatches through the child vtable (perl: 7)');
 };
 
 # Multi-statement ADJUST bodies are ordered by their control chain.
@@ -172,9 +208,9 @@ subtest 'multi-statement ADJUST body in control-chain order' => sub {
     $val->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$val]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:14', 'statements ran in chain order (perl: 5 + 9 = 14)');
+    is($out, '[14]', 'statements ran in chain order (perl: 5 + 9 = 14)');
 };
 
 # class Top { method seven { 7 } } class Mid :isa(Top) {} class Kid :isa(Mid) {}
@@ -202,9 +238,9 @@ subtest 'grandparent inheritance, child sorts before parent (review)' => sub {
     $call->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:7', 'the grandparent method reaches the grandchild vtable (perl: 7)');
+    is($out, '[7]', 'the grandparent method reaches the grandchild vtable (perl: 7)');
 };
 
 # field $y = 41 (default, no :param): the default-value lowering path
@@ -233,9 +269,9 @@ subtest 'field default value lowers through the MOP registry (review)' => sub {
     $val->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$val]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Int:41', 'the default expression initializes the field (perl: 41)');
+    is($out, '[41]', 'the default expression initializes the field (perl: 41)');
 };
 
 # A statement-effect node appearing as an INPUT of an ADJUST statement

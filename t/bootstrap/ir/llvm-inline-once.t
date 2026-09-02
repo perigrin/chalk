@@ -12,6 +12,11 @@ use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
 use Chalk::Target::LLVM;
 
+my $LLI = q{/usr/lib/llvm-15/bin/lli};
+unless (-x $LLI) {
+    plan skip_all => qq{lli not found at $LLI};
+}
+
 # ---------------------------------------------------------------------------
 # THE BUG: _lower_call_direct never writes its result into $self->{cache}, so
 # a Call node reached twice (once as a statement via process_control_node,
@@ -72,16 +77,27 @@ subtest 'an inlined effectful callee used as both a statement and a value lowers
 
     Chalk::IR::Graph->new(start => $start, returns => [$ret]);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok(!$@, 'the graph lowers without a GAP') or diag $@;
     ok(defined $ll && length $ll, 'lowering produced IR') or return;
 
-    # Two printf calls are expected: one for the callee's `print "x\n"`, one
-    # for the top-level `Int:%lld` result print. The bug doubles the FIRST
-    # (the callee's inlined print), producing three total.
+    # Exactly ONE printf: the callee's inlined `print "x\n"`. The bug doubles
+    # it (the Call is reached both as a statement and as the Return's value),
+    # producing two. program_mode emits no result-print epilogue, so this
+    # count is the callee's print alone.
     my $printf_calls = () = $ll =~ /call i32 \(i8\*, \.\.\.\) \@printf/g;
-    is($printf_calls, 2, 'exactly two printf calls: the callee print is inlined once, plus the result print')
+    is($printf_calls, 1, 'exactly one printf call: the callee print is inlined once')
         or diag $ll;
+
+    # Count in the IR is static; RUN it to prove the effect fires once.
+    require File::Temp;
+    my ($lfh, $lf) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
+    print $lfh $ll;
+    close $lfh;
+    my $out  = qx($LLI $lf 2>&1);
+    my $exit = $? >> 8;
+    is($exit, 0, 'lli exits 0');
+    is($out, "x\n", 'the inlined callee print runs exactly once at runtime');
 
     my $string_globals = () = $ll =~ /\@str_const_\d+ = /g;
     is($string_globals, 1, 'exactly one string constant global for the "x\n" literal')

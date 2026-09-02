@@ -78,12 +78,11 @@ sub run_through_bson ($source) {
 
     # Load and lower the entry unit through the ONE pipeline seam.
     #
-    # program_mode: the Int:/Str: return-value epilogue exists ONLY so a
-    # fragment harness could read a value back. A program states its own output,
-    # so the tag is suppressed — deleting its last consumer is the point of the
-    # corpus-as-programs migration. It rides on the CALL (D6), never on pipeline
-    # state: the three callers whose oracle CONSUMES the epilogue must keep
-    # getting it (see t/bootstrap/corpus/mode2-omits-program-mode.t).
+    # A program states its own output: this graph prints exactly what its Print
+    # nodes print. The Int:/Str: return-value epilogue that fragment harnesses
+    # once read a value back through is gone, and `program_mode` — the flag that
+    # suppressed it — is inert. Harnesses that need to observe a return value
+    # now WRAP the graph in a Print (see Mode2Adapter::_print_returned_value).
     my $select = sub ($graphs, $mop) {
         my $g = $graphs->{'main::__PROGRAM__'} // $graphs->{'main::__main__'}
             or return ();

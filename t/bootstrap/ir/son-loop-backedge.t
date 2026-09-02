@@ -18,7 +18,7 @@ use Chalk::IR::Serialize::JSON ();
 # uses for loop_backedge edges).
 #
 # Shape under test = the corpus control-flow.md D2 contract:
-#   my $n = 3; my $s = 0; while ($n > 0) { $s += $n; $n-- } $s   => Int:6
+#   my $n = 3; my $s = 0; while ($n > 0) { $s += $n; $n-- } $s   => 6
 
 my $json = JSON::PP->new->encode({
     version => 1,
@@ -94,12 +94,41 @@ subtest 'forward-referenced backedges are patched onto the Phis' => sub {
         'Add lists the $s Phi as a consumer');
 };
 
-subtest 'the loaded loop graph lowers and runs to Int:6' => sub {
+subtest 'the loaded loop graph lowers and runs, printing 6' => sub {
     my $LLI = '/usr/lib/llvm-15/bin/lli';
     plan skip_all => "lli not found at $LLI" unless -x $LLI;
 
     require Chalk::Target::LLVM;
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    require Chalk::IR::NodeFactory;
+
+    # Observe the loop's result the way a program does -- by PRINTING it --
+    # rather than off a type-tag return epilogue. The Prints hang off the
+    # Return's EXISTING control_in (the exit Region), so they land after the
+    # loop and do not perturb the block structure asserted above. Three
+    # Prints, not a Concat: a Coerce'd Int has no tracked length.
+    my $f = Chalk::IR::NodeFactory->new;
+    my $str = $f->make('Coerce', inputs => [$ret->inputs->[0]],
+                       from_repr => 'Int', to_repr => 'Str');
+    $str->set_representation('Str');
+
+    my $ctrl = $ret->control_in;
+    for my $part ('[', $str, "]\n") {
+        my $val = ref $part ? $part : do {
+            my $k = $f->make('Constant', value => $part, const_type => 'string');
+            $k->set_representation('Str');
+            $k;
+        };
+        my $p = $f->make('Print', inputs => [$val]);
+        $p->set_control_in($ctrl);
+        $ctrl = $p;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $prog_ret = $f->make_cfg('Return', inputs => [$u]);
+    $prog_ret->set_control_in($ctrl);
+
+    my $ll = eval { Chalk::Target::LLVM->lower($prog_ret, program_mode => 1) };
     is($@, '', 'lower() does not die') or diag($@);
     plan skip_all => 'lowering failed' unless defined $ll;
 
@@ -110,7 +139,7 @@ subtest 'the loaded loop graph lowers and runs to Int:6' => sub {
     my $exit = $? >> 8;
     chomp $out;
     is($exit, 0, 'lli exits 0') or diag($out);
-    is($out, 'Int:6', 'loop computes Int:6 (3+2+1)');
+    is($out, '[6]', 'loop computes 6 (3+2+1)');
 };
 
 done_testing();

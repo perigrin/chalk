@@ -35,6 +35,43 @@ sub run_lli {
     return ($out, $exit);
 }
 
+# Observe the returned value the way a program does: PRINT it, bracketed,
+# then return undef. A program's contract is stdout plus exit status; it
+# has no side channel that hands a value back to a harness. The Print is
+# appended AFTER the graph's last existing effect, so the control ordering
+# under test is preserved. Three Prints rather than one Concat: Concat
+# needs both operands to have tracked lengths, which a Coerce'd Int lacks.
+sub print_returned_value {
+    my ($f, $ret_node) = @_;
+
+    my $v    = $ret_node->inputs->[0];
+    my $repr = $v->representation;
+    my $s    = $v;
+    if (!defined $repr || $repr ne 'Str') {
+        $s = $f->make('Coerce', inputs => [$v],
+            from_repr => $repr, to_repr => 'Str');
+        $s->set_representation('Str');
+    }
+
+    my $open = $f->make('Constant', value => '[', const_type => 'string');
+    $open->set_representation('Str');
+    my $close = $f->make('Constant', value => "]\n", const_type => 'string');
+    $close->set_representation('Str');
+
+    my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    for my $part ($open, $s, $close) {
+        my $p = $f->make('Print', inputs => [$part]);
+        $p->set_control_in($ctrl);
+        $ctrl = $p;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
+}
+
 sub str_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => $val, const_type => 'string');
@@ -102,9 +139,9 @@ subtest 'match re-tested after subject reassign sees the new value' => sub {
     $asg->set_control_in($vy);
     $vy->set_control_in($vs);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Bool:', 'the second match tests the reassigned subject (perl: false)');
+    is($out, '[]', 'the second match tests the reassigned subject (perl: false)');
 };
 
 # my $s = "aa x"; $s =~ /(a+)/; my $p = $1;
@@ -156,9 +193,9 @@ subtest 'capture records are per program point' => sub {
     $asg->set_control_in($vp);
     $vp->set_control_in($vs);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Str:aa-aaa', 'each $1 reads its own match record (perl: aa-aaa)');
+    is($out, '[aa-aaa]', 'each $1 reads its own match record (perl: aa-aaa)');
 };
 
 # my $re = qr/b/; my $s = "b"; my $y = ($s =~ $re); $s = "x";
@@ -202,9 +239,9 @@ subtest 'qr-apply (Match) re-applied after subject reassign sees the new value' 
     $asg->set_control_in($vy);
     $vy->set_control_in($vs);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
     is($exit, 0, 'lli exits 0');
-    is($out, 'Bool:', 'the second qr-apply tests the reassigned subject (perl: false)');
+    is($out, '[]', 'the second qr-apply tests the reassigned subject (perl: false)');
 };
 
 done_testing;

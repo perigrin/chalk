@@ -132,11 +132,16 @@ my @ALLOWED = (
     [ qr/\@snprintf\(/                      => 'snprintf varargs slot must match %.15g -- printf contract' ],
     [ qr/\@chalk_str_to_num\(/              => 'helper ABI (the define at LLVM.pm:129)' ],
 
-    # The IEEE-754 printer, and the guard that refuses to run it at any other
-    # machine type. These constants ARE binary64 and cannot be derived.
-    [ qr/unless \$nty eq 'double'/          => 'the guard asserting the printer got the type it needs' ],
+    # IEEE-754 Inf/NaN detection. These constants ARE binary64 and cannot be
+    # derived from a repr; the fcmp compares against the exact bit patterns.
+    #
+    # Two exemptions stood beside this one and are GONE with the return-value
+    # type-tag epilogue that owned their sites: the `unless $nty eq 'double'`
+    # guard, and the `@printf(` varargs slot. This file's own inverse check --
+    # "an exemption matching nothing is a hole in the net, left open for a site
+    # that no longer exists" -- is what caught them, which is the check working
+    # as designed rather than a regression.
     [ qr/fcmp (?:uno|oeq) double/          => 'IEEE-754 binary64 Inf/NaN detection, guarded above' ],
-    [ qr/\@printf\(/                        => 'printf varargs slot must match %g -- guarded above' ],
 
     # `double` as an English word in diagnostic prose, not a type name.
     [ qr/fdiv double\) not i64 sdiv/        => 'diagnostic text in the Int-repr Divide GAP message' ],

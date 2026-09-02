@@ -33,6 +33,43 @@ sub run_lli {
     return ($out, $exit);
 }
 
+# Observe the returned value the way a program does: PRINT it, bracketed,
+# then return undef. A program's contract is stdout plus exit status; it
+# has no side channel that hands a value back to a harness. The Print is
+# appended AFTER the graph's last existing effect, so the control ordering
+# under test is preserved. Three Prints rather than one Concat: Concat
+# needs both operands to have tracked lengths, which a Coerce'd Int lacks.
+sub print_returned_value {
+    my ($f, $ret_node) = @_;
+
+    my $v    = $ret_node->inputs->[0];
+    my $repr = $v->representation;
+    my $s    = $v;
+    if (!defined $repr || $repr ne 'Str') {
+        $s = $f->make('Coerce', inputs => [$v],
+            from_repr => $repr, to_repr => 'Str');
+        $s->set_representation('Str');
+    }
+
+    my $open = $f->make('Constant', value => '[', const_type => 'string');
+    $open->set_representation('Str');
+    my $close = $f->make('Constant', value => "]\n", const_type => 'string');
+    $close->set_representation('Str');
+
+    my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    for my $part ($open, $s, $close) {
+        my $p = $f->make('Print', inputs => [$part]);
+        $p->set_control_in($ctrl);
+        $ctrl = $p;
+    }
+
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_representation('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$u]);
+    $ret->set_control_in($ctrl);
+    return $ret;
+}
+
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
@@ -94,9 +131,9 @@ subtest "parent ADJUST runs on a child constructor" => sub {
     $call->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0') or diag $out;
-    is($out, 'Int:21', 'both ADJUSTs ran (base d=6 + child k=15 = 21)');
+    is($out, '[21]', 'both ADJUSTs ran (base d=6 + child k=15 = 21)');
 };
 
 # Child sorts ALPHABETICALLY before its parent: "Apple" lt "Zoo". The
@@ -139,9 +176,9 @@ subtest "inherited ADJUST when child sorts before parent" => sub {
     $call->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0') or diag $out;
-    is($out, 'Int:21', 'parent ADJUST ran across the sort-order boundary (z=20 -> d=21)');
+    is($out, '[21]', 'parent ADJUST ran across the sort-order boundary (z=20 -> d=21)');
 };
 
 # Three levels: G { field $g :param } -> Mid :isa(G) { field $m; ADJUST { $m = $g + 1 } }
@@ -197,9 +234,9 @@ subtest "three-level field + ADJUST inheritance" => sub {
     $call->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0') or diag $out;
-    is($out, 'Int:42', 'grandparent + parent ADJUSTs chained (g=40 -> m=41 -> k=42)');
+    is($out, '[42]', 'grandparent + parent ADJUSTs chained (g=40 -> m=41 -> k=42)');
 };
 
 # An inherited :reader method called on a child; a child overriding a method
@@ -240,9 +277,9 @@ subtest "inherited :reader and field-inheriting override" => sub {
     $sum->set_representation('Int');
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0') or diag $out;
-    is($out, 'Int:110', 'inherited :reader (5) + field-inheriting override (105) = 110');
+    is($out, '[110]', 'inherited :reader (5) + field-inheriting override (105) = 110');
 };
 
 done_testing;
