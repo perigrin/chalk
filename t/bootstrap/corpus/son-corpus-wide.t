@@ -179,6 +179,7 @@ my %tally = (green => 0, gap_declared => 0, bug => 0, no_source => 0,
              shape_ok => 0, inv_ok => 0, gate_green => 0, todo => 0);
 my %by_topic;
 my @bugs;
+my @worklist;   # the same gaps, structured for the artifact below
 
 for my $md (@topics) {
     my $topic = $md =~ m{/([^/]+)\.md$} ? $1 : $md;
@@ -308,6 +309,25 @@ for my $md (@topics) {
             $tally{bug}++;
             $by_topic{$topic}{bug}++;
             push @bugs, "$label -> $why";
+
+            # The same facts, kept STRUCTURED so the worklist artifact below
+            # can be iterated rather than eyeballed. Which LEG failed is the
+            # part that groups the work -- four cases missing the same
+            # Coerce(Int -> Str) are one cause, not four -- and that grouping
+            # is invisible once the legs are joined into prose.
+            push @worklist, {
+                topic     => $topic,
+                case      => $title,
+                behavior  => ($behavior_ok ? 1 : 0),
+                shape     => ($shape_ok    ? 1 : 0),
+                invariant => ($inv_ok      ? 1 : 0),
+                why       => $why,
+                (!$behavior_ok
+                    ? (behavior_why => (defined $lli ? "lli '$lli' != perl '$oracle'" : $err))
+                    : ()),
+                (!$shape_ok ? (shape_why => $shape_why) : ()),
+                (!$inv_ok   ? (invariant_why => $inv_why) : ()),
+            };
             # Not a test failure: this is the gap map. Mark TODO so red = worklist.
             TODO: {
                 local $TODO = "B::SoN gap (worklist, not a regression)";
@@ -336,6 +356,72 @@ if (@bugs) {
     diag("");
     diag("=== worklist (triple-contract gaps to close) ===");
     diag("  $_") for @bugs;
+}
+
+# THE WORKLIST AS AN ARTIFACT, not only as scrollback.
+#
+# This tally was computed on every run and then discarded -- the only way to
+# work through it was to run the gate (~10 minutes), read the diag block, and
+# copy a case name out of the terminal. Writing it down costs one open/print
+# and makes the gaps iterable: sortable by leg, groupable by cause, diffable
+# between runs to see what a change actually moved.
+#
+# It is a REPORT, never an input. Nothing reads it back to decide what to
+# test, so a stale or deleted file cannot change what the gate asserts.
+{
+    my $path = $ENV{CHALK_WORKLIST_OUT} // 'paad/worklist.json';
+    my ($dir) = $path =~ m{^(.*)/[^/]+$};
+    if (defined $dir && !-d $dir) { mkdir $dir or undef }
+
+    # Hand-rolled JSON: this file already avoids non-core deps, and the shape
+    # is three scalar types deep. Sorted for a stable diff between runs.
+    my $esc = sub {
+        my $v = shift // '';
+        $v =~ s/\\/\\\\/g; $v =~ s/"/\\"/g;
+        $v =~ s/\n/\\n/g; $v =~ s/\t/\\t/g; $v =~ s/\r//g;
+        return $v;
+    };
+
+    my @rows = sort { $a->{topic} cmp $b->{topic} || $a->{case} cmp $b->{case} } @worklist;
+    my @json;
+    push @json, '{';
+    push @json, sprintf('  "gate_green": %d,', $tally{gate_green} // 0);
+    push @json, sprintf('  "behavior": %d,',   $tally{green}      // 0);
+    push @json, sprintf('  "shape": %d,',      $tally{shape_ok}   // 0);
+    push @json, sprintf('  "invariant": %d,',  $tally{inv_ok}     // 0);
+    push @json, sprintf('  "gap_declared": %d,', $tally{gap_declared} // 0);
+    push @json, sprintf('  "worklist_count": %d,', scalar @rows);
+    push @json, '  "worklist": [';
+    for my $i (0 .. $#rows) {
+        my $r = $rows[$i];
+        my @f = (
+            sprintf('"topic": "%s"',     $esc->($r->{topic})),
+            sprintf('"case": "%s"',      $esc->($r->{case})),
+            sprintf('"behavior": %s',    $r->{behavior}  ? 'true' : 'false'),
+            sprintf('"shape": %s',       $r->{shape}     ? 'true' : 'false'),
+            sprintf('"invariant": %s',   $r->{invariant} ? 'true' : 'false'),
+            sprintf('"why": "%s"',       $esc->($r->{why})),
+        );
+        push @f, sprintf('"behavior_why": "%s"',  $esc->($r->{behavior_why}))
+            if exists $r->{behavior_why};
+        push @f, sprintf('"shape_why": "%s"',     $esc->($r->{shape_why}))
+            if exists $r->{shape_why};
+        push @f, sprintf('"invariant_why": "%s"', $esc->($r->{invariant_why}))
+            if exists $r->{invariant_why};
+        push @json, '    { ' . join(', ', @f) . ' }' . ($i == $#rows ? '' : ',');
+    }
+    push @json, '  ]';
+    push @json, '}';
+
+    if (open my $out, '>', $path) {
+        print {$out} join("\n", @json), "\n";
+        close $out;
+        diag("");
+        diag("worklist written to $path (" . scalar(@rows) . " open gaps)");
+    }
+    else {
+        diag("could not write worklist to $path: $!");
+    }
 }
 
 # The gate floor: the worklist is TODO (red = worklist, not regression), but
