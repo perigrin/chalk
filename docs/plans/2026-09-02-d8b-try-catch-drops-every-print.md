@@ -88,3 +88,60 @@ compile; nothing checked the claim. When the refusal it described stopped
 happening, the declaration silently became a lie that read as coverage.
 
 That blind spot is now closed (bf459ac8). This is the first thing it found.
+
+---
+
+# RESOLVED 2026-09-02 (6571632c)
+
+`lli` now prints `in` then `1`, matching perl. Corpus gate 214 -> 215, every
+leg up, nothing broken.
+
+## The cause, confirmed
+
+Two defects, in the place this doc predicted ("the loss is in the backend's
+control processing"):
+
+1. `_process_control_chain`'s Region arm asks a Region for its `head` -- the
+   owning If/Loop -- so it can process the head instead. A try/catch Region has
+   NO head, because the desugaring builds a shared-control merge with no
+   runtime test for an If to be built from. The arm fell to its else, pushed
+   the bare Region, and `last`: every effect behind it on the chain was
+   abandoned.
+
+2. `process_control_node` handles If, Loop, statement-nodes and Unwind. A
+   Region matches none of them and falls off the end of the sub, so even the
+   pushed node emitted nothing. PUSHING A NODE THAT EMITS NOTHING is what made
+   this look handled while dropping everything.
+
+A headless Region now walks its ARMS (its inputs are the arms' tails) instead
+of ending the chain. All arms, not just the first -- taking one would have
+fixed the reported case and left its bilateral partner broken.
+
+## What this doc got right, and one thing it flagged as not-evidence
+
+RIGHT: the wire is correct (Print#6 at ctl=0, Print#7 chained at ctl=6), the
+loader keeps the chain, and the loss is downstream of both. Verified before
+blaming, in a detached archive tree.
+
+The unconsumed Phis were recorded here as SUGGESTIVE BUT NOT ESTABLISHED, and
+that caution was right: they are a symptom of the same desugaring, not the
+cause. The cause is the head lookup. Had they been written up as the diagnosis,
+the fix would have been aimed at Phi bookkeeping and missed.
+
+## The GAP declaration is retired
+
+D8b was `L: GAP` with prose asserting the backend "refuses loudly". It stopped
+refusing at some point and nothing noticed, because the gate `pass()`ed a
+declared GAP without running it. The GAP-execution check (bf459ac8) is what
+surfaced this, and on this fix it reported the case as "now LOWERS AND MATCHES
+perl -- promote it to a real case". Promoted: the ir block now describes the
+headless-Region shape.
+
+## Still open, and NOT chalk's
+
+A `die` inside a try is dropped SILENTLY by the producer, along with the entire
+catch body. Measured on the wire: no Unwind, no "boom" constant, no "caught"
+constant, and no warning. Reported to perl5-son. Recorded in
+`t/bootstrap/ir/a-headless-region-does-not-end-the-chain.t` as a KNOWN WRONG
+ANSWER via `isnt` rather than skipped, so it fails the day the producer emits
+the Unwind.
