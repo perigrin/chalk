@@ -955,3 +955,144 @@ return %p
 control: %start -> %p
 L: GREEN
 ```
+
+## A22 `exists` on a present key
+
+`exists $h{a}` asks whether the KEY IS PRESENT. That is a different question
+from `defined $h{a}`, which asks about its value, and the two disagree on the
+case that separates them:
+
+    my %h = (a => undef);
+    exists  $h{a}    true     the key is there
+    defined $h{a}    false    its value is not
+
+Measured on 5.42.0. The producer mapped `exists` onto `Defined` OF THE KEY --
+`Defined(Constant("zz"))` -- which is always true, so `exists $h{zz}` on an
+absent key answered "yes" where perl answers "no". A SILENT WRONG ANSWER, and
+not repairable by stamping: the operand was the key, never the slot. It now
+refuses (perl5-son ca019b3).
+
+Filed as a pair with A23 because the present-key case agrees with the broken
+mapping by coincidence -- only the absent-key case discriminates.
+
+```perl
+# source
+use 5.42.0;
+my %h = (a => 1);
+print exists $h{a} ? "yes" : "no", "\n";
+```
+
+```behavior
+stdout: yes\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+L: GAP(exists is not Defined: the producer emitted Defined(KEY), which is always true; refused at the source rather than mis-stamped)
+```
+
+## A23 `exists` on an ABSENT key (the case that discriminates)
+
+The polarity A22 cannot see. Under the old mapping this printed "yes" where
+perl prints "no" -- a wrong answer, not a refusal. A test written only against
+A22 passes on the broken producer AND the fixed one.
+
+```perl
+# source
+use 5.42.0;
+my %h = (a => 1);
+print exists $h{zz} ? "yes" : "no", "\n";
+```
+
+```behavior
+stdout: no\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+L: GAP(exists is not Defined: Defined(Constant("zz")) is always true, so this printed "yes"; refused at the source)
+```
+
+## A24 `delete` removes a key
+
+`delete $h{a}` removes the key, so a later `keys` sees one fewer. It reached
+the wire as `Call(delete, Constant(key))` -- the key as its ONLY operand, with
+no container and no memory edge, so the removal was invisible to every later
+read. Refused on the same contract push/unshift/splice are held to (A13/A14):
+a mutation whose effect a later read cannot observe is not modelled.
+
+```perl
+# source
+use 5.42.0;
+my %h = (a => 1, b => 2);
+delete $h{a};
+print scalar(keys %h), "\n";
+```
+
+```behavior
+stdout: 1\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+L: GAP(delete hash-key mutation not memory-modeled: the removal is not observed by a later keys read)
+```
+
+## A25 `scalar reverse` is a STRING, not a count
+
+One producer rule covered four builtins -- keys/values/reverse/sort, "List in
+list context, Int in scalar context" -- and only the two COUNTS satisfy it.
+Measured on 5.42.0:
+
+    scalar keys %h         2       a count
+    scalar reverse "abc"   "cba"   a STRING
+    scalar reverse @a      "321"   CONCATENATES, then reverses
+    scalar reverse(10,20)  "0201"  string-reversed "1020" -- NOT 2010
+    scalar sort @a         undef   not a count either
+
+`reverse(10,20)` is the case that settles it: a numeric reading would give
+2010. The stamp is now Str (perl5-son ca019b3). The backend has no `reverse`
+lowering, so this GAPs there rather than at the wire.
+
+```perl
+# source
+use 5.42.0;
+print scalar reverse("abc"), "\n";
+```
+
+```behavior
+stdout: cba\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+L: GAP(LLVM backend: cannot lower op=Call for reverse -- no reverse lowering exists)
+```
+
+## A26 `reverse` in list context
+
+The other arm of the same builtin: in list context `reverse` returns the
+reversed LIST, so `(reverse(1,2,3))[0]` is 3. Paired with A25 so the two
+contexts are pinned together -- a rule that got one right and the other wrong
+is exactly what A25 documents.
+
+```perl
+# source
+use 5.42.0;
+my @a = reverse(1, 2, 3);
+print $a[0], "\n";
+```
+
+```behavior
+stdout: 3\n
+return: Bool:1
+context: scalar
+```
+
+```ir
+L: GAP(LLVM backend: cannot lower op=Call for reverse -- no reverse lowering exists)
+```
