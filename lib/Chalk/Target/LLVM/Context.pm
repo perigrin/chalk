@@ -8809,7 +8809,19 @@ sub _lower_call_method {
     $self->_emit("  $typed_fn = bitcast i8* $opaque_fn to $fn_type*  ; cast to typed fn ptr");
 
     my $result = $self->_fresh;
-    if ($result_repr eq 'Str') {
+
+    # THE CALL MUST MATCH THE FN-POINTER CAST, which was made at $abi_repr just
+    # above. This arm keyed on $result_repr -- the NODE's repr -- so a method
+    # whose vtable ABI is %Slot, called at a site the loader narrowed to Str,
+    # emitted a %Str-returning call through a %Slot-returning pointer and lli
+    # refused ("defined with type '%Slot (i8*)*' but expected '%Str (i8*)*'").
+    #
+    # Same class as the bug the comment above this cast records (a node
+    # narrowed to Int casting a %Slot callee to `i64 (i8*)`), reached through
+    # the other operand: there the CAST followed the node, here the CALL did.
+    # The ABI is the authority for both, and a refinement is honoured by
+    # unboxing at the boundary -- which the else-branch below already does.
+    if ($result_repr eq 'Str' && $abi_repr eq 'Str') {
         $self->{_need_strpair} = 1;
         $self->_emit("  $result = call %Str $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> StrPair");
         my $str_ptr = $self->_fresh;
@@ -8841,6 +8853,30 @@ sub _lower_call_method {
             my $mi_pay = _slot_idx('payload');
             $self->_emit("  $pay = extractvalue %Slot $result, $mi_pay  ; Call(method) $method_name: Slot payload -> "
                        . ($node->representation // '?'));
+
+            # A STR PAYLOAD IS A POINTER TO THE BOXED STR, not the value.
+            # Every other narrowed reading (Int, Num, Boolean) IS the payload
+            # word, so returning it directly was right for them and silently
+            # wrong here -- the consumer would read a heap address as a string.
+            # Unpacked the same way the field read does: one encoding, read the
+            # same way wherever it is met.
+            if (($node->representation // '') eq 'Str') {
+                $self->{_need_strpair} = 1;
+                my $pair = $self->_fresh;
+                $self->_emit("  $pair = inttoptr i64 $pay to %Str*  ; Call(method) $method_name: payload -> %Str*");
+                my $pg = $self->_fresh;
+                $self->_emit("  $pg = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 " . _str_idx('ptr') . "  ; %Str.ptr");
+                my $sp = $self->_fresh;
+                $self->_emit("  $sp = load i8*, i8** $pg  ; load str ptr");
+                my $lg = $self->_fresh;
+                $self->_emit("  $lg = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 " . _str_idx('len') . "  ; %Str.len");
+                my $sl = $self->_fresh;
+                $self->_emit("  $sl = load i64, i64* $lg  ; load str len");
+                $sp = $self->_set_str_len($sp, $sl);
+                $self->{cache}{ $node->id } = $sp;
+                return $sp;
+            }
+
             $self->{cache}{ $node->id } = $pay;
             return $pay;
         }
@@ -10106,22 +10142,27 @@ sub _lower_field_access_in_method {
         my $slot = $self->_fresh;
         $self->_emit("  $slot = load %Slot, %Slot* $slot_gep  ; load field[$field_index] cell");
 
-        # ONE READING ONLY WHEN THE CELL CANNOT HOLD ANOTHER. The full tag
-        # dispatch emits a Str arm, which GEPs a %Str -- and a method body
-        # is lowered BEFORE the prologue that honours `_need_strpair`, so the
-        # type is declared after its first use and lli refuses the module
-        # ("base element of getelementptr must be sized", corpus A5). That is a
-        # pre-existing emission-order limitation this read newly reaches.
+        # THE STR ARM IS BACK, because the reason it was dropped is gone.
         #
-        # So dispatch only over the readings whose values share the target's
-        # machine type. Int and Num both land in a word, and confusing them is
-        # the actual defect here -- a cell written tag=Num and read as Int gave
-        # back the double's bits. A Str-tagged cell reaching an Int-typed read
-        # is a different question, and the undef arm answers it honestly rather
-        # than emitting a type the module has not declared yet.
+        # It was excluded because the Str arm GEPs the boxed-Str type while a
+        # method body is lowered BEFORE the prologue that declared it, so the
+        # type appeared after its first use and lli refused the module. That
+        # was a property of %StrPair being declared CONDITIONALLY, on a
+        # pre-scan that asked which methods return Str. %Str is declared
+        # unconditionally, and since the collapse there is only %Str -- so the
+        # ordering hazard this narrowing worked around no longer exists.
+        #
+        # DROPPING THE ARM WAS NOT SAFE, which is what forced the collapse.
+        # Measured on `field $s :param = "hi"; method get { $s }`: the
+        # constructor boxes "hi" onto the heap and stores the pointer, the tag
+        # is written Str, and the read then tested only Int/Num/Boolean -- so
+        # the cell fell to the undef arm and the program printed an empty line
+        # where perl prints `hi`. The old comment said the undef arm "answers
+        # honestly"; it does for a Str cell reaching an INT-typed read, and it
+        # does not for a Str cell reaching a Scalar-typed read, which is this
+        # case.
         my $val = $self->_emit_read_slot_as($slot, $repr,
-            "FieldAccess(method) field[$field_index] -> $repr",
-            readings => [qw(Int Num Boolean)]);
+            "FieldAccess(method) field[$field_index] -> $repr");
         $self->{cache}{ $node->id } = $val;
         return $val;
     }

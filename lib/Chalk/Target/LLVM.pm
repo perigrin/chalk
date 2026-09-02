@@ -911,6 +911,49 @@ sub _emit_class_registry_ir {
                     # Opaque one this arm would stamp on.
                     push @lines, "  ret %Slot $body_val";
                 }
+                elsif ($body_repr eq 'Str') {
+                    # A STR BODY IS AN AGGREGATE, NOT A PAYLOAD WORD.
+                    # `field $s :param = "hi"; method get { $s }` reads the
+                    # field as a Str (`%Str = { ptr, len, enc }`) and this arm
+                    # stuffed that straight into the i64 payload slot -- lli
+                    # refused with "'%tmp_11' defined with type '%Str' but
+                    # expected 'i64'".
+                    #
+                    # A Str lives in a Slot as a POINTER TO A HEAP %Str, which
+                    # is exactly how the CONSTRUCTOR wrote this field, so the
+                    # return re-boxes it the same way rather than inventing a
+                    # second encoding. One encoding written from both ends is
+                    # the property the read half relies on.
+                    my $C = 'Chalk::Target::LLVM::Context';
+                    # Declared in this arm rather than hoisted: the else-branch
+                    # below has its own copies, and one shared set would outlive
+                    # the arm that needs it.
+                    my $ri_def = $C->can('_slot_idx')->('defined');
+                    my $ri_tag = $C->can('_slot_idx')->('tag');
+                    my $ri_pay = $C->can('_slot_idx')->('payload');
+                    $ctx->{_need_strpair} = 1;
+                    push @lines, "  %ret_xp = extractvalue %Str $body_val, "
+                               . $C->can('_str_idx')->('ptr') . "  ; %Str.ptr";
+                    push @lines, "  %ret_xl = extractvalue %Str $body_val, "
+                               . $C->can('_str_idx')->('len') . "  ; %Str.len";
+                    push @lines, "  %ret_sm = call i8* \@malloc(i64 "
+                               . $C->can('_sizeof_llvm_type')->('%Str')
+                               . ")  ; boxed Str for a Str method return";
+                    push @lines, "  %ret_pp = bitcast i8* %ret_sm to %Str*";
+                    push @lines, "  %ret_g0 = getelementptr inbounds %Str, %Str* %ret_pp, i64 0, i32 "
+                               . $C->can('_str_idx')->('ptr');
+                    push @lines, "  store i8* %ret_xp, i8** %ret_g0  ; %Str.ptr";
+                    push @lines, "  %ret_g1 = getelementptr inbounds %Str, %Str* %ret_pp, i64 0, i32 "
+                               . $C->can('_str_idx')->('len');
+                    push @lines, "  store i64 %ret_xl, i64* %ret_g1  ; %Str.len";
+                    push @lines, "  %ret_pi = ptrtoint %Str* %ret_pp to i64";
+                    my $str_tag = $C->can('_slot_tag_value')->(
+                                      $C->can('_slot_tag_for_repr')->('Str'));
+                    push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, $ri_def";
+                    push @lines, "  %ret_st = insertvalue %Slot %ret_s0, i8 $str_tag, $ri_tag";
+                    push @lines, "  %ret_s1 = insertvalue %Slot %ret_st, i64 %ret_pi, $ri_pay";
+                    push @lines, '  ret %Slot %ret_s1';
+                }
                 else {
                     my $ri_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
                     my $ri_tag = Chalk::Target::LLVM::Context::_slot_idx('tag');

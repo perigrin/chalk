@@ -29,38 +29,39 @@ subtest 'the layout is declared exactly once, as data' => sub {
         'there is a single accessor for the type declaration');
 
     my $decl = Chalk::Target::LLVM::Context::_strpair_type_decl();
-    like($decl, qr/^%StrPair = type \{.*\}$/,
+    like($decl, qr/^%Str = type \{.*\}$/,
         'it returns a well-formed LLVM type declaration');
 
-    ok(defined &Chalk::Target::LLVM::Context::_strpair_size_bytes,
+    # THE SIZE ACCESSOR IS GONE ON PURPOSE, and this assertion outlived it.
+    # `_strpair_size_bytes` computed the struct size IN PERL -- a second
+    # implementation of LLVM's alignment rules, which is the very duplication
+    # this file exists to forbid. It was replaced by `_sizeof_llvm_type`, which
+    # emits a `ptrtoint getelementptr null` constant expression and lets LLVM
+    # compute it from the declaration, so the size CANNOT drift from the struct.
+    #
+    # The old assertion was never updated and had been dying with "Undefined
+    # subroutine" ever since -- measured identical at session-start HEAD, so
+    # this guard was dead for the whole time the migration was relying on it.
+    ok(defined &Chalk::Target::LLVM::Context::_sizeof_llvm_type,
         'there is a single accessor for the allocation size');
 };
 
-subtest 'the allocation size is DERIVED from the field list, not hardcoded' => sub {
-    plan tests => 2;
+subtest 'the allocation size is DERIVED by LLVM, not computed here' => sub {
+    plan tests => 3;
 
-    my $size = Chalk::Target::LLVM::Context::_strpair_size_bytes();
-    is($size, 16, 'today {i8*, i64} is 16 bytes');
+    # _sizeof_llvm_type emits a constant EXPRESSION rather than a number: LLVM
+    # evaluates it against the type declaration in the same module, so the two
+    # cannot disagree. That is strictly better than agreeing-by-test, which is
+    # what the previous version of this subtest checked (and what a perl-side
+    # re-implementation of LLVM's alignment rules can only ever approximate).
+    my $expr = Chalk::Target::LLVM::Context::_sizeof_llvm_type('%Str');
 
-    # THE DISCRIMINATING CHECK. The size must be computed from the same field
-    # list the declaration is built from, so widening the struct moves both
-    # together. A hardcoded `return 16` passes the assertion above and fails
-    # this one.
-    my @fields = Chalk::Target::LLVM::Context::_strpair_fields();
-    my $expect = 0;
-    for my $f (@fields) {
-        # LLVM struct layout: each field is aligned to its own size, and the
-        # struct is padded to its largest member's alignment.
-        my $w = $f->{bytes};
-        $expect = int(($expect + $w - 1) / $w) * $w;   # align
-        $expect += $w;
-    }
-    my $max = 0;
-    for my $f (@fields) { $max = $f->{bytes} if $f->{bytes} > $max }
-    $expect = int(($expect + $max - 1) / $max) * $max if $max;
-
-    is($size, $expect,
-        'the reported size equals the size computed from the field list');
+    like($expr, qr/\bptrtoint\b/,
+        'the size is a ptrtoint constant expression, not a literal');
+    like($expr, qr/\%Str/,
+        'and it is computed from the %Str type itself');
+    unlike($expr, qr/\b\d+\b(?!\s*\))/,
+        'no bare byte count is baked into it');
 };
 
 subtest 'no hardcoded StrPair size survives in the emitters' => sub {
