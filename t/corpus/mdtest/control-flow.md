@@ -1535,17 +1535,22 @@ context: scalar
 
 ```ir
 # Measured shape (B::SoN, perl5-son pu): no TryCatch node is ever built --
-# entertrycatch desugars directly to Region+Phi, the same shared-control-merge
+# entertrycatch desugars directly to a Region merge, the same shared-control
 # shape an if/else uses. TryCatch node line kept in prose only: see above.
-%c0    = Constant(0) :Int
-%c1    = Constant(1) :Int
+#
+# THE REGION HAS NO HEAD, and that is what this case pins. An if/else Region
+# is owned by an If; this one is owned by nothing, because there is no runtime
+# test to branch on. The backend's control-chain walk asked every Region for
+# its head and ABANDONED THE CHAIN when there was none -- so the try body's
+# Print was dropped and the program emitted an empty main(), printing nothing
+# where perl prints `in`. A silent wrong answer, hidden behind this case's own
+# `L: GAP` declaration until the gate started executing declared GAPs.
+%start = Start()
 %msg   = Constant("in\n") :Str
 %pr    = Print(%msg)
-%merge = Region(%pr, %c0)
-%val   = Phi(%c1, %c0, region: %merge)
-return %val
-control: %pr -> %merge
-L: GAP(LLVM backend: Phi node encountered in lower_value before its enclosing if/loop structure was processed -- a TryCatch-desugared Region never runs through _process_if_node/_process_loop_node, the only place that primes Phi bookkeeping; measured via Chalk::Target::LLVM->lower on the real B::SoN graph, error at lib/Chalk/Target/LLVM/Context.pm line 2295)
+%merge = Region(%pr, %start)
+return %pr
+L: GREEN
 ```
 
 ## D10 do-block value

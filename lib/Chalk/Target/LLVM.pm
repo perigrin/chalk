@@ -1175,7 +1175,37 @@ sub _process_control_chain {
                     $ctrl = $head->can('control_in') ? $head->control_in : undef;
                 }
                 else {
-                    push @chain, $ctrl;
+                    # A HEADLESS REGION IS A MERGE WITH NO RUNTIME TEST, and
+                    # `last` here ABANDONED EVERY EFFECT BEHIND IT.
+                    #
+                    # try/catch builds exactly this: the producer desugars it to
+                    # the same shared-control merge an if/else uses, but there
+                    # is no condition to branch on, so no If is ever built and
+                    # the Region has no head. Measured on
+                    # `try { print "in\n"; $x = 1 } catch ($e) { $x = 2 }`:
+                    # the chain stopped here and the emitted main() was EMPTY --
+                    # both Prints dropped, lli exit 0, nothing printed where
+                    # perl prints "in" then 1. A silent wrong answer.
+                    #
+                    # The Region's INPUTS are its arms' tails, so the chain
+                    # continues through them rather than ending. Walking every
+                    # arm is what makes the catch arm reachable too -- taking
+                    # only the first would fix the case above and leave its
+                    # bilateral partner broken.
+                    #
+                    # The Region itself is NOT pushed: it emits nothing (see
+                    # process_control_node, which has no Region arm and never
+                    # needed one), and pushing a node that emits nothing is how
+                    # this looked handled while dropping everything.
+                    my $inputs = $ctrl->can('inputs') ? $ctrl->inputs : undef;
+                    for my $arm (grep { blessed($_) } ($inputs ? $inputs->@* : ())) {
+                        my $a = $arm;
+                        while (defined $a && blessed($a)) {
+                            last if $seen{ $a->id }++;
+                            push @chain, $a;
+                            $a = $a->can('control_in') ? $a->control_in : undef;
+                        }
+                    }
                     last;
                 }
             }
