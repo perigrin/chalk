@@ -486,9 +486,33 @@ When we test membership using S = Str as the reference type, every integer that 
 
 Boolean is a primitive two-element type containing only the builtin true and false values. Boolean presents an interesting edge case in the formalism. Values like 1, 0, '', and undef can round-trip through boolean coercion and participate in all boolean operations (&&, ||, !, conditionals). However, they fail the `is_bool()` test, which returns true only for the primitive `true` and `false` values themselves.
 
-Whether Boolean fits the formal definition depends on how we classify `is_bool()`. If `is_bool()` ∈ Operations(Boolean), then no coercion produces values satisfying all Boolean operations, making Boolean an exception to the formalism. However, `is_bool()` is arguably a membership predicate (Any → Boolean) rather than an operation on Boolean values, which would mean `is_bool()` ∉ Operations(Boolean). Under this interpretation, Boolean fits the formalism perfectly - values coerce to Boolean and satisfy all actual Boolean operations - though unfortunately it means that `is_bool()` would report false for some values that are members of Boolean under this formalism.
+Whether Boolean fits the formal definition depends on how we classify `is_bool()`. Both readings are set out below and then **resolved** — the paragraph after them settles it on measurement rather than leaving the choice open. If `is_bool()` ∈ Operations(Boolean), then no coercion produces values satisfying all Boolean operations, making Boolean an exception to the formalism. However, `is_bool()` is arguably a membership predicate (Any → Boolean) rather than an operation on Boolean values, which would mean `is_bool()` ∉ Operations(Boolean). Under this interpretation, Boolean fits the formalism perfectly - values coerce to Boolean and satisfy all actual Boolean operations - though unfortunately it means that `is_bool()` would report false for some values that are members of Boolean under this formalism.
 
-The resolution may also depend on future language evolution, particularly whether operators like `!!` might eventually produce values that satisfy `is_bool()`, providing a coercion path to full Boolean membership. For now, we present both interpretations and acknowledge Boolean as requiring further consideration and future work.
+**This is now resolved, and by the second interpretation.** The hedge above was conditional on future language evolution — specifically on whether operators like `!!` would produce values satisfying `is_bool()`, providing a coercion path to full Boolean membership. On perl 5.42.0 they do. Measured:
+
+| Expression | `is_bool()` |
+|---|---|
+| `!!1`, `!!0` | true |
+| `!!""`, `!!"a"`, `!!undef` | true |
+| `!1`, `!0` | true |
+| `1==1`, `1==2` | true |
+| `true`, `false` | true |
+| `1`, `0`, `""` | **false** |
+
+`!!` is a total coercion into Boolean: it yields an `is_bool()`-true value for every input, including `undef` and strings. Comparison operators do the same. So the coercion path exists, Boolean has a genuine coercion function like every other type in the lattice, and the formalism admits it without exception.
+
+The last row is the point that keeps `is_bool()` a membership predicate rather than an operation: `1` and `0` remain non-members while coercing into Boolean via `!!`. That is exactly the shape of every other membership relation here — `"5"` is not an Int but coerces to one — so `is_bool()` ∉ Operations(Boolean) is the reading the language now supports, not merely the more convenient one.
+
+Boolean therefore requires no further consideration as a special case. It is a primitive two-element type under Scalar, with `!!` as its coercion and `is_bool()` as its membership predicate.
+
+**Boolean's position in the lattice follows from this, and it is NOT under `Str`.** The two-factor test is `A <: B iff (A ⊆ B) and (every operation of B holds for values of A)`. Factor 2 passes for `Boolean <: Str` — every string operation works on a boolean with no coercion (`"x".true."y".false."z"` is `"x1yz"`, `length(true)`/`length(false)` are 1/0). Factor 1 fails. Str membership requires an admissible detour type S preserving the value, and measured on 5.42.0:
+
+| | direct Str | via Num |
+|---|---|---|
+| `false` | `""` | `"0"` |
+| `true` | `"1"` | `"1"` |
+
+`false` is not preserved, and that is not a marginal counterexample: **Boolean has exactly two inhabitants**, so `false` is half the type. Every `is_bool()`-true value collapses onto one of the two — `!!1`, `1==1`, `!0` and `true` are one value, not four (measured: all trues stringify to `"1"`, all falses to `""`) — so failing on `false` fails on 50% of Boolean's membership. (S=Str is inadmissible as vacuous — the identity on every Str; S=Boolean is circular, since Str's definition would then depend on Boolean, inverting the stratification.) Note that `true` *is* preserved: testing one value reaches the wrong conclusion, and so does testing one factor. Substitutability is not membership.
 
 **Note:** See Example 7 for detailed discussion of how Boolean evolved with the introduction of `is_bool()` and the implications for the type system.
 
