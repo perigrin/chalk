@@ -155,3 +155,28 @@ failed write, a full disk.
 
 So `print` yields `join(Boolean, Undef)`, and in this lattice that join is
 exactly **Scalar**. The producers
+ stamp was not careless -- it is the join over
+both outcomes, and it is more honest than mine.
+
+MY EVIDENCE WAS ONE POLARITY. I measured `my $r = print "y\n"` -- the success
+path -- confirmed `is_bool($r)`, and stopped. The corpus prose at logical.md and
+chalk's own `Print :Boolean` stamp record the same half-truth, so three sources
+agreeing did not make it right: they shared an assumption none of them had
+tested against a failing print. Checking BOTH DIRECTIONS is the discipline that
+was missing, and it is the same one an earlier session wrote down after four
+vacuous acceptance criteria.
+
+THE DECIDING CASE, reproduced here:
+
+    my $r = (1 == 1) && (print {$read_only} "x");   # $r is undef
+
+With `Print => Boolean` the `And` becomes Boolean and the backend lowers an i1
+for a value that is `undef` at runtime -- turning a LOUD REFUSAL at
+Context.pm:3854 into a SILENT WRONG ANSWER. That is the T3 failure class, which
+is the one thing worse than a GAP.
+
+WHAT THIS ACTUALLY MEANS FOR L5d/L5e. They are not blocked on a producer stamp.
+They are blocked on `Scalar` having no machine reading in T2 -- the same wall as
+the gate-green floor's Undef-joins-to-Scalar cases. As perl5-son put it: Scalar
+is the type of every perl value that could be undef, so it will not stay rare.
+The honest fix is a representation for Scalar, not a narrower claim about print.
