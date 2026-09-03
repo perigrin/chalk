@@ -26,11 +26,13 @@ before it is executable. Note also that an effect-free callee called twice
 (`sub f { 7 }`) ALREADY lowers through the inliner, so the population Slice 2
 unblocks should be measured rather than presumed.
 
-### The `fib` typing question — a false dilemma, and the obvious third option is ALSO wrong
+### The `fib` typing question — a false dilemma, and the answer is already in the lattice
 
 This doc frames Slice 3's typing prerequisite as "a seed plus a join-rule
-change". Both halves are wrong, and the correction is worth recording in full
-because the appealing fix is a trap.
+change". The join-rule half is wrong AND actively dangerous to act on; the seed
+half is right but for a different element than anyone reaching for it would
+pick. The full correction is recorded because the appealing fix is a trap and
+the real fix is one word.
 
 `2026-08-21-unknown-is-a-type-absence-is-not.md` diagnoses two defects: an
 unstamped arm reaches the join as a Perl `undef` (not a lattice point, so the
@@ -60,17 +62,38 @@ commit. Three further reasons not to revisit it:
   the TernaryExpr condition-drop. It is not licence for a drop inside the fold
   that every merge in the compiler shares.
 
-**What survives from the 2026-08-21 doc is its deeper shape, which is the actual
-third option:** what a recursive callee needs is not a widening but a
-HYPOTHESIS — assume the return type is the join of the arms that ARE known,
-then CHECK the recursive arm is consistent with it. That is ordinary fixpoint
-inference over a recursive definition, and it is why a base case exists.
+**AND THE ANSWER IS SIMPLER THAN EITHER, AND ALREADY BUILT.** The lattice has a
+BOTTOM element, `None`, and `join_types` documents it for precisely this case
+(`TypeLibrary.pm:383`):
 
-The distinction that matters: a hypothesis-and-check belongs where a recursive
-callee's RETURN TYPE is derived (`_resolve_direct_calls`, which today reads the
-callee's Return value and finds it unstamped), NOT inside the lattice join. The
-join's absorbing behaviour is correct for what a join is; recursion needs an
-iteration around it, not a weaker join underneath it.
+> None is the identity (T join None == T), which is what lets a recursive
+> function type from its base case: the recursive arm contributes None on the
+> first pass, so Int join None == Int rather than collapsing to a top.
+
+Verified against shipped code:
+
+    join(None,    Int) = Int        join(Int,  None) = Int
+    join(None,    Str) = Str        join(None, None) = None
+    join(Unknown, Int) = Unknown    <- the contrast: top absorbs, bottom yields
+
+So the recursive arm must contribute **`None` (bottom)** — not `Unknown` (top),
+which absorbs and discards the base case, and not absence, which makes the join
+bail. With the right element the EXISTING join types `fib` mechanically. No
+drop-rule, no special case, no cycle-breaking, and nothing to build in the join.
+
+**What is actually missing is a seed.** Measured: nothing in `lib/` ever stamps
+a node `None` for this purpose, so the recursive Call stays unstamped and
+`_seed_and_propagate_reprs` bails at `Analysis.pm:2085`
+(`next if grep { !defined } @reprs`) before the identity can apply. The
+identity element exists, is documented for this exact use, and has no producer.
+
+This also disposes of a more elaborate answer that looks right: "assume the
+return type is the join of the known arms, then check the recursive arm is
+consistent" describes a hypothesis-and-check pass to be built. That is what
+`None` + the existing join already DO on the first pass, for the
+one-typed-arm-plus-one-recursive-arm shape. Real iteration is still needed for
+mutual recursion where no arm types on the first pass — but that is a later
+generalisation, not the thing standing between HEAD and `fib`.
 
 Also already landed and listed here as outstanding: the TernaryExpr join already
 EXCLUDES the Bool condition (`Analysis.pm:2082`).
