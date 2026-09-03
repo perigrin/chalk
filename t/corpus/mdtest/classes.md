@@ -929,3 +929,19 @@ stdout: 42\n
 return: Bool:1
 context: scalar
 ```
+
+```ir
+%start = Start()
+%cls  = MOP::Class(name: "Counter")
+%ten  = Constant(10) :Int
+%new  = Call(%ten, dispatch_kind: "method", name: "new", class: "Counter") :Object
+%k    = Constant(32) :Int
+%plus = Call(%new, %k, dispatch_kind: "method", name: "plus", class: "Counter") :Int
+%sp   = Coerce(%plus, from_repr: "Int", to_repr: "Str") :Str
+%nl   = Constant("\n") :Str
+%p    = Print(%sp, %nl)
+return %p
+control: %start -> %new -> %plus -> %p
+L: GREEN
+```
+

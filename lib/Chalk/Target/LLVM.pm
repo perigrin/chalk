@@ -422,6 +422,81 @@ sub _method_body_root {
 # guard). GAP loudly on a graph without a single unique Return rather than
 # returning undef — a silent undef would bare-deref in Dominators->from_return_node
 # and _process_control_chain, turning a lowering GAP into an opaque crash.
+# _method_param_reprs($mop_method) -> \@reprs, ordered by parameter index
+#
+# A method's declared parameters are its Parameter nodes. Each carries an
+# `index` and its own stamp, so this reads the graph rather than a parallel
+# record that could drift from it.
+#
+# The invocant is NOT included: it is the `i8* %self` every method has, and it
+# is not a Parameter node.
+# _method_param_decl(\@param_reprs) -> the formal parameter list text,
+# invocant included, e.g. 'i8* %self, i64 %arg0'.
+#
+# THE ONE PLACE THAT NAMES THE ARGUMENTS. The definition, an inherited
+# forwarder's call, and the vtable's fn-pointer cast must agree exactly or lli
+# rejects the module -- and `_lower_parameter` reads %arg$i on the strength of
+# the names chosen here. Keeping all of that in one sub is why they cannot
+# drift apart.
+sub _method_param_decl {
+    my ($param_reprs) = @_;
+    my @d = ('i8* %self');
+    my $i = 0;
+    for my $r (@{ $param_reprs // [] }) {
+        push @d, _method_fn_llvm_ret_type($r) . ' %arg' . $i;
+        $i++;
+    }
+    return join(', ', @d);
+}
+
+# _method_param_fwd(\@param_reprs) -> the ARGUMENT list for forwarding the same
+# parameters straight through, e.g. 'i8* %self, i64 %arg0'. Identical text to
+# the declaration here, but derived separately because the two are different
+# questions and only one of them is free to change.
+sub _method_param_fwd { return _method_param_decl($_[0]) }
+
+sub _method_param_reprs {
+    my ($m) = @_;
+    my $g = $m && $m->can('graph') ? $m->graph : undef;
+    return [] unless $g;
+
+    my %by_index;
+    for my $n (_graph_all_nodes($g)) {
+        next unless blessed($n) && $n->can('operation')
+                 && $n->operation eq 'Parameter';
+        my $i = $n->can('index') ? $n->index : undef;
+        next unless defined $i;
+        # A repr is REQUIRED here: an untyped parameter would make the emitted
+        # signature disagree with the call site, which lli reports as a type
+        # mismatch far from the cause. Refuse at the declaration instead.
+        my $r = $n->representation
+            // die "GAP: method parameter at index $i has no representation -- "
+                 . "the emitted signature would not match its call sites.";
+        $by_index{$i} = $r;
+    }
+    return [ map { $by_index{$_} } sort { $a <=> $b } keys %by_index ];
+}
+
+# _graph_all_nodes($g) -> every node reachable from the graph's returns,
+# including via control_in. `$g->nodes` walks value inputs only, so a
+# Parameter read only by an effect node would be invisible to it.
+sub _graph_all_nodes {
+    my ($g) = @_;
+    my %seen;
+    my @out;
+    my @q = grep { blessed($_) } $g->returns->@*;
+    while (my $n = shift @q) {
+        next unless blessed($n);
+        next if $seen{ $n->id }++;
+        push @out, $n;
+        push @q, grep { blessed($_) } $n->inputs->@*
+            if $n->can('inputs') && defined $n->inputs;
+        my $c = $n->can('control_in') ? $n->control_in : undef;
+        push @q, $c if defined $c && blessed($c);
+    }
+    return @out;
+}
+
 sub _method_body_return {
     my ($mop_method) = @_;
     my $mname = $mop_method->name // '?';
@@ -565,11 +640,18 @@ sub _populate_registry_from_mop_class {
             ? $m->return_type
             : _require_repr($body_node, "MOP::Method '$mname' body root");
         unless (grep { ($_->{name} // '') eq $mname } @{ $registry->{$cname}{methods} }) {
+            # THE SIGNATURE COMES FROM THE BODY GRAPH, not from a wire field.
+            # A method's parameters are exactly its Parameter nodes, each
+            # carrying its own index and stamp, so the graph is the authority
+            # and there is nothing to keep in sync with it. Sorted by index so
+            # the emitted argument order is the declared order rather than
+            # whatever order the walk happened to reach them in.
             push @{ $registry->{$cname}{methods} }, {
                 name        => $mname,
                 body_node   => $body_node,
                 body_return => _method_body_return($m),
                 return_repr => $ret_repr,
+                param_reprs => _method_param_reprs($m),
                 vtable_slot => $mslot++,
             };
         }
@@ -722,10 +804,12 @@ sub _emit_class_registry_ir {
                 # Inherited method: emit a wrapper that forwards to the parent's impl
                 my $parent = $minfo->{inherited_from};
                 my $parent_fn = '@' . $parent . '__' . $mname;
-                push @lines, "define internal $fn_ret $fn_name(i8* %self) {";
+                my $p_decl = _method_param_decl($minfo->{param_reprs});
+                my $p_fwd   = _method_param_fwd($minfo->{param_reprs});
+                push @lines, "define internal $fn_ret $fn_name($p_decl) {";
                 push @lines, 'entry:';
                 if ($ret_repr eq 'Str') {
-                    push @lines, "  %r = call %Str $parent_fn(i8* %self)";
+                    push @lines, "  %r = call %Str $parent_fn($p_fwd)";
                     push @lines, '  ret %Str %r';
                 }
                 elsif ($ret_repr eq 'Num') {
@@ -733,15 +817,15 @@ sub _emit_class_registry_ir {
                     # `double` again here was a second authority for the same
                     # answer, in the one place where disagreeing with the
                     # function's own header is guaranteed-invalid IR.
-                    push @lines, "  %r = call $fn_ret $parent_fn(i8* %self)";
+                    push @lines, "  %r = call $fn_ret $parent_fn($p_fwd)";
                     push @lines, "  ret $fn_ret %r";
                 }
                 elsif ($ret_repr eq 'Boolean') {
-                    push @lines, "  %r = call i1 $parent_fn(i8* %self)";
+                    push @lines, "  %r = call i1 $parent_fn($p_fwd)";
                     push @lines, '  ret i1 %r';
                 }
                 else {
-                    push @lines, "  %r = call i64 $parent_fn(i8* %self)";
+                    push @lines, "  %r = call i64 $parent_fn($p_fwd)";
                     push @lines, '  ret i64 %r';
                 }
                 push @lines, '}';
@@ -834,7 +918,8 @@ sub _emit_class_registry_ir {
             # return_repr; %Str has none, because it is needed by any Str
             # VALUE rather than only by a Str-returning method.)
 
-            push @lines, "define internal $fn_ret $fn_name(i8* %self) {  ; method body for ${cname}::${mname}";
+            my $body_p_decl = _method_param_decl($minfo->{param_reprs});
+            push @lines, "define internal $fn_ret $fn_name($body_p_decl) {  ; method body for ${cname}::${mname}";
             push @lines, 'entry:';
 
             # Emit all instructions from the body context (current block
@@ -1128,7 +1213,8 @@ sub _emit_class_registry_ir {
             my $mname   = $minfo->{name};
             my $fn_name = '@' . $cname . '__' . $mname;
             my $ret_repr = $minfo->{return_repr};
-            my $fn_type_str = Chalk::Target::LLVM::Context::_method_fn_type($ret_repr);
+            my $fn_type_str = Chalk::Target::LLVM::Context::_method_fn_type(
+                $ret_repr, $minfo->{param_reprs});
             push @vt_init, "i8* bitcast ($fn_type_str* $fn_name to i8*)";
         }
         push @lines, "$vt_global = private unnamed_addr constant $vt_type { " . join(', ', @vt_init) . " }  ; vtable for $cname";

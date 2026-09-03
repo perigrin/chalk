@@ -42,14 +42,23 @@ use Chalk::IR::Analysis;      # return_reading_for_want: which of a callee readi
 # _method_fn_type($result_repr) -> LLVM fn type string for method signatures.
 # Duplicate of the module-level sub; both packages need it to avoid cross-package calls.
 sub _method_fn_type {
-    my ($result_repr) = @_;
+    my ($result_repr, $param_reprs) = @_;
     # DERIVED, not a parallel table. A method's function-pointer type is its
     # return type applied to (i8*), so there is exactly one authority for both
     # and they cannot drift. They HAD drifted: this chain grew a `Scalar` arm
     # that _method_fn_llvm_ret_type never got, so a Scalar-returning method
     # could be pointed at but not called -- invisible because the ABI equality
     # check upstream rejected the Scalar/Int pair before either was reached.
-    return Chalk::Target::LLVM::_method_fn_llvm_ret_type($result_repr) . ' (i8*)';
+    # THE ARGUMENT TYPES ARE PART OF THE FN-POINTER TYPE. A vtable slot is
+    # bitcast to this before the call, so a signature that omits the arguments
+    # makes the cast and the definition disagree -- exactly the drift the
+    # comment above records for the return type, reached through the operand
+    # list instead.
+    my @args = ('i8*');
+    push @args, map { Chalk::Target::LLVM::_method_fn_llvm_ret_type($_) }
+                @{ $param_reprs // [] };
+    return Chalk::Target::LLVM::_method_fn_llvm_ret_type($result_repr)
+         . ' (' . join(', ', @args) . ')';
 }
 
 sub new {
@@ -1623,6 +1632,9 @@ sub lower_value {
     }
     elsif ($op eq 'ListAppend') {
         return $self->_lower_list_append($node);
+    }
+    elsif ($op eq 'Parameter') {
+        return $self->_lower_parameter($node);
     }
     elsif ($op eq 'Subscript') {
         return $self->_lower_subscript($node);
@@ -6533,6 +6545,36 @@ sub _find_block_idx {
 # GROWTH IS malloc+memcpy, not realloc: only malloc and memcpy are declared,
 # and realloc is what they compose to. Capacity doubles (from a floor of 4),
 # so N appends cost O(N) copying rather than O(N^2).
+# _lower_parameter($node) -> the SSA name of the method argument
+#
+# Inside a METHOD BODY a parameter is a real LLVM function argument, named
+# positionally as %arg0, %arg1, ... beside the %self invocant. That is the
+# whole lowering: the value is already there, and this returns its name.
+#
+# It is NOT the same question the direct-sub inliner answers. That path
+# (_collect_positional_arg_reads) substitutes the CALLER's already-lowered
+# value for the callee's read, because an inlined body has no arguments of its
+# own. A method is a real vtable call with a real signature, so the argument
+# arrives in the ordinary way -- which is why Parameter reached the
+# catch-all refusal for years while `sub f($x)` worked.
+sub _lower_parameter {
+    my ($self, $node) = @_;
+
+    my $idx = $node->can('index') ? $node->index : undef;
+    defined $idx
+        or die "GAP: Parameter node has no index -- cannot name its argument";
+
+    unless ($self->{_in_method_body}) {
+        die "GAP: op=Parameter outside a method body. A sub's parameters are "
+          . "bound by the inliner (_collect_positional_arg_reads); reaching "
+          . "here means a Parameter escaped that path.";
+    }
+
+    my $ref = "%arg$idx";
+    $self->{cache}{ $node->id } = $ref;
+    return $ref;
+}
+
 sub _lower_list_append {
     my ($self, $node) = @_;
 
@@ -9114,7 +9156,42 @@ sub _lower_call_method {
     # AT THE ABI. `$result_repr` (the node's, possibly refined) named this type
     # until 2026-09-01, so a node narrowed to Int cast a `%Slot (i8*)` callee to
     # `i64 (i8*)` and called it at the wrong type.
-    my $fn_type  = _method_fn_type($abi_repr);
+    # THE ARGUMENTS. `$node->inputs` is [invocant, arg0, arg1, ...], and the
+    # callee's formals came from its own Parameter nodes -- two independent
+    # readings of the same signature, so a disagreement between them is a real
+    # defect and refused rather than papered over. Passing the wrong count
+    # through a bitcast fn pointer is not a diagnosable error at run time; it
+    # is stack garbage read as a value.
+    my $param_reprs = $minfo->{param_reprs} // [];
+    my @arg_nodes   = @{ $node->inputs }[ 1 .. $#{ $node->inputs } ];
+    if (@arg_nodes != @$param_reprs) {
+        die "GAP: Call(method) '$method_name' passes " . scalar(@arg_nodes)
+          . " argument(s) but '$class_name'::$method_name declares "
+          . scalar(@$param_reprs) . " -- the emitted call would read stack "
+          . "garbage for the missing one.";
+    }
+
+    my @call_args;
+    for my $i (0 .. $#arg_nodes) {
+        my $want = $param_reprs->[$i];
+        my $got  = $arg_nodes[$i]->representation // '';
+        # AT THE CALLEE'S TYPE, for the same reason the return is: the body is
+        # emitted once, at one machine type. A caller that knows a narrower
+        # type still has to hand over the declared one.
+        my $ref = $self->lower_value($arg_nodes[$i]);
+        # _emit_coercion is the shipped arrow between two reprs, the same one
+        # an explicit Coerce node lowers through. It refuses a pair it cannot
+        # bridge, which is the right answer here: calling at the wrong machine
+        # type is not diagnosable at run time.
+        $ref = $self->_emit_coercion($ref, $got, $want,
+                                     "Call(method) $method_name arg $i")
+            if $got ne $want;
+        push @call_args,
+             Chalk::Target::LLVM::_method_fn_llvm_ret_type($want) . " $ref";
+    }
+    my $arg_text = join(', ', "i8* $obj_raw", @call_args);
+
+    my $fn_type  = _method_fn_type($abi_repr, $param_reprs);
     my $typed_fn = $self->_fresh;
     $self->_emit("  $typed_fn = bitcast i8* $opaque_fn to $fn_type*  ; cast to typed fn ptr");
 
@@ -9133,7 +9210,7 @@ sub _lower_call_method {
     # unboxing at the boundary -- which the else-branch below already does.
     if ($result_repr eq 'Str' && $abi_repr eq 'Str') {
         $self->{_need_str_type} = 1;
-        $self->_emit("  $result = call %Str $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> StrPair");
+        $self->_emit("  $result = call %Str $typed_fn($arg_text)  ; Call(method) $method_name -> StrPair");
         my $str_ptr = $self->_fresh;
         my $str_len = $self->_fresh;
         $self->_emit("  $str_ptr = extractvalue %Str $result, 0  ; Call(method) $method_name result ptr");
@@ -9150,7 +9227,7 @@ sub _lower_call_method {
         # so call and definition can never disagree (and an unsupported repr dies
         # there once, not in a parallel inline table).
         my $ret_ty = Chalk::Target::LLVM::_method_fn_llvm_ret_type($abi_repr);
-        $self->_emit("  $result = call $ret_ty $typed_fn(i8* $obj_raw)  ; Call(method) $method_name -> $ret_ty");
+        $self->_emit("  $result = call $ret_ty $typed_fn($arg_text)  ; Call(method) $method_name -> $ret_ty");
         # THE CALL IS AT THE ABI; THE NODE MAY KNOW MORE. When the vtable
         # declares Scalar the callee returns %Slot, but this node's repr may
         # have been refined to something narrower -- Int <: Scalar. Consumers

@@ -1032,9 +1032,30 @@ sub _seed_direct_call_arg_reprs ($graphs) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
             next unless $node->operation eq 'Call'
                 && $node->can('dispatch_kind')
-                && ($node->dispatch_kind // '') eq 'direct'
                 && $node->can('target') && $node->target;
+
+            # A METHOD'S PARAMETERS ARE SEEDED THE SAME WAY A SUB'S ARE. The
+            # question this pass answers -- "what type reaches parameter N,
+            # joined over every callsite?" -- does not depend on how the callee
+            # was dispatched, and the Parameter-by-index arm below is already
+            # exactly the right answer for a declared signature.
+            #
+            # It was gated to `direct` only, so `method just_arg($k) { $k }`
+            # left $k at Unknown: nothing else constrains a parameter whose only
+            # consumer is the Return. A parameter used in arithmetic got a type
+            # from the join op instead and hid the gap -- which is why `$n + $k`
+            # lowered while `$k` alone did not.
+            my $kind = $node->dispatch_kind // '';
+            next unless $kind eq 'direct' || $kind eq 'method';
+            next if $kind eq 'method' && ($node->name // '') eq 'new';
+
             my @args = grep { blessed($_) } $node->inputs->@*;
+
+            # THE INVOCANT IS NOT ARGUMENT ZERO. A method Call's inputs are
+            # [invocant, arg0, ...], so seeding parameter 0 from inputs[0] would
+            # stamp `$k` with the OBJECT's repr -- a type-shaped answer that was
+            # never derived from anything the caller passes.
+            shift @args if $kind eq 'method';
             next unless @args;
 
             # Find the callee's single positional argument read: either a
