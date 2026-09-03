@@ -153,6 +153,18 @@ to make the definedness bit runtime-opaque (not constant-foldable by the LLVM
 optimizer).  The DefinedOr branches on the loaded i1 bit and the phi selects
 the RHS value on the undef path.
 
+PROMOTED FROM `L: GAP` 2026-09-03. The refusal it declared -- "DefinedOr with
+repr=Scalar reached LLVM backend" -- is gone: `Scalar` has a machine type
+(%Slot), and the guard predated it. See
+docs/plans/2026-09-02-finish-the-str-strpair-migration.md for the type work and
+a340d22a for the lowering.
+
+THE RESULT IS `Scalar` AND THAT IS THE HONEST TYPE. At runtime `undef // 7`
+yields 7, an Int -- the maybe-ness really is discharged. But the STATIC type is
+the join of the two arms, and the phi needs one machine type for both, so the
+narrower arm is boxed. Knowing the value will be defined does not make the arms
+the same width.
+
 ```perl
 # source
 use 5.42.0;
@@ -168,22 +180,14 @@ context: scalar
 ```
 
 ```ir
-%start = Start()
-%cn    = Constant("$a") :Str
-%cundef = Constant(undef) :Undef
-%vda   = VarDecl(%cn, %cundef) :Undef
-%pa    = PadAccess(%vda, "$a") :Undef
-%cnb   = Constant("$b") :Str
-%cb    = Constant(7) :Int
-%vdb   = VarDecl(%cnb, %cb) :Int
-%pb    = PadAccess(%vdb, "$b") :Int
-%r     = DefinedOr(%pa, %pb) :Scalar
-%nl = Constant("\n") :Str
-%co_p  = Coerce(%r : Scalar -> Str) :Str
-%p  = Print(%co_p, %nl)
+%undef = Constant(undef) :Undef
+%seven = Constant(7) :Int
+%dor   = DefinedOr(%undef, %seven) :Scalar
+%co    = Coerce(%dor : Scalar -> Str) :Str
+%nl    = Constant("\n") :Str
+%p     = Print(%co, %nl)
 return %p
-control: %start -> %p
-L: GAP(the merge is Scalar -- the join of an Undef arm with a defined arm -- and Scalar has no machine encoding until T2 exists. DECLARED, not discovered: perigrin ruled (D2, 2026-08-26) that deleting the Undef drop is worth this temporary drop, because Int was the WRONG answer for a value that is undef on one path, and a loud GAP naming Scalar beats a green that lies. Restoring this case to GREEN is T2's acceptance criterion -- T2 is not done while it stands. See spec 9.5, which pins the floor at 215 and makes it a CEILING too: a fourth case GAPping here is a regression, not more of the same)
+L: GREEN
 ```
 
 ## L3c defined-or with an early-return fallback
@@ -243,8 +247,29 @@ context: scalar
 %phi = Phi(%c99, %und) :Scalar
 return %phi
 control: %start -> %p
-L: GAP(the merge is Scalar -- the join of an Undef arm with a defined arm -- and Scalar has no machine encoding until T2 exists. DECLARED, not discovered: perigrin ruled (D2, 2026-08-26) that deleting the Undef drop is worth this temporary drop, because Int was the WRONG answer for a value that is undef on one path, and a loud GAP naming Scalar beats a green that lies. Restoring this case to GREEN is T2's acceptance criterion -- T2 is not done while it stands. See spec 9.5, which pins the floor at 215 and makes it a CEILING too: a fourth case GAPping here is a regression, not more of the same)
+L: GREEN
 ```
+
+THE ACCEPTANCE CRITERION THIS CASE CARRIED IS MET (2026-09-03). Its GAP said
+"Restoring this case to GREEN is T2's acceptance criterion -- T2 is not done
+while it stands", and the reason it stood was that `Scalar` -- the join of an
+Undef arm with a defined arm -- had no machine encoding.
+
+It has one. `Scalar` maps to `%Slot`, the tagged cell; what was missing was
+smaller than "T2 does not exist" and turned out to be four specific things:
+T1 had no `Scalar` row in the coercion table at all (so `Scalar -> Boolean` did
+not exist as far as the type layer knew), `_lower_and`/`_lower_or`/
+`_lower_defined_or` each refused repr=Scalar with guards written before Scalar
+had a type, the short-circuit merge bridged its arms against EACH OTHER rather
+than against the phi's type, and `_narrow_unknown_coercions` skipped a Scalar
+operand because `_is_narrowed` -- a fixpoint termination latch -- answers false
+for it.
+
+D2's ruling is vindicated rather than reversed: `Int` really was the wrong
+answer for a value that is undef on one path, the loud GAP really was better
+than a green that lies, and the honest type is what eventually lowered. The
+value IS knowably 4 at runtime here; the STATIC type is still the join, and
+boxing is how two differently-typed arms reach one phi.
 
 ## L5 void print in a true && arm
 
@@ -1064,6 +1089,18 @@ symptom in place:
    nothing established. Deleting that drop is what makes this case honest, and
    what makes it a GAP: `Scalar` has no machine encoding until T2.
 
+PROMOTED FROM `L: GAP` 2026-09-03. The refusal it declared -- "DefinedOr with
+repr=Scalar reached LLVM backend" -- is gone: `Scalar` has a machine type
+(%Slot), and the guard predated it. See
+docs/plans/2026-09-02-finish-the-str-strpair-migration.md for the type work and
+a340d22a for the lowering.
+
+THE RESULT IS `Scalar` AND THAT IS THE HONEST TYPE. At runtime `undef // 7`
+yields 7, an Int -- the maybe-ness really is discharged. But the STATIC type is
+the join of the two arms, and the phi needs one machine type for both, so the
+narrower arm is boxed. Knowing the value will be defined does not make the arms
+the same width.
+
 ```perl
 # source
 use 5.42.0;
@@ -1078,20 +1115,20 @@ context: scalar
 ```
 
 ```ir
-%start = Start()
-%u   = Constant(undef) :Undef
-%d   = Constant(9) :Int
-%dor = DefinedOr(%u, %d) :Scalar
-%nl  = Constant("\n") :Str
-%co_p   = Coerce(%dor : Scalar -> Str) :Str
-%p   = Print(%co_p, %nl)
-%one = Constant(1) :Int
-%nl = Constant("\n") :Str
-%co_p  = Coerce(%one : Int -> Str) :Str
-%p  = Print(%co_p, %nl)
-return %p
-control: %start -> %p
-L: GAP(the merge is Scalar -- the join of an Undef arm with a defined arm -- and Scalar has no machine encoding until T2 exists. DECLARED, not discovered: perigrin ruled (D2, 2026-08-26) that deleting the Undef drop is worth this temporary drop, because Int was the WRONG answer for a value that is undef on one path, and a loud GAP naming Scalar beats a green that lies. Restoring this case to GREEN is T2's acceptance criterion -- T2 is not done while it stands. See spec 9.5, which pins the floor at 215 and makes it a CEILING too: a fourth case GAPping here is a regression, not more of the same)
+%undef = Constant(undef) :Undef
+%nine  = Constant(9) :Int
+%dor   = DefinedOr(%undef, %nine) :Scalar
+%co    = Coerce(%dor : Scalar -> Str) :Str
+%nl    = Constant("\n") :Str
+%p     = Print(%co, %nl)
+# The second statement, `say(1)`. A program top level returns nothing, so the
+# Return value is Constant(undef) and both Prints ride the control chain --
+# which is why this case does NOT `return %p`.
+%one   = Constant(1) :Int
+%co2   = Coerce(%one : Int -> Str) :Str
+%p2    = Print(%co2, %nl)
+return %p2
+L: GREEN
 ```
 
 ## L3e defined-or whose LHS IS defined (bilateral)

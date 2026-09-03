@@ -1381,7 +1381,8 @@ sub _narrow_unknown_coercions ($graphs) {
                 # treats from_repr as a fallback -- but a node whose recorded
                 # type disagrees with its operand is exactly what the shape leg
                 # exists to catch.
-                next unless _is_narrowed($repr) || $repr eq 'Scalar';
+                next unless _is_narrowed($repr)
+                         || (defined $repr && $repr eq 'Scalar');
 
                 # The operand is ALREADY the target type: the coercion is an
                 # identity edge and the consumer can read the operand directly.
