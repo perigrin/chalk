@@ -122,17 +122,30 @@ PROG
     is $lli, $perl, 'lli agrees on both arms';
 };
 
-# THE VOID-CALL ARM IS DELIBERATELY NOT PINNED HERE. It is the other shape that
-# already worked, so it belongs in this file on the merits -- but exercising it
-# needs a `print` inside a method body, and that trips a SEPARATE pre-existing
-# defect: `@fmt_print_str` is emitted undeclared and lli rejects the module
-# ("use of undefined value '@fmt_print_str'"). Measured identically on producer
-# pins a7eadbf and b96087c, so it is unrelated to this fix.
-#
-# Pinning it here would leave this file with a permanently-red subtest that says
-# nothing about the guard -- and a red file stops being read, which is how a real
-# regression later hides in the noise. The producer-side test
-# (perl5-son t/from-optree-field-store-in-one-armed-if.t) carries that control at
-# the GRAPH level, where it passes cleanly and still discriminates.
+# THE VOID-CALL ARM, restored. It was left out when this file landed because a
+# `print` inside a method body tripped a SEPARATE defect -- @fmt_print_str
+# emitted undeclared, lli rejecting the module -- which would have made this a
+# permanently-red subtest saying nothing about the guard. That defect is fixed
+# (the format global joins the post-class re-emit), so the control can do its
+# job: it differs from the broken case in exactly one way, and it already
+# worked, so a fix that broke it fixed the wrong thing.
+subtest 'a one-armed if with a void print still works' => sub {
+    my $src = <<'PROG';
+use 5.42.0;
+use feature 'class';
+no warnings 'experimental::class';
+class C {
+    field $n :param = 0;
+    method show { if ($n > 5) { print "big\n" } return 1 }
+}
+package main;
+C->new(n => 10)->show;
+C->new(n => 1)->show;
+PROG
+    my ($perl, $lli, $err) = compile_and_run($src, 'package=main,package=C');
+    is $perl, "big\n", 'perl prints once, for the taken guard only' or return;
+    ok !defined $err, 'it lowers' or do { diag("  $err"); return };
+    is $lli, $perl, 'lli agrees -- a void-call arm was never affected';
+};
 
 done_testing;

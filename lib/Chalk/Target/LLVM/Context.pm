@@ -677,6 +677,10 @@ sub render_need_flag_prologue {
     if ($self->{_need_print_str_fmt}) {
         # "%.*s\0" = 5 bytes = [5 x i8]
         push @lines, '@fmt_print_str = private unnamed_addr constant [5 x i8] c"%.*s\00", align 1';
+        # Records that the DEFINITION exists, so the post-class re-emit below
+        # does not add a second one for a program that prints both in the main
+        # graph and in a method body.
+        $self->{_print_str_fmt_emitted} = 1;
     }
     if ($self->{_need_print_int_fmt}) {
         # "%lld\0" = %,l,l,d,\0 = 5 bytes = [5 x i8]
@@ -890,6 +894,24 @@ sub render_need_flag_postclass_reemit {
     if ($self->{_need_memcmp} && !$self->{_memcmp_emitted}) {
         push @lines, 'declare i32 @memcmp(i8* nocapture readonly, i8* nocapture readonly, i64)';
         $self->{_memcmp_emitted} = 1;
+    }
+
+    # Post-class re-emit for _need_print_str_fmt (the same F6 pattern as memcmp
+    # above): a `print` inside a METHOD BODY sets the flag on $body_ctx, which
+    # reaches $self only through absorb_need_flags_from -- and that runs after
+    # _emit_class_registry_ir, by which time the prologue has already chosen
+    # what to declare. The module then REFERENCED @fmt_print_str without
+    # defining it, and lli refused to load it ("use of undefined value").
+    #
+    # Worse than a GAP: the compiler reported success and produced a module
+    # that cannot run.
+    #
+    # Guarded by _print_str_fmt_emitted so a program that prints in BOTH the
+    # main graph and a method body defines it once, not twice -- a redefinition
+    # is the mirror-image lli rejection.
+    if ($self->{_need_print_str_fmt} && !$self->{_print_str_fmt_emitted}) {
+        push @lines, '@fmt_print_str = private unnamed_addr constant [5 x i8] c"%.*s\00", align 1';
+        $self->{_print_str_fmt_emitted} = 1;
     }
 
     # Post-class re-emit for _need_getenv (same F6 pattern as memcmp): a
