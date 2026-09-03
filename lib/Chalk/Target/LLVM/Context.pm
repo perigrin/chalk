@@ -3932,9 +3932,18 @@ sub _lower_and {
     my ($self, $node) = @_;
 
     my $repr = $node->representation;
-    if (defined $repr && $repr eq 'Scalar') {
-        die "And with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
-    }
+    # NO Scalar REFUSAL HERE ANY MORE. It predated `Scalar` having a machine
+    # type: it does now (%Slot), `_emit_coercion` boxes any narrowed reading
+    # into one, and `_emit_read_slot_as` reads it back by tag. What was
+    # genuinely missing was at T1 -- `%_COERCIBLE_TO` had no Scalar row at all,
+    # so `Scalar -> Boolean` did not exist as far as the type layer knew, and
+    # this path could not ask for the bridge it needed.
+    #
+    # WHY THE MERGE IS Scalar AT ALL, since it looks like a defect and is not:
+    # `$x eq $x && (print ...)` has a Boolean guard and a Boolean-returning
+    # print -- but a FAILED print returns undef, so the join is Scalar. That is
+    # the honest type of "one of these two values", and the %Slot ABI is what
+    # carries it. Narrowing it away would be the claim that print cannot fail.
 
     my $inputs = $node->inputs;
     my $lhs_node = $inputs->[0];
@@ -3958,8 +3967,24 @@ sub _lower_and {
     # block, the RHS in the rhs block. Coercing both after _new_block($end) --
     # the obvious place, next to the phi -- would reference the LHS in a block
     # it never flowed to, which is invalid IR rather than a wrong answer.
+    # BRIDGE AGAINST THE MERGE TYPE, NOT AGAINST THE OTHER ARM. This asked
+    # whether the two arms differ FROM EACH OTHER, which is the wrong
+    # comparison: the phi's machine type comes from the NODE's repr, so an arm
+    # needs a coercion whenever it differs from THAT -- and two arms can agree
+    # with each other while both differ from it.
+    #
+    # Measured on `$x eq $x && (print "y\n")`: a Boolean guard and a
+    # Boolean-returning print, so `$lhs_repr eq $rhs_repr` and no coercion was
+    # emitted -- but the And's own repr is Scalar (a failed print returns undef,
+    # so the join of the two arms is Scalar, not Boolean). Two i1 values then
+    # fed a `phi %Slot` and lli refused: "'%tmp_23' defined with type 'i1' but
+    # expected '%Slot'".
+    #
+    # _emit_coercion is a no-op when a side already matches, so widening the
+    # condition costs nothing on the paths that were already correct.
     my $merge_repr = (defined $repr && defined $lhs_repr && defined $rhs_repr
-                        && $lhs_repr ne $rhs_repr) ? $repr : undef;
+                        && ($lhs_repr ne $repr || $rhs_repr ne $repr))
+                   ? $repr : undef;
 
     # Lower the LHS in the current block, then test its truthiness.
     my $lhs_ref    = $self->lower_value($lhs_node);
@@ -4010,9 +4035,18 @@ sub _lower_or {
     my ($self, $node) = @_;
 
     my $repr = $node->representation;
-    if (defined $repr && $repr eq 'Scalar') {
-        die "Or with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
-    }
+    # NO Scalar REFUSAL HERE ANY MORE. It predated `Scalar` having a machine
+    # type: it does now (%Slot), `_emit_coercion` boxes any narrowed reading
+    # into one, and `_emit_read_slot_as` reads it back by tag. What was
+    # genuinely missing was at T1 -- `%_COERCIBLE_TO` had no Scalar row at all,
+    # so `Scalar -> Boolean` did not exist as far as the type layer knew, and
+    # this path could not ask for the bridge it needed.
+    #
+    # WHY THE MERGE IS Scalar AT ALL, since it looks like a defect and is not:
+    # `$x eq $x || (print ...)` has a Boolean guard and a Boolean-returning
+    # print -- but a FAILED print returns undef, so the join is Scalar. That is
+    # the honest type of "one of these two values", and the %Slot ABI is what
+    # carries it. Narrowing it away would be the claim that print cannot fail.
 
     my $inputs = $node->inputs;
     my $lhs_node = $inputs->[0];
@@ -4027,8 +4061,24 @@ sub _lower_or {
     # `||` yields one of its OPERANDS, so its arms can differ in type. Same rule
     # and same block-placement constraint as _lower_and: the bridge is emitted
     # where each value is LIVE, not next to the phi.
+    # BRIDGE AGAINST THE MERGE TYPE, NOT AGAINST THE OTHER ARM. This asked
+    # whether the two arms differ FROM EACH OTHER, which is the wrong
+    # comparison: the phi's machine type comes from the NODE's repr, so an arm
+    # needs a coercion whenever it differs from THAT -- and two arms can agree
+    # with each other while both differ from it.
+    #
+    # Measured on `$x eq $x && (print "y\n")`: a Boolean guard and a
+    # Boolean-returning print, so `$lhs_repr eq $rhs_repr` and no coercion was
+    # emitted -- but the And's own repr is Scalar (a failed print returns undef,
+    # so the join of the two arms is Scalar, not Boolean). Two i1 values then
+    # fed a `phi %Slot` and lli refused: "'%tmp_23' defined with type 'i1' but
+    # expected '%Slot'".
+    #
+    # _emit_coercion is a no-op when a side already matches, so widening the
+    # condition costs nothing on the paths that were already correct.
     my $merge_repr = (defined $repr && defined $lhs_repr && defined $rhs_repr
-                        && $lhs_repr ne $rhs_repr) ? $repr : undef;
+                        && ($lhs_repr ne $repr || $rhs_repr ne $repr))
+                   ? $repr : undef;
 
     # Lower the LHS in the current block, then test its truthiness.
     my $lhs_ref    = $self->lower_value($lhs_node);

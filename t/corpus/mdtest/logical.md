@@ -365,6 +365,17 @@ backend expands `And` into short-circuit br+phi: the Boolean LHS is already the 
 condition (its truthiness is the identity, no `icmp ne i64`), the print fires only on
 the truthy branch, and the i1 phi merges the two Boolean operands. (t/base/cond.t.)
 
+THE MERGE IS `Scalar`, NOT `Boolean`, and this spec said Boolean until the
+producer began typing `print`. Both operands are Boolean -- a StrEq guard and a
+print's `builtin::is_bool` return -- but a FAILED print returns undef
+(measured: `print {$handle_opened_for_input} "x"` is undef, warns, and does not
+die), so the join of the two arms is `join(Boolean, Undef)` = `Scalar`.
+
+That is not imprecision to be narrowed away: it is the honest type of "one of
+these two values", and claiming Boolean would have the backend lower an i1 for
+a value that is undef at runtime. `Scalar` lowers as `%Slot`, the tagged cell,
+which is exactly what carries a disjunction whose arms differ.
+
 ```perl
 # source
 use 5.42.0;
@@ -383,9 +394,9 @@ context: scalar
 %eq = StrEq(%xa, %xa) :Boolean
 %s0 = Constant("y\n") :Str
 %p  = Print(%s0) :Boolean
-%r  = And(%eq, %p) :Boolean
+%r  = And(%eq, %p) :Scalar
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%r : Boolean -> Str) :Str
+%co_p  = Coerce(%r : Scalar -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
@@ -399,6 +410,17 @@ Bilateral `||` polarity of L5d, matching cond.t's actual last line (`$x != $x ||
 the print fires: stdout is `y\n`. Perl `A || B` returns B when A is falsy, so the
 block returns the print's Boolean `1`. The backend `Or` br+phi tests the Boolean LHS
 directly (i1 truthiness = identity) and merges an i1 phi.
+
+THE MERGE IS `Scalar`, NOT `Boolean`, and this spec said Boolean until the
+producer began typing `print`. Both operands are Boolean -- a StrEq guard and a
+print's `builtin::is_bool` return -- but a FAILED print returns undef
+(measured: `print {$handle_opened_for_input} "x"` is undef, warns, and does not
+die), so the join of the two arms is `join(Boolean, Undef)` = `Scalar`.
+
+That is not imprecision to be narrowed away: it is the honest type of "one of
+these two values", and claiming Boolean would have the backend lower an i1 for
+a value that is undef at runtime. `Scalar` lowers as `%Slot`, the tagged cell,
+which is exactly what carries a disjunction whose arms differ.
 
 ```perl
 # source
@@ -418,9 +440,9 @@ context: scalar
 %ne = StrNe(%xa, %xa) :Boolean
 %s0 = Constant("y\n") :Str
 %p  = Print(%s0) :Boolean
-%r  = Or(%ne, %p) :Boolean
+%r  = Or(%ne, %p) :Scalar
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%r : Boolean -> Str) :Str
+%co_p  = Coerce(%r : Scalar -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p

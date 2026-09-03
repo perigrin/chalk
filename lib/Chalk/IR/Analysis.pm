@@ -256,6 +256,32 @@ my %_COERCIBLE_TO = (
     Str   => { Num => 1, Int => 1, Boolean => 1 },
     Boolean  => { Int => 1, Num => 1, Str => 1 },
     Undef => { Int => 1, Num => 1, Str => 1, Boolean => 1 },
+
+    # SCALAR HAS A TRUTH VALUE, and this row was missing entirely -- Scalar
+    # appeared nowhere as a coercion SOURCE, so `_coercion_exists('Scalar',
+    # 'Boolean')` was false and `&&`/`||` over a tagged cell refused for want
+    # of a conversion T1 said did not exist.
+    #
+    # It exists. Measured on 5.42.0 across one witness per branch of Scalar --
+    # Int, Num, Str, Undef, Boolean and a reference, including the pairs a
+    # naive reading gets wrong ("0" is false, "00" is TRUE, "" is false, a ref
+    # is true): every inhabitant produces a boolean, and NONE dies doing it.
+    # perl's truthiness is total.
+    #
+    # THE ARGUMENT IS COMPOSITIONAL, which is why only this one target is
+    # added. Scalar is the JOIN of the single-value types; every member
+    # individually coerces to Boolean (see the four rows above), so the join
+    # does too. It is NOT added for Int/Num/Str: narrowing a tagged cell to a
+    # specific reading is a different question -- which reading? -- and the
+    # honest answer there is still the tag dispatch, not a coercion row.
+    #
+    # AND IT IS NOT SUBTYPING. Scalar is the PARENT of Str on the lattice;
+    # `Scalar <: Boolean` would invert the hierarchy. A coercion says a
+    # conversion is DEFINED, not that one type contains the other -- the
+    # distinction this table's own header insists on, and the one that
+    # `ArrayRef -> Num` (legal, lossy, not a subtype) exists to illustrate.
+    # Pinned by t/bootstrap/ir/scalar-has-a-truth-value.t.
+    Scalar => { Boolean => 1 },
 );
 
 # hydrate($graphs, $classes) -> \%graphs
@@ -1337,7 +1363,25 @@ sub _narrow_unknown_coercions ($graphs) {
                 # Still untyped: leave the Unknown in place so the backend can
                 # report it. Narrowing to a guess here would recreate exactly
                 # the bug this replaced.
-                next unless _is_narrowed($repr);
+                #
+                # `Scalar` IS AN ANSWER HERE, though `_is_narrowed` says
+                # otherwise -- and the difference matters. That predicate is a
+                # FIXPOINT TERMINATION LATCH: it asks "could this stamp still
+                # move?", and Scalar could, so it answers false. This site asks
+                # a different question -- "do we know what the operand is?" --
+                # and for a tagged cell we do: Scalar is a measured type with a
+                # machine encoding (%Slot) and real coercions out of it
+                # (Scalar -> Boolean, added when && over a tagged cell was
+                # unblocked).
+                #
+                # Measured on logical.md L5d: the And's operand is Scalar and
+                # its Coerce kept `from_repr=Unknown`, so the node MISDESCRIBED
+                # itself and the corpus spec could not match. Not a miscompile
+                # -- _lower_coerce reads the operand's live representation and
+                # treats from_repr as a fallback -- but a node whose recorded
+                # type disagrees with its operand is exactly what the shape leg
+                # exists to catch.
+                next unless _is_narrowed($repr) || $repr eq 'Scalar';
 
                 # The operand is ALREADY the target type: the coercion is an
                 # identity edge and the consumer can read the operand directly.
