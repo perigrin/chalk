@@ -422,14 +422,6 @@ sub _method_body_root {
 # guard). GAP loudly on a graph without a single unique Return rather than
 # returning undef — a silent undef would bare-deref in Dominators->from_return_node
 # and _process_control_chain, turning a lowering GAP into an opaque crash.
-# _method_param_reprs($mop_method) -> \@reprs, ordered by parameter index
-#
-# A method's declared parameters are its Parameter nodes. Each carries an
-# `index` and its own stamp, so this reads the graph rather than a parallel
-# record that could drift from it.
-#
-# The invocant is NOT included: it is the `i8* %self` every method has, and it
-# is not a Parameter node.
 # _method_param_decl(\@param_reprs) -> the formal parameter list text,
 # invocant included, e.g. 'i8* %self, i64 %arg0'.
 #
@@ -438,6 +430,12 @@ sub _method_body_root {
 # rejects the module -- and `_lower_parameter` reads %arg$i on the strength of
 # the names chosen here. Keeping all of that in one sub is why they cannot
 # drift apart.
+#
+# The same text serves a define's FORMALS and a forwarder's ACTUALS, because in
+# LLVM both are `<type> <name>`. An earlier `_method_param_fwd` wrapper existed
+# to mark those as separate questions; it delegated straight here, so the
+# separation was asserted in a comment and absent from the code. One name, one
+# body, nothing to drift.
 sub _method_param_decl {
     my ($param_reprs) = @_;
     my @d = ('i8* %self');
@@ -449,52 +447,76 @@ sub _method_param_decl {
     return join(', ', @d);
 }
 
-# _method_param_fwd(\@param_reprs) -> the ARGUMENT list for forwarding the same
-# parameters straight through, e.g. 'i8* %self, i64 %arg0'. Identical text to
-# the declaration here, but derived separately because the two are different
-# questions and only one of them is free to change.
-sub _method_param_fwd { return _method_param_decl($_[0]) }
-
+# _method_param_reprs($mop_method) -> \@reprs, one per DECLARED parameter,
+# dense and ordered by index.
+#
+# TWO AUTHORITIES, EACH ANSWERING THE QUESTION IT CAN. The ARITY comes from the
+# declared signature the producer ships (`method_signatures`, carried onto the
+# metaobject by the loader); the TYPE of each parameter comes from the body
+# graph's Parameter nodes.
+#
+# The split is forced, not stylistic. The graph records a Parameter node only
+# for a parameter the body READS, so it is a lossy view of the declaration:
+#
+#     method m($k)      { 42 }        no Parameter node at all
+#     method m($a, $b)  { $b }        one node, at index 1
+#     method m($a,$b,$c){ $a + $c }   two nodes, at indices 0 and 2
+#     method outer($k)  { $self->inner($k) }   the read is PadAccess, not Parameter
+#
+# Deriving arity from those nodes undercounts every one of them, and the emitted
+# signature then disagrees with the call site. An earlier version of this sub did
+# exactly that, on the stated premise that "a method's parameters are exactly its
+# Parameter nodes" -- which is false, and refused ~57 of the 503 parameterized
+# methods in lib/Chalk (interface-conformance parameters like `$ctx` and `%opts`
+# are routinely unread).
+#
+# THE LIST IS DENSE BY CONSTRUCTION -- index N really is position N -- because
+# `_method_param_decl` names arguments POSITIONALLY (%arg0, %arg1) while
+# `_lower_parameter` reads them by the node's own index. Compacting a sparse
+# index map decouples those two: for the `{0,2}` case above, a compacted list
+# declares %arg0,%arg1 while the body emits %arg2, which is an undeclared
+# register and invalid IR rather than a diagnosable refusal.
+#
+# A parameter with no Parameter node has no type to read, and `Scalar` is the
+# honest answer: the body never constrains it, so the uniform tagged cell is
+# exactly what is known. It is a real lattice member with a machine encoding
+# (%Slot), not a placeholder.
 sub _method_param_reprs {
     my ($m) = @_;
-    my $g = $m && $m->can('graph') ? $m->graph : undef;
-    return [] unless $g;
+    return [] unless $m;
 
-    my %by_index;
-    for my $n (_graph_all_nodes($g)) {
-        next unless blessed($n) && $n->can('operation')
-                 && $n->operation eq 'Parameter';
-        my $i = $n->can('index') ? $n->index : undef;
-        next unless defined $i;
-        # A repr is REQUIRED here: an untyped parameter would make the emitted
-        # signature disagree with the call site, which lli reports as a type
-        # mismatch far from the cause. Refuse at the declaration instead.
-        my $r = $n->representation
-            // die "GAP: method parameter at index $i has no representation -- "
-                 . "the emitted signature would not match its call sites.";
-        $by_index{$i} = $r;
+    my $declared = ($m->can('params') && ref($m->params) eq 'ARRAY')
+        ? $m->params : [];
+    return [] unless @$declared;
+
+    # Types from the graph, keyed by the SAME index space the declaration uses.
+    my %repr_at;
+    my $g = $m->can('graph') ? $m->graph : undef;
+    if ($g) {
+        for my $n (_graph_all_nodes($g)) {
+            next unless blessed($n) && $n->can('operation')
+                     && $n->operation eq 'Parameter';
+            my $i = $n->can('index') ? $n->index : undef;
+            next unless defined $i;
+            my $r = $n->representation or next;
+            $repr_at{$i} = $r;
+        }
     }
-    return [ map { $by_index{$_} } sort { $a <=> $b } keys %by_index ];
+
+    return [ map { $repr_at{$_} // 'Scalar' } 0 .. $#$declared ];
 }
 
-# _graph_all_nodes($g) -> every node reachable from the graph's returns,
-# including via control_in. `$g->nodes` walks value inputs only, so a
-# Parameter read only by an effect node would be invisible to it.
+# _graph_all_nodes($g) -> every node belonging to the graph.
+#
+# Delegates to the loader's enumeration rather than repeating it. An earlier
+# private walker here followed only `inputs` and `control_in` from the returns,
+# on the stated premise that "$g->nodes walks value inputs only" -- Graph::nodes
+# documents itself as walking inputs AND consumers, so the premise was false and
+# the private walker was strictly weaker: it missed the Parameter in a one-armed
+# `if` entirely (3 nodes seen against 6).
 sub _graph_all_nodes {
     my ($g) = @_;
-    my %seen;
-    my @out;
-    my @q = grep { blessed($_) } $g->returns->@*;
-    while (my $n = shift @q) {
-        next unless blessed($n);
-        next if $seen{ $n->id }++;
-        push @out, $n;
-        push @q, grep { blessed($_) } $n->inputs->@*
-            if $n->can('inputs') && defined $n->inputs;
-        my $c = $n->can('control_in') ? $n->control_in : undef;
-        push @q, $c if defined $c && blessed($c);
-    }
-    return @out;
+    return Chalk::IR::Analysis::_all_graph_nodes($g);
 }
 
 sub _method_body_return {
@@ -805,7 +827,7 @@ sub _emit_class_registry_ir {
                 my $parent = $minfo->{inherited_from};
                 my $parent_fn = '@' . $parent . '__' . $mname;
                 my $p_decl = _method_param_decl($minfo->{param_reprs});
-                my $p_fwd   = _method_param_fwd($minfo->{param_reprs});
+                my $p_fwd   = $p_decl;   # formals and actuals are the same text
                 push @lines, "define internal $fn_ret $fn_name($p_decl) {";
                 push @lines, 'entry:';
                 if ($ret_repr eq 'Str') {

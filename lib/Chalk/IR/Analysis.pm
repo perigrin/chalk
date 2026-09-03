@@ -1632,6 +1632,19 @@ sub _replay_classes ($classes, $graphs) {
         # "inference has not determined this"; undef is an ABSENCE, and an
         # absence forces every downstream consumer to invent its own meaning.
         my $wire_rts = $cd->{method_return_types} // {};
+
+        # THE DECLARED SIGNATURE, from the same metadata channel as the return
+        # type. `method_signatures` ships {kind, invocant, mandatory, optional,
+        # params:[{index,name,sigil}]} and the loader read it NOWHERE -- it
+        # appeared only in test fixtures.
+        #
+        # The declaration is not recoverable from the graph, which is why this
+        # has to be carried rather than derived: the producer emits a Parameter
+        # node only for a parameter the body READS, so `method m($k) { 42 }`
+        # has none at all and `method m($a,$b) { $b }` has only index 1. An
+        # arity scanned out of the graph undercounts both, and the resulting
+        # signature disagrees with every call site.
+        my $wire_sigs = $cd->{method_signatures} // {};
         for my $mname (sort keys %$methods) {
             # NOT declare_sub's die-on-missing-graph rule, deliberately.
             # An agentic review proposed mirroring it here on symmetry
@@ -1644,9 +1657,44 @@ sub _replay_classes ($classes, $graphs) {
             # after translate() succeeds, so its absence really is a
             # contradiction; a method's is not.
             my $graph = $graphs->{ $methods->{$mname} };
+            # `params` is the DECLARED list, ordered by index and dense --
+            # index N is position N, with no holes -- so a consumer can pair
+            # parameter N with argument N positionally. A wire predating
+            # method_signatures leaves it empty, which is the same "absent"
+            # answer the graph-derived arity used to give, so nothing regresses
+            # against an old wire; it simply stops improving.
+            #
+            # ONLY A `declared` SIGNATURE HAS POSITIONAL PARAMETERS. A method
+            # written without one (`method get { $n }`) still ships a signature
+            # record, as kind=implicit with a SLURPY `@_` standing in the params
+            # list -- mandatory 0, optional 0, slurpy '@'. That entry is not a
+            # positional parameter and counting it declares arity 1 for a method
+            # that takes none, which refuses every call to it.
+            #
+            # Keyed on `kind` rather than on the params list being non-empty,
+            # because the implicit form's list is NOT empty -- it holds the
+            # slurpy. Reading the shape instead of the label is what made this
+            # look like a working fix on three of four cases.
+            my $sig = $wire_sigs->{$mname};
+            my @params;
+            if ($sig && ($sig->{kind} // '') eq 'declared'
+                     && ref($sig->{params}) eq 'ARRAY') {
+                # Positionals only: a trailing slurpy (`method m($a, @rest)`)
+                # binds no single argument slot, so it is not part of the
+                # positional arity the ABI emits.
+                my %by_index = map  { $_->{index} => $_ }
+                               grep { defined $_->{index}
+                                      && ($_->{sigil} // '$') eq '$' }
+                               $sig->{params}->@*;
+                my $max = (sort { $a <=> $b } keys %by_index)[-1];
+                @params = map { $by_index{$_} // { index => $_ } } 0 .. $max
+                    if defined $max;
+            }
+
             $cls->declare_method($mname,
                 (defined $graph ? (graph => $graph) : ()),
                 return_type => ($wire_rts->{$mname} // 'Unknown'),
+                params      => \@params,
             );
         }
 
