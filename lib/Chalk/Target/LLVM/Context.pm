@@ -223,6 +223,17 @@ sub configure_as_method_body {
         $self->{_in_method_body}   = 1;
         $self->{_method_self_name} = '%self';
     }
+    # TWO DIFFERENT FACTS, and they were one flag until real sub defines
+    # needed them apart. `_in_method_body` means "there is an invocant",
+    # which is what a FieldAccess and a `$self` PadAccess need.
+    # `_in_function_body` means "this is an emitted function whose parameters
+    # arrive as LLVM arguments", which is what a Parameter needs -- and that is
+    # true of a `sub twice($n)` define, which has arguments and no invocant.
+    #
+    # Conflating them made a sub's Parameter refuse ("op=Parameter outside a
+    # method body") the moment sub defines were emitted, even though the
+    # argument was right there in the signature.
+    $self->{_in_function_body} = 1;
     $self->{_method_class_name} = $args{class_name};
     $self->{_method_name}       = $args{method_name};
     # varname -> positional index, for a parameter READ AS A PAD SLOT rather
@@ -6664,18 +6675,22 @@ sub _find_block_idx {
 # GROWTH IS malloc+memcpy, not realloc: only malloc and memcpy are declared,
 # and realloc is what they compose to. Capacity doubles (from a floor of 4),
 # so N appends cost O(N) copying rather than O(N^2).
-# _lower_parameter($node) -> the SSA name of the method argument
+# _lower_parameter($node) -> the SSA name of the function argument
 #
-# Inside a METHOD BODY a parameter is a real LLVM function argument, named
-# positionally as %arg0, %arg1, ... beside the %self invocant. That is the
-# whole lowering: the value is already there, and this returns its name.
+# Inside an EMITTED FUNCTION BODY a parameter is a real LLVM argument, named
+# positionally as %arg0, %arg1, ... That is the whole lowering: the value is
+# already there, and this returns its name.
 #
-# It is NOT the same question the direct-sub inliner answers. That path
+# METHOD OR SUB, the same answer. A method's arguments sit beside the `%self`
+# invocant and a sub's do not, but the invocant is a separate fact -- see
+# `_in_function_body` vs `_in_method_body` in configure_as_method_body. Gating
+# this on the METHOD flag meant a `sub twice($n)` define refused its own
+# parameter, which is why the two were split.
+#
+# It is NOT the question the direct-sub inliner answers. That path
 # (_collect_positional_arg_reads) substitutes the CALLER's already-lowered
 # value for the callee's read, because an inlined body has no arguments of its
-# own. A method is a real vtable call with a real signature, so the argument
-# arrives in the ordinary way -- which is why Parameter reached the
-# catch-all refusal for years while `sub f($x)` worked.
+# own. A real define has arguments, so the value arrives in the ordinary way.
 sub _lower_parameter {
     my ($self, $node) = @_;
 
@@ -6683,10 +6698,12 @@ sub _lower_parameter {
     defined $idx
         or die "GAP: Parameter node has no index -- cannot name its argument";
 
-    unless ($self->{_in_method_body}) {
-        die "GAP: op=Parameter outside a method body. A sub's parameters are "
-          . "bound by the inliner (_collect_positional_arg_reads); reaching "
-          . "here means a Parameter escaped that path.";
+    unless ($self->{_in_function_body}) {
+        die "GAP: op=Parameter outside an emitted function body. A parameter "
+          . "lowers to an LLVM argument, so it needs a function that HAS "
+          . "arguments; reaching here means a Parameter escaped both that path "
+          . "and the inliner's (_collect_positional_arg_reads), which "
+          . "substitutes the caller's value into an inlined body instead.";
     }
 
     my $ref = "%arg$idx";

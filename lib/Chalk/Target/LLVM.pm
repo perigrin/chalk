@@ -363,11 +363,17 @@ sub _build_registry_from_mop {
         # F9/F10/F11/F13 each printed their callee's output twice, gate
         # 214 -> 207.
         #
-        # Step 5 (retire the inliner) is what makes main's subs worth
-        # registering, and it is the same step that gives their defines a
-        # caller. Skipping main entirely until then keeps ONE reason in ONE
-        # place rather than a flag that no longer has a writer.
-        next if $cls->name eq 'main';
+        # MAIN IS REGISTERED, so a top-level `sub` reaches the emission path
+        # at all. Registration alone changes nothing emitted: the sub-define
+        # loop is still gated on CHALK_EMIT_SUB_DEFINES and the inliner still
+        # owns every direct call.
+        #
+        # THE HAZARD IS MEASURED, and it is why the gate stays shut here.
+        # Registering main's subs while the inliner ALSO substitutes their
+        # bodies made corpus F9/F10/F11/F13 each print their callee's output
+        # TWICE -- gate 214 -> 207. A body must be emitted once AND reached
+        # once; neither half is safe alone, so the gate opens only in the step
+        # that simultaneously stops the call site from inlining.
         _populate_registry_from_mop_class(\%registry, $cls);
     }
     _flatten_inheritance(\%registry);
@@ -422,6 +428,23 @@ sub _method_body_root {
 # guard). GAP loudly on a graph without a single unique Return rather than
 # returning undef — a silent undef would bare-deref in Dominators->from_return_node
 # and _process_control_chain, turning a lowering GAP into an opaque crash.
+# _sub_param_decl(\@param_reprs) -> the formal parameter list for a SUB.
+#
+# The method form with the invocant dropped: a sub has no `$self`, so its
+# arguments start at %arg0 with nothing before them. Sharing the naming with
+# _method_param_decl is deliberate -- `_lower_parameter` reads %argN by index
+# for both, so a sub and a method must agree about which name holds which slot.
+sub _sub_param_decl {
+    my ($param_reprs) = @_;
+    my @d;
+    my $i = 0;
+    for my $r (@{ $param_reprs // [] }) {
+        push @d, _method_fn_llvm_ret_type($r) . ' %arg' . $i;
+        $i++;
+    }
+    return join(', ', @d);
+}
+
 # _method_param_index($mop_method) -> { '$name' => positional index }
 #
 # The declared parameter names, mapped to the argument slot each one binds. A
@@ -648,6 +671,12 @@ sub _populate_registry_from_mop_class {
     $registry->{$cname} //= { methods => [], subs => [], fields => [], adjusts => [], parent => undef };
     $registry->{$cname}{subs} //= [];
     $registry->{$cname}{parent} //= $cls->parent_name;
+    # DECLARED AS A CLASS, as opposed to a package that merely holds
+    # file-level subs. `main` is registered so its subs can get defines, and it
+    # is never instantiated -- no vtable, no object struct. An empty
+    # `class Empty {}` IS instantiable and must keep both, which is why this is
+    # a declaration flag rather than a test of whether the class has members.
+    $registry->{$cname}{is_class} //= ($cname eq 'main') ? 0 : 1;
 
     # SUBS ARE NOT METHODS, and they are kept in their own list rather than
     # appended to {methods}. A sub takes no implicit invocant and is not
@@ -683,6 +712,12 @@ sub _populate_registry_from_mop_class {
             name        => $sname,
             body_node   => $body_node,
             body_return => _method_body_return($s),
+            # SAME TWO AUTHORITIES AS A METHOD: arity from the declared
+            # signature, per-parameter type from the body graph's Parameter
+            # nodes. See _method_param_reprs for why the graph alone cannot
+            # answer the arity question.
+            param_reprs => _method_param_reprs($s),
+            param_index => _method_param_index($s),
             # Qualified: an unqualified name made the GAP ambiguous across
             # classes declaring the same sub name.
             # `return_repr` is a FORCING point: it names a type in the emitted
@@ -838,6 +873,11 @@ sub _emit_class_registry_ir {
         my $methods = $reg->{methods} // [];
         my $fields  = $reg->{fields}  // [];
 
+        # See the note in the emission loop below: an entry that holds only
+        # file-level subs is not a class, so it gets no vtable type and no
+        # object struct.
+        next unless $reg->{is_class};
+
         # Vtable type: { i8* class-name, i8* slot0, i8* slot1, ... }
         my $vt_type = '%' . $cname . '.vt';
         my @vt_elems = ('i8*');  # slot 0 = class-name ptr
@@ -856,6 +896,27 @@ sub _emit_class_registry_ir {
         my $methods = $reg->{methods} // [];
         my $fields  = $reg->{fields}  // [];
 
+        # A REGISTRY ENTRY WITH NO METHODS AND NO FIELDS IS NOT A CLASS, so it
+        # gets no class machinery. `main` is the case: it holds file-level subs
+        # so their defines can be emitted, but it is never instantiated --
+        # no `main->new`, no object, nothing to dispatch. A vtable type, object
+        # struct and vtable global for it are machinery that cannot be used, and
+        # ir/llvm-class-sub-define.t pins their absence ("main's class machinery
+        # must stay absent either way: it is never instantiated").
+        #
+        # KEYED ON DECLARATION, not on shape. My first version tested "no
+        # methods and no fields", which is wrong: `class Empty {}` has neither
+        # and IS instantiable -- `Empty->new` must find a vtable and an object
+        # struct. Measured, that test broke llvm-mop-registry.t with "base
+        # element of getelementptr must be sized" on the sizeof of an
+        # un-emitted %Empty.obj. `is_class` records what the MOP actually
+        # declared instead of guessing from what the class happens to contain.
+        #
+        # SCOPED TO THE MACHINERY, NOT THE WHOLE ITERATION. The sub-define loop
+        # further down shares this block, and `next` here would skip exactly the
+        # defines this registration exists to emit.
+        my $is_instantiable = $reg->{is_class} ? 1 : 0;
+
         # Sort fields by field_index to ensure consistent struct layout
         my @sorted_fields = sort { ($a->{field_index} // 0) <=> ($b->{field_index} // 0) } @$fields;
 
@@ -866,7 +927,8 @@ sub _emit_class_registry_ir {
         my $cn_name_global = '@' . $cname . '__class_name';
         my $cn_bytes = length($cname) + 1;  # +1 for NUL
         my $cn_enc   = _encode_c_string($cname);
-        push @lines, "$cn_name_global = private unnamed_addr constant [$cn_bytes x i8] c\"$cn_enc\\00\", align 1";
+        push @lines, "$cn_name_global = private unnamed_addr constant [$cn_bytes x i8] c\"$cn_enc\\00\", align 1"
+            if $is_instantiable;
 
         # Method body functions (one define per method)
         for my $minfo (@$methods) {
@@ -1203,14 +1265,43 @@ sub _emit_class_registry_ir {
                 method_name => $sname,
                 has_self    => 0,
                 parent_ctx  => $ctx,
+                param_index => $sinfo->{param_index} // {},
             );
 
             _process_control_chain($body_ctx, $body_return);
             my $body_val = $body_ctx->lower_value($body_node);
+
+            # COERCE AT THE RETURN BOUNDARY. The declared return type is what
+            # the signature promises callers; the body computes whatever its
+            # own expression does, and the two need not agree. Measured:
+            # `sub twice($n) { $n * 2 }` declares Num and its body multiplies
+            # to Int, so the define emitted `ret double %tmp` over an i64 and
+            # lli refused ("'%tmp_2' defined with type 'i64' but expected
+            # 'double'").
+            #
+            # Through _emit_coercion -- the same arrow an explicit Coerce node
+            # lowers through, and the same one the method call site uses for
+            # arguments. It refuses a pair it cannot bridge, which is the right
+            # answer: returning at the wrong machine type is not diagnosable at
+            # run time.
+            my $body_repr = (blessed($body_node)
+                             && $body_node->can('representation'))
+                          ? ($body_node->representation // '')
+                          : '';
+            if ($body_repr ne '' && $body_repr ne $ret_repr) {
+                $body_val = $body_ctx->_emit_coercion(
+                    $body_val, $body_repr, $ret_repr,
+                    "sub ${cname}::${sname} return");
+                push @lines, ();   # the coercion emitted into $body_ctx
+            }
             # _need_str_type (and every other NEED_FLAG) is absorbed below via
             # absorb_need_flags_from, once the body is fully rendered.
 
-            push @lines, "define internal $fn_ret $fn_name() {  ; sub body for ${cname}::${sname}";
+            # A SUB'S DEFINE TAKES ITS ARGUMENTS AND NO INVOCANT. The method
+            # form is `(i8* %self, ...)`; a sub has no `$self`, so this is the
+            # same positional %argN list with the invocant dropped.
+            my $s_decl = _sub_param_decl($sinfo->{param_reprs});
+            push @lines, "define internal $fn_ret $fn_name($s_decl) {  ; sub body for ${cname}::${sname}";
             push @lines, 'entry:';
             push @lines, $body_ctx->render_blocks(1);
 
@@ -1285,6 +1376,11 @@ sub _emit_class_registry_ir {
         }
 
         # Vtable global: @Cls__vtable = { class-name-ptr, fn-ptr0, fn-ptr1, ... }
+        # Non-instantiable entries (see the note at the top of this loop) get no
+        # vtable: nothing dispatches through it and its class-name operand was
+        # not emitted either.
+        next unless $is_instantiable;
+
         my $vt_global = '@' . $cname . '__vtable';
         my @vt_init;
         push @vt_init, "i8* getelementptr inbounds ([$cn_bytes x i8], [$cn_bytes x i8]* $cn_name_global, i64 0, i64 0)";
