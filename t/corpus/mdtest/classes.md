@@ -117,7 +117,12 @@ context: scalar
 %fa     = FieldAccess(field_index: 0, field_stash: "Greeter") :Str
 %mi     = MOP::Method(class: %cls, name: "hello", body: %fa, return_repr: "Str")
 %new_g  = Call(dispatch_kind: "method", name: "new", class: "Greeter") :Object
-%result = Call(%new_g, dispatch_kind: "method", name: "hello", class: "Greeter") :Str
+# `:Scalar`, NOT `:Str`. A `:param` field admits ANYTHING a caller
+# passes -- measured, `P->new(msg => [1,2])` hands back an ArrayRef --
+# so the field's type is the join of its default with what :param
+# accepts, and the method returning it inherits that. The Str is a true
+# fact about the INITIALISER and a false one about the FIELD.
+%result = Call(%new_g, dispatch_kind: "method", name: "hello", class: "Greeter") :Scalar
 %nl = Constant("\n") :Str
 %p  = Print(%result, %nl)
 return %p

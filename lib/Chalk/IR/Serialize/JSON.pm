@@ -720,9 +720,24 @@ sub _deserialize_graph ($method_data) {
         # table here: `keys` is a count in scalar context and the keys in list
         # context, so a name table would be vaguer than the op. TypeLibrary
         # has no `keys` row for exactly that reason.
-        if ($op eq 'Call'
-                && ($fields->{dispatch_kind} // '') eq 'builtin'
-                && ($nd->{stamp} // '') eq 'List') {
+        # THE ARGUMENT IS ABOUT THE VALUE, NOT THE OP that produced it, so the
+        # rescue covers an ArrayLiteral too. `my @g = grep { ... } (3,1,2)`
+        # stamps its SOURCE LIST `List` on the wire; the drop above then left
+        # it with no representation and the backend refused at
+        # "Length.operand ... with NO representation (undef)" -- a message that
+        # names TypeInference and sends the reader to the wrong layer, because
+        # nothing had failed to infer. The answer was on the wire and this
+        # filter discarded it.
+        #
+        # Scoped to the ops that MATERIALISE a list of scalars -- a builtin
+        # Call and a literal. It is deliberately NOT every List-stamped node:
+        # the drop exists because `List` is arity-polymorphic and most things
+        # wearing it have no single encoding, and re-stamping all of them
+        # `Array` would be exactly the guess the drop prevents.
+        if (($nd->{stamp} // '') eq 'List'
+                && ( $op eq 'ArrayLiteral'
+                  || ($op eq 'Call'
+                      && ($fields->{dispatch_kind} // '') eq 'builtin') )) {
             $node->set_representation('Array');
         }
 

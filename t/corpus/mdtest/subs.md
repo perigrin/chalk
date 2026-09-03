@@ -732,7 +732,12 @@ context: scalar
 %sorted = Call(%three, %one, %two, dispatch_kind: "builtin", name: "sort") :Array
 %idx   = Constant(0) :Int
 %elem  = Subscript(%sorted, %idx) :Scalar
-%co    = Coerce(%elem : Unknown -> Str) :Str
+# `Scalar`, not `Unknown`. The element read out of a runtime-ordered
+# array is a tagged cell -- which reading lands at index 0 is decided at
+# runtime -- and `Scalar` is the name for that. It read `Unknown` until
+# the loader learned to narrow a Coerce whose operand is Scalar;
+# `Unknown` means "nothing ever typed this", which was never true here.
+%co    = Coerce(%elem : Scalar -> Str) :Str
 %nl    = Constant("\n") :Str
 %p     = Print(%co, %nl)
 return %p
