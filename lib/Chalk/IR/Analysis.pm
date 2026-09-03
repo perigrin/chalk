@@ -1074,6 +1074,61 @@ sub _seed_direct_call_arg_reprs ($graphs) {
                 next unless blessed($n) && $n->operation eq 'Parameter';
                 $params{ $n->index } = $n;
             }
+
+            # A PARAMETER PASSED ONWARD IS A PAD READ, NOT A Parameter NODE.
+            # `method outer($k) { $self->inner($k) }` never consumes $k with an
+            # operation, so the producer emits `PadAccess{varname:'$k'}` and no
+            # Parameter node at all -- the loop above finds nothing to stamp and
+            # the read reaches the backend with no representation.
+            #
+            # The BINDING is known even though the type is not: the declared
+            # signature says which name is parameter N. Matching varname against
+            # it is the same mechanism a `:reader` accessor's field read already
+            # uses below (the (graph, varname) -> type walk), keyed on the
+            # signature instead of a field.
+            #
+            # FILL A HOLE, NEVER PREEMPT A SOURCE. Only a pad read that is
+            # genuinely untyped is collected; one that already carries a repr is
+            # left alone, so `$self` keeps its Object stamp and a pad slot typed
+            # by any other pass keeps that answer. The collected reprs go
+            # through the SAME join as the Parameter arm, so a name reaching two
+            # callsites with different types widens rather than picking one.
+            my $meta = $node->target;
+            if ($meta && $meta->can('params') && ref($meta->params) eq 'ARRAY') {
+                my @decl = $meta->params->@*;
+                for my $i (0 .. $#decl) {
+                    # A METHOD'S params ARE RECORDS; A SUB'S ARE BARE NAMES.
+                    # declare_sub passes the wire's `params` through unchanged
+                    # (Analysis.pm:1769) and those are plain strings, while a
+                    # method's come from method_signatures as
+                    # {index,name,sigil}. This pass now runs for both dispatch
+                    # kinds, so it meets both -- reading `{name}` off a string
+                    # died with "Can't use string as a HASH ref".
+                    my $d = $decl[$i];
+                    my $pname = ref($d) eq 'HASH' ? $d->{name} : $d;
+                    defined $pname && length $pname or next;
+                    next if exists $params{$i};   # a real Parameter node wins
+                    my $arg  = $args[$i]                    or next;
+                    my $repr = $arg->representation         or next;
+                    for my $n ($callee->nodes->@*) {
+                        next unless blessed($n)
+                                 && $n->operation eq 'PadAccess'
+                                 && $n->can('varname')
+                                 && ($n->varname // '') eq $pname;
+                        # A HOLE IS `Unknown` OR ABSENT, not merely undef.
+                        # `defined ->representation` reads Unknown as a
+                        # committed answer and would skip the very case
+                        # this fill exists for -- a forwarded parameter
+                        # arrives stamped Unknown, not undef. _is_narrowed
+                        # is the predicate the other guards use for
+                        # exactly this question (pinned by
+                        # ir/is-narrowed-guards.t, which caught this).
+                        next if _is_narrowed($n->representation);
+                        $collect->( $n, $repr, _arg_is_self_call($arg, $callee) );
+                    }
+                }
+            }
+
             if (%params) {
                 for my $i ( sort { $a <=> $b } keys %params ) {
                     # A parameter with no matching argument is an arity

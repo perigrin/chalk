@@ -8,8 +8,6 @@ use lib 'lib', 't/lib';
 
 use Chalk::CodeGen::Pipeline;
 
-our $TODO;
-
 # THE PRODUCER EMITS NO `Parameter` NODE FOR A PARAMETER THE BODY NEVER READS.
 # Measured, `method m($k) { 42 }`:
 #
@@ -125,19 +123,9 @@ subtest 'a hole in the middle does not misnumber the arguments' => sub {
 # than Parameter, so a Parameter-scan sees nothing at all -- the same undercount
 # as the unused case, reached a different way.
 #
-# THE ARITY HALF OF THIS IS FIXED; the subtest stays red on a SEPARATE defect.
-# It no longer refuses with an arity mismatch -- the declared signature now says
-# 1 and the call passes 1. It refuses one layer further in, with
-#
-#     GAP: PadAccess reached LLVM backend with NO representation (undef)
-#
-# because nothing types a PadAccess that reads a declared-but-unread parameter.
-# That is a TypeInference gap, not an ABI one, and closing it means teaching the
-# forwarding shape to seed its own type -- work with a different shape and its
-# own risk of preempting a source. Marked TODO rather than deleted: the case is
-# correct and it will pass when that lands. Deleting it would lose the only
-# pin on the forwarding shape, which is pervasive in lib/Chalk.
-$TODO = 'PadAccess for a forwarded parameter is untyped -- a TypeInference gap';
+# Both halves now work: the declared signature supplies the arity, and the
+# loader stamps the pad read from the callsite so the forwarded parameter
+# carries a type. Pinned in full by a-forwarded-parameter-is-typed.t.
 subtest 'a forwarded parameter counts toward arity' => sub {
     my ($perl, $lli, $err) = compile_and_run(
         cls("    method inner(\$v) { \$v + 1 }\n    method outer(\$k) { \$self->inner(\$k) }",
@@ -146,8 +134,6 @@ subtest 'a forwarded parameter counts toward arity' => sub {
     ok !defined $err, 'it lowers' or do { diag("  $err"); return };
     is $lli, $perl, 'lli agrees';
 };
-$TODO = undef;
-
 # THE CONTROLS. Every shape that worked before must still work -- these are the
 # cases a "just count the declared params" fix could plausibly break, since they
 # are the ones where declared and used arity AGREE.

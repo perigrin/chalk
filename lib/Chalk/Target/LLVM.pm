@@ -422,6 +422,29 @@ sub _method_body_root {
 # guard). GAP loudly on a graph without a single unique Return rather than
 # returning undef — a silent undef would bare-deref in Dominators->from_return_node
 # and _process_control_chain, turning a lowering GAP into an opaque crash.
+# _method_param_index($mop_method) -> { '$name' => positional index }
+#
+# The declared parameter names, mapped to the argument slot each one binds. A
+# body that reads a parameter as a PAD ACCESS (because it forwards it rather
+# than consuming it) has no Parameter node to carry the index, so the name is
+# the only handle -- and the declaration is where the name and the position are
+# recorded together.
+sub _method_param_index {
+    my ($m) = @_;
+    my %idx;
+    return \%idx unless $m && $m->can('params') && ref($m->params) eq 'ARRAY';
+    my @decl = $m->params->@*;
+    for my $i (0 .. $#decl) {
+        # A method's params are records; a SUB's are bare names (the wire's
+        # `params` passes through declare_sub unchanged). Both reach here.
+        my $d = $decl[$i];
+        my $n = ref($d) eq 'HASH' ? $d->{name} : $d;
+        next unless defined $n && length $n;
+        $idx{$n} = $i;
+    }
+    return \%idx;
+}
+
 # _method_param_decl(\@param_reprs) -> the formal parameter list text,
 # invocant included, e.g. 'i8* %self, i64 %arg0'.
 #
@@ -490,16 +513,45 @@ sub _method_param_reprs {
     return [] unless @$declared;
 
     # Types from the graph, keyed by the SAME index space the declaration uses.
+    #
+    # TWO SPELLINGS OF THE SAME READ. A parameter CONSUMED by an operation is a
+    # `Parameter` node carrying its own index; one FORWARDED to another call is
+    # a `PadAccess` carrying only its name, which the declaration maps back to
+    # an index. Both are the parameter, so both are read here -- taking the type
+    # from whichever spelling the body used.
+    #
+    # Without the PadAccess arm a forwarded parameter falls to the `Scalar`
+    # default below, and the emitted define declares %Slot where the callee it
+    # forwards to expects i64: lli refuses with "'%arg0' defined with type
+    # '%Slot' but expected 'i64'". The type WAS known -- the loader stamps that
+    # pad read from the callsite -- it was simply not being looked at.
     my %repr_at;
+    my %index_of;
+    my @decl_names =
+        map { ref($_) eq 'HASH' ? ($_->{name} // '') : ($_ // '') } @$declared;
+    $index_of{ $decl_names[$_] } = $_ for 0 .. $#decl_names;
+
     my $g = $m->can('graph') ? $m->graph : undef;
     if ($g) {
         for my $n (_graph_all_nodes($g)) {
-            next unless blessed($n) && $n->can('operation')
-                     && $n->operation eq 'Parameter';
-            my $i = $n->can('index') ? $n->index : undef;
-            next unless defined $i;
-            my $r = $n->representation or next;
-            $repr_at{$i} = $r;
+            next unless blessed($n) && $n->can('operation');
+            my $op = $n->operation;
+
+            if ($op eq 'Parameter') {
+                my $i = $n->can('index') ? $n->index : undef;
+                next unless defined $i;
+                my $r = $n->representation or next;
+                $repr_at{$i} = $r;
+            }
+            elsif ($op eq 'PadAccess' && $n->can('varname')) {
+                my $i = $index_of{ $n->varname // '' };
+                next unless defined $i;
+                # A Parameter node is the more direct statement of the same
+                # fact, so it wins where both exist.
+                next if defined $repr_at{$i};
+                my $r = $n->representation or next;
+                $repr_at{$i} = $r;
+            }
         }
     }
 
@@ -674,6 +726,7 @@ sub _populate_registry_from_mop_class {
                 body_return => _method_body_return($m),
                 return_repr => $ret_repr,
                 param_reprs => _method_param_reprs($m),
+                param_index => _method_param_index($m),
                 vtable_slot => $mslot++,
             };
         }
@@ -916,6 +969,10 @@ sub _emit_class_registry_ir {
                 class_name  => $cname,
                 method_name => $mname,
                 parent_ctx  => $ctx,
+                # THE SAME DECLARATION THE SIGNATURE WAS EMITTED FROM, so the
+                # name a body reads and the argument the define declares cannot
+                # disagree: both are position N of $m->params.
+                param_index => $minfo->{param_index} // {},
             );
 
             # Emit the body's statement effects (field-store Assign, void Call, and

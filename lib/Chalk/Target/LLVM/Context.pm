@@ -225,6 +225,11 @@ sub configure_as_method_body {
     }
     $self->{_method_class_name} = $args{class_name};
     $self->{_method_name}       = $args{method_name};
+    # varname -> positional index, for a parameter READ AS A PAD SLOT rather
+    # than through a Parameter node (`method outer($k) { $self->inner($k) }`).
+    # Empty for a method with no declared signature, which is why the lookup
+    # site tests `defined` on the result rather than on the map.
+    $self->{_method_param_index} = $args{param_index} // {};
     $self->{class_registry}     = $args{class_registry} if defined $args{class_registry};
     $self->inherit_need_flags_from($args{parent_ctx}) if defined $args{parent_ctx};
     return $self;
@@ -3155,6 +3160,28 @@ sub _lower_padaccess {
                  . "has no _method_self_name to lower to.";
         $self->{cache}{ $node->id } = $self_ref;
         return $self_ref;
+    }
+
+    # A DECLARED PARAMETER IS BACKED BY AN LLVM ARGUMENT, NOT A VarDecl.
+    # `method outer($k) { $self->inner($k) }` reads $k as a pad access with no
+    # declaration in the body -- the binding comes from the signature, and the
+    # value arrives in %argN. This is the SAME shape as the `$self` case above:
+    # an unbacked PadAccess whose value is a register the function already has.
+    #
+    # Kept as a second arm rather than folded into that one because the two
+    # answer different questions -- $self is the invocant at a fixed position,
+    # a parameter is positional by declared index -- and collapsing them would
+    # make the invocant just another entry in a table it is not part of.
+    if ($self->{_in_method_body}
+            && $node->can('varname')
+            && !defined $node->inputs->[0]) {
+        my $vn  = $node->varname // '';
+        my $idx = $self->{_method_param_index}{$vn};
+        if (defined $idx) {
+            my $ref = "%arg$idx";
+            $self->{cache}{ $node->id } = $ref;
+            return $ref;
+        }
     }
 
     my $repr = _require_repr($node, 'PadAccess');
