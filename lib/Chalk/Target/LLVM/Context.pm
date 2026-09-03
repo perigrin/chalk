@@ -4741,28 +4741,74 @@ my %_REPR_NO_MACHINE_TYPE = (
              . "vocabulary leaked into the value pipeline: a LAYER VIOLATION.",
 
     # BOTTOM. The join identity, and an INFERENCE value with no runtime
-    # counterpart: no value is ever `None`, so there is nothing to lay out.
+    # counterpart. THE QUESTION IS MALFORMED, not merely unanswered.
     #
-    # It is reached on purpose, at one site. A self-recursive call contributes
-    # `None` on the first pass (Analysis.pm, _resolve_direct_calls) so that
-    # `join(None, Int) == Int` lets a recursive sub type from its BASE CASE
-    # instead of bailing on an absent arm or collapsing to `Unknown`, which
-    # absorbs. That is what makes `fib`'s ternary type at all.
+    # `None` is the EMPTY TYPE -- `$TYPE_BITSET{None} = 0`, no bits, inhabited
+    # by nothing. "What is the representation of None" is not a question whose
+    # answer is missing; it is a question with no content, in the way that
+    # asking the width of the empty set is not. A layout describes the values a
+    # type has, and this type has none. Adding an encoding here would not be
+    # completing the table -- it would be inventing an inhabitant for a type
+    # defined by having none.
     #
-    # SO ARRIVING HERE IS A REAL SIGNAL, and a different one from Unknown's.
-    # Unknown means inference FAILED. `None` means it has not FINISHED: the
-    # value flowing here is the not-yet-resolved arm itself, escaping into
-    # codegen instead of being joined away by a typed sibling. For a recursive
-    # sub that means the base case did not type, or nothing merged the arms --
-    # so read this as "the fixpoint owes another round", not as a missing
-    # encoding to add.
-    None    => "'None' is the type lattice's BOTTOM and the join identity — an "
-             . "inference value, not a runtime one, so no value is ever 'None' "
-             . "and no layout exists. It is seeded on a self-recursive call so "
-             . "a recursive sub can type from its base case (join(None,T) == T). "
-             . "Reaching machine-type selection means it was never joined away: "
-             . "inference has not FINISHED (contrast Unknown, which means it "
-             . "FAILED).",
+    # This is why it sits in THIS table rather than %_REPR_LLVM_TYPE, and why
+    # its entry can never move: unlike `Scalar`, which was here until 2026-08-29
+    # on a reading that turned out to be wrong (the %Slot box existed all
+    # along), no future work makes `None` representable.
+    #
+    # The lattice already uses it honestly elsewhere: `die` has
+    # `return_type => 'None'` (TypeLibrary.pm:249), which is exact -- `die` does
+    # not return a value of some type, it does not return. Bottom is the type of
+    # "there is no value here".
+    #
+    # AND `void` IS NOT THE ANSWER, though it is the obvious guess: an empty
+    # type has nothing to move, so it looks like the EASIEST thing to represent
+    # rather than the impossible one. The lattice already separates the two
+    # nothings, and they behave differently under join -- measured:
+    #
+    #     join(Void, Int) = List      Void is a value-ARITY claim: "yields
+    #                                 nothing" merged with "yields an Int" is
+    #                                 "yields some number of things". It
+    #                                 PARTICIPATES.
+    #     join(None, Int) = Int       None is the IDENTITY. It contributes no
+    #                                 constraint because there is nothing to
+    #                                 constrain.
+    #
+    # So `void` is the encoding of `Void` (TypeLibrary.pm:43, "arity 0: yields
+    # nothing", sibling of Scalar) -- a position that RUNS and produces no
+    # value, which the backend already emits for ADJUST blocks (`ret void`).
+    # Something happens there.
+    #
+    # `None` arriving here is not a position that yields nothing; it is a
+    # request for the VALUE of an expression that has none. The correct emission
+    # is not `void`, it is that the code path should not exist. Emitting `void`
+    # would answer a question about arity when the question was about a value.
+    #
+    # WHY IT IS SEEDED ANYWAY, and where. A self-recursive call contributes
+    # `None` on the first pass (Analysis.pm, _resolve_direct_calls) because it
+    # is the join IDENTITY: `join(None, T) == T`, so a recursive sub types from
+    # its BASE CASE instead of bailing on an absent arm or collapsing to
+    # `Unknown`, which absorbs. That use is about the LATTICE, and it never
+    # intends a value to flow.
+    #
+    # SO ARRIVING HERE IS A REAL SIGNAL, distinct from Unknown's. Unknown means
+    # inference FAILED and the node could be anything. `None` means a position
+    # holding no value reached codegen as though it held one: the seeded arm was
+    # never joined away by a typed sibling, or a genuinely non-returning
+    # expression was consumed for its value. Read it as "nothing flows here, and
+    # something asked what it looks like".
+    None    => "'None' is the type lattice's BOTTOM -- the EMPTY type, "
+             . "inhabited by nothing (its bitset is 0). It has no layout "
+             . "because there is nothing to lay out, so this is a malformed "
+             . "question rather than a missing table entry, and no future work "
+             . "makes it representable. It is seeded on a self-recursive call "
+             . "as the JOIN IDENTITY (join(None,T) == T) so a recursive sub can "
+             . "type from its base case; that use never intends a value to "
+             . "flow. Reaching machine-type selection means a position holding "
+             . "NO value was asked what it looks like -- the seeded arm was "
+             . "never joined away by a typed sibling, or a non-returning "
+             . "expression was consumed for its value. Contrast Unknown, which "
+             . "means inference FAILED and the node could be anything.",
 
     # An ERROR STATE, not a kind of value, and NOT merely "higher than Scalar".
     # The distinction is the KIND of absence
