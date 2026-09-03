@@ -1621,6 +1621,9 @@ sub lower_value {
     elsif ($op eq 'Count') {
         return $self->_lower_length($node);
     }
+    elsif ($op eq 'ListAppend') {
+        return $self->_lower_list_append($node);
+    }
     elsif ($op eq 'Subscript') {
         return $self->_lower_subscript($node);
     }
@@ -6501,6 +6504,165 @@ sub _find_block_idx {
 # into `sort`'s argument slots (`sort {$a<=>$b} (3,1,2)` is a Call with three
 # scalar inputs, measured on the wire), so the sort lowering has N elements and
 # no aggregate to point at.
+# _lower_list_append($node) -> the accumulator %Array* (unchanged pointer)
+#
+# map/grep's loop-carried accumulator step. `inputs[0]` is the accumulator --
+# always a loop Phi in the shapes the producer builds -- and `inputs[1..]` are
+# this iteration's contributions.
+#
+# ARITY DOES NOT IDENTIFY THE SHAPE, which is the whole difficulty and is
+# documented on the node itself. Measured against the producer:
+#
+#   grep { $_ > 1 } (3,1,2)   ListAppend(Phi:Array, Subscript:Int, NumGt:Boolean)
+#   map  { $_ * 2 } (1,2)     ListAppend(Phi:Array, Multiply:Int)
+#   map  { ($_,$_) } (1,2)    ListAppend(Phi:Array, Subscript:Int, Subscript:Int)
+#
+# The first and third have THE SAME ARITY and mean different things: grep's
+# last input is a BOOLEAN GATE deciding whether to append at all, map's is a
+# SECOND ELEMENT. So the gate is recognised by its STAMP -- a trailing
+# Boolean-repr input -- and never by counting inputs. A lowering that counted
+# would be wrong for one of the two whichever way it guessed, and the corpus
+# would only catch it on the shape it happened to guess against.
+#
+# THE ACCUMULATOR IS ONE HEAP BUFFER, MUTATED IN PLACE. `%Array*` is a
+# pointer, so the loop Phi carries the same address every iteration and the
+# append writes through it. That is what makes this a loop-carried value
+# without a copy per iteration -- and it is why this returns the accumulator
+# pointer unchanged rather than a new one.
+#
+# GROWTH IS malloc+memcpy, not realloc: only malloc and memcpy are declared,
+# and realloc is what they compose to. Capacity doubles (from a floor of 4),
+# so N appends cost O(N) copying rather than O(N^2).
+sub _lower_list_append {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+
+    my $inputs = $node->inputs // [];
+    my $acc_node = $inputs->[0]
+        or die "GAP: ListAppend has no accumulator input";
+    my @rest = grep { blessed($_) } @{[ @$inputs[1 .. $#$inputs] ]};
+
+    my $acc = $self->lower_value($acc_node);
+
+    # THE GATE, by stamp and only at the LAST position. A Boolean contribution
+    # in the middle would be an element (`map { ($_ > 1, $_) }` is a pair whose
+    # first member is a boolean), so position matters as well as type.
+    my $gate_node;
+    if (@rest && ($rest[-1]->representation // '') eq 'Boolean') {
+        $gate_node = pop @rest;
+    }
+
+    my $cont_label = $self->_fresh_label('la.cont.');
+    my $body_label = $self->_fresh_label('la.body.');
+
+    if (defined $gate_node) {
+        my $gate = $self->lower_value($gate_node);
+        $self->_set_terminator("  br i1 $gate, label %$body_label, label %$cont_label  ; ListAppend: predicate gate");
+        $self->_new_block($body_label);
+    }
+
+    for my $elem_node (@rest) {
+        $self->_emit_append_one($acc, $elem_node);
+    }
+
+    if (defined $gate_node) {
+        $self->_set_terminator("  br label %$cont_label  ; ListAppend: rejoin after append");
+        $self->_new_block($cont_label);
+    }
+
+    # The pointer is unchanged -- the buffer behind it is what moved.
+    $self->{cache}{ $node->id } = $acc;
+    return $acc;
+}
+
+# _emit_append_one($acc_ref, $elem_node) -> nothing
+#
+# Append one element to a %Array*, growing the slot buffer when it is full.
+# Factored out because map's pair form appends TWICE per iteration, and two
+# copies of this would be two places for the grow logic to drift.
+sub _emit_append_one {
+    my ($self, $acc, $elem_node) = @_;
+
+    my ($gi_def, $gi_tag, $gi_pay) =
+        (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
+
+    # Read the header.
+    my $len_ptr = $self->_fresh;
+    my $cap_ptr = $self->_fresh;
+    my $elm_ptr = $self->_fresh;
+    $self->_emit("  $len_ptr = getelementptr inbounds %Array, %Array* $acc, i32 0, i32 0  ; ListAppend: len ptr");
+    $self->_emit("  $cap_ptr = getelementptr inbounds %Array, %Array* $acc, i32 0, i32 1  ; ListAppend: cap ptr");
+    $self->_emit("  $elm_ptr = getelementptr inbounds %Array, %Array* $acc, i32 0, i32 2  ; ListAppend: elems ptr");
+    my $len = $self->_fresh;
+    my $cap = $self->_fresh;
+    $self->_emit("  $len = load i64, i64* $len_ptr  ; ListAppend: current len");
+    $self->_emit("  $cap = load i64, i64* $cap_ptr  ; ListAppend: current cap");
+
+    # GROW WHEN FULL. The empty seed has cap=0, so the first append always
+    # takes this path -- which is why the floor is 4 rather than `cap * 2`
+    # (doubling zero stays zero, and the buffer would never grow).
+    my $full      = $self->_fresh;
+    my $grow_lbl  = $self->_fresh_label('la.grow.');
+    my $store_lbl = $self->_fresh_label('la.store.');
+    $self->_emit("  $full = icmp sge i64 $len, $cap  ; ListAppend: buffer full?");
+    $self->_set_terminator("  br i1 $full, label %$grow_lbl, label %$store_lbl  ; ListAppend: grow if full");
+
+    $self->_new_block($grow_lbl);
+    my $dbl     = $self->_fresh;
+    my $newcap  = $self->_fresh;
+    my $small   = $self->_fresh;
+    $self->_emit("  $dbl = mul i64 $cap, 2  ; ListAppend: doubled cap");
+    $self->_emit("  $small = icmp slt i64 $dbl, 4  ; ListAppend: below the floor?");
+    $self->_emit("  $newcap = select i1 $small, i64 4, i64 $dbl  ; ListAppend: new cap (floor 4)");
+    my $slot_sz  = _sizeof_llvm_type('%Slot');
+    my $newbytes = $self->_fresh;
+    $self->_emit("  $newbytes = mul i64 $newcap, $slot_sz  ; ListAppend: new buffer bytes");
+    my $newbuf = $self->_fresh;
+    $self->_emit("  $newbuf = call i8* \@malloc(i64 $newbytes)  ; ListAppend: grow buffer");
+    my $oldslots = $self->_fresh;
+    my $oldbytes = $self->_fresh;
+    my $oldraw   = $self->_fresh;
+    $self->_emit("  $oldslots = load %Slot*, %Slot** $elm_ptr  ; ListAppend: old slots");
+    $self->_emit("  $oldraw = bitcast %Slot* $oldslots to i8*  ; ListAppend: old slots as i8*");
+    $self->_emit("  $oldbytes = mul i64 $len, $slot_sz  ; ListAppend: live bytes to copy");
+    $self->_emit("  call i8* \@memcpy(i8* $newbuf, i8* $oldraw, i64 $oldbytes)  ; ListAppend: copy live elements");
+    my $newslots = $self->_fresh;
+    $self->_emit("  $newslots = bitcast i8* $newbuf to %Slot*  ; ListAppend: new slots ptr");
+    $self->_emit("  store %Slot* $newslots, %Slot** $elm_ptr  ; ListAppend: install new buffer");
+    $self->_emit("  store i64 $newcap, i64* $cap_ptr  ; ListAppend: install new cap");
+    $self->_set_terminator("  br label %$store_lbl  ; ListAppend: grown");
+
+    # STORE. Re-read the elems pointer: the grow path may have replaced it, and
+    # a value carried across the branch would be the pre-grow buffer on one
+    # edge -- a use-after-free with the shape of a phi nobody wrote.
+    $self->_new_block($store_lbl);
+    my $slots = $self->_fresh;
+    $self->_emit("  $slots = load %Slot*, %Slot** $elm_ptr  ; ListAppend: slots (post-grow)");
+
+    my $elem_ref  = $self->lower_value($elem_node);
+    my $elem_repr = $elem_node->representation // '';
+
+    my $d_gep = $self->_fresh;
+    my $t_gep = $self->_fresh;
+    my $p_gep = $self->_fresh;
+    $self->_emit("  $d_gep = getelementptr inbounds %Slot, %Slot* $slots, i64 $len, i32 $gi_def  ; ListAppend: slot[len] defined");
+    $self->_emit("  $t_gep = getelementptr inbounds %Slot, %Slot* $slots, i64 $len, i32 $gi_tag  ; ListAppend: slot[len] tag");
+    $self->_emit("  $p_gep = getelementptr inbounds %Slot, %Slot* $slots, i64 $len, i32 $gi_pay  ; ListAppend: slot[len] payload");
+    $self->_emit("  store i1 true, i1* $d_gep  ; ListAppend: defined=true");
+    my $tag = _slot_tag_for_repr($elem_repr);
+    $self->_emit("  store i8 " . _slot_tag_value($tag) . ", i8* $t_gep  ; ListAppend: tag=$tag");
+    my $payload = $self->_box_payload($elem_ref, $elem_repr, 'ListAppend elem');
+    $self->_emit("  store i64 $payload, i64* $p_gep  ; ListAppend: payload");
+
+    my $newlen = $self->_fresh;
+    $self->_emit("  $newlen = add i64 $len, 1  ; ListAppend: len+1");
+    $self->_emit("  store i64 $newlen, i64* $len_ptr  ; ListAppend: install new len");
+
+    return;
+}
+
 sub _emit_array_of {
     my ($self, $inputs) = @_;
 

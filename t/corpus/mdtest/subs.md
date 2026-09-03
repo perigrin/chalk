@@ -763,6 +763,24 @@ effect-ordering bug gets through.
 `grep { ... }` -- part of the 277 grep/map block uses in `lib/Chalk/`. Same
 blocker as F18.
 
+THE ACCUMULATOR IS A LOOP-CARRIED %Array*, not a value copied per iteration.
+`ListAppend(acc, ...)` mutates the buffer behind the pointer and returns the
+SAME pointer, so the loop Phi merges one address with itself and the growth
+lives in the header (len/cap) rather than in the SSA graph.
+
+ARITY DOES NOT IDENTIFY THE SHAPE, which is why F19 and F20 are separate cases
+rather than one. Measured against the producer:
+
+    grep { $_ > 1 } (3,1,2)    ListAppend(Phi:Array, Subscript:Int, NumGt:Boolean)
+    map  { $_ * 2 } (1,2)      ListAppend(Phi:Array, Multiply:Int)
+    map  { ($_,$_) } (1,2)     ListAppend(Phi:Array, Subscript:Int, Subscript:Int)
+
+grep's three-input form and map's pair form have THE SAME ARITY and mean
+different things -- grep's last input is a BOOLEAN GATE, map's is a SECOND
+ELEMENT. The lowering distinguishes them by the input's STAMP at the last
+position, never by counting, and a lowering that counted would be wrong for
+one of the two whichever way it guessed.
+
 ```perl
 # source
 use 5.42.0;
@@ -776,11 +794,54 @@ return: Bool:1
 context: scalar
 ```
 
+```ir
+%start = Start()
+%c3    = Constant(3) :Int
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%zero  = Constant(0) :Int
+%src   = ArrayLiteral(%c3, %c1, %c2) :Array
+%acc0  = ArrayLiteral() :Array
+%loop  = Loop(%start)
+%i     = Phi(%zero) :Int
+%acc   = Phi(%acc0) :Array
+%elem  = Subscript(%src, %i) :Int
+%keep  = NumGt(%elem, %c1) :Boolean
+%app   = ListAppend(%acc, %elem, %keep) :Array
+%inext = Add(%i, %c1) :Int
+%n     = Count(%acc) :Int
+%co    = Coerce(%n : Int -> Str) :Str
+%nl    = Constant("\n") :Str
+%p     = Print(%co, %nl)
+return %p
+loop_backedge: %i -> %inext
+loop_backedge: %acc -> %app
+L: GREEN
+```
+
 L: GAP: LLVM backend: cannot lower op=Call (not in literal-arithmetic slice)
 
 ## F20 map with a block
 
 `map { ... }` -- the other half of the 277. Same blocker as F18.
+
+THE ACCUMULATOR IS A LOOP-CARRIED %Array*, not a value copied per iteration.
+`ListAppend(acc, ...)` mutates the buffer behind the pointer and returns the
+SAME pointer, so the loop Phi merges one address with itself and the growth
+lives in the header (len/cap) rather than in the SSA graph.
+
+ARITY DOES NOT IDENTIFY THE SHAPE, which is why F19 and F20 are separate cases
+rather than one. Measured against the producer:
+
+    grep { $_ > 1 } (3,1,2)    ListAppend(Phi:Array, Subscript:Int, NumGt:Boolean)
+    map  { $_ * 2 } (1,2)      ListAppend(Phi:Array, Multiply:Int)
+    map  { ($_,$_) } (1,2)     ListAppend(Phi:Array, Subscript:Int, Subscript:Int)
+
+grep's three-input form and map's pair form have THE SAME ARITY and mean
+different things -- grep's last input is a BOOLEAN GATE, map's is a SECOND
+ELEMENT. The lowering distinguishes them by the input's STAMP at the last
+position, never by counting, and a lowering that counted would be wrong for
+one of the two whichever way it guessed.
 
 ```perl
 # source
@@ -793,6 +854,35 @@ say($m[1]);
 stdout: 4\n
 return: Bool:1
 context: scalar
+```
+
+```ir
+%start = Start()
+%c1    = Constant(1) :Int
+%c2    = Constant(2) :Int
+%zero  = Constant(0) :Int
+%src   = ArrayLiteral(%c1, %c2) :Array
+%acc0  = ArrayLiteral() :Array
+%loop  = Loop(%start)
+%i     = Phi(%zero) :Int
+%acc   = Phi(%acc0) :Array
+%elem  = Subscript(%src, %i) :Int
+%doubled = Multiply(%elem, %c2) :Int
+%app   = ListAppend(%acc, %doubled) :Array
+%inext = Add(%i, %c1) :Int
+# `say($m[1])` -- an INDEXED READ of the result, not a count. The read is
+# `:Scalar` because an element out of the accumulator is a tagged cell: which
+# reading lands at index 1 is decided by what the loop appended, so it is
+# unboxed at the Coerce rather than known statically.
+%one   = Constant(1) :Int
+%out   = Subscript(%acc, %one) :Scalar
+%co    = Coerce(%out : Scalar -> Str) :Str
+%nl    = Constant("\n") :Str
+%p     = Print(%co, %nl)
+return %p
+loop_backedge: %i -> %inext
+loop_backedge: %acc -> %app
+L: GREEN
 ```
 
 L: GAP: LLVM backend: cannot lower op=Call (not in literal-arithmetic slice)
