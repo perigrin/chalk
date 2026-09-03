@@ -892,6 +892,27 @@ sub return_reading_for_want ($return, $want) {
     return defined $scalar_reading ? $scalar_reading : $list_reading;
 }
 
+# _stamp_is_absent($node) -> has inference not REACHED this node at all?
+#
+# A DIFFERENT QUESTION FROM `_is_narrowed`, and the difference is the whole
+# reason this exists rather than reusing it. Measured:
+#
+#     _is_narrowed(undef)   = false      _is_narrowed(None)    = true
+#     _is_narrowed(Unknown) = false      _is_narrowed(Int)     = true
+#
+# `_is_narrowed` asks "has this node COMMITTED to an answer?", so it groups
+# absence with `Unknown` -- correct for a fixpoint latch, wrong here. A site
+# that seeds a value must fire ONLY on absence: `Unknown` is a real stamp
+# meaning inference ran and failed, and overwriting it with bottom would move a
+# node from top to bottom on no evidence. That is the "preempt a source"
+# mistake, and it is exactly what `!_is_narrowed` would have done here.
+#
+# Reads `stamp`, not the deprecated `representation` alias -- same storage, and
+# the axis this actually asks about is the TYPE.
+sub _stamp_is_absent ($node) {
+    return !defined $node->stamp;
+}
+
 sub _resolve_direct_calls ($graphs) {
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
@@ -956,6 +977,54 @@ sub _resolve_direct_calls ($graphs) {
                     if !_is_narrowed($have)
                     || ($have ne $want
                         && Chalk::Grammar::Perl::TypeLibrary::is_subtype($want, $have));
+            }
+            elsif ( _stamp_is_absent($node)
+                    && refaddr($callee) == refaddr($graphs->{$gname}) ) {
+                # A SELF-RECURSIVE CALL CONTRIBUTES BOTTOM, NOT ABSENCE.
+                #
+                # `sub fib { my $n = shift; $n < 2 ? $n : fib($n-1) + fib($n-2) }`
+                # has a cycle with no entry point: this Call is typed from its
+                # callee's Return value, and for a self-call that value is the
+                # very ternary being computed. Nothing propagates, so the Add
+                # above it, the ternary, and the Return all stay unstamped and
+                # the backend refuses with "Add node has no representation".
+                #
+                # WHICH ELEMENT the arm contributes decides the whole question,
+                # and the three candidates behave differently:
+                #
+                #   absence   the merge BAILS (:2085 skips any undefined input)
+                #   Unknown   TOP, and it ABSORBS -- join(Unknown,Int) is
+                #             Unknown, so the base case's Int is computed and
+                #             then discarded
+                #   None      BOTTOM, the join IDENTITY -- join(None,Int) is
+                #             Int, so the base case decides
+                #
+                # `None` is right, and this is not a new rule: join_types
+                # documents it for exactly this case (TypeLibrary.pm:383) --
+                # "None is the identity (T join None == T), which is what lets a
+                # recursive function type from its base case: the recursive arm
+                # contributes None on the first pass". The identity element
+                # existed and was documented for this use; it simply had no
+                # producer.
+                #
+                # SELF-recursion only, compared by graph identity the way
+                # _arg_is_self_call does. A call to a DIFFERENT sub that has not
+                # typed yet is a node inference has not reached, and stamping it
+                # bottom would claim the callee returns nothing rather than
+                # admitting the pass is unfinished. This pass runs inside a
+                # fixpoint, so that call resolves on a later round.
+                #
+                # ONLY WHEN ABSENT (`!defined`), so this never overwrites an
+                # answer. `None` is the weakest claim in the lattice and joins
+                # away against anything, but a later round CAN narrow this node
+                # via the branch above -- which is the fixpoint working, not a
+                # conflict.
+                #
+                # FIRST ITERATION, NOT A GENERAL SOLUTION. This types the
+                # one-typed-arm-plus-one-recursive-arm shape. Mutual recursion
+                # where no arm types on the first pass still needs real
+                # iteration to a fixpoint.
+                $node->set_representation('None');
             }
         }
     }

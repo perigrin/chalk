@@ -4740,6 +4740,30 @@ my %_REPR_NO_MACHINE_TYPE = (
              . "exists. Reaching machine-type selection means signature "
              . "vocabulary leaked into the value pipeline: a LAYER VIOLATION.",
 
+    # BOTTOM. The join identity, and an INFERENCE value with no runtime
+    # counterpart: no value is ever `None`, so there is nothing to lay out.
+    #
+    # It is reached on purpose, at one site. A self-recursive call contributes
+    # `None` on the first pass (Analysis.pm, _resolve_direct_calls) so that
+    # `join(None, Int) == Int` lets a recursive sub type from its BASE CASE
+    # instead of bailing on an absent arm or collapsing to `Unknown`, which
+    # absorbs. That is what makes `fib`'s ternary type at all.
+    #
+    # SO ARRIVING HERE IS A REAL SIGNAL, and a different one from Unknown's.
+    # Unknown means inference FAILED. `None` means it has not FINISHED: the
+    # value flowing here is the not-yet-resolved arm itself, escaping into
+    # codegen instead of being joined away by a typed sibling. For a recursive
+    # sub that means the base case did not type, or nothing merged the arms --
+    # so read this as "the fixpoint owes another round", not as a missing
+    # encoding to add.
+    None    => "'None' is the type lattice's BOTTOM and the join identity — an "
+             . "inference value, not a runtime one, so no value is ever 'None' "
+             . "and no layout exists. It is seeded on a self-recursive call so "
+             . "a recursive sub can type from its base case (join(None,T) == T). "
+             . "Reaching machine-type selection means it was never joined away: "
+             . "inference has not FINISHED (contrast Unknown, which means it "
+             . "FAILED).",
+
     # An ERROR STATE, not a kind of value, and NOT merely "higher than Scalar".
     # The distinction is the KIND of absence
     # (docs/architecture/2026-08-09-types-fetches-and-contexts.md): Scalar is
