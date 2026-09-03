@@ -4188,9 +4188,18 @@ sub _lower_defined_or {
     my ($self, $node) = @_;
 
     my $repr = $node->representation;
-    if (defined $repr && $repr eq 'Scalar') {
-        die "DefinedOr with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
-    }
+    # NO Scalar REFUSAL. Like the And/Or guards this mirrored, it predated
+    # Scalar having a machine type -- it has one (%Slot), and the phi machinery
+    # below already handles an aggregate result (it emits `undef` for the
+    # statically-unreachable arm precisely because `add %Str 0, 0` is not an
+    # instruction).
+    #
+    # `my $u; $u // 7` merges an undef LHS with an Int RHS, so the node's own
+    # repr is the join: Scalar. The RESULT is never actually a maybe-value --
+    # this function's own comment says so ("either the LHS was defined or the
+    # RHS replaced it, so the value is defined by construction and the
+    # maybe-ness has been discharged") -- but the STATIC type is still the
+    # join, and boxing it is how the two arms are given one machine type.
 
     my $inputs   = $node->inputs;
     my $lhs_node = $inputs->[0];
@@ -4245,6 +4254,25 @@ sub _lower_defined_or {
     # RHS block: evaluate the RHS, then jump to end.
     $self->_new_block($undef_label);
     my $rhs_ref       = $self->lower_value($rhs_node);
+
+    # BRIDGE THE RHS TO THE MERGE TYPE, in the block where it is live. The phi
+    # is typed from the NODE's repr, and the RHS may be narrower: `my $u;
+    # $u // 7` merges an undef LHS with an Int RHS into a Scalar result, so the
+    # i64 must be boxed or lli refuses the phi operand.
+    #
+    # Emitted HERE, not next to the phi: a coercion in the merge block would
+    # land above the phi (LLVM requires phis at the top of their block) and can
+    # open continuation blocks of its own, so the incoming label is re-read
+    # after it. Same reasoning the And/Or arms give for their own bridges.
+    my $rhs_repr_now = $rhs_node->can('representation') ? $rhs_node->representation : undef;
+    my $node_repr_early = $node->representation;
+    if (defined $rhs_repr_now && defined $node_repr_early
+            && $rhs_repr_now ne $node_repr_early
+            && $node_repr_early ne 'Slot') {
+        $rhs_ref = $self->_emit_coercion($rhs_ref, $rhs_repr_now,
+                                         $node_repr_early, 'DefinedOr.RHS');
+    }
+
     my $undef_end_label = $self->_current_block_label;
     $self->_set_terminator("  br label %$end_label  ; DefinedOr: undef path falls through");
 
