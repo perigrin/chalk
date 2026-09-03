@@ -90,6 +90,10 @@ use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::ExpressionList;
 use Chalk::IR::Node::Coerce;
 use Chalk::IR::Node::ListAppend;
+use Chalk::IR::Node::MakeCell;
+use Chalk::IR::Node::CellRead;
+use Chalk::IR::Node::CellWrite;
+use Chalk::IR::Node::CellParam;
 
 my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Constant Phi
@@ -106,6 +110,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     PostfixDeref CompoundAssign BacktickExpr VarDecl ListAssign
     TernaryExpr StructRef StructFieldAccess
     ExpressionList ListAppend
+    MakeCell CellRead CellWrite CellParam
     Start MemStart Return Unwind
     Coerce
 );

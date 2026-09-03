@@ -552,6 +552,29 @@ sub _deserialize_graph ($method_data) {
             # from the graph that produced it.
             $args{name} = $fields->{name} if exists $fields->{name};
         }
+        elsif ($op eq 'MakeCell') {
+            # The captured variable's name, for diagnostics.
+            $args{cell_name} = $fields->{cell_name}
+                if exists $fields->{cell_name};
+            # WHETHER ANY CLOSURE WRITES THROUGH THIS CELL. A read-only capture
+            # lowers to a plain value with no allocation, so this decides
+            # whether the cell exists at all at runtime.
+            #
+            # NOT INVENTED WHEN ABSENT. Defaulting a missing flag to false would
+            # elide a cell that is in fact written -- dropping the write, a
+            # miscompile. The class defaults it to 0 for a frontend-built node
+            # with no wire record; a wire that omits it for a real capture is a
+            # producer defect, and the honest failure is the missing write
+            # showing up in the behavioural corpus rather than a guess here.
+            $args{captured_written} = $fields->{captured_written} ? 1 : 0
+                if exists $fields->{captured_written};
+        }
+        elsif ($op eq 'CellParam') {
+            # Position within the closure's CELL inputs -- not the caller's
+            # argument list. See CellParam.pm on why this is not a Parameter.
+            $args{index} = $fields->{index} if exists $fields->{index};
+            $args{name}  = $fields->{name}  if exists $fields->{name};
+        }
         elsif ($op eq 'Call') {
             $args{dispatch_kind} = $fields->{dispatch_kind};
             $args{name}          = $fields->{name};
