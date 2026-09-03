@@ -4,6 +4,37 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
+# The deprecation category for `representation` / `set_representation`.
+#
+# TWO GATES, AND BOTH ARE LOAD-BEARING.
+#
+# `warnings::register` gives the category, so a scope mid-migration can say
+# `no warnings 'Chalk::IR::Node'` to silence a file it has not reached yet.
+# Verified: that suppression works.
+#
+# But the category is ON by default under `use 5.42.0`, and these methods are
+# called from everywhere. MEASURED: with the warning ungated, ONE ordinary test
+# file (ir/a-method-takes-arguments.t) emits 1438 deprecation lines. That is not
+# a warning anyone reads; it is a wall that hides the diagnostics underneath it,
+# and this project treats non-pristine test output as a failure rather than as
+# noise to skim.
+#
+# So the warning is additionally gated on CHALK_WARN_DEPRECATED_REPR being set.
+# Default silent, opt-in loud:
+#
+#     CHALK_WARN_DEPRECATED_REPR=1 prove -Ilib t/some/file.t
+#
+# which is what makes the migration incremental -- turn it on, fix what it
+# names, move to the next file -- rather than one commit that must touch ~1700
+# sites at once. The env gate goes away with the last call site; the category
+# outlives it only long enough to prove the last one is gone.
+package Chalk::IR::Node { use warnings::register; }
+
+# Read once at load: this is checked on a hot path (every stamp read in the
+# compiler) and a per-call %ENV lookup would be a real cost for a diagnostic
+# that is off in every normal run.
+my $_WARN_DEPRECATED_REPR = $ENV{CHALK_WARN_DEPRECATED_REPR} ? 1 : 0;
+
 class Chalk::IR::Node {
 
     # Stable content-based ID for the node
@@ -323,8 +354,21 @@ class Chalk::IR::Node {
     # non-pristine test output as a failure rather than as noise to skim. The
     # warning lands only when the migration is ready to absorb it.
     # ---------------------------------------------------------------------
-    method representation()      { return $stamp }
+    method representation() {
+        warnings::warnif('Chalk::IR::Node',
+            'representation() is deprecated; use stamp() -- it names the TYPE '
+          . 'axis, which is what this returns')
+            if $_WARN_DEPRECATED_REPR;
+        return $stamp;
+    }
     method set_representation($repr) {
+        # The write is the more dangerous direction: it OVERWRITES the type
+        # rather than naming it, so a non-lattice name here destroys a real
+        # type. See the paragraphs above.
+        warnings::warnif('Chalk::IR::Node',
+            'set_representation() is deprecated; use set_stamp() -- it writes '
+          . 'the TYPE axis, and a machine-encoding name here destroys the type')
+            if $_WARN_DEPRECATED_REPR;
         $stamp = $repr;
         return;
     }
