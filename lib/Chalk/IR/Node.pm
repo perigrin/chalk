@@ -292,6 +292,37 @@ class Chalk::IR::Node {
     # cannot be poisoned. Pinned by t/bootstrap/ir/stamp-alias-preconditions.t,
     # which fails if a non-lattice name is written again.
     # hazard RETURNING rather than documenting a live one.
+    #
+    # ---------------------------------------------------------------------
+    # DEPRECATED. NEW CODE MUST USE `stamp` / `set_stamp`.
+    #
+    # These two are a transitional read/write alias for the SAME storage, kept
+    # only so the ~111 existing `->representation` call sites in lib/ keep
+    # working while they are migrated. Measured at the time of writing:
+    #
+    #     ->representation   111 reads      ->stamp        12
+    #     set_representation  32 writes     set_stamp       6
+    #
+    # so the deprecated spelling is still the majority and cannot simply be
+    # deleted. It is not merely a style preference: the name is WRONG about
+    # which axis it names. A stamp is a TYPE (`Unknown` is a legitimate value);
+    # a representation is a MACHINE ENCODING (`Unknown` has none, and
+    # _repr_to_llvm_type dies on it). Calling the type axis by the encoding
+    # axis's name is what lets a value that is correct on one axis be read as
+    # poison on the other -- see the paragraphs above for the concrete case.
+    #
+    # PLANNED, in this order, and deliberately NOT done together:
+    #   1. this notice                       <- you are here
+    #   2. a `warnings::register` deprecation warning on both methods, silent
+    #      by default so no existing run becomes noisy
+    #   3. migrate the call sites, then restore pristine test output
+    #   4. delete these two methods
+    #
+    # Step 2 is separated from step 1 because turning on a warning across 143
+    # call sites at once floods every test run, and this project treats
+    # non-pristine test output as a failure rather than as noise to skim. The
+    # warning lands only when the migration is ready to absorb it.
+    # ---------------------------------------------------------------------
     method representation()      { return $stamp }
     method set_representation($repr) {
         $stamp = $repr;

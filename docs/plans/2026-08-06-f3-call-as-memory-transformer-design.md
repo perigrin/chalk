@@ -1,6 +1,98 @@
 # Design: real `define` + `call` — reordered after review
 
 **Status:** design v2, awaiting review. Not a plan; no implementation.
+
+## v3 re-measurement, 2026-09-03 — READ BEFORE EXECUTING ANY SLICE
+
+Measured on HEAD against pinned producer b96087c.
+
+**Slice 0 (recursion guard) IS DONE.** The guard exists at `Context.pm:8639`
+and fires cleanly on `sub f { my $n = shift; $n <= 0 ? 0 : f($n-1) }` — exit 0,
+no hang. The "compiler HANGS, true exit 124" claim is stale.
+
+**Slice 1 (epilogue suppression) IS DONE.** `program_mode` suppresses the type
+tag; `print "hi\n"` gives chalk `hi` against perl `hi`, byte-identical.
+
+**Slice 2's ACCEPTANCE CRITERION CONTRADICTS ITS OWN SCOPE.** The slice is
+scoped to "a non-recursive, EFFECT-FREE, single-argument callee" and then names
+corpus F12 as the case that must flip GAP -> GREEN. F12 is
+
+    sub g { for my $i (1..2) { print "z" } 9 }
+
+-- a loop AND a print, i.e. exactly the effect-bearing callee the slice
+excludes. Measured, it GAPs at `Context.pm:8819` on the effect-on-control-chain
+path. **Slice 2 as scoped cannot close F12** and needs a real acceptance case
+before it is executable. Note also that an effect-free callee called twice
+(`sub f { 7 }`) ALREADY lowers through the inliner, so the population Slice 2
+unblocks should be measured rather than presumed.
+
+### The `fib` typing question — a false dilemma, and the obvious third option is ALSO wrong
+
+This doc frames Slice 3's typing prerequisite as "a seed plus a join-rule
+change". Both halves are wrong, and the correction is worth recording in full
+because the appealing fix is a trap.
+
+`2026-08-21-unknown-is-a-type-absence-is-not.md` diagnoses two defects: an
+unstamped arm reaches the join as a Perl `undef` (not a lattice point, so the
+join bails), and `Unknown` is TOP so it wins any join it does enter. It
+concludes that **`Unknown` must not participate in a join** — drop those arms,
+let the base case decide.
+
+**DO NOT IMPLEMENT THAT.** It was superseded five days later. `6a0a0b7d`
+(2026-08-26) made `_join_repr` a total fold of the lattice join, deliberately
+absorbing:
+
+> `Unknown` is now a RESULT, not just an input, and it ABSORBS, so an arm
+> inference could not type makes the whole merge Unknown rather than being
+> discarded in favour of the known arm. That is deliberate: typing a merge from
+> one arm when the other is unknown is a guess about the unknown one.
+
+The 2026-08-21 doc's own status is `MEASURED, not fixed`, and it predates the
+commit. Three further reasons not to revisit it:
+
+- `join-is-the-lattice-join.t:84` already pins "Unknown absorbs", with an
+  exhaustive agreement check over every ordered pair of the sixteen lattice
+  stamps. A drop-rule would contradict a green test.
+- That commit re-measured 231 corpus cases, head vs total-fold, and diffed every
+  node's final stamp: **zero lines**. A drop-rule moves stamps verified stable.
+- The `Undef` precedent the 2026-08-21 doc cites is a CALLER-level drop
+  (`_seed_and_propagate_reprs`), explicitly preserved by `6a0a0b7d` alongside
+  the TernaryExpr condition-drop. It is not licence for a drop inside the fold
+  that every merge in the compiler shares.
+
+**What survives from the 2026-08-21 doc is its deeper shape, which is the actual
+third option:** what a recursive callee needs is not a widening but a
+HYPOTHESIS — assume the return type is the join of the arms that ARE known,
+then CHECK the recursive arm is consistent with it. That is ordinary fixpoint
+inference over a recursive definition, and it is why a base case exists.
+
+The distinction that matters: a hypothesis-and-check belongs where a recursive
+callee's RETURN TYPE is derived (`_resolve_direct_calls`, which today reads the
+callee's Return value and finds it unstamped), NOT inside the lattice join. The
+join's absorbing behaviour is correct for what a join is; recursion needs an
+iteration around it, not a weaker join underneath it.
+
+Also already landed and listed here as outstanding: the TernaryExpr join already
+EXCLUDES the Bool condition (`Analysis.pm:2082`).
+
+### The typing gap is upstream of the call gap, for BOTH recursion shapes
+
+Measured after the loader, `fib` AND `down` both end with an unstamped
+TernaryExpr and an unstamped Return. They differ only in which refusal is
+reached first: `fib` lowers an `Add` over two calls and needs a type immediately
+("Add node has no representation at lowering time"), while `down`'s recursive
+Call hits the recursion GAP before any type is required.
+
+**Consequence for testing:** a test asserting only "it refuses for a call-shaped
+reason" passes for `down` today while its types are just as absent — a false
+green. I wrote one before catching it.
+
+**Consequence for ordering:** neither half alone makes `fib` compile. The
+2026-08-21 doc is explicit that it "does NOT establish that `fib` compiles once
+both are fixed — call emission is still required for the recursion itself; this
+is only the typing half."
+
+---
 **Type-library work belongs to:** `docs/plans/2026-07-19-runtime-mop-coerce-multimethod.md`
 (milestone `runtime-mop-pilot`). This design does NOT build it.
 
