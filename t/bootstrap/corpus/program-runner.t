@@ -72,10 +72,24 @@ subtest 'the entry point is discovered, not supplied' => sub {
 subtest 'a blocked file names the ENTRY graph blocker' => sub {
     my $r = $R->run_file("$BASE/rs.t");
     is($r->{verdict}, 'SKIP', 'rs.t does not compile yet');
-    like($r->{skip_reason}, qr/explicit filehandle/,
-        'it names main::__PROGRAM__\'s own blocker');
+
+    # THE BLOCKER MOVED, AND THE MECHANISM STILL WORKS. This asserted
+    # "explicit filehandle" -- rs.t's `print TESTFILE $teststring` -- against
+    # main::test_bad_setting's "if/else arm", which the producer prints FIRST.
+    # The producer now emits NO gap for rs.t at all (measured: zero GAP lines),
+    # so the file reaches chalk's backend intact and stops at the first thing
+    # THAT cannot lower: `op=Call`, from the top-level `ok(...)` calls.
+    #
+    # That is still main::__PROGRAM__'s OWN blocker, which is what this
+    # subtest exists to check -- the entry graph's, not another sub's. Only
+    # the expected string is stale, so only the string changes. The negative
+    # assertion stays and is what carries the test: if attribution regressed to
+    # "first blocker anywhere", a sub's blocker would surface here instead.
+    like($r->{skip_reason}, qr/cannot lower op=Call/,
+        'it names main::__PROGRAM__\'s own blocker (the top-level ok() call)');
     unlike($r->{skip_reason}, qr/if\/else arm/,
-        'not main::test_bad_setting\'s, which the producer prints FIRST');
+        'not main::test_bad_setting\'s, which the producer printed FIRST '
+      . 'when it still gapped');
 };
 
 # --- No silent drops --------------------------------------------------------

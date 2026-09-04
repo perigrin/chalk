@@ -58,15 +58,25 @@ cmp_ok($report->{passed}, '>=', $W->passing_floor,
 
 # --- Acceptance D: a blocker belongs to the ENTRY graph ----------------------
 # A file's first_blocker must be the blocker of the program itself, not of some
-# other sub the producer happened to GAP first. rs.t is the case that proves the
-# difference: `main::test_bad_setting` GAPs on an if/else arm and is reported
-# BEFORE `main::__PROGRAM__`'s own explicit-filehandle GAP, so a reader that
-# takes the first GAP in stderr attributes the wrong feature to the file and
-# sends the next build at a construct that is not in the way.
+# other sub the producer happened to GAP first. A reader that takes the first
+# GAP in stderr attributes the wrong feature to the file and sends the next
+# build at a construct that is not in the way.
+#
+# rs.t is the case that proves the difference, and WHAT IT PROVES HAS MOVED.
+# It was: `main::test_bad_setting` GAPs on an if/else arm and is reported
+# BEFORE `main::__PROGRAM__`'s own explicit-filehandle GAP. The producer now
+# emits NO gap for rs.t at all (measured: zero GAP lines), so the file reaches
+# chalk's backend intact and stops at the first thing THAT cannot lower --
+# `op=Call`, from the top-level `ok(...)` calls, which is still
+# main::__PROGRAM__'s OWN blocker.
+#
+# So only the expected string is stale. The negative assertion stays and is
+# what carries the test: if attribution regressed to "first blocker anywhere",
+# a sub's blocker would surface here instead.
 subtest 'a first_blocker is the ENTRY graph blocker, not another sub\'s' => sub {
     my $rs = $report->{files}{'rs.t'} or return fail('rs.t missing from the worklist');
-    like($rs->{first_blocker}, qr/explicit filehandle/,
-        'rs.t reports main::__PROGRAM__\'s own blocker');
+    like($rs->{first_blocker}, qr/cannot lower op=Call/,
+        'rs.t reports main::__PROGRAM__\'s own blocker (the top-level ok() call)');
     unlike($rs->{first_blocker}, qr/if\/else arm/,
         'rs.t does not report main::test_bad_setting\'s blocker');
 };

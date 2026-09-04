@@ -543,7 +543,7 @@ subtest 'an element-store Assign is NOT subsumed (effectful, teeth)' => sub {
     # element store (Subscript lhs) is a real effect the real graph must carry;
     # subsuming it would mask a dropped array/hash write.
     my $spec = <<'END_IR';
-%arr  = ArrayRef() :ArrayRef
+%arr  = ArrayLiteral() :Array
 %idx  = Constant(0) :Int
 %lhs  = Subscript(%arr, %idx) :Int
 %one  = Constant(1) :Int
@@ -723,6 +723,17 @@ END_IR
 };
 
 subtest 'an implicit deref subsumes the spec PostfixDeref (R4/R5)' => sub {
+    # `ArrayLiteral`, NOT `ArrayRef`. These spec blocks named an operation that
+    # DOES NOT EXIST -- there is no Chalk::IR::Node::ArrayRef, the constructive
+    # builder has never accepted one, and no corpus ir block uses it. The
+    # factory said so ("Unknown data node operation: ArrayRef") and the whole
+    # FILE died at that point, after 36 subtests had already reported, which
+    # reads as one failure rather than an abort.
+    #
+    # `ArrayRef` IS a real REPRESENTATION (a boxed pointer), which is likely how
+    # it got written here as an op. The aggregate an ir block constructs is an
+    # `ArrayLiteral(...) :Array`, which is what the corpus uses everywhere.
+    #
     # perl's aggregate deref ($r->[0]) is an implicit rv2av (an OpMap SKIP), so
     # B::SoN emits Subscript(ArrayRef, idx) directly -- no PostfixDeref. The
     # corpus keeps the explicit PostfixDeref shape; subsume it when the real
@@ -730,7 +741,7 @@ subtest 'an implicit deref subsumes the spec PostfixDeref (R4/R5)' => sub {
     my $spec = <<'END_IR';
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
-%ref   = ArrayRef(%c1, %c2) :ArrayRef
+%ref   = ArrayLiteral(%c1, %c2) :Array
 %deref = PostfixDeref(%ref, sigil: "@") :Array
 %idx   = Constant(0) :Int
 %r     = Subscript(%deref, %idx) :Int
@@ -739,7 +750,7 @@ END_IR
     my $real = $C->build_graph_from_ir(<<'END_IR');
 %c1  = Constant(1) :Int
 %c2  = Constant(2) :Int
-%ref = ArrayRef(%c1, %c2) :ArrayRef
+%ref = ArrayLiteral(%c1, %c2) :Array
 %idx = Constant(0) :Int
 %r   = Subscript(%ref, %idx) :Int
 return %r
@@ -755,7 +766,7 @@ subtest 'a PostfixDeref is NOT subsumed when the real graph keeps one (teeth)' =
     # the deref away entirely.
     my $spec = <<'END_IR';
 %c1    = Constant(1) :Int
-%ref   = ArrayRef(%c1) :ArrayRef
+%ref   = ArrayLiteral(%c1) :Array
 %deref = PostfixDeref(%ref, sigil: "@") :Array
 %idx   = Constant(0) :Int
 %r     = Subscript(%deref, %idx) :Int
@@ -765,14 +776,14 @@ END_IR
     my $real = $C->build_graph_from_ir(<<'END_IR');
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
-%ref   = ArrayRef(%c1, %c2) :ArrayRef
+%ref   = ArrayLiteral(%c1, %c2) :Array
 %deref = PostfixDeref(%ref, sigil: "@") :Array
 %idx   = Constant(0) :Int
 %r     = Subscript(%deref, %idx) :Int
 return %r
 END_IR
     my $res = $C->shape_subset_check($spec, $real);
-    # spec ArrayRef(1) vs real ArrayRef(1,2): the element Constant(2) is extra
+    # spec ArrayLiteral(1) vs real ArrayLiteral(1,2): Constant(2) is extra
     # in real (subset match is fine), but the spec's PostfixDeref IS present in
     # real, so it must match structurally -- this stays PASS (deref present both
     # sides). The teeth case that must FAIL is a KEPT deref with no match:

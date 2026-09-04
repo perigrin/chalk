@@ -67,14 +67,26 @@ IR
 
 # --- Finding 5c: a duplicate field_index in the registry population ------------
 # A minimal class stand-in that yields two DISTINCT fields sharing a fieldix.
-# _populate_registry_from_mop_class only calls name/parent_name/methods/fields/
-# adjust_blocks on the class, so a plain blessed shim exercises the path.
+# _populate_registry_from_mop_class calls name/parent_name/methods/fields/
+# adjust_blocks/subs on the class, so a plain blessed shim exercises the path.
+#
+# `subs` WAS MISSING AND THE FAILURE NAMED THE WRONG THING: production grew a
+# sixth call (LLVM.pm:694, recording sub metadata into the registry rather than
+# recovering it by scanning) and this shim was not grown with it, so the test
+# died with "Can't locate object method 'subs' via package 'DupClass'" -- which
+# reads as a defect in the code under test rather than in the stand-in.
+#
+# The comment above is the contract, and it is only true if it is MAINTAINED.
+# A stub that lists the methods it must provide should be updated in the same
+# commit that adds one; that this was not is why the list is now spelled out
+# again here.
 package DupClass {
     sub new { bless { fields => $_[1] }, $_[0] }
     sub name          { 'Dup' }
     sub parent_name   { undef }
     sub methods       { () }
     sub adjust_blocks { () }
+    sub subs          { () }
     sub fields        { @{ $_[0]{fields} } }
 }
 
