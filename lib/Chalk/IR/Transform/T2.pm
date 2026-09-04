@@ -49,14 +49,48 @@ class Chalk::IR::Transform::T2 {
     # Int's set without changing the pass's shape. A hash literal mapping
     # Int => 'i64' would express none of that, and building one now would bake
     # in the pre-narrowed assumption this split exists to remove.
+    # THE MAPPING IS INJECTIVE, AND THAT IS A DESIGN REQUIREMENT, not an
+    # accident of which names were free.
+    #
+    # `Boolean` and `Undef` both denote one bit and would both answer `i1`;
+    # `ArrayRef`, `HashRef`, `CodeRef` and `Object` are all boxed pointers and
+    # would all answer `i8*`. Collapsed that way, a consumer holding `i1`
+    # cannot tell which type it had -- so a site asking "is this an Undef?"
+    # starts firing on Booleans too, silently. A check meaning two things at
+    # once is the failure mode this codebase keeps recording.
+    #
+    # LLVM ENFORCES THE DISTINCTION FOR FREE, because named struct types are
+    # NOMINAL. Measured against lli-15:
+    #
+    #     %Bool  = type { i1 }
+    #     %Undef = type { i1 }
+    #     ... extractvalue %Undef %b
+    #     -> error: '%b' defined with type '%Bool = type { i1 }' but expected
+    #        '%Undef = type { i1 }'
+    #
+    # Two structurally identical types stay distinct and mixing them is a
+    # VERIFIER error rather than a silent pass. The backend already depends on
+    # this for %Str, %Slot, %Array and %Hash -- these brands only apply it
+    # consistently.
+    #
+    # THE COST HAS A TRIVIAL INVERSE, which is why it is not really a cost. A
+    # branded value is a struct wrapping its payload, so it costs an
+    # insertvalue/extractvalue pair. perigrin: "even if LLVM's optimizer didn't
+    # we could trivially write a post-T2 optimizer that did unwind them" --
+    # unwrapping a single-field struct needs no analysis at all. So the brand
+    # is a COMPILE-TIME fact that has done its job the moment T2's output is
+    # checked, and correctness never depends on the unwrapping happening.
+    # (LLVM's own optimizer flattens single-field structs routinely, so the
+    # pass may never need writing; that is a measurement, not an assumption.)
     our %CANDIDATES = (
         # Decidable today: one candidate, so narrowing is trivially done.
-        Boolean  => ['i1'],
-        Undef    => ['i1'],
-        Object   => ['i8*'],
-        ArrayRef => ['i8*'],
-        HashRef  => ['i8*'],
-        CodeRef  => ['i8*'],
+        # BRANDED where the underlying machine type is shared -- see above.
+        Boolean  => ['%Boolean'],    # { i1 }, distinct from Undef
+        Undef    => ['%Undef'],      # { i1 }, distinct from Boolean
+        Object   => ['%Object*'],
+        ArrayRef => ['%ArrayRef*'],
+        HashRef  => ['%HashRef*'],
+        CodeRef  => ['%CodeRef*'],
         Array    => ['%Array*'],
         Hash     => ['%Hash*'],
 
@@ -137,6 +171,38 @@ class Chalk::IR::Transform::T2 {
 
         $node->set_stamp($class->_choose($node, $stamp));
         return;
+    }
+
+    # llvm_type_for($chalk_type) -> the LLVM type a DECLARED type narrows to.
+    #
+    # THE MOP IS NOT REWRITTEN, DELIBERATELY. A field's declared type, a
+    # method's return type and a sub's are the program's own view of itself,
+    # and the MOP is intended to become a RUNTIME metaobject -- perigrin:
+    # "the long term thoughts of the MOP being potentially a runtime MOP".
+    # `$obj->meta->field('n')->type` must answer `Int`, because that is what
+    # the LANGUAGE says; `i64` is a compilation artifact with no business
+    # surviving into a running program.
+    #
+    # So the Chalk type stays canonical on the metaobject and the LLVM type is
+    # DERIVED HERE, on demand. That makes a runtime MOP correct by
+    # construction: nothing ever writes a compile-time type into it, so nothing
+    # can leak. It also explains why MOP::Field has no `set_type` and why
+    # `set_return_type` refuses this rewrite -- it enforces narrowing WITHIN
+    # the Chalk lattice, and crossing to LLVM vocabulary is a different
+    # operation that should not borrow that door.
+    #
+    # THIS IS NOT "consumers deciding encoding one site at a time", which the
+    # T2 design rightly forbids. That objection is to N INDEPENDENT decisions;
+    # this is ONE decision in one place, called from wherever a declared type
+    # meets the backend (measured: 3 such sites, all in Target/LLVM.pm). The
+    # graph nodes are still REWRITTEN -- only the metaobject, which outlives
+    # compilation, keeps its own vocabulary.
+    sub llvm_type_for ($class, $chalk_type) {
+        return undef unless defined $chalk_type;
+        # Already an LLVM type, or a name T2 does not narrow (Unknown reaching
+        # here is the caller's to diagnose): pass it through unchanged.
+        return $chalk_type unless exists $CANDIDATES{$chalk_type};
+        return $CANDIDATES{$chalk_type}[0];
     }
 
     # _choose($node, $stamp) -> the single LLVM type.

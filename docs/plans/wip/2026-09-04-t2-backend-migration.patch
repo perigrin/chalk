@@ -1,0 +1,1278 @@
+diff --git a/lib/Chalk/Target/LLVM.pm b/lib/Chalk/Target/LLVM.pm
+index dc1924d4..ff7cdc7f 100644
+--- a/lib/Chalk/Target/LLVM.pm
++++ b/lib/Chalk/Target/LLVM.pm
+@@ -223,7 +223,7 @@ sub _method_fn_llvm_ret_type {
+     # Str is the ONLY divergence from %_REPR_LLVM_TYPE, and it is a genuine
+     # one: a Str VALUE is %Str (ptr,len,enc) but a Str RETURN crosses the
+     # function boundary as %Str (ptr,len).
+-    return '%Str' if $repr eq 'Str';
++    return '%Str' if $repr eq '%Str';
+ 
+     # Every other representation DEFERS. The literal chain that stood here
+     # (i64/i1/double/i1/%Slot) answered the same question %_REPR_LLVM_TYPE
+@@ -725,7 +725,12 @@ sub _populate_registry_from_mop_class {
+             # declaration is authoritative when it determined one; `Unknown`
+             # means inference did NOT, and there is no encoding of `Unknown` --
+             # so fall through to the body root rather than emit it as a type.
+-            return_repr => (
++            # THROUGH T2, because the metaobject speaks CHALK and the
++            # backend speaks LLVM. The MOP keeps its own vocabulary so it can
++            # become a runtime metaobject -- see T2::llvm_type_for -- so the
++            # translation happens where the two meet, once, through the one
++            # authority.
++            return_repr => Chalk::IR::Transform::T2->llvm_type_for(
+                 ( ( $s->return_type // 'Unknown' ) ne 'Unknown' )
+                 ? $s->return_type
+                 : _require_repr($body_node, "MOP::Sub '${cname}::${sname}' body root")
+@@ -745,9 +750,12 @@ sub _populate_registry_from_mop_class {
+         # root. (A method's return_type used to be universally undef, which made
+         # `//` do this by accident; now that declare_method carries the wire's
+         # value it arrives as the lattice top and must be tested for.)
+-        my $ret_repr  = ( ( $m->return_type // 'Unknown' ) ne 'Unknown' )
++        # Through T2: the declared type is Chalk vocabulary, the emitted
++        # signature is LLVM vocabulary. See T2::llvm_type_for.
++        my $ret_repr  = Chalk::IR::Transform::T2->llvm_type_for(
++            ( ( $m->return_type // 'Unknown' ) ne 'Unknown' )
+             ? $m->return_type
+-            : _require_repr($body_node, "MOP::Method '$mname' body root");
++            : _require_repr($body_node, "MOP::Method '$mname' body root"));
+         unless (grep { ($_->{name} // '') eq $mname } @{ $registry->{$cname}{methods} }) {
+             # THE SIGNATURE COMES FROM THE BODY GRAPH, not from a wire field.
+             # A method's parameters are exactly its Parameter nodes, each
+@@ -770,9 +778,13 @@ sub _populate_registry_from_mop_class {
+     for my $mf ($cls->fields) {
+         my $fname       = $mf->name;
+         my $fidx        = $mf->fieldix;
+-        my $f_repr      = $mf->type
++        # Through T2: a field's declared type stays Chalk on the
++        # metaobject (a runtime MOP must answer `Int`, not `i64`) and is
++        # translated here, where it meets the emitted struct layout.
++        my $f_repr      = Chalk::IR::Transform::T2->llvm_type_for(
++            $mf->type
+             // die "GAP: field '$fname' in class '$cname' has no declared repr "
+-                 . "(type) — refusing to silently default to Int.";
++                 . "(type) — refusing to silently default to Int.");
+         # A field already at this index is either the SAME field re-encountered
+         # (idempotent re-add across inheritance passes — skip it) or a DIFFERENT
+         # field colliding on the slot (malformed MOP — the second would be
+@@ -945,11 +957,11 @@ sub _emit_class_registry_ir {
+                 my $p_fwd   = $p_decl;   # formals and actuals are the same text
+                 push @lines, "define internal $fn_ret $fn_name($p_decl) {";
+                 push @lines, 'entry:';
+-                if ($ret_repr eq 'Str') {
++                if ($ret_repr eq '%Str') {
+                     push @lines, "  %r = call %Str $parent_fn($p_fwd)";
+                     push @lines, '  ret %Str %r';
+                 }
+-                elsif ($ret_repr eq 'Num') {
++                elsif ($ret_repr eq 'double') {
+                     # $fn_ret is already this repr's return type (:700); naming
+                     # `double` again here was a second authority for the same
+                     # answer, in the one place where disagreeing with the
+@@ -957,7 +969,7 @@ sub _emit_class_registry_ir {
+                     push @lines, "  %r = call $fn_ret $parent_fn($p_fwd)";
+                     push @lines, "  ret $fn_ret %r";
+                 }
+-                elsif ($ret_repr eq 'Boolean') {
++                elsif ($ret_repr eq '%Boolean') {
+                     push @lines, "  %r = call i1 $parent_fn($p_fwd)";
+                     push @lines, '  ret i1 %r';
+                 }
+@@ -988,7 +1000,7 @@ sub _emit_class_registry_ir {
+                 # Load payload
+                 push @lines, "  %pay_gep = getelementptr inbounds %${cname}.obj, %${cname}.obj* %obj, i64 0, i32 $slot_idx, i32 $fi_pay";
+                 push @lines, '  %pay = load i64, i64* %pay_gep';
+-                if ($ret_repr eq 'Str') {
++                if ($ret_repr eq '%Str') {
+                     # payload = StrPair* (as i64) -> cast back and return {ptr, len}
+                     push @lines, '  %pair_ptr = inttoptr i64 %pay to %Str*';
+                     push @lines, '  %pp_gep = getelementptr inbounds %Str, %Str* %pair_ptr, i64 0, i32 0';
+@@ -1068,7 +1080,7 @@ sub _emit_class_registry_ir {
+             push @lines, $body_ctx->render_blocks(1);
+ 
+             # Emit return instruction
+-            if ($ret_repr eq 'Str') {
++            if ($ret_repr eq '%Str') {
+                 # Through the seam, not into the table. This was the one direct
+                 # A Str-returning body hands back a %Str aggregate, so
+                 # destructure it for the %Str return ABI. Emitted inline
+@@ -1076,7 +1088,7 @@ sub _emit_class_registry_ir {
+                 # through the context, so _str_parts — which emits into the
+                 # context's current block — cannot be used here.
+                 #
+-                # Keyed on the repr (we are inside `$ret_repr eq 'Str'`), not on
++                # Keyed on the repr (we are inside `$ret_repr eq '%Str'`), not on
+                 # a side registry: every Str value is an aggregate, and a phi
+                 # result is one the registry would never have recorded.
+                 push @lines, "  %ret_sp = extractvalue %Str $body_val, 0";
+@@ -1097,18 +1109,18 @@ sub _emit_class_registry_ir {
+                     push @lines, '  ret %Str %ret_r1';
+                 }
+             }
+-            elsif ($ret_repr eq 'Num') {
++            elsif ($ret_repr eq 'double') {
+                 push @lines, "  ret $fn_ret $body_val";
+             }
+-            elsif ($ret_repr eq 'Boolean') {
++            elsif ($ret_repr eq '%Boolean') {
+                 push @lines, "  ret i1 $body_val";
+             }
+-            elsif ($ret_repr eq 'Undef') {
++            elsif ($ret_repr eq '%Undef') {
+                 # Undef-returning method (discarded if/else field-mutation
+                 # residual): the body value is the i1 defined-bit (always 0).
+                 push @lines, "  ret i1 $body_val";
+             }
+-            elsif ($ret_repr eq 'Scalar') {
++            elsif ($ret_repr eq '%Slot') {
+                 # The ABI is %Slot = { i1 defined, i8 tag, i64 payload }.
+                 #
+                 # WHETHER TO BOX DEPENDS ON WHAT THE BODY ALREADY IS, and the
+@@ -1131,13 +1143,13 @@ sub _emit_class_registry_ir {
+                               ? ($body_node->representation // '')
+                               : '';
+ 
+-                if ($body_repr eq 'Scalar') {
++                if ($body_repr eq '%Slot') {
+                     # Already a %Slot: the tag it carries is the reading the
+                     # body established, which is strictly better than the
+                     # Opaque one this arm would stamp on.
+                     push @lines, "  ret %Slot $body_val";
+                 }
+-                elsif ($body_repr eq 'Str') {
++                elsif ($body_repr eq '%Str') {
+                     # A STR BODY IS AN AGGREGATE, NOT A PAYLOAD WORD.
+                     # `field $s :param = "hi"; method get { $s }` reads the
+                     # field as a Str (`%Str = { ptr, len, enc }`) and this arm
+@@ -1305,17 +1317,17 @@ sub _emit_class_registry_ir {
+             push @lines, 'entry:';
+             push @lines, $body_ctx->render_blocks(1);
+ 
+-            if ($ret_repr eq 'Str') {
++            if ($ret_repr eq '%Str') {
+                 push @lines, "  %ret_sp = extractvalue %Str $body_val, 0";
+                 push @lines, "  %ret_sl = extractvalue %Str $body_val, 1";
+                 push @lines, "  %ret_r0 = insertvalue %Str undef, i8* %ret_sp, 0";
+                 push @lines, "  %ret_r1 = insertvalue %Str %ret_r0, i64 %ret_sl, 1";
+                 push @lines, '  ret %Str %ret_r1';
+             }
+-            elsif ($ret_repr eq 'Num')  { push @lines, "  ret $fn_ret $body_val" }
+-            elsif ($ret_repr eq 'Boolean'
+-                || $ret_repr eq 'Undef'){ push @lines, "  ret i1 $body_val" }
+-            elsif ($ret_repr eq 'Scalar') {
++            elsif ($ret_repr eq 'double')  { push @lines, "  ret $fn_ret $body_val" }
++            elsif ($ret_repr eq '%Boolean'
++                || $ret_repr eq '%Undef'){ push @lines, "  ret i1 $body_val" }
++            elsif ($ret_repr eq '%Slot') {
+                 # Boxed into %Slot -- see the sibling site above.
+                 my $ri_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
+                 my $ri_tag = Chalk::Target::LLVM::Context::_slot_idx('tag');
+diff --git a/lib/Chalk/Target/LLVM/Context.pm b/lib/Chalk/Target/LLVM/Context.pm
+index 3f1de1bc..7a962d6a 100644
+--- a/lib/Chalk/Target/LLVM/Context.pm
++++ b/lib/Chalk/Target/LLVM/Context.pm
+@@ -30,7 +30,8 @@ use utf8;
+ # Keep `GAP:` honest: if the message would not make sense as an entry on a
+ # list of features to implement, it is not a GAP.
+ 
+-use Chalk::IR::NodeFactory;   # is_statement_node() classifier used by the value/effect collectors
++use Chalk::IR::NodeFactory;
++use Chalk::IR::Transform::T2;   # is_statement_node() classifier used by the value/effect collectors
+ use Chalk::IR::Analysis;      # return_reading_for_want: which of a callee reading a callsite takes
+ 
+ # Re-export helpers from the main package so unqualified calls in this
+@@ -676,7 +677,7 @@ sub render_need_flag_prologue {
+     # path); this branch handles the case where the return is not Str but the
+     # body contains a Coerce(Boolean->Str) in the MAIN graph (not a method
+     # body — method bodies are handled post-class).
+-    if ($self->{_need_bool_str_globals} && $result_repr ne 'Str') {
++    if ($self->{_need_bool_str_globals} && $result_repr ne '%Str') {
+         push @lines, '@coerce_bool_str_true  = private unnamed_addr constant [2 x i8] c"1\00", align 1';
+         push @lines, '@coerce_bool_str_false = private unnamed_addr constant [1 x i8] c"\00",   align 1';
+         $self->{_bool_str_globals_emitted} = 1;
+@@ -871,7 +872,7 @@ sub render_need_flag_postclass_reemit {
+     my ($self, $result_repr) = @_;
+     my @lines;
+ 
+-    if ($self->{_need_bool_str_globals} && $result_repr ne 'Str') {
++    if ($self->{_need_bool_str_globals} && $result_repr ne '%Str') {
+         # Only emit if the Str-prologue path (which always includes these globals)
+         # did NOT already emit them. The Str-prologue emits them unconditionally
+         # when result_repr eq 'Str'; for all other reprs, we must emit here if needed.
+@@ -880,7 +881,7 @@ sub render_need_flag_postclass_reemit {
+         # path, elsewhere) or when _need_bool_str_globals was already set on $self
+         # before class-lowering (render_need_flag_prologue, above). Since we only
+         # reach here when result_repr ne 'Str', the prologue cannot have emitted them
+-        # (it checks `$result_repr ne 'Str'` too), so we need to emit now IF the flag
++        # (it checks `$result_repr ne '%Str'` too), so we need to emit now IF the flag
+         # was newly set by method-body propagation (not by the main graph). Guard:
+         # _bool_str_globals_emitted tracks whether the prologue already emitted them.
+         unless ($self->{_bool_str_globals_emitted}) {
+@@ -1824,11 +1825,11 @@ sub _lower_constant {
+           . "(value=${\(defined $val ? $val : 'undef')}). "
+           . "Fix TypeInference to annotate this node, or set the representation explicitly.";
+     }
+-    if ($repr eq 'Scalar') {
++    if ($repr eq '%Slot') {
+         die "Constant node with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+     }
+ 
+-    if ($repr eq 'Int') {
++    if ($repr eq 'i64') {
+         # Int constant -> i64 immediate via add i64 0, VALUE. Emit into the ENTRY
+         # block: a constant is pure and, when hash-consed across blocks (e.g. an
+         # index shared by a branch-guarded store and a post-merge read, memory-SSA
+@@ -1839,7 +1840,7 @@ sub _lower_constant {
+         $self->{cache}{$node->id} = $ref;
+         return $ref;
+     }
+-    elsif ($repr eq 'Boolean') {
++    elsif ($repr eq '%Boolean') {
+         # Boolean constant -> i1 immediate. A folded comparison (1 < 2) reaches
+         # here as a Boolean Constant; Perl's true is 1, false is the empty
+         # string, so any truthy value lowers to i1 1 and a falsy one to i1 0.
+@@ -1849,7 +1850,7 @@ sub _lower_constant {
+         $self->{cache}{$node->id} = $ref;
+         return $ref;
+     }
+-    elsif ($repr eq 'Num') {
++    elsif ($repr eq 'double') {
+         # Num constant -> double immediate.
+         #
+         # A float whose value is INTEGRAL arrives here as a bare integer literal
+@@ -1870,7 +1871,7 @@ sub _lower_constant {
+         $self->{cache}{$node->id} = $ref;
+         return $ref;
+     }
+-    elsif ($repr eq 'Str') {
++    elsif ($repr eq '%Str') {
+         # Str constant -> private global + GEP to get i8* ptr.
+         # The Str representation is {ptr, len, encoding}; here encoding=0 (ASCII/default).
+         # We track the ptr as the SSA value and record the byte-length in _str_len_table.
+@@ -1916,7 +1917,7 @@ sub _lower_constant {
+         $self->{cache}{$node->id} = $strv;
+         return $strv;
+     }
+-    elsif ($repr eq 'Undef') {
++    elsif ($repr eq '%Undef') {
+         # Undef constant -> an i1 defined-bit of false (0).
+         #
+         # The Undef representation carries a single i1 "defined" bit. For a
+@@ -1963,7 +1964,7 @@ sub _lower_constant {
+ # The op table that stood here (%_INT_TO_FLOAT_OP: add=>fadd, sub=>fsub,
+ # mul=>fmul) is now %_FLOAT_OPCODE beside %_REPR_LLVM_TYPE, reached through
+ # _repr_opcode. Here it was keyed by the mnemonic ALONE, so the representation
+-# entered only through a `$repr eq 'Num'` branch that hardcoded `double` next
++# entered only through a `$repr eq 'double'` branch that hardcoded `double` next
+ # to it -- the machine type asserted at the site rather than asked for.
+ 
+ sub _lower_binop_int {
+@@ -1975,7 +1976,7 @@ sub _lower_binop_int {
+         die "$op node has no representation at lowering time. "
+           . "Fix TypeInference to annotate this node (G.6/F7).";
+     }
+-    die "$op with repr=Scalar reached LLVM backend" if $repr eq 'Scalar';
++    die "$op with repr=Scalar reached LLVM backend" if $repr eq '%Slot';
+ 
+     my $inputs  = $node->inputs;
+ 
+@@ -1987,7 +1988,7 @@ sub _lower_binop_int {
+     # type first. An `add i64` over a double operand is invalid IR (lli verify:
+     # "double but expected i64"). 019f63e9.
+     #
+-    # The single branch that used to read `if ($repr eq 'Num')` is gone: were
++    # The single branch that used to read `if ($repr eq 'double')` is gone: were
+     # Num to map to an integral type, _repr_opcode would return the integer
+     # mnemonic and _lower_as_repr would emit no conversion, with no edit here.
+     my $ty     = _repr_to_llvm_type($repr);
+@@ -2043,12 +2044,12 @@ sub _lower_divide {
+     # An Int-repr Divide would silently emit sdiv which miscompiles vs perl.
+     # The correct path: give the Divide node Num representation and Coerce the
+     # Int operands to Num before dividing.
+-    if (!defined $repr || $repr eq 'Int') {
++    if (!defined $repr || $repr eq 'i64') {
+         die "GAP: op=Divide with repr=" . ($repr // 'undef')
+           . " — Perl `/` is float division; lower as Num (fdiv double) not i64 sdiv. "
+           . "Set Divide representation to 'Num' and Coerce Int operands to Num.";
+     }
+-    if ($repr eq 'Scalar') {
++    if ($repr eq '%Slot') {
+         die "Divide with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+     }
+ 
+@@ -2088,10 +2089,10 @@ sub _lower_modulo {
+     my $repr = $node->representation;
+     my $op   = $node->operation;
+ 
+-    if (defined $repr && $repr eq 'Scalar') {
++    if (defined $repr && $repr eq '%Slot') {
+         die "Modulo with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+     }
+-    if (defined $repr && $repr eq 'Num') {
++    if (defined $repr && $repr eq 'double') {
+         die "LLVM backend: Modulo with repr=Num not supported (fmod semantics differ from perl %)";
+     }
+ 
+@@ -2158,7 +2159,7 @@ sub _lower_concat {
+     my ($self, $node) = @_;
+ 
+     my $repr = $node->representation;
+-    if (defined $repr && $repr ne 'Str') {
++    if (defined $repr && $repr ne '%Str') {
+         die "GAP: Concat with repr=$repr reached LLVM backend — Concat requires Str operands";
+     }
+ 
+@@ -2326,11 +2327,11 @@ sub _empty_str_ref {
+ sub _emit_to_str {
+     my ($self, $from, $input_ref, $label) = @_;
+ 
+-    if ($from eq 'Str') {
++    if ($from eq '%Str') {
+         return $input_ref;   # already a Str; the length is already tracked
+     }
+ 
+-    if ($from eq 'Boolean') {
++    if ($from eq '%Boolean') {
+         my ($one_g, $one_len, $one_tot) = $self->_module_global_name('bool_str', '1');
+         my ($nil_g, undef,    $nil_tot) = $self->_module_global_name('bool_str', '');
+         my ($one_p, $nil_p, $ptr, $len) =
+@@ -2343,7 +2344,7 @@ sub _emit_to_str {
+         return $ptr;
+     }
+ 
+-    if ($from eq 'Num') {
++    if ($from eq 'double') {
+         # perl's float stringification IS %.15g (verified against perl 5.42 on
+         # 0.1, 1e+34, 1.000001, 0.0005 and the corpus floats). snprintf is
+         # called twice: once with a null buffer to learn the length, then into a
+@@ -2421,7 +2422,7 @@ sub _emit_to_str {
+         return $self->_set_str_len($out_p, $out_l);
+     }
+ 
+-    if ($from eq 'Int') {
++    if ($from eq 'i64') {
+         return $self->_emit_int_to_str($input_ref);
+     }
+ 
+@@ -2431,7 +2432,7 @@ sub _emit_to_str {
+     # Kept SEPARATE from the Unknown arm below although both emit "". They are
+     # different claims, and the lattice keeps them apart for that reason
+     # ("Scalar is a legitimate static answer, Unknown is an inference failure").
+-    if ($from eq 'Undef') {
++    if ($from eq '%Undef') {
+         return $self->_emit_empty_str($label);
+     }
+ 
+@@ -2484,8 +2485,8 @@ sub _emit_to_str {
+     # It is NOT string INTERPOLATION: `"@k"` joins the elements with $" and is
+     # a different operation reached a different way. The refusal below stays
+     # for anything that really has no scalar reading.
+-    if ($from eq 'Array' || $from eq 'ArrayRef' || $from eq 'Hash' || $from eq 'HashRef') {
+-        my $kind = ($from eq 'Hash' || $from eq 'HashRef') ? 'Hash' : 'Array';
++    if ($from eq '%Array*' || $from eq '%ArrayRef*' || $from eq '%Hash*' || $from eq '%HashRef*') {
++        my $kind = ($from eq '%Hash*' || $from eq '%HashRef*') ? 'Hash' : 'Array';
+         my $ptr  = $input_ref;
+         if ($from =~ /Ref$/) {
+             my $typed = $self->_fresh;
+@@ -2616,7 +2617,7 @@ sub _emit_box_into_slot {
+     my ($self, $input_ref, $from, $label) = @_;
+ 
+     return $self->_build_slot('false', '0', 'Undef', "$label: undef cell")
+-        if $from eq 'Undef';
++        if $from eq '%Undef';
+ 
+     # An UNKNOWN operand is an inference failure that got this far. It has no
+     # established reading, so it boxes as Opaque -- and a later read of that
+@@ -2743,10 +2744,10 @@ sub _emit_read_slot_as {
+ sub _unbox_payload_as {
+     my ($self, $payload, $repr, $label) = @_;
+ 
+-    return $payload if $repr eq 'Int';   # an Int IS the payload word
++    return $payload if $repr eq 'i64';   # an Int IS the payload word
+ 
+     my $ref = $self->_fresh;
+-    if ($repr eq 'Num') {
++    if ($repr eq 'double') {
+         # REINTERPRET, not convert: the payload word holds this value's bits.
+         # Only the KIND of move is fixed here; the type it lands in is
+         # %_REPR_LLVM_TYPE's decision, exactly as at _store_field_payload's
+@@ -2756,11 +2757,11 @@ sub _unbox_payload_as {
+         $self->_emit("  $ref = bitcast i64 $payload to $num_ty  ; $label: payload -> Num");
+         return $ref;
+     }
+-    if ($repr eq 'Boolean') {
++    if ($repr eq '%Boolean') {
+         $self->_emit("  $ref = icmp ne i64 $payload, 0  ; $label: payload -> Boolean");
+         return $ref;
+     }
+-    if ($repr eq 'Str') {
++    if ($repr eq '%Str') {
+         # _box_payload stores a %Str* via ptrtoint; read the pair back and
+         # rebuild the (ptr, len) VALUE so the length travels with the pointer.
+         $self->{_need_str_type} = 1;
+@@ -2821,6 +2822,28 @@ sub _lower_coerce {
+ sub _emit_coercion {
+     my ($self, $input_ref, $from, $to, $what) = @_;
+ 
++    # NORMALISE BOTH ENDS TO ONE VOCABULARY, at the single entry point rather
++    # than at each of the ~19 callers.
++    #
++    # The two arguments arrive from different places and, after T2, in
++    # different vocabularies: a node's STAMP has been narrowed to an LLVM type,
++    # while a Coerce node's `from_repr`/`to_repr` FIELDS still hold the Chalk
++    # types the producer wrote. Measured, that produced `Coerce[i64->Str]` --
++    # one end narrowed, one not -- and the backend refused a conversion it
++    # actually knows how to do.
++    #
++    # THE COERCE FIELDS ARE NOT NARROWED BY T2 ON PURPOSE. They are reader-only
++    # and they participate in the node's hash-cons identity: two
++    # `Coerce(Int->Str)` nodes ARE the same node BECAUSE of those fields.
++    # Rewriting them in place would corrupt the node cache, and a coercion is
++    # defined by the pair it bridges -- it is not a node that merely carries a
++    # type.
++    #
++    # `llvm_type_for` is idempotent on an already-narrowed name, so this is
++    # safe for both kinds of caller and needs no flag saying which is which.
++    $from = Chalk::IR::Transform::T2->llvm_type_for($from) // $from;
++    $to   = Chalk::IR::Transform::T2->llvm_type_for($to)   // $to;
++
+     return $input_ref if $from eq $to;   # nothing to bridge
+ 
+     my $ref = $self->_fresh;
+@@ -2831,7 +2854,7 @@ sub _emit_coercion {
+     # is integral and the other is not. Map Num to an integral type and it
+     # returns undef -- the arrow is the identity and nothing is emitted, which
+     # is the correct answer, reached without editing this arm.
+-    if (($from eq 'Int' && $to eq 'Num') || ($from eq 'Num' && $to eq 'Int')) {
++    if (($from eq 'i64' && $to eq 'double') || ($from eq 'double' && $to eq 'i64')) {
+         my $conv = _repr_convert_op($from, $to);
+         return $input_ref unless $conv;   # same machine type: nothing to bridge
+         my $ft = _repr_to_llvm_type($from);
+@@ -2849,14 +2872,14 @@ sub _emit_coercion {
+     # predicates differ by more than a leading `f`). The zero it compares
+     # against comes from the same authority, so -0.0 stays covered whatever
+     # that zero becomes.
+-    elsif ($to eq 'Boolean' && ($from eq 'Int' || $from eq 'Num')) {
++    elsif ($to eq '%Boolean' && ($from eq 'i64' || $from eq 'double')) {
+         my $cmp   = _repr_opcode('icmp', $from);
+         my $pred  = _repr_is_float($from) ? 'une' : 'ne';
+         my $ty    = _repr_to_llvm_type($from);
+         my $zero  = _repr_zero($from);
+         $self->_emit("  $ref = $cmp $pred $ty $input_ref, $zero  ; Coerce[$from->Boolean] truthiness");
+     }
+-    elsif ($to eq 'Boolean' && $from eq 'Boolean') {
++    elsif ($to eq '%Boolean' && $from eq '%Boolean') {
+         # Identity coercion — just pass through. (Also caught by the
+         # $from eq $to guard above; kept so the arm list stays exhaustive.)
+         return $input_ref;
+@@ -2867,7 +2890,7 @@ sub _emit_coercion {
+     # merges it with a real Num. The %Slot tag dispatch is the first such
+     # consumer -- a Boolean-tagged cell read as Num lands in a `phi double`
+     # beside a genuine double -- and lli rejected it there.
+-    elsif ($from eq 'Boolean' && $to eq 'Num') {
++    elsif ($from eq '%Boolean' && $to eq 'double') {
+         # `uitofp` vs `zext` is exactly the choice _repr_convert_op makes, from
+         # Num's machine type rather than from its name -- and it knows i1 is
+         # UNsigned, which is the bug the comment above records.
+@@ -2878,7 +2901,7 @@ sub _emit_coercion {
+         $self->_emit("  $ref = $conv $ft $input_ref to $tt  ; Coerce[Boolean->Num] $one");
+     }
+     # Coerce(Boolean->Int) = 0/1: zero-extend i1 to i64 (same as Boolean->Num for integers).
+-    elsif ($from eq 'Boolean' && $to eq 'Int') {
++    elsif ($from eq '%Boolean' && $to eq 'i64') {
+         $self->_emit("  $ref = zext i1 $input_ref to i64  ; Coerce[Boolean->Int] 0/1");
+     }
+     # Coerce(Undef->Int/Num) = 0. Perl is unambiguous: undef in numeric context
+@@ -2886,7 +2909,7 @@ sub _emit_coercion {
+     # (always i1 false), so the numeric face is the constant, not a conversion
+     # of that bit -- zext'ing the bit would also give 0 here, but only by
+     # coincidence, and would be wrong the moment Undef is represented otherwise.
+-    elsif ($from eq 'Undef' && ($to eq 'Int' || $to eq 'Num')) {
++    elsif ($from eq '%Undef' && ($to eq 'i64' || $to eq 'double')) {
+         # These three ternaries were the functor written inline in miniature:
+         # one branch on the Chalk type picking a zero literal, one picking a
+         # machine type, one picking an opcode -- three chances to disagree.
+@@ -2905,7 +2928,7 @@ sub _emit_coercion {
+     # The %Slot tag dispatch is the first caller to reach it: an undefined cell
+     # read as Boolean takes the undef path, and that path needs an answer for
+     # every target type it can be asked for.
+-    elsif ($from eq 'Undef' && $to eq 'Boolean') {
++    elsif ($from eq '%Undef' && $to eq '%Boolean') {
+         # `icmp ne i1 false, true` computes (false != true) = TRUE, which is
+         # the OPPOSITE of what the trailing comment claimed and of what perl
+         # does: undef is false. Caught by the composition characterization --
+@@ -2937,14 +2960,14 @@ sub _emit_coercion {
+     # joins) that pass reprs directly with no Coerce NODE on the edge. When one
+     # of these dies, the label is what says whether a node or an arm join
+     # produced the conversion.
+-    elsif ($to eq 'Scalar' || $to eq 'Slot') {
++    elsif ($to eq '%Slot' || $to eq 'Slot') {
+         # BOXING. No dispatch is needed and none would be honest: the source's
+         # own representation IS the reading, so it becomes the tag. This is the
+         # only point in the pipeline where the interpretation of those 64 bits
+         # is known for free, which is exactly why the tag is written here.
+         return $self->_emit_box_into_slot($input_ref, $from, "$what\[$from -> $to]");
+     }
+-    elsif ($from eq 'Scalar' || $from eq 'Slot') {
++    elsif ($from eq '%Slot' || $from eq 'Slot') {
+         # READING. The 2026-07-15 die that stood here said this needed "a T2
+         # decision about how to read a %Slot payload ... either a tag or a
+         # runtime". It is a tag: %Slot carries an i8 naming the reading its
+@@ -2961,7 +2984,7 @@ sub _emit_coercion {
+     # (ptr, len) PAIR, so each of these records a length in _str_len_table
+     # alongside the pointer it returns; a consumer that slices `len` bytes off
+     # an unrecorded pointer would emit garbage.
+-    elsif ($to eq 'Str') {
++    elsif ($to eq '%Str') {
+         return $self->_emit_to_str($from, $input_ref, "$what\[$from->Str]");
+     }
+     # Coerce(Str->Num): perl leading-numeric rule.
+@@ -2973,7 +2996,7 @@ sub _emit_coercion {
+     # that returns 0.0 for any string starting with "0x" or "0X" (the one known
+     # divergence between strtod and perl's rule). strtod matches perl for all other
+     # leading-numeric forms. See G3 implementation notes.
+-    elsif ($from eq 'Str' && $to eq 'Num') {
++    elsif ($from eq '%Str' && $to eq 'double') {
+         my ($ptr_ref, $tracked_len) = $self->_str_parts($input_ref);
+         my $len_ref = $tracked_len // 0;
+         # Flag that the str-to-num helper + strtod declaration are needed.
+@@ -2990,7 +3013,7 @@ sub _emit_coercion {
+     # which was latent while nothing routed a Str into an Int. The %Slot tag
+     # dispatch is the first caller that reaches it: reading a cell as Int must
+     # enumerate the Str tag, because the cell may hold one.
+-    elsif ($from eq 'Str' && $to eq 'Int') {
++    elsif ($from eq '%Str' && $to eq 'i64') {
+         my $as_num = $self->_emit_coercion($input_ref, 'Str', 'Num', $what);
+         return $self->_emit_coercion($as_num, 'Num', 'Int', $what);
+     }
+@@ -3006,7 +3029,7 @@ sub _emit_coercion {
+     #   is_single_zero = (is_single_char AND is_zero_char)
+     #   is_false = (is_empty OR is_single_zero)
+     #   result = NOT is_false  (true iff not false)
+-    elsif ($from eq 'Str' && $to eq 'Boolean') {
++    elsif ($from eq '%Str' && $to eq '%Boolean') {
+         my ($ptr_ref, $tracked_len) = $self->_str_parts($input_ref);
+         my $len_ref = $tracked_len // 0;
+         # is_empty = (len == 0)
+@@ -3086,10 +3109,10 @@ sub _ensure_i1 {
+     die "LLVM backend: _ensure_i1 called with undef repr — operand must have a representation set"
+         unless defined $repr;
+ 
+-    return $ref if $repr eq 'Boolean';
++    return $ref if $repr eq '%Boolean';
+ 
+     die "LLVM backend: _ensure_i1 cannot convert repr=$repr to i1"
+-        unless $repr eq 'Int' || $repr eq 'Num';
++        unless $repr eq 'i64' || $repr eq 'double';
+ 
+     # Same shape as _emit_coercion's truthiness arm, and the same semantics:
+     # Int nonzero -> true (1) / zero -> false (0); Num nonzero -> true / zero
+@@ -3127,7 +3150,7 @@ sub _lower_vardecl {
+     my ($self, $node) = @_;
+ 
+     my $repr = _require_repr($node, 'VarDecl');
+-    if ($repr eq 'Scalar') {
++    if ($repr eq '%Slot') {
+         die "VarDecl with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+     }
+ 
+@@ -3138,7 +3161,7 @@ sub _lower_vardecl {
+     }
+     else {
+         # No initializer: use a zero/empty value for the type.
+-        if ($repr eq 'Str') {
++        if ($repr eq '%Str') {
+             die "GAP: VarDecl with repr=Str and no initializer reached LLVM backend — "
+               . "uninit Str is not yet lowered (would require an empty-string global).";
+         }
+@@ -3163,7 +3186,7 @@ sub _lower_vardecl {
+     # Undef representation: propagate the defined-bit and payload from the init
+     # node to this VarDecl, indexed by VarDecl id. DefinedOr looks up the payload
+     # by the PadAccess node's VarDecl id to complete the phi merge.
+-    if ($repr eq 'Undef' && defined $init_node) {
++    if ($repr eq '%Undef' && defined $init_node) {
+         my $init_id = $init_node->id;
+         if (exists $self->{_undef_defined_bit}{$init_id}) {
+             $self->{_undef_defined_bit}{ $node->id } = $self->{_undef_defined_bit}{$init_id};
+@@ -3218,7 +3241,7 @@ sub _lower_padaccess {
+     }
+ 
+     my $repr = _require_repr($node, 'PadAccess');
+-    if ($repr eq 'Scalar') {
++    if ($repr eq '%Slot') {
+         die "PadAccess with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+     }
+ 
+@@ -3253,7 +3276,7 @@ sub _lower_padaccess {
+     # Undef representation: propagate _undef_defined_bit and _undef_payload
+     # from the VarDecl to this PadAccess node id. DefinedOr looks up the
+     # payload by the LHS node's id (the PadAccess), not the VarDecl's id.
+-    if ($repr eq 'Undef') {
++    if ($repr eq '%Undef') {
+         if (exists $self->{_undef_defined_bit}{$vd_id}) {
+             $self->{_undef_defined_bit}{ $node->id } = $self->{_undef_defined_bit}{$vd_id};
+         }
+@@ -3276,7 +3299,7 @@ sub _lower_assign {
+     my ($self, $node) = @_;
+ 
+     my $repr = _require_repr($node, 'Assign');
+-    if ($repr eq 'Scalar') {
++    if ($repr eq '%Slot') {
+         die "Assign with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+     }
+ 
+@@ -3373,7 +3396,7 @@ sub _lower_assign {
+         # A Str package scalar needs TWO mutable slots (an i8* ptr and an i64
+         # len), since a Str value is a (ptr, len) pair. Store both; the read
+         # loads both and re-registers the loaded ptr in the length table.
+-        if ($rhs_repr eq 'Str') {
++        if ($rhs_repr eq '%Str') {
+             my ($pname, $lname) = $self->_pkg_str_global_names($lhs->stash_name, $var);
+             my ($str_ptr, $tracked_len) = $self->_str_parts($rhs_ref);
+             my $len_ref = $tracked_len
+@@ -3387,7 +3410,7 @@ sub _lower_assign {
+         # A Num package scalar is a single `double` slot — the float analogue of
+         # the Int i64 slot, in its own global so the read knows which face the
+         # bits hold.
+-        if ($rhs_repr eq 'Num') {
++        if ($rhs_repr eq 'double') {
+             my $nname = $self->_pkg_num_global_name($lhs->stash_name, $var);
+             my $nty = _repr_to_llvm_type($rhs_repr);
+             $self->_emit("  store $nty $rhs_ref, $nty* $nname  ; Assign(EntryDef-lvalue): store \$$var (Num package scalar)");
+@@ -3396,7 +3419,7 @@ sub _lower_assign {
+         }
+         die "GAP: Assign(EntryDef-lvalue) rhs repr=$rhs_repr; only Int, Num "
+           . "and Str package scalars are lowered runtime-free."
+-            unless $rhs_repr eq 'Int';
++            unless $rhs_repr eq 'i64';
+         my $gname = $self->_pkg_global_name($lhs->stash_name, $var);
+         $self->_emit("  store i64 $rhs_ref, i64* $gname  ; Assign(EntryDef-lvalue): store \$$var (package scalar)");
+         $self->{cache}{ $node->id } = $rhs_ref;
+@@ -3412,7 +3435,7 @@ sub _lower_assign {
+         my $key_idx   = $lhs->inputs->[1];
+         my $ctr_repr  = $container->representation // '';
+ 
+-        if ($ctr_repr eq 'Array' || $ctr_repr eq 'ArrayRef') {
++        if ($ctr_repr eq '%Array*' || $ctr_repr eq '%ArrayRef*') {
+             # Array element store: bounds-checked (same as _lower_array_write body).
+             $self->{_need_aggregate_types} = 1;
+ 
+@@ -3476,7 +3499,7 @@ sub _lower_assign {
+             $self->{cache}{ $node->id } = $rhs_ref;
+             return $rhs_ref;
+         }
+-        elsif ($ctr_repr eq 'Hash' || $ctr_repr eq 'HashRef') {
++        elsif ($ctr_repr eq '%Hash*' || $ctr_repr eq '%HashRef*') {
+             # Hash element store: linear-scan key lookup and value update (same body as _lower_hash_write).
+             $self->{_need_aggregate_types} = 1;
+             $self->{_need_malloc_memcpy}   = 1;
+@@ -3646,8 +3669,8 @@ my %FCMP_PREDICATE = (
+ # boolean is not a shape we lower runtime-free).
+ sub _coerce_ref_to_num {
+     my ($self, $ref, $repr, $op) = @_;
+-    return $ref if defined $repr && $repr eq 'Num';
+-    if (!defined $repr || $repr eq 'Int') {
++    return $ref if defined $repr && $repr eq 'double';
++    if (!defined $repr || $repr eq 'i64') {
+         # Which instruction (if any) bridges Int to Num is _repr_convert_op's
+         # answer, read out of both reprs' machine types. Undef here means the
+         # two share a type and the value is already in the right shape --
+@@ -3658,7 +3681,7 @@ sub _coerce_ref_to_num {
+             . _repr_to_llvm_type('Num') . "  ; $op: Int operand -> Num");
+         return $d;
+     }
+-    if ($repr eq 'Str') {
++    if ($repr eq '%Str') {
+         my ($str_ptr, $tracked) = $self->_str_parts($ref);
+         $ref = $str_ptr;
+         my $len_ref = $tracked // 0;
+@@ -3678,7 +3701,7 @@ sub _lower_icmp_int {
+     my $repr = $node->representation;
+     my $op   = $node->operation;
+ 
+-    if (defined $repr && $repr eq 'Scalar') {
++    if (defined $repr && $repr eq '%Slot') {
+         die "$op with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+     }
+ 
+@@ -3694,8 +3717,8 @@ sub _lower_icmp_int {
+     # is Num or Str, perl numifies both and compares as numbers -> coerce each to
+     # a double and fcmp. `"0" == "0"` (Str operands) is the t/base/cond.t blocker;
+     # `3 == 3.0` (Int vs Num) also lands here.
+-    my $lhs_int = !defined $lhs_repr || $lhs_repr eq 'Int';
+-    my $rhs_int = !defined $rhs_repr || $rhs_repr eq 'Int';
++    my $lhs_int = !defined $lhs_repr || $lhs_repr eq 'i64';
++    my $rhs_int = !defined $rhs_repr || $rhs_repr eq 'i64';
+     if ($lhs_int && $rhs_int) {
+         my $pred = $ICMP_PREDICATE{$op}
+             or die "LLVM backend: unknown comparison op=$op";
+@@ -3752,7 +3775,7 @@ sub _str_compare_operand {
+     my ($self, $input, $op, $side) = @_;
+     my $repr = $input->representation // '';
+     my $ref  = $self->lower_value($input);
+-    return $ref if $repr eq 'Str';
++    return $ref if $repr eq '%Str';
+     # StrEq/StrNe's signature is (Str, Str). A non-Str operand arrives through
+     # an explicit Stringify inserted by the producer, exactly as Print's
+     # arguments do -- `eq` does not know how to render any representation.
+@@ -3770,7 +3793,7 @@ sub _lower_str_compare {
+ 
+     my $op = $node->operation;
+     my $repr = $node->representation;
+-    if (defined $repr && $repr eq 'Scalar') {
++    if (defined $repr && $repr eq '%Slot') {
+         die "$op with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+     }
+ 
+@@ -3835,7 +3858,7 @@ sub _lower_ternary {
+     my $repr = $node->representation;
+     my $op   = $node->operation;
+ 
+-    if (defined $repr && $repr eq 'Scalar') {
++    if (defined $repr && $repr eq '%Slot') {
+         die "TernaryExpr with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
+     }
+ 
+@@ -3877,7 +3900,7 @@ sub _lower_ternary {
+     # Both arms statically Undef (a discarded if/else field-mutation residual):
+     # the result is Undef regardless of the guard. The Undef repr is the i1
+     # defined-bit (always false), so short-circuit to a constant 0 -- no select.
+-    if ($true_repr eq 'Undef' && $fals_repr eq 'Undef') {
++    if ($true_repr eq '%Undef' && $fals_repr eq '%Undef') {
+         $self->{cache}{$node->id} = '0';
+         return '0';
+     }
+@@ -3886,7 +3909,7 @@ sub _lower_ternary {
+     # i8* ptr on the guard, AND select the length so _str_len_table tracks the
+     # chosen arm's byte count (a downstream print/concat slices exactly len
+     # bytes). Both arms must be Str; a length must be tracked for each.
+-    if ($true_repr eq 'Str' && $fals_repr eq 'Str') {
++    if ($true_repr eq '%Str' && $fals_repr eq '%Str') {
+         my ($true_ptr, $true_len_t) = $self->_str_parts($true_ref);
+         my ($fals_ptr, $fals_len_t) = $self->_str_parts($fals_ref);
+         ($true_ref, $fals_ref) = ($true_ptr, $fals_ptr);
+@@ -3911,7 +3934,7 @@ sub _lower_ternary {
+     # representation looks like on the machine is not this site's question.
+     die "LLVM backend: TernaryExpr branches have mismatched or unsupported types "
+       . "(true=$true_repr, false=$fals_repr)"
+-        unless ($true_repr eq 'Int' || $true_repr eq 'Num')
++        unless ($true_repr eq 'i64' || $true_repr eq 'double')
+             && $true_repr eq $fals_repr;
+     my $branch_type = _repr_to_llvm_type($true_repr);
+ 
+@@ -3957,12 +3980,12 @@ sub _shortcircuit_i1_cond {
+         die "$op_tag ($sym) $side operand has no representation at lowering time (G.7/F8). "
+           . "Fix TypeInference to annotate the operand.";
+     }
+-    if ($repr eq 'Int') {
++    if ($repr eq 'i64') {
+         my $cond = $self->_fresh;
+         $self->_emit("  $cond = icmp ne i64 $ref, 0  ; $op_tag: test $side truthiness (Int)");
+         return $cond;
+     }
+-    if ($repr eq 'Boolean') {
++    if ($repr eq '%Boolean') {
+         # Already an i1 — the value IS the branch condition.
+         return $ref;
+     }
+@@ -4289,7 +4312,7 @@ sub _lower_defined_or {
+ 
+     # Get the definedness condition (i1).
+     my $defined_cond;
+-    if ($lhs_repr eq 'Undef') {
++    if ($lhs_repr eq '%Undef') {
+         # The defined bit was set by _lower_constant to the alloca/load result.
+         # lhs_ref IS the defined bit (i1 false for Constant(undef)).
+         $defined_cond = $lhs_ref;
+@@ -4369,7 +4392,7 @@ sub _lower_defined_or {
+     # (i64 0 for Constant(undef)) or a zero for the type. When LHS is a typed value,
+     # lhs_ref IS the payload.
+     my $lhs_phi_val;
+-    if ($lhs_repr eq 'Undef') {
++    if ($lhs_repr eq '%Undef') {
+         # The payload was recorded by _lower_constant in _undef_payload -- as an
+         # i64, which is only usable when the RESULT is an i64. `my $u; $u // ""`
+         # merges into a %Str, and feeding the recorded payload there produced
+@@ -4450,7 +4473,7 @@ sub _lower_defined {
+         $self->{cache}{$node->id} = $bit;
+         return $bit;
+     }
+-    elsif ($op_repr eq 'Undef') {
++    elsif ($op_repr eq '%Undef') {
+         # op_ref IS the defined bit (i1), from _lower_constant's alloca/load.
+         $self->{cache}{$node->id} = $op_ref;
+         return $op_ref;
+@@ -4884,7 +4907,28 @@ my %_REPR_NO_MACHINE_TYPE = (
+              . "the unbuilt qr//-as-function case (see :5752).",
+ );
+ 
++# The LLVM types T2 emits. DERIVED FROM T2's candidate sets rather than
++# re-listed here: a second copy would be one more place to forget when a
++# candidate is added, which is the drift this whole split exists to remove.
++my %_IS_LLVM_TYPE = map { $_->[0] => 1 }
++                    values %Chalk::IR::Transform::T2::CANDIDATES;
++
+ sub _repr_to_llvm_type ($repr //= die "node reached machine-type selection with NO representation (undef) — fix TypeInference so this node carries an explicit repr before lowering.") {
++    # POST-T2 THIS IS A PASS-THROUGH, and that is the whole point of the split.
++    # The design's contract: "T2 rewrites the graph; every node comes out
++    # carrying an LLVM type. The backend then READS a type off the node instead
++    # of computing one."
++    #
++    # So a stamp arriving here is ALREADY the answer. Recognised by being one
++    # of the types T2 emits, rather than by a flag threaded through every
++    # caller.
++    return $repr if $_IS_LLVM_TYPE{$repr};
++
++    # The Chalk-name arm SURVIVES for now, because not every producer of a
++    # `repr`-shaped string has moved: a hand-built test graph, or a caller
++    # holding a declared type it has not passed through T2::llvm_type_for.
++    # It is a MIGRATION AID, not the contract -- when the last Chalk name stops
++    # reaching here this arm and %_REPR_LLVM_TYPE both delete.
+     return $_REPR_LLVM_TYPE{$repr} if exists $_REPR_LLVM_TYPE{$repr};
+ 
+     die "LLVM backend: $_REPR_NO_MACHINE_TYPE{$repr}\n"
+@@ -4904,11 +4948,28 @@ sub _repr_to_llvm_type ($repr //= die "node reached machine-type selection with
+ # must move together -- if Num ever maps to an integer type its zero stops being
+ # `0.0` -- so keeping them apart as `_repr_to_llvm_type(...)` plus a hardcoded
+ # `0.0` is exactly the parallel authority the type map was written to prevent.
++# KEYED BY BOTH VOCABULARIES DURING THE MIGRATION. Post-T2 a caller holds an
++# LLVM type; a hand-built graph or an un-migrated helper may still hold a Chalk
++# name. Rather than translate at each of this table's callers, it answers both
++# -- the Chalk keys are the migration aid and delete when nothing reaches them.
++#
++# `%Boolean` and `%Undef` are branded single-field structs, so their zero is
++# not a bare `0`: it is the struct with a false payload. Getting that wrong
++# would emit `0` where a `{ i1 }` is expected and lli would refuse -- which is
++# the brands doing their job, but the right answer is to give them one here.
+ my %_REPR_ZERO = (
+-    Int     => '0',
+-    Num     => '0.0',
+-    Boolean => '0',
+-    Undef   => '0',
++    # Chalk vocabulary (migration aid).
++    Int      => '0',
++    Num      => '0.0',
++    Boolean  => '0',
++    Undef    => '0',
++
++    # LLVM vocabulary (post-T2, the contract).
++    'i64'      => '0',
++    'double'   => '0.0',
++    'i1'       => '0',
++    '%Boolean' => 'zeroinitializer',
++    '%Undef'   => 'zeroinitializer',
+ );
+ 
+ # Accessors returning the two maps THEMSELVES, so a caller can ask what the
+@@ -4947,7 +5008,7 @@ my %_FLOAT_OPCODE = (
+ # _repr_is_float($repr) -> whether this representation's machine type is a
+ # floating-point type. The ONE predicate the opcode/instruction choices consult,
+ # derived from %_REPR_LLVM_TYPE rather than from the repr NAME. Ask this, never
+-# `$repr eq 'Num'`, when the question is "which instruction family".
++# `$repr eq 'double'`, when the question is "which instruction family".
+ sub _repr_is_float ($repr //= die "asked whether a NO representation (undef) is float") {
+     my $ty = _repr_to_llvm_type($repr);
+     return $ty eq 'double' || $ty eq 'float';
+@@ -4981,7 +5042,7 @@ sub _repr_convert_op {
+ 
+     my $ff = _repr_is_float($from);
+     my $tf = _repr_is_float($to);
+-    return 'sitofp' if !$ff && $tf && $from ne 'Boolean';   # signed int -> float
++    return 'sitofp' if !$ff && $tf && $from ne '%Boolean';   # signed int -> float
+     return 'uitofp' if !$ff && $tf;                          # i1 is UNsigned
+     return 'fptosi' if  $ff && !$tf;                         # float -> signed int
+     return undef;   # int<->int of differing widths: caller's business, not ours
+@@ -5280,7 +5341,7 @@ sub _process_if_node {
+     my $cond_ref = $self->lower_value($cond_input);
+ 
+     my $cond_repr = $cond_input->representation // 'Boolean';
+-    if ($cond_repr eq 'Int') {
++    if ($cond_repr eq 'i64') {
+         my $bool_ref = $self->_fresh;
+         $self->_emit("  $bool_ref = icmp ne i64 $cond_ref, 0  ; If (elab): coerce Int to i1");
+         $cond_ref = $bool_ref;
+@@ -6010,7 +6071,7 @@ sub _lower_builtin_exit {
+         die "GAP: exit status has repr=$repr; only Int is lowered (perl "
+           . "truncates a non-integer status, which belongs in an explicit "
+           . "Coerce on the operand, not a guess here)."
+-            unless $repr eq 'Int';
++            unless $repr eq 'i64';
+         my $i64 = $self->lower_value($operand);
+         # The status is an i32 at the C boundary; an i64 operand truncates.
+         $status_ref = $self->_fresh;
+@@ -6918,7 +6979,7 @@ sub _lower_array_ref {
+     # was WRONG and broke the five genuine-reference cases in
+     # llvm-array-hash.t, which have nothing to unbox.
+     my $repr = $node->representation // 'ArrayRef';
+-    if ($repr eq 'Array') {
++    if ($repr eq '%Array*') {
+         $self->{cache}{ $node->id } = $arr;
+         return $arr;
+     }
+@@ -7007,7 +7068,7 @@ sub _lower_hash_ref {
+     # A `HashRef` OPERATION spells both `{a=>1}` (repr=HashRef, boxed i8*) and
+     # a plain lexical `my %h = (...)` (repr=Hash, an unboxed %Hash*).
+     my $hrepr = $node->representation // 'HashRef';
+-    if ($hrepr eq 'Hash') {
++    if ($hrepr eq '%Hash*') {
+         $self->{cache}{ $node->id } = $hash;
+         return $hash;
+     }
+@@ -7029,7 +7090,7 @@ sub _lower_length {
+     my $operand = $node->inputs->[0];
+     my $op_repr = _require_repr($operand, 'Length.operand');
+ 
+-    if ($op_repr eq 'Array' || $op_repr eq 'ArrayRef') {
++    if ($op_repr eq '%Array*' || $op_repr eq '%ArrayRef*') {
+         $self->{_need_aggregate_types} = 1;
+         # Typed pointer resolved at THIS use — see _container_ptr.
+         my $arr_ref = $self->_container_ptr($operand, 'Array');
+@@ -7040,7 +7101,7 @@ sub _lower_length {
+         $self->{cache}{ $node->id } = $len;
+         return $len;
+     }
+-    elsif ($op_repr eq 'Hash' || $op_repr eq 'HashRef') {
++    elsif ($op_repr eq '%Hash*' || $op_repr eq '%HashRef*') {
+         # scalar %h: the key count. The %Hash struct is
+         # { i64 count, i64 cap, %HashEntry* entries }, so the count is field 0
+         # (parallel to %Array's len). Modern perl's `scalar %h` yields the key
+@@ -7054,7 +7115,7 @@ sub _lower_length {
+         $self->{cache}{ $node->id } = $cnt;
+         return $cnt;
+     }
+-    elsif ($op_repr eq 'Str') {
++    elsif ($op_repr eq '%Str') {
+         # lower_value for Str returns i8* (ptr to NUL-terminated bytes).
+         # The length is tracked separately in _str_len_table, keyed by the i8* SSA ref.
+         # Emit a compile-time literal via add i64 0, <len>.
+@@ -7138,10 +7199,10 @@ sub _lower_subscript {
+     my $container = $self->_unwrap_ref_container($node->inputs->[0]);
+     my $container_repr = _require_repr($container, 'Subscript.container');
+ 
+-    if ($container_repr eq 'Array' || $container_repr eq 'ArrayRef') {
++    if ($container_repr eq '%Array*' || $container_repr eq '%ArrayRef*') {
+         return $self->_lower_array_read($node);
+     }
+-    elsif ($container_repr eq 'Hash' || $container_repr eq 'HashRef') {
++    elsif ($container_repr eq '%Hash*' || $container_repr eq '%HashRef*') {
+         return $self->_lower_hash_read($node);
+     }
+     else {
+@@ -7223,14 +7284,14 @@ sub _lower_array_read {
+ 
+     $self->_new_block($lbl_end);
+ 
+-    if ($repr eq 'Int') {
++    if ($repr eq 'i64') {
+         # In-bounds known: phi-select the payload (OOB path unreachable for valid idx).
+         my $result = $self->_fresh;
+         $self->_emit("  $result = phi i64 [ $pay_val, \%$lbl_inb ], [ 0, \%$lbl_oob ]  ; ArrayRead :Int payload");
+         $self->{cache}{ $node->id } = $result;
+         return $result;
+     }
+-    elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
++    elsif ($repr eq '%ArrayRef*' || $repr eq '%HashRef*') {
+         # Pointer element: phi-select payload then inttoptr.
+         my $raw_pay = $self->_fresh;
+         $self->_emit("  $raw_pay = phi i64 [ $pay_val, \%$lbl_inb ], [ 0, \%$lbl_oob ]  ; ArrayRead :$repr raw ptr payload");
+@@ -7239,7 +7300,7 @@ sub _lower_array_read {
+         $self->{cache}{ $node->id } = $ptr;
+         return $ptr;
+     }
+-    elsif ($repr eq 'Str' || $repr eq 'Num') {
++    elsif ($repr eq '%Str' || $repr eq 'double') {
+         # The symmetric unbox of _box_payload. A Str payload is a %Str*
+         # (a Str is a (ptr,len) pair and does not fit in one word); a Num
+         # payload is the double's bits. Without these arms both fell through to
+@@ -7248,7 +7309,7 @@ sub _lower_array_read {
+         my $raw_pay = $self->_fresh;
+         $self->_emit("  $raw_pay = phi i64 [ $pay_val, \%$lbl_inb ], [ 0, \%$lbl_oob ]  ; ArrayRead :$repr raw payload");
+ 
+-        if ($repr eq 'Num') {
++        if ($repr eq 'double') {
+             # Reinterpretation into the representation's own machine type; see
+             # _unbox_payload_as, which does the same move for the same reason.
+             my $num_ty = _repr_to_llvm_type($repr);
+@@ -7421,7 +7482,7 @@ sub _lower_builtin_sort {
+     # mutate its operand. A buffer built here is already private, but copying it
+     # too costs one memcpy and keeps a single path.
+     my $src;
+-    if (@elems == 1 && ($op_repr eq 'Array' || $op_repr eq 'ArrayRef')) {
++    if (@elems == 1 && ($op_repr eq '%Array*' || $op_repr eq '%ArrayRef*')) {
+         $src = $self->_container_ptr($operand, 'Array');
+     }
+     else {
+@@ -7446,7 +7507,7 @@ sub _lower_builtin_sort {
+               . "$er payload is the value itself. perl compares these as "
+               . "strings (`sort (10,9,100)` is 10,100,9); lowering it needs a "
+               . "numeric-to-string materialisation the comparator does not have."
+-                if $cmp eq 'string' && $er ne 'Str';
++                if $cmp eq 'string' && $er ne '%Str';
+         }
+         $src = $self->_emit_array_of(\@elems);
+     }
+@@ -7652,7 +7713,7 @@ sub _lower_builtin_keys {
+     my $op_repr = $operand->can('representation') ? ($operand->representation // '') : '';
+     die "GAP: keys over an operand with repr=" . ($op_repr || 'NONE')
+       . " — only a Hash or HashRef has a key list to read."
+-        unless $op_repr eq 'Hash' || $op_repr eq 'HashRef';
++        unless $op_repr eq '%Hash*' || $op_repr eq '%HashRef*';
+ 
+     my $hash = $self->_container_ptr($operand, 'Hash');
+ 
+@@ -7671,7 +7732,7 @@ sub _lower_builtin_keys {
+     # ("'%tmp_42' defined with type '%Array*' but expected 'i64'"). Materialising
+     # a list nobody asked for is also the work perl skips here.
+     my $repr = $node->can('representation') ? ($node->representation // '') : '';
+-    if ($repr eq 'Int') {
++    if ($repr eq 'i64') {
+         $self->{cache}{$node->id} = $cnt;
+         return $cnt;
+     }
+@@ -7798,7 +7859,7 @@ sub _lower_builtin_join {
+     my $sep_repr = (blessed($sep_node) && $sep_node->can('representation'))
+                  ? $sep_node->representation : undef;
+     $sep_ref = $self->_emit_coercion($sep_ref, $sep_repr, 'Str', 'join separator')
+-        if defined $sep_repr && $sep_repr ne 'Str';
++        if defined $sep_repr && $sep_repr ne '%Str';
+ 
+     # A RUNTIME-ARITY LIST LOOPS. `join(",", sort keys %h)` is the case the
+     # corpus wants (references.md R11) and its element count is the hash's
+@@ -7810,7 +7871,7 @@ sub _lower_builtin_join {
+                  ? ($list_node->representation // '') : '';
+         die "GAP: join over an operand with repr=" . ($repr || 'NONE')
+           . " — a runtime-arity join needs a materialised Array to walk."
+-            unless $repr eq 'Array' || $repr eq 'ArrayRef';
++            unless $repr eq '%Array*' || $repr eq '%ArrayRef*';
+         return $self->_emit_join_loop($list_node, $sep_ref);
+     }
+ 
+@@ -7825,7 +7886,7 @@ sub _lower_builtin_join {
+         my $el_repr = (blessed($el) && $el->can('representation'))
+                     ? $el->representation : undef;
+         $el_ref = $self->_emit_coercion($el_ref, $el_repr, 'Str', "join element[$i]")
+-            if defined $el_repr && $el_repr ne 'Str';
++            if defined $el_repr && $el_repr ne '%Str';
+ 
+         if (!defined $acc) {
+             $acc = $el_ref;
+@@ -7983,7 +8044,7 @@ sub _lower_builtin_shift_pop {
+     my $repr = $node->representation;
+     die "GAP: $name element repr=" . ($repr // 'NONE (undef)')
+       . " not lowered (only Int elements yet)"
+-        unless defined $repr && $repr eq 'Int';
++        unless defined $repr && $repr eq 'i64';
+ 
+     # The array is the aggregate input. Post-load the loader has already moved the
+     # leading control token to control_in (the is_stmt_effect contract), so the
+@@ -7996,7 +8057,7 @@ sub _lower_builtin_shift_pop {
+         my $op   = blessed($_) ? $_->operation : '';
+         my $repr = (blessed($_) && $_->representation) // '';
+         $op eq 'ArrayLiteral' || $op eq 'HashLiteral'
+-            || $repr eq 'Array' || $repr eq 'ArrayRef'
++            || $repr eq '%Array*' || $repr eq '%ArrayRef*'
+     } $node->inputs->@*;
+     die "GAP: $name operand is not an Array/ArrayRef" unless defined $array;
+     _seed_container_repr($array);
+@@ -8184,13 +8245,13 @@ sub _lower_hash_read {
+     # hend: result phi.
+     $self->_new_block($lbl_end);
+ 
+-    if ($repr eq 'Int') {
++    if ($repr eq 'i64') {
+         my $result = $self->_fresh;
+         $self->_emit("  $result = phi i64 [ $vp_val, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; HashRead :Int payload");
+         $self->{cache}{ $node->id } = $result;
+         return $result;
+     }
+-    elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
++    elsif ($repr eq '%ArrayRef*' || $repr eq '%HashRef*') {
+         # Pointer element: phi-select payload then inttoptr (mirrors _lower_array_read).
+         # The slot payload holds a ref (ArrayRef/HashRef) stored as i64; reading it
+         # back as a usable pointer requires inttoptr i64 -> i8*.
+@@ -8201,14 +8262,14 @@ sub _lower_hash_read {
+         $self->{cache}{ $node->id } = $ptr;
+         return $ptr;
+     }
+-    elsif ($repr eq 'Str' || $repr eq 'Num') {
++    elsif ($repr eq '%Str' || $repr eq 'double') {
+         # The symmetric unbox of _box_payload, mirroring _lower_array_read: a
+         # Str payload is a %Str* (a Str is a (ptr,len) pair, too wide for
+         # one word), a Num payload is the double's bits.
+         my $raw_pay = $self->_fresh;
+         $self->_emit("  $raw_pay = phi i64 [ $vp_val, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; HashRead :$repr raw payload");
+ 
+-        if ($repr eq 'Num') {
++        if ($repr eq 'double') {
+             # Reinterpretation into the representation's own machine type; see
+             # _unbox_payload_as, which does the same move for the same reason.
+             my $num_ty = _repr_to_llvm_type($repr);
+@@ -8328,7 +8389,7 @@ sub _box_payload {
+     my ($self, $val_ref, $repr, $what) = @_;
+ 
+     my $ref = $self->_fresh;
+-    if ($repr eq 'Str') {
++    if ($repr eq '%Str') {
+         # A Str is a (ptr, len) PAIR and does not fit in one word, so box it
+         # into a heap %Str and carry the pointer. The length must come from
+         # the length table; strlen would be wrong for a string with an embedded
+@@ -8364,24 +8425,24 @@ sub _box_payload {
+         $self->{_need_malloc_memcpy} = 1;
+         return $ref;
+     }
+-    if ($repr eq 'Num') {
++    if ($repr eq 'double') {
+         # A double is exactly one word: reinterpret its bits rather than boxing.
+         # The read side bitcasts back, so no precision is lost.
+         my $num_ty = _repr_to_llvm_type($repr);
+         $self->_emit("  $ref = bitcast $num_ty $val_ref to i64  ; Num -> i64 payload for $what");
+         return $ref;
+     }
+-    if ($repr eq 'Boolean') {
++    if ($repr eq '%Boolean') {
+         $self->_emit("  $ref = zext i1 $val_ref to i64  ; Boolean -> i64 payload for $what");
+         return $ref;
+     }
+-    if ($repr eq 'ArrayRef' || $repr eq 'HashRef' || $repr eq 'CodeRef'
+-            || $repr eq 'Object') {
++    if ($repr eq '%ArrayRef*' || $repr eq '%HashRef*' || $repr eq '%CodeRef*'
++            || $repr eq '%Object*') {
+         $self->_emit("  $ref = ptrtoint i8* $val_ref to i64  ; $repr ptr -> i64 payload for $what");
+         return $ref;
+     }
+     # An Int IS the payload word — no conversion, and no instruction.
+-    return $val_ref if $repr eq 'Int';
++    return $val_ref if $repr eq 'i64';
+ 
+     die "GAP: $what has repr=$repr, which has no i64 payload encoding "
+       . "(Int, Boolean, Num, Str and ref types are boxed) — refusing to emit "
+@@ -8422,7 +8483,7 @@ sub _field_store_is_coherent {
+     my %DIRECT = map { $_ => 1 } qw(Int Boolean);
+ 
+     # The general cell reads as a bare i64, so it holds any direct value.
+-    return $DIRECT{$value_repr} ? true : false if $field_repr eq 'Scalar';
++    return $DIRECT{$value_repr} ? true : false if $field_repr eq '%Slot';
+ 
+     # Otherwise the two must name the SAME encoding, and the equality check
+     # above already covered that: distinct boxed kinds bitcast differently on
+@@ -8433,7 +8494,7 @@ sub _field_store_is_coherent {
+ sub _store_field_payload {
+     my ($self, $val_ref, $repr, $pay_gep, $pname) = @_;
+ 
+-    if ($repr eq 'Str') {
++    if ($repr eq '%Str') {
+         my ($str_ptr, $len_ref) = $self->_str_parts($val_ref);
+         my $pair_raw = $self->_fresh;
+         my $pair_ptr = $self->_fresh;
+@@ -8466,16 +8527,16 @@ sub _store_field_payload {
+     }
+ 
+     my $pay_i64 = $self->_fresh;
+-    if ($repr eq 'Boolean') {
++    if ($repr eq '%Boolean') {
+         $self->_emit("  $pay_i64 = zext i1 $val_ref to i64  ; Boolean->i64 for field '$pname'");
+-    } elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
++    } elsif ($repr eq '%ArrayRef*' || $repr eq '%HashRef*') {
+         # Pointer-repr value: ptrtoint before storing into the i64 payload,
+         # mirroring the array/hash element-store branches. A bare
+         # `add i64 0, <ptr>` would be invalid IR.
+         $self->_emit("  $pay_i64 = ptrtoint i8* $val_ref to i64  ; $repr ptr -> i64 for field '$pname'");
+-    } elsif ($repr eq 'Int') {
++    } elsif ($repr eq 'i64') {
+         $self->_emit("  $pay_i64 = add i64 0, $val_ref  ; identity: Int->i64 for field '$pname'");
+-    } elsif ($repr eq 'Num') {
++    } elsif ($repr eq 'double') {
+         # REINTERPRET the bits into the cell; do NOT convert. `fptosi` would
+         # truncate 1.5 to 1 and silently lose the value -- the payload is a
+         # 64-bit box, not an integer the number is being coerced to.
+@@ -9344,7 +9405,7 @@ sub _lower_call_method {
+     # the other operand: there the CAST followed the node, here the CALL did.
+     # The ABI is the authority for both, and a refinement is honoured by
+     # unboxing at the boundary -- which the else-branch below already does.
+-    if ($result_repr eq 'Str' && $abi_repr eq 'Str') {
++    if ($result_repr eq '%Str' && $abi_repr eq '%Str') {
+         $self->{_need_str_type} = 1;
+         $self->_emit("  $result = call %Str $typed_fn($arg_text)  ; Call(method) $method_name -> StrPair");
+         my $str_ptr = $self->_fresh;
+@@ -9371,7 +9432,7 @@ sub _lower_call_method {
+         # here rather than caching a %Slot where an i64 is expected. The
+         # refinement is honoured at the boundary, not by calling at the
+         # narrower type: the callee has ONE emitted body at ONE machine type.
+-        if ($abi_repr eq 'Scalar' && ($node->representation // '') ne 'Scalar') {
++        if ($abi_repr eq '%Slot' && ($node->representation // '') ne 'Scalar') {
+             my $pay = $self->_fresh;
+             my $mi_pay = _slot_idx('payload');
+             $self->_emit("  $pay = extractvalue %Slot $result, $mi_pay  ; Call(method) $method_name: Slot payload -> "
+@@ -10211,7 +10272,7 @@ sub _lower_regex_capture {
+ 
+     my $repr       = _require_repr($node, 'RegexCapture');
+     die "GAP: RegexCapture has repr=$repr; \$N capture values are Str"
+-        unless $repr eq 'Str';
++        unless $repr eq '%Str';
+     my $match_node = $node->inputs->[0];
+     my $n          = $node->n;
+ 
+@@ -10263,7 +10324,7 @@ sub _lower_env_read {
+     my ($self, $node) = @_;
+ 
+     my $repr = _require_repr($node, 'EnvRead');
+-    die "GAP: EnvRead has repr=$repr; %ENV values are Str" unless $repr eq 'Str';
++    die "GAP: EnvRead has repr=$repr; %ENV values are Str" unless $repr eq '%Str';
+     my $key  = $node->key;
+     $self->{_need_getenv} = 1;
+ 
+@@ -10314,7 +10375,7 @@ sub _lower_stash_access {
+     # A Str package scalar: load BOTH slots (ptr + len) and re-register the
+     # loaded ptr's length so a downstream print/concat/return slices exactly
+     # len bytes. Mirrors the two-slot store.
+-    if ($repr eq 'Str') {
++    if ($repr eq '%Str') {
+         my ($pname, $lname) = $self->_pkg_str_global_names($node->stash_name, $var);
+         my $ptr = $self->_fresh;
+         my $len = $self->_fresh;
+@@ -10325,7 +10386,7 @@ sub _lower_stash_access {
+         return $ptr;
+     }
+     # A Num package scalar: load the `double` slot. Mirrors the Num store.
+-    if ($repr eq 'Num') {
++    if ($repr eq 'double') {
+         my $nname = $self->_pkg_num_global_name($node->stash_name, $var);
+         my $val   = $self->_fresh;
+         my $nty = _repr_to_llvm_type($repr);
+@@ -10335,7 +10396,7 @@ sub _lower_stash_access {
+     }
+     die "GAP: EntryDef repr=$repr; only Int, Num and Str package scalars are "
+       . "lowered runtime-free (a ref slot needs a differently-typed global)."
+-        unless $repr eq 'Int';
++        unless $repr eq 'i64';
+ 
+     my $gname = $self->_pkg_global_name($node->stash_name, $var);
+     my $val   = $self->_fresh;
+@@ -10541,7 +10602,7 @@ sub _lower_print {
+         my $repr = $arg->representation;
+         my $ref  = $self->lower_value($arg);
+ 
+-        if (defined $repr && $repr eq 'Str') {
++        if (defined $repr && $repr eq '%Str') {
+             my ($str_ptr, $len) = $self->_str_parts($ref);
+             $ref = $str_ptr;
+             die "Print of a Str arg whose length is not tracked in "
+@@ -10616,7 +10677,7 @@ sub _lower_field_access_in_method {
+     my $pay       = $self->_fresh;
+     $self->_emit("  $pay = load i64, i64* $pay_gep  ; load field[$field_index] payload");
+ 
+-    if ($repr eq 'Str') {
++    if ($repr eq '%Str') {
+         # Payload is a StrPair* (as i64) — cast and extract {ptr, len}
+         $self->{_need_str_type} = 1;
+         my $pair_ptr = $self->_fresh;
+@@ -10633,7 +10694,7 @@ sub _lower_field_access_in_method {
+         $self->{cache}{ $node->id } = $sp;
+         return $sp;
+     }
+-    elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
++    elsif ($repr eq '%ArrayRef*' || $repr eq '%HashRef*') {
+         # An aggregate-ref field: the payload i64 is a boxed i8* (the store side
+         # does `ptrtoint i8* -> i64`; _store_field_payload). Read is the mirror:
+         # inttoptr i64 -> i8*. _container_ptr then bitcasts this i8* to %Array*/

@@ -75,17 +75,20 @@ sub stamps_of ($graphs) {
     return \%by_op;
 }
 
-subtest 'before T2 the graph is in CHALK vocabulary' => sub {
-    # The premise, asserted rather than assumed: if the loader stopped
-    # producing Chalk types, the pass below would be transforming something
-    # else and every assertion here would be measuring the wrong thing.
-    my $graphs = $LOAD->($WIRE);
-    my $s = stamps_of($graphs);
-
-    is $s->{Add}[0], 'Int', 'an Add carries the Chalk type Int';
-    ok scalar(grep { ($_ // '') eq 'Str' } $s->{Constant}->@*),
-        'and a Str constant carries Str';
-};
+# THE PRE-T2 VOCABULARY IS NO LONGER OBSERVABLE THROUGH THE LOADER, and that
+# is the wiring working rather than a gap in coverage. `from_json` now runs
+# T1 and then T2, so every graph it hands back is already past the boundary --
+# there is no "before" to sample from that entry point.
+#
+# An earlier version of this subtest loaded the wire and asserted the Add
+# carried `Int`. After wiring it read `i64` and failed, which is the correct
+# answer to a question that had stopped making sense. Kept as a note rather
+# than deleted silently, because "this assertion became unreachable" is a fact
+# about the pipeline worth recording.
+#
+# The premise it was protecting -- that T1 really does produce Chalk types, so
+# T2 is transforming what it thinks it is -- is now covered by T1's own tests
+# and by the leak check below, which fails if anything Chalk-shaped survives.
 
 subtest 'after T2 every stamp is an LLVM type' => sub {
     my $graphs = $LOAD->($WIRE);
@@ -177,6 +180,73 @@ subtest 'a non-value type is refused as a layer violation, not as a gap' => sub 
     ok $err, 'it refuses' or return;
     like $err, qr/signature vocabulary|SEQUENCE/,
         'and says List is not a value type, rather than blaming inference';
+};
+
+# THE MAPPING IS INJECTIVE, and this is the property the brands exist to give.
+#
+# Without them `Boolean` and `Undef` both answer `i1`, and the four reference
+# types all answer `i8*`. A consumer holding `i1` then cannot tell which it had
+# -- so a site that asked "is this an Undef?" would start firing on Booleans
+# too, silently. That is a check meaning two things at once, which is the
+# failure this codebase keeps recording.
+#
+# LLVM DOES THE ENFORCING, because named struct types are NOMINAL. Measured:
+#
+#     %Bool  = type { i1 }
+#     %Undef = type { i1 }
+#     ... extractvalue %Undef %b   ->  error: '%b' defined with type
+#                                      '%Bool = type { i1 }' but expected
+#                                      '%Undef = type { i1 }'
+#
+# Two structurally identical types stay distinct and mixing them is a VERIFIER
+# error, not a silent pass. The backend already relies on this for %Str, %Slot,
+# %Array and %Hash; the brands just apply it consistently.
+#
+# THE COST HAS A TRIVIAL INVERSE, which is why it is not a cost. A branded
+# value is a struct wrapping its payload, so it costs an insertvalue/
+# extractvalue pair -- and unwrapping is a mechanical post-T2 rewrite that
+# needs no analysis. perigrin: "even if LLVM's optimizer didn't we could
+# trivially write a post-T2 optimizer that did unwind them". So the brand is a
+# COMPILE-TIME fact that has done its job once T2's output is checked;
+# correctness never depends on the unwrapping happening.
+subtest 'the Chalk -> LLVM mapping is injective' => sub {
+    my %seen;
+    my @collisions;
+    for my $chalk (sort keys %Chalk::IR::Transform::T2::CANDIDATES) {
+        my $llvm = $Chalk::IR::Transform::T2::CANDIDATES{$chalk}[0];
+        push @collisions, "$llvm <- $seen{$llvm}, $chalk" if exists $seen{$llvm};
+        $seen{$llvm} = $chalk;
+    }
+    is_deeply \@collisions, [],
+        'no two Chalk types narrow to the same LLVM type'
+        or diag('  a consumer cannot tell these apart: '
+              . join('; ', @collisions));
+};
+
+# THE TWO COLLAPSES THAT MOTIVATED THE BRANDS, pinned by name so a later
+# "simplification" back to bare i1 fails here rather than in a miscompile.
+subtest 'Boolean and Undef are distinguishable' => sub {
+    my $b = $Chalk::IR::Transform::T2::CANDIDATES{Boolean}[0];
+    my $u = $Chalk::IR::Transform::T2::CANDIDATES{Undef}[0];
+    isnt $b, $u, 'Boolean and Undef narrow to DIFFERENT types';
+
+    # ASSERTED POSITIVELY too: `isnt` alone is satisfied by any two distinct
+    # strings, including two that are wrong.
+    like $b, qr/^%/, 'Boolean is a named (nominal) type';
+    like $u, qr/^%/, 'Undef is a named (nominal) type';
+};
+
+subtest 'the four reference types are distinguishable' => sub {
+    my %by;
+    for my $t (qw(ArrayRef HashRef CodeRef Object)) {
+        my $llvm = $Chalk::IR::Transform::T2::CANDIDATES{$t}[0];
+        push @{ $by{$llvm} }, $t;
+    }
+    my @shared = grep { @{ $by{$_} } > 1 } sort keys %by;
+    is_deeply \@shared, [],
+        'no two reference types share a machine type'
+        or diag('  shared: ' . join('; ',
+                map { "$_ <- " . join(',', $by{$_}->@*) } @shared));
 };
 
 done_testing;
