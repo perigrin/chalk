@@ -6,6 +6,7 @@ use experimental 'class';
 no warnings 'experimental::class';
 
 use Scalar::Util qw(blessed);
+use Chalk::IR::Value;   # narrow_num tests operands with isa
 
 class Chalk::IR::Transform::T2 {
 
@@ -217,6 +218,110 @@ class Chalk::IR::Transform::T2 {
     # cell you are forced into when nothing was proven. A Scalar that T2 could
     # prove is only ever Int should lower as i64 -- that proof needs intervals
     # and is out of scope, so it boxes.
+    # narrow_num($node) -> 'double' or 'i64'. THE ONLY MULTI-CANDIDATE CHOICE.
+    #
+    # `Num` maps to {double, i64} and every other Chalk type has one candidate,
+    # so this is where the representation question is actually asked. Getting
+    # it wrong is a live miscompile, pinned as a GAP in
+    # t/corpus/mdtest/arithmetic.md:
+    #
+    #     my $n = 9007199254740993; my $s = $n + 0.0;
+    #     perl:  9007199254740993      chalk: 9.00719925474099e+15
+    #
+    # `%_REPR_LLVM_TYPE` maps Num to double unconditionally, so the sitofp
+    # cannot hold an i64 above 2^53. That table is a DEFAULT executed before any
+    # constraint is seen; this is the same decision made after.
+    #
+    # THREE CONSTRAINT SOURCES, measured at 36 of 54 Num nodes directly and 46
+    # of 54 after propagation
+    # (docs/plans/2026-09-04-narrowing-reaches-85-percent.md):
+    #
+    #   (a) a consumer states a requirement
+    #   (b) a fractional literal constrains itself
+    #   (c) every value input is already Int -- the inputs PROVE i64
+    #
+    # Source (c) is the strongest and was the one missed in the first design
+    # pass: it proves i64 rather than merely failing to contradict it.
+    #
+    # ORDER MATTERS AND IS NOT ARBITRARY. Fractional evidence is checked first
+    # because it is POSITIVE evidence about this value, while "all inputs are
+    # Int" is evidence about its operands. A node with one fractional and one
+    # integral input is a double, and reversing the order would call it i64.
+    sub narrow_num ($class, $node) {
+        my $stamp = $node->stamp // '';
+        die "T2: narrow_num expects a Num-stamped node, got '"
+          . ($stamp eq '' ? '(unstamped)' : $stamp) . "' (op="
+          . $node->operation . ")\n"
+            unless $stamp eq 'Num';
+
+        # (b) A FRACTIONAL LITERAL IS ITS OWN CONSTRAINT. Nothing needs to
+        # observe `1.5` to know it cannot be an integer.
+        return 'double' if $class->_is_fractional_constant($node);
+
+        # (b') A FRACTIONAL INPUT propagates the same way. Checked before (c)
+        # so that Add(Int, 1.5) is a double rather than being claimed by the
+        # all-Int rule -- which it would not be, since 1.5 is not Int, but
+        # stating the order makes the dependency explicit rather than
+        # incidental.
+        for my $in (($node->inputs // [])->@*) {
+            next unless defined $in && ref $in && $in->can('operation');
+            return 'double' if $class->_is_fractional_constant($in);
+        }
+
+        # (c) EVERY VALUE INPUT IS ALREADY Int. The operands prove the result
+        # needs no float, which is exactly the 2^53 case: a Coerce(Int -> Num)
+        # over an Int constant has nothing fractional anywhere near it.
+        my @vals = grep { defined $_ && ref $_ && $_ isa Chalk::IR::Value }
+                   (($node->inputs // [])->@*);
+        if (@vals) {
+            my $every_int = 1;
+            for my $v (@vals) {
+                $every_int = 0 unless ($v->stamp // '') eq 'Int';
+            }
+            return 'i64' if $every_int;
+        }
+
+        # DEFAULT, AND IT IS FORCED RATHER THAN CHOSEN. An unobserved Num has
+        # no most-general representation -- double and i64 are incomparable and
+        # the emitter needs a concrete type -- so something must pick, and that
+        # is what defaulting IS. GHC states the impossibility directly: you
+        # cannot have both representation polymorphism and principal types.
+        #
+        # A NAMED RULE, not an `array->[0]`. Kept as its own sub for two
+        # reasons: the reason belongs somewhere findable, and a test can
+        # INVERT it to prove a constraint is load-bearing rather than merely
+        # agreeing with the default. That check earned its keep immediately --
+        # the 2^53 subtest passed with source (c) disabled, because `i64` is
+        # also the default, and only the inverted-default run showed the rule
+        # firing.
+        return $class->_default_num_repr;
+    }
+
+    # _default_num_repr -> the representation an unobserved Num takes.
+    #
+    # FORCED, NOT CHOSEN. An unobserved Num has no most-general representation:
+    # `double` and `i64` are incomparable and the emitter needs a concrete
+    # type, so something must pick arbitrarily -- which is what defaulting IS.
+    # GHC states the impossibility directly: you cannot have both
+    # representation polymorphism and principal types.
+    #
+    # `i64` is the honest pick because it is what perl does: a literal stays an
+    # IV until something makes it an NV. And there is no wrapping-i64 semantics
+    # to preserve either -- `use64bitint` is a BUILD FLAG, and IV_MAX+1
+    # promotes (B::IV -> B::PVIV, value intact) rather than wrapping.
+    sub _default_num_repr ($class) { return 'i64' }
+
+    # _is_fractional_constant($node) -> bool. A Constant whose value is not an
+    # integer literal. Asked of the node itself and of its inputs.
+    sub _is_fractional_constant ($class, $node) {
+        return false unless $node->can('operation');
+        return false unless $node->operation eq 'Constant';
+        return false unless $node->can('value');
+        my $v = $node->value;
+        return false unless defined $v;
+        return $v !~ /\A-?\d+\z/ ? true : false;
+    }
+
     sub _choose ($class, $node, $stamp) {
         my $candidates = $CANDIDATES{$stamp}
             or die "T2: no candidate set for '$stamp' (op="
