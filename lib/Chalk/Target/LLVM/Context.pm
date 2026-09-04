@@ -32,6 +32,7 @@ use utf8;
 
 use Chalk::IR::NodeFactory;   # is_statement_node() classifier used by the value/effect collectors
 use Chalk::IR::Analysis;      # return_reading_for_want: which of a callee reading a callsite takes
+use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 
 # Re-export helpers from the main package so unqualified calls in this
 # package resolve correctly (both packages share the same implementation).
@@ -1539,9 +1540,9 @@ sub lower_value {
             # consumers in the inlined body read the value as what it actually
             # is, not as the callee's un-narrowed `Scalar`.
             if (defined $bound->{repr}
-                    && ($node->representation // '') ne $bound->{repr}
-                    && $node->can('set_representation')) {
-                $node->set_representation($bound->{repr});
+                    && ($node->stamp // '') ne $bound->{repr}
+                    && $node isa Chalk::IR::Value) {
+                $node->set_stamp($bound->{repr});
             }
             return $bound->{ref};
         }
@@ -1690,13 +1691,13 @@ sub lower_value {
     # distinct from Ref (the \ operator, a reference constructor): ref() takes a
     # reference and yields a Str, \ takes a value and yields a reference.
     elsif ($op eq 'RefType' && defined $node->inputs->[0]
-        && defined $node->inputs->[0]->representation
-        && $node->inputs->[0]->representation eq 'Object') {
+        && defined $node->inputs->[0]->stamp
+        && $node->inputs->[0]->stamp eq 'Object') {
         return $self->_lower_ref_of_object($node);
     }
     # Call(dispatch_kind='method'): vtable-slot dispatch, canonical form of MethodCall.
     # inputs[0] = invocant (obj node); the class rides as the class_name attr.
-    # name = method name. return repr from node->representation.
+    # name = method name. return repr from node->stamp.
     elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'method') {
         return $self->_lower_call_method($node);
     }
@@ -1801,7 +1802,7 @@ sub lower_value {
           . "unwind.";
     }
     else {
-        if (defined $node->representation && $node->representation eq 'Scalar') {
+        if (defined $node->stamp && $node->stamp eq 'Scalar') {
             die "node op=$op repr=Scalar reached LLVM backend — cannot lower runtime-free. "
               . "This value requires libperl; it is a GAP on the L corner.";
         }
@@ -1812,7 +1813,7 @@ sub lower_value {
 sub _lower_constant {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     my $val  = $node->value;
 
     if (!defined $repr) {
@@ -1969,7 +1970,7 @@ sub _lower_constant {
 sub _lower_binop_int {
     my ($self, $node, $llvm_op) = @_;
 
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     my $op   = $node->operation;
     unless (defined $repr) {
         die "$op node has no representation at lowering time. "
@@ -2016,8 +2017,8 @@ sub _lower_binop_int {
 sub _lower_as_repr {
     my ($self, $node, $want) = @_;
     my $ref  = $self->lower_value($node);
-    my $orep = (ref($node) && $node->can('representation'))
-        ? $node->representation : undef;
+    my $orep = (ref($node) && $node isa Chalk::IR::Value)
+        ? $node->stamp : undef;
 
     # A bare untyped operand feeding a float-typed op still needs promoting:
     # its SSA value is an integer one. This mirrors _lower_as_double, which
@@ -2035,7 +2036,7 @@ sub _lower_as_repr {
 sub _lower_divide {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     my $op   = $node->operation;
 
     # Divide with Int representation is a correctness trap: Perl `/` is always
@@ -2085,7 +2086,7 @@ sub _lower_divide {
 sub _lower_modulo {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     my $op   = $node->operation;
 
     if (defined $repr && $repr eq 'Scalar') {
@@ -2157,7 +2158,7 @@ sub _lower_modulo {
 sub _lower_concat {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     if (defined $repr && $repr ne 'Str') {
         die "GAP: Concat with repr=$repr reached LLVM backend — Concat requires Str operands";
     }
@@ -2800,9 +2801,37 @@ sub _lower_coerce {
     # that carry none.
     my $input_ref = $self->lower_value($node->inputs->[0]);
     my $operand   = $node->inputs->[0];
-    my $from      = (blessed($operand) && $operand->can('representation')
-                     && defined $operand->representation)
-                  ? $operand->representation
+    # `_is_narrowed`, NOT `defined`. Under the every-Value-node-is-stamped
+    # invariant a stamp is ALWAYS defined, so `defined` stopped discriminating
+    # and this branch began firing for operands whose stamp is `Unknown` --
+    # emitting an i1 where a %Slot was expected. Measured on
+    # `my $ok = print "x\n"`: lli refused with "'%tmp_10' defined with type
+    # 'i1' but expected '%Slot'".
+    #
+    # The question this guard MEANT is "has the operand COMMITTED to a
+    # representation?", which is what `_is_narrowed` answers. Node.pm's
+    # deprecation notice predicted exactly this: "once this holds, `defined
+    # $node->representation` STOPS DISCRIMINATING for value nodes -- it is
+    # always true."
+    # NO CLASS TEST. `stamp` is declared on Chalk::IR::Node (Node.pm:64), the
+    # BASE -- every node carries one. But Chalk::IR::Value is a SIBLING of the
+    # value-producing control nodes, not their parent: Print, Proj, VarDecl and
+    # ListAssign are all `:isa(Chalk::IR::Node)` directly. An `isa
+    # Chalk::IR::Value` test therefore asks about the CLASS HIERARCHY when the
+    # question is about the STAMP, and silently skips the 4 node kinds that
+    # produce a value without descending from Value.
+    #
+    # Measured on `my $ok = print "x\n"`: T1 stamps the Print `Boolean`, the
+    # wire's `from_repr` says `Scalar`, the class test fails, the stale
+    # `Scalar` wins, and the %Slot tag dispatch runs against a bare i1 --
+    # "'%tmp_10' defined with type 'i1' but expected '%Slot'". The trace named
+    # the caller outright: `Coerce[Scalar -> Str]` from _lower_coerce.
+    #
+    # `_is_narrowed` alone is the whole question: has this operand COMMITTED to
+    # a representation? A node that has answers for itself; one that has not
+    # falls back to the wire's static claim.
+    my $from      = Chalk::IR::Analysis::_is_narrowed($operand->stamp)
+                  ? $operand->stamp
                   : $node->from_repr;
 
     my $ref = $self->_emit_coercion($input_ref, $from, $to, 'Coerce');
@@ -3057,12 +3086,12 @@ sub _emit_coercion {
 sub _lower_not {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
 
     my $inputs   = $node->inputs;
     my $operand  = $inputs->[0];
     my $op_ref   = $self->lower_value($operand);
-    my $op_repr  = $operand->representation;
+    my $op_repr  = $operand->stamp;
     die "LLVM backend: Not operand has no representation set — cannot determine i1 vs i64"
         unless defined $op_repr;
 
@@ -3363,7 +3392,7 @@ sub _lower_assign {
         # typed cell types the VARIABLE instead of its dataflow, and the
         # per-repr kinds are perl's SV union rebuilt one type at a time.
         # The fix is to stop treating the slot as the unit — filed as Part H.
-        my $slot_repr = $lhs->representation;
+        my $slot_repr = $lhs->stamp;
         if (defined $slot_repr && $slot_repr ne $rhs_repr) {
             die "GAP: package scalar \$$var is stored as $rhs_repr but its slot "
               . "is $slot_repr — this store would be invisible to every read. "
@@ -3410,7 +3439,7 @@ sub _lower_assign {
         # the SAME aggregate the array name resolves to (memory-SSA phase 2d).
         my $container = $self->_unwrap_ref_container($lhs->inputs->[0]);
         my $key_idx   = $lhs->inputs->[1];
-        my $ctr_repr  = $container->representation // '';
+        my $ctr_repr  = $container->stamp // '';
 
         if ($ctr_repr eq 'Array' || $ctr_repr eq 'ArrayRef') {
             # Array element store: bounds-checked (same as _lower_array_write body).
@@ -3445,7 +3474,7 @@ sub _lower_assign {
             # into an array of Ints emits a correct store and an Int read of a
             # pointer, printing the raw address. Until the element-type
             # inference joins stores as well as literals, this must stay a GAP.
-            my $rhs_repr = $rhs->representation // '';
+            my $rhs_repr = $rhs->stamp // '';
             my $rhs_i64;
             # `Str` is admitted now that _element_repr JOINS STORES as well as
             # literal initializers (Analysis.pm's _element_store_values). The
@@ -3550,7 +3579,7 @@ sub _lower_assign {
             # excluded for the same reason as the array-lvalue branch above: a
             # type-changing store is invisible to the element-type inference,
             # so the read would still load at the literal-derived repr.
-            my $wrhs_repr = $rhs->representation // '';
+            my $wrhs_repr = $rhs->stamp // '';
             my $wrhs_i64;
             if ($wrhs_repr =~ /\A(?:Int|ArrayRef|HashRef|CodeRef|Object)\z/) {
                 $wrhs_i64 = $self->_box_payload($rhs_ref, $wrhs_repr,
@@ -3675,7 +3704,7 @@ sub _coerce_ref_to_num {
 sub _lower_icmp_int {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     my $op   = $node->operation;
 
     if (defined $repr && $repr eq 'Scalar') {
@@ -3685,8 +3714,8 @@ sub _lower_icmp_int {
     my $inputs  = $node->inputs;
     my $lhs_node = $inputs->[0];
     my $rhs_node = $inputs->[1];
-    my $lhs_repr = $lhs_node->representation;
-    my $rhs_repr = $rhs_node->representation;
+    my $lhs_repr = $lhs_node->stamp;
+    my $rhs_repr = $rhs_node->stamp;
     my $lhs_ref = $self->lower_value($lhs_node);
     my $rhs_ref = $self->lower_value($rhs_node);
 
@@ -3750,7 +3779,7 @@ sub _lower_icmp_int {
 # any other repr (Num, aggregate) is a loud GAP.
 sub _str_compare_operand {
     my ($self, $input, $op, $side) = @_;
-    my $repr = $input->representation // '';
+    my $repr = $input->stamp // '';
     my $ref  = $self->lower_value($input);
     return $ref if $repr eq 'Str';
     # StrEq/StrNe's signature is (Str, Str). A non-Str operand arrives through
@@ -3769,7 +3798,7 @@ sub _lower_str_compare {
     my ($self, $node, $is_eq) = @_;
 
     my $op = $node->operation;
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     if (defined $repr && $repr eq 'Scalar') {
         die "$op with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
@@ -3832,7 +3861,7 @@ sub _lower_str_compare {
 sub _lower_ternary {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     my $op   = $node->operation;
 
     if (defined $repr && $repr eq 'Scalar') {
@@ -4006,7 +4035,7 @@ sub _shortcircuit_phi_repr {
 sub _lower_and {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     # NO Scalar REFUSAL HERE ANY MORE. It predated `Scalar` having a machine
     # type: it does now (%Slot), `_emit_coercion` boxes any narrowed reading
     # into one, and `_emit_read_slot_as` reads it back by tag. What was
@@ -4028,8 +4057,8 @@ sub _lower_and {
     # runtime-free. `$x eq $y && (print ...)` is Boolean && Boolean (a comparison guard
     # and a print's builtin::is_bool return) — the cond.t idiom. Any other repr is
     # a loud GAP (see _shortcircuit_i1_cond).
-    my $lhs_repr = $lhs_node->representation;
-    my $rhs_repr = $rhs_node->representation;
+    my $lhs_repr = $lhs_node->stamp;
+    my $rhs_repr = $rhs_node->stamp;
 
     # `&&` yields one of its OPERANDS, not a boolean -- measured:
     # `my $a=5; my $b="hi"; $a && $b` is "hi", and with $a=0 it is 0. So the two
@@ -4109,7 +4138,7 @@ sub _lower_and {
 sub _lower_or {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     # NO Scalar REFUSAL HERE ANY MORE. It predated `Scalar` having a machine
     # type: it does now (%Slot), `_emit_coercion` boxes any narrowed reading
     # into one, and `_emit_read_slot_as` reads it back by tag. What was
@@ -4130,8 +4159,8 @@ sub _lower_or {
     # Validate operand reprs: Int (icmp ne i64) and Boolean (already i1) both lower
     # runtime-free. `$x ne $y || (print ...)` is Boolean || Boolean — the cond.t idiom.
     # Any other repr is a loud GAP (see _shortcircuit_i1_cond).
-    my $lhs_repr = $lhs_node->representation;
-    my $rhs_repr = $rhs_node->representation;
+    my $lhs_repr = $lhs_node->stamp;
+    my $rhs_repr = $rhs_node->stamp;
 
     # `||` yields one of its OPERANDS, so its arms can differ in type. Same rule
     # and same block-placement constraint as _lower_and: the bridge is emitted
@@ -4262,7 +4291,7 @@ sub _emit_shortcircuit_phi {
 sub _lower_defined_or {
     my ($self, $node) = @_;
 
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     # NO Scalar REFUSAL. Like the And/Or guards this mirrored, it predated
     # Scalar having a machine type -- it has one (%Slot), and the phi machinery
     # below already handles an aggregate result (it emits `undef` for the
@@ -4339,8 +4368,8 @@ sub _lower_defined_or {
     # land above the phi (LLVM requires phis at the top of their block) and can
     # open continuation blocks of its own, so the incoming label is re-read
     # after it. Same reasoning the And/Or arms give for their own bridges.
-    my $rhs_repr_now = $rhs_node->can('representation') ? $rhs_node->representation : undef;
-    my $node_repr_early = $node->representation;
+    my $rhs_repr_now = $rhs_node isa Chalk::IR::Value ? $rhs_node->stamp : undef;
+    my $node_repr_early = $node->stamp;
     if (defined $rhs_repr_now && defined $node_repr_early
             && $rhs_repr_now ne $node_repr_early
             && $node_repr_early ne 'Slot') {
@@ -5279,7 +5308,7 @@ sub _process_if_node {
 
     my $cond_ref = $self->lower_value($cond_input);
 
-    my $cond_repr = $cond_input->representation // 'Boolean';
+    my $cond_repr = $cond_input->stamp // 'Boolean';
     if ($cond_repr eq 'Int') {
         my $bool_ref = $self->_fresh;
         $self->_emit("  $bool_ref = icmp ne i64 $cond_ref, 0  ; If (elab): coerce Int to i1");
@@ -5477,7 +5506,7 @@ sub _wire_region_phis_with_preblock {
         # which is exactly where _lower_arm_in_tail leaves the emitter. Doing
         # it in pass 2 (next to the phi) would reference each arm from the
         # merge block, which is invalid IR rather than a wrong answer.
-        my $phi_repr = $phi_node->representation;
+        my $phi_repr = $phi_node->stamp;
 
         # WHICH PHI SLOT IS THE THEN ARM? Read it off the Region, do not
         # assume slot 0.
@@ -5536,8 +5565,8 @@ sub _coerce_arm {
     my ($self, $arm_node, $arm_val, $phi_repr, $arm_label, $what) = @_;
 
     return $arm_val unless defined $phi_repr && defined $arm_val;
-    return $arm_val unless ref($arm_node) && $arm_node->can('representation');
-    my $arm_repr = $arm_node->representation;
+    return $arm_val unless ref($arm_node) && $arm_node isa Chalk::IR::Value;
+    my $arm_repr = $arm_node->stamp;
     return $arm_val unless defined $arm_repr && $arm_repr ne $phi_repr;
 
     my $idx = $self->_find_block_idx($arm_label);
@@ -5808,7 +5837,7 @@ sub _prelower_loop_drain_operands {
             # drained value is off the return path); match _lower_builtin_shift_pop.
             my ($array) = grep {
                 my $op  = blessed($_) ? $_->operation : '';
-                my $rep = (blessed($_) && $_->representation) // '';
+                my $rep = (blessed($_) && $_->stamp) // '';
                 $op eq 'ArrayLiteral' || $op eq 'HashLiteral'
                     || $rep eq 'Array' || $rep eq 'ArrayRef'
             } $n->inputs->@*;
@@ -6728,7 +6757,7 @@ sub _lower_list_append {
     # in the middle would be an element (`map { ($_ > 1, $_) }` is a pair whose
     # first member is a boolean), so position matters as well as type.
     my $gate_node;
-    if (@rest && ($rest[-1]->representation // '') eq 'Boolean') {
+    if (@rest && ($rest[-1]->stamp // '') eq 'Boolean') {
         $gate_node = pop @rest;
     }
 
@@ -6820,7 +6849,7 @@ sub _emit_append_one {
     $self->_emit("  $slots = load %Slot*, %Slot** $elm_ptr  ; ListAppend: slots (post-grow)");
 
     my $elem_ref  = $self->lower_value($elem_node);
-    my $elem_repr = $elem_node->representation // '';
+    my $elem_repr = $elem_node->stamp // '';
 
     my $d_gep = $self->_fresh;
     my $t_gep = $self->_fresh;
@@ -6868,7 +6897,7 @@ sub _emit_array_of {
         $self->_emit("  $slot_tag = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_tag  ; ArrayRef: slot[$i] tag ptr");
         $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_pay  ; ArrayRef: slot[$i] payload ptr");
         $self->_emit("  store i1 true, i1* $slot_def  ; ArrayRef: slot[$i] defined=true");
-        my $elem_repr = $inputs->[$i]->representation // '';
+        my $elem_repr = $inputs->[$i]->stamp // '';
         # The element's own repr IS the reading its payload carries -- the very
         # repr _box_payload boxes by on the next line. Recording it here is what
         # lets a later consumer read the payload back without guessing.
@@ -6917,7 +6946,7 @@ sub _lower_array_ref {
     # Fixing it in _container_ptr instead -- by unboxing for `Array` too --
     # was WRONG and broke the five genuine-reference cases in
     # llvm-array-hash.t, which have nothing to unbox.
-    my $repr = $node->representation // 'ArrayRef';
+    my $repr = $node->stamp // 'ArrayRef';
     if ($repr eq 'Array') {
         $self->{cache}{ $node->id } = $arr;
         return $arr;
@@ -6981,7 +7010,7 @@ sub _lower_hash_ref {
         # A %HashEntry's value is the same {defined, i64 payload} cell a %Slot
         # is, so the value is boxed by the same rule — see _box_payload.
         my $val_node = $inputs->[ $i * 2 + 1 ];
-        my $val_repr = $val_node->representation // '';
+        my $val_repr = $val_node->stamp // '';
         my $val_i64  = $self->_box_payload($val_ref, $val_repr,
                                            "HashRef value[$i]");
         $self->_emit("  store i64 $val_i64, i64* $e_vp   ; HashRef: value");
@@ -7006,7 +7035,7 @@ sub _lower_hash_ref {
     # BOX ONLY WHEN THE NODE IS A REF -- the twin of the %Array case above.
     # A `HashRef` OPERATION spells both `{a=>1}` (repr=HashRef, boxed i8*) and
     # a plain lexical `my %h = (...)` (repr=Hash, an unboxed %Hash*).
-    my $hrepr = $node->representation // 'HashRef';
+    my $hrepr = $node->stamp // 'HashRef';
     if ($hrepr eq 'Hash') {
         $self->{cache}{ $node->id } = $hash;
         return $hash;
@@ -7101,7 +7130,7 @@ sub _unwrap_ref_container {
 sub _container_ptr {
     my ($self, $container, $kind) = @_;
     $container = $self->_unwrap_ref_container($container);
-    my $repr = $container->representation // '';
+    my $repr = $container->stamp // '';
     my $v = $self->lower_value($container);
     return $v unless $repr eq "${kind}Ref";   # unboxed %Array*/%Hash* already
     my $typed = $self->_fresh;
@@ -7321,10 +7350,10 @@ sub _lower_array_read {
 # The seed is a FALLBACK, never an override: a committed repr survives, since
 # `Array` and `ArrayRef` take different container-pointer paths.
 sub _seed_container_repr ($array) {
-    my $repr = $array->representation;
+    my $repr = $array->stamp;
     return if defined $repr && $repr ne 'Unknown';
     return unless $array->operation eq 'ArrayLiteral';
-    $array->set_representation('ArrayRef');
+    $array->set_stamp('ArrayRef');
     return;
 }
 
@@ -7404,7 +7433,7 @@ sub _lower_builtin_sort {
       . "FOLDED numeric/string comparators are); got sort_cmp='$cmp'."
         unless $cmp eq 'numeric' || $cmp eq 'string';
 
-    my $op_repr = $operand->can('representation') ? ($operand->representation // '') : '';
+    my $op_repr = $operand isa Chalk::IR::Value ? ($operand->stamp // '') : '';
 
     # TWO OPERAND SHAPES REACH HERE, and the difference is perl's, not ours.
     # `sort keys %h` passes ONE aggregate (the keys Call, stamped List and
@@ -7649,7 +7678,7 @@ sub _lower_builtin_keys {
     my ($operand) = grep { blessed($_) } $node->inputs->@*;
     die "GAP: keys expects a hash operand." unless defined $operand;
 
-    my $op_repr = $operand->can('representation') ? ($operand->representation // '') : '';
+    my $op_repr = $operand isa Chalk::IR::Value ? ($operand->stamp // '') : '';
     die "GAP: keys over an operand with repr=" . ($op_repr || 'NONE')
       . " — only a Hash or HashRef has a key list to read."
         unless $op_repr eq 'Hash' || $op_repr eq 'HashRef';
@@ -7670,7 +7699,7 @@ sub _lower_builtin_keys {
     # consumer of an Int-stamped Call expects an i64 and got an %Array*
     # ("'%tmp_42' defined with type '%Array*' but expected 'i64'"). Materialising
     # a list nobody asked for is also the work perl skips here.
-    my $repr = $node->can('representation') ? ($node->representation // '') : '';
+    my $repr = $node isa Chalk::IR::Value ? ($node->stamp // '') : '';
     if ($repr eq 'Int') {
         $self->{cache}{$node->id} = $cnt;
         return $cnt;
@@ -7795,8 +7824,8 @@ sub _lower_builtin_join {
     # The separator is a Str by join's signature; anything else is bridged the
     # same way an operand of any Str-context operator is.
     my $sep_ref = $self->lower_value($sep_node);
-    my $sep_repr = (blessed($sep_node) && $sep_node->can('representation'))
-                 ? $sep_node->representation : undef;
+    my $sep_repr = ($sep_node isa Chalk::IR::Value)
+                 ? $sep_node->stamp : undef;
     $sep_ref = $self->_emit_coercion($sep_ref, $sep_repr, 'Str', 'join separator')
         if defined $sep_repr && $sep_repr ne 'Str';
 
@@ -7806,8 +7835,8 @@ sub _lower_builtin_join {
     # program this exists for. The static path stays because it emits straight
     # -line concats with no loop when the count IS known.
     unless (defined $elements) {
-        my $repr = $list_node->can('representation')
-                 ? ($list_node->representation // '') : '';
+        my $repr = $list_node isa Chalk::IR::Value
+                 ? ($list_node->stamp // '') : '';
         die "GAP: join over an operand with repr=" . ($repr || 'NONE')
           . " — a runtime-arity join needs a materialised Array to walk."
             unless $repr eq 'Array' || $repr eq 'ArrayRef';
@@ -7822,8 +7851,8 @@ sub _lower_builtin_join {
     for my $i (0 .. $elements->$#*) {
         my $el      = $elements->[$i];
         my $el_ref  = $self->lower_value($el);
-        my $el_repr = (blessed($el) && $el->can('representation'))
-                    ? $el->representation : undef;
+        my $el_repr = ($el isa Chalk::IR::Value)
+                    ? $el->stamp : undef;
         $el_ref = $self->_emit_coercion($el_ref, $el_repr, 'Str', "join element[$i]")
             if defined $el_repr && $el_repr ne 'Str';
 
@@ -7980,7 +8009,7 @@ sub _lower_builtin_shift_pop {
     my $name = $node->name;   # 'shift' or 'pop'
     # No fallback: the die below already rejects everything but Int, so a
     # guessed 'Int' only made the message name a repr the node never had.
-    my $repr = $node->representation;
+    my $repr = $node->stamp;
     die "GAP: $name element repr=" . ($repr // 'NONE (undef)')
       . " not lowered (only Int elements yet)"
         unless defined $repr && $repr eq 'Int';
@@ -7994,7 +8023,7 @@ sub _lower_builtin_shift_pop {
     # (e.g. `while (shift @q) { ... }` where the drained value is unused).
     my ($array) = grep {
         my $op   = blessed($_) ? $_->operation : '';
-        my $repr = (blessed($_) && $_->representation) // '';
+        my $repr = (blessed($_) && $_->stamp) // '';
         $op eq 'ArrayLiteral' || $op eq 'HashLiteral'
             || $repr eq 'Array' || $repr eq 'ArrayRef'
     } $node->inputs->@*;
@@ -8839,7 +8868,7 @@ sub _lower_call_direct {
     # The repr is what every consumer uses to decide how to READ the value, so
     # rebinding one without the other is a type lie.
     $self->{_arg_bind}{ refaddr($arg_reads[$_]) } =
-        { ref => $arg_refs[$_], repr => $args[$_]->representation }
+        { ref => $arg_refs[$_], repr => $args[$_]->stamp }
         for 0 .. $#arg_reads;
 
     # The callee's body nodes must NOT outlive this inline frame in the value
@@ -9310,7 +9339,7 @@ sub _lower_call_method {
     my @call_args;
     for my $i (0 .. $#arg_nodes) {
         my $want = $param_reprs->[$i];
-        my $got  = $arg_nodes[$i]->representation // '';
+        my $got  = $arg_nodes[$i]->stamp // '';
         # AT THE CALLEE'S TYPE, for the same reason the return is: the body is
         # emitted once, at one machine type. A caller that knows a narrower
         # type still has to hand over the declared one.
@@ -9371,11 +9400,11 @@ sub _lower_call_method {
         # here rather than caching a %Slot where an i64 is expected. The
         # refinement is honoured at the boundary, not by calling at the
         # narrower type: the callee has ONE emitted body at ONE machine type.
-        if ($abi_repr eq 'Scalar' && ($node->representation // '') ne 'Scalar') {
+        if ($abi_repr eq 'Scalar' && ($node->stamp // '') ne 'Scalar') {
             my $pay = $self->_fresh;
             my $mi_pay = _slot_idx('payload');
             $self->_emit("  $pay = extractvalue %Slot $result, $mi_pay  ; Call(method) $method_name: Slot payload -> "
-                       . ($node->representation // '?'));
+                       . ($node->stamp // '?'));
 
             # A STR PAYLOAD IS A POINTER TO THE BOXED STR, not the value.
             # Every other narrowed reading (Int, Num, Boolean) IS the payload
@@ -9383,7 +9412,7 @@ sub _lower_call_method {
             # wrong here -- the consumer would read a heap address as a string.
             # Unpacked the same way the field read does: one encoding, read the
             # same way wherever it is met.
-            if (($node->representation // '') eq 'Str') {
+            if (($node->stamp // '') eq 'Str') {
                 $self->{_need_str_type} = 1;
                 my $pair = $self->_fresh;
                 $self->_emit("  $pair = inttoptr i64 $pay to %Str*  ; Call(method) $method_name: payload -> %Str*");
@@ -10538,7 +10567,7 @@ sub _lower_print {
 
     for my $arg ($node->inputs->@*) {
         next unless defined $arg;
-        my $repr = $arg->representation;
+        my $repr = $arg->stamp;
         my $ref  = $self->lower_value($arg);
 
         if (defined $repr && $repr eq 'Str') {

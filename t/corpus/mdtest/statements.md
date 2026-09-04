@@ -343,10 +343,13 @@ L: GREEN
 
 ## Print as a value (my $ok = print)
 
-`print` returns a genuine boolean (`builtin::is_bool` true) — `1` on success.
-Reading its return value (`my $ok = print "x\n"; $ok`) yields `Bool:1` in the
-type-tagged oracle, NOT `Int:1`: the Print node's representation is Boolean. The
-stdout is `x\n`; the block value is the Print's boolean `1`.
+`print` returns `1` on success and `undef` on failure (a read-only handle), so
+its honest type is `join(Boolean, Undef)`, which the lattice puts at `Scalar`.
+`Boolean` alone would be WRONG rather than narrow — Boolean does not admit
+undef, and a failed print returns exactly that. The runtime value here is the
+boolean `1`, and the type-tagged oracle reads `Bool:1`; the STAMP is the wider
+`Scalar` because the stamp must cover the failing case too. The stdout is
+`x\n`; the block value is the Print's `1`.
 
 ```perl
 # source
@@ -363,9 +366,9 @@ context: scalar
 ```ir
 %start = Start()
 %s0   = Constant("x\n") :Str
-%p    = Print(%s0) :Boolean
+%p    = Print(%s0) :Scalar
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%p : Boolean -> Str) :Str
+%co_p  = Coerce(%p : Scalar -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
