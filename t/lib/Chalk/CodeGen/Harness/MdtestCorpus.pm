@@ -349,23 +349,80 @@ sub build_graph_from_ir {
     return wantarray ? ($ret, $build->{mop}) : $ret;
 }
 
-# parse_l_verdict_from_ir($ir_block) -> 'GREEN' | 'GAP'
+# parse_l_verdict_from_ir($ir_block) -> 'GREEN' | 'GAP' | 'DEVIATES'
 #
 # Extracts the L: verdict line from a named-SSA ir block.
 # Returns 'GREEN' if the L: GREEN line is present, 'GAP' for L: GAP(...),
-# or 'GREEN' as the default when no L: line is present.
+# 'DEVIATES' for L: DEVIATES(reason) expected=..., or 'GREEN' as the default
+# when no L: line is present.
 sub parse_l_verdict_from_ir {
     my ($class, $ir_block) = @_;
     return 'GREEN' unless defined $ir_block;
 
     for my $line (split /\n/, $ir_block) {
-        $line =~ s/\s*#.*$//;
         $line =~ s/^\s+|\s+$//g;
-        if ($line =~ /^L:\s*(GREEN|GAP)/i) {
+        # NOTE: no comment-stripping here. A DEVIATES line's expected= value is
+        # verbatim output and may legitimately contain a '#'.
+        if ($line =~ /^L:\s*(GREEN|GAP|DEVIATES)/i) {
             return uc($1);
         }
     }
     return 'GREEN';
+}
+
+# parse_deviation_from_ir($ir_block) -> { reason, expected } or undef
+#
+# A DEVIATES case produces output that is LEGAL PERL but not byte-identical to
+# what `perl` prints. Its contract is STRICTER than GREEN, not looser: the case
+# must still lower and run, and its output must match the DECLARED string
+# exactly. The gate stops comparing against `perl` and starts comparing against
+# a value a human wrote down and justified.
+#
+# WHY THE LATITUDE EXISTS. Perl-the-language does not specify IV vs NV, and
+# `perl` is not self-consistent about it:
+#
+#     literal 9007199254740993  ->  9007199254740993
+#     2**53 + 1                 ->  9.00719925474099e+15
+#     numerically equal?           YES     string equal?  NO
+#
+# Same value, two outputs, both correct Perl. Byte-identity with `perl` is
+# therefore not a well-defined target for that value.
+#
+# WHY A DECLARED STRING RATHER THAN A NUMERIC COMPARISON. An earlier draft
+# proposed asserting the two outputs compare `==` under perl semantics, which
+# is stronger where it applies. It does not generalise: `==` is meaningful only
+# for IV and NV (perigrin). Hash iteration order, string formatting and list
+# output have no numeric comparison at all, and those are exactly the other
+# cases a static compiler may legitimately deviate on. The declared string is
+# the only mechanism that covers the whole class.
+#
+# THE RULE THAT DECIDES WHAT MAY USE THIS (perigrin): a deviation is legitimate
+# when static compilation CANNOT do what `perl` does, and illegitimate when
+# chalk simply HAS NOT YET. Both fields below are mandatory because that
+# distinction lives in the reason: a deviation with nothing to check against,
+# or with no stated justification, is a defect wearing a legitimising label.
+sub parse_deviation_from_ir {
+    my ($class, $ir_block) = @_;
+    return undef unless defined $ir_block;
+
+    for my $line (split /\n/, $ir_block) {
+        $line =~ s/^\s+|\s+$//g;
+        next unless $line =~ /^L:\s*DEVIATES/i;
+
+        my ($reason) = $line =~ /^L:\s*DEVIATES\s*\(([^)]*)\)/i;
+        die "corpus: L: DEVIATES needs a reason naming the Perl-level "
+          . "guarantee that permits the deviation -- got: $line\n"
+            unless defined $reason && $reason =~ /\S/;
+
+        my ($expected) = $line =~ /\bexpected=(.*)$/;
+        die "corpus: L: DEVIATES needs expected=<output>; without it the case "
+          . "would accept ANY output, which is strictly weaker than GREEN "
+          . "-- got: $line\n"
+            unless defined $expected && $expected =~ /\S/;
+
+        return { reason => $reason, expected => $expected };
+    }
+    return undef;
 }
 
 # ---------------------------------------------------------------------------

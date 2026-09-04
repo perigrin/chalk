@@ -176,7 +176,8 @@ sub perl_oracle ($source) {
 my @topics = sort glob('t/corpus/mdtest/*.md');
 
 my %tally = (green => 0, gap_declared => 0, bug => 0, no_source => 0,
-             shape_ok => 0, inv_ok => 0, gate_green => 0, todo => 0);
+             shape_ok => 0, inv_ok => 0, gate_green => 0, todo => 0,
+             deviations => 0);
 my %by_topic;
 my @bugs;
 my @worklist;   # the same gaps, structured for the artifact below
@@ -294,7 +295,35 @@ for my $md (@topics) {
         # contract. Comparing stdout alone made `exit 4` indistinguishable from
         # `exit 0`.
         my $status_ok   = ($lli_exit // 0) == ($oracle_exit // 0);
-        my $behavior_ok = !$vacuous && defined $lli && $lli eq $oracle
+
+        # A DEVIATES CASE IS CHECKED AGAINST ITS DECLARED STRING, NOT perl.
+        #
+        # Its output is legal Perl but not byte-identical to what `perl`
+        # prints, because `perl` is not self-consistent about representation:
+        # the literal 9007199254740993 prints exactly while 2**53+1 prints
+        # 9.00719925474099e+15, the two compare == and stringify differently.
+        # Byte-identity with `perl` is not a well-defined target there.
+        #
+        # THE CONTRACT IS STRICTER THAN GREEN, NOT LOOSER. The case must still
+        # lower, still run, still match its exit status, and its stdout must
+        # equal a string a human wrote down and justified. What it loses is the
+        # right to be compared against `perl`; what it gains is nothing.
+        #
+        # The declared string is the only mechanism that generalises: an
+        # earlier draft proposed asserting `==` instead, which is meaningful
+        # only for IV and NV (perigrin) and says nothing about hash order,
+        # formatting or list output -- the other places a static compiler may
+        # legitimately differ.
+        my $expect = $oracle;
+        if ($verdict eq 'DEVIATES') {
+            my $dev = Chalk::CodeGen::Harness::MdtestCorpus
+                ->parse_deviation_from_ir($case->{ir} // '');
+            $expect = $dev->{expected};
+            $tally{deviations}++;
+            $by_topic{$topic}{deviates}++;
+        }
+
+        my $behavior_ok = !$vacuous && defined $lli && $lli eq $expect
                           && $status_ok;
         $err //= "exit status: perl $oracle_exit vs lli $lli_exit"
             if defined $lli && !$status_ok;
@@ -402,9 +431,17 @@ for my $t (sort keys %by_topic) {
         $b->{inv} // 0, $b->{gap} // 0, $b->{bug} // 0));
 }
 diag("");
+# `deviations` IS A CEILING, NOT A FLOOR. Every other number here is a floor
+# that must not fall; this one is a count that must not RISE. A deviation is
+# output that is legal Perl but not what `perl` prints, and the standing
+# instruction is to MINIMISE them (perigrin) -- so folding them into
+# gate-green would make them invisible and let them accumulate, which is the
+# exact pattern this file has recorded before (a GAP-declared case that
+# silently started working; a shape leg that passed without checking
+# operands). A deviation nobody counts is a deviation nobody removes.
 diag(sprintf(
-    "TOTAL: gate-green=%d  behavior=%d  shape=%d  invariant=%d  gap-declared=%d  todo=%d  worklist=%d  (no-source sections=%d)",
-    @tally{qw(gate_green green shape_ok inv_ok gap_declared todo bug no_source)}));
+    "TOTAL: gate-green=%d  behavior=%d  shape=%d  invariant=%d  gap-declared=%d  deviations=%d  todo=%d  worklist=%d  (no-source sections=%d)",
+    @tally{qw(gate_green green shape_ok inv_ok gap_declared deviations todo bug no_source)}));
 if (@bugs) {
     diag("");
     diag("=== worklist (triple-contract gaps to close) ===");
