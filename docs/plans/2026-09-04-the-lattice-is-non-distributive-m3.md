@@ -99,6 +99,39 @@ and Julia both name as the PRECONDITION for legal unboxing is therefore already
 structural here, and it is why `i64` is available as a default representation
 for an unobserved `Num`.
 
+## Widening is NOT required, and the lattice says so
+
+Recorded because I claimed the opposite earlier in the same session, citing
+T2's own note that "a widening operator at loop Phis" is unbuilt.
+
+**Measured height of the type lattice: 6** (`scratchpad/height2.pl`), longest
+ascending chain `None < Int < Num < Str < Scalar < List < Unknown`:
+
+    None 6   Int 5   Num 4   Str 3   Boolean 3   Undef 3
+    Scalar 2   List 1   Code 1   Glob 1   IO 1   Format 1   Unknown 0
+
+A monotone join-based fixpoint moves each node UPWARD only, so it can take at
+most 6 steps per node before saturating. **Termination follows from finite
+height alone** — on an ACC lattice the join already IS a widening, and adding
+an explicit widening operator would only lose precision. The T2 note's widening
+requirement belongs to interval/width-and-sign selection (an infinite-height
+domain), not to the spine collapse over these 13 names.
+
+**The real loop hazard is Click's, and it does not apply to us either.**
+Starting at TOP and descending computes the GREATEST fixpoint, which is sound
+only if the analysis runs to completion with monotone rules — stop early and
+the answer is unsound. Chalk starts at `None` (BOTTOM, the join identity,
+`TypeLibrary.pm:395`; `Analysis.pm:999-1006` documents a self-recursive arm
+contributing `None` on the first pass) and joins upward, so it computes a LEAST
+fixpoint. Stopping early yields an under-approximation — less precise, still
+sound.
+
+So for the spine-collapse pass the loop story is: no widening, LFP from `None`,
+termination in ≤6 steps per node. What loops DO still need is the substitution
+half — a narrowing discovered at one node has to reach the nodes that produced
+it, which is the piece HM calls substitution composition and which Chalk does
+not have.
+
 ## Corrections carried in from the research
 
 Flagged so they are not re-derived: Tiuryn '92 is PSPACE-**hard** (completeness
