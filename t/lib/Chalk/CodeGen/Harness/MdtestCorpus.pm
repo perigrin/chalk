@@ -259,10 +259,33 @@ sub build_graph_from_ir {
                 croak "build_graph_from_ir: could not build node for line: $raw_line";
             }
 
-            # Only call set_representation on IR nodes (MOP metaobjects do
-            # not have this method).
+            # ASK WHETHER IT CAN CARRY A STAMP, NOT WHAT CLASS IT IS.
+            #
+            # This guard was `$node isa Chalk::IR::Value`, and that is the
+            # WRONG QUESTION -- the same one that made commit 0cc04737 a
+            # miscompile in the LLVM backend. `stamp` is declared on
+            # Chalk::IR::Node (Node.pm:64), the BASE, so every node carries
+            # one. But Chalk::IR::Value is a SIBLING of the value-producing
+            # control nodes rather than their parent: Print, Proj, VarDecl and
+            # ListAssign are each `:isa(Chalk::IR::Node)` DIRECTLY.
+            #
+            # So a declared `:Repr` on any of those four was silently DROPPED,
+            # and the failure surfaced three steps later as "VarDecl reached
+            # LLVM backend with NO representation (undef) -- fix TypeInference".
+            # It named the wrong pass: TypeInference was fine, the spec block
+            # said `:Int`, and this line threw it away. Measured on
+            # t/bootstrap/corpus/logical.t, where L3/L3b/L4 all failed this way
+            # while being GREEN in the real corpus gate.
+            #
+            # `isa Chalk::IR::Node` asks the question that actually matters and
+            # still excludes the MOP metaobjects this guard was written for: they do
+            # not inherit from Chalk::IR::Node at all. Deliberately NOT
+            # can(...), which returns false for a method that was never
+            # defined AND for one that was deleted -- a guard that degrades
+            # silently is what turned 0cc04737 into a miscompile in the first
+            # place.
             $node->set_stamp($repr)
-                if defined $repr && $node isa Chalk::IR::Value;
+                if defined $repr && $node isa Chalk::IR::Node;
             $sym{$name} = $node;
             next;
         }
