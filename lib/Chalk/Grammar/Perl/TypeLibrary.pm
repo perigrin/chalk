@@ -592,6 +592,27 @@ class Chalk::Grammar::Perl::TypeLibrary {
         StrCmp => 'cmp',
         Concat => '.',
 
+        # DIVIDE, AND ONLY DIVIDE, OF THE ARITHMETIC FAMILY. Perl's `/` is
+        # float division as a matter of SEMANTICS -- 3/4 is 0.75, not 0 -- so
+        # both operands are Num whatever the source wrote. `/` already carries
+        # the (Num, Num) -> Num signature below; this line is the missing link
+        # that lets `operand_repr_for_ir_op` reach it.
+        #
+        # Its siblings stay out, and that is not an oversight: `+`, `-`, `*`
+        # are genuinely polymorphic in perl (Int+Int and Num+Num are both
+        # valid), so a table answering "what must this operand BE?" has no
+        # authority to pick one. `/` is the exception because it has no Int
+        # form at all.
+        #
+        # The backend has always known this -- its Divide arm dies unless the
+        # result repr is float, "If Num were ever mapped to an integral type,
+        # this site must FAIL rather than quietly pick `sdiv`" -- so the
+        # requirement existed as a BACKEND ASSERTION while being absent from
+        # the table meant to publish it. Adding it here makes it an
+        # OBSERVATION a narrowing pass can consume, rather than a rule only the
+        # emitter enforces.
+        Divide => '/',
+
         # DELIBERATELY ABSENT -- BitAnd/BitOr/BitXor. Numeric `&` is
         # (Int, Int) -> Int while string-bitwise `&.` is a Str operator, and
         # BOTH lower to the same node type, so the NODE does not determine its

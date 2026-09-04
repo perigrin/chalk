@@ -127,9 +127,34 @@ subtest 'Print declines -- variadic Any is not a coercion target' => sub {
 };
 
 subtest 'an unmapped op declines' => sub {
-    for my $op (qw(Add Divide Multiply NoSuchOpAtAll)) {
+    for my $op (qw(Add Multiply NoSuchOpAtAll)) {
         is want($op, 0), undef, "$op has no opinion";
     }
+};
+
+# ---------------------------------------------------------------------------
+# Divide is the one arithmetic op with a FIXED operand type
+# ---------------------------------------------------------------------------
+
+subtest 'Divide wants Num at both positions -- perl / is float division' => sub {
+    # `Add` and `Multiply` decline above and SHOULD: perl's `+` is genuinely
+    # polymorphic, Int+Int and Num+Num are both valid, and a table answering
+    # "what must this operand BE?" has no business picking one.
+    #
+    # `/` is not like that. Perl's division is float division as a matter of
+    # SEMANTICS -- 3/4 is 0.75, not 0 -- so both operands are Num regardless of
+    # what the source wrote. The backend already knows this and asserts it:
+    # Context.pm's Divide arm dies unless the result repr is float, saying "If
+    # Num were ever mapped to an integral type, this site must FAIL rather than
+    # quietly pick `sdiv`".
+    #
+    # That makes the requirement a genuine OBSERVATION -- the strongest one in
+    # the language for narrowing purposes -- and it was living only as a
+    # backend assertion, absent from the table that publishes such things.
+    # Measured before this test: 54 Num-stamped nodes across the corpus, ZERO
+    # with any observation to pin them.
+    is want('Divide', 0), 'Num', 'Divide logical position 0 wants Num';
+    is want('Divide', 1), 'Num', 'Divide logical position 1 wants Num';
 };
 
 # ---------------------------------------------------------------------------
