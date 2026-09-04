@@ -184,6 +184,69 @@ control: %start -> %p
 L: GREEN
 ```
 
+## Int exceeding 2^53 entering a Num context loses precision
+
+`my $n = 9007199254740993; my $s = $n + 0.0;` prints `9007199254740993` in perl
+and `9.00719925474099e+15` here. A SILENT WRONG ANSWER from ordinary source --
+no GAP, no error, just a different number.
+
+The cause is the OBJECT map, not the arrow map. `Coerce(Int -> Num)` forces a
+`sitofp` because `%_REPR_LLVM_TYPE` maps `Num` to `double`, and an i64 above
+2^53 does not survive a double's 53-bit mantissa. The precision is gone at the
+Coerce, BEFORE `Add` runs -- adding `0.0` is not what breaks it, entering `Num`
+is.
+
+Perl does not have this problem because it keeps an IV and an NV as distinct
+representations of one scalar: `B::svref_2object(\9007199254740993)` is a
+`B::IV` and stays one across `+ 0.0`. Chalk's `Num` is likewise a UNION, and
+`Chalk::IR::Transform::T2` already records it as the candidate SET
+`['double','i64']` -- but `T2::_choose` returns `$candidates->[0]`
+unconditionally, and T2 is not wired into lowering at all, so `double` always
+wins.
+
+Fixing it needs a per-site representation choice driven by what the value is
+OBSERVED to do, which `Context.pm:4640`'s standing note describes and which 46
+context-free `_repr_to_llvm_type` call sites currently assume away. That is a
+real piece of work, not a table edit. Flipping `Num` to `i64` wholesale was
+measured: the composition table collapses from 224 rows to 53, and the cause is
+not "fractions stop lowering" but a genuine TYPE CONFLICT -- `my $x = 1.5`
+emits `floating point constant invalid for type`, because the literal demands
+`double` and the map now says `i64`. LLVM rejects it outright.
+
+That error is the shape of the whole problem. CHALK's types are ORDERED
+(Int <: Num <: Str), so T1's operation is a JOIN, and unification would be
+wrong there -- it would force Int = Num. But LLVM's types are UNORDERED: `i64`
+and `double` have no relation, no subtyping, no implicit conversion. Discrete
+equality is exactly what UNIFICATION wants, so T2 -- not T1 -- is the
+HM-shaped pass (perigrin, 2026-09-04).
+
+Read that way, `%_REPR_LLVM_TYPE` is a PREMATURE SUBSTITUTION: it binds every
+`Num` to `double` before a single constraint has been seen, and flipping it to
+`i64` is the same mistake with the other value. The candidate set IS a
+unification variable; the literal `1.5` and an `fdiv` are unifications that
+bind it; a variable still free at emission needs DEFAULTING, which is a real HM
+notion -- GHC defaults numeric literals and RuntimeRep the same way -- rather
+than an improvisation.
+
+Recorded as GAP rather than fixed, so the wrong answer is pinned and visible.
+
+```perl
+# source
+use 5.42.0;
+my $n = 9007199254740993;
+my $s = $n + 0.0;
+print $s, "\n";
+```
+
+```behavior
+stdout: 9007199254740993\n
+return: Bool:1
+context: scalar
+```
+
+L: GAP precision: Coerce(Int -> Num) sitofps an i64 above 2^53; Num maps to double
+
+
 ## Integer literal at INT64_MIN
 
 The most negative representable i64 (`-9223372036854775808`, i.e. `-2**63`)

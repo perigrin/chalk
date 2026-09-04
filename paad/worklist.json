@@ -3,10 +3,11 @@
   "gate_green": 224,
   "behavior": 225,
   "shape": 225,
-  "invariant": 225,
+  "invariant": 226,
   "gap_declared": 30,
-  "worklist_count": 2,
+  "worklist_count": 3,
   "worklist": [
+    { "topic": "arithmetic", "case": "Int exceeding 2^53 entering a Num context loses precision", "behavior": false, "shape": false, "invariant": true, "why": "lli '9.00719925474099e+15' != perl '9007199254740993' | shape: no ir block", "behavior_why": "lli '9.00719925474099e+15' != perl '9007199254740993'", "shape_why": "no ir block" },
     { "topic": "subs", "case": "F18 sort with a comparator block", "behavior": true, "shape": true, "invariant": false, "why": "invariant: op Call has undef control_in (broken effect chain)", "invariant_why": "op Call has undef control_in (broken effect chain)" },
     { "topic": "subs", "case": "F22 polymorphic callee: one sub called with Int and with Str", "behavior": false, "shape": false, "invariant": true, "why": "lli '' != perl '1\nhi' | shape: no ir block", "behavior_why": "lli '' != perl '1\nhi'", "shape_why": "no ir block" }
   ]
