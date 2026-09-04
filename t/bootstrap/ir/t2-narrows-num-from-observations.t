@@ -44,6 +44,7 @@ sub build (%opt) {
     return ($f, $g, $start);
 }
 
+
 subtest 'a fractional literal narrows to double' => sub {
     my ($f, $g) = build();
     my $c = $f->make('Constant', value => 1.5, stamp => 'Num');
@@ -134,5 +135,39 @@ subtest 'narrowing refuses a stamp that is not Num' => sub {
     like $err, qr/\bNum\b/,
         'narrow_num on a non-Num stamp dies naming the expectation';
 };
+
+# ---------------------------------------------------------------------------
+# NOT YET WIRED: what wiring narrow_num into the backend still needs
+# ---------------------------------------------------------------------------
+#
+# The narrowing decision above is correct in isolation. WIRING IT AT
+# `_lower_coerce` WAS TRIED AND REVERTED, and the two reasons are worth keeping
+# because they are the actual remaining work rather than a detail.
+#
+# (1) NARROWING ONE NODE DOES NOT NARROW ITS CONSUMER. With the Coerce
+#     answering i64, the emitted module was invalid:
+#
+#       %tmp_1 = add  i64 0, 9007199254740993
+#       %tmp_3 = fadd double %tmp_1, %tmp_2     <- i64 operand, double op
+#       error: '%tmp_1' defined with type 'i64' but expected 'double'
+#
+#     The `Add` consuming it is still stamped Num and still emits `fadd
+#     double`. A decision has to REACH the nodes that depend on it -- which is
+#     precisely the substitution-composition gap recorded in
+#     docs/plans/2026-09-04-t2-narrowing-the-design.md as the piece that does
+#     not exist.
+#
+# (2) SOURCE (b) CANNOT SEE `0.0`. The producer sends `0.0` as the value 0, so
+#     the fractional-literal test reads it as integral and the wrong branch
+#     wins. Measured: `0.0 =~ /\A-?\d+\z/` matches. The wire has already lost
+#     the distinction, so source (b) needs the stamp or a fractional flag, not
+#     the value's spelling.
+#
+# A first attempt at these acceptance tests asserted only the ABSENCE of a
+# `sitofp` instruction. Both passed while the module was invalid -- absence of
+# one instruction says nothing about whether the result verifies. Any
+# replacement must run `lli` and check the OUTPUT against perl, which is what
+# the corpus gate does and why the GAP in t/corpus/mdtest/arithmetic.md is the
+# real acceptance test for this work.
 
 done_testing;
