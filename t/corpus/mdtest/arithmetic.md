@@ -244,7 +244,23 @@ return: Bool:1
 context: scalar
 ```
 
-L: GAP precision: Coerce(Int -> Num) sitofps an i64 above 2^53; Num maps to double
+NOT DECLARED A GAP, AND THE GATE IS RIGHT TO REFUSE ONE. A first version of
+this case carried `L: GAP(...)`, and the gate rejected it with "a
+corpus-declared GAP that LOWERS BUT DISAGREES with perl ... the declaration was
+hiding a miscompile, not an absence." That is exactly what it was: a GAP
+declaration is a claim that the case DOES NOT COMPILE, and this one compiles
+and gets the answer wrong.
+
+Nor is it a `DEVIATES` case. That verdict is for output that is legal Perl
+which a static compiler CANNOT match, and this is the other kind: chalk emits a
+float only because `_join_repr(Int, Num)` is `Num` and `Num` means `double` --
+a choice made before any constraint is seen. perl gets it exact and so could
+chalk. Labelling it would freeze a defect behind a legitimising name.
+
+So it stands as a plain worklist failure: the case is red, the number is
+honest, and the gate names it every run until the representation choice is
+fixed. See docs/plans/2026-09-04-perl-decides-repr-by-value-not-type.md for why
+the fix is narrow-and-promote rather than "narrow Num to i64 here".
 
 
 ## Integer literal at INT64_MIN

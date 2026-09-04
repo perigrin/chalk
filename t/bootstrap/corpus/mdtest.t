@@ -51,6 +51,22 @@ ok((grep { /Integer modulo/ } @case_titles),         'case: Integer modulo right
 # the worklist, not a regression, and must never silently mask a real FAIL.
 my %KNOWN_WORKLIST = map { $_ => 1 } (
     'Float division of two variables',
+    # A LIVE MISCOMPILE, not an absence: this case COMPILES and gets the wrong
+    # answer (9.00719925474099e+15 against perl's 9007199254740993), because
+    # %_REPR_LLVM_TYPE maps Num to double before any constraint is seen and the
+    # sitofp cannot hold an i64 above 2^53.
+    #
+    # It is deliberately NOT declared `L: GAP`. The gate rejects that outright
+    # -- "a corpus-declared GAP that LOWERS BUT DISAGREES with perl ... the
+    # declaration was hiding a miscompile, not an absence" -- and it is right:
+    # a GAP claims the case does not compile. It is not a DEVIATES case either,
+    # since chalk COULD produce the exact answer; that verdict is for output a
+    # static compiler cannot match.
+    #
+    # So it is TODO here and red on the gate, which is the honest shape for a
+    # known defect with a named cause. See
+    # docs/plans/2026-09-04-perl-decides-repr-by-value-not-type.md.
+    'Int exceeding 2^53 entering a Num context loses precision',
 );
 
 for my $case (@$cases) {
@@ -83,9 +99,21 @@ for my $case (@$cases) {
 
         # For GREEN cases: directly prove the graph built from the block goes
         # through lli and matches perl (the load-bearing proof).
+        # AN ABSENT ir BLOCK IS NOT A GREEN ONE, and this used to conflate
+        # them. `parse_l_verdict_from_ir` defaults to 'GREEN' when it finds no
+        # L: line -- correct for a block that simply omits the declaration --
+        # but `$case->{ir} // ''` fed it an EMPTY STRING for a case with no
+        # block at all, which took the same default. The next line then handed
+        # `undef` to `build_graph_from_ir` and the whole FILE died with
+        # "ir_block must be defined", after the per-case subtests had already
+        # reported. A dying file reads as zero failures in a grep for `not ok`.
+        #
+        # A case without an ir block has nothing to build FROM: the
+        # constructive proof does not apply to it, which is different from
+        # applying and failing.
         my $decl_verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir(
             $case->{ir} // '');
-        if ($decl_verdict eq 'GREEN') {
+        if (defined $case->{ir} && $case->{ir} =~ /\S/ && $decl_verdict eq 'GREEN') {
             my $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir(
                 $case->{ir});
             ok(defined $return_node, "$title: build_graph_from_ir returns a node");
