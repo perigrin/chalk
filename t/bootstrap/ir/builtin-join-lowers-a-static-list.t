@@ -82,8 +82,19 @@ subtest 'a non-static list argument still GAPs' => sub {
     # its ARITY, which is a structural fact about the node that produces it.
     my $list_arg = $join->inputs->[1];
     ok(blessed($list_arg), 'join has a list argument');
-    ok(!defined $list_arg->representation,
-        'the list argument has NO representation -- List is not a machine type');
+
+    # ASKED AS AN ENCODING QUESTION, not as an absence. This read
+    # `!defined ->representation` until the loader began carrying every LATTICE
+    # type -- including the ones with no machine encoding -- so that a value
+    # node is never stampless. `List` is now PRESENT as a type and still has no
+    # encoding, which is exactly the distinction the surrounding comment is
+    # about: lowerability comes from arity, not from the repr.
+    #
+    # The old spelling passed only because two different facts shared one
+    # field. Asking `is_lowerable_stamp` says what this test means.
+    is($list_arg->stamp, 'List', 'the list argument carries the TYPE List');
+    ok(!Chalk::IR::Serialize::JSON::is_lowerable_stamp($list_arg->stamp),
+        'and List has NO machine encoding -- it is not a lowerable stamp');
 };
 
 done_testing;

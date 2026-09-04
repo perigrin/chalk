@@ -723,6 +723,50 @@ sub _deserialize_graph ($method_data) {
         if (is_lowerable_stamp($nd->{stamp})) {
             $node->set_representation($nd->{stamp});
         }
+        # `Unknown` IS A TYPE AND MUST BE CARRIED, even though it is not
+        # lowerable. The gate above answers "does this stamp have a machine
+        # encoding?" and `Unknown` honestly does not -- so widening that gate
+        # would break its stated contract with the backend. This is a separate
+        # admission answering a different question: does T1 have an OPINION
+        # about this node?
+        #
+        # WHY IT MATTERS. Dropping it turns a node the producer typed
+        # `Unknown` ("inference ran and could not decide") into a node with NO
+        # stamp ("inference never reached this"), which are different claims.
+        # Measured on corpus T14 (`exit 4 if $c`): the wire says
+        # `Call(exit) stamp=Unknown` and T1 finished with that node untyped,
+        # because the answer was discarded here -- the comment below already
+        # names the mechanism, "by the time any later pass looks the wire's
+        # answer is gone".
+        #
+        # THE INVARIANT THIS SERVES: every Value node carries a stamp after T1,
+        # with `Unknown` as the honest answer where nothing could be derived
+        # (_assert_value_nodes_are_typed). Absence stops being a state a value
+        # node can be in, which is what lets `_is_narrowed` be the only
+        # question consumers ask.
+        #
+        # NOT A LICENCE TO SYNTHESIZE. This carries an answer the producer
+        # gave; it does not invent one. A node the wire left unstamped stays
+        # unstamped here and is T1's to derive or to declare Unknown for.
+        #
+        # ANY LATTICE TYPE, not just `Unknown`. Measured across the corpus and
+        # the ir/data fixtures, the wire sends four types this gate was
+        # dropping -- `Unknown`, `List`, `Code`, `ScalarRef` -- and every one is
+        # a genuine lattice member that simply has no machine encoding:
+        #
+        #     List       lattice=yes  lowerable=no
+        #     Code       lattice=yes  lowerable=no
+        #     ScalarRef  lattice=yes  lowerable=no
+        #     Unknown    lattice=yes  lowerable=no
+        #
+        # An `Unknown`-only special case was the first fix here and it was too
+        # narrow: it closed the two untyped `Call` roots in the corpus and left
+        # nine ir/ fixtures failing on `AnonSub`(Code), `Ref`(ScalarRef),
+        # `ArrayLiteral`(List) and `FieldAccess`. Same defect, four values.
+        elsif (defined $nd->{stamp}
+               && Chalk::Grammar::Perl::TypeLibrary::is_lattice_type($nd->{stamp})) {
+            $node->set_representation($nd->{stamp});
+        }
 
         # A BUILTIN CALL STAMPED `List` YIELDS AN AGGREGATE, and its consumers
         # need a representation before lowering -- _require_repr runs as a

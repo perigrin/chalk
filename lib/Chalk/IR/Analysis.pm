@@ -534,7 +534,7 @@ sub infer ($class, $graphs) {
     # _assert_value_nodes_are_typed below for why it is off and what has to
     # happen before it can be turned on.
     #
-    # _assert_value_nodes_are_typed(\%graphs);
+    _assert_value_nodes_are_typed(\%graphs);
 
     # The graph set IS the result. $mop is not returned alongside it -- it was
     # attached to every graph above, so a caller wanting the MOP asks a graph

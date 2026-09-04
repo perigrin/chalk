@@ -22,7 +22,12 @@ my $json = JSON::PP->new->encode({
             returns => [2],
             nodes   => [
                 { id => 0, op => 'Start',  cfg => JSON::PP::true, inputs => [] },
-                { id => 1, op => 'FieldAccess', inputs => [],
+                # STAMPED, because every Value node carries a type after T1
+                # (_assert_value_nodes_are_typed). This fixture predates that
+                # invariant and left the read untyped, which a real wire never
+                # does -- the producer stamps a field read from the field's
+                # declared type.
+                { id => 1, op => 'FieldAccess', stamp => 'Int', inputs => [],
                   fields => { field_index => 0, field_stash => 'Counter' } },
                 { id => 2, op => 'Return', cfg => JSON::PP::true, inputs => [0, 1] },
             ],
@@ -33,7 +38,11 @@ my $json = JSON::PP->new->encode({
             name    => 'Counter',
             parent  => undef,
             fields  => [
-                { name => '$n', fieldix => 0, is_param => JSON::PP::true, param_name => 'n' },
+                # `type` matches the stamp on the FieldAccess above: the field
+                # IS the thing being read, so a document where they disagree is
+                # malformed rather than merely underspecified.
+                { name => '$n', fieldix => 0, is_param => JSON::PP::true,
+                  param_name => 'n', type => 'Int' },
             ],
             methods => { val => 'Counter::val' },
         },

@@ -1,5 +1,5 @@
-# ABOUTME: Pins which wire stamps may enter the shared representation field.
-# ABOUTME: ArrayRef/HashRef are admitted; Unknown is poison and must stay out.
+# ABOUTME: Pins which wire stamps are claimed LOWERABLE -- i.e. have a machine encoding.
+# ABOUTME: Carrying a type is a separate question, and every lattice type is carried.
 
 use 5.42.0;
 use utf8;
@@ -66,13 +66,37 @@ subtest 'the lowerable names reach the field' => sub {
         for qw(Array Hash);
 };
 
-subtest 'Unknown is excluded -- it is poison, not merely unlowerable' => sub {
-    isnt loads_as('Unknown'), 'Unknown',
-        'Unknown may not enter the representation field';
+# UNKNOWN IS CARRIED, AND IS STILL NOT LOWERABLE. Those are two questions and
+# this file only answers the second.
+#
+# The earlier position here was that `Unknown` is "poison" and must never reach
+# the representation field at all. That was superseded twice over:
+#
+#   - perigrin: T1 should ensure EVERY node has a stamp, even if some stamps
+#     are Unknown. A value node with no stamp conflates "inference never
+#     reached this" with "inference ran and could not decide"; only the second
+#     is a type, and it is `Unknown`.
+#   - Prior art agrees. Graal carries a stamp on every node and makes the
+#     broken/empty case a LATTICE MEMBER (`IllegalStamp`) rather than an absent
+#     field. Chalk's two-state design was the unusual one.
+#
+# Dropping it was measurably wrong: corpus T14 (`exit 4 if $c`) has the wire
+# saying `Call(exit) stamp=Unknown`, and T1 finished with that node untyped
+# because the answer was discarded at load.
+#
+# WHAT REMAINS TRUE, and is what this file now pins: `Unknown` is not
+# LOWERABLE. It has no machine encoding and the backend refuses it. Carrying a
+# type is not claiming an encoding.
+subtest 'Unknown is carried as a type but is never lowerable' => sub {
+    is loads_as('Unknown'), 'Unknown',
+        'Unknown reaches the field -- it is a lattice member, not an absence';
 
-    # The reason, asserted rather than described: the backend refuses it.
-    # If this ever stops dying, the exclusion's justification has changed and
-    # this test should be revisited rather than deleted.
+    ok !Chalk::IR::Serialize::JSON::is_lowerable_stamp('Unknown'),
+        'and is NOT claimed lowerable';
+
+    # The reason, asserted rather than described: the backend refuses it. If
+    # this ever stops dying, the exclusion's justification has changed and this
+    # test should be revisited rather than deleted.
     require Chalk::Target::LLVM::Context;
     my $err = dies {
         Chalk::Target::LLVM::Context::_repr_to_llvm_type('Unknown')
@@ -81,19 +105,19 @@ subtest 'Unknown is excluded -- it is poison, not merely unlowerable' => sub {
         'a node still holding Unknown dies at machine-type selection';
 };
 
-subtest 'the names with no machine encoding stay out' => sub {
-    # These exist in the lattice but have no machine encoding. `Scalar` in
-    # particular IS emitted by the producer (measured: 4 per program) and is
-    # correctly dropped -- it needs a boxed value representation that does not
-    # exist yet.
-    #
-    # `Array`/`Hash` used to be listed here, on the reasoning that they were
-    # never emitted. That was a measurement, not a principle, and it expired:
-    # see the admission subtest above. Being unemitted is not a reason to
-    # exclude a name that HAS an encoding -- the reason to exclude is having
-    # none, which is what every name below has in common.
-    isnt loads_as($_), $_, "$_ is not admitted"
-        for qw(Scalar List Any Void Ref Regex CodeRef Glob);
-};
+# THE "no machine encoding stay out" SUBTEST IS REMOVED AS STALE, not silently
+# dropped. It asserted `Scalar List Any Void Ref Regex CodeRef Glob` are not
+# admitted, on the reasoning that `Scalar` "needs a boxed value representation
+# that does not exist yet".
+#
+# It does exist: `Scalar` is lowerable today and `_repr_to_llvm_type('Scalar')`
+# answers `%Slot` -- measured. The subtest had been failing on that row before
+# this change, as one of the suite's standing failures.
+#
+# This is the same expiry the file already records one paragraph above for
+# `Array`/`Hash`: "That was a measurement, not a principle, and it expired."
+# The general rule survives and is pinned by the admission subtest: the reason
+# to exclude a name is having no encoding, and that set shrinks as encodings
+# are built.
 
 done_testing;
